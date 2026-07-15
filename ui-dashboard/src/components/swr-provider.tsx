@@ -7,6 +7,7 @@ import {
   type Middleware,
   type SWRConfiguration,
 } from "swr";
+import { createCacheHelper, getTimestamp, SWRGlobalState } from "swr/_internal";
 import * as Sentry from "@sentry/nextjs";
 import {
   normalizeSWRFreshnessKey,
@@ -132,27 +133,62 @@ export function PersistedCacheActivator({
       // react-doctor-disable-next-line effect/no-pass-data-to-parent -- post-hydration activation must publish into provider-scoped SWR state
       if (persistedCache.cache.get(entry.key)?.data !== undefined) continue;
 
-      let activatedPersistedData = false;
-      // This mutate belongs to the custom provider. Its functional update is
-      // the second, atomic network-wins check: a response can land after the
-      // Map read above but before mutate applies the persisted snapshot.
-      void mutate(
+      // Publish through SWR's cache helper so subscribers repaint without
+      // stamping a mutation over a request that the mounted hook already has
+      // in flight. A functional mutate here would make SWR discard that
+      // response; following it with another mutate would issue a duplicate.
+      const [readCache, publishCache] = createCacheHelper(
+        persistedCache.cache,
         entry.key,
-        (currentData: unknown) => {
-          if (currentData !== undefined) return currentData;
-          activatedPersistedData = true;
-          return entry.data;
-        },
-        { revalidate: false },
-      )
-        .then(() => {
-          if (!activatedPersistedData) return undefined;
-          markSWRFreshnessCached(entry.key, entry.updatedAt);
-          // The cached paint is visible; now trigger the hook's normal
-          // revalidation without awaiting it.
-          return mutate(entry.key);
-        })
-        .catch(() => undefined);
+      );
+      const current = readCache();
+      if (current.data !== undefined) {
+        // The inner read is the atomic network-wins check. Re-publish that
+        // winner so every provider subscriber observes it.
+        publishCache({});
+        continue;
+      }
+
+      const hasInFlightRequest =
+        SWRGlobalState.get(persistedCache.cache)?.[2][entry.key] !== undefined;
+      const failedRequestError = current.error;
+      const hasFailedRequest = failedRequestError !== undefined;
+      if (hasFailedRequest) {
+        // SWR removes its in-flight marker as soon as a request rejects. Keep
+        // that completed attempt's error (and its configured retry/backoff)
+        // instead of clearing it and immediately issuing a second request.
+        publishCache({ data: entry.data });
+
+        const fetches = SWRGlobalState.get(persistedCache.cache)?.[2];
+        if (fetches !== undefined && fetches[entry.key] === undefined) {
+          // React StrictMode replays the hook's mount effect immediately after
+          // this passive effect. Keep a one-microtask SWR dedupe marker so that
+          // replay observes the completed request instead of starting another.
+          const replayGuard: [Promise<unknown>, number] = [
+            Promise.resolve(entry.data),
+            getTimestamp(),
+          ];
+          fetches[entry.key] = replayGuard;
+          void replayGuard[0].then(() => {
+            if (fetches[entry.key] === replayGuard) delete fetches[entry.key];
+          });
+        }
+      } else {
+        publishCache({ data: entry.data, error: undefined });
+      }
+      markSWRFreshnessCached(entry.key, entry.updatedAt);
+      if (hasFailedRequest) {
+        // Establish cachedAt first, then restore the failure that this load
+        // already observed so the freshness banner remains degraded.
+        recordSWRFreshnessError(failedRequestError, entry.key);
+      }
+
+      // Reuse mount revalidation when it exists. With no mounted consumer,
+      // this is a no-op and a later hook follows its own revalidate-on-mount
+      // policy against the cached value.
+      if (!hasInFlightRequest && !hasFailedRequest) {
+        void mutate(entry.key).catch(() => undefined);
+      }
     }
   }, [mutate, persistedCache]);
 

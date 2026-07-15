@@ -1,5 +1,6 @@
 import { unstable_serialize } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TradingLimitsQuery } from "@/lib/__generated__/graphql";
 import {
   OLS_POOL,
   POOL_DEPLOYMENT,
@@ -38,6 +39,29 @@ const otherTradingLimitsKey = [
   { poolId: "42220-0xother" },
 ] as const;
 
+function tradingLimitsPayload(id: string): TradingLimitsQuery {
+  return {
+    TradingLimit: [
+      {
+        id,
+        token: "0xtoken",
+        limit0: "100",
+        limit1: "200",
+        decimals: 18,
+        netflow0: "10",
+        netflow1: "20",
+        lastUpdated0: "1000",
+        lastUpdated1: "2000",
+        limitPressure0: "0.1",
+        limitPressure1: "0.2",
+        limitStatus: "OK",
+        updatedAtBlock: "123",
+        updatedAtTimestamp: "3000",
+      },
+    ],
+  };
+}
+
 class MemoryStorage {
   readonly values = new Map<string, string>();
   throwOnGet = false;
@@ -67,16 +91,7 @@ function seedTradingLimits(storage: MemoryStorage, now = NOW): number {
     storage,
   });
   controller.cache.set(unstable_serialize(tradingLimitsKey), {
-    data: {
-      TradingLimit: [
-        {
-          id: "limit-1",
-          limit0: "100",
-          limit1: "200",
-          token: "0xtoken",
-        },
-      ],
-    },
+    data: tradingLimitsPayload("limit-1"),
   });
   controller.recordNetworkSuccess(tradingLimitsKey);
   return controller.flush() ?? 0;
@@ -140,16 +155,7 @@ describe("persisted SWR cache", () => {
     expect(controller.cache.size).toBe(0);
     expect(controller.consumeHydratedEntries()).toEqual([
       {
-        data: {
-          TradingLimit: [
-            {
-              id: "limit-1",
-              limit0: "100",
-              limit1: "200",
-              token: "0xtoken",
-            },
-          ],
-        },
+        data: tradingLimitsPayload("limit-1"),
         key: serializedKey,
         updatedAt: NOW,
       },
@@ -175,16 +181,18 @@ describe("persisted SWR cache", () => {
     });
     const firstKey = unstable_serialize(tradingLimitsKey);
     const secondKey = unstable_serialize(otherTradingLimitsKey);
+    const firstData = tradingLimitsPayload("first-tab");
+    const secondData = tradingLimitsPayload("second-tab");
 
     first.cache.set(firstKey, {
-      data: { TradingLimit: [{ id: "first-tab" }] },
+      data: firstData,
     });
     first.recordNetworkSuccess(tradingLimitsKey);
     expect(first.flush()).toBeGreaterThan(0);
 
     now += 1_000;
     second.cache.set(secondKey, {
-      data: { TradingLimit: [{ id: "second-tab" }] },
+      data: secondData,
     });
     second.recordNetworkSuccess(otherTradingLimitsKey);
     expect(second.flush()).toBeGreaterThan(0);
@@ -196,12 +204,12 @@ describe("persisted SWR cache", () => {
     };
     expect(record.entries).toEqual([
       {
-        data: { TradingLimit: [{ id: "second-tab" }] },
+        data: secondData,
         key: secondKey,
         updatedAt: NOW + 1_000,
       },
       {
-        data: { TradingLimit: [{ id: "first-tab" }] },
+        data: firstData,
         key: firstKey,
         updatedAt: NOW,
       },
@@ -260,6 +268,57 @@ describe("persisted SWR cache", () => {
     expect(storage.getItem(SWR_PERSISTED_CACHE_STORAGE_KEY)).toBeNull();
   });
 
+  it("discards a current-build record with malformed TradingLimits data", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      SWR_PERSISTED_CACHE_STORAGE_KEY,
+      JSON.stringify({
+        buildSalt: BUILD_SALT,
+        entries: [
+          {
+            data: { TradingLimit: [{}] },
+            key: unstable_serialize(tradingLimitsKey),
+            updatedAt: NOW,
+          },
+        ],
+        savedAt: NOW,
+        schemaVersion: SWR_PERSISTED_CACHE_SCHEMA_VERSION,
+      }),
+    );
+
+    let controller: ReturnType<typeof createPersistedSWRCache> | undefined;
+    expect(() => {
+      controller = createPersistedSWRCache({
+        buildSalt: BUILD_SALT,
+        now: () => NOW,
+        storage,
+      });
+    }).not.toThrow();
+
+    expect(controller?.consumeHydratedEntries()).toEqual([]);
+    expect(storage.getItem(SWR_PERSISTED_CACHE_STORAGE_KEY)).toBeNull();
+  });
+
+  it("does not write malformed TradingLimits network data", () => {
+    const storage = new MemoryStorage();
+    const controller = createPersistedSWRCache({
+      buildSalt: BUILD_SALT,
+      now: () => NOW,
+      storage,
+    });
+    controller.cache.set(unstable_serialize(tradingLimitsKey), {
+      data: { TradingLimit: [{}] },
+    });
+    controller.recordNetworkSuccess(tradingLimitsKey);
+
+    let bytes: number | null | undefined;
+    expect(() => {
+      bytes = controller.flush();
+    }).not.toThrow();
+    expect(bytes).toBe(0);
+    expect(storage.getItem(SWR_PERSISTED_CACHE_STORAGE_KEY)).toBeNull();
+  });
+
   it("degrades quota and unavailable-storage failures to memory-only", () => {
     const quotaStorage = new MemoryStorage();
     quotaStorage.throwOnSet = true;
@@ -269,14 +328,15 @@ describe("persisted SWR cache", () => {
       storage: quotaStorage,
     });
     const serializedKey = unstable_serialize(tradingLimitsKey);
+    const memoryData = tradingLimitsPayload("still-in-memory");
     controller.cache.set(serializedKey, {
-      data: { TradingLimit: [{ id: "still-in-memory" }] },
+      data: memoryData,
     });
     controller.recordNetworkSuccess(tradingLimitsKey);
 
     expect(controller.flush()).toBeNull();
     expect(controller.cache.get(serializedKey)).toEqual({
-      data: { TradingLimit: [{ id: "still-in-memory" }] },
+      data: memoryData,
     });
 
     const deniedStorage = new MemoryStorage();

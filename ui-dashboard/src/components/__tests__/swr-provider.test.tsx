@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { act } from "react";
+import { act, StrictMode } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import useSWR, {
@@ -15,6 +15,7 @@ import {
   PersistedCacheActivator,
   SwrProvider,
 } from "@/components/swr-provider";
+import type { TradingLimitsQuery } from "@/lib/__generated__/graphql";
 import { TRADING_LIMITS } from "@/lib/queries";
 import {
   createPersistedSWRCache,
@@ -50,9 +51,30 @@ const persistedTradingLimitsKey = [
   { poolId: "42220-0xpool" },
 ] as const;
 
-type TradingLimitsPayload = {
-  TradingLimit: Array<{ id: string }>;
-};
+type TradingLimitsPayload = TradingLimitsQuery;
+
+function tradingLimitsPayload(id: string): TradingLimitsPayload {
+  return {
+    TradingLimit: [
+      {
+        id,
+        token: "0xtoken",
+        limit0: "100",
+        limit1: "200",
+        decimals: 18,
+        netflow0: "10",
+        netflow1: "20",
+        lastUpdated0: "1000",
+        lastUpdated1: "2000",
+        limitPressure0: "0.1",
+        limitPressure1: "0.2",
+        limitStatus: "OK",
+        updatedAtBlock: "123",
+        updatedAtTimestamp: "3000",
+      },
+    ],
+  };
+}
 
 const providerPreloadKey = "provider-preload-key";
 
@@ -133,27 +155,53 @@ function CustomSuccessProbe({
 }
 
 function PersistedTradingLimitsProbe({
-  networkResponse,
-  triggerRef,
+  fetcher,
+  refreshInterval = 30_000,
 }: {
-  networkResponse: Promise<TradingLimitsPayload>;
-  triggerRef: TriggerRef;
+  fetcher: () => Promise<TradingLimitsPayload>;
+  refreshInterval?: number;
 }) {
-  const { data, mutate } = useSWR<TradingLimitsPayload>(
+  const { data } = useSWR<TradingLimitsPayload>(
     persistedTradingLimitsKey,
-    () => networkResponse,
+    fetcher,
     {
-      refreshInterval: 30_000,
+      refreshInterval,
       revalidateOnMount: true,
       shouldRetryOnError: false,
     },
   );
-  triggerRef.current = () => mutate();
-
   return (
     <>
       <DataFreshnessBanner />
       <div>{data?.TradingLimit[0]?.id ?? "missing"}</div>
+    </>
+  );
+}
+
+function ImmediateFailureTradingLimitsProbe({
+  fetcher,
+  onError,
+}: {
+  fetcher: () => Promise<TradingLimitsPayload>;
+  onError: (error: unknown) => void;
+}) {
+  const { data, error } = useSWR<TradingLimitsPayload>(
+    persistedTradingLimitsKey,
+    fetcher,
+    {
+      errorRetryCount: 1,
+      errorRetryInterval: 250,
+      loadingTimeout: 0,
+      onError,
+      refreshInterval: 30_000,
+      revalidateOnMount: true,
+    },
+  );
+  return (
+    <>
+      <DataFreshnessBanner />
+      <div>{data?.TradingLimit[0]?.id ?? "missing"}</div>
+      <div>{error instanceof Error ? error.message : "no error"}</div>
     </>
   );
 }
@@ -255,8 +303,10 @@ describe("SwrProvider freshness tracking", () => {
       storage: window.localStorage,
     });
     const serializedKey = unstable_serialize(persistedTradingLimitsKey);
+    const cachedData = tradingLimitsPayload("cached-limit");
+    const networkData = tradingLimitsPayload("network-limit");
     seed.cache.set(serializedKey, {
-      data: { TradingLimit: [{ id: "cached-limit" }] },
+      data: cachedData,
     });
     seed.recordNetworkSuccess(persistedTradingLimitsKey);
     expect(seed.flush()).toBeGreaterThan(0);
@@ -266,30 +316,23 @@ describe("SwrProvider freshness tracking", () => {
     const networkResponse = new Promise<TradingLimitsPayload>((resolve) => {
       resolveNetwork = resolve;
     });
-    const triggerRef: TriggerRef = { current: null };
+    const fetcher = vi.fn(() => networkResponse);
 
     await act(async () => {
       root.render(
         <SwrProvider>
-          <PersistedTradingLimitsProbe
-            networkResponse={networkResponse}
-            triggerRef={triggerRef}
-          />
+          <PersistedTradingLimitsProbe fetcher={fetcher} />
         </SwrProvider>,
       );
     });
 
     expect(container.textContent).toContain("cached-limit");
     expect(container.textContent).toContain("Showing cached data from 10s ago");
+    expect(fetcher).toHaveBeenCalledTimes(1);
 
-    let revalidation: Promise<unknown> | null = null;
-    act(() => {
-      revalidation = triggerRef.current?.() ?? null;
-    });
     await act(async () => {
-      resolveNetwork({ TradingLimit: [{ id: "network-limit" }] });
+      resolveNetwork(networkData);
       await networkResponse;
-      await revalidation;
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -309,21 +352,75 @@ describe("SwrProvider freshness tracking", () => {
     expect(record.savedAt).toBe(NOW);
     expect(record.entries).toEqual([
       {
-        data: { TradingLimit: [{ id: "network-limit" }] },
+        data: networkData,
         key: serializedKey,
         updatedAt: NOW,
       },
     ]);
   });
 
-  it("keeps a network success that lands between the activation check and provider mutate", async () => {
+  it("keeps SWR's backoff after an immediate mount failure", async () => {
+    vi.useRealTimers();
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+    const cachedAt = Date.now() - 10_000;
+    const seed = createPersistedSWRCache({
+      buildSalt: "dev",
+      now: () => cachedAt,
+      storage: window.localStorage,
+    });
+    seed.cache.set(unstable_serialize(persistedTradingLimitsKey), {
+      data: tradingLimitsPayload("cached-after-failure"),
+    });
+    seed.recordNetworkSuccess(persistedTradingLimitsKey);
+    expect(seed.flush()).toBeGreaterThan(0);
+    resetSWRFreshnessForTests();
+
+    const originalError = new Error("immediate mount failure");
+    const fetcher = vi.fn(async () => {
+      throw originalError;
+    });
+    const onError = vi.fn();
+
+    // Do not wrap this concurrent-root render in `act`: act flushes passive
+    // effects before rejected-promise microtasks, masking the production race
+    // where SWR records the failure before cache activation runs.
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      root.render(
+        <StrictMode>
+          <SwrProvider>
+            <ImmediateFailureTradingLimitsProbe
+              fetcher={fetcher}
+              onError={onError}
+            />
+          </SwrProvider>
+        </StrictMode>,
+      );
+
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 100));
+      expect(container.textContent).toContain("cached-after-failure");
+      expect(container.textContent).toContain("immediate mount failure");
+      expect(container.textContent).toContain("Latest refresh failed");
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError.mock.calls[0]?.[0]).toBe(originalError);
+
+      // With Math.random fixed at zero, SWR's first exponential-backoff retry
+      // is due after 250ms. The activator must neither bypass nor cancel it.
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 300));
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(onError).toHaveBeenCalledTimes(2);
+      expect(onError.mock.calls[1]?.[0]).toBe(originalError);
+    } finally {
+      randomSpy.mockRestore();
+      reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+  });
+
+  it("keeps a network success that lands between the activation check and provider publish", async () => {
     const serializedKey = unstable_serialize(persistedTradingLimitsKey);
-    const networkData: TradingLimitsPayload = {
-      TradingLimit: [{ id: "network-won-race" }],
-    };
-    const persistedData: TradingLimitsPayload = {
-      TradingLimit: [{ id: "persisted-lost-race" }],
-    };
+    const networkData = tradingLimitsPayload("network-won-race");
+    const persistedData = tradingLimitsPayload("persisted-lost-race");
 
     class NetworkWinsRaceCache extends Map<string, State<unknown>> {
       private armed = false;
@@ -337,7 +434,7 @@ describe("SwrProvider freshness tracking", () => {
         if (this.armed && key === serializedKey) {
           this.armed = false;
           // Simulate SWR committing a successful response after the activator's
-          // first read but before its provider-scoped mutate applies.
+          // first read but before its provider-scoped publish applies.
           super.set(key, { ...current, data: networkData });
         }
         return current;
@@ -379,7 +476,7 @@ describe("SwrProvider freshness tracking", () => {
     expect(container.textContent).not.toContain("Showing cached data");
   });
 
-  it("keeps SSR hydration stable before warm-painting the staged cache", async () => {
+  it("revalidates once when the consumer mounts after cache activation", async () => {
     const cachedAt = NOW - 10_000;
     const seed = createPersistedSWRCache({
       buildSalt: "dev",
@@ -387,20 +484,69 @@ describe("SwrProvider freshness tracking", () => {
       storage: window.localStorage,
     });
     seed.cache.set(unstable_serialize(persistedTradingLimitsKey), {
-      data: { TradingLimit: [{ id: "cached-after-hydration" }] },
+      data: tradingLimitsPayload("cached-before-mount"),
+    });
+    seed.recordNetworkSuccess(persistedTradingLimitsKey);
+    expect(seed.flush()).toBeGreaterThan(0);
+    resetSWRFreshnessForTests();
+
+    let resolveNetwork!: (data: TradingLimitsPayload) => void;
+    const networkResponse = new Promise<TradingLimitsPayload>((resolve) => {
+      resolveNetwork = resolve;
+    });
+    const fetcher = vi.fn(() => networkResponse);
+
+    await act(async () => {
+      root.render(<SwrProvider>consumer not mounted</SwrProvider>);
+      await Promise.resolve();
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.render(
+        <SwrProvider>
+          <PersistedTradingLimitsProbe fetcher={fetcher} refreshInterval={0} />
+        </SwrProvider>,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("cached-before-mount");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveNetwork(tradingLimitsPayload("network-after-mount"));
+      await networkResponse;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("network-after-mount");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps SSR hydration stable before warm-painting the staged cache", async () => {
+    const cachedAt = NOW - 10_000;
+    const seed = createPersistedSWRCache({
+      buildSalt: "dev",
+      now: () => cachedAt,
+      storage: window.localStorage,
+    });
+    const cachedData = tradingLimitsPayload("cached-after-hydration");
+    seed.cache.set(unstable_serialize(persistedTradingLimitsKey), {
+      data: cachedData,
     });
     seed.recordNetworkSuccess(persistedTradingLimitsKey);
     expect(seed.flush()).toBeGreaterThan(0);
     resetSWRFreshnessForTests();
 
     const networkResponse = new Promise<TradingLimitsPayload>(() => {});
-    const triggerRef: TriggerRef = { current: null };
+    const fetcher = vi.fn(() => networkResponse);
     const tree = (
       <SwrProvider>
-        <PersistedTradingLimitsProbe
-          networkResponse={networkResponse}
-          triggerRef={triggerRef}
-        />
+        <PersistedTradingLimitsProbe fetcher={fetcher} />
       </SwrProvider>
     );
 

@@ -1,5 +1,6 @@
 import { unstable_serialize, type Key, type State } from "swr";
 import { clientEnv } from "@/env";
+import type { TradingLimitsQuery } from "@/lib/__generated__/graphql";
 
 /**
  * Persistent SWR is deliberately fail-closed. `TradingLimits` is the only
@@ -104,6 +105,46 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+type TradingLimitRow = TradingLimitsQuery["TradingLimit"][number];
+
+const TRADING_LIMIT_STRING_FIELDS = [
+  "id",
+  "token",
+  "limit0",
+  "limit1",
+  "netflow0",
+  "netflow1",
+  "lastUpdated0",
+  "lastUpdated1",
+  "limitPressure0",
+  "limitPressure1",
+  "limitStatus",
+  "updatedAtBlock",
+  "updatedAtTimestamp",
+] as const satisfies readonly (keyof TradingLimitRow)[];
+
+function isTradingLimitsPayload(value: unknown): value is TradingLimitsQuery {
+  if (!isObject(value) || !Array.isArray(value.TradingLimit)) return false;
+  return value.TradingLimit.every(
+    (row) =>
+      isObject(row) &&
+      typeof row.decimals === "number" &&
+      Number.isInteger(row.decimals) &&
+      TRADING_LIMIT_STRING_FIELDS.every(
+        (field) => typeof row[field] === "string",
+      ),
+  );
+}
+
+function isPersistableSWRPayload(key: unknown, data: unknown): boolean {
+  // Keep the validator fail-closed if the operation allowlist ever expands:
+  // every newly admitted operation must add its exact response contract here.
+  return (
+    operationNameFromKey(key) === "TradingLimits" &&
+    isTradingLimitsPayload(data)
+  );
+}
+
 function isFiniteTimestamp(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
@@ -143,6 +184,9 @@ function parseEntry(
   if (!isFiniteTimestamp(candidate.updatedAt)) return INVALID_ENTRY;
   if (candidate.updatedAt > now + MAX_FUTURE_SKEW_MS) return INVALID_ENTRY;
   if (!("data" in candidate)) return INVALID_ENTRY;
+  if (!isPersistableSWRPayload(candidate.key, candidate.data)) {
+    return INVALID_ENTRY;
+  }
   if (now - candidate.updatedAt > SWR_PERSISTED_CACHE_MAX_AGE_MS) return null;
   return {
     data: candidate.data,
@@ -213,6 +257,7 @@ function persistenceCandidate(
   if (now - updatedAt > SWR_PERSISTED_CACHE_MAX_AGE_MS) return null;
   const data = readCacheData(cache.get(key));
   if (data === undefined) return null;
+  if (!isPersistableSWRPayload(key, data)) return null;
   const candidate = { data, key, updatedAt };
   try {
     return byteLength(JSON.stringify(candidate)) <= MAX_ENTRY_BYTES

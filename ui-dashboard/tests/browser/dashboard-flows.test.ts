@@ -626,6 +626,11 @@ test.describe("dashboard browser flows", () => {
       expect(persisted.raw).not.toContain(excluded);
     }
 
+    // Give activation and its follow-up microtasks time to settle before
+    // releasing the held response. A second request here would mean cache
+    // activation bypassed SWR's in-flight deduplication.
+    expect(tradingLimitsRequests).toBe(1);
+
     releaseRefresh();
     await expect(limitBars.first()).toHaveAttribute("aria-valuenow", "50");
     await expect(
