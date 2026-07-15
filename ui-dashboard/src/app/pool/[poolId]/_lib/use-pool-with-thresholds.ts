@@ -28,6 +28,12 @@ import {
   type PoolVpOracleFreshnessExtResponse,
   type PoolVpOracleFreshnessExtRow,
 } from "@/lib/queries";
+import {
+  PoolThresholdsKnownExtSchema,
+  PoolVpDeprecationExtSchema,
+  PoolVpLifecycleDeprecationExtSchema,
+  PoolVpOracleFreshnessExtSchema,
+} from "@/lib/queries/pool-detail-schemas";
 import { isVirtualPool, type Pool } from "@/lib/types";
 
 function mergePoolExtensions(
@@ -253,7 +259,11 @@ function useThresholdExtension(args: {
     POOL_THRESHOLDS_KNOWN_EXT,
     { id: args.poolId, chainId: args.chainId },
     undefined,
-    { timeoutMs: 5000, fallbackData: args.initialData?.thresholds },
+    {
+      timeoutMs: 5000,
+      fallbackData: args.initialData?.thresholds,
+      schema: PoolThresholdsKnownExtSchema,
+    },
   );
   const current = firstPoolRow(data);
   const row = usePoolScopedRowFallback(
@@ -296,6 +306,7 @@ function useVpFreshnessExtension(args: {
       timeoutMs: 5000,
       fallbackData: args.initialData?.vpOracleFreshness,
       onSuccess: recordObservation,
+      schema: PoolVpOracleFreshnessExtSchema,
     },
   );
   const rawCurrent = firstPoolRow(data);
@@ -325,7 +336,11 @@ function useVpDeprecationExtensions(args: {
     POOL_VP_DEPRECATION_EXT,
     { id: args.poolId, chainId: args.chainId },
     undefined,
-    { timeoutMs: 5000, fallbackData: args.initialData?.vpDeprecation },
+    {
+      timeoutMs: 5000,
+      fallbackData: args.initialData?.vpDeprecation,
+      schema: PoolVpDeprecationExtSchema,
+    },
   );
   const currentExchange = firstBiPoolExchangeRow(exchange.data);
   const exchangeRow = usePoolScopedRowFallback(
@@ -346,6 +361,7 @@ function useVpDeprecationExtensions(args: {
     {
       timeoutMs: 5000,
       fallbackData: args.initialData?.vpLifecycleDeprecation,
+      schema: PoolVpLifecycleDeprecationExtSchema,
     },
   );
   const currentLifecycle = firstVirtualPoolLifecycleRow(lifecycle.data);

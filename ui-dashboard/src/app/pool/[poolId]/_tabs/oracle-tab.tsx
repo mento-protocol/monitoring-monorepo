@@ -32,19 +32,16 @@ import {
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
   POOL_BREAKER_CONFIG,
+  type PoolBreakerConfigResponse,
 } from "@/lib/queries";
+import { PoolBreakerConfigSchema } from "@/lib/queries/pool-detail-schemas";
 import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import { effectiveBreakerThreshold, pickTrippableConfig } from "@/lib/breaker";
 import { normalizeSearch } from "@/lib/table-search";
 import { buildOrderBy } from "@/lib/table-sort";
 import { tokenSymbol } from "@/lib/tokens";
-import {
-  type BreakerConfig,
-  isVirtualPool,
-  type OracleSnapshot,
-  type Pool,
-} from "@/lib/types";
+import { isVirtualPool, type OracleSnapshot, type Pool } from "@/lib/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { matchesRowSearch } from "../_lib/helpers";
 import type { OracleSortCol } from "../_lib/types";
@@ -259,12 +256,7 @@ export function OracleTab(props: OracleTabProps) {
     data: breakerData,
     isLoading: isBreakerLoading,
     error: breakerError,
-  } = useGQL<{
-    // POOL_BREAKER_CONFIG also returns BreakerTripEvent[], but this consumer
-    // only reads BreakerConfig — typing the unread selection out keeps the
-    // local shape honest. <BreakerPanel /> consumes the trip events.
-    BreakerConfig: BreakerConfig[];
-  }>(
+  } = useGQL<PoolBreakerConfigResponse>(
     rateFeedID && chainId ? POOL_BREAKER_CONFIG : null,
     rateFeedID && chainId ? { chainId, rateFeedID } : undefined,
     // Bound the shared POOL_BREAKER_CONFIG fetch (arg[2] stays `undefined` →
@@ -272,7 +264,10 @@ export function OracleTab(props: OracleTabProps) {
     // Every subscriber of this SWR key must set it, or SWR could run this
     // consumer's unbounded fetcher and defeat the sibling timeouts.
     undefined,
-    { timeoutMs: BREAKER_CONFIG_TIMEOUT_MS },
+    {
+      timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
+      schema: PoolBreakerConfigSchema,
+    },
   );
   const breakerConfig = useMemo(() => {
     const configs = breakerData?.BreakerConfig ?? [];

@@ -85,6 +85,27 @@ const FIRSTDAY_ROWS = {
     },
   ],
 };
+const BROKER_WINDOW_ROWS = {
+  brokerVolumeWindowSnapshots: WINDOW_ROWS.volumeWindowSnapshots,
+};
+const BROKER_TODAY_ROWS = {
+  brokerVolumeTodayTraders: TODAY_ROWS.volumeTodayTraders,
+};
+const BROKER_FIRSTDAY_ROWS = {
+  brokerVolumeWindowFirstDaySnapshots:
+    FIRSTDAY_ROWS.volumeWindowFirstDaySnapshots,
+};
+
+function validHeroResponses(): Record<string, unknown> {
+  return {
+    [VOLUME_WINDOW_LATEST]: WINDOW_ROWS,
+    [VOLUME_TODAY_TRADERS]: TODAY_ROWS,
+    [VOLUME_WINDOW_FIRSTDAY_LATEST]: FIRSTDAY_ROWS,
+    [BROKER_VOLUME_WINDOW_LATEST]: BROKER_WINDOW_ROWS,
+    [BROKER_VOLUME_TODAY_TRADERS]: BROKER_TODAY_ROWS,
+    [BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST]: BROKER_FIRSTDAY_ROWS,
+  };
+}
 
 function respondByDocument(
   responses: Record<string, unknown>,
@@ -167,14 +188,11 @@ describe("fetchVolumeHeroForSSR", () => {
   });
 
   it("prefetches the broker variants with [false, true] actors for the v2 all-actors view", async () => {
-    const brokerWindow = { brokerVolumeWindowSnapshots: [] };
-    const brokerToday = { brokerVolumeTodayTraders: [] };
-    const brokerFirstDay = { brokerVolumeWindowFirstDaySnapshots: [] };
     requestMock.mockImplementation(
       respondByDocument({
-        [BROKER_VOLUME_WINDOW_LATEST]: brokerWindow,
-        [BROKER_VOLUME_TODAY_TRADERS]: brokerToday,
-        [BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST]: brokerFirstDay,
+        [BROKER_VOLUME_WINDOW_LATEST]: BROKER_WINDOW_ROWS,
+        [BROKER_VOLUME_TODAY_TRADERS]: BROKER_TODAY_ROWS,
+        [BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST]: BROKER_FIRSTDAY_ROWS,
       }),
     );
 
@@ -192,9 +210,9 @@ describe("fetchVolumeHeroForSSR", () => {
       includeProtocolActors: true,
       todayMidnight: TODAY_MIDNIGHT,
     });
-    expect(result?.heroV2).toEqual(brokerWindow);
-    expect(result?.todayV2).toEqual(brokerToday);
-    expect(result?.firstDayV2).toEqual(brokerFirstDay);
+    expect(result?.heroV2).toEqual(BROKER_WINDOW_ROWS);
+    expect(result?.todayV2).toEqual(BROKER_TODAY_ROWS);
+    expect(result?.firstDayV2).toEqual(BROKER_FIRSTDAY_ROWS);
     expect(result?.heroV3).toBeUndefined();
     const todayCall = requestMock.mock.calls.find(
       ([request]) =>
@@ -257,6 +275,61 @@ describe("fetchVolumeHeroForSSR", () => {
     expect(result?.todayV3).toEqual(TODAY_ROWS);
     expect(result?.firstDayV3).toBeUndefined();
   });
+
+  it.each([
+    ["v3 window", "v3", VOLUME_WINDOW_LATEST],
+    ["v3 today", "v3", VOLUME_TODAY_TRADERS],
+    ["v2 window", "v2", BROKER_VOLUME_WINDOW_LATEST],
+    ["v2 today", "v2", BROKER_VOLUME_TODAY_TRADERS],
+  ] as const)(
+    "drops the all-or-nothing primary pair when the %s payload is malformed",
+    async (_name, venue, malformedDocument) => {
+      const responses = validHeroResponses();
+      responses[malformedDocument] = { payload: "must-not-cross-or-log" };
+      requestMock.mockImplementation(respondByDocument(responses));
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
+        await expect(
+          fetchVolumeHeroForSSR(venue, "7d", false, TODAY_MIDNIGHT),
+        ).resolves.toBeUndefined();
+        expect(consoleError).not.toHaveBeenCalled();
+      } finally {
+        consoleError.mockRestore();
+      }
+    },
+  );
+
+  it.each([
+    ["v3", VOLUME_WINDOW_FIRSTDAY_LATEST],
+    ["v2", BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST],
+  ] as const)(
+    "drops only the malformed %s firstDay extension and keeps valid primaries",
+    async (venue, malformedDocument) => {
+      const responses = validHeroResponses();
+      responses[malformedDocument] = { payload: "wrong-shape" };
+      requestMock.mockImplementation(respondByDocument(responses));
+
+      const result = await fetchVolumeHeroForSSR(
+        venue,
+        "7d",
+        false,
+        TODAY_MIDNIGHT,
+      );
+
+      if (venue === "v3") {
+        expect(result?.heroV3).toEqual(WINDOW_ROWS);
+        expect(result?.todayV3).toEqual(TODAY_ROWS);
+        expect(result?.firstDayV3).toBeUndefined();
+      } else {
+        expect(result?.heroV2).toEqual(BROKER_WINDOW_ROWS);
+        expect(result?.todayV2).toEqual(BROKER_TODAY_ROWS);
+        expect(result?.firstDayV2).toBeUndefined();
+      }
+    },
+  );
 
   it("returns undefined when the default network has no Hasura URL", async () => {
     networksState.hasuraUrl = "";

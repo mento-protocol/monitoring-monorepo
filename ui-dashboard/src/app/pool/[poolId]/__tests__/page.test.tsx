@@ -3,6 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import type { PoolDetailInitialData } from "@/lib/pool-detail-initial-data";
 import type { PoolBreakerConfigResponse } from "@/lib/queries/config";
+import {
+  BrokerExchangeDailySnapshots24hSchema,
+  PoolBreakerConfigSchema,
+  PoolV2ExchangeSchema,
+} from "@/lib/queries/pool-detail-schemas";
 import type { Pool } from "@/lib/types";
 
 const mockUseGQL = vi.fn();
@@ -654,12 +659,14 @@ describe("Pool detail LPs tab", () => {
 
     expect(findUseGqlCall("PoolV2Exchange")?.[3]).toMatchObject({
       fallbackData: initialData.v2Exchange,
+      schema: PoolV2ExchangeSchema,
     });
     expect(
       findUseGqlCall("BrokerExchangeDailySnapshots24h")?.[3],
     ).toMatchObject({
       timeoutMs: 5000,
       fallbackData: initialData.brokerExchange24h,
+      schema: BrokerExchangeDailySnapshots24hSchema,
     });
     expect(html).toContain("ConstantSum");
     expect(html).not.toContain("v2 exchange config unavailable");
@@ -709,6 +716,7 @@ describe("Pool detail LPs tab", () => {
     for (const call of breakerCalls) {
       expect(call[3]).toMatchObject({
         fallbackData: initialData.breakerConfig,
+        schema: PoolBreakerConfigSchema,
       });
     }
     // Resolved shape paints on first render (no `h-[78px]` shimmer cell): the

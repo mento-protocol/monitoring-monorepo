@@ -137,6 +137,54 @@ const BREAKER_CONFIG_RESPONSE = {
   BreakerTripEvent: [],
 };
 
+const THRESHOLDS_RESPONSE = {
+  Pool: [
+    {
+      id: VIRTUAL_POOL.id,
+      rebalanceThresholdsKnown: true,
+      tokenDecimalsKnown: true,
+    },
+  ],
+};
+const VP_FRESHNESS_RESPONSE = {
+  Pool: [{ id: VIRTUAL_POOL.id, medianLive: true }],
+};
+const VP_DEPRECATION_RESPONSE = {
+  BiPoolExchange: [{ id: "v2", minimumReports: "1" }],
+};
+const VP_LIFECYCLE_RESPONSE = { VirtualPoolLifecycle: [] };
+const BROKER_24H_RESPONSE = {
+  BrokerExchangeDailySnapshot: [
+    {
+      id: "42220-v2-volume-1778457600",
+      timestamp: "1778457600",
+      volumeUsdWei: "42000000000000000000",
+      swapCount: 3,
+    },
+  ],
+};
+
+function validVirtualResponses(): Record<string, unknown> {
+  return {
+    [POOL_DETAIL_WITH_HEALTH]: { Pool: [VIRTUAL_POOL] },
+    [POOL_THRESHOLDS_KNOWN_EXT]: THRESHOLDS_RESPONSE,
+    [POOL_VP_ORACLE_FRESHNESS_EXT]: VP_FRESHNESS_RESPONSE,
+    [POOL_VP_DEPRECATION_EXT]: VP_DEPRECATION_RESPONSE,
+    [POOL_VP_LIFECYCLE_DEPRECATION_EXT]: VP_LIFECYCLE_RESPONSE,
+    [POOL_V2_EXCHANGE]: V2_EXCHANGE_RESPONSE,
+    [BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H]: BROKER_24H_RESPONSE,
+  };
+}
+
+function respondByDocument(responses: Record<string, unknown>) {
+  return ({ document }: { document: string }) => {
+    if (!(document in responses)) throw new Error("unexpected query");
+    const response = responses[document];
+    if (response instanceof Error) throw response;
+    return response;
+  };
+}
+
 describe("fetchPoolDetailForSSR", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -427,5 +475,125 @@ describe("fetchPoolDetailForSSR", () => {
     ).toBeGreaterThan(0);
     expect(result?.v2Exchange).toEqual(V2_EXCHANGE_RESPONSE);
     expect(result?.brokerExchange24h?.BrokerExchangeDailySnapshot).toEqual([]);
+  });
+
+  it("drops the entire fallback when the primary pool payload is malformed before row access or freshness decoration", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    requestMock.mockResolvedValue({
+      Pool: [{ ...VIRTUAL_POOL, chainId: "42220" }],
+    });
+
+    try {
+      await expect(
+        fetchPoolDetailForSSR(42220, VIRTUAL_POOL.id),
+      ).resolves.toBeUndefined();
+      expect(requestMock).toHaveBeenCalledTimes(1);
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it.each([
+    [POOL_THRESHOLDS_KNOWN_EXT, "thresholds"],
+    [POOL_VP_ORACLE_FRESHNESS_EXT, "vpOracleFreshness"],
+    [POOL_VP_DEPRECATION_EXT, "vpDeprecation"],
+    [POOL_VP_LIFECYCLE_DEPRECATION_EXT, "vpLifecycleDeprecation"],
+  ] as const)(
+    "drops only malformed optional response %s while retaining unrelated fallbacks",
+    async (malformedDocument, droppedKey) => {
+      const responses = validVirtualResponses();
+      responses[malformedDocument] = { unexpected: "wrong-shape" };
+      requestMock.mockImplementation(respondByDocument(responses));
+
+      const result = await fetchPoolDetailForSSR(42220, VIRTUAL_POOL.id);
+
+      expect(result?.pool.Pool[0]).toMatchObject(VIRTUAL_POOL);
+      expect(result?.[droppedKey]).toBeUndefined();
+      const independentKeys = [
+        "thresholds",
+        "vpOracleFreshness",
+        "vpDeprecation",
+        "vpLifecycleDeprecation",
+      ] as const;
+      for (const key of independentKeys) {
+        if (key !== droppedKey) expect(result?.[key]).toBeDefined();
+      }
+      expect(result?.v2Exchange).toEqual(V2_EXCHANGE_RESPONSE);
+      expect(result?.brokerExchange24h).toEqual(BROKER_24H_RESPONSE);
+      if (droppedKey === "vpOracleFreshness") {
+        expect(result?.vpOracleFreshness).toBeUndefined();
+      } else {
+        expect(
+          result?.vpOracleFreshness?.Pool[0]?.vpOracleFreshnessCheckedAt,
+        ).toBeGreaterThan(0);
+      }
+    },
+  );
+
+  it("drops a malformed v2 exchange and its unaddressable dependent volume request without losing independent pool extensions", async () => {
+    const responses = validVirtualResponses();
+    responses[POOL_V2_EXCHANGE] = { BiPoolExchange: [{ id: 123 }] };
+    requestMock.mockImplementation(respondByDocument(responses));
+
+    const result = await fetchPoolDetailForSSR(42220, VIRTUAL_POOL.id);
+
+    expect(result?.pool.Pool[0]).toMatchObject(VIRTUAL_POOL);
+    expect(result?.thresholds).toEqual(THRESHOLDS_RESPONSE);
+    expect(result?.vpOracleFreshness?.Pool[0]?.medianLive).toBe(true);
+    expect(result?.vpDeprecation).toEqual(VP_DEPRECATION_RESPONSE);
+    expect(result?.vpLifecycleDeprecation).toEqual(VP_LIFECYCLE_RESPONSE);
+    expect(result?.v2Exchange).toBeUndefined();
+    expect(result?.brokerExchange24h).toBeUndefined();
+    expect(
+      requestMock.mock.calls.some(
+        ([request]) =>
+          (request as { document: string }).document ===
+          BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
+      ),
+    ).toBe(false);
+  });
+
+  it("drops only a malformed broker 24h payload while retaining the valid v2 exchange and pool extensions", async () => {
+    const responses = validVirtualResponses();
+    responses[BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H] = {
+      BrokerExchangeDailySnapshot: [{ swapCount: "3" }],
+    };
+    requestMock.mockImplementation(respondByDocument(responses));
+
+    const result = await fetchPoolDetailForSSR(42220, VIRTUAL_POOL.id);
+
+    expect(result?.pool.Pool[0]).toMatchObject(VIRTUAL_POOL);
+    expect(result?.thresholds).toEqual(THRESHOLDS_RESPONSE);
+    expect(result?.v2Exchange).toEqual(V2_EXCHANGE_RESPONSE);
+    expect(result?.brokerExchange24h).toBeUndefined();
+  });
+
+  it("drops only a malformed breaker-config payload for an FPMM pool", async () => {
+    const responses: Record<string, unknown> = {
+      [POOL_DETAIL_WITH_HEALTH]: { Pool: [FPMM_POOL] },
+      [POOL_THRESHOLDS_KNOWN_EXT]: {
+        Pool: [{ id: FPMM_POOL.id, tokenDecimalsKnown: true }],
+      },
+      [POOL_VP_ORACLE_FRESHNESS_EXT]: {
+        Pool: [{ id: FPMM_POOL.id, medianLive: true }],
+      },
+      [POOL_VP_DEPRECATION_EXT]: { BiPoolExchange: [] },
+      [POOL_VP_LIFECYCLE_DEPRECATION_EXT]: { VirtualPoolLifecycle: [] },
+      [POOL_BREAKER_CONFIG]: {
+        BreakerConfig: [{ status: "NOT_A_STATUS" }],
+        BreakerTripEvent: [],
+      },
+    };
+    requestMock.mockImplementation(respondByDocument(responses));
+
+    const result = await fetchPoolDetailForSSR(42220, FPMM_POOL.id);
+
+    expect(result?.pool.Pool[0]).toMatchObject(FPMM_POOL);
+    expect(result?.thresholds?.Pool[0]?.tokenDecimalsKnown).toBe(true);
+    expect(result?.vpOracleFreshness?.Pool[0]?.medianLive).toBe(true);
+    expect(result?.breakerConfig).toBeUndefined();
   });
 });

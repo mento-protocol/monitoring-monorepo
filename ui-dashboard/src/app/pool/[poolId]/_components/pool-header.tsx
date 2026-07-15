@@ -35,6 +35,10 @@ import {
   type PoolBreakerConfigResponse,
   type PoolV2ExchangeResponse,
 } from "@/lib/queries";
+import {
+  BrokerExchangeDailySnapshots24hSchema,
+  PoolV2ExchangeSchema,
+} from "@/lib/queries/pool-detail-schemas";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { explorerAddressUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import {
@@ -83,7 +87,7 @@ export function PoolHeader({
     isVirtual ? POOL_V2_EXCHANGE : null,
     { poolId: pool.id, chainId: pool.chainId },
     undefined,
-    { fallbackData: initialV2Exchange },
+    { fallbackData: initialV2Exchange, schema: PoolV2ExchangeSchema },
   );
   const v2Config = v2Data?.BiPoolExchange?.[0] ?? null;
   const v2LoadingWithoutData = isLoadingWithoutData(v2Data, v2Loading);
@@ -100,9 +104,7 @@ export function PoolHeader({
     data: exchangeVolumeData,
     isLoading: exchangeVolumeLoading,
     error: exchangeVolumeError,
-  } = useGQL<{
-    BrokerExchangeDailySnapshot: BrokerExchangeDailySnapshotRow[];
-  }>(
+  } = useGQL<BrokerExchangeDailySnapshots24hResponse>(
     isVirtual && exchangeIdForVolume && exchangeProviderForVolume
       ? BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H
       : null,
@@ -113,7 +115,11 @@ export function PoolHeader({
       since: volumeSince,
     },
     SNAPSHOT_REFRESH_MS,
-    { timeoutMs: HASURA_TIMEOUT_MS, fallbackData: initialExchangeVolume },
+    {
+      timeoutMs: HASURA_TIMEOUT_MS,
+      fallbackData: initialExchangeVolume,
+      schema: BrokerExchangeDailySnapshots24hSchema,
+    },
   );
   const exchangeVolumeRows =
     exchangeVolumeData?.BrokerExchangeDailySnapshot ?? [];

@@ -13,6 +13,7 @@ import {
   POOL_BREAKER_CONFIG,
   type PoolBreakerConfigResponse,
 } from "@/lib/queries";
+import { PoolBreakerConfigSchema } from "@/lib/queries/pool-detail-schemas";
 import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { BreakerConfig, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
@@ -61,10 +62,6 @@ type Props = {
    *  the pill knows on first paint whether the pool is FX-gated — no
    *  shimmer→null flash for non-FX pools (issue #1237). */
   initialBreakerConfig?: PoolBreakerConfigResponse | undefined;
-};
-
-type Response = {
-  BreakerConfig: BreakerConfig[];
 };
 
 function findEnabledMarketHoursConfig(
@@ -257,7 +254,7 @@ export function MarketHoursPill({
   const rateFeedID = pool.referenceRateFeedID ?? "";
   const queried = !isVirtual && !!rateFeedID;
 
-  const { data, isLoading, error } = useGQL<Response>(
+  const { data, isLoading, error } = useGQL<PoolBreakerConfigResponse>(
     queried ? POOL_BREAKER_CONFIG : null,
     { chainId: pool.chainId, rateFeedID },
     undefined,
@@ -266,6 +263,7 @@ export function MarketHoursPill({
     // BREAKER_CONFIG_TIMEOUT_MS. Must match every sibling subscriber.
     {
       fallbackData: initialBreakerConfig,
+      schema: PoolBreakerConfigSchema,
       timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
     },
   );

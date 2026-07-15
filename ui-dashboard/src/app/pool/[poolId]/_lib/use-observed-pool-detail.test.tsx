@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import type { PoolDetailInitialData } from "@/lib/pool-detail-initial-data";
 import type { PoolDetailResponse } from "@/lib/queries";
+import { PoolDetailWithHealthSchema } from "@/lib/queries/pool-detail-schemas";
 import type { Pool } from "@/lib/types";
 
 (
@@ -16,6 +17,7 @@ const gqlMock = vi.hoisted(() => ({
   error: undefined as Error | undefined,
   isLoading: false,
   onSuccess: undefined as ((response: PoolDetailResponse) => void) | undefined,
+  schema: undefined as unknown,
 }));
 
 vi.mock("@/lib/graphql", () => ({
@@ -23,9 +25,13 @@ vi.mock("@/lib/graphql", () => ({
     _query: string,
     _variables: Record<string, unknown>,
     _refreshInterval: undefined,
-    options: { onSuccess?: (response: PoolDetailResponse) => void },
+    options: {
+      onSuccess?: (response: PoolDetailResponse) => void;
+      schema?: unknown;
+    },
   ) => {
     gqlMock.onSuccess = options.onSuccess;
+    gqlMock.schema = options.schema;
     return {
       data: gqlMock.data,
       error: gqlMock.error,
@@ -78,6 +84,7 @@ beforeEach(() => {
   gqlMock.error = undefined;
   gqlMock.isLoading = false;
   gqlMock.onSuccess = undefined;
+  gqlMock.schema = undefined;
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -91,6 +98,14 @@ afterEach(() => {
 });
 
 describe("useObservedPoolDetail", () => {
+  it("uses the same base-response schema as the SSR prefetch", () => {
+    const pool = makePool("42220-0xpool-a", 42220, 2_000);
+
+    act(() => root.render(<Probe pool={pool} fallback={initialData(pool)} />));
+
+    expect(gqlMock.schema).toBe(PoolDetailWithHealthSchema);
+  });
+
   it("retains the SSR pool and reports degradation after a successful omission", () => {
     const pool = makePool("42220-0xpool-a", 42220, 2_000);
     gqlMock.data = { Pool: [] };

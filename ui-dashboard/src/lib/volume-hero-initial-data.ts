@@ -12,7 +12,7 @@ import type {
 } from "@/lib/volume";
 import type { Venue } from "@/lib/volume-url-params";
 
-// Raw response shapes for the unconditional hero queries (see
+// Schema-validated response shapes for the unconditional hero queries (see
 // lib/queries/volume.ts). Kept structurally identical to the inline types in
 // `use-hero-rollup.ts` so the prefetched payload plugs straight into each
 // `useGQL` call's `fallbackData`.
@@ -52,7 +52,8 @@ export type VolumeHeroView = {
 };
 
 /**
- * Server-prefetched raw responses for the /volume hero first paint, as a
+ * Schema-validated server-prefetched responses for the /volume hero first
+ * paint, as a
  * per-venue discriminated union: the primary pair (window + today) is
  * REQUIRED for the active venue (the fetch returns `undefined` overall when
  * either fails — the compiler now enforces that invariant), the firstDay
