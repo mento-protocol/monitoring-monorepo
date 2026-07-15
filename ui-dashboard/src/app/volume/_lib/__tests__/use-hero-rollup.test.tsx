@@ -35,17 +35,26 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
+  BROKER_VOLUME_TODAY_TRADERS,
+  BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST,
+  BROKER_VOLUME_WINDOW_LATEST,
   VOLUME_PARTIAL_OVERLAP_TRADERS,
   VOLUME_TODAY_TRADERS,
   VOLUME_WINDOW_FIRSTDAY_LATEST,
   VOLUME_WINDOW_LATEST,
   VOLUME_YESTERDAY_TRADERS,
 } from "@/lib/queries/volume";
-import type {
-  VolumeTodayTraderRow,
-  VolumeWindowFirstDayRow,
-  VolumeWindowRow,
+import {
+  rangeCutoffSeconds,
+  type VolumeRangeKey,
+  type VolumeTodayTraderRow,
+  type VolumeWindowFirstDayRow,
+  type VolumeWindowRow,
 } from "@/lib/volume";
+import {
+  volumeQueryIdentity,
+  type VolumeQueryIdentity,
+} from "../use-resolved-query-identity";
 
 // ---------------------------------------------------------------------------
 // useGQL mock — programmable per-query response. Each test configures
@@ -162,21 +171,50 @@ function yesterdayRow(
 // ---------------------------------------------------------------------------
 
 type HookResult = ReturnType<typeof useHeroRollup>;
+const EMPTY_KPI_SOURCE: ReadonlyArray<{
+  chainId: number;
+  volumeUsdWei: bigint;
+}> = [];
+
+function kpiIdentity(
+  range: VolumeRangeKey,
+  cutoff = rangeCutoffSeconds(range),
+): VolumeQueryIdentity {
+  return volumeQueryIdentity({
+    range,
+    cutoff,
+    includeProtocolActors: false,
+  });
+}
 
 function Probe({
   resultRef,
   initialData,
+  venue = "v3",
+  range = "7d",
+  utcDayKey = 0,
+  kpiSource = EMPTY_KPI_SOURCE,
+  kpiSourceIdentity,
+  kpiSourceIsCapHit = false,
 }: {
   resultRef: { current: HookResult | null };
   initialData?: VolumeHeroInitialData | undefined;
+  venue?: "v3" | "v2" | undefined;
+  range?: VolumeRangeKey | undefined;
+  utcDayKey?: number | undefined;
+  kpiSource?: ReadonlyArray<{ chainId: number; volumeUsdWei: bigint }>;
+  kpiSourceIdentity?: VolumeQueryIdentity | undefined;
+  kpiSourceIsCapHit?: boolean | undefined;
 }) {
   resultRef.current = useHeroRollup({
-    venue: "v3",
-    range: "7d",
+    venue,
+    range,
     includeProtocolActors: false,
     isProtocolActorIn: [false],
-    utcDayKey: 0,
-    kpiSource: [],
+    utcDayKey,
+    kpiSource,
+    kpiSourceIdentity,
+    kpiSourceIsCapHit,
     initialData,
   });
   return null;
@@ -203,16 +241,43 @@ afterEach(() => {
     root.unmount();
   });
   container.remove();
+  vi.useRealTimers();
 });
 
-function render(initialData?: VolumeHeroInitialData): {
-  current: HookResult | null;
-} {
+function render(
+  initialData?: VolumeHeroInitialData,
+  options: {
+    venue?: "v3" | "v2";
+    range?: VolumeRangeKey;
+    utcDayKey?: number;
+    kpiSource?: ReadonlyArray<{ chainId: number; volumeUsdWei: bigint }>;
+    kpiSourceIdentity?: VolumeQueryIdentity;
+    kpiSourceIsCapHit?: boolean;
+  } = {},
+): { current: HookResult | null } {
   const ref: { current: HookResult | null } = { current: null };
   act(() => {
-    root.render(<Probe resultRef={ref} initialData={initialData} />);
+    root.render(
+      <Probe resultRef={ref} initialData={initialData} {...options} />,
+    );
   });
   return ref;
+}
+
+function rerender(
+  ref: { current: HookResult | null },
+  options: {
+    venue?: "v3" | "v2";
+    range?: VolumeRangeKey;
+    utcDayKey?: number;
+    kpiSource?: ReadonlyArray<{ chainId: number; volumeUsdWei: bigint }>;
+    kpiSourceIdentity?: VolumeQueryIdentity;
+    kpiSourceIsCapHit?: boolean;
+  } = {},
+) {
+  act(() => {
+    root.render(<Probe resultRef={ref} {...options} />);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +373,516 @@ describe("useHeroRollup orchestration", () => {
     expect(result!.totalTraders).toBe(11);
     const overlapVars = lastVariables.get(VOLUME_PARTIAL_OVERLAP_TRADERS);
     expect(overlapVars?.limit).toBe(4);
+    expect(
+      lastOptions.get(VOLUME_YESTERDAY_TRADERS)?.keepPreviousData,
+    ).toBeUndefined();
+    expect(
+      lastOptions.get(VOLUME_PARTIAL_OVERLAP_TRADERS)?.keepPreviousData,
+    ).toBeUndefined();
+  });
+
+  it("keeps retained hero data rendered across a range-key change", () => {
+    const yesterdayMidnight = TODAY_MIDNIGHT - SECONDS_PER_DAY;
+    const priorSnapshot = snapshot({
+      chainId: CELO,
+      snapshotDay: String(yesterdayMidnight),
+      windowStartDay: String(yesterdayMidnight - 5 * SECONDS_PER_DAY),
+    });
+    const primaryData = { volumeWindowSnapshots: [priorSnapshot] };
+    const firstDayData = {
+      volumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+    };
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: primaryData,
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_TODAY_TRADERS, {
+      data: { volumeTodayTraders: [] },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: firstDayData,
+      isLoading: false,
+      error: undefined,
+    });
+
+    const ref = render(undefined, { range: "7d" });
+    expect(ref.current?.isLoading).toBe(false);
+
+    // Mirror SWR's key-transition state with keepPreviousData: the old
+    // response remains present while the new key reports isLoading=true.
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: primaryData,
+      isLoading: true,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: firstDayData,
+      isLoading: true,
+      error: undefined,
+    });
+    rerender(ref, { range: "30d" });
+
+    expect(lastVariables.get(VOLUME_WINDOW_LATEST)?.windowKey).toBe("30d");
+    expect(lastOptions.get(VOLUME_WINDOW_LATEST)?.keepPreviousData).toBe(true);
+    expect(
+      lastOptions.get(VOLUME_WINDOW_FIRSTDAY_LATEST)?.keepPreviousData,
+    ).toBe(true);
+    expect(
+      lastOptions.get(VOLUME_TODAY_TRADERS)?.keepPreviousData,
+    ).toBeUndefined();
+    expect(ref.current?.isLoading).toBe(false);
+    expect(ref.current?.totalVolume).toBeGreaterThan(0);
+  });
+
+  it("publishes only range-coherent hero slices and concentration inputs", () => {
+    const yesterdayMidnight = TODAY_MIDNIGHT - SECONDS_PER_DAY;
+    const priorPrimary = {
+      volumeWindowSnapshots: [
+        snapshot({
+          chainId: CELO,
+          windowKey: "7d",
+          snapshotDay: String(yesterdayMidnight),
+          windowStartDay: String(yesterdayMidnight - 6 * SECONDS_PER_DAY),
+          totalVolumeUsdWei: "1000000000000000000000",
+        }),
+      ],
+    };
+    const priorFirstDay = {
+      volumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+    };
+    const todayData = { volumeTodayTraders: [] };
+    const priorKpi = [
+      { chainId: CELO, volumeUsdWei: BigInt("500000000000000000000") },
+    ];
+
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: priorPrimary,
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: priorFirstDay,
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_TODAY_TRADERS, {
+      data: todayData,
+      isLoading: false,
+      error: undefined,
+    });
+
+    const ref = render(undefined, {
+      range: "7d",
+      kpiSource: priorKpi,
+      kpiSourceIdentity: kpiIdentity("7d"),
+      kpiSourceIsCapHit: true,
+    });
+    expect(ref.current?.displayRange).toBe("7d");
+    expect(ref.current?.totalVolume).toBeCloseTo(1000, 4);
+    expect(ref.current?.concentration).toBeCloseTo(50, 4);
+    expect(ref.current?.isKpiSourceCapHit).toBe(true);
+
+    const nextPrimary = {
+      volumeWindowSnapshots: [
+        snapshot({
+          chainId: CELO,
+          windowKey: "30d",
+          snapshotDay: String(yesterdayMidnight),
+          windowStartDay: String(yesterdayMidnight - 29 * SECONDS_PER_DAY),
+          totalVolumeUsdWei: "3000000000000000000000",
+        }),
+      ],
+    };
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: nextPrimary,
+      isLoading: false,
+      error: undefined,
+    });
+    // The primary response won the race. SWR still exposes the prior
+    // first-day slice and trader numerator for their replacement keys.
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: priorFirstDay,
+      isLoading: true,
+      error: undefined,
+    });
+    rerender(ref, {
+      range: "30d",
+      kpiSource: priorKpi,
+      kpiSourceIdentity: kpiIdentity("7d"),
+    });
+
+    // Keep the prior complete snapshot; never combine the new denominator
+    // with an old first-day subtraction or numerator.
+    expect(ref.current?.displayRange).toBe("7d");
+    expect(ref.current?.totalVolume).toBeCloseTo(1000, 4);
+    expect(ref.current?.concentration).toBeCloseTo(50, 4);
+    expect(ref.current?.isKpiSourceCapHit).toBe(true);
+
+    const nextFirstDay = {
+      volumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+    };
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: nextFirstDay,
+      isLoading: false,
+      error: undefined,
+    });
+    // Even after the hero pair is current, the old trader numerator keeps
+    // the whole display on its previous coherent version.
+    rerender(ref, {
+      range: "30d",
+      kpiSource: priorKpi,
+      kpiSourceIdentity: kpiIdentity("7d"),
+    });
+    expect(ref.current?.displayRange).toBe("7d");
+    expect(ref.current?.concentration).toBeCloseTo(50, 4);
+    expect(ref.current?.isKpiSourceCapHit).toBe(true);
+
+    rerender(ref, {
+      range: "30d",
+      kpiSource: [
+        { chainId: CELO, volumeUsdWei: BigInt("600000000000000000000") },
+      ],
+      kpiSourceIdentity: kpiIdentity("30d"),
+    });
+    expect(ref.current?.displayRange).toBe("30d");
+    expect(ref.current?.totalVolume).toBeCloseTo(3000, 4);
+    expect(ref.current?.concentration).toBeCloseTo(20, 4);
+    expect(ref.current?.isKpiSourceCapHit).toBe(false);
+  });
+
+  it("withholds concentration identity after a venue round trip until the active hero catches up", () => {
+    const yesterdayMidnight = TODAY_MIDNIGHT - SECONDS_PER_DAY;
+    const v2Primary7d = {
+      brokerVolumeWindowSnapshots: [
+        snapshot({
+          chainId: CELO,
+          windowKey: "7d",
+          snapshotDay: String(yesterdayMidnight),
+          windowStartDay: String(yesterdayMidnight - 6 * SECONDS_PER_DAY),
+          totalVolumeUsdWei: "1000000000000000000000",
+        }),
+      ],
+    };
+    const v2FirstDay7d = {
+      brokerVolumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+    };
+    gqlResponses.set(BROKER_VOLUME_WINDOW_LATEST, {
+      data: v2Primary7d,
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: v2FirstDay7d,
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(BROKER_VOLUME_TODAY_TRADERS, {
+      data: { brokerVolumeTodayTraders: [] },
+      isLoading: false,
+      error: undefined,
+    });
+
+    const ref = render(undefined, {
+      venue: "v2",
+      range: "7d",
+      kpiSource: [
+        { chainId: CELO, volumeUsdWei: BigInt("500000000000000000000") },
+      ],
+      kpiSourceIdentity: kpiIdentity("7d"),
+      kpiSourceIsCapHit: true,
+    });
+    expect(ref.current?.displayIdentity).toBe(kpiIdentity("7d"));
+    expect(ref.current?.isKpiSourceCapHit).toBe(true);
+
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: {
+        volumeWindowSnapshots: [
+          snapshot({
+            chainId: CELO,
+            windowKey: "30d",
+            snapshotDay: String(yesterdayMidnight),
+            windowStartDay: String(yesterdayMidnight - 29 * SECONDS_PER_DAY),
+            totalVolumeUsdWei: "3000000000000000000000",
+          }),
+        ],
+      },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: {
+        volumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+      },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_TODAY_TRADERS, {
+      data: { volumeTodayTraders: [] },
+      isLoading: false,
+      error: undefined,
+    });
+    rerender(ref, {
+      venue: "v3",
+      range: "30d",
+      kpiSource: [
+        { chainId: CELO, volumeUsdWei: BigInt("600000000000000000000") },
+      ],
+      kpiSourceIdentity: kpiIdentity("30d"),
+    });
+    expect(ref.current?.displayIdentity).toBe(kpiIdentity("30d"));
+
+    // Switching back reactivates v2's retained 7d hero pair while the v2
+    // trader query has already resolved for 30d. The last coherent display
+    // belongs to v3, so no same-venue prior can hide this intermediate state.
+    gqlResponses.set(BROKER_VOLUME_WINDOW_LATEST, {
+      data: v2Primary7d,
+      isLoading: true,
+      error: undefined,
+    });
+    gqlResponses.set(BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: v2FirstDay7d,
+      isLoading: true,
+      error: undefined,
+    });
+    rerender(ref, {
+      venue: "v2",
+      range: "30d",
+      kpiSource: [
+        { chainId: CELO, volumeUsdWei: BigInt("900000000000000000000") },
+      ],
+      kpiSourceIdentity: kpiIdentity("30d"),
+      kpiSourceIsCapHit: true,
+    });
+    expect(ref.current?.displayRange).toBe("7d");
+    expect(ref.current?.displayIdentity).toBeUndefined();
+    expect(ref.current?.isKpiSourceCapHit).toBe(false);
+
+    gqlResponses.set(BROKER_VOLUME_WINDOW_LATEST, {
+      data: {
+        brokerVolumeWindowSnapshots: [
+          snapshot({
+            chainId: CELO,
+            windowKey: "30d",
+            snapshotDay: String(yesterdayMidnight),
+            windowStartDay: String(yesterdayMidnight - 29 * SECONDS_PER_DAY),
+            totalVolumeUsdWei: "3000000000000000000000",
+          }),
+        ],
+      },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: {
+        brokerVolumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+      },
+      isLoading: false,
+      error: undefined,
+    });
+    rerender(ref, {
+      venue: "v2",
+      range: "30d",
+      kpiSource: [
+        { chainId: CELO, volumeUsdWei: BigInt("900000000000000000000") },
+      ],
+      kpiSourceIdentity: kpiIdentity("30d"),
+      kpiSourceIsCapHit: true,
+    });
+    expect(ref.current?.displayRange).toBe("30d");
+    expect(ref.current?.displayIdentity).toBe(kpiIdentity("30d"));
+    expect(ref.current?.isKpiSourceCapHit).toBe(true);
+  });
+
+  it("keeps the prior coherent display across UTC midnight until the KPI cutoff catches up", () => {
+    vi.useFakeTimers();
+    const dayN = Date.UTC(2026, 6, 14) / 1000;
+    vi.setSystemTime((dayN + 12 * 60 * 60) * 1000);
+    const oldCutoff = rangeCutoffSeconds("7d", dayN);
+    const priorKpi = [
+      { chainId: CELO, volumeUsdWei: BigInt("500000000000000000000") },
+    ];
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: {
+        volumeWindowSnapshots: [
+          snapshot({
+            chainId: CELO,
+            windowKey: "7d",
+            snapshotDay: String(dayN - SECONDS_PER_DAY),
+            windowStartDay: String(dayN - 7 * SECONDS_PER_DAY),
+            totalVolumeUsdWei: "1000000000000000000000",
+          }),
+        ],
+      },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: { volumeWindowFirstDaySnapshots: [] },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_TODAY_TRADERS, {
+      data: { volumeTodayTraders: [] },
+      isLoading: false,
+      error: undefined,
+    });
+
+    const ref = render(undefined, {
+      range: "7d",
+      utcDayKey: dayN,
+      kpiSource: priorKpi,
+      kpiSourceIdentity: kpiIdentity("7d", oldCutoff),
+    });
+    expect(ref.current?.totalVolume).toBeCloseTo(1000, 4);
+    expect(ref.current?.concentration).toBeCloseTo(50, 4);
+
+    const dayNPlusOne = dayN + SECONDS_PER_DAY;
+    vi.setSystemTime((dayNPlusOne + 12 * 60 * 60) * 1000);
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: {
+        volumeWindowSnapshots: [
+          snapshot({
+            chainId: CELO,
+            windowKey: "7d",
+            snapshotDay: String(dayN),
+            windowStartDay: String(dayN - 6 * SECONDS_PER_DAY),
+            totalVolumeUsdWei: "2000000000000000000000",
+          }),
+        ],
+      },
+      isLoading: false,
+      error: undefined,
+    });
+    rerender(ref, {
+      range: "7d",
+      utcDayKey: dayNPlusOne,
+      kpiSource: priorKpi,
+      kpiSourceIdentity: kpiIdentity("7d", oldCutoff),
+    });
+
+    // The denominator advanced to day N+1, but the numerator still belongs
+    // to day N. Keep the complete day-N display instead of mixing them.
+    expect(ref.current?.totalVolume).toBeCloseTo(1000, 4);
+    expect(ref.current?.concentration).toBeCloseTo(50, 4);
+
+    const freshKpi = [
+      { chainId: CELO, volumeUsdWei: BigInt("600000000000000000000") },
+    ];
+    rerender(ref, {
+      range: "7d",
+      utcDayKey: dayNPlusOne,
+      kpiSource: freshKpi,
+      kpiSourceIdentity: kpiIdentity(
+        "7d",
+        rangeCutoffSeconds("7d", dayNPlusOne),
+      ),
+    });
+    expect(ref.current?.totalVolume).toBeCloseTo(2000, 4);
+    expect(ref.current?.concentration).toBeCloseTo(30, 4);
+  });
+
+  it("publishes a degraded current primary when retained first-day replacement fails", () => {
+    const yesterdayMidnight = TODAY_MIDNIGHT - SECONDS_PER_DAY;
+    const priorFirstDay = {
+      volumeWindowFirstDaySnapshots: [firstDaySlice({ chainId: CELO })],
+    };
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: {
+        volumeWindowSnapshots: [
+          snapshot({
+            chainId: CELO,
+            windowKey: "7d",
+            snapshotDay: String(yesterdayMidnight),
+            windowStartDay: String(yesterdayMidnight - 6 * SECONDS_PER_DAY),
+          }),
+        ],
+      },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: priorFirstDay,
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_TODAY_TRADERS, {
+      data: { volumeTodayTraders: [] },
+      isLoading: false,
+      error: undefined,
+    });
+
+    const ref = render(undefined, {
+      range: "7d",
+      kpiSource: [],
+      kpiSourceIdentity: kpiIdentity("7d"),
+    });
+    expect(ref.current?.displayRange).toBe("7d");
+
+    gqlResponses.set(VOLUME_WINDOW_LATEST, {
+      data: {
+        volumeWindowSnapshots: [
+          snapshot({
+            chainId: CELO,
+            windowKey: "30d",
+            totalVolumeUsdWei: "3000000000000000000000",
+          }),
+        ],
+      },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: priorFirstDay,
+      isLoading: false,
+      error: new Error("30d first-day replacement failed"),
+    });
+    gqlResponses.set(VOLUME_YESTERDAY_TRADERS, {
+      data: { volumeYesterdayTraders: [] },
+      isLoading: false,
+      error: undefined,
+    });
+    rerender(ref, {
+      range: "30d",
+      kpiSource: [],
+      kpiSourceIdentity: kpiIdentity("30d"),
+    });
+
+    expect(ref.current?.displayRange).toBe("30d");
+    expect(ref.current?.totalVolume).toBeCloseTo(3000, 4);
+    expect(ref.current?.degradedChains).toEqual([CELO]);
+  });
+
+  it("opts both v2 range-keyed hero queries into previous-data retention", () => {
+    gqlResponses.set(BROKER_VOLUME_WINDOW_LATEST, {
+      data: { brokerVolumeWindowSnapshots: [] },
+      isLoading: true,
+      error: undefined,
+    });
+    gqlResponses.set(BROKER_VOLUME_TODAY_TRADERS, {
+      data: { brokerVolumeTodayTraders: [] },
+      isLoading: false,
+      error: undefined,
+    });
+    gqlResponses.set(BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST, {
+      data: { brokerVolumeWindowFirstDaySnapshots: [] },
+      isLoading: true,
+      error: undefined,
+    });
+
+    render(undefined, { venue: "v2", range: "90d" });
+
+    expect(lastOptions.get(BROKER_VOLUME_WINDOW_LATEST)?.keepPreviousData).toBe(
+      true,
+    );
+    expect(
+      lastOptions.get(BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST)?.keepPreviousData,
+    ).toBe(true);
+    expect(
+      lastOptions.get(BROKER_VOLUME_TODAY_TRADERS)?.keepPreviousData,
+    ).toBeUndefined();
   });
 
   it("phase 3: firstDay query errors out → chain stays degraded, tiles stay rendered with conservative totals", () => {

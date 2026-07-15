@@ -51,6 +51,7 @@ function renderSection({
     root.render(
       <V3VolumeSection
         rangeLabel="7d"
+        aggregatorRangeLabel="7d"
         range="7d"
         cutoff={0}
         filteredTraderRows={[]}

@@ -2,10 +2,16 @@ import { Tile } from "@/components/feedback";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { Tooltip } from "@/components/tooltip";
 import { formatUSD } from "@/lib/format";
-import { VOLUME_RANGES, rangeDays, type VolumeRangeKey } from "@/lib/volume";
+import {
+  VOLUME_RANGES,
+  rangeDays,
+  weiToUsd,
+  type VolumeRangeKey,
+} from "@/lib/volume";
 import {
   VOLUME_CHART_RANGES,
   VOLUME_FALLBACK_CHART_RANGES,
+  type RangeKey,
 } from "@/lib/time-series";
 import type { VolumePageModel, VolumeUrlState } from "../page-client";
 import { TopPoolsList } from "./top-pools-list";
@@ -175,13 +181,11 @@ function SegmentButton({
 export function VolumeKpiTiles({
   hero,
   range,
-  isTableCapHit,
   tableIsLoading,
   tableHasError,
 }: {
   hero: VolumePageModel["hero"];
   range: VolumeRangeKey;
-  isTableCapHit: boolean;
   tableIsLoading: boolean;
   tableHasError: boolean;
 }) {
@@ -199,16 +203,17 @@ export function VolumeKpiTiles({
       />
       <Tile
         label={
-          isTableCapHit ? "Top-10 concentration (≈)" : "Top-10 concentration"
+          hero.isKpiSourceCapHit
+            ? "Top-10 concentration (≈)"
+            : "Top-10 concentration"
         }
         value={concentrationValue({
           hero,
-          isTableCapHit,
           tableIsLoading,
           tableHasError,
         })}
         subtitle={
-          isTableCapHit
+          hero.isKpiSourceCapHit
             ? "Lower bound — long-tail trader-days outside top-1000 by single-day volume can bias this low"
             : "Share of window volume"
         }
@@ -234,18 +239,17 @@ function swapsSubtitle(hero: VolumePageModel["hero"]): string {
 
 function concentrationValue({
   hero,
-  isTableCapHit,
   tableIsLoading,
   tableHasError,
 }: {
   hero: VolumePageModel["hero"];
-  isTableCapHit: boolean;
   tableIsLoading: boolean;
   tableHasError: boolean;
 }): string {
   if (hero.isLoading || tableIsLoading) return "…";
   if (hero.hasError || tableHasError) return "—";
-  return `${isTableCapHit ? "≈ " : ""}${hero.concentration.toFixed(1)}%`;
+  if (hero.displayIdentity === undefined) return "…";
+  return `${hero.isKpiSourceCapHit ? "≈ " : ""}${hero.concentration.toFixed(1)}%`;
 }
 
 export function VolumeChartArea({
@@ -255,19 +259,12 @@ export function VolumeChartArea({
   urlState: VolumeUrlState;
   model: VolumePageModel;
 }) {
-  if (model.showChart)
-    return <PoolChartArea urlState={urlState} model={model} />;
+  if (model.showChart) return <PoolChartArea model={model} />;
   if (urlState.range === "24h") return null;
   return <DailyVolumeChart urlState={urlState} model={model} />;
 }
 
-function PoolChartArea({
-  urlState,
-  model,
-}: {
-  urlState: VolumeUrlState;
-  model: VolumePageModel;
-}) {
+function PoolChartArea({ model }: { model: VolumePageModel }) {
   const { poolVolumeBreakdown, chartBreakdown, topPoolsListEntries } =
     model.poolChart;
   return (
@@ -279,10 +276,10 @@ function PoolChartArea({
           series={poolVolumeBreakdown.totalSeries}
           breakdown={chartBreakdown}
           breakdownMode="stacked"
-          range={model.chartControls.chartRange}
+          range={chartRangeForVolumeRange(model.poolChartRange)}
           onRangeChange={model.chartControls.onChartRangeChange}
           ranges={VOLUME_CHART_RANGES}
-          headline={model.headline}
+          headline={formatUSD(weiToUsd(poolVolumeBreakdown.windowTotalUsdWei))}
           change={null}
           isLoading={model.status.poolChartIsLoading}
           hasError={model.status.poolChartHasError}
@@ -302,7 +299,7 @@ function PoolChartArea({
           entries={topPoolsListEntries}
           isLoading={model.status.poolChartIsLoading}
           hasError={model.status.poolChartHasError}
-          windowLabel={rangeLabel(urlState.range)}
+          windowLabel={rangeLabel(model.poolChartRange)}
         />
       </div>
     </div>
@@ -325,7 +322,7 @@ function DailyVolumeChart({
       series={
         venue === "v3" ? aggregates.dailyVolume : aggregates.v2DailyVolume
       }
-      range={chartControls.chartRange}
+      range={chartRangeForVolumeRange(model.tableRange)}
       onRangeChange={chartControls.onChartRangeChange}
       ranges={VOLUME_FALLBACK_CHART_RANGES}
       headline={model.headline}
@@ -354,14 +351,14 @@ export function VolumeVenueSection({
   urlState: VolumeUrlState;
   model: VolumePageModel;
 }) {
-  const { range, cutoff } = urlState;
   const { aggregates, status } = model;
   if (urlState.venue === "v2") {
     return (
       <>
         <V2VolumeSection
-          rangeLabel={rangeLabel(range)}
-          cutoff={cutoff}
+          rangeLabel={rangeLabel(model.tableRange)}
+          aggregatorRangeLabel={rangeLabel(model.aggregatorRange)}
+          cutoff={model.tableCutoff}
           canUseVolumeFilters={urlState.canUseVolumeFilters}
           v2Aggregated={aggregates.v2Aggregated}
           v2AggregatorAggregated={aggregates.v2AggregatorAggregated}
@@ -377,9 +374,10 @@ export function VolumeVenueSection({
   return (
     <>
       <V3VolumeSection
-        rangeLabel={rangeLabel(range)}
-        range={range}
-        cutoff={cutoff}
+        rangeLabel={rangeLabel(model.tableRange)}
+        aggregatorRangeLabel={rangeLabel(model.aggregatorRange)}
+        range={model.tableRange}
+        cutoff={model.tableCutoff}
         filteredTraderRows={aggregates.filteredTraderRows}
         traders={aggregates.aggregated}
         pools={model.poolMeta}
@@ -407,7 +405,7 @@ function v3SourceChart(urlState: VolumeUrlState, model: VolumePageModel) {
   return {
     series: model.aggregatorChart.v3AggregatorChart.totalSeries,
     breakdown: model.aggregatorChart.v3AggregatorChart.breakdown,
-    range: model.chartControls.chartRange,
+    range: chartRangeForVolumeRange(model.aggregatorRange),
     onRangeChange: model.chartControls.onChartRangeChange,
     ranges: VOLUME_FALLBACK_CHART_RANGES,
     headline: formatUSD(model.aggregatorChart.v3AggregatorChartTotal),
@@ -419,6 +417,10 @@ function rangeSubtitle(range: VolumeRangeKey): string {
   if (range === "24h") return "Today (UTC)";
   const days = rangeDays(range);
   return `Last ${days} days`;
+}
+
+function chartRangeForVolumeRange(range: VolumeRangeKey): RangeKey {
+  return range === "30d" || range === "90d" || range === "all" ? range : "7d";
 }
 
 function rangeLabel(range: VolumeRangeKey): string {

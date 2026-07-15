@@ -685,6 +685,13 @@ describe("rangeCutoffSeconds", () => {
     expect(rangeCutoffSeconds("all")).toBe(0);
   });
 
+  it("can anchor the cutoff to an explicit UTC epoch", () => {
+    const nextDayMidnight = TODAY_MIDNIGHT_UTC + SECONDS_PER_DAY;
+    expect(rangeCutoffSeconds("30d", nextDayMidnight + 12 * 60 * 60)).toBe(
+      nextDayMidnight - 29 * SECONDS_PER_DAY,
+    );
+  });
+
   it("cutoff is independent of intra-day clock drift", () => {
     // Two probes at 09:00 UTC and 23:59 UTC of the same UTC day must
     // produce identical cutoffs — the `Date.now() / 86400` floor masks
