@@ -535,8 +535,24 @@ async function createQueueIssue(options, sentryIssue) {
 }
 
 async function reopenQueueIssue(options, existingIssue, sentryIssue) {
+  // Order matters for crash-safety: the reopen (state change) goes LAST.
+  // The closed->open transition is what flips the next run onto the
+  // open-match skip path, so if the label or comment step failed after an
+  // early reopen, the issue would sit open without `sentry:needs-triage`
+  // forever — reopened but invisible to triage. With the state change last,
+  // any partial failure leaves the issue closed and the whole (idempotent)
+  // sequence is retried on the next run; the worst case is a duplicate
+  // regression comment.
   await runGh(
-    ["issue", "reopen", String(existingIssue.number), "-R", options.repo],
+    [
+      "issue",
+      "edit",
+      String(existingIssue.number),
+      "-R",
+      options.repo,
+      "--add-label",
+      "sentry:needs-triage",
+    ],
     { dryRun: options.dryRun, mutates: true },
   );
   await runGh(
@@ -552,15 +568,7 @@ async function reopenQueueIssue(options, existingIssue, sentryIssue) {
     { dryRun: options.dryRun, mutates: true },
   );
   await runGh(
-    [
-      "issue",
-      "edit",
-      String(existingIssue.number),
-      "-R",
-      options.repo,
-      "--add-label",
-      "sentry:needs-triage",
-    ],
+    ["issue", "reopen", String(existingIssue.number), "-R", options.repo],
     { dryRun: options.dryRun, mutates: true },
   );
 }
@@ -778,6 +786,17 @@ async function main() {
     process.stdout.write(
       `Sentry triage ingest: fetched=${counts.fetched} created=${counts.created} skipped-existing=${counts.skippedExisting} reopened=${counts.reopened} errors=${counts.errors}\n`,
     );
+  }
+  // Per-issue mutation failures are tolerated inside the loop (one bad issue
+  // must not abort the batch) and the run record still posts, but the run as
+  // a whole must FAIL so the scheduled workflow goes red and the
+  // Slack-on-failure notifier fires — otherwise a systemic failure mode
+  // (bad token permission, API outage) would stay green indefinitely.
+  if (counts.errors > 0) {
+    process.stderr.write(
+      `${counts.errors} Sentry issue(s) failed to ingest; exiting nonzero so the failure notifier fires.\n`,
+    );
+    process.exitCode = 1;
   }
 }
 

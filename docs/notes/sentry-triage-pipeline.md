@@ -9,7 +9,9 @@ last_verified: 2026-07-15
 # Sentry Triage Pipeline
 
 Operational reference for the Sentry issue triage/autofix pipeline decided in
-[ADR 0036](adr/0036-sentry-triage-pipeline.md). This note is intentionally
+[ADR 0036](../adr/0036-sentry-triage-pipeline.md) (the ADR lands via its own
+PR from the `adr/0036-sentry-triage-pipeline` branch; the queue contract here
+is normative either way, per issue #1274). This note is intentionally
 sectioned by pipeline stage: each stage's issue lands its own section here so
 later stages (triage-agent verdicts, phased mutations, the push leg) extend
 this file instead of rewriting it. Only Phase 1 (deterministic ingest) exists
@@ -153,7 +155,9 @@ reopened / errors. A missing run record — the workflow ran but the comment
 never landed — is itself the alert signal for Phase 1; combined with the
 schedule-failure Slack notifier (`.github/workflows/notify-slack-on-main-failure.yml`,
 which this workflow is registered in), that covers both "the run crashed" and
-"the run silently stopped mattering."
+"the run silently stopped mattering." A run with per-issue mutation errors
+still posts the run record but exits nonzero, so the failure notifier fires
+for systemic failure modes (bad token permission, API outage) too.
 
 ## Operator runbook (activation)
 
@@ -165,7 +169,8 @@ issue):
    per the repo secrets rule).
 2. Flip the repo Actions variable `SENTRY_TRIAGE_ENABLED` to `true`.
 3. Watch the next scheduled run (05:30 and 13:30 UTC) or trigger
-   `workflow_dispatch` manually; confirm the run-record comment lands on
+   `workflow_dispatch` manually from the `main` ref (a job guard skips runs
+   dispatched from any other ref); confirm the run-record comment lands on
    tracker issue #1282.
 
 ## Verification

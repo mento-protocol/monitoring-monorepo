@@ -48,6 +48,12 @@ concurrency:
 jobs:
   ingest:
     name: Ingest Sentry issues into the triage queue
+    # Main-only guard: schedule always runs on the default branch, but
+    # workflow_dispatch can be pointed at any ref — without this, a manual
+    # run from an experimental branch would execute unreviewed script code
+    # with SENTRY_TRIAGE_TOKEN and `issues: write`. Same pattern as
+    # terraform-deploy-queue-watch.yml.
+    if: github.ref == 'refs/heads/main'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 15
     steps:
