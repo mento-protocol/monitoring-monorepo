@@ -139,7 +139,10 @@ describe("stacked TimeSeriesChartCard caller matrix", () => {
     const model = {
       showChart: true,
       poolChart: {
-        poolVolumeBreakdown: { totalSeries: chartSeries() },
+        poolVolumeBreakdown: {
+          totalSeries: chartSeries(),
+          windowTotalUsdWei: BigInt(0),
+        },
         chartBreakdown: poolBreakdown,
         topPoolsListEntries: [],
       },
