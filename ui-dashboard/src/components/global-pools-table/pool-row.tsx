@@ -1,7 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { formatUSD, normalizePoolIdForChain } from "@/lib/format";
-import { preloadGQL } from "@/lib/graphql";
+import { formatUSD } from "@/lib/format";
 import { poolName } from "@/lib/tokens";
 import { type Pool } from "@/lib/types";
 import {
@@ -9,10 +8,7 @@ import {
   NETWORKS,
   type Network,
 } from "@/lib/networks";
-import {
-  POOL_DETAIL_WITH_HEALTH,
-  type PoolDetailResponse,
-} from "@/lib/queries";
+import { preloadPoolDetail } from "@/lib/pool-detail-preload";
 import { Row } from "@/components/table";
 import { SourceBadge, HealthBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
@@ -151,11 +147,7 @@ export function PoolRow({
 function prefetchPoolDetail(entry: GlobalPoolEntry): void {
   const networkId = configuredNetworkIdForChainId(entry.pool.chainId);
   const network = networkId ? NETWORKS[networkId] : entry.network;
-  const id = normalizePoolIdForChain(entry.pool.id, network.chainId);
-  preloadGQL<PoolDetailResponse>(network, POOL_DETAIL_WITH_HEALTH, {
-    id,
-    chainId: network.chainId,
-  });
+  preloadPoolDetail(network, entry.pool.id);
 }
 
 function Cell({

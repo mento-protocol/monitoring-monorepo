@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { buildPoolDetailHref, buildPoolsFilterUrl } from "@/lib/routing";
 import { useGQL } from "@/lib/graphql";
+import { preloadPoolDetail } from "@/lib/pool-detail-preload";
 import {
   showInitialSkeleton,
   useAllNetworksData,
@@ -423,6 +424,8 @@ function SwapTable({
                     href={buildPoolDetailHref(s.poolId)}
                     className="text-sm font-medium text-indigo-400 hover:text-indigo-300"
                     title={s.poolId}
+                    onFocus={() => preloadPoolDetail(network, s.poolId)}
+                    onMouseEnter={() => preloadPoolDetail(network, s.poolId)}
                   >
                     {poolNames[s.poolId] ?? truncateAddress(s.poolId)}
                   </Link>

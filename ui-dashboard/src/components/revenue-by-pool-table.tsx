@@ -14,6 +14,7 @@ import { buildPoolDetailHref } from "@/lib/routing";
 import type { NetworkData, PoolLabel } from "@/lib/fetch-all-networks";
 import type { Network } from "@/lib/networks";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
+import { preloadPoolDetail } from "@/lib/pool-detail-preload";
 import type { SortDir } from "@/lib/table-sort";
 import { useTableSort } from "@/lib/use-table-sort";
 
@@ -269,6 +270,7 @@ function FeeCell({ row, column }: { row: PoolFeeRow; column: FeeColumn }) {
 function RevenueTableRow({ row }: { row: PoolFeeRow }) {
   const display = rowDisplayName(row);
   const href = buildPoolDetailHref(row.poolId);
+  const prefetch = () => preloadPoolDetail(row.network, row.poolId);
   return (
     <Row>
       <td className="px-2 sm:px-4 py-2 sm:py-3">
@@ -277,6 +279,8 @@ function RevenueTableRow({ row }: { row: PoolFeeRow }) {
           <Link
             href={href}
             className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
+            onFocus={prefetch}
+            onMouseEnter={prefetch}
           >
             {display}
           </Link>

@@ -48,16 +48,20 @@ vi.mock("next/link", () => ({
   default: ({
     href,
     children,
-    className,
+    ...props
   }: {
     href: string;
     children: React.ReactNode;
-    className?: string;
-  }) => (
-    <a href={href} className={className}>
+  } & React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={href} {...props}>
       {children}
     </a>
   ),
+}));
+
+const mockPreloadGQL = vi.fn();
+vi.mock("@/lib/graphql", () => ({
+  preloadGQL: (...args: unknown[]) => mockPreloadGQL(...args),
 }));
 
 // ChainIcon pulls in Next Image; stub it out.
@@ -66,6 +70,7 @@ vi.mock("@/components/chain-icon", () => ({
 }));
 
 import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
+import { POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -570,6 +575,57 @@ describe("RevenueByPoolTable — sort transitions", () => {
     names = poolNamesInOrder(handle.container);
     expect(names[0]).toContain("0xaaaa");
     expect(names[1]).toContain("0xbbbb");
+  });
+});
+
+describe("RevenueByPoolTable — pool-detail prefetch", () => {
+  let handle: InteractiveHandle | null = null;
+
+  beforeEach(() => {
+    mockPreloadGQL.mockClear();
+    window.history.replaceState(null, "", "/revenue");
+    handle = renderInteractive([networkData([feeSnapshot()])]);
+  });
+
+  afterEach(() => {
+    if (handle) teardown(handle);
+    handle = null;
+  });
+
+  it("preloads the exact namespaced pool key on hover and focus", () => {
+    const link = handle?.container.querySelector<HTMLAnchorElement>(
+      `a[href="/pool/${CHAIN}-${POOL_ADDR}"]`,
+    );
+    expect(link).not.toBeNull();
+    const expectedNetwork = networkData([]).network;
+    const expectedVariables = {
+      id: `${CHAIN}-${POOL_ADDR}`,
+      chainId: CHAIN,
+    };
+
+    act(() => {
+      link?.dispatchEvent(
+        new MouseEvent("mouseover", {
+          bubbles: true,
+          relatedTarget: document.body,
+        }),
+      );
+    });
+    expect(mockPreloadGQL).toHaveBeenCalledWith(
+      expectedNetwork,
+      POOL_DETAIL_WITH_HEALTH,
+      expectedVariables,
+    );
+
+    mockPreloadGQL.mockClear();
+    act(() => {
+      link?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    });
+    expect(mockPreloadGQL).toHaveBeenCalledWith(
+      expectedNetwork,
+      POOL_DETAIL_WITH_HEALTH,
+      expectedVariables,
+    );
   });
 });
 

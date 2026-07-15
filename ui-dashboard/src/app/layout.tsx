@@ -10,6 +10,7 @@ import { DataFreshnessBanner } from "@/components/data-freshness-banner";
 import { ResourceHints } from "@/components/resource-hints";
 import { SessionErrorGuard } from "@/components/session-error-guard";
 import { SwrProvider } from "@/components/swr-provider";
+import { PlotlyIdlePreloader } from "@/components/plotly-idle-preloader";
 import { Analytics } from "@vercel/analytics/next";
 import { serverEnv, clientEnv } from "@/env";
 import "./globals.css";
@@ -62,6 +63,7 @@ export default async function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
       >
+        <PlotlyIdlePreloader />
         <ResourceHints />
         <SessionProvider session={session}>
           <SessionErrorGuard />
