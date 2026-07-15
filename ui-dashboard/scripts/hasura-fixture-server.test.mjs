@@ -45,6 +45,8 @@ describe("hasura fixture daily snapshot filters", () => {
       since: todayStart - 1,
     });
 
-    expect(rows).toHaveLength(6);
+    // Four rows per fixture pool (today, 1d, 2d, and the deliberate 365d
+    // full-history sentinel used by the bounded-SSR browser flow).
+    expect(rows).toHaveLength(8);
   });
 });

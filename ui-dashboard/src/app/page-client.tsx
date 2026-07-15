@@ -42,10 +42,14 @@ const SECONDS_PER_DAY = 86_400;
 export default function GlobalPage({
   initialNetworkData,
   initialNetworkDataFetchedAtMs,
+  initialUniqueLpCount,
   initialIsWeekend = false,
 }: {
   initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
+  /** Exact server aggregate used while raw cumulative LP addresses are omitted
+   * from the bounded Flight payload. `null` is a real unavailable result. */
+  initialUniqueLpCount?: number | null | undefined;
   initialIsWeekend?: boolean;
 }) {
   // First paint uses `initialNetworkData` via SWR's `fallbackData`; on
@@ -53,12 +57,15 @@ export default function GlobalPage({
   // cache may hold fresher data from another page's polling cycle (e.g.
   // /pools also calls useAllNetworksData under the same key). If no other
   // page has polled, the worst case is the cache matches the SSR payload
-  // anyway, and the next `refreshInterval` tick will refresh either way.
+  // anyway. The bounded snapshot seed stays sufficient for the default 30d
+  // charts; selecting "All" explicitly requests complete history without
+  // waiting for the next `refreshInterval` tick.
   return (
     <Suspense>
       <GlobalContent
         initialNetworkData={initialNetworkData}
         initialNetworkDataFetchedAtMs={initialNetworkDataFetchedAtMs}
+        initialUniqueLpCount={initialUniqueLpCount}
         initialIsWeekend={initialIsWeekend}
       />
     </Suspense>
@@ -116,16 +123,27 @@ function perPoolTvlWindow(
 function GlobalContent({
   initialNetworkData,
   initialNetworkDataFetchedAtMs,
+  initialUniqueLpCount,
   initialIsWeekend,
 }: {
   initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
+  initialUniqueLpCount?: number | null | undefined;
   initialIsWeekend: boolean;
 }) {
-  const { networkData, isLoading } = useAllNetworksData(
-    initialNetworkData,
-    initialNetworkDataFetchedAtMs,
-  );
+  const {
+    networkData,
+    isLoading,
+    isSnapshotHistoryCapped,
+    snapshotHistoryError,
+    requestFullSnapshotHistory,
+  } = useAllNetworksData(initialNetworkData, initialNetworkDataFetchedAtMs);
+  // SWR reports `isLoading` while `fallbackData` is being revalidated, even
+  // though the last-good network payload is still renderable. That distinction
+  // matters for the on-demand full-history request: selecting a capped chart's
+  // "All" range must only load that chart, not blank every KPI and sibling
+  // chart while the shared SWR key refreshes in the background.
+  const isInitialLoading = showInitialSkeleton(isLoading, networkData.length);
 
   // Whether any network has a top-level, rates, snapshot, or pagination
   // failure. Used to show N/A / "partial data" in KPI tiles rather than
@@ -163,6 +181,9 @@ function GlobalContent({
   const anyLpError = networkData.some(
     (netData) => netData.lpError !== null && netData.error === null,
   );
+  const uniqueLpAddressesOmitted = networkData.some(
+    (netData) => netData.uniqueLpAddressesOmitted === true,
+  );
 
   // Per-pool entries, volume, WoW, and strategy badges — shared with pools page.
   // Trading-limit pressure still flows into Health through Pool fields.
@@ -180,6 +201,7 @@ function GlobalContent({
   } = useMemo(() => buildGlobalPoolEntries(networkData), [networkData]);
 
   // Aggregate KPIs across all chains for the summary tiles.
+  // eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- This single pass intentionally keeps cross-network KPI numerators, denominators, and partial-data gates atomic.
   const aggregated = useMemo(() => {
     let totalPools = 0;
     let totalFpmmPools = 0;
@@ -285,8 +307,12 @@ function GlobalContent({
 
     // Show N/A when no chain contributed a successful LP result OR any
     // top-level chain error means we can't claim a complete global count.
-    const totalUniqueLps =
-      anyNetworkError || (!hasSuccessfulLpResult && anyLpError)
+    const totalUniqueLps = uniqueLpAddressesOmitted
+      ? // The server computed this exact cross-chain union before replacing
+        // the cumulative address arrays. `undefined` violates that projection
+        // invariant, so fail closed instead of displaying a false zero.
+        (initialUniqueLpCount ?? null)
+      : anyNetworkError || (!hasSuccessfulLpResult && anyLpError)
         ? null
         : uniqueLpSet.size;
 
@@ -320,6 +346,8 @@ function GlobalContent({
     anySnapshots7dError,
     anyFeesError,
     anyLpError,
+    uniqueLpAddressesOmitted,
+    initialUniqueLpCount,
   ]);
 
   const failedNetworks = networkData.filter((net) => net.error !== null);
@@ -349,18 +377,21 @@ function GlobalContent({
           totalTvl={aggregated.totalTvl}
           tvlPartial={aggregated.tvlPartial}
           change7d={aggregated.tvlChange7d}
-          isLoading={isLoading}
+          isLoading={isInitialLoading}
           hasError={anyNetworkError}
           hasSnapshotError={
             anySnapshots7dError ||
             anySnapshotsAllDailyError ||
             anySnapshotsAllDailyTruncated
           }
+          snapshotHistoryCapped={isSnapshotHistoryCapped}
+          snapshotHistoryError={snapshotHistoryError}
+          requestFullSnapshotHistory={requestFullSnapshotHistory}
           plotlyDeferMode="idle"
         />
         <VolumeOverTimeChart
           networkData={networkData}
-          isLoading={isLoading}
+          isLoading={isInitialLoading}
           hasError={anyNetworkError}
           hasSnapshotError={
             anySnapshotsAllDailyError || anySnapshotsAllDailyTruncated
@@ -370,6 +401,9 @@ function GlobalContent({
             anyBrokerSnapshotsAllDailyTruncated
           }
           fullVolumeSeries={aggregated.volumeSeries}
+          snapshotHistoryCapped={isSnapshotHistoryCapped}
+          snapshotHistoryError={snapshotHistoryError}
+          requestFullSnapshotHistory={requestFullSnapshotHistory}
           plotlyDeferMode="idle"
         />
       </div>
@@ -382,7 +416,7 @@ function GlobalContent({
             sub24h={aggregated.totalFees24h}
             sub7d={aggregated.totalFees7d}
             sub30d={aggregated.totalFees30d}
-            isLoading={isLoading}
+            isLoading={isInitialLoading}
             hasError={anyNetworkError || anyFeesError}
             format={formatUSD}
             totalPrefix={feesApprox ? "≈ " : ""}
@@ -399,7 +433,7 @@ function GlobalContent({
           />
 
           <LpTile
-            isLoading={isLoading}
+            isLoading={isInitialLoading}
             totalUniqueLps={aggregated.totalUniqueLps}
             anyNetworkError={anyNetworkError}
             anyLpError={anyLpError}
@@ -407,10 +441,10 @@ function GlobalContent({
           />
 
           <SwapsTile
-            isLoading={isLoading}
+            isLoading={isInitialLoading}
             totalSwapsAllTime={aggregated.totalSwapsAllTime}
           />
-          <TradersTile isLoading={isLoading} networkData={networkData} />
+          <TradersTile isLoading={isInitialLoading} networkData={networkData} />
         </div>
       </section>
 
@@ -429,7 +463,7 @@ function GlobalContent({
 
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">All Pools</h2>
-        {showInitialSkeleton(isLoading, networkData.length) ? (
+        {isInitialLoading ? (
           // Matches the real GlobalPoolsTable's 45px header / 58px row
           // rhythm (`PoolsTableSkeleton`, `@/components/pools-table-skeleton`)
           // — same shape `(home)/loading.tsx` and /pools's stand-ins

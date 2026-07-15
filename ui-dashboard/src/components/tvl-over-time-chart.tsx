@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { chainColor } from "@/lib/chain-colors";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
@@ -17,9 +17,9 @@ import { forwardFillSeries } from "@/lib/chart-gap-fill";
 import {
   SECONDS_PER_DAY,
   filterSeriesByRange,
-  type RangeKey,
   type TimeSeriesPoint,
 } from "@/lib/time-series";
+import { useSnapshotHistoryRange } from "@/hooks/use-snapshot-history-range";
 
 type SeriesPoint = { timestamp: number; tvlUSD: number };
 
@@ -393,9 +393,16 @@ interface TvlOverTimeChartProps {
   isLoading: boolean;
   hasError: boolean;
   hasSnapshotError: boolean;
+  /** Whether the current Server Component seed intentionally omits old rows. */
+  snapshotHistoryCapped?: boolean;
+  /** Unexpected error from the on-demand full-history SWR revalidation. */
+  snapshotHistoryError?: Error | null;
+  /** Shared/coalesced request used when this chart first selects "All". */
+  requestFullSnapshotHistory?: () => Promise<void>;
   plotlyDeferMode?: PlotlyDeferMode;
 }
 
+// eslint-disable-next-line max-lines-per-function -- Chart owns range handoff plus TVL series/breakdown projection as one render contract.
 export function TvlOverTimeChart({
   networkData,
   totalTvl,
@@ -404,9 +411,25 @@ export function TvlOverTimeChart({
   isLoading,
   hasError,
   hasSnapshotError,
+  snapshotHistoryCapped,
+  snapshotHistoryError = null,
+  requestFullSnapshotHistory,
   plotlyDeferMode = "none",
 }: TvlOverTimeChartProps) {
-  const [range, setRange] = useState<RangeKey>("30d");
+  const historyIsCapped =
+    snapshotHistoryCapped ??
+    networkData.some((network) => network.snapshotsAllDailyCapped);
+  const {
+    range,
+    handleRangeChange,
+    allHistoryUnavailable,
+    allHistoryLoading,
+    allHistoryFailed,
+  } = useSnapshotHistoryRange({
+    historyIsCapped,
+    snapshotHistoryError,
+    requestFullSnapshotHistory,
+  });
 
   const { fullSeries, fullBreakdown } = useMemo<{
     fullSeries: TimeSeriesPoint[];
@@ -449,19 +472,23 @@ export function TvlOverTimeChart({
   // is fine: the headline shows current TVL (not a bar-sum), so no invariant
   // to preserve against a rolling-hour summary window.
   const visibleSeries = useMemo(
-    () => filterSeriesByRange(fullSeries, range),
-    [fullSeries, range],
+    () => (allHistoryUnavailable ? [] : filterSeriesByRange(fullSeries, range)),
+    [allHistoryUnavailable, fullSeries, range],
   );
   const visibleBreakdown = useMemo<BreakdownSeries[]>(
     () =>
-      fullBreakdown.map((b) => ({
-        ...b,
-        series: filterSeriesByRange(b.series, range),
-      })),
-    [fullBreakdown, range],
+      allHistoryUnavailable
+        ? []
+        : fullBreakdown.map((b) => ({
+            ...b,
+            series: filterSeriesByRange(b.series, range),
+          })),
+    [allHistoryUnavailable, fullBreakdown, range],
   );
 
-  const headline = isLoading
+  const chartIsLoading = isLoading || allHistoryLoading;
+  const chartHasSnapshotError = hasSnapshotError || allHistoryFailed;
+  const headline = chartIsLoading
     ? "…"
     : tvlPartial === null
       ? "—"
@@ -470,9 +497,11 @@ export function TvlOverTimeChart({
         : formatUSD(totalTvl);
   const emptyMessage = hasError
     ? "Unable to load TVL history"
-    : hasSnapshotError
-      ? "Historical data partial — some chains failed to load"
-      : "Not enough history yet";
+    : allHistoryFailed
+      ? "Unable to load full TVL history"
+      : hasSnapshotError
+        ? "Historical data partial — some chains failed to load"
+        : "Not enough history yet";
 
   return (
     <TimeSeriesChartCard
@@ -481,13 +510,13 @@ export function TvlOverTimeChart({
       series={visibleSeries}
       breakdown={visibleBreakdown}
       range={range}
-      onRangeChange={setRange}
+      onRangeChange={handleRangeChange}
       headline={headline}
       change={change7d}
       hoverDateFormat="%b %d, %Y"
-      isLoading={isLoading}
+      isLoading={chartIsLoading}
       hasError={hasError}
-      hasSnapshotError={hasSnapshotError}
+      hasSnapshotError={chartHasSnapshotError}
       emptyMessage={emptyMessage}
       plotlyDeferMode={plotlyDeferMode}
     />

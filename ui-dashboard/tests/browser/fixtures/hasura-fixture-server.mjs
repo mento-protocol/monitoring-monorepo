@@ -329,7 +329,10 @@ function dailySnapshotsFor(poolId) {
   const pool = poolsById.get(poolId);
   if (!pool) return [];
   const todayStart = Math.floor(nowSeconds() / DAY_SECONDS) * DAY_SECONDS;
-  return [0, 1, 2].map((daysAgo) => ({
+  // The 365d row deliberately sits outside the 30d Server Component seed.
+  // Browser tests can therefore prove that selecting "All" performs the
+  // normal client-side full-history fetch instead of relabeling the seed.
+  return [0, 1, 2, 365].map((daysAgo) => ({
     id: `${poolId}-${todayStart - daysAgo * DAY_SECONDS}`,
     poolId,
     timestamp: String(todayStart - daysAgo * DAY_SECONDS),
@@ -347,7 +350,7 @@ function dailySnapshotsFor(poolId) {
           ? "25000000000000000000"
           : "50000000000000000000",
     rebalanceCount: 0,
-    cumulativeSwapCount: 3 - daysAgo,
+    cumulativeSwapCount: daysAgo >= 365 ? 1 : 3 - daysAgo,
     cumulativeVolume0: "125000000000000000000",
     cumulativeVolume1:
       pool.token1Decimals === 6 ? "125000000" : "125000000000000000000",

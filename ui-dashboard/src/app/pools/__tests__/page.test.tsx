@@ -198,6 +198,7 @@ function makeNetworkData(
     snapshots7d: [],
     snapshots30d: [],
     snapshotsAllDaily: [],
+    snapshotsAllDailyCapped: false,
     snapshotsAllDailyTruncated: false,
     brokerSnapshotsAllDaily: [],
     brokerSnapshotsAllDailyTruncated: false,
@@ -231,6 +232,9 @@ const baseAllNetworksResult = {
   ],
   isLoading: false,
   error: null,
+  isSnapshotHistoryCapped: false,
+  snapshotHistoryError: null,
+  requestFullSnapshotHistory: vi.fn(async () => undefined),
 };
 
 const baseSwapsResult = {
@@ -497,6 +501,9 @@ describe("PoolsPage loading-state skeleton parity", () => {
       networkData: [],
       isLoading: true,
       error: null,
+      isSnapshotHistoryCapped: false,
+      snapshotHistoryError: null,
+      requestFullSnapshotHistory: vi.fn(async () => undefined),
     });
     vi.mocked(useGQL).mockReturnValue(baseSwapsResult as SWRResponse);
 

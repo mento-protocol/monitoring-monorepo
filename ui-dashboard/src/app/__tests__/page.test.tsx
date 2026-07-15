@@ -91,14 +91,21 @@ function render(
   networkData: NetworkData[],
   isLoading = false,
   initialIsWeekend = false,
+  initialUniqueLpCount?: number | null,
 ): string {
   (useAllNetworksData as ReturnType<typeof vi.fn>).mockReturnValue({
     networkData,
     isLoading,
     error: null,
+    isSnapshotHistoryCapped: false,
+    snapshotHistoryError: null,
+    requestFullSnapshotHistory: vi.fn(async () => undefined),
   });
   return renderToStaticMarkup(
-    <GlobalPage initialIsWeekend={initialIsWeekend} />,
+    <GlobalPage
+      initialIsWeekend={initialIsWeekend}
+      initialUniqueLpCount={initialUniqueLpCount}
+    />,
   );
 }
 
@@ -137,6 +144,40 @@ describe("GlobalPage — loading state", () => {
     const html = render([], true);
     // Should have multiple "…" placeholders
     expect(html.split("…").length - 1).toBeGreaterThanOrEqual(4);
+  });
+
+  it("keeps last-good KPIs, the recent charts, and the pool table visible during background revalidation", () => {
+    const pool = makeTvlPool({
+      swapCount: 17,
+      reserves0: "1000000000000000000",
+      reserves1: "1000000000000000000",
+    });
+    const html = render(
+      [
+        makeNetworkData({
+          network: TVL_NETWORK,
+          pools: [pool],
+          uniqueLpAddresses: ["0x1111111111111111111111111111111111111111"],
+          fees: {
+            totalFeesUSD: 1_000,
+            fees24hUSD: 10,
+            fees7dUSD: 70,
+            fees30dUSD: 300,
+            unpricedSymbols: [],
+            unpricedSymbols24h: [],
+            unresolvedCount: 0,
+            unresolvedCount24h: 0,
+          },
+        }),
+      ],
+      true,
+    );
+
+    expect(html).toContain('aria-label="Swap Fees: $1K"');
+    expect(html).toContain('data-testid="global-pools-table"');
+    expect(html).not.toContain("Total Value Locked chart is loading.");
+    expect(html).not.toContain("Volume chart is loading.");
+    expect(html).not.toContain("…");
   });
 
   // The "All Pools" degraded-path skeleton must reserve the same table
@@ -257,6 +298,29 @@ describe("GlobalPage — fees-only failure", () => {
 // LP query failure
 
 describe("GlobalPage — LP query failure", () => {
+  it("renders the exact server aggregate while cumulative LP addresses are omitted", () => {
+    const html = render(
+      [
+        makeNetworkData({
+          uniqueLpAddresses: null,
+          uniqueLpAddressesOmitted: true,
+        }),
+        makeNetworkData({
+          network: NETWORK_2,
+          uniqueLpAddresses: null,
+          uniqueLpAddressesOmitted: true,
+        }),
+      ],
+      false,
+      false,
+      13,
+    );
+
+    expect(html).toContain("LPs");
+    expect(html).toContain(">13<");
+    expect(html).toContain("Unique LP addresses across all chains");
+  });
+
   it("shows N/A when all LP queries fail", () => {
     const html = render([
       makeNetworkData({

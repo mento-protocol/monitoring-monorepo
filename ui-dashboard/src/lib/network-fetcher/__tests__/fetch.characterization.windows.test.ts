@@ -176,6 +176,7 @@ describe("fetchNetworkData characterization — window error precedence", () => 
         makeDaily(todayMidnight - 60 * 86400, "pool-tail"),
       ],
       refreshAfterTimestamp: todayMidnight - 86400,
+      complete: true,
     });
     const tailErr = new Error("incremental tail timeout");
     installGraphQLMock({

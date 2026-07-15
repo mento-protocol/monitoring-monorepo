@@ -13,8 +13,7 @@ import {
 } from "@/lib/protocol-fees";
 import { buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolDailyFeeSnapshot } from "@/lib/types";
-import { filterSnapshotsToWindow, type TimeRange } from "@/lib/volume";
-import { SECONDS_PER_DAY } from "./constants";
+import { buildDailySnapshotSlices, type TimeRange } from "@/lib/volume";
 import { toError } from "./errors";
 import { mutableDayCutoff } from "./pagination";
 import type {
@@ -177,7 +176,9 @@ function deriveOlsPoolIds(
 /**
  * Derives the snapshotsAllDaily/snapshots7d/snapshots30d/snapshots slices
  * plus their per-window errors. Window-specific arrays are derived in-memory
- * from `snapshotsAllDaily` — no separate requests, no server-side cap. If
+ * from `snapshotsAllDaily` — no separate requests. This fetch-layer payload
+ * is always uncapped; the Server Component transport projection applies its
+ * own recent-history cap later and marks that projection explicitly. If
  * pagination truncated (hit MAX_PAGES or mid-loop fetch failure) we keep the
  * most-recent rows we did fetch: 24h/7d/30d derive correctly from those and
  * "All" is flagged as partial.
@@ -188,6 +189,7 @@ function deriveSnapshotSlice(args: {
   snapshotTailNowMs: number;
 }): {
   snapshotsAllDaily: NetworkData["snapshotsAllDaily"];
+  snapshotsAllDailyCapped: boolean;
   snapshotsAllDailyTruncated: boolean;
   snapshotsAllDailyError: Error | null;
   snapshots: NetworkData["snapshots"];
@@ -211,30 +213,11 @@ function deriveSnapshotSlice(args: {
       ? toError(snapshotsAllDailyResult.reason)
       : (snapshotsAllDailyResult.value.error ?? null);
 
-  // PoolDailySnapshot rows are UTC-midnight-aligned incremental aggregates
-  // (one row per pool per UTC day). Anchoring on today's UTC midnight gives
-  // exactly 1/7/30 daily rows per KPI window without overcounting.
-  //
   // `nowSeconds` is the caller's snapshot of "now" (`windows.w24h.to`), so
-  // deriving todayMidnight from it keeps all three windows consistent with
-  // the same clock tick rather than calling Date.now() again.
-  const todayMidnight =
-    Math.floor(nowSeconds / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-  const dw24h: TimeRange = {
-    from: todayMidnight,
-    to: todayMidnight + SECONDS_PER_DAY,
-  };
-  const dw7d: TimeRange = {
-    from: todayMidnight - 6 * SECONDS_PER_DAY,
-    to: todayMidnight + SECONDS_PER_DAY,
-  };
-  const dw30d: TimeRange = {
-    from: todayMidnight - 29 * SECONDS_PER_DAY,
-    to: todayMidnight + SECONDS_PER_DAY,
-  };
-
-  const snapshots7d = filterSnapshotsToWindow(snapshotsAllDaily, dw7d);
-  const snapshots30d = filterSnapshotsToWindow(snapshotsAllDaily, dw30d);
+  // the shared derivation keeps server assembly and client restoration on the
+  // same UTC-day boundaries without another Date.now() tick.
+  const { dailyWindows, snapshots, snapshots7d, snapshots30d } =
+    buildDailySnapshotSlices(snapshotsAllDaily, nowSeconds);
 
   // Per-window error detection. Pagination issues (error or truncation) only
   // affect a specific window if we didn't fetch far enough back to cover its
@@ -262,7 +245,7 @@ function deriveSnapshotSlice(args: {
 
   const { snapshotsError, snapshots7dError, snapshots30dError } =
     resolveWindowErrors({
-      windows: { w24h: dw24h, w7d: dw7d, w30d: dw30d },
+      windows: dailyWindows,
       oldestFetchedTs,
       paginationIssue,
       mutableTailIssue,
@@ -271,9 +254,12 @@ function deriveSnapshotSlice(args: {
 
   return {
     snapshotsAllDaily,
+    snapshotsAllDailyCapped:
+      snapshotsAllDailyResult.status === "fulfilled" &&
+      snapshotsAllDailyResult.value.historyComplete === false,
     snapshotsAllDailyTruncated,
     snapshotsAllDailyError,
-    snapshots: filterSnapshotsToWindow(snapshotsAllDaily, dw24h),
+    snapshots,
     snapshots7d,
     snapshots30d,
     snapshotsError,

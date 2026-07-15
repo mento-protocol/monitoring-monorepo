@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { InitialNetworkData, NetworkData } from "@/lib/fetch-all-networks";
 import type { Network } from "@/lib/networks";
-import type { Pool } from "@/lib/types";
+import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 
 const harness = vi.hoisted(() => ({
   fetchAllNetworks: vi.fn<() => Promise<NetworkData[]>>(),
   fetcher: undefined as (() => Promise<NetworkData[]>) | undefined,
+  fetchers: [] as (() => Promise<NetworkData[]>)[],
+  mutateRequest: undefined as Promise<NetworkData[]> | undefined,
+  seedIncrementalRowCacheFromNetworkData: vi.fn(),
 }));
 
 vi.mock("@/lib/fetch-all-networks", async (importOriginal) => {
@@ -15,7 +18,8 @@ vi.mock("@/lib/fetch-all-networks", async (importOriginal) => {
   return {
     ...actual,
     fetchAllNetworks: harness.fetchAllNetworks,
-    seedIncrementalRowCacheFromNetworkData: vi.fn(),
+    seedIncrementalRowCacheFromNetworkData:
+      harness.seedIncrementalRowCacheFromNetworkData,
   };
 });
 
@@ -33,10 +37,16 @@ vi.mock("swr", () => ({
     config: { fallbackData?: NetworkData[] },
   ) => {
     harness.fetcher = fetcher;
+    harness.fetchers.push(fetcher);
     return {
       data: config.fallbackData,
       error: undefined,
       isLoading: false,
+      mutate: () => {
+        const request = fetcher();
+        harness.mutateRequest = request;
+        return request;
+      },
     };
   },
   useSWRConfig: () => ({ cache: { get: () => undefined } }),
@@ -64,17 +74,52 @@ const ACTIVE_VP = {
   updatedAtTimestamp: "2000",
 } satisfies Pool;
 
-function networkData(pool: Pool): InitialNetworkData {
+const TODAY_MIDNIGHT = 1_700_006_400;
+const SECONDS_PER_DAY = 86_400;
+
+function dailySnapshot(daysAgo: number): PoolSnapshotWindow {
+  return {
+    poolId: ACTIVE_VP.id,
+    timestamp: String(TODAY_MIDNIGHT - daysAgo * SECONDS_PER_DAY),
+    reserves0: "1",
+    reserves1: "1",
+    swapCount: daysAgo + 1,
+    swapVolume0: "1",
+    swapVolume1: "1",
+  };
+}
+
+const DAILY_HISTORY = [0, 6, 7, 29, 30].map(dailySnapshot);
+
+function networkData(
+  pool: Pool,
+  snapshotsAllDailyCapped = true,
+): InitialNetworkData {
   return {
     network: NETWORK,
     pools: [pool],
+    snapshotWindows: {
+      w24h: { from: TODAY_MIDNIGHT - SECONDS_PER_DAY, to: TODAY_MIDNIGHT },
+      w7d: { from: TODAY_MIDNIGHT - 7 * SECONDS_PER_DAY, to: TODAY_MIDNIGHT },
+      w30d: {
+        from: TODAY_MIDNIGHT - 30 * SECONDS_PER_DAY,
+        to: TODAY_MIDNIGHT,
+      },
+    },
+    snapshots: [],
+    snapshots7d: [],
+    snapshots30d: [],
+    snapshotsAllDaily: DAILY_HISTORY,
+    snapshotsAllDailyCapped,
     feeSnapshots: [],
     liveHealthError: null,
   } as InitialNetworkData;
 }
 
+let latestResult: ReturnType<typeof useAllNetworksData> | undefined;
+
 function Probe({ fallback }: { fallback: InitialNetworkData[] }) {
-  useAllNetworksData(fallback, 0);
+  latestResult = useAllNetworksData(fallback, 0);
   return null;
 }
 
@@ -82,6 +127,9 @@ describe("useAllNetworksData cold-cache reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     harness.fetcher = undefined;
+    harness.fetchers.length = 0;
+    harness.mutateRequest = undefined;
+    latestResult = undefined;
   });
 
   it("retains the SSR VirtualPool extension on the first client refresh", async () => {
@@ -99,6 +147,158 @@ describe("useAllNetworksData cold-cache reconciliation", () => {
     expect(refreshed[0]?.pools[0]?.wrappedExchangeMinimumReports).toBe("2");
     expect(refreshed[0]?.liveHealthError?.message).toContain(
       "did not reconfirm 1 VirtualPool extension",
+    );
+  });
+
+  it("restores omitted daily windows before consumers and cache seeding", () => {
+    const fallback = [networkData(ACTIVE_VP)];
+
+    renderToStaticMarkup(<Probe fallback={fallback} />);
+
+    const restored = latestResult!.networkData[0]!;
+    expect(restored.snapshots.map((row) => row.timestamp)).toEqual([
+      String(TODAY_MIDNIGHT),
+    ]);
+    expect(restored.snapshots7d.map((row) => row.timestamp)).toEqual(
+      [0, 6].map((daysAgo) =>
+        String(TODAY_MIDNIGHT - daysAgo * SECONDS_PER_DAY),
+      ),
+    );
+    expect(restored.snapshots30d.map((row) => row.timestamp)).toEqual(
+      [0, 6, 7, 29].map((daysAgo) =>
+        String(TODAY_MIDNIGHT - daysAgo * SECONDS_PER_DAY),
+      ),
+    );
+    expect(harness.seedIncrementalRowCacheFromNetworkData).toHaveBeenCalledWith(
+      [restored],
+    );
+    // The transport object is immutable: it still carries the explicit empty
+    // tuples, proving restoration did not re-inflate the Flight prop itself.
+    expect(fallback[0]!.snapshots).toEqual([]);
+    expect(fallback[0]!.snapshots7d).toEqual([]);
+    expect(fallback[0]!.snapshots30d).toEqual([]);
+  });
+
+  it("coalesces repeated full-history requests while the capped seed refresh is in flight", async () => {
+    const fallback = [networkData(ACTIVE_VP)];
+    let resolveFetch!: (value: NetworkData[]) => void;
+    harness.fetchAllNetworks.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    renderToStaticMarkup(<Probe fallback={fallback} />);
+
+    const first = latestResult!.requestFullSnapshotHistory();
+    const second = latestResult!.requestFullSnapshotHistory();
+
+    expect(second).toBe(first);
+    expect(harness.fetchAllNetworks).toHaveBeenCalledTimes(1);
+    resolveFetch([networkData(ACTIVE_VP, false) as NetworkData]);
+    await Promise.all([first, second]);
+  });
+
+  it("joins a user-triggered All request to mount revalidation at the fetch boundary", async () => {
+    const fallback = [networkData(ACTIVE_VP)];
+    let resolveFetch!: (value: NetworkData[]) => void;
+    harness.fetchAllNetworks.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    renderToStaticMarkup(<Probe fallback={fallback} />);
+
+    // Model SWR starting a mount revalidation before the chart asks for All.
+    const mountRequest = harness.fetcher!();
+    const allRequest = latestResult!.requestFullSnapshotHistory();
+
+    expect(harness.fetchAllNetworks).toHaveBeenCalledTimes(1);
+    expect(harness.mutateRequest).toBe(mountRequest);
+
+    const completed = networkData(ACTIVE_VP, false) as NetworkData;
+    resolveFetch([completed]);
+    const [mountResult] = await Promise.all([mountRequest, allRequest]);
+
+    expect(mountResult).toEqual([completed]);
+  });
+
+  it("shares one raw fan-out across hook instances but reconciles each caller's fallback", async () => {
+    const firstFallback = [networkData(ACTIVE_VP)];
+    const secondFallback = [
+      networkData({
+        ...ACTIVE_VP,
+        wrappedExchangeMinimumReports: "3",
+      }),
+    ];
+    let resolveFetch!: (value: NetworkData[]) => void;
+    harness.fetchAllNetworks.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    renderToStaticMarkup(<Probe fallback={firstFallback} />);
+    const firstInstanceFetcher = harness.fetchers[0]!;
+    renderToStaticMarkup(<Probe fallback={secondFallback} />);
+
+    const firstMountRequest = firstInstanceFetcher();
+    const secondAllRequest = latestResult!.requestFullSnapshotHistory();
+
+    expect(harness.fetchAllNetworks).toHaveBeenCalledTimes(1);
+    resolveFetch([
+      networkData({
+        ...ACTIVE_VP,
+        wrappedExchangeMinimumReports: undefined,
+      }) as NetworkData,
+    ]);
+    const [firstResult, secondResult] = await Promise.all([
+      firstMountRequest,
+      harness.mutateRequest!,
+      secondAllRequest,
+    ]);
+
+    expect(firstResult[0]?.pools[0]?.wrappedExchangeMinimumReports).toBe("2");
+    expect(secondResult[0]?.pools[0]?.wrappedExchangeMinimumReports).toBe("3");
+  });
+
+  it("does not refetch when the visible snapshot history is already complete", async () => {
+    renderToStaticMarkup(<Probe fallback={[networkData(ACTIVE_VP, false)]} />);
+
+    await latestResult!.requestFullSnapshotHistory();
+
+    expect(harness.fetchAllNetworks).not.toHaveBeenCalled();
+  });
+
+  it("treats bounded Broker rows as incomplete even when v3 history is complete", async () => {
+    const fallback = {
+      ...networkData(ACTIVE_VP, false),
+      brokerSnapshotsAllDailyCapped: true,
+    } satisfies InitialNetworkData;
+    harness.fetchAllNetworks.mockResolvedValueOnce([
+      {
+        ...fallback,
+        brokerSnapshotsAllDailyCapped: false,
+      } as NetworkData,
+    ]);
+    renderToStaticMarkup(<Probe fallback={[fallback]} />);
+
+    await latestResult!.requestFullSnapshotHistory();
+
+    expect(latestResult!.isSnapshotHistoryCapped).toBe(true);
+    expect(harness.fetchAllNetworks).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a failed completion while keeping the bounded history marked incomplete", () => {
+    const failedFallback = {
+      ...networkData(ACTIVE_VP),
+      snapshotsAllDailyError: { message: "full history timeout" },
+      snapshotsAllDailyTruncated: true,
+    } satisfies InitialNetworkData;
+
+    renderToStaticMarkup(<Probe fallback={[failedFallback]} />);
+
+    expect(latestResult!.isSnapshotHistoryCapped).toBe(true);
+    expect(latestResult!.snapshotHistoryError?.message).toBe(
+      "full history timeout",
     );
   });
 });

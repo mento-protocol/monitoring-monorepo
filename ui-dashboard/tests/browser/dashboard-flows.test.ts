@@ -127,6 +127,24 @@ test.describe("dashboard browser flows", () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test("keeps decoded homepage and pools documents below the Flight payload budget", async ({
+    request,
+  }) => {
+    const paths = ["/", "/pools"] as const;
+    const responses = await Promise.all(paths.map((path) => request.get(path)));
+    const bodies = await Promise.all(
+      responses.map((response) => response.body()),
+    );
+
+    responses.forEach((response) => expect(response.ok()).toBe(true));
+    bodies.forEach((body, index) => {
+      expect(
+        body.byteLength,
+        `${paths[index]} decoded document bytes`,
+      ).toBeLessThan(500_000);
+    });
+  });
+
   test("switches chain context through the pool list target", async ({
     page,
   }) => {
@@ -154,6 +172,148 @@ test.describe("dashboard browser flows", () => {
       "aria-selected",
       "true",
     );
+  });
+
+  test("keeps the bounded /pools SSR seed without an eager full-history client fetch", async ({
+    page,
+  }) => {
+    let fullHistoryRequests = 0;
+    await page.route("**/graphql", async (route) => {
+      if (
+        (route.request().postData() ?? "").includes(
+          "query PoolDailySnapshotsAll",
+        )
+      ) {
+        fullHistoryRequests += 1;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/pools");
+    await expect(page.getByRole("heading", { name: "Pools" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "USDC/USDm" }).first(),
+    ).toBeVisible();
+    await page.waitForLoadState("networkidle");
+
+    expect(fullHistoryRequests).toBe(0);
+  });
+
+  test("loads full homepage snapshot history on demand before rendering All", async ({
+    page,
+  }) => {
+    let fullHistoryRequests = 0;
+    let releaseFullHistory!: () => void;
+    const fullHistoryGate = new Promise<void>((resolve) => {
+      releaseFullHistory = resolve;
+    });
+    await page.route("**/graphql", async (route) => {
+      if (
+        !(route.request().postData() ?? "").includes(
+          "query PoolDailySnapshotsAll",
+        )
+      ) {
+        await route.continue();
+        return;
+      }
+      fullHistoryRequests += 1;
+      await fullHistoryGate;
+      await route.continue();
+    });
+
+    await page.goto("/");
+    const rangeGroup = page.getByRole("group", {
+      name: "TVL chart time range",
+    });
+    await expect(rangeGroup).toBeVisible();
+    await expect(
+      rangeGroup.getByRole("button", { name: "1M" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(fullHistoryRequests).toBe(0);
+
+    await rangeGroup.getByRole("button", { name: "All" }).click();
+
+    await expect.poll(() => fullHistoryRequests).toBeGreaterThan(0);
+    await expect(
+      page.getByText("Total Value Locked chart is loading."),
+    ).toHaveCount(1);
+    await expect(
+      rangeGroup.getByRole("button", { name: "All" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    // The shared SWR key is revalidating, but its bounded SSR payload remains
+    // valid last-good data for every surface except the selected capped chart.
+    // Keep the loading state scoped to TVL "All" instead of blanking the 1M
+    // Volume chart, KPI tiles, or pool table while the request is held.
+    await expect(
+      page.getByRole("figure", { name: "Volume chart, 1M range" }),
+    ).toBeVisible();
+    await expect(page.getByText("Volume chart is loading.")).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: /^Swap Fees:/ }),
+    ).not.toHaveAttribute("aria-label", "Swap Fees: …");
+    await expect(
+      page
+        .getByText("LPs", { exact: true })
+        .locator("xpath=following-sibling::p[1]"),
+    ).not.toHaveText("…");
+    await expect(
+      page
+        .getByText("Swaps", { exact: true })
+        .locator("xpath=following-sibling::p[1]"),
+    ).not.toHaveText("…");
+    await expect(
+      page.getByRole("link", { name: "USDC/USDm" }).first(),
+    ).toBeVisible();
+
+    releaseFullHistory();
+
+    await expect(
+      page.getByText("Total Value Locked chart is loading."),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("figure", {
+        name: "Total Value Locked chart, All range",
+      }),
+    ).toBeVisible();
+
+    const completedRequestCount = fullHistoryRequests;
+    await rangeGroup.getByRole("button", { name: "1M" }).click();
+    await rangeGroup.getByRole("button", { name: "All" }).click();
+    await page.waitForTimeout(200);
+    expect(fullHistoryRequests).toBe(completedRequestCount);
+  });
+
+  test("shows an honest degraded state when full homepage history cannot load", async ({
+    page,
+  }) => {
+    let fullHistoryRequests = 0;
+    await page.route("**/graphql", async (route) => {
+      if (
+        (route.request().postData() ?? "").includes(
+          "query PoolDailySnapshotsAll",
+        )
+      ) {
+        fullHistoryRequests += 1;
+        await route.abort("timedout");
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/");
+    const rangeGroup = page.getByRole("group", {
+      name: "TVL chart time range",
+    });
+    await rangeGroup.getByRole("button", { name: "All" }).click();
+
+    await expect.poll(() => fullHistoryRequests).toBeGreaterThan(0);
+    const figure = page.getByRole("figure", {
+      name: "Total Value Locked chart, All range",
+    });
+    await expect(
+      figure.getByText("Unable to load full TVL history", { exact: true }),
+    ).toBeVisible();
+    await expect(figure.getByRole("img")).toHaveCount(0);
   });
 
   test("keeps a fresh live-health overlay ahead of an expiring fleet snapshot", async ({
