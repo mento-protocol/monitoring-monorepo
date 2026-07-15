@@ -131,6 +131,56 @@ describe("useResolvedQueryIdentity", () => {
     expect(resultRef.current).toBe("90d|organic");
   });
 
+  it("adopts distinct current-key cache data when its revalidation errors", () => {
+    const resultRef: { current: VersionedResult | null } = { current: null };
+    const priorData = { rows: ["same payload"] };
+    const cachedCurrentData = { rows: ["same payload"] };
+    const priorIdentity = volumeQueryIdentity({
+      range: "30d",
+      cutoff: 100,
+      includeProtocolActors: false,
+    });
+    const currentIdentity = volumeQueryIdentity({
+      range: "90d",
+      cutoff: 50,
+      includeProtocolActors: false,
+    });
+
+    act(() => {
+      root.render(
+        <VersionedProbe
+          result={{ data: priorData, error: null, isLoading: false }}
+          identity={priorIdentity}
+          resultRef={resultRef}
+        />,
+      );
+    });
+
+    // SWR serves B's own cached object while B's background revalidation
+    // fails. It is structurally equal to A on purpose: provenance is the
+    // exact reference, not row equality.
+    act(() => {
+      root.render(
+        <VersionedProbe
+          result={{
+            data: cachedCurrentData,
+            error: new Error("current cache revalidation failed"),
+            isLoading: false,
+          }}
+          identity={currentIdentity}
+          resultRef={resultRef}
+        />,
+      );
+    });
+
+    expect(resultRef.current).toMatchObject({
+      data: cachedCurrentData,
+      dataIdentity: currentIdentity,
+      isLoading: false,
+      hasError: false,
+    });
+  });
+
   it("recognises descriptor-validated SSR fallback as current-key data", () => {
     const resultRef: { current: string | undefined } = { current: undefined };
 
@@ -164,6 +214,84 @@ describe("useResolvedQueryIdentity", () => {
     });
 
     expect(resultRef.current).toBeUndefined();
+  });
+
+  it("seeds current identity from cached data with a remount-time error", () => {
+    const resultRef: { current: VersionedResult | null } = { current: null };
+    const cachedData = { rows: ["cached current window"] };
+    const currentIdentity = volumeQueryIdentity({
+      range: "30d",
+      cutoff: 100,
+      includeProtocolActors: false,
+    });
+
+    act(() => {
+      root.render(
+        <VersionedProbe
+          result={{
+            data: cachedData,
+            error: new Error("background revalidation failed"),
+            isLoading: false,
+          }}
+          identity={currentIdentity}
+          resultRef={resultRef}
+        />,
+      );
+    });
+
+    expect(resultRef.current).toMatchObject({
+      data: cachedData,
+      dataIdentity: currentIdentity,
+      isLoading: false,
+      hasError: false,
+    });
+  });
+
+  it("seeds cached error data when a tracker is first enabled after mounting disabled", () => {
+    const resultRef: { current: VersionedResult | null } = { current: null };
+    const cachedData = { rows: ["cached v2 window"] };
+    const currentIdentity = volumeQueryIdentity({
+      range: "90d",
+      cutoff: 50,
+      includeProtocolActors: false,
+    });
+
+    act(() => {
+      root.render(
+        <VersionedProbe
+          result={{ data: cachedData, error: null, isLoading: false }}
+          identity={currentIdentity}
+          enabled={false}
+          resultRef={resultRef}
+        />,
+      );
+    });
+    expect(resultRef.current).toMatchObject({
+      data: undefined,
+      dataIdentity: undefined,
+      isLoading: false,
+      hasError: false,
+    });
+
+    act(() => {
+      root.render(
+        <VersionedProbe
+          result={{
+            data: cachedData,
+            error: new Error("cached key revalidation failed"),
+            isLoading: false,
+          }}
+          identity={currentIdentity}
+          resultRef={resultRef}
+        />,
+      );
+    });
+    expect(resultRef.current).toMatchObject({
+      data: cachedData,
+      dataIdentity: currentIdentity,
+      isLoading: false,
+      hasError: false,
+    });
   });
 
   it("retains ranges but rejects retained data across actor-filter identities", () => {
@@ -249,6 +377,7 @@ describe("useResolvedQueryIdentity", () => {
     });
     expect(resultRef.current).toMatchObject({
       data: retainedData,
+      dataIdentity: priorOrganic,
       hasError: false,
     });
 
@@ -428,6 +557,26 @@ describe("useResolvedQueryIdentity", () => {
       root.render(
         <VersionedProbe
           result={{ data: retainedV2Data, error: null, isLoading: true }}
+          identity={v2Organic90d}
+          resultRef={resultRef}
+        />,
+      );
+    });
+    expect(resultRef.current).toMatchObject({
+      data: retainedV2Data,
+      dataIdentity: v2Organic30d,
+      isLoading: false,
+      hasError: false,
+    });
+
+    act(() => {
+      root.render(
+        <VersionedProbe
+          result={{
+            data: retainedV2Data,
+            error: new Error("new v2 key failed"),
+            isLoading: false,
+          }}
           identity={v2Organic90d}
           resultRef={resultRef}
         />,

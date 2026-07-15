@@ -48,7 +48,6 @@ import { useVolumeAggregates } from "./_lib/use-volume-aggregates";
 import { useVolumeUrlState } from "./_lib/url-state";
 import { usePoolVolumeSnapshots } from "./_lib/use-pool-volume-snapshots";
 import {
-  actorViewFromQueryIdentity,
   cutoffFromQueryIdentity,
   rangeFromQueryIdentity,
   useVersionedVolumeQueryData,
@@ -116,6 +115,8 @@ function useVolumePageModel(
     isProtocolActorIn,
     showChart,
   });
+  const traderDataIdentity = activeTraderDataIdentity(queries);
+  const aggregatorDataIdentity = activeAggregatorDataIdentity(queries);
   const rows = readVolumeRows(queries);
   const aggregates = useVolumeAggregates({
     includeProtocolActors,
@@ -143,6 +144,7 @@ function useVolumePageModel(
     venue === "v3"
       ? aggregates.unfilteredAggregated
       : aggregates.unfilteredV2Aggregated;
+  const kpiSourceIsCapHit = volumeTableCapHit({ venue, queries });
   const hero = useHeroRollup({
     venue,
     range,
@@ -150,16 +152,19 @@ function useVolumePageModel(
     isProtocolActorIn,
     utcDayKey,
     kpiSource,
-    kpiSourceRange: rangeFromQueryIdentity(activeTraderDataIdentity(queries)),
-    kpiSourceIncludesProtocolActors: actorViewFromQueryIdentity(
-      activeTraderDataIdentity(queries),
-    ),
+    kpiSourceIdentity: traderDataIdentity,
+    kpiSourceIsCapHit,
     initialData,
   });
   const chartControls = useVolumeChartControls(range, updateRange);
   const status = buildVolumeStatus({ venue, queries });
   const headline =
-    hero.isLoading || hero.hasError ? "" : formatUSD(hero.totalVolume);
+    hero.isLoading ||
+    hero.hasError ||
+    traderDataIdentity === undefined ||
+    hero.displayIdentity !== traderDataIdentity
+      ? ""
+      : formatUSD(hero.totalVolume);
 
   return {
     venue,
@@ -174,13 +179,9 @@ function useVolumePageModel(
     chartControls,
     status,
     headline,
-    tableCutoff:
-      cutoffFromQueryIdentity(activeTraderDataIdentity(queries)) ?? cutoff,
-    tableRange:
-      rangeFromQueryIdentity(activeTraderDataIdentity(queries)) ?? range,
-    aggregatorRange:
-      rangeFromQueryIdentity(queries.v3AggregatorsDataState.dataIdentity) ??
-      range,
+    tableCutoff: cutoffFromQueryIdentity(traderDataIdentity) ?? cutoff,
+    tableRange: rangeFromQueryIdentity(traderDataIdentity) ?? range,
+    aggregatorRange: rangeFromQueryIdentity(aggregatorDataIdentity) ?? range,
     poolChartRange: queries.poolVolumeResult.dataRange ?? range,
   };
 }
@@ -310,6 +311,18 @@ function activeTraderDataIdentity(
     : queries.v2TradersDataState.data === undefined
       ? undefined
       : queries.v2TradersDataState.dataIdentity;
+}
+
+function activeAggregatorDataIdentity(
+  queries: VolumeQueries,
+): VolumeQueryIdentity | undefined {
+  return queries.venue === "v3"
+    ? queries.v3AggregatorsDataState.data === undefined
+      ? undefined
+      : queries.v3AggregatorsDataState.dataIdentity
+    : queries.v2AggregatorsDataState.data === undefined
+      ? undefined
+      : queries.v2AggregatorsDataState.dataIdentity;
 }
 
 function readVolumeRows({
@@ -550,7 +563,6 @@ function VolumePageView({
       <VolumeKpiTiles
         hero={hero}
         range={hero.displayRange}
-        isTableCapHit={status.isTableCapHit}
         tableIsLoading={status.tableIsLoading}
         tableHasError={status.tableHasError}
       />

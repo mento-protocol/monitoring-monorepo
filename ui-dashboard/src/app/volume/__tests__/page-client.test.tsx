@@ -29,6 +29,12 @@ const mockTimeSeriesChartCard = vi.hoisted(() => vi.fn());
 const mockV2VolumeSection = vi.hoisted(() => vi.fn());
 const mockV3VolumeSection = vi.hoisted(() => vi.fn());
 const mockUsePoolChartViewModel = vi.hoisted(() => vi.fn());
+const resolvedIdentityOverrides = vi.hoisted(() => ({
+  v3Trader: undefined as string | undefined,
+  v3Aggregator: undefined as string | undefined,
+  v2Trader: undefined as string | undefined,
+  v2Aggregator: undefined as string | undefined,
+}));
 
 vi.mock("@/lib/graphql", () => ({
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
@@ -48,12 +54,27 @@ vi.mock("../_lib/use-resolved-query-identity", async (importOriginal) => {
     useVersionedVolumeQueryData: (
       result: { data: unknown; error: unknown; isLoading: boolean },
       currentIdentity: string,
-    ) => ({
-      data: result.data,
-      dataIdentity: result.data === undefined ? undefined : currentIdentity,
-      isLoading: result.isLoading && result.data === undefined,
-      hasError: result.error != null && result.data === undefined,
-    }),
+    ) => {
+      const data = result.data as Record<string, unknown> | undefined;
+      const identityOverride = data?.TraderDailySnapshot
+        ? resolvedIdentityOverrides.v3Trader
+        : data?.AggregatorDailySnapshot
+          ? resolvedIdentityOverrides.v3Aggregator
+          : data?.BrokerTraderDailySnapshot
+            ? resolvedIdentityOverrides.v2Trader
+            : data?.BrokerAggregatorDailySnapshot
+              ? resolvedIdentityOverrides.v2Aggregator
+              : undefined;
+      return {
+        data: result.data,
+        dataIdentity:
+          result.data === undefined
+            ? undefined
+            : (identityOverride ?? currentIdentity),
+        isLoading: result.isLoading && result.data === undefined,
+        hasError: result.error != null && result.data === undefined,
+      };
+    },
   };
 });
 
@@ -101,7 +122,14 @@ vi.mock("../_lib/pool-chart-vm", () => ({
 }));
 
 const mockUseHeroRollup = vi.hoisted(() => vi.fn());
-const heroState = vi.hoisted(() => ({ isLoading: false, hasError: false }));
+const heroState = vi.hoisted(() => ({
+  isLoading: false,
+  hasError: false,
+  totalVolume: 0,
+  concentration: 0,
+  displayIdentity: undefined as string | undefined,
+  isKpiSourceCapHit: false,
+}));
 
 vi.mock("../_lib/use-hero-rollup", () => ({
   useHeroRollup: (args: unknown) => {
@@ -109,13 +137,15 @@ vi.mock("../_lib/use-hero-rollup", () => ({
     return {
       isLoading: heroState.isLoading,
       hasError: heroState.hasError,
-      totalVolume: 0,
+      totalVolume: heroState.totalVolume,
       totalTraders: 0,
       totalSwaps: 0,
-      concentration: 0,
+      concentration: heroState.concentration,
       staleChains: [],
       degradedChains: [],
       displayRange: volumeState.range,
+      displayIdentity: heroState.displayIdentity,
+      isKpiSourceCapHit: heroState.isKpiSourceCapHit,
     };
   },
 }));
@@ -183,8 +213,16 @@ describe("VolumeClient useGQL wiring", () => {
     mockV2VolumeSection.mockClear();
     mockV3VolumeSection.mockClear();
     mockUsePoolChartViewModel.mockClear();
+    resolvedIdentityOverrides.v3Trader = undefined;
+    resolvedIdentityOverrides.v3Aggregator = undefined;
+    resolvedIdentityOverrides.v2Trader = undefined;
+    resolvedIdentityOverrides.v2Aggregator = undefined;
     heroState.isLoading = false;
     heroState.hasError = false;
+    heroState.totalVolume = 0;
+    heroState.concentration = 0;
+    heroState.displayIdentity = undefined;
+    heroState.isKpiSourceCapHit = false;
     volumeState.range = "7d";
     poolVolumeState.rows = [];
     poolVolumeState.isLoading = false;
@@ -372,6 +410,48 @@ describe("VolumeClient useGQL wiring", () => {
     );
   });
 
+  it("labels v2 trader and aggregator rows with their independent resolved ranges", () => {
+    volumeState.range = "90d";
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === BROKER_TRADER_DAILY_TOP) {
+        return {
+          data: { BrokerTraderDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      if (query === BROKER_AGGREGATOR_DAILY_TOP) {
+        return {
+          data: { BrokerAggregatorDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    resolvedIdentityOverrides.v2Trader = "90d|100|organic";
+    resolvedIdentityOverrides.v2Aggregator = "30d|200|organic";
+
+    renderVolume("v2");
+    expect(mockV2VolumeSection).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        rangeLabel: "3M",
+        aggregatorRangeLabel: "1M",
+      }),
+    );
+
+    mockV2VolumeSection.mockClear();
+    resolvedIdentityOverrides.v2Trader = "30d|200|organic";
+    resolvedIdentityOverrides.v2Aggregator = "90d|100|organic";
+    renderVolume("v2");
+    expect(mockV2VolumeSection).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        rangeLabel: "1M",
+        aggregatorRangeLabel: "3M",
+      }),
+    );
+  });
+
   it("switches the v2 aggregator query ordering with the actor filter", () => {
     renderVolume("v2", true);
 
@@ -430,6 +510,81 @@ describe("VolumeClient useGQL wiring", () => {
     );
   });
 
+  it("withholds the daily-chart headline until the full trader and hero identities match", () => {
+    volumeState.range = "90d";
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === BROKER_TRADER_DAILY_TOP) {
+        return {
+          data: { BrokerTraderDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    resolvedIdentityOverrides.v2Trader = "90d|200|organic";
+    heroState.totalVolume = 123;
+    heroState.displayIdentity = "90d|100|organic";
+
+    renderVolume("v2");
+    let chartCall = mockTimeSeriesChartCard.mock.calls.find(
+      ([props]) => props.title === "Daily v2 traded volume",
+    );
+    expect(chartCall?.[0]).toMatchObject({ headline: "" });
+
+    mockTimeSeriesChartCard.mockClear();
+    heroState.displayIdentity = "90d|200|organic";
+    renderVolume("v2");
+    chartCall = mockTimeSeriesChartCard.mock.calls.find(
+      ([props]) => props.title === "Daily v2 traded volume",
+    );
+    expect(chartCall?.[0].headline).not.toBe("");
+  });
+
+  it("keeps the displayed concentration cap state separate from the current table cap", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === TRADER_DAILY_TOP) {
+        return {
+          data: { TraderDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    heroState.displayIdentity = "7d|100|organic";
+    heroState.isKpiSourceCapHit = true;
+
+    const html = renderVolume("v3");
+
+    expect(html).toContain("Top-10 concentration (≈)");
+    expect(mockV3VolumeSection).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        tableState: expect.objectContaining({ isCapHit: false }),
+      }),
+    );
+  });
+
+  it("withholds concentration while no coherent hero and trader identity exists", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === TRADER_DAILY_TOP) {
+        return {
+          data: { TraderDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+    heroState.concentration = 42;
+    heroState.displayIdentity = undefined;
+
+    const html = renderVolume("v3");
+
+    expect(html).not.toContain("42.0%");
+    expect(html).toContain(">…</p>");
+  });
+
   it("keeps analysis sections directly below top-line volume", () => {
     const html = renderVolume("v3");
 
@@ -461,6 +616,27 @@ describe("VolumeClient useGQL wiring", () => {
 
     expect(mockUseHeroRollup).toHaveBeenCalledWith(
       expect.objectContaining({ initialData }),
+    );
+  });
+
+  it("passes the trader range, cutoff, and actor scope into the hero KPI identity", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (query === TRADER_DAILY_TOP) {
+        return {
+          data: { TraderDailySnapshot: [] },
+          error: null,
+          isLoading: false,
+        };
+      }
+      return { data: undefined, error: null, isLoading: false };
+    });
+
+    renderVolume("v3");
+
+    expect(mockUseHeroRollup).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kpiSourceIdentity: "7d|1700000000|organic",
+      }),
     );
   });
 

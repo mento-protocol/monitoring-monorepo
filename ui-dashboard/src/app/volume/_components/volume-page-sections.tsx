@@ -181,13 +181,11 @@ function SegmentButton({
 export function VolumeKpiTiles({
   hero,
   range,
-  isTableCapHit,
   tableIsLoading,
   tableHasError,
 }: {
   hero: VolumePageModel["hero"];
   range: VolumeRangeKey;
-  isTableCapHit: boolean;
   tableIsLoading: boolean;
   tableHasError: boolean;
 }) {
@@ -205,16 +203,17 @@ export function VolumeKpiTiles({
       />
       <Tile
         label={
-          isTableCapHit ? "Top-10 concentration (≈)" : "Top-10 concentration"
+          hero.isKpiSourceCapHit
+            ? "Top-10 concentration (≈)"
+            : "Top-10 concentration"
         }
         value={concentrationValue({
           hero,
-          isTableCapHit,
           tableIsLoading,
           tableHasError,
         })}
         subtitle={
-          isTableCapHit
+          hero.isKpiSourceCapHit
             ? "Lower bound — long-tail trader-days outside top-1000 by single-day volume can bias this low"
             : "Share of window volume"
         }
@@ -240,18 +239,17 @@ function swapsSubtitle(hero: VolumePageModel["hero"]): string {
 
 function concentrationValue({
   hero,
-  isTableCapHit,
   tableIsLoading,
   tableHasError,
 }: {
   hero: VolumePageModel["hero"];
-  isTableCapHit: boolean;
   tableIsLoading: boolean;
   tableHasError: boolean;
 }): string {
   if (hero.isLoading || tableIsLoading) return "…";
   if (hero.hasError || tableHasError) return "—";
-  return `${isTableCapHit ? "≈ " : ""}${hero.concentration.toFixed(1)}%`;
+  if (hero.displayIdentity === undefined) return "…";
+  return `${hero.isKpiSourceCapHit ? "≈ " : ""}${hero.concentration.toFixed(1)}%`;
 }
 
 export function VolumeChartArea({
@@ -359,6 +357,7 @@ export function VolumeVenueSection({
       <>
         <V2VolumeSection
           rangeLabel={rangeLabel(model.tableRange)}
+          aggregatorRangeLabel={rangeLabel(model.aggregatorRange)}
           cutoff={model.tableCutoff}
           canUseVolumeFilters={urlState.canUseVolumeFilters}
           v2Aggregated={aggregates.v2Aggregated}

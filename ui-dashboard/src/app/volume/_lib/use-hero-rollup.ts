@@ -35,6 +35,7 @@ import {
 import {
   buildHeroPartialOverlapQueryInput,
   mergeHeroSnapshot,
+  rangeCutoffSeconds,
   top10Concentration,
   weiToUsd,
   type VolumeRangeKey,
@@ -45,7 +46,13 @@ import {
 } from "@/lib/volume";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import type { Venue } from "./url-state";
-import { useResolvedQueryIdentity } from "./use-resolved-query-identity";
+import {
+  actorViewFromQueryIdentity,
+  cutoffFromQueryIdentity,
+  rangeFromQueryIdentity,
+  useResolvedQueryIdentity,
+  type VolumeQueryIdentity,
+} from "./use-resolved-query-identity";
 
 type HeroV3Data = { volumeWindowSnapshots: VolumeWindowRow[] };
 type HeroV2Data = { brokerVolumeWindowSnapshots: VolumeWindowRow[] };
@@ -81,8 +88,8 @@ export function useHeroRollup({
   isProtocolActorIn,
   utcDayKey,
   kpiSource,
-  kpiSourceRange,
-  kpiSourceIncludesProtocolActors,
+  kpiSourceIdentity,
+  kpiSourceIsCapHit,
   initialData,
 }: {
   venue: Venue;
@@ -95,11 +102,12 @@ export function useHeroRollup({
    *  the resulting rows so the table query and the hero query can degrade
    *  independently. */
   kpiSource: ReadonlyArray<{ chainId: number; volumeUsdWei: bigint }>;
-  /** Identity of `kpiSource`. A retained trader response keeps its resolved
-   * range/filter identity so concentration never divides an old numerator by
-   * a new hero denominator. */
-  kpiSourceRange?: VolumeRangeKey | undefined;
-  kpiSourceIncludesProtocolActors?: boolean | undefined;
+  /** Full identity of `kpiSource`. A retained trader response keeps its
+   * resolved range/cutoff/filter identity so concentration never divides an
+   * old numerator by a new hero denominator, including across UTC midnight. */
+  kpiSourceIdentity?: VolumeQueryIdentity | undefined;
+  /** Cap state paired with `kpiSource`; retained displays keep this version. */
+  kpiSourceIsCapHit: boolean;
   /** Server-prefetched hero responses (perf-plan S4), forwarded to the
    *  matching `useGQL` calls as `fallbackData` so the first render paints
    *  populated tiles. Only attached when the prefetched view descriptor
@@ -122,6 +130,11 @@ export function useHeroRollup({
    * this can intentionally lag `range` while the next coherent snapshot is
    * still assembling. */
   displayRange: VolumeRangeKey;
+  /** Trader identity paired with the displayed concentration. Undefined while
+   * the hero slices and trader numerator do not form one coherent version. */
+  displayIdentity: VolumeQueryIdentity | undefined;
+  /** Whether the displayed concentration is a lower-bound approximation. */
+  isKpiSourceCapHit: boolean;
   isLoading: boolean;
   hasError: boolean;
 } {
@@ -406,6 +419,8 @@ export function useHeroRollup({
     range: VolumeRangeKey;
     totals: typeof candidateHeroTotals;
     concentration: number;
+    kpiSourceIdentity: VolumeQueryIdentity | undefined;
+    isKpiSourceCapHit: boolean;
   };
   const lastCoherentDisplay = useRef<HeroDisplaySnapshot | undefined>(
     undefined,
@@ -414,24 +429,32 @@ export function useHeroRollup({
     snapshotDataRange !== undefined && firstDayDataRange === snapshotDataRange;
   const firstDayTerminallyUnavailable =
     snapshotDataRange === range &&
-    rawFirstDayRows === undefined &&
+    firstDayRows === undefined &&
     !activeFirstDayResult.isLoading;
+  const kpiSourceRange = rangeFromQueryIdentity(kpiSourceIdentity);
   const kpiMatchesPrimary =
     kpiSourceRange === snapshotDataRange &&
-    kpiSourceIncludesProtocolActors === includeProtocolActors;
-  const kpiSourceIsPending =
-    kpiSourceRange === undefined ||
-    kpiSourceIncludesProtocolActors === undefined;
+    snapshotDataRange !== undefined &&
+    cutoffFromQueryIdentity(kpiSourceIdentity) ===
+      rangeCutoffSeconds(snapshotDataRange, todayMidnight) &&
+    actorViewFromQueryIdentity(kpiSourceIdentity) === includeProtocolActors;
+  const kpiSourceIsPending = kpiSourceIdentity === undefined;
   const canPublishCoherentDisplay =
     snapshotDataRange !== undefined &&
     (firstDayMatchesPrimary || firstDayTerminallyUnavailable) &&
     (kpiMatchesPrimary || kpiSourceIsPending);
+  const canPublishCoherentConcentration =
+    canPublishCoherentDisplay && kpiMatchesPrimary;
   const candidateDisplay: HeroDisplaySnapshot = {
     venue,
     includeProtocolActors,
     range: snapshotDataRange ?? range,
     totals: candidateHeroTotals,
     concentration: candidateConcentration,
+    kpiSourceIdentity: canPublishCoherentConcentration
+      ? kpiSourceIdentity
+      : undefined,
+    isKpiSourceCapHit: canPublishCoherentConcentration && kpiSourceIsCapHit,
   };
   const priorDisplay = lastCoherentDisplay.current;
   const canReusePriorDisplay =
@@ -487,6 +510,8 @@ export function useHeroRollup({
     staleChains: display.totals.staleChains,
     degradedChains: display.totals.degradedChains,
     displayRange: display.range,
+    displayIdentity: display.kpiSourceIdentity,
+    isKpiSourceCapHit: display.isKpiSourceCapHit,
     isLoading,
     hasError,
   };

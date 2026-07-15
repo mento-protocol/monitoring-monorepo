@@ -62,6 +62,43 @@ type ResolvedQueryIdentityOptions = {
   fallbackMatchesCurrent?: boolean;
 };
 
+function classifyCurrentResponse(
+  result: QueryResultState,
+  { enabled, fallbackMatchesCurrent = false }: ResolvedQueryIdentityOptions,
+): {
+  isCurrentResponse: boolean;
+  isCurrentFallback: boolean;
+  isSeedableResponse: boolean;
+} {
+  const hasCurrentKeyData = enabled && result.data !== undefined;
+  return {
+    isCurrentResponse:
+      hasCurrentKeyData && result.error == null && !result.isLoading,
+    isCurrentFallback: hasCurrentKeyData && fallbackMatchesCurrent,
+    isSeedableResponse: hasCurrentKeyData && !result.isLoading,
+  };
+}
+
+type ResolvedData<TIdentity> = {
+  identity: TIdentity;
+  data: unknown;
+};
+
+function canAdoptSeedableResponse<TIdentity>(
+  isSeedableResponse: boolean,
+  currentIdentity: TIdentity,
+  currentData: unknown,
+  lastResolved: ResolvedData<TIdentity> | undefined,
+): boolean {
+  if (!isSeedableResponse) return false;
+  if (lastResolved === undefined) return true;
+  if (lastResolved.identity === currentIdentity) return true;
+  // SWR 2.4's keepPreviousData path exposes laggyDataRef.current by exact
+  // reference. A distinct non-loading value therefore came from the current
+  // key's cache, even when its background revalidation also returned an error.
+  return lastResolved.data !== currentData;
+}
+
 /**
  * Tracks which query identity produced SWR's currently exposed data.
  *
@@ -84,27 +121,37 @@ export function useResolvedQueryIdentity<
 >(
   result: QueryResultState,
   currentIdentity: TIdentity,
-  { enabled, fallbackMatchesCurrent = false }: ResolvedQueryIdentityOptions,
+  options: ResolvedQueryIdentityOptions,
 ): TIdentity | undefined {
-  const isCurrentResponse =
-    enabled &&
-    result.data !== undefined &&
-    result.error == null &&
-    !result.isLoading;
-  const isCurrentFallback =
-    enabled && result.data !== undefined && fallbackMatchesCurrent;
-  const lastResolvedIdentity = useRef<TIdentity | undefined>(
-    isCurrentResponse || isCurrentFallback ? currentIdentity : undefined,
+  const { isCurrentResponse, isCurrentFallback, isSeedableResponse } =
+    classifyCurrentResponse(result, options);
+  // Cached data with a background-revalidation error still belongs to the
+  // current SWR key when a tracker first mounts or becomes enabled. Keep this
+  // broader seed separate from `isCurrentResponse`: an error after a key
+  // change may be retained data from the previous key and must not update an
+  // already-established identity.
+  const lastResolved = useRef<ResolvedData<TIdentity> | undefined>(
+    isSeedableResponse || isCurrentFallback
+      ? { identity: currentIdentity, data: result.data }
+      : undefined,
   );
+  const canAdoptCurrentData = canAdoptSeedableResponse(
+    isSeedableResponse,
+    currentIdentity,
+    result.data,
+    lastResolved.current,
+  );
+  const resolvesCurrentIdentity =
+    isCurrentResponse || isCurrentFallback || canAdoptCurrentData;
 
   useEffect(() => {
-    if (!isCurrentResponse) return;
-    lastResolvedIdentity.current = currentIdentity;
-  }, [currentIdentity, isCurrentResponse]);
+    if (!resolvesCurrentIdentity || result.data === undefined) return;
+    lastResolved.current = { identity: currentIdentity, data: result.data };
+  }, [currentIdentity, resolvesCurrentIdentity, result.data]);
 
   if (result.data === undefined) return undefined;
-  if (isCurrentResponse || isCurrentFallback) return currentIdentity;
-  return lastResolvedIdentity.current;
+  if (resolvesCurrentIdentity) return currentIdentity;
+  return lastResolved.current?.identity;
 }
 
 /** Range-retained query state with actor-sensitive data exposure. */

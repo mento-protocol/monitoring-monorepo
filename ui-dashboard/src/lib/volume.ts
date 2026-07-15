@@ -307,11 +307,14 @@ export function rangeDays(range: VolumeRangeKey): number | null {
  * midnight" (≤ 24h of data, sometimes only a few hours). Aligning to the
  * UTC boundary makes the window deterministic against bucket size.
  */
-export function rangeCutoffSeconds(range: VolumeRangeKey): number {
+export function rangeCutoffSeconds(
+  range: VolumeRangeKey,
+  nowSeconds = Date.now() / 1000,
+): number {
   const days = rangeDays(range);
   if (days === null) return 0;
   const todayMidnightUtc =
-    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+    Math.floor(nowSeconds / SECONDS_PER_DAY) * SECONDS_PER_DAY;
   return todayMidnightUtc - (days - 1) * SECONDS_PER_DAY;
 }
 

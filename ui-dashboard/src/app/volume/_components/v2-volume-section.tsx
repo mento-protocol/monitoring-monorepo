@@ -29,6 +29,7 @@ import { TableSectionTitle } from "./table-section-title";
  */
 export function V2VolumeSection({
   rangeLabel,
+  aggregatorRangeLabel,
   cutoff,
   canUseVolumeFilters,
   v2Aggregated,
@@ -43,6 +44,8 @@ export function V2VolumeSection({
    *  "all-time" — already mapped from `VolumeRangeKey` by the
    *  parent. Used only in section titles. */
   rangeLabel: string;
+  /** Range label resolved independently by the aggregator query. */
+  aggregatorRangeLabel: string;
   /** Same UTC-day cutoff used by the trader query; bounds the Via marker query. */
   cutoff: number;
   canUseVolumeFilters: boolean;
@@ -80,7 +83,7 @@ export function V2VolumeSection({
       </section>
       <AggregatorBreakdownSection
         venueLabel="v2"
-        rangeLabel={rangeLabel}
+        rangeLabel={aggregatorRangeLabel}
         aggregators={v2AggregatorAggregated}
         isLoading={v2AggIsLoading}
         hasError={v2AggHasError}
