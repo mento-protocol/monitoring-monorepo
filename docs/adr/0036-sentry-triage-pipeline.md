@@ -50,11 +50,20 @@ trust is earned in phases, and Codex remains the independent PR reviewer.**
   new/regressed Sentry issue org-wide into exactly one labeled queue issue
   (`sentry-triage`), idempotent by Sentry short-ID. The queue reuses the
   ADR 0006 machinery for state, dedup, audit, and recovery — no bespoke DB.
+  **This repo is public, so queue issues carry only non-sensitive coordinates**
+  (short-ID, project, level, counts, timestamps, permalink) — never raw Sentry
+  titles, culprits, messages, stack frames, or user data. Full payloads stay in
+  Sentry and are fetched at triage time; noise heuristics run on the raw
+  payload in-memory only, and only the resulting label is public.
 - **Stage B — read-only agent triage:** per queue issue, a claude-code-action
-  agent (Sentry MCP stdio, read-only token) posts a structured verdict
-  (`code-fix` / `config-fix` / `upstream-transient` / `needs-human`) and label.
+  agent (Sentry MCP stdio, read-only token) posts a structured verdict comment
+  (`code-fix` / `config-fix` / `upstream-transient` / `needs-human`).
   Sentry payloads are treated as untrusted input (prompt-injection surface):
-  the investigating agent holds no write credentials beyond commenting here.
+  the investigating agent's only write is that comment — **verdict labels are
+  applied by a deterministic workflow step** that parses the comment, validates
+  it against the allowed label set, and rejects anything else, so the LLM
+  session holds no queue-state authority. Verdict prose follows the same
+  public-repo redaction rule (no verbatim payload text or user data).
 - **Stage C — phased mutations:** Phase 2a: human-approved archive
   (`archived_until_escalating`, never hard-resolve) executed by a deterministic
   step with a separate write-scoped token. Phase 2b: scoped fix PRs in this
@@ -106,6 +115,12 @@ trust is earned in phases, and Codex remains the independent PR reviewer.**
 - The queue label namespace (`sentry-triage`, `sentry:*`) is disjoint from the
   dev-backlog labels (`agent-ready` etc.) so the two agent queues cannot
   cross-claim.
+- Accepted residual risk: agent-authored verdict prose is instructed, not
+  mechanically guaranteed, to stay redacted; every downstream consumer of a
+  verdict (archive, fix PR) sits behind a human gate, so a leaked-or-wrong
+  verdict cannot mutate anything by itself. A private queue repo was considered
+  and rejected while redacted coordinates suffice — revisit if redaction proves
+  leaky in practice.
 - Verdict accuracy is measured from day one; each phase gates on the previous
   phase's measured performance, not on elapsed time.
 - The prior weekly cloud routine is superseded and gets disabled at Phase-1
