@@ -52,8 +52,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "Tier quota",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -77,8 +77,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "remount failed",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -98,8 +98,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "fast key failed",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -119,8 +119,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "poll failed",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -144,8 +144,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "Unknown refresh error",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -161,8 +161,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "refresh failed",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -174,8 +174,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       cachedCount: 1,
+      cachedLastUpdatedAt: NOW - 10_000,
       failedCount: 0,
-      lastUpdatedAt: NOW - 10_000,
     });
   });
 
@@ -189,8 +189,8 @@ describe("SWR freshness status", () => {
     expect(getSWRFreshnessStatus()).toMatchObject({
       cachedCount: 0,
       failedCount: 1,
+      failedLastUpdatedAt: NOW - 10_000,
       lastErrorMessage: "refresh failed",
-      lastUpdatedAt: NOW - 10_000,
     });
 
     recordSWRFreshnessSuccess("cached-key", {
@@ -213,8 +213,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "shared failed",
-      lastUpdatedAt: NOW,
     });
 
     unregisterSecond();
@@ -228,5 +228,27 @@ describe("SWR freshness status", () => {
     unregister();
 
     expect(getSWRFreshnessStatus()).toBeNull();
+  });
+
+  it("keeps independent ages for cached-only and failed-after-success sources", () => {
+    markSWRFreshnessCached("cached-key", NOW - 20_000);
+    registerSWRFreshnessKey("cached-key");
+
+    vi.setSystemTime(NOW - 5_000);
+    registerSWRFreshnessKey("failed-key");
+    recordSWRFreshnessSuccess("failed-key", {
+      refreshInterval: REFRESH_MS,
+    });
+    vi.setSystemTime(NOW);
+    recordSWRFreshnessError(new Error("refresh failed"), "failed-key", {
+      refreshInterval: REFRESH_MS,
+    });
+
+    expect(getSWRFreshnessStatus()).toMatchObject({
+      cachedCount: 1,
+      cachedLastUpdatedAt: NOW - 20_000,
+      failedCount: 1,
+      failedLastUpdatedAt: NOW - 5_000,
+    });
   });
 });

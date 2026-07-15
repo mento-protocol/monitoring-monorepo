@@ -90,4 +90,26 @@ describe("DataFreshnessBanner", () => {
     });
     expect(container.textContent).toBe("");
   });
+
+  it("announces independent ages when cached and failed sources coexist", () => {
+    markSWRFreshnessCached("cached-key", NOW - 20_000);
+    const unregisterCached = registerSWRFreshnessKey("cached-key");
+
+    vi.setSystemTime(NOW - 5_000);
+    const unregisterFailed = registerSWRFreshnessKey("failed-key");
+    recordSWRFreshnessSuccess("failed-key", { refreshInterval: 30_000 });
+    vi.setSystemTime(NOW);
+    recordSWRFreshnessError(new Error("429"), "failed-key", {
+      refreshInterval: 30_000,
+    });
+    cleanupFreshness = () => {
+      unregisterCached();
+      unregisterFailed();
+    };
+
+    render();
+
+    expect(container.textContent).toContain("last-good data from 5s ago");
+    expect(container.textContent).toContain("cached data from 20s ago");
+  });
 });

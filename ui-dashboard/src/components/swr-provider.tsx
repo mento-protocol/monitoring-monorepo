@@ -118,7 +118,7 @@ const baseSWRConfig: SWRConfiguration = {
   },
 };
 
-function PersistedCacheActivator({
+export function PersistedCacheActivator({
   persistedCache,
 }: {
   persistedCache: PersistedSWRCacheController;
@@ -132,11 +132,26 @@ function PersistedCacheActivator({
       // react-doctor-disable-next-line effect/no-pass-data-to-parent -- post-hydration activation must publish into provider-scoped SWR state
       if (persistedCache.cache.get(entry.key)?.data !== undefined) continue;
 
-      markSWRFreshnessCached(entry.key, entry.updatedAt);
-      // This mutate belongs to the custom provider. Populate after hydration,
-      // then trigger the hook's normal revalidation without awaiting it.
-      void mutate(entry.key, entry.data, { revalidate: false })
-        .then(() => mutate(entry.key))
+      let activatedPersistedData = false;
+      // This mutate belongs to the custom provider. Its functional update is
+      // the second, atomic network-wins check: a response can land after the
+      // Map read above but before mutate applies the persisted snapshot.
+      void mutate(
+        entry.key,
+        (currentData: unknown) => {
+          if (currentData !== undefined) return currentData;
+          activatedPersistedData = true;
+          return entry.data;
+        },
+        { revalidate: false },
+      )
+        .then(() => {
+          if (!activatedPersistedData) return undefined;
+          markSWRFreshnessCached(entry.key, entry.updatedAt);
+          // The cached paint is visible; now trigger the hook's normal
+          // revalidation without awaiting it.
+          return mutate(entry.key);
+        })
         .catch(() => undefined);
     }
   }, [mutate, persistedCache]);

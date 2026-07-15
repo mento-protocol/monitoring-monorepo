@@ -32,6 +32,11 @@ const tradingLimitsKey = [
   TRADING_LIMITS,
   { poolId: POOL_ID },
 ] as const;
+const otherTradingLimitsKey = [
+  "celo-mainnet",
+  TRADING_LIMITS,
+  { poolId: "42220-0xother" },
+] as const;
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -151,6 +156,56 @@ describe("persisted SWR cache", () => {
     ]);
     expect(controller.consumeHydratedEntries()).toEqual([]);
     expect(controller.cache.size).toBe(0);
+  });
+
+  it("merges valid untouched entries written by another controller", () => {
+    const storage = new MemoryStorage();
+    let now = NOW;
+    // Both tabs start before either has written, so the second controller has
+    // no in-memory knowledge of the first tab's later entry.
+    const first = createPersistedSWRCache({
+      buildSalt: BUILD_SALT,
+      now: () => now,
+      storage,
+    });
+    const second = createPersistedSWRCache({
+      buildSalt: BUILD_SALT,
+      now: () => now,
+      storage,
+    });
+    const firstKey = unstable_serialize(tradingLimitsKey);
+    const secondKey = unstable_serialize(otherTradingLimitsKey);
+
+    first.cache.set(firstKey, {
+      data: { TradingLimit: [{ id: "first-tab" }] },
+    });
+    first.recordNetworkSuccess(tradingLimitsKey);
+    expect(first.flush()).toBeGreaterThan(0);
+
+    now += 1_000;
+    second.cache.set(secondKey, {
+      data: { TradingLimit: [{ id: "second-tab" }] },
+    });
+    second.recordNetworkSuccess(otherTradingLimitsKey);
+    expect(second.flush()).toBeGreaterThan(0);
+
+    const raw = storage.getItem(SWR_PERSISTED_CACHE_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    const record = JSON.parse(raw!) as {
+      entries: Array<{ data: unknown; key: string; updatedAt: number }>;
+    };
+    expect(record.entries).toEqual([
+      {
+        data: { TradingLimit: [{ id: "second-tab" }] },
+        key: secondKey,
+        updatedAt: NOW + 1_000,
+      },
+      {
+        data: { TradingLimit: [{ id: "first-tab" }] },
+        key: firstKey,
+        updatedAt: NOW,
+      },
+    ]);
   });
 
   it("discards the whole record on build-salt or schema mismatch", () => {

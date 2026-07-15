@@ -3,14 +3,23 @@
 import { act } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import useSWR, { unstable_serialize } from "swr";
+import useSWR, {
+  preload,
+  SWRConfig,
+  unstable_serialize,
+  type State,
+} from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DataFreshnessBanner } from "@/components/data-freshness-banner";
-import { SwrProvider } from "@/components/swr-provider";
+import {
+  PersistedCacheActivator,
+  SwrProvider,
+} from "@/components/swr-provider";
 import { TRADING_LIMITS } from "@/lib/queries";
 import {
   createPersistedSWRCache,
   SWR_PERSISTED_CACHE_STORAGE_KEY,
+  type PersistedSWRCacheController,
 } from "@/lib/swr-persisted-cache";
 import { resetSWRFreshnessForTests } from "@/lib/swr-freshness";
 
@@ -44,6 +53,34 @@ const persistedTradingLimitsKey = [
 type TradingLimitsPayload = {
   TradingLimit: Array<{ id: string }>;
 };
+
+const providerPreloadKey = "provider-preload-key";
+
+function ProviderCacheProbe() {
+  const { data } = useSWR<TradingLimitsPayload>(
+    persistedTradingLimitsKey,
+    null,
+    { revalidateOnMount: false },
+  );
+  return (
+    <>
+      <DataFreshnessBanner />
+      <div>{data?.TradingLimit[0]?.id ?? "missing"}</div>
+    </>
+  );
+}
+
+function PreloadProbe({
+  fetcher,
+}: {
+  fetcher: () => Promise<FallbackPayload>;
+}) {
+  const { data } = useSWR<FallbackPayload>(providerPreloadKey, fetcher, {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+  });
+  return <div>{data?.ready ? "preload ready" : "missing"}</div>;
+}
 
 function FallbackDataProbe({ triggerRef }: { triggerRef: TriggerRef }) {
   const { data, mutate } = useSWR<FallbackPayload>(
@@ -279,6 +316,69 @@ describe("SwrProvider freshness tracking", () => {
     ]);
   });
 
+  it("keeps a network success that lands between the activation check and provider mutate", async () => {
+    const serializedKey = unstable_serialize(persistedTradingLimitsKey);
+    const networkData: TradingLimitsPayload = {
+      TradingLimit: [{ id: "network-won-race" }],
+    };
+    const persistedData: TradingLimitsPayload = {
+      TradingLimit: [{ id: "persisted-lost-race" }],
+    };
+
+    class NetworkWinsRaceCache extends Map<string, State<unknown>> {
+      private armed = false;
+
+      arm() {
+        this.armed = true;
+      }
+
+      override get(key: string): State<unknown> | undefined {
+        const current = super.get(key);
+        if (this.armed && key === serializedKey) {
+          this.armed = false;
+          // Simulate SWR committing a successful response after the activator's
+          // first read but before its provider-scoped mutate applies.
+          super.set(key, { ...current, data: networkData });
+        }
+        return current;
+      }
+    }
+
+    const raceCache = new NetworkWinsRaceCache();
+    const persistedCache = {
+      cache: raceCache,
+      attachLifecycleFlushes: () => () => undefined,
+      consumeHydratedEntries: () => {
+        raceCache.arm();
+        return [
+          {
+            data: persistedData,
+            key: serializedKey,
+            updatedAt: NOW - 10_000,
+          },
+        ];
+      },
+      flush: () => null,
+      recordNetworkSuccess: () => undefined,
+    } satisfies PersistedSWRCacheController;
+
+    await act(async () => {
+      root.render(
+        <SWRConfig value={{ provider: () => raceCache }}>
+          <PersistedCacheActivator persistedCache={persistedCache} />
+          <ProviderCacheProbe />
+        </SWRConfig>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(raceCache.get(serializedKey)?.data).toEqual(networkData);
+    expect(container.textContent).toContain("network-won-race");
+    expect(container.textContent).not.toContain("persisted-lost-race");
+    expect(container.textContent).not.toContain("Showing cached data");
+  });
+
   it("keeps SSR hydration stable before warm-painting the staged cache", async () => {
     const cachedAt = NOW - 10_000;
     const seed = createPersistedSWRCache({
@@ -342,5 +442,25 @@ describe("SwrProvider freshness tracking", () => {
     expect(hydrationErrors).toEqual([]);
     expect(container.textContent).toContain("cached-after-hydration");
     expect(container.textContent).toContain("Showing cached data from 10s ago");
+  });
+
+  it("consumes SWR's global preload under the custom provider", async () => {
+    const preloadedFetcher = vi.fn(async () => stableSuccessPayload);
+    const hookFetcher = vi.fn(async () => ({ ready: false }));
+    preload(providerPreloadKey, preloadedFetcher);
+
+    await act(async () => {
+      root.render(
+        <SwrProvider>
+          <PreloadProbe fetcher={hookFetcher} />
+        </SwrProvider>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("preload ready");
+    expect(preloadedFetcher).toHaveBeenCalledTimes(1);
+    expect(hookFetcher).not.toHaveBeenCalled();
   });
 });

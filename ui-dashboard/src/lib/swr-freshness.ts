@@ -11,9 +11,10 @@ type SwrFreshnessEntry = {
 
 export type SwrFreshnessStatus = {
   cachedCount: number;
+  cachedLastUpdatedAt: number | null;
   failedCount: number;
+  failedLastUpdatedAt: number | null;
   lastErrorMessage: string | null;
-  lastUpdatedAt: number;
 };
 
 type Listener = () => void;
@@ -150,9 +151,10 @@ export function getSWRFreshnessVersion(): number {
 
 export function getSWRFreshnessStatus(): SwrFreshnessStatus | null {
   let cachedCount = 0;
+  let cachedLastUpdatedAt = Number.POSITIVE_INFINITY;
   let failedCount = 0;
+  let failedLastUpdatedAt = Number.POSITIVE_INFINITY;
   let lastErrorMessage: string | null = null;
-  let lastUpdatedAt = Number.POSITIVE_INFINITY;
 
   for (const entry of entries.values()) {
     if (entry.activeCount <= 0) continue;
@@ -163,22 +165,27 @@ export function getSWRFreshnessStatus(): SwrFreshnessStatus | null {
     if (failedAfterSuccess) {
       failedCount += 1;
       lastErrorMessage = entry.lastErrorMessage;
-      lastUpdatedAt = Math.min(lastUpdatedAt, lastGoodAt);
+      failedLastUpdatedAt = Math.min(failedLastUpdatedAt, lastGoodAt);
       continue;
     }
     if (entry.cachedAt !== null && entry.lastSuccessAt === null) {
       cachedCount += 1;
-      lastUpdatedAt = Math.min(lastUpdatedAt, entry.cachedAt);
+      cachedLastUpdatedAt = Math.min(cachedLastUpdatedAt, entry.cachedAt);
     }
   }
 
-  if (
-    (cachedCount === 0 && failedCount === 0) ||
-    !Number.isFinite(lastUpdatedAt)
-  ) {
-    return null;
-  }
-  return { cachedCount, failedCount, lastErrorMessage, lastUpdatedAt };
+  if (cachedCount === 0 && failedCount === 0) return null;
+  return {
+    cachedCount,
+    cachedLastUpdatedAt: Number.isFinite(cachedLastUpdatedAt)
+      ? cachedLastUpdatedAt
+      : null,
+    failedCount,
+    failedLastUpdatedAt: Number.isFinite(failedLastUpdatedAt)
+      ? failedLastUpdatedAt
+      : null,
+    lastErrorMessage,
+  };
 }
 
 export function resetSWRFreshnessForTests(): void {

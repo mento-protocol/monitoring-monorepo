@@ -249,8 +249,58 @@ function collectPersistableEntries(
   return entries;
 }
 
+function mergePersistableEntries(
+  buildSalt: string,
+  diskEntries: readonly PersistedCacheEntry[],
+  localEntries: readonly PersistedCacheEntry[],
+  locallyUpdatedKeys: ReadonlySet<string>,
+): PersistedCacheEntry[] {
+  const newestByKey = new Map<string, PersistedCacheEntry>();
+  const localCandidateKeys = new Set(localEntries.map((entry) => entry.key));
+  for (const entry of diskEntries) {
+    // A local network success owns this key even when its new value cannot be
+    // serialized. Keeping the older disk value would resurrect stale data on
+    // the next load.
+    if (
+      !locallyUpdatedKeys.has(entry.key) ||
+      localCandidateKeys.has(entry.key)
+    ) {
+      newestByKey.set(entry.key, entry);
+    }
+  }
+  for (const entry of localEntries) {
+    const existing = newestByKey.get(entry.key);
+    if (existing === undefined || entry.updatedAt >= existing.updatedAt) {
+      newestByKey.set(entry.key, entry);
+    }
+  }
+
+  const newestFirst = Array.from(newestByKey.values()).sort(
+    (a, b) => b.updatedAt - a.updatedAt,
+  );
+  const merged: PersistedCacheEntry[] = [];
+  for (const entry of newestFirst) {
+    if (merged.length >= MAX_ENTRIES) break;
+    try {
+      if (byteLength(JSON.stringify(entry)) > MAX_ENTRY_BYTES) continue;
+      const nextEntries = [...merged, entry];
+      if (
+        byteLength(JSON.stringify(makeRecord(buildSalt, nextEntries))) <=
+        SWR_PERSISTED_CACHE_MAX_BYTES
+      ) {
+        merged.push(entry);
+      }
+    } catch {
+      // Invalid local data stays memory-only. Parsed disk entries cannot be
+      // cyclic, but use one fail-closed path for both sources.
+    }
+  }
+  return merged;
+}
+
 class PersistedSWRCache implements PersistedSWRCacheController {
   readonly cache = new Map<string, State<unknown>>();
+  private readonly locallyUpdatedKeys = new Set<string>();
   private readonly updatedAtByKey = new Map<string, number>();
   private hydratedEntries: PersistedCacheEntry[] = [];
   private writeTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
@@ -307,13 +357,25 @@ class PersistedSWRCache implements PersistedSWRCacheController {
   flush = (): number | null => {
     this.clearWriteTimer();
     if (this.storage === null || this.writesDisabled) return null;
-    const entries = collectPersistableEntries(
+    const now = this.now();
+    const localEntries = collectPersistableEntries(
       this.cache,
       this.updatedAtByKey,
       this.buildSalt,
-      this.now(),
+      now,
     );
     try {
+      const raw = this.storage.getItem(SWR_PERSISTED_CACHE_STORAGE_KEY);
+      const diskEntries =
+        raw === null
+          ? []
+          : (parseRecord(raw, this.buildSalt, now)?.entries ?? []);
+      const entries = mergePersistableEntries(
+        this.buildSalt,
+        diskEntries,
+        localEntries,
+        this.locallyUpdatedKeys,
+      );
       if (entries.length === 0) {
         this.storage.removeItem(SWR_PERSISTED_CACHE_STORAGE_KEY);
         return 0;
@@ -338,6 +400,7 @@ class PersistedSWRCache implements PersistedSWRCacheController {
     if (!isPersistableSWRKey(key)) return;
     const serializedKey = serializedCacheKey(key);
     if (!serializedKey) return;
+    this.locallyUpdatedKeys.add(serializedKey);
     this.updatedAtByKey.set(serializedKey, this.now());
     this.scheduleFlush();
   };
