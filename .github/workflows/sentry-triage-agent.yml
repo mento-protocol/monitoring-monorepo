@@ -181,5 +181,5 @@ jobs:
             --model claude-sonnet-5
             --max-turns 40
             --setting-sources user
-            --mcp-config '{"mcpServers":{"sentry":{"command":"npx","args":["-y","@sentry/mcp-server@latest"],"env":{"SENTRY_ACCESS_TOKEN":"${SENTRY_TRIAGE_TOKEN}","SENTRY_HOST":"us.sentry.io"}}}}'
+            --mcp-config '{"mcpServers":{"sentry":{"command":"npx","args":["-y","@sentry/mcp-server@0.37.0"],"env":{"SENTRY_ACCESS_TOKEN":"${SENTRY_TRIAGE_TOKEN}","SENTRY_HOST":"us.sentry.io"}}}}'
             --allowedTools 'Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh issue edit:*),mcp__sentry__find_organizations,mcp__sentry__find_projects,mcp__sentry__get_issue_details,mcp__sentry__get_event_stacktrace,mcp__sentry__get_issue_tag_values,mcp__sentry__get_issue_activity,mcp__sentry__search_issues,mcp__sentry__search_events,mcp__sentry__search_issue_events,mcp__sentry__get_sentry_resource'
