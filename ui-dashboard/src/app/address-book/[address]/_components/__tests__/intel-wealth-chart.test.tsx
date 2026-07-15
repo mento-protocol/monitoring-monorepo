@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntelWealthRecord } from "@/lib/intel-wealth";
 
 let mockSwrData: IntelWealthRecord | null = null;
+const capturedPlotConfigs: Array<Record<string, unknown>> = [];
 
 vi.mock("next-auth/react", () => ({
   useSession: () => ({ status: "authenticated" }),
@@ -24,10 +25,13 @@ vi.mock("next/dynamic", () => ({
     function MockPlot({
       ariaLabel,
       textAlternative,
+      config,
     }: {
       ariaLabel: string;
       textAlternative: string;
+      config: Record<string, unknown>;
     }) {
+      capturedPlotConfigs.push(config);
       return (
         <div data-testid="plot" aria-label={ariaLabel}>
           {textAlternative}
@@ -77,8 +81,15 @@ function render() {
   });
 }
 
+function rerender() {
+  act(() => {
+    root?.render(<IntelWealthChart address={ADDRESS} />);
+  });
+}
+
 beforeEach(() => {
   mockSwrData = makeRecord();
+  capturedPlotConfigs.length = 0;
 });
 
 afterEach(() => {
@@ -120,5 +131,28 @@ describe("IntelWealthChart accessibility", () => {
     expect(container?.querySelector(".sr-only")?.textContent).toBe(
       "Wealth trajectory chart with 1 portfolio snapshot. Snapshot: Now $250.00.",
     );
+  });
+
+  it("keeps the Plotly config reference stable across an SWR data update", () => {
+    render();
+    const initialConfig = capturedPlotConfigs.at(-1);
+
+    mockSwrData = {
+      ...makeRecord(),
+      fetchedAt: "2026-07-02T12:00:00.000Z",
+      portfolio: {
+        ...makeRecord().portfolio,
+        "0d_ago": {
+          ts: 1_765_086_400,
+          data: { tokens: [{ symbol: "CELO", usd: 300 }] },
+        },
+      },
+    };
+    rerender();
+    const refreshedConfig = capturedPlotConfigs.at(-1);
+
+    expect(capturedPlotConfigs).toHaveLength(2);
+    expect(initialConfig).toMatchObject({ scrollZoom: false });
+    expect(refreshedConfig).toBe(initialConfig);
   });
 });

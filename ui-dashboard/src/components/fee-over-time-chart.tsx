@@ -23,6 +23,13 @@ const Plot = dynamic(() => import("@/lib/react-plotly-basic"), {
   loading: PlotSkeleton,
 });
 
+// Stable identity lets react-plotly.js skip redraws when an unrelated parent
+// re-render leaves this chart's data and layout unchanged.
+const REVENUE_PLOTLY_CONFIG = {
+  ...PLOTLY_CONFIG,
+  scrollZoom: false,
+} as const;
+
 type TotalRevenueChartProps = {
   series: CanonicalRevenueDailyPoint[];
   isLoading: boolean;
@@ -349,7 +356,7 @@ function RevenueChartBody({
             textAlternative={summary}
             data={figure.traces}
             layout={figure.layout}
-            config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
+            config={REVENUE_PLOTLY_CONFIG}
             style={{ width: "100%", height: 220 }}
             useResizeHandler
           />

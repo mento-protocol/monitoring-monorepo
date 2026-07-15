@@ -13,6 +13,13 @@ const Plot = dynamic(() => import("@/lib/react-plotly-basic"), {
   loading: () => <div className="h-40 animate-pulse rounded bg-slate-800/30" />,
 });
 
+// react-plotly.js ref-compares config and redraws when its identity changes.
+// Keep this chart-local override stable across SWR/session re-renders.
+const WEALTH_PLOTLY_CONFIG = {
+  ...PLOTLY_CONFIG,
+  scrollZoom: false,
+} as const;
+
 /**
  * Walk an unknown portfolio response and sum the `usd` field of every
  * per-token leaf. A "per-token leaf" is an object that has BOTH a `usd`
@@ -204,7 +211,7 @@ export function IntelWealthChart({ address }: { address: string }) {
             textAlternative={chartTextAlternative}
             data={[sparkTrace(points)]}
             layout={SPARK_LAYOUT}
-            config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
+            config={WEALTH_PLOTLY_CONFIG}
             style={{ width: "100%", height: 160 }}
             useResizeHandler
           />
