@@ -255,7 +255,10 @@ const config = [
   {
     // Manifest-referenced CSS emitted under .next/static/ (single Tailwind v4 bundle).
     //
-    // Baseline: 11,400 bytes  Budget: retained at 12 KB (5.3% headroom)
+    // Baseline: 11,400 bytes  Budget: retained at 12 KB (5.3% headroom).
+    // The prior per-budget 10,283-byte note was stale: origin/main's 2026-07-09
+    // header already measured 11,276 bytes, and this PR changes no styles or
+    // Tailwind class names.
     name: "All client CSS",
     path: manifestPathsOrFallback(".css", ["static/"], ".next/static/**/*.css"),
     limit: "12 kB",
