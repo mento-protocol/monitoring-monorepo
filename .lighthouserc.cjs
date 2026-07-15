@@ -151,6 +151,8 @@ module.exports = {
       // `warn` = advisory (non-blocking); `error` = blocking. `assertMatrix`
       // scopes the single evidence-backed exception to `/volume`; using one
       // assertion factory keeps the remaining budgets mechanically identical.
+      // `/volume` aggregates its three runs by median because that route's
+      // evidence-backed baseline and headroom are both median-derived.
       assertMatrix: [
         {
           matchingUrlPattern: NON_VOLUME_URL_PATTERN,
@@ -158,6 +160,7 @@ module.exports = {
         },
         {
           matchingUrlPattern: VOLUME_URL_PATTERN,
+          aggregationMethod: "median",
           assertions: assertionsWithLcpCeiling(2440),
         },
       ],

@@ -1448,6 +1448,12 @@ assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions wor
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
 assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
 
+run_gate ".lighthouserc.cjs"
+assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse CI budget config changed)"
+
+run_gate "scripts/lighthouse-config.test.mjs"
+assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse config assertion suite changed)"
+
 run_gate ".github/workflows/ci.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"

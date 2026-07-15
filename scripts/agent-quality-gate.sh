@@ -1390,6 +1390,7 @@ while IFS= read -r path; do
     .lighthouserc.cjs)
       add_surface "ui-dashboard"
       add_checklist "docs/pr-checklists/code-health.md" "Lighthouse CI budget config changed"
+      add_command "node scripts/lighthouse-config.test.mjs" "Lighthouse CI budget config changed"
       ;;
     .shellcheckrc)
       # The repo-wide `./tools/trunk check --all --filter=shellcheck` command
@@ -1470,6 +1471,9 @@ while IFS= read -r path; do
         scripts/check-agent-context.mjs|scripts/check-agent-context-helpers.mjs|scripts/check-agent-context.test.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
           add_command "node scripts/check-agent-context.test.mjs" "agent context checker changed"
+          ;;
+        scripts/lighthouse-config.test.mjs)
+          add_command "node scripts/lighthouse-config.test.mjs" "Lighthouse config assertion suite changed"
           ;;
         scripts/check-deploy-root-anchors.test.mjs)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy root-anchor test changed"
