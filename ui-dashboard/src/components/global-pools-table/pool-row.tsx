@@ -1,18 +1,10 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { formatUSD, normalizePoolIdForChain } from "@/lib/format";
-import { preloadGQL } from "@/lib/graphql";
+import { formatUSD } from "@/lib/format";
 import { poolName } from "@/lib/tokens";
 import { type Pool } from "@/lib/types";
-import {
-  configuredNetworkIdForChainId,
-  NETWORKS,
-  type Network,
-} from "@/lib/networks";
-import {
-  POOL_DETAIL_WITH_HEALTH,
-  type PoolDetailResponse,
-} from "@/lib/queries";
+import { type Network } from "@/lib/networks";
+import { preloadPoolDetail } from "@/lib/pool-detail-preload";
 import { Row } from "@/components/table";
 import { SourceBadge, HealthBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
@@ -110,7 +102,7 @@ export function PoolRow({
       <NameCell
         pool={pool}
         network={network}
-        onPrefetch={() => prefetchPoolDetail(entry)}
+        onPrefetch={() => preloadPoolDetail(network, pool.id)}
       />
       {showVirtualPoolSource && <SourceCell pool={pool} />}
       <HealthCell status={effectiveStatus} details={healthDetails} />
@@ -146,16 +138,6 @@ export function PoolRow({
       <StrategyCell strategies={strategies} />
     </Row>
   );
-}
-
-function prefetchPoolDetail(entry: GlobalPoolEntry): void {
-  const networkId = configuredNetworkIdForChainId(entry.pool.chainId);
-  const network = networkId ? NETWORKS[networkId] : entry.network;
-  const id = normalizePoolIdForChain(entry.pool.id, network.chainId);
-  preloadGQL<PoolDetailResponse>(network, POOL_DETAIL_WITH_HEALTH, {
-    id,
-    chainId: network.chainId,
-  });
 }
 
 function Cell({

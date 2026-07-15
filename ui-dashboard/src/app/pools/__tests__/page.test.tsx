@@ -1,12 +1,26 @@
+/** @vitest-environment jsdom */
+
+import { act, type AnchorHTMLAttributes, type ReactNode } from "react";
+import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SWRResponse } from "swr";
-import type { Network } from "@/lib/networks";
+import { NETWORKS, type Network } from "@/lib/networks";
 import type { GlobalPoolEntry } from "@/components/global-pools-table";
 import { POOLS_TABLE_SKELETON_ROWS } from "@/components/pools-table-skeleton";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
+import { POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
+import type { SwapEvent } from "@/lib/types";
 
 const mockReplace = vi.fn();
+const mockPreloadGQL = vi.fn();
+const mockConfiguredNetworkIdForChainId = vi.fn();
 let mockSearchParams = new URLSearchParams();
+
+const reactActEnvironment = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => mockSearchParams,
@@ -36,6 +50,28 @@ vi.mock("@/components/network-provider", () => ({
 
 vi.mock("@/lib/graphql", () => ({
   useGQL: vi.fn(),
+  preloadGQL: (...args: unknown[]) => mockPreloadGQL(...args),
+}));
+
+vi.mock("@/lib/networks", async () => ({
+  ...(await vi.importActual<typeof import("@/lib/networks")>("@/lib/networks")),
+  configuredNetworkIdForChainId: (chainId: number) =>
+    mockConfiguredNetworkIdForChainId(chainId),
+}));
+
+vi.mock("next/link", () => ({
+  default: ({
+    href,
+    children,
+    ...props
+  }: {
+    href: string;
+    children: ReactNode;
+  } & AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 // Keep the real `showInitialSkeleton` (a pure helper) and mock only the hook —
@@ -84,6 +120,10 @@ vi.mock("@/components/global-pools-table", () => ({
   ),
   globalPoolKey: ({ network, pool }: GlobalPoolEntry) =>
     `${network.id}:${pool.id}`,
+}));
+
+vi.mock("@/components/sender-cell", () => ({
+  SenderCell: ({ address }: { address: string }) => <td>{address}</td>,
 }));
 
 import { useGQL } from "@/lib/graphql";
@@ -194,8 +234,24 @@ const baseSwapsResult = {
   isLoading: false,
 };
 
+const recentSwap: SwapEvent = {
+  id: "42220-swap-1",
+  chainId: 42220,
+  poolId: celoPool.id,
+  sender: "0x0000000000000000000000000000000000000003",
+  recipient: "0x0000000000000000000000000000000000000004",
+  amount0In: "1000000000000000000",
+  amount1In: "0",
+  amount0Out: "0",
+  amount1Out: "1000000000000000000",
+  txHash: `0x${"1".repeat(64)}`,
+  blockNumber: "123",
+  blockTimestamp: "1700000000",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mockConfiguredNetworkIdForChainId.mockReturnValue(null);
   mockSearchParams = new URLSearchParams();
   vi.mocked(useAllNetworksData).mockReturnValue(baseAllNetworksResult);
 });
@@ -274,6 +330,107 @@ describe("PoolsPage multichain rendering", () => {
     renderToStaticMarkup(<PoolsPage />);
 
     expect(poolSwapsSeen).toEqual([{ poolId: celoPool.id, limit: 25 }]);
+  });
+
+  it("preloads the exact pool-detail key on Recent Swaps hover and focus", () => {
+    vi.mocked(useGQL).mockReturnValue({
+      data: { SwapEvent: [recentSwap] },
+      error: null,
+      isLoading: false,
+    } as SWRResponse);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(<PoolsPage />);
+    });
+    const link = container.querySelector<HTMLAnchorElement>(
+      `a[href="/pool/${celoPool.id}"]`,
+    );
+    expect(link).not.toBeNull();
+
+    act(() => {
+      link?.dispatchEvent(
+        new MouseEvent("mouseover", {
+          bubbles: true,
+          relatedTarget: document.body,
+        }),
+      );
+    });
+    expect(mockPreloadGQL).toHaveBeenCalledWith(
+      celoNet,
+      POOL_DETAIL_WITH_HEALTH,
+      { id: celoPool.id, chainId: celoNet.chainId },
+      { timeoutMs: HASURA_TIMEOUT_MS },
+    );
+
+    mockPreloadGQL.mockClear();
+    act(() => {
+      link?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    });
+    expect(mockPreloadGQL).toHaveBeenCalledWith(
+      celoNet,
+      POOL_DETAIL_WITH_HEALTH,
+      { id: celoPool.id, chainId: celoNet.chainId },
+      { timeoutMs: HASURA_TIMEOUT_MS },
+    );
+
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it("preloads through the configured pool route while retaining entry network metadata", () => {
+    const entryNetwork = makeNetwork(
+      "celo-mainnet-local",
+      42220,
+      "Celo local fallback",
+    );
+    entryNetwork.tokenSymbols = {
+      [celoPool.token0]: "LOCAL0",
+      [celoPool.token1]: "LOCAL1",
+    };
+    vi.mocked(useAllNetworksData).mockReturnValue({
+      ...baseAllNetworksResult,
+      networkData: [makeNetworkData(entryNetwork, celoPool)],
+    });
+    vi.mocked(useGQL).mockReturnValue({
+      data: { SwapEvent: [recentSwap] },
+      error: null,
+      isLoading: false,
+    } as SWRResponse);
+    mockConfiguredNetworkIdForChainId.mockReturnValue("celo-mainnet");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(<PoolsPage />);
+    });
+
+    const link = container.querySelector<HTMLAnchorElement>(
+      `a[href="/pool/${celoPool.id}"]`,
+    );
+    expect(link?.textContent).toBe("LOCAL0/LOCAL1");
+
+    act(() => {
+      link?.dispatchEvent(
+        new MouseEvent("mouseover", {
+          bubbles: true,
+          relatedTarget: document.body,
+        }),
+      );
+    });
+    expect(mockPreloadGQL).toHaveBeenCalledWith(
+      NETWORKS["celo-mainnet"],
+      POOL_DETAIL_WITH_HEALTH,
+      { id: celoPool.id, chainId: 42220 },
+      { timeoutMs: HASURA_TIMEOUT_MS },
+    );
+    expect(entryNetwork.hasuraUrl).not.toBe(NETWORKS["celo-mainnet"].hasuraUrl);
+
+    act(() => root.unmount());
+    container.remove();
   });
 });
 
