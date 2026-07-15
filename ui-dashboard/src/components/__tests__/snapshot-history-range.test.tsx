@@ -148,6 +148,36 @@ describe("homepage snapshot history range handoff", () => {
     expect(container.querySelector('[data-testid="plot"]')).not.toBeNull();
   });
 
+  it("uses Broker cap state when a Volume caller omits the combined override", () => {
+    const requestFullSnapshotHistory = vi.fn(async () => undefined);
+    const networkData = historyData(false).map((data) => ({
+      ...data,
+      brokerSnapshotsAllDailyCapped: true,
+    }));
+    act(() => {
+      root.render(
+        <VolumeOverTimeChart
+          networkData={networkData}
+          isLoading={false}
+          hasError={false}
+          hasSnapshotError={false}
+          hasBrokerSnapshotError={false}
+          fullVolumeSeries={buildDailyVolumeSeries(networkData)}
+          snapshotHistoryError={null}
+          requestFullSnapshotHistory={requestFullSnapshotHistory}
+        />,
+      );
+    });
+
+    act(() => {
+      rangeButton("Volume chart time range", "All").click();
+    });
+
+    expect(requestFullSnapshotHistory).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Volume chart is loading.");
+    expect(container.querySelector('[data-testid="plot"]')).toBeNull();
+  });
+
   it("shows an explicit error instead of plotting capped volume as All", () => {
     const networkData = historyData(true);
     const requestFullSnapshotHistory = vi.fn(async () => undefined);

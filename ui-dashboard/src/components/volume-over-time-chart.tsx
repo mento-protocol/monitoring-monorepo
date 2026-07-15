@@ -595,7 +595,11 @@ export function VolumeOverTimeChart({
 }: VolumeOverTimeChartProps) {
   const historyIsCapped =
     snapshotHistoryCapped ??
-    networkData.some((network) => network.snapshotsAllDailyCapped);
+    networkData.some(
+      (network) =>
+        network.snapshotsAllDailyCapped ||
+        network.brokerSnapshotsAllDailyCapped === true,
+    );
   const {
     range,
     handleRangeChange,
