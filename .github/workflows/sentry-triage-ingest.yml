@@ -1,0 +1,81 @@
+name: Sentry Triage Ingest
+
+# Stage A of the Sentry triage pipeline (ADR 0036,
+# docs/adr/0036-sentry-triage-pipeline.md): a deterministic, no-LLM ingest that
+# turns every new/regressed Sentry issue across the `mento-labs` org (6
+# projects, 4 repos) into exactly one labeled GitHub queue issue in this repo,
+# idempotent by Sentry short ID. Read-only against Sentry — GET only, never
+# resolves/archives/assigns.
+#
+# Inert until Terraform provisions `secrets.SENTRY_TRIAGE_TOKEN` (a read-only
+# Sentry token) and the kill switch `vars.SENTRY_TRIAGE_ENABLED` is flipped to
+# the literal string `true` (tracked in #1276; runbook in
+# docs/notes/sentry-triage-pipeline.md). Both guards fail safe: this workflow
+# merges and runs on schedule immediately, but every run no-ops until an
+# operator turns it on — first the kill-switch step below (repo variable),
+# then a second no-op inside scripts/sentry-triage-ingest.mjs itself if the
+# token secret is still missing (defense in depth; see the script's
+# `resolveTokenGuard`).
+#
+# Advisory only: `schedule` / `workflow_dispatch` triggers can never satisfy a
+# required PR status check (see supply-chain.yml's note that only `ci`,
+# `Code Quality`, and the Vercel checks are in the branch ruleset), so this
+# workflow is intentionally not registered as a required check anywhere.
+#
+# Failures (including inside the ingest script itself) surface through
+# notify-slack-on-main-failure.yml like every other schedule-only workflow —
+# this workflow's name is registered in that file's `workflow_run.workflows`
+# list. Per the queue contract, an absent run-record comment on the tracker
+# issue (#1282) is a second, independent staleness signal on top of that.
+
+on:
+  schedule:
+    # 2x/day per the ADR's batch cadence — org-wide volume (~4-5 new Sentry
+    # issues/day) doesn't need push-based latency. Off-the-hour to dodge cron
+    # contention on GitHub's scheduler.
+    - cron: 30 5 * * *
+    - cron: 30 13 * * *
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: sentry-triage-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    name: Ingest Sentry issues into the triage queue
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 15
+    steps:
+      - name: Check kill switch
+        id: killswitch
+        env:
+          ENABLED: ${{ vars.SENTRY_TRIAGE_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "$ENABLED" != "true" ]; then
+            echo "::notice::SENTRY_TRIAGE_ENABLED repo variable is not the literal string 'true' — skipping Sentry triage ingest. No Sentry or GitHub API calls were made."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: steps.killswitch.outputs.enabled == 'true'
+
+      - uses: ./.github/actions/pnpm-install
+        if: steps.killswitch.outputs.enabled == 'true'
+
+      - name: Run ingest
+        if: steps.killswitch.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Empty/unset when the Terraform secret (#1276) hasn't been created
+          # yet — scripts/sentry-triage-ingest.mjs's resolveTokenGuard() logs
+          # a ::notice:: and exits 0 in that case, no network calls made.
+          SENTRY_TRIAGE_TOKEN: ${{ secrets.SENTRY_TRIAGE_TOKEN }}
+        run: pnpm sentry:ingest

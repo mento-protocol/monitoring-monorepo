@@ -1,0 +1,752 @@
+#!/usr/bin/env node
+/**
+ * Stage A of the Sentry triage pipeline (ADR 0036,
+ * docs/adr/0036-sentry-triage-pipeline.md): a deterministic, no-LLM ingest
+ * that turns every new or regressed Sentry issue across the `mento-labs` org
+ * into exactly one labeled GitHub queue issue in this repo, idempotent by
+ * Sentry short ID. Read-only against Sentry (GET only) — never resolves,
+ * archives, assigns, or otherwise mutates a Sentry issue.
+ *
+ * The queue contract (title format, label names, body shape, idempotency
+ * rules) is normative — see the GitHub issue that authored this script
+ * (mento-protocol/monitoring-monorepo#1274) and
+ * docs/notes/sentry-triage-pipeline.md. Do not change it without updating
+ * both, since the Stage B triage-agent workflow builds against it.
+ */
+
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
+export const DEFAULT_ORG = "mento-labs";
+export const DEFAULT_SENTRY_BASE_URL = "https://us.sentry.io";
+// Tracker issue for the whole pipeline rollout (ADR 0036 evidence section);
+// the run record described in the queue contract lands here as a single
+// rolling comment.
+export const DEFAULT_TRACKER_ISSUE = 1282;
+
+export const NEW_ISSUES_QUERY = "is:unresolved firstSeen:-8d";
+export const REGRESSED_ISSUES_QUERY = "is:unresolved is:regressed";
+
+export const RUN_RECORD_MARKER = "<!-- sentry-triage-ingest:run-record:v1 -->";
+const BODY_MARKER = "<!-- sentry-triage:v1 -->";
+
+// ---------------------------------------------------------------------------
+// Pure helpers: title/body construction, noise classification, dedup
+// decision. Untrusted-input handling lives here (Sentry titles/culprits are
+// attacker-reachable text — never execute/eval anything derived from them).
+// ---------------------------------------------------------------------------
+
+/** Strip control chars/newlines and collapse whitespace to a single line. */
+export function sanitizeFreeText(text) {
+  return (
+    String(text ?? "")
+      // eslint-disable-next-line no-control-regex -- stripping control chars from untrusted Sentry text is the whole point here
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+      .replace(/[\r\n\t]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+}
+
+// Replace every backtick with a visually similar but byte-distinct
+// character. This is what actually prevents an attacker-controlled Sentry
+// title/culprit from closing the ```yaml fence early (or a single-backtick
+// inline-code span) once embedded in the issue body's markdown.
+export function defangBackticks(text) {
+  return text.replace(/`/g, "ˋ");
+}
+
+export function neutralizeUntrusted(text) {
+  return defangBackticks(sanitizeFreeText(text));
+}
+
+export function truncateTitle(text, maxLen = 90) {
+  const clean = text ?? "";
+  if (clean.length <= maxLen) return clean;
+  return `${clean.slice(0, maxLen).trimEnd()}…`;
+}
+
+/** `[sentry] <SHORT-ID>: <Sentry issue title, truncated to 90 chars>` */
+export function buildQueueTitle(shortId, rawTitle) {
+  const truncated = truncateTitle(neutralizeUntrusted(rawTitle), 90);
+  return `[sentry] ${shortId}: ${truncated}`;
+}
+
+// Noise heuristics from the queue contract: CSP reports, RPC timeouts,
+// chunk-load errors, and aborted fetches account for most of the org's
+// operational noise (ADR 0036 context).
+const NOISE_PATTERNS = [
+  /^Blocked '/,
+  /TimeoutError/,
+  /Failed to fetch/,
+  /Failed to load chunk/,
+  /AbortError/,
+];
+
+export function classifyNoise(rawTitle) {
+  const title = String(rawTitle ?? "");
+  return NOISE_PATTERNS.some((pattern) => pattern.test(title));
+}
+
+export function buildQueueLabels(isNoise) {
+  const labels = ["sentry-triage", "sentry:needs-triage"];
+  if (isNoise) labels.push("sentry:candidate-noise");
+  return labels;
+}
+
+// Idempotently created/updated on every run (`gh label create --force`).
+export const LABEL_DEFINITIONS = [
+  {
+    name: "sentry-triage",
+    color: "5319e7",
+    description: "Sentry triage pipeline queue issue (ADR 0036)",
+  },
+  {
+    name: "sentry:needs-triage",
+    color: "fbca04",
+    description: "Awaiting triage-agent verdict",
+  },
+  {
+    name: "sentry:candidate-noise",
+    color: "d4c5f9",
+    description:
+      "Matches known operational-noise heuristics (CSP, timeouts, chunk-load, abort)",
+  },
+  {
+    name: "sentry:verdict-code-fix",
+    color: "0e8a16",
+    description: "Triage verdict: fixable in this repo's code",
+  },
+  {
+    name: "sentry:verdict-config-fix",
+    color: "1d76db",
+    description: "Triage verdict: fixable via configuration",
+  },
+  {
+    name: "sentry:verdict-upstream",
+    color: "e99695",
+    description: "Triage verdict: upstream/third-party, not fixable here",
+  },
+  {
+    name: "sentry:verdict-needs-human",
+    color: "d93f0b",
+    description: "Triage verdict: needs human judgment",
+  },
+];
+
+const QUEUE_TITLE_PATTERN = /^\[sentry\] ([^:]+):/;
+
+export function extractShortIdFromTitle(title) {
+  const match = QUEUE_TITLE_PATTERN.exec(String(title ?? ""));
+  return match ? match[1] : null;
+}
+
+export function indexQueueIssuesByShortId(issues) {
+  const map = new Map();
+  for (const issue of issues ?? []) {
+    const shortId = extractShortIdFromTitle(issue.title);
+    if (!shortId) continue;
+    if (!map.has(shortId)) map.set(shortId, issue);
+  }
+  return map;
+}
+
+/**
+ * Idempotency rule (normative): open match -> skip. Closed match + the
+ * Sentry issue is regressed -> reopen. Closed match, not regressed -> skip
+ * (stays closed). No match -> create.
+ */
+export function decideDedupAction({ existingIssue, isRegressed }) {
+  if (!existingIssue) return { action: "create" };
+  if (existingIssue.state === "OPEN") {
+    return { action: "skip", reason: "already open" };
+  }
+  if (isRegressed) return { action: "reopen" };
+  return { action: "skip", reason: "closed, not regressed" };
+}
+
+export function buildRegressedComment(lastSeen) {
+  return `Regressed in Sentry (last seen ${lastSeen})`;
+}
+
+function isSafeSentryPermalink(url) {
+  try {
+    const parsed = new URL(String(url));
+    return (
+      parsed.protocol === "https:" && /(^|\.)sentry\.io$/.test(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+const METADATA_FIELDS = [
+  "short_id",
+  "sentry_issue_id",
+  "project",
+  "level",
+  "status",
+  "events",
+  "users",
+  "first_seen",
+  "last_seen",
+  "culprit",
+  "permalink",
+];
+const NUMERIC_METADATA_FIELDS = new Set(["events", "users"]);
+
+function yamlFieldValue(key, meta) {
+  const value = meta[key];
+  if (NUMERIC_METADATA_FIELDS.has(key)) {
+    const n = Number(value);
+    return Number.isFinite(n) ? String(n) : "0";
+  }
+  return JSON.stringify(neutralizeUntrusted(String(value ?? "")));
+}
+
+export function buildMetadataYaml(meta) {
+  const lines = METADATA_FIELDS.map(
+    (key) => `${key}: ${yamlFieldValue(key, meta)}`,
+  );
+  return ["```yaml", ...lines, "```"].join("\n");
+}
+
+export function buildIssueBody(meta) {
+  const safeTitle = neutralizeUntrusted(meta.title ?? "");
+  const link = isSafeSentryPermalink(meta.permalink)
+    ? `[View in Sentry](${meta.permalink})`
+    : "(permalink unavailable)";
+  return [
+    BODY_MARKER,
+    "",
+    buildMetadataYaml(meta),
+    "",
+    "## Sentry Issue",
+    "",
+    `\`${safeTitle}\``,
+    "",
+    link,
+    "",
+  ].join("\n");
+}
+
+function toMetadata(sentryIssue) {
+  return {
+    short_id: sentryIssue.shortId,
+    sentry_issue_id: sentryIssue.id,
+    project: sentryIssue.project,
+    level: sentryIssue.level,
+    status: sentryIssue.status,
+    events: sentryIssue.events,
+    users: sentryIssue.users,
+    first_seen: sentryIssue.firstSeen,
+    last_seen: sentryIssue.lastSeen,
+    culprit: sentryIssue.culprit,
+    permalink: sentryIssue.permalink,
+    title: sentryIssue.title,
+  };
+}
+
+export function buildRunRecordBody(counts, timestampIso) {
+  return [
+    RUN_RECORD_MARKER,
+    "",
+    `**Sentry triage ingest — last run:** ${timestampIso}`,
+    "",
+    `- Fetched: ${counts.fetched}`,
+    `- Created: ${counts.created}`,
+    `- Skipped (existing): ${counts.skippedExisting}`,
+    `- Reopened (regressed): ${counts.reopened}`,
+    `- Errors: ${counts.errors}`,
+  ].join("\n");
+}
+
+/** Kill switch (SENTRY_TRIAGE_ENABLED) is checked by the workflow YAML, not
+ * here, per the queue contract. This is the secret-guard: the script itself
+ * must no-op gracefully (exit 0) when the token isn't provisioned yet,
+ * whether invoked from CI or locally. */
+export function resolveTokenGuard(env = process.env) {
+  const token = env.SENTRY_TRIAGE_TOKEN;
+  if (!token || !token.trim()) {
+    return {
+      shouldRun: false,
+      reason:
+        "SENTRY_TRIAGE_TOKEN is not set; skipping Sentry triage ingest (secret not yet provisioned).",
+      token: null,
+    };
+  }
+  return { shouldRun: true, reason: null, token: token.trim() };
+}
+
+// ---------------------------------------------------------------------------
+// Sentry REST client: GET-only, paginated via Link headers.
+// ---------------------------------------------------------------------------
+
+export function parseLinkHeader(header) {
+  if (!header) return {};
+  const result = {};
+  for (const part of header.split(",")) {
+    const match = /<([^>]+)>;\s*rel="([^"]+)"(?:;\s*results="([^"]+)")?/.exec(
+      part.trim(),
+    );
+    if (!match) continue;
+    const [, url, rel, results] = match;
+    result[rel] = { url, hasResults: results === "true" };
+  }
+  return result;
+}
+
+function toCount(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function mapSentryIssue(raw) {
+  return {
+    id: String(raw?.id ?? ""),
+    shortId: raw?.shortId ?? "",
+    title: raw?.title ?? "",
+    culprit: raw?.culprit ?? "",
+    level: raw?.level ?? "error",
+    status: raw?.status ?? "unresolved",
+    project: raw?.project?.slug ?? raw?.project?.name ?? "unknown",
+    events: toCount(raw?.count),
+    users: toCount(raw?.userCount),
+    firstSeen: raw?.firstSeen ?? null,
+    lastSeen: raw?.lastSeen ?? null,
+    permalink: raw?.permalink ?? "",
+    isRegressed: false,
+  };
+}
+
+export function mergeSentryIssues(newIssues, regressedIssues) {
+  const byId = new Map();
+  for (const issue of newIssues ?? []) {
+    byId.set(issue.id, { ...issue, isRegressed: false });
+  }
+  for (const issue of regressedIssues ?? []) {
+    const existing = byId.get(issue.id);
+    byId.set(
+      issue.id,
+      existing
+        ? { ...existing, isRegressed: true }
+        : { ...issue, isRegressed: true },
+    );
+  }
+  return byId;
+}
+
+async function fetchSentryIssuesPage(url, token, fetchImpl) {
+  const res = await fetchImpl(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(
+      `Sentry API request failed: ${res.status} ${res.statusText} (${url})`,
+    );
+  }
+  const body = await res.json();
+  const links = parseLinkHeader(res.headers.get("link"));
+  return { issues: Array.isArray(body) ? body : [], next: links.next };
+}
+
+async function fetchAllSentryIssues({
+  query,
+  org,
+  baseUrl,
+  token,
+  fetchImpl,
+  maxPages = 20,
+}) {
+  let url = `${baseUrl}/api/0/organizations/${encodeURIComponent(org)}/issues/?query=${encodeURIComponent(query)}&limit=100`;
+  const collected = [];
+  let pages = 0;
+  while (url && pages < maxPages) {
+    const { issues, next } = await fetchSentryIssuesPage(url, token, fetchImpl);
+    collected.push(...issues);
+    url = next?.hasResults ? next.url : null;
+    pages += 1;
+  }
+  return collected.map(mapSentryIssue);
+}
+
+async function defaultFetchMergedSentryIssues(options) {
+  const common = {
+    org: options.org,
+    baseUrl: options.sentryBaseUrl,
+    token: options.sentryToken,
+    fetchImpl: fetch,
+  };
+  const [newIssues, regressedIssues] = await Promise.all([
+    fetchAllSentryIssues({ ...common, query: NEW_ISSUES_QUERY }),
+    fetchAllSentryIssues({ ...common, query: REGRESSED_ISSUES_QUERY }),
+  ]);
+  return mergeSentryIssues(newIssues, regressedIssues);
+}
+
+// ---------------------------------------------------------------------------
+// GitHub side effects (via `gh`, mirroring scripts/agent-issue-board.mjs).
+// Read-only calls always execute; mutating calls are logged and skipped
+// under --dry-run.
+// ---------------------------------------------------------------------------
+
+function quoteArg(value) {
+  if (/^[A-Za-z0-9_./:=@#-]+$/.test(value)) return value;
+  return JSON.stringify(value);
+}
+
+function formatGh(args) {
+  return `gh ${args.map((arg) => quoteArg(String(arg))).join(" ")}`;
+}
+
+function runGh(args, { dryRun = false, mutates = false } = {}) {
+  if (dryRun && mutates) {
+    process.stderr.write(`[dry-run] ${formatGh(args)}\n`);
+    return Promise.resolve("");
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn("gh", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (err) => {
+      reject(new Error(`gh ${args.join(" ")} failed: ${err.message}`));
+    });
+    child.on("close", (status) => {
+      if (status !== 0) {
+        reject(
+          new Error(
+            `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}`,
+          ),
+        );
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+async function ghJson(args, opts = {}) {
+  const stdout = await runGh(args, opts);
+  return stdout.trim() ? JSON.parse(stdout) : null;
+}
+
+async function ensureLabelsExist(options) {
+  for (const label of LABEL_DEFINITIONS) {
+    await runGh(
+      [
+        "label",
+        "create",
+        label.name,
+        "--color",
+        label.color,
+        "--description",
+        label.description,
+        "-R",
+        options.repo,
+        "--force",
+      ],
+      { dryRun: options.dryRun, mutates: true },
+    );
+  }
+}
+
+async function listExistingQueueIssues(options) {
+  const issues = await ghJson([
+    "issue",
+    "list",
+    "-R",
+    options.repo,
+    "--search",
+    "label:sentry-triage",
+    "--state",
+    "all",
+    "--limit",
+    "1000",
+    "--json",
+    "number,title,state,labels",
+  ]);
+  return issues ?? [];
+}
+
+async function createQueueIssue(options, sentryIssue) {
+  const title = buildQueueTitle(sentryIssue.shortId, sentryIssue.title);
+  const isNoise = classifyNoise(sentryIssue.title);
+  const labels = buildQueueLabels(isNoise);
+  const body = buildIssueBody(toMetadata(sentryIssue));
+  await runGh(
+    [
+      "issue",
+      "create",
+      "-R",
+      options.repo,
+      "--title",
+      title,
+      "--body",
+      body,
+      "--label",
+      labels.join(","),
+    ],
+    { dryRun: options.dryRun, mutates: true },
+  );
+}
+
+async function reopenQueueIssue(options, existingIssue, sentryIssue) {
+  await runGh(
+    ["issue", "reopen", String(existingIssue.number), "-R", options.repo],
+    { dryRun: options.dryRun, mutates: true },
+  );
+  await runGh(
+    [
+      "issue",
+      "comment",
+      String(existingIssue.number),
+      "-R",
+      options.repo,
+      "--body",
+      buildRegressedComment(sentryIssue.lastSeen),
+    ],
+    { dryRun: options.dryRun, mutates: true },
+  );
+  await runGh(
+    [
+      "issue",
+      "edit",
+      String(existingIssue.number),
+      "-R",
+      options.repo,
+      "--add-label",
+      "sentry:needs-triage",
+    ],
+    { dryRun: options.dryRun, mutates: true },
+  );
+}
+
+async function fetchTrackerComments(options) {
+  const stdout = await runGh(
+    [
+      "api",
+      `repos/${options.repo}/issues/${options.trackerIssue}/comments`,
+      "--paginate",
+    ],
+    {},
+  );
+  return stdout.trim() ? JSON.parse(stdout) : [];
+}
+
+async function defaultPostRunRecord(options, counts, now) {
+  const body = buildRunRecordBody(counts, now.toISOString());
+  const comments = await fetchTrackerComments(options);
+  const existing = comments.find(
+    (comment) =>
+      typeof comment.body === "string" &&
+      comment.body.includes(RUN_RECORD_MARKER),
+  );
+  if (existing) {
+    await runGh(
+      [
+        "api",
+        "-X",
+        "PATCH",
+        `repos/${options.repo}/issues/comments/${existing.id}`,
+        "-f",
+        `body=${body}`,
+      ],
+      { dryRun: options.dryRun, mutates: true },
+    );
+  } else {
+    await runGh(
+      [
+        "issue",
+        "comment",
+        String(options.trackerIssue),
+        "-R",
+        options.repo,
+        "--body",
+        body,
+      ],
+      { dryRun: options.dryRun, mutates: true },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Orchestration. Dependency-injectable so tests can prove the dedup
+// invariant (a second run creates zero new issues) with mocked I/O instead
+// of hitting Sentry/GitHub.
+// ---------------------------------------------------------------------------
+
+export async function runIngest(options, deps = {}) {
+  const {
+    fetchMergedSentryIssues = defaultFetchMergedSentryIssues,
+    listQueueIssues = listExistingQueueIssues,
+    ensureLabels = ensureLabelsExist,
+    createIssue = createQueueIssue,
+    reopenIssue = reopenQueueIssue,
+    postRunRecord = defaultPostRunRecord,
+    now = () => new Date(),
+  } = deps;
+
+  const counts = {
+    fetched: 0,
+    created: 0,
+    skippedExisting: 0,
+    reopened: 0,
+    errors: 0,
+  };
+
+  await ensureLabels(options);
+
+  const merged = await fetchMergedSentryIssues(options);
+  counts.fetched = merged.size;
+
+  const existingIssues = await listQueueIssues(options);
+  const existingByShortId = indexQueueIssuesByShortId(existingIssues);
+
+  for (const sentryIssue of merged.values()) {
+    try {
+      const existingIssue = existingByShortId.get(sentryIssue.shortId) ?? null;
+      const decision = decideDedupAction({
+        existingIssue,
+        isRegressed: sentryIssue.isRegressed,
+      });
+      if (decision.action === "skip") {
+        counts.skippedExisting += 1;
+      } else if (decision.action === "create") {
+        await createIssue(options, sentryIssue);
+        counts.created += 1;
+      } else if (decision.action === "reopen") {
+        await reopenIssue(options, existingIssue, sentryIssue);
+        counts.reopened += 1;
+      }
+    } catch (err) {
+      counts.errors += 1;
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `Error processing Sentry issue ${sentryIssue.shortId || sentryIssue.id}: ${message}\n`,
+      );
+    }
+  }
+
+  await postRunRecord(options, counts, now());
+  return counts;
+}
+
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
+function usage() {
+  return `Usage: pnpm sentry:ingest [options]
+
+Options:
+  --repo <owner/name>        Repository to file queue issues in (default: ${DEFAULT_REPO})
+  --org <sentry-org>         Sentry organization slug (default: ${DEFAULT_ORG})
+  --sentry-base-url <url>    Sentry API base URL (default: ${DEFAULT_SENTRY_BASE_URL})
+  --tracker-issue <number>   Tracker issue for the run-record comment (default: ${DEFAULT_TRACKER_ISSUE})
+  --dry-run                  Print mutations without applying them
+  --json                     Print machine-readable run counts
+  -h, --help                 Show this help
+`;
+}
+
+export function parseArgs(argv) {
+  const options = {
+    repo: DEFAULT_REPO,
+    org: DEFAULT_ORG,
+    sentryBaseUrl: DEFAULT_SENTRY_BASE_URL,
+    trackerIssue: DEFAULT_TRACKER_ISSUE,
+    dryRun: false,
+    json: false,
+    help: false,
+  };
+
+  const args = [...argv];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    const readValue = () => {
+      const value = args[++i];
+      if (!value) throw new Error(`${arg} requires a value`);
+      return value;
+    };
+
+    switch (arg) {
+      case "--repo":
+        options.repo = readValue();
+        break;
+      case "--org":
+        options.org = readValue();
+        break;
+      case "--sentry-base-url":
+        options.sentryBaseUrl = readValue();
+        break;
+      case "--tracker-issue":
+        options.trackerIssue = Number(readValue());
+        break;
+      case "--dry-run":
+        options.dryRun = true;
+        break;
+      case "--json":
+        options.json = true;
+        break;
+      case "-h":
+      case "--help":
+        options.help = true;
+        break;
+      default:
+        throw new Error(`Unknown option: ${arg}\n\n${usage()}`);
+    }
+  }
+
+  if (!Number.isInteger(options.trackerIssue) || options.trackerIssue <= 0) {
+    throw new Error("--tracker-issue must be a positive integer");
+  }
+
+  return options;
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    process.stdout.write(usage());
+    return;
+  }
+
+  // Kill switch (SENTRY_TRIAGE_ENABLED) is checked by the calling workflow
+  // step, per the queue contract. This guard covers the secret itself, so
+  // the script also no-ops gracefully when invoked directly (locally, or if
+  // the workflow step were ever bypassed) instead of throwing an
+  // unhelpful fetch error.
+  const guard = resolveTokenGuard(process.env);
+  if (!guard.shouldRun) {
+    process.stdout.write(`::notice::${guard.reason}\n`);
+    return;
+  }
+  options.sentryToken = guard.token;
+
+  const counts = await runIngest(options);
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(counts, null, 2)}\n`);
+  } else {
+    process.stdout.write(
+      `Sentry triage ingest: fetched=${counts.fetched} created=${counts.created} skipped-existing=${counts.skippedExisting} reopened=${counts.reopened} errors=${counts.errors}\n`,
+    );
+  }
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  });
+}
