@@ -36,10 +36,14 @@ export function DataFreshnessBanner() {
   if (status === null) return null;
 
   const age = formatAge(currentNow - status.lastUpdatedAt);
-  const sourceCount =
+  const failedSourceCount =
     status.failedCount === 1
       ? "1 data source"
       : `${status.failedCount} data sources`;
+  const cachedSourceCount =
+    status.cachedCount === 1
+      ? "1 data source"
+      : `${status.cachedCount} data sources`;
 
   return (
     <div
@@ -48,8 +52,24 @@ export function DataFreshnessBanner() {
       className="border-b border-amber-400/20 bg-amber-950/30 px-3 py-2 text-xs text-amber-100 sm:px-6"
     >
       <div className="mx-auto max-w-7xl">
-        Latest refresh failed. Showing last-good data from {age} ago across{" "}
-        {sourceCount}. Retrying automatically.
+        {status.failedCount > 0 ? (
+          <>
+            Latest refresh failed. Showing last-good data from {age} ago across{" "}
+            {failedSourceCount}. Retrying automatically.
+          </>
+        ) : (
+          <>
+            Showing cached data from {age} ago across {cachedSourceCount}.{" "}
+            Refreshing…
+          </>
+        )}
+        {status.failedCount > 0 && status.cachedCount > 0 ? (
+          <>
+            {" "}
+            Also showing cached data across {cachedSourceCount} while it
+            refreshes.
+          </>
+        ) : null}
         {status.lastErrorMessage ? (
           <span className="sr-only">
             {" "}

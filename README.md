@@ -226,6 +226,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`         | Optional Monad Testnet Envio GraphQL endpoint                                                              |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`    | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
 | `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`      | Set to `true` with the per-testnet endpoint URL to show hosted testnet networks                            |
+| `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`       | Auto-set from Vercel deployment/commit; invalidates the bounded client cache (`dev` locally)               |
 | `HASURA_SECRET_CELO_SEPOLIA_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-sepolia-local` proxy                               |
 | `HASURA_SECRET_CELO_MAINNET_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-mainnet-local` proxy                               |
 | `HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL` | Optional upstream URL override for local sepolia Hasura proxy (default `http://localhost:8080/v1/graphql`) |

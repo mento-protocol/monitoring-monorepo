@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const CELO_POOL_ID = "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e";
 const MONAD_POOL_ID = "143-0xb0a0264ce6847f101b76ba36a4a3083ba489f501";
+const SWR_PERSISTED_CACHE_STORAGE_KEY = "mento-monitoring:swr-persisted-cache";
 
 function escapedPoolId(poolId: string): RegExp {
   return new RegExp(`/pool/${poolId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
@@ -531,6 +532,105 @@ test.describe("dashboard browser flows", () => {
         document.documentElement.clientWidth + 1,
     );
     expect(hasDocumentOverflow).toBe(false);
+  });
+
+  test("warm-starts Trading Limits from bounded persisted SWR data before revalidation", async ({
+    page,
+  }) => {
+    await page.goto(`/pool/${CELO_POOL_ID}?tab=limits`);
+
+    const limitBars = page
+      .getByRole("tabpanel", { name: "limits" })
+      .getByRole("progressbar");
+    await expect(limitBars).toHaveCount(4);
+    await expect(limitBars.first()).toHaveAttribute("aria-valuenow", "0");
+
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let markRefreshStarted!: () => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      markRefreshStarted = resolve;
+    });
+    let tradingLimitsRequests = 0;
+
+    await page.route("**/graphql", async (route) => {
+      const body = route.request().postData() ?? "";
+      if (!body.includes("query TradingLimits")) {
+        await route.continue();
+        return;
+      }
+
+      tradingLimitsRequests += 1;
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.TradingLimit = json.data.TradingLimit.map(
+        (row: Record<string, unknown>, index: number) =>
+          index === 0
+            ? {
+                ...row,
+                limitPressure0: "0.5",
+                netflow0: "38500000000000000000",
+              }
+            : row,
+      );
+      markRefreshStarted();
+      await refreshGate;
+      await route.fulfill({ response, json });
+    });
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await refreshStarted;
+    expect(tradingLimitsRequests).toBe(1);
+
+    // The network response is still held above: these are the previous
+    // session's real rows, not a skeleton or the mutated fixture response.
+    await expect(limitBars).toHaveCount(4);
+    await expect(limitBars.first()).toHaveAttribute("aria-valuenow", "0");
+    await expect(
+      page.getByRole("status").filter({ hasText: "Showing cached data" }),
+    ).toBeVisible();
+
+    const persisted = await page.evaluate((storageKey) => {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw === null) throw new Error("Persisted SWR record is missing");
+      const parsed = JSON.parse(raw) as {
+        buildSalt: string;
+        entries: Array<{ key: string }>;
+        schemaVersion: number;
+      };
+      return {
+        buildSalt: parsed.buildSalt,
+        bytes: new Blob([raw]).size,
+        keys: parsed.entries.map((entry) => entry.key),
+        raw,
+        schemaVersion: parsed.schemaVersion,
+      };
+    }, SWR_PERSISTED_CACHE_STORAGE_KEY);
+
+    expect(persisted.schemaVersion).toBe(1);
+    expect(persisted.buildSalt).toBe("dev");
+    expect(persisted.bytes).toBeLessThan(128 * 1024);
+    expect(persisted.keys).toHaveLength(1);
+    expect(persisted.keys[0]).toContain("query TradingLimits");
+    for (const excluded of [
+      "all-networks-data",
+      "PoolDetailWithHealth",
+      "PoolBreakerConfig",
+      "PoolSwapsPage",
+      "address-labels:all",
+      "address-reports:index",
+      "address-reports:single:",
+    ]) {
+      expect(persisted.raw).not.toContain(excluded);
+    }
+
+    releaseRefresh();
+    await expect(limitBars.first()).toHaveAttribute("aria-valuenow", "50");
+    await expect(
+      page.getByText("Showing cached data", { exact: false }),
+    ).toHaveCount(0);
   });
 
   test("omits deviation threshold remnants on the Oracle tab", async ({

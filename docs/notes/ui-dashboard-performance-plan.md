@@ -234,16 +234,22 @@ chainId}]` — the server must reproduce the exact normalized id + `network.id`
 
 ### Tier 4 — Spikes (high ceiling, real uncertainty — investigate before committing)
 
-- **S1 · Persisted SWR cache (localStorage/IndexedDB warm-start)** (L, medium ceiling —
-  the adaptation of Linear's local-first #1/#8). Would give returning users last-known
-  data **instantly** on cold reload, then revalidate. `swr-provider.tsx:39` sets no cache
-  provider (default in-memory Map dies on reload). **Two hazards make this a spike, not a
-  task:** (1) SWR reads the persisted cache _before_ SSR `fallbackData`, so a seeded value
-  on the `/` and `/pools` keys would render stale on first paint and risk a hydration
-  mismatch on exactly the pages fixed for CLS 0.4896 — must exclude SSR-prefetched keys;
-  (2) monitoring data must not show dangerously stale numbers (TTL-drop + forced
-  revalidate + a visible "updating" indicator). Prototype behind a flag; measure
-  warm-reload paint vs. mismatch risk.
+- **S1 · Persisted SWR cache (localStorage warm-start) — delivered by #1248.**
+  The production allowlist contains exactly `TradingLimits`: it is a bounded current
+  per-pool configuration read (normally two token rows), has no SSR `fallbackData`, and
+  powers the client-only Limits tab. The provider keeps at most eight entries / 128 KiB,
+  drops values after 30 minutes, invalidates the whole record on schema or deployment-salt
+  mismatch, and visibly announces cached data until a real revalidation succeeds or
+  fails. All storage/parse/quota failures degrade to the ordinary in-memory SWR cache.
+
+  The implementation-time `fallbackData` audit explicitly keeps every root
+  `SWR_KEY_*`, pool-detail SSR query (`PoolDetailWithHealth`, threshold/VirtualPool
+  extensions, `PoolV2Exchange`, broker 24h exchange data, and `PoolBreakerConfig`), and
+  the `/volume` hero queries out of persistence. Auth keys (`address-labels:all`,
+  `address-reports:index`, `address-reports:single:*`), event/history queries, OLS data,
+  and every other unreviewed operation are also denied by default. Expanding this list
+  requires a new fallback/auth/cardinality audit plus fixture-browser proof.
+
 - **S2 · GraphQL transport batching** (L, low — _quota_, not latency). Spike whether the
   hosted Envio Hasura endpoint accepts `graphql-request` array-batched POSTs and returns
   per-operation errors at HTTP 200 (load-bearing for the deliberately-split schema-lag

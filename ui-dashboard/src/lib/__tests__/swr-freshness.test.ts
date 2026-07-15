@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { unstable_serialize } from "swr";
 import {
   getSWRFreshnessStatus,
+  markSWRFreshnessCached,
   normalizeSWRFreshnessKey,
   recordSWRFreshnessError,
   recordSWRFreshnessSuccess,
@@ -163,6 +164,39 @@ describe("SWR freshness status", () => {
       lastErrorMessage: "refresh failed",
       lastUpdatedAt: NOW,
     });
+  });
+
+  it("does not stamp persisted cache data as a fresh network success", () => {
+    markSWRFreshnessCached("cached-key", NOW - 10_000);
+    registerSWRFreshnessKey("cached-key");
+
+    seedSWRFreshnessData("cached-key", { refreshInterval: REFRESH_MS });
+
+    expect(getSWRFreshnessStatus()).toMatchObject({
+      cachedCount: 1,
+      failedCount: 0,
+      lastUpdatedAt: NOW - 10_000,
+    });
+  });
+
+  it("transitions cached data through first error and first success", () => {
+    markSWRFreshnessCached("cached-key", NOW - 10_000);
+    registerSWRFreshnessKey("cached-key");
+
+    recordSWRFreshnessError(new Error("refresh failed"), "cached-key", {
+      refreshInterval: REFRESH_MS,
+    });
+    expect(getSWRFreshnessStatus()).toMatchObject({
+      cachedCount: 0,
+      failedCount: 1,
+      lastErrorMessage: "refresh failed",
+      lastUpdatedAt: NOW - 10_000,
+    });
+
+    recordSWRFreshnessSuccess("cached-key", {
+      refreshInterval: REFRESH_MS,
+    });
+    expect(getSWRFreshnessStatus()).toBeNull();
   });
 
   it("keeps duplicate registrations active until the final unregister", () => {
