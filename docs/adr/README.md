@@ -68,6 +68,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0009](0009-supply-chain-hardening.md)              | Supply-chain posture: release-age gate, lockfile-lint, SHA-pinned Actions       |
 | [0010](0010-required-checks-no-paths-filters.md)    | Required CI checks carry no `paths:` filters; only advisory jobs may            |
 | [0033](0033-adr-process-and-gate.md)                | ADRs record architectural decisions, enforced by a reminder gate                |
+| [0036](0036-sentry-triage-pipeline.md)              | Sentry triage/autofix: staged GitHub Actions agent pipeline + GH-Issue queue    |
 
 ### shared-config
 
