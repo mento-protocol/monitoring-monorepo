@@ -118,7 +118,9 @@ trust is earned in phases, and Codex remains the independent PR reviewer.**
 - Tracker issue [#1282](https://github.com/mento-protocol/monitoring-monorepo/issues/1282)
   (phases, child issues #1274-#1281; noise-floor work
   mento-protocol/frontend-monorepo#529).
-- Enforcing files (Phase 1): `.github/workflows/sentry-triage-ingest.yml`,
-  `.github/workflows/sentry-triage-agent.yml`, `scripts/sentry-triage-ingest.mjs`,
-  `.github/prompts/sentry-triage.md`, `terraform/github-secrets.tf`,
+- Phase-1 enforcement lands via sibling PRs in the same batch — #1287
+  (`scripts/sentry-triage-ingest.mjs`, `.github/workflows/sentry-triage-ingest.yml`),
+  #1286 (`.github/workflows/sentry-triage-agent.yml`, `.github/prompts/sentry-triage.md`),
+  and #1284 (`terraform/github-secrets.tf`) — plus
   `docs/notes/sentry-triage-pipeline.md` (queue + verdict contracts, runbook).
+  Until those merge, this ADR records the accepted plan those PRs implement.
