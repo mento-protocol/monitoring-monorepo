@@ -517,22 +517,52 @@ export function normalizeRestIssues(pages) {
     }));
 }
 
+/**
+ * Manual REST pagination via explicit `page=N` requests. Deliberately avoids
+ * `gh api --paginate --slurp`: `--slurp` only exists on recent gh releases,
+ * and an older runner-image gh would fail the very first queue scan (before
+ * the run record posts). A plain page loop is version-independent, has no
+ * result cap (the Codex 1000-cap fix), and terminates on the first short or
+ * empty page. Fails loud past `maxPages` instead of silently truncating.
+ * Returns an array of pages; `runner` is injectable for tests.
+ */
+export async function ghPaginate(
+  path,
+  { perPage = 100, maxPages = 200, runner } = {},
+) {
+  const run = runner ?? ((args) => runGh(args, {}));
+  const pages = [];
+  for (let page = 1; ; page += 1) {
+    if (page > maxPages) {
+      throw new Error(
+        `GitHub pagination exceeded ${maxPages} pages for ${path}; refusing to continue silently`,
+      );
+    }
+    const separator = path.includes("?") ? "&" : "?";
+    const stdout = await run([
+      "api",
+      `${path}${separator}per_page=${perPage}&page=${page}`,
+    ]);
+    const items = stdout && stdout.trim() ? JSON.parse(stdout) : [];
+    if (!Array.isArray(items)) {
+      throw new Error(`Unexpected non-array GitHub API response for ${path}`);
+    }
+    if (items.length === 0) break;
+    pages.push(items);
+    if (items.length < perPage) break;
+  }
+  return pages;
+}
+
 async function listExistingQueueIssues(options) {
   // The full label set (all states) is the dedup source of truth, so page
   // through it completely via the REST API — `gh issue list --limit N` caps
   // the scan and would silently start creating duplicates once the queue
-  // outgrows the cap. `--slurp` wraps each paginated page into one JSON
-  // array-of-arrays that normalizeRestIssues flattens.
-  const stdout = await runGh(
-    [
-      "api",
-      `repos/${options.repo}/issues?labels=sentry-triage&state=all&per_page=100`,
-      "--paginate",
-      "--slurp",
-    ],
-    {},
+  // outgrows the cap.
+  const pages = await ghPaginate(
+    `repos/${options.repo}/issues?labels=sentry-triage&state=all`,
   );
-  return normalizeRestIssues(stdout.trim() ? JSON.parse(stdout) : []);
+  return normalizeRestIssues(pages);
 }
 
 async function createQueueIssue(options, sentryIssue) {
@@ -601,19 +631,12 @@ async function reopenQueueIssue(options, existingIssue, sentryIssue) {
 }
 
 async function fetchTrackerComments(options) {
-  // `--paginate` alone emits one JSON array per page (invalid JSON when
-  // concatenated past 100 comments); `--slurp` wraps the pages into a single
-  // parseable array-of-arrays.
-  const stdout = await runGh(
-    [
-      "api",
-      `repos/${options.repo}/issues/${options.trackerIssue}/comments`,
-      "--paginate",
-      "--slurp",
-    ],
-    {},
+  // Same manual page loop as the dedup scan — parseable on any gh version
+  // and safe past the 100-comment pagination boundary.
+  const pages = await ghPaginate(
+    `repos/${options.repo}/issues/${options.trackerIssue}/comments`,
   );
-  return stdout.trim() ? JSON.parse(stdout).flat() : [];
+  return pages.flat();
 }
 
 async function defaultPostRunRecord(options, counts, now) {

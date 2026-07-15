@@ -11,6 +11,7 @@ import {
   defangBackticks,
   defangMentions,
   extractShortIdFromTitle,
+  ghPaginate,
   indexQueueIssuesByShortId,
   isSafeNextPageUrl,
   mapSentryIssue,
@@ -546,6 +547,68 @@ await test("mapSentryIssue normalizes the fields used downstream", () => {
   assertEqual(mapped.events, 42);
   assertEqual(mapped.users, 7);
   assertEqual(mapped.isRegressed, false);
+});
+
+await test("ghPaginate walks pages until a short page and builds page params", async () => {
+  const calls = [];
+  const item = (n) => ({ n });
+  const fullPage = JSON.stringify(Array.from({ length: 3 }, (_, i) => item(i)));
+  const shortPage = JSON.stringify([item(0)]);
+  const runner = async (args) => {
+    calls.push(args[1]);
+    return calls.length < 3 ? fullPage : shortPage;
+  };
+
+  const pages = await ghPaginate("repos/o/r/issues?labels=x", {
+    perPage: 3,
+    runner,
+  });
+  assertEqual(pages.length, 3);
+  assertEqual(pages.flat().length, 7);
+  assertDeepEqual(calls, [
+    "repos/o/r/issues?labels=x&per_page=3&page=1",
+    "repos/o/r/issues?labels=x&per_page=3&page=2",
+    "repos/o/r/issues?labels=x&per_page=3&page=3",
+  ]);
+});
+
+await test("ghPaginate handles empty results and uses ? for bare paths", async () => {
+  const calls = [];
+  const runner = async (args) => {
+    calls.push(args[1]);
+    return "[]";
+  };
+  const pages = await ghPaginate("repos/o/r/issues/1/comments", { runner });
+  assertDeepEqual(pages, []);
+  assertDeepEqual(calls, ["repos/o/r/issues/1/comments?per_page=100&page=1"]);
+});
+
+await test("ghPaginate fails loud on runaway pagination and non-array responses", async () => {
+  const fullRunner = async () =>
+    JSON.stringify(Array.from({ length: 2 }, (_, i) => ({ i })));
+  let threw = null;
+  try {
+    await ghPaginate("repos/o/r/issues", {
+      perPage: 2,
+      maxPages: 3,
+      runner: fullRunner,
+    });
+  } catch (err) {
+    threw = err;
+  }
+  assert(threw, "expected runaway pagination to throw");
+  assert(/exceeded 3 pages/.test(threw.message), "wrong runaway error");
+
+  threw = null;
+  try {
+    await ghPaginate("repos/o/r/issues", {
+      runner: async () => JSON.stringify({ message: "rate limited" }),
+    });
+  } catch (err) {
+    threw = err;
+  }
+  assert(threw, "expected non-array response to throw");
+  assert(/non-array/.test(threw.message), "wrong non-array error");
 });
 
 await test("REST issue normalization flattens pages, drops PRs, uppercases state", () => {
