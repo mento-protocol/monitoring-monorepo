@@ -126,3 +126,51 @@ resource "github_actions_secret" "integration_probe_squid_integrator_id" {
   secret_name = "SQUID_INTEGRATOR_ID"
   value       = var.squid_integrator_id
 }
+
+# Sentry triage/autofix pipeline secrets
+# ───────────────────────────────────────
+#
+# The staged Sentry triage/autofix pipeline (ADR 0036) runs entirely inside
+# this repo's GitHub Actions. Two scheduled workflows —
+# `.github/workflows/sentry-triage-ingest.yml` and
+# `.github/workflows/sentry-triage-agent.yml`, added by sibling Phase-1 PRs —
+# consume these two repo-level secrets:
+#
+#   - SENTRY_TRIAGE_TOKEN: a READ-ONLY Sentry internal-integration token
+#     (scopes: Issue & Event Read, Project Read, Organization Read — NO write
+#     scopes). Phase-1 triage is read-only by design; the investigating agent
+#     treats Sentry payloads as untrusted input and holds no write credential
+#     beyond commenting on its queue issue (ADR 0036 trust boundary). A
+#     separate write-scoped token is minted only if/when Phase-2 auto-archive
+#     is approved — do NOT widen this token's scopes here.
+#   - CLAUDE_CODE_OAUTH_TOKEN: the Max-subscription OAuth token minted by
+#     `claude setup-token`, used by `anthropics/claude-code-action@v1` in agent
+#     mode. Inference-only; it carries no repo write capability of its own.
+#
+# Both are `count`-gated on their tfvar being non-empty, exactly like the
+# integration-probe aggregator keys above: plan and apply succeed while the
+# values are unset, so this stack can merge and apply before the operator
+# provisions the tokens. The pipeline stays inert until the tokens exist AND
+# `github_actions_variable.sentry_triage_enabled` is flipped to "true" (see
+# `github-variables.tf`). Human provisioning runbook:
+# `docs/notes/sentry-triage-pipeline.md`.
+
+resource "github_actions_secret" "sentry_triage_token" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.sentry_triage_token == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "SENTRY_TRIAGE_TOKEN"
+  value       = var.sentry_triage_token
+}
+
+resource "github_actions_secret" "claude_code_oauth_token" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.claude_code_oauth_token == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "CLAUDE_CODE_OAUTH_TOKEN"
+  value       = var.claude_code_oauth_token
+}

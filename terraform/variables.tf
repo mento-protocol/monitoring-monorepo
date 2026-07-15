@@ -170,6 +170,51 @@ variable "squid_integrator_id" {
   default     = ""
 }
 
+# ── Sentry triage/autofix (ADR 0036) ──────────────────────────────────────────
+
+variable "sentry_triage_token" {
+  description = <<-EOT
+    READ-ONLY Sentry internal-integration token for the scheduled Sentry
+    triage/autofix pipeline (ADR 0036). Scopes: Issue & Event Read, Project
+    Read, Organization Read — NO write scopes. Mirrors into the repo-level
+    Actions secret `SENTRY_TRIAGE_TOKEN`. Leave empty until provisioned; the
+    secret resource is `count`-gated so `terraform apply` succeeds without it.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "claude_code_oauth_token" {
+  description = <<-EOT
+    Claude Max-subscription OAuth token (`claude setup-token`) used by
+    `anthropics/claude-code-action@v1` in the Sentry triage/autofix pipeline
+    (ADR 0036). Mirrors into the repo-level Actions secret
+    `CLAUDE_CODE_OAUTH_TOKEN`. Leave empty until provisioned; the secret
+    resource is `count`-gated so `terraform apply` succeeds without it.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "sentry_triage_enabled" {
+  description = <<-EOT
+    Kill switch for the scheduled Sentry triage/autofix workflows (ADR 0036,
+    ADR 0030). Mirrors into the repo-level Actions variable
+    `SENTRY_TRIAGE_ENABLED`; the workflows no-op unless it equals "true".
+    Defaults to "false" so the pipeline stays inert until deliberately
+    activated by a follow-up tfvar change plus a re-apply.
+  EOT
+  type        = string
+  default     = "false"
+
+  validation {
+    condition     = contains(["true", "false"], var.sentry_triage_enabled)
+    error_message = "sentry_triage_enabled must be the string \"true\" or \"false\"."
+  }
+}
+
 # ── Auth (Google OAuth / NextAuth) ─────────────────────────────────────────
 
 variable "auth_google_id" {
