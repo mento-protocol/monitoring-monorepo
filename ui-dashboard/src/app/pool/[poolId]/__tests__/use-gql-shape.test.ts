@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import React, { type ReactNode } from "react";
 import type { Pool } from "@/lib/types";
 import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
+import { PoolBreakerConfigSchema } from "@/lib/queries/pool-detail-schemas";
 
 // Characterization test for the upcoming pool-page extraction refactor.
 //
@@ -277,14 +278,19 @@ describe("useGQL call shape across pool detail tabs", () => {
 
     renderToStaticMarkup(React.createElement(PoolDetailPage));
 
-    const breakerCall = mockUseGQL.mock.calls.find(
+    const breakerCalls = mockUseGQL.mock.calls.filter(
       ([query]) =>
         typeof query === "string" && query.includes("query PoolBreakerConfig"),
     );
-    expect(breakerCall).toBeDefined();
+    // This harness stubs the header siblings, so OracleTab is the one mounted
+    // subscriber here. The page test covers BreakerPanel + MarketHoursPill.
+    expect(breakerCalls).toHaveLength(1);
     // arg[2] stays refreshMs (undefined → 30s poll); the timeout rides in arg[3].
-    expect(breakerCall?.[3]).toMatchObject({
-      timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
-    });
+    for (const breakerCall of breakerCalls) {
+      expect(breakerCall[3]).toMatchObject({
+        timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
+        schema: PoolBreakerConfigSchema,
+      });
+    }
   });
 });

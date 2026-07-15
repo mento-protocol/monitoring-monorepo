@@ -42,6 +42,7 @@ import {
 } from "@/lib/queries";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
+import { BrokerExchangeDailySnapshots24hSchema } from "@/lib/queries/pool-detail-schemas";
 
 const redirectMock = vi.fn();
 const useGQLMock = vi.fn();
@@ -1189,7 +1190,10 @@ describe("Pool detail tab search", () => {
         since: Date.UTC(2026, 4, 11) / 1000,
       },
       SNAPSHOT_REFRESH_MS,
-      { timeoutMs: HASURA_TIMEOUT_MS },
+      {
+        timeoutMs: HASURA_TIMEOUT_MS,
+        schema: BrokerExchangeDailySnapshots24hSchema,
+      },
     );
   });
 

@@ -7,6 +7,7 @@ import {
   POOL_DETAIL_WITH_HEALTH,
   type PoolDetailResponse,
 } from "@/lib/queries";
+import { PoolDetailWithHealthSchema } from "@/lib/queries/pool-detail-schemas";
 import type { Pool } from "@/lib/types";
 import { useCallback, useMemo, useRef, useState } from "react";
 
@@ -48,6 +49,7 @@ export function useObservedPoolDetail(
     {
       fallbackData: initialData?.pool,
       onSuccess: recordFreshnessCheck,
+      schema: PoolDetailWithHealthSchema,
       timeoutMs: HASURA_TIMEOUT_MS,
     },
   );

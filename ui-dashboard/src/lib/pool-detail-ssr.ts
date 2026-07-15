@@ -4,6 +4,7 @@
 // — that guard throws under the (non-RSC) vitest environment that transitively
 // imports this via page.tsx, exactly as pool-og.ts avoids it.
 import { unstable_cache } from "next/cache";
+import type { ZodType } from "zod";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { PoolDetailInitialData } from "@/lib/pool-detail-initial-data";
@@ -30,6 +31,16 @@ import {
   type PoolVpOracleFreshnessExtResponse,
 } from "@/lib/queries/pool-detail";
 import {
+  BrokerExchangeDailySnapshots24hSchema,
+  PoolBreakerConfigSchema,
+  PoolDetailWithHealthSchema,
+  PoolThresholdsKnownExtSchema,
+  PoolV2ExchangeSchema,
+  PoolVpDeprecationExtSchema,
+  PoolVpLifecycleDeprecationExtSchema,
+  PoolVpOracleFreshnessExtSchema,
+} from "@/lib/queries/pool-detail-schemas";
+import {
   NETWORKS,
   NETWORK_IDS,
   configuredNetworkIdForChainId,
@@ -46,7 +57,8 @@ import { isVirtualPool, type Pool } from "@/lib/types";
 // extension-backed tiles paint immediately, eliminating that shift.
 //
 // Distinct from lib/pool-og.ts: that fetch merges extensions and returns a
-// transformed PoolOgData shape for OG images; this returns the raw responses.
+// transformed PoolOgData shape for OG images; this returns the shared
+// schema-parsed response shapes used by the client hooks.
 function currentUtcDayStartSeconds(nowMs = Date.now()): number {
   return Math.floor(nowMs / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
 }
@@ -58,13 +70,16 @@ async function requestOptional<T>(
   document: string,
   variables: Record<string, unknown>,
   signal: AbortSignal,
+  schema: ZodType<T>,
 ): Promise<T | undefined> {
   try {
-    return await client.request<T>({
+    const raw = await client.request<unknown>({
       document,
       variables,
       signal,
     });
+    const result = schema.safeParse(raw);
+    return result.success ? result.data : undefined;
   } catch {
     return undefined;
   }
@@ -82,6 +97,7 @@ async function fetchVirtualPoolHeaderInitialData(
     POOL_V2_EXCHANGE,
     { poolId: pool.id, chainId },
     signal,
+    PoolV2ExchangeSchema,
   );
   const v2Config = v2Exchange?.BiPoolExchange?.[0];
   const exchangeId = (pool.wrappedExchangeId ?? v2Config?.exchangeId ?? "")
@@ -102,6 +118,7 @@ async function fetchVirtualPoolHeaderInitialData(
         since: currentUtcDayStartSeconds(),
       },
       signal,
+      BrokerExchangeDailySnapshots24hSchema,
     );
   return { v2Exchange, brokerExchange24h };
 }
@@ -127,6 +144,7 @@ async function fetchPoolBreakerConfig(
     POOL_BREAKER_CONFIG,
     { chainId, rateFeedID },
     signal,
+    PoolBreakerConfigSchema,
   );
 }
 
@@ -148,6 +166,7 @@ async function fetchPoolDetailUncached(
     POOL_DETAIL_WITH_HEALTH,
     { id, chainId },
     signal,
+    PoolDetailWithHealthSchema,
   );
   const oracleFreshnessCheckedAt = Date.now() / 1000;
   const pool = rawPool
@@ -179,12 +198,14 @@ async function fetchPoolDetailUncached(
       POOL_THRESHOLDS_KNOWN_EXT,
       { id, chainId },
       signal,
+      PoolThresholdsKnownExtSchema,
     ),
     requestOptional<PoolVpOracleFreshnessExtResponse>(
       client,
       POOL_VP_ORACLE_FRESHNESS_EXT,
       { id, chainId },
       signal,
+      PoolVpOracleFreshnessExtSchema,
     ).then((response) => {
       if (!response) return undefined;
       const vpOracleFreshnessCheckedAt = Date.now() / 1000;
@@ -201,12 +222,14 @@ async function fetchPoolDetailUncached(
       POOL_VP_DEPRECATION_EXT,
       { id, chainId },
       signal,
+      PoolVpDeprecationExtSchema,
     ),
     requestOptional<PoolVpLifecycleDeprecationExtResponse>(
       client,
       POOL_VP_LIFECYCLE_DEPRECATION_EXT,
       { id, chainId },
       signal,
+      PoolVpLifecycleDeprecationExtSchema,
     ),
     fetchVirtualPoolHeaderInitialData(client, chainId, poolRow, signal),
     fetchPoolBreakerConfig(client, chainId, poolRow, signal),
@@ -256,8 +279,8 @@ const CACHE_KEY_PARTS = [
 
 // 60s revalidate matches the OG cache and the client polling cadence: the fallback
 // paints instantly, then the client's useGQL revalidates on mount for fresh data.
-// The raw response is plain JSON (no Map/Set), so unstable_cache serialization is
-// lossless here.
+// The parsed response is plain JSON (no Map/Set), so unstable_cache
+// serialization is lossless here.
 const fetchPoolDetailCached = unstable_cache(
   fetchPoolDetailUncached,
   CACHE_KEY_PARTS,

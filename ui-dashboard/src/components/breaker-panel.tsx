@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { useGQL } from "@/lib/graphql";
 import { useNetwork } from "@/components/network-provider";
 import { type PoolBreakerConfigResponse } from "@/lib/queries";
+import { PoolBreakerConfigSchema } from "@/lib/queries/pool-detail-schemas";
 import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
-import type { BreakerConfig, BreakerTripEvent, Pool } from "@/lib/types";
+import type { BreakerConfig, Pool } from "@/lib/types";
 import { isVirtualPool } from "@/lib/types";
 import { pickTrippableConfig } from "@/lib/breaker";
 import { Tooltip } from "@/components/tooltip";
@@ -36,11 +37,6 @@ type Props = {
    *  the panel knows on first paint whether the pool has a trip-able breaker —
    *  no skeleton→null collapse for pools that resolve to none (issue #1237). */
   initialBreakerConfig?: PoolBreakerConfigResponse | undefined;
-};
-
-type Response = {
-  BreakerConfig: BreakerConfig[];
-  BreakerTripEvent: BreakerTripEvent[];
 };
 
 function BreakerIdentityMetric({
@@ -370,7 +366,7 @@ export function BreakerPanel({
   const isVirtual = isVirtualPool(pool);
   const rateFeedID = pool.referenceRateFeedID ?? "";
 
-  const { data, isLoading, error } = useGQL<Response>(
+  const { data, isLoading, error } = useGQL<PoolBreakerConfigResponse>(
     breakerConfigQuery(isVirtual, rateFeedID),
     {
       chainId: pool.chainId,
@@ -383,6 +379,7 @@ export function BreakerPanel({
     // subscriber (SWR dedup owns one fetcher).
     {
       fallbackData: initialBreakerConfig,
+      schema: PoolBreakerConfigSchema,
       timeoutMs: BREAKER_CONFIG_TIMEOUT_MS,
     },
   );

@@ -16,14 +16,20 @@ type GqlResult = {
 };
 
 const responses = vi.hoisted(() => new Map<string, GqlResult>());
+const useGqlCalls = vi.hoisted(() => [] as unknown[][]);
 
 vi.mock("@/lib/graphql", () => ({
-  useGQL: (query: string): GqlResult =>
-    responses.get(query) ?? {
-      data: undefined,
-      error: undefined,
-      isLoading: false,
-    },
+  useGQL: (...args: unknown[]): GqlResult => {
+    useGqlCalls.push(args);
+    const query = args[0] as string;
+    return (
+      responses.get(query) ?? {
+        data: undefined,
+        error: undefined,
+        isLoading: false,
+      }
+    );
+  },
 }));
 
 import {
@@ -32,6 +38,12 @@ import {
   POOL_VP_LIFECYCLE_DEPRECATION_EXT,
   POOL_VP_ORACLE_FRESHNESS_EXT,
 } from "@/lib/queries";
+import {
+  PoolThresholdsKnownExtSchema,
+  PoolVpDeprecationExtSchema,
+  PoolVpLifecycleDeprecationExtSchema,
+  PoolVpOracleFreshnessExtSchema,
+} from "@/lib/queries/pool-detail-schemas";
 import {
   usePoolWithThresholds,
   type PoolWithThresholdsResult,
@@ -67,6 +79,7 @@ function result(data: unknown): GqlResult {
 
 beforeEach(() => {
   responses.clear();
+  useGqlCalls.length = 0;
   responses.set(
     POOL_THRESHOLDS_KNOWN_EXT,
     result({
@@ -109,6 +122,27 @@ afterEach(() => {
 });
 
 describe("usePoolWithThresholds missing-row retention", () => {
+  it("uses the shared SSR schemas for every split extension query", () => {
+    act(() => root.render(<Probe />));
+
+    const schemaFor = (query: string) =>
+      (
+        useGqlCalls.find(([document]) => document === query)?.[3] as
+          | { schema?: unknown }
+          | undefined
+      )?.schema;
+    expect(schemaFor(POOL_THRESHOLDS_KNOWN_EXT)).toBe(
+      PoolThresholdsKnownExtSchema,
+    );
+    expect(schemaFor(POOL_VP_ORACLE_FRESHNESS_EXT)).toBe(
+      PoolVpOracleFreshnessExtSchema,
+    );
+    expect(schemaFor(POOL_VP_DEPRECATION_EXT)).toBe(PoolVpDeprecationExtSchema);
+    expect(schemaFor(POOL_VP_LIFECYCLE_DEPRECATION_EXT)).toBe(
+      PoolVpLifecycleDeprecationExtSchema,
+    );
+  });
+
   it("retains breaker inputs and degrades when a successful response omits the pool", () => {
     act(() => root.render(<Probe />));
     expect(observed?.pool?.breakerTripped).toBe(true);

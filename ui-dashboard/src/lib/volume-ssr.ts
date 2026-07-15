@@ -5,6 +5,7 @@
 // that transitively imports this via page.tsx, exactly as pool-detail-ssr.ts
 // avoids it.
 import { unstable_cache } from "next/cache";
+import type { ZodType } from "zod";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { DEFAULT_NETWORK, NETWORKS } from "@/lib/networks";
@@ -16,6 +17,14 @@ import {
   VOLUME_WINDOW_FIRSTDAY_LATEST,
   VOLUME_WINDOW_LATEST,
 } from "@/lib/queries/volume";
+import {
+  BrokerVolumeTodayTradersSchema,
+  BrokerVolumeWindowFirstDayLatestSchema,
+  BrokerVolumeWindowLatestSchema,
+  VolumeTodayTradersSchema,
+  VolumeWindowFirstDayLatestSchema,
+  VolumeWindowLatestSchema,
+} from "@/lib/queries/volume-schemas";
 import type { VolumeRangeKey } from "@/lib/volume";
 import {
   protocolActorInForView,
@@ -36,8 +45,8 @@ const FIRST_DAY_TIMEOUT_MS = 2_000;
 // pool-detail pattern). `/volume` is otherwise a pure client waterfall: the
 // hero headline, KPI tiles, and data-quality banners all wait for
 // HTML → JS → hydrate → client GraphQL. Fetching the same query variables
-// server-side and handing the raw responses to `useHeroRollup` as per-query
-// fallbackData lets the first render paint populated numbers.
+// server-side and handing the schema-validated responses to `useHeroRollup` as
+// per-query fallbackData lets the first render paint populated numbers.
 //
 // Only the UNCONDITIONAL first-render queries are prefetched (window snapshot,
 // today partial, firstDay slice). The conditional second-wave queries
@@ -51,13 +60,16 @@ async function requestOptional<T>(
   document: string,
   variables: Record<string, unknown>,
   signal: AbortSignal,
+  schema: ZodType<T>,
 ): Promise<T | undefined> {
   try {
-    return await client.request<T>({
+    const raw = await client.request<unknown>({
       document,
       variables,
       signal,
     });
+    const result = schema.safeParse(raw);
+    return result.success ? result.data : undefined;
   } catch {
     return undefined;
   }
@@ -107,18 +119,21 @@ async function fetchVolumeHeroUncached(
         BROKER_VOLUME_WINDOW_LATEST,
         windowVariables,
         signal,
+        BrokerVolumeWindowLatestSchema,
       ),
       requestOptional<BrokerVolumeTodayTradersResponse>(
         client,
         BROKER_VOLUME_TODAY_TRADERS,
         todayVariables,
         signal,
+        BrokerVolumeTodayTradersSchema,
       ),
       requestOptional<BrokerVolumeWindowFirstDayLatestResponse>(
         client,
         BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST,
         windowVariables,
         firstDaySignal,
+        BrokerVolumeWindowFirstDayLatestSchema,
       ),
     ]);
     // The hero tiles gate their loading state on the PRIMARY pair (window +
@@ -138,18 +153,21 @@ async function fetchVolumeHeroUncached(
       VOLUME_WINDOW_LATEST,
       windowVariables,
       signal,
+      VolumeWindowLatestSchema,
     ),
     requestOptional<VolumeTodayTradersResponse>(
       client,
       VOLUME_TODAY_TRADERS,
       todayVariables,
       signal,
+      VolumeTodayTradersSchema,
     ),
     requestOptional<VolumeWindowFirstDayLatestResponse>(
       client,
       VOLUME_WINDOW_FIRSTDAY_LATEST,
       windowVariables,
       firstDaySignal,
+      VolumeWindowFirstDayLatestSchema,
     ),
   ]);
   // Same primary-pair rule as the v2 branch above.
@@ -158,7 +176,7 @@ async function fetchVolumeHeroUncached(
 
 // 60s revalidate matches pool-detail-ssr and the client polling cadence: the
 // fallback paints instantly, then the client's useGQL revalidates on mount.
-// The raw responses are plain JSON (no Map/Set/BigInt — Hasura numerics are
+// The parsed responses are plain JSON (no Map/Set/BigInt — Hasura numerics are
 // strings), so unstable_cache serialization is lossless here.
 //
 // The key is salted with the deployment id (unique per deployment, including
