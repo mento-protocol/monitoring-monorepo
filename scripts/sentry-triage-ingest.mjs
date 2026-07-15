@@ -75,15 +75,25 @@ export function truncateTitle(text, maxLen = 90) {
   return `${clean.slice(0, maxLen).trimEnd()}…`;
 }
 
-/** `[sentry] <SHORT-ID>: <Sentry issue title, truncated to 90 chars>` */
-export function buildQueueTitle(shortId, rawTitle) {
-  const truncated = truncateTitle(neutralizeUntrusted(rawTitle), 90);
-  return `[sentry] ${shortId}: ${truncated}`;
+/**
+ * `[sentry] <SHORT-ID> (<project>, <level>)` — queue contract v2.
+ *
+ * This repo is PUBLIC: the Sentry issue title is production error payload
+ * and must never appear in the queue issue. Only Sentry-assigned
+ * identifiers/metadata render; project and level are still neutralized and
+ * bounded as defense in depth.
+ */
+export function buildQueueTitle(shortId, project, level) {
+  const safeProject = truncateTitle(neutralizeUntrusted(project), 40);
+  const safeLevel = truncateTitle(neutralizeUntrusted(level), 20);
+  return `[sentry] ${shortId} (${safeProject}, ${safeLevel})`;
 }
 
 // Noise heuristics from the queue contract: CSP reports, RPC timeouts,
 // chunk-load errors, and aborted fetches account for most of the org's
-// operational noise (ADR 0036 context).
+// operational noise (ADR 0036 context). The raw Sentry title is classified
+// IN-MEMORY only — it never renders anywhere; only the resulting
+// `sentry:candidate-noise` label is public (queue contract v2).
 const NOISE_PATTERNS = [
   /^Blocked '/,
   /TimeoutError/,
@@ -143,7 +153,9 @@ export const LABEL_DEFINITIONS = [
   },
 ];
 
-const QUEUE_TITLE_PATTERN = /^\[sentry\] ([^:]+):/;
+// Short ID is the first whitespace-delimited token after the `[sentry] `
+// prefix (queue contract v2 title: `[sentry] <SHORT-ID> (<project>, <level>)`).
+const QUEUE_TITLE_PATTERN = /^\[sentry\] (\S+)/;
 
 export function extractShortIdFromTitle(title) {
   const match = QUEUE_TITLE_PATTERN.exec(String(title ?? ""));
@@ -192,6 +204,10 @@ function isSafeSentryPermalink(url) {
   }
 }
 
+// Queue contract v2: NO payload-derived text (`title`, `culprit`, messages)
+// may appear here — this repo is public, and those fields would publish
+// production error data. Only Sentry-assigned identifiers and counters
+// render; triage reads the payload in Sentry via the permalink.
 const METADATA_FIELDS = [
   "short_id",
   "sentry_issue_id",
@@ -202,14 +218,12 @@ const METADATA_FIELDS = [
   "users",
   "first_seen",
   "last_seen",
-  "culprit",
   "permalink",
 ];
 const NUMERIC_METADATA_FIELDS = new Set(["events", "users"]);
-// Hard bound for untrusted string values embedded in the yaml block
-// ("Truncate hard" per the issue spec). Generous enough for any legitimate
-// culprit/permalink, tight enough that a hostile multi-KB title can't bloat
-// the issue body.
+// Hard bound for the remaining string values embedded in the yaml block
+// ("Truncate hard" per the issue spec) — defense in depth even though v2
+// only renders identifier-ish fields.
 const MAX_YAML_STRING_LEN = 200;
 
 function yamlFieldValue(key, meta) {
@@ -231,27 +245,17 @@ export function buildMetadataYaml(meta) {
 }
 
 export function buildIssueBody(meta) {
-  // Same truncated+neutralized treatment as the queue title, per the
-  // documented queue contract ("<truncated, neutralized title>").
-  const safeTitle = truncateTitle(neutralizeUntrusted(meta.title), 90);
+  // Queue contract v2: the human-readable section is ONLY the permalink —
+  // no payload-derived text renders in this public repo.
   const link = isSafeSentryPermalink(meta.permalink)
     ? `[View in Sentry](${meta.permalink})`
     : "(permalink unavailable)";
-  return [
-    BODY_MARKER,
-    "",
-    buildMetadataYaml(meta),
-    "",
-    "## Sentry Issue",
-    "",
-    `\`${safeTitle}\``,
-    "",
-    link,
-    "",
-  ].join("\n");
+  return [BODY_MARKER, "", buildMetadataYaml(meta), "", link, ""].join("\n");
 }
 
 export function toMetadata(sentryIssue) {
+  // Deliberately excludes `title` and `culprit` (payload-derived text) —
+  // queue contract v2 keeps them out of the public queue issue entirely.
   return {
     short_id: sentryIssue.shortId,
     sentry_issue_id: sentryIssue.id,
@@ -262,9 +266,7 @@ export function toMetadata(sentryIssue) {
     users: sentryIssue.users,
     first_seen: sentryIssue.firstSeen,
     last_seen: sentryIssue.lastSeen,
-    culprit: sentryIssue.culprit,
     permalink: sentryIssue.permalink,
-    title: sentryIssue.title,
   };
 }
 
@@ -507,7 +509,11 @@ async function listExistingQueueIssues(options) {
 }
 
 async function createQueueIssue(options, sentryIssue) {
-  const title = buildQueueTitle(sentryIssue.shortId, sentryIssue.title);
+  const title = buildQueueTitle(
+    sentryIssue.shortId,
+    sentryIssue.project,
+    sentryIssue.level,
+  );
   const isNoise = classifyNoise(sentryIssue.title);
   const labels = buildQueueLabels(isNoise);
   const body = buildIssueBody(toMetadata(sentryIssue));

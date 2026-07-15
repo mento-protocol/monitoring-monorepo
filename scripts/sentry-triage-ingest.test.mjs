@@ -90,12 +90,23 @@ await test("title truncation cuts at 90 chars and adds an ellipsis", () => {
   assertEqual(truncated.slice(0, 90), "x".repeat(90));
 });
 
-await test("queue title format matches the normative contract", () => {
+await test("queue title format matches the normative v2 contract", () => {
   const title = buildQueueTitle(
     "GOVERNANCE-MENTO-ORG-51",
-    "CombinedGraphQLErrors",
+    "governance-mento-org",
+    "error",
   );
-  assertEqual(title, "[sentry] GOVERNANCE-MENTO-ORG-51: CombinedGraphQLErrors");
+  assertEqual(
+    title,
+    "[sentry] GOVERNANCE-MENTO-ORG-51 (governance-mento-org, error)",
+  );
+});
+
+await test("queue title contains no Sentry payload text (public repo)", () => {
+  // v2: only Sentry-assigned identifiers/metadata render — the issue title
+  // (production error payload) must never be passed into the queue title.
+  const title = buildQueueTitle("X-1", "app-mento-org", "warning");
+  assertEqual(title, "[sentry] X-1 (app-mento-org, warning)");
 });
 
 // ---------------------------------------------------------------------------
@@ -114,9 +125,13 @@ await test("defangBackticks removes every backtick to prevent fence breakout", (
   assert(!result.includes("`"), "expected no backticks to survive");
 });
 
-await test("queue title neutralizes an attempted fence breakout in the title", () => {
-  const title = buildQueueTitle("X-1", "```\nmalicious");
+await test("queue title neutralizes hostile project/level values", () => {
+  // Defense in depth: project/level are Sentry-org-controlled, but they
+  // still get the full neutralize+truncate treatment before rendering.
+  const title = buildQueueTitle("X-1", "```\nmalicious-project", "@someuser");
   assert(!title.includes("`"), "expected backticks stripped from queue title");
+  assert(!title.includes("\n"), "expected newlines collapsed in queue title");
+  assert(!/@[a-z]/i.test(title), "expected mention defanged in queue title");
 });
 
 // ---------------------------------------------------------------------------
@@ -160,7 +175,7 @@ await test("queue labels add the noise label only when classified as noise", () 
 // YAML metadata rendering
 // ---------------------------------------------------------------------------
 
-await test("metadata YAML renders every contract field in order", () => {
+await test("metadata YAML renders every v2 contract field and nothing payload-derived", () => {
   const yaml = buildMetadataYaml({
     short_id: "GOVERNANCE-MENTO-ORG-51",
     sentry_issue_id: "123456",
@@ -171,7 +186,6 @@ await test("metadata YAML renders every contract field in order", () => {
     users: 7,
     first_seen: "2026-07-01T00:00:00Z",
     last_seen: "2026-07-14T10:00:00Z",
-    culprit: "handler in routes.ts",
     permalink: "https://mento-labs.sentry.io/issues/123456/",
   });
 
@@ -187,53 +201,57 @@ await test("metadata YAML renders every contract field in order", () => {
     yaml.includes('permalink: "https://mento-labs.sentry.io/issues/123456/"'),
     "missing permalink",
   );
+  // v2: payload-derived fields must not exist in the public yaml block.
+  assert(!yaml.includes("title:"), "expected no title field in v2 yaml");
+  assert(!yaml.includes("culprit:"), "expected no culprit field in v2 yaml");
 });
 
 await test("metadata YAML defangs an embedded fence-breakout attempt", () => {
+  // Defense in depth: even identifier-ish fields get the full neutralize
+  // treatment before rendering.
   const yaml = buildMetadataYaml({
     short_id: "X-1",
     sentry_issue_id: "1",
-    project: "p",
+    project: "```\n@everyone this breaks out",
     level: "error",
     status: "unresolved",
     events: 0,
     users: 0,
     first_seen: null,
     last_seen: null,
-    culprit: "```\n@everyone this breaks out",
     permalink: "",
   });
   const lines = yaml.split("\n");
   assertEqual(lines[0], "```yaml");
   // Only the closing fence line may be a bare triple-backtick; the embedded
-  // "```" from the untrusted culprit must have been defanged, so it must not
+  // "```" from the hostile value must have been defanged, so it must not
   // introduce a second one anywhere in the block.
   const bareFenceLines = lines.filter((line) => line.trim() === "```");
   assertEqual(bareFenceLines.length, 1);
+  assert(!/@[a-z]/i.test(yaml), "expected mention defanged in yaml block");
 });
 
 await test("metadata YAML hard-bounds unbounded string fields", () => {
   const yaml = buildMetadataYaml({
     short_id: "X-1",
     sentry_issue_id: "1",
-    project: "p",
+    project: "x".repeat(500),
     level: "error",
     status: "unresolved",
     events: 0,
     users: 0,
     first_seen: null,
     last_seen: null,
-    culprit: "x".repeat(500),
     permalink: "https://mento-labs.sentry.io/issues/1/",
   });
-  const culpritLine = yaml
+  const projectLine = yaml
     .split("\n")
-    .find((line) => line.startsWith("culprit:"));
-  const culpritValue = JSON.parse(culpritLine.slice("culprit:".length).trim());
-  assertEqual(culpritValue.length, 201); // 200-char bound + ellipsis
+    .find((line) => line.startsWith("project:"));
+  const projectValue = JSON.parse(projectLine.slice("project:".length).trim());
+  assertEqual(projectValue.length, 201); // 200-char bound + ellipsis
   assert(
-    culpritValue.endsWith("…"),
-    "expected bounded culprit to end with ellipsis",
+    projectValue.endsWith("…"),
+    "expected bounded project to end with ellipsis",
   );
   // A legitimate permalink stays intact (well under the bound).
   assert(
@@ -252,11 +270,6 @@ await test("mention defanging breaks user and team mentions", () => {
   assert(result.includes("someuser"), "expected mention text kept readable");
 });
 
-await test("queue title defangs mentions from Sentry titles", () => {
-  const title = buildQueueTitle("X-1", "Error reported by @someuser");
-  assert(!/@[a-z]/i.test(title), "expected mention defanged in queue title");
-});
-
 // ---------------------------------------------------------------------------
 // Issue body assembly
 // ---------------------------------------------------------------------------
@@ -271,46 +284,55 @@ const BODY_TEST_META = {
   users: 1,
   first_seen: "2026-07-01T00:00:00Z",
   last_seen: "2026-07-14T10:00:00Z",
-  culprit: "foo()",
   permalink: "https://mento-labs.sentry.io/issues/1/",
-  title: "Boom",
 };
 
-await test("issue body starts with the v1 marker and renders the safe link", () => {
+await test("issue body is marker + yaml + safe link, nothing else", () => {
   const body = buildIssueBody(BODY_TEST_META);
   assert(body.startsWith("<!-- sentry-triage:v1 -->"), "missing body marker");
   assert(
     body.includes("[View in Sentry](https://mento-labs.sentry.io/issues/1/)"),
     "missing permalink link",
   );
-  assert(body.includes("`Boom`"), "missing human-readable title");
 });
 
-await test("issue body truncates the title exactly like the queue title", () => {
-  const longTitle = "y".repeat(120);
-  const body = buildIssueBody({ ...BODY_TEST_META, title: longTitle });
-  const expected = truncateTitle(longTitle, 90);
-  assert(
-    body.includes(`\`${expected}\``),
-    "expected body title truncated to 90 chars",
+await test("issue body publishes no Sentry payload text (public repo, v2)", () => {
+  // Even when the in-memory Sentry issue carries payload text, none of it
+  // may reach the rendered body — the yaml block and human-readable section
+  // only contain Sentry-assigned identifiers, counters, and the permalink.
+  const sentryIssue = mapSentryIssue({
+    id: 9,
+    shortId: "X-9",
+    title: "SECRET-PAYLOAD-TITLE: user@example.com crashed",
+    culprit: "SECRET-CULPRIT in payments.ts",
+    level: "error",
+    status: "unresolved",
+    project: { slug: "app-mento-org" },
+    count: "1",
+    userCount: 1,
+    firstSeen: "2026-07-01T00:00:00Z",
+    lastSeen: "2026-07-14T10:00:00Z",
+    permalink: "https://mento-labs.sentry.io/issues/9/",
+  });
+  const body = buildIssueBody(toMetadata(sentryIssue));
+  assert(!body.includes("SECRET-PAYLOAD-TITLE"), "payload title leaked");
+  assert(!body.includes("SECRET-CULPRIT"), "payload culprit leaked");
+  assert(!body.includes("title:"), "expected no title field in body yaml");
+  assert(!body.includes("culprit:"), "expected no culprit field in body yaml");
+  // ... and the queue title carries no payload text either.
+  const queueTitle = buildQueueTitle(
+    sentryIssue.shortId,
+    sentryIssue.project,
+    sentryIssue.level,
   );
-  assert(
-    !body.includes("y".repeat(91)),
-    "expected no untruncated title remnant",
-  );
-  // Identical treatment to the queue title's <title> segment.
-  const queueTitle = buildQueueTitle("X-1", longTitle);
-  assert(
-    queueTitle.endsWith(expected),
-    "body and queue title truncation diverged",
-  );
+  assertEqual(queueTitle, "[sentry] X-9 (app-mento-org, error)");
 });
 
-await test("issue body survives a malicious title/culprit with one fence intact", () => {
+await test("issue body survives hostile metadata with one fence intact", () => {
   const body = buildIssueBody({
     ...BODY_TEST_META,
-    title: "```\n@everyone breakout " + "z".repeat(200),
-    culprit: "```yaml\ninjected: true",
+    project: "```\n@everyone breakout " + "z".repeat(200),
+    status: "```yaml\ninjected: true",
   });
   const bareFenceLines = body
     .split("\n")
@@ -337,7 +359,7 @@ await test("issue body falls back to plain text for a non-Sentry permalink", () 
   );
 });
 
-await test("toMetadata maps the Sentry issue fields onto the yaml contract keys", () => {
+await test("toMetadata maps v2 contract keys and drops payload-derived fields", () => {
   const meta = toMetadata(
     mapSentryIssue({
       id: 7,
@@ -362,8 +384,10 @@ await test("toMetadata maps the Sentry issue fields onto the yaml contract keys"
   assertEqual(meta.users, 2);
   assertEqual(meta.first_seen, "2026-07-01T00:00:00Z");
   assertEqual(meta.last_seen, "2026-07-14T10:00:00Z");
-  assertEqual(meta.culprit, "foo()");
-  assertEqual(meta.title, "Boom");
+  assertEqual(meta.permalink, "https://mento-labs.sentry.io/issues/7/");
+  // v2: payload-derived text must not survive the mapping.
+  assert(!("title" in meta), "expected no title key in metadata");
+  assert(!("culprit" in meta), "expected no culprit key in metadata");
 });
 
 // ---------------------------------------------------------------------------
@@ -430,15 +454,17 @@ await test("regressed comment neutralizes a hostile lastSeen value", () => {
 
 await test("queue issue index extracts short IDs from titles and dedupes", () => {
   assertEqual(
-    extractShortIdFromTitle("[sentry] GOVERNANCE-MENTO-ORG-51: Some title"),
+    extractShortIdFromTitle(
+      "[sentry] GOVERNANCE-MENTO-ORG-51 (governance-mento-org, error)",
+    ),
     "GOVERNANCE-MENTO-ORG-51",
   );
   assertEqual(extractShortIdFromTitle("not a queue issue"), null);
 
   const index = indexQueueIssuesByShortId([
-    { number: 1, title: "[sentry] X-1: first", state: "OPEN" },
-    { number: 2, title: "[sentry] X-1: duplicate", state: "OPEN" },
-    { number: 3, title: "[sentry] X-2: other", state: "CLOSED" },
+    { number: 1, title: "[sentry] X-1 (p, error)", state: "OPEN" },
+    { number: 2, title: "[sentry] X-1 (p, error)", state: "OPEN" },
+    { number: 3, title: "[sentry] X-2 (q, warning)", state: "CLOSED" },
   ]);
   assertEqual(index.get("X-1").number, 1);
   assertEqual(index.get("X-2").number, 3);
@@ -615,7 +641,11 @@ await test("running the orchestrator twice creates no duplicate issues", async (
       nextNumber += 1;
       fakeQueueIssues.push({
         number: nextNumber,
-        title: buildQueueTitle(sentryIssue.shortId, sentryIssue.title),
+        title: buildQueueTitle(
+          sentryIssue.shortId,
+          sentryIssue.project,
+          sentryIssue.level,
+        ),
         state: "OPEN",
       });
     },
@@ -656,7 +686,7 @@ await test("a regressed, previously closed issue is reopened exactly once", asyn
   const fakeQueueIssues = [
     {
       number: 200,
-      title: buildQueueTitle("X-9", "Regressed bug"),
+      title: buildQueueTitle("X-9", "unknown", "error"),
       state: "CLOSED",
     },
   ];

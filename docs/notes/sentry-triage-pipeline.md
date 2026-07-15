@@ -15,13 +15,22 @@ later stages (triage-agent verdicts, phased mutations, the push leg) extend
 this file instead of rewriting it. Only Phase 1 (deterministic ingest) exists
 today.
 
-## Queue contract
+## Queue contract (v2)
 
 Stage A (`scripts/sentry-triage-ingest.mjs`, `.github/workflows/sentry-triage-ingest.yml`)
 turns every new or regressed Sentry issue across the `mento-labs` org into
 exactly one GitHub queue issue in this repo. The contract below is normative —
 Stage B (the read-only triage agent) and later phases build against it. Do not
 change it without updating the ingest script and this doc together.
+
+**v2 privacy rule (why this contract looks the way it does):** this repo is
+PUBLIC, so raw Sentry payload text — issue titles, culprits, messages — would
+publish production error data (ADR 0036). No payload-derived text may appear
+anywhere in a queue issue: not in the title, not in the yaml block, not in
+the human-readable section, not in comments. Queue issues carry only
+Sentry-assigned identifiers, counters, and timestamps; triage reads the
+actual payload in Sentry via the permalink. The raw title is still used
+IN-MEMORY for noise classification — only the resulting label is public.
 
 ### Source
 
@@ -40,18 +49,21 @@ change it without updating the ingest script and this doc together.
 ### Title
 
 ```text
-[sentry] <SHORT-ID>: <Sentry issue title, truncated to 90 chars>
+[sentry] <SHORT-ID> (<project>, <level>)
 ```
 
-Example: `[sentry] GOVERNANCE-MENTO-ORG-51: CombinedGraphQLErrors: An error occurred! …`
+Example: `[sentry] GOVERNANCE-MENTO-ORG-51 (governance-mento-org, error)`
 
 `<SHORT-ID>` is the Sentry issue's own `shortId` (e.g.
-`GOVERNANCE-MENTO-ORG-51`). The title is the sole idempotency key — see below.
+`GOVERNANCE-MENTO-ORG-51`). The Sentry issue title is payload text and never
+appears here (v2 privacy rule). The queue title is the sole idempotency key —
+see below.
 
 ### Idempotency
 
-Before creating an issue, search existing queue issues (**all states**) for
-`[sentry] <SHORT-ID>:` at the start of the title:
+Before creating an issue, search existing queue issues (**all states**) for a
+title whose first whitespace-delimited token after the `[sentry]` prefix
+equals `<SHORT-ID>`:
 
 - **Open match** → skip.
 - **Closed match, Sentry issue is regressed** → reopen it, comment
@@ -71,7 +83,9 @@ Every queue issue carries `sentry-triage` (the durable queue-namespace
 marker, kept for the issue's lifetime) plus `sentry:needs-triage`.
 `sentry:candidate-noise` is added when the raw Sentry title matches a noise
 heuristic: `^Blocked '` (CSP reports), `TimeoutError`, `Failed to fetch`,
-`Failed to load chunk`, `AbortError`.
+`Failed to load chunk`, `AbortError`. The classification runs in-memory
+during ingest; the raw title itself never renders anywhere (v2 privacy
+rule).
 
 Queue issues never get the dev-backlog labels (`agent-ready`,
 `needs-grooming`, etc.) — this is a disjoint label namespace so the two agent
@@ -99,32 +113,27 @@ events: 42
 users: 7
 first_seen: "2026-07-01T00:00:00Z"
 last_seen: "2026-07-14T10:00:00Z"
-culprit: "handler in routes.ts"
 permalink: "https://mento-labs.sentry.io/issues/6197137101/"
 ```
-
-## Sentry Issue
-
-`<truncated, neutralized title>`
 
 [View in Sentry](<permalink>)
 ````
 
-Sentry event payloads (titles, culprits) are untrusted, attacker-reachable
-text. The ingest script never executes or evals anything derived from them;
-every embedded string is truncated and neutralized:
+The yaml block deliberately has NO `title` or `culprit` fields, and the
+human-readable section is only the permalink (v2 privacy rule above). All
+Sentry-derived strings that do render are still treated as untrusted,
+attacker-reachable text as defense in depth — never executed or evaled, and
+neutralized before embedding:
 
 - control characters and newlines collapsed;
-- every backtick replaced with a look-alike character, so an
-  attacker-controlled title/culprit can never close the yaml code fence early
-  or break out of the inline-code span in the human-readable section;
+- every backtick replaced with a look-alike character, so a hostile value can
+  never close the yaml code fence early;
 - a zero-width space inserted after every at-sign, so mention syntax like
-  `@user` or `@org/team` can never become a live GitHub mention.
+  `@user` or `@org/team` can never become a live GitHub mention;
+- yaml string fields hard-bounded at 200 chars ("truncate hard").
 
-Titles are truncated to 90 chars in both the queue title and the body's
-"## Sentry Issue" line; other yaml string fields are hard-bounded at 200
-chars. The permalink is only rendered as a clickable link when it parses as
-an `https://\*.sentry.io` URL; otherwise the body falls back to plain text.
+The permalink is only rendered as a clickable link when it parses as an
+`https://\*.sentry.io` URL; otherwise the body falls back to plain text.
 
 ### Kill switch
 
