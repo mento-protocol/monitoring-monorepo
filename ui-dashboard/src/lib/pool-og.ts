@@ -1,6 +1,11 @@
 import { unstable_cache } from "next/cache";
 import { isNamespacedPoolId, extractChainIdFromPoolId } from "@/lib/pool-id";
-import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
+import {
+  NETWORKS,
+  NETWORK_IDS,
+  networkIdForChainId,
+  type Network,
+} from "@/lib/networks";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import {
   buildOracleRateMap,
@@ -608,10 +613,23 @@ function mergePoolOgExtensions(
 // 60s gives fresh state on each new unfurl while still batching repeated
 // requests (generateMetadata + generateImageMetadata + Image within one
 // server request all dedupe here).
-const cachedFetch = unstable_cache(fetchPoolOgDataUncached, ["pool-og"], {
-  revalidate: 60,
-  tags: ["pool-og"],
-});
+const cachedFetch = unstable_cache(
+  fetchPoolOgDataUncached,
+  [
+    "pool-og",
+    process.env.VERCEL_DEPLOYMENT_ID ??
+      process.env.VERCEL_GIT_COMMIT_SHA ??
+      "dev",
+    NETWORK_IDS.flatMap((id) => {
+      const network = NETWORKS[id];
+      return network.hasuraUrl ? [`${id}=${network.hasuraUrl}`] : [];
+    }).join("|"),
+  ],
+  {
+    revalidate: 60,
+    tags: ["pool-og"],
+  },
+);
 
 export function fetchPoolForMetadata(
   rawPoolId: string,

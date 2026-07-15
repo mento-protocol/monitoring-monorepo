@@ -9,6 +9,9 @@ const fixtures = vi.hoisted(() => ({
   ADDR_USDM_MONAD: "0xbbb0000000000000000000000000000000000001",
   ADDR_GBPM_MONAD: "0xbbb0000000000000000000000000000000000002",
 }));
+const { capturedCacheKeyParts } = vi.hoisted(() => ({
+  capturedCacheKeyParts: [] as string[][],
+}));
 const { ADDR_USDM_CELO, ADDR_CUSD_CELO, ADDR_USDM_MONAD, ADDR_GBPM_MONAD } =
   fixtures;
 
@@ -66,6 +69,16 @@ vi.mock("graphql-request", () => {
   MockGraphQLClient.prototype.request = vi.fn();
   return { GraphQLClient: MockGraphQLClient };
 });
+
+vi.mock("next/cache", () => ({
+  unstable_cache: <T extends (...args: unknown[]) => unknown>(
+    fn: T,
+    keyParts?: string[],
+  ) => {
+    if (keyParts) capturedCacheKeyParts.push(keyParts);
+    return fn;
+  },
+}));
 
 import { GraphQLClient } from "graphql-request";
 import { fetchHomepageOgDataUncached } from "../homepage-og";
@@ -138,6 +151,20 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("homepage OG cache key", () => {
+  it("includes the deployment marker and every resolved mainnet endpoint", () => {
+    expect(capturedCacheKeyParts).toEqual([
+      [
+        "homepage-og",
+        process.env.VERCEL_DEPLOYMENT_ID ??
+          process.env.VERCEL_GIT_COMMIT_SHA ??
+          "dev",
+        "celo-mainnet=https://hasura-celo.example/v1/graphql|monad-mainnet=https://hasura-monad.example/v1/graphql",
+      ],
+    ]);
+  });
 });
 
 describe("fetchHomepageOgDataUncached", () => {

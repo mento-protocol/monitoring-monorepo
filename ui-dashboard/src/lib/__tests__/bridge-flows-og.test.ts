@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const { capturedCacheKeyParts } = vi.hoisted(() => ({
+  capturedCacheKeyParts: [] as string[][],
+}));
+
 // NETWORKS mock — two mainnet chains sharing a Hasura URL (matches the
 // real config where both Celo + Monad point at the same NEXT_PUBLIC_HASURA_URL).
 vi.mock("@/lib/networks", () => {
@@ -45,9 +49,16 @@ vi.mock("graphql-request", () => {
 });
 
 // next/cache's unstable_cache wraps the fn with memoization we don't need in
-// the uncached test path; no-op it so every test sees fresh mock responses.
+// the uncached test path; keep it as an identity wrapper while recording the
+// module-init key parts so deploy/config salting is a tested contract.
 vi.mock("next/cache", () => ({
-  unstable_cache: <T extends (...args: unknown[]) => unknown>(fn: T) => fn,
+  unstable_cache: <T extends (...args: unknown[]) => unknown>(
+    fn: T,
+    keyParts?: string[],
+  ) => {
+    if (keyParts) capturedCacheKeyParts.push(keyParts);
+    return fn;
+  },
 }));
 
 import { GraphQLClient } from "graphql-request";
@@ -115,6 +126,20 @@ function mockRequests(handlers: {
     throw new Error(`Unexpected query: ${doc.slice(0, 40)}`);
   });
 }
+
+describe("bridge flows OG cache key", () => {
+  it("includes the deployment marker and every resolved mainnet endpoint", () => {
+    expect(capturedCacheKeyParts).toEqual([
+      [
+        "bridge-flows-og",
+        process.env.VERCEL_DEPLOYMENT_ID ??
+          process.env.VERCEL_GIT_COMMIT_SHA ??
+          "dev",
+        "celo-mainnet=https://multichain.example.com/v1/graphql|monad-mainnet=https://multichain.example.com/v1/graphql",
+      ],
+    ]);
+  });
+});
 
 describe("fetchBridgeFlowsOgDataUncached", () => {
   beforeEach(() => {

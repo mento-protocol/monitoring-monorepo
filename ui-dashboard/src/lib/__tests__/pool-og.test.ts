@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const { capturedCacheKeyParts } = vi.hoisted(() => ({
+  capturedCacheKeyParts: [] as string[][],
+}));
+
 vi.mock("@/lib/networks", () => {
   const network = {
     id: "celo-mainnet" as const,
@@ -34,6 +38,16 @@ vi.mock("graphql-request", () => {
   MockGraphQLClient.prototype.request = vi.fn();
   return { GraphQLClient: MockGraphQLClient };
 });
+
+vi.mock("next/cache", () => ({
+  unstable_cache: <T extends (...args: unknown[]) => unknown>(
+    fn: T,
+    keyParts?: string[],
+  ) => {
+    if (keyParts) capturedCacheKeyParts.push(keyParts);
+    return fn;
+  },
+}));
 
 import { GraphQLClient } from "graphql-request";
 import { fetchPoolOgDataUncached } from "../pool-og";
@@ -90,6 +104,20 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("pool OG cache key", () => {
+  it("includes the deployment marker and every resolved endpoint", () => {
+    expect(capturedCacheKeyParts).toEqual([
+      [
+        "pool-og",
+        process.env.VERCEL_DEPLOYMENT_ID ??
+          process.env.VERCEL_GIT_COMMIT_SHA ??
+          "dev",
+        "celo-mainnet=https://hasura.example.com/v1/graphql",
+      ],
+    ]);
+  });
 });
 
 describe("fetchPoolOgDataUncached", () => {

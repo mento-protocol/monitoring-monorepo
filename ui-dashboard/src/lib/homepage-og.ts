@@ -145,6 +145,15 @@ type SettledVpLifecycleDeprecationRows = PromiseSettledResult<{
   VirtualPoolLifecycle: VpLifecycleDeprecationRow[];
 }>;
 
+function homepageChains(): Network[] {
+  return NETWORK_IDS.flatMap((id) => {
+    const network = NETWORKS[id];
+    return network.hasuraUrl && !network.local && !network.testnet
+      ? [network]
+      : [];
+  });
+}
+
 async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   if (!network.hasuraUrl) return null;
   const client = makeOgGraphQLClient(network);
@@ -309,12 +318,7 @@ async function fetchHomepageChainState(): Promise<{
   slices: ChainSlice[];
   offlineChains: string[];
 }> {
-  const configuredChains = NETWORK_IDS.flatMap((id) => {
-    const network = NETWORKS[id];
-    return network.hasuraUrl && !network.local && !network.testnet
-      ? [network]
-      : [];
-  });
+  const configuredChains = homepageChains();
   const results = await Promise.all(
     configuredChains.map(async (network) => ({
       network,
@@ -789,7 +793,15 @@ function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
 // long cache would leave stale counts in shared previews.
 const cachedFetch = unstable_cache(
   fetchHomepageOgDataUncached,
-  ["homepage-og"],
+  [
+    "homepage-og",
+    process.env.VERCEL_DEPLOYMENT_ID ??
+      process.env.VERCEL_GIT_COMMIT_SHA ??
+      "dev",
+    homepageChains()
+      .map((network) => `${network.id}=${network.hasuraUrl}`)
+      .join("|"),
+  ],
   { revalidate: 60, tags: ["homepage-og"] },
 );
 

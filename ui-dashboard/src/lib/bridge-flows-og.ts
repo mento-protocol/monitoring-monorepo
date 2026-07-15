@@ -160,7 +160,15 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
 
 const cachedFetch = unstable_cache(
   fetchBridgeFlowsOgDataUncached,
-  ["bridge-flows-og"],
+  [
+    "bridge-flows-og",
+    process.env.VERCEL_DEPLOYMENT_ID ??
+      process.env.VERCEL_GIT_COMMIT_SHA ??
+      "dev",
+    bridgeChains()
+      .map((network) => `${network.id}=${network.hasuraUrl}`)
+      .join("|"),
+  ],
   { revalidate: 60, tags: ["bridge-flows-og"] },
 );
 
