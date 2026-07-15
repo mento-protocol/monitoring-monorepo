@@ -141,7 +141,7 @@ describe("Lighthouse route assertion matrix", () => {
       "categories:accessibility": ["error", { minScore: 0.94 }],
       "cumulative-layout-shift": ["error", { maxNumericValue: 0.1 }],
     });
-    assert.equal(nonVolume.aggregationMethod, undefined);
+    assert.equal(nonVolume.aggregationMethod, "median");
     assert.equal(volume.aggregationMethod, "median");
   });
 
@@ -185,6 +185,25 @@ describe("Lighthouse route assertion matrix", () => {
     assert.equal(oneSlowRun.status, 0, oneSlowRun.stderr);
     assert.equal(findLcpResult(oneSlowRun, VOLUME_PATH).actual, 2440);
     assert.equal(findLcpResult(oneSlowRun, VOLUME_PATH).passed, true);
+  });
+
+  it("uses the median non-volume run instead of an optimistic outlier", () => {
+    const oneLuckyRun = runLhciAssert(
+      NON_VOLUME_PATHS.flatMap((path) => reportsFor(path, [1699, 1701, 1702])),
+    );
+    const oneSlowRun = runLhciAssert(
+      NON_VOLUME_PATHS.flatMap((path) => reportsFor(path, [1698, 1700, 1702])),
+    );
+
+    assert.equal(oneLuckyRun.status, 1, oneLuckyRun.stderr);
+    assert.equal(oneSlowRun.status, 0, oneSlowRun.stderr);
+
+    for (const path of NON_VOLUME_PATHS) {
+      assert.equal(findLcpResult(oneLuckyRun, path).actual, 1701, path);
+      assert.equal(findLcpResult(oneLuckyRun, path).passed, false, path);
+      assert.equal(findLcpResult(oneSlowRun, path).actual, 1700, path);
+      assert.equal(findLcpResult(oneSlowRun, path).passed, true, path);
+    }
   });
 
   it("retains the blocking 1,700 ms ceiling on every non-volume route", () => {
