@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { unlinkSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const nextPort = Number(process.env.PLAYWRIGHT_NEXT_PORT ?? 3210);
 const fixturePort = Number(process.env.PLAYWRIGHT_FIXTURE_PORT ?? 3211);
@@ -11,6 +13,15 @@ const nextCommand =
   process.env.PLAYWRIGHT_NEXT_COMMAND?.replaceAll("{port}", String(nextPort)) ??
   `pnpm dev --hostname 127.0.0.1 --port ${nextPort}`;
 const nextTimeout = Number(process.env.PLAYWRIGHT_NEXT_TIMEOUT_MS ?? 120_000);
+const fixedWeekendServerClock = pathToFileURL(
+  resolve("tests/browser/fixtures/fixed-weekend-server-clock.mjs"),
+).href;
+const nextServerNodeOptions = [
+  process.env.NODE_OPTIONS,
+  `--import=${fixedWeekendServerClock}`,
+]
+  .filter(Boolean)
+  .join(" ");
 
 /**
  * Probe the active Claude Code bash sandbox by attempting a write to /tmp,
@@ -88,6 +99,7 @@ export default defineConfig({
     {
       command: nextCommand,
       env: {
+        NODE_OPTIONS: nextServerNodeOptions,
         NEXT_PUBLIC_HASURA_URL: `${fixtureUrl}/graphql`,
         NEXT_PUBLIC_BROWSER_TEST_FIXTURES: "true",
         NEXT_TELEMETRY_DISABLED: "1",

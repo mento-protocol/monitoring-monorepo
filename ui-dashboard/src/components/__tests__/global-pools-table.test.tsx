@@ -131,6 +131,24 @@ describe("globalPoolKey", () => {
 
 // GlobalPoolsTable rendering
 
+describe("GlobalPoolsTable — FX weekend SSR banner", () => {
+  it("includes the banner in weekend server markup", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry()]} initialIsWeekend={true} />,
+    );
+
+    expect(html).toContain("FX markets are closed this weekend.");
+  });
+
+  it("omits the banner from weekday server markup", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry()]} initialIsWeekend={false} />,
+    );
+
+    expect(html).not.toContain("FX markets are closed this weekend.");
+  });
+});
+
 describe("GlobalPoolsTable — column structure", () => {
   it("renders a branded chain icon before the pool name", () => {
     const html = renderToStaticMarkup(

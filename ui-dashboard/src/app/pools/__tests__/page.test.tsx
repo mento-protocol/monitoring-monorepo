@@ -50,12 +50,14 @@ vi.mock("@/hooks/use-all-networks-data", async () => ({
 vi.mock("@/components/global-pools-table", () => ({
   GlobalPoolsTable: ({
     entries,
+    initialIsWeekend,
     olsPoolKeys,
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
   }: {
     entries: GlobalPoolEntry[];
+    initialIsWeekend?: boolean;
     olsPoolKeys?: Set<string>;
     volume24hByKey?: Map<string, number | null | undefined>;
     volume7dByKey?: Map<string, number | null | undefined>;
@@ -63,6 +65,9 @@ vi.mock("@/components/global-pools-table", () => ({
   }) => (
     <div data-testid="global-pools-table">
       <span data-testid="entries-count">{entries.length}</span>
+      <span data-testid="initial-is-weekend">
+        {String(initialIsWeekend ?? false)}
+      </span>
       <span data-testid="chains">
         {[...new Set(entries.map((e) => e.network.id))].join(",")}
       </span>
@@ -201,6 +206,14 @@ beforeEach(() => {
 });
 
 describe("PoolsPage multichain rendering", () => {
+  it("threads the server weekend snapshot into GlobalPoolsTable", () => {
+    vi.mocked(useGQL).mockReturnValue(baseSwapsResult as SWRResponse);
+
+    const html = renderToStaticMarkup(<PoolsPage initialIsWeekend={true} />);
+
+    expect(html).toContain('data-testid="initial-is-weekend">true<');
+  });
+
   it("keeps pools visible and discloses a live-health refresh failure", () => {
     vi.mocked(useAllNetworksData).mockReturnValue({
       ...baseAllNetworksResult,

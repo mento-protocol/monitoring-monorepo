@@ -3,6 +3,7 @@ import GlobalPage from "../page-client";
 import { fetchHomepageOgData } from "@/lib/homepage-og";
 import { fetchInitialNetworkData } from "@/lib/network-fetcher/server-cache";
 import { formatUSD } from "@/lib/format";
+import { isWeekend } from "@/lib/weekend";
 
 // Dynamic OG metadata — scoped to the homepage so other routes (/pool/...,
 // /address-book, etc.) don't inherit the cross-chain I/O when the cache is
@@ -87,10 +88,12 @@ export default async function HomePage() {
   // truly unexpected error bubbles up; an undefined initial payload just
   // reverts to the client-only code path.
   const initialPayload = await fetchInitialNetworkData().catch(() => undefined);
+  const initialIsWeekend = isWeekend();
   return (
     <GlobalPage
       initialNetworkData={initialPayload?.networks}
       initialNetworkDataFetchedAtMs={initialPayload?.fetchedAtMs}
+      initialIsWeekend={initialIsWeekend}
     />
   );
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PoolsPageClient } from "./_components/pools-page-client";
 import { fetchInitialNetworkData } from "@/lib/network-fetcher/server-cache";
+import { isWeekend } from "@/lib/weekend";
 
 // SSR the initial cross-chain pool list so first paint already contains the
 // full pools table. Without this, the client renders a 3-row `<Skeleton />`
@@ -29,10 +30,12 @@ export const metadata: Metadata = {
 
 export default async function PoolsPage() {
   const initialPayload = await fetchInitialNetworkData().catch(() => undefined);
+  const initialIsWeekend = isWeekend();
   return (
     <PoolsPageClient
       initialNetworkData={initialPayload?.networks}
       initialNetworkDataFetchedAtMs={initialPayload?.fetchedAtMs}
+      initialIsWeekend={initialIsWeekend}
     />
   );
 }

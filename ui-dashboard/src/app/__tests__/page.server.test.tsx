@@ -1,8 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import HomePage, { generateMetadata } from "../(home)/page";
 
-type GlobalPageProps = { initialNetworkData?: unknown };
+type GlobalPageProps = {
+  initialNetworkData?: unknown;
+  initialIsWeekend?: boolean;
+};
 
 const { mockFetchInitialNetworkData, mockFetchHomepageOgData, mockGlobalPage } =
   vi.hoisted(() => ({
@@ -48,6 +51,10 @@ beforeEach(() => {
   mockGlobalPage.mockClear();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("HomePage route metadata", () => {
   it("returns fallback metadata when homepage OG data is unavailable", async () => {
     mockFetchHomepageOgData.mockResolvedValueOnce(null);
@@ -86,6 +93,8 @@ describe("HomePage route metadata", () => {
 
 describe("HomePage server component", () => {
   it("passes resolved initial network data into the client page", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-18T12:00:00Z"));
     const initialNetworkData = [{ networkId: "celo-mainnet", pools: [] }];
     mockFetchInitialNetworkData.mockResolvedValueOnce({
       networks: initialNetworkData,
@@ -97,10 +106,13 @@ describe("HomePage server component", () => {
     expect(mockGlobalPage).toHaveBeenCalledWith({
       initialNetworkData,
       initialNetworkDataFetchedAtMs: 1_700_000_000_000,
+      initialIsWeekend: true,
     });
   });
 
   it("falls back to client-side fetching when initial network data rejects", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-15T12:00:00Z"));
     mockFetchInitialNetworkData.mockRejectedValueOnce(
       new Error("network fanout"),
     );
@@ -110,6 +122,7 @@ describe("HomePage server component", () => {
     expect(mockGlobalPage).toHaveBeenCalledWith({
       initialNetworkData: undefined,
       initialNetworkDataFetchedAtMs: undefined,
+      initialIsWeekend: false,
     });
   });
 });
