@@ -3,11 +3,7 @@ import type { ReactNode } from "react";
 import { formatUSD } from "@/lib/format";
 import { poolName } from "@/lib/tokens";
 import { type Pool } from "@/lib/types";
-import {
-  configuredNetworkIdForChainId,
-  NETWORKS,
-  type Network,
-} from "@/lib/networks";
+import { type Network } from "@/lib/networks";
 import { preloadPoolDetail } from "@/lib/pool-detail-preload";
 import { Row } from "@/components/table";
 import { SourceBadge, HealthBadge } from "@/components/badges";
@@ -106,7 +102,7 @@ export function PoolRow({
       <NameCell
         pool={pool}
         network={network}
-        onPrefetch={() => prefetchPoolDetail(entry)}
+        onPrefetch={() => preloadPoolDetail(network, pool.id)}
       />
       {showVirtualPoolSource && <SourceCell pool={pool} />}
       <HealthCell status={effectiveStatus} details={healthDetails} />
@@ -142,12 +138,6 @@ export function PoolRow({
       <StrategyCell strategies={strategies} />
     </Row>
   );
-}
-
-function prefetchPoolDetail(entry: GlobalPoolEntry): void {
-  const networkId = configuredNetworkIdForChainId(entry.pool.chainId);
-  const network = networkId ? NETWORKS[networkId] : entry.network;
-  preloadPoolDetail(network, entry.pool.id);
 }
 
 function Cell({

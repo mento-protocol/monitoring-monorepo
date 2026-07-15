@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SWRResponse } from "swr";
-import type { Network } from "@/lib/networks";
+import { NETWORKS, type Network } from "@/lib/networks";
 import type { GlobalPoolEntry } from "@/components/global-pools-table";
 import { POOLS_TABLE_SKELETON_ROWS } from "@/components/pools-table-skeleton";
 import { POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
@@ -13,6 +13,7 @@ import type { SwapEvent } from "@/lib/types";
 
 const mockReplace = vi.fn();
 const mockPreloadGQL = vi.fn();
+const mockConfiguredNetworkIdForChainId = vi.fn();
 let mockSearchParams = new URLSearchParams();
 
 const reactActEnvironment = globalThis as typeof globalThis & {
@@ -49,6 +50,12 @@ vi.mock("@/components/network-provider", () => ({
 vi.mock("@/lib/graphql", () => ({
   useGQL: vi.fn(),
   preloadGQL: (...args: unknown[]) => mockPreloadGQL(...args),
+}));
+
+vi.mock("@/lib/networks", async () => ({
+  ...(await vi.importActual<typeof import("@/lib/networks")>("@/lib/networks")),
+  configuredNetworkIdForChainId: (chainId: number) =>
+    mockConfiguredNetworkIdForChainId(chainId),
 }));
 
 vi.mock("next/link", () => ({
@@ -243,6 +250,7 @@ const recentSwap: SwapEvent = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockConfiguredNetworkIdForChainId.mockReturnValue(null);
   mockSearchParams = new URLSearchParams();
   vi.mocked(useAllNetworksData).mockReturnValue(baseAllNetworksResult);
 });
@@ -364,6 +372,58 @@ describe("PoolsPage multichain rendering", () => {
       POOL_DETAIL_WITH_HEALTH,
       { id: celoPool.id, chainId: celoNet.chainId },
     );
+
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it("preloads through the configured pool route while retaining entry network metadata", () => {
+    const entryNetwork = makeNetwork(
+      "celo-mainnet-local",
+      42220,
+      "Celo local fallback",
+    );
+    entryNetwork.tokenSymbols = {
+      [celoPool.token0]: "LOCAL0",
+      [celoPool.token1]: "LOCAL1",
+    };
+    vi.mocked(useAllNetworksData).mockReturnValue({
+      ...baseAllNetworksResult,
+      networkData: [makeNetworkData(entryNetwork, celoPool)],
+    });
+    vi.mocked(useGQL).mockReturnValue({
+      data: { SwapEvent: [recentSwap] },
+      error: null,
+      isLoading: false,
+    } as SWRResponse);
+    mockConfiguredNetworkIdForChainId.mockReturnValue("celo-mainnet");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(<PoolsPage />);
+    });
+
+    const link = container.querySelector<HTMLAnchorElement>(
+      `a[href="/pool/${celoPool.id}"]`,
+    );
+    expect(link?.textContent).toBe("LOCAL0/LOCAL1");
+
+    act(() => {
+      link?.dispatchEvent(
+        new MouseEvent("mouseover", {
+          bubbles: true,
+          relatedTarget: document.body,
+        }),
+      );
+    });
+    expect(mockPreloadGQL).toHaveBeenCalledWith(
+      NETWORKS["celo-mainnet"],
+      POOL_DETAIL_WITH_HEALTH,
+      { id: celoPool.id, chainId: 42220 },
+    );
+    expect(entryNetwork.hasuraUrl).not.toBe(NETWORKS["celo-mainnet"].hasuraUrl);
 
     act(() => root.unmount());
     container.remove();
