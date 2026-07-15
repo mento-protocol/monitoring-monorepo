@@ -141,6 +141,19 @@ export type NetworkData = {
 };
 
 /**
+ * Network data that is safe to seed into the `/` and `/pools` SSR fallback.
+ *
+ * The server computes the aggregated `fees` summary before serializing this
+ * payload, then deliberately strips the raw fee-history rows. Keeping the
+ * empty tuple in the public type makes that projection part of the contract:
+ * client fallback consumers cannot accidentally treat the SSR seed as a
+ * complete fee-history response.
+ */
+export type InitialNetworkData = Omit<NetworkData, "feeSnapshots"> & {
+  feeSnapshots: [];
+};
+
+/**
  * Legacy v2 volume row from `BrokerDailySnapshot`. Already filtered server-
  * side to `routedViaV3Router=false` — the rows in this array are pure v2
  * (Broker-direct or v2 MentoRouter), no router-driven sibling double-count.
