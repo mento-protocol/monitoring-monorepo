@@ -372,8 +372,8 @@ describe("fetchInitialNetworkData", () => {
     expect(initial!.snapshotsAllDailyCapped).toBe(true);
   });
 
-  it("caps homepage Broker history to the same recent UTC-day window", async () => {
-    const now = Date.UTC(2026, 6, 15, 12, 34, 56);
+  it("keeps the Broker boundary day required during the first UTC hour", async () => {
+    const now = Date.UTC(2026, 6, 15, 0, 34, 56);
     const today = Math.floor(now / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
     const brokerHistory = Array.from(
       { length: INITIAL_SNAPSHOT_HISTORY_DAYS + 7 },
@@ -396,10 +396,13 @@ describe("fetchInitialNetworkData", () => {
     const [initial] = (await fetchInitialNetworkData("home")).networks;
 
     expect(initial!.brokerSnapshotsAllDaily).toHaveLength(
-      INITIAL_SNAPSHOT_HISTORY_DAYS,
+      INITIAL_SNAPSHOT_HISTORY_DAYS + 1,
     );
     expect(initial!.brokerSnapshotsAllDaily.at(-1)!.timestamp).toBe(
-      String(today - (INITIAL_SNAPSHOT_HISTORY_DAYS - 1) * SECONDS_PER_DAY),
+      String(today - INITIAL_SNAPSHOT_HISTORY_DAYS * SECONDS_PER_DAY),
+    );
+    expect(initial!.brokerSnapshotsAllDaily.at(-1)!.timestamp).toBe(
+      String(buildSnapshotWindows(now).w30d.from),
     );
     expect(initial!.brokerSnapshotsAllDailyCapped).toBe(true);
   });
@@ -538,7 +541,7 @@ describe("fetchInitialNetworkData", () => {
       ),
     ).toBe(true);
     expect(result.networks[0]!.brokerSnapshotsAllDaily).toHaveLength(
-      INITIAL_SNAPSHOT_HISTORY_DAYS,
+      INITIAL_SNAPSHOT_HISTORY_DAYS + 1,
     );
     expect(
       result.networks.every((initial) => initial.uniqueLpAddresses === null),

@@ -98,8 +98,9 @@ export function rehydrateNetworkData(data: DehydratedNetworkData): NetworkData {
  *   TVL chart forward-fill quiet pools from their last confirmed reserves;
  *   the bounded rows still cover every default chart/KPI window without
  *   letting the Flight payload grow forever.
- * - Broker history receives the same UTC-day cap; it is only consumed by the
- *   homepage's default volume chart and the cap covers that exact 30-day UI.
+ * - Broker history keeps one additional UTC-day boundary bucket beyond the
+ *   pool window. The rolling 30-day chart starts at the prior midnight during
+ *   UTC hour zero, so that bucket is required until the next hourly boundary.
  * - cumulative LP addresses are replaced by a payload-level exact cross-chain
  *   count before serialization. The raw addresses never enter the Data Cache
  *   or Flight payload.
@@ -147,14 +148,16 @@ function projectInitialNetworkData(
   const todayMidnightUtc =
     Math.floor(data.snapshotWindows.w24h.to / SECONDS_PER_DAY) *
     SECONDS_PER_DAY;
-  const cutoff =
+  const poolCutoff =
     todayMidnightUtc - (INITIAL_SNAPSHOT_HISTORY_DAYS - 1) * SECONDS_PER_DAY;
+  const brokerCutoff =
+    todayMidnightUtc - INITIAL_SNAPSHOT_HISTORY_DAYS * SECONDS_PER_DAY;
   const snapshotsAllDaily = projectPoolSnapshotHistory(
     data.snapshotsAllDaily,
-    cutoff,
+    poolCutoff,
   );
   const brokerSnapshotsAllDaily = data.brokerSnapshotsAllDaily.filter(
-    (snapshot) => Number(snapshot.timestamp) >= cutoff,
+    (snapshot) => Number(snapshot.timestamp) >= brokerCutoff,
   );
   return {
     ...data,
