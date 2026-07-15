@@ -179,16 +179,14 @@ export function useHeroRollup({
       keepPreviousData: true,
     },
   );
-  const heroV3DataRange = useResolvedQueryIdentity(
-    heroV3Result,
-    range,
-    fallback?.heroV3 !== undefined,
-  );
-  const heroV2DataRange = useResolvedQueryIdentity(
-    heroV2Result,
-    range,
-    fallback?.heroV2 !== undefined,
-  );
+  const heroV3DataRange = useResolvedQueryIdentity(heroV3Result, range, {
+    enabled: venue === "v3",
+    fallbackMatchesCurrent: fallback?.heroV3 !== undefined,
+  });
+  const heroV2DataRange = useResolvedQueryIdentity(heroV2Result, range, {
+    enabled: venue === "v2",
+    fallbackMatchesCurrent: fallback?.heroV2 !== undefined,
+  });
 
   const todayV3Result = useGQL<{
     volumeTodayTraders: VolumeTodayTraderRow[];
@@ -244,12 +242,18 @@ export function useHeroRollup({
   const heroFirstDayV3DataRange = useResolvedQueryIdentity(
     heroFirstDayV3Result,
     range,
-    fallback?.firstDayV3 !== undefined,
+    {
+      enabled: venue === "v3",
+      fallbackMatchesCurrent: fallback?.firstDayV3 !== undefined,
+    },
   );
   const heroFirstDayV2DataRange = useResolvedQueryIdentity(
     heroFirstDayV2Result,
     range,
-    fallback?.firstDayV2 !== undefined,
+    {
+      enabled: venue === "v2",
+      fallbackMatchesCurrent: fallback?.firstDayV2 !== undefined,
+    },
   );
   const snapshotDataRange = venue === "v3" ? heroV3DataRange : heroV2DataRange;
   const firstDayDataRange =

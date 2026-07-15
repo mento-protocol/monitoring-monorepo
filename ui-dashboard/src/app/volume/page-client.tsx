@@ -270,18 +270,22 @@ function useVolumeQueries({
   const tradersDataState = useVersionedVolumeQueryData(
     tradersResult,
     currentDataIdentity,
+    { enabled: venue === "v3" },
   );
   const v3AggregatorsDataState = useVersionedVolumeQueryData(
     v3AggregatorsResult,
     currentDataIdentity,
+    { enabled: venue === "v3" },
   );
   const v2TradersDataState = useVersionedVolumeQueryData(
     v2TradersResult,
     currentDataIdentity,
+    { enabled: venue === "v2" },
   );
   const v2AggregatorsDataState = useVersionedVolumeQueryData(
     v2AggregatorsResult,
     currentDataIdentity,
+    { enabled: venue === "v2" },
   );
   return {
     venue,

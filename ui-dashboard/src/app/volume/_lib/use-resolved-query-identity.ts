@@ -55,6 +55,13 @@ type QueryResultState = {
   isLoading: boolean;
 };
 
+type ResolvedQueryIdentityOptions = {
+  /** Whether the query's SWR key is currently non-null. */
+  enabled: boolean;
+  /** Whether descriptor validation proved SSR fallback belongs to this key. */
+  fallbackMatchesCurrent?: boolean;
+};
+
 /**
  * Tracks which query identity produced SWR's currently exposed data.
  *
@@ -66,20 +73,28 @@ type QueryResultState = {
  * `fallbackMatchesCurrent` covers SSR `fallbackData`: SWR reports it as
  * loading during the first revalidation, but the server descriptor has
  * already proved that it belongs to the current key.
+ *
+ * `enabled` must match whether the query's SWR key is non-null. A disabled
+ * SWR hook can expose its last data with `isLoading: false`; that data must
+ * not be restamped as belonging to identities selected while the query was
+ * disabled.
  */
 export function useResolvedQueryIdentity<
   TIdentity extends string | number | boolean,
 >(
   result: QueryResultState,
   currentIdentity: TIdentity,
-  fallbackMatchesCurrent = false,
+  { enabled, fallbackMatchesCurrent = false }: ResolvedQueryIdentityOptions,
 ): TIdentity | undefined {
   const isCurrentResponse =
-    result.data !== undefined && result.error == null && !result.isLoading;
+    enabled &&
+    result.data !== undefined &&
+    result.error == null &&
+    !result.isLoading;
+  const isCurrentFallback =
+    enabled && result.data !== undefined && fallbackMatchesCurrent;
   const lastResolvedIdentity = useRef<TIdentity | undefined>(
-    isCurrentResponse || (result.data !== undefined && fallbackMatchesCurrent)
-      ? currentIdentity
-      : undefined,
+    isCurrentResponse || isCurrentFallback ? currentIdentity : undefined,
   );
 
   useEffect(() => {
@@ -88,7 +103,7 @@ export function useResolvedQueryIdentity<
   }, [currentIdentity, isCurrentResponse]);
 
   if (result.data === undefined) return undefined;
-  if (isCurrentResponse || fallbackMatchesCurrent) return currentIdentity;
+  if (isCurrentResponse || isCurrentFallback) return currentIdentity;
   return lastResolvedIdentity.current;
 }
 
@@ -96,20 +111,24 @@ export function useResolvedQueryIdentity<
 export function useVersionedVolumeQueryData<T>(
   result: QueryResultState & { data: T | undefined },
   currentIdentity: VolumeQueryIdentity,
+  { enabled }: Pick<ResolvedQueryIdentityOptions, "enabled">,
 ): {
   data: T | undefined;
   dataIdentity: VolumeQueryIdentity | undefined;
   isLoading: boolean;
   hasError: boolean;
 } {
-  const dataIdentity = useResolvedQueryIdentity(result, currentIdentity);
-  const data = dataMatchesCurrentActor(dataIdentity, currentIdentity)
-    ? result.data
-    : undefined;
+  const dataIdentity = useResolvedQueryIdentity(result, currentIdentity, {
+    enabled,
+  });
+  const data =
+    enabled && dataMatchesCurrentActor(dataIdentity, currentIdentity)
+      ? result.data
+      : undefined;
   return {
     data,
     dataIdentity,
-    isLoading: isLoadingWithoutData(result.isLoading, data),
-    hasError: hasErrorWithoutData(result.error, data),
+    isLoading: enabled && isLoadingWithoutData(result.isLoading, data),
+    hasError: enabled && hasErrorWithoutData(result.error, data),
   };
 }
