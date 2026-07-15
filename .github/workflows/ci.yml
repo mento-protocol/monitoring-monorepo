@@ -218,6 +218,7 @@ jobs:
               - scripts/**/*.cjs
               - scripts/**/*.js
               - scripts/**/*.sh
+              - .lighthouserc.cjs
               - "**/vitest.hermetic-setup.ts"
               - "**/vitest.config.ts"
               - "**/vitest.mutation.config.ts"
@@ -846,6 +847,12 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: ESLint root scripts
         run: pnpm lint:scripts
+      - name: Lighthouse config assertion suite
+        # Exercises route matching, per-route threshold boundaries, and
+        # multi-run aggregation through the installed LHCI CLI. Keep this in
+        # the required `ci` sentinel path so config-only regressions cannot
+        # merge behind the advisory Lighthouse workflow.
+        run: node scripts/lighthouse-config.test.mjs
       - name: Agent quality-gate routing regression suite
         # Verifies the path-to-command mapping in scripts/agent-quality-gate.sh.
         # Without this in CI, a routing regression only fails locally (pre-push)

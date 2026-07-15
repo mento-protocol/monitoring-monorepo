@@ -49,10 +49,18 @@ if (!PREVIEW_URL) {
 
 const EXPECTED_HOST = new URL(PREVIEW_URL).host;
 // Keep in sync with the `--collect.url` flags passed to `lhci autorun`
-// in .github/workflows/lighthouse.yml. Adding a third audited URL there
-// without updating this set will surface here as a "path mismatch"
-// failure for the legitimate new page.
-const EXPECTED_PATHS = new Set(["/", "/pools"]);
+// in .github/workflows/lighthouse.yml. The exact per-path run counts below
+// ensure that adding, removing, or accidentally duplicating a collected URL
+// fails closed instead of silently reducing route coverage.
+const AUDITED_PATHS = [
+  "/",
+  "/pools",
+  "/volume",
+  "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+];
+const RUNS_PER_PATH = 3;
+const EXPECTED_PATHS = new Set(AUDITED_PATHS);
+const EXPECTED_REPORT_COUNT = AUDITED_PATHS.length * RUNS_PER_PATH;
 const LHCI_DIR = resolve(".lighthouseci");
 
 if (!existsSync(LHCI_DIR)) {
@@ -62,22 +70,22 @@ if (!existsSync(LHCI_DIR)) {
   process.exit(1);
 }
 
-// lhci writes one `lhr-<hash>.json` per run (numberOfRuns=3 × 2 URLs = 6
+// lhci writes one `lhr-<hash>.json` per run (numberOfRuns=3 × 4 URLs = 12
 // files) under `.lighthouseci/`. Each is a full Lighthouse report JSON
 // with `finalUrl` + `requestedUrl` at the top level.
 const reports = readdirSync(LHCI_DIR)
   .filter((name) => name.startsWith("lhr-") && name.endsWith(".json"))
   .map((name) => join(LHCI_DIR, name));
 
-if (reports.length === 0) {
-  console.error(
-    `::error::No lhr-*.json reports found under ${LHCI_DIR} — lhci likely crashed before writing any. Failing closed.`,
-  );
-  process.exit(1);
-}
-
 const failures = [];
 const summary = [];
+const pathCounts = new Map(AUDITED_PATHS.map((path) => [path, 0]));
+
+if (reports.length !== EXPECTED_REPORT_COUNT) {
+  failures.push(
+    `Expected exactly ${EXPECTED_REPORT_COUNT} Lighthouse reports (${RUNS_PER_PATH} runs × ${AUDITED_PATHS.length} paths), found ${reports.length}`,
+  );
+}
 
 for (const reportPath of reports) {
   const lhr = JSON.parse(readFileSync(reportPath, "utf8"));
@@ -98,6 +106,9 @@ for (const reportPath of reports) {
   }
   const hostOk = parsed.host === EXPECTED_HOST;
   const pathOk = EXPECTED_PATHS.has(parsed.pathname);
+  if (pathOk) {
+    pathCounts.set(parsed.pathname, (pathCounts.get(parsed.pathname) ?? 0) + 1);
+  }
 
   // Gate 2: Lighthouse runtime error. Set when Lighthouse itself couldn't
   // complete the audit — NO_FCP, NO_DOCUMENT_REQUEST, PROTOCOL_TIMEOUT,
@@ -149,6 +160,15 @@ for (const reportPath of reports) {
   if (!statusOk) {
     failures.push(
       `Main document for ${requestedUrl} returned HTTP ${statusCode} (finalUrl=${finalUrl}) — likely a Vercel error/interstitial page rendered in place`,
+    );
+  }
+}
+
+for (const path of AUDITED_PATHS) {
+  const actualRuns = pathCounts.get(path) ?? 0;
+  if (actualRuns !== RUNS_PER_PATH) {
+    failures.push(
+      `Expected ${RUNS_PER_PATH} Lighthouse reports for ${path}, found ${actualRuns}`,
     );
   }
 }
