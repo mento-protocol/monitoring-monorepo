@@ -46,15 +46,18 @@ import { SwapsTableSkeleton } from "./pools-skeletons";
 export function PoolsPageClient({
   initialNetworkData,
   initialNetworkDataFetchedAtMs,
+  initialIsWeekend = false,
 }: {
   initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
+  initialIsWeekend?: boolean;
 }) {
   return (
     <Suspense>
       <PoolsContent
         initialNetworkData={initialNetworkData}
         initialNetworkDataFetchedAtMs={initialNetworkDataFetchedAtMs}
+        initialIsWeekend={initialIsWeekend}
       />
     </Suspense>
   );
@@ -64,9 +67,11 @@ export function PoolsPageClient({
 function PoolsContent({
   initialNetworkData,
   initialNetworkDataFetchedAtMs,
+  initialIsWeekend,
 }: {
   initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
+  initialIsWeekend: boolean;
 }) {
   "use memo";
 
@@ -240,6 +245,7 @@ function PoolsContent({
         ) : (
           <GlobalPoolsTable
             entries={entries}
+            initialIsWeekend={initialIsWeekend}
             volume24hByKey={volume24hByKey}
             volume7dByKey={volume7dByKey}
             tvlChangeWoWByKey={tvlChangeWoWByKey}

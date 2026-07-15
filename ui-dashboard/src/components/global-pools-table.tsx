@@ -29,6 +29,7 @@ function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
 
 interface GlobalPoolsTableProps {
   entries: GlobalPoolEntry[];
+  initialIsWeekend?: boolean;
   volume24hByKey?: Map<string, number | null | undefined>;
   volume24hLoading?: boolean;
   volume24hError?: boolean;
@@ -43,6 +44,7 @@ interface GlobalPoolsTableProps {
 
 export function GlobalPoolsTable({
   entries,
+  initialIsWeekend = false,
   volume24hByKey,
   volume24hLoading = false,
   volume24hError = false,
@@ -108,15 +110,10 @@ export function GlobalPoolsTable({
   );
 
   const showVirtualPoolSource = hasAnyVirtualPools(entries);
-  // SSR-safe: only show the weekend banner after mount. The server's
-  // wall-clock day can differ from the viewer's (and a cached SSR payload can
-  // outlive the weekend), so gating on isWeekend() during render would emit
-  // server HTML the client discards as a hydration mismatch. See useIsWeekend.
-  const showWeekendBanner = useIsWeekend();
 
   return (
     <>
-      {showWeekendBanner && <WeekendBanner />}
+      <WeekendBanner initialIsWeekend={initialIsWeekend} />
       <Table>
         <PoolTableHeader
           sortKey={sortKey}
@@ -151,7 +148,11 @@ export function GlobalPoolsTable({
   );
 }
 
-function WeekendBanner() {
+function WeekendBanner({ initialIsWeekend }: { initialIsWeekend: boolean }) {
+  // Reuse the route's serialized snapshot through hydration, then go live.
+  const showWeekendBanner = useIsWeekend(initialIsWeekend);
+  if (!showWeekendBanner) return null;
+
   return (
     <div className="mb-4 flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-300">
       <span className="text-base leading-5 flex-shrink-0" aria-hidden="true">

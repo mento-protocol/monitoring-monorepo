@@ -42,9 +42,11 @@ const SECONDS_PER_DAY = 86_400;
 export default function GlobalPage({
   initialNetworkData,
   initialNetworkDataFetchedAtMs,
+  initialIsWeekend = false,
 }: {
   initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
+  initialIsWeekend?: boolean;
 }) {
   // First paint uses `initialNetworkData` via SWR's `fallbackData`; on
   // back-navigation the populated SWR cache wins, which is the right call —
@@ -57,6 +59,7 @@ export default function GlobalPage({
       <GlobalContent
         initialNetworkData={initialNetworkData}
         initialNetworkDataFetchedAtMs={initialNetworkDataFetchedAtMs}
+        initialIsWeekend={initialIsWeekend}
       />
     </Suspense>
   );
@@ -113,9 +116,11 @@ function perPoolTvlWindow(
 function GlobalContent({
   initialNetworkData,
   initialNetworkDataFetchedAtMs,
+  initialIsWeekend,
 }: {
   initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
+  initialIsWeekend: boolean;
 }) {
   const { networkData, isLoading } = useAllNetworksData(
     initialNetworkData,
@@ -435,6 +440,7 @@ function GlobalContent({
         ) : (
           <GlobalPoolsTable
             entries={globalEntries}
+            initialIsWeekend={initialIsWeekend}
             volume24hByKey={volume24hByKey}
             volume7dByKey={volume7dByKey}
             tvlChangeWoWByKey={tvlChangeWoWByKey}

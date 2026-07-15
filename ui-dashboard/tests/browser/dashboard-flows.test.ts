@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 
 const CELO_POOL_ID = "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e";
 const MONAD_POOL_ID = "143-0xb0a0264ce6847f101b76ba36a4a3083ba489f501";
@@ -27,6 +27,8 @@ function trackUnexpectedBrowserErrors(page: Page): string[] {
 // and the rebalance-blocked prose never renders. Wed 2026-04-15 12:00
 // UTC is mid-window for FX trading hours on every supported chain.
 const WEEKDAY_FIXTURE_INSTANT = new Date("2026-04-15T12:00:00Z");
+const WEEKEND_FIXTURE_INSTANT = new Date("2026-04-18T12:00:00Z");
+const FIXED_WEEKEND_SERVER_CLOCK_HEADER = "x-playwright-fixed-weekend-clock";
 const FIXTURE_NOW_SECONDS = Math.floor(
   WEEKDAY_FIXTURE_INSTANT.getTime() / 1000,
 );
@@ -664,22 +666,58 @@ test.describe("dashboard browser flows", () => {
     await expect(rows).toHaveCount(1);
   });
 
-  test("shows the FX weekend banner after mount without a hydration mismatch", async ({
+  test("SSR-renders the FX weekend banner on both pool surfaces and hydrates without a mismatch", async ({
     page,
+    request,
   }) => {
-    // Pin the CLIENT clock to a Saturday so the weekend banner should show.
-    // SSR renders with the server's own wall-clock day (often a weekday), so
-    // gating the banner on a render-time isWeekend() would diverge from the
-    // client and trip a hydration mismatch — caught by the afterEach
-    // console-error assertion. useIsWeekend defers the banner to after mount, so
-    // SSR and the hydration pass agree and the banner fades in client-side.
-    await page.clock.setFixedTime(new Date("2026-04-18T12:00:00Z")); // Saturday
-    await page.goto("/pools");
+    const fixedClockHeaders = {
+      [FIXED_WEEKEND_SERVER_CLOCK_HEADER]: "true",
+    };
+    const routeDocumentWithFixedClock = async (route: Route) => {
+      const request = route.request();
+      if (request.resourceType() !== "document") {
+        await route.continue();
+        return;
+      }
+      await route.continue({
+        headers: { ...request.headers(), ...fixedClockHeaders },
+      });
+    };
+    try {
+      // The Playwright-managed Next process scopes its matching Saturday
+      // `new Date()` clock to this fixture header. Raw API responses never
+      // execute page JavaScript, proving the banner is in SSR HTML rather than
+      // inserted by the mounted client hook.
+      await Promise.all(
+        ["/", "/pools"].map(async (route) => {
+          const response = await request.get(route, {
+            headers: fixedClockHeaders,
+          });
+          expect(response.ok()).toBe(true);
+          expect(await response.text()).toContain(
+            "FX markets are closed this weekend.",
+          );
+        }),
+      );
 
-    await expect(page.getByRole("heading", { name: "Pools" })).toBeVisible();
-    await expect(
-      page.getByText(/FX markets are closed this weekend/),
-    ).toBeVisible();
+      // Scope the header to document requests. Sending it to the fixture
+      // GraphQL origin would trigger an unnecessary CORS preflight.
+      await page.route("**/*", routeDocumentWithFixedClock);
+      await page.clock.setFixedTime(WEEKEND_FIXTURE_INSTANT);
+      const expectHydratedWeekendBanner = async (route: string) => {
+        await page.goto(route);
+        await expect(
+          page.getByText(/FX markets are closed this weekend/),
+        ).toBeVisible();
+      };
+      await expectHydratedWeekendBanner("/");
+      await expectHydratedWeekendBanner("/pools");
+    } finally {
+      if (!page.isClosed()) {
+        await page.unroute("**/*", routeDocumentWithFixedClock);
+      }
+    }
+    // The suite's afterEach rejects every page/console hydration error.
   });
 
   test("shows rebalance-blocked prose without the raw Solidity error code", async ({

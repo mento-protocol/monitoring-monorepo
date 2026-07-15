@@ -41,6 +41,7 @@ vi.mock("@/lib/graphql", () => ({
 // GlobalPoolsTable has complex deps — stub it, but capture props for assertions
 interface CapturedTableProps {
   entries: { pool: { id: string }; network: { id: string } }[];
+  initialIsWeekend?: boolean;
   volume24hByKey?: Map<string, number | null>;
   tvlChangeWoWByKey?: Map<string, number | null>;
 }
@@ -86,13 +87,19 @@ function makePool(id: string): Pool {
   };
 }
 
-function render(networkData: NetworkData[], isLoading = false): string {
+function render(
+  networkData: NetworkData[],
+  isLoading = false,
+  initialIsWeekend = false,
+): string {
   (useAllNetworksData as ReturnType<typeof vi.fn>).mockReturnValue({
     networkData,
     isLoading,
     error: null,
   });
-  return renderToStaticMarkup(<GlobalPage />);
+  return renderToStaticMarkup(
+    <GlobalPage initialIsWeekend={initialIsWeekend} />,
+  );
 }
 
 beforeEach(() => {
@@ -153,6 +160,12 @@ describe("GlobalPage — loading state", () => {
 // All networks succeed
 
 describe("GlobalPage — all networks succeed", () => {
+  it("threads the server weekend snapshot into GlobalPoolsTable", () => {
+    render([makeNetworkData({ pools: [makeTvlPool()] })], false, true);
+
+    expect(capturedProps?.initialIsWeekend).toBe(true);
+  });
+
   it("renders the summary tiles without error state on all-success", () => {
     const html = render([
       makeNetworkData({ pools: [], fees: null }),

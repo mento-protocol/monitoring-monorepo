@@ -18,19 +18,22 @@ const subscribe = (notify: () => void): (() => void) => {
 /**
  * SSR-safe FX-weekend flag.
  *
- * Returns `false` on the server render and the client's hydration render (the
- * `getServerSnapshot`), then the real `isWeekend()` value on the client after
- * commit (`getSnapshot`). This keeps the server HTML and the first client
- * render in agreement, so weekend-dependent UI (e.g. the FX "markets closed"
- * banner) can never trigger a hydration mismatch — the server's wall-clock day
- * can differ from the viewer's, and a statically-cached SSR payload can outlive
- * the weekend entirely. `useSyncExternalStore` is the idiomatic way to read a
- * client-only value with a server fallback (no setState-in-effect dance).
+ * Returns `initialIsWeekend` on the server render and the client's hydration
+ * render (the `getServerSnapshot`), then the real `isWeekend()` value on the
+ * client after commit (`getSnapshot`). The default stays `false` for consumers
+ * that do not receive a server-computed clock snapshot. A seeded consumer must
+ * pass the exact same serialized value on the server and client so hydration
+ * never recomputes wall-clock state independently. `useSyncExternalStore` then
+ * synchronously compares against the live clock immediately after hydration
+ * and corrects any ISR-stale seed before keeping the hourly subscription.
+ * This seeded path is intentionally limited to the informational weekend
+ * banner; operator-safety state with async inputs must still render neutral
+ * until those inputs resolve.
  */
-export function useIsWeekend(): boolean {
+export function useIsWeekend(initialIsWeekend = false): boolean {
   return useSyncExternalStore(
     subscribe,
     () => isWeekend(),
-    () => false,
+    () => initialIsWeekend,
   );
 }
