@@ -12,6 +12,7 @@ const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
 };
 const mockPreloadGQL = vi.fn();
+const mockLinkProps = vi.fn();
 let mockSearchParams = new URLSearchParams();
 
 vi.mock("@/lib/graphql", () => ({
@@ -37,15 +38,20 @@ vi.mock("next/link", () => ({
   default: ({
     href,
     children,
+    prefetch,
     ...props
   }: {
     href: string;
     children: ReactNode;
-  } & AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a href={href} {...props}>
-      {children}
-    </a>
-  ),
+    prefetch?: boolean;
+  } & AnchorHTMLAttributes<HTMLAnchorElement>) => {
+    mockLinkProps({ href, prefetch });
+    return (
+      <a href={href} {...props}>
+        {children}
+      </a>
+    );
+  },
 }));
 
 import { GlobalPoolsTable } from "@/components/global-pools-table";
@@ -92,6 +98,7 @@ beforeEach(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   mockSearchParams = new URLSearchParams();
   mockPreloadGQL.mockClear();
+  mockLinkProps.mockClear();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -107,6 +114,23 @@ afterEach(() => {
 });
 
 describe("GlobalPoolsTable pool-detail prefetch", () => {
+  it("disables Next.js viewport prefetch for pool links", () => {
+    act(() => {
+      root.render(
+        <GlobalPoolsTable
+          entries={[
+            { pool: BASE_POOL, network: CELO_NETWORK, rates: new Map() },
+          ]}
+        />,
+      );
+    });
+
+    expect(mockLinkProps).toHaveBeenCalledWith({
+      href: `/pool/${POOL_ID}`,
+      prefetch: false,
+    });
+  });
+
   it("preloads the pool detail query only on pool link hover", () => {
     act(() => {
       root.render(
