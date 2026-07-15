@@ -53,10 +53,10 @@ export type VolumeHeroView = {
 
 /**
  * Schema-validated server-prefetched responses for the /volume hero first
- * paint, as a
- * per-venue discriminated union: the primary pair (window + today) is
- * REQUIRED for the active venue (the fetch returns `undefined` overall when
- * either fails — the compiler now enforces that invariant), the firstDay
+ * paint, modeled as a per-venue discriminated union. The primary pair
+ * (window + today) is REQUIRED for the active venue; the fetch returns
+ * `undefined` overall when either fails, and the compiler enforces that
+ * invariant. The firstDay
  * catch-up slice stays optional (schema-lag resilient, same as pool-detail's
  * extension queries), and the other venue's fields are typed `undefined` so
  * a v3 payload can never silently carry v2 data (or vice versa) while
