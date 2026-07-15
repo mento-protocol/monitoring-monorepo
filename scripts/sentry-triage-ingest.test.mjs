@@ -12,6 +12,7 @@ import {
   defangMentions,
   extractShortIdFromTitle,
   indexQueueIssuesByShortId,
+  isSafeNextPageUrl,
   mapSentryIssue,
   mergeSentryIssues,
   normalizeRestIssues,
@@ -500,6 +501,29 @@ await test("Link header parsing follows rel + results", () => {
   );
   assertEqual(links.next.hasResults, true);
   assertEqual(links.previous.hasResults, false);
+});
+
+await test("pagination refuses non-https or cross-host next-page URLs", () => {
+  const base = "https://us.sentry.io";
+  assertEqual(
+    isSafeNextPageUrl(
+      "https://us.sentry.io/api/0/organizations/x/issues/?cursor=abc",
+      base,
+    ),
+    true,
+  );
+  // http downgrade would leak the bearer token in cleartext.
+  assertEqual(
+    isSafeNextPageUrl(
+      "http://us.sentry.io/api/0/organizations/x/issues/",
+      base,
+    ),
+    false,
+  );
+  // Cross-host would hand the bearer token to a third party.
+  assertEqual(isSafeNextPageUrl("https://evil.example/steal", base), false);
+  assertEqual(isSafeNextPageUrl("https://eu.sentry.io/api/0/", base), false);
+  assertEqual(isSafeNextPageUrl("not a url", base), false);
 });
 
 await test("mapSentryIssue normalizes the fields used downstream", () => {

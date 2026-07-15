@@ -359,6 +359,22 @@ export function mergeSentryIssues(newIssues, regressedIssues) {
   return byId;
 }
 
+/**
+ * The Link header is response data — never follow it blindly with the
+ * Authorization header attached. A next-page URL is only safe when it is
+ * https and points at the exact host we started from; anything else would
+ * leak the Sentry token to a third-party (or downgraded) origin.
+ */
+export function isSafeNextPageUrl(nextUrl, baseUrl) {
+  try {
+    const next = new URL(String(nextUrl));
+    const base = new URL(String(baseUrl));
+    return next.protocol === "https:" && next.hostname === base.hostname;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchSentryIssuesPage(url, token, fetchImpl) {
   const res = await fetchImpl(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -387,7 +403,18 @@ async function fetchAllSentryIssues({
   while (url && pages < maxPages) {
     const { issues, next } = await fetchSentryIssuesPage(url, token, fetchImpl);
     collected.push(...issues);
-    url = next?.hasResults ? next.url : null;
+    if (next?.hasResults) {
+      if (!isSafeNextPageUrl(next.url, baseUrl)) {
+        // Fail loud rather than silently truncating the scan: a hostile or
+        // malformed pagination URL should never be followed with the token.
+        throw new Error(
+          `Refusing to follow unsafe Sentry pagination URL: ${next.url}`,
+        );
+      }
+      url = next.url;
+    } else {
+      url = null;
+    }
     pages += 1;
   }
   return collected.map(mapSentryIssue);
