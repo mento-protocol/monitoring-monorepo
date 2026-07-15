@@ -31,9 +31,11 @@ Two findings shaped the decision more than any feature comparison:
    produced zero auditable output — and nobody noticed. The dominant failure
    mode of this automation category is not wrong fixes; it is _unauditable
    automation going dark_.
-2. **Platform constraints (verified 2026-07-15):** Codex offers no public API
-   for subscription-powered scheduled work (`@codex` does not trigger on GitHub
-   issues; CI auth is API-key-only in practice). Claude cloud routines cap at
+2. **Platform constraints (verified 2026-07-15):** Codex has in-app scheduled
+   tasks and a local-CLI SDK, but no externally triggerable API surface on
+   subscription auth — in-app automations cannot be fired by external systems,
+   `@codex` does not trigger on GitHub issues, and OpenAI's own CI/CD guidance
+   makes headless use API-key-billed in practice. Claude cloud routines cap at
    15 runs/day on Max, live outside IaC in a personal account, and their push
    API is experimental without idempotency. `anthropics/claude-code-action@v1`
    officially supports Max-subscription OAuth (`claude setup-token`) in agent
@@ -116,11 +118,13 @@ trust is earned in phases, and Codex remains the independent PR reviewer.**
   dev-backlog labels (`agent-ready` etc.) so the two agent queues cannot
   cross-claim.
 - Accepted residual risk: agent-authored verdict prose is instructed, not
-  mechanically guaranteed, to stay redacted; every downstream consumer of a
-  verdict (archive, fix PR) sits behind a human gate, so a leaked-or-wrong
-  verdict cannot mutate anything by itself. A private queue repo was considered
-  and rejected while redacted coordinates suffice — revisit if redaction proves
-  leaky in practice.
+  mechanically guaranteed, to stay redacted. A leaked-or-wrong verdict cannot
+  merge code or mutate Sentry by itself — archiving requires a human-applied
+  approval label, and merge stays human everywhere — but in Phase 2b a
+  `code-fix` verdict does trigger automated branch/PR creation (bounded by
+  per-run caps and the review gauntlet); that mutation is accepted, not
+  human-pre-gated. A private queue repo was considered and rejected while
+  redacted coordinates suffice — revisit if redaction proves leaky in practice.
 - Verdict accuracy is measured from day one; each phase gates on the previous
   phase's measured performance, not on elapsed time.
 - The prior weekly cloud routine is superseded and gets disabled at Phase-1
