@@ -4,11 +4,18 @@
 // 2026-05-27 against the Vercel preview after the bypass cookie + GitHub
 // secret sync landed; CLS rebaselined 2026-05-28 after PR #652 SSR fix):
 //   Accessibility: 0.94  (prod; deterministic across runs)
-//   Performance:   silent-passed ≥ 0.75 floor on every URL
-//   LCP:           silent-passed ≤ 1 700 ms on every URL (prod baseline ~1 200 ms)
+//   Performance:   silent-passed ≥ 0.75 floor on both original URLs
+//   LCP:           silent-passed ≤ 1 700 ms on both original URLs
+//                  (prod baseline ~1 200 ms)
 //   CLS:           0.0000 on /pools (deterministic across 3 prod runs after
 //                  PR #652 SSR fix; pre-fix was 0.4896)
 //   INP:           40 ms on /pools filter interaction (web-vitals; ≪ 200 ms budget)
+//
+//   Route coverage expanded on 2026-07-15. The four audited routes all inherit
+//   the shared blocking thresholds above. Historical empirical baselines exist
+//   for `/` and `/pools`; the first real 3-run Vercel preview measurements for
+//   `/volume` and the canonical pool-detail route are pending. No per-URL
+//   assertion exception is configured without that preview evidence.
 //
 // BUDGET RATIONALE:
 //   Accessibility + Performance + LCP + CLS are now `error` (blocking).
@@ -28,16 +35,19 @@
 //     accessibility:      0.94 (error; matches current prod baseline)
 //
 // PAGES AUDITED:
-//   Injected at workflow runtime from LHCI_URLS env var (comma-separated).
-//   The workflow sets this to the Vercel preview URL for the homepage and the
-//   pools index page. Pool detail pages are excluded because they require a
-//   valid pool address in the path, which changes per deployment.
+//   Injected at workflow runtime through repeated `--collect.url` flags:
+//     /
+//     /pools
+//     /volume
+//     /pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e
+//   The pool-detail target is the canonical Celo USDC/USDm pool. Its immutable,
+//   chain-qualified ID is shared with the INP gate and browser fixtures.
 
 /** @type {import('@lhci/cli').LighthouseRcConfig} */
 module.exports = {
   ci: {
     collect: {
-      // URLs are injected by the workflow via LHCI_URLS (comma-separated).
+      // URLs are injected by the workflow through repeated `--collect.url` flags.
       // The collect block intentionally has no `url` field here — the workflow
       // passes --collect.url=... flags directly to `lhci autorun` so that the
       // preview URL is embedded at runtime rather than hardcoded here.
@@ -60,7 +70,7 @@ module.exports = {
       assertions: {
         // Performance score: error below 0.75 (desktop SSR, production
         // baseline ~0.80). First real CI run with the bypass working
-        // (PR #614 on commit a9e4a5a4) silent-passed every URL well above
+        // (PR #614 on commit a9e4a5a4) silent-passed both original URLs well above
         // the 0.75 floor, so promoting from `warn` to `error` doesn't
         // demand any dashboard change. The 5-point headroom catches any
         // material regression while staying clear of CI runner load
@@ -87,7 +97,7 @@ module.exports = {
 
         // Largest Contentful Paint: error above 1 700 ms
         // Baseline ~1 200 ms desktop + 500 ms headroom. First real CI run
-        // with the bypass working (PR #614) silent-passed both URLs well
+        // with the bypass working (PR #614) silent-passed both original URLs well
         // under 1 700 ms, so promoting to `error` doesn't demand any
         // dashboard change. Catches LCP regressions on the first commit
         // that introduces them, rather than waiting for an engineer to
@@ -112,7 +122,7 @@ module.exports = {
         // INP is asserted in a separate workflow step that runs
         // `ui-dashboard/scripts/measure-inp.mjs` — Playwright drives a
         // set of scripted interactions on /pools (filter input + Apply
-        // click), /leaderboard (time-window switch, column sort), and
+        // click), /volume (time-window switch, column sort), and
         // /pool/[poolId] (TVL chart range button click on the canonical
         // Celo USDC/USDm pool), and the web-vitals library reports the
         // real Event-Timing-API INP for each. Each surface is asserted

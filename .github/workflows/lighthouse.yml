@@ -1,13 +1,13 @@
 name: Lighthouse CI
 
 # Core Web Vitals + accessibility regression detection for the ui-dashboard.
-# Runs against the Vercel preview deployment for every PR so regressions are
-# caught before merge rather than after production deploy.
+# Runs against the Vercel preview deployment for every dashboard-affecting PR
+# so regressions are caught before merge rather than after production deploy.
 #
-# REQUIRED-STATUS SAFETY:
-#   No workflow-level `paths:` filter — required-status workflows must run on
-#   every PR (AGENTS.md "Required-status workflows MUST NOT use paths:").
-#   The internal `filter` step uses dorny/paths-filter and is
+# ADVISORY PATH-FILTER SAFETY:
+#   This workflow is not ruleset-required, so its workflow-level `paths:`
+#   filter mirrors the dashboard inputs that can produce a Vercel preview.
+#   The internal `filter` step uses the same paths via dorny/paths-filter and is
 #   `continue-on-error: true`. The `decide` step then either runs Lighthouse
 #   (dashboard changed) or skips cleanly (no dashboard change). A filter
 #   failure falls closed → Lighthouse always runs when detection fails.
@@ -59,9 +59,9 @@ permissions:
 
 jobs:
   lighthouse:
-    # Always runs (required-status safe — no `paths:` filter at workflow
-    # level). The `filter` step is `continue-on-error: true`, and the
-    # `decide` step computes whether to run Lighthouse:
+    # Runs when the advisory workflow-level dashboard paths match. The
+    # redundant in-job `filter` step is `continue-on-error: true`, and the
+    # `decide` step computes whether to run Lighthouse fail-closed:
     #   - PR + filter succeeded + dashboard=true  → run
     #   - PR + filter succeeded + dashboard=false → no-op skip
     #   - PR + filter failed (any cause)           → run (fail-closed)
@@ -561,6 +561,8 @@ jobs:
           pnpm exec lhci autorun \
             --collect.url="${PREVIEW_URL}/" \
             --collect.url="${PREVIEW_URL}/pools" \
+            --collect.url="${PREVIEW_URL}/volume" \
+            --collect.url="${PREVIEW_URL}/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e" \
             --collect.settings.extraHeaders="${BYPASS_HEADER}" \
             2>&1 | tee /tmp/lhci-output.txt
 
@@ -570,13 +572,14 @@ jobs:
         # audit Vercel's SSO interstitial — a minimal page that scores
         # 0.94+ on accessibility — and the gate passes with false confidence.
         #
-        # The check parses `.lighthouseci/manifest.json` and each report's
-        # `finalUrl`, then asserts every audited URL's host matches the
-        # preview host AND its pathname is one of `/` or `/pools`. This
-        # catches more than just the SSO interstitial: a Vercel error page,
-        # a mid-deploy 503, a wrong-project deployment, or any redirect to
-        # an unexpected path all fail closed. Previously a stdout grep for
-        # `vercel.com/login` only caught the SSO case.
+        # The check parses every `.lighthouseci/lhr-*.json` report's
+        # `finalUrl`, then asserts the exact 3-runs × 4-path matrix for `/`,
+        # `/pools`, `/volume`, and the canonical Celo pool-detail route on the
+        # preview host. This catches more than just the SSO interstitial: a
+        # Vercel error page, a mid-deploy 503, a wrong-project deployment, a
+        # missing/duplicated run, or any redirect to an unexpected path all
+        # fail closed. Previously a stdout grep for `vercel.com/login` only
+        # caught the SSO case.
         #
         # `always()` keeps this guard running even when `lhci autorun` exits
         # non-zero. Without it, a hard performance-budget failure (once those
@@ -680,9 +683,19 @@ jobs:
               .map(m => m[0]);
 
             const previewUrl = "${{ steps.vercel-url.outputs.preview_url }}";
+            const auditedPaths = [
+              "/",
+              "/pools",
+              "/volume",
+              "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+            ];
 
             let body = `## Lighthouse CI Results\n\n`;
-            body += `Audited: [${previewUrl}/](${previewUrl}/) and [${previewUrl}/pools](${previewUrl}/pools)\n\n`;
+            body += `### Audited pages\n`;
+            body += auditedPaths
+              .map(path => `- [\`${path}\`](${previewUrl}${path})`)
+              .join("\n");
+            body += "\n\n";
 
             if (reportUrls.length > 0) {
               body += `### Reports\n`;
