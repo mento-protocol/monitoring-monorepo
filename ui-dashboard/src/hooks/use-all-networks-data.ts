@@ -10,7 +10,10 @@ import {
   type NetworkData,
 } from "@/lib/fetch-all-networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
-import { SWR_KEY_ALL_NETWORKS_DATA } from "@/lib/swr-keys";
+import {
+  SWR_KEY_ALL_NETWORKS_DATA,
+  SWR_KEY_POOLS_NETWORKS_DATA,
+} from "@/lib/swr-keys";
 import { useLivePoolHealth } from "@/hooks/use-live-pool-health";
 import { buildDailySnapshotSlices } from "@/lib/volume";
 
@@ -20,19 +23,30 @@ type AllNetworksResult = {
   error: Error | null;
   /** True while the visible data still carries the bounded SSR history. */
   isSnapshotHistoryCapped: boolean;
+  /** PoolDailySnapshot-only cap used by the TVL chart. */
+  isPoolSnapshotHistoryCapped: boolean;
   /** Unexpected failure from an on-demand full-history revalidation. */
   snapshotHistoryError: Error | null;
+  /** PoolDailySnapshot-only failure used by the TVL chart. */
+  poolSnapshotHistoryError: Error | null;
   /** Coalesced normal SWR revalidation used by the homepage "All" charts. */
   requestFullSnapshotHistory: () => Promise<void>;
 };
 
+export type AllNetworksDataCacheScope = "home" | "pools";
+
+const ALL_NETWORKS_DATA_KEYS = {
+  home: SWR_KEY_ALL_NETWORKS_DATA,
+  pools: SWR_KEY_POOLS_NETWORKS_DATA,
+} as const satisfies Record<AllNetworksDataCacheScope, string>;
+
 const EMPTY_NETWORK_DATA: NetworkData[] = [];
 
-// One browser-tab fetch boundary for the shared all-networks SWR key. Multiple
-// hook instances can coexist briefly during route transitions; SWR normally
-// dedupes them, but an imperative mutate in one instance can overlap a mount or
-// polling revalidation in another. Share only the raw fleet fan-out here, then
-// let each caller reconcile that result against its own last-good data.
+// One browser-tab fetch boundary across the route-scoped all-networks caches.
+// Multiple hook instances can coexist briefly during route transitions; SWR
+// dedupes within a key, while this boundary lets overlapping route fetches
+// share only the raw fleet fan-out. Each caller still reconciles that result
+// against its own last-good data before writing to its isolated cache.
 let allNetworksFetchInFlight: Promise<NetworkData[]> | null = null;
 
 function fetchAllNetworksAtBoundary(): Promise<NetworkData[]> {
@@ -51,7 +65,7 @@ function fetchAllNetworksAtBoundary(): Promise<NetworkData[]> {
   return request;
 }
 
-function cappedSnapshotHistoryFailure(
+function cappedPoolSnapshotHistoryFailure(
   networkData: readonly NetworkData[],
 ): Error | null {
   for (const network of networkData) {
@@ -63,6 +77,14 @@ function cappedSnapshotHistoryFailure(
         return new Error("Full snapshot history pagination was truncated");
       }
     }
+  }
+  return null;
+}
+
+function cappedBrokerSnapshotHistoryFailure(
+  networkData: readonly NetworkData[],
+): Error | null {
+  for (const network of networkData) {
     if (network.brokerSnapshotsAllDailyCapped === true) {
       if (network.brokerSnapshotsAllDailyError != null) {
         return new Error(network.brokerSnapshotsAllDailyError.message);
@@ -73,6 +95,46 @@ function cappedSnapshotHistoryFailure(
     }
   }
   return null;
+}
+
+type SnapshotHistoryStatus = Pick<
+  AllNetworksResult,
+  | "isSnapshotHistoryCapped"
+  | "isPoolSnapshotHistoryCapped"
+  | "snapshotHistoryError"
+  | "poolSnapshotHistoryError"
+>;
+
+function deriveSnapshotHistoryStatus(
+  networkData: readonly NetworkData[],
+  swrError: Error | null,
+): SnapshotHistoryStatus {
+  const isPoolSnapshotHistoryCapped = networkData.some(
+    (network) => network.snapshotsAllDailyCapped,
+  );
+  const isSnapshotHistoryCapped = networkData.some(
+    (network) =>
+      network.snapshotsAllDailyCapped ||
+      network.brokerSnapshotsAllDailyCapped === true,
+  );
+  const poolSnapshotHistoryNetworkError =
+    cappedPoolSnapshotHistoryFailure(networkData);
+  const snapshotHistoryNetworkError =
+    poolSnapshotHistoryNetworkError ??
+    cappedBrokerSnapshotHistoryFailure(networkData);
+
+  return {
+    isSnapshotHistoryCapped,
+    isPoolSnapshotHistoryCapped,
+    snapshotHistoryError:
+      isSnapshotHistoryCapped && swrError !== null
+        ? swrError
+        : snapshotHistoryNetworkError,
+    poolSnapshotHistoryError:
+      isPoolSnapshotHistoryCapped && swrError !== null
+        ? swrError
+        : poolSnapshotHistoryNetworkError,
+  };
 }
 
 function vpCursorRegressed(
@@ -185,6 +247,34 @@ export function retainConfirmedVpExtensions(
   });
 }
 
+/** Preserve the bounded Broker seed when a completion attempt fails before
+ * returning any rows. The fresh error/cap channels stay in place, so the
+ * volume chart discloses degradation while continuing to show recent
+ * last-confirmed v2 data instead of a misleading zero. */
+function retainConfirmedBrokerHistory(
+  current: NetworkData[],
+  previous: NetworkData[] | undefined,
+): NetworkData[] {
+  if (previous === undefined) return current;
+  const previousByNetwork = new Map(
+    previous.map((data) => [data.network.id, data] as const),
+  );
+  return current.map((data) => {
+    if (
+      data.brokerSnapshotsAllDailyCapped !== true ||
+      data.brokerSnapshotsAllDaily.length > 0
+    ) {
+      return data;
+    }
+    const prior = previousByNetwork.get(data.network.id);
+    if (!prior || prior.brokerSnapshotsAllDaily.length === 0) return data;
+    return {
+      ...data,
+      brokerSnapshotsAllDaily: prior.brokerSnapshotsAllDaily,
+    };
+  });
+}
+
 /**
  * SSR payloads younger than this skip mount revalidation entirely (first
  * paint fires 0 client GraphQL requests). Older ones still paint instantly
@@ -256,10 +346,11 @@ export {
  * - On a COLD cache (first visit within a session) with a healthy SSR
  *   payload, skip mount- and stale-revalidation so first paint fires 0
  *   client GraphQL requests.
- * - On a WARM cache (back-navigation; `/pools` and `/` share this key and
- *   its poll cycle may have already populated it), let SWR revalidate so
- *   stale cached entries get refreshed — otherwise the user can see
- *   cached data up to 5 min old until the next interval fires.
+ * - On a WARM route cache (back-navigation; its poll cycle may have already
+ *   populated it), let SWR revalidate so stale cached entries get refreshed —
+ *   otherwise the user can see cached data up to 5 min old until the next
+ *   interval fires. `/` and `/pools` use distinct keys because their bounded
+ *   server payloads intentionally have different shapes.
  * - On any SSR degradation (per-slice or per-chain error), let SWR
  *   revalidate on mount so partial `N/A` metrics recover immediately
  *   instead of being pinned until the next poll.
@@ -277,8 +368,10 @@ export function useAllNetworksData(
    *  (`fetchInitialNetworkData(route).fetchedAtMs`). Omitted/unknown counts as
    *  stale — revalidate-on-mount is the safe default. */
   fallbackFetchedAtMs?: number,
+  cacheScope: AllNetworksDataCacheScope = "home",
 ): AllNetworksResult {
   const { cache } = useSWRConfig();
+  const swrKey = ALL_NETWORKS_DATA_KEYS[cacheScope];
   const fullHistoryRequestRef = useRef<Promise<void> | null>(null);
   // SWR dedupes ordinary revalidations, but a user-triggered `mutate()` may
   // still invoke the fetcher while mount or polling revalidation is already in
@@ -297,7 +390,7 @@ export function useAllNetworksData(
   // default stale-check should fire to refresh cached data that could be
   // older than the SSR payload. The read is synchronous and idempotent —
   // `cache.get` doesn't mutate state.
-  const isCacheCold = cache.get(SWR_KEY_ALL_NETWORKS_DATA)?.data === undefined;
+  const isCacheCold = cache.get(swrKey)?.data === undefined;
   const skipRevalidation = shouldSkipMountRevalidation({
     hasFallback: restoredFallbackData !== undefined,
     allHealthy,
@@ -317,11 +410,14 @@ export function useAllNetworksData(
     if (networkFetchRef.current !== null) return networkFetchRef.current;
 
     const request = fetchAllNetworksAtBoundary().then((current) => {
-      const cached = cache.get(SWR_KEY_ALL_NETWORKS_DATA)?.data;
+      const cached = cache.get(swrKey)?.data;
       const previous = Array.isArray(cached)
         ? (cached as NetworkData[])
         : restoredFallbackData;
-      return retainConfirmedVpExtensions(current, previous);
+      return retainConfirmedBrokerHistory(
+        retainConfirmedVpExtensions(current, previous),
+        previous,
+      );
     });
     networkFetchRef.current = request;
     void request.then(
@@ -333,9 +429,9 @@ export function useAllNetworksData(
       },
     );
     return request;
-  }, [cache, restoredFallbackData]);
+  }, [cache, restoredFallbackData, swrKey]);
   const { data, error, isLoading, mutate } = useSWR<NetworkData[]>(
-    SWR_KEY_ALL_NETWORKS_DATA,
+    swrKey,
     fetcher,
     {
       ...SHARED_QUERY_SWR_CONFIG,
@@ -353,18 +449,13 @@ export function useAllNetworksData(
         : { revalidateOnMount: true }),
     },
   );
-  const isSnapshotHistoryCapped = (
-    data ??
-    restoredFallbackData ??
-    EMPTY_NETWORK_DATA
-  ).some(
-    (network) =>
-      network.snapshotsAllDailyCapped ||
-      network.brokerSnapshotsAllDailyCapped === true,
+  const visibleNetworkData = data ?? restoredFallbackData ?? EMPTY_NETWORK_DATA;
+  const swrError = error instanceof Error ? error : null;
+  const snapshotHistoryStatus = deriveSnapshotHistoryStatus(
+    visibleNetworkData,
+    swrError,
   );
-  const snapshotHistoryNetworkError = cappedSnapshotHistoryFailure(
-    data ?? restoredFallbackData ?? EMPTY_NETWORK_DATA,
-  );
+  const { isSnapshotHistoryCapped } = snapshotHistoryStatus;
   const requestFullSnapshotHistory = useCallback((): Promise<void> => {
     if (!isSnapshotHistoryCapped) return Promise.resolve();
     if (fullHistoryRequestRef.current !== null) {
@@ -375,29 +466,26 @@ export function useAllNetworksData(
     // from timestamp 0; other consumers keep the same SWR key and failure
     // semantics. Swallow the promise rejection here—the SWR `error` channel
     // below is what renders an honest unavailable state for the selected
-    // "All" range.
-    const request = mutate()
-      .then(
-        () => undefined,
-        () => undefined,
-      )
-      .finally(() => {
+    // "All" range. Use `.then(success, failure)` rather than `Promise.finally`
+    // because this client bundle targets ES2017 without a Promise polyfill.
+    const request = mutate().then(
+      () => {
         fullHistoryRequestRef.current = null;
-      });
+      },
+      () => {
+        fullHistoryRequestRef.current = null;
+      },
+    );
     fullHistoryRequestRef.current = request;
     return request;
   }, [isSnapshotHistoryCapped, mutate]);
-  const liveHealth = useLivePoolHealth(data ?? EMPTY_NETWORK_DATA);
+  const liveHealth = useLivePoolHealth(visibleNetworkData);
 
   return {
     networkData: liveHealth.networkData,
     isLoading,
-    error: error instanceof Error ? error : liveHealth.error,
-    isSnapshotHistoryCapped,
-    snapshotHistoryError:
-      isSnapshotHistoryCapped && error instanceof Error
-        ? error
-        : snapshotHistoryNetworkError,
+    error: swrError ?? liveHealth.error,
+    ...snapshotHistoryStatus,
     requestFullSnapshotHistory,
   };
 }

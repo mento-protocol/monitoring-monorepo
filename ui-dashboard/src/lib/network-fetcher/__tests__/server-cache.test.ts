@@ -199,6 +199,9 @@ describe("InitialNetworkData type contract", () => {
       InitialNetworkData["snapshotsAllDailyCapped"]
     >().toEqualTypeOf<boolean>();
     expectTypeOf<
+      InitialNetworkData["brokerSnapshotsAllDailyCapped"]
+    >().toEqualTypeOf<boolean | undefined>();
+    expectTypeOf<
       InitialNetworkData["feeSnapshots"][number]
     >().toEqualTypeOf<never>();
   });
@@ -318,11 +321,16 @@ describe("fetchInitialNetworkData", () => {
     const [initial] = (await fetchInitialNetworkData("home")).networks;
 
     expect(initial!.snapshotsAllDaily).toHaveLength(
-      INITIAL_SNAPSHOT_HISTORY_DAYS,
+      INITIAL_SNAPSHOT_HISTORY_DAYS + 1,
     );
     expect(initial!.snapshotsAllDaily[0]!.timestamp).toBe(String(today));
-    expect(initial!.snapshotsAllDaily.at(-1)!.timestamp).toBe(
+    expect(initial!.snapshotsAllDaily.at(-2)!.timestamp).toBe(
       String(today - (INITIAL_SNAPSHOT_HISTORY_DAYS - 1) * SECONDS_PER_DAY),
+    );
+    // One latest pre-window anchor lets TVL forward-fill quiet pools from
+    // their last confirmed reserves without carrying unbounded history.
+    expect(initial!.snapshotsAllDaily.at(-1)!.timestamp).toBe(
+      String(today - INITIAL_SNAPSHOT_HISTORY_DAYS * SECONDS_PER_DAY),
     );
     expect(initial!.snapshotsAllDailyCapped).toBe(true);
     expect(initial!.snapshots).toEqual([]);
@@ -331,6 +339,37 @@ describe("fetchInitialNetworkData", () => {
     expect(source.snapshotsAllDaily).toHaveLength(
       INITIAL_SNAPSHOT_HISTORY_DAYS + 5,
     );
+  });
+
+  it("keeps exactly the latest pre-window TVL anchor for each pool", async () => {
+    const now = Date.UTC(2026, 6, 15, 12, 34, 56);
+    const today = Math.floor(now / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+    const cutoff =
+      today - (INITIAL_SNAPSHOT_HISTORY_DAYS - 1) * SECONDS_PER_DAY;
+    const source = healthyNetworkData({
+      snapshotWindows: buildSnapshotWindows(now),
+      snapshotsAllDaily: [
+        snapshotRow("active", cutoff),
+        snapshotRow("active", cutoff - SECONDS_PER_DAY),
+        snapshotRow("active", cutoff - 2 * SECONDS_PER_DAY),
+        snapshotRow("quiet", cutoff - 3 * SECONDS_PER_DAY),
+        snapshotRow("quiet", cutoff - 9 * SECONDS_PER_DAY),
+      ],
+    });
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    mockFetchAllNetworks.mockResolvedValueOnce([source]);
+
+    const [initial] = (await fetchInitialNetworkData("home")).networks;
+
+    expect(
+      initial!.snapshotsAllDaily.map((row) => [row.poolId, row.timestamp]),
+    ).toEqual([
+      ["active", String(cutoff)],
+      ["active", String(cutoff - SECONDS_PER_DAY)],
+      ["quiet", String(cutoff - 3 * SECONDS_PER_DAY)],
+    ]);
+    expect(initial!.snapshotsAllDailyCapped).toBe(true);
   });
 
   it("caps homepage Broker history to the same recent UTC-day window", async () => {
@@ -412,6 +451,7 @@ describe("fetchInitialNetworkData", () => {
           data.brokerSnapshotsAllDaily.length === 0,
       ),
     ).toBe(true);
+    expect(pools.networks[0]!.brokerSnapshotsAllDailyCapped).toBe(true);
   });
 
   it("keeps every history-growing field in a representative payload below 500KB", async () => {
@@ -494,7 +534,7 @@ describe("fetchInitialNetworkData", () => {
       result.networks.every(
         (initial) =>
           initial.snapshotsAllDaily.length ===
-          poolCountPerNetwork * INITIAL_SNAPSHOT_HISTORY_DAYS,
+          poolCountPerNetwork * (INITIAL_SNAPSHOT_HISTORY_DAYS + 1),
       ),
     ).toBe(true);
     expect(result.networks[0]!.brokerSnapshotsAllDaily).toHaveLength(

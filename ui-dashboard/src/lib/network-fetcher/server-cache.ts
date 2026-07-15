@@ -94,7 +94,9 @@ export function rehydrateNetworkData(data: DehydratedNetworkData): NetworkData {
  * - the 1/7/30-day arrays are dropped because the client-safe daily-slice
  *   helper reconstructs them synchronously from the canonical daily rows;
  * - `snapshotsAllDaily` keeps the latest `INITIAL_SNAPSHOT_HISTORY_DAYS`
- *   UTC-day buckets, which covers every default chart/KPI window without
+ *   UTC-day buckets plus one pre-window anchor per pool. The anchor lets the
+ *   TVL chart forward-fill quiet pools from their last confirmed reserves;
+ *   the bounded rows still cover every default chart/KPI window without
  *   letting the Flight payload grow forever.
  * - Broker history receives the same UTC-day cap; it is only consumed by the
  *   homepage's default volume chart and the cap covers that exact 30-day UI.
@@ -102,11 +104,39 @@ export function rehydrateNetworkData(data: DehydratedNetworkData): NetworkData {
  *   count before serialization. The raw addresses never enter the Data Cache
  *   or Flight payload.
  *
- * `snapshotsAllDailyCapped` is the explicit handoff contract: the client may
- * use the rows for recent windows and as last-good data, but it must force a
- * from-zero pagination before presenting "All". Error/truncation outcome
- * fields remain intact so health and degraded UI semantics do not change.
+ * The routes use isolated client SWR keys so `/pools` can omit homepage-only
+ * Broker history without overwriting the homepage seed. The cap fields are
+ * the explicit handoff contract: the client may use bounded rows for recent
+ * windows and as last-good data, but it must force a from-zero pagination
+ * before presenting "All". Error/truncation outcome fields remain intact so
+ * health and degraded UI semantics do not change.
  */
+function projectPoolSnapshotHistory(
+  rows: DehydratedNetworkData["snapshotsAllDaily"],
+  cutoff: number,
+): DehydratedNetworkData["snapshotsAllDaily"] {
+  const recentRows: DehydratedNetworkData["snapshotsAllDaily"] = [];
+  const anchorByPool = new Map<
+    string,
+    DehydratedNetworkData["snapshotsAllDaily"][number]
+  >();
+  for (const row of rows) {
+    const timestamp = Number(row.timestamp);
+    if (timestamp >= cutoff) {
+      recentRows.push(row);
+      continue;
+    }
+    const currentAnchor = anchorByPool.get(row.poolId);
+    if (
+      currentAnchor === undefined ||
+      timestamp > Number(currentAnchor.timestamp)
+    ) {
+      anchorByPool.set(row.poolId, row);
+    }
+  }
+  return [...recentRows, ...anchorByPool.values()];
+}
+
 function projectInitialNetworkData(
   data: DehydratedNetworkData,
 ): DehydratedInitialNetworkData {
@@ -119,8 +149,9 @@ function projectInitialNetworkData(
     SECONDS_PER_DAY;
   const cutoff =
     todayMidnightUtc - (INITIAL_SNAPSHOT_HISTORY_DAYS - 1) * SECONDS_PER_DAY;
-  const snapshotsAllDaily = data.snapshotsAllDaily.filter(
-    (snapshot) => Number(snapshot.timestamp) >= cutoff,
+  const snapshotsAllDaily = projectPoolSnapshotHistory(
+    data.snapshotsAllDaily,
+    cutoff,
   );
   const brokerSnapshotsAllDaily = data.brokerSnapshotsAllDaily.filter(
     (snapshot) => Number(snapshot.timestamp) >= cutoff,
@@ -162,8 +193,8 @@ function rehydrateInitialNetworkData(
   // `/pools` consumes neither Broker volume history nor LP addresses. Keep the
   // same shared server cache entry, then remove the homepage-only bounded rows
   // at the final route projection so they never cross this route's Flight
-  // boundary. An omitted non-empty/capped Broker slice stays marked incomplete
-  // if this fallback is ever observed by the shared client hook.
+  // boundary. The route's isolated SWR key prevents this intentionally slim
+  // fallback from replacing the homepage seed.
   return {
     ...rehydrated,
     brokerSnapshotsAllDaily: [],

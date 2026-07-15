@@ -77,11 +77,11 @@ export type NetworkData = {
    */
   brokerSnapshotsAllDaily: BrokerDailySnapshotRow[];
   /**
-   * True while the visible Broker daily rows are known to be only a recent
-   * subset (or deliberately omitted by a route projection). Absence is the
-   * normal full-fetch value and is equivalent to false. Together with
-   * `snapshotsAllDailyCapped`, this prevents the volume chart from presenting
-   * a bounded Server Component seed as complete "All" history.
+   * True while the visible Broker daily rows are known to be incomplete: a
+   * recent Server Component subset, a failed first page, or partial/truncated
+   * pagination. Absence is equivalent to false for legacy fixtures. Together
+   * with `snapshotsAllDailyCapped`, this prevents the volume chart from
+   * presenting incomplete data as complete "All" history.
    */
   brokerSnapshotsAllDailyCapped?: boolean | undefined;
   /** True when the broker pagination loop hit its safety cap. */

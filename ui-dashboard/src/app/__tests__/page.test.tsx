@@ -98,7 +98,9 @@ function render(
     isLoading,
     error: null,
     isSnapshotHistoryCapped: false,
+    isPoolSnapshotHistoryCapped: false,
     snapshotHistoryError: null,
+    poolSnapshotHistoryError: null,
     requestFullSnapshotHistory: vi.fn(async () => undefined),
   });
   return renderToStaticMarkup(

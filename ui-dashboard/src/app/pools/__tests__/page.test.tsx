@@ -233,7 +233,9 @@ const baseAllNetworksResult = {
   isLoading: false,
   error: null,
   isSnapshotHistoryCapped: false,
+  isPoolSnapshotHistoryCapped: false,
   snapshotHistoryError: null,
+  poolSnapshotHistoryError: null,
   requestFullSnapshotHistory: vi.fn(async () => undefined),
 };
 
@@ -272,6 +274,11 @@ describe("PoolsPage multichain rendering", () => {
     const html = renderToStaticMarkup(<PoolsPage initialIsWeekend={true} />);
 
     expect(html).toContain('data-testid="initial-is-weekend">true<');
+    expect(useAllNetworksData).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      "pools",
+    );
   });
 
   it("keeps pools visible and discloses a live-health refresh failure", () => {
@@ -502,7 +509,9 @@ describe("PoolsPage loading-state skeleton parity", () => {
       isLoading: true,
       error: null,
       isSnapshotHistoryCapped: false,
+      isPoolSnapshotHistoryCapped: false,
       snapshotHistoryError: null,
+      poolSnapshotHistoryError: null,
       requestFullSnapshotHistory: vi.fn(async () => undefined),
     });
     vi.mocked(useGQL).mockReturnValue(baseSwapsResult as SWRResponse);

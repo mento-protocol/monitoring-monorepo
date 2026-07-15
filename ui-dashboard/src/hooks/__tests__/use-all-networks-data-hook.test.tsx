@@ -3,11 +3,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { InitialNetworkData, NetworkData } from "@/lib/fetch-all-networks";
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
+import {
+  SWR_KEY_ALL_NETWORKS_DATA,
+  SWR_KEY_POOLS_NETWORKS_DATA,
+} from "@/lib/swr-keys";
 
 const harness = vi.hoisted(() => ({
   fetchAllNetworks: vi.fn<() => Promise<NetworkData[]>>(),
   fetcher: undefined as (() => Promise<NetworkData[]>) | undefined,
   fetchers: [] as (() => Promise<NetworkData[]>)[],
+  cacheKeys: [] as string[],
   mutateRequest: undefined as Promise<NetworkData[]> | undefined,
   seedIncrementalRowCacheFromNetworkData: vi.fn(),
 }));
@@ -32,10 +37,11 @@ vi.mock("@/hooks/use-live-pool-health", () => ({
 
 vi.mock("swr", () => ({
   default: (
-    _key: string,
+    key: string,
     fetcher: () => Promise<NetworkData[]>,
     config: { fallbackData?: NetworkData[] },
   ) => {
+    harness.cacheKeys.push(key);
     harness.fetcher = fetcher;
     harness.fetchers.push(fetcher);
     return {
@@ -52,7 +58,10 @@ vi.mock("swr", () => ({
   useSWRConfig: () => ({ cache: { get: () => undefined } }),
 }));
 
-import { useAllNetworksData } from "../use-all-networks-data";
+import {
+  useAllNetworksData,
+  type AllNetworksDataCacheScope,
+} from "../use-all-networks-data";
 
 const NETWORK = {
   id: "celo-mainnet",
@@ -118,8 +127,14 @@ function networkData(
 
 let latestResult: ReturnType<typeof useAllNetworksData> | undefined;
 
-function Probe({ fallback }: { fallback: InitialNetworkData[] }) {
-  latestResult = useAllNetworksData(fallback, 0);
+function Probe({
+  fallback,
+  cacheScope = "home",
+}: {
+  fallback: InitialNetworkData[];
+  cacheScope?: AllNetworksDataCacheScope;
+}) {
+  latestResult = useAllNetworksData(fallback, 0, cacheScope);
   return null;
 }
 
@@ -128,8 +143,22 @@ describe("useAllNetworksData cold-cache reconciliation", () => {
     vi.clearAllMocks();
     harness.fetcher = undefined;
     harness.fetchers.length = 0;
+    harness.cacheKeys.length = 0;
     harness.mutateRequest = undefined;
     latestResult = undefined;
+  });
+
+  it("isolates the intentionally stripped /pools fallback under its own SWR key", () => {
+    const fallback = [networkData(ACTIVE_VP)];
+
+    renderToStaticMarkup(<Probe fallback={fallback} />);
+    renderToStaticMarkup(<Probe fallback={fallback} cacheScope="pools" />);
+
+    expect(harness.cacheKeys).toEqual([
+      SWR_KEY_ALL_NETWORKS_DATA,
+      SWR_KEY_POOLS_NETWORKS_DATA,
+    ]);
+    expect(SWR_KEY_POOLS_NETWORKS_DATA).not.toBe(SWR_KEY_ALL_NETWORKS_DATA);
   });
 
   it("retains the SSR VirtualPool extension on the first client refresh", async () => {
@@ -196,6 +225,30 @@ describe("useAllNetworksData cold-cache reconciliation", () => {
     expect(harness.fetchAllNetworks).toHaveBeenCalledTimes(1);
     resolveFetch([networkData(ACTIVE_VP, false) as NetworkData]);
     await Promise.all([first, second]);
+  });
+
+  it("starts an All request without Promise.finally support", () => {
+    const fallback = [networkData(ACTIVE_VP)];
+    harness.fetchAllNetworks.mockResolvedValueOnce([
+      networkData(ACTIVE_VP, false) as NetworkData,
+    ]);
+    renderToStaticMarkup(<Probe fallback={fallback} />);
+
+    const finallyDescriptor = Object.getOwnPropertyDescriptor(
+      Promise.prototype,
+      "finally",
+    )!;
+    Object.defineProperty(Promise.prototype, "finally", {
+      ...finallyDescriptor,
+      value: undefined,
+    });
+
+    try {
+      expect(() => latestResult!.requestFullSnapshotHistory()).not.toThrow();
+      expect(harness.fetchAllNetworks).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(Promise.prototype, "finally", finallyDescriptor);
+    }
   });
 
   it("joins a user-triggered All request to mount revalidation at the fetch boundary", async () => {
@@ -284,7 +337,57 @@ describe("useAllNetworksData cold-cache reconciliation", () => {
     await latestResult!.requestFullSnapshotHistory();
 
     expect(latestResult!.isSnapshotHistoryCapped).toBe(true);
+    expect(latestResult!.isPoolSnapshotHistoryCapped).toBe(false);
+    expect(latestResult!.poolSnapshotHistoryError).toBeNull();
     expect(harness.fetchAllNetworks).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates a Broker-only completion failure from the TVL error channel", () => {
+    const fallback = {
+      ...networkData(ACTIVE_VP, false),
+      brokerSnapshotsAllDailyCapped: true,
+      brokerSnapshotsAllDailyTruncated: true,
+    } satisfies InitialNetworkData;
+
+    renderToStaticMarkup(<Probe fallback={[fallback]} />);
+
+    expect(latestResult!.isSnapshotHistoryCapped).toBe(true);
+    expect(latestResult!.snapshotHistoryError?.message).toBe(
+      "Full Broker history pagination was truncated",
+    );
+    expect(latestResult!.isPoolSnapshotHistoryCapped).toBe(false);
+    expect(latestResult!.poolSnapshotHistoryError).toBeNull();
+  });
+
+  it("retains bounded Broker rows when completion fails before page one", async () => {
+    const recentBrokerRow = {
+      id: "broker-recent",
+      timestamp: String(TODAY_MIDNIGHT),
+      volumeUsdWei: "1000000000000000000",
+      swapCount: 1,
+    };
+    const fallback = {
+      ...networkData(ACTIVE_VP, false),
+      brokerSnapshotsAllDaily: [recentBrokerRow],
+      brokerSnapshotsAllDailyCapped: true,
+    } satisfies InitialNetworkData;
+    harness.fetchAllNetworks.mockResolvedValueOnce([
+      {
+        ...fallback,
+        brokerSnapshotsAllDaily: [],
+        brokerSnapshotsAllDailyCapped: true,
+        brokerSnapshotsAllDailyError: { message: "Broker unavailable" },
+      } as NetworkData,
+    ]);
+    renderToStaticMarkup(<Probe fallback={[fallback]} />);
+
+    const refreshed = await harness.fetcher!();
+
+    expect(refreshed[0]!.brokerSnapshotsAllDaily).toEqual([recentBrokerRow]);
+    expect(refreshed[0]!.brokerSnapshotsAllDailyCapped).toBe(true);
+    expect(refreshed[0]!.brokerSnapshotsAllDailyError?.message).toBe(
+      "Broker unavailable",
+    );
   });
 
   it("surfaces a failed completion while keeping the bounded history marked incomplete", () => {

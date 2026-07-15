@@ -125,6 +125,7 @@ function deriveBrokerSlice(
   result: PromiseSettledResult<PaginatedPageResult<BrokerDailySnapshotRow>>,
 ): {
   brokerSnapshotsAllDaily: BrokerDailySnapshotRow[];
+  brokerSnapshotsAllDailyCapped: boolean;
   brokerSnapshotsAllDailyTruncated: boolean;
   brokerSnapshotsAllDailyError: Error | null;
 } {
@@ -133,6 +134,13 @@ function deriveBrokerSlice(
   return {
     brokerSnapshotsAllDaily:
       result.status === "fulfilled" ? result.value.rows : [],
+    // A rejected first page and either kind of partial pagination are all
+    // incomplete-history outcomes. Keep the cap explicit so the shared chart
+    // handoff cannot relabel missing Broker history as a complete "All" range.
+    brokerSnapshotsAllDailyCapped:
+      result.status === "rejected" ||
+      result.value.truncated ||
+      result.value.error !== null,
     brokerSnapshotsAllDailyTruncated:
       result.status === "fulfilled" && result.value.truncated,
     brokerSnapshotsAllDailyError:

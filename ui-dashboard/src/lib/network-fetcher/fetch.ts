@@ -95,6 +95,7 @@ export const blankNetworkData = (
   snapshotsAllDailyCapped: false,
   snapshotsAllDailyTruncated: false,
   brokerSnapshotsAllDaily: [],
+  brokerSnapshotsAllDailyCapped: false,
   brokerSnapshotsAllDailyTruncated: false,
   olsPoolIds: new Set(),
   cdpPoolIds: new Set(),

@@ -53,13 +53,12 @@ export default function GlobalPage({
   initialIsWeekend?: boolean;
 }) {
   // First paint uses `initialNetworkData` via SWR's `fallbackData`; on
-  // back-navigation the populated SWR cache wins, which is the right call —
-  // cache may hold fresher data from another page's polling cycle (e.g.
-  // /pools also calls useAllNetworksData under the same key). If no other
-  // page has polled, the worst case is the cache matches the SSR payload
-  // anyway. The bounded snapshot seed stays sufficient for the default 30d
-  // charts; selecting "All" explicitly requests complete history without
-  // waiting for the next `refreshInterval` tick.
+  // back-navigation the populated homepage SWR cache wins, which is the right
+  // call because it may hold fresher data from this route's polling cycle.
+  // `/pools` has an isolated key because its Flight payload deliberately omits
+  // homepage-only Broker history. The bounded homepage seed stays sufficient
+  // for the default 30d charts; selecting "All" explicitly requests complete
+  // history without waiting for the next `refreshInterval` tick.
   return (
     <Suspense>
       <GlobalContent
@@ -135,7 +134,9 @@ function GlobalContent({
     networkData,
     isLoading,
     isSnapshotHistoryCapped,
+    isPoolSnapshotHistoryCapped,
     snapshotHistoryError,
+    poolSnapshotHistoryError,
     requestFullSnapshotHistory,
   } = useAllNetworksData(initialNetworkData, initialNetworkDataFetchedAtMs);
   // SWR reports `isLoading` while `fallbackData` is being revalidated, even
@@ -384,8 +385,8 @@ function GlobalContent({
             anySnapshotsAllDailyError ||
             anySnapshotsAllDailyTruncated
           }
-          snapshotHistoryCapped={isSnapshotHistoryCapped}
-          snapshotHistoryError={snapshotHistoryError}
+          snapshotHistoryCapped={isPoolSnapshotHistoryCapped}
+          snapshotHistoryError={poolSnapshotHistoryError}
           requestFullSnapshotHistory={requestFullSnapshotHistory}
           plotlyDeferMode="idle"
         />

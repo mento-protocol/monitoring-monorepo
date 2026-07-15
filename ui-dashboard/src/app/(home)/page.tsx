@@ -87,7 +87,8 @@ export default async function HomePage() {
   // Promise.allSettled internally so it won't throw). Guard anyway in case a
   // truly unexpected error bubbles up; an undefined initial payload just
   // reverts to the client-only code path. Snapshot history is projected to a
-  // bounded 30 UTC-day seed; the default charts fit inside it, while their
+  // bounded 30 UTC-day seed plus one pre-window TVL anchor per pool; the default
+  // charts fit inside it, while their
   // "All" controls request the normal full SWR payload before rendering.
   const initialPayload = await fetchInitialNetworkData("home").catch(
     () => undefined,

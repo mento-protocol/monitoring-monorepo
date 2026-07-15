@@ -113,6 +113,41 @@ describe("homepage snapshot history range handoff", () => {
     expect(requestFullSnapshotHistory).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps TVL All available when only Broker history is capped", () => {
+    const requestFullSnapshotHistory = vi.fn(async () => undefined);
+    const networkData = historyData(false).map((data) => ({
+      ...data,
+      brokerSnapshotsAllDailyCapped: true,
+      brokerSnapshotsAllDailyTruncated: true,
+    }));
+    act(() => {
+      root.render(
+        <TvlOverTimeChart
+          networkData={networkData}
+          totalTvl={2}
+          tvlPartial={false}
+          change7d={null}
+          isLoading={false}
+          hasError={false}
+          hasSnapshotError={false}
+          snapshotHistoryCapped={false}
+          snapshotHistoryError={null}
+          requestFullSnapshotHistory={requestFullSnapshotHistory}
+        />,
+      );
+    });
+
+    act(() => {
+      rangeButton("TVL chart time range", "All").click();
+    });
+
+    expect(requestFullSnapshotHistory).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain(
+      "Total Value Locked chart is loading.",
+    );
+    expect(container.querySelector('[data-testid="plot"]')).not.toBeNull();
+  });
+
   it("shows an explicit error instead of plotting capped volume as All", () => {
     const networkData = historyData(true);
     const requestFullSnapshotHistory = vi.fn(async () => undefined);

@@ -87,6 +87,7 @@ function PoolsContent({
   const { networkData, isLoading: poolsLoading } = useAllNetworksData(
     initialNetworkData,
     initialNetworkDataFetchedAtMs,
+    "pools",
   );
   const searchParams = useSearchParams();
   const { replace } = useRouter();
