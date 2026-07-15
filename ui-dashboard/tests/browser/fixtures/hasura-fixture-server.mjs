@@ -1105,12 +1105,6 @@ export function handleGraphQL({ query, variables = {} }) {
           .filter((swap) => swap.poolId === variables.poolId)
           .slice(0, variables.limit ?? swaps.length),
       };
-    case "PoolSwapsCount":
-      return {
-        SwapEvent: swaps
-          .filter((swap) => swap.poolId === variables.poolId)
-          .map((swap) => ({ id: swap.id })),
-      };
     case "PoolDeployment":
       return {
         FactoryDeployment: [

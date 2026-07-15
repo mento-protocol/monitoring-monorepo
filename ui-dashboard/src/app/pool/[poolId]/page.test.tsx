@@ -27,12 +27,10 @@ import {
   POOL_LIQUIDITY_COUNT,
   POOL_LIQUIDITY_PAGE,
   POOL_REBALANCES,
-  POOL_REBALANCES_COUNT,
   POOL_REBALANCES_PAGE,
   POOL_REBALANCES_USD_EXT,
   POOL_RESERVES,
   POOL_SWAPS,
-  POOL_SWAPS_COUNT,
   POOL_SWAPS_PAGE,
   POOL_THRESHOLDS_KNOWN_EXT,
   POOL_V2_EXCHANGE,
@@ -236,6 +234,7 @@ let interactiveContainer: HTMLDivElement | null = null;
 let interactiveRoot: Root | null = null;
 let oracleCount = 51;
 let oracleCountError = false;
+let poolDetailLoading = false;
 
 const basePool: Pool = {
   id: "pool-1",
@@ -251,6 +250,8 @@ const basePool: Pool = {
   token1Decimals: 18,
   oraclePrice: "1000000000000000000000000",
   rebalancerAddress: "0xrebalancer",
+  swapCount: 1,
+  rebalanceCount: 1,
 };
 let poolForTest: Pool = basePool;
 
@@ -451,12 +452,16 @@ beforeEach(() => {
   oracleCountError = false;
   oracleRowsForTest = oracleRows;
   poolForTest = basePool;
+  poolDetailLoading = false;
   window.history.replaceState({}, "", "/pool/pool-1");
 
   useGQLMock.mockImplementation(
     (query: unknown, variables?: { offset?: number; limit?: number }) => {
-      if (query === POOL_DETAIL_WITH_HEALTH)
+      if (query === POOL_DETAIL_WITH_HEALTH) {
+        if (poolDetailLoading)
+          return { data: undefined, error: null, isLoading: true };
         return makeGqlResult({ Pool: [poolForTest] });
+      }
       if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === TRADING_LIMITS)
         return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
@@ -464,8 +469,6 @@ beforeEach(() => {
         return makeGqlResult({ FactoryDeployment: [{ txHash: "0xdeploy" }] });
       if (query === POOL_SWAPS || query === POOL_SWAPS_PAGE)
         return makeGqlResult({ SwapEvent: swaps });
-      if (query === POOL_SWAPS_COUNT)
-        return makeGqlResult({ SwapEvent: swaps.map((s) => ({ id: s.id })) });
       if (query === POOL_DAILY_SNAPSHOTS_CHART)
         return makeGqlResult({ PoolDailySnapshot: poolSnapshots });
       if (query === POOL_HOURLY_SNAPSHOTS_CHART)
@@ -474,10 +477,6 @@ beforeEach(() => {
         return makeGqlResult({ ReserveUpdate: reserves });
       if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
         return makeGqlResult({ RebalanceEvent: rebalances });
-      if (query === POOL_REBALANCES_COUNT)
-        return makeGqlResult({
-          RebalanceEvent: rebalances.map((r) => ({ id: r.id })),
-        });
       if (query === POOL_LIQUIDITY || query === POOL_LIQUIDITY_PAGE)
         return makeGqlResult({ LiquidityEvent: liquidity });
       if (query === POOL_LIQUIDITY_COUNT)
@@ -528,6 +527,14 @@ function renderInteractive(params: Record<string, string> = {}) {
     interactiveRoot?.render(<PoolDetailPage />);
   });
   return interactiveContainer;
+}
+
+function firedOperationNames(): string[] {
+  return useGQLMock.mock.calls.flatMap(([query]) => {
+    if (typeof query !== "string") return [];
+    const match = query.match(/\bquery\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    return match?.[1] ? [match[1]] : [];
+  });
 }
 
 function rangeButton(
@@ -609,6 +616,110 @@ describe("pool detail route redirects", () => {
 
     expect(isValidElement(rendered)).toBe(true);
     expect(redirectMock).not.toHaveBeenCalled();
+  });
+});
+
+const counterPaginationCases = [
+  {
+    tab: "swaps",
+    counterKey: "swapCount",
+    searchParam: "swapsQ",
+    pageQuery: POOL_SWAPS_PAGE,
+    noun: "swaps",
+  },
+  {
+    tab: "rebalances",
+    counterKey: "rebalanceCount",
+    searchParam: "rebalancesQ",
+    pageQuery: POOL_REBALANCES_PAGE,
+    noun: "rebalances",
+  },
+] as const;
+
+describe("Pool detail counter-backed pagination", () => {
+  it.each(counterPaginationCases)(
+    "uses the Pool $counterKey beyond Envio's 1,000-row response cap",
+    ({ tab, counterKey, pageQuery }) => {
+      poolForTest = { ...basePool, [counterKey]: 1_025 };
+      const container = renderInteractive({ tab });
+
+      expect(container.textContent).toContain("1,025 total · page 1 of 41");
+      expect(container.textContent).not.toContain("Showing first 1,000");
+      expect(firedOperationNames()).not.toContain("PoolSwapsCount");
+      expect(firedOperationNames()).not.toContain("PoolRebalancesCount");
+
+      useGQLMock.mockClear();
+      const nextButton = container.querySelector(
+        'button[aria-label="Next page"]',
+      ) as HTMLButtonElement;
+      expect(nextButton).toBeTruthy();
+
+      act(() => {
+        nextButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(useGQLMock).toHaveBeenCalledWith(
+        pageQuery,
+        expect.objectContaining({ offset: 25, limit: 25 }),
+      );
+      expect(container.textContent).toContain("page 2 of 41");
+    },
+  );
+
+  it.each(counterPaginationCases)(
+    "caps $noun search at the truthful 1,000-row Hasura window",
+    ({ tab, counterKey, searchParam, pageQuery, noun }) => {
+      poolForTest = { ...basePool, [counterKey]: 2_501 };
+      const html = renderWithParams({ tab, [searchParam]: "treasury" });
+
+      expect(useGQLMock).toHaveBeenCalledWith(
+        pageQuery,
+        expect.objectContaining({ offset: 0, limit: 1_000 }),
+      );
+      expect(html).toContain(
+        `Search covers the most recent 1,000 of 2,501 ${noun} only.`,
+      );
+      expect(html).not.toContain("page 1 of");
+    },
+  );
+
+  it.each(counterPaginationCases)(
+    "uses the bounded bootstrap while $counterKey is not loaded",
+    ({ tab, counterKey, searchParam, pageQuery, noun }) => {
+      poolForTest = { ...basePool, [counterKey]: undefined };
+      const html = renderWithParams({ tab, [searchParam]: "treasury" });
+
+      expect(useGQLMock).toHaveBeenCalledWith(
+        pageQuery,
+        expect.objectContaining({ offset: 0, limit: 500 }),
+      );
+      expect(html).toContain(
+        `Search checks up to the most recent 500 ${noun} while the total is loading.`,
+      );
+      expect(html).not.toContain("0 total");
+    },
+  );
+
+  it.each(counterPaginationCases)(
+    "does not bootstrap $noun search when the authoritative counter is zero",
+    ({ tab, counterKey, searchParam, pageQuery }) => {
+      poolForTest = { ...basePool, [counterKey]: 0 };
+      renderWithParams({ tab, [searchParam]: "treasury" });
+
+      expect(useGQLMock).toHaveBeenCalledWith(
+        pageQuery,
+        expect.objectContaining({ offset: 0, limit: 0 }),
+      );
+    },
+  );
+
+  it("does not flash zero-count pagination or mount swap queries while the pool is loading", () => {
+    poolDetailLoading = true;
+    const html = renderWithParams({ tab: "swaps" });
+
+    expect(html).not.toContain("0 total");
+    expect(firedOperationNames()).not.toContain("PoolSwapsCount");
+    expect(firedOperationNames()).not.toContain("PoolSwapsPage");
   });
 });
 
@@ -1185,8 +1296,6 @@ describe("Pool detail tab search", () => {
           });
         if (query === POOL_SWAPS || query === POOL_SWAPS_PAGE)
           return makeGqlResult({ SwapEvent: swaps });
-        if (query === POOL_SWAPS_COUNT)
-          return makeGqlResult({ SwapEvent: swaps.map((s) => ({ id: s.id })) });
         if (query === POOL_DAILY_SNAPSHOTS_CHART)
           return makeGqlResult({ PoolDailySnapshot: poolSnapshots });
         if (query === POOL_HOURLY_SNAPSHOTS_CHART)
@@ -1195,10 +1304,6 @@ describe("Pool detail tab search", () => {
           return makeGqlResult({ ReserveUpdate: reserves });
         if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
           return makeGqlResult({ RebalanceEvent: rebalances });
-        if (query === POOL_REBALANCES_COUNT)
-          return makeGqlResult({
-            RebalanceEvent: rebalances.map((r) => ({ id: r.id })),
-          });
         if (query === POOL_LIQUIDITY || query === POOL_LIQUIDITY_PAGE)
           return makeGqlResult({ LiquidityEvent: liquidity });
         if (query === POOL_LIQUIDITY_COUNT)
@@ -1280,14 +1385,12 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
   function overrideRebalances(rows: RebalanceEvent[]) {
     useGQLMock.mockImplementation((query: unknown) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
-        return makeGqlResult({ Pool: [basePool] });
+        return makeGqlResult({
+          Pool: [{ ...basePool, rebalanceCount: rows.length }],
+        });
       if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
         return makeGqlResult({ RebalanceEvent: rows });
-      if (query === POOL_REBALANCES_COUNT)
-        return makeGqlResult({
-          RebalanceEvent: rows.map((r) => ({ id: r.id })),
-        });
       return makeGqlResult({});
     });
   }
@@ -1354,14 +1457,12 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
   ) {
     useGQLMock.mockImplementation((query: unknown) => {
       if (query === POOL_DETAIL_WITH_HEALTH)
-        return makeGqlResult({ Pool: [basePool] });
+        return makeGqlResult({
+          Pool: [{ ...basePool, rebalanceCount: rows.length }],
+        });
       if (query === POOL_THRESHOLDS_KNOWN_EXT) return makeTrustFlagsResult();
       if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
         return makeGqlResult({ RebalanceEvent: rows });
-      if (query === POOL_REBALANCES_COUNT)
-        return makeGqlResult({
-          RebalanceEvent: rows.map((r) => ({ id: r.id })),
-        });
       if (query === POOL_REBALANCES_USD_EXT) {
         if (extResult === "error")
           return {

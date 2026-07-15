@@ -11,11 +11,7 @@ import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
 import { TagsCell } from "@/components/tags-cell";
 import { TxHashCell } from "@/components/tx-hash-cell";
-import {
-  ENVIO_MAX_ROWS,
-  SEARCH_BOOTSTRAP_LIMIT,
-  SEARCH_MAX_LIMIT,
-} from "@/lib/constants";
+import { ENVIO_MAX_ROWS, SEARCH_BOOTSTRAP_LIMIT } from "@/lib/constants";
 import {
   formatBlock,
   formatBoundaryBps,
@@ -29,7 +25,6 @@ import { useGQL } from "@/lib/graphql";
 import {
   POOL_REBALANCE_REWARDS,
   POOL_REBALANCES,
-  POOL_REBALANCES_COUNT,
   POOL_REBALANCES_PAGE,
   POOL_REBALANCES_USD_EXT,
 } from "@/lib/queries";
@@ -40,7 +35,6 @@ import type { Pool, RebalanceEvent } from "@/lib/types";
 import React, { useMemo } from "react";
 import { MIN_REWARD_SAMPLE_SIZE } from "../_lib/constants";
 import { addressSearchTerms, matchesRowSearch } from "../_lib/helpers";
-import { usePoolScopedCountFallback } from "../_lib/use-pool-scoped-count-fallback";
 import {
   BOUNDARY_TOOLTIP,
   EFFECTIVENESS_TOOLTIP,
@@ -204,18 +198,16 @@ export function RebalancesTab({
     [onSearchChange],
   );
 
-  const { data: countData, error: countError } = useGQL<{
-    RebalanceEvent: { id: string }[];
-  }>(POOL_REBALANCES_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
-  const rawTotal = countData?.RebalanceEvent?.length ?? 0;
-  const total = usePoolScopedCountFallback(poolId, rawTotal, !!countError);
-  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+  const counterTotal = pool?.rebalanceCount;
+  const total = counterTotal ?? 0;
 
   const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
   const page = Math.max(1, Math.min(rawPage, totalPages));
   const isSearching = query.length > 0;
-  const searchFetchLimit =
-    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const searchFetchLimit = Math.min(
+    counterTotal ?? SEARCH_BOOTSTRAP_LIMIT,
+    ENVIO_MAX_ROWS,
+  );
   const fetchLimit = isSearching ? searchFetchLimit : limit;
   const fetchOffset = isSearching ? 0 : (page - 1) * limit;
   const orderBy = useMemo(() => buildOrderBy("blockNumber", "desc"), []);
@@ -443,29 +435,21 @@ export function RebalancesTab({
           onPageChange={setRawPage}
         />
       )}
-      {countCapped && !isSearching && (
+      {isSearching && counterTotal === undefined && (
         <p className="px-1 pt-1 text-xs text-amber-400">
-          Showing first {ENVIO_MAX_ROWS.toLocaleString()} rebalances — older
-          entries may exist beyond this page range.
+          Search checks up to the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} rebalances while the total
+          is loading.
         </p>
       )}
-      {countCapped && isSearching && (
-        <p className="px-1 pt-1 text-xs text-amber-400">
-          Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()}{" "}
-          rebalances only.
-        </p>
-      )}
-      {countError && !isSearching && (
-        <p className="px-1 pt-1 text-xs text-amber-400">
-          Could not load total count — pagination may be incomplete.
-        </p>
-      )}
-      {countError && isSearching && (
-        <p className="px-1 pt-1 text-xs text-amber-400">
-          Could not load total count — search covers the most recent{" "}
-          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
-        </p>
-      )}
+      {isSearching &&
+        counterTotal !== undefined &&
+        counterTotal > ENVIO_MAX_ROWS && (
+          <p className="px-1 pt-1 text-xs text-amber-400">
+            Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()} of{" "}
+            {counterTotal.toLocaleString()} rebalances only.
+          </p>
+        )}
     </>
   );
 }

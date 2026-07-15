@@ -304,14 +304,6 @@ export const POOL_SWAPS_PAGE = `
   }
 `;
 
-export const POOL_SWAPS_COUNT = `
-  query PoolSwapsCount($poolId: String!, $limit: Int!, $offset: Int!) {
-    SwapEvent(where: { poolId: { _eq: $poolId } }, limit: $limit, offset: $offset) {
-      id
-    }
-  }
-`;
-
 export const POOL_RESERVES = `
   query PoolReserves($poolId: String!, $limit: Int!) {
     ReserveUpdate(
@@ -379,14 +371,6 @@ export const POOL_REBALANCE_REWARDS = `
       order_by: [{ blockNumber: desc }, { id: asc }]
     ) {
       rewardUsd
-    }
-  }
-`;
-
-export const POOL_REBALANCES_COUNT = `
-  query PoolRebalancesCount($poolId: String!, $limit: Int!, $offset: Int!) {
-    RebalanceEvent(where: { poolId: { _eq: $poolId } }, limit: $limit, offset: $offset) {
-      id
     }
   }
 `;

@@ -6663,6 +6663,7 @@ export type PoolDetailWithHealthQuery = {
     readonly reserves0: string;
     readonly reserves1: string;
     readonly swapCount: number;
+    readonly rebalanceCount: number;
     readonly healthTotalSeconds: string;
     readonly hasHealthData: boolean;
   }>;
@@ -7209,18 +7210,6 @@ export type PoolSwapsPageQuery = {
   }>;
 };
 
-// queries/pools.POOL_SWAPS_COUNT
-export type PoolSwapsCountQueryVariables = {
-  readonly poolId: string;
-  readonly limit: number;
-  readonly offset: number;
-};
-export type PoolSwapsCountQuery = {
-  readonly SwapEvent: ReadonlyArray<{
-    readonly id: string;
-  }>;
-};
-
 // queries/pools.POOL_RESERVES
 export type PoolReservesQueryVariables = {
   readonly poolId: string;
@@ -7307,18 +7296,6 @@ export type PoolRebalanceRewardsQueryVariables = {
 export type PoolRebalanceRewardsQuery = {
   readonly RebalanceEvent: ReadonlyArray<{
     readonly rewardUsd: string;
-  }>;
-};
-
-// queries/pools.POOL_REBALANCES_COUNT
-export type PoolRebalancesCountQueryVariables = {
-  readonly poolId: string;
-  readonly limit: number;
-  readonly offset: number;
-};
-export type PoolRebalancesCountQuery = {
-  readonly RebalanceEvent: ReadonlyArray<{
-    readonly id: string;
   }>;
 };
 

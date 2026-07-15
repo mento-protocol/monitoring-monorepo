@@ -170,6 +170,7 @@ describe("PoolDetailWithHealthSchema", () => {
       reserves0: "1000000",
       reserves1: "1000000",
       swapCount: 42,
+      rebalanceCount: 17,
       healthTotalSeconds: "86400",
       hasHealthData: true,
     };
@@ -178,6 +179,21 @@ describe("PoolDetailWithHealthSchema", () => {
     if (result.success) {
       expect(result.data.Pool[0]!.token0Decimals).toBe(18);
       expect(result.data.Pool[0]!.token1Decimals).toBe(6);
+      expect(result.data.Pool[0]!.swapCount).toBe(42);
+      expect(result.data.Pool[0]!.rebalanceCount).toBe(17);
+    }
+  });
+
+  it("preserves pool counters through the runtime schema", () => {
+    const row = { ...minimalRow, swapCount: 42, rebalanceCount: 17 };
+    const result = PoolDetailWithHealthSchema.safeParse({ Pool: [row] });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.Pool[0]).toMatchObject({
+        swapCount: 42,
+        rebalanceCount: 17,
+      });
     }
   });
 
