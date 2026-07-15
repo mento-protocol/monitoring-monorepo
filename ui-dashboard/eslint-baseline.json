@@ -280,13 +280,6 @@
     "linePreview": " | export function TagInput({ | tags,"
   },
   {
-    "file": "src/components/time-series-chart-card-hooks.ts",
-    "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 16. Maximum allowed is 15.",
-    "line": 200,
-    "linePreview": "event?: { clientX?: number; clientY?: number }; | }) => { | if (!enabled) return;"
-  },
-  {
     "file": "src/lib/address-book.ts",
     "ruleId": "complexity",
     "message": "Function 'countImportLabels' has a complexity of 29. Maximum allowed is 15.",
