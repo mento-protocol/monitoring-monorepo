@@ -1,5 +1,6 @@
 import { preloadGQL } from "@/lib/graphql";
 import { normalizePoolIdForChain } from "@/lib/format";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import {
   configuredNetworkIdForChainId,
   NETWORKS,
@@ -19,8 +20,13 @@ export function preloadPoolDetail(network: Network, id: string): void {
   const routeNetworkId = configuredNetworkIdForChainId(network.chainId);
   const routeNetwork = routeNetworkId ? NETWORKS[routeNetworkId] : network;
   const normalizedId = normalizePoolIdForChain(id, routeNetwork.chainId);
-  preloadGQL<PoolDetailResponse>(routeNetwork, POOL_DETAIL_WITH_HEALTH, {
-    id: normalizedId,
-    chainId: routeNetwork.chainId,
-  });
+  preloadGQL<PoolDetailResponse>(
+    routeNetwork,
+    POOL_DETAIL_WITH_HEALTH,
+    {
+      id: normalizedId,
+      chainId: routeNetwork.chainId,
+    },
+    { timeoutMs: HASURA_TIMEOUT_MS },
+  );
 }

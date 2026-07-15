@@ -75,14 +75,18 @@ export function preloadGQL<T>(
   network: Network,
   query: string,
   variables?: Record<string, unknown>,
-  options: { ttlMs?: number } = {},
+  options: { ttlMs?: number; timeoutMs?: number } = {},
 ): void {
   const key = gqlKey(network, query, variables);
   if (!key) return;
   const [serializedKey] = serialize(key);
   if (!serializedKey) return;
 
-  const req = preload(key, () => requestGQL<T>(network, query, variables));
+  const req = preload(key, () =>
+    requestGQL<T>(network, query, variables, {
+      timeoutMs: options.timeoutMs,
+    }),
+  );
   if (req === undefined) return;
 
   const ttlMs = options.ttlMs ?? SPECULATIVE_PRELOAD_TTL_MS;

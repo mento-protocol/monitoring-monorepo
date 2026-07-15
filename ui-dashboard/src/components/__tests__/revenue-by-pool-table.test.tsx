@@ -70,6 +70,7 @@ vi.mock("@/components/chain-icon", () => ({
 }));
 
 import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
 
 // ---------------------------------------------------------------------------
@@ -615,6 +616,7 @@ describe("RevenueByPoolTable — pool-detail prefetch", () => {
       expectedNetwork,
       POOL_DETAIL_WITH_HEALTH,
       expectedVariables,
+      { timeoutMs: HASURA_TIMEOUT_MS },
     );
 
     mockPreloadGQL.mockClear();
@@ -625,6 +627,7 @@ describe("RevenueByPoolTable — pool-detail prefetch", () => {
       expectedNetwork,
       POOL_DETAIL_WITH_HEALTH,
       expectedVariables,
+      { timeoutMs: HASURA_TIMEOUT_MS },
     );
   });
 });

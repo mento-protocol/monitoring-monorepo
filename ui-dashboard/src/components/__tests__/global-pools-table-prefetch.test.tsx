@@ -6,6 +6,7 @@ import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
@@ -146,6 +147,7 @@ describe("GlobalPoolsTable pool-detail prefetch", () => {
       expect.objectContaining({ id: "celo-mainnet", chainId: 42220 }),
       POOL_DETAIL_WITH_HEALTH,
       { id: POOL_ID, chainId: 42220 },
+      { timeoutMs: HASURA_TIMEOUT_MS },
     );
   });
 
@@ -170,6 +172,7 @@ describe("GlobalPoolsTable pool-detail prefetch", () => {
       expect.objectContaining({ id: "celo-mainnet", chainId: 42220 }),
       POOL_DETAIL_WITH_HEALTH,
       { id: POOL_ID, chainId: 42220 },
+      { timeoutMs: HASURA_TIMEOUT_MS },
     );
   });
 });

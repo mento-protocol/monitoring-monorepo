@@ -8,6 +8,7 @@ import type { SWRResponse } from "swr";
 import { NETWORKS, type Network } from "@/lib/networks";
 import type { GlobalPoolEntry } from "@/components/global-pools-table";
 import { POOLS_TABLE_SKELETON_ROWS } from "@/components/pools-table-skeleton";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
 import type { SwapEvent } from "@/lib/types";
 
@@ -361,6 +362,7 @@ describe("PoolsPage multichain rendering", () => {
       celoNet,
       POOL_DETAIL_WITH_HEALTH,
       { id: celoPool.id, chainId: celoNet.chainId },
+      { timeoutMs: HASURA_TIMEOUT_MS },
     );
 
     mockPreloadGQL.mockClear();
@@ -371,6 +373,7 @@ describe("PoolsPage multichain rendering", () => {
       celoNet,
       POOL_DETAIL_WITH_HEALTH,
       { id: celoPool.id, chainId: celoNet.chainId },
+      { timeoutMs: HASURA_TIMEOUT_MS },
     );
 
     act(() => root.unmount());
@@ -422,6 +425,7 @@ describe("PoolsPage multichain rendering", () => {
       NETWORKS["celo-mainnet"],
       POOL_DETAIL_WITH_HEALTH,
       { id: celoPool.id, chainId: 42220 },
+      { timeoutMs: HASURA_TIMEOUT_MS },
     );
     expect(entryNetwork.hasuraUrl).not.toBe(NETWORKS["celo-mainnet"].hasuraUrl);
 
