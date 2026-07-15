@@ -149,11 +149,17 @@ ratchet is now fully in place.
   drives `/pools` filter, `/volume` time-window and sort, and the canonical pool
   TVL-range interactions. Skips fork PRs and Dependabot. Shared Lighthouse
   budgets and route-baseline status live in `.lighthouserc.cjs`; INP defaults to
-  200 ms. Accessibility (≥ 0.94), performance (≥ 0.75), LCP (≤ 1 700 ms), CLS
-  (≤ 0.10), and per-surface INP (≤ 200 ms) are all blocking. Do not add a
-  per-route exception without deterministic three-run preview evidence. CLS was
-  promoted from advisory after PR #652 reduced deterministic `/pools` CLS from
-  0.4896 to 0.0000. Remaining follow-ups are #659 (INP multi-run median), #660
+  200 ms. Accessibility (≥ 0.94), performance (≥ 0.75), CLS (≤ 0.10), and
+  per-surface INP (≤ 200 ms) are shared and blocking. LCP is blocking at
+  1 700 ms for `/`, `/pools`, and canonical pool detail, and at 2 440 ms for
+  `/volume`. The `/volume` exception is backed by the 2026-07-15 three-run
+  preview values (1 981.264, 1 885.954, and 1 940.190 ms): per-metric median
+  baseline 1 940 ms + the established 500 ms headroom. That run measured performance
+  0.91, accessibility 0.95, and CLS 0.000716; the workflow took 5m10 total
+  (3m10 LHCI), leaving 14m50 under the 20-minute timeout. Do not add a per-route
+  exception without deterministic three-run preview evidence. CLS was promoted
+  from advisory after PR #652 reduced deterministic `/pools` CLS from 0.4896 to
+  0.0000. Remaining follow-ups are #659 (INP multi-run median), #660
   (`workflow_run` secret hardening), and #661 (SSR initial-data hardening). The
   fail-closed `assert-lhci-finalurl.mjs` guard requires exactly 12 reports—the
   complete 3-runs × 4-path matrix—on the preview host, with no Lighthouse
