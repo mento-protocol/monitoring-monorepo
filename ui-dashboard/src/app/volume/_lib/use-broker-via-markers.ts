@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import useSWR from "swr";
 import { useNetwork } from "@/components/network-provider";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";

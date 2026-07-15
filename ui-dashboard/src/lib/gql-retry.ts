@@ -1,5 +1,5 @@
-import { ClientError } from "graphql-request";
 import type { SWRConfiguration } from "swr";
+import type { ClientError } from "@/lib/graphql-fetch";
 import { GraphQLSchemaError } from "@/lib/graphql-schema-error";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 
@@ -29,7 +29,7 @@ function clampBackoff(ms: number): number {
 }
 
 export function retryAfterMs(err: unknown): number | null {
-  if (!(err instanceof ClientError)) return null;
+  if (!isClientError(err)) return null;
   if (err.response.status !== 429) return null;
   const header = err.response.headers?.get?.("retry-after");
   if (!header) return RATE_LIMIT_BACKOFF_MS;
@@ -42,6 +42,18 @@ export function retryAfterMs(err: unknown): number | null {
     return clampBackoff(date - Date.now());
   }
   return RATE_LIMIT_BACKOFF_MS;
+}
+
+function isClientError(err: unknown): err is ClientError {
+  return (
+    err instanceof Error &&
+    err.name === "ClientError" &&
+    "response" in err &&
+    typeof err.response === "object" &&
+    err.response !== null &&
+    "status" in err.response &&
+    typeof err.response.status === "number"
+  );
 }
 
 // Schedules `revalidate(opts)` after `delayMs`, but defers the timer until

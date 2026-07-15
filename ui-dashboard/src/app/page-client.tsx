@@ -30,7 +30,7 @@ import {
   VolumeTodayTradersSchema,
   VolumeWindowTradersLatestSchema,
 } from "@/lib/queries/volume-schemas";
-import type { z } from "zod";
+import type { z } from "zod/mini";
 
 type VolumeWindowTradersLatest = z.infer<
   typeof VolumeWindowTradersLatestSchema

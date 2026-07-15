@@ -6,7 +6,7 @@
 // still declares its own `vi.mock` blocks — those are hoisted per test
 // file by the vitest transform and cannot live in a shared module.
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import { vi } from "vitest";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";

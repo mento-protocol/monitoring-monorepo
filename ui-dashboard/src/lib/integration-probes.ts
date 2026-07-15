@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/mini";
 import { getRedis } from "@/lib/redis";
 
 const INTEGRATION_PROBES_LATEST_KEY = "integration-probes:latest";
@@ -21,35 +21,39 @@ const EvidenceSchema = z.object({
   path: z.string(),
 });
 
-const VolumeSignalSchema = z
-  .object({
-    window: z.literal("30d"),
-    category: z.enum([
-      "dex-aggregator",
-      "bridge-aggregator",
-      "direct-bridge",
-      "official-stats",
-    ]),
-    valueUsd: z.number().nullable(),
-    sourceLabel: z.string(),
-    sourceUrl: z.string().nullable(),
-    sourceProtocol: z.string().nullable(),
-    note: z.string().nullable(),
-  })
-  .nullable()
-  .optional()
-  .transform((value) => value ?? null);
+const NullableStringSchema = z.nullable(z.string());
+const NullableNumberSchema = z.nullable(z.number());
 
-const NullableNumberSchema = z
-  .number()
-  .nullable()
-  .optional()
-  .transform((value) => value ?? null);
-const NullableStringSchema = z
-  .string()
-  .nullable()
-  .optional()
-  .transform((value) => value ?? null);
+const VolumeSignalSchema = z.pipe(
+  z.optional(
+    z.nullable(
+      z.object({
+        window: z.literal("30d"),
+        category: z.enum([
+          "dex-aggregator",
+          "bridge-aggregator",
+          "direct-bridge",
+          "official-stats",
+        ]),
+        valueUsd: NullableNumberSchema,
+        sourceLabel: z.string(),
+        sourceUrl: NullableStringSchema,
+        sourceProtocol: NullableStringSchema,
+        note: NullableStringSchema,
+      }),
+    ),
+  ),
+  z.transform((value) => value ?? null),
+);
+
+const NullishNumberSchema = z.pipe(
+  z.optional(NullableNumberSchema),
+  z.transform((value) => value ?? null),
+);
+const NullishStringSchema = z.pipe(
+  z.optional(NullableStringSchema),
+  z.transform((value) => value ?? null),
+);
 
 const PairResultSchema = z.object({
   pairId: z.string(),
@@ -60,16 +64,16 @@ const PairResultSchema = z.object({
   status: StatusSchema,
   evidence: z.array(EvidenceSchema),
   sourceLabels: z.array(z.string()),
-  txTarget: z.string().nullable(),
-  downstreamProvider: z.string().nullable(),
-  routeVariant: NullableStringSchema,
-  routeAmountUsd: NullableStringSchema,
-  attemptCount: NullableNumberSchema,
-  requestUrl: z.string().nullable(),
-  httpStatus: NullableNumberSchema,
-  latencyMs: NullableNumberSchema,
-  responsePreview: NullableStringSchema,
-  error: z.string().nullable(),
+  txTarget: NullableStringSchema,
+  downstreamProvider: NullableStringSchema,
+  routeVariant: NullishStringSchema,
+  routeAmountUsd: NullishStringSchema,
+  attemptCount: NullishNumberSchema,
+  requestUrl: NullableStringSchema,
+  httpStatus: NullishNumberSchema,
+  latencyMs: NullishNumberSchema,
+  responsePreview: NullishStringSchema,
+  error: NullableStringSchema,
 });
 
 const ChainResultSchema = z.object({
@@ -78,8 +82,8 @@ const ChainResultSchema = z.object({
   chainLabel: z.string(),
   status: StatusSchema,
   pairCoverage: z.object({ passed: z.number(), total: z.number() }),
-  blockingReason: z.string().nullable(),
-  nextStep: z.string().nullable(),
+  blockingReason: NullableStringSchema,
+  nextStep: NullableStringSchema,
   pairs: z.array(PairResultSchema),
 });
 
@@ -137,7 +141,7 @@ export const IntegrationProbeSnapshotSchema = z.object({
     aggregators: z.number(),
     chainChecks: z.number(),
     passingChainChecks: z.number(),
-    partialChainChecks: z.number().optional().default(0),
+    partialChainChecks: z._default(z.optional(z.number()), 0),
     failingChainChecks: z.number(),
     needsKeyChainChecks: z.number(),
     unsupportedChainChecks: z.number(),

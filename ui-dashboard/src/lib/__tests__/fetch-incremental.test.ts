@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { GraphQLClient } from "graphql-request";
+import type { GraphQLClient } from "@/lib/graphql-fetch";
 import {
   fetchAllDailySnapshotPages,
   fetchAllFeeSnapshotPages,

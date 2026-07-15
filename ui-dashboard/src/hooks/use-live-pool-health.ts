@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import useSWR, { useSWRConfig } from "swr";
 import type { AllPoolsLiveHealthQuery } from "@/lib/__generated__/graphql";
 import { retryAfterMs, SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";

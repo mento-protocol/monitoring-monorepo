@@ -1,6 +1,6 @@
 // Discovery targets + query builder for server-side unique-address discovery.
 //
-// Extracted into a zero-dependency module (no graphql-request / Sentry / React)
+// Extracted into a zero-dependency module (no transport / Sentry / React)
 // so the GraphQL contract test can validate the dynamically-built `Distinct_*`
 // queries against the indexer schema without dragging in the runtime deps of
 // `mento-address-discovery.ts`. The runtime and the test share ONE builder, so

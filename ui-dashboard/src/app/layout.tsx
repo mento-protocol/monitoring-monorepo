@@ -12,7 +12,8 @@ import { SessionErrorGuard } from "@/components/session-error-guard";
 import { SwrProvider } from "@/components/swr-provider";
 import { PlotlyIdlePreloader } from "@/components/plotly-idle-preloader";
 import { Analytics } from "@vercel/analytics/next";
-import { serverEnv, clientEnv } from "@/env";
+import { clientEnv } from "@/env";
+import { serverEnv } from "@/server-env";
 import "./globals.css";
 
 // This is server-only; local `next start` needs analytics development mode.

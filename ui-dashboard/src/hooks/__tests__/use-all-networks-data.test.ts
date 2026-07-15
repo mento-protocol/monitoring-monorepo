@@ -243,15 +243,15 @@ describe("retainConfirmedVpExtensions", () => {
   });
 });
 
-// Mock graphql-request
+// Mock the internal GraphQL transport.
 
-vi.mock("graphql-request", () => {
+vi.mock("@/lib/graphql-fetch", () => {
   const MockGraphQLClient = vi.fn();
   MockGraphQLClient.prototype.request = vi.fn();
   return { GraphQLClient: MockGraphQLClient };
 });
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import { incrementalRowCache } from "@/lib/fetch-all-networks";
 
 /**

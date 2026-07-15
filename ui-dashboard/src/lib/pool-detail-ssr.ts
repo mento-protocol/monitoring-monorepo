@@ -4,7 +4,6 @@
 // — that guard throws under the (non-RSC) vitest environment that transitively
 // imports this via page.tsx, exactly as pool-og.ts avoids it.
 import { unstable_cache } from "next/cache";
-import type { ZodType } from "zod";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { PoolDetailInitialData } from "@/lib/pool-detail-initial-data";
@@ -48,6 +47,7 @@ import {
 } from "@/lib/networks";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { isVirtualPool, type Pool } from "@/lib/types";
+import type { SafeParseSchema } from "@/lib/safe-parse-schema";
 
 // SSR-prefetch of the pool-detail base row plus split extension queries.
 // `/pool/[poolId]` is otherwise a pure client waterfall: PoolOverview swaps a
@@ -70,7 +70,7 @@ async function requestOptional<T>(
   document: string,
   variables: Record<string, unknown>,
   signal: AbortSignal,
-  schema: ZodType<T>,
+  schema: SafeParseSchema<T>,
 ): Promise<T | undefined> {
   try {
     const raw = await client.request<unknown>({

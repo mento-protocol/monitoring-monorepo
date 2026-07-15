@@ -15,12 +15,12 @@
 // 3. Set budget to current_bytes × 1.10 (10% headroom).
 // 4. Update the comments below with the new baseline + date.
 //
-// BASELINE (measured 2026-07-09 with Next.js 16.2.6 + Turbopack):
-//   All client JS chunks (brotli):     1,134,004 bytes (1.08 MB)
-//   Plotly chunk (brotli):               289,067 bytes
-//   Markdown editor chunk (brotli):       44,080 bytes
-//   Sentry replay chunk (brotli):         34,824 bytes
-//   All CSS (brotli):                     11,276 bytes (11.0 KB)
+// BASELINE (measured 2026-07-15 with Next.js 16.2.6 + Turbopack):
+//   All client JS chunks (brotli):     1,122,116 bytes (1.07 MB)
+//   Plotly chunk (brotli):               288,930 bytes
+//   Markdown editor chunk (brotli):       44,109 bytes
+//   Sentry replay chunk (brotli):         34,792 bytes
+//   All CSS (brotli):                     11,400 bytes (11.1 KB)
 
 const fs = process.getBuiltinModule("node:fs");
 const path = process.getBuiltinModule("node:path");
@@ -193,7 +193,10 @@ const config = [
     // traces are used) cut the client JS from 1,702,785 → 1,085,606 bytes brotli
     // (−36%). See docs/notes/ui-dashboard-performance-plan.md (P1).
     //
-    // Baseline: 1,134,004 bytes  Budget: 1190 KB. (Was 1,085,606 after the P1
+    // Baseline: 1,122,116 bytes  Budget: 1180 KB. Replacing graphql-request with
+    // the internal fetch transport and moving client schemas to zod/mini removed
+    // 11,888 bytes from the 1,134,004-byte baseline, so the aggregate cap tightens
+    // by 10 KB rather than giving the savings back. (Was 1,085,606 after the P1
     // plotly swap; lazy-splitting the markdown editor in P4 moved ~44 KB brotli off
     // the data-page critical path but added ~9 KB of async chunk-boundary overhead
     // to this all-chunks total; lazy-loading Sentry Session Replay (2026-07-09)
@@ -207,16 +210,16 @@ const config = [
       ["static/chunks/"],
       ".next/static/chunks/**/*.js",
     ),
-    limit: "1190 kB",
+    limit: "1180 kB",
   },
   {
     // Plotly chunk, pinned by content (the "js-plotly-plot" DOM class the bundle
     // emits) so it survives Turbopack's per-build content hashing. Guards P1: the
     // lean plotly.js-basic-dist-min build is ~291 KB brotli; reintroducing the full
     // plotly.js (mapbox-gl + WebGL) balloons this chunk past the budget and fails CI
-    // here, before it hides inside the 1190 KB aggregate.
+    // here, before it hides inside the 1180 KB aggregate.
     //
-    // Baseline: 291,466 bytes  Budget: ×1.10 = 320,613 bytes → 320 KB
+    // Baseline: 288,930 bytes  Budget: ×1.10 = 317,823 bytes → 320 KB
     name: "Plotly chunk (js-plotly-plot)",
     path: chunkContaining("js-plotly-plot", "plotly"),
     limit: "320 kB",
@@ -229,7 +232,7 @@ const config = [
     // static import re-merges it into a shared chunk, the matched chunk's size jumps
     // well past this budget and fails CI.
     //
-    // Baseline: 44,130 bytes  Budget: ×1.10 = 48,543 bytes → 49 KB
+    // Baseline: 44,109 bytes  Budget: ×1.10 = 48,520 bytes → 49 KB
     name: "Markdown editor chunk (react-markdown)",
     path: chunkContaining("react-markdown", "markdown"),
     limit: "49 kB",
@@ -244,7 +247,7 @@ const config = [
     // shared chunk, the matched chunk's size jumps well past this budget and
     // fails CI.
     //
-    // Baseline: 34,824 bytes  Budget: ×1.10 = 38,306 bytes → 39 KB
+    // Baseline: 34,792 bytes  Budget: ×1.10 = 38,271 bytes → 39 KB
     name: "Sentry replay chunk (rr_width)",
     path: chunkContaining("rr_width", "sentry-replay"),
     limit: "39 kB",
@@ -252,7 +255,7 @@ const config = [
   {
     // Manifest-referenced CSS emitted under .next/static/ (single Tailwind v4 bundle).
     //
-    // Baseline: 10,283 bytes  Budget: ×1.10 = 11,312 bytes → 12 KB
+    // Baseline: 11,400 bytes  Budget: retained at 12 KB (5.3% headroom)
     name: "All client CSS",
     path: manifestPathsOrFallback(".css", ["static/"], ".next/static/**/*.css"),
     limit: "12 kB",

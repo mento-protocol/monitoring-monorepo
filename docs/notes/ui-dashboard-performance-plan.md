@@ -245,9 +245,11 @@ chainId}]` — the server must reproduce the exact normalized id + `network.id`
   revalidate + a visible "updating" indicator). Prototype behind a flag; measure
   warm-reload paint vs. mismatch risk.
 - **S2 · GraphQL transport batching** (L, low — _quota_, not latency). Spike whether the
-  hosted Envio Hasura endpoint accepts `graphql-request` array-batched POSTs and returns
-  per-operation errors at HTTP 200 (load-bearing for the deliberately-split schema-lag
-  resilience). Not a `_aggregate` (no (d) conflict). Only worth it for quota pressure.
+  hosted Envio Hasura endpoint accepts array-batched POSTs from the dashboard's internal
+  fetch transport and returns per-operation errors at HTTP 200 (load-bearing for the
+  deliberately-split schema-lag resilience). Not a `_aggregate` (no (d) conflict). Only
+  worth it for quota pressure; the transport replacement itself deliberately preserves
+  one operation per request.
 - **S3 · React Compiler `compilationMode: "all"`** (M, low — INP only). Today only 1 of
   172 files carries `"use memo"`. Auto-compiling all doesn't reduce the 6 MB parse and
   slightly _increases_ bundle KB — it only trims INP, and there's no measured INP problem.
