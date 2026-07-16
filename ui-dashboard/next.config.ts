@@ -1,6 +1,11 @@
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
+const swrCacheBuildSalt =
+  process.env.VERCEL_DEPLOYMENT_ID ??
+  process.env.VERCEL_GIT_COMMIT_SHA ??
+  "dev";
+
 const nextConfig: NextConfig = {
   reactCompiler: {
     compilationMode: "annotation",
@@ -13,6 +18,9 @@ const nextConfig: NextConfig = {
     // localhost-empty case is load-bearing for `shouldEnableSentry`
     // in instrumentation-client.ts; do not add a fallback here.
     NEXT_PUBLIC_VERCEL_ENV: process.env.VERCEL_ENV ?? "",
+    // Persistent SWR records never cross a deploy boundary. Deployment ID
+    // wins over commit SHA so env-only redeploys also invalidate local data.
+    NEXT_PUBLIC_SWR_CACHE_BUILD_SALT: swrCacheBuildSalt,
   },
   async headers() {
     return [

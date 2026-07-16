@@ -60,6 +60,12 @@ const clientSchema = z.object({
   NEXT_PUBLIC_SHOW_TESTNET_NETWORKS: envBool,
   NEXT_PUBLIC_BROWSER_TEST_FIXTURES: envBool,
   NEXT_PUBLIC_SENTRY_DSN: z.catch(z.optional(z.url()), undefined),
+  // Inlined by next.config.ts from the Vercel deployment/commit identity.
+  // `dev` keeps non-Vercel tests and localhost deterministic.
+  NEXT_PUBLIC_SWR_CACHE_BUILD_SALT: z._default(
+    z.string().check(z.minLength(1)),
+    "dev",
+  ),
   // `next.config.ts` inlines `NEXT_PUBLIC_VERCEL_ENV=""` on localhost (mirror of
   // `VERCEL_ENV`, which is unset off-Vercel). `.catch(undefined)` so that
   // empty-string case — load-bearing for `shouldEnableSentry` — resolves to
@@ -100,5 +106,7 @@ export const clientEnv = clientSchema.parse({
   NEXT_PUBLIC_BROWSER_TEST_FIXTURES:
     process.env.NEXT_PUBLIC_BROWSER_TEST_FIXTURES,
   NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  NEXT_PUBLIC_SWR_CACHE_BUILD_SALT:
+    process.env.NEXT_PUBLIC_SWR_CACHE_BUILD_SALT,
   NEXT_PUBLIC_VERCEL_ENV: process.env.NEXT_PUBLIC_VERCEL_ENV,
 });

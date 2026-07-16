@@ -193,6 +193,7 @@ describe("assembleNetworkData — pure composition", () => {
     expect(result.feeSnapshotsError).toBeNull();
     expect(result.snapshotsAllDailyError).toBeNull();
     expect(result.brokerSnapshotsAllDailyError).toBeNull();
+    expect(result.brokerSnapshotsAllDailyCapped).toBe(false);
     expect(result.lpError).toBeNull();
     expect(result.strategyError).toBeNull();
     expect(result.olsPoolIds).toEqual(new Set());
@@ -231,5 +232,42 @@ describe("assembleNetworkData — pure composition", () => {
     expect(result.snapshotsError).toBe(tailErr);
     expect(result.snapshots7dError).toBe(tailErr);
     expect(result.snapshots30dError).toBe(tailErr);
+  });
+
+  it("keeps Broker history capped when pagination returns partial rows", () => {
+    const result = assembleNetworkData({
+      ...baseArgs,
+      brokerSnapshotsAllDailyResult: fulfilled({
+        rows: [
+          {
+            id: "broker-partial",
+            timestamp: String(NOW),
+            volumeUsdWei: "1",
+            swapCount: 1,
+          },
+        ],
+        truncated: true,
+        error: new Error("page 2 failed"),
+      }),
+    });
+
+    expect(result.brokerSnapshotsAllDaily).toHaveLength(1);
+    expect(result.brokerSnapshotsAllDailyTruncated).toBe(true);
+    expect(result.brokerSnapshotsAllDailyCapped).toBe(true);
+    expect(result.brokerSnapshotsAllDailyError?.message).toBe("page 2 failed");
+  });
+
+  it("marks Broker history capped when its first page rejects", () => {
+    const result = assembleNetworkData({
+      ...baseArgs,
+      brokerSnapshotsAllDailyResult: rejected(new Error("Broker unavailable")),
+    });
+
+    expect(result.brokerSnapshotsAllDaily).toEqual([]);
+    expect(result.brokerSnapshotsAllDailyTruncated).toBe(false);
+    expect(result.brokerSnapshotsAllDailyCapped).toBe(true);
+    expect(result.brokerSnapshotsAllDailyError?.message).toBe(
+      "Broker unavailable",
+    );
   });
 });

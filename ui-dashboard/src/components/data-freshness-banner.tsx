@@ -35,11 +35,22 @@ export function DataFreshnessBanner() {
   const status = getSWRFreshnessStatus();
   if (status === null) return null;
 
-  const age = formatAge(currentNow - status.lastUpdatedAt);
-  const sourceCount =
+  const cachedAge =
+    status.cachedLastUpdatedAt === null
+      ? null
+      : formatAge(currentNow - status.cachedLastUpdatedAt);
+  const failedAge =
+    status.failedLastUpdatedAt === null
+      ? null
+      : formatAge(currentNow - status.failedLastUpdatedAt);
+  const failedSourceCount =
     status.failedCount === 1
       ? "1 data source"
       : `${status.failedCount} data sources`;
+  const cachedSourceCount =
+    status.cachedCount === 1
+      ? "1 data source"
+      : `${status.cachedCount} data sources`;
 
   return (
     <div
@@ -48,8 +59,26 @@ export function DataFreshnessBanner() {
       className="border-b border-amber-400/20 bg-amber-950/30 px-3 py-2 text-xs text-amber-100 sm:px-6"
     >
       <div className="mx-auto max-w-7xl">
-        Latest refresh failed. Showing last-good data from {age} ago across{" "}
-        {sourceCount}. Retrying automatically.
+        {status.failedCount > 0 && failedAge !== null ? (
+          <>
+            Latest refresh failed. Showing last-good data from {failedAge} ago
+            across {failedSourceCount}. Retrying automatically.
+          </>
+        ) : cachedAge !== null ? (
+          <>
+            Showing cached data from {cachedAge} ago across {cachedSourceCount}.
+            Refreshing…
+          </>
+        ) : null}
+        {status.failedCount > 0 &&
+        status.cachedCount > 0 &&
+        cachedAge !== null ? (
+          <>
+            {" "}
+            Also showing cached data from {cachedAge} ago across{" "}
+            {cachedSourceCount} while it refreshes.
+          </>
+        ) : null}
         {status.lastErrorMessage ? (
           <span className="sr-only">
             {" "}

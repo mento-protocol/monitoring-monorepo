@@ -358,6 +358,7 @@ describe("incremental pool daily snapshot pagination", () => {
         network: NETWORKS["celo-mainnet"],
         pools: [{ id: "pool-a" }],
         snapshotsAllDaily: [cachedToday],
+        snapshotsAllDailyCapped: false,
         snapshotsAllDailyError: null,
         snapshotsAllDailyTruncated: false,
         feeSnapshots: [],
@@ -383,6 +384,95 @@ describe("incremental pool daily snapshot pagination", () => {
     });
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0]!.swapVolume0).toBe("9");
+    expect(
+      incrementalRowCache.get("celo-mainnet:PoolDailySnapshot")?.complete,
+    ).toBe(true);
+  });
+
+  it("forces a full fetch for a capped SSR seed, then dedupes later incremental merges", async () => {
+    const ssrToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "1");
+    const fullToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "9");
+    const historical = poolSnapshotRow(
+      "pool-a",
+      TODAY_MIDNIGHT_SECONDS - 200 * 86_400,
+      "2",
+    );
+    const nextToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "11");
+    seedIncrementalRowCacheFromNetworkData([
+      {
+        network: NETWORKS["celo-mainnet"],
+        pools: [{ id: "pool-a" }],
+        snapshotsAllDaily: [ssrToday],
+        snapshotsAllDailyCapped: true,
+        snapshotsAllDailyError: null,
+        snapshotsAllDailyTruncated: false,
+      } as unknown as NetworkData,
+    ]);
+    expect(
+      incrementalRowCache.get("celo-mainnet:PoolDailySnapshot")?.complete,
+    ).toBe(false);
+    requestMock
+      .mockResolvedValueOnce({
+        PoolDailySnapshot: [fullToday, historical],
+      })
+      .mockResolvedValueOnce({ PoolDailySnapshot: [nextToday] });
+
+    const full = await fetchAllDailySnapshotPages(
+      makeClient(),
+      ["pool-a"],
+      "celo-mainnet",
+    );
+    // The second call intentionally depends on the first populating the
+    // incremental cache; parallelizing them would invalidate this regression.
+    // react-doctor-disable-next-line react-doctor/server-sequential-independent-await
+    const incremental = await fetchAllDailySnapshotPages(
+      makeClient(),
+      ["pool-a"],
+      "celo-mainnet",
+    );
+
+    expect(variablesAt(0)).toMatchObject({ afterTimestamp: 0, offset: 0 });
+    expect(variablesAt(1)).toMatchObject({
+      afterTimestamp: YESTERDAY_MIDNIGHT_SECONDS,
+      offset: 0,
+    });
+    expect(full.rows).toEqual([fullToday, historical]);
+    expect(full.historyComplete).toBe(true);
+    expect(incremental.rows).toEqual([nextToday, historical]);
+    expect(incremental.historyComplete).toBe(true);
+    expect(
+      incrementalRowCache.get("celo-mainnet:PoolDailySnapshot")?.complete,
+    ).toBe(true);
+  });
+
+  it("preserves a capped SSR seed and its incomplete marker when the full fetch fails", async () => {
+    const ssrToday = poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS, "1");
+    seedIncrementalRowCacheFromNetworkData([
+      {
+        network: NETWORKS["celo-mainnet"],
+        pools: [{ id: "pool-a" }],
+        snapshotsAllDaily: [ssrToday],
+        snapshotsAllDailyCapped: true,
+        snapshotsAllDailyError: null,
+        snapshotsAllDailyTruncated: false,
+      } as unknown as NetworkData,
+    ]);
+    requestMock.mockRejectedValueOnce(new Error("full history timeout"));
+
+    const result = await fetchAllDailySnapshotPages(
+      makeClient(),
+      ["pool-a"],
+      "celo-mainnet",
+    );
+
+    expect(variablesAt(0)).toMatchObject({ afterTimestamp: 0, offset: 0 });
+    expect(result.rows).toEqual([ssrToday]);
+    expect(result.truncated).toBe(true);
+    expect(result.error?.message).toBe("full history timeout");
+    expect(result.historyComplete).toBe(false);
+    expect(
+      incrementalRowCache.get("celo-mainnet:PoolDailySnapshot")?.complete,
+    ).toBe(false);
   });
 
   it("does not overwrite a warm cache with older SSR fallback rows", async () => {
@@ -393,12 +483,14 @@ describe("incremental pool daily snapshot pagination", () => {
       variablesKey: "pool-a",
       rows: [polledToday],
       refreshAfterTimestamp: YESTERDAY_MIDNIGHT_SECONDS,
+      complete: true,
     });
     seedIncrementalRowCacheFromNetworkData([
       {
         network: NETWORKS["celo-mainnet"],
         pools: [{ id: "pool-a" }],
         snapshotsAllDaily: [ssrToday],
+        snapshotsAllDailyCapped: false,
         snapshotsAllDailyError: null,
         snapshotsAllDailyTruncated: false,
         feeSnapshots: [],
@@ -429,12 +521,14 @@ describe("incremental pool daily snapshot pagination", () => {
       variablesKey: "pool-a",
       rows: [polledToday],
       refreshAfterTimestamp: YESTERDAY_MIDNIGHT_SECONDS,
+      complete: true,
     });
     seedIncrementalRowCacheFromNetworkData([
       {
         network: NETWORKS["celo-mainnet"],
         pools: [{ id: "pool-b" }],
         snapshotsAllDaily: [ssrToday],
+        snapshotsAllDailyCapped: false,
         snapshotsAllDailyError: null,
         snapshotsAllDailyTruncated: false,
         feeSnapshots: [],
@@ -473,12 +567,14 @@ describe("incremental pool daily snapshot pagination", () => {
       variablesKey: "pool-a",
       rows: [cachedToday],
       refreshAfterTimestamp: YESTERDAY_MIDNIGHT_SECONDS,
+      complete: true,
     });
     seedIncrementalRowCacheFromNetworkData([
       {
         network: NETWORKS["celo-mainnet"],
         pools: [{ id: "pool-a" }],
         snapshotsAllDaily: [ssrToday, ssrOld],
+        snapshotsAllDailyCapped: false,
         snapshotsAllDailyError: null,
         snapshotsAllDailyTruncated: false,
         feeSnapshots: [],
@@ -509,12 +605,14 @@ describe("incremental pool daily snapshot pagination", () => {
       variablesKey: "pool-a",
       rows: [cachedStale],
       refreshAfterTimestamp: staleTimestamp,
+      complete: true,
     });
     seedIncrementalRowCacheFromNetworkData([
       {
         network: NETWORKS["celo-mainnet"],
         pools: [{ id: "pool-a" }],
         snapshotsAllDaily: [ssrToday],
+        snapshotsAllDailyCapped: false,
         snapshotsAllDailyError: null,
         snapshotsAllDailyTruncated: false,
         feeSnapshots: [],
@@ -544,6 +642,7 @@ describe("incremental pool daily snapshot pagination", () => {
         network: NETWORKS["celo-mainnet"],
         pools: [{ id: "pool-a" }],
         snapshotsAllDaily: [poolSnapshotRow("pool-a", TODAY_MIDNIGHT_SECONDS)],
+        snapshotsAllDailyCapped: false,
         snapshotsAllDailyError: null,
         snapshotsAllDailyTruncated: true,
         feeSnapshots: [],
@@ -554,6 +653,7 @@ describe("incremental pool daily snapshot pagination", () => {
         network: NETWORKS["monad-mainnet"],
         pools: [{ id: "pool-b" }],
         snapshotsAllDaily: [poolSnapshotRow("pool-b", TODAY_MIDNIGHT_SECONDS)],
+        snapshotsAllDailyCapped: false,
         snapshotsAllDailyError: new Error("snapshot failed"),
         snapshotsAllDailyTruncated: false,
         feeSnapshots: [feeRow("fee-b", TODAY_MIDNIGHT_SECONDS)],

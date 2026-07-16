@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const CELO_POOL_ID = "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e";
 const MONAD_POOL_ID = "143-0xb0a0264ce6847f101b76ba36a4a3083ba489f501";
+const SWR_PERSISTED_CACHE_STORAGE_KEY = "mento-monitoring:swr-persisted-cache";
 
 function escapedPoolId(poolId: string): RegExp {
   return new RegExp(`/pool/${poolId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
@@ -127,6 +128,24 @@ test.describe("dashboard browser flows", () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test("keeps decoded homepage and pools documents below the Flight payload budget", async ({
+    request,
+  }) => {
+    const paths = ["/", "/pools"] as const;
+    const responses = await Promise.all(paths.map((path) => request.get(path)));
+    const bodies = await Promise.all(
+      responses.map((response) => response.body()),
+    );
+
+    responses.forEach((response) => expect(response.ok()).toBe(true));
+    bodies.forEach((body, index) => {
+      expect(
+        body.byteLength,
+        `${paths[index]} decoded document bytes`,
+      ).toBeLessThan(500_000);
+    });
+  });
+
   test("switches chain context through the pool list target", async ({
     page,
   }) => {
@@ -154,6 +173,148 @@ test.describe("dashboard browser flows", () => {
       "aria-selected",
       "true",
     );
+  });
+
+  test("keeps the bounded /pools SSR seed without an eager full-history client fetch", async ({
+    page,
+  }) => {
+    let fullHistoryRequests = 0;
+    await page.route("**/graphql", async (route) => {
+      if (
+        (route.request().postData() ?? "").includes(
+          "query PoolDailySnapshotsAll",
+        )
+      ) {
+        fullHistoryRequests += 1;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/pools");
+    await expect(page.getByRole("heading", { name: "Pools" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "USDC/USDm" }).first(),
+    ).toBeVisible();
+    await page.waitForLoadState("networkidle");
+
+    expect(fullHistoryRequests).toBe(0);
+  });
+
+  test("loads full homepage snapshot history on demand before rendering All", async ({
+    page,
+  }) => {
+    let fullHistoryRequests = 0;
+    let releaseFullHistory!: () => void;
+    const fullHistoryGate = new Promise<void>((resolve) => {
+      releaseFullHistory = resolve;
+    });
+    await page.route("**/graphql", async (route) => {
+      if (
+        !(route.request().postData() ?? "").includes(
+          "query PoolDailySnapshotsAll",
+        )
+      ) {
+        await route.continue();
+        return;
+      }
+      fullHistoryRequests += 1;
+      await fullHistoryGate;
+      await route.continue();
+    });
+
+    await page.goto("/");
+    const rangeGroup = page.getByRole("group", {
+      name: "TVL chart time range",
+    });
+    await expect(rangeGroup).toBeVisible();
+    await expect(
+      rangeGroup.getByRole("button", { name: "1M" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(fullHistoryRequests).toBe(0);
+
+    await rangeGroup.getByRole("button", { name: "All" }).click();
+
+    await expect.poll(() => fullHistoryRequests).toBeGreaterThan(0);
+    await expect(
+      page.getByText("Total Value Locked chart is loading."),
+    ).toHaveCount(1);
+    await expect(
+      rangeGroup.getByRole("button", { name: "All" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    // The shared SWR key is revalidating, but its bounded SSR payload remains
+    // valid last-good data for every surface except the selected capped chart.
+    // Keep the loading state scoped to TVL "All" instead of blanking the 1M
+    // Volume chart, KPI tiles, or pool table while the request is held.
+    await expect(
+      page.getByRole("figure", { name: "Volume chart, 1M range" }),
+    ).toBeVisible();
+    await expect(page.getByText("Volume chart is loading.")).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: /^Swap Fees:/ }),
+    ).not.toHaveAttribute("aria-label", "Swap Fees: …");
+    await expect(
+      page
+        .getByText("LPs", { exact: true })
+        .locator("xpath=following-sibling::p[1]"),
+    ).not.toHaveText("…");
+    await expect(
+      page
+        .getByText("Swaps", { exact: true })
+        .locator("xpath=following-sibling::p[1]"),
+    ).not.toHaveText("…");
+    await expect(
+      page.getByRole("link", { name: "USDC/USDm" }).first(),
+    ).toBeVisible();
+
+    releaseFullHistory();
+
+    await expect(
+      page.getByText("Total Value Locked chart is loading."),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("figure", {
+        name: "Total Value Locked chart, All range",
+      }),
+    ).toBeVisible();
+
+    const completedRequestCount = fullHistoryRequests;
+    await rangeGroup.getByRole("button", { name: "1M" }).click();
+    await rangeGroup.getByRole("button", { name: "All" }).click();
+    await page.waitForTimeout(200);
+    expect(fullHistoryRequests).toBe(completedRequestCount);
+  });
+
+  test("shows an honest degraded state when full homepage history cannot load", async ({
+    page,
+  }) => {
+    let fullHistoryRequests = 0;
+    await page.route("**/graphql", async (route) => {
+      if (
+        (route.request().postData() ?? "").includes(
+          "query PoolDailySnapshotsAll",
+        )
+      ) {
+        fullHistoryRequests += 1;
+        await route.abort("timedout");
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/");
+    const rangeGroup = page.getByRole("group", {
+      name: "TVL chart time range",
+    });
+    await rangeGroup.getByRole("button", { name: "All" }).click();
+
+    await expect.poll(() => fullHistoryRequests).toBeGreaterThan(0);
+    const figure = page.getByRole("figure", {
+      name: "Total Value Locked chart, All range",
+    });
+    await expect(
+      figure.getByText("Unable to load full TVL history", { exact: true }),
+    ).toBeVisible();
+    await expect(figure.getByRole("img")).toHaveCount(0);
   });
 
   test("keeps a fresh live-health overlay ahead of an expiring fleet snapshot", async ({
@@ -531,6 +692,110 @@ test.describe("dashboard browser flows", () => {
         document.documentElement.clientWidth + 1,
     );
     expect(hasDocumentOverflow).toBe(false);
+  });
+
+  test("warm-starts Trading Limits from bounded persisted SWR data before revalidation", async ({
+    page,
+  }) => {
+    await page.goto(`/pool/${CELO_POOL_ID}?tab=limits`);
+
+    const limitBars = page
+      .getByRole("tabpanel", { name: "limits" })
+      .getByRole("progressbar");
+    await expect(limitBars).toHaveCount(4);
+    await expect(limitBars.first()).toHaveAttribute("aria-valuenow", "0");
+
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let markRefreshStarted!: () => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      markRefreshStarted = resolve;
+    });
+    let tradingLimitsRequests = 0;
+
+    await page.route("**/graphql", async (route) => {
+      const body = route.request().postData() ?? "";
+      if (!body.includes("query TradingLimits")) {
+        await route.continue();
+        return;
+      }
+
+      tradingLimitsRequests += 1;
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.TradingLimit = json.data.TradingLimit.map(
+        (row: Record<string, unknown>, index: number) =>
+          index === 0
+            ? {
+                ...row,
+                limitPressure0: "0.5",
+                netflow0: "38500000000000000000",
+              }
+            : row,
+      );
+      markRefreshStarted();
+      await refreshGate;
+      await route.fulfill({ response, json });
+    });
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await refreshStarted;
+    expect(tradingLimitsRequests).toBe(1);
+
+    // The network response is still held above: these are the previous
+    // session's real rows, not a skeleton or the mutated fixture response.
+    await expect(limitBars).toHaveCount(4);
+    await expect(limitBars.first()).toHaveAttribute("aria-valuenow", "0");
+    await expect(
+      page.getByRole("status").filter({ hasText: "Showing cached data" }),
+    ).toBeVisible();
+
+    const persisted = await page.evaluate((storageKey) => {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw === null) throw new Error("Persisted SWR record is missing");
+      const parsed = JSON.parse(raw) as {
+        buildSalt: string;
+        entries: Array<{ key: string }>;
+        schemaVersion: number;
+      };
+      return {
+        buildSalt: parsed.buildSalt,
+        bytes: new Blob([raw]).size,
+        keys: parsed.entries.map((entry) => entry.key),
+        raw,
+        schemaVersion: parsed.schemaVersion,
+      };
+    }, SWR_PERSISTED_CACHE_STORAGE_KEY);
+
+    expect(persisted.schemaVersion).toBe(1);
+    expect(persisted.buildSalt).toBe("dev");
+    expect(persisted.bytes).toBeLessThan(128 * 1024);
+    expect(persisted.keys).toHaveLength(1);
+    expect(persisted.keys[0]).toContain("query TradingLimits");
+    for (const excluded of [
+      "all-networks-data",
+      "PoolDetailWithHealth",
+      "PoolBreakerConfig",
+      "PoolSwapsPage",
+      "address-labels:all",
+      "address-reports:index",
+      "address-reports:single:",
+    ]) {
+      expect(persisted.raw).not.toContain(excluded);
+    }
+
+    // Give activation and its follow-up microtasks time to settle before
+    // releasing the held response. A second request here would mean cache
+    // activation bypassed SWR's in-flight deduplication.
+    expect(tradingLimitsRequests).toBe(1);
+
+    releaseRefresh();
+    await expect(limitBars.first()).toHaveAttribute("aria-valuenow", "50");
+    await expect(
+      page.getByText("Showing cached data", { exact: false }),
+    ).toHaveCount(0);
   });
 
   test("omits deviation threshold remnants on the Oracle tab", async ({

@@ -24,6 +24,9 @@ resource "google_monitoring_notification_channel" "alerts_infra_slack" {
 
   labels = {
     channel_name = local.alerts_infra_slack_channel_name
+    # GCP populates the Slack workspace label after channel creation. Model
+    # that stable provider value so refresh-only plans do not remove it.
+    team = "Mento Labs"
   }
 
   sensitive_labels {

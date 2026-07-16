@@ -188,9 +188,21 @@ chainId}]` — the server must reproduce the exact normalized id + `network.id`
   for the Map/Set fields, caches healthy payloads only (degraded ones pass through
   uncached via an error carrier — cold misses only, since `unstable_cache` serves stale
   entries and swallows background-revalidation errors; a `fetchedAt` age gate bounds
-  served staleness at ~90s with a foreground refetch, covering the stale-serve path so
-  `N/A` tiles are never pinned), and strips
-  the unread raw `feeSnapshots` rows from the `/` + `/pools` Flight payload. Note the
+  served staleness at 5 minutes with a foreground refetch, covering the stale-serve path
+  so `N/A` tiles are never pinned), and strips the unread raw `feeSnapshots` rows from
+  the `/` + `/pools` Flight payload. **Payload projection shipped 2026-07-15:** the
+  transport now carries the 30 UTC-day default v3 window plus one latest pre-window
+  anchor per pool for TVL forward-fill. Broker carries one additional UTC-day boundary
+  bucket because the rolling 30-day window starts exactly 30 midnights ago during UTC
+  hour zero. It omits the redundant 1/7/30-day arrays. `useAllNetworksData` reconstructs those
+  arrays synchronously from the bounded canonical rows before consumers or
+  incremental-cache seeding; selecting a chart's "All" range triggers the normal
+  full-history SWR fetch, and capped seeds remain cache-incomplete until that pagination
+  succeeds. The cumulative LP-address arrays are replaced by the homepage's exact
+  cross-chain union count, while `/pools` receives neither Broker history nor LP data
+  because it consumes neither. This is the audited transport invariant: every
+  time/cumulative `InitialNetworkData` field is bounded, omitted, or aggregated; the
+  remaining collections are bounded by current configured entities. Note the
   impact re-rating vs. this plan's original scoring: a 2026-07-09 re-measure showed the
   homepage document _streaming_ until 0.9–1.9s (the fan-out runs inside the streamed
   RSC content, not TTFB), so this was in fact the homepage LCP lever, not just cost.
@@ -234,16 +246,22 @@ chainId}]` — the server must reproduce the exact normalized id + `network.id`
 
 ### Tier 4 — Spikes (high ceiling, real uncertainty — investigate before committing)
 
-- **S1 · Persisted SWR cache (localStorage/IndexedDB warm-start)** (L, medium ceiling —
-  the adaptation of Linear's local-first #1/#8). Would give returning users last-known
-  data **instantly** on cold reload, then revalidate. `swr-provider.tsx:39` sets no cache
-  provider (default in-memory Map dies on reload). **Two hazards make this a spike, not a
-  task:** (1) SWR reads the persisted cache _before_ SSR `fallbackData`, so a seeded value
-  on the `/` and `/pools` keys would render stale on first paint and risk a hydration
-  mismatch on exactly the pages fixed for CLS 0.4896 — must exclude SSR-prefetched keys;
-  (2) monitoring data must not show dangerously stale numbers (TTL-drop + forced
-  revalidate + a visible "updating" indicator). Prototype behind a flag; measure
-  warm-reload paint vs. mismatch risk.
+- **S1 · Persisted SWR cache (localStorage warm-start) — delivered by #1248.**
+  The production allowlist contains exactly `TradingLimits`: it is a bounded current
+  per-pool configuration read (normally two token rows), has no SSR `fallbackData`, and
+  powers the client-only Limits tab. The provider keeps at most eight entries / 128 KiB,
+  drops values after 30 minutes, invalidates the whole record on schema or deployment-salt
+  mismatch, and visibly announces cached data until a real revalidation succeeds or
+  fails. All storage/parse/quota failures degrade to the ordinary in-memory SWR cache.
+
+  The implementation-time `fallbackData` audit explicitly keeps every root
+  `SWR_KEY_*`, pool-detail SSR query (`PoolDetailWithHealth`, threshold/VirtualPool
+  extensions, `PoolV2Exchange`, broker 24h exchange data, and `PoolBreakerConfig`), and
+  the `/volume` hero queries out of persistence. Auth keys (`address-labels:all`,
+  `address-reports:index`, `address-reports:single:*`), event/history queries, OLS data,
+  and every other unreviewed operation are also denied by default. Expanding this list
+  requires a new fallback/auth/cardinality audit plus fixture-browser proof.
+
 - **S2 · GraphQL transport batching** (L, low — _quota_, not latency). Spike whether the
   hosted Envio Hasura endpoint accepts array-batched POSTs from the dashboard's internal
   fetch transport and returns per-operation errors at HTTP 200 (load-bearing for the

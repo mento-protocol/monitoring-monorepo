@@ -207,7 +207,13 @@ function capturePageCapExhaustion(args: {
 /** @internal Exported for test-scope `.clear()`. */
 export const incrementalRowCache = new Map<
   string,
-  { variablesKey: string; rows: unknown[]; refreshAfterTimestamp: number }
+  {
+    variablesKey: string;
+    rows: unknown[];
+    refreshAfterTimestamp: number;
+    /** False for a bounded SSR seed until a full pagination succeeds. */
+    complete: boolean;
+  }
 >();
 
 const poolIdsVariablesKey = (poolIds: readonly string[]) =>
@@ -219,6 +225,7 @@ type IncrementalSeedArgs = {
   rows: unknown[];
   dedupKey: (row: unknown) => string;
   timestampOf: (row: unknown) => number;
+  complete: boolean;
   nowMs?: number;
 };
 
@@ -228,6 +235,7 @@ function seedIncrementalRows({
   rows,
   dedupKey,
   timestampOf,
+  complete,
   nowMs = Date.now(),
 }: IncrementalSeedArgs): void {
   if (rows.length === 0) return;
@@ -250,9 +258,11 @@ function seedIncrementalRows({
       timestampOf,
       nowMs,
     );
+    const mergedComplete = existing.complete || complete;
     if (
       existing.rows.length === mergedRows.length &&
-      existing.refreshAfterTimestamp === mergedRefreshAfterTimestamp
+      existing.refreshAfterTimestamp === mergedRefreshAfterTimestamp &&
+      existing.complete === mergedComplete
     ) {
       return;
     }
@@ -260,6 +270,9 @@ function seedIncrementalRows({
       variablesKey,
       rows: mergedRows,
       refreshAfterTimestamp: mergedRefreshAfterTimestamp,
+      // Never downgrade a full client cache when an older capped Server
+      // Component fallback renders later (for example on back-navigation).
+      complete: mergedComplete,
     });
     return;
   }
@@ -268,6 +281,7 @@ function seedIncrementalRows({
     variablesKey,
     rows,
     refreshAfterTimestamp,
+    complete,
   });
 }
 
@@ -289,6 +303,7 @@ export function seedIncrementalRowCacheFromNetworkData(
           return `${snapshot.poolId}-${snapshot.timestamp}`;
         },
         timestampOf: (row) => Number((row as PoolSnapshotWindow).timestamp),
+        complete: !data.snapshotsAllDailyCapped,
       });
     }
 
@@ -336,6 +351,21 @@ function mergeRowsPreservingExisting<TRow>(
   );
 }
 
+function mergeRowsReplacingExisting<TRow>(
+  existingRows: readonly TRow[],
+  incomingRows: readonly TRow[],
+  dedupKey: (row: TRow) => string,
+  timestampOf: (row: TRow) => number,
+): TRow[] {
+  const merged = new Map<string, TRow>();
+  for (const row of existingRows) merged.set(dedupKey(row), row);
+  for (const row of incomingRows) merged.set(dedupKey(row), row);
+  return [...merged.values()].sort(
+    (a, b) =>
+      timestampOf(b) - timestampOf(a) || dedupKey(b).localeCompare(dedupKey(a)),
+  );
+}
+
 function shouldCacheCompleteRows<TRow>(
   result: PaginatedPageResult<TRow>,
 ): boolean {
@@ -347,6 +377,130 @@ function surfacedIncrementalError(
   surfaceIncrementalError: boolean,
 ): Error | null {
   return surfaceIncrementalError ? error : null;
+}
+
+type CompleteHistoryResult<TRow> = PaginatedPageResult<TRow> & {
+  historyComplete: boolean;
+};
+
+type IncrementalBranchArgs<TRow> = {
+  paginate: (afterTimestamp: number) => Promise<PaginatedPageResult<TRow>>;
+  cacheKey: string;
+  variablesKey: string;
+  cachedRows: TRow[];
+  dedupKey: (row: TRow) => string;
+  timestampOf: (row: TRow) => number;
+  nowMs: number;
+  surfaceIncrementalError: boolean;
+};
+
+function cacheCompleteRows<TRow>(
+  result: PaginatedPageResult<TRow>,
+  rows: TRow[],
+  args: Pick<
+    IncrementalBranchArgs<TRow>,
+    "cacheKey" | "variablesKey" | "timestampOf" | "nowMs"
+  >,
+): void {
+  if (!shouldCacheCompleteRows(result)) return;
+  incrementalRowCache.set(args.cacheKey, {
+    variablesKey: args.variablesKey,
+    rows,
+    refreshAfterTimestamp: refreshAfterTimestampForRows(
+      rows,
+      args.timestampOf,
+      args.nowMs,
+    ),
+    complete: true,
+  });
+}
+
+async function fetchFullHistoryFromSeed<TRow>(
+  args: IncrementalBranchArgs<TRow> & { hasMatchingCache: boolean },
+): Promise<CompleteHistoryResult<TRow>> {
+  let full: PaginatedPageResult<TRow>;
+  try {
+    full = await args.paginate(0);
+  } catch (err) {
+    if (!args.hasMatchingCache) throw err;
+    const error = err instanceof Error ? err : new Error(String(err));
+    return {
+      rows: args.cachedRows,
+      truncated: true,
+      error: surfacedIncrementalError(error, args.surfaceIncrementalError),
+      historyComplete: false,
+    };
+  }
+
+  const rows = args.hasMatchingCache
+    ? mergeRowsReplacingExisting(
+        args.cachedRows,
+        full.rows,
+        args.dedupKey,
+        args.timestampOf,
+      )
+    : full.rows;
+  if (
+    args.hasMatchingCache &&
+    full.rows.length === 0 &&
+    args.cachedRows.length > 0
+  ) {
+    const error = new Error(
+      "Full snapshot history returned no rows after a capped SSR seed",
+    );
+    return {
+      rows: args.cachedRows,
+      truncated: true,
+      error: surfacedIncrementalError(error, args.surfaceIncrementalError),
+      historyComplete: false,
+    };
+  }
+
+  cacheCompleteRows(full, rows, args);
+  return {
+    ...full,
+    rows,
+    historyComplete: !full.truncated && full.error === null,
+  };
+}
+
+async function fetchMutableHistoryTail<TRow>(
+  args: IncrementalBranchArgs<TRow> & { refreshAfterTimestamp: number },
+): Promise<CompleteHistoryResult<TRow>> {
+  let tail: PaginatedPageResult<TRow>;
+  try {
+    tail = await args.paginate(args.refreshAfterTimestamp);
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    return {
+      rows: args.cachedRows,
+      truncated: true,
+      error: surfacedIncrementalError(error, args.surfaceIncrementalError),
+      mutableTailError: error,
+      // The immutable history remains complete; only its mutable tail is
+      // stale. Keep "All" renderable with the existing partial-data signal.
+      historyComplete: true,
+    };
+  }
+
+  const rows = mergeRowsReplacingExisting(
+    args.cachedRows,
+    tail.rows,
+    args.dedupKey,
+    args.timestampOf,
+  );
+  cacheCompleteRows(tail, rows, args);
+  return {
+    rows,
+    truncated: tail.truncated,
+    error: surfacedIncrementalError(tail.error, args.surfaceIncrementalError),
+    mutableTailError:
+      tail.error ??
+      (tail.truncated
+        ? new Error("Snapshot incremental tail pagination truncated")
+        : null),
+    historyComplete: true,
+  };
 }
 
 async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
@@ -363,7 +517,7 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
   nowMs?: number;
   surfaceIncrementalError?: boolean;
   extra?: Record<string, unknown>;
-}): Promise<PaginatedPageResult<TRow>> {
+}): Promise<CompleteHistoryResult<TRow>> {
   const {
     client,
     query,
@@ -392,66 +546,34 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
       ...(extra !== undefined ? { extra } : {}),
     });
 
-  if (cached === undefined || cached.variablesKey !== variablesKey) {
-    const full = await paginate(0);
-    if (shouldCacheCompleteRows(full)) {
-      incrementalRowCache.set(cacheKey, {
-        variablesKey,
-        rows: full.rows,
-        refreshAfterTimestamp: refreshAfterTimestampForRows(
-          full.rows,
-          timestampOf,
-          nowMs,
-        ),
-      });
-    }
-    return full;
-  }
-
-  const cachedRows = cached.rows as TRow[];
-  let tail: PaginatedPageResult<TRow>;
-  try {
-    tail = await paginate(cached.refreshAfterTimestamp);
-  } catch (err) {
-    const error = err instanceof Error ? err : new Error(String(err));
-    return {
-      rows: cachedRows,
-      truncated: true,
-      error: surfacedIncrementalError(error, surfaceIncrementalError),
-      mutableTailError: error,
-    };
-  }
-
-  const merged = new Map<string, TRow>();
-  for (const row of cachedRows) merged.set(dedupKey(row), row);
-  for (const row of tail.rows) merged.set(dedupKey(row), row);
-  const rows = [...merged.values()].sort(
-    (a, b) =>
-      timestampOf(b) - timestampOf(a) || dedupKey(b).localeCompare(dedupKey(a)),
-  );
-
-  if (shouldCacheCompleteRows(tail)) {
-    incrementalRowCache.set(cacheKey, {
-      variablesKey,
-      rows,
-      refreshAfterTimestamp: refreshAfterTimestampForRows(
-        rows,
-        timestampOf,
-        nowMs,
-      ),
-    });
-  }
-
-  return {
-    rows,
-    truncated: tail.truncated,
-    error: surfacedIncrementalError(tail.error, surfaceIncrementalError),
-    mutableTailError:
-      tail.error ??
-      (tail.truncated
-        ? new Error("Snapshot incremental tail pagination truncated")
-        : null),
+  const hasMatchingCache =
+    cached !== undefined && cached.variablesKey === variablesKey;
+  const cachedRows = hasMatchingCache ? (cached.rows as TRow[]) : [];
+  const branchArgs: IncrementalBranchArgs<TRow> = {
+    paginate,
+    cacheKey,
+    variablesKey,
+    cachedRows,
+    dedupKey,
+    timestampOf,
+    nowMs,
+    surfaceIncrementalError,
   };
+
+  // A bounded SSR seed is useful last-good recent data, but it is not proof
+  // of complete history. Force the same from-zero pagination as a cold
+  // client, then merge the result over the seed so mutable rows get the
+  // fresher client value. On failure, preserve the seed and surface the
+  // degraded channel instead of either losing recent data or silently
+  // presenting the cap as "All".
+  if (!hasMatchingCache || !cached.complete) {
+    return fetchFullHistoryFromSeed({ ...branchArgs, hasMatchingCache });
+  }
+
+  return fetchMutableHistoryTail({
+    ...branchArgs,
+    refreshAfterTimestamp: cached.refreshAfterTimestamp,
+  });
 }
 
 /**

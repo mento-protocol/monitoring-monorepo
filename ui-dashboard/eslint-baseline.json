@@ -70,20 +70,6 @@
     "linePreview": " | function Card({ data }: { data: HomepageOgData | null }) { | // null → \"—\" (unavailable); 0 → \"$0.00\" (real empty state)."
   },
   {
-    "file": "src/app/page-client.tsx",
-    "ruleId": "complexity",
-    "message": "Arrow function has a complexity of 35. Maximum allowed is 15.",
-    "line": 177,
-    "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
-  },
-  {
-    "file": "src/app/page-client.tsx",
-    "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 53 to the 18 allowed.",
-    "line": 177,
-    "linePreview": "// Aggregate KPIs across all chains for the summary tiles. | const aggregated = useMemo(() => { | let totalPools = 0;"
-  },
-  {
     "file": "src/app/pool/[poolId]/_components/ols-liquidity-events.tsx",
     "ruleId": "complexity",
     "message": "Function 'OlsLiquidityEvents' has a complexity of 35. Maximum allowed is 15.",
@@ -108,7 +94,7 @@
     "file": "src/app/pool/[poolId]/_components/pool-header.tsx",
     "ruleId": "complexity",
     "message": "Function 'PoolHeader' has a complexity of 28. Maximum allowed is 15.",
-    "line": 55,
+    "line": 60,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing composed header surface; this PR only threads SSR fallback props into its current queries. | export function PoolHeader({ | pool,"
   },
   {
@@ -150,14 +136,14 @@
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'PoolsContent' has a complexity of 26. Maximum allowed is 15.",
-    "line": 60,
+    "line": 67,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging. | function PoolsContent({ | initialNetworkData,"
   },
   {
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 24 to the 18 allowed.",
-    "line": 60,
+    "line": 67,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging. | function PoolsContent({ | initialNetworkData,"
   },
   {
