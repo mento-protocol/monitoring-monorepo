@@ -5390,6 +5390,8 @@ export type BridgeTransfersWindowQuery = {
     readonly deliveredTimestamp: string | null;
     readonly deliveredTxHash: string | null;
     readonly attestationCount: number;
+    readonly firstAttestedTimestamp: string | null;
+    readonly lastAttestedTimestamp: string | null;
     readonly usdValueAtSend: string | null;
     readonly firstSeenAt: string;
     readonly lastUpdatedAt: string;
