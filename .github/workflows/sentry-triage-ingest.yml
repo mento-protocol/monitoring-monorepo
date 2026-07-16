@@ -36,6 +36,16 @@ on:
     - cron: 30 5 * * *
     - cron: 30 13 * * *
   workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: lookback_days only widens the Sentry firstSeen
+    # search window for backfill after an outage or at first activation. It is
+    # validated to ^[0-9]+$ below before use (the script additionally enforces
+    # the 1-90 range and fails loud) and cannot affect any build/deploy
+    # output. Same skip pattern as sentry-triage-agent.yml's issue_number.
+    inputs:
+      lookback_days:
+        description: firstSeen lookback window in days (integer 1-90). Leave blank for the default 8. Widen to backfill after an outage.
+        required: false
+        type: string
 
 permissions:
   issues: write
@@ -84,4 +94,18 @@ jobs:
           # yet — scripts/sentry-triage-ingest.mjs's resolveTokenGuard() logs
           # a ::notice:: and exits 0 in that case, no network calls made.
           SENTRY_TRIAGE_TOKEN: ${{ secrets.SENTRY_TRIAGE_TOKEN }}
-        run: pnpm sentry:ingest
+          # Optional workflow_dispatch backfill override. Never interpolated
+          # into the shell command — validated to a bare integer here, with
+          # the 1-90 range enforced (fail-loud) inside the script.
+          DISPATCH_LOOKBACK_DAYS: ${{ github.event.inputs.lookback_days }}
+        run: |
+          set -euo pipefail
+          if [ -n "${DISPATCH_LOOKBACK_DAYS:-}" ]; then
+            if [[ "${DISPATCH_LOOKBACK_DAYS}" =~ ^[0-9]+$ ]]; then
+              export SENTRY_TRIAGE_LOOKBACK_DAYS="${DISPATCH_LOOKBACK_DAYS}"
+            else
+              echo "::error::workflow_dispatch input lookback_days must be a plain integer"
+              exit 1
+            fi
+          fi
+          pnpm sentry:ingest

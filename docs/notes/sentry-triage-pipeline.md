@@ -42,7 +42,10 @@ IN-MEMORY for noise classification — only the resulting label is public.
   the owning repo are a later phase, not part of Stage A.
 - `GET https://us.sentry.io/api/0/organizations/mento-labs/issues/`, paginated
   via `Link` response headers.
-  - New issues: `query=is:unresolved firstSeen:-8d`
+  - New issues: `query=is:unresolved firstSeen:-<N>d` — the lookback `<N>`
+    defaults to 8 days and is configurable (integer 1-90) via the
+    `SENTRY_TRIAGE_LOOKBACK_DAYS` env var, the `--lookback-days` CLI flag
+    (flag wins), or the workflow's `lookback_days` dispatch input.
   - Regressed issues: `query=is:unresolved is:regressed`
 - `Authorization: Bearer $SENTRY_TRIAGE_TOKEN` (read-only token; Stage A never
   writes to Sentry).
@@ -68,7 +71,10 @@ equals `<SHORT-ID>`:
 
 - **Open match** → skip.
 - **Closed match, Sentry issue is regressed** → reopen it, comment
-  `Regressed in Sentry (last seen <ts>)`, and re-add `sentry:needs-triage`.
+  `Regressed in Sentry (last seen <ts>)`, re-add `sentry:needs-triage`, and
+  remove any stale `sentry:verdict-*` labels — the old verdict described the
+  old occurrence, and a reopened issue must read as awaiting triage, not as
+  carrying a verdict and needs-triage at once.
 - **Closed match, not regressed** → skip (stays closed).
 - **No match** → create.
 
@@ -334,9 +340,22 @@ re-apply; the secrets can stay in place.
 
 After flipping the switch, watch the next scheduled runs (ingest 05:30/13:30
 UTC, agent 06:15/14:15 UTC) or trigger `workflow_dispatch` manually from the
-`main` ref (both workflows guard against dispatch from other refs); confirm the
-run-record comment lands on tracker issue
+`main` ref. Only the ingest workflow guards against dispatch from other refs
+(`github.ref == 'refs/heads/main'` job guard); the agent workflow's
+branch-dispatch hardening is tracked in
+[#1289](https://github.com/mento-protocol/monitoring-monorepo/issues/1289)
+(GitHub-Environment protection). Confirm the run-record comment lands on
+tracker issue
 [#1282](https://github.com/mento-protocol/monitoring-monorepo/issues/1282).
+
+**Backfill after an outage or at first activation:** the ingest's default
+firstSeen window is 8 days, so Sentry issues first seen during a longer inert
+or broken period fall outside the next scheduled scan. Run one manual
+`workflow_dispatch` of `Sentry Triage Ingest` from `main` with the
+`lookback_days` input widened (integer up to 90, e.g. `30`), or run
+`pnpm sentry:ingest --lookback-days 30` locally with a `SENTRY_TRIAGE_TOKEN`.
+Idempotency makes a too-wide window harmless — existing queue issues are
+skipped.
 
 ## Verification
 

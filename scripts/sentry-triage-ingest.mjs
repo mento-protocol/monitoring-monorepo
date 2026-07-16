@@ -25,8 +25,37 @@ export const DEFAULT_SENTRY_BASE_URL = "https://us.sentry.io";
 // rolling comment.
 export const DEFAULT_TRACKER_ISSUE = 1282;
 
-export const NEW_ISSUES_QUERY = "is:unresolved firstSeen:-8d";
+// Default firstSeen lookback. 8 days comfortably covers the 2x/day schedule
+// plus weekend-long gaps, but a fixed window cannot backfill issues first
+// seen during a longer outage or inert period — hence the
+// SENTRY_TRIAGE_LOOKBACK_DAYS / --lookback-days override (see the runbook in
+// docs/notes/sentry-triage-pipeline.md).
+export const DEFAULT_LOOKBACK_DAYS = 8;
+const MAX_LOOKBACK_DAYS = 90;
+
+export function buildNewIssuesQuery(lookbackDays = DEFAULT_LOOKBACK_DAYS) {
+  return `is:unresolved firstSeen:-${lookbackDays}d`;
+}
+
 export const REGRESSED_ISSUES_QUERY = "is:unresolved is:regressed";
+
+/**
+ * CLI flag wins over the env var; default 8. Fails loud on anything that is
+ * not an integer in [1, 90] — a typo'd override should turn the run red, not
+ * silently fall back to a window the operator didn't ask for.
+ */
+export function resolveLookbackDays(cliValue, env = process.env) {
+  const raw = cliValue ?? env.SENTRY_TRIAGE_LOOKBACK_DAYS;
+  if (raw == null || String(raw).trim() === "") return DEFAULT_LOOKBACK_DAYS;
+  const trimmed = String(raw).trim();
+  const days = Number(trimmed);
+  if (!/^\d+$/.test(trimmed) || days < 1 || days > MAX_LOOKBACK_DAYS) {
+    throw new Error(
+      `Lookback days must be an integer between 1 and ${MAX_LOOKBACK_DAYS}, got: ${trimmed}`,
+    );
+  }
+  return days;
+}
 
 export const RUN_RECORD_MARKER = "<!-- sentry-triage-ingest:run-record:v1 -->";
 const BODY_MARKER = "<!-- sentry-triage:v1 -->";
@@ -152,6 +181,14 @@ export const LABEL_DEFINITIONS = [
     description: "Triage verdict: needs human judgment",
   },
 ];
+
+// Stage B's verdict namespace, derived from the definitions above so the two
+// can't drift. A reopened regression must shed its previous verdict — the
+// old verdict described the old occurrence, and downstream consumers filter
+// on `sentry:needs-triage` + absence of a verdict.
+export const VERDICT_LABELS = LABEL_DEFINITIONS.map(
+  (label) => label.name,
+).filter((name) => name.startsWith("sentry:verdict-"));
 
 // Short ID is the first whitespace-delimited token after the `[sentry] `
 // prefix (queue contract v2 title: `[sentry] <SHORT-ID> (<project>, <level>)`).
@@ -428,7 +465,10 @@ async function defaultFetchMergedSentryIssues(options) {
     fetchImpl: fetch,
   };
   const [newIssues, regressedIssues] = await Promise.all([
-    fetchAllSentryIssues({ ...common, query: NEW_ISSUES_QUERY }),
+    fetchAllSentryIssues({
+      ...common,
+      query: buildNewIssuesQuery(options.lookbackDays),
+    }),
     fetchAllSentryIssues({ ...common, query: REGRESSED_ISSUES_QUERY }),
   ]);
   return mergeSentryIssues(newIssues, regressedIssues);
@@ -591,6 +631,28 @@ async function createQueueIssue(options, sentryIssue) {
   );
 }
 
+/**
+ * Label edit for the regression-reopen path: re-queue for triage AND shed
+ * any stale `sentry:verdict-*` labels from the previous triage round — the
+ * old verdict described the old occurrence, and leaving it would show
+ * downstream consumers both a verdict and needs-triage at once. Removing an
+ * absent label is a no-op for `gh issue edit` (the labels themselves always
+ * exist because ensureLabelsExist runs first). Exported for tests.
+ */
+export function buildReopenLabelEditArgs(issueNumber, repo) {
+  return [
+    "issue",
+    "edit",
+    String(issueNumber),
+    "-R",
+    repo,
+    "--add-label",
+    "sentry:needs-triage",
+    "--remove-label",
+    VERDICT_LABELS.join(","),
+  ];
+}
+
 async function reopenQueueIssue(options, existingIssue, sentryIssue) {
   // Order matters for crash-safety: the reopen (state change) goes LAST.
   // The closed->open transition is what flips the next run onto the
@@ -600,18 +662,10 @@ async function reopenQueueIssue(options, existingIssue, sentryIssue) {
   // any partial failure leaves the issue closed and the whole (idempotent)
   // sequence is retried on the next run; the worst case is a duplicate
   // regression comment.
-  await runGh(
-    [
-      "issue",
-      "edit",
-      String(existingIssue.number),
-      "-R",
-      options.repo,
-      "--add-label",
-      "sentry:needs-triage",
-    ],
-    { dryRun: options.dryRun, mutates: true },
-  );
+  await runGh(buildReopenLabelEditArgs(existingIssue.number, options.repo), {
+    dryRun: options.dryRun,
+    mutates: true,
+  });
   await runGh(
     [
       "issue",
@@ -749,13 +803,15 @@ Options:
   --org <sentry-org>         Sentry organization slug (default: ${DEFAULT_ORG})
   --sentry-base-url <url>    Sentry API base URL (default: ${DEFAULT_SENTRY_BASE_URL})
   --tracker-issue <number>   Tracker issue for the run-record comment (default: ${DEFAULT_TRACKER_ISSUE})
+  --lookback-days <days>     firstSeen lookback window, integer 1-${MAX_LOOKBACK_DAYS} (default: ${DEFAULT_LOOKBACK_DAYS};
+                             env fallback SENTRY_TRIAGE_LOOKBACK_DAYS; widen to backfill after an outage)
   --dry-run                  Print mutations without applying them
   --json                     Print machine-readable run counts
   -h, --help                 Show this help
 `;
 }
 
-export function parseArgs(argv) {
+export function parseArgs(argv, env = process.env) {
   const options = {
     repo: DEFAULT_REPO,
     org: DEFAULT_ORG,
@@ -765,6 +821,7 @@ export function parseArgs(argv) {
     json: false,
     help: false,
   };
+  let lookbackCliValue = null;
 
   const args = [...argv];
   for (let i = 0; i < args.length; i += 1) {
@@ -788,6 +845,9 @@ export function parseArgs(argv) {
       case "--tracker-issue":
         options.trackerIssue = Number(readValue());
         break;
+      case "--lookback-days":
+        lookbackCliValue = readValue();
+        break;
       case "--dry-run":
         options.dryRun = true;
         break;
@@ -807,6 +867,7 @@ export function parseArgs(argv) {
     throw new Error("--tracker-issue must be a positive integer");
   }
 
+  options.lookbackDays = resolveLookbackDays(lookbackCliValue, env);
   return options;
 }
 

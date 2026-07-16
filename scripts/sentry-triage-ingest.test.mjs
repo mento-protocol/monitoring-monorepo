@@ -2,9 +2,11 @@
 import {
   buildIssueBody,
   buildMetadataYaml,
+  buildNewIssuesQuery,
   buildQueueLabels,
   buildQueueTitle,
   buildRegressedComment,
+  buildReopenLabelEditArgs,
   buildRunRecordBody,
   classifyNoise,
   decideDedupAction,
@@ -19,11 +21,13 @@ import {
   normalizeRestIssues,
   parseArgs,
   parseLinkHeader,
+  resolveLookbackDays,
   resolveTokenGuard,
   runIngest,
   sanitizeFreeText,
   toMetadata,
   truncateTitle,
+  VERDICT_LABELS,
 } from "./sentry-triage-ingest.mjs";
 
 let passed = 0;
@@ -674,19 +678,104 @@ await test("run record body includes counts and the rolling-comment marker", () 
 // ---------------------------------------------------------------------------
 
 await test("parseArgs applies defaults", () => {
-  const options = parseArgs([]);
+  const options = parseArgs([], {});
   assertEqual(options.repo, "mento-protocol/monitoring-monorepo");
   assertEqual(options.org, "mento-labs");
   assertEqual(options.trackerIssue, 1282);
   assertEqual(options.dryRun, false);
+  assertEqual(options.lookbackDays, 8);
 });
 
 await test("parseArgs reads flags and rejects a bad tracker issue", () => {
-  const options = parseArgs(["--dry-run", "--tracker-issue", "42"]);
+  const options = parseArgs(["--dry-run", "--tracker-issue", "42"], {});
   assertEqual(options.dryRun, true);
   assertEqual(options.trackerIssue, 42);
-  assertThrows(() => parseArgs(["--tracker-issue", "0"]), /positive integer/);
-  assertThrows(() => parseArgs(["--nope"]), /Unknown option/);
+  assertThrows(
+    () => parseArgs(["--tracker-issue", "0"], {}),
+    /positive integer/,
+  );
+  assertThrows(() => parseArgs(["--nope"], {}), /Unknown option/);
+});
+
+// ---------------------------------------------------------------------------
+// Lookback window (backfill after outages)
+// ---------------------------------------------------------------------------
+
+await test("new-issues query embeds the lookback window", () => {
+  assertEqual(buildNewIssuesQuery(), "is:unresolved firstSeen:-8d");
+  assertEqual(buildNewIssuesQuery(30), "is:unresolved firstSeen:-30d");
+});
+
+await test("lookback resolution: default, env fallback, CLI precedence", () => {
+  assertEqual(resolveLookbackDays(null, {}), 8);
+  assertEqual(
+    resolveLookbackDays(null, { SENTRY_TRIAGE_LOOKBACK_DAYS: "" }),
+    8,
+  );
+  assertEqual(
+    resolveLookbackDays(null, { SENTRY_TRIAGE_LOOKBACK_DAYS: "30" }),
+    30,
+  );
+  // CLI flag wins over the env var.
+  assertEqual(
+    resolveLookbackDays("14", { SENTRY_TRIAGE_LOOKBACK_DAYS: "30" }),
+    14,
+  );
+});
+
+await test("lookback resolution fails loud on invalid values", () => {
+  for (const bad of ["0", "91", "abc", "8.5", "-3", "1e2"]) {
+    assertThrows(() => resolveLookbackDays(bad, {}), /between 1 and 90/);
+    assertThrows(
+      () => resolveLookbackDays(null, { SENTRY_TRIAGE_LOOKBACK_DAYS: bad }),
+      /between 1 and 90/,
+    );
+  }
+});
+
+await test("parseArgs wires --lookback-days through validation", () => {
+  assertEqual(parseArgs(["--lookback-days", "30"], {}).lookbackDays, 30);
+  assertEqual(
+    parseArgs(["--lookback-days", "14"], { SENTRY_TRIAGE_LOOKBACK_DAYS: "30" })
+      .lookbackDays,
+    14,
+  );
+  assertEqual(
+    parseArgs([], { SENTRY_TRIAGE_LOOKBACK_DAYS: "21" }).lookbackDays,
+    21,
+  );
+  assertThrows(
+    () => parseArgs(["--lookback-days", "999"], {}),
+    /between 1 and 90/,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Regression-reopen label hygiene
+// ---------------------------------------------------------------------------
+
+await test("verdict label set is derived from the label definitions", () => {
+  assertDeepEqual(VERDICT_LABELS, [
+    "sentry:verdict-code-fix",
+    "sentry:verdict-config-fix",
+    "sentry:verdict-upstream",
+    "sentry:verdict-needs-human",
+  ]);
+});
+
+await test("reopen label edit re-queues triage and sheds stale verdicts", () => {
+  const args = buildReopenLabelEditArgs(200, "owner/repo");
+  assertDeepEqual(args, [
+    "issue",
+    "edit",
+    "200",
+    "-R",
+    "owner/repo",
+    "--add-label",
+    "sentry:needs-triage",
+    "--remove-label",
+    "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human",
+  ]);
 });
 
 // ---------------------------------------------------------------------------
