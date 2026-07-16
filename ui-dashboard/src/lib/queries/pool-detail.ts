@@ -88,6 +88,8 @@ export const POOL_DETAIL_WITH_HEALTH = `
       reserves1
       swapCount
       rebalanceCount
+      notionalVolume0
+      notionalVolume1
       healthTotalSeconds
       hasHealthData
     }

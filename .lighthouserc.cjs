@@ -17,17 +17,26 @@
 //   The audited route also measured performance 0.91,
 //   accessibility 0.95, and CLS 0.000716. Applying the existing convention
 //   (per-metric median rounded to 1 940 ms + 500 ms headroom) sets only
-//   `/volume` to 2 440 ms. The other three routes retain
-//   the shared 1 700 ms LCP ceiling and every other assertion remains shared.
+//   `/volume` to 2 440 ms. `/` and `/pools` retain the blocking 1 700 ms
+//   ceiling. The canonical pool-detail preview keeps measuring the same
+//   1 700 ms ceiling at `?lhci=live`, but reports it as a warning because
+//   repeated audits of one unchanged preview ranged from 927–2 640 ms with
+//   90%+ of LCP in element render delay. A production-build fixture audit at
+//   `?lhci=fixture` owns the blocking 1 700 ms pool-detail contract instead.
+//   Every non-LCP assertion remains shared and blocking.
 //
-//   The 2026-07-15 workflow took 5m10 total, including 3m10 for LHCI, leaving
-//   14m50 headroom under the job's 20-minute timeout.
+//   The 2026-07-15 preview-only workflow took 5m10 total, including 3m10 for
+//   LHCI. The job now has a 30-minute timeout so the deterministic fixture
+//   production build, browser smoke, and three additional pool runs have an
+//   independent execution envelope.
 //
 // BUDGET RATIONALE:
-//   Accessibility + Performance + LCP + CLS are now `error` (blocking).
-//   Accessibility because the score is deterministic; Performance + LCP
-//   because the first empirical CI run passed them comfortably without
-//   any dashboard change; CLS because PR #652 (SSR /pools initial pool
+//   Accessibility + Performance + CLS are `error` (blocking) on every route.
+//   LCP is blocking except for the live canonical pool-detail measurement,
+//   which remains visible at the same 1 700 ms ceiling as a diagnostic warning.
+//   Accessibility because the score is deterministic; Performance and the
+//   blocking LCP surfaces because empirical CI runs passed them with calibrated
+//   headroom; CLS because PR #652 (SSR /pools initial pool
 //   list) eliminated the deterministic 0.4896 layout shift and 3 post-
 //   merge prod runs reported 0.0000. CI runner load variance is real
 //   but the headroom (perf score 5 points below the original typical run,
@@ -35,8 +44,10 @@
 //
 //   Headroom applied:
 //     performance score:  baseline - 0.05  (error at <0.75 → catches big regressions)
-//     LCP:                baseline + 500 ms (error at >1 700 ms normally;
-//                         >2 440 ms on evidence-backed `/volume` only)
+//     LCP:                baseline + 500 ms (error at >1 700 ms for `/`,
+//                         `/pools`, and deterministic pool fixture; warn at
+//                         >1 700 ms for live pool detail; error at >2 440 ms
+//                         on evidence-backed `/volume` only)
 //     CLS:                0.10 (error; standard web-vitals "good" threshold)
 //     INP:                200 ms (in measure-inp.mjs; web-vitals "good" threshold)
 //     accessibility:      0.94 (error; matches current prod baseline)
@@ -46,22 +57,37 @@
 //     /
 //     /pools
 //     /volume
-//     /pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e
+//     /pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e?lhci=live
 //   The pool-detail target is the canonical Celo USDC/USDm pool. Its immutable,
-//   chain-qualified ID is shared with the INP gate and browser fixtures.
+//   chain-qualified ID is shared with the INP gate and browser fixtures. The
+//   deterministic local production-fixture audit uses the same path with
+//   `?lhci=fixture`; exact query markers keep the live and fixture contracts
+//   non-overlapping. Fixture mode isolates production app render/hydration cost
+//   and deliberately delayed client breaker revalidation. It excludes Vercel
+//   edge/network variance, production analytics/Sentry, and live-indexer
+//   latency; `?lhci=live` continues to cover the real deployed bundle/host and
+//   records those surfaces alongside blocking accessibility/performance/CLS.
 
-const NON_VOLUME_URL_PATTERN =
-  /^https?:\/\/[^/]+(?:\/|\/pools|\/pool\/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e)(?:[?#]|$)/
-    .source;
+const CANONICAL_POOL_PATH =
+  "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e";
+const ROOT_AND_POOLS_URL_PATTERN = /^https?:\/\/[^/]+(?:\/|\/pools)(?:[?#]|$)/
+  .source;
 const VOLUME_URL_PATTERN = /^https?:\/\/[^/]+\/volume(?:[?#]|$)/.source;
+const LIVE_POOL_URL_PATTERN = new RegExp(
+  `^https?://[^/]+${CANONICAL_POOL_PATH.replaceAll("/", "\\/")}\\?lhci=live(?:#.*)?$`,
+).source;
+const FIXTURE_POOL_URL_PATTERN = new RegExp(
+  `^https?://[^/]+${CANONICAL_POOL_PATH.replaceAll("/", "\\/")}\\?lhci=fixture(?:#.*)?$`,
+).source;
 
 /**
  * Keep every assertion identical across routes except for the evidence-backed
- * LCP ceiling supplied by the assert-matrix entry.
+ * LCP ceiling and severity supplied by the assert-matrix entry.
  *
  * @param {number} lcpMaxNumericValue
+ * @param {"error" | "warn"} lcpSeverity
  */
-function assertionsWithLcpCeiling(lcpMaxNumericValue) {
+function assertionsWithLcpCeiling(lcpMaxNumericValue, lcpSeverity = "error") {
   return {
     // Performance score: error below 0.75 (desktop SSR, production
     // baseline ~0.80). First real CI run with the bypass working
@@ -90,12 +116,14 @@ function assertionsWithLcpCeiling(lcpMaxNumericValue) {
     // unexpected redirect all fail closed).
     "categories:accessibility": ["error", { minScore: 0.94 }],
 
-    // Largest Contentful Paint: error above the route's calibrated ceiling.
-    // `/`, `/pools`, and canonical pool detail retain 1 700 ms. `/volume`
-    // uses the documented 2 440 ms evidence-backed ceiling. Both apply the
-    // same baseline + 500 ms convention.
+    // Largest Contentful Paint: measured against the route's calibrated
+    // ceiling. `/`, `/pools`, and the deterministic canonical pool fixture
+    // block above 1 700 ms. The live canonical pool keeps that same numeric
+    // contract as a warning because live indexer/SSR scheduling made repeated
+    // same-preview results non-deterministic. `/volume` blocks above its
+    // documented 2 440 ms evidence-backed ceiling.
     "largest-contentful-paint": [
-      "error",
+      lcpSeverity,
       { maxNumericValue: lcpMaxNumericValue },
     ],
 
@@ -149,13 +177,16 @@ module.exports = {
     },
     assert: {
       // `warn` = advisory (non-blocking); `error` = blocking. `assertMatrix`
-      // scopes the single evidence-backed exception to `/volume`; using one
-      // assertion factory keeps the remaining budgets mechanically identical.
+      // scopes the two evidence-backed exceptions: `/volume` has a larger
+      // blocking ceiling, while only the live canonical pool changes LCP
+      // severity. The fixture marker restores the blocking pool contract.
+      // Exact query matching prevents live and fixture entries from overlap.
+      // One assertion factory keeps the remaining budgets mechanically equal.
       // Aggregate every route's three runs by median so one lucky run cannot
-      // hide a regression. `/volume` also has a median-derived route budget.
+      // hide a regression or a live warning.
       assertMatrix: [
         {
-          matchingUrlPattern: NON_VOLUME_URL_PATTERN,
+          matchingUrlPattern: ROOT_AND_POOLS_URL_PATTERN,
           aggregationMethod: "median",
           assertions: assertionsWithLcpCeiling(1700),
         },
@@ -163,6 +194,16 @@ module.exports = {
           matchingUrlPattern: VOLUME_URL_PATTERN,
           aggregationMethod: "median",
           assertions: assertionsWithLcpCeiling(2440),
+        },
+        {
+          matchingUrlPattern: LIVE_POOL_URL_PATTERN,
+          aggregationMethod: "median",
+          assertions: assertionsWithLcpCeiling(1700, "warn"),
+        },
+        {
+          matchingUrlPattern: FIXTURE_POOL_URL_PATTERN,
+          aggregationMethod: "median",
+          assertions: assertionsWithLcpCeiling(1700),
         },
       ],
     },
