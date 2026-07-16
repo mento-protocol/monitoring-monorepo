@@ -281,6 +281,14 @@ describe('Metric.parse', () => {
     });
   });
 
+  describe('EUROP.balanceOf()', () => {
+    it('should parse the raw balance into whole units using 6 decimals', () => {
+      const oneHundredTokens = BigInt('100000000'); // 100 * 1e6
+      const result = metric.parse(oneHundredTokens, 'EUROP', 'balanceOf');
+      expect(result).toBe(100);
+    });
+  });
+
   describe('configured token totalSupply()', () => {
     it('should match the legacy 18-decimal conversion for every configured stable token', () => {
       const rawSupply = 123_456n * 1_000_000_000_000_000_000n + 999_999n;

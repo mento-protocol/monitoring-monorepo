@@ -68,6 +68,8 @@ export class Metric {
     // Monad reserve tokens (issue #707); both verified 6dp on-chain.
     'USDT0.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
     'AUSD.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    // Polygon reserve token; verified 6dp on-chain.
+    'EUROP.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
     'SortedOracles.medianRate': (output) => this.parseMedianRate(output),
     'SortedOracles.isOldestReportExpired': (output) =>
       this.parseOldestReportExpired(output),
