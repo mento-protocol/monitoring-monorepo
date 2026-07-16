@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import React, { type ReactNode } from "react";
 import type { Pool } from "@/lib/types";
-import { BREAKER_CONFIG_TIMEOUT_MS } from "@/lib/hasura-timeout";
+import {
+  BREAKER_CONFIG_TIMEOUT_MS,
+  HASURA_TIMEOUT_MS,
+} from "@/lib/hasura-timeout";
 import { PoolBreakerConfigSchema } from "@/lib/queries/pool-detail-schemas";
 
 // Characterization test for the upcoming pool-page extraction refactor.
@@ -12,8 +15,8 @@ import { PoolBreakerConfigSchema } from "@/lib/queries/pool-detail-schemas";
 //   useGQL(query, variables?, refreshInterval = 30_000, swrOptions?)
 //
 // This test pins the *call shape* every tab uses: every useGQL call
-// passes a string-or-null query, and `refreshInterval` (3rd arg) is
-// either undefined (defaults to 30_000) or a positive number — never
+// passes a string-or-null query, and its 3rd arg is either an options object,
+// undefined (defaults to 30_000), or a positive legacy refresh number — never
 // `0`, which would silently disable polling per `AGENTS.md`.
 //
 // Refactoring the page into per-tab files cannot drop options or pass
@@ -245,21 +248,50 @@ describe("useGQL call shape across pool detail tabs", () => {
             `tab=${tab}: useGQL arg[1] (variables) must be object|undefined`,
           ).toBe("object");
         }
-        // Arg 2: refreshMs is undefined or a positive number — never 0,
-        // which would silently disable polling (`AGENTS.md` SWR rule).
-        if (refreshMs !== undefined) {
-          expect(
-            typeof refreshMs,
-            `tab=${tab}: useGQL arg[2] (refreshMs) must be number|undefined`,
-          ).toBe("number");
+        // Arg 2: a legacy refresh number or an options object. Any explicit
+        // refresh interval must be positive — 0 silently disables polling.
+        if (typeof refreshMs === "number") {
           expect(
             refreshMs,
             `tab=${tab}: useGQL arg[2]=0 silently disables SWR polling — never pass 0`,
           ).toBeGreaterThan(0);
+        } else if (refreshMs !== undefined) {
+          expect(
+            typeof refreshMs,
+            `tab=${tab}: useGQL arg[2] must be number|options|undefined`,
+          ).toBe("object");
+          const options = refreshMs as { refreshInterval?: number };
+          if (options.refreshInterval !== undefined) {
+            expect(options.refreshInterval).toBeGreaterThan(0);
+          }
         }
       }
     },
   );
+
+  it("bounds TradingLimits revalidation so persisted data cannot refresh forever", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({ Pool: [BASE_POOL] });
+      }
+      if (query.includes("TradingLimits")) {
+        return gqlResult({ TradingLimit: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    renderToStaticMarkup(React.createElement(PoolDetailPage));
+
+    const tradingLimitsCalls = mockUseGQL.mock.calls.filter(
+      ([query]) =>
+        typeof query === "string" && query.includes("query TradingLimits"),
+    );
+    expect(tradingLimitsCalls).toHaveLength(1);
+    expect(tradingLimitsCalls[0]?.[2]).toMatchObject({
+      timeoutMs: HASURA_TIMEOUT_MS,
+    });
+  });
 
   it("bounds the shared POOL_BREAKER_CONFIG fetch with a timeout in the oracle tab — every subscriber must, or SWR dedup can run an unbounded fetcher (Codex P1, issue #1257)", () => {
     mockSearchParams.set("tab", "oracle");

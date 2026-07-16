@@ -147,6 +147,7 @@ describe("stacked TimeSeriesChartCard caller matrix", () => {
         chartBreakdown: poolBreakdown,
         topPoolsListEntries: [],
       },
+      poolChartRange: "30d",
       chartControls: {
         chartRange: "30d",
         onChartRangeChange: () => undefined,
