@@ -8,7 +8,7 @@ scope: ui-dashboard
 date: 2026-07
 ---
 
-# ADR 0036 — Dashboard native GraphQL transport and client-side Zod Mini
+# ADR 0037 — Dashboard native GraphQL transport and client-side Zod Mini
 
 **Status:** Accepted (Jul 2026), in force.
 **Scope:** ui-dashboard
