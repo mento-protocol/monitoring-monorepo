@@ -138,6 +138,24 @@ describe("deriveBridgeStatus", () => {
     ).toBe("ATTESTED");
   });
 
+  it("uses attestation time when a late source upsert backdates lastUpdatedAt", () => {
+    const now = 1_700_100_000;
+    const sourceTimestamp = now - 2 * 60 * 60;
+    const attestedRecently = now - 10 * 60;
+    expect(
+      deriveBridgeStatus(
+        {
+          status: "ATTESTED",
+          sentTimestamp: String(sourceTimestamp),
+          firstSeenAt: String(sourceTimestamp),
+          lastUpdatedAt: String(sourceTimestamp),
+          lastAttestedTimestamp: String(attestedRecently),
+        },
+        now,
+      ),
+    ).toBe("ATTESTED");
+  });
+
   it("keeps recently progressed QUEUED_INBOUND transfers from being marked stuck", () => {
     const now = 1_700_100_000;
     const sentLongAgo = now - 25 * 60 * 60;

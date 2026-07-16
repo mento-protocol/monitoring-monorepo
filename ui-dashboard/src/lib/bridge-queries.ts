@@ -49,6 +49,8 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
       deliveredTimestamp
       deliveredTxHash
       attestationCount
+      firstAttestedTimestamp
+      lastAttestedTimestamp
       usdValueAtSend
       firstSeenAt
       lastUpdatedAt
