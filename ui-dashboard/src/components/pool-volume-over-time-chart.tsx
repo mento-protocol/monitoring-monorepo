@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
 import {
   getSnapshotVolumeInUsd,
+  poolTotalVolumeUSD,
   snapshotWindow7d,
   snapshotWindow30d,
 } from "@/lib/volume";
@@ -105,14 +106,22 @@ function volumeHeadline({
   priceable,
   visibleSeries,
   rangeTotal,
+  allTimeTotal,
 }: {
   loading: boolean;
   priceable: boolean;
   visibleSeries: TimeSeriesPoint[];
   rangeTotal: number;
+  allTimeTotal: number | null | undefined;
 }): string {
   if (loading) return "…";
-  if (!priceable || visibleSeries.length === 0) return "—";
+  if (!priceable) return "—";
+  if (allTimeTotal !== undefined) {
+    if (allTimeTotal === null) return "—";
+    if (allTimeTotal === 0 && visibleSeries.length === 0) return "—";
+    return formatUSD(allTimeTotal);
+  }
+  if (visibleSeries.length === 0) return "—";
   return formatUSD(rangeTotal);
 }
 
@@ -184,16 +193,27 @@ export function PoolVolumeOverTimeChart({
     () => visibleSeries.reduce((sum, pt) => sum + pt.value, 0),
     [visibleSeries],
   );
+  // The default All-range headline has an exact cumulative source on Pool.
+  // It does not need to wait for the chart's daily-snapshot history, which is
+  // fetched after hydration and can contain at most Hasura's newest 1,000
+  // rows. The history still revalidates normally and owns the plotted series;
+  // only the headline uses the exact server-prefetched cumulative counters.
+  const allTimeTotal =
+    range === "all"
+      ? poolTotalVolumeUSD(pool, network, rates ?? new Map())
+      : undefined;
+  const headlineLoading = isLoading || (range !== "all" && snapshotsLoading);
   const loading = isLoading || snapshotsLoading;
   const error = hasError || snapshotsError;
   const hoverDateFormat =
     bucketSeconds === SECONDS_PER_HOUR ? "%b %d, %H:00 UTC" : "%b %d, %Y";
 
   const headline = volumeHeadline({
-    loading,
+    loading: headlineLoading,
     priceable,
     visibleSeries,
     rangeTotal,
+    allTimeTotal,
   });
 
   return (
@@ -204,6 +224,7 @@ export function PoolVolumeOverTimeChart({
       range={range}
       onRangeChange={setRange}
       headline={headline}
+      headlineLoading={headlineLoading}
       change={null}
       hoverDateFormat={hoverDateFormat}
       isLoading={loading}

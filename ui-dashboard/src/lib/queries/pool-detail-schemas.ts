@@ -119,6 +119,11 @@ const PoolDetailRowSchema = z.object({
   reserves1: OptionalStringSchema,
   swapCount: OptionalNumberSchema,
   rebalanceCount: OptionalNumberSchema,
+  // Pool cumulative counters are non-null in schema.graphql and power the
+  // exact SSR all-time Volume headline. Missing values must fail parsing
+  // rather than fabricate a believable $0.00 while snapshot history loads.
+  notionalVolume0: z.string(),
+  notionalVolume1: z.string(),
   healthTotalSeconds: OptionalStringSchema,
   hasHealthData: OptionalBooleanSchema,
   // Hasura can return null on FPMM pools; coerce to undefined for Pool compat.

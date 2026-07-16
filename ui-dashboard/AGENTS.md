@@ -3,7 +3,7 @@ title: Monitoring Dashboard Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-09
+last_verified: 2026-07-16
 ---
 
 # AGENTS.md — Monitoring Dashboard
@@ -50,6 +50,7 @@ pnpm codegen # Generate GraphQL operation types from ../indexer-envio/schema.gra
 pnpm build   # Production build
 pnpm start   # Start production server
 pnpm lint    # Run ESLint
+pnpm lighthouse:pool-fixture  # Production-build canonical pool Lighthouse gate (3 deterministic runs)
 pnpm test:browser  # Fixture-driven Playwright browser interaction tests
 pnpm test:browser:production  # Build-backed fixture browser tests via next start
 pnpm test:mutation  # Targeted StrykerJS baseline for src/lib/weekend.ts
@@ -207,6 +208,20 @@ Chromium frame-detach flakes, set `PLAYWRIGHT_FORCE_SINGLE_PROCESS=true`. If
 Next's dev server panics under Turbopack during that local verification, use
 `PLAYWRIGHT_NEXT_COMMAND='pnpm dev --webpack --hostname 127.0.0.1 --port {port}'`;
 CI should leave both unset.
+
+`pnpm lighthouse:pool-fixture` is the deterministic production-build gate for
+the canonical pool-detail LCP contract. It builds against the local
+`lighthouse-pool` Hasura scenario, proves both the SSR breaker value and exact
+all-time Volume headline remain visible while client revalidation is
+deliberately delayed, rejects fixture GraphQL/request/browser errors, and
+collects three exact `?lhci=fixture` Lighthouse runs with the blocking 1,700 ms
+median ceiling. The runner proves one delayed breaker completion per audit and
+requires a real blocking LHCI assertion result across all three values.
+Artifacts and per-run phase/network diagnostics are written under
+`reports/lighthouse-pool/`. This secretless fixture lane also runs for workflow
+self-changes, fork PRs, and Dependabot PRs. It isolates app render/hydration
+cost; the trusted preview workflow's exact `?lhci=live` run remains the source
+for deployed Vercel, live-indexer, and production-service variance.
 
 ## React Doctor
 

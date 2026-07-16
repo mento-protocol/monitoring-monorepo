@@ -6664,6 +6664,8 @@ export type PoolDetailWithHealthQuery = {
     readonly reserves1: string;
     readonly swapCount: number;
     readonly rebalanceCount: number;
+    readonly notionalVolume0: string;
+    readonly notionalVolume1: string;
     readonly healthTotalSeconds: string;
     readonly hasHealthData: boolean;
   }>;

@@ -137,6 +137,8 @@ describe("PoolDetailWithHealthSchema", () => {
     createdAtTimestamp: "1700000000",
     updatedAtBlock: "2000",
     updatedAtTimestamp: "1700001000",
+    notionalVolume0: "0",
+    notionalVolume1: "0",
   };
 
   it("passes with minimal required fields", () => {
@@ -171,6 +173,8 @@ describe("PoolDetailWithHealthSchema", () => {
       reserves1: "1000000",
       swapCount: 42,
       rebalanceCount: 17,
+      notionalVolume0: "125000000000000000000",
+      notionalVolume1: "125000000",
       healthTotalSeconds: "86400",
       hasHealthData: true,
     };
@@ -181,6 +185,10 @@ describe("PoolDetailWithHealthSchema", () => {
       expect(result.data.Pool[0]!.token1Decimals).toBe(6);
       expect(result.data.Pool[0]!.swapCount).toBe(42);
       expect(result.data.Pool[0]!.rebalanceCount).toBe(17);
+      expect(result.data.Pool[0]!.notionalVolume0).toBe(
+        "125000000000000000000",
+      );
+      expect(result.data.Pool[0]!.notionalVolume1).toBe("125000000");
     }
   });
 
@@ -195,6 +203,14 @@ describe("PoolDetailWithHealthSchema", () => {
         rebalanceCount: 17,
       });
     }
+  });
+
+  it("fails closed when an exact cumulative volume counter is missing", () => {
+    const row = { ...minimalRow };
+    Reflect.deleteProperty(row, "notionalVolume1");
+    const result = PoolDetailWithHealthSchema.safeParse({ Pool: [row] });
+
+    expect(result.success).toBe(false);
   });
 
   it("preserves token decimals through the schema (no silent strip)", () => {

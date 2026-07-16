@@ -23,12 +23,12 @@ const CONFIG_PATH = fileURLToPath(
 );
 
 const PREVIEW_ORIGIN = "https://monitoring-example.vercel.app";
-const NON_VOLUME_PATHS = [
-  "/",
-  "/pools",
-  "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
-];
+const ROOT_AND_POOLS_PATHS = ["/", "/pools"];
 const VOLUME_PATH = "/volume";
+const CANONICAL_POOL_PATH =
+  "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e";
+const LIVE_POOL_PATH = `${CANONICAL_POOL_PATH}?lhci=live`;
+const FIXTURE_POOL_PATH = `${CANONICAL_POOL_PATH}?lhci=fixture`;
 const REAL_VOLUME_LCP_VALUES = [1981.264, 1885.954, 1940.19];
 
 function makeLhr(path, lcpNumericValue) {
@@ -110,7 +110,12 @@ function findLcpResult(result, path) {
 
 describe("Lighthouse route assertion matrix", () => {
   it("matches each audited route exactly once", () => {
-    const paths = [...NON_VOLUME_PATHS, VOLUME_PATH];
+    const paths = [
+      ...ROOT_AND_POOLS_PATHS,
+      VOLUME_PATH,
+      LIVE_POOL_PATH,
+      FIXTURE_POOL_PATH,
+    ];
 
     for (const path of paths) {
       const url = new URL(path, PREVIEW_ORIGIN).href;
@@ -120,29 +125,41 @@ describe("Lighthouse route assertion matrix", () => {
       assert.equal(matches.length, 1, path);
     }
 
-    const unrelatedUrl = new URL("/volume-history", PREVIEW_ORIGIN).href;
-    const unrelatedMatches = config.ci.assert.assertMatrix.filter(
-      ({ matchingUrlPattern }) =>
-        new RegExp(matchingUrlPattern).test(unrelatedUrl),
-    );
-    assert.equal(unrelatedMatches.length, 0);
+    const unmatchedPaths = [
+      "/volume-history",
+      CANONICAL_POOL_PATH,
+      `${CANONICAL_POOL_PATH}?lhci=other`,
+      `${CANONICAL_POOL_PATH}?lhci=live&extra=true`,
+      `${CANONICAL_POOL_PATH}?lhci=fixture&extra=true`,
+    ];
+    for (const path of unmatchedPaths) {
+      const url = new URL(path, PREVIEW_ORIGIN).href;
+      const matches = config.ci.assert.assertMatrix.filter(
+        ({ matchingUrlPattern }) => new RegExp(matchingUrlPattern).test(url),
+      );
+      assert.equal(matches.length, 0, path);
+    }
   });
 
   it("keeps every non-LCP assertion identical between matrix entries", () => {
-    const [nonVolume, volume] = config.ci.assert.assertMatrix;
     const withoutLcp = ({ "largest-contentful-paint": _lcp, ...rest }) => rest;
+    const [first, ...remaining] = config.ci.assert.assertMatrix;
+    assert.ok(first);
 
-    assert.deepEqual(
-      withoutLcp(volume.assertions),
-      withoutLcp(nonVolume.assertions),
-    );
-    assert.deepEqual(withoutLcp(nonVolume.assertions), {
+    for (const entry of remaining) {
+      assert.deepEqual(
+        withoutLcp(entry.assertions),
+        withoutLcp(first.assertions),
+      );
+    }
+    assert.deepEqual(withoutLcp(first.assertions), {
       "categories:performance": ["error", { minScore: 0.75 }],
       "categories:accessibility": ["error", { minScore: 0.94 }],
       "cumulative-layout-shift": ["error", { maxNumericValue: 0.1 }],
     });
-    assert.equal(nonVolume.aggregationMethod, "median");
-    assert.equal(volume.aggregationMethod, "median");
+    for (const entry of config.ci.assert.assertMatrix) {
+      assert.equal(entry.aggregationMethod, "median");
+    }
   });
 
   it("passes the real /volume measurements at the 2,440 ms ceiling", () => {
@@ -187,18 +204,19 @@ describe("Lighthouse route assertion matrix", () => {
     assert.equal(findLcpResult(oneSlowRun, VOLUME_PATH).passed, true);
   });
 
-  it("uses the median non-volume run instead of an optimistic outlier", () => {
+  it("uses the median blocking 1,700 ms run instead of an optimistic outlier", () => {
+    const blockingPaths = [...ROOT_AND_POOLS_PATHS, FIXTURE_POOL_PATH];
     const oneLuckyRun = runLhciAssert(
-      NON_VOLUME_PATHS.flatMap((path) => reportsFor(path, [1699, 1701, 1702])),
+      blockingPaths.flatMap((path) => reportsFor(path, [1699, 1701, 1702])),
     );
     const oneSlowRun = runLhciAssert(
-      NON_VOLUME_PATHS.flatMap((path) => reportsFor(path, [1698, 1700, 1702])),
+      blockingPaths.flatMap((path) => reportsFor(path, [1698, 1700, 1702])),
     );
 
     assert.equal(oneLuckyRun.status, 1, oneLuckyRun.stderr);
     assert.equal(oneSlowRun.status, 0, oneSlowRun.stderr);
 
-    for (const path of NON_VOLUME_PATHS) {
+    for (const path of blockingPaths) {
       assert.equal(findLcpResult(oneLuckyRun, path).actual, 1701, path);
       assert.equal(findLcpResult(oneLuckyRun, path).passed, false, path);
       assert.equal(findLcpResult(oneSlowRun, path).actual, 1700, path);
@@ -206,12 +224,13 @@ describe("Lighthouse route assertion matrix", () => {
     }
   });
 
-  it("retains the blocking 1,700 ms ceiling on every non-volume route", () => {
+  it("retains the blocking 1,700 ms ceiling on root, pools, and fixture pool", () => {
+    const blockingPaths = [...ROOT_AND_POOLS_PATHS, FIXTURE_POOL_PATH];
     const atCeiling = runLhciAssert(
-      NON_VOLUME_PATHS.flatMap((path) => reportsFor(path, [1700, 1700, 1700])),
+      blockingPaths.flatMap((path) => reportsFor(path, [1700, 1700, 1700])),
     );
     const aboveCeiling = runLhciAssert(
-      NON_VOLUME_PATHS.flatMap((path) =>
+      blockingPaths.flatMap((path) =>
         reportsFor(path, [1700.001, 1700.001, 1700.001]),
       ),
     );
@@ -219,7 +238,7 @@ describe("Lighthouse route assertion matrix", () => {
     assert.equal(atCeiling.status, 0, atCeiling.stderr);
     assert.equal(aboveCeiling.status, 1, aboveCeiling.stderr);
 
-    for (const path of NON_VOLUME_PATHS) {
+    for (const path of blockingPaths) {
       const atCeilingLcp = findLcpResult(atCeiling, path);
       const aboveCeilingLcp = findLcpResult(aboveCeiling, path);
 
@@ -227,5 +246,35 @@ describe("Lighthouse route assertion matrix", () => {
       assert.equal(atCeilingLcp.passed, true, path);
       assert.equal(aboveCeilingLcp.passed, false, path);
     }
+  });
+
+  it("records live pool LCP above 1,700 ms as a median warning", () => {
+    const result = runLhciAssert(
+      reportsFor(LIVE_POOL_PATH, [1699, 1701, 2640]),
+    );
+    const lcp = findLcpResult(result, LIVE_POOL_PATH);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(lcp.expected, 1700);
+    assert.equal(lcp.actual, 1701);
+    assert.equal(lcp.passed, false);
+    assert.equal(lcp.level, "warn");
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /largest-contentful-paint.*warning/s,
+    );
+  });
+
+  it("blocks fixture pool LCP above the same exact 1,700 ms ceiling", () => {
+    const result = runLhciAssert(
+      reportsFor(FIXTURE_POOL_PATH, [1699, 1701, 2640]),
+    );
+    const lcp = findLcpResult(result, FIXTURE_POOL_PATH);
+
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(lcp.expected, 1700);
+    assert.equal(lcp.actual, 1701);
+    assert.equal(lcp.passed, false);
+    assert.equal(lcp.level, "error");
   });
 });

@@ -3,7 +3,7 @@ title: Recurring PR Review Patterns
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-03
+last_verified: 2026-07-16
 ---
 
 # Recurring PR Review Patterns
@@ -140,32 +140,60 @@ ratchet is now fully in place.
 - **Catalog version-skew check (blocking, `pnpm skew:check`)**: `scripts/version-skew-check.mjs` enforces that every manifest entry for a cataloged package is either `catalog:` or exactly the catalog version. Use `catalog:` only in packages that are always installed from the root workspace; standalone deploy roots such as `indexer-envio`, `aegis`, `governance-watchdog`, and alerts functions keep literal pins and rely on this check to prevent drift. Add a fixture to `scripts/version-skew-check.test.mjs` when the catalog gains semantics beyond exact pin equality.
 - **Core Web Vitals + accessibility gate (`lhci autorun` + INP via Playwright)**:
   `.github/workflows/lighthouse.yml` runs only on PRs that touch dashboard
-  inputs (workflow-level `paths:` filter mirroring the in-job filter and the
-  paths Vercel builds previews for). It is advisory, so that filter is safe.
-  The gate polls the Vercel preview URL (5-minute timeout), then runs three Lighthouse collections
-  each against `/`, `/pools`, `/volume`, and canonical pool detail
-  `/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e` for accessibility,
-  performance, LCP, and CLS. `ui-dashboard/scripts/measure-inp.mjs` separately
-  drives `/pools` filter, `/volume` time-window and sort, and the canonical pool
-  TVL-range interactions. Skips fork PRs and Dependabot. Shared Lighthouse
-  budgets and route-baseline status live in `.lighthouserc.cjs`; INP defaults to
-  200 ms. Accessibility (≥ 0.94), performance (≥ 0.75), CLS (≤ 0.10), and
-  per-surface INP (≤ 200 ms) are shared and blocking. LCP is blocking at
-  1 700 ms for `/`, `/pools`, and canonical pool detail, and at 2 440 ms for
-  `/volume`. The `/volume` exception is backed by the 2026-07-15 three-run
-  preview values (1 981.264, 1 885.954, and 1 940.190 ms): per-metric median
-  baseline 1 940 ms + the established 500 ms headroom. That run measured performance
-  0.91, accessibility 0.95, and CLS 0.000716; the workflow took 5m10 total
-  (3m10 LHCI), leaving 14m50 under the 20-minute timeout. Do not add a per-route
-  exception without deterministic three-run preview evidence. CLS was promoted
-  from advisory after PR #652 reduced deterministic `/pools` CLS from 0.4896 to
-  0.0000. Remaining follow-ups are #659 (INP multi-run median), #660
-  (`workflow_run` secret hardening), and #661 (SSR initial-data hardening). The
-  fail-closed `assert-lhci-finalurl.mjs` guard requires exactly 12 reports—the
-  complete 3-runs × 4-path matrix—on the preview host, with no Lighthouse
-  runtime error or main-document 4xx/5xx. The Vercel protection bypass requires
-  both `x-vercel-protection-bypass` and `x-vercel-set-bypass-cookie: true` for
-  Lighthouse and Playwright. Pairs with `size-limit.yml` (bundle bytes), which
-  covers a different failure class.
+  inputs or the workflow itself. The workflow-level `paths:` filter mirrors the
+  in-job fixture filter; a narrower preview filter mirrors the paths Vercel
+  builds. It is advisory, so the workflow-level filter is safe.
+  The gate polls the Vercel preview URL (5-minute timeout), then runs three
+  Lighthouse collections each against `/`, `/pools`, `/volume`, and canonical
+  pool detail
+  `/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e?lhci=live`
+  for accessibility, performance, LCP, and CLS. The preview remains the source
+  of truth for the real deployed bundle/host, Vercel edge/network behavior,
+  production analytics/Sentry, and live-indexer latency. Accessibility
+  (≥ 0.94), performance (≥ 0.75), and CLS (≤ 0.10) remain shared and blocking.
+  Root and `/pools` LCP remain blocking at 1 700 ms; `/volume` remains blocking
+  at 2 440 ms, backed by the 2026-07-15 values (1 981.264, 1 885.954, and
+  1 940.190 ms). The live pool still measures the unchanged 1 700 ms ceiling,
+  but emits a warning because one unchanged preview produced 927–2 640 ms
+  samples with 90%+ of LCP attributed to element render delay from live
+  indexer/SSR/client scheduling.
+
+  `pnpm dashboard:lighthouse:pool-fixture` owns the blocking pool-detail
+  contract. It builds the real production dashboard against the local Hasura
+  fixture, verifies the exact SSR breaker and Volume values through deliberately
+  delayed client breaker revalidation in Playwright, and collects three
+  canonical `?lhci=fixture` runs with median LCP blocking above the same 1 700 ms
+  ceiling. The runner requires one completed delayed breaker request per browser
+  audit and inspects `assertion-results.json` to prove the blocking assertion
+  actually ran across all three numeric values. Fixture mode isolates app
+  render/hydration cost; it deliberately excludes Vercel edge/network variance,
+  production analytics/Sentry, and live-indexer latency. Exact query markers
+  make the live warning and fixture error patterns non-overlapping, while all
+  non-LCP assertions remain mechanically identical and blocking.
+
+  `ui-dashboard/scripts/measure-inp.mjs` separately drives `/pools` filter,
+  `/volume` time-window and sort, and canonical pool TVL-range interactions;
+  per-surface INP remains blocking at ≤ 200 ms. The fail-closed
+  `assert-lhci-finalurl.mjs` guard still requires exactly 12 preview reports—the
+  complete 3-runs × 4-path matrix—with no redirect, Lighthouse runtime error, or
+  main-document 4xx/5xx. Live and fixture per-run diagnostics are appended to
+  the sticky PR comment when a preview exists; trusted workflow-only/ignored
+  preview runs update that same comment with a fixture-only status so an older
+  result cannot remain misleading. The full
+  `ui-dashboard/reports/lighthouse-pool/` directory is uploaded even on
+  failure. The combined job has a 30-minute
+  timeout for the preview plus deterministic production-build phase. Fork and
+  Dependabot PRs still run the secretless deterministic fixture, but skip the
+  Vercel preview, PR comment, and INP lanes that require trusted secrets or
+  write permissions. The Vercel protection bypass remains confined to trusted
+  workflow shell and requires both `x-vercel-protection-bypass` and
+  `x-vercel-set-bypass-cookie: true`; the fixture command receives neither
+  secret. The preview final-URL guard and diagnostics both require the exact
+  `?lhci=live` pathname/query target; fixture diagnostics require the exact
+  `?lhci=fixture` target. `scripts/lighthouse-config.test.mjs` exercises exact
+  pattern non-overlap, warning/error severity, thresholds, and median aggregation
+  through the installed LHCI CLI. Pairs with `size-limit.yml` (bundle bytes),
+  which covers a different failure class.
+
 - **GraphQL schema diff (advisory, `pnpm code-health:schema-diff`)**: `.github/workflows/schema-diff.yml` runs on every PR (no workflow-level `paths:` filter — intentionally). It posts a sticky comment and clears it when the schema reverts to base, so it must stay unfiltered: a `paths:` skip on a revert PR would strand the stale comment (the cleanup step never runs). Run/skip is decided in-job via the inline `filter` step + `decide` step — the diff runs only when `indexer-envio/schema.graphql` changed (fail-closed on path-detection error). Uses `graphql`'s `findBreakingChanges` + `findDangerousChanges` to compare `origin/<base>:indexer-envio/schema.graphql` against `HEAD`. Results posted as a sticky PR comment (header `schema-diff`); exit code always 0 (advisory). Breaking changes (removals, type narrowing, new required args) surfaced prominently; dangerous changes (default shifts, new optional fields) listed separately; safe additions skipped. Local run: `pnpm code-health:schema-diff`. Promotion to blocking is a follow-up once real-PR signal has been collected.
 - **Env-var validation (pattern — `src/env.ts` per package)**: each package parses `process.env` through Zod at module load and exports typed constants (`env` for indexer-envio + metrics-bridge; `clientEnv` from `ui-dashboard/src/env.ts`; `serverEnv` from `ui-dashboard/src/server-env.ts`). Use `.catch(default)` (not `.default()`) for numeric/enum fields that have a fallback so invalid values silently resolve instead of throwing. The dashboard client schema uses `zod/mini`; its full-Zod server schema is isolated in `server-env.ts` so client imports cannot retain full Zod in browser chunks. Never import `serverEnv` from a client component. Files whose tests manipulate `process.env` at test time (via `vi.stubEnv`) keep direct `process.env` reads; the static parse runs before any test hook fires. Dynamic computed-key reads (`process.env[config.envVar]`) also stay as-is.

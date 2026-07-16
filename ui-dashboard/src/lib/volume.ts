@@ -62,10 +62,12 @@ export function poolTotalVolumeUSD(
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
   if (USDM_SYMBOLS.has(sym0)) {
-    return parseWei(pool.notionalVolume0 ?? "0", pool.token0Decimals ?? 18);
+    if (pool.notionalVolume0 === undefined) return null;
+    return parseWei(pool.notionalVolume0, pool.token0Decimals ?? 18);
   }
   if (USDM_SYMBOLS.has(sym1)) {
-    return parseWei(pool.notionalVolume1 ?? "0", pool.token1Decimals ?? 18);
+    if (pool.notionalVolume1 === undefined) return null;
+    return parseWei(pool.notionalVolume1, pool.token1Decimals ?? 18);
   }
   return (
     volumeViaFxRate(sym0, pool.notionalVolume0, pool.token0Decimals, rates) ??
@@ -79,7 +81,8 @@ function volumeViaFxRate(
   decimals: number | undefined,
   rates: OracleRateMap,
 ): number | null {
-  const amount = parseWei(rawVolume ?? "0", decimals ?? 18);
+  if (rawVolume === undefined) return null;
+  const amount = parseWei(rawVolume, decimals ?? 18);
   return tokenToUSD(symbol, amount, rates);
 }
 

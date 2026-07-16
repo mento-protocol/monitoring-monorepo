@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-16
 ---
 
 # Quick Commands
@@ -63,6 +63,7 @@ pnpm dashboard:dev            # Dev server; see ui-dashboard/AGENTS.md for logge
 pnpm dashboard:codegen        # Generate dashboard GraphQL operation types from indexer-envio/schema.graphql
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check bundle size against budgets (run after build)
+pnpm dashboard:lighthouse:pool-fixture # Production-build canonical pool Lighthouse: deterministic fixture, delayed breaker revalidation, blocking 1 700 ms median LCP
 pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture-driven browser interaction + visual snapshot tests
 pnpm --filter @mento-protocol/ui-dashboard test:browser:production        # Build-backed fixture browser tests via next start
 pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots # Re-baseline visual snapshots after a legitimate UI change

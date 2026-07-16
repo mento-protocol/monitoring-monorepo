@@ -10,7 +10,7 @@ const AUDITED_PATHS = [
   "/",
   "/pools",
   "/volume",
-  "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+  "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e?lhci=live",
 ];
 const SCRIPT_PATH = fileURLToPath(
   new URL("./assert-lhci-finalurl.mjs", import.meta.url),
@@ -66,7 +66,7 @@ describe("assert-lhci-finalurl", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Audited 12 report(s)");
     expect(result.stdout).toContain(
-      "All audited URLs match the expected host + path set.",
+      "All audited URLs match the expected host + path/query set.",
     );
   });
 
@@ -123,7 +123,24 @@ describe("assert-lhci-finalurl", () => {
     const result = runGuard();
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Path mismatch");
+    expect(result.stderr).toContain("Path/query mismatch");
     expect(result.stderr).toContain("got /unexpected");
+  });
+
+  it("rejects the canonical pool report when its live contract marker is missing", () => {
+    const paths = AUDITED_PATHS.flatMap((path) => Array(3).fill(path));
+    paths[9] = "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e";
+    writeReports(paths);
+
+    const result = runGuard();
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Path/query mismatch");
+    expect(result.stderr).toContain(
+      "got /pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+    );
+    expect(result.stderr).toContain(
+      "Expected 3 Lighthouse reports for /pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e?lhci=live, found 2",
+    );
   });
 });
