@@ -83,6 +83,20 @@ locals {
       aegis_chain         = "monadTestnet"
       chainlink_feed_path = ""
     }
+    "polygon-amoy" = {
+      title = "Polygon-Amoy"
+      env   = "staging"
+      # Amoy signers hold only single-digit POL (faucet-funded), unlike the
+      # Monad testnet signers which carry mainnet-scale balances — so this
+      # threshold can't mirror the 500 POL mainnet value.
+      metric              = "Native_balanceOf"
+      symbol              = "POL"
+      threshold           = 1
+      explorer            = "amoy.polygonscan.com"
+      chain_id            = "80002"
+      aegis_chain         = "polygonAmoy"
+      chainlink_feed_path = ""
+    }
   }
 
   # Chains split by environment, used to fan out Slack notification routes
@@ -198,6 +212,8 @@ locals {
   # `Native_balanceOf` RelayerSigner variants (aegis/config.yaml), resolved
   # from the global RelayerSigner* vars — the addresses currently match the
   # Monad signer set, but keep the map separate for the same drift reasons.
+  # polygon and polygon-amoy share this signer set; split into separate maps
+  # if testnet signers diverge.
   polygon_relayer_signers = {
     EURUSD  = "0x7973B53c09Ec35cdCa71D46b98801ddeD856BB20"
     USDCUSD = "0x9b4Ee654F6bd2485e804080dDbd5E048b21271B3"

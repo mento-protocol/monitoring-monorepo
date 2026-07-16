@@ -51,6 +51,14 @@ locals {
       symbol    = "MON"
       threshold = 50
     }
+    "polygon-amoy" = {
+      title  = "Polygon-Amoy"
+      metric = "Native_balanceOf"
+      symbol = "POL"
+      # Amoy signers are faucet-funded (single-digit POL); see the matching
+      # comment in alerts/rules/protocol-routing-locals.tf.
+      threshold = 1
+    }
   }
 
   prometheus_datasource_uid = "grafanacloud-prom"

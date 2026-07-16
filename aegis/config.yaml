@@ -236,6 +236,21 @@ chains:
       JPYUSD: '0xb9aDdcD1d1CE7d49DBB540E2677F1C572Bc8D195'
       CHFUSD: '0x2EE56bE22D6af8c1b0ac97149b6F42D3B0BFb8C2'
 
+  - id: polygonAmoy
+    label: polygon-amoy
+    httpRpcUrl: https://rpc-amoy.polygon.technology
+    contracts:
+      # Same deterministic testnet deploy addresses as monadTestnet above.
+      # Verified on-chain (chainId 80002): only the three Polygon rate feeds
+      # below are registered; all other feed IDs revert "not been added".
+      SortedOracles: '0x85ed9ac57827132B8F60938F3165BC139E1F53cd'
+      BreakerBox: '0x88869E30609D2C0E4032463D713328C6f541878e'
+    vars:
+      # Polygon rate feeds (same IDs on polygon mainnet and Amoy)
+      USDCUSD: '0x81a313Ff894BFC6093d33b5514E34D7FAA41B7eF'
+      EURUSD: '0xEc57482AA55e3ad026C315A0e4A692B776C318cA'
+      EUROPEUR: '0xc22418a83DfC262B10a1f57E25309DB83E7eA79e'
+
   - id: celoSepolia
     label: celo-sepolia
     httpRpcUrl: https://forno.celo-sepolia.celo-testnet.org
@@ -548,10 +563,11 @@ metrics:
 
   # Polygon rate feed freshness. Polygon SortedOracles reports its own feed set,
   # so this is a separate entry from the Celo and Monad ones above.
+  # Amoy registers the same three feed IDs as polygon mainnet.
   - source: SortedOracles.isOldestReportExpired(address rateFeed)(bool isExpired,address oracle)
     schedule: 0/10 * * * * *
     type: gauge
-    chains: [polygon]
+    chains: [polygon, polygonAmoy]
     variants:
       - [USDCUSD]
       - [EURUSD]
@@ -561,7 +577,7 @@ metrics:
   - source: BreakerBox.getRateFeedTradingMode(address rateFeed)(uint8)
     schedule: 0/10 * * * * *
     type: gauge
-    chains: [polygon]
+    chains: [polygon, polygonAmoy]
     variants:
       - [USDCUSD]
       - [EURUSD]
@@ -668,10 +684,11 @@ metrics:
 
   # Native gas-token balance (POL) for Polygon relayer signers.
   # Uses eth_getBalance under the hood instead of an ERC20 balanceOf call.
+  # polygon and polygon-amoy share the same signer addresses.
   - source: Native.balanceOf(address owner)(uint256)
     schedule: 0 * * * * *
     type: gauge
-    chains: [polygon]
+    chains: [polygon, polygonAmoy]
     variants:
       - [RelayerSignerUSDCUSD]
       - [RelayerSignerEURUSD]
