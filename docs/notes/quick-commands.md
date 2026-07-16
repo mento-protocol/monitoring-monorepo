@@ -81,6 +81,10 @@ pnpm issue:release --issue 901                 # Release a mistaken claim back t
 pnpm issue:board sync                          # Re-project labels and close merged in-pr board items
 pnpm issue:board:test                          # Offline tests for the issue-board helper
 
+# Sentry triage pipeline (Stage A — deterministic ingest, ADR 0036)
+pnpm sentry:ingest --dry-run                   # Print queue-issue mutations without applying (needs local SENTRY_TRIAGE_TOKEN)
+pnpm sentry:ingest:test                        # Offline tests for the ingest helper (docs/notes/sentry-triage-pipeline.md)
+
 # Public config package
 pnpm --filter @mento-protocol/config build     # Build the public protocol metadata package
 npm pack ./shared-config --dry-run             # Inspect the files that would publish to npm
