@@ -263,7 +263,8 @@ The dashboard's enforced React Doctor state is **100 / 100 (0 diagnostics)**.
 - **React 19** + React DOM 19
 - **Plotly.js** (via react-plotly.js) for charts
 - **SWR** for data fetching + real-time updates
-- **graphql-request** for Hasura queries
+- **Native fetch transport** (`src/lib/graphql-fetch.ts`) for Hasura queries
+- **Zod Mini** for client-bundled response/env validation; full Zod stays server-only
 - **Tailwind CSS 4** for styling
 
 ## Multi-Chain Support

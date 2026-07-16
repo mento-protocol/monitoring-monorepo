@@ -42,7 +42,7 @@ vi.mock("@/lib/networks", () => {
   };
 });
 
-vi.mock("graphql-request", () => {
+vi.mock("@/lib/graphql-fetch", () => {
   const MockGraphQLClient = vi.fn();
   MockGraphQLClient.prototype.request = vi.fn();
   return { GraphQLClient: MockGraphQLClient };
@@ -61,7 +61,7 @@ vi.mock("next/cache", () => ({
   },
 }));
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import { fetchBridgeFlowsOgDataUncached } from "../bridge-flows-og";
 
 const BRIDGE_SNAPSHOT_QUERY_MARKER = "BridgeDailySnapshot";

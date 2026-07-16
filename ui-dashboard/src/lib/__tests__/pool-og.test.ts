@@ -33,7 +33,7 @@ vi.mock("@/lib/networks", () => {
   };
 });
 
-vi.mock("graphql-request", () => {
+vi.mock("@/lib/graphql-fetch", () => {
   const MockGraphQLClient = vi.fn();
   MockGraphQLClient.prototype.request = vi.fn();
   return { GraphQLClient: MockGraphQLClient };
@@ -49,7 +49,7 @@ vi.mock("next/cache", () => ({
   },
 }));
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import { fetchPoolOgDataUncached } from "../pool-og";
 
 const ADDR_CUSD = "0xaaa0000000000000000000000000000000000001";

@@ -1,27 +1,27 @@
-import { GraphQLClient } from "graphql-request";
 import { useMemo } from "react";
 import useSWR, { preload, type SWRResponse } from "swr";
 import { cache, serialize, SWRGlobalState } from "swr/_internal";
-import type { ZodType } from "zod";
 import { useNetwork } from "@/components/network-provider";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
 import { resolveGraphqlEndpoint } from "@/lib/graphql-endpoint";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import { GraphQLSchemaError } from "@/lib/graphql-schema-error";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { Network } from "@/lib/networks";
+import type { SafeParseSchema } from "@/lib/safe-parse-schema";
 
 // Re-export for backward compatibility — but new server-side imports
 // should target `@/lib/hasura-timeout` directly to avoid pulling
 // useSWR / useNetwork into the server bundle (codex P1 PR #372).
 export { HASURA_TIMEOUT_MS };
 
-// Cache clients per Hasura URL so we don't recreate on every render
+// Cache clients per Hasura URL so we don't recreate on every render.
 const clientCache = new Map<string, GraphQLClient>();
 
 function getClient(network: Network): GraphQLClient {
   const endpoint = resolveGraphqlEndpoint(network.hasuraUrl);
   const cached = clientCache.get(endpoint);
-  if (cached) return cached;
+  if (cached !== undefined) return cached;
   const client = new GraphQLClient(endpoint);
   clientCache.set(endpoint, client);
   return client;
@@ -138,7 +138,7 @@ export type UseGQLOptions<T> = {
   timeoutMs?: number | undefined;
   /** Optional Zod schema to validate the response. When provided,
    *  a parse failure throws `GraphQLSchemaError` via SWR's error path. */
-  schema?: ZodType<T> | undefined;
+  schema?: SafeParseSchema<T> | undefined;
   /** Server-prefetched initial data for SSR-prefetch pages. Forwarded to SWR's
    *  `fallbackData` at this hook's computed key, so the first client render paints
    *  real content instead of a skeleton (kills the layout shift) while the normal

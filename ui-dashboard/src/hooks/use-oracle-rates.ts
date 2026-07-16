@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import useSWR from "swr";
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import {
   NETWORKS,
   NETWORK_IDS,

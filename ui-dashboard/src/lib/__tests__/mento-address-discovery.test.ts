@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const requestMock = vi.fn();
 
-vi.mock("graphql-request", () => ({
+vi.mock("@/lib/graphql-fetch", () => ({
   GraphQLClient: class {
     request = requestMock;
   },

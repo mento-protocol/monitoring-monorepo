@@ -1,7 +1,7 @@
 // Type-only surface for the all-networks fetcher. Held in a separate module
 // from `./fetch` so importers that only need the shape (e.g. slim hooks
 // constructing `NetworkData[]`-shaped payloads) don't transitively pull
-// `graphql-request`, `@sentry/nextjs`, and the rest of the runtime
+// the transport, `@sentry/nextjs`, and the rest of the runtime
 // dependency graph. `SnapshotWindows` and `TimeRange` are re-exported from
 // `@/lib/volume` so the barrel `@/lib/fetch-all-networks` exposes the full
 // type surface from a single import path.

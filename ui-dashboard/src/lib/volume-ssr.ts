@@ -5,7 +5,6 @@
 // that transitively imports this via page.tsx, exactly as pool-detail-ssr.ts
 // avoids it.
 import { unstable_cache } from "next/cache";
-import type { ZodType } from "zod";
 import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { DEFAULT_NETWORK, NETWORKS } from "@/lib/networks";
@@ -37,6 +36,7 @@ import {
   type VolumeWindowLatestResponse,
 } from "@/lib/volume-hero-initial-data";
 import type { Venue } from "@/lib/volume-url-params";
+import type { SafeParseSchema } from "@/lib/safe-parse-schema";
 
 // Tighter budget for the OPTIONAL firstDay slice — see firstDaySignal below.
 const FIRST_DAY_TIMEOUT_MS = 2_000;
@@ -60,7 +60,7 @@ async function requestOptional<T>(
   document: string,
   variables: Record<string, unknown>,
   signal: AbortSignal,
-  schema: ZodType<T>,
+  schema: SafeParseSchema<T>,
 ): Promise<T | undefined> {
   try {
     const raw = await client.request<unknown>({

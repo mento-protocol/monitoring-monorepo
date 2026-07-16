@@ -26,7 +26,7 @@ vi.mock("@/lib/strategy-detection", () => ({
   detectProbedStrategies: mockDetectProbedStrategies,
 }));
 
-vi.mock("graphql-request", () => {
+vi.mock("@/lib/graphql-fetch", () => {
   const MockGraphQLClient = vi.fn();
   MockGraphQLClient.prototype.request = vi.fn();
   return { GraphQLClient: MockGraphQLClient };

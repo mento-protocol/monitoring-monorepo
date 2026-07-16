@@ -1,4 +1,4 @@
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import * as Sentry from "@sentry/nextjs";
 import {
   BROKER_DAILY_SNAPSHOTS_ALL,

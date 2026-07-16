@@ -1,6 +1,6 @@
 "use client";
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";

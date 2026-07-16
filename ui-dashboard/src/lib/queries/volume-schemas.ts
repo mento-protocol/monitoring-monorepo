@@ -16,7 +16,9 @@
  *   TypeScript row types in lib/volume.ts / lib/volume-pool.ts.
  */
 
-import { z } from "zod";
+import { z } from "zod/mini";
+
+const NullableStringSchema = z.nullable(z.string());
 
 // ---------------------------------------------------------------------------
 // Shared row fragments (reused across v3 and v2 broker variants)
@@ -80,7 +82,7 @@ const TraderDailyRowSchema = z.object({
   volumeUsdWei: z.string(),
   feesPaidUsdWei: z.string(),
   isProtocolActor: z.boolean(),
-  aggregatorKeys: z.array(z.string()).default([]),
+  aggregatorKeys: z._default(z.array(z.string()), []),
   lastSeenTimestamp: z.string(),
 });
 
@@ -149,8 +151,8 @@ export const SwapEventOutliersSchema = z.object({
 const PoolForVolumeRowSchema = z.object({
   id: z.string(),
   chainId: z.number(),
-  token0: z.string().nullable(),
-  token1: z.string().nullable(),
+  token0: NullableStringSchema,
+  token1: NullableStringSchema,
 });
 
 export const PoolsForVolumeSchema = z.object({

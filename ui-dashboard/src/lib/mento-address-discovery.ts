@@ -11,7 +11,7 @@
  * index Monad; MiniPay's `FederatedAttestations` issuer is Celo-only).
  */
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import * as Sentry from "@sentry/nextjs";
 import { isValidAddress } from "@/lib/validators";
 import {

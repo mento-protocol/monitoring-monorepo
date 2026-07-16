@@ -100,6 +100,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0023](0023-es2017-no-polyfill.md)                   | Ship ES2017 with no polyfill; ban immutable-array methods via lint + `sortedCopy` |
 | [0024](0024-plotly-basic-dist-bundle-budgets.md)     | Plotly.js `basic-dist` + enforced bundle-size budgets                             |
 | [0025](0025-fixture-browser-tests-react-doctor.md)   | Fixture-driven browser tests + visual snapshots + a react-doctor score gate       |
+| [0036](0036-dashboard-graphql-zod-mini.md)           | Native GraphQL transport + Zod Mini for browser-reachable validation              |
 
 ### aegis
 
