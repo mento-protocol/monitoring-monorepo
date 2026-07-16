@@ -325,11 +325,11 @@ function vpOracleFreshnessRows(rows) {
   }));
 }
 
-function dailySnapshotsFor(poolId) {
+function dailySnapshotsFor(poolId, daysAgoValues = [0, 1, 2]) {
   const pool = poolsById.get(poolId);
   if (!pool) return [];
   const todayStart = Math.floor(nowSeconds() / DAY_SECONDS) * DAY_SECONDS;
-  return [0, 1, 2].map((daysAgo) => ({
+  return daysAgoValues.map((daysAgo) => ({
     id: `${poolId}-${todayStart - daysAgo * DAY_SECONDS}`,
     poolId,
     timestamp: String(todayStart - daysAgo * DAY_SECONDS),
@@ -347,7 +347,7 @@ function dailySnapshotsFor(poolId) {
           ? "25000000000000000000"
           : "50000000000000000000",
     rebalanceCount: 0,
-    cumulativeSwapCount: 3 - daysAgo,
+    cumulativeSwapCount: daysAgo >= 365 ? 1 : 3 - daysAgo,
     cumulativeVolume0: "125000000000000000000",
     cumulativeVolume1:
       pool.token1Decimals === 6 ? "125000000" : "125000000000000000000",
@@ -849,8 +849,16 @@ function operationName(query) {
 
 function rowsByPoolIds(poolIds) {
   const ids = new Set(poolIds ?? []);
+  // The 365d and 366d rows deliberately sit outside the 30d Server Component
+  // seed. Projection keeps the latest old row as the TVL forward-fill anchor
+  // and drops the older row, preserving the capped-history handoff. Keep both
+  // exclusive to the all-history operation so browser tests can prove that
+  // selecting "All" performs the client fetch without polluting pool-detail
+  // and OG chart fixtures (and their visual snapshots).
   return pools.flatMap((pool) =>
-    ids.size === 0 || ids.has(pool.id) ? dailySnapshotsFor(pool.id) : [],
+    ids.size === 0 || ids.has(pool.id)
+      ? dailySnapshotsFor(pool.id, [0, 1, 2, 365, 366])
+      : [],
   );
 }
 

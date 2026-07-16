@@ -26,7 +26,7 @@ vi.mock("@sentry/nextjs", () => ({
   captureMessage: vi.fn(),
 }));
 
-vi.mock("graphql-request", () => {
+vi.mock("@/lib/graphql-fetch", () => {
   const MockGraphQLClient = vi.fn();
   MockGraphQLClient.prototype.request = vi.fn();
   return { GraphQLClient: MockGraphQLClient };
@@ -68,7 +68,7 @@ vi.mock("@/lib/networks", async (importOriginal) => {
   };
 });
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import { useCdpBorrowingRevenue } from "../use-cdp-borrowing-revenue";
 
 type HookFetcherRow = {

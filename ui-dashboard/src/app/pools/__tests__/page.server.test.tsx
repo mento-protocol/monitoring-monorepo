@@ -4,6 +4,7 @@ import PoolsPage from "../page";
 
 type PoolsPageProps = {
   initialNetworkData?: unknown;
+  initialNetworkDataFetchedAtMs?: number;
   initialIsWeekend?: boolean;
 };
 
@@ -44,6 +45,7 @@ describe("PoolsPage server component", () => {
 
     renderToStaticMarkup(await PoolsPage());
 
+    expect(mockFetchInitialNetworkData).toHaveBeenCalledWith("pools");
     expect(mockPoolsPageClient).toHaveBeenCalledWith({
       initialNetworkData,
       initialNetworkDataFetchedAtMs: 1_700_000_000_000,

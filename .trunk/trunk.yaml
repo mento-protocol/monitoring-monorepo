@@ -27,6 +27,12 @@ lint:
         # responses that contain harmless misspellings + are not formatted
         # for human review).
         - "**/.intel-marathon/**"
+    - linters: [markdownlint]
+      paths:
+        # LLM prompt payloads (e.g. the Sentry triage-agent prompt), not rendered
+        # documentation — prose rules like MD041 (first line must be an H1) don't
+        # apply. Prettier still normalizes their formatting.
+        - .github/prompts/**
     - linters: [osv-scanner]
       paths:
         - indexer-envio/pnpm-lock.yaml

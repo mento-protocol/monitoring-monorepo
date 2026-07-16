@@ -20,6 +20,10 @@ import type {
   NetworkData,
   PoolLabel,
 } from "@/lib/network-fetcher/types";
+import {
+  INITIAL_SNAPSHOT_HISTORY_DAYS,
+  SECONDS_PER_DAY,
+} from "@/lib/network-fetcher/constants";
 import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 
 /**
@@ -44,9 +48,19 @@ type DehydratedNetworkData = Omit<
 
 type DehydratedInitialNetworkData = Omit<
   DehydratedNetworkData,
-  "feeSnapshots"
+  | "feeSnapshots"
+  | "snapshots"
+  | "snapshots7d"
+  | "snapshots30d"
+  | "uniqueLpAddresses"
+  | "uniqueLpAddressesOmitted"
 > & {
   feeSnapshots: [];
+  snapshots: [];
+  snapshots7d: [];
+  snapshots30d: [];
+  uniqueLpAddresses: null;
+  uniqueLpAddressesOmitted: true;
 };
 
 export function dehydrateNetworkData(data: NetworkData): DehydratedNetworkData {
@@ -72,26 +86,147 @@ export function rehydrateNetworkData(data: DehydratedNetworkData): NetworkData {
 }
 
 /**
- * Drops the raw `feeSnapshots` rows (~330KB of the ~1.04MB Flight payload)
- * from the SSR payload. Nothing on `/` or `/pools` reads the raw rows — the
- * aggregated `fees` summary is computed server-side in `assembleNetworkData`
- * before this projection, `/revenue` uses its own slim `useProtocolFees` hook
- * with a separate SWR key, and `seedIncrementalRowCacheFromNetworkData`
- * intentionally never seeds fee history (it keeps full pagination so healed
- * rows are re-fetched). `feeSnapshotsError` / `feeSnapshotsTruncated` are
- * kept so `isNetworkDataFullyHealthy` and the `≈` truncation UX still see
- * the fetch outcome.
+ * Projects the full network response into the bounded homepage Server
+ * Component payload (the `/pools` route applies one additional omission):
+ *
+ * - raw `feeSnapshots` rows are dropped because those routes only read the
+ *   already-aggregated `fees` summary; `/revenue` has its own SWR key;
+ * - the 1/7/30-day arrays are dropped because the client-safe daily-slice
+ *   helper reconstructs them synchronously from the canonical daily rows;
+ * - `snapshotsAllDaily` keeps the latest `INITIAL_SNAPSHOT_HISTORY_DAYS`
+ *   UTC-day buckets plus one pre-window anchor per pool. The anchor lets the
+ *   TVL chart forward-fill quiet pools from their last confirmed reserves;
+ *   the bounded rows still cover every default chart/KPI window without
+ *   letting the Flight payload grow forever.
+ * - Broker history keeps one additional UTC-day boundary bucket beyond the
+ *   pool window. The rolling 30-day chart starts at the prior midnight during
+ *   UTC hour zero, so that bucket is required until the next hourly boundary.
+ * - cumulative LP addresses are replaced by a payload-level exact cross-chain
+ *   count before serialization. The raw addresses never enter the Data Cache
+ *   or Flight payload.
+ *
+ * The routes use isolated client SWR keys so `/pools` can omit homepage-only
+ * Broker history without overwriting the homepage seed. The cap fields are
+ * the explicit handoff contract: the client may use bounded rows for recent
+ * windows and as last-good data, but it must force a from-zero pagination
+ * before presenting "All". Error/truncation outcome fields remain intact so
+ * health and degraded UI semantics do not change.
  */
-function stripFeeSnapshotRows(
+function projectPoolSnapshotHistory(
+  rows: DehydratedNetworkData["snapshotsAllDaily"],
+  cutoff: number,
+): DehydratedNetworkData["snapshotsAllDaily"] {
+  const recentRows: DehydratedNetworkData["snapshotsAllDaily"] = [];
+  const anchorByPool = new Map<
+    string,
+    DehydratedNetworkData["snapshotsAllDaily"][number]
+  >();
+  for (const row of rows) {
+    const timestamp = Number(row.timestamp);
+    if (timestamp >= cutoff) {
+      recentRows.push(row);
+      continue;
+    }
+    const currentAnchor = anchorByPool.get(row.poolId);
+    if (
+      currentAnchor === undefined ||
+      timestamp > Number(currentAnchor.timestamp)
+    ) {
+      anchorByPool.set(row.poolId, row);
+    }
+  }
+  return [...recentRows, ...anchorByPool.values()];
+}
+
+function projectInitialNetworkData(
   data: DehydratedNetworkData,
 ): DehydratedInitialNetworkData {
-  return { ...data, feeSnapshots: [] };
+  // Anchor the cap to the exact clock snapshot used to derive the server's
+  // 1/7/30-day windows. Using fetch-completion time here creates a midnight
+  // race: a fan-out that starts before 00:00 and finishes after it could drop
+  // the oldest row still required by the already-computed 30-day window.
+  const todayMidnightUtc =
+    Math.floor(data.snapshotWindows.w24h.to / SECONDS_PER_DAY) *
+    SECONDS_PER_DAY;
+  const poolCutoff =
+    todayMidnightUtc - (INITIAL_SNAPSHOT_HISTORY_DAYS - 1) * SECONDS_PER_DAY;
+  const brokerCutoff =
+    todayMidnightUtc - INITIAL_SNAPSHOT_HISTORY_DAYS * SECONDS_PER_DAY;
+  const snapshotsAllDaily = projectPoolSnapshotHistory(
+    data.snapshotsAllDaily,
+    poolCutoff,
+  );
+  const brokerSnapshotsAllDaily = data.brokerSnapshotsAllDaily.filter(
+    (snapshot) => Number(snapshot.timestamp) >= brokerCutoff,
+  );
+  return {
+    ...data,
+    feeSnapshots: [],
+    snapshots: [],
+    snapshots7d: [],
+    snapshots30d: [],
+    snapshotsAllDaily,
+    snapshotsAllDailyCapped:
+      data.snapshotsAllDailyCapped ||
+      snapshotsAllDaily.length < data.snapshotsAllDaily.length,
+    brokerSnapshotsAllDaily,
+    brokerSnapshotsAllDailyCapped:
+      data.brokerSnapshotsAllDailyCapped === true ||
+      brokerSnapshotsAllDaily.length < data.brokerSnapshotsAllDaily.length,
+    uniqueLpAddresses: null,
+    uniqueLpAddressesOmitted: true,
+  };
 }
 
 function rehydrateInitialNetworkData(
   data: DehydratedInitialNetworkData,
+  route: InitialNetworkDataRoute,
 ): InitialNetworkData {
-  return { ...rehydrateNetworkData(data), feeSnapshots: [] };
+  const rehydrated: InitialNetworkData = {
+    ...rehydrateNetworkData(data),
+    feeSnapshots: [],
+    snapshots: [],
+    snapshots7d: [],
+    snapshots30d: [],
+    uniqueLpAddresses: null,
+    uniqueLpAddressesOmitted: true,
+  };
+  if (route === "home") return rehydrated;
+
+  // `/pools` consumes neither Broker volume history nor LP addresses. Keep the
+  // same shared server cache entry, then remove the homepage-only bounded rows
+  // at the final route projection so they never cross this route's Flight
+  // boundary. The route's isolated SWR key prevents this intentionally slim
+  // fallback from replacing the homepage seed.
+  return {
+    ...rehydrated,
+    brokerSnapshotsAllDaily: [],
+    brokerSnapshotsAllDailyCapped:
+      rehydrated.brokerSnapshotsAllDaily.length > 0 ||
+      rehydrated.brokerSnapshotsAllDailyCapped === true,
+  };
+}
+
+/** Exact homepage LP KPI semantics, computed while the raw address sets are
+ * still available. Successful chains are unioned case-insensitively; a total
+ * network failure makes the protocol-wide result unknowable, while an LP-only
+ * failure still preserves the lower-bound count from successful chains (the
+ * retained per-network error/truncation flags drive the existing disclosure). */
+function aggregateUniqueLpCount(data: readonly NetworkData[]): number | null {
+  if (data.some((networkData) => networkData.error !== null)) return null;
+
+  const addresses = new Set<string>();
+  let hasSuccessfulResult = false;
+  let hasLpError = false;
+  for (const networkData of data) {
+    if (networkData.lpError !== null) hasLpError = true;
+    if (networkData.uniqueLpAddresses === null) continue;
+    hasSuccessfulResult = true;
+    for (const address of networkData.uniqueLpAddresses) {
+      addresses.add(address.toLowerCase());
+    }
+  }
+  return !hasSuccessfulResult && hasLpError ? null : addresses.size;
 }
 
 /**
@@ -101,9 +236,9 @@ function rehydrateInitialNetworkData(
  * TTL (it would otherwise trap every visitor on `N/A` tiles until expiry).
  */
 class DegradedNetworkDataError extends Error {
-  declare readonly payload: DehydratedInitialNetworkData[];
+  declare readonly payload: CachedNetworkPayload;
 
-  constructor(payload: DehydratedInitialNetworkData[]) {
+  constructor(payload: CachedNetworkPayload) {
     super("degraded network data payload — not cached");
     this.name = "DegradedNetworkDataError";
     // Non-enumerable: `unstable_cache`'s swallowed-error path console.errors
@@ -123,19 +258,29 @@ class DegradedNetworkDataError extends Error {
 interface CachedNetworkPayload {
   fetchedAt: number;
   networks: DehydratedInitialNetworkData[];
+  /** Exact aggregate replacing the cumulative per-network LP address arrays. */
+  uniqueLpCount: number | null;
 }
 
 async function fetchDehydratedInitialNetworkData(): Promise<CachedNetworkPayload> {
   const data = await fetchAllNetworks();
+  // One completion timestamp records cache freshness. The history projection
+  // itself uses each payload's shared window clock (see above).
+  const fetchedAt = Date.now();
+  const uniqueLpCount = aggregateUniqueLpCount(data);
   const dehydrated = data.map((networkData) =>
-    stripFeeSnapshotRows(dehydrateNetworkData(networkData)),
+    projectInitialNetworkData(dehydrateNetworkData(networkData)),
   );
   // Empty = no configured networks (misconfigured env) — treat as degraded
   // rather than pinning an empty dashboard for the TTL.
   if (data.length === 0 || !data.every(isNetworkDataFullyHealthy)) {
-    throw new DegradedNetworkDataError(dehydrated);
+    throw new DegradedNetworkDataError({
+      fetchedAt,
+      networks: dehydrated,
+      uniqueLpCount,
+    });
   }
-  return { fetchedAt: Date.now(), networks: dehydrated };
+  return { fetchedAt, networks: dehydrated, uniqueLpCount };
 }
 
 // 30s revalidate — but NOT a staleness bound: on dynamic renders
@@ -160,7 +305,9 @@ async function fetchDehydratedInitialNetworkData(): Promise<CachedNetworkPayload
 // One fan-out per deploy is cheap insurance against a new deployment
 // reading a payload fetched by old code or from an old endpoint.
 const CACHE_KEY_PARTS = [
-  "all-networks-ssr",
+  // Explicit projection version also protects persistent local `.next/cache`
+  // entries where no Vercel deployment id is available.
+  "all-networks-ssr-v2",
   process.env.VERCEL_DEPLOYMENT_ID ??
     process.env.VERCEL_GIT_COMMIT_SHA ??
     "dev",
@@ -208,9 +355,14 @@ function fetchDehydratedInitialNetworkDataCoalesced(): Promise<CachedNetworkPayl
 /** SSR payload plus its fetch-completion timestamp. `fetchedAtMs` crosses to
  *  the client so `useAllNetworksData` can gate its mount-revalidation skip on
  *  actual payload freshness rather than trusting whatever the cache served. */
+export type InitialNetworkDataRoute = "home" | "pools";
+
 export type InitialNetworkDataPayload = {
   networks: InitialNetworkData[];
   fetchedAtMs: number;
+  /** Present only for the homepage route; exact replacement for omitted raw
+   * LP address arrays. `null` retains the existing unavailable semantics. */
+  uniqueLpCount?: number | null | undefined;
 };
 
 /**
@@ -228,11 +380,15 @@ export type InitialNetworkDataPayload = {
  * last-healthy one. Within the staleness window, freshness is the CLIENT's
  * job: the returned `fetchedAtMs` drives the hook's freshness gate, which
  * revalidates on mount whenever the payload is older than its
- * fresh-enough bound — instant paint, live data ~1-2s later. Raw
- * `feeSnapshots` rows are stripped (see `stripFeeSnapshotRows`); use
- * `fetchAllNetworks` directly if a future server consumer needs them.
+ * fresh-enough bound — instant paint, live data ~1-2s later. Raw fee rows,
+ * redundant window arrays, and history older than the bounded SSR window are
+ * projected out (see `projectInitialNetworkData`); use `fetchAllNetworks`
+ * directly if a future
+ * server consumer needs either full dataset.
  */
-export async function fetchInitialNetworkData(): Promise<InitialNetworkDataPayload> {
+export async function fetchInitialNetworkData(
+  route: InitialNetworkDataRoute,
+): Promise<InitialNetworkDataPayload> {
   try {
     const cached = await cachedFetch();
     const payload =
@@ -242,18 +398,26 @@ export async function fetchInitialNetworkData(): Promise<InitialNetworkDataPaylo
           // launching a second fan-out.
           await fetchDehydratedInitialNetworkDataCoalesced()
         : cached;
-    return {
-      networks: payload.networks.map(rehydrateInitialNetworkData),
+    const result: InitialNetworkDataPayload = {
+      networks: payload.networks.map((networkData) =>
+        rehydrateInitialNetworkData(networkData, route),
+      ),
       fetchedAtMs: payload.fetchedAt,
     };
+    if (route === "home") result.uniqueLpCount = payload.uniqueLpCount;
+    return result;
   } catch (err) {
     if (err instanceof DegradedNetworkDataError) {
       // Degraded payloads are fetched in-band (never cached), so they are
       // fresh as of this request.
-      return {
-        networks: err.payload.map(rehydrateInitialNetworkData),
-        fetchedAtMs: Date.now(),
+      const result: InitialNetworkDataPayload = {
+        networks: err.payload.networks.map((networkData) =>
+          rehydrateInitialNetworkData(networkData, route),
+        ),
+        fetchedAtMs: err.payload.fetchedAt,
       };
+      if (route === "home") result.uniqueLpCount = err.payload.uniqueLpCount;
+      return result;
     }
     throw err;
   }

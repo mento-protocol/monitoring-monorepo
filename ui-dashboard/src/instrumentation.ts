@@ -1,6 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
 import { shouldEnableSentry } from "../sentry.shared";
-import { serverEnv } from "./env";
+import { serverEnv } from "./server-env";
 
 export async function register() {
   if (!shouldEnableSentry()) return;

@@ -1,7 +1,7 @@
 // Type-only surface for the all-networks fetcher. Held in a separate module
 // from `./fetch` so importers that only need the shape (e.g. slim hooks
 // constructing `NetworkData[]`-shaped payloads) don't transitively pull
-// `graphql-request`, `@sentry/nextjs`, and the rest of the runtime
+// the transport, `@sentry/nextjs`, and the rest of the runtime
 // dependency graph. `SnapshotWindows` and `TimeRange` are re-exported from
 // `@/lib/volume` so the barrel `@/lib/fetch-all-networks` exposes the full
 // type surface from a single import path.
@@ -57,6 +57,17 @@ export type NetworkData = {
    * Envio tier quota (429).
    */
   snapshotsAllDaily: PoolSnapshotWindow[];
+  /**
+   * True while the visible `snapshotsAllDaily` rows are known to be only a
+   * recent subset. The normal source fetch sets false; the Server Component
+   * projection sets true, and a failed attempt to complete that bounded seed
+   * keeps it true. This is distinct from `snapshotsAllDailyTruncated`: the
+   * latter explains an upstream pagination safety outcome, while this flag is
+   * the consumer contract that prevents presenting a subset as "All".
+   * Incremental-cache seeding must keep the slice incomplete until a full
+   * pagination succeeds.
+   */
+  snapshotsAllDailyCapped: boolean;
   /** True when the daily pagination loop hit its safety cap. */
   snapshotsAllDailyTruncated: boolean;
   /**
@@ -65,6 +76,14 @@ export type NetworkData = {
    * double-counted against v3. Empty on chains without a Broker (Monad).
    */
   brokerSnapshotsAllDaily: BrokerDailySnapshotRow[];
+  /**
+   * True while the visible Broker daily rows are known to be incomplete: a
+   * recent Server Component subset, a failed first page, or partial/truncated
+   * pagination. Absence is equivalent to false for legacy fixtures. Together
+   * with `snapshotsAllDailyCapped`, this prevents the volume chart from
+   * presenting incomplete data as complete "All" history.
+   */
+  brokerSnapshotsAllDailyCapped?: boolean | undefined;
   /** True when the broker pagination loop hit its safety cap. */
   brokerSnapshotsAllDailyTruncated: boolean;
   olsPoolIds: Set<string>;
@@ -108,6 +127,13 @@ export type NetworkData = {
    */
   poolLabels: Map<string, PoolLabel>;
   uniqueLpAddresses: string[] | null;
+  /**
+   * True only when the Server Component projection deliberately removed the
+   * cumulative address set. The homepage then reads the exact pre-aggregated
+   * cross-chain count from its payload; a normal client fetch omits this flag
+   * and restores address-level deduplication.
+   */
+  uniqueLpAddressesOmitted?: boolean | undefined;
   /** True when the LP address pagination loop hit its safety cap. */
   uniqueLpAddressesTruncated: boolean;
   rates: OracleRateMap;
@@ -144,13 +170,38 @@ export type NetworkData = {
  * Network data that is safe to seed into the `/` and `/pools` SSR fallback.
  *
  * The server computes the aggregated `fees` summary before serializing this
- * payload, then deliberately strips the raw fee-history rows. Keeping the
- * empty tuple in the public type makes that projection part of the contract:
- * client fallback consumers cannot accidentally treat the SSR seed as a
- * complete fee-history response.
+ * payload, then deliberately strips the raw fee-history rows and the three
+ * redundant 1/7/30-day snapshot arrays. Keeping empty tuples in the public
+ * type makes that projection part of the contract: the all-networks hook must
+ * synchronously derive the window arrays from `snapshotsAllDaily` before the
+ * fallback reaches consumers or incremental-cache seeding, while client
+ * fallback consumers cannot treat the SSR seed as complete fee history.
+ * `snapshotsAllDailyCapped` and `brokerSnapshotsAllDailyCapped` separately mark
+ * whether canonical daily histories were shortened for transport; unlike fee
+ * rows, that history is fetched on demand when a chart selects "All". The raw
+ * cumulative LP-address set is also stripped; `uniqueLpAddressesOmitted`
+ * routes the homepage to the payload-level exact aggregate instead.
+ *
+ * Growth audit invariant: every time/cumulative field in `NetworkData` is
+ * bounded or aggregated here (`snapshotsAllDaily`, Broker history,
+ * `feeSnapshots`, LP addresses). Remaining collections are bounded by the
+ * configured network's current pool/token/strategy entity set.
  */
-export type InitialNetworkData = Omit<NetworkData, "feeSnapshots"> & {
+export type InitialNetworkData = Omit<
+  NetworkData,
+  | "feeSnapshots"
+  | "snapshots"
+  | "snapshots7d"
+  | "snapshots30d"
+  | "uniqueLpAddresses"
+  | "uniqueLpAddressesOmitted"
+> & {
   feeSnapshots: [];
+  snapshots: [];
+  snapshots7d: [];
+  snapshots30d: [];
+  uniqueLpAddresses: null;
+  uniqueLpAddressesOmitted: true;
 };
 
 /**
@@ -240,4 +291,11 @@ export type PaginatedPageResult<T> = {
   mutableTailError?: Error | null;
 };
 
-export type SnapshotPageResult = PaginatedPageResult<PoolSnapshotWindow>;
+export type SnapshotPageResult = PaginatedPageResult<PoolSnapshotWindow> & {
+  /**
+   * False when rows came from a bounded seed whose from-zero completion has
+   * not succeeded. Optional for older hand-built fixtures; only explicit
+   * false marks the assembled client payload capped.
+   */
+  historyComplete?: boolean;
+};

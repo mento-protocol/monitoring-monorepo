@@ -1,6 +1,6 @@
 "use client";
 
-import { GraphQLClient, type Variables } from "graphql-request";
+import { GraphQLClient, type Variables } from "@/lib/graphql-fetch";
 import { useMemo } from "react";
 import useSWR, { type SWRResponse } from "swr";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";

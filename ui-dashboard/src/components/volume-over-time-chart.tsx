@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { formatUSD } from "@/lib/format";
 import {
   getSnapshotVolumeInUsd,
@@ -21,6 +21,7 @@ import {
   type TimeSeriesPoint,
 } from "@/lib/time-series";
 import { zeroFillSeries } from "@/lib/chart-gap-fill";
+import { useSnapshotHistoryRange } from "@/hooks/use-snapshot-history-range";
 
 type SeriesPoint = { timestamp: number; volumeUSD: number };
 
@@ -567,11 +568,18 @@ interface VolumeOverTimeChartProps {
    */
   hasBrokerSnapshotError: boolean;
   fullVolumeSeries: DailyVolumeSeriesResult;
+  /** Whether the current Server Component seed intentionally omits old rows. */
+  snapshotHistoryCapped?: boolean;
+  /** Unexpected error from the on-demand full-history SWR revalidation. */
+  snapshotHistoryError?: Error | null;
+  /** Shared/coalesced request used when this chart first selects "All". */
+  requestFullSnapshotHistory?: () => Promise<void>;
   plotlyDeferMode?: PlotlyDeferMode;
 }
 
 // The four loading/error flags are independent: volume can load while
 // snapshots or broker rollups degrade separately.
+/* eslint-disable max-lines-per-function -- Chart owns range handoff plus v2/v3 stacked-series projection as one render contract. */
 // react-doctor-disable-next-line react-doctor/no-many-boolean-props
 export function VolumeOverTimeChart({
   networkData,
@@ -580,9 +588,29 @@ export function VolumeOverTimeChart({
   hasSnapshotError,
   hasBrokerSnapshotError,
   fullVolumeSeries,
+  snapshotHistoryCapped,
+  snapshotHistoryError = null,
+  requestFullSnapshotHistory,
   plotlyDeferMode = "none",
 }: VolumeOverTimeChartProps) {
-  const [range, setRange] = useState<RangeKey>("30d");
+  const historyIsCapped =
+    snapshotHistoryCapped ??
+    networkData.some(
+      (network) =>
+        network.snapshotsAllDailyCapped ||
+        network.brokerSnapshotsAllDailyCapped === true,
+    );
+  const {
+    range,
+    handleRangeChange,
+    allHistoryUnavailable,
+    allHistoryLoading,
+    allHistoryFailed,
+  } = useSnapshotHistoryRange({
+    historyIsCapped,
+    snapshotHistoryError,
+    requestFullSnapshotHistory,
+  });
 
   // v3 WoW pill — v2 has a separate trajectory but is much smaller today, so
   // tracking the dominant-side delta keeps the headline meaningful. v2 WoW
@@ -602,9 +630,11 @@ export function VolumeOverTimeChart({
   const visibleV3Result = useMemo<DailyVolumeSeriesResult>(
     () =>
       range === "all"
-        ? fullVolumeSeries
+        ? allHistoryUnavailable
+          ? { series: [], byChain: [], volumePartial: false }
+          : fullVolumeSeries
         : buildDailyVolumeSeries(networkData, activeWindow),
-    [networkData, range, activeWindow, fullVolumeSeries],
+    [activeWindow, allHistoryUnavailable, fullVolumeSeries, networkData, range],
   );
   const visibleV3Points = visibleV3Result.series;
   const visibleVolumePartial = visibleV3Result.volumePartial;
@@ -613,8 +643,11 @@ export function VolumeOverTimeChart({
   // (already filtered to routedViaV3Router=false server-side). Empty until
   // the indexer's Broker handler is deployed and resyncs.
   const visibleV2Points = useMemo<SeriesPoint[]>(
-    () => buildBrokerDailyV2Series(networkData, activeWindow),
-    [networkData, activeWindow],
+    () =>
+      allHistoryUnavailable
+        ? []
+        : buildBrokerDailyV2Series(networkData, activeWindow),
+    [activeWindow, allHistoryUnavailable, networkData],
   );
 
   // Stack v3 (bottom) + v2 (top). Distinct, named legend entries; the chart
@@ -649,10 +682,12 @@ export function VolumeOverTimeChart({
     [visibleV3Points, visibleV2Points],
   );
 
+  const chartIsLoading = isLoading || allHistoryLoading;
+  const chartHasSnapshotError = hasSnapshotError || allHistoryFailed;
   const headline = computeHeadline({
-    isLoading,
+    isLoading: chartIsLoading,
     hasError,
-    hasSnapshotError,
+    hasSnapshotError: chartHasSnapshotError,
     hasBrokerSnapshotError,
     v3Partial: visibleVolumePartial,
     v3Points: visibleV3Points,
@@ -663,11 +698,9 @@ export function VolumeOverTimeChart({
 
   const change = weekOverWeekChangePct(fullV3Series);
 
-  const emptyMessage = volumeEmptyMessage(
-    hasError,
-    hasSnapshotError,
-    visibleVolumePartial,
-  );
+  const emptyMessage = allHistoryFailed
+    ? "Unable to load full volume history"
+    : volumeEmptyMessage(hasError, hasSnapshotError, visibleVolumePartial);
 
   return (
     <TimeSeriesChartCard
@@ -677,15 +710,16 @@ export function VolumeOverTimeChart({
       breakdown={visibleBreakdown}
       breakdownMode="stacked"
       range={range}
-      onRangeChange={setRange}
+      onRangeChange={handleRangeChange}
       headline={headline}
       change={change}
       changeLabel="v3 week-over-week"
-      isLoading={isLoading}
+      isLoading={chartIsLoading}
       hasError={hasError}
-      hasSnapshotError={hasSnapshotError || visibleVolumePartial === true}
+      hasSnapshotError={chartHasSnapshotError || visibleVolumePartial === true}
       emptyMessage={emptyMessage}
       plotlyDeferMode={plotlyDeferMode}
     />
   );
 }
+/* eslint-enable max-lines-per-function */

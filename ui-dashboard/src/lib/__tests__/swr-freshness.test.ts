@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { unstable_serialize } from "swr";
 import {
   getSWRFreshnessStatus,
+  markSWRFreshnessCached,
   normalizeSWRFreshnessKey,
   recordSWRFreshnessError,
   recordSWRFreshnessSuccess,
@@ -51,8 +52,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "Tier quota",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -76,8 +77,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "remount failed",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -97,8 +98,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "fast key failed",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -118,8 +119,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "poll failed",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -143,8 +144,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "Unknown refresh error",
-      lastUpdatedAt: NOW,
     });
   });
 
@@ -160,9 +161,42 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "refresh failed",
-      lastUpdatedAt: NOW,
     });
+  });
+
+  it("does not stamp persisted cache data as a fresh network success", () => {
+    markSWRFreshnessCached("cached-key", NOW - 10_000);
+    registerSWRFreshnessKey("cached-key");
+
+    seedSWRFreshnessData("cached-key", { refreshInterval: REFRESH_MS });
+
+    expect(getSWRFreshnessStatus()).toMatchObject({
+      cachedCount: 1,
+      cachedLastUpdatedAt: NOW - 10_000,
+      failedCount: 0,
+    });
+  });
+
+  it("transitions cached data through first error and first success", () => {
+    markSWRFreshnessCached("cached-key", NOW - 10_000);
+    registerSWRFreshnessKey("cached-key");
+
+    recordSWRFreshnessError(new Error("refresh failed"), "cached-key", {
+      refreshInterval: REFRESH_MS,
+    });
+    expect(getSWRFreshnessStatus()).toMatchObject({
+      cachedCount: 0,
+      failedCount: 1,
+      failedLastUpdatedAt: NOW - 10_000,
+      lastErrorMessage: "refresh failed",
+    });
+
+    recordSWRFreshnessSuccess("cached-key", {
+      refreshInterval: REFRESH_MS,
+    });
+    expect(getSWRFreshnessStatus()).toBeNull();
   });
 
   it("keeps duplicate registrations active until the final unregister", () => {
@@ -179,8 +213,8 @@ describe("SWR freshness status", () => {
 
     expect(getSWRFreshnessStatus()).toMatchObject({
       failedCount: 1,
+      failedLastUpdatedAt: NOW,
       lastErrorMessage: "shared failed",
-      lastUpdatedAt: NOW,
     });
 
     unregisterSecond();
@@ -194,5 +228,27 @@ describe("SWR freshness status", () => {
     unregister();
 
     expect(getSWRFreshnessStatus()).toBeNull();
+  });
+
+  it("keeps independent ages for cached-only and failed-after-success sources", () => {
+    markSWRFreshnessCached("cached-key", NOW - 20_000);
+    registerSWRFreshnessKey("cached-key");
+
+    vi.setSystemTime(NOW - 5_000);
+    registerSWRFreshnessKey("failed-key");
+    recordSWRFreshnessSuccess("failed-key", {
+      refreshInterval: REFRESH_MS,
+    });
+    vi.setSystemTime(NOW);
+    recordSWRFreshnessError(new Error("refresh failed"), "failed-key", {
+      refreshInterval: REFRESH_MS,
+    });
+
+    expect(getSWRFreshnessStatus()).toMatchObject({
+      cachedCount: 1,
+      cachedLastUpdatedAt: NOW - 20_000,
+      failedCount: 1,
+      failedLastUpdatedAt: NOW - 5_000,
+    });
   });
 });

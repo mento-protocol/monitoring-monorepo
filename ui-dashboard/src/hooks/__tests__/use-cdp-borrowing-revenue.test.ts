@@ -22,16 +22,16 @@ vi.mock("@sentry/nextjs", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// graphql-request mock
+// Internal GraphQL transport mock.
 // ---------------------------------------------------------------------------
 
-vi.mock("graphql-request", () => {
+vi.mock("@/lib/graphql-fetch", () => {
   const MockGraphQLClient = vi.fn();
   MockGraphQLClient.prototype.request = vi.fn();
   return { GraphQLClient: MockGraphQLClient };
 });
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 
 // ---------------------------------------------------------------------------
 // Import the module-private helpers via the public fetchPaginatedRows export.

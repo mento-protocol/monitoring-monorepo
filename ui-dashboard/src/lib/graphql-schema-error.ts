@@ -1,4 +1,4 @@
-import type { ZodIssue } from "zod";
+import type { core } from "zod/mini";
 
 /**
  * Thrown when a `schema` is provided to `useGQL` and the Hasura response fails
@@ -10,9 +10,9 @@ import type { ZodIssue } from "zod";
  * pick it up without any extra wiring.
  */
 export class GraphQLSchemaError extends Error {
-  readonly issues: ZodIssue[];
+  readonly issues: core.$ZodIssue[];
 
-  constructor(issues: ZodIssue[], queryHint?: string) {
+  constructor(issues: core.$ZodIssue[], queryHint?: string) {
     const prefix = queryHint ? `[${queryHint}] ` : "";
     super(
       `${prefix}GraphQL response failed schema validation: ${issues

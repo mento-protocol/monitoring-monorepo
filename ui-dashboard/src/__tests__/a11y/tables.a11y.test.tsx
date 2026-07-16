@@ -196,6 +196,7 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
     snapshots7d: [],
     snapshots30d: [],
     snapshotsAllDaily: [],
+    snapshotsAllDailyCapped: false,
     snapshotsAllDailyTruncated: false,
     brokerSnapshotsAllDaily: [],
     brokerSnapshotsAllDailyTruncated: false,

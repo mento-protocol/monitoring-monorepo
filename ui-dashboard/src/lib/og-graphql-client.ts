@@ -1,4 +1,4 @@
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import type { Network } from "@/lib/networks";
 
 // Shared server-side GraphQLClient factory for OG metadata/image routes.

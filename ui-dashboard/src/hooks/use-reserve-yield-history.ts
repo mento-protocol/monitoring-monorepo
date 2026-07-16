@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import { NETWORKS } from "@/lib/networks";
 import {
   STETH_YIELD_DAILY_SNAPSHOTS,

@@ -11,6 +11,7 @@ import { PoolVolumeOverTimeChart } from "@/components/pool-volume-over-time-char
 import { ReservesPanel } from "@/components/reserves-panel";
 import { normalizePoolIdForChain } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
+import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import type { PoolDetailInitialData } from "@/lib/pool-detail-initial-data";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
@@ -165,7 +166,13 @@ function usePoolDetailData(
     isLoading: limitsLoading,
   } = useGQL<{
     TradingLimit: TradingLimit[];
-  }>(TRADING_LIMITS, { poolId: normalizedPoolId });
+  }>(
+    TRADING_LIMITS,
+    { poolId: normalizedPoolId },
+    {
+      timeoutMs: HASURA_TIMEOUT_MS,
+    },
+  );
   const { data: deployData } = useGQL<{
     FactoryDeployment: { txHash: string }[];
   }>(POOL_DEPLOYMENT, { poolId: normalizedPoolId });
