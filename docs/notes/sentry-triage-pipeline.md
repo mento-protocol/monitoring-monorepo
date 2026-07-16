@@ -1,80 +1,117 @@
----
-title: Sentry Triage/Autofix Pipeline
-status: active
-owner: eng
-canonical: true
-last_verified: 2026-07-15
-scope: ci/process
----
+# Sentry triage pipeline
 
-# Sentry Triage/Autofix Pipeline
+<!--
+  NOTE: This file is co-owned by two in-flight PRs. The Stage A "queue contract"
+  section is authored by the ingest PR (#1274); the "Verdict contract" section
+  below is authored by the triage-agent PR (#1275). If only one has merged, this
+  file may contain only that PR's section — the orchestrator resolves the merge.
+-->
 
-Operational reference for the staged Sentry triage/autofix pipeline defined in
-[`docs/adr/0036-sentry-triage-pipeline.md`](../adr/0036-sentry-triage-pipeline.md).
-The queue and verdict contracts are added by the sibling Phase-1 PRs; this
-section covers the human token-provisioning and activation runbook.
+## Verdict contract
 
-## Operator runbook (Phase-1 activation)
+The read-only triage agent — `.github/workflows/sentry-triage-agent.yml`, driven
+by the prompt in `.github/prompts/sentry-triage.md` — is Stage B of the Sentry
+triage pipeline (ADR 0036). For each pending queue issue (`sentry-triage` +
+`sentry:needs-triage`) it investigates the underlying Sentry issue (Sentry MCP,
+read-only token + the repo checkout for `analytics-mento-org`) and posts exactly
+one verdict comment. It never fixes code, never writes to Sentry, and never
+opens PRs. Responsibility is deliberately split: **the LLM agent's only write is
+the verdict comment; the verdict label is applied by a deterministic workflow
+step** that parses the comment (see below) — the agent holds no label-editing
+capability at all.
 
-Phase 1 provisions two read-limited credentials and one kill-switch variable
-entirely through the platform Terraform stack (`terraform/`, ADR 0030
-IaC-before-CLI): `github_actions_secret.sentry_triage_token`,
-`github_actions_secret.claude_code_oauth_token`, and
-`github_actions_variable.sentry_triage_enabled`. The two secret mirrors are
-`count`-gated on their tfvar being non-empty, so the Terraform code can merge
-and apply before the tokens exist. The pipeline stays inert until both tokens
-are set **and** `SENTRY_TRIAGE_ENABLED` is `"true"`.
+### Verdict comment
 
-All token values live only in the platform stack's gitignored, operator-held
-`terraform/terraform.tfvars` (the same file that supplies `lifi_api_key` and the
-other `count`-gated platform secrets) — never committed, never set through
-`gh secret set` or the GitHub UI.
+The comment starts with the marker `<!-- sentry-triage-verdict:v1 -->`, followed
+by a fenced ` ```yaml ` block, followed by a short (≤ 15 line) human-readable
+diagnosis.
 
-1. **Mint the read-only Sentry token.** In Sentry (org `mento-labs`), create an
-   internal integration named `sentry-triage-reader` with READ-ONLY scopes:
-   _Issue & Event: Read_, _Project: Read_, _Organization: Read_. Add no write
-   scopes — Phase 2 mints a separate write-scoped token only if and when
-   auto-archive is approved (ADR 0036 trust boundary). Copy the generated token.
-2. **Mint the Claude OAuth token — this rotates a shared live secret.**
-   `CLAUDE_CODE_OAUTH_TOKEN` already exists as a live repo secret consumed by
-   both `.github/workflows/claude.yml` jobs (the on-demand Claude assistant and
-   the auto-review job), and GitHub cannot read secret values back, so the
-   Terraform adoption necessarily writes a new value over the live one. Locally,
-   on the Max plan, run `claude setup-token` to mint a fresh one-year,
-   inference-only OAuth token. The first apply (step 4) overwrites the live
-   secret with this fresh token — a rotation, not an outage: `claude.yml` and
-   the triage workflows then share the new value. Do not put a placeholder or
-   stale token here; a bad value breaks the existing Claude PR automation on its
-   next run.
-3. **Set both values in the platform tfvars.** In your local, gitignored
-   `terraform/terraform.tfvars`, set `sentry_triage_token` and
-   `claude_code_oauth_token` (see `terraform/terraform.tfvars.example` for the
-   keys and placeholder comments). This is the exact same value source the
-   `count`-gated integration-probe secrets already use. Once
-   `claude_code_oauth_token` has been applied, never empty it again: the count
-   gate would plan a destroy of the shared live secret, which the resource's
-   `prevent_destroy` lifecycle guard rejects at plan time (deliberately loud —
-   rotate by replacing the value, not by clearing it).
-4. **Plan and apply the platform stack (human-approved local apply).** Run
-   `pnpm infra:plan` and confirm the two new `github_actions_secret` resources
-   appear (they are absent while the tfvars are empty); the
-   `CLAUDE_CODE_OAUTH_TOKEN` "create" is an upsert that overwrites the existing
-   live secret (see step 2). After human sign-off,
-   run `pnpm tf apply platform` from a clean `main` checkout. The platform stack
-   is manual-plan / manual-apply (`terraform.stacks.json` →
-   `apply: "manual"`, `applyPolicy: "human-review-required"`); it is **not** a
-   CI `production-infra` apply like the alerts/aegis/governance-watchdog stacks.
-   The apply mirrors the two values into the repo Actions secrets
-   `SENTRY_TRIAGE_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`. `SENTRY_TRIAGE_ENABLED`
-   is provisioned by the same apply in its default `"false"` (off) position.
-   After the apply, sanity-check the rotation by triggering any PR's Claude
-   auto-review (or an on-demand mention) and confirming `claude.yml` still
-   authenticates.
-5. **Flip the kill switch to activate.** Once both Phase-1 workflow PRs
-   (`sentry-triage-ingest`, `sentry-triage-agent`) are merged and the two tokens
-   are applied, set `sentry_triage_enabled = "true"` in `terraform.tfvars` and
-   re-apply the platform stack (still IaC, not the GitHub UI). The scheduled
-   workflows activate on their next run.
+Redaction rule: this repository is public, so the diagnosis (and every yaml
+field) must never quote Sentry payload text, stack frames, parameterized URLs,
+or user data verbatim — abstract descriptions plus the Sentry permalink only.
+This mirrors the Stage A queue contract, which likewise keeps Sentry titles and
+culprits out of queue-issue bodies.
 
-To pause the pipeline at any time, set `sentry_triage_enabled = "false"` and
-re-apply; the secrets can stay in place.
+```yaml
+verdict: code-fix # code-fix | config-fix | upstream-transient | needs-human
+confidence: medium # high | medium | low
+affected_repo: mento-protocol/frontend-monorepo
+summary: <one line>
+root_cause: |
+  <1-3 lines>
+proposed_action: |
+  <1-3 lines>
+duplicate_of: [] # list of Sentry SHORT-IDs (e.g. GOVERNANCE-MENTO-ORG-51), possibly empty
+```
+
+Field semantics:
+
+- `verdict` — the classification (see the four values below). Required.
+- `confidence` — `high` / `medium` / `low`. Low confidence and `needs-human`
+  both mean "a person should look before any action is taken".
+- `affected_repo` — the owning repo for the error, e.g.
+  `mento-protocol/frontend-monorepo` (app/governance/reserve), `mento-protocol/mento-analytics-api`
+  (analytics-api), `mento-protocol/monitoring-monorepo` (analytics-mento-org →
+  `ui-dashboard/`), or `mento-protocol/minipay-dapp`.
+- `summary` — one line describing the error.
+- `root_cause` — 1–3 lines. For non-`analytics-mento-org` projects the agent has
+  no source checkout, so this is derived from Sentry evidence alone and says so.
+- `proposed_action` — 1–3 lines describing the fix/config change/escalation.
+- `duplicate_of` — Sentry SHORT-IDs of other queue issues in the same
+  culprit/message family; empty when none found.
+
+### Verdict label application (deterministic)
+
+After the agent finishes, a deterministic step in
+`.github/workflows/sentry-triage-agent.yml` (not the agent) reads the newest
+marker-bearing comment on the queue issue, extracts the yaml `verdict` value,
+validates it against exactly the four allowed values, removes
+`sentry:needs-triage`, and adds the mapped verdict label. If no valid verdict
+comment exists, the step fails the job loudly (`::error::` + exit 1) and leaves
+`sentry:needs-triage` in place so the next scheduled run retries the issue — a
+failed triage never silently strands an unlabeled issue.
+
+The verdict **value** maps to the verdict **label** as follows (label names are
+owned by the Stage A queue contract / ingest bootstrap):
+
+| verdict              | label                        |
+| -------------------- | ---------------------------- |
+| `code-fix`           | `sentry:verdict-code-fix`    |
+| `config-fix`         | `sentry:verdict-config-fix`  |
+| `upstream-transient` | `sentry:verdict-upstream`    |
+| `needs-human`        | `sentry:verdict-needs-human` |
+
+Note the deliberate asymmetry: the verdict value `upstream-transient` maps to the
+label `sentry:verdict-upstream` (not `-upstream-transient`).
+
+### How to read a verdict
+
+- `code-fix` — a code change in the owning repo would fix it (bug, unhandled
+  edge, bad assumption).
+- `config-fix` — a configuration/infra change fixes it (CSP allowlist, env var,
+  alert rule, third-party setting) — no application code change needed.
+- `upstream-transient` — external outage/flake/user-environment noise; no action
+  in our repos.
+- `needs-human` — ambiguous root cause, a security-sensitive surface
+  (auth/payments/keys), or conflicting evidence. The agent is instructed to pick
+  this whenever uncertain — a wrong confident verdict is worse than an
+  escalation.
+
+A missing verdict comment on a `sentry:needs-triage` issue after a scheduled run
+means the triage agent did not run or did not finish — treat it as a signal,
+not as "no issues found".
+
+### What Phase 2 does with verdicts (forward-looking)
+
+Phase 1 is read-only by design: verdicts and labels only, no fixes and no Sentry
+writes (ADR 0036, Stage B). Later phases consume these labels, each gated on the
+previous phase's measured verdict accuracy — not on elapsed time:
+
+- `sentry:verdict-upstream` → candidate for the human-approved archive step
+  (Phase 2a), which may only ever set Sentry issues to
+  `archived_until_escalating`, never hard-resolve.
+- `sentry:verdict-code-fix` → candidate for scoped fix-PR generation in the
+  owning repo (Phase 2b+), which runs through required CI and independent
+  (Codex) review like any other PR.
+- `sentry:verdict-config-fix` and `sentry:verdict-needs-human` → stay with a
+  person.
