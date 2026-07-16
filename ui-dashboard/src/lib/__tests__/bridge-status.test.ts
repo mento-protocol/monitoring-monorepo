@@ -61,9 +61,9 @@ describe("deriveBridgeStatus", () => {
     ).toBe("STUCK");
   });
 
-  it("keeps SENT within the 24h window", () => {
+  it("keeps SENT within the 1h window", () => {
     const now = 1_700_100_000;
-    const sentRecently = now - 23 * 60 * 60;
+    const sentRecently = now - 59 * 60;
     expect(
       deriveBridgeStatus(
         {
@@ -76,9 +76,9 @@ describe("deriveBridgeStatus", () => {
     ).toBe("SENT");
   });
 
-  it("overlays STUCK when SENT passes the 24h threshold", () => {
+  it("overlays STUCK when SENT passes the 1h threshold", () => {
     const now = 1_700_100_000;
-    const sentLongAgo = now - 25 * 60 * 60;
+    const sentLongAgo = now - 61 * 60;
     expect(
       deriveBridgeStatus(
         {
@@ -91,9 +91,24 @@ describe("deriveBridgeStatus", () => {
     ).toBe("STUCK");
   });
 
-  it("overlays STUCK for ATTESTED transfers past the threshold", () => {
+  it("keeps ATTESTED within the 15m window", () => {
     const now = 1_700_100_000;
-    const sentLongAgo = now - 25 * 60 * 60;
+    const attestedRecently = now - 14 * 60;
+    expect(
+      deriveBridgeStatus(
+        {
+          status: "ATTESTED",
+          sentTimestamp: String(attestedRecently),
+          firstSeenAt: String(attestedRecently),
+        },
+        now,
+      ),
+    ).toBe("ATTESTED");
+  });
+
+  it("overlays STUCK when ATTESTED passes the 15m threshold", () => {
+    const now = 1_700_100_000;
+    const sentLongAgo = now - 16 * 60;
     expect(
       deriveBridgeStatus(
         {
@@ -109,7 +124,7 @@ describe("deriveBridgeStatus", () => {
   it("keeps recently progressed ATTESTED transfers from being marked stuck", () => {
     const now = 1_700_100_000;
     const sentLongAgo = now - 25 * 60 * 60;
-    const updatedRecently = now - 60 * 60;
+    const updatedRecently = now - 10 * 60;
     expect(
       deriveBridgeStatus(
         {
@@ -159,7 +174,7 @@ describe("deriveBridgeStatus", () => {
 
   it("ignores epoch sentTimestamp and falls back to firstSeenAt", () => {
     const now = 1_700_100_000;
-    const firstSeenRecently = now - 2 * 60 * 60;
+    const firstSeenRecently = now - 30 * 60;
     expect(
       deriveBridgeStatus(
         {
@@ -187,9 +202,9 @@ describe("deriveBridgeStatus", () => {
     ).toBe("STUCK");
   });
 
-  it("keeps PENDING within the 24h window from firstSeenAt", () => {
+  it("keeps PENDING within the 1h window from firstSeenAt", () => {
     const now = 1_700_100_000;
-    const firstSeenRecently = now - 2 * 60 * 60;
+    const firstSeenRecently = now - 59 * 60;
     expect(
       deriveBridgeStatus(
         {
