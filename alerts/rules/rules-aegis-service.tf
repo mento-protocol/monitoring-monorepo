@@ -40,7 +40,7 @@ resource "grafana_rule_group" "aegis_service_alerts" {
         # Testnet poll errors have warning-only rules in rules-aegis-testnet.tf.
         # Keep this page scoped to production and preserve the failing call
         # labels so the on-call can see what broke without digging first.
-        expr                = "sum by (chain, contract, functionName) (increase(view_call_query_duration_count{chain=~\"^(celo|monad)$\",status=\"error\"}[5m]))"
+        expr                = "sum by (chain, contract, functionName) (increase(view_call_query_duration_count{chain=~\"^(celo|monad|polygon)$\",status=\"error\"}[5m]))"
         fullMetaSearch      = false
         includeNullMetadata = true
         instant             = true

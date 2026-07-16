@@ -194,6 +194,15 @@ locals {
     USDTUSD = "0x36a5C808e25AF0F5e406Eaa831d1749542378794"
   }
 
+  # Per-feed Polygon relayer signer wallets. Polygon publishes only these two
+  # `Native_balanceOf` RelayerSigner variants (aegis/config.yaml), resolved
+  # from the global RelayerSigner* vars — the addresses currently match the
+  # Monad signer set, but keep the map separate for the same drift reasons.
+  polygon_relayer_signers = {
+    EURUSD  = "0x7973B53c09Ec35cdCa71D46b98801ddeD856BB20"
+    USDCUSD = "0x9b4Ee654F6bd2485e804080dDbd5E048b21271B3"
+  }
+
   # GCP project for mainnet relayer cloud functions. Used by the Slack
   # stale-price template's "relayer cloud function" link. Sourced from
   # `mento-protocol/oracle-relayer` repo (`.project_vars_cache`,
@@ -216,6 +225,11 @@ locals {
 
   monad_relayer_signer_branches = join("\n", [
     for k, v in local.monad_relayer_signers :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $relayer = %q -}}{{ end -}}", k, v)
+  ])
+
+  polygon_relayer_signer_branches = join("\n", [
+    for k, v in local.polygon_relayer_signers :
     format("{{ if eq .Labels.rateFeed %q -}}{{ $relayer = %q -}}{{ end -}}", k, v)
   ])
 
@@ -286,6 +300,17 @@ locals {
     USDTUSD = "usdt-usd"
   }
 
+  # Polygon's directory file still lives under Chainlink's legacy chain slug:
+  # `feeds-matic-mainnet.json` (the data.chain.link URL path is `polygon/mainnet`).
+  # EUROPEUR is intentionally absent — Chainlink publishes no EUROP feed.
+  # Polygon has no `*_pool_addresses_by_rate_feed` map: its rate feeds have no
+  # FPMM pools in the Envio indexer, so the trading-mode bullet falls back to
+  # the Grafana alert-details URL.
+  polygon_chainlink_slugs_by_rate_feed = {
+    EURUSD  = "eur-usd"
+    USDCUSD = "usdc-usd"
+  }
+
   # Pre-rendered template fragments that set `$pool` per rate feed. Built from
   # the maps above using the same independent-branches idiom as the relayer
   # signer branches — Grafana's Sprig subset doesn't expose `dict` / `index`,
@@ -314,6 +339,11 @@ locals {
 
   monad_chainlink_slug_branches = join("\n", [
     for k, v in local.monad_chainlink_slugs_by_rate_feed :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $chainlinkSlug = %q -}}{{ end -}}", k, v)
+  ])
+
+  polygon_chainlink_slug_branches = join("\n", [
+    for k, v in local.polygon_chainlink_slugs_by_rate_feed :
     format("{{ if eq .Labels.rateFeed %q -}}{{ $chainlinkSlug = %q -}}{{ end -}}", k, v)
   ])
 

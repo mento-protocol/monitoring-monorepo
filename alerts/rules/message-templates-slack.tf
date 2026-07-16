@@ -12,8 +12,8 @@ EOT
 resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
   name = "Slack - Stale Price Alert Message"
   # Per-feed explorer links to relayer signers are set by the chain-specific
-  # `${local.celo_relayer_signer_branches}` and
-  # `${local.monad_relayer_signer_branches}` fragments (one independent
+  # `${local.celo_relayer_signer_branches}`, `${local.monad_relayer_signer_branches}`,
+  # and `${local.polygon_relayer_signer_branches}` fragments (one independent
   # `{{ if eq .Labels.rateFeed "X" }}` block per entry — see locals.tf for
   # the source maps). Each fragment is wrapped in a matching `{{ if eq
   # .Labels.chain ... }}` guard so same-named feeds only render links through
@@ -44,6 +44,9 @@ ${local.celo_relayer_signer_branches}
 {{/* monad and monad-testnet currently share signer addresses; split maps if testnet diverges. */ -}}
 {{ if or (eq .Labels.chain "monad") (eq .Labels.chain "monad-testnet") -}}
 ${local.monad_relayer_signer_branches}
+{{ end -}}
+{{ if eq .Labels.chain "polygon" -}}
+${local.polygon_relayer_signer_branches}
 {{ end -}}
 {{ $titleURL := .GeneratorURL -}}
 {{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
@@ -167,6 +170,9 @@ ${local.celo_chainlink_slug_branches}
 {{ if eq .Labels.chain "monad" -}}
 ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
+{{ end -}}
+{{ if eq .Labels.chain "polygon" -}}
+${local.polygon_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}

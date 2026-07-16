@@ -130,6 +130,9 @@ ${local.celo_chainlink_slug_branches}
 ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
 {{ end -}}
+{{ if eq .Labels.chain "polygon" -}}
+${local.polygon_chainlink_slug_branches}
+{{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
 {{ $chainlinkURL := "" -}}
@@ -165,6 +168,9 @@ ${local.celo_chainlink_slug_branches}
 {{ if eq .Labels.chain "monad" -}}
 ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
+{{ end -}}
+{{ if eq .Labels.chain "polygon" -}}
+${local.polygon_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
