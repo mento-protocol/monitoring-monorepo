@@ -163,13 +163,17 @@ ratchet is now fully in place.
   fixture, verifies the exact SSR breaker and Volume values through deliberately
   delayed client breaker revalidation in Playwright, and collects three
   canonical `?lhci=fixture` runs with median LCP blocking above the same 1 700 ms
-  ceiling. The runner requires one completed delayed breaker request per browser
-  audit and inspects `assertion-results.json` to prove the blocking assertion
-  actually ran across all three numeric values. Fixture mode isolates app
-  render/hydration cost; it deliberately excludes Vercel edge/network variance,
-  production analytics/Sentry, and live-indexer latency. Exact query markers
-  make the live warning and fixture error patterns non-overlapping, while all
-  non-LCP assertions remain mechanically identical and blocking.
+  ceiling. The browser smoke requires exactly one delayed breaker completion.
+  Lighthouse collection permits additional valid retries or prefetches but
+  requires at least four cumulative completions afterward. The generated
+  diagnostics must contain exactly three Lighthouse runs, each independently
+  proving a GraphQL duration above 1 700 ms and completion after LCP, while
+  `assertion-results.json` proves the blocking assertion actually ran across
+  all three numeric values. Fixture mode isolates app render/hydration cost; it
+  deliberately excludes Vercel edge/network variance, production
+  analytics/Sentry, and live-indexer latency. Exact query markers make the live
+  warning and fixture error patterns non-overlapping, while all non-LCP
+  assertions remain mechanically identical and blocking.
 
   `ui-dashboard/scripts/measure-inp.mjs` separately drives `/pools` filter,
   `/volume` time-window and sort, and canonical pool TVL-range interactions;

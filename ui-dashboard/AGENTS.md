@@ -215,8 +215,12 @@ the canonical pool-detail LCP contract. It builds against the local
 all-time Volume headline remain visible while client revalidation is
 deliberately delayed, rejects fixture GraphQL/request/browser errors, and
 collects three exact `?lhci=fixture` Lighthouse runs with the blocking 1,700 ms
-median ceiling. The runner proves one delayed breaker completion per audit and
-requires a real blocking LHCI assertion result across all three values.
+median ceiling. The browser smoke requires exactly one delayed breaker
+completion. Lighthouse collection permits additional valid retries or
+prefetches but requires at least four cumulative completions afterward. The
+generated diagnostics must contain exactly three Lighthouse runs, each
+independently proving GraphQL duration above 1,700 ms and completion after LCP,
+plus a real blocking LHCI assertion result across all three values.
 Artifacts and per-run phase/network diagnostics are written under
 `reports/lighthouse-pool/`. This secretless fixture lane also runs for workflow
 self-changes, fork PRs, and Dependabot PRs. It isolates app render/hydration
