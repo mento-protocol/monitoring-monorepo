@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
+  accessSync,
+  constants as fsConstants,
   existsSync,
+  lstatSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
+  readlinkSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -11,6 +18,21 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
+import {
+  assertNoSecretLikeContent,
+  buildBoundedReviewPrompts,
+  createReviewInputCollector,
+  isWithin,
+  MAX_REVIEW_INPUT_BYTES,
+  normalizedGitFileMode,
+  readBoundedRegularFile,
+  readSafeEvidenceFile,
+  reviewPromptOutputPaths,
+  sensitivePathReason,
+  serializeSafeUntrackedFile,
+  utf8Size,
+  writeReviewPromptOutputs,
+} from "./agent-autoreview-core.mjs";
 
 const REVIEW_SCHEMA = {
   type: "object",
@@ -73,8 +95,8 @@ const REVIEW_SCHEMA = {
 
 const ENGINES = new Set(["codex", "claude", "local"]);
 const TARGET_MODES = new Set(["auto", "local", "branch", "commit"]);
-const MAX_BUNDLE_CHARS = 180_000;
-const MAX_FILE_CHARS = 40_000;
+const MAX_GIT_OUTPUT_BYTES = MAX_REVIEW_INPUT_BYTES + 12 * 1024 * 1024;
+const CLAUDE_SAFE_MODE_MIN_VERSION = [2, 1, 169];
 
 function usage() {
   console.log(`Usage:
@@ -89,13 +111,12 @@ Options:
   --model <name>                     Model passed through to the engine
   --thinking <level>                 Codex reasoning effort or Claude effort
   --prompt <text>                    Extra review instruction (repeatable)
-  --prompt-file <path>               Extra review instruction file (repeatable)
-  --dataset <path>                   Extra evidence file to include (repeatable)
+  --prompt-file <path>               Repo-relative review instruction file (repeatable)
+  --dataset <path>                   Repo-relative evidence file (repeatable)
   --output <path>                    Write human output to a file as well as stdout
   --json-output <path>               Write validated structured JSON
   --bundle-output <path>             Write the full review prompt/change bundle
   --prepare-only                     Build target/bundle metadata for subagent review, then exit
-  --parallel-tests <command>         Run a shell test command while review runs
   --timeout-seconds <seconds>        Reviewer process timeout (default: 1800)
   --dry-run                          Print target/engine without invoking a reviewer
   --no-tools                         Disable Claude tools and MCP servers; Codex requires read-only sandbox
@@ -123,8 +144,10 @@ function parseArgs(argv) {
     output: null,
     jsonOutput: null,
     bundleOutput: null,
+    bundleOutputDisplay: null,
     prepareOnly: false,
-    parallelTests: null,
+    trustedInputRoot: null,
+    sourceSnapshotOnly: false,
     dryRun: false,
     tools: true,
     webSearch: true,
@@ -187,12 +210,23 @@ function parseArgs(argv) {
       case "--bundle-output":
         args.bundleOutput = next();
         break;
+      case "--bundle-output-display":
+        args.bundleOutputDisplay = next();
+        break;
       case "--prepare-only":
         args.prepareOnly = true;
         break;
-      case "--parallel-tests":
-        args.parallelTests = next();
+      case "--trusted-input-root":
+        args.trustedInputRoot = next();
         break;
+      case "--source-snapshot-only":
+        args.sourceSnapshotOnly = true;
+        break;
+      case "--parallel-tests":
+        next();
+        throw new Error(
+          "--parallel-tests was removed; run pnpm agent:quality-gate --run before autoreview",
+        );
       case "--timeout-seconds":
         args.timeoutSeconds = Number.parseInt(next(), 10);
         if (!Number.isFinite(args.timeoutSeconds) || args.timeoutSeconds <= 0) {
@@ -227,15 +261,115 @@ function parseArgs(argv) {
   if (!ENGINES.has(args.engine)) {
     throw new Error(`invalid --engine: ${args.engine}`);
   }
+  if (args.bundleOutputDisplay && !args.bundleOutput) {
+    throw new Error("--bundle-output-display requires --bundle-output");
+  }
   return args;
 }
 
-function runGit(repo, gitArgs, { check = true } = {}) {
-  const result = spawnSync("git", gitArgs, {
-    cwd: repo,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+function checkoutRootFrom(start) {
+  let current = realpathSync(start);
+  while (true) {
+    if (existsSync(path.join(current, ".git"))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return realpathSync(start);
+    current = parent;
+  }
+}
+
+function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
+  const candidates = path.isAbsolute(command)
+    ? [command]
+    : (process.env.PATH || "")
+        .split(path.delimiter)
+        .filter((entry) => entry && path.isAbsolute(entry))
+        .map((entry) => path.join(entry, command));
+  const root = realpathSync(rejectRoot);
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate, fsConstants.X_OK);
+      const resolved = realpathSync(candidate);
+      if (isWithin(path.resolve(candidate), root) || isWithin(resolved, root)) {
+        continue;
+      }
+      if (!statSync(resolved).isFile()) continue;
+      return path.resolve(candidate);
+    } catch {
+      // Keep searching a bounded, absolute PATH for an external executable.
+    }
+  }
+  if (required) {
+    throw new Error(
+      `${command} CLI is not available outside the reviewed repo`,
+    );
+  }
+  return null;
+}
+
+function gitEnvironment() {
+  return {
+    HOME: process.env.HOME || tmpdir(),
+    LANG: process.env.LANG || "C.UTF-8",
+    LC_ALL: process.env.LC_ALL || "C.UTF-8",
+    PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+    TMPDIR: process.env.TMPDIR || tmpdir(),
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+    GIT_EXTERNAL_DIFF: "",
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_PAGER: "cat",
+    GIT_TERMINAL_PROMPT: "0",
+    PAGER: "cat",
+  };
+}
+
+function decodeGitOutput(data, label) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(data);
+  } catch {
+    throw new Error(`${label} returned non-UTF-8 output`);
+  }
+}
+
+function runGitResult(
+  repo,
+  gitArgs,
+  { maxBuffer = MAX_GIT_OUTPUT_BYTES } = {},
+) {
+  const rejectRoot = realpathSync(repo);
+  const git = resolveTrustedCommand("git", rejectRoot);
+  const result = spawnSync(
+    git,
+    ["-c", "core.fsmonitor=false", "-c", "diff.renames=false", ...gitArgs],
+    {
+      cwd: repo,
+      env: gitEnvironment(),
+      encoding: "buffer",
+      maxBuffer,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  if (result.error) {
+    const error = new Error(
+      `git ${gitArgs[0] || "command"} failed: ${result.error.message}`,
+    );
+    error.code = result.error.code;
+    throw error;
+  }
+  return {
+    status: result.status,
+    stdout: decodeGitOutput(result.stdout || Buffer.alloc(0), "git"),
+    stderr: decodeGitOutput(result.stderr || Buffer.alloc(0), "git stderr"),
+  };
+}
+
+function runGit(
+  repo,
+  gitArgs,
+  { check = true, maxBuffer = MAX_GIT_OUTPUT_BYTES } = {},
+) {
+  const result = runGitResult(repo, gitArgs, { maxBuffer });
   if (check && result.status !== 0) {
     throw new Error(
       `git ${gitArgs.join(" ")} failed: ${result.stderr || result.stdout}`,
@@ -244,15 +378,39 @@ function runGit(repo, gitArgs, { check = true } = {}) {
   return result.stdout;
 }
 
+function gitPathList(repo, gitArgs) {
+  const paths = runGit(repo, gitArgs).split("\0").filter(Boolean);
+  for (const relativePath of paths) {
+    if (/\t|\r|\n/.test(relativePath)) {
+      throw new Error(
+        "changed paths containing tabs or line breaks are unsupported; rename the path before autoreview",
+      );
+    }
+  }
+  return paths;
+}
+
 function repoRoot() {
-  const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  if (result.status !== 0) {
+  const cwd = realpathSync(process.cwd());
+  const rejectRoot = checkoutRootFrom(cwd);
+  const git = resolveTrustedCommand("git", rejectRoot);
+  const result = spawnSync(
+    git,
+    ["-c", "core.fsmonitor=false", "rev-parse", "--show-toplevel"],
+    {
+      cwd,
+      env: gitEnvironment(),
+      encoding: "buffer",
+      maxBuffer: 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  if (result.error || result.status !== 0) {
     throw new Error("autoreview must run inside a git repository");
   }
-  return path.resolve(result.stdout.trim());
+  const repo = realpathSync(decodeGitOutput(result.stdout, "git").trim());
+  resolveTrustedCommand("git", repo);
+  return repo;
 }
 
 function currentBranch(repo) {
@@ -263,31 +421,82 @@ function isDirty(repo) {
   return runGit(repo, ["status", "--porcelain"]).trim() !== "";
 }
 
-function shellQuote(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
-}
-
-function commandExists(command) {
-  const result = spawnSync("sh", ["-c", `command -v ${shellQuote(command)}`], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  return result.status === 0;
-}
-
-function detectPrBase(repo) {
-  if (!commandExists("gh")) return null;
+function detectPrBase(repo, branch) {
+  if (!branch) return null;
+  const gh = resolveTrustedCommand("gh", repo, { required: false });
+  if (!gh) return null;
+  const git = resolveTrustedCommand("git", repo);
+  const env = {
+    HOME: process.env.HOME || tmpdir(),
+    LANG: process.env.LANG || "C.UTF-8",
+    LC_ALL: process.env.LC_ALL || "C.UTF-8",
+    PATH: [
+      path.dirname(gh),
+      path.dirname(git),
+      "/usr/bin",
+      "/bin",
+      "/usr/sbin",
+      "/sbin",
+    ]
+      .filter((entry, index, entries) => entries.indexOf(entry) === index)
+      .join(path.delimiter),
+    GH_PAGER: "cat",
+    GH_PROMPT_DISABLED: "1",
+  };
+  for (const key of ["GH_TOKEN", "GITHUB_TOKEN"]) {
+    if (process.env[key]) env[key] = process.env[key];
+  }
   const result = spawnSync(
-    "gh",
-    ["pr", "view", "--json", "baseRefName", "--jq", ".baseRefName"],
+    gh,
+    [
+      "pr",
+      "list",
+      "--head",
+      branch,
+      "--state",
+      "open",
+      "--limit",
+      "2",
+      "--json",
+      "baseRefName",
+    ],
     {
       cwd: repo,
+      env,
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  const base = result.stdout.trim();
-  return result.status === 0 && base ? `origin/${base}` : null;
+  if (result.error) {
+    throw new Error(`failed to inspect PR base: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `failed to inspect PR base: ${(result.stderr || result.stdout).trim() || `gh exited ${result.status}`}`,
+    );
+  }
+  let prs;
+  try {
+    prs = JSON.parse(result.stdout);
+  } catch {
+    throw new Error("failed to inspect PR base: gh returned invalid JSON");
+  }
+  if (!Array.isArray(prs)) {
+    throw new Error(
+      "failed to inspect PR base: gh returned a non-array result",
+    );
+  }
+  if (prs.length > 1) {
+    throw new Error(
+      `multiple open PRs match head branch ${branch}; pass --base explicitly`,
+    );
+  }
+  if (prs.length === 0) return null;
+  const base = prs[0]?.baseRefName;
+  if (typeof base !== "string" || !base) {
+    throw new Error("failed to inspect PR base: gh omitted baseRefName");
+  }
+  return `origin/${base}`;
 }
 
 function chooseTarget(repo, args) {
@@ -307,7 +516,7 @@ function chooseTarget(repo, args) {
     args.mode === "branch" ||
     (args.mode === "auto" && branch && branch !== "main")
   ) {
-    const ref = args.base || detectPrBase(repo) || "origin/main";
+    const ref = args.base || detectPrBase(repo, branch) || "origin/main";
     if (args.mode === "auto" && dirty) {
       return { mode: "branch-local", ref };
     }
@@ -319,128 +528,340 @@ function chooseTarget(repo, args) {
   throw new Error("no review target: clean main checkout and no forced mode");
 }
 
-function bounded(text, limit = MAX_BUNDLE_CHARS) {
-  if (text.length <= limit) return text;
-  return `${text.slice(0, limit)}\n\n[truncated at ${limit} characters]\n`;
+function freezeTargetRef(repo, target) {
+  if (!target.ref) return target;
+  const requestedRef = target.ref;
+  if (
+    requestedRef.startsWith("-") ||
+    /[\0-\x20\x7f]/.test(requestedRef) ||
+    requestedRef.includes("...")
+  ) {
+    throw new Error(`invalid review ref: ${requestedRef}`);
+  }
+  const result = runGitResult(repo, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    "--end-of-options",
+    `${requestedRef}^{commit}`,
+  ]);
+  if (result.status !== 0) {
+    throw new Error(`review ref does not resolve to a commit: ${requestedRef}`);
+  }
+  const ref = result.stdout.trim();
+  if (!/^[0-9a-f]{40,64}$/i.test(ref)) {
+    throw new Error(
+      `review ref did not resolve to an object ID: ${requestedRef}`,
+    );
+  }
+  return { ...target, ref, requested_ref: requestedRef };
 }
 
-function readText(filePath, limit = MAX_FILE_CHARS) {
+function readText(filePath) {
   try {
     const data = readFileSync(filePath);
     if (data.includes(0)) return "[binary file omitted]";
-    return bounded(data.toString("utf8"), limit);
+    return new TextDecoder("utf-8", { fatal: true }).decode(data);
   } catch (error) {
     return `[unreadable: ${error.message}]`;
   }
 }
 
-function localBundle(repo) {
-  const parts = [
-    "# Git Status",
-    runGit(repo, ["status", "--short"]),
-    "# Staged Diff",
-    runGit(repo, ["diff", "--cached", "--stat"]),
-    bounded(runGit(repo, ["diff", "--cached", "--patch", "--find-renames"])),
-    "# Unstaged Diff",
-    runGit(repo, ["diff", "--stat"]),
-    bounded(runGit(repo, ["diff", "--patch", "--find-renames"])),
-  ];
-  const untracked = runGit(repo, ["ls-files", "--others", "--exclude-standard"])
-    .split("\n")
-    .filter(Boolean);
+function aggregateInputLimitError(label) {
+  const error = new Error(
+    `review input exceeds the ${MAX_REVIEW_INPUT_BYTES}-byte aggregate limit while adding ${label}`,
+  );
+  error.code = "AUTOREVIEW_INPUT_TOO_LARGE";
+  return error;
+}
+
+function gitBundlePart(collector, label, repo, gitArgs) {
+  const maxBuffer = Math.max(
+    1024,
+    Math.min(MAX_GIT_OUTPUT_BYTES, collector.remainingBytes() + 1),
+  );
+  let output;
+  try {
+    output = runGit(repo, gitArgs, { maxBuffer });
+  } catch (error) {
+    if (error.code === "ENOBUFS") {
+      throw aggregateInputLimitError(label);
+    }
+    throw error;
+  }
+  collector.add(label, output);
+}
+
+function appendLocalBundle(repo, collector) {
+  collector.add("git status heading", "# Git Status");
+  gitBundlePart(collector, "git status", repo, ["status", "--short"]);
+  collector.add("staged diff heading", "# Staged Diff");
+  gitBundlePart(collector, "staged diff stat", repo, [
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--cached",
+    "--stat",
+  ]);
+  gitBundlePart(collector, "staged diff", repo, [
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--cached",
+    "--patch",
+    "--no-renames",
+  ]);
+  collector.add("unstaged diff heading", "# Unstaged Diff");
+  gitBundlePart(collector, "unstaged diff stat", repo, [
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--stat",
+  ]);
+  gitBundlePart(collector, "unstaged diff", repo, [
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--patch",
+    "--no-renames",
+  ]);
+  const untracked = gitPathList(repo, [
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+    "-z",
+  ]);
   if (untracked.length > 0) {
-    parts.push("# Untracked Files");
+    collector.add("untracked files heading", "# Untracked Files");
     for (const rel of untracked) {
-      parts.push(`## ${rel}\n${readText(path.join(repo, rel))}`);
+      const remainingBytes = collector.remainingBytes();
+      let serialized;
+      try {
+        serialized = serializeSafeUntrackedFile(repo, rel, remainingBytes);
+      } catch (error) {
+        if (
+          error.code === "AUTOREVIEW_INPUT_TOO_LARGE" &&
+          remainingBytes < MAX_REVIEW_INPUT_BYTES
+        ) {
+          throw aggregateInputLimitError(`untracked file ${rel}`);
+        }
+        throw error;
+      }
+      collector.add(`untracked file ${rel}`, serialized);
     }
   }
-  return parts.join("\n\n");
+}
+
+function localBundle(repo) {
+  const collector = createReviewInputCollector();
+  appendLocalBundle(repo, collector);
+  return collector.toString();
+}
+
+function appendBranchBundle(repo, baseRef, collector) {
+  collector.add("branch diff heading", "# Branch Diff");
+  collector.add("branch base", `base: ${baseRef}`);
+  gitBundlePart(collector, "branch diff stat", repo, [
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--stat",
+    `${baseRef}...HEAD`,
+    "--",
+  ]);
+  gitBundlePart(collector, "branch diff", repo, [
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--patch",
+    "--no-renames",
+    `${baseRef}...HEAD`,
+    "--",
+  ]);
 }
 
 function branchBundle(repo, baseRef) {
-  return [
-    "# Branch Diff",
-    `base: ${baseRef}`,
-    runGit(repo, ["diff", "--stat", `${baseRef}...HEAD`]),
-    bounded(
-      runGit(repo, ["diff", "--patch", "--find-renames", `${baseRef}...HEAD`]),
-    ),
-  ].join("\n\n");
+  const collector = createReviewInputCollector();
+  appendBranchBundle(repo, baseRef, collector);
+  return collector.toString();
 }
 
 function branchLocalBundle(repo, baseRef) {
-  return [branchBundle(repo, baseRef), "# Local Diff", localBundle(repo)].join(
-    "\n\n",
-  );
+  const collector = createReviewInputCollector();
+  appendBranchBundle(repo, baseRef, collector);
+  collector.add("local diff heading", "# Local Diff");
+  appendLocalBundle(repo, collector);
+  return collector.toString();
 }
 
 function commitBundle(repo, commitRef) {
-  return [
-    "# Commit Diff",
-    `commit: ${commitRef}`,
-    runGit(repo, ["show", "--stat", "--format=fuller", commitRef]),
-    bounded(
-      runGit(repo, [
-        "show",
-        "--patch",
-        "--find-renames",
-        "--format=fuller",
-        commitRef,
-      ]),
-    ),
-  ].join("\n\n");
+  const collector = createReviewInputCollector();
+  collector.add("commit diff heading", "# Commit Diff");
+  collector.add("commit ref", `commit: ${commitRef}`);
+  gitBundlePart(collector, "commit diff stat", repo, [
+    "show",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--stat",
+    "--format=fuller",
+    "--end-of-options",
+    commitRef,
+    "--",
+  ]);
+  gitBundlePart(collector, "commit diff", repo, [
+    "show",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--patch",
+    "--no-renames",
+    "--format=fuller",
+    "--end-of-options",
+    commitRef,
+    "--",
+  ]);
+  return collector.toString();
 }
 
 function changedPaths(repo, target) {
   const sources =
     target.mode === "local"
       ? [
-          runGit(repo, ["diff", "--name-only", "--cached"]),
-          runGit(repo, ["diff", "--name-only"]),
-          runGit(repo, ["ls-files", "--others", "--exclude-standard"]),
+          gitPathList(repo, [
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            "--cached",
+            "-z",
+          ]),
+          gitPathList(repo, [
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            "-z",
+          ]),
+          gitPathList(repo, [
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+          ]),
         ]
       : target.mode === "branch"
-        ? [runGit(repo, ["diff", "--name-only", `${target.ref}...HEAD`])]
+        ? [
+            gitPathList(repo, [
+              "diff",
+              "--no-ext-diff",
+              "--no-textconv",
+              "--name-only",
+              "-z",
+              `${target.ref}...HEAD`,
+              "--",
+            ]),
+          ]
         : target.mode === "branch-local"
           ? [
-              runGit(repo, ["diff", "--name-only", `${target.ref}...HEAD`]),
-              runGit(repo, ["diff", "--name-only", "--cached"]),
-              runGit(repo, ["diff", "--name-only"]),
-              runGit(repo, ["ls-files", "--others", "--exclude-standard"]),
+              gitPathList(repo, [
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--name-only",
+                "-z",
+                `${target.ref}...HEAD`,
+                "--",
+              ]),
+              gitPathList(repo, [
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--name-only",
+                "--cached",
+                "-z",
+              ]),
+              gitPathList(repo, [
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--name-only",
+                "-z",
+              ]),
+              gitPathList(repo, [
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+              ]),
             ]
-          : [runGit(repo, ["show", "--name-only", "--format=", target.ref])];
+          : [
+              gitPathList(repo, [
+                "show",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--name-only",
+                "--format=",
+                "-z",
+                "--end-of-options",
+                target.ref,
+                "--",
+              ]),
+            ];
 
-  return new Set(
-    sources
-      .join("\n")
-      .split("\n")
-      .map((item) => item.trim())
-      .filter(Boolean),
-  );
+  return new Set(sources.flat());
 }
 
-function loadExtras(repo, args) {
-  const chunks = [];
-  for (const prompt of args.prompts) chunks.push(prompt);
+function loadExtras(repo, args, maxBytes) {
+  const collector = createReviewInputCollector(
+    maxBytes,
+    "supplemental review input",
+  );
+  for (const prompt of args.prompts) {
+    assertNoSecretLikeContent("--prompt", prompt);
+    collector.add("--prompt", prompt);
+  }
   for (const file of args.promptFiles) {
-    const fullPath = path.resolve(repo, file);
-    if (existsSync(fullPath) && statSync(fullPath).isDirectory()) {
-      throw new Error(`--prompt-file must be a file, got directory: ${file}`);
-    }
-    chunks.push(`# Prompt file: ${file}\n${readText(fullPath)}`);
+    const evidence = readSafeEvidenceFile({
+      repo,
+      rawPath: file,
+      label: "--prompt-file",
+      maxBytes: collector.remainingBytes(),
+    });
+    collector.add(
+      `--prompt-file ${evidence.displayPath}`,
+      `# Prompt file: ${evidence.displayPath}\n${evidence.content}`,
+    );
   }
   for (const file of args.datasets) {
-    const fullPath = path.resolve(repo, file);
-    if (existsSync(fullPath) && statSync(fullPath).isDirectory()) {
-      throw new Error(`--dataset must be a file, got directory: ${file}`);
-    }
-    chunks.push(`# Dataset: ${file}\n${readText(fullPath)}`);
+    const evidence = readSafeEvidenceFile({
+      repo,
+      rawPath: file,
+      label: "--dataset",
+      trustedRoot: args.trustedInputRoot,
+      allowTrustedRoot: true,
+      maxBytes: collector.remainingBytes(),
+    });
+    collector.add(
+      `--dataset ${evidence.displayPath}`,
+      `# Dataset: ${evidence.displayPath}\n${evidence.content}`,
+    );
   }
-  return chunks.join("\n\n");
+  return collector.toString();
 }
 
-function buildPrompt(repo, target, bundle, extras) {
-  const targetLine = target.ref ? `${target.mode} ${target.ref}` : target.mode;
+function renderReviewPrompt(target, branch, baseline, chunk, extras, position) {
+  const targetLine = target.ref
+    ? `${target.mode} ${target.requested_ref || target.ref} (frozen commit ${target.ref})`
+    : target.mode;
+  const chunkPolicy = position
+    ? `Oversized review bundle pass: ${position.index}/${position.total}
+- The complete validated change is distributed across all ${position.total} passes.
+- Original change bytes appear exactly once across the pass sequence.
+- Continuation context may repeat file and hunk headers; it is not extra change content.
+- Do not issue a final verdict until you have inspected every pass listed by the bundle index.
+- Accumulate defects and cross-pass contract failures for one final report covering the complete target.${
+        chunk.context ? `\n\n# Continuation Context\n${chunk.context}` : ""
+      }`
+    : "";
   return `You are a skeptical senior code reviewer. Review the provided git change bundle only.
 
 Return exactly one JSON object and nothing else. The JSON object must match this schema exactly:
@@ -449,38 +870,242 @@ ${JSON.stringify(REVIEW_SCHEMA, null, 2)}
 Hard rules:
 - Do not modify files.
 - Do not invoke nested reviewers or review tools.
+- The review sandbox is intentionally empty. The bundle and explicit evidence are the only reviewed-repository source.
+- Do not report missing unchanged context merely because it is absent from the bundle.
 - Shell commands, if available, must be read-only inspection commands.
 - Do not run tests, formatters, package installs, generators, network mutation commands, git mutation commands, or commands that write files.
 - Report only actionable defects introduced or exposed by this change.
 - Prefer high-signal findings over style feedback.
-- Include security findings only for concrete, actionable risk.
+- Report every distinct actionable defect in the complete reviewed target, then sweep once more for independent failure modes.
+- Include security findings only for concrete, actionable risk at a trust boundary.
+- This is a closeout gate. Do not turn a narrow patch into a broad redesign request.
+- Prefer the smallest correct pre-merge fix. Sibling cleanup, hardening, and architecture work are follow-ups unless this patch cannot safely land without them.
+- A clean source review is not runtime proof. Do not claim that UI, CLI, API, integration, or generated-artifact behavior was verified by this review.
 - If there are no actionable findings, return an empty findings array and mark the patch correct.
 
 Review target: ${targetLine}
-Repository: ${repo}
+Current branch: ${branch}
+Review sandbox: . (intentionally contains no reviewed repository files)
+Scope baseline: ${baseline.changedFiles} changed files; ${baseline.nonTestLoc} non-test changed lines.
+
+${chunkPolicy}
 
 ${extras}
 
 # Change Bundle
-${bundle}`;
+${chunk.content}`;
+}
+
+function safeTempRoot(repo) {
+  const root = realpathSync(tmpdir());
+  if (!statSync(root).isDirectory()) {
+    throw new Error("temporary root must be a directory");
+  }
+  if (isWithin(root, realpathSync(repo))) {
+    throw new Error(
+      "temporary directory must be outside the reviewed repository; relocate TMPDIR",
+    );
+  }
+  return root;
+}
+
+function safeProxyUrl(value) {
+  try {
+    const candidate = value.includes("://") ? value : `http://${value}`;
+    const parsed = new URL(candidate);
+    return (
+      ["http:", "https:", "socks:", "socks4:", "socks5:"].includes(
+        parsed.protocol,
+      ) &&
+      Boolean(parsed.hostname) &&
+      !parsed.username &&
+      !parsed.password &&
+      ["", "/"].includes(parsed.pathname) &&
+      !parsed.search &&
+      !parsed.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
+function externalPath(repo, value) {
+  if (!value) return null;
+  try {
+    const resolved = realpathSync(value);
+    return isWithin(resolved, realpathSync(repo)) ? null : resolved;
+  } catch {
+    return null;
+  }
+}
+
+function copyExternalRegularFileEnv(env, repo, key) {
+  const value = process.env[key];
+  if (!value) return;
+  const resolved = externalPath(repo, value);
+  if (!resolved || !statSync(resolved).isFile()) {
+    throw new Error(
+      `${key} must point to an existing regular file outside the reviewed repository`,
+    );
+  }
+  env[key] = resolved;
+}
+
+function safeEngineEnv(repo, engine, executable, tempRoot) {
+  const common = new Set([
+    "ALL_PROXY",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "LANG",
+    "LC_ALL",
+    "NO_PROXY",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "all_proxy",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+  ]);
+  const engineKeys = {
+    codex: new Set([
+      "AZURE_OPENAI_API_KEY",
+      "AZURE_OPENAI_ENDPOINT",
+      "CODEX_API_KEY",
+      "OPENAI_API_KEY",
+      "OPENAI_BASE_URL",
+      "OPENAI_ORGANIZATION",
+      "OPENAI_PROJECT",
+    ]),
+    claude: new Set([
+      "ANTHROPIC_API_KEY",
+      "ANTHROPIC_AUTH_TOKEN",
+      "ANTHROPIC_BASE_URL",
+      "ANTHROPIC_VERTEX_PROJECT_ID",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+      "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+      "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+      "AWS_DEFAULT_REGION",
+      "AWS_EC2_METADATA_DISABLED",
+      "AWS_PROFILE",
+      "AWS_REGION",
+      "AWS_ROLE_ARN",
+      "AWS_ROLE_SESSION_NAME",
+      "AWS_SDK_LOAD_CONFIG",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "CLAUDE_CODE_USE_BEDROCK",
+      "CLAUDE_CODE_USE_VERTEX",
+      "CLOUD_ML_REGION",
+      "GOOGLE_APPLICATION_CREDENTIALS",
+    ]),
+  };
+  const env = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      common.has(key) ||
+      engineKeys[engine]?.has(key) ||
+      key.startsWith("AUTOREVIEW_FAKE_")
+    ) {
+      env[key] = value;
+    }
+  }
+  for (const key of [
+    "ALL_PROXY",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "all_proxy",
+    "http_proxy",
+    "https_proxy",
+  ]) {
+    if (env[key] && !safeProxyUrl(env[key])) {
+      throw new Error(
+        `unsafe credentialed or malformed proxy URL in ${key}; configure a credential-free proxy before autoreview`,
+      );
+    }
+  }
+  const home = externalPath(repo, process.env.HOME);
+  if (home) env.HOME = home;
+  if (engine === "codex") {
+    const codexHome = externalPath(
+      repo,
+      process.env.CODEX_HOME || (home ? path.join(home, ".codex") : ""),
+    );
+    if (codexHome) env.CODEX_HOME = codexHome;
+  }
+  if (engine === "claude") {
+    const claudeConfig = externalPath(repo, process.env.CLAUDE_CONFIG_DIR);
+    if (claudeConfig) env.CLAUDE_CONFIG_DIR = claudeConfig;
+    for (const key of [
+      "AWS_CONFIG_FILE",
+      "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+      "AWS_SHARED_CREDENTIALS_FILE",
+      "AWS_WEB_IDENTITY_TOKEN_FILE",
+      "GOOGLE_APPLICATION_CREDENTIALS",
+    ]) {
+      copyExternalRegularFileEnv(env, repo, key);
+    }
+    env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+  }
+  const git = resolveTrustedCommand("git", repo);
+  const node = resolveTrustedCommand("node", repo);
+  env.PATH = [
+    path.dirname(executable),
+    path.dirname(node),
+    path.dirname(git),
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+  ]
+    .filter((entry, index, entries) => entries.indexOf(entry) === index)
+    .join(path.delimiter);
+  env.TMPDIR = tempRoot;
+  env.GIT_CONFIG_GLOBAL = "/dev/null";
+  env.GIT_CONFIG_NOSYSTEM = "1";
+  env.GIT_CONFIG_SYSTEM = "/dev/null";
+  env.GIT_EXTERNAL_DIFF = "";
+  env.GIT_OPTIONAL_LOCKS = "0";
+  env.GIT_PAGER = "cat";
+  env.GIT_TERMINAL_PROMPT = "0";
+  env.PAGER = "cat";
+  return env;
 }
 
 function runCommandWithInput(
   command,
-  args,
-  repo,
+  commandArgs,
+  cwd,
   prompt,
-  { stream = false, timeoutSeconds = 1800 } = {},
+  { env, label, stream = false, timeoutSeconds = 1800 } = {},
 ) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: repo,
+    const child = spawn(command, commandArgs, {
+      cwd,
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     let killTimer = null;
+    const configuredHeartbeat = Number.parseInt(
+      process.env.AUTOREVIEW_HEARTBEAT_SECONDS || "60",
+      10,
+    );
+    const heartbeatSeconds =
+      Number.isFinite(configuredHeartbeat) && configuredHeartbeat > 0
+        ? configuredHeartbeat
+        : 60;
+    const started = Date.now();
+    const heartbeat = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - started) / 1000);
+      console.error(
+        `review still running: ${label || path.basename(command)} elapsed=${elapsed}s pid=${child.pid}`,
+      );
+    }, heartbeatSeconds * 1000);
+    heartbeat.unref?.();
 
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -501,11 +1126,13 @@ function runCommandWithInput(
     });
     child.on("error", (error) => {
       clearTimeout(timeout);
+      clearInterval(heartbeat);
       if (killTimer) clearTimeout(killTimer);
       reject(error);
     });
     child.on("close", (code, signal) => {
       clearTimeout(timeout);
+      clearInterval(heartbeat);
       if (killTimer) clearTimeout(killTimer);
       if (timedOut) {
         reject(new Error(`${command} timed out after ${timeoutSeconds}s`));
@@ -525,8 +1152,16 @@ function runCommandWithInput(
   });
 }
 
+function tomlInlineTable(values) {
+  return `{${Object.entries(values)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(", ")}}`;
+}
+
 async function runCodex(repo, args, prompt) {
-  if (!commandExists("codex")) {
+  const codex = resolveTrustedCommand("codex", repo, { required: false });
+  if (!codex) {
     throw new Error("codex CLI is not available");
   }
   if (!args.tools) {
@@ -534,16 +1169,70 @@ async function runCodex(repo, args, prompt) {
       "--no-tools is not supported for Codex; use read-only sandbox",
     );
   }
-  const tempDir = mkdtempSync(path.join(tmpdir(), "autoreview-codex."));
+  const tempRoot = safeTempRoot(repo);
+  const tempDir = mkdtempSync(path.join(tempRoot, "autoreview-codex."));
+  const workspace = path.join(tempDir, "workspace");
+  const stateDir = path.join(tempDir, "state");
+  const logDir = path.join(tempDir, "log");
+  mkdirSync(workspace);
+  mkdirSync(stateDir);
+  mkdirSync(logDir);
   const schemaPath = path.join(tempDir, "schema.json");
   const outputPath = path.join(tempDir, "last-message.json");
   writeFileSync(schemaPath, JSON.stringify(REVIEW_SCHEMA));
   try {
+    const toolEnv = tomlInlineTable({
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_EXTERNAL_DIFF: "",
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_PAGER: "cat",
+      GIT_TERMINAL_PROMPT: "0",
+      PAGER: "cat",
+    });
     const codexArgs = [
+      "--ask-for-approval",
+      "never",
+      ...(args.webSearch ? ["--search"] : []),
+      "-c",
+      "project_doc_max_bytes=0",
+      "-c",
+      `sqlite_home=${JSON.stringify(stateDir)}`,
+      "-c",
+      `log_dir=${JSON.stringify(logDir)}`,
+      "-c",
+      "features.shell_snapshot=false",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "features.plugins=false",
+      "-c",
+      "skills.include_instructions=false",
+      "-c",
+      "skills.config=[]",
+      "-c",
+      `projects.${JSON.stringify(workspace)}.trust_level="untrusted"`,
+      "-c",
+      'shell_environment_policy.inherit="core"',
+      "-c",
+      "shell_environment_policy.ignore_default_excludes=false",
+      "-c",
+      `shell_environment_policy.set=${toolEnv}`,
+      "-c",
+      "shell_environment_policy.experimental_use_profile=false",
+      "-c",
+      "allow_login_shell=false",
+      "-c",
+      'default_permissions="autoreview"',
+      "-c",
+      'permissions.autoreview.filesystem={":minimal"="read",":workspace_roots"="read"}',
       "exec",
+      "--ignore-user-config",
+      "--ignore-rules",
+      "--skip-git-repo-check",
       "--ephemeral",
       "-C",
-      repo,
+      workspace,
       "-s",
       "read-only",
       "--output-schema",
@@ -556,10 +1245,18 @@ async function runCodex(repo, args, prompt) {
       codexArgs.push("-c", `model_reasoning_effort="${args.thinking}"`);
     }
     codexArgs.push("-");
-    const result = await runCommandWithInput("codex", codexArgs, repo, prompt, {
-      stream: args.streamEngineOutput,
-      timeoutSeconds: args.timeoutSeconds,
-    });
+    const result = await runCommandWithInput(
+      codex,
+      codexArgs,
+      workspace,
+      prompt,
+      {
+        env: safeEngineEnv(repo, "codex", codex, tempRoot),
+        label: "codex",
+        stream: args.streamEngineOutput,
+        timeoutSeconds: args.timeoutSeconds,
+      },
+    );
     return existsSync(outputPath)
       ? readFileSync(outputPath, "utf8")
       : result.stdout;
@@ -568,39 +1265,114 @@ async function runCodex(repo, args, prompt) {
   }
 }
 
+function parseVersion(text) {
+  const match = text.match(/\b(\d+)\.(\d+)\.(\d+)\b/);
+  return match ? match.slice(1).map((part) => Number.parseInt(part, 10)) : null;
+}
+
+function compareVersion(left, right) {
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return 0;
+}
+
+function ensureClaudeIsolationSupported(claude, repo, env, cwd) {
+  const versionResult = spawnSync(claude, ["--version"], {
+    cwd,
+    env,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const version = parseVersion(
+    `${versionResult.stdout || ""}\n${versionResult.stderr || ""}`,
+  );
+  if (
+    versionResult.status !== 0 ||
+    !version ||
+    compareVersion(version, CLAUDE_SAFE_MODE_MIN_VERSION) < 0
+  ) {
+    throw new Error(
+      "claude engine requires Claude Code >= 2.1.169 for --safe-mode",
+    );
+  }
+  const helpResult = spawnSync(claude, ["--help"], {
+    cwd,
+    env,
+    encoding: "utf8",
+    maxBuffer: 2 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const help = `${helpResult.stdout || ""}\n${helpResult.stderr || ""}`;
+  const required = [
+    "--safe-mode",
+    "--setting-sources",
+    "--strict-mcp-config",
+    "--disallowedTools",
+    "--tools",
+  ];
+  const missing = required.filter((flag) => !help.includes(flag));
+  if (helpResult.status !== 0 || missing.length > 0) {
+    throw new Error(
+      `claude engine is missing required isolation flags: ${missing.join(", ") || "--help failed"}`,
+    );
+  }
+}
+
 async function runClaude(repo, args, prompt) {
-  if (!commandExists("claude")) {
+  const claude = resolveTrustedCommand("claude", repo, { required: false });
+  if (!claude) {
     throw new Error("claude CLI is not available");
   }
-  const claudeArgs = [
-    "--print",
-    "--no-session-persistence",
-    "--output-format",
-    "json",
-    "--json-schema",
-    JSON.stringify(REVIEW_SCHEMA),
-    "--permission-mode",
-    "dontAsk",
-    // Keep locally configured MCP servers out of the review environment.
-    "--mcp-config",
-    JSON.stringify({ mcpServers: {} }),
-    "--strict-mcp-config",
-  ];
-  if (args.model) claudeArgs.push("--model", args.model);
-  if (args.thinking) claudeArgs.push("--effort", args.thinking);
-  if (args.tools) {
-    const tools = args.webSearch
-      ? "Read,Grep,Glob,WebSearch,WebFetch"
-      : "Read,Grep,Glob";
-    claudeArgs.push("--tools", tools);
-  } else {
-    claudeArgs.push("--tools", "");
+  const tempRoot = safeTempRoot(repo);
+  const env = safeEngineEnv(repo, "claude", claude, tempRoot);
+  const workspace = mkdtempSync(
+    path.join(tempRoot, "autoreview-claude-workspace."),
+  );
+  try {
+    ensureClaudeIsolationSupported(claude, repo, env, workspace);
+    const claudeArgs = [
+      "--safe-mode",
+      "--setting-sources",
+      "user",
+      "--strict-mcp-config",
+      "--disallowedTools",
+      "mcp__*",
+      "--print",
+      "--no-session-persistence",
+      "--output-format",
+      "json",
+      "--json-schema",
+      JSON.stringify(REVIEW_SCHEMA),
+      "--permission-mode",
+      "dontAsk",
+      "--mcp-config",
+      JSON.stringify({ mcpServers: {} }),
+    ];
+    if (args.model) claudeArgs.push("--model", args.model);
+    if (args.thinking) claudeArgs.push("--effort", args.thinking);
+    if (args.tools) {
+      claudeArgs.push("--tools", args.webSearch ? "WebSearch" : "");
+    } else {
+      claudeArgs.push("--tools", "");
+    }
+    const result = await runCommandWithInput(
+      claude,
+      claudeArgs,
+      workspace,
+      prompt,
+      {
+        env,
+        label: "claude",
+        stream: args.streamEngineOutput,
+        timeoutSeconds: args.timeoutSeconds,
+      },
+    );
+    return result.stdout;
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
   }
-  const result = await runCommandWithInput("claude", claudeArgs, repo, prompt, {
-    stream: args.streamEngineOutput,
-    timeoutSeconds: args.timeoutSeconds,
-  });
-  return result.stdout;
 }
 
 function parseJsonCandidate(text) {
@@ -752,23 +1524,19 @@ function targetTreeRef(target) {
   return null;
 }
 
-function readGitBlob(repo, treeRef, rel, limit = MAX_FILE_CHARS) {
-  const result = spawnSync("git", ["show", `${treeRef}:${rel}`], {
-    cwd: repo,
-    encoding: "buffer",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
+function readGitBlob(repo, treeRef, rel) {
+  const result = runGitResult(repo, ["show", `${treeRef}:${rel}`]);
   if (result.status !== 0) return null;
-  if (result.stdout.includes(0)) return "[binary file omitted]";
-  return bounded(result.stdout.toString("utf8"), limit);
+  if (result.stdout.includes("\0")) return "[binary file omitted]";
+  return result.stdout;
 }
 
 function readRepoFile(repo, rel, target = null) {
   const treeRef = targetTreeRef(target);
-  if (treeRef) return readGitBlob(repo, treeRef, rel, Number.MAX_SAFE_INTEGER);
+  if (treeRef) return readGitBlob(repo, treeRef, rel);
   const full = path.join(repo, rel);
   if (!existsSync(full)) return null;
-  return readText(full, Number.MAX_SAFE_INTEGER);
+  return readText(full);
 }
 
 function addLocalFinding(
@@ -897,10 +1665,7 @@ function deletedFileReferenceChecks(repo, target) {
   const checks = [];
   const seen = new Set();
   const add = (deleted, treeRef) => {
-    for (const rel of deleted
-      .split("\n")
-      .map((item) => item.trim())
-      .filter(Boolean)) {
+    for (const rel of deleted) {
       const key = `${treeRef || "worktree"}\0${rel}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -910,44 +1675,75 @@ function deletedFileReferenceChecks(repo, target) {
 
   if (target.mode === "branch") {
     add(
-      runGit(repo, [
+      gitPathList(repo, [
         "diff",
+        "--no-ext-diff",
+        "--no-textconv",
         "--name-only",
         "--diff-filter=D",
+        "-z",
         `${target.ref}...HEAD`,
+        "--",
       ]),
       "HEAD",
     );
   }
   if (target.mode === "branch-local") {
     add(
-      runGit(repo, [
+      gitPathList(repo, [
         "diff",
+        "--no-ext-diff",
+        "--no-textconv",
         "--name-only",
         "--diff-filter=D",
+        "-z",
         `${target.ref}...HEAD`,
+        "--",
       ]),
       null,
     );
   }
   if (target.mode === "commit") {
     add(
-      runGit(repo, [
+      gitPathList(repo, [
         "show",
+        "--no-ext-diff",
+        "--no-textconv",
         "--name-only",
         "--diff-filter=D",
         "--format=",
+        "-z",
+        "--end-of-options",
         target.ref,
+        "--",
       ]),
       target.ref,
     );
   }
   if (target.mode === "local" || target.mode === "branch-local") {
     add(
-      runGit(repo, ["diff", "--name-only", "--diff-filter=D", "--cached"]),
+      gitPathList(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--name-only",
+        "--diff-filter=D",
+        "--cached",
+        "-z",
+      ]),
       null,
     );
-    add(runGit(repo, ["diff", "--name-only", "--diff-filter=D"]), null);
+    add(
+      gitPathList(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--name-only",
+        "--diff-filter=D",
+        "-z",
+      ]),
+      null,
+    );
   }
 
   return checks;
@@ -958,11 +1754,7 @@ function reviewDeletedFileReferences(repo, target, findings) {
     const grepArgs = treeRef
       ? ["grep", "-n", "-F", "--", rel, treeRef, "--", "."]
       : ["grep", "-n", "-F", "--", rel, "--", "."];
-    const result = spawnSync("git", grepArgs, {
-      cwd: repo,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const result = runGitResult(repo, grepArgs);
     if (result.status !== 0 || !result.stdout.trim()) continue;
     const treePrefix = treeRef ? `${treeRef}:` : "";
     const hit = result.stdout
@@ -1058,11 +1850,7 @@ function diffCheckCommands(target) {
 function reviewDiffCheck(repo, target, findings) {
   const outputs = [];
   for (const gitArgs of diffCheckCommands(target)) {
-    const result = spawnSync("git", gitArgs, {
-      cwd: repo,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const result = runGitResult(repo, gitArgs);
     const output = `${result.stdout || ""}${result.stderr || ""}`.trim();
     if (output) outputs.push(output);
   }
@@ -1130,27 +1918,233 @@ function printReport(report) {
   return `${lines.join("\n")}\n`;
 }
 
-function startParallelTests(command, repo) {
-  console.log(`tests: ${command}`);
-  const child = spawn(command, {
-    cwd: repo,
-    shell: true,
-    stdio: "inherit",
-  });
-  const done = new Promise((resolve) => {
-    child.on("error", () => resolve(1));
-    child.on("close", (code) => resolve(code ?? 1));
-  });
-  return { done };
+function nonTestPath(relativePath) {
+  const normalized = relativePath.replaceAll("\\", "/");
+  return !(
+    /(^|\/)(?:__tests__|fixtures|test|tests)(\/|$)/.test(normalized) ||
+    /\.(?:spec|test)\.[^/]+$/.test(normalized)
+  );
 }
 
-function finishParallelTests(testRun) {
-  return testRun?.done ?? Promise.resolve(0);
+function numstatSources(repo, target) {
+  if (target.mode === "local") {
+    return [
+      runGit(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        "--cached",
+      ]),
+      runGit(repo, ["diff", "--no-ext-diff", "--no-textconv", "--numstat"]),
+    ];
+  }
+  if (target.mode === "branch") {
+    return [
+      runGit(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        `${target.ref}...HEAD`,
+      ]),
+    ];
+  }
+  if (target.mode === "branch-local") {
+    return [
+      runGit(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        `${target.ref}...HEAD`,
+      ]),
+      runGit(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        "--cached",
+      ]),
+      runGit(repo, ["diff", "--no-ext-diff", "--no-textconv", "--numstat"]),
+    ];
+  }
+  return [
+    runGit(repo, [
+      "show",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--numstat",
+      "--format=",
+      target.ref,
+    ]),
+  ];
+}
+
+function scopeBaseline(repo, target, paths) {
+  let nonTestLoc = 0;
+  for (const source of numstatSources(repo, target)) {
+    for (const line of source.split("\n")) {
+      const match = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
+      if (!match || !nonTestPath(match[3])) continue;
+      if (match[1] !== "-") nonTestLoc += Number.parseInt(match[1], 10);
+      if (match[2] !== "-") nonTestLoc += Number.parseInt(match[2], 10);
+    }
+  }
+  if (target.mode === "local" || target.mode === "branch-local") {
+    const untracked = gitPathList(repo, [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      "-z",
+    ]);
+    for (const relativePath of untracked) {
+      if (!nonTestPath(relativePath)) continue;
+      try {
+        const filePath = path.join(repo, relativePath);
+        const lexicalStat = lstatSync(filePath);
+        if (lexicalStat.isSymbolicLink() || !lexicalStat.isFile()) continue;
+        const resolved = realpathSync(filePath);
+        if (!isWithin(resolved, repo)) continue;
+        const { data: content } = readBoundedRegularFile(
+          resolved,
+          "untracked file",
+        );
+        nonTestLoc +=
+          content.length === 0
+            ? 0
+            : content.toString("utf8").split("\n").length -
+              (content.at(-1) === 0x0a ? 1 : 0);
+      } catch (error) {
+        if (error.code === "AUTOREVIEW_INPUT_TOO_LARGE") throw error;
+        // Bundle construction will report unsafe or unreadable untracked files.
+      }
+    }
+  }
+  return { changedFiles: paths.size, nonTestLoc };
+}
+
+function assertReviewableBundle(paths, bundle) {
+  const blocked = [...paths]
+    .map((relativePath) => ({
+      relativePath,
+      reason: sensitivePathReason(relativePath),
+    }))
+    .filter(({ reason }) => reason);
+  if (blocked.length > 0) {
+    throw new Error(
+      `refusing to include sensitive changed paths in review bundle: ${blocked
+        .slice(0, 10)
+        .map(({ relativePath, reason }) => `${relativePath} (${reason})`)
+        .join(", ")}`,
+    );
+  }
+  if (
+    /(?:^|\n)(?:GIT binary patch|Binary files .+ differ)(?:\n|$)/.test(bundle)
+  ) {
+    throw new Error(
+      "refusing binary changes because their complete contents cannot be reviewed",
+    );
+  }
+  if (
+    /(?:^|\n)(?:(?:old|new|new file|deleted file) mode 160000|[+-]Subproject commit )/.test(
+      bundle,
+    )
+  ) {
+    throw new Error(
+      "refusing gitlink/submodule changes because dependency contents are absent from the review bundle",
+    );
+  }
+  assertNoSecretLikeContent("selected change", bundle);
+}
+
+function sourceSnapshot(repo) {
+  const hash = createHash("sha256");
+  hash.update("\0head-oid\0");
+  hash.update(runGit(repo, ["rev-parse", "HEAD"]));
+  hash.update("\0head-ref\0");
+  const symbolicHead = runGitResult(repo, ["symbolic-ref", "--quiet", "HEAD"]);
+  if (symbolicHead.status === 0) {
+    const symbolicRef = symbolicHead.stdout.trim();
+    if (!symbolicRef) {
+      throw new Error("git symbolic-ref --quiet HEAD returned an empty ref");
+    }
+    hash.update(`symbolic:${symbolicRef}`);
+  } else if (symbolicHead.status === 1) {
+    hash.update("detached");
+  } else {
+    throw new Error(
+      `git symbolic-ref --quiet HEAD failed: ${symbolicHead.stderr || symbolicHead.stdout}`,
+    );
+  }
+  hash.update("\0staged\0");
+  hash.update(
+    runGit(repo, [
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--binary",
+      "--cached",
+      "HEAD",
+      "--",
+    ]),
+  );
+  hash.update("\0unstaged\0");
+  hash.update(
+    runGit(repo, ["diff", "--no-ext-diff", "--no-textconv", "--binary", "--"]),
+  );
+  for (const relativePath of gitPathList(repo, [
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+    "-z",
+  ]).sort()) {
+    hash.update("\0path\0");
+    hash.update(relativePath);
+    const filePath = path.join(repo, relativePath);
+    try {
+      const fileStat = lstatSync(filePath);
+      if (fileStat.isSymbolicLink()) {
+        hash.update("\0symlink\0");
+        hash.update("\0mode\0");
+        hash.update("120000");
+        hash.update(readlinkSync(filePath));
+      } else if (fileStat.isFile()) {
+        const resolved = realpathSync(filePath);
+        if (!isWithin(resolved, repo)) {
+          hash.update("\0outside\0");
+        } else {
+          const { data, fileStat: openedStat } = readBoundedRegularFile(
+            resolved,
+            "untracked file",
+          );
+          hash.update("\0file\0");
+          hash.update(`\0mode\0${normalizedGitFileMode(openedStat)}`);
+          hash.update(data);
+        }
+      } else {
+        hash.update("\0non-file\0");
+      }
+    } catch (error) {
+      if (error.code === "AUTOREVIEW_INPUT_TOO_LARGE") throw error;
+      hash.update(`\0unreadable\0${error.code || error.name}`);
+    }
+  }
+  return hash.digest("hex");
+}
+
+function assertSourceSnapshot(repo, expected, message) {
+  if (sourceSnapshot(repo) !== expected) throw new Error(message);
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const repo = repoRoot();
+  if (args.sourceSnapshotOnly) {
+    console.log(sourceSnapshot(repo));
+    return 0;
+  }
+  const reviewSourceSnapshot = args.dryRun ? null : sourceSnapshot(repo);
   let target;
   try {
     target = chooseTarget(repo, args);
@@ -1165,11 +2159,14 @@ async function main() {
       throw error;
     }
   }
+  target = freezeTargetRef(repo, target);
   const branch = currentBranch(repo) || "detached";
 
   console.log(`autoreview target: ${target.mode}`);
   console.log(`branch: ${branch}`);
   console.log(`engine: ${args.engine}`);
+  if (target.requested_ref)
+    console.log(`requested_ref: ${target.requested_ref}`);
   if (target.ref) console.log(`ref: ${target.ref}`);
   console.log(`tools: ${args.tools ? "on" : "off"}`);
   console.log(`web_search: ${args.webSearch ? "on" : "off"}`);
@@ -1177,64 +2174,136 @@ async function main() {
 
   const paths = changedPaths(repo, target);
   if (paths.size === 0) {
+    assertSourceSnapshot(
+      repo,
+      reviewSourceSnapshot,
+      "source changed while the review target was being selected; rerun autoreview against the updated tree",
+    );
     console.log("autoreview clean: no changed files for selected target");
     return 0;
   }
+  const baseline = scopeBaseline(repo, target, paths);
+  console.log(
+    `scope_baseline: changed_files=${baseline.changedFiles} non_test_loc=${baseline.nonTestLoc}`,
+  );
 
-  const bundle =
-    target.mode === "local"
-      ? localBundle(repo)
-      : target.mode === "branch"
-        ? branchBundle(repo, target.ref)
-        : target.mode === "branch-local"
-          ? branchLocalBundle(repo, target.ref)
-          : commitBundle(repo, target.ref);
-  const prompt = buildPrompt(repo, target, bundle, loadExtras(repo, args));
-  console.log(`bundle: ${prompt.length} chars`);
-  if (args.bundleOutput) {
-    writeFileSync(args.bundleOutput, prompt);
-    console.log(`bundle_output: ${args.bundleOutput}`);
-  }
-  if (args.prepareOnly) {
-    console.log(
-      JSON.stringify(
-        {
-          target,
-          branch,
-          engine: args.engine,
-          changed_paths: [...paths].sort(),
-          bundle_chars: prompt.length,
-          bundle_output: args.bundleOutput,
-          recommended_next_step:
-            "Inside Codex, spawn a fresh-context read-only subagent with this bundle instead of running nested codex exec.",
-        },
-        null,
-        2,
-      ),
+  const needsBundle =
+    args.engine !== "local" ||
+    args.prepareOnly ||
+    Boolean(args.bundleOutput) ||
+    args.prompts.length > 0 ||
+    args.promptFiles.length > 0 ||
+    args.datasets.length > 0;
+  let prompts = [];
+  let bundleOutputs = [];
+  if (needsBundle) {
+    const bundle =
+      target.mode === "local"
+        ? localBundle(repo)
+        : target.mode === "branch"
+          ? branchBundle(repo, target.ref)
+          : target.mode === "branch-local"
+            ? branchLocalBundle(repo, target.ref)
+            : commitBundle(repo, target.ref);
+    assertReviewableBundle(paths, bundle);
+    assertNoSecretLikeContent("current branch", branch);
+    if (target.requested_ref) {
+      assertNoSecretLikeContent(
+        "requested review target ref",
+        target.requested_ref,
+      );
+    }
+    if (target.ref) assertNoSecretLikeContent("review target ref", target.ref);
+    const bundleBytes = utf8Size(bundle);
+    const extras = loadExtras(repo, args, MAX_REVIEW_INPUT_BYTES - bundleBytes);
+    prompts = buildBoundedReviewPrompts(bundle, (chunk, position) =>
+      renderReviewPrompt(target, branch, baseline, chunk, extras, position),
     );
-    return 0;
+    assertSourceSnapshot(
+      repo,
+      reviewSourceSnapshot,
+      "source changed while the review bundle was being created; rerun autoreview against the updated tree",
+    );
+    console.log(
+      `bundle: ${bundleBytes} bytes; review passes: ${prompts.length}`,
+    );
+    if (args.prepareOnly) {
+      const displayedBundleOutput =
+        args.bundleOutputDisplay || args.bundleOutput;
+      if (args.bundleOutput) {
+        writeReviewPromptOutputs(args.bundleOutput, prompts);
+        bundleOutputs = reviewPromptOutputPaths(
+          displayedBundleOutput,
+          prompts.length,
+        );
+        console.log(`bundle_output: ${displayedBundleOutput}`);
+      }
+      console.log(
+        JSON.stringify(
+          {
+            target,
+            branch,
+            engine: args.engine,
+            changed_paths: [...paths].sort(),
+            scope_baseline: baseline,
+            bundle_bytes: bundleBytes,
+            review_passes: prompts.length,
+            prompt_bytes: prompts.map(utf8Size),
+            bundle_output: displayedBundleOutput,
+            bundle_outputs: bundleOutputs,
+            behavior_validation_required: true,
+            recommended_next_step:
+              "Inside Codex, have a fresh-context read-only subagent review every listed bounded pass; then run the separate quality, browser, runtime, or generated-artifact proof required by the change.",
+          },
+          null,
+          2,
+        ),
+      );
+      return 0;
+    }
   }
 
-  const tests = args.parallelTests
-    ? startParallelTests(args.parallelTests, repo)
-    : null;
+  if (args.engine !== "local" && prompts.length > 1) {
+    throw new Error(
+      `semantic review requires ${prompts.length} bounded passes, but independent engine invocations cannot safely detect cross-pass defects; rerun with --prepare-only --bundle-output <path> and have one fresh-context reviewer inspect every listed pass`,
+    );
+  }
+
   let report;
-  try {
-    if (args.engine === "local") {
-      report = runLocalReview(repo, target, paths);
-    } else {
-      const raw =
-        args.engine === "codex"
-          ? await runCodex(repo, args, prompt)
-          : await runClaude(repo, args, prompt);
-      report = validateReport(extractReviewJson(raw), paths);
-    }
-  } finally {
-    const testStatus = await finishParallelTests(tests);
-    if (testStatus !== 0) {
-      console.error(`tests failed with exit code ${testStatus}`);
-      process.exitCode = 1;
-    }
+  if (args.engine === "local") {
+    assertSourceSnapshot(
+      repo,
+      reviewSourceSnapshot,
+      "source changed before local review; rerun autoreview against the updated tree",
+    );
+    report = runLocalReview(repo, target, paths);
+    assertSourceSnapshot(
+      repo,
+      reviewSourceSnapshot,
+      "source changed during local review; rerun autoreview against the updated tree",
+    );
+  } else {
+    assertSourceSnapshot(
+      repo,
+      reviewSourceSnapshot,
+      "source changed before semantic review; rerun autoreview against the updated tree",
+    );
+    const raw =
+      args.engine === "codex"
+        ? await runCodex(repo, args, prompts[0])
+        : await runClaude(repo, args, prompts[0]);
+    report = validateReport(extractReviewJson(raw), paths);
+    assertSourceSnapshot(
+      repo,
+      reviewSourceSnapshot,
+      "source changed during semantic review; rerun autoreview against the updated tree",
+    );
+  }
+
+  if (args.bundleOutput) {
+    const displayedBundleOutput = args.bundleOutputDisplay || args.bundleOutput;
+    writeReviewPromptOutputs(args.bundleOutput, prompts);
+    console.log(`bundle_output: ${displayedBundleOutput}`);
   }
 
   if (args.jsonOutput) {

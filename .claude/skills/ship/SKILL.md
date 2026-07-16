@@ -5,7 +5,7 @@ title: Ship Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-28
+last_verified: 2026-07-16
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -58,17 +58,41 @@ staging anything.
 pnpm agent:quality-gate --run
 ```
 
-2. For non-trivial behavioral, workflow, security, data-flow, infrastructure,
-   or UI changes, run the closeout review when the helper is available:
+2. Freeze the original request, target/owner, changed files, and non-test
+   changed-line count as the scope baseline. For non-trivial behavioral,
+   workflow, security, data-flow, infrastructure, or UI changes, run the
+   closeout review:
 
 ```bash
 pnpm agent:autoreview
 ```
 
-If `pnpm agent:autoreview` reports that the global helper is missing, do a
-current-session closeout review instead: inspect the diff against the PR base,
-read every touched file that carries behavior, check docs/workflow drift, and
-state in the PR body/final summary that the structured helper was unavailable.
+The repo-local helper reviews the complete branch-local target without
+truncation. Direct semantic engines fail closed if the target needs more than
+one prompt; prepared bundles retain bounded lossless passes that one
+fresh-context reviewer must inspect completely.
+Semantic engines run from an isolated empty workspace with restricted project
+configuration and environment; sensitive inputs fail closed. Direct
+supplemental evidence must be repo-relative, except for adapter-generated PR
+feedback inside its trusted bundle directory. A quiet reviewer emits a
+60-second heartbeat. Do not pass the removed `--parallel-tests` option; the
+quality gate owns test execution.
+
+If direct semantic execution refuses a multi-pass target, run
+`pnpm agent:autoreview --prepare-bundle-dir <dir>` with a directory outside the
+worktree and have one fresh-context reviewer inspect every pass listed by the
+bundle index.
+
+Inside an active Codex sandbox, the adapter may choose the local deterministic
+engine only when no engine was explicitly selected. An explicitly selected
+unavailable semantic engine, or a missing repo helper, is a hard stop: report
+the blocker rather than silently substituting local or current-session review.
+
+Verify accepted findings before editing. Classify scope growth as in-scope,
+follow-up, or stop, create an issue before deferring valid follow-up work, warn
+near twice the frozen baseline, and pause for reclassification after two
+review-triggered patch cycles. A clean source review is not UI, CLI/API,
+generated-artifact, or runtime proof; retain all applicable verification.
 
 3. For UI changes, follow the browser verification protocol in `AGENTS.md`.
    If browser tools are unavailable in the session, say so explicitly and do not

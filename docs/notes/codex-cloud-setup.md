@@ -15,9 +15,11 @@ garden_lane: operator-runbooks
 Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
 `~/.claude` directories. Cloud setup and maintenance therefore rely on the
 repo-local helper at `scripts/agent-autoreview.mjs`; they fail fast only if that
-repo-owned executable is missing or an explicit `AUTOREVIEW_HELPER` override is
-not executable. PR shipping requires `pnpm agent:autoreview` as the structured
-batch-boundary review.
+repo-owned executable is missing or an explicit compatible `AUTOREVIEW_HELPER`
+override is not executable. Prepared-bundle overrides must implement the pinned
+helper CLI contract, including source snapshots and bundle-output flags. PR
+shipping requires `pnpm agent:autoreview` as the structured batch-boundary
+review.
 Configure the Codex Cloud environment setup script as:
 
 ```bash
@@ -52,8 +54,8 @@ execution. Setup checks OSV API egress by POSTing to
 `https://api.osv.dev/v1/querybatch` unless `CODEX_CLOUD_CHECK_OSV_EGRESS=false`,
 and verifies the repo-local autoreview helper at
 `scripts/agent-autoreview.mjs` before tool prewarm. Set `AUTOREVIEW_HELPER` only
-for an intentional executable override; setup fails fast when the effective
-helper is missing.
+for an intentional compatible executable override; setup fails fast when the
+effective helper is missing.
 
 Codex Cloud maintenance runs when Codex resumes a cached container after
 checking out the task branch. It skips apt/tool installation, re-establishes

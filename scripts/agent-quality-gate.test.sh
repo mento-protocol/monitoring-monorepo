@@ -2653,6 +2653,14 @@ run_gate "scripts/agent-autoreview.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
 
+run_gate "scripts/agent-autoreview-core.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+
+run_gate "scripts/agent-autoreview-core.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+
 run_gate "scripts/check-agent-context.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
 assert_contains "- node scripts/check-agent-context.test.mjs (agent context checker changed)"

@@ -91,6 +91,23 @@ gate in the same worktree. Invocation details, parallelism, cache behavior, the
 server-side full-repository fallback, and common traps live in
 [`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md).
 
+Autoreview keeps this repo's branch-local target (base-to-`HEAD` plus dirty
+tracked and untracked work), deterministic Mento checks, and repo-selected
+checklist/feedback context. It reviews that complete target without truncation,
+but direct semantic engines fail closed when the target needs more than one
+prompt. Prepared bundles retain a bounded, lossless pass index that one
+fresh-context reviewer must inspect completely. Direct and prepared capture
+enforce a cumulative byte budget before review input accumulates in memory or
+staging sidecars.
+Semantic engines run in an isolated empty workspace with restricted project
+configuration and environment; review inputs fail closed on sensitive content.
+Inside an active Codex sandbox, the adapter may choose its local deterministic
+engine only when no engine was explicitly selected; an explicitly selected
+unavailable semantic engine fails closed. Autoreview does not run tests;
+`pnpm agent:quality-gate --run` owns test execution.
+Autoreview is source review, not runtime or behavior proof, so all mapped gate,
+browser, generated-artifact, and runtime verification still applies.
+
 ## PR description standard
 
 Every PR description starts with `## The Problem` followed by
@@ -116,6 +133,12 @@ comments/threads, annotations, and failing logs. Reply before resolving:
 Audit sibling surfaces after one instance of a hazard is found; review is a
 batch-boundary verifier, not the inner edit loop. Never force-push or amend
 while babysitting.
+
+Freeze the intended review baseline before the first pass: the user request,
+target/owner, changed files, and non-test changed lines. Classify additions as
+in-scope, follow-up, or stop; create an issue before deferring valid follow-up
+work, warn near twice the baseline, and pause for reclassification after two
+review-triggered patch cycles rather than starting a third automatically.
 
 Before all-clear, run:
 

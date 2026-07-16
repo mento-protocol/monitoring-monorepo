@@ -254,21 +254,43 @@ Field expectations:
 1. Sweep feedback surfaces and reply to all review comments.
    Use `Fixed in <commit> — <what changed>` or
    `Won't fix: <technical reason why>`; never resolve a thread before replying.
-2. Batch review fixes locally, auditing sibling surfaces before pushing.
+2. Freeze the original request, target/owner, changed files, and non-test
+   changed-line count as the scope baseline. Batch review fixes locally,
+   auditing sibling surfaces before pushing. Classify additions as in-scope,
+   follow-up, or stop; open an issue before deferring valid follow-up work, warn
+   near twice the baseline, and pause for reclassification after two
+   review-triggered patch cycles rather than starting a third automatically.
 3. Run the mapped local gate once for the batch.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
    run `pnpm agent:autoreview` as a structured closeout review. The command is
-   a repo adapter for the pinned helper at `scripts/agent-autoreview.mjs`.
+   a repo adapter for the pinned helper at `scripts/agent-autoreview.mjs`. It
+   reviews the complete branch-local target without truncation. Direct semantic
+   engines fail closed if the target needs more than one prompt; prepared
+   bundles preserve a bounded lossless pass index that one fresh-context
+   reviewer must inspect completely. Semantic engines run from an isolated
+   empty workspace with restricted project configuration and environment, and
+   review inputs fail closed when sensitive paths or content are detected. A
+   quiet semantic pass emits a heartbeat every 60 seconds.
    Verify accepted findings before editing; if review-triggered fixes change
-   code, rerun focused checks and autoreview once for that fixed batch. Inside
-   an active Codex sandbox, the adapter defaults to the helper's local
-   deterministic engine unless an engine is passed explicitly, because nested
-   `codex exec` is unavailable there. For a true fresh-context Codex semantic
-   pass, run `pnpm agent:autoreview --prepare-bundle-dir <dir>` and hand the
-   generated bundle to the reviewer; use a directory outside the repo worktree
-   so local-mode bundles do not include themselves. Add
-   `--feedback-pr <number>` when the batch responds to PR feedback so the
-   feedback ledger is included.
+   code, rerun focused checks and autoreview for that fixed batch. Inside an
+   active Codex sandbox, the adapter may default to the helper's local
+   deterministic engine only when no engine is explicitly selected. An
+   explicitly selected unavailable semantic engine fails closed. For a true
+   fresh-context Codex semantic pass, prepare a bundle and hand it to the
+   reviewer:
+
+   ```bash
+   pnpm agent:autoreview --prepare-bundle-dir <dir>
+   ```
+
+   Use a directory outside the repo worktree so local-mode bundles do not
+   include themselves. Direct supplemental evidence must be repo-relative;
+   adapter-generated `--feedback-pr <number>` state inside the trusted bundle
+   directory is the narrow exception. Do not pass the removed
+   `--parallel-tests` option; the quality gate owns tests. A clean source review
+   does not prove UI, CLI/API, generated-artifact, or runtime behavior, so keep
+   all applicable verification in the validation record.
+
 5. Run `pnpm --silent pr:feedback-state --pr <number> --json` for a feedback-only sweep,
    or `pnpm pr:ready-state --pr <number> --json` for the final readiness
    source of truth. For a foreground wait loop, use
@@ -313,6 +335,10 @@ watching until Codex approves, posts new feedback, or the signal becomes stale.
 - Avoid broad bot review as an inner loop; use review at batch boundaries.
 - Use `pnpm agent:autoreview` for local structured closeout on non-trivial
   batches before pushing, not as a replacement for `pr:ready-state`.
+- Keep the frozen scope baseline visible through review; pause after two patch
+  cycles or when scope approaches twice the baseline.
+- Run tests through `pnpm agent:quality-gate --run`; autoreview no longer has a
+  parallel-test execution mode.
 - Cap manual Codex fallback to one request per head.
 - If `codexReviewSignal` is `requested` or `in_flight`, wait instead of posting
   another `@codex review`.

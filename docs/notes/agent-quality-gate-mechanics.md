@@ -123,13 +123,65 @@ pnpm agent:autoreview
 
 Use it as a batch-boundary verifier. Verify every accepted finding in the real
 code before editing, rerun focused checks after review-triggered fixes, and
-rerun autoreview once for that fixed batch. This adapter uses the repo-local
-helper at `scripts/agent-autoreview.mjs` by default and does not replace the
-final PR readiness probe. Inside an active Codex sandbox, the adapter defaults
-to the helper's local deterministic engine because nested `codex exec` is unavailable there;
-pass `--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` to override.
-Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the pinned
-repo helper.
+rerun autoreview for the fixed batch. Freeze the initial request, target/owner,
+changed-file set, and non-test changed-line count as the scope baseline before
+the first pass. Classify proposed additions as in-scope, follow-up, or stop;
+create an issue before deferring a valid follow-up, warn when non-test scope
+approaches twice the baseline, and pause for reclassification after two
+review-triggered patch cycles instead of starting a third automatically.
+
+This adapter uses the repo-local helper at `scripts/agent-autoreview.mjs` and
+keeps the repo's branch-local target: merge-base-to-`HEAD` commits plus current
+tracked and untracked work. It includes deterministic Mento checks and selected
+repo checklist/feedback context. Review bundles are never silently truncated.
+When a semantic prompt is too large, the helper losslessly partitions the
+complete bundle into a bounded pass index for prepared-bundle handoff. One
+fresh-context reviewer must inspect every listed pass so cross-pass contracts
+remain visible. Direct Codex or Claude execution fails closed instead of
+launching independent semantic passes, and bundle preparation fails if the full
+review cannot fit the bounded pass budget.
+The direct helper and prepared-bundle adapter enforce one cumulative input
+budget while capturing diffs, untracked files, checklists, and feedback, before
+those bytes can accumulate in memory or staging sidecars.
+The helper resolves a symbolic branch base or commit target once to an immutable
+object ID, fingerprints the symbolic branch or detached state, `HEAD`,
+staged/unstaged bytes, and untracked file or symlink state, and fails if that
+source changes during bundle construction or semantic review. The repo adapter
+also removes reviewed-repo directories from its executable search path and
+resolves Git/GitHub CLI targets outside the worktree before capture. Prepared
+repo-context bundles apply the same before/after fingerprint while every
+artifact remains in an adjacent ephemeral directory, then publish the complete
+bundle with one rename only after validation passes. The published
+`helper-output.txt` reports the final prompt/pass paths, never the discarded
+staging directory.
+
+Semantic Codex and Claude passes run from an empty temporary workspace with
+repo/project instructions, hooks, plugins, and inherited environment restricted
+to the review contract. Reviewer credentials remain available only to launch
+the selected engine; repository tooling and unrelated environment state do not.
+For Claude/Bedrock this includes standard AWS web-identity, container, profile,
+and shared-file credential-chain locators. Credential/config file variables are
+canonicalized to existing regular files outside the reviewed repository; a
+repo-contained path fails closed before Claude starts.
+Direct supplemental-evidence paths must be repo-relative, regular UTF-8 files
+confined to the worktree. The narrow trusted exception is the adapter-generated
+`pr:feedback-state` dataset inside its prepared-bundle directory. Sensitive
+paths, credential-like content, private keys, and secret-bearing URLs fail
+closed before any prepared-bundle artifact is published or review input is sent
+to a semantic engine. A quiet semantic reviewer emits a progress heartbeat
+every 60 seconds.
+
+Inside an active Codex sandbox, and only when no engine was selected explicitly,
+the adapter defaults to the helper's local deterministic engine because nested
+`codex exec` is unavailable there. An explicit engine selection through
+`--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` takes precedence
+and fails closed if that engine is unavailable; it never silently falls back.
+Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the
+pinned repo helper with a compatible implementation of its CLI contract.
+Prepared-bundle replacements must support `--source-snapshot-only` plus the
+helper's bundle-output and trusted-input flags. The old autoreview
+`--parallel-tests` path is removed: the mapped quality gate owns test execution
+and isolation.
 
 For a true Codex semantic pass from inside Codex, prepare a repo-context bundle
 and pass that bundle to a fresh-context reviewer:
@@ -143,7 +195,14 @@ their own generated files. The bundle contains changed paths, patch files,
 repo-selected checklist/prompt context, and the helper's
 `autoreview-prompt.md`. Add
 `--feedback-pr <number>` to include the current `pr:feedback-state` ledger as a
-review dataset for feedback-fix batches.
+review dataset for feedback-fix batches. Prepared-bundle mode owns that prompt
+path, so do not combine `--prepare-bundle-dir` with `--bundle-output`.
+
+Autoreview answers whether the source bundle contains review findings. It does
+not prove CLI/API behavior, generated artifacts, deployment/runtime behavior,
+or a UI interaction. Keep the mapped quality gate and every applicable browser,
+generation, integration, and runtime check in the validation record. The final
+PR all-clear still comes from `pnpm pr:ready-state`, not autoreview.
 
 To classify review depth and likely context-update requirements before or after
 the mapped gate, use:

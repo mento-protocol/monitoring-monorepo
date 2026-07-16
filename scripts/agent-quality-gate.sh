@@ -1500,7 +1500,7 @@ while IFS= read -r path; do
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in
-        scripts/agent-autoreview.mjs)
+        scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs)
           add_command "bash scripts/agent-autoreview.test.sh" "agent autoreview helper changed"
           ;;
         scripts/check-agent-context.mjs|scripts/check-agent-context-helpers.mjs|scripts/check-agent-context.test.mjs)
