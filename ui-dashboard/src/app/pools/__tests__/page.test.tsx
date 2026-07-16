@@ -198,6 +198,7 @@ function makeNetworkData(
     snapshots7d: [],
     snapshots30d: [],
     snapshotsAllDaily: [],
+    snapshotsAllDailyCapped: false,
     snapshotsAllDailyTruncated: false,
     brokerSnapshotsAllDaily: [],
     brokerSnapshotsAllDailyTruncated: false,
@@ -231,6 +232,11 @@ const baseAllNetworksResult = {
   ],
   isLoading: false,
   error: null,
+  isSnapshotHistoryCapped: false,
+  isPoolSnapshotHistoryCapped: false,
+  snapshotHistoryError: null,
+  poolSnapshotHistoryError: null,
+  requestFullSnapshotHistory: vi.fn(async () => undefined),
 };
 
 const baseSwapsResult = {
@@ -268,6 +274,11 @@ describe("PoolsPage multichain rendering", () => {
     const html = renderToStaticMarkup(<PoolsPage initialIsWeekend={true} />);
 
     expect(html).toContain('data-testid="initial-is-weekend">true<');
+    expect(useAllNetworksData).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      "pools",
+    );
   });
 
   it("keeps pools visible and discloses a live-health refresh failure", () => {
@@ -497,6 +508,11 @@ describe("PoolsPage loading-state skeleton parity", () => {
       networkData: [],
       isLoading: true,
       error: null,
+      isSnapshotHistoryCapped: false,
+      isPoolSnapshotHistoryCapped: false,
+      snapshotHistoryError: null,
+      poolSnapshotHistoryError: null,
+      requestFullSnapshotHistory: vi.fn(async () => undefined),
     });
     vi.mocked(useGQL).mockReturnValue(baseSwapsResult as SWRResponse);
 

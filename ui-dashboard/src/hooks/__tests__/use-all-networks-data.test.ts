@@ -367,6 +367,16 @@ describe("fetchNetworkData — happy path", () => {
     expect(result.fees).not.toBeNull();
     expect(result.uniqueLpAddresses).toHaveLength(5);
     expect(result.rates).toBeInstanceOf(Map);
+    expect(isNetworkDataFullyHealthy(result)).toBe(true);
+    // The SSR cap is an intentional transport projection, not upstream
+    // degradation. A fresh capped seed must remain eligible for the cold-cache
+    // mount skip; the explicit "All" interaction owns full-history recovery.
+    expect(
+      isNetworkDataFullyHealthy({
+        ...result,
+        snapshotsAllDailyCapped: true,
+      }),
+    ).toBe(true);
 
     // Verify the request shape per query type (call order can vary because
     // the fees/snapshots/LP triad fires via Promise.allSettled after Pool).
@@ -1015,6 +1025,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
       variablesKey: "pool-tail",
       rows: cachedRows,
       refreshAfterTimestamp: todayMidnight - 86400,
+      complete: true,
     });
     const tailErr = new Error("incremental tail timeout");
 

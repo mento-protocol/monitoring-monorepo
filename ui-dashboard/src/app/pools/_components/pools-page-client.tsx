@@ -81,10 +81,13 @@ function PoolsContent({
   // hook's `fallbackData` branch turns off mount revalidation on a cold SWR
   // cache when the payload is fresh (< SSR_FRESH_ENOUGH_MS), so that first
   // paint fires zero client GraphQL requests; older SSR payloads paint
-  // instantly and revalidate immediately.
+  // instantly and revalidate immediately. The seed's bounded daily history
+  // is intentional: this route only consumes 24h/7d/30d windows, and a later
+  // normal poll replaces it with the complete client payload.
   const { networkData, isLoading: poolsLoading } = useAllNetworksData(
     initialNetworkData,
     initialNetworkDataFetchedAtMs,
+    "pools",
   );
   const searchParams = useSearchParams();
   const { replace } = useRouter();

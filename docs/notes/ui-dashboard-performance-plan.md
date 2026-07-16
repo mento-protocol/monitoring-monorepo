@@ -188,9 +188,21 @@ chainId}]` — the server must reproduce the exact normalized id + `network.id`
   for the Map/Set fields, caches healthy payloads only (degraded ones pass through
   uncached via an error carrier — cold misses only, since `unstable_cache` serves stale
   entries and swallows background-revalidation errors; a `fetchedAt` age gate bounds
-  served staleness at ~90s with a foreground refetch, covering the stale-serve path so
-  `N/A` tiles are never pinned), and strips
-  the unread raw `feeSnapshots` rows from the `/` + `/pools` Flight payload. Note the
+  served staleness at 5 minutes with a foreground refetch, covering the stale-serve path
+  so `N/A` tiles are never pinned), and strips the unread raw `feeSnapshots` rows from
+  the `/` + `/pools` Flight payload. **Payload projection shipped 2026-07-15:** the
+  transport now carries the 30 UTC-day default v3 window plus one latest pre-window
+  anchor per pool for TVL forward-fill. Broker carries one additional UTC-day boundary
+  bucket because the rolling 30-day window starts exactly 30 midnights ago during UTC
+  hour zero. It omits the redundant 1/7/30-day arrays. `useAllNetworksData` reconstructs those
+  arrays synchronously from the bounded canonical rows before consumers or
+  incremental-cache seeding; selecting a chart's "All" range triggers the normal
+  full-history SWR fetch, and capped seeds remain cache-incomplete until that pagination
+  succeeds. The cumulative LP-address arrays are replaced by the homepage's exact
+  cross-chain union count, while `/pools` receives neither Broker history nor LP data
+  because it consumes neither. This is the audited transport invariant: every
+  time/cumulative `InitialNetworkData` field is bounded, omitted, or aggregated; the
+  remaining collections are bounded by current configured entities. Note the
   impact re-rating vs. this plan's original scoring: a 2026-07-09 re-measure showed the
   homepage document _streaming_ until 0.9–1.9s (the fan-out runs inside the streamed
   RSC content, not TTFB), so this was in fact the homepage LCP lever, not just cost.
