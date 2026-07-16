@@ -56,6 +56,19 @@ describe("TimeSeriesChartCard delta-row loading parity", () => {
     expect(html).not.toContain(DELTA_ROW_MARKER);
   });
 
+  it("can paint an exact headline while the chart series is still loading", () => {
+    const html = render({
+      isLoading: true,
+      headlineLoading: false,
+      headline: "$125.00",
+    });
+
+    expect(html).toContain("$125.00");
+    expect(html).not.toContain("h-[1em] w-36");
+    // The independently-loading chart still keeps its reserved plot skeleton.
+    expect(html).toContain("animate-pulse");
+  });
+
   it("matches loading-vs-loaded row absence for a card that always passes change=null with reserveDeltaRow=false", () => {
     const loadingHtml = render({ isLoading: true, reserveDeltaRow: false });
     const loadedHtml = render({ isLoading: false, reserveDeltaRow: false });

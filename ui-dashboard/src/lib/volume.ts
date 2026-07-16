@@ -62,10 +62,12 @@ export function poolTotalVolumeUSD(
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
   if (USDM_SYMBOLS.has(sym0)) {
-    return parseWei(pool.notionalVolume0 ?? "0", pool.token0Decimals ?? 18);
+    if (pool.notionalVolume0 === undefined) return null;
+    return parseWei(pool.notionalVolume0, pool.token0Decimals ?? 18);
   }
   if (USDM_SYMBOLS.has(sym1)) {
-    return parseWei(pool.notionalVolume1 ?? "0", pool.token1Decimals ?? 18);
+    if (pool.notionalVolume1 === undefined) return null;
+    return parseWei(pool.notionalVolume1, pool.token1Decimals ?? 18);
   }
   return (
     volumeViaFxRate(sym0, pool.notionalVolume0, pool.token0Decimals, rates) ??
@@ -79,7 +81,8 @@ function volumeViaFxRate(
   decimals: number | undefined,
   rates: OracleRateMap,
 ): number | null {
-  const amount = parseWei(rawVolume ?? "0", decimals ?? 18);
+  if (rawVolume === undefined) return null;
+  const amount = parseWei(rawVolume, decimals ?? 18);
   return tokenToUSD(symbol, amount, rates);
 }
 
@@ -165,6 +168,50 @@ export function filterSnapshotsToWindow(
     const timestamp = Number(snapshot.timestamp);
     return timestamp >= window.from && timestamp < window.to;
   });
+}
+
+/**
+ * Derive the UTC-day-aligned 1/7/30-day slices used by the homepage and pools
+ * table from the canonical daily history. The normal `snapshotWindows` are
+ * rolling hour windows; daily rollup rows are midnight buckets, so these
+ * bounds deliberately include today plus the preceding 6/29 UTC days.
+ *
+ * Kept in this client-safe module so the Server Component transport can omit
+ * the three redundant arrays and the client can reconstruct them
+ * synchronously, before the SSR fallback reaches SWR consumers or the
+ * incremental cache.
+ */
+export function buildDailySnapshotSlices(
+  snapshotsAllDaily: PoolSnapshotWindow[],
+  nowSeconds: number,
+): {
+  dailyWindows: SnapshotWindows;
+  snapshots: PoolSnapshotWindow[];
+  snapshots7d: PoolSnapshotWindow[];
+  snapshots30d: PoolSnapshotWindow[];
+} {
+  const todayMidnight =
+    Math.floor(nowSeconds / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  const dailyWindows: SnapshotWindows = {
+    w24h: {
+      from: todayMidnight,
+      to: todayMidnight + SECONDS_PER_DAY,
+    },
+    w7d: {
+      from: todayMidnight - 6 * SECONDS_PER_DAY,
+      to: todayMidnight + SECONDS_PER_DAY,
+    },
+    w30d: {
+      from: todayMidnight - 29 * SECONDS_PER_DAY,
+      to: todayMidnight + SECONDS_PER_DAY,
+    },
+  };
+  return {
+    dailyWindows,
+    snapshots: filterSnapshotsToWindow(snapshotsAllDaily, dailyWindows.w24h),
+    snapshots7d: filterSnapshotsToWindow(snapshotsAllDaily, dailyWindows.w7d),
+    snapshots30d: filterSnapshotsToWindow(snapshotsAllDaily, dailyWindows.w30d),
+  };
 }
 
 export function buildPoolVolumeMapInWindow(

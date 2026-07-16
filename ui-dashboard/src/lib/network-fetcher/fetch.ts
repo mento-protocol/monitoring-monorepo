@@ -6,7 +6,7 @@
 // state intentionally persists across requests to throttle Sentry signals
 // across the 30s poll loop; tests `.clear()` those caches between cases.
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
@@ -92,8 +92,10 @@ export const blankNetworkData = (
   snapshots7d: [],
   snapshots30d: [],
   snapshotsAllDaily: [],
+  snapshotsAllDailyCapped: false,
   snapshotsAllDailyTruncated: false,
   brokerSnapshotsAllDaily: [],
+  brokerSnapshotsAllDailyCapped: false,
   brokerSnapshotsAllDailyTruncated: false,
   olsPoolIds: new Set(),
   cdpPoolIds: new Set(),

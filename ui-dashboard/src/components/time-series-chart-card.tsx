@@ -89,6 +89,12 @@ interface TimeSeriesChartCardProps {
   /** String for simple "$X.XM" headlines, or a ReactNode for richer layouts
    *  (e.g. multi-value cells with inline badges). */
   headline: string | ReactNode;
+  /**
+   * Whether the headline itself is still loading. Defaults to `isLoading`.
+   * Use this when a card can paint an exact headline from server-prefetched
+   * summary data while its chart series continues loading independently.
+   */
+  headlineLoading?: boolean;
   change: number | null;
   changeLabel?: string;
   /**
@@ -174,6 +180,7 @@ export function TimeSeriesChartCard({
   range,
   onRangeChange,
   headline,
+  headlineLoading,
   change,
   changeLabel = "week-over-week",
   hoverDateFormat = "%b %d, %Y",
@@ -191,6 +198,7 @@ export function TimeSeriesChartCard({
   plotlyDeferMode = "none",
   reserveDeltaRow = true,
 }: TimeSeriesChartCardProps) {
+  const resolvedHeadlineLoading = headlineLoading ?? isLoading;
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
   // When any breakdown series carries a `legendIcon`, swap Plotly's
@@ -533,7 +541,7 @@ export function TimeSeriesChartCard({
             )}
           </p>
           <p className="mt-1 font-mono text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-            {isLoading ? (
+            {resolvedHeadlineLoading ? (
               // Pre-reserve the hero width so the transition from skeleton to
               // the real number doesn't shift the tab row on its right.
               <span className="inline-block h-[1em] w-36 animate-pulse rounded bg-slate-800/60 align-middle" />

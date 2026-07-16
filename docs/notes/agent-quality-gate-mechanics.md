@@ -34,7 +34,8 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:review-materiality:test`, `scripts.agent:context-check`,
 `scripts.agent:autoreview`, `scripts.issue:board`,
 `scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
-`scripts.issue:release`, `scripts.pr:feedback-state`,
+`scripts.issue:release`, `scripts.sentry:ingest`,
+`scripts.sentry:ingest:test`, `scripts.pr:feedback-state`,
 `scripts.pr:feedback-state:test`, `scripts.pr:ready-state`,
 `scripts.pr:ready-state:test`,
 `scripts.tf`, `scripts.tf:test`, `scripts.alerts:rules:lint`,
@@ -58,6 +59,15 @@ build-backed `size-limit` stay serialized with each other, but are not global
 quality prerequisites: a browser setup failure still lets independent
 lint/typecheck/unit/knip feedback run. `--fail-fast` stays sequential so it
 still stops before starting the next mapped command.
+
+Do not launch dashboard browser tests, a dashboard dev server, or another
+quality-gate run concurrently with `pnpm agent:quality-gate --run` in the same
+worktree. Next processes share `ui-dashboard/.next`; competing writers can
+produce false `Another next dev server is already running` or
+`ChunkLoadError` failures. The gate also schedules coverage alongside other
+independent checks, so an extra ad hoc coverage run only adds load and can turn
+normally passing accessibility tests into timeout noise. Run focused tests
+before the gate, then let one gate invocation own the full mapped batch.
 
 For non-trivial behavioral, workflow, security, data-flow, or UI batches, run
 the structured closeout review after the mapped gate and before pushing:

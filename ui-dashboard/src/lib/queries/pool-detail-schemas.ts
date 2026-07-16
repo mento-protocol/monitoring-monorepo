@@ -14,8 +14,21 @@
  * - Keep in sync with the corresponding query and TypeScript type in types.ts.
  */
 
-import { z } from "zod";
+import { z } from "zod/mini";
 import { ORACLE_REPORTER_TYPES } from "@mento-protocol/config/oracle-reporters";
+
+const OptionalStringSchema = z.optional(z.string());
+const OptionalNumberSchema = z.optional(z.number());
+const OptionalBooleanSchema = z.optional(z.boolean());
+const NullableStringSchema = z.nullable(z.string());
+const NullishNumberToUndefinedSchema = z.pipe(
+  z.optional(z.nullable(z.number())),
+  z.transform((value) => value ?? undefined),
+);
+const NullishStringToUndefinedSchema = z.pipe(
+  z.optional(z.nullable(z.string())),
+  z.transform((value) => value ?? undefined),
+);
 
 // ---------------------------------------------------------------------------
 // POOL_BREACH_ROLLUP
@@ -23,9 +36,9 @@ import { ORACLE_REPORTER_TYPES } from "@mento-protocol/config/oracle-reporters";
 
 const PoolBreachRollupRowSchema = z.object({
   id: z.string(),
-  breachCount: z.number().optional(),
-  healthBinarySeconds: z.string().optional(),
-  healthTotalSeconds: z.string().optional(),
+  breachCount: OptionalNumberSchema,
+  healthBinarySeconds: OptionalStringSchema,
+  healthTotalSeconds: OptionalStringSchema,
 });
 
 export const PoolBreachRollupSchema = z.object({
@@ -38,7 +51,7 @@ export const PoolBreachRollupSchema = z.object({
 
 const PoolConfigExtRowSchema = z.object({
   id: z.string(),
-  rebalanceReward: z.number().optional(),
+  rebalanceReward: OptionalNumberSchema,
 });
 
 export const PoolConfigExtSchema = z.object({
@@ -70,62 +83,51 @@ export const PoolRateFeedExtSchema = z.object({
 const PoolDetailRowSchema = z.object({
   id: z.string(),
   chainId: z.number(),
-  token0: z.string().nullable(),
-  token1: z.string().nullable(),
+  token0: NullableStringSchema,
+  token1: NullableStringSchema,
   // Decimals are queried but may be null on older indexer rows; coerce so the
   // inferred type stays compatible with Pool.token0Decimals?: number.
-  token0Decimals: z
-    .number()
-    .nullable()
-    .optional()
-    .transform((v) => v ?? undefined),
-  token1Decimals: z
-    .number()
-    .nullable()
-    .optional()
-    .transform((v) => v ?? undefined),
+  token0Decimals: NullishNumberToUndefinedSchema,
+  token1Decimals: NullishNumberToUndefinedSchema,
   source: z.string(),
   createdAtBlock: z.string(),
   createdAtTimestamp: z.string(),
   updatedAtBlock: z.string(),
   updatedAtTimestamp: z.string(),
   // Optional health/oracle fields — may be absent on older schema versions
-  healthStatus: z.string().optional(),
-  oracleOk: z.boolean().optional(),
-  oraclePrice: z.string().optional(),
-  oracleTimestamp: z.string().optional(),
-  oracleTxHash: z.string().optional(),
-  oracleExpiry: z.string().optional(),
-  oracleNumReporters: z.number().optional(),
-  referenceRateFeedID: z.string().optional(),
-  priceDifference: z.string().optional(),
-  rebalanceThreshold: z.number().optional(),
-  lastRebalancedAt: z.string().optional(),
+  healthStatus: OptionalStringSchema,
+  oracleOk: OptionalBooleanSchema,
+  oraclePrice: OptionalStringSchema,
+  oracleTimestamp: OptionalStringSchema,
+  oracleTxHash: OptionalStringSchema,
+  oracleExpiry: OptionalStringSchema,
+  oracleNumReporters: OptionalNumberSchema,
+  referenceRateFeedID: OptionalStringSchema,
+  priceDifference: OptionalStringSchema,
+  rebalanceThreshold: OptionalNumberSchema,
+  lastRebalancedAt: OptionalStringSchema,
   // Hasura can return null when no breach is open; coerce to undefined so the
   // inferred type stays compatible with Pool.deviationBreachStartedAt?: string.
-  deviationBreachStartedAt: z
-    .string()
-    .nullable()
-    .optional()
-    .transform((v) => v ?? undefined),
-  lpFee: z.number().optional(),
-  protocolFee: z.number().optional(),
-  limitStatus: z.string().optional(),
-  limitPressure0: z.string().optional(),
-  limitPressure1: z.string().optional(),
-  rebalancerAddress: z.string().optional(),
-  reserves0: z.string().optional(),
-  reserves1: z.string().optional(),
-  swapCount: z.number().optional(),
-  rebalanceCount: z.number().optional(),
-  healthTotalSeconds: z.string().optional(),
-  hasHealthData: z.boolean().optional(),
+  deviationBreachStartedAt: NullishStringToUndefinedSchema,
+  lpFee: OptionalNumberSchema,
+  protocolFee: OptionalNumberSchema,
+  limitStatus: OptionalStringSchema,
+  limitPressure0: OptionalStringSchema,
+  limitPressure1: OptionalStringSchema,
+  rebalancerAddress: OptionalStringSchema,
+  reserves0: OptionalStringSchema,
+  reserves1: OptionalStringSchema,
+  swapCount: OptionalNumberSchema,
+  rebalanceCount: OptionalNumberSchema,
+  // Pool cumulative counters are non-null in schema.graphql and power the
+  // exact SSR all-time Volume headline. Missing values must fail parsing
+  // rather than fabricate a believable $0.00 while snapshot history loads.
+  notionalVolume0: z.string(),
+  notionalVolume1: z.string(),
+  healthTotalSeconds: OptionalStringSchema,
+  hasHealthData: OptionalBooleanSchema,
   // Hasura can return null on FPMM pools; coerce to undefined for Pool compat.
-  wrappedExchangeId: z
-    .string()
-    .nullable()
-    .optional()
-    .transform((v) => v ?? undefined),
+  wrappedExchangeId: NullishStringToUndefinedSchema,
 });
 
 export const PoolDetailWithHealthSchema = z.object({
@@ -138,12 +140,12 @@ export const PoolDetailWithHealthSchema = z.object({
 
 const PoolThresholdsKnownExtRowSchema = z.object({
   id: z.string(),
-  rebalanceThresholdAbove: z.number().optional(),
-  rebalanceThresholdBelow: z.number().optional(),
-  rebalanceThresholdsKnown: z.boolean().optional(),
-  tokenDecimalsKnown: z.boolean().optional(),
-  degenerateReserves: z.boolean().optional(),
-  breakerTripped: z.boolean().optional(),
+  rebalanceThresholdAbove: OptionalNumberSchema,
+  rebalanceThresholdBelow: OptionalNumberSchema,
+  rebalanceThresholdsKnown: OptionalBooleanSchema,
+  tokenDecimalsKnown: OptionalBooleanSchema,
+  degenerateReserves: OptionalBooleanSchema,
+  breakerTripped: OptionalBooleanSchema,
 });
 
 export const PoolThresholdsKnownExtSchema = z.object({
@@ -156,12 +158,12 @@ export const PoolThresholdsKnownExtSchema = z.object({
 
 const PoolVpOracleFreshnessExtRowSchema = z.object({
   id: z.string(),
-  oracleTimestamp: z.string().optional(),
-  oracleNumReporters: z.number().optional(),
-  tokenDecimalsKnown: z.boolean().optional(),
-  lastOracleReportAt: z.string().optional(),
-  medianLive: z.boolean().optional(),
-  oracleFreshnessWindow: z.string().optional(),
+  oracleTimestamp: OptionalStringSchema,
+  oracleNumReporters: OptionalNumberSchema,
+  tokenDecimalsKnown: OptionalBooleanSchema,
+  lastOracleReportAt: OptionalStringSchema,
+  medianLive: OptionalBooleanSchema,
+  oracleFreshnessWindow: OptionalStringSchema,
 });
 
 export const PoolVpOracleFreshnessExtSchema = z.object({
@@ -174,8 +176,8 @@ export const PoolVpOracleFreshnessExtSchema = z.object({
 
 const PoolVpDeprecationExtRowSchema = z.object({
   id: z.string(),
-  isDeprecated: z.boolean().optional(),
-  minimumReports: z.string().optional(),
+  isDeprecated: OptionalBooleanSchema,
+  minimumReports: OptionalStringSchema,
 });
 
 export const PoolVpDeprecationExtSchema = z.object({
@@ -188,7 +190,7 @@ export const PoolVpDeprecationExtSchema = z.object({
 
 const PoolVpLifecycleDeprecationExtRowSchema = z.object({
   id: z.string(),
-  poolId: z.string().optional(),
+  poolId: OptionalStringSchema,
 });
 
 export const PoolVpLifecycleDeprecationExtSchema = z.object({
@@ -207,7 +209,7 @@ const PoolV2ExchangeRowSchema = z.object({
   asset0: z.string(),
   asset1: z.string(),
   pricingModule: z.string(),
-  pricingModuleName: z.string().nullable(),
+  pricingModuleName: NullableStringSchema,
   spread: z.string(),
   referenceRateFeedID: z.string(),
   referenceRateResetFrequency: z.string(),
@@ -217,7 +219,7 @@ const PoolV2ExchangeRowSchema = z.object({
   bucket1: z.string(),
   lastBucketUpdate: z.string(),
   isDeprecated: z.boolean(),
-  wrappedByPoolId: z.string().nullable(),
+  wrappedByPoolId: NullableStringSchema,
 });
 
 export const PoolV2ExchangeSchema = z.object({
@@ -254,18 +256,18 @@ const BreakerConfigRowSchema = z.object({
   enabled: z.boolean(),
   cooldownTime: z.string(),
   rateChangeThreshold: z.string(),
-  smoothingFactor: z.string().nullable(),
-  medianRatesEMA: z.string().nullable(),
-  referenceValue: z.string().nullable(),
-  lastMedianRate: z.string().nullable(),
-  lastUpdatedAt: z.string().nullable(),
+  smoothingFactor: NullableStringSchema,
+  medianRatesEMA: NullableStringSchema,
+  referenceValue: NullableStringSchema,
+  lastMedianRate: NullableStringSchema,
+  lastUpdatedAt: NullableStringSchema,
   status: z.enum(["OK", "TRIPPED"]),
   tradingMode: z.number(),
   lastStatusUpdatedAt: z.string(),
   cooldownEndsAt: z.string(),
-  lastTripAt: z.string().nullable(),
-  lastTripTxHash: z.string().nullable(),
-  lastResetAt: z.string().nullable(),
+  lastTripAt: NullableStringSchema,
+  lastTripTxHash: NullableStringSchema,
+  lastResetAt: NullableStringSchema,
   tripCountLifetime: z.number(),
   breaker: z.object({
     id: z.string(),
@@ -282,7 +284,7 @@ const BreakerTripEventRowSchema = z.object({
   blockTimestamp: z.string(),
   txHash: z.string(),
   medianRateAtTrip: z.string(),
-  referenceAtTrip: z.string().nullable(),
+  referenceAtTrip: NullableStringSchema,
   thresholdAtTrip: z.string(),
   breaker: z.object({
     address: z.string(),

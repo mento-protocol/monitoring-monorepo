@@ -9,6 +9,7 @@ import {
   PoolV2ExchangeSchema,
 } from "@/lib/queries/pool-detail-schemas";
 import type { Pool } from "@/lib/types";
+import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 
 const mockUseGQL = vi.fn();
 const mockReplace = vi.fn();
@@ -604,6 +605,58 @@ describe("Pool detail LPs tab", () => {
     });
     expect(html).toContain("Pool health inputs refresh failed");
     expect(html).toContain("transient trust query failure");
+  });
+
+  it("paints the exact all-time volume headline from SSR pool counters while snapshot history revalidates", () => {
+    const poolWithVolume: Pool = {
+      ...BASE_POOL,
+      notionalVolume0: "100000000000000000000",
+      notionalVolume1: "125000000000000000000",
+    };
+    const initialData: PoolDetailInitialData = {
+      pool: { Pool: [poolWithVolume] },
+      thresholds: {
+        Pool: [
+          {
+            id: poolWithVolume.id,
+            rebalanceThresholdsKnown: true,
+            tokenDecimalsKnown: true,
+          },
+        ],
+      },
+    };
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return revalidatingGqlResult(initialData.pool);
+      }
+      if (query.includes("PoolThresholdsKnownExt")) {
+        return revalidatingGqlResult(initialData.thresholds);
+      }
+      if (query.includes("PoolDailySnapshotsChart")) {
+        // This is the real first-paint condition: chart history only starts
+        // after hydration, while the exact Pool cumulative counters already
+        // arrived in the Server Component fallback.
+        return loadingGqlResult();
+      }
+      if (query.includes("TradingLimits")) {
+        return gqlResult({ TradingLimit: [] });
+      }
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderPoolDetailPage(initialData);
+
+    expect(html).toMatch(
+      />Volume<\/p><p[^>]*>\$125\.00<\/p>[\s\S]*?animate-pulse/,
+    );
+    expect(findUseGqlCall("PoolDailySnapshotsChart")?.[2]).toBe(
+      SNAPSHOT_REFRESH_MS,
+    );
   });
 
   it("threads SSR fallbacks into VirtualPool header extension queries", () => {

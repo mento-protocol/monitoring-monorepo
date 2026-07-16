@@ -74,6 +74,30 @@ upstash_api_key = "..."
 # `count`-gated so `terraform apply` succeeds without it.
 # squid_integrator_id = "..."
 
+# ── Sentry triage/autofix (ADR 0036) ──────────────────────────────────────────
+# READ-ONLY Sentry internal-integration token for the triage pipeline.
+# Scopes: Issue & Event Read, Project Read, Organization Read — NO write scopes.
+# Leave empty until provisioned; the GitHub Actions secret resource is
+# `count`-gated so `terraform apply` succeeds without it. See the human runbook
+# in docs/notes/sentry-triage-pipeline.md for how to mint it.
+# sentry_triage_token = "xxx-read-only-sentry-token-xxx"
+
+# Claude Max OAuth token from `claude setup-token` for claude-code-action.
+# Leave empty until provisioned; the GitHub Actions secret resource is
+# `count`-gated so `terraform apply` succeeds without it.
+# CAUTION: the CLAUDE_CODE_OAUTH_TOKEN repo secret already exists live and is
+# shared with .github/workflows/claude.yml — setting this value overwrites
+# (rotates) it on apply, so it must be a fresh working `claude setup-token`
+# value, and once applied it must never be emptied (the resource has
+# `prevent_destroy`). See the runbook in docs/notes/sentry-triage-pipeline.md.
+# claude_code_oauth_token = "xxx-claude-oauth-token-xxx"
+
+# Kill switch for the scheduled Sentry triage workflows (string "true"/"false",
+# default "false"). Flip to "true" only after both Phase-1 workflow PRs are
+# merged AND the two tokens above are provisioned. Still IaC — set it here and
+# re-apply, never via the GitHub UI.
+# sentry_triage_enabled = "false"
+
 # ── Arkham Intelligence ───────────────────────────────────────────────────────
 # API key for manual /api/arkham/enrich counterparty tagging.
 # Apply for access at https://intel.arkm.com/api — gated, no self-serve signup.

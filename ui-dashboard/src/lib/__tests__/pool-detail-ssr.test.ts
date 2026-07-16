@@ -65,6 +65,8 @@ const VIRTUAL_POOL = {
   createdAtTimestamp: "1700000000",
   updatedAtBlock: "1",
   updatedAtTimestamp: "1700000000",
+  notionalVolume0: "0",
+  notionalVolume1: "0",
 };
 const V2_EXCHANGE_RESPONSE = {
   BiPoolExchange: [
@@ -103,6 +105,8 @@ const FPMM_POOL = {
   createdAtTimestamp: "1700000000",
   updatedAtBlock: "1",
   updatedAtTimestamp: "1700000000",
+  notionalVolume0: "0",
+  notionalVolume1: "0",
 };
 const BREAKER_CONFIG_RESPONSE = {
   BreakerConfig: [

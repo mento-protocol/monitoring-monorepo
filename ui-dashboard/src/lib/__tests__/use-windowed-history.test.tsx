@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { requestMock } = vi.hoisted(() => ({ requestMock: vi.fn() }));
 
-vi.mock("graphql-request", () => ({
+vi.mock("@/lib/graphql-fetch", () => ({
   GraphQLClient: vi.fn(function GraphQLClient() {
     return { request: requestMock };
   }),

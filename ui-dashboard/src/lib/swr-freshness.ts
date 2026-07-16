@@ -2,6 +2,7 @@ import { unstable_serialize, type Key, type SWRConfiguration } from "swr";
 
 type SwrFreshnessEntry = {
   activeCount: number;
+  cachedAt: number | null;
   key: string;
   lastErrorAt: number | null;
   lastErrorMessage: string | null;
@@ -9,9 +10,11 @@ type SwrFreshnessEntry = {
 };
 
 export type SwrFreshnessStatus = {
+  cachedCount: number;
+  cachedLastUpdatedAt: number | null;
   failedCount: number;
+  failedLastUpdatedAt: number | null;
   lastErrorMessage: string | null;
-  lastUpdatedAt: number;
 };
 
 type Listener = () => void;
@@ -42,6 +45,7 @@ function upsertEntry(normalizedKey: string): SwrFreshnessEntry {
   if (existing) return existing;
   const next: SwrFreshnessEntry = {
     activeCount: 0,
+    cachedAt: null,
     key: normalizedKey,
     lastErrorAt: null,
     lastErrorMessage: null,
@@ -62,7 +66,11 @@ export function registerSWRFreshnessKey(key: unknown): () => void {
     current.activeCount -= 1;
     if (current.activeCount <= 0) {
       current.activeCount = 0;
-      if (current.lastSuccessAt === null && current.lastErrorAt === null) {
+      if (
+        current.cachedAt === null &&
+        current.lastSuccessAt === null &&
+        current.lastErrorAt === null
+      ) {
         entries.delete(normalizedKey);
       }
     }
@@ -80,6 +88,7 @@ export function recordSWRFreshnessSuccess(
     entries.get(normalizedKey) ??
     (refreshIntervalMs !== null ? upsertEntry(normalizedKey) : null);
   if (!entry) return;
+  entry.cachedAt = null;
   entry.lastSuccessAt = Date.now();
   entry.lastErrorAt = null;
   entry.lastErrorMessage = null;
@@ -96,8 +105,21 @@ export function seedSWRFreshnessData(
     entries.get(normalizedKey) ??
     (refreshIntervalMs !== null ? upsertEntry(normalizedKey) : null);
   if (!entry) return;
+  if (entry.cachedAt !== null) return;
   if (entry.lastSuccessAt !== null || entry.lastErrorAt !== null) return;
   entry.lastSuccessAt = Date.now();
+  emit();
+}
+
+/** Mark locally persisted data without claiming a network success this load. */
+export function markSWRFreshnessCached(key: unknown, cachedAt: number): void {
+  if (!Number.isFinite(cachedAt) || cachedAt <= 0) return;
+  const normalizedKey = normalizeSWRFreshnessKey(key);
+  const entry = upsertEntry(normalizedKey);
+  entry.cachedAt = cachedAt;
+  entry.lastSuccessAt = null;
+  entry.lastErrorAt = null;
+  entry.lastErrorMessage = null;
   emit();
 }
 
@@ -128,22 +150,42 @@ export function getSWRFreshnessVersion(): number {
 }
 
 export function getSWRFreshnessStatus(): SwrFreshnessStatus | null {
+  let cachedCount = 0;
+  let cachedLastUpdatedAt = Number.POSITIVE_INFINITY;
   let failedCount = 0;
+  let failedLastUpdatedAt = Number.POSITIVE_INFINITY;
   let lastErrorMessage: string | null = null;
-  let lastUpdatedAt = Number.POSITIVE_INFINITY;
 
   for (const entry of entries.values()) {
-    if (entry.activeCount <= 0 || entry.lastSuccessAt === null) continue;
+    if (entry.activeCount <= 0) continue;
+    const lastGoodAt = entry.lastSuccessAt ?? entry.cachedAt;
+    if (lastGoodAt === null) continue;
     const failedAfterSuccess =
-      entry.lastErrorAt !== null && entry.lastErrorAt > entry.lastSuccessAt;
-    if (!failedAfterSuccess) continue;
-    failedCount += 1;
-    lastErrorMessage = entry.lastErrorMessage;
-    lastUpdatedAt = Math.min(lastUpdatedAt, entry.lastSuccessAt);
+      entry.lastErrorAt !== null && entry.lastErrorAt > lastGoodAt;
+    if (failedAfterSuccess) {
+      failedCount += 1;
+      lastErrorMessage = entry.lastErrorMessage;
+      failedLastUpdatedAt = Math.min(failedLastUpdatedAt, lastGoodAt);
+      continue;
+    }
+    if (entry.cachedAt !== null && entry.lastSuccessAt === null) {
+      cachedCount += 1;
+      cachedLastUpdatedAt = Math.min(cachedLastUpdatedAt, entry.cachedAt);
+    }
   }
 
-  if (failedCount === 0 || !Number.isFinite(lastUpdatedAt)) return null;
-  return { failedCount, lastErrorMessage, lastUpdatedAt };
+  if (cachedCount === 0 && failedCount === 0) return null;
+  return {
+    cachedCount,
+    cachedLastUpdatedAt: Number.isFinite(cachedLastUpdatedAt)
+      ? cachedLastUpdatedAt
+      : null,
+    failedCount,
+    failedLastUpdatedAt: Number.isFinite(failedLastUpdatedAt)
+      ? failedLastUpdatedAt
+      : null,
+    lastErrorMessage,
+  };
 }
 
 export function resetSWRFreshnessForTests(): void {

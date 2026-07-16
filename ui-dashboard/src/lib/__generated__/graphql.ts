@@ -5390,6 +5390,8 @@ export type BridgeTransfersWindowQuery = {
     readonly deliveredTimestamp: string | null;
     readonly deliveredTxHash: string | null;
     readonly attestationCount: number;
+    readonly firstAttestedTimestamp: string | null;
+    readonly lastAttestedTimestamp: string | null;
     readonly usdValueAtSend: string | null;
     readonly firstSeenAt: string;
     readonly lastUpdatedAt: string;
@@ -6664,6 +6666,8 @@ export type PoolDetailWithHealthQuery = {
     readonly reserves1: string;
     readonly swapCount: number;
     readonly rebalanceCount: number;
+    readonly notionalVolume0: string;
+    readonly notionalVolume1: string;
     readonly healthTotalSeconds: string;
     readonly hasHealthData: boolean;
   }>;

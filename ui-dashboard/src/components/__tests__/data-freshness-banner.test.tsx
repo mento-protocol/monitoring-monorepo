@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DataFreshnessBanner } from "@/components/data-freshness-banner";
 import {
+  markSWRFreshnessCached,
   recordSWRFreshnessError,
   recordSWRFreshnessSuccess,
   registerSWRFreshnessKey,
@@ -74,5 +75,41 @@ describe("DataFreshnessBanner", () => {
     });
 
     expect(container.textContent).toBe("");
+  });
+
+  it("announces cached data until the first network success", () => {
+    markSWRFreshnessCached("cached-key", NOW - 7_000);
+    cleanupFreshness = registerSWRFreshnessKey("cached-key");
+    render();
+
+    expect(container.textContent).toContain("Showing cached data from 7s ago");
+    expect(container.textContent).toContain("Refreshing…");
+
+    act(() => {
+      recordSWRFreshnessSuccess("cached-key", { refreshInterval: 30_000 });
+    });
+    expect(container.textContent).toBe("");
+  });
+
+  it("announces independent ages when cached and failed sources coexist", () => {
+    markSWRFreshnessCached("cached-key", NOW - 20_000);
+    const unregisterCached = registerSWRFreshnessKey("cached-key");
+
+    vi.setSystemTime(NOW - 5_000);
+    const unregisterFailed = registerSWRFreshnessKey("failed-key");
+    recordSWRFreshnessSuccess("failed-key", { refreshInterval: 30_000 });
+    vi.setSystemTime(NOW);
+    recordSWRFreshnessError(new Error("429"), "failed-key", {
+      refreshInterval: 30_000,
+    });
+    cleanupFreshness = () => {
+      unregisterCached();
+      unregisterFailed();
+    };
+
+    render();
+
+    expect(container.textContent).toContain("last-good data from 5s ago");
+    expect(container.textContent).toContain("cached data from 20s ago");
   });
 });

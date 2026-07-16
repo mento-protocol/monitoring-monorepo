@@ -4,7 +4,14 @@ import type {
   BridgeTransfer,
 } from "./types";
 
-const STUCK_THRESHOLD_SECONDS = 24 * 60 * 60;
+const STUCK_THRESHOLD_SECONDS_BY_STATUS = {
+  PENDING: 60 * 60,
+  SENT: 60 * 60,
+  ATTESTED: 15 * 60,
+  // NTT inbound rate-limit windows default to 24h. Keep queued transfers on
+  // that longer clock because manually resubmitting the VAA cannot bypass it.
+  QUEUED_INBOUND: 24 * 60 * 60,
+} as const;
 
 /**
  * Canonical order for status-filter UI rendering. Ordered lifecycle-
@@ -35,19 +42,21 @@ export const ALL_BRIDGE_STATUSES = [
 /**
  * Derive the display status. Overlays "STUCK" when an in-flight transfer
  * (PENDING, SENT, ATTESTED, or QUEUED_INBOUND — any non-terminal state)
- * hasn't progressed within 24h. Client-side so the window stays fresh
- * without a bespoke indexer recompute.
+ * hasn't progressed within its lifecycle-specific window. Attested transfers
+ * should redeem promptly, pending/sent transfers get a one-hour allowance,
+ * and inbound rate-limit queues retain a 24-hour allowance. Client-side so
+ * the window stays fresh without a bespoke indexer recompute.
  *
- * Age basis: prefer `lastUpdatedAt` so recently progressed transfers do not
- * get marked stuck just because the original send is old; fall back to
- * `sentTimestamp` and then `firstSeenAt` for older schemas or partial rows.
- * PENDING rows created by a destination-first race have no `sentTimestamp`,
- * so `firstSeenAt` remains the final fallback clock for rows that never
- * progressed.
+ * Age basis: ATTESTED prefers `lastAttestedTimestamp` because a late source
+ * upsert can backdate `lastUpdatedAt` after destination progress. Other states
+ * prefer `lastUpdatedAt`, then fall back to `sentTimestamp` and `firstSeenAt`
+ * for older schemas or partial rows. PENDING rows created by a
+ * destination-first race have no `sentTimestamp`, so `firstSeenAt` remains the
+ * final fallback clock for rows that never progressed.
  */
 export function deriveBridgeStatus(
   transfer: Pick<BridgeTransfer, "status" | "sentTimestamp" | "firstSeenAt"> &
-    Partial<Pick<BridgeTransfer, "lastUpdatedAt">>,
+    Partial<Pick<BridgeTransfer, "lastUpdatedAt" | "lastAttestedTimestamp">>,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): BridgeStatusOverlay {
   const { status } = transfer;
@@ -57,12 +66,17 @@ export function deriveBridgeStatus(
     status === "ATTESTED" ||
     status === "QUEUED_INBOUND";
   if (!inFlight) return status;
+  const lastAttested =
+    status === "ATTESTED"
+      ? parseBridgeTimestamp(transfer.lastAttestedTimestamp)
+      : null;
   const lastUpdated = parseBridgeTimestamp(transfer.lastUpdatedAt);
   const sent = parseBridgeTimestamp(transfer.sentTimestamp);
   const firstSeen = parseBridgeTimestamp(transfer.firstSeenAt);
-  const ts = lastUpdated ?? sent ?? firstSeen;
+  const ts = lastAttested ?? lastUpdated ?? sent ?? firstSeen;
   if (ts === null || !Number.isFinite(ts)) return status;
-  return nowSeconds - ts > STUCK_THRESHOLD_SECONDS ? "STUCK" : status;
+  const threshold = STUCK_THRESHOLD_SECONDS_BY_STATUS[status];
+  return nowSeconds - ts > threshold ? "STUCK" : status;
 }
 
 function parseBridgeTimestamp(raw: string | null | undefined): number | null {

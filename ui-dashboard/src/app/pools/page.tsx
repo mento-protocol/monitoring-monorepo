@@ -8,12 +8,14 @@ import { isWeekend } from "@/lib/weekend";
 // then swaps in a ~27-row table when SWR resolves, pushing the swaps section
 // below it down by ~1 200 px — measured CLS 0.4896 on the lhci /pools run
 // (BACKLOG "Lighthouse CI Follow-Ups"). The payload is served from a
-// cross-request cache (30s TTL, ~90s worst-case staleness via the fetchedAt
+// cross-request cache (30s TTL, up to 5min served staleness via the fetchedAt
 // age gate in server-cache; healthy payloads only — degraded ones are never
 // cached, and the underlying `fetchAllNetworks` uses `Promise.allSettled`
 // internally so it degrades per-network on failure); the catch only fires on
 // truly unexpected errors, and an undefined initial payload falls back to
-// the existing client-only path.
+// the existing client-only path. Pool rows and recent KPI windows remain
+// complete in this seed; only chart history older than 30 UTC days is
+// projected out, so the route's Flight payload cannot grow forever.
 //
 // This route also now has its own `loading.tsx`, shaped like the real page
 // (KPI tiles + table placeholders). The 0.4896 CLS regression above came
@@ -29,7 +31,9 @@ export const metadata: Metadata = {
 };
 
 export default async function PoolsPage() {
-  const initialPayload = await fetchInitialNetworkData().catch(() => undefined);
+  const initialPayload = await fetchInitialNetworkData("pools").catch(
+    () => undefined,
+  );
   const initialIsWeekend = isWeekend();
   return (
     <PoolsPageClient

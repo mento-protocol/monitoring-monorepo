@@ -9,6 +9,10 @@ const isMain =
   resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 const DAY_SECONDS = 86_400;
 const FIXED_1 = "1000000000000000000000000";
+const DEFAULT_SCENARIO = "default";
+const LIGHTHOUSE_POOL_SCENARIO = "lighthouse-pool";
+const LIGHTHOUSE_POOL_REFERENCE_RATE_FEED_ID =
+  "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
 
 const ADDRESSES = {
   celoPool: "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
@@ -127,6 +131,51 @@ const pools = [
 ];
 
 const poolsById = new Map(pools.map((pool) => [pool.id, pool]));
+
+const lighthousePoolBreakerResponse = {
+  BreakerConfig: [
+    {
+      id: "42220-lighthouse-pool-median-delta",
+      enabled: true,
+      cooldownTime: "0",
+      rateChangeThreshold: "0",
+      smoothingFactor: "5000000000000000000000",
+      medianRatesEMA: "1171560280196965000000000",
+      referenceValue: null,
+      lastMedianRate: "1175000000000000000000000",
+      lastUpdatedAt: "1776254400",
+      status: "OK",
+      tradingMode: 0,
+      lastStatusUpdatedAt: "1776254400",
+      cooldownEndsAt: "0",
+      lastTripAt: null,
+      lastTripTxHash: null,
+      lastResetAt: null,
+      tripCountLifetime: 0,
+      breaker: {
+        id: "42220-lighthouse-pool-breaker",
+        address: "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9",
+        kind: "MEDIAN_DELTA",
+        activatesTradingMode: 3,
+        defaultCooldownTime: "900",
+        defaultRateChangeThreshold: "40000000000000000000000",
+      },
+    },
+  ],
+  BreakerTripEvent: [],
+};
+
+const lighthousePoolRateFeedResponse = {
+  RateFeed: [
+    {
+      id: `42220-${LIGHTHOUSE_POOL_REFERENCE_RATE_FEED_ID}`,
+      chainId: 42220,
+      feedAddress: LIGHTHOUSE_POOL_REFERENCE_RATE_FEED_ID,
+      pair: "EUR/USD",
+      reporterTypes: ["CHAINLINK"],
+    },
+  ],
+};
 
 function tradingLimitFixture(pool, token, limit0, limit1) {
   return {
@@ -325,11 +374,11 @@ function vpOracleFreshnessRows(rows) {
   }));
 }
 
-function dailySnapshotsFor(poolId) {
+function dailySnapshotsFor(poolId, daysAgoValues = [0, 1, 2]) {
   const pool = poolsById.get(poolId);
   if (!pool) return [];
   const todayStart = Math.floor(nowSeconds() / DAY_SECONDS) * DAY_SECONDS;
-  return [0, 1, 2].map((daysAgo) => ({
+  return daysAgoValues.map((daysAgo) => ({
     id: `${poolId}-${todayStart - daysAgo * DAY_SECONDS}`,
     poolId,
     timestamp: String(todayStart - daysAgo * DAY_SECONDS),
@@ -347,7 +396,7 @@ function dailySnapshotsFor(poolId) {
           ? "25000000000000000000"
           : "50000000000000000000",
     rebalanceCount: 0,
-    cumulativeSwapCount: 3 - daysAgo,
+    cumulativeSwapCount: daysAgo >= 365 ? 1 : 3 - daysAgo,
     cumulativeVolume0: "125000000000000000000",
     cumulativeVolume1:
       pool.token1Decimals === 6 ? "125000000" : "125000000000000000000",
@@ -847,10 +896,53 @@ function operationName(query) {
   return query.match(/\bquery\s+([A-Za-z0-9_]+)/)?.[1] ?? "Unknown";
 }
 
+function fixtureScenario(value) {
+  const scenario = value || DEFAULT_SCENARIO;
+  if (scenario !== DEFAULT_SCENARIO && scenario !== LIGHTHOUSE_POOL_SCENARIO) {
+    throw new Error(`Unknown Hasura fixture scenario: ${scenario}`);
+  }
+  return scenario;
+}
+
+function poolForScenario(pool, scenario) {
+  if (
+    scenario !== LIGHTHOUSE_POOL_SCENARIO ||
+    pool?.id !== ADDRESSES.celoPool
+  ) {
+    return pool;
+  }
+  return {
+    ...pool,
+    referenceRateFeedID: LIGHTHOUSE_POOL_REFERENCE_RATE_FEED_ID,
+  };
+}
+
+export function shouldDelayPoolBreakerResponse(
+  { query },
+  headers,
+  clientDelayMs,
+) {
+  const origin = headers?.origin;
+  return (
+    Number(clientDelayMs) > 0 &&
+    operationName(query ?? "") === "PoolBreakerConfig" &&
+    typeof origin === "string" &&
+    origin.length > 0
+  );
+}
+
 function rowsByPoolIds(poolIds) {
   const ids = new Set(poolIds ?? []);
+  // The 365d and 366d rows deliberately sit outside the 30d Server Component
+  // seed. Projection keeps the latest old row as the TVL forward-fill anchor
+  // and drops the older row, preserving the capped-history handoff. Keep both
+  // exclusive to the all-history operation so browser tests can prove that
+  // selecting "All" performs the client fetch without polluting pool-detail
+  // and OG chart fixtures (and their visual snapshots).
   return pools.flatMap((pool) =>
-    ids.size === 0 || ids.has(pool.id) ? dailySnapshotsFor(pool.id) : [],
+    ids.size === 0 || ids.has(pool.id)
+      ? dailySnapshotsFor(pool.id, [0, 1, 2, 365, 366])
+      : [],
   );
 }
 
@@ -858,7 +950,11 @@ function dailySnapshotLowerBound(variables) {
   return Number(variables.afterTimestamp ?? variables.since ?? 0);
 }
 
-export function handleGraphQL({ query, variables = {} }) {
+export function handleGraphQL(
+  { query, variables = {}, scenario: requestScenario },
+  scenarioOverride,
+) {
+  const scenario = fixtureScenario(scenarioOverride ?? requestScenario);
   const op = operationName(query ?? "");
   switch (op) {
     case "PoolsForVolume":
@@ -952,9 +1048,29 @@ export function handleGraphQL({ query, variables = {} }) {
     case "PoolDetailWithHealth": {
       const pool = poolsById.get(String(variables.id));
       return {
-        Pool: pool && pool.chainId === Number(variables.chainId) ? [pool] : [],
+        Pool:
+          pool && pool.chainId === Number(variables.chainId)
+            ? [poolForScenario(pool, scenario)]
+            : [],
       };
     }
+    case "PoolBreakerConfig":
+      if (scenario !== LIGHTHOUSE_POOL_SCENARIO) {
+        return unhandledOperation(op);
+      }
+      return Number(variables.chainId) === 42220 &&
+        variables.rateFeedID === LIGHTHOUSE_POOL_REFERENCE_RATE_FEED_ID
+        ? lighthousePoolBreakerResponse
+        : { BreakerConfig: [], BreakerTripEvent: [] };
+    case "PoolRateFeedExt":
+      if (scenario !== LIGHTHOUSE_POOL_SCENARIO) {
+        return unhandledOperation(op);
+      }
+      return Number(variables.chainId) === 42220 &&
+        String(variables.feedAddress).toLowerCase() ===
+          LIGHTHOUSE_POOL_REFERENCE_RATE_FEED_ID
+        ? lighthousePoolRateFeedResponse
+        : { RateFeed: [] };
     case "PoolThresholdsKnownExt": {
       const pool = poolsById.get(String(variables.id));
       return { Pool: pool ? thresholdRows([pool]) : [] };
@@ -1256,14 +1372,38 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-function startServer(port) {
+function parseClientDelayMs(value) {
+  const delayMs = Number(value ?? 0);
+  if (!Number.isSafeInteger(delayMs) || delayMs < 0) {
+    throw new Error(
+      `HASURA_FIXTURE_CLIENT_DELAY_MS must be a non-negative integer, got ${value}`,
+    );
+  }
+  return delayMs;
+}
+
+function startServer(
+  port,
+  {
+    scenario = process.env.HASURA_FIXTURE_SCENARIO,
+    clientDelayMs = process.env.HASURA_FIXTURE_CLIENT_DELAY_MS,
+  } = {},
+) {
+  const activeScenario = fixtureScenario(scenario);
+  const activeClientDelayMs = parseClientDelayMs(clientDelayMs);
+  let errorCount = 0;
+  let delayedPoolBreakerCount = 0;
   const server = http.createServer((req, res) => {
     if (req.method === "OPTIONS") {
       sendJson(res, 204, {});
       return;
     }
     if (req.url === "/health") {
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 200, {
+        ok: true,
+        errorCount,
+        delayedPoolBreakerCount,
+      });
       return;
     }
     if (req.url !== "/graphql" || req.method !== "POST") {
@@ -1279,13 +1419,30 @@ function startServer(port) {
     req.on("end", () => {
       try {
         const body = JSON.parse(raw);
-        const result = handleGraphQL(body);
-        if (result.__fixtureErrors) {
-          sendJson(res, 200, { errors: result.__fixtureErrors });
-          return;
+        const result = handleGraphQL(body, activeScenario);
+        const respond = () => {
+          if (result.__fixtureErrors) {
+            errorCount += result.__fixtureErrors.length;
+            sendJson(res, 200, { errors: result.__fixtureErrors });
+            return;
+          }
+          sendJson(res, 200, { data: result });
+        };
+        const shouldDelay = shouldDelayPoolBreakerResponse(
+          body,
+          req.headers,
+          activeClientDelayMs,
+        );
+        if (shouldDelay) {
+          setTimeout(() => {
+            respond();
+            delayedPoolBreakerCount += 1;
+          }, activeClientDelayMs);
+        } else {
+          respond();
         }
-        sendJson(res, 200, { data: result });
       } catch (error) {
+        errorCount += 1;
         sendJson(res, 500, {
           errors: [
             {
@@ -1299,7 +1456,9 @@ function startServer(port) {
   });
 
   server.listen(port, "127.0.0.1", () => {
-    process.stdout.write(`Hasura fixture server listening on ${port}\n`);
+    process.stdout.write(
+      `Hasura fixture server listening on ${port} (${activeScenario})\n`,
+    );
   });
 
   process.on("SIGTERM", () => {

@@ -3,9 +3,10 @@
 // the dashboard (not an in-place error / interstitial). Replaces the prior
 // stdout `grep` for `vercel.com/login` with a structural three-gate check:
 //
-//   1. `finalUrl` host + pathname match the preview + expected dashboard
-//      paths — catches host-level regressions (SSO interstitial host,
-//      wrong vercel.app project, off-list path).
+//   1. `finalUrl` host + exact pathname/query match the preview + expected
+//      dashboard targets — catches host-level regressions (SSO interstitial
+//      host, wrong vercel.app project, off-list path, or a stripped pool
+//      contract marker).
 //   2. `lhr.runtimeError.code === 'NO_ERROR'` — catches Lighthouse-internal
 //      failures (NO_FCP, NO_DOCUMENT_REQUEST, PROTOCOL_TIMEOUT).
 //   3. The main-document network request returned HTTP 2xx — catches
@@ -34,7 +35,7 @@
 //
 // Exit codes:
 //   0 — every audited finalUrl matched the expected host + one of the
-//       expected pathnames, Lighthouse reported no runtime error, and
+//       expected pathname/query targets, Lighthouse reported no runtime error, and
 //       the main document returned HTTP 2xx.
 //   1 — no reports found, or at least one report failed any gate above.
 
@@ -56,7 +57,7 @@ const AUDITED_PATHS = [
   "/",
   "/pools",
   "/volume",
-  "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+  "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e?lhci=live",
 ];
 const RUNS_PER_PATH = 3;
 const EXPECTED_PATHS = new Set(AUDITED_PATHS);
@@ -105,9 +106,10 @@ for (const reportPath of reports) {
     continue;
   }
   const hostOk = parsed.host === EXPECTED_HOST;
-  const pathOk = EXPECTED_PATHS.has(parsed.pathname);
+  const auditedPath = `${parsed.pathname}${parsed.search}`;
+  const pathOk = EXPECTED_PATHS.has(auditedPath);
   if (pathOk) {
-    pathCounts.set(parsed.pathname, (pathCounts.get(parsed.pathname) ?? 0) + 1);
+    pathCounts.set(auditedPath, (pathCounts.get(auditedPath) ?? 0) + 1);
   }
 
   // Gate 2: Lighthouse runtime error. Set when Lighthouse itself couldn't
@@ -149,7 +151,7 @@ for (const reportPath of reports) {
   }
   if (!pathOk) {
     failures.push(
-      `Path mismatch for ${requestedUrl}: expected ${[...EXPECTED_PATHS].join(" or ")}, got ${parsed.pathname} (finalUrl=${finalUrl})`,
+      `Path/query mismatch for ${requestedUrl}: expected ${[...EXPECTED_PATHS].join(" or ")}, got ${auditedPath} (finalUrl=${finalUrl})`,
     );
   }
   if (!runtimeOk) {
@@ -184,4 +186,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("All audited URLs match the expected host + path set.");
+console.log("All audited URLs match the expected host + path/query set.");

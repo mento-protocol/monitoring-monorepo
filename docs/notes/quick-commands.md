@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-16
 ---
 
 # Quick Commands
@@ -63,6 +63,7 @@ pnpm dashboard:dev            # Dev server; see ui-dashboard/AGENTS.md for logge
 pnpm dashboard:codegen        # Generate dashboard GraphQL operation types from indexer-envio/schema.graphql
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check bundle size against budgets (run after build)
+pnpm dashboard:lighthouse:pool-fixture # Production-build canonical pool Lighthouse: deterministic fixture, delayed breaker revalidation, blocking 1 700 ms median LCP
 pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture-driven browser interaction + visual snapshot tests
 pnpm --filter @mento-protocol/ui-dashboard test:browser:production        # Build-backed fixture browser tests via next start
 pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots # Re-baseline visual snapshots after a legitimate UI change
@@ -80,6 +81,10 @@ pnpm issue:review --pr 123 --issue 901         # Move claimed issue to in-pr / r
 pnpm issue:release --issue 901                 # Release a mistaken claim back to agent-ready
 pnpm issue:board sync                          # Re-project labels and close merged in-pr board items
 pnpm issue:board:test                          # Offline tests for the issue-board helper
+
+# Sentry triage pipeline (Stage A — deterministic ingest, ADR 0036)
+pnpm sentry:ingest --dry-run                   # Print queue-issue mutations without applying (needs local SENTRY_TRIAGE_TOKEN)
+pnpm sentry:ingest:test                        # Offline tests for the ingest helper (docs/notes/sentry-triage-pipeline.md)
 
 # Public config package
 pnpm --filter @mento-protocol/config build     # Build the public protocol metadata package

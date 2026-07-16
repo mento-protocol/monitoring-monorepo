@@ -19,23 +19,32 @@ name: Lighthouse CI
 #   says "skip", the Vercel wait + Lighthouse steps are also skipped, keeping
 #   run time under 30 s for non-dashboard PRs.
 #
-# PR COMMENT:
-#   lhci autorun with `upload.target: temporary-public-storage` produces a
-#   public report URL. A subsequent step posts/updates a sticky PR comment
-#   via peter-evans/create-or-update-comment so the result is always
-#   visible on the PR without requiring an LHCI server.
+# POOL-DETAIL SPLIT:
+#   The preview audit keeps the real deployed bundle, Vercel edge, live indexer,
+#   and all four routes in view. Its canonical pool URL uses `?lhci=live`; only
+#   that route's 1 700 ms LCP assertion is warning-level because repeated
+#   same-preview samples showed 927–2 640 ms live scheduling variance. A second
+#   production-build fixture audit uses `?lhci=fixture` and blocks at the same
+#   1 700 ms ceiling under deterministic delayed-revalidation data. The local
+#   fixture remains runnable when Vercel has no preview, ignores the build, or
+#   the PR is a fork/Dependabot context without preview secrets.
+#
+# PR COMMENT + ARTIFACT:
+#   lhci autorun with `upload.target: temporary-public-storage` produces public
+#   preview report URLs. The sticky PR comment also includes live and fixture
+#   pool diagnostics, while the complete `ui-dashboard/reports/lighthouse-pool`
+#   directory is uploaded even when either phase fails.
 
 on:
   pull_request:
     branches: [main]
     # Advisory workflow — NOT in the branch ruleset's required checks, so a
     # `paths:` filter is safe (a skipped run cannot leave a *required* check
-    # pending). These globs mirror the in-job `filter` step exactly AND the
+    # pending). These globs mirror the in-job `filter` step exactly. Most are
     # dashboard paths Vercel builds previews for (ui-dashboard/scripts/
-    # vercel-ignore-build.sh) — a non-dashboard PR posts no preview, so there
-    # is nothing for Lighthouse to measure anyway. The in-job filter/decide
-    # steps are kept (they also skip forks + dependabot). Keep this list in
-    # sync with the in-job `filters:` block and vercel-ignore-build.sh.
+    # vercel-ignore-build.sh); the workflow file itself is included so changes
+    # to this gate exercise the secretless fixture even when Vercel correctly
+    # skips a preview. Keep this list in sync with the in-job `filters:` block.
     # NOTE: the ignore script also diffs incrementally against the branch's
     # previous deployment, so Vercel can skip a SHA even when these globs
     # match (e.g. a change under ui-dashboard/scripts/ that is not a build
@@ -49,6 +58,7 @@ on:
       - pnpm-workspace.yaml
       - patches/**
       - .lighthouserc.cjs
+      - .github/workflows/lighthouse.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -61,12 +71,13 @@ jobs:
   lighthouse:
     # Runs when the advisory workflow-level dashboard paths match. The
     # redundant in-job `filter` step is `continue-on-error: true`, and the
-    # `decide` step computes whether to run Lighthouse fail-closed:
-    #   - PR + filter succeeded + dashboard=true  → run
-    #   - PR + filter succeeded + dashboard=false → no-op skip
-    #   - PR + filter failed (any cause)           → run (fail-closed)
-    # When Lighthouse does run, a performance/accessibility assertion failure
-    # warns/errors per the budgets in .lighthouserc.cjs.
+    # `decide` computes the local-fixture and trusted-preview lanes separately:
+    #   - fixture=true/filter failure  → run the local fixture (fail-closed)
+    #   - preview=true + trusted PR    → also run the secret-bearing preview
+    #   - workflow-only/fork/Dependabot → local fixture only
+    #   - fixture=false                → no-op skip
+    # Preview assertions warn/error per .lighthouserc.cjs; the deterministic
+    # fixture owns the blocking pool-detail LCP contract.
     name: Core Web Vitals + accessibility (ui-dashboard)
     # Cannot move to the cheaper ARM runners even if the economics ever
     # favor it: lhci launches Chrome via chrome-launcher, and Google does
@@ -75,7 +86,10 @@ jobs:
     # pointing CHROME_PATH at Playwright's arm64 Chromium — a behavior
     # change to the audit browser.
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 20
+    # The preview phase historically completes in ~5 minutes. The deterministic
+    # production-build fixture phase adds a build, browser smoke, and three
+    # isolated Lighthouse collections, so keep a separate timeout envelope.
+    timeout-minutes: 30
     permissions:
       contents: read
       # Required for the sticky Lighthouse PR comment. The comment is
@@ -107,20 +121,28 @@ jobs:
         uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         with:
           filters: |
-            # MUST match the paths Vercel actually builds previews for (see
-            # ui-dashboard/scripts/vercel-ignore-build.sh#dashboard_paths). When
-            # a PR only touches paths Vercel skips, no preview deployment is
-            # ever posted for the head SHA, so the Lighthouse wait step would
-            # time out and fail a required check. Keep these in sync with
-            # vercel-ignore-build.sh — both lists govern the same "is this a
-            # dashboard-affecting change" decision.
+            # Most entries match the paths Vercel actually builds previews for
+            # (see ui-dashboard/scripts/vercel-ignore-build.sh#dashboard_paths).
+            # The workflow file is intentionally fixture-only: changing the
+            # gate must exercise it even though Vercel has no dashboard build
+            # input. The wait step detects Vercel's ignored-build verdict while
+            # the deterministic fixture continues independently.
             #
             # `.lighthouserc.cjs` is in BOTH lists so config-only PRs (e.g.
             # changing severity from `warn` to `error` or adjusting a budget
             # threshold) actually exercise the gate they're changing.
             # Without it, a budget change merges without empirical validation
             # and the next dashboard PR is the place breakage surfaces.
-            dashboard:
+            fixture:
+              - ui-dashboard/**
+              - shared-config/**
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - patches/**
+              - .lighthouserc.cjs
+              - .github/workflows/lighthouse.yml
+            preview:
               - ui-dashboard/**
               - shared-config/**
               - package.json
@@ -133,40 +155,62 @@ jobs:
         id: decide
         env:
           FILTER_OUTCOME: ${{ steps.filter.outcome }}
-          DASHBOARD_CHANGED: ${{ steps.filter.outputs.dashboard }}
+          FIXTURE_CHANGED: ${{ steps.filter.outputs.fixture }}
+          PREVIEW_CHANGED: ${{ steps.filter.outputs.preview }}
           # Fork PRs do not produce Vercel preview deployments (see
-          # docs/deployment.md), so the wait step would always time out.
-          # Skip Lighthouse for forks; same-repo PRs are the only ones that
-          # produce previews and the only ones we trust with the bypass secret.
+          # docs/deployment.md), so only the local fixture can run there.
+          # Same-repo PRs are the only ones that produce previews and the only
+          # ones we trust with the bypass secret.
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           BASE_REPO: ${{ github.repository }}
           # Dependabot PRs are technically same-repo (head.repo.full_name
           # matches), but GitHub treats them like forked runs: the token is
           # read-only and `secrets.*` are unavailable. The bypass-secret +
           # PR-comment steps would fail with missing secrets and leave the
-          # required check blocking routine dependency updates. Skip them.
-          PR_ACTOR: ${{ github.actor }}
+          # required check blocking routine dependency updates. They still run
+          # the secretless deterministic fixture.
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
-          if [[ "$PR_ACTOR" == "dependabot[bot]" ]]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "PR from dependabot[bot] — GitHub blocks Actions secrets for Dependabot, skipping Lighthouse."
-          elif [[ -n "$PR_HEAD_REPO" && "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "PR from fork '$PR_HEAD_REPO' — Vercel does not build previews for forks, skipping Lighthouse."
-          elif [[ "$FILTER_OUTCOME" != "success" ]]; then
+          if [[ "$FILTER_OUTCOME" != "success" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running Lighthouse."
-          elif [[ "$DASHBOARD_CHANGED" == "true" ]]; then
+            echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running the deterministic fixture."
+          elif [[ "$FIXTURE_CHANGED" == "true" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "Dashboard inputs changed — running Lighthouse."
+            echo "Dashboard inputs changed — running the deterministic fixture."
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "preview=false" >> "$GITHUB_OUTPUT"
+            echo "comment=false" >> "$GITHUB_OUTPUT"
             echo "Dashboard code + its Lighthouse inputs unchanged — skipping Lighthouse."
+            exit 0
+          fi
+
+          if [[ "$PR_AUTHOR" == "dependabot[bot]" ]]; then
+            echo "preview=false" >> "$GITHUB_OUTPUT"
+            echo "comment=false" >> "$GITHUB_OUTPUT"
+            echo "PR from dependabot[bot] — running the secretless fixture and skipping the Vercel preview lane."
+          elif [[ -z "$PR_HEAD_REPO" ]]; then
+            echo "preview=false" >> "$GITHUB_OUTPUT"
+            echo "comment=false" >> "$GITHUB_OUTPUT"
+            echo "PR head repository is unavailable — failing closed to the secretless fixture lane."
+          elif [[ "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
+            echo "preview=false" >> "$GITHUB_OUTPUT"
+            echo "comment=false" >> "$GITHUB_OUTPUT"
+            echo "PR from fork '$PR_HEAD_REPO' — running the secretless fixture and skipping the Vercel preview lane."
+          else
+            echo "comment=true" >> "$GITHUB_OUTPUT"
+            if [[ "$FILTER_OUTCOME" != "success" || "$PREVIEW_CHANGED" == "true" ]]; then
+              echo "preview=true" >> "$GITHUB_OUTPUT"
+              echo "Trusted same-repo PR with preview inputs — running both fixture and Vercel preview lanes."
+            else
+              echo "preview=false" >> "$GITHUB_OUTPUT"
+              echo "Trusted same-repo PR changed only fixture/workflow inputs — running the fixture lane without waiting for Vercel."
+            fi
           fi
 
       - name: Wait for Vercel preview deployment
         id: vercel-url
-        if: steps.decide.outputs.run == 'true'
+        if: steps.decide.outputs.preview == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -510,11 +554,11 @@ jobs:
             core.setFailed(`Timed out waiting for a successful Vercel preview deployment for SHA ${sha}. Check the Vercel deployment logs.`);
 
       - name: Install dependencies (includes @lhci/cli)
-        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true'
+        if: ${{ always() && steps.decide.outputs.run == 'true' }}
         uses: ./.github/actions/pnpm-install
 
       - name: Install Chromium dependencies
-        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true'
+        if: ${{ always() && steps.decide.outputs.run == 'true' }}
         run: |
           # lhci autorun launches Chromium via puppeteer internally.
           # The required system libraries are not present on the runner by default.
@@ -526,7 +570,7 @@ jobs:
 
       - name: Run Lighthouse CI
         id: lhci
-        if: steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true'
+        if: ${{ steps.decide.outputs.preview == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         env:
           # The bypass secret is passed via lhci's --collect.settings.extraHeaders
           # rather than the URL query string so it does NOT end up in the
@@ -563,11 +607,12 @@ jobs:
             --collect.url="${PREVIEW_URL}/" \
             --collect.url="${PREVIEW_URL}/pools" \
             --collect.url="${PREVIEW_URL}/volume" \
-            --collect.url="${PREVIEW_URL}/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e" \
+            --collect.url="${PREVIEW_URL}/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e?lhci=live" \
             --collect.settings.extraHeaders="${BYPASS_HEADER}" \
             2>&1 | tee /tmp/lhci-output.txt
 
       - name: Assert every Lighthouse report's finalUrl matches the dashboard
+        id: final_url_guard
         # The accessibility budget is `error`-severity (blocking). If the
         # deployment-protection bypass silently regresses, lhci will happily
         # audit Vercel's SSO interstitial — a minimal page that scores
@@ -576,7 +621,9 @@ jobs:
         # The check parses every `.lighthouseci/lhr-*.json` report's
         # `finalUrl`, then asserts the exact 3-runs × 4-path matrix for `/`,
         # `/pools`, `/volume`, and the canonical Celo pool-detail route on the
-        # preview host. This catches more than just the SSO interstitial: a
+        # preview host. The pool request carries `?lhci=live`; the guard counts
+        # the exact pathname + query target so a stripped marker cannot bypass
+        # the pool assertion pattern. This catches more than the SSO interstitial: a
         # Vercel error page, a mid-deploy 503, a wrong-project deployment, a
         # missing/duplicated run, or any redirect to an unexpected path all
         # fail closed. Previously a stdout grep for `vercel.com/login` only
@@ -586,7 +633,7 @@ jobs:
         # non-zero. Without it, a hard performance-budget failure (once those
         # graduate from `warn` to `error`) would skip the SSO diagnostic and
         # leave the engineer staring at a generic assertion failure.
-        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
+        if: ${{ always() && steps.decide.outputs.preview == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         env:
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
         run: node ui-dashboard/scripts/assert-lhci-finalurl.mjs
@@ -609,7 +656,7 @@ jobs:
         # job) can never restore another arch's Chromium — binaries are
         # arch-specific and a cross-arch restore would fail at exec time,
         # not install time.
-        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
+        if: ${{ always() && steps.decide.outputs.run == 'true' }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
@@ -623,24 +670,72 @@ jobs:
           restore-keys: |
             playwright-chromium-${{ runner.arch }}-
 
-      - name: Install Playwright Chromium (for INP measurement)
-        # The INP step uses `@playwright/test`'s chromium (the dashboard's
-        # existing browser-test infra) rather than puppeteer-core + lighthouse
-        # user-flow because (a) zero new workspace deps, (b) web-vitals
-        # delivers the same Event-Timing-API INP a real user would see —
-        # Lighthouse timespan mode estimates it from main-thread timing.
+      - name: Install Playwright Chromium (for fixture + INP measurement)
+        # The fixture runner uses `@playwright/test`'s chromium for its delayed
+        # breaker-revalidation smoke and as the local LHCI CHROME_PATH fallback.
+        # The INP step uses the same existing browser-test dependency rather than
+        # puppeteer-core + lighthouse user-flow because (a) zero new workspace
+        # deps, (b) web-vitals delivers the same Event-Timing-API INP a real user
+        # would see — Lighthouse timespan mode estimates it from main-thread
+        # timing.
         #
-        # `always()` keeps the INP gate independent of the lhci step's
-        # outcome: an accessibility regression (already blocking) shouldn't
-        # silently skip the INP step and mask a simultaneous INP regression.
+        # `always()` keeps the fixture and INP gates independent of the preview
+        # lhci step's outcome: an accessibility regression (already blocking)
+        # shouldn't silently skip either additional signal.
         #
         # On a cache hit (see prior step) this is a fast no-op that just
         # verifies the chromium binary is present.
-        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
+        if: ${{ always() && steps.decide.outputs.run == 'true' }}
         working-directory: ui-dashboard
         run: pnpm exec playwright install chromium
 
+      - name: Measure canonical pool LCP against deterministic fixture
+        id: pool-fixture
+        # This phase owns the blocking 1 700 ms pool-detail LCP contract. It
+        # builds and starts the real production dashboard against the local
+        # Hasura fixture, verifies the delayed breaker revalidation path in a
+        # browser, and collects three `?lhci=fixture` Lighthouse runs.
+        #
+        # It deliberately excludes Vercel edge/network variance, production
+        # analytics/Sentry, and live-indexer latency. The preview phase above
+        # continues to cover those real deployment surfaces, all non-LCP
+        # budgets, and warning-level live pool LCP diagnostics.
+        #
+        # No Vercel bypass value is passed to this PR-controlled command. The
+        # raw secret remains confined to the trusted workflow shell in the
+        # preview/INP steps and is unset before their Node processes start.
+        if: ${{ always() && steps.decide.outputs.run == 'true' }}
+        run: pnpm dashboard:lighthouse:pool-fixture
+
+      - name: Summarize live pool Lighthouse diagnostics
+        id: live-pool-diagnostics
+        # Run even when preview LHCI or the deterministic fixture fails so the
+        # artifact and sticky comment retain the per-run candidate/phase data
+        # needed to distinguish app render cost from live scheduling variance.
+        # The CLI fails closed on a missing/invalid three-report live pool set.
+        if: ${{ always() && steps.decide.outputs.preview == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
+        run: |
+          mkdir -p ui-dashboard/reports/lighthouse-pool
+          node ui-dashboard/scripts/lighthouse-pool-diagnostics.mjs \
+            --dir .lighthouseci \
+            --path '/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e?lhci=live' \
+            --expected-runs 3 \
+            --output-json ui-dashboard/reports/lighthouse-pool/live-diagnostics.json \
+            --output-markdown ui-dashboard/reports/lighthouse-pool/live-diagnostics.md
+
+      - name: Upload pool Lighthouse diagnostics
+        # Preserve both fixture and live JSON/Markdown even when either audit,
+        # the final-URL guard, diagnostics validation, or INP fails.
+        if: ${{ always() && steps.decide.outputs.run == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lighthouse-pool-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: ui-dashboard/reports/lighthouse-pool/
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Measure INP (Playwright + web-vitals)
+        id: inp
         # Drives the /pools client surface through a scripted interaction
         # (focus filter input → type → click Apply), captures INP via the
         # web-vitals library injected into the page, and fails the workflow
@@ -658,7 +753,7 @@ jobs:
         # `always()` mirrors the audited-page guard: don't silently skip
         # the INP gate when an earlier step (lhci accessibility, the bypass
         # guard) fails.
-        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
+        if: ${{ always() && steps.decide.outputs.preview == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
         env:
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           PREVIEW_URL: ${{ steps.vercel-url.outputs.preview_url }}
@@ -670,10 +765,17 @@ jobs:
           BYPASS_HEADERS_JSON="$BYPASS_HEADERS_JSON" node ui-dashboard/scripts/measure-inp.mjs
 
       - name: Post Lighthouse results as PR comment
-        if: ${{ always() && steps.decide.outputs.run == 'true' && steps.vercel-url.outputs.skip_lighthouse != 'true' && steps.vercel-url.outputs.preview_url != '' }}
+        if: ${{ always() && steps.decide.outputs.comment == 'true' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           LHCI_STEP_OUTCOME: ${{ steps.lhci.outcome }}
+          FIXTURE_STEP_OUTCOME: ${{ steps.pool-fixture.outcome }}
+          LIVE_DIAGNOSTICS_OUTCOME: ${{ steps.live-pool-diagnostics.outcome }}
+          FINAL_URL_GUARD_OUTCOME: ${{ steps.final_url_guard.outcome }}
+          INP_STEP_OUTCOME: ${{ steps.inp.outcome }}
+          PREVIEW_EXPECTED: ${{ steps.decide.outputs.preview }}
+          PREVIEW_SKIPPED: ${{ steps.vercel-url.outputs.skip_lighthouse }}
+          VERCEL_WAIT_OUTCOME: ${{ steps.vercel-url.outcome }}
         with:
           script: |
             const fs = require("fs");
@@ -693,19 +795,38 @@ jobs:
               .map(m => m[0]);
 
             const previewUrl = "${{ steps.vercel-url.outputs.preview_url }}";
+            const previewExpected = process.env.PREVIEW_EXPECTED === "true";
+            const previewSkipped = process.env.PREVIEW_SKIPPED === "true";
             const auditedPaths = [
               "/",
               "/pools",
               "/volume",
-              "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+              "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e?lhci=live",
             ];
+            const diagnosticsDir = path.join(
+              process.env.GITHUB_WORKSPACE,
+              "ui-dashboard/reports/lighthouse-pool",
+            );
+            const readDiagnostics = (filename, label) => {
+              const reportPath = path.join(diagnosticsDir, filename);
+              if (!fs.existsSync(reportPath)) {
+                return `### ${label}\n\n_Diagnostics unavailable; inspect the workflow logs and artifact step._\n\n`;
+              }
+              return `### ${label}\n\n${fs.readFileSync(reportPath, "utf8").trim()}\n\n`;
+            };
 
             let body = `## Lighthouse CI Results\n\n`;
-            body += `### Audited pages\n`;
-            body += auditedPaths
-              .map(path => `- [\`${path}\`](${previewUrl}${path})`)
-              .join("\n");
-            body += "\n\n";
+            if (previewUrl) {
+              body += `### Audited preview pages\n`;
+              body += auditedPaths
+                .map(path => `- [\`${path}\`](${previewUrl}${path})`)
+                .join("\n");
+              body += "\n\n";
+            } else {
+              body +=
+                "The Vercel preview lane was unavailable or not required. " +
+                "The deterministic production-build fixture still audited the canonical pool target.\n\n";
+            }
 
             if (reportUrls.length > 0) {
               body += `### Reports\n`;
@@ -718,12 +839,43 @@ jobs:
             // Use the actual step outcome, not presentation glyphs in LHCI's
             // terminal output. Hard assertion failures use `✘`, while the old
             // parser counted only `❌` and could label a red run as warnings.
-            const jobStatus = formatLighthouseStatus({
+            const previewStatus = formatLighthouseStatus({
               stepOutcome: process.env.LHCI_STEP_OUTCOME,
               lhciOutput,
             });
+            const fixtureOutcome = process.env.FIXTURE_STEP_OUTCOME;
+            const liveDiagnosticsOutcome = process.env.LIVE_DIAGNOSTICS_OUTCOME;
+            const finalUrlGuardOutcome = process.env.FINAL_URL_GUARD_OUTCOME;
+            const inpOutcome = process.env.INP_STEP_OUTCOME;
+            const fixtureOnly = !previewExpected || previewSkipped;
+            const jobStatus =
+              fixtureOutcome !== "success"
+                ? "❌ Failed"
+                : fixtureOnly
+                  ? "✅ Passed (deterministic fixture only)"
+                  : liveDiagnosticsOutcome === "success" &&
+                      finalUrlGuardOutcome === "success" &&
+                      inpOutcome === "success"
+                    ? previewStatus
+                    : "❌ Failed";
 
             body += `**Status:** ${jobStatus}\n\n`;
+            body += `- Vercel preview wait: \`${process.env.VERCEL_WAIT_OUTCOME ?? "unknown"}\`\n`;
+            body += `- Preview Lighthouse: \`${process.env.LHCI_STEP_OUTCOME ?? "unknown"}\`\n`;
+            body += `- Preview final-URL guard: \`${finalUrlGuardOutcome ?? "unknown"}\`\n`;
+            body += `- Deterministic pool fixture: \`${fixtureOutcome ?? "unknown"}\`\n`;
+            body += `- Live pool diagnostics: \`${liveDiagnosticsOutcome ?? "unknown"}\`\n`;
+            body += `- Preview INP: \`${inpOutcome ?? "unknown"}\`\n\n`;
+            if (previewUrl) {
+              body += readDiagnostics(
+                "live-diagnostics.md",
+                "Live preview pool diagnostics (LCP warning contract)",
+              );
+            }
+            body += readDiagnostics(
+              "fixture-diagnostics.md",
+              "Deterministic production-fixture pool diagnostics (blocking contract)",
+            );
             body += `<details><summary>Raw lhci output</summary>\n\n\`\`\`\n${lhciOutput.slice(0, 8000)}\n\`\`\`\n</details>\n`;
             body += `\n<!-- lighthouse-ci-comment -->`;
 

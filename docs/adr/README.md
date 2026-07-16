@@ -68,6 +68,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0009](0009-supply-chain-hardening.md)              | Supply-chain posture: release-age gate, lockfile-lint, SHA-pinned Actions       |
 | [0010](0010-required-checks-no-paths-filters.md)    | Required CI checks carry no `paths:` filters; only advisory jobs may            |
 | [0033](0033-adr-process-and-gate.md)                | ADRs record architectural decisions, enforced by a reminder gate                |
+| [0036](0036-sentry-triage-pipeline.md)              | Sentry triage/autofix: staged GitHub Actions agent pipeline + GH-Issue queue    |
 
 ### shared-config
 
@@ -100,6 +101,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0023](0023-es2017-no-polyfill.md)                   | Ship ES2017 with no polyfill; ban immutable-array methods via lint + `sortedCopy` |
 | [0024](0024-plotly-basic-dist-bundle-budgets.md)     | Plotly.js `basic-dist` + enforced bundle-size budgets                             |
 | [0025](0025-fixture-browser-tests-react-doctor.md)   | Fixture-driven browser tests + visual snapshots + a react-doctor score gate       |
+| [0037](0037-dashboard-graphql-zod-mini.md)           | Native GraphQL transport + Zod Mini for browser-reachable validation              |
 
 ### aegis
 

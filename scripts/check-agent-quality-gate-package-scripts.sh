@@ -22,6 +22,8 @@ const expectedScripts = {
   "issue:claim": "node scripts/agent-issue-board.mjs claim",
   "issue:review": "node scripts/agent-issue-board.mjs review",
   "issue:release": "node scripts/agent-issue-board.mjs release",
+  "sentry:ingest": "node scripts/sentry-triage-ingest.mjs",
+  "sentry:ingest:test": "node scripts/sentry-triage-ingest.test.mjs",
   "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
   "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
   "pr:ready-state": "node scripts/pr-ready-state.mjs",

@@ -486,7 +486,7 @@ export type BridgeStatus =
   | "CANCELLED"
   | "FAILED";
 
-// Derived client-side overlay: a SENT or ATTESTED transfer older than 24h.
+// Derived client-side overlay for in-flight transfers past their status window.
 export type BridgeStatusOverlay = BridgeStatus | "STUCK";
 
 export type BridgeTransfer = {

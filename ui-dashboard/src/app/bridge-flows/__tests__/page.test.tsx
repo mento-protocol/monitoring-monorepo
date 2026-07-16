@@ -1497,7 +1497,7 @@ describe("BridgeFlowsPage — toast lifecycle (via captured addToast)", () => {
   it("addToast captured via redeem pill: toast appears, then auto-dismisses after 6 000 ms", async () => {
     // Build a STUCK transfer (canManuallyRedeemTransfer requires a sentTxHash
     // and a destChainId) so the redeem pill is rendered.
-    // STUCK is derived: SENT + sentTimestamp older than 24h.
+    // STUCK is derived: SENT + no progress for more than 1h.
     const SECONDS_PER_DAY = 86_400;
     const nowSec = Math.floor(Date.now() / 1000);
     const stuck: BridgeTransfer = makeTransfer({
