@@ -60,6 +60,15 @@ quality prerequisites: a browser setup failure still lets independent
 lint/typecheck/unit/knip feedback run. `--fail-fast` stays sequential so it
 still stops before starting the next mapped command.
 
+Do not launch dashboard browser tests, a dashboard dev server, or another
+quality-gate run concurrently with `pnpm agent:quality-gate --run` in the same
+worktree. Next processes share `ui-dashboard/.next`; competing writers can
+produce false `Another next dev server is already running` or
+`ChunkLoadError` failures. The gate also schedules coverage alongside other
+independent checks, so an extra ad hoc coverage run only adds load and can turn
+normally passing accessibility tests into timeout noise. Run focused tests
+before the gate, then let one gate invocation own the full mapped batch.
+
 For non-trivial behavioral, workflow, security, data-flow, or UI batches, run
 the structured closeout review after the mapped gate and before pushing:
 
