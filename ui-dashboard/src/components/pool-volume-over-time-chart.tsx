@@ -118,7 +118,6 @@ function volumeHeadline({
   if (!priceable) return "—";
   if (allTimeTotal !== undefined) {
     if (allTimeTotal === null) return "—";
-    if (allTimeTotal === 0 && visibleSeries.length === 0) return "—";
     return formatUSD(allTimeTotal);
   }
   if (visibleSeries.length === 0) return "—";
