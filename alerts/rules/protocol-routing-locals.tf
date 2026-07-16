@@ -61,6 +61,17 @@ locals {
       aegis_chain         = "monad"
       chainlink_feed_path = "monad/monad"
     }
+    "polygon" = {
+      title               = "Polygon"
+      env                 = "prod"
+      metric              = "Native_balanceOf"
+      symbol              = "POL"
+      threshold           = 500
+      explorer            = "polygonscan.com"
+      chain_id            = "137"
+      aegis_chain         = "polygon"
+      chainlink_feed_path = "polygon/mainnet"
+    }
     "monad-testnet" = {
       title               = "Monad-Testnet"
       env                 = "staging"
