@@ -4,6 +4,8 @@ import HomePage, { generateMetadata } from "../(home)/page";
 
 type GlobalPageProps = {
   initialNetworkData?: unknown;
+  initialNetworkDataFetchedAtMs?: number;
+  initialUniqueLpCount?: number | null;
   initialIsWeekend?: boolean;
 };
 
@@ -99,13 +101,16 @@ describe("HomePage server component", () => {
     mockFetchInitialNetworkData.mockResolvedValueOnce({
       networks: initialNetworkData,
       fetchedAtMs: 1_700_000_000_000,
+      uniqueLpCount: 123,
     });
 
     renderToStaticMarkup(await HomePage());
 
+    expect(mockFetchInitialNetworkData).toHaveBeenCalledWith("home");
     expect(mockGlobalPage).toHaveBeenCalledWith({
       initialNetworkData,
       initialNetworkDataFetchedAtMs: 1_700_000_000_000,
+      initialUniqueLpCount: 123,
       initialIsWeekend: true,
     });
   });
@@ -122,6 +127,7 @@ describe("HomePage server component", () => {
     expect(mockGlobalPage).toHaveBeenCalledWith({
       initialNetworkData: undefined,
       initialNetworkDataFetchedAtMs: undefined,
+      initialUniqueLpCount: undefined,
       initialIsWeekend: false,
     });
   });

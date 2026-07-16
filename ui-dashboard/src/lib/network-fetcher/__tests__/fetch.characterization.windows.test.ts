@@ -26,7 +26,7 @@ vi.mock("@/lib/strategy-detection", () => ({
   detectProbedStrategies: mockDetectProbedStrategies,
 }));
 
-vi.mock("graphql-request", () => {
+vi.mock("@/lib/graphql-fetch", () => {
   const MockGraphQLClient = vi.fn();
   MockGraphQLClient.prototype.request = vi.fn();
   return { GraphQLClient: MockGraphQLClient };
@@ -176,6 +176,7 @@ describe("fetchNetworkData characterization — window error precedence", () => 
         makeDaily(todayMidnight - 60 * 86400, "pool-tail"),
       ],
       refreshAfterTimestamp: todayMidnight - 86400,
+      complete: true,
     });
     const tailErr = new Error("incremental tail timeout");
     installGraphQLMock({

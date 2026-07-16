@@ -126,3 +126,83 @@ resource "github_actions_secret" "integration_probe_squid_integrator_id" {
   secret_name = "SQUID_INTEGRATOR_ID"
   value       = var.squid_integrator_id
 }
+
+# Sentry triage/autofix pipeline secrets
+# ───────────────────────────────────────
+#
+# The staged Sentry triage/autofix pipeline (ADR 0036) runs entirely inside
+# this repo's GitHub Actions. Two scheduled workflows —
+# `.github/workflows/sentry-triage-ingest.yml` and
+# `.github/workflows/sentry-triage-agent.yml`, added by sibling Phase-1 PRs —
+# consume these two repo-level secrets:
+#
+#   - SENTRY_TRIAGE_TOKEN: a READ-ONLY Sentry internal-integration token
+#     (scopes: Issue & Event Read, Project Read, Organization Read — NO write
+#     scopes). Phase-1 triage is read-only by design; the investigating agent
+#     treats Sentry payloads as untrusted input and holds no write credential
+#     beyond commenting on its queue issue (ADR 0036 trust boundary). A
+#     separate write-scoped token is minted only if/when Phase-2 auto-archive
+#     is approved — do NOT widen this token's scopes here.
+#   - CLAUDE_CODE_OAUTH_TOKEN: the Max-subscription OAuth token minted by
+#     `claude setup-token`, used by `anthropics/claude-code-action@v1` in agent
+#     mode. Inference-only; it carries no repo write capability of its own.
+#     NOT a triage-only secret: it already exists live and is consumed by both
+#     `.github/workflows/claude.yml` jobs (on-demand assistant + auto-review),
+#     so the resource below ADOPTS a shared production credential — see its
+#     lifecycle note.
+#
+# Both are `count`-gated on their tfvar being non-empty, exactly like the
+# integration-probe aggregator keys above: plan and apply succeed while the
+# values are unset, so this stack can merge and apply before the operator
+# provisions the tokens. The pipeline stays inert until the tokens exist AND
+# `github_actions_variable.sentry_triage_enabled` is flipped to "true" (see
+# `github-variables.tf`). Human provisioning runbook:
+# `docs/notes/sentry-triage-pipeline.md`.
+
+# SENTRY_TRIAGE_TOKEN is brand-new: no live secret of this name exists and no
+# workflow consumes it until the sibling Phase-1 PRs land, so plain count
+# gating is enough — destroying it while unused breaks nothing, which is why
+# it carries no `prevent_destroy` (asymmetric with
+# `claude_code_oauth_token` below, which guards a shared live credential).
+resource "github_actions_secret" "sentry_triage_token" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.sentry_triage_token == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "SENTRY_TRIAGE_TOKEN"
+  value       = var.sentry_triage_token
+}
+
+resource "github_actions_secret" "claude_code_oauth_token" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.claude_code_oauth_token == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "CLAUDE_CODE_OAUTH_TOKEN"
+  value       = var.claude_code_oauth_token
+
+  # This adopts an EXISTING live secret shared with `.github/workflows/
+  # claude.yml` (the on-demand Claude assistant and the auto-review job both
+  # read `secrets.CLAUDE_CODE_OAUTH_TOKEN`). Two hazards follow:
+  #
+  #   1. Adoption overwrite: GitHub secret writes are upserts, so the first
+  #      apply with the tfvar set OVERWRITES the live value. The runbook
+  #      (docs/notes/sentry-triage-pipeline.md) therefore requires putting a
+  #      current working token — in practice a freshly minted
+  #      `claude setup-token` value, since GitHub can't read secrets back —
+  #      into tfvars, which rotates the token for claude.yml too.
+  #   2. Destroy-on-empty: emptying the tfvar later would flip count 1→0 and
+  #      destroy the live secret, silently breaking claude.yml.
+  #      `prevent_destroy` turns that into a loud plan-time error instead.
+  #      (Limitation: deleting this whole resource block removes the guard
+  #      with it — Terraform then destroys the secret on the next apply.)
+  #
+  # While the tfvar is unset the resource has no state instance, so
+  # `prevent_destroy` has nothing to act on and plans stay green — the count
+  # gate and the guard compose cleanly.
+  lifecycle {
+    prevent_destroy = true
+  }
+}

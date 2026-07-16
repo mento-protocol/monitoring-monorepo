@@ -607,9 +607,6 @@ importers:
       graphql:
         specifier: ^16.13.1
         version: 16.13.1
-      graphql-request:
-        specifier: ^7.4.0
-        version: 7.4.0(graphql@16.13.1)
       next:
         specifier: 16.2.6
         version: 16.2.6(@babel/core@7.29.6)(@opentelemetry/api@1.9.1)(@playwright/test@1.60.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)

@@ -137,6 +137,35 @@ queued `main` run reaches a terminal state. Later queued jobs can pass the
 issue fixed from the first successful apply alone. Verify the live resource and
 run `terraform-drift.yml` before closing the drift issue.
 
+## Platform GitHub Actions secrets and variables
+
+The platform stack mirrors repo-level GitHub Actions secrets and variables on
+`monitoring-monorepo` (`terraform/github-secrets.tf`,
+`terraform/github-variables.tf`). Their values come from the platform stack's
+gitignored, operator-held `terraform/terraform.tfvars` (never committed) or from
+other platform resources; each secret-mirroring resource is `count`-gated on its
+value being set, so plan/apply succeed while a value is unset. The platform
+stack is manual-plan / manual-apply (`pnpm infra:plan`, then a human-approved
+`pnpm tf apply platform`), not a CI `production-infra` apply.
+
+Sentry triage/autofix pipeline (ADR 0036), provisioned by issue #1276:
+
+- `SENTRY_TRIAGE_TOKEN` — READ-ONLY Sentry internal-integration token
+  (`sentry_triage_token` tfvar). Read scopes only; no write scopes (Phase-1
+  trust boundary). `count`-gated.
+- `CLAUDE_CODE_OAUTH_TOKEN` — Claude Max OAuth token from `claude setup-token`
+  (`claude_code_oauth_token` tfvar), for `anthropics/claude-code-action@v1`.
+  `count`-gated. Adopts the pre-existing live secret shared with
+  `.github/workflows/claude.yml`: the first apply overwrites (rotates) the live
+  value, and the resource carries `prevent_destroy` so emptying the tfvar fails
+  the plan loudly instead of silently breaking the Claude PR automation.
+- `SENTRY_TRIAGE_ENABLED` — kill-switch **variable** (`sentry_triage_enabled`
+  tfvar), default `"false"`. The scheduled workflows stay inert until it is
+  `"true"`.
+
+The human token-provisioning and activation steps are in the operator runbook in
+[`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md).
+
 ## GitHub Environment Setup
 
 Pre-merge requirement for the production-environment split in issue #762:

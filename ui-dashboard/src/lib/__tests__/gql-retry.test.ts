@@ -1,6 +1,6 @@
-import { ClientError } from "graphql-request";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rateLimitAwareRetry, retryAfterMs } from "@/lib/gql-retry";
+import { ClientError } from "@/lib/graphql-fetch";
 import { GraphQLSchemaError } from "@/lib/graphql-schema-error";
 
 function makeClientError(status: number, retryAfter?: string): ClientError {

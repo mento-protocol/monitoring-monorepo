@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ClientError, GraphQLClient } from "graphql-request";
+import { ClientError, GraphQLClient } from "@/lib/graphql-fetch";
 import type { NetworkData } from "@/lib/fetch-all-networks";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";

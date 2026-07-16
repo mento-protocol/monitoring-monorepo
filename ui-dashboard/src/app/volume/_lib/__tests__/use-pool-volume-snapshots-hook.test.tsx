@@ -10,7 +10,7 @@ const { requestMock } = vi.hoisted(() => ({
   requestMock: vi.fn(),
 }));
 
-vi.mock("graphql-request", () => ({
+vi.mock("@/lib/graphql-fetch", () => ({
   GraphQLClient: vi.fn(function GraphQLClientMock() {
     return { request: requestMock };
   }),

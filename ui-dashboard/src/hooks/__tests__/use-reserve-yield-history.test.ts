@@ -30,7 +30,7 @@ vi.mock("swr", () => ({
   default: swrMock,
 }));
 
-vi.mock("graphql-request", () => ({
+vi.mock("@/lib/graphql-fetch", () => ({
   GraphQLClient: vi.fn().mockImplementation(function GraphQLClient() {
     return {
       request: graphQlRequestMock,

@@ -4,7 +4,7 @@
  * Strategy: mock `swr` to capture the fetcher passed as the second argument,
  * then call it directly. This exercises `fetchAllProtocolFees` (which is not
  * exported) without DOM rendering or SWR revalidation noise. The
- * `graphql-request` mock routes each `client.request()` call based on the
+ * The transport mock routes each `client.request()` call based on the
  * query document string — same pattern as `use-all-networks-data.test.ts`.
  */
 
@@ -27,13 +27,13 @@ vi.mock("swr", () => ({
   },
 }));
 
-vi.mock("graphql-request", () => {
+vi.mock("@/lib/graphql-fetch", () => {
   const MockGraphQLClient = vi.fn();
   MockGraphQLClient.prototype.request = vi.fn();
   return { GraphQLClient: MockGraphQLClient };
 });
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 import { incrementalRowCache } from "@/lib/fetch-all-networks";
 
 // ---------------------------------------------------------------------------

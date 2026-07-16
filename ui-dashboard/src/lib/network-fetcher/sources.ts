@@ -5,7 +5,7 @@
 // `Promise.allSettled` so one query's schema-lag or timeout degrades only
 // its own slice instead of failing the whole pool list.
 
-import type { GraphQLClient } from "graphql-request";
+import type { GraphQLClient } from "@/lib/graphql-fetch";
 import type { Network } from "@/lib/networks";
 import {
   ALL_CDP_POOLS,
