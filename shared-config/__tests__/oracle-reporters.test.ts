@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import oracleReportersJson from "../oracle-reporters.json" with { type: "json" };
+import { contractEntries } from "../src/tokens";
 import {
   describeRateFeed,
   getChainlinkDataFeedUrl,
@@ -28,6 +29,9 @@ describe("oracle reporter registry", () => {
     expect(
       getRateFeedPair(42220, "0xf590b62f9cfcc6409075b1ecac8176fe25744b88"),
     ).toBe("GBP/USD");
+    expect(
+      getRateFeedPair(137, "0xc22418a83DfC262B10a1f57E25309DB83E7eA79e"),
+    ).toBe("EUROP/EUR");
   });
 
   it("maps known rate feeds to static adapter types and unknown feeds to null", () => {
@@ -40,6 +44,12 @@ describe("oracle reporter registry", () => {
       ),
     ).toBe("CHAINLINK");
     expect(getRateFeedReporterType(42220, unknownFeed)).toBeNull();
+    expect(
+      getRateFeedReporterType(
+        137,
+        "0xc22418a83dfc262b10a1f57e25309db83e7ea79e",
+      ),
+    ).toBe("MANUAL");
   });
 
   it("maps known reporters to static adapter types and unknown reporters to manual", () => {
@@ -49,6 +59,31 @@ describe("oracle reporter registry", () => {
     expect(
       getOracleReporterType(143, "0x0000000000000000000000000000000000000000"),
     ).toBe("MANUAL");
+    expect(
+      getOracleReporterType(137, "0x1C267bE736fB7B750243E41b1575Ab872Ae626bb"),
+    ).toBe("CHAINLINK");
+    expect(
+      getOracleReporterType(137, "0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458"),
+    ).toBe("MANUAL");
+  });
+
+  it("cross-references Polygon reporters with the contracts registry", () => {
+    const polygonAddressesByName = new Map(
+      contractEntries(137).map((entry) => [entry.rawName, entry.address]),
+    );
+    const polygonReporters = ROOT["137"]?.reporters ?? {};
+    const usdcReporter = polygonAddressesByName.get(
+      "ChainlinkRelayerV1USDCUSD",
+    );
+    const eurReporter = polygonAddressesByName.get("ChainlinkRelayerV1EURUSD");
+    const manualReporter = polygonAddressesByName.get("MigrationMultisig");
+
+    expect(usdcReporter).toBeDefined();
+    expect(eurReporter).toBeDefined();
+    expect(manualReporter).toBeDefined();
+    expect(polygonReporters[usdcReporter ?? ""]?.type).toBe("CHAINLINK");
+    expect(polygonReporters[eurReporter ?? ""]?.type).toBe("CHAINLINK");
+    expect(polygonReporters[manualReporter ?? ""]?.type).toBe("MANUAL");
   });
 
   it("keeps reporterTypes aligned with reporters", () => {
@@ -70,6 +105,9 @@ describe("oracle reporter registry", () => {
     expect(getChainlinkDataFeedUrl(143, "GBP/USD")).toBe(
       "https://data.chain.link/feeds/monad/monad/gbp-usd",
     );
+    expect(getChainlinkDataFeedUrl(137, "EUR/USD")).toBe(
+      "https://data.chain.link/feeds/polygon/mainnet/eur-usd",
+    );
     expect(
       getRateFeedChainlinkDataFeedUrl(
         143,
@@ -82,6 +120,12 @@ describe("oracle reporter registry", () => {
         "0xfde35b45cbd2504fb5dc514f007bc2de27034274",
       ),
     ).toBe("https://data.chain.link/feeds/celo/mainnet/jpy-usd-fx");
+    expect(
+      getRateFeedChainlinkDataFeedUrl(
+        137,
+        "0xc22418a83dfc262b10a1f57e25309db83e7ea79e",
+      ),
+    ).toBeNull();
   });
 
   it("returns stable defaults for unknown feeds and chains", () => {

@@ -323,8 +323,8 @@ function StablesHeader(): React.JSX.Element {
         Mento stablecoins
       </h1>
       <p className="mt-1 text-sm text-slate-400">
-        Circulating supply of Mento-issued stablecoins across Celo and Monad,
-        excluding Celo NTT lock custody from global totals.
+        Circulating supply of Mento-issued stablecoins across Celo, Monad, and
+        Polygon, excluding Celo NTT lock custody from global totals.
       </p>
     </header>
   );

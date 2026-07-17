@@ -2,9 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
-import { POOL_CONFIG_EXT, POOL_RATE_FEED_EXT } from "@/lib/queries";
+import {
+  POOL_CONFIG_EXT,
+  POOL_LIQUIDITY_STRATEGIES,
+  POOL_RATE_FEED_EXT,
+} from "@/lib/queries";
 import {
   PoolConfigExtSchema,
+  PoolLiquidityStrategiesSchema,
   PoolRateFeedExtSchema,
 } from "@/lib/queries/pool-detail-schemas";
 
@@ -32,10 +37,11 @@ function defaultUseGQL(query?: unknown) {
   if (query === POOL_CONFIG_EXT) {
     return { data: { Pool: [{ rebalanceReward: 1 }] } };
   }
+  if (query === POOL_LIQUIDITY_STRATEGIES) return {};
   return {};
 }
 
-const mockUseGQL = vi.fn(defaultUseGQL);
+const mockUseGQL = vi.fn<(query?: unknown) => unknown>(defaultUseGQL);
 
 const mockGetName = vi.fn((address: string) => `name-for-${address.slice(-4)}`);
 
@@ -359,6 +365,62 @@ describe("PoolConfigPanel", () => {
       const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
       expect(html).toContain(
         `href="https://celoscan.io/address/${STRATEGY_ADDR}"`,
+      );
+    });
+
+    it("renders every active strategy with its kind", () => {
+      const open = "0x54e2ae8c8448912e17ce0b2453bafb7b0d80e40f";
+      mockUseGQL.mockImplementation((query?: unknown) => {
+        if (query === POOL_LIQUIDITY_STRATEGIES) {
+          return {
+            data: {
+              PoolLiquidityStrategy: [
+                {
+                  id: `${BASE_POOL.id}-${open}`,
+                  chainId: BASE_POOL.chainId,
+                  poolId: BASE_POOL.id,
+                  strategyAddress: open,
+                  kind: "OPEN",
+                  active: true,
+                  addedAtBlock: "1",
+                  addedAtTimestamp: "1",
+                  updatedAtBlock: "2",
+                  updatedAtTimestamp: "2",
+                },
+                {
+                  id: `${BASE_POOL.id}-${STRATEGY_ADDR}`,
+                  chainId: BASE_POOL.chainId,
+                  poolId: BASE_POOL.id,
+                  strategyAddress: STRATEGY_ADDR,
+                  kind: "RESERVE",
+                  active: true,
+                  addedAtBlock: "1",
+                  addedAtTimestamp: "1",
+                  updatedAtBlock: "2",
+                  updatedAtTimestamp: "2",
+                },
+              ],
+            },
+          };
+        }
+        return defaultUseGQL(query);
+      });
+      const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
+      expect(html).toContain("Open");
+      expect(html).toContain("Reserve");
+      expect(html).toContain(`https://celoscan.io/address/${open}`);
+      expect(html).toContain(`https://celoscan.io/address/${STRATEGY_ADDR}`);
+    });
+
+    it("validates the isolated many-to-many strategy query", () => {
+      renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
+      expect(mockUseGQL).toHaveBeenCalledWith(
+        POOL_LIQUIDITY_STRATEGIES,
+        { poolId: BASE_POOL.id, chainId: BASE_POOL.chainId },
+        {
+          timeoutMs: 5000,
+          schema: PoolLiquidityStrategiesSchema,
+        },
       );
     });
 

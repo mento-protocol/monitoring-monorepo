@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as queries from "@/lib/queries";
 
 const EXPECTED_EXPORT_NAMES = [
+  "ALL_ACTIVE_POOL_LIQUIDITY_STRATEGIES",
   "ALL_POOLS_WITH_HEALTH",
   "ALL_POOLS_BREACH_ROLLUP",
   "ALL_POOLS_HEALTH_CURSOR",
@@ -30,6 +31,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_VP_DEPRECATION_EXT",
   "POOL_VP_LIFECYCLE_DEPRECATION_EXT",
   "POOL_CONFIG_EXT",
+  "POOL_LIQUIDITY_STRATEGIES",
   "POOL_RATE_FEED_EXT",
   "POOL_V2_EXCHANGE",
   "POOL_BREACH_ROLLUP",
@@ -633,6 +635,18 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
   it("ALL_CDP_POOLS filters removed pools scoped to chainId", () => {
     expect(queries.ALL_CDP_POOLS).toContain("removed: { _eq: false }");
     expect(queries.ALL_CDP_POOLS).toContain("chainId: { _eq: $chainId }");
+  });
+
+  it("ALL_ACTIVE_POOL_LIQUIDITY_STRATEGIES is active, chain-scoped, and deterministic", () => {
+    expect(queries.ALL_ACTIVE_POOL_LIQUIDITY_STRATEGIES).toContain(
+      "active: { _eq: true }",
+    );
+    expect(queries.ALL_ACTIVE_POOL_LIQUIDITY_STRATEGIES).toContain(
+      "chainId: { _eq: $chainId }",
+    );
+    expect(queries.ALL_ACTIVE_POOL_LIQUIDITY_STRATEGIES).toContain(
+      "order_by: [{ poolId: asc }, { strategyAddress: asc }]",
+    );
   });
 
   it("CDP_MARKET_DETAIL fetches open/history troves and batch rates with deterministic caps", () => {

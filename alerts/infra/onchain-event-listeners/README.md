@@ -100,7 +100,7 @@ provider "restapi" {
 ## Architecture
 
 ```text
-QuickNode (Celo Mainnet)
+QuickNode (one webhook per configured chain)
     ↓
 Filter Function (JavaScript)
     ↓ (only matching events)
@@ -145,12 +145,15 @@ This ensures consistency between Terraform and the TypeScript Cloud Function.
 
 ## Network Support
 
-Currently supports:
+The deployed root stack currently configures:
 
-- `celo-mainnet` (default)
-- `celo-testnet`
+- `celo-mainnet`
+- `ethereum-mainnet`
+- `polygon-mainnet`
 
-To add support for other networks, update the `network` variable.
+The module accepts any QuickNode network identifier allowed by the root
+`multisigs` variable; the handler must also have a matching viem chain and Safe
+EIP-3770 configuration before a new chain is enabled.
 
 ## Webhook Management
 
@@ -228,7 +231,8 @@ terraform apply -lock=false
 terraform apply -lock=false
 ```
 
-Replace `<network>` with your network key (e.g., `celo`, `ethereum`, `base`).
+Replace `<network>` with your network key (e.g., `celo`, `ethereum`,
+`polygon`).
 
 ### State Repair Script
 
@@ -280,7 +284,7 @@ See [WEBHOOK_STATE_MANAGEMENT.md](./WEBHOOK_STATE_MANAGEMENT.md) for architectur
 **Solution:**
 
 1. Verify API key: <https://dashboard.quicknode.com/api-keys>
-2. Check network: `celo-mainnet` or `celo-testnet`
+2. Check network: `celo-mainnet`, `ethereum-mainnet`, or `polygon-mainnet`
 3. Enable debug mode: `debug_mode = true`
 
 ### No Events Received
@@ -311,7 +315,8 @@ See [WEBHOOK_STATE_MANAGEMENT.md](./WEBHOOK_STATE_MANAGEMENT.md) for architectur
 
 ## Best Practices
 
-1. **Test First** - Use `celo-testnet` before mainnet
+1. **Test First** - Run the handler's hermetic tests and inspect the Terraform
+   plan before enabling or replacing a mainnet webhook
 2. **Monitor Logs** - Check QuickNode webhook delivery status
 3. **Signature Validation** - Always verify webhook signatures in Cloud Function
 4. **Error Handling** - Filter function includes comprehensive error handling

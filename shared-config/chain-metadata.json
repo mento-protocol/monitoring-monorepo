@@ -9,6 +9,11 @@
     "label": "Monad",
     "explorerBaseUrl": "https://monadscan.com"
   },
+  "137": {
+    "slug": "polygon",
+    "label": "Polygon",
+    "explorerBaseUrl": "https://polygonscan.com"
+  },
   "11142220": {
     "slug": "celo-sepolia",
     "label": "Celo Sepolia",
@@ -18,5 +23,10 @@
     "slug": "monad-testnet",
     "label": "Monad Testnet",
     "explorerBaseUrl": "https://testnet.monadscan.com"
+  },
+  "80002": {
+    "slug": "polygon-amoy",
+    "label": "Polygon Amoy",
+    "explorerBaseUrl": "https://amoy.polygonscan.com"
   }
 }

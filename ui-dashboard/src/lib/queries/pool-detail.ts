@@ -182,6 +182,39 @@ export const POOL_CONFIG_EXT = `
   }
 `;
 
+// A pool may authorize more than one strategy simultaneously (Polygon's
+// EURm/EUROP pool launches with both Open and Reserve). Keep this isolated
+// from POOL_DETAIL_WITH_HEALTH so the detail page survives the indexer
+// deploy+resync window and falls back to Pool.rebalancerAddress meanwhile.
+export type PoolLiquidityStrategiesResponse = {
+  PoolLiquidityStrategy: import("@/lib/types").PoolLiquidityStrategy[];
+};
+
+export const POOL_LIQUIDITY_STRATEGIES = `
+  query PoolLiquidityStrategies($poolId: String!, $chainId: Int!) {
+    PoolLiquidityStrategy(
+      where: {
+        poolId: { _eq: $poolId }
+        chainId: { _eq: $chainId }
+        active: { _eq: true }
+      }
+      order_by: [{ kind: asc }, { strategyAddress: asc }]
+      limit: 20
+    ) {
+      id
+      chainId
+      poolId
+      strategyAddress
+      kind
+      active
+      addedAtBlock
+      addedAtTimestamp
+      updatedAtBlock
+      updatedAtTimestamp
+    }
+  }
+`;
+
 // Isolated from POOL_DETAIL_WITH_HEALTH because RateFeed is a new indexer
 // entity. During the hosted deploy+resync window Hasura may reject the type;
 // the config panel should keep rendering and degrade only Oracle Source.

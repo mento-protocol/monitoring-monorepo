@@ -280,6 +280,16 @@ locals {
     GBPUSD  = "0xd0e9c1a718d2a693d41eacd4b2696180403ce081"
   }
 
+  # Polygon mainnet FPMM pools, verified from the three FPMMDeployed events in
+  # transaction 0x28514ec3c8ccd5618896a50aceb0df43cfd87c7a43e3c1874d5e24a35afd995a
+  # at block 90348018. These addresses intentionally match the live factory
+  # events rather than the deterministic addresses reused on another chain.
+  polygon_pool_addresses_by_rate_feed = {
+    USDCUSD  = "0x463c0d1f04bcd99a1efcf94ac2a75bc19ea4a7e5"
+    EURUSD   = "0x93e15a22fda39fefccce82d387a09ccf030ead61"
+    EUROPEUR = "0xcd8c6811d975981f57e7fb32e59f0bee66af3201"
+  }
+
   # Per-chain rateFeed → Chainlink data-feed slug maps. Source: Chainlink's
   # reference-data-directory.vercel.app/feeds-{chain}-mainnet.json — only
   # rateFeeds with a published `data.chain.link/<chainlink_feed_path>/<slug>`
@@ -318,9 +328,6 @@ locals {
   # Polygon's directory file still lives under Chainlink's legacy chain slug:
   # `feeds-matic-mainnet.json` (the data.chain.link URL path is `polygon/mainnet`).
   # EUROPEUR is intentionally absent — Chainlink publishes no EUROP feed.
-  # Polygon has no `*_pool_addresses_by_rate_feed` map: its rate feeds have no
-  # FPMM pools in the Envio indexer, so the trading-mode bullet falls back to
-  # the Grafana alert-details URL.
   polygon_chainlink_slugs_by_rate_feed = {
     EURUSD  = "eur-usd"
     USDCUSD = "usdc-usd"
@@ -339,6 +346,11 @@ locals {
 
   monad_pool_branches = join("\n", [
     for k, v in local.monad_pool_addresses_by_rate_feed :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $pool = %q -}}{{ end -}}", k, v)
+  ])
+
+  polygon_pool_branches = join("\n", [
+    for k, v in local.polygon_pool_addresses_by_rate_feed :
     format("{{ if eq .Labels.rateFeed %q -}}{{ $pool = %q -}}{{ end -}}", k, v)
   ])
 
@@ -409,7 +421,9 @@ locals {
       names = [
         "Low USDC Reserve Balance Alert",
         "Low USDT Reserve Balance Alert",
-        "Low axlUSDC Reserve Balance Alert"
+        "Low axlUSDC Reserve Balance Alert",
+        "Empty USDC Reserve Balance Alert [Polygon]",
+        "Empty EUROP Reserve Balance Alert [Polygon]"
       ],
       slack_title_template       = "slack.reserve_balance_alert_title",
       slack_message_template     = "slack.reserve_balance_alert_message",
@@ -429,10 +443,12 @@ locals {
       victorops_message_template = "victorops.trading_mode_alert_message"
     },
     aegis_service_issues = {
-      names = [
+      names = concat([
         "Aegis view-call failures [production]",
         "Aegis does not report new data"
-      ],
+        ], [
+        for k, c in local.prod_chains : "Aegis No Successful Poll [${c.title}]"
+      ]),
       slack_title_template       = "slack.aegis_service_alert_title",
       slack_message_template     = "slack.aegis_service_alert_message",
       victorops_title_template   = "victorops.aegis_service_alert_title",

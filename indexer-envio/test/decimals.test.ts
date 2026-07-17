@@ -166,6 +166,17 @@ describe("contractAddresses — deterministic namespace address resolution", () 
     );
   });
 
+  it("resolves Polygon v2.65 breaker aliases from generic runtime names", () => {
+    assert.equal(
+      getContractAddress(137, "BreakerBox")?.toLowerCase(),
+      "0x9fc1e0d10fb38954da385b8b25ab2bbaf3241722",
+    );
+    assert.equal(
+      getContractAddress(80002, "MedianDeltaBreaker")?.toLowerCase(),
+      "0xf923c884f319b8866f67c5719a80e5cb4d0faf2c",
+    );
+  });
+
   it("requireContractAddress throws for un-indexed chainId", () => {
     assert.throws(
       () => requireContractAddress(999, "SortedOracles"),

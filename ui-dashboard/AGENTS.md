@@ -296,12 +296,14 @@ The dashboard supports multiple network targets (all defined in `src/lib/network
 | `celo-mainnet-local` | Celo Mainnet  | local   |
 | `celo-mainnet`       | Celo Mainnet  | prod    |
 | `monad-mainnet`      | Monad Mainnet | prod    |
+| `polygon-mainnet`    | Polygon       | prod    |
 | `celo-sepolia`       | Celo Sepolia  | testnet |
 | `monad-testnet`      | Monad Testnet | testnet |
+| `polygon-amoy`       | Polygon Amoy  | testnet |
 
 Token symbols and address labels come from `@mento-protocol/config/tokens` — the shared derivation also used by metrics-bridge. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
 
-Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. Hosted testnet networks stay hidden unless `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true` and their per-network endpoint is configured: `NEXT_PUBLIC_HASURA_URL_TESTNET` for Monad Testnet and `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` for Celo Sepolia. The package `dev` script supplies the live prod endpoint by default for local worktrees; explicit env values still override it. Explorer URL defaults come from `@mento-protocol/config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
+Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. Hosted testnet networks stay hidden unless `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true` and their endpoint is configured: `NEXT_PUBLIC_HASURA_URL_TESTNET` for Monad Testnet + Polygon Amoy and `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` for Celo Sepolia. The package `dev` script supplies the live prod endpoint by default for local worktrees; explicit env values still override it. Explorer URL defaults come from `@mento-protocol/config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
 
 ## Notes
 

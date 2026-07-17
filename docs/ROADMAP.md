@@ -1,6 +1,6 @@
 # Monitoring Monorepo — Roadmap
 
-Last updated: 2026-05-18
+Last updated: 2026-07-17
 
 ## Done
 
@@ -22,8 +22,8 @@ Last updated: 2026-05-18
 - [x] Pool cumulative fields: `swapCount`, `notionalVolume0/1`, `rebalanceCount`
 - [x] `txHash` on all indexed events
 - [x] `@index` directives on schema for query performance
-- [x] Deploy branch strategy (`deploy/celo-sepolia`, `deploy/celo-mainnet`)
-- [x] Multichain config (`config.multichain.mainnet.yaml`) — Celo (42220) + Monad (143)
+- [x] Deploy branch strategy — one multichain `envio` branch with commit-scoped verify/promote/rollback helpers
+- [x] Multichain config (`config.multichain.mainnet.yaml`) — Celo (42220) + Monad (143) + Polygon (137)
 - [x] **Deviation breach tracking** — `deviationBreachStartedAt` on Pool entity (rising-edge timestamp)
 - [x] **Deviation breach history entity** — first-class per-breach entries with start/end for charting
 - [x] **Anchor-based breach deferral** — correct handling of multi-`ReservesUpdated` txs
@@ -72,8 +72,8 @@ Last updated: 2026-05-18
 - [x] CI pipeline — single aggregate `ci.yml` (ESLint 10 + Vitest + typecheck + Codecov) fans out to `ui` / `indexer` / `bridge` via path filter; Trunk `Code Quality` is the only other required check
 - [x] **High/critical npm advisory merge-block**
 - [x] **CI actions pinned to commit SHAs** (`claude-code-action`, `checkout`)
-- [x] `pnpm deploy:indexer [network]` (prompts if no network passed)
-- [x] `pnpm update-endpoint:mainnet` — updates Vercel env var via API after indexer redeploy
+- [x] `pnpm deploy:indexer` pushes `HEAD` to the multichain `envio` branch; commit-scoped status, logs, metrics, verify, promote, and rollback wrappers own the rest of the workflow
+- [x] Static production Envio endpoint — promotion changes the deployment behind the stable URL, so no Vercel endpoint rewrite command is required
 - [x] **Envio deploy notification** — replaced by Envio's native Slack integration on the hosted indexer (the `notify-envio-deploy.yml` workflow was removed alongside)
 - [x] Deployment docs (`docs/deployment.md`)
 - [x] Non-interactive deploy scripts (status, promote, logs)
@@ -86,14 +86,14 @@ Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state 
 
 **Live protocol alert rules** (Terraform-managed in `alerts/rules/`, including the Aegis service-health group):
 
-| Alert Group      | What it monitors                                                  | Channels                                                                                |
-| ---------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Oracle Relayers  | Stale price feeds, low native-token balance for relayer wallets   | Slack #alerts-oracles + #alerts-critical/Splunk (page, prod chains)                     |
-| Reserve Balances | Low USDC/USDT/axlUSDC in reserve                                  | Slack #alerts-reserve                                                                   |
-| Trading Modes    | Circuit breakers tripped (trading halted per rate feed)           | Slack #alerts-critical/Splunk (page, prod chains); #alerts-testnet (staging chains)     |
-| Trading Limits   | L0/L1/LG utilization >90%                                         | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)                         |
-| CDPs             | SP headroom/thinning, shutdown, liquidation/redemption, shortfall | Slack #alerts-cdps (warnings); #alerts-critical (shutdown / SP-below-floor / shortfall) |
-| Aegis Service    | RPC failures, data staleness                                      | Slack #alerts-infra; #alerts-critical/Splunk (page)                                     |
+| Alert Group      | What it monitors                                                      | Channels                                                                                |
+| ---------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Oracle Relayers  | Stale price feeds, low native-token balance for relayer wallets       | Slack #alerts-oracles + #alerts-critical/Splunk (page, prod chains)                     |
+| Reserve Balances | Low configured collateral plus exact-zero Polygon USDC/EUROP reserves | Slack #alerts-reserve + #alerts-critical/Splunk for Polygon zero-balance pages          |
+| Trading Modes    | Circuit breakers tripped (trading halted per rate feed)               | Slack #alerts-critical/Splunk (page, prod chains); #alerts-testnet (staging chains)     |
+| Trading Limits   | L0/L1/LG utilization >90%                                             | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)                         |
+| CDPs             | SP headroom/thinning, shutdown, liquidation/redemption, shortfall     | Slack #alerts-cdps (warnings); #alerts-critical (shutdown / SP-below-floor / shortfall) |
+| Aegis Service    | RPC failures, global data staleness, and per-chain no-success polls   | Slack #alerts-infra; #alerts-critical/Splunk (page)                                     |
 
 Slack is the active delivery path; page-severity alerts still escalate through Splunk On-Call.
 
@@ -110,11 +110,11 @@ Slack is the active delivery path; page-severity alerts still escalate through S
 
 Metrics pipeline and first-cut alert rules are shipped end-to-end:
 
-- **Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls Hasura every 30s and exports `mento_pool_*` gauges. Grafana Alloy (`aegis/grafana-agent/`, App Engine in `mento-monitoring`) scrapes the bridge and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
+- **Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls Hasura every 30s and exports `mento_pool_*` gauges. Grafana Alloy (`aegis/grafana-agent/`, App Engine in `mento-monitoring`) scrapes the bridge and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). The configured fleet is 14 FPMM pools across Celo, Monad, and Polygon mainnet; production reporting remains subject to the Polygon indexer cutover.
 - **Terraform module** `alerts/rules/` — Grafana provider + Slack contact points + alert rules, separate state backend (`gs://mento-terraform-tfstate-6ed6/alerts-rules`).
 - **Slack channels.** Domain-split: `#alerts-critical` (page-worthy across services) + per-domain warning channels (`#alerts-oracles`, `#alerts-pools`, `#alerts-infra`). Protocol/Aegis routing additionally uses `#alerts-reserve` (reserve balance) and `#alerts-testnet` (any non-prod chain). Global routing and contact points live in `alerts/rules`, so v3 changes no longer coordinate through Aegis Terraform resources.
 
-**Live FPMM + bridge rule inventory:**
+**Configured FPMM + bridge rule inventory:**
 
 | Service          | Rule                                    | Severity | Threshold                                                                        |
 | ---------------- | --------------------------------------- | -------- | -------------------------------------------------------------------------------- |
@@ -134,6 +134,8 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 | `oracles`        | Oracle Report Outlier                   | warning  | consecutive-report jump ≥1% FX / ≥0.5% USD-pegged, within 10m (FX-weekend gated) |
 | `metrics-bridge` | Not Reporting                           | critical | `time() - bridge_last_poll > 90` for 2m                                          |
 | `metrics-bridge` | Poll Errors                             | critical | `sum by (kind)(rate(poll_errors_total{kind=~".+"}[5m])) > 0.01/s` for 10m        |
+| `metrics-bridge` | Polygon Pool Coverage Incomplete        | critical | fewer than 3 Polygon pool health series, or no data, for 10m                     |
+| `reserve`        | Empty USDC/EUROP Reserve [Polygon]      | page     | exact ReserveV2 token balance `== 0` for 5m                                      |
 | `cdps`           | System Shutdown                         | critical | `mento_cdp_shutdown > 0.5` for 1m                                                |
 | `cdps`           | Stability Pool Below Floor              | critical | `mento_cdp_sp_headroom < 0` for 15m (below MIN_BOLD_IN_SP)                       |
 | `cdps`           | Stability Pool Thin                     | warning  | `sp_deposits / system_debt < 0.02` for 30m                                       |
@@ -152,8 +154,7 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 ### CDP Monitoring Rollout
 
 - [ ] Deploy and backfill the Liquity v2 Celo indexer changes, promote the synced deployment, and verify hosted Hasura exposes the CDP schema before production dashboard rollout.
-- [x] Cut the global pools table from CDP RPC probing to Celo-only indexed `CdpPool` rows; the remaining Monad runtime fallback is Reserve-only.
-- [ ] Add an indexed positive Reserve source for Monad and remove the remaining runtime strategy fallback.
+- [x] Read active pool strategies from `PoolLiquidityStrategy`; retain narrow legacy OLS/CDP/`rebalancerAddress` fallbacks only while the additive schema is absent during rollout.
 
 ---
 
@@ -192,9 +193,9 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 ## Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│            Celo Mainnet (42220)  +  Monad Mainnet (143)                │
-│   FPMMs · SortedOracles · BreakerBox · Broker · Reserve                │
+┌────────────────────────────────────────────────────────────────────────┐
+│ Celo Mainnet (42220) + Monad Mainnet (143) + Polygon Mainnet (137)    │
+│ FPMMs · SortedOracles · BreakerBox · Broker · Reserve · Wormhole NTT  │
 └──────┬───────────────────────────────────────────┬────────────────────┘
        │                                           │
  Events (HyperSync)                         View calls (RPC, 10-60s)

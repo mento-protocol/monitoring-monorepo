@@ -28,3 +28,16 @@ describe("bridge-queries order_by uses array syntax", () => {
     });
   }
 });
+
+describe("bridge transfer list/count filters stay aligned", () => {
+  it("accepts the same BridgeTransfer boolean expression in both queries", () => {
+    expect(BRIDGE_TRANSFERS_WINDOW).toContain(
+      "$where: BridgeTransfer_bool_exp!",
+    );
+    expect(BRIDGE_TRANSFERS_COUNT).toContain(
+      "$where: BridgeTransfer_bool_exp!",
+    );
+    expect(BRIDGE_TRANSFERS_WINDOW).toContain("where: $where");
+    expect(BRIDGE_TRANSFERS_COUNT).toContain("where: $where");
+  });
+});

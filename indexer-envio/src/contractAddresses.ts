@@ -25,6 +25,16 @@ export type ContractsJson = Record<
   >
 >;
 
+// Some deployment manifests publish the live v2.65 breaker contracts only
+// under their versioned keys. Runtime callers deliberately use stable generic
+// names, so resolve those names to the published v2.65 aliases when the bare
+// key is absent. Exact keys always win for chains that publish both.
+const CONTRACT_NAME_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
+  BreakerBox: ["BreakerBoxv265"],
+  MedianDeltaBreaker: ["MedianDeltaBreakerv265"],
+  ValueDeltaBreaker: ["ValueDeltaBreakerv265"],
+};
+
 /**
  * Look up a contract address by chainId + contractName using the explicit
  * namespace map. Returns undefined if chainId is not indexed or contract
@@ -36,10 +46,14 @@ export function getContractAddress(
 ): `0x${string}` | undefined {
   const ns = CONTRACT_NAMESPACE_BY_CHAIN[String(chainId)];
   if (!ns) return undefined;
-  const entry = (_contractsJson as ContractsJson)[String(chainId)]?.[ns]?.[
-    contractName
-  ];
-  return entry?.address as `0x${string}` | undefined;
+  const entries = (_contractsJson as ContractsJson)[String(chainId)]?.[ns];
+  const exact = entries?.[contractName]?.address;
+  if (exact) return exact as `0x${string}`;
+  for (const fallbackName of CONTRACT_NAME_FALLBACKS[contractName] ?? []) {
+    const fallback = entries?.[fallbackName]?.address;
+    if (fallback) return fallback as `0x${string}`;
+  }
+  return undefined;
 }
 
 /**
@@ -143,6 +157,67 @@ export function _clearPricingModuleIndex(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Liquidity-strategy kind resolution
+//
+// FPMM's LiquidityStrategyUpdated event carries only an address. Classify
+// published strategy deployments from contracts.json so the indexer can keep
+// a many-to-many pool/strategy registry without selector-probing every event.
+// OLS/CDP lifecycle handlers also pass an explicit kind, which covers local or
+// newly-deployed strategies before their manifest name reaches this package.
+// ---------------------------------------------------------------------------
+
+export type ContractLiquidityStrategyKind = "OPEN" | "CDP" | "RESERVE";
+
+function liquidityStrategyKindForName(
+  name: string,
+): ContractLiquidityStrategyKind | null {
+  if (name.startsWith("OpenLiquidityStrategy")) return "OPEN";
+  if (name.startsWith("CDPLiquidityStrategy")) return "CDP";
+  if (name.startsWith("ReserveLiquidityStrategy")) return "RESERVE";
+  return null;
+}
+
+const _liquidityStrategyKindIndex = new Map<
+  number,
+  Map<string, ContractLiquidityStrategyKind>
+>();
+
+export function lookupLiquidityStrategyKind(
+  chainId: number,
+  address: string,
+): ContractLiquidityStrategyKind | null {
+  let index = _liquidityStrategyKindIndex.get(chainId);
+  if (!index) {
+    index = new Map<string, ContractLiquidityStrategyKind>();
+    const ns = CONTRACT_NAMESPACE_BY_CHAIN[String(chainId)];
+    const chainEntries = ns
+      ? (_contractsJson as ContractsJson)[String(chainId)]?.[ns]
+      : undefined;
+    if (chainEntries) {
+      for (const [rawName, entry] of Object.entries(chainEntries)) {
+        const kind = liquidityStrategyKindForName(rawName);
+        if (!kind || !entry.address) continue;
+        const key = entry.address.toLowerCase();
+        const existing = index.get(key);
+        if (existing && existing !== kind) {
+          throw new Error(
+            `[contractAddresses] Conflicting liquidity-strategy kinds for ${entry.address} on chain ${chainId}: ${existing} vs ${kind}`,
+          );
+        }
+        index.set(key, kind);
+      }
+    }
+    _liquidityStrategyKindIndex.set(chainId, index);
+  }
+  return index.get(address.toLowerCase()) ?? null;
+}
+
+/** @internal Test-only: clear the strategy-kind index between tests. */
+export function _clearLiquidityStrategyKindIndex(): void {
+  _liquidityStrategyKindIndex.clear();
+}
+
+// ---------------------------------------------------------------------------
 // Breaker-kind resolution
 //
 // Breaker kind is deployment metadata: each known breaker address is published
@@ -158,7 +233,9 @@ export type ContractBreakerKind =
 
 const BREAKER_KIND_BY_CONTRACT_NAME: Record<string, ContractBreakerKind> = {
   MedianDeltaBreaker: "MEDIAN_DELTA",
+  MedianDeltaBreakerv265: "MEDIAN_DELTA",
   ValueDeltaBreaker: "VALUE_DELTA",
+  ValueDeltaBreakerv265: "VALUE_DELTA",
   MarketHoursBreaker: "MARKET_HOURS",
   MarketHoursBreakerv300: "MARKET_HOURS",
   MarketHoursBreakerToggleablev300: "MARKET_HOURS",

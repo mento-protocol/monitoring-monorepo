@@ -57,6 +57,7 @@ function renderSection({
         filteredTraderRows={[]}
         traders={[]}
         pools={new Map()}
+        chainIdIn={[42220, 143, 137]}
         protocolActorFilter={[false]}
         canUseVolumeFilters={false}
         tableState={{

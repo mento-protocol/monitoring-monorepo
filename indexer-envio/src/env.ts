@@ -19,6 +19,7 @@ const schema = z.object({
 
   ENVIO_START_BLOCK_CELO: z.string().optional(),
   ENVIO_START_BLOCK_MONAD: z.string().optional(),
+  ENVIO_START_BLOCK_POLYGON: z.string().optional(),
   ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD: z.string().optional(),
 
   NODE_ENV: z.enum(["development", "production", "test"]).catch("development"),
@@ -47,6 +48,7 @@ export const env = schema.parse({
   ENVIO_STRICT_START_BLOCK: process.env.ENVIO_STRICT_START_BLOCK,
   ENVIO_START_BLOCK_CELO: process.env.ENVIO_START_BLOCK_CELO,
   ENVIO_START_BLOCK_MONAD: process.env.ENVIO_START_BLOCK_MONAD,
+  ENVIO_START_BLOCK_POLYGON: process.env.ENVIO_START_BLOCK_POLYGON,
   ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD:
     process.env.ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD,
   NODE_ENV: process.env.NODE_ENV,

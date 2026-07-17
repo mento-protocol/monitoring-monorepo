@@ -1,6 +1,10 @@
 import { ClientError, GraphQLClient, gql } from "graphql-request";
 import { HASURA_URL } from "./config.js";
-import type { BridgePoolsResponse, PoolRow } from "./types.js";
+import type {
+  BridgePoolsResponse,
+  PoolLiquidityStrategyRow,
+  PoolRow,
+} from "./types.js";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -103,6 +107,25 @@ export const BRIDGE_POOLS_ORACLE_TX_QUERY = gql`
   }
 `;
 
+// Optional companion query for the authoritative many-to-many strategy
+// registry. It is intentionally isolated from BRIDGE_POOLS_QUERY so the
+// bridge can deploy before the indexer schema/replay: an unknown-field error
+// falls back to Pool.rebalancerAddress, while a successful empty result is
+// authoritative and must NOT resurrect the legacy pointer.
+export const BRIDGE_POOL_LIQUIDITY_STRATEGIES_QUERY = gql`
+  query BridgePoolLiquidityStrategies {
+    activeStrategies: PoolLiquidityStrategy(
+      where: { active: { _eq: true } }
+      order_by: [{ poolId: asc }, { strategyAddress: asc }]
+      limit: 1000
+    ) {
+      poolId
+      strategyAddress
+      kind
+    }
+  }
+`;
+
 // Optional companion query for the VP-specific freshness window. If the bridge
 // deploys before the indexer schema, only the new VP freshness metric degrades;
 // FPMM gauges keep publishing.
@@ -152,6 +175,10 @@ type OpenBreachRow = Pick<
 >;
 
 type OracleTxRow = Pick<PoolRow, "id" | "oracleTxHash">;
+type ActiveLiquidityStrategiesResult = {
+  rows: PoolLiquidityStrategyRow[];
+  available: boolean;
+};
 type VpFreshnessRow = Pick<
   PoolRow,
   "id" | "oracleFreshnessWindow" | "tokenDecimalsKnown"
@@ -176,6 +203,7 @@ type BridgePoolsBaseResponse = {
     | "currentOpenBreachPeak"
     | "currentOpenBreachEntryThreshold"
     | "wrappedExchangeDeprecated"
+    | "activeLiquidityStrategies"
   >[];
 };
 
@@ -205,6 +233,7 @@ type BridgePoolCompanionResponses = {
   lineage: { Pool: OracleLineageRow[] };
   openBreach: { Pool: OpenBreachRow[] };
   oracleTx: { Pool: OracleTxRow[] };
+  activeStrategies: ActiveLiquidityStrategiesResult;
   vpFreshness: { Pool: VpFreshnessRow[] };
   vpExchangeDeprecation: {
     BiPoolExchange: VpExchangeDeprecationRow[];
@@ -235,10 +264,34 @@ const unknownFieldWarnings = {
   oracleLineage: false,
   openBreach: false,
   oracleTx: false,
+  activeStrategies: false,
   vpFreshness: false,
   vpExchangeDeprecation: false,
   vpLifecycleDeprecation: false,
 };
+
+async function requestOptionalActiveLiquidityStrategies(
+  signal: AbortSignal,
+): Promise<ActiveLiquidityStrategiesResult> {
+  try {
+    const response = await client.request<{
+      activeStrategies?: PoolLiquidityStrategyRow[];
+    }>({ document: BRIDGE_POOL_LIQUIDITY_STRATEGIES_QUERY, signal });
+    return {
+      rows: response.activeStrategies ?? [],
+      available: true,
+    };
+  } catch (err) {
+    if (!isUnknownFieldError(err)) throw err;
+    if (!unknownFieldWarnings.activeStrategies) {
+      unknownFieldWarnings.activeStrategies = true;
+      console.warn(
+        "[metrics-bridge] Hasura schema missing PoolLiquidityStrategy; rebalance probes are using the legacy single-strategy pointer until the indexer catches up.",
+      );
+    }
+    return { rows: [], available: false };
+  }
+}
 
 async function requestOptionalPoolRows<T>(
   document: string,
@@ -308,6 +361,7 @@ async function requestBridgePoolCompanions(
     lineage,
     openBreach,
     oracleTx,
+    activeStrategies,
     vpFreshness,
     vpExchangeDeprecation,
     vpLifecycleDeprecation,
@@ -334,6 +388,7 @@ async function requestBridgePoolCompanions(
       "oracleTx",
       "[metrics-bridge] Hasura schema missing oracle tx hash field; oracle alert transaction links disabled until indexer catches up.",
     ),
+    requestOptionalActiveLiquidityStrategies(signal),
     requestOptionalPoolRows<VpFreshnessRow>(
       BRIDGE_POOLS_VP_FRESHNESS_QUERY,
       signal,
@@ -348,6 +403,7 @@ async function requestBridgePoolCompanions(
     lineage,
     openBreach,
     oracleTx,
+    activeStrategies,
     vpFreshness,
     vpExchangeDeprecation,
     vpLifecycleDeprecation,
@@ -359,6 +415,7 @@ function mergeBridgePoolCompanions({
   lineage,
   openBreach,
   oracleTx,
+  activeStrategies,
   vpFreshness,
   vpExchangeDeprecation,
   vpLifecycleDeprecation,
@@ -368,20 +425,10 @@ function mergeBridgePoolCompanions({
   const oracleTxById = new Map(
     oracleTx.Pool.filter((p) => p.oracleTxHash).map((p) => [p.id, p]),
   );
+  const activeStrategiesByPoolId = groupActiveStrategies(activeStrategies.rows);
   const vpFreshnessById = new Map(vpFreshness.Pool.map((p) => [p.id, p]));
-  const deprecatedVpPoolIds = new Set<string>();
-  const vpMinimumReportsByPoolId = new Map<string, string>();
-  for (const e of vpExchangeDeprecation.BiPoolExchange) {
-    if (e.wrappedByPoolId && e.minimumReports) {
-      vpMinimumReportsByPoolId.set(e.wrappedByPoolId, e.minimumReports);
-    }
-    if (e.wrappedByPoolId && e.isDeprecated) {
-      deprecatedVpPoolIds.add(e.wrappedByPoolId);
-    }
-  }
-  for (const lifecycle of vpLifecycleDeprecation.VirtualPoolLifecycle) {
-    deprecatedVpPoolIds.add(lifecycle.poolId);
-  }
+  const { deprecatedVpPoolIds, vpMinimumReportsByPoolId } =
+    deriveVpLifecycleState(vpExchangeDeprecation, vpLifecycleDeprecation);
   return {
     Pool: base.Pool.map((p) => ({
       ...p,
@@ -393,12 +440,70 @@ function mergeBridgePoolCompanions({
       ...openBreachById.get(p.id),
       ...oracleTxById.get(p.id),
       ...vpFreshnessById.get(p.id),
+      activeLiquidityStrategies: resolvePoolStrategies(
+        p,
+        activeStrategies,
+        activeStrategiesByPoolId,
+      ),
       wrappedExchangeDeprecated: deprecatedVpPoolIds.has(p.id),
       wrappedExchangeMinimumReports:
         vpMinimumReportsByPoolId.get(p.id) ??
         VP_FRESHNESS_DEFAULTS.wrappedExchangeMinimumReports,
     })),
   };
+}
+
+function groupActiveStrategies(
+  rows: PoolLiquidityStrategyRow[],
+): Map<string, PoolLiquidityStrategyRow[]> {
+  const byPoolId = new Map<string, PoolLiquidityStrategyRow[]>();
+  for (const strategy of rows) {
+    if (!strategy.poolId || !strategy.strategyAddress) continue;
+    const strategies = byPoolId.get(strategy.poolId) ?? [];
+    strategies.push(strategy);
+    byPoolId.set(strategy.poolId, strategies);
+  }
+  return byPoolId;
+}
+
+function deriveVpLifecycleState(
+  exchange: BridgePoolCompanionResponses["vpExchangeDeprecation"],
+  lifecycle: BridgePoolCompanionResponses["vpLifecycleDeprecation"],
+): {
+  deprecatedVpPoolIds: Set<string>;
+  vpMinimumReportsByPoolId: Map<string, string>;
+} {
+  const deprecatedVpPoolIds = new Set<string>();
+  const vpMinimumReportsByPoolId = new Map<string, string>();
+  for (const e of exchange.BiPoolExchange) {
+    if (e.wrappedByPoolId && e.minimumReports) {
+      vpMinimumReportsByPoolId.set(e.wrappedByPoolId, e.minimumReports);
+    }
+    if (e.wrappedByPoolId && e.isDeprecated) {
+      deprecatedVpPoolIds.add(e.wrappedByPoolId);
+    }
+  }
+  for (const row of lifecycle.VirtualPoolLifecycle) {
+    deprecatedVpPoolIds.add(row.poolId);
+  }
+  return { deprecatedVpPoolIds, vpMinimumReportsByPoolId };
+}
+
+function resolvePoolStrategies(
+  pool: BridgePoolsBaseResponse["Pool"][number],
+  result: ActiveLiquidityStrategiesResult,
+  byPoolId: Map<string, PoolLiquidityStrategyRow[]>,
+): PoolLiquidityStrategyRow[] {
+  if (result.available) return byPoolId.get(pool.id) ?? [];
+  return pool.rebalancerAddress
+    ? [
+        {
+          poolId: pool.id,
+          strategyAddress: pool.rebalancerAddress,
+          kind: "UNKNOWN",
+        },
+      ]
+    : [];
 }
 
 export async function fetchPools(): Promise<BridgePoolsResponse> {

@@ -91,7 +91,7 @@ describe("StablesSparklineGrid — loading-branch skeleton parity", () => {
     expect(grid!.className).toBe(GRID_CLASS);
 
     const cards = grid!.querySelectorAll("article");
-    expect(cards).toHaveLength(20);
+    expect(cards).toHaveLength(22);
     for (const card of Array.from(cards)) {
       expect((card as HTMLElement).className).toBe(CARD_CLASS);
     }

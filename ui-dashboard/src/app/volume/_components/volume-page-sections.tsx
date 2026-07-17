@@ -1,6 +1,7 @@
 import { Tile } from "@/components/feedback";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { Tooltip } from "@/components/tooltip";
+import { ChainFilterControl } from "@/components/chain-filter-control";
 import { formatUSD } from "@/lib/format";
 import {
   VOLUME_RANGES,
@@ -30,6 +31,11 @@ export function VolumePageHeader({ urlState }: { urlState: VolumeUrlState }) {
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-3">
+        <ChainFilterControl
+          value={urlState.chainId}
+          options={urlState.chainOptions}
+          onChange={urlState.updateChainId}
+        />
         <VenueToggleGroup
           venue={urlState.venue}
           updateVenue={urlState.updateVenue}
@@ -381,6 +387,7 @@ export function VolumeVenueSection({
         filteredTraderRows={aggregates.filteredTraderRows}
         traders={aggregates.aggregated}
         pools={model.poolMeta}
+        chainIdIn={urlState.chainIdIn}
         protocolActorFilter={model.isProtocolActorIn}
         canUseVolumeFilters={urlState.canUseVolumeFilters}
         tableState={{

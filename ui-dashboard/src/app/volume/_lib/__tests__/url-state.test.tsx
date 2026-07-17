@@ -21,6 +21,11 @@ import { useVolumeUrlState, type Venue } from "../url-state";
 
 type UrlStateResult = ReturnType<typeof useVolumeUrlState>;
 type ResultRef = { current: UrlStateResult | null };
+const CHAIN_OPTIONS = [
+  { chainId: 42220, label: "Celo" },
+  { chainId: 143, label: "Monad" },
+  { chainId: 137, label: "Polygon" },
+] as const;
 
 function HookWrapper({
   resultRef,
@@ -29,7 +34,10 @@ function HookWrapper({
   resultRef: ResultRef;
   canUseVolumeFilters: boolean;
 }) {
-  resultRef.current = useVolumeUrlState({ canUseVolumeFilters });
+  resultRef.current = useVolumeUrlState({
+    canUseVolumeFilters,
+    chainOptions: CHAIN_OPTIONS,
+  });
   return null;
 }
 
@@ -157,6 +165,52 @@ describe("useVolumeUrlState", () => {
       ref.current?.updateVenue("v3");
     });
     expect(window.location.search).toBe("?foo=1");
+  });
+
+  it("switches chain scope without dropping window, actor, venue, sort, or hash state", () => {
+    setup(
+      "/volume?range=30d&actors=all&venue=v2&volumeSort=swaps&volumeDir=asc#tables",
+    );
+    const ref = renderHook();
+
+    act(() => {
+      ref.current?.updateChainId(137);
+    });
+
+    expect(ref.current?.chainId).toBe(137);
+    expect(ref.current?.chainIdIn).toEqual([137]);
+    expect(window.location.search).toBe(
+      "?range=30d&actors=all&venue=v2&volumeSort=swaps&volumeDir=asc&chain=137",
+    );
+    expect(window.location.hash).toBe("#tables");
+
+    act(() => {
+      ref.current?.updateChainId(null);
+    });
+    expect(ref.current?.chainId).toBeNull();
+    expect(ref.current?.chainIdIn).toEqual([42220, 143, 137]);
+    expect(window.location.search).toBe(
+      "?range=30d&actors=all&venue=v2&volumeSort=swaps&volumeDir=asc",
+    );
+  });
+
+  it("canonicalizes an unavailable chain and syncs a valid chain on popstate", () => {
+    setup("/volume?chain=999&range=90d");
+    const ref = renderHook();
+
+    expect(ref.current?.chainId).toBeNull();
+    expect(window.location.search).toBe("?range=90d");
+
+    window.history.replaceState(
+      window.history.state,
+      "",
+      "/volume?chain=143&range=90d",
+    );
+    act(() => window.dispatchEvent(new PopStateEvent("popstate")));
+
+    expect(ref.current?.chainId).toBe(143);
+    expect(ref.current?.chainIdIn).toEqual([143]);
+    expect(ref.current?.range).toBe("90d");
   });
 
   it("syncs state from browser back-forward popstate", () => {

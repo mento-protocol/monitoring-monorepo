@@ -57,7 +57,7 @@ done
 if [[ -z "$NETWORK" ]]; then
   DEPLOY_BRANCH="envio"
   SYNC_URL="https://envio.dev/app/${ENVIO_ORG}/${ENVIO_INDEXER}"
-  echo "🌐 Deploying multichain indexer (Celo + Monad) → branch: $DEPLOY_BRANCH"
+  echo "🌐 Deploying multichain indexer (Celo + Monad + Polygon) → branch: $DEPLOY_BRANCH"
 else
   if ! validate_network "$NETWORK"; then
     echo "Invalid network: $NETWORK"

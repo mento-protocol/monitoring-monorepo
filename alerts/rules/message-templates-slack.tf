@@ -52,8 +52,13 @@ ${local.polygon_relayer_signer_branches}
 {{ $titleURL := .GeneratorURL -}}
 {{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
 *<{{ $titleURL }}|Stale price for the {{ $slash }} rate feed on {{ $chain }}>*
+{{ if eq .Labels.rateFeed "EUROPEUR" -}}
+- Inspect the fixed EUR-parity report in this chain's SortedOracles and confirm its 1.0 report has not expired.
+- Verify the deployment/migration owner responsible for that fixed report. EUROPEUR is not published by the oracle-relayer cloud function.
+{{ else -}}
 - Check the latest transactions of the {{ if $relayer -}}<https://{{ .Labels.explorer }}/address/{{ $relayer }}|{{ $slash }} relayer on {{ $chain }}>{{- else -}}{{ $slash }} relayer on {{ $chain }}{{- end }}
 - Check if the <https://console.cloud.google.com/logs/query;query=resource.labels.service_name%3D%22relay-{{ .Labels.chain }}%22%20AND%20labels.rateFeed%3D%22{{ $enc }}%22?project=${local.oracle_relayer_mainnet_project_id}|relayer cloud function> is still being triggered regularly
+{{ end -}}
 
 {{ end -}}
 {{ range .Alerts.Resolved -}}
@@ -110,13 +115,13 @@ resource "grafana_message_template" "slack_reserve_balance_alert_message" {
 {{ range .Alerts.Firing -}}
 {{ $token := .Labels.token -}}
 {{ $reserveAddress := .Labels.ownerValue -}}
-*<https://celoscan.io/address/{{ $reserveAddress }}|Low {{ $token }} balance in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }} left*
+*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|Low {{ $token }} balance in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }} left*
 - Top up the {{ .Labels.owner }} above the alert threshold of {{ .Annotations.threshold }} {{ $token }}
 {{ end -}}
 {{ range .Alerts.Resolved -}}
 {{ $token := .Labels.token -}}
 {{ $reserveAddress := .Labels.ownerValue -}}
-*<https://celoscan.io/address/{{ $reserveAddress }}|Sufficient {{ $token }} balance restored in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }}*
+*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|Sufficient {{ $token }} balance restored in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }}*
 {{ end -}}
 {{ end }}
 EOT
@@ -139,9 +144,9 @@ resource "grafana_message_template" "slack_trading_mode_alert_title" {
 
 resource "grafana_message_template" "slack_trading_mode_alert_message" {
   name = "Slack - Trading Mode Alert Message"
-  # Pool URL: `$pool` is set per-chain by the `celo_pool_branches` / `monad_pool_branches`
-  # fragments (one independent `{{ if eq .Labels.rateFeed "X" -}}` block per entry, see
-  # locals.tf). When set, we build `monitoring.mento.org/pool/<chain_id>-<pool>?tab=oracle`;
+  # Pool URL: `$pool` is set per-chain by the `*_pool_branches` fragments (one
+  # independent `{{ if eq .Labels.rateFeed "X" -}}` block per entry, see locals.tf).
+  # When set, we build `monitoring.mento.org/pool/<chain_id>-<pool>?tab=oracle`;
   # otherwise we fall back to the Grafana alert-details URL so the bullet still resolves.
   # Chainlink URL: gated on both `$chainlinkFeedPath` (chain-level — empty for testnets)
   # AND `$chainlinkSlug` (per-rateFeed allowlist — only set for feeds Chainlink actually
@@ -173,6 +178,7 @@ ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
 {{ end -}}
 {{ if eq .Labels.chain "polygon" -}}
+${local.polygon_pool_branches}
 ${local.polygon_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}

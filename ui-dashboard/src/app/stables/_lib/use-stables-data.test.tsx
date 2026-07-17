@@ -117,7 +117,7 @@ describe("useStablesChanges", () => {
     expect(mockUseGQL).toHaveBeenCalledWith(
       STABLES_CHANGES,
       expect.objectContaining({
-        chainIds: [42220, 143],
+        chainIds: [42220, 143, 137],
         limit: 400,
         offset: 0,
         sinceTimestamp: expect.any(Number),

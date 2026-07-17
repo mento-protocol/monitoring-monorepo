@@ -3,7 +3,7 @@ title: Integration Probes Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-06-01
+last_verified: 2026-07-17
 ---
 
 # integration-probes
@@ -12,7 +12,8 @@ last_verified: 2026-06-01
 
 `@mento-protocol/integration-probes` runs quote-only checks against DEX
 aggregators and cross-chain routers. It publishes the latest snapshot to
-Upstash Redis for the dashboard `/integrations` page.
+Upstash Redis for the dashboard `/integrations` page. The default mainnet
+probe fleet is Celo (42220), Monad (143), and Polygon (137).
 
 ## Commands
 
@@ -20,6 +21,7 @@ Upstash Redis for the dashboard `/integrations` page.
 pnpm integrations:probe
 pnpm integrations:probe --write-upstash
 pnpm integrations:probe --adapter openocean,relay --chain 42220 --pair-limit 1 --output .tmp/integration-probe-smoke.json
+pnpm integrations:probe --adapter openocean,kyberswap --chain 137 --pair-limit 1 --output .tmp/integration-probe-polygon-smoke.json
 pnpm integrations:probe:test
 pnpm --filter @mento-protocol/integration-probes typecheck
 pnpm --filter @mento-protocol/integration-probes lint

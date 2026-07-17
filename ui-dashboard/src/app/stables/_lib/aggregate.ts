@@ -217,8 +217,8 @@ export function custodySnapshotsAlignedToSupplyRows(
 
 /**
  * Group snapshots by `{chainId}|{tokenAddress}|{source}`. Exported so the
- * hero chart can reuse the same discriminator key — chain-local supplies on
- * Celo and Monad must stay separate before the USD stack sums them.
+ * hero chart can reuse the same discriminator key — chain-local supplies must
+ * stay separate before the USD stack sums them.
  */
 export function groupSnapshotsByTokenSource(
   snapshots: ReadonlyArray<StableSupplyDailySnapshot>,

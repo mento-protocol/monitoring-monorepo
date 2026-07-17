@@ -11,6 +11,13 @@ import {
 import { useSearchParams } from "next/navigation";
 import { rangeCutoffSeconds, type VolumeRangeKey } from "@/lib/volume";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
+import {
+  activeChainIds,
+  configuredProductionChainOptions,
+  type ChainFilterOption,
+  type ChainFilterValue,
+} from "@/lib/chain-filter";
+import { useUrlChainFilter } from "@/hooks/use-url-chain-filter";
 // Pure param parsing is shared with the /volume Server Component (SSR
 // prefetch must derive the identical first-render view) — see
 // lib/volume-url-params.ts. This module stays the client-side owner of
@@ -42,6 +49,7 @@ type VolumeUrlActionInputs = VolumeUrlSetters &
   };
 type VolumeUrlStateOptions = {
   canUseVolumeFilters: boolean;
+  chainOptions?: readonly ChainFilterOption[] | undefined;
 };
 type VolumeUrlStateResult = {
   canUseVolumeFilters: boolean;
@@ -49,11 +57,15 @@ type VolumeUrlStateResult = {
   actorFilter: ActorFilter;
   includeProtocolActors: boolean;
   venue: Venue;
+  chainId: ChainFilterValue;
+  chainIdIn: number[];
+  chainOptions: readonly ChainFilterOption[];
   cutoff: number;
   utcDayKey: number;
   updateRange: (next: VolumeRangeKey) => void;
   updateIncludeProtocolActors: (next: boolean) => void;
   updateVenue: (next: Venue) => void;
+  updateChainId: (next: ChainFilterValue) => void;
 };
 
 function writeVolumeUrl(
@@ -100,6 +112,7 @@ function replaceVolumeUrlSearch(params: URLSearchParams) {
  */
 export function useVolumeUrlState({
   canUseVolumeFilters,
+  chainOptions: chainOptionsOverride,
 }: VolumeUrlStateOptions): VolumeUrlStateResult {
   // `useSearchParams()` here is load-bearing for direct page loads —
   // `useState` lazy initializers serialize their result on SSR and don't
@@ -111,6 +124,15 @@ export function useVolumeUrlState({
   // is satisfied — the rule's static check just can't see across files.
   // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
   const searchParams = useSearchParams();
+  const chainOptions = useMemo(
+    () => chainOptionsOverride ?? configuredProductionChainOptions(),
+    [chainOptionsOverride],
+  );
+  const { chainId, updateChainId } = useUrlChainFilter(chainOptions);
+  const chainIdIn = useMemo(
+    () => activeChainIds(chainId, chainOptions),
+    [chainId, chainOptions],
+  );
 
   const initialReadParams =
     typeof window !== "undefined"
@@ -162,9 +184,13 @@ export function useVolumeUrlState({
     actorFilter: effectiveActorFilter,
     includeProtocolActors: effectiveActorFilter === "all",
     venue,
+    chainId,
+    chainIdIn,
+    chainOptions,
     cutoff,
     utcDayKey,
     ...actions,
+    updateChainId,
   };
 }
 

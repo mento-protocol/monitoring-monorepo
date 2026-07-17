@@ -12,6 +12,11 @@ This module:
 4. Configures environment variables and Secret Manager access for Slack delivery
 5. Sets up IAM permissions for public invocation (by QuickNode Webhooks)
 
+The production handler routes Celo, Ethereum, and Polygon. Safe Wallet links
+use each network's EIP-3770 short name (`celo`, `eth`, and `matic`
+respectively); those prefixes intentionally differ from the internal
+`ethereum` and `polygon` chain keys.
+
 ## Prerequisites
 
 - Google Cloud project with billing enabled

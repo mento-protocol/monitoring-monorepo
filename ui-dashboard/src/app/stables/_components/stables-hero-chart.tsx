@@ -66,7 +66,7 @@ export function StablesHeroChart({
   isLoading,
   hasError,
 }: Props): React.JSX.Element {
-  // Group snapshots by `{chainId}|{tokenAddress}|{source}` so Celo and Monad
+  // Group snapshots by `{chainId}|{tokenAddress}|{source}` so chain-local
   // supplies stay distinct before the stacked total sums them.
   const { breakdown, totalSeries } = useMemo(() => {
     if (snapshots.length === 0 && latestPerToken.length === 0) {

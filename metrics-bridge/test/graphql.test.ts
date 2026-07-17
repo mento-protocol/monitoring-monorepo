@@ -123,6 +123,22 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           ],
         });
       }
+      if (doc.includes("BridgePoolLiquidityStrategies")) {
+        return Promise.resolve({
+          activeStrategies: [
+            {
+              poolId: BASE_POOL.id,
+              strategyAddress: "0x0000000000000000000000000000000000000aaa",
+              kind: "OPEN",
+            },
+            {
+              poolId: BASE_POOL.id,
+              strategyAddress: "0x0000000000000000000000000000000000000bbb",
+              kind: "RESERVE",
+            },
+          ],
+        });
+      }
       if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.resolve({
           Pool: [
@@ -168,6 +184,18 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       prevMedianAt: "1713199580",
       currentOpenBreachPeak: "15000",
       currentOpenBreachEntryThreshold: 5000,
+      activeLiquidityStrategies: [
+        {
+          poolId: BASE_POOL.id,
+          strategyAddress: "0x0000000000000000000000000000000000000aaa",
+          kind: "OPEN",
+        },
+        {
+          poolId: BASE_POOL.id,
+          strategyAddress: "0x0000000000000000000000000000000000000bbb",
+          kind: "RESERVE",
+        },
+      ],
     });
   });
 
@@ -182,6 +210,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       }
       if (doc.includes("BridgePoolsOracleTx")) {
         return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolLiquidityStrategies")) {
+        return Promise.resolve({ activeStrategies: [] });
       }
       if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.resolve({
@@ -218,6 +249,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       tokenDecimalsKnown: true,
       wrappedExchangeDeprecated: false,
       wrappedExchangeMinimumReports: "3",
+      // A successful empty registry response is authoritative; the legacy
+      // pointer must not be resurrected.
+      activeLiquidityStrategies: [],
     });
   });
 
@@ -232,6 +266,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       }
       if (doc.includes("BridgePoolsOracleTx")) {
         return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolLiquidityStrategies")) {
+        return Promise.reject(unknownFieldError("PoolLiquidityStrategy"));
       }
       if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.resolve({
@@ -278,6 +315,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       }
       if (doc.includes("BridgePoolsOracleTx")) {
         return Promise.resolve({ Pool: [] });
+      }
+      if (doc.includes("BridgePoolLiquidityStrategies")) {
+        return Promise.reject(unknownFieldError("PoolLiquidityStrategy"));
       }
       if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.resolve({
@@ -333,6 +373,9 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       if (doc.includes("BridgePoolsOracleTx")) {
         return Promise.resolve({ Pool: [] });
       }
+      if (doc.includes("BridgePoolLiquidityStrategies")) {
+        return Promise.reject(unknownFieldError("PoolLiquidityStrategy"));
+      }
       if (doc.includes("BridgePoolsVpFreshness")) {
         return Promise.resolve({ Pool: [] });
       }
@@ -361,6 +404,13 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
       lastOracleJumpBps: "3.0000",
       currentOpenBreachPeak: "0",
       currentOpenBreachEntryThreshold: 0,
+      activeLiquidityStrategies: [
+        {
+          poolId: BASE_POOL.id,
+          strategyAddress: BASE_POOL.rebalancerAddress,
+          kind: "UNKNOWN",
+        },
+      ],
     });
   });
 

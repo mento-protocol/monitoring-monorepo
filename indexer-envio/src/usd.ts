@@ -24,6 +24,68 @@ export function normalizeRewardBps(bps: number): number {
 
 const bAbs = (n: bigint): bigint => (n < 0n ? -n : n);
 
+const EXPLICIT_FX_CURRENCY_BY_SYMBOL: Readonly<Record<string, string>> = {
+  axlEUROC: "EUR",
+  cEUR: "EUR",
+  EUROP: "EUR",
+};
+
+function currencyForSymbol(symbol: string | undefined): string | null {
+  if (symbol === undefined) return null;
+  if (USD_PEGGED_SYMBOLS.has(symbol)) return "USD";
+  const explicit = EXPLICIT_FX_CURRENCY_BY_SYMBOL[symbol];
+  if (explicit !== undefined) return explicit;
+  if (/^[A-Z]{3}m$/.test(symbol)) return symbol.slice(0, 3);
+  return null;
+}
+
+function tokenCurrency(
+  chainId: number,
+  token: string | undefined,
+): string | null {
+  if (!token) return null;
+  return currencyForSymbol(
+    KNOWN_TOKEN_META.get(`${chainId}:${token.toLowerCase()}`)?.symbol,
+  );
+}
+
+/**
+ * Currency shared by both legs of a non-USD stable pair (for example
+ * EURm/EUROP). These pairs need a historical same-chain FX rate rather than
+ * the $1 pegged-leg shortcut used by USDm/USDC pools.
+ */
+export function swapFxCurrency(input: {
+  chainId: number;
+  token0: string | undefined;
+  token1: string | undefined;
+}): string | null {
+  const currency0 = tokenCurrency(input.chainId, input.token0);
+  const currency1 = tokenCurrency(input.chainId, input.token1);
+  if (
+    currency0 === null ||
+    currency1 === null ||
+    currency0 === "USD" ||
+    currency0 !== currency1
+  ) {
+    return null;
+  }
+  return currency0;
+}
+
+/** True when a pool is a USD/currency cross that can price `currency`. */
+export function poolCarriesUsdRateForCurrency(
+  chainId: number,
+  token0: string | undefined,
+  token1: string | undefined,
+  currency: string,
+): boolean {
+  const currencies = [
+    tokenCurrency(chainId, token0),
+    tokenCurrency(chainId, token1),
+  ];
+  return currencies.includes("USD") && currencies.includes(currency);
+}
+
 /**
  * Convert a wei-scaled amount to a 4dp fixed-point string. Truncates (not
  * rounds) on overflow past 4dp — acceptable for monitoring display.
@@ -208,7 +270,12 @@ export interface SwapUsdInput {
  * pegged. Callers should distinguish "uncomputable" from "zero-volume swap"
  * by also checking the raw amounts.
  */
-export function computeSwapUsdWei(input: SwapUsdInput): bigint {
+export function computeSwapUsdWei(
+  input: SwapUsdInput,
+  /** USD per token, Fixidity-scaled (1e24 = $1). Required only for a
+   * same-currency non-USD pair such as EURm/EUROP. */
+  fxUsdRate?: bigint,
+): bigint {
   const {
     chainId,
     token0,
@@ -238,8 +305,18 @@ export function computeSwapUsdWei(input: SwapUsdInput): bigint {
     token0Decimals,
     token1Decimals,
   );
-  if (picked === null) return 0n;
-  return scaleToUsdWei(picked.peggedAmount, picked.peggedDecimals);
+  if (picked !== null) {
+    return scaleToUsdWei(picked.peggedAmount, picked.peggedDecimals);
+  }
+
+  if (fxUsdRate === undefined || fxUsdRate <= 0n) return 0n;
+  if (swapFxCurrency(input) === null) return 0n;
+  const useToken0 =
+    a0 * 10n ** BigInt(token1Decimals) >= a1 * 10n ** BigInt(token0Decimals);
+  const amountUsdWei = useToken0
+    ? scaleToUsdWei(a0, token0Decimals)
+    : scaleToUsdWei(a1, token1Decimals);
+  return (amountUsdWei * fxUsdRate) / 10n ** 24n;
 }
 
 /**

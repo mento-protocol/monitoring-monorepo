@@ -21,8 +21,13 @@ resource "grafana_message_template" "victorops_oracle_stale_price_alert_message"
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
 {{ range .Alerts.Firing }}
 FIRING: Stale price for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain | title }}
+{{ if eq .Labels.rateFeed "EUROPEUR" -}}
+1. Inspect the fixed EUR-parity report in this chain's SortedOracles and confirm its 1.0 report has not expired.
+2. Verify the deployment/migration owner responsible for that fixed report. EUROPEUR is not published by the oracle-relayer cloud function.
+{{ else -}}
 1. Check the latest transactions of the {{ .Labels.rateFeed }} relayer on {{ .Labels.chain | title }}
 2. Check if the relayer cloud function is still being triggered regularly
+{{ end -}}
 {{ end }}
 {{ range .Alerts.Resolved }}
 RESOLVED: Price is fresh again for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain }}
@@ -79,7 +84,7 @@ resource "grafana_message_template" "victorops_reserve_balance_alert_message" {
   {{ $token := .Labels.token -}}
   {{ $reserveAddress := .Labels.ownerValue -}}
 FIRING: Low {{ $token }} balance — {{ .Annotations.currentBalance }} left
-Please top up the {{ $token }} balance of the {{ .Labels.owner }} ({{ $reserveAddress }}) above the alert threshold of {{ .Annotations.threshold }} {{ $token }}. Address: https://celoscan.io/address/{{ $reserveAddress }}
+Please top up the {{ $token }} balance of the {{ .Labels.owner }} ({{ $reserveAddress }}) above the alert threshold of {{ .Annotations.threshold }} {{ $token }}. Address: https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}
 {{ if .GeneratorURL -}}Grafana Alert Link: {{ .GeneratorURL }}{{- end }}
   {{ end -}}
   {{ range .Alerts.Resolved -}}
@@ -131,6 +136,7 @@ ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
 {{ end -}}
 {{ if eq .Labels.chain "polygon" -}}
+${local.polygon_pool_branches}
 ${local.polygon_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
@@ -170,6 +176,7 @@ ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
 {{ end -}}
 {{ if eq .Labels.chain "polygon" -}}
+${local.polygon_pool_branches}
 ${local.polygon_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}

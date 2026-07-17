@@ -2,6 +2,26 @@
   "$generated": true,
   "entries": [
     {
+      "chainId": 137,
+      "wormholeChainId": 5,
+      "tokenSymbol": "EURm",
+      "tokenAddress": "0x4d502d735b4c574b487ed641ae87ceae884731c7",
+      "tokenDecimals": 18,
+      "helper": "0x0e72e26e4e08779d08b2a52f59f41e6659a3547d",
+      "nttManagerProxy": "0x5f8a1e50f83f53951b89fc73ead80b27045c67fd",
+      "transceiverProxy": "0x6467cfca82184657f32f1195f9a26b5578399479"
+    },
+    {
+      "chainId": 137,
+      "wormholeChainId": 5,
+      "tokenSymbol": "USDm",
+      "tokenAddress": "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
+      "tokenDecimals": 18,
+      "helper": "0x37316334108c816f9862bab52347a0aab7551127",
+      "nttManagerProxy": "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+      "transceiverProxy": "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b"
+    },
+    {
       "chainId": 143,
       "wormholeChainId": 48,
       "tokenSymbol": "CHFm",

@@ -3,7 +3,7 @@ title: Envio Indexer Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-17
 ---
 
 # AGENTS.md — Envio Indexer
@@ -12,7 +12,7 @@ last_verified: 2026-07-08
 
 ## What This Is
 
-Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain). Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split. Ethereum reserve-yield entities run in the same hosted project: sUSDS remains event-only, and stETH adds a launch-aligned sub-daily wallet balance sampler that writes daily rows. The historical sUSDS onBlock heartbeat is intentionally excluded.
+Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad + Polygon (multichain). Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split. Ethereum reserve-yield entities run in the same hosted project: sUSDS remains event-only, and stETH adds a launch-aligned sub-daily wallet balance sampler that writes daily rows. The historical sUSDS onBlock heartbeat is intentionally excluded.
 
 ## Before Opening PRs
 
@@ -24,13 +24,13 @@ This is mandatory for cross-layer/stateful data work. Do not assume the UI/query
 
 ## Key Files
 
-- `config.multichain.mainnet.yaml` — **Default** mainnet config (Ethereum reserve-yield + Celo + Monad)
+- `config.multichain.mainnet.yaml` — **Default** mainnet config (Ethereum reserve-yield + Celo + Monad + Polygon)
 - `config.multichain.testnet.yaml` — Testnet multichain config
-- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, plus sUSDS and stETH yield ledgers)
+- `schema.graphql` — Entity definitions (FPMM, `PoolLiquidityStrategy`, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path, plus sUSDS and stETH yield ledgers)
 - `src/EventHandlers.ts` — Event processing logic, including sUSDS event-only reserve-yield handlers and the stETH sub-daily wallet sampler
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
 - `config/deployment-namespaces.json` — Vendored copy of the chain ID → active namespace map used by Envio hosted builds
-- `config/protocolActors.json` — Manual protocol-controlled caller/entry-point overrides for the dashboard volume filter. Dynamic pool liquidity-strategy contracts are classified from `Pool.rebalancerAddress`; add entries here only for protocol actors that are not already discoverable from pool state or normal contract metadata.
+- `config/protocolActors.json` — Manual protocol-controlled caller/entry-point overrides for the dashboard volume filter. `PoolLiquidityStrategy` is authoritative for active strategy cardinality; the populated `Pool.rebalancerAddress` compatibility pointer remains the swap-time fast path for dynamic strategies, while named strategies are also discovered from contract metadata. Add manual entries only for actors that neither source covers.
 - `scripts/run-envio-with-env.mjs` — Wrapper that loads .env before running envio CLI
 - `scripts/checkYamlAddresses.mjs` — Drift gate; asserts every hex address in `config*.yaml` resolves to `@mento-protocol/contracts`, `config/nttAddresses.json`, or the inline allowlist (testnet pool instances). Runs in CI before codegen; invoke locally with `pnpm check:yaml-addresses`. When bumping the contracts package, run this first — a renamed entry shows up here in <1s.
 - `abis/` — Vendored ABIs, refreshed from `@mento-protocol/contracts` via `pnpm generate:abis`. ERC20 stub + Wormhole NTT minimal subsets are hand-vendored (excluded from the script — see `scripts/generateAbis.mjs` header).
@@ -49,7 +49,7 @@ pnpm check:yaml-addresses   # Verify every address in config*.yaml resolves to a
 
 ## How It Works
 
-1. Envio listens to events from configured contracts on Celo and Monad; handlers use per-chain RPC clients for historical contract reads
+1. Envio listens to events from configured contracts on Celo, Monad, and Polygon; handlers use per-chain RPC clients for historical contract reads
 2. Events are processed by `EventHandlers.ts` and stored in Postgres
 3. Hasura auto-generates a GraphQL API over the Postgres tables
 4. The dashboard queries Hasura for pool data
@@ -76,6 +76,8 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_API_TOKEN` — required only for chains that default to HyperRPC (currently only Monad Testnet 10143). Not needed for mainnet if using the full-node defaults. ([create token](https://envio.dev/app/api-tokens))
 - `ENVIO_RPC_URL_42220` — (optional) Celo Mainnet primary RPC override (default: `https://forno.celo.org`)
 - `ENVIO_RPC_URL_143` — (optional) Monad Mainnet primary RPC override (default: `https://rpc2.monad.xyz`)
+- `ENVIO_RPC_URL_137` — (optional) Polygon Mainnet primary RPC override (default: `https://polygon.drpc.org`)
+- `ENVIO_RPC_URL_80002` — (optional) Polygon Amoy handler/event-sync RPC override (default: `https://rpc-amoy.polygon.technology`)
 - `ENVIO_RPC_URL_1` — (optional) Ethereum Mainnet handler `eth_call` RPC override. Use an archive-capable endpoint before local reserve-yield replays.
 - `ENVIO_RPC_URL_10143` — (optional) Monad Testnet primary RPC override (default: HyperRPC — requires `ENVIO_API_TOKEN`)
 - `ENVIO_RPC_URL_11142220` — (optional) Celo Sepolia handler `eth_call` RPC override (default: `https://forno.celo-sepolia.celo-testnet.org`)
@@ -83,6 +85,8 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_RPC_FALLBACK_URL_<chainId>` — (optional) explicit per-chain fallback RPC for `readContractWithBlockFallback`. Used for **both** archive-depth and rate-limit failover, so the fallback must cover the full sync window. When unset, falls back to `RPC_CONFIG_BY_CHAIN[<chainId>].default` only if the primary differs from it; otherwise no fallback is used. Empty-string values are treated as unset. **Caveat:** swapping in a shallow-archive secondary as the fallback (e.g. a tokenized QuickNode URL behind `rpc2.monad.xyz`) only works when the deep-archive primary rarely rate-limits at the indexer's load — otherwise rate-limit failover can leak into archive-depth misses during catch-up.
 - `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
 - `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60710000
+- `ENVIO_START_BLOCK_POLYGON` — (optional) Polygon start block, defaults to 90273661 and must not exceed the first FPMM deployment block 90348018
+- `ENVIO_START_BLOCK_POLYGON_AMOY` — (optional) Polygon Amoy start block, defaults to 37555761
 - `ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD` — (optional) Ethereum reserve-yield start block, defaults to 19111760
 - `ENVIO_ORACLE_SNAPSHOT_RETENTION_DAYS` — (optional) raw `OracleSnapshot` retention window in days; unset keeps all rows. The value takes effect on the next full resync. Hosted deployments pass it via `.env.cloud` (`envio-cloud indexer add -e .env.cloud ...`); setting it is an ops step, not part of ordinary CI.
 
@@ -90,7 +94,7 @@ Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route
 
 > **Note:** These RPC URLs are only used for contract reads (`eth_call`). Envio's event syncing uses HyperSync, configured in the YAML files.
 
-Mainnet (Ethereum reserve-yield + Celo + Monad): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`. Reserve-yield event suites: `pnpm indexer:reserve-yield:test`.
+Mainnet (Ethereum reserve-yield + Celo + Monad + Polygon): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet + Polygon Amoy): `pnpm indexer:testnet:dev`. Reserve-yield event suites: `pnpm indexer:reserve-yield:test`.
 
 ## Local dev gotchas
 
@@ -116,11 +120,11 @@ Every `config.*.yaml` specifies `handler: src/EventHandlers.ts`. Envio expects a
 
 When a new set of contracts has been deployed and a new `@mento-protocol/contracts` version is published:
 
-1. Update the `@mento-protocol/contracts` version in `package.json` and `../ui-dashboard/package.json`
-2. Update namespace string(s) in `../shared-config/deployment-namespaces.json` (e.g. `"42220": "mainnet-v2"`)
+1. Update the `@mento-protocol/contracts` version in `package.json` and `../shared-config/package.json`
+2. If the active namespace changed, update `../shared-config/deployment-namespaces.json` and its hosted-build mirror at `config/deployment-namespaces.json` (e.g. `"42220": "mainnet-v2"`)
 3. Run `pnpm install` from the repo root
-4. Refresh vendored ABIs from the new package: `pnpm generate:abis`. Commit any resulting diff under `abis/`.
-5. Typecheck: `pnpm --filter @mento-protocol/ui-dashboard typecheck` and `pnpm typecheck`
+4. Run `pnpm check:yaml-addresses`, then refresh vendored ABIs from the new package with `pnpm generate:abis`. Commit any resulting diff under `abis/`.
+5. Regenerate the indexer/dashboard GraphQL types and typecheck both consumers.
 
 ### Adding a new contract to index
 

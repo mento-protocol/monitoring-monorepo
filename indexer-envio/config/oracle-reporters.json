@@ -119,5 +119,35 @@
         "name": "ChainlinkRelayerV1JPYUSD"
       }
     }
+  },
+  "137": {
+    "feeds": {
+      "0x81a313ff894bfc6093d33b5514e34d7faa41b7ef": {
+        "pair": "USDC/USD",
+        "type": "CHAINLINK"
+      },
+      "0xec57482aa55e3ad026c315a0e4a692b776c318ca": {
+        "pair": "EUR/USD",
+        "type": "CHAINLINK"
+      },
+      "0xc22418a83dfc262b10a1f57e25309db83e7ea79e": {
+        "pair": "EUROP/EUR",
+        "type": "MANUAL"
+      }
+    },
+    "reporters": {
+      "0x1c267be736fb7b750243e41b1575ab872ae626bb": {
+        "type": "CHAINLINK",
+        "name": "ChainlinkRelayerV1USDCUSD"
+      },
+      "0xc5f7acf94fd76d2fd6c04ffc6c1d519cd16ce7dd": {
+        "type": "CHAINLINK",
+        "name": "ChainlinkRelayerV1EURUSD"
+      },
+      "0x58099b74f4acd642da77b4b7966b4138ec5ba458": {
+        "type": "MANUAL",
+        "name": "MigrationMultisig EUROP/EUR"
+      }
+    }
   }
 }

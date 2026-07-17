@@ -215,6 +215,7 @@ function Probe({
     kpiSource,
     kpiSourceIdentity,
     kpiSourceIsCapHit,
+    chainIdIn: [CELO],
     initialData,
   });
   return null;
@@ -933,6 +934,7 @@ describe("useHeroRollup orchestration", () => {
         venue: "v3",
         range: "7d",
         includeProtocolActors: false,
+        chainIdIn: [CELO],
         todayMidnight: TODAY_MIDNIGHT,
       },
       heroV3: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },
@@ -967,6 +969,7 @@ describe("useHeroRollup orchestration", () => {
         venue: "v3",
         range: "30d", // Probe renders range "7d" — must not seed 30d data
         includeProtocolActors: false,
+        chainIdIn: [CELO],
         todayMidnight: TODAY_MIDNIGHT,
       },
       heroV3: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },
@@ -990,6 +993,7 @@ describe("useHeroRollup orchestration", () => {
         venue: "v3",
         range: "7d",
         includeProtocolActors: false,
+        chainIdIn: [CELO],
         todayMidnight: TODAY_MIDNIGHT - SECONDS_PER_DAY,
       },
       heroV3: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },

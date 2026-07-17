@@ -30,7 +30,7 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 ## Mento repo quick reference
 
 - Org: `mento-protocol`, indexer: `mento`
-- Deploy branch: `envio` (multichain Celo + Monad)
+- Deploy branch: `envio` (multichain Celo + Monad + Polygon, plus Ethereum reserve-yield events)
 - Wrapper scripts (always prefer these over raw CLI inside this repo):
 
 ```bash

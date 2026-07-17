@@ -10,7 +10,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 
 | Package                                         | Description                                                                                                 |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad multichain                                                          |
+| [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad + Polygon multichain                                                |
 | [`ui-dashboard`](./ui-dashboard/)               | Next.js 16 + Plotly.js multi-chain dashboard — all chains shown together, network derived from the pool URL |
 | [`metrics-bridge`](./metrics-bridge/)           | Hasura → Prometheus exporter for v3 alert rules                                                             |
 | [`shared-config`](./shared-config/)             | Public `@mento-protocol/config` package for protocol metadata, thresholds, and shared ABIs                  |
@@ -21,8 +21,9 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 
 ```text
 ┌──────────────────────┐     ┌──────────────────┐     ┌────────────────┐
-│ Celo + Monad         │────▶│  Envio HyperIndex │────▶│  Hasura        │
-│  (HyperSync / RPC)   │     │  (Hosted, mento)  │     │  (GraphQL API) │
+│ Celo + Monad +       │────▶│  Envio HyperIndex │────▶│  Hasura        │
+│ Polygon              │     │  (Hosted, mento)  │     │  (GraphQL API) │
+│  (HyperSync / RPC)   │     │                  │     │                │
 └──────────────────────┘     └──────────────────┘     └───────┬────────┘
                                                                │
                                                         ┌──────▼──────┐
@@ -32,7 +33,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
                                                         └─────────────┘
 ```
 
-Celo Mainnet (42220), Monad Mainnet (143), and Ethereum reserve-yield events (1) are served from a single Envio project (`mento`) using `config.multichain.mainnet.yaml`. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing is event-only; the historical sUSDS onBlock heartbeat is not registered in the hosted indexer.
+`config.multichain.mainnet.yaml` configures a single Envio project (`mento`) for Celo Mainnet (42220), Monad Mainnet (143), Polygon Mainnet (137), and Ethereum reserve-yield events (1). Polygon becomes live at the static endpoint after the normal indexer deploy, sync verification, and promotion workflow. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing is event-only; the historical sUSDS onBlock heartbeat is not registered in the hosted indexer.
 
 **Static production endpoint:** `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`
 
@@ -42,9 +43,15 @@ Celo Mainnet (42220), Monad Mainnet (143), and Ethereum reserve-yield events (1)
 | ------------- | -------- | --------------------------------------------------------------------- |
 | Celo Mainnet  | 42220    | Live in the production multichain indexer                             |
 | Monad Mainnet | 143      | Live in the production multichain indexer                             |
+| Polygon       | 137      | Configured in the production multichain indexer                       |
 | Ethereum      | 1        | Live in the production multichain indexer — reserve-yield events only |
 | Celo Sepolia  | 11142220 | Hosted dashboard support is opt-in via testnet env vars               |
 | Monad Testnet | 10143    | Hosted dashboard support is opt-in via testnet env vars               |
+| Polygon Amoy  | 80002    | Hosted dashboard support is opt-in via testnet env vars               |
+
+The canonical Polygon contract, dashboard, alert-condition, deferral, and
+production-cutover matrix is
+[`docs/notes/polygon-monitoring.md`](./docs/notes/polygon-monitoring.md).
 
 ## Getting Started
 
@@ -117,10 +124,10 @@ pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentr
 ### Run the Indexer (local)
 
 ```bash
-# Multichain mainnet (Celo + Monad) — default
+# Multichain mainnet (Celo + Monad + Polygon) — default
 pnpm indexer:codegen && pnpm indexer:dev
 
-# Multichain testnet (Celo Sepolia + Monad testnet)
+# Multichain testnet (Celo Sepolia + Monad Testnet + Polygon Amoy)
 pnpm indexer:testnet:codegen && pnpm indexer:testnet:dev
 ```
 
@@ -132,8 +139,8 @@ pnpm dashboard:dev
 ```
 
 The dashboard dev script defaults to the live production Envio GraphQL endpoint
-when `NEXT_PUBLIC_HASURA_URL` is unset, so fresh git worktrees use real Celo and
-Monad data without copying `.env.local`. Set `NEXT_PUBLIC_HASURA_URL` explicitly
+when `NEXT_PUBLIC_HASURA_URL` is unset, so fresh git worktrees use live
+production data without copying `.env.local`. Set `NEXT_PUBLIC_HASURA_URL` explicitly
 only when you need a non-prod endpoint.
 
 For deterministic browser review, run the dashboard package directly on a fixed
@@ -210,34 +217,42 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `ENVIO_RPC_URL_42220`                      | Celo Mainnet primary RPC endpoint                                                                              |
 | `ENVIO_RPC_URL_143`                        | Monad Mainnet primary RPC endpoint                                                                             |
+| `ENVIO_RPC_URL_137`                        | Polygon Mainnet primary RPC endpoint                                                                           |
+| `ENVIO_RPC_URL_80002`                      | Polygon Amoy primary RPC endpoint                                                                              |
 | `ENVIO_RPC_FALLBACK_URL_<chainId>`         | (optional) per-chain fallback RPC for archive-depth + rate-limit failover (see `indexer-envio/AGENTS.md`)      |
 | `ENVIO_START_BLOCK_CELO`                   | Celo start block (default: 60664500)                                                                           |
 | `ENVIO_START_BLOCK_MONAD`                  | Monad start block (default: 60710000)                                                                          |
+| `ENVIO_START_BLOCK_POLYGON`                | Polygon start block (default: 90273661)                                                                        |
+| `ENVIO_START_BLOCK_POLYGON_AMOY`           | Polygon Amoy start block (default: 37555761)                                                                   |
 | `ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD` | Ethereum reserve-yield start block (default: 19111760)                                                         |
 | `INDEXER_PERF`                             | Optional indexer sync profiler; set to `1` to log handler/effect/entity counters during local or debug replays |
 | `INDEXER_PERF_LOG_INTERVAL_EVENTS`         | Optional profiler log interval in processed handler calls (default: 10000)                                     |
 
 ### Dashboard
 
-| Variable                                 | Description                                                                                                |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `ENABLE_EXPERIMENTAL_COREPACK`           | Vercel Corepack opt-in so hosted builds honor the repo `packageManager` pnpm version (Terraform-managed)   |
-| `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo, Monad, and Ethereum reserve-yield data)                       |
-| `NEXT_PUBLIC_HASURA_URL_TESTNET`         | Optional Monad Testnet Envio GraphQL endpoint                                                              |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`    | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
-| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`      | Set to `true` with the per-testnet endpoint URL to show hosted testnet networks                            |
-| `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`       | Auto-set from Vercel deployment/commit; invalidates the bounded client cache (`dev` locally)               |
-| `HASURA_SECRET_CELO_SEPOLIA_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-sepolia-local` proxy                               |
-| `HASURA_SECRET_CELO_MAINNET_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-mainnet-local` proxy                               |
-| `HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL` | Optional upstream URL override for local sepolia Hasura proxy (default `http://localhost:8080/v1/graphql`) |
-| `HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL` | Optional upstream URL override for local mainnet Hasura proxy (default `http://localhost:8080/v1/graphql`) |
-| `UPSTASH_REDIS_REST_URL`                 | Address labels storage (Upstash Redis)                                                                     |
-| `UPSTASH_REDIS_REST_TOKEN`               | Address labels Redis auth token                                                                            |
-| `AUTH_SECRET`                            | Auth.js JWT secret; required for local simulated login and real OAuth sessions                             |
-| `AUTH_GOOGLE_ID`                         | Google OAuth client id; non-empty placeholder is enough for local simulated login                          |
-| `AUTH_GOOGLE_SECRET`                     | Google OAuth client secret; non-empty placeholder is enough for local simulated login                      |
-| `BLOB_STORE_ID`                          | Vercel Blob OIDC store id for daily label backups (set by the Vercel store integration)                    |
-| `BLOB_WEBHOOK_PUBLIC_KEY`                | Vercel Blob OIDC public key (set by the Vercel store integration)                                          |
+| Variable                                   | Description                                                                                                |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `ENABLE_EXPERIMENTAL_COREPACK`             | Vercel Corepack opt-in so hosted builds honor the repo `packageManager` pnpm version (Terraform-managed)   |
+| `NEXT_PUBLIC_HASURA_URL`                   | Prod Envio GraphQL endpoint (shared by Celo, Monad, Polygon, and Ethereum reserve-yield data)              |
+| `NEXT_PUBLIC_HASURA_URL_TESTNET`           | Optional Monad Testnet Envio GraphQL endpoint                                                              |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`      | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
+| `NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET`      | Optional Polygon RPC override (default: `https://polygon.drpc.org`)                                        |
+| `NEXT_PUBLIC_RPC_URL_POLYGON_AMOY`         | Optional Polygon Amoy RPC override (default: `https://rpc-amoy.polygon.technology`)                        |
+| `NEXT_PUBLIC_EXPLORER_URL_POLYGON_MAINNET` | Optional Polygon explorer-base override (default: `https://polygonscan.com`)                               |
+| `NEXT_PUBLIC_EXPLORER_URL_POLYGON_AMOY`    | Optional Polygon Amoy explorer-base override (default: `https://amoy.polygonscan.com`)                     |
+| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`        | Set to `true` with the per-testnet endpoint URL to show hosted testnet networks                            |
+| `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`         | Auto-set from Vercel deployment/commit; invalidates the bounded client cache (`dev` locally)               |
+| `HASURA_SECRET_CELO_SEPOLIA_LOCAL`         | Optional server-only admin secret for `/api/hasura/celo-sepolia-local` proxy                               |
+| `HASURA_SECRET_CELO_MAINNET_LOCAL`         | Optional server-only admin secret for `/api/hasura/celo-mainnet-local` proxy                               |
+| `HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL`   | Optional upstream URL override for local sepolia Hasura proxy (default `http://localhost:8080/v1/graphql`) |
+| `HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL`   | Optional upstream URL override for local mainnet Hasura proxy (default `http://localhost:8080/v1/graphql`) |
+| `UPSTASH_REDIS_REST_URL`                   | Address labels storage (Upstash Redis)                                                                     |
+| `UPSTASH_REDIS_REST_TOKEN`                 | Address labels Redis auth token                                                                            |
+| `AUTH_SECRET`                              | Auth.js JWT secret; required for local simulated login and real OAuth sessions                             |
+| `AUTH_GOOGLE_ID`                           | Google OAuth client id; non-empty placeholder is enough for local simulated login                          |
+| `AUTH_GOOGLE_SECRET`                       | Google OAuth client secret; non-empty placeholder is enough for local simulated login                      |
+| `BLOB_STORE_ID`                            | Vercel Blob OIDC store id for daily label backups (set by the Vercel store integration)                    |
+| `BLOB_WEBHOOK_PUBLIC_KEY`                  | Vercel Blob OIDC public key (set by the Vercel store integration)                                          |
 
 ### Integration Probes
 

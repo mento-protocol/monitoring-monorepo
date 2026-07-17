@@ -19,8 +19,8 @@ repo commands.
 pnpm install
 
 # Indexer
-pnpm indexer:codegen              # Generate types from schema (multichain mainnet: Ethereum reserve-yield + Celo + Monad)
-pnpm indexer:dev                   # Start indexer (multichain mainnet: Ethereum reserve-yield + Celo + Monad)
+pnpm indexer:codegen              # Generate types from schema (multichain mainnet: Ethereum reserve-yield + Celo + Monad + Polygon)
+pnpm indexer:dev                   # Start indexer (multichain mainnet: Ethereum reserve-yield + Celo + Monad + Polygon)
 pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test    # Codegen mainnet config, run sUSDS/stETH tests, restore mainnet codegen
 pnpm indexer:mutation              # Targeted StrykerJS baseline for indexer pure logic
 pnpm deploy:indexer                # Push HEAD to envio branch and trigger hosted reindex
@@ -55,7 +55,7 @@ pnpm adr:check:test                 # Offline tests for the ADR reminder trigger
 node scripts/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 node scripts/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
 node scripts/file-size-watchlist.mjs  # Refresh source file-size watchlist; use --format issue for GitHub Issues, not BACKLOG.md
-pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
+pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet + Polygon Amoy)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
 # Dashboard

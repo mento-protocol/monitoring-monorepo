@@ -14,6 +14,7 @@ const CHAIN_ICONS: Record<number, ComponentType<BrandedIconProps>> = {
   143: NetworkMonad,
   10143: NetworkMonad,
   137: NetworkPolygon,
+  80002: NetworkPolygon,
 };
 
 function GenericChainIcon({ size }: { size: number }) {

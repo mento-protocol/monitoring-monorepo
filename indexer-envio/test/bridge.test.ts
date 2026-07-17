@@ -355,23 +355,26 @@ describe("computeWormholeStatus — status machine", () => {
 });
 
 describe("wormhole/chainIds — EVM ↔ Wormhole mapping", () => {
-  it("tracks mainnet and testnet candidates for Celo and Monad", () => {
+  it("tracks mainnet and testnet candidates for Celo, Monad, and Polygon", () => {
     assert.deepEqual(WORMHOLE_TO_EVM_CHAIN_IDS[14], [42220, 11142220]);
     assert.deepEqual(WORMHOLE_TO_EVM_CHAIN_IDS[48], [143, 10143]);
+    assert.deepEqual(WORMHOLE_TO_EVM_CHAIN_IDS[5], [137, 80002]);
   });
 
   it("resolves Wormhole ids within the active mainnet config", () => {
-    const mainnetChainIds = [42220, 143];
+    const mainnetChainIds = [42220, 143, 137];
 
     assert.equal(wormholeToEvmChainId(14, mainnetChainIds), 42220);
     assert.equal(wormholeToEvmChainId(48, mainnetChainIds), 143);
+    assert.equal(wormholeToEvmChainId(5, mainnetChainIds), 137);
   });
 
   it("resolves Wormhole ids within the active testnet config", () => {
-    const testnetChainIds = [11142220, 10143];
+    const testnetChainIds = [11142220, 10143, 80002];
 
     assert.equal(wormholeToEvmChainId(14, testnetChainIds), 11142220);
     assert.equal(wormholeToEvmChainId(48, testnetChainIds), 10143);
+    assert.equal(wormholeToEvmChainId(5, testnetChainIds), 80002);
   });
 
   it("wormholeToEvmChainId returns null for unknown ids (e.g. Solana = 1)", () => {
@@ -399,6 +402,7 @@ describe("wormhole/nttAddresses — manifest lookup", () => {
     const chainIds = new Set(manifestEntries.map((e) => e.chainId));
     assert.ok(chainIds.has(42220), "Celo entries expected");
     assert.ok(chainIds.has(143), "Monad entries expected");
+    assert.ok(chainIds.has(137), "Polygon entries expected");
   });
 
   it("findByNttManager returns a matching entry for a real manager", () => {
@@ -474,7 +478,7 @@ describe("wormhole/nttAddresses — Envio YAML sync", () => {
 
   for (const { path, content } of yamls) {
     const label = path.split("/").pop()!;
-    for (const chainId of [42220, 143]) {
+    for (const chainId of [42220, 143, 137]) {
       const expected = manifestEntries.filter((e) => e.chainId === chainId);
       if (expected.length === 0) continue;
 

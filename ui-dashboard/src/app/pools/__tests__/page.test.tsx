@@ -262,6 +262,7 @@ const recentSwap: SwapEvent = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(window.history.state, "", "/pools");
   mockConfiguredNetworkIdForChainId.mockReturnValue(null);
   mockSearchParams = new URLSearchParams();
   vi.mocked(useAllNetworksData).mockReturnValue(baseAllNetworksResult);
@@ -315,6 +316,41 @@ describe("PoolsPage multichain rendering", () => {
     expect(html).toContain('data-testid="global-pools-table"');
     expect(html).toContain('data-testid="entries-count">2<');
     expect(html).toContain("celo-mainnet,monad-mainnet");
+  });
+
+  it("filters pools and recent swaps by chain without dropping limit or sort URL state", () => {
+    window.history.replaceState(
+      window.history.state,
+      "",
+      "/pools?limit=50&poolsSort=tvl&poolsDir=asc",
+    );
+    mockSearchParams = new URLSearchParams(window.location.search);
+    vi.mocked(useGQL).mockReturnValue(baseSwapsResult as SWRResponse);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    act(() => root.render(<PoolsPage />));
+    const monadButton = Array.from(
+      container.querySelectorAll<HTMLButtonElement>("button[aria-pressed]"),
+    ).find((button) => button.textContent === "Monad");
+    expect(monadButton).toBeDefined();
+
+    act(() => monadButton?.click());
+
+    expect(window.location.search).toBe(
+      "?limit=50&poolsSort=tvl&poolsDir=asc&chain=143",
+    );
+    expect(container.querySelector('[data-testid="chains"]')?.textContent).toBe(
+      "monad-mainnet",
+    );
+    expect(vi.mocked(useGQL).mock.calls.at(-1)?.[1]).toEqual({
+      chainIdIn: [143],
+      limit: 50,
+    });
+
+    act(() => root.unmount());
+    container.remove();
   });
 
   it("accepts a Monad (foreign-chain) namespaced pool filter without blocking", () => {

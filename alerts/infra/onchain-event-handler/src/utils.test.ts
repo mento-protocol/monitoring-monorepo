@@ -11,10 +11,12 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { privateKeyToAccount } from "viem/accounts";
 
 // Mock config BEFORE importing utils so constants.ts builds
-// MULTISIGS_BY_CHAIN from this fixture. Three multisigs:
+// MULTISIGS_BY_CHAIN from this fixture. Five logical multisigs:
 // - SOLO_CELO: 0xaaa... only on celo
 // - SOLO_ETH:  0xbbb... only on ethereum
 // - AMBIGUOUS: 0xccc... on both celo + ethereum
+// - SOLO_POLYGON: 0xddd... only on polygon
+// - AMBIGUOUS_CELO_POLYGON: 0xfff... on celo + polygon (like ReserveSafe)
 vi.mock("./config", () => ({
   default: {
     MULTISIG_CONFIG: JSON.stringify({
@@ -37,6 +39,21 @@ vi.mock("./config", () => ({
         address: "0xCCcccCCcCcCcCccCcCCcccCccccCcCCcCCcCccCC",
         name: "Ambiguous (Eth side)",
         chain: "ethereum",
+      },
+      SOLO_POLYGON: {
+        address: "0xDDdddDDdDdDdDddDdDDdddDdddDdDdDDdDDdDDdd",
+        name: "Solo Polygon",
+        chain: "polygon",
+      },
+      AMBIGUOUS_CELO_POLYGON_CELO: {
+        address: "0xFFfffFFfFfFfFffFfFFffffFfffFfFFfFFfFffFF",
+        name: "Ambiguous Celo/Polygon (Celo side)",
+        chain: "celo",
+      },
+      AMBIGUOUS_CELO_POLYGON_POLYGON: {
+        address: "0xFFfffFFfFfFfFffFfFFffffFfffFfFFfFFfFffFF",
+        name: "Ambiguous Celo/Polygon (Polygon side)",
+        chain: "polygon",
       },
     }),
     QUICKNODE_SIGNING_SECRET: "test-secret",
@@ -77,7 +94,10 @@ vi.mock("./event-formatters/transaction-formatters", () => ({
 const SOLO_CELO_ADDR = "0xAAaaaAAaAaAaAaaAaaAaaaaAaaAAaAAaAAaAaaAA";
 const SOLO_ETH_ADDR = "0xBBbbbBBbBbBbBbbBbBBbbbbBbbbBbBBbBBbBbbBB";
 const AMBIGUOUS_ADDR = "0xCCcccCCcCcCcCccCcCCcccCccccCcCCcCCcCccCC";
-const UNKNOWN_ADDR = "0xDDdddDDdDdDdDddDdDDdddDdddDdDdDDdDDdDDdd";
+const SOLO_POLYGON_ADDR = "0xDDdddDDdDdDdDddDdDDdddDdddDdDdDDdDDdDDdd";
+const AMBIGUOUS_CELO_POLYGON_ADDR =
+  "0xFFfffFFfFfFfFffFfFFffffFfffFfFFfFFfFffFF";
+const UNKNOWN_ADDR = "0xEEeeeEEeEeEeEeeEeEEeeeeEeeeEeEEeEEeEeeEE";
 const BLOCK_HASH =
   "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
 
@@ -91,6 +111,7 @@ describe("findChainForAddress", () => {
   it("returns the chain name when address is configured on exactly one chain", () => {
     expect(utils.findChainForAddress(SOLO_CELO_ADDR)).toBe("celo");
     expect(utils.findChainForAddress(SOLO_ETH_ADDR)).toBe("ethereum");
+    expect(utils.findChainForAddress(SOLO_POLYGON_ADDR)).toBe("polygon");
   });
 
   it("returns null when address is configured on multiple chains (ambiguity)", () => {
@@ -110,6 +131,24 @@ describe("findChainForAddress", () => {
     );
     // Mixed-case lookups should match too.
     expect(utils.findChainForAddress(SOLO_ETH_ADDR)).toBe("ethereum");
+  });
+});
+
+describe("getSafeUiUrl", () => {
+  it("uses Polygon's canonical matic EIP-3770 prefix", async () => {
+    const { getSafeUiUrl } = await import("./utils");
+
+    expect(getSafeUiUrl(SOLO_POLYGON_ADDR, "0xsafeTx", "SOLO_POLYGON")).toBe(
+      `https://app.safe.global/transactions/tx?safe=matic:${SOLO_POLYGON_ADDR.toLowerCase()}&id=multisig_${SOLO_POLYGON_ADDR.toLowerCase()}_0xsafeTx`,
+    );
+  });
+
+  it("uses Ethereum's eth EIP-3770 prefix rather than the internal chain key", async () => {
+    const { getSafeUiUrl } = await import("./utils");
+
+    expect(getSafeUiUrl(SOLO_ETH_ADDR, "0xsafeTx", "SOLO_ETH")).toBe(
+      `https://app.safe.global/transactions/tx?safe=eth:${SOLO_ETH_ADDR.toLowerCase()}&id=multisig_${SOLO_ETH_ADDR.toLowerCase()}_0xsafeTx`,
+    );
   });
 });
 
@@ -152,6 +191,20 @@ describe("findChainFromBlockHash", () => {
     );
     expect(result).toBe("celo");
     // Both candidate chains should have been probed in parallel
+    expect(getBlockMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("probes Polygon when a Safe address is shared with Celo", async () => {
+    // Candidate order follows CHAIN_CONFIGS: Celo rejects, Polygon verifies.
+    getBlockMock.mockRejectedValueOnce(new Error("block not found"));
+    getBlockMock.mockResolvedValueOnce({ number: 90_000_000n });
+
+    const result = await utils.findChainFromBlockHash(
+      BLOCK_HASH,
+      AMBIGUOUS_CELO_POLYGON_ADDR,
+    );
+
+    expect(result).toBe("polygon");
     expect(getBlockMock).toHaveBeenCalledTimes(2);
   });
 

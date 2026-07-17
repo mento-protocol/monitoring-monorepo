@@ -5,7 +5,7 @@
 export const WORMHOLE_TO_EVM_CHAIN_IDS: Record<number, readonly number[]> = {
   14: [42220, 11142220], // Celo mainnet/testnet
   48: [143, 10143], // Monad mainnet/testnet
-  // 5: 137, // Polygon (future)
+  5: [137, 80002], // Polygon mainnet/Amoy
 };
 
 export function wormholeToEvmChainId(

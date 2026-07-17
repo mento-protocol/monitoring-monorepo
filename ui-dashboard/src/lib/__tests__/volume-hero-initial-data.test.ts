@@ -12,6 +12,7 @@ const VIEW: VolumeHeroView = {
   venue: "v3",
   range: "7d",
   includeProtocolActors: false,
+  chainIdIn: [42220, 143, 137],
   todayMidnight: TODAY_MIDNIGHT,
 };
 
@@ -20,6 +21,7 @@ const MATCHING_ACTUAL = {
   venue: "v3",
   range: "7d",
   isProtocolActorIn: [false],
+  chainIdIn: [42220, 143, 137],
   todayMidnight: TODAY_MIDNIGHT,
 } as const;
 
@@ -85,6 +87,15 @@ describe("volumeHeroViewMatches", () => {
       volumeHeroViewMatches(VIEW, {
         ...MATCHING_ACTUAL,
         todayMidnight: TODAY_MIDNIGHT + 86_400,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a chain-scope mismatch", () => {
+    expect(
+      volumeHeroViewMatches(VIEW, {
+        ...MATCHING_ACTUAL,
+        chainIdIn: [137],
       }),
     ).toBe(false);
   });

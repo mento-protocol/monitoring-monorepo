@@ -40,6 +40,7 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { axe } from "vitest-axe";
 import { LimitSelect } from "@/components/controls";
+import { ChainFilterControl } from "@/components/chain-filter-control";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
 import {
   BucketFilter,
@@ -93,6 +94,33 @@ describe("LimitSelect a11y", () => {
     expect(select?.id).toBe("tab-limit-test");
     const results = await axe(container);
     expect(results.violations).toEqual([]);
+  });
+});
+
+describe("ChainFilterControl a11y", () => {
+  it("labels the toggle group and exposes exactly one pressed chain", async () => {
+    render(
+      <ChainFilterControl
+        value={137}
+        options={[
+          { chainId: 42220, label: "Celo" },
+          { chainId: 143, label: "Monad" },
+          { chainId: 137, label: "Polygon" },
+        ]}
+        onChange={() => undefined}
+      />,
+    );
+
+    expect(
+      container.querySelector('[role="group"]')?.getAttribute("aria-label"),
+    ).toBe("Chain");
+    expect(
+      container.querySelectorAll('button[aria-pressed="true"]'),
+    ).toHaveLength(1);
+    expect(
+      container.querySelector('button[aria-pressed="true"]')?.textContent,
+    ).toBe("Polygon");
+    expect((await axe(container)).violations).toEqual([]);
   });
 });
 

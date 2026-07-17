@@ -19,7 +19,7 @@ import {
 // Mirror of the private map in networks.ts — kept here so the drift-guard
 // test can assert every canonical chainId still resolves to a matching
 // NETWORKS entry. If the real map changes, update this too.
-const EXPECTED_CANONICAL_CHAIN_IDS = [42220, 11142220, 143, 10143];
+const EXPECTED_CANONICAL_CHAIN_IDS = [42220, 11142220, 143, 10143, 137, 80002];
 import { MAINNET_CHAIN_IDS } from "../types";
 
 // Known Celo mainnet addresses from @mento-protocol/contracts (42220/mainnet).
@@ -310,7 +310,9 @@ describe("NETWORKS — Monad networks", () => {
     // for type=token entries.
     const monad = NETWORKS["monad-mainnet"];
     const stableTokenSpokeAddr = "0x6a8ff60a89f3f359fa16f45076d6dd1712b5e62e";
-    expect(monad.addressLabels[stableTokenSpokeAddr]).toBe("StableTokenSpoke");
+    expect(monad.addressLabels[stableTokenSpokeAddr]).toBe(
+      "StableTokenSpokev300",
+    );
   });
 
   it("monad-mainnet excludes StableTokenSpoke* implementation proxies from tokenSymbols (but keeps them in addressLabels)", () => {
@@ -340,12 +342,81 @@ describe("NETWORKS — Monad networks", () => {
   });
 });
 
+describe("NETWORKS — Polygon networks", () => {
+  const EUROP_POLYGON = "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51";
+  const EURM_POLYGON = "0x4d502d735b4c574b487ed641ae87ceae884731c7";
+  const USDC_POLYGON = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359";
+  const USDM_POLYGON = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115";
+  const MOCK_EUROP_AMOY = "0x62a5e599c4f4bfa1024efffa15799a7a2bb29dec";
+
+  it("inherits Polygon mainnet token symbols and labels from shared config", () => {
+    const polygon = NETWORKS["polygon-mainnet"];
+    expect(polygon.tokenSymbols).toMatchObject({
+      [EUROP_POLYGON]: "EUROP",
+      [EURM_POLYGON]: "EURm",
+      [USDC_POLYGON]: "USDC",
+      [USDM_POLYGON]: "USDm",
+    });
+    expect(polygon.addressLabels[EUROP_POLYGON]).toBe("EUROP");
+  });
+
+  it("inherits Polygon Amoy token metadata from shared config", () => {
+    const amoy = NETWORKS["polygon-amoy"];
+    expect(amoy.tokenSymbols[MOCK_EUROP_AMOY]).toBe("MockERC20EUROP");
+    expect(amoy.addressLabels[MOCK_EUROP_AMOY]).toBe("MockERC20EUROP");
+  });
+
+  it("wires the shared mainnet Hasura endpoint into Polygon", async () => {
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL",
+      "  https://indexer.hyperindex.xyz/multichain/v1/graphql  ",
+    );
+
+    const networks = await import("../networks");
+    expect(networks.NETWORKS["polygon-mainnet"].hasuraUrl).toBe(
+      "https://indexer.hyperindex.xyz/multichain/v1/graphql",
+    );
+    expect(networks.isConfiguredNetworkId("polygon-mainnet")).toBe(true);
+  });
+
+  it("wires the shared testnet Hasura endpoint into Amoy only when opted in", async () => {
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL_TESTNET",
+      "  https://indexer.hyperindex.xyz/testnet/v1/graphql  ",
+    );
+    vi.stubEnv("NEXT_PUBLIC_SHOW_TESTNET_NETWORKS", "true");
+
+    const networks = await import("../networks");
+    expect(networks.NETWORKS["polygon-amoy"].hasuraUrl).toBe(
+      "https://indexer.hyperindex.xyz/testnet/v1/graphql",
+    );
+    expect(networks.isConfiguredNetworkId("polygon-amoy")).toBe(true);
+  });
+
+  it("uses Polygon RPC and explorer defaults", () => {
+    expect(NETWORKS["polygon-mainnet"].rpcUrl).toBe("https://polygon.drpc.org");
+    expect(NETWORKS["polygon-mainnet"].explorerBaseUrl).toBe(
+      "https://polygonscan.com",
+    );
+    expect(NETWORKS["polygon-amoy"].rpcUrl).toBe(
+      "https://rpc-amoy.polygon.technology",
+    );
+    expect(NETWORKS["polygon-amoy"].explorerBaseUrl).toBe(
+      "https://amoy.polygonscan.com",
+    );
+  });
+});
+
 describe("NETWORKS — virtual pool support", () => {
-  it("enables virtual pools for all Celo networks, disables for Monad", () => {
+  it("enables virtual pools for all Celo networks and disables them elsewhere", () => {
     expect(NETWORKS["celo-sepolia-local"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-mainnet-local"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-mainnet"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-sepolia"].hasVirtualPools).toBe(true);
+    expect(NETWORKS["monad-mainnet"].hasVirtualPools).toBe(false);
+    expect(NETWORKS["monad-testnet"].hasVirtualPools).toBe(false);
+    expect(NETWORKS["polygon-mainnet"].hasVirtualPools).toBe(false);
+    expect(NETWORKS["polygon-amoy"].hasVirtualPools).toBe(false);
   });
 });
 
@@ -353,11 +424,13 @@ describe("isCanonicalNetwork", () => {
   it("returns true for canonical prod networks", () => {
     expect(isCanonicalNetwork("celo-mainnet")).toBe(true);
     expect(isCanonicalNetwork("monad-mainnet")).toBe(true);
+    expect(isCanonicalNetwork("polygon-mainnet")).toBe(true);
   });
 
   it("returns true for hosted testnets that are canonical for their chainId", () => {
     expect(isCanonicalNetwork("celo-sepolia")).toBe(true);
     expect(isCanonicalNetwork("monad-testnet")).toBe(true);
+    expect(isCanonicalNetwork("polygon-amoy")).toBe(true);
   });
 
   it("returns false for local variants sharing a chainId with a canonical hosted one", () => {
@@ -370,6 +443,7 @@ describe("networkIdForChainId — pool-ID-driven network resolution", () => {
   it("maps each prod chainId to its prod IndexerNetworkId", () => {
     expect(networkIdForChainId(42220)).toBe("celo-mainnet");
     expect(networkIdForChainId(143)).toBe("monad-mainnet");
+    expect(networkIdForChainId(137)).toBe("polygon-mainnet");
   });
 
   it("maps Celo Sepolia chainId to the hosted testnet variant", () => {
@@ -378,6 +452,10 @@ describe("networkIdForChainId — pool-ID-driven network resolution", () => {
 
   it("maps Monad Testnet chainId to the hosted testnet variant", () => {
     expect(networkIdForChainId(10143)).toBe("monad-testnet");
+  });
+
+  it("maps Polygon Amoy chainId to the hosted testnet variant", () => {
+    expect(networkIdForChainId(80002)).toBe("polygon-amoy");
   });
 
   it("returns null for unknown chainIds", () => {
@@ -433,6 +511,8 @@ describe("isConfiguredNetworkId — URL routing guard", () => {
     expect(typeof isConfiguredNetworkId("celo-sepolia")).toBe("boolean");
     expect(typeof isConfiguredNetworkId("monad-mainnet")).toBe("boolean");
     expect(typeof isConfiguredNetworkId("monad-testnet")).toBe("boolean");
+    expect(typeof isConfiguredNetworkId("polygon-mainnet")).toBe("boolean");
+    expect(typeof isConfiguredNetworkId("polygon-amoy")).toBe("boolean");
   });
 
   it("returns false for unknown network id regardless of env", () => {
@@ -444,6 +524,8 @@ describe("isConfiguredNetworkId — URL routing guard", () => {
     expect(isNetworkId("celo-sepolia-hosted")).toBe(false);
     expect(isNetworkId("monad-mainnet-hosted")).toBe(false);
     expect(isNetworkId("monad-testnet-hosted")).toBe(false);
+    expect(isNetworkId("polygon-mainnet-hosted")).toBe(false);
+    expect(isNetworkId("polygon-amoy-hosted")).toBe(false);
   });
 
   it("never returns true for a network with empty hasuraUrl", () => {

@@ -111,8 +111,8 @@ gated by the `production` GitHub Environment required-reviewer rule.
 
 Protocol alert rules and global Grafana notification routing live in
 `alerts/rules` (`pnpm alerts:rules:plan`). That stack also owns the Aegis
-testnet-health alerts, which page `#alerts-testnet` when Celo Sepolia or Monad
-Testnet polling stops or records repeated view-call errors. See
+testnet-health alerts, which page `#alerts-testnet` when Celo Sepolia, Monad
+Testnet, or Polygon Amoy polling stops or records repeated view-call errors. See
 `docs/terraform.md` for the stack registry.
 
 ### How to deploy a new rate feed

@@ -3,7 +3,7 @@ title: Metrics Bridge Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-07-17
 ---
 
 # AGENTS.md — Metrics Bridge
@@ -22,7 +22,19 @@ last_verified: 2026-05-20
 - New Prometheus labels must have bounded cardinality. Never expose tx hashes, user addresses, or pool-specific free text as unbounded labels. Narrow exception: `last_oracle_update_url` is intentionally carried only on the oracle timestamp/expiry gauges so Grafana can link Slack "last update" text to the exact report transaction; do not copy that pattern to broad pool labels or user/high-frequency dimensions.
 - Every polling loop must have a timeout, visible error metric/state, and a deterministic retry posture.
 - Rebalance probe changes must update unit tests and the mutation baseline when the changed branch is part of the current mutation target.
+- `PoolLiquidityStrategy` is authoritative for rebalance-probe cardinality.
+  Use `Pool.rebalancerAddress` only for the explicit missing-schema rollout
+  fallback. A pool is blocked only when every active strategy returns a
+  confirmed blocked result; skip/transport outcomes are unconfirmed, not
+  blocked.
 
 ## Verification
 
 Run `pnpm --filter @mento-protocol/metrics-bridge lint`, `typecheck`, and `test`. For Cloud Run/runtime changes, apply `docs/pr-checklists/terraform-cloudrun.md`.
+
+## RPC overrides
+
+Rebalance simulation uses full-node RPCs rather than Envio HyperRPC. Production
+defaults exist for Celo (`RPC_URL_42220`), Monad (`RPC_URL_143`), and Polygon
+(`RPC_URL_137`); each environment variable overrides the corresponding public
+default. Monad testnet still requires an explicit `RPC_URL_10143`.

@@ -172,6 +172,14 @@ export function _setRpcClientForTests(
 // event syncing uses HyperSync, configured in the YAML files.)
 const RPC_CONFIG_BY_CHAIN: Record<number, { default: string; envVar: string }> =
   {
+    137: {
+      default: "https://polygon.drpc.org",
+      envVar: "ENVIO_RPC_URL_137",
+    }, // Polygon Mainnet
+    80002: {
+      default: "https://rpc-amoy.polygon.technology",
+      envVar: "ENVIO_RPC_URL_80002",
+    }, // Polygon Amoy
     42220: { default: "https://forno.celo.org", envVar: "ENVIO_RPC_URL_42220" }, // Celo Mainnet
     11142220: {
       default: "https://forno.celo-sepolia.celo-testnet.org",

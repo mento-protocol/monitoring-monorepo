@@ -42,6 +42,7 @@ vi.mock("@/lib/networks", () => ({
 import { fetchVolumeHeroForSSR } from "../volume-ssr";
 
 const TODAY_MIDNIGHT = 1_780_012_800;
+const CHAIN_ID_IN = [42220, 143, 137] as const;
 
 const WINDOW_ROWS = {
   volumeWindowSnapshots: [
@@ -141,6 +142,7 @@ describe("fetchVolumeHeroForSSR", () => {
       "7d",
       false,
       TODAY_MIDNIGHT,
+      CHAIN_ID_IN,
     );
 
     expect(result?.view).toEqual({
@@ -148,6 +150,7 @@ describe("fetchVolumeHeroForSSR", () => {
       venue: "v3",
       range: "7d",
       includeProtocolActors: false,
+      chainIdIn: CHAIN_ID_IN,
       todayMidnight: TODAY_MIDNIGHT,
     });
     expect(result?.heroV3).toEqual(WINDOW_ROWS);
@@ -164,13 +167,16 @@ describe("fetchVolumeHeroForSSR", () => {
     );
     expect(byDocument.get(VOLUME_WINDOW_LATEST)?.variables).toEqual({
       windowKey: "7d",
+      chainIdIn: CHAIN_ID_IN,
     });
     expect(byDocument.get(VOLUME_TODAY_TRADERS)?.variables).toEqual({
       todayMidnight: TODAY_MIDNIGHT,
+      chainIdIn: CHAIN_ID_IN,
       isProtocolActorIn: [false],
     });
     expect(byDocument.get(VOLUME_WINDOW_FIRSTDAY_LATEST)?.variables).toEqual({
       windowKey: "7d",
+      chainIdIn: CHAIN_ID_IN,
     });
     // Two budgets: the shared primary deadline plus the tighter independent
     // budget for the optional firstDay slice, so a hung optional query can't
@@ -201,6 +207,7 @@ describe("fetchVolumeHeroForSSR", () => {
       "90d",
       true,
       TODAY_MIDNIGHT,
+      CHAIN_ID_IN,
     );
 
     expect(result?.view).toEqual({
@@ -208,6 +215,7 @@ describe("fetchVolumeHeroForSSR", () => {
       venue: "v2",
       range: "90d",
       includeProtocolActors: true,
+      chainIdIn: CHAIN_ID_IN,
       todayMidnight: TODAY_MIDNIGHT,
     });
     expect(result?.heroV2).toEqual(BROKER_WINDOW_ROWS);
@@ -221,6 +229,7 @@ describe("fetchVolumeHeroForSSR", () => {
     );
     expect((todayCall?.[0] as { variables: unknown }).variables).toEqual({
       todayMidnight: TODAY_MIDNIGHT,
+      chainIdIn: CHAIN_ID_IN,
       isProtocolActorIn: [false, true],
     });
   });
@@ -235,7 +244,7 @@ describe("fetchVolumeHeroForSSR", () => {
     );
 
     await expect(
-      fetchVolumeHeroForSSR("v3", "7d", false, TODAY_MIDNIGHT),
+      fetchVolumeHeroForSSR("v3", "7d", false, TODAY_MIDNIGHT, CHAIN_ID_IN),
     ).resolves.toBeUndefined();
   });
 
@@ -249,7 +258,7 @@ describe("fetchVolumeHeroForSSR", () => {
     );
 
     await expect(
-      fetchVolumeHeroForSSR("v3", "7d", false, TODAY_MIDNIGHT),
+      fetchVolumeHeroForSSR("v3", "7d", false, TODAY_MIDNIGHT, CHAIN_ID_IN),
     ).resolves.toBeUndefined();
   });
 
@@ -269,6 +278,7 @@ describe("fetchVolumeHeroForSSR", () => {
       "7d",
       false,
       TODAY_MIDNIGHT,
+      CHAIN_ID_IN,
     );
 
     expect(result?.heroV3).toEqual(WINDOW_ROWS);
@@ -293,7 +303,13 @@ describe("fetchVolumeHeroForSSR", () => {
 
       try {
         await expect(
-          fetchVolumeHeroForSSR(venue, "7d", false, TODAY_MIDNIGHT),
+          fetchVolumeHeroForSSR(
+            venue,
+            "7d",
+            false,
+            TODAY_MIDNIGHT,
+            CHAIN_ID_IN,
+          ),
         ).resolves.toBeUndefined();
         expect(consoleError).not.toHaveBeenCalled();
       } finally {
@@ -317,6 +333,7 @@ describe("fetchVolumeHeroForSSR", () => {
         "7d",
         false,
         TODAY_MIDNIGHT,
+        CHAIN_ID_IN,
       );
 
       if (venue === "v3") {
@@ -335,7 +352,7 @@ describe("fetchVolumeHeroForSSR", () => {
     networksState.hasuraUrl = "";
 
     await expect(
-      fetchVolumeHeroForSSR("v3", "7d", false, TODAY_MIDNIGHT),
+      fetchVolumeHeroForSSR("v3", "7d", false, TODAY_MIDNIGHT, CHAIN_ID_IN),
     ).resolves.toBeUndefined();
     expect(requestMock).not.toHaveBeenCalled();
   });

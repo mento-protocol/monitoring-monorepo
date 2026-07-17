@@ -1,9 +1,10 @@
 # Rebalance Failure Reason in Deviation Breach Alerts — Feasibility
 
-> **As-shipped note (refreshed 2026-04-30):** the design proposed below shipped in PR #233+ with two later refinements:
+> **As-shipped note (refreshed 2026-07-17):** the design proposed below shipped in PR #233+ with later refinements:
 >
 > 1. The `reason_code` label is no longer rendered to Slack — the line reads "Rebalance Blocked: \<reason_message\>." with the all-caps code dropped (the label is still emitted on the gauge for log/diagnostic spelunking). See PR #269.
 > 2. The trailing " to rebalance" / " to fully rebalance" suffix on four `ERROR_MESSAGES` entries was trimmed — under the "Rebalance Blocked:" prefix the suffix was filler. The example below ("Reserve has insufficient collateral to rebalance") is the pre-trim form. See PR #269.
+> 3. Polygon mainnet rebalance probes use the full-node dRPC default and can be overridden with `RPC_URL_137`, alongside the Celo and Monad per-chain overrides described below.
 >
 > The original feasibility analysis follows unchanged.
 

@@ -90,6 +90,80 @@ resource "grafana_rule_group" "aegis_service_alerts" {
       severity = "page"
     }
   }
+  # A single global heartbeat can stay healthy while one production chain has
+  # stopped polling. Keep one rule per expected chain so an absent Polygon
+  # series cannot be masked by successful Celo or Monad samples.
+  dynamic "rule" {
+    for_each = local.prod_chains
+    iterator = chain
+
+    content {
+      name           = "Aegis No Successful Poll [${chain.value.title}]"
+      condition      = "threshold"
+      for            = "5m"
+      exec_err_state = "Error"
+      no_data_state  = "Alerting"
+
+      data {
+        ref_id = "successfulPolls"
+
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+
+        datasource_uid = var.prometheus_datasource_uid
+        model = jsonencode({
+          refId         = "successfulPolls"
+          expr          = "sum(increase(view_call_query_duration_count{chain=\"${chain.value.aegis_chain}\",status=\"success\"}[10m]))"
+          editorMode    = "code"
+          instant       = true
+          intervalMs    = 1000
+          legendFormat  = "__auto"
+          maxDataPoints = 43200
+          range         = false
+        })
+      }
+
+      data {
+        ref_id = "threshold"
+
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+
+        datasource_uid = "__expr__"
+        model = jsonencode({
+          refId         = "threshold"
+          type          = "threshold"
+          expression    = "successfulPolls"
+          intervalMs    = 1000
+          maxDataPoints = 43200
+          conditions = [{
+            evaluator = { params = [1], type = "lt" }
+            operator  = { type = "and" }
+            query     = { params = ["threshold"] }
+            reducer   = { params = [], type = "last" }
+            type      = "query"
+          }]
+          datasource = { type = "__expr__", uid = "__expr__" }
+        })
+      }
+
+      annotations = {
+        summary     = "Aegis has not completed a successful ${chain.value.title} production view call in 10 minutes. Check the ${chain.value.title} RPC endpoint and chain-specific Aegis configuration."
+        description = "Other production chains can still be reporting normally, so check the ${chain.value.title} RPC endpoint and chain-specific Aegis configuration."
+      }
+
+      labels = {
+        service  = "aegis"
+        severity = "page"
+        chain    = chain.key
+      }
+    }
+  }
+
   rule {
     name      = "Aegis does not report new data"
     condition = "C"

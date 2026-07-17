@@ -3,6 +3,11 @@ import { getAuthSession } from "@/auth";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { fetchVolumeHeroForSSR } from "@/lib/volume-ssr";
 import {
+  activeChainIds,
+  configuredProductionChainOptions,
+  readChainFilter,
+} from "@/lib/chain-filter";
+import {
   readActorFilterFromParams,
   readRangeFromParams,
   readVenueFromParams,
@@ -50,6 +55,11 @@ export default async function VolumePage({
   ]);
   const canUseVolumeFilters = !!session;
   const params = toURLSearchParams(resolvedSearchParams ?? {});
+  const chainOptions = configuredProductionChainOptions();
+  const chainIdIn = activeChainIds(
+    readChainFilter(params, chainOptions),
+    chainOptions,
+  );
 
   // Derive the first-render view exactly as `useVolumeUrlState` will on the
   // client (shared parsing in lib/volume-url-params.ts). Logged-out visitors
@@ -71,12 +81,14 @@ export default async function VolumePage({
     range,
     includeProtocolActors,
     currentUtcDayStartSeconds(),
+    chainIdIn,
   );
 
   return (
     <Suspense>
       <VolumeClient
         canUseVolumeFilters={canUseVolumeFilters}
+        chainOptions={chainOptions}
         initialData={initialData}
       />
     </Suspense>

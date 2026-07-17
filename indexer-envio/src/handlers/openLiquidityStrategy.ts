@@ -10,6 +10,7 @@ import type {
 } from "envio";
 import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
+import { syncPoolLiquidityStrategy } from "../liquidityStrategies.js";
 
 /**
  * OLS pool record ID: "{chainId}-{poolAddress}-{olsAddress}-{registrationId}".
@@ -131,6 +132,17 @@ indexer.onEvent(
       olsAddress,
     });
 
+    await syncPoolLiquidityStrategy({
+      context,
+      chainId: event.chainId,
+      poolId,
+      strategyAddress: olsAddress,
+      active: true,
+      explicitKind: "OPEN",
+      blockNumber,
+      blockTimestamp,
+    });
+
     if (context.isPreload) return;
 
     for (const activePool of activePools) {
@@ -194,6 +206,17 @@ indexer.onEvent(
     const olsAddress = asAddress(event.srcAddress);
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+
+    await syncPoolLiquidityStrategy({
+      context,
+      chainId: event.chainId,
+      poolId,
+      strategyAddress: olsAddress,
+      active: false,
+      explicitKind: "OPEN",
+      blockNumber,
+      blockTimestamp,
+    });
 
     if (context.isPreload) {
       await getLatestActiveOlsPool(context, { poolId, olsAddress });
