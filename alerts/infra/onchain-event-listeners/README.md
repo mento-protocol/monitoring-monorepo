@@ -1,360 +1,106 @@
-# On-Chain Event Listeners Module
+<!-- agent-context: title="On-chain Event Listeners Module" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=alerts/infra/onchain-event-listeners review_interval_days=90 garden_lane=operator-runbooks -->
 
-This module creates and manages QuickNode webhooks for monitoring on-chain events from any smart contract. Currently configured for Safe multisig events, but extensible to monitor other contract types.
+# On-chain Event Listeners Module
 
-## Features
+Terraform module for creating one QuickNode `evmContractEvents` webhook per
+configured chain. Each webhook filters Safe logs by contract address and the 17
+topic hashes committed in `event-hashes.json`, then sends signed payloads to the
+shared on-chain event handler.
 
-- Automated webhook creation via Terraform
-- Server-side event filtering (JavaScript filter on QuickNode)
-- Event signatures from Safe contract ABI (`safe-abi.json`)
-- Multi-address support (multiple multisigs per webhook)
+The parent `alerts/infra` stack currently configures Celo and Ethereum. The
+handler routes eight security events to `#multisig-alerts` and the remaining
+nine operational events to `#multisig-events`.
 
-## What Gets Created
+## Source of truth
 
-One QuickNode webhook per chain that monitors all specified multisig addresses and 16 Safe event types (filtered server-side).
+- `../onchain-event-handler/src/safe-abi.json` is the Safe event ABI.
+- `event-hashes.json` is the Terraform input generated from that ABI.
+- `../onchain-event-handler/src/constants.ts` computes the same hashes at
+  runtime and defines the security-event subset.
 
-## Event Types Monitored
+Regenerate and validate the committed hashes after changing the ABI:
 
-### Security Events (→ Alerts Channel)
-
-- `SafeSetup` - Initial Safe configuration
-- `AddedOwner` - New owner added
-- `RemovedOwner` - Owner removed
-- `ChangedThreshold` - Signature threshold changed
-- `ChangedFallbackHandler` - Fallback handler updated
-- `EnabledModule` - Module enabled
-- `DisabledModule` - Module disabled
-- `ChangedGuard` - Transaction guard changed
-
-### Operational Events (→ Events Channel)
-
-- `ExecutionSuccess` - Transaction executed successfully
-- `ExecutionFailure` - Transaction execution failed
-- `ApproveHash` - Hash approved by owner
-- `SignMsg` - Message signed
-- `SafeModuleTransaction` - Transaction from module
-- `ExecutionFromModuleSuccess` - Module transaction succeeded
-- `SafeReceived` - Funds received
-- `SafeMultiSigTransaction` - Multi-sig transaction executed
+```bash
+pnpm --filter @mento-protocol/alerts-onchain-event-handler build:event-hashes
+```
 
 ## Usage
 
+The root stack owns module instantiation. Its current shape is:
+
 ```hcl
 module "onchain_event_listeners" {
-  source = "./onchain-event-listeners"
+  source   = "./onchain-event-listeners"
+  for_each = local.multisigs_by_chain
 
   providers = {
     restapi.quicknode = restapi.quicknode
   }
 
-  webhook_endpoint_url   = "https://your-cloud-function-url.run.app"
-  multisig_addresses     = [
-    "0x655133d8E90F8190ed5c1F0f3710F602800C0150",  # Mento Labs
-    "0x87647780180B8f55980C7D3fFeFe08a9B29e9aE1",  # Reserve
-  ]
-  webhook_name           = "safe-multisig-monitor"
-  quicknode_network_name = "celo-mainnet"
-  is_active              = true
+  chain_key               = each.key
+  webhook_endpoint_url     = module.onchain_event_handler.function_url
+  multisig_addresses       = [for _, multisig in each.value : multisig.address]
+  webhook_name             = "safe-multisig-monitor-${each.key}"
+  quicknode_network_name   = local.multisigs_by_chain_network[each.key]
+  quicknode_api_key        = var.quicknode_api_key
+  quicknode_signing_secret = var.quicknode_signing_secret
+  debug_mode               = var.debug_mode
 }
 ```
+
+Do not instantiate this module independently. The parent stack validates that
+all multisigs grouped under a chain use the same QuickNode network and wires the
+handler URL and signing secret consistently.
 
 ## Inputs
 
-| Name                     | Description                                         | Type           | Default                   | Required |
-| ------------------------ | --------------------------------------------------- | -------------- | ------------------------- | -------- |
-| `webhook_endpoint_url`   | URL of the Cloud Function endpoint                  | `string`       | -                         | Yes      |
-| `multisig_addresses`     | List of Safe multisig addresses to monitor          | `list(string)` | -                         | Yes      |
-| `webhook_name`           | Name for the QuickNode webhook                      | `string`       | `"safe-multisig-monitor"` | No       |
-| `quicknode_network_name` | QuickNode network identifier (e.g., "celo-mainnet") | `string`       | `"celo-mainnet"`          | No       |
-| `is_active`              | Whether the webhook should be active                | `bool`         | `true`                    | No       |
-| `compression`            | Compression method for payloads                     | `string`       | `"none"`                  | No       |
+| Name                       | Description                                                    | Default                 |
+| -------------------------- | -------------------------------------------------------------- | ----------------------- |
+| `chain_key`                | Lowercase parent `for_each` key used to scope state operations | required                |
+| `webhook_endpoint_url`     | HTTPS on-chain event handler URL                               | required                |
+| `multisig_addresses`       | Safe addresses monitored by this chain's webhook               | required                |
+| `quicknode_api_key`        | QuickNode API key used by Terraform and the repair helper      | required                |
+| `quicknode_signing_secret` | At least 32 characters; sent as the webhook security token     | required                |
+| `webhook_name`             | Base name; a config hash is appended during creation           | `safe-multisig-monitor` |
+| `quicknode_network_name`   | QuickNode network identifier                                   | `celo-mainnet`          |
+| `compression`              | Destination payload compression (`none` or `gzip`)             | `none`                  |
+| `debug_mode`               | REST provider request/response logging                         | `false`                 |
+
+The module has no `is_active` input. Pause or resume a webhook in the QuickNode
+dashboard only as an explicitly coordinated incident action; reconcile any
+resulting drift before the next apply.
 
 ## Outputs
 
-| Name           | Description            |
-| -------------- | ---------------------- |
-| `webhook_id`   | QuickNode webhook ID   |
-| `webhook_name` | QuickNode webhook name |
+- `webhook_id`
+- `webhook_endpoint`
+- `webhook_name`
 
-## Provider Requirements
+## Update and state behavior
 
-### REST API Provider (QuickNode API)
+QuickNode does not support in-place updates for this webhook shape. The module:
 
-```hcl
-provider "restapi" {
-  alias = "quicknode"
-  uri   = "https://api.quicknode.com"
-  headers = {
-    "x-api-key"    = var.quicknode_api_key
-    "Content-Type" = "application/json"
-    "accept"       = "application/json"
-  }
-  write_returns_object = true
-}
-```
+1. hashes the network, addresses, endpoint, signing secret, compression, and
+   event hashes;
+2. pauses and deletes the old webhook when that hash changes;
+3. removes only the matching chain instance from Terraform state; and
+4. creates a replacement through the `evmContractEvents` template.
 
-**Required:**
+`update_path` and `update_method` are deliberately absent. Do not add them: the
+REST provider would attempt unsupported PUT/PATCH operations.
 
-- QuickNode API key from: [dashboard.quicknode.com/api-keys](https://dashboard.quicknode.com/api-keys)
+If a webhook was deleted outside Terraform and planning reports a 404, stop
+before applying. After explicit state-repair approval, run
+`alerts/infra/scripts/fix-webhook-state.sh`, inspect its proposed state changes,
+then run `pnpm alerts:infra:plan` again. Deployment and recreation happen only
+through the reviewed `production-infra`-gated CI workflow.
 
-## Architecture
+## Debugging and security
 
-```text
-QuickNode (Celo Mainnet)
-    ↓
-Filter Function (JavaScript)
-    ↓ (only matching events)
-Cloud Function Endpoint
-    ↓
-Process & Route to Slack
-```
+Keep `debug_mode = false` in CI. REST provider debug output contains the full
+QuickNode `x-api-key` header and webhook signing secret. Never share a plan or
+log captured with debug mode enabled.
 
-## Filter Function
-
-The module includes a sophisticated JavaScript filter function that runs on QuickNode's servers:
-
-```javascript
-function main(payload) {
-  // Validates payload structure
-  // Filters by multisig address
-  // Filters by event signature (topic0)
-  // Returns only matching events
-}
-```
-
-**Benefits:** Reduces webhook calls and Cloud Function invocations (cost optimization), fast server-side filtering, robust error handling.
-
-## Event Signatures
-
-Event signatures are automatically extracted from the Safe contract ABI (`../onchain-event-handler/src/safe-abi.json`):
-
-```json
-{
-  "security_events": {
-    "0x9465fa0c962cc76958e6373a993326400c1c94f8be2fe3a952adfa7f60b2ea26": "AddedOwner",
-    ...
-  },
-  "operational_events": {
-    "0x442e715f626346e8c54381002da614f62bee8d27386535b2521ec8540898556e": "ExecutionSuccess",
-    ...
-  }
-}
-```
-
-This ensures consistency between Terraform and the TypeScript Cloud Function.
-
-## Network Support
-
-Currently supports:
-
-- `celo-mainnet` (default)
-- `celo-testnet`
-
-To add support for other networks, update the `network` variable.
-
-## Webhook Management
-
-### Activate/Deactivate
-
-```hcl
-is_active = false  # Pause webhook without deleting
-```
-
-### Delete Webhook
-
-Remove the module or run:
-
-```bash
-terraform destroy -target=module.onchain_event_listeners
-```
-
-### Update Filter or Configuration
-
-**IMPORTANT:** QuickNode webhooks cannot be updated via PUT/PATCH. When webhook configuration changes (filter function, addresses, etc.), Terraform will recreate the webhook.
-
-**If you get a 404 error during apply:**
-
-This happens because Terraform plans an update before the provisioner can delete the old webhook. To fix:
-
-```bash
-# Remove the webhook from Terraform state
-terraform state rm 'module.onchain_event_listeners["celo"].restapi_object.multisig_webhook'
-
-# Apply again - it will create a new webhook
-terraform apply
-```
-
-The provisioner will automatically delete the old webhook from QuickNode, but you need to remove it from Terraform state first.
-
-### Update Filter
-
-Event signatures are automatically updated when `safe-abi.json` changes.
-
-## Cost Optimization
-
-Server-side filtering minimizes costs:
-
-- QuickNode: Only charged for matching events
-- Cloud Functions: Fewer invocations
-- Estimated savings: ~80% vs server-side-only filtering
-
-## State Management
-
-### Overview
-
-QuickNode webhooks require special handling because they **cannot be updated via PUT/PATCH**. Any configuration change requires deleting and recreating the webhook. This can cause state drift issues.
-
-**📚 See [WEBHOOK_STATE_MANAGEMENT.md](./WEBHOOK_STATE_MANAGEMENT.md) for comprehensive documentation.**
-
-### Common Issue: 404 Errors on Apply
-
-**Symptom:** `Error: unexpected response code '404'` when running `terraform apply`
-
-**Cause:** Webhook in Terraform state doesn't exist in QuickNode (deleted manually or by a previous failed apply)
-
-**Quick Fix:**
-
-```bash
-# Option 1: Manual fix (always works, no network required)
-terraform state rm -lock=false 'module.onchain_event_listeners["<network>"].restapi_object.multisig_webhook'
-terraform state rm -lock=false \
-  'module.onchain_event_listeners["<network>"].null_resource.pause_webhook_before_update' \
-  'module.onchain_event_listeners["<network>"].null_resource.pause_webhook_on_destroy'
-terraform plan -lock=false
-terraform apply -lock=false
-
-# Option 2: Automated fix (requires network access)
-./scripts/fix-webhook-state.sh
-terraform apply -lock=false
-```
-
-Replace `<network>` with your network key (e.g., `celo`, `ethereum`, `base`).
-
-### State Repair Script
-
-Use [`scripts/fix-webhook-state.sh`](../scripts/fix-webhook-state.sh) to automatically detect and fix state drift:
-
-```bash
-# Run the repair script (automatically reads API key from terraform.tfvars)
-./scripts/fix-webhook-state.sh
-
-# The script will:
-# 1. Read QuickNode API key from terraform.tfvars (or QUICKNODE_API_KEY env var)
-# 2. Check which webhooks exist in Terraform state
-# 3. Verify they exist in QuickNode
-# 4. Identify orphaned webhooks
-# 5. Offer to remove them from state
-# 6. Guide you through terraform apply
-```
-
-### Best Practices for State Management
-
-1. **Before applying changes**, run the state repair script
-2. **After manual changes** in QuickNode dashboard, refresh state
-3. **Use version control** for Terraform state (or remote backend)
-4. **Coordinate with team** when applying changes
-
-### Why This Approach?
-
-The module uses several techniques to prevent state drift:
-
-- **Hash-based naming** - Webhook names include a config hash to force recreation on changes
-- **No update operations** - `update_method = "POST"` prevents PUT/PATCH attempts
-- **Automated cleanup** - Provisioners pause and delete old webhooks before recreation
-- **Debug mode** - Enabled by default for better troubleshooting
-
-See [WEBHOOK_STATE_MANAGEMENT.md](./WEBHOOK_STATE_MANAGEMENT.md) for architecture details and advanced troubleshooting.
-
-## Troubleshooting
-
-### Webhook Not Creating
-
-**Error:** `Error creating QuickNode webhook`
-
-**Causes:**
-
-- Invalid API key
-- Invalid network identifier
-- Malformed filter function
-
-**Solution:**
-
-1. Verify API key: <https://dashboard.quicknode.com/api-keys>
-2. Check network: `celo-mainnet` or `celo-testnet`
-3. Enable debug mode: `debug_mode = true`
-
-### No Events Received
-
-**Causes:**
-
-- Webhook is paused (`is_active = false`)
-- No matching events on blockchain
-- Filter function blocking all events
-- Cloud Function endpoint is down
-
-**Solution:**
-
-1. Check webhook status in QuickNode dashboard
-2. Verify multisig addresses are correct
-3. Test Cloud Function endpoint manually
-4. Check Cloud Function logs
-
-### Filter Function Errors
-
-**Error:** `Filter function returned null for all events`
-
-**Solution:**
-
-- Check that addresses are correct (lowercase)
-- Verify event signatures are up to date
-- Review QuickNode webhook logs
-
-## Best Practices
-
-1. **Test First** - Use `celo-testnet` before mainnet
-2. **Monitor Logs** - Check QuickNode webhook delivery status
-3. **Signature Validation** - Always verify webhook signatures in Cloud Function
-4. **Error Handling** - Filter function includes comprehensive error handling
-5. **Version Control** - Track changes to event signatures
-
-## Integration with Cloud Function
-
-This module works in tandem with the [`onchain-event-handler`](../onchain-event-handler/README.md):
-
-```hcl
-# 1. Deploy Cloud Function
-module "alert_handler" { ... }
-
-# 2. Create QuickNode webhook pointing to Cloud Function
-module "onchain_event_listeners" {
-  source = "./onchain-event-listeners"
-  webhook_endpoint_url = module.alert_handler.function_url
-  depends_on           = [module.alert_handler]
-}
-```
-
-## Security
-
-- Signature verification (HMAC-SHA256)
-- HTTPS-only endpoints
-- Address format validation
-- Error containment (errors don't crash webhook)
-
-## Performance
-
-- Latency: ~2-3 seconds from blockchain event to Slack notification
-- Throughput: Handles multiple events per block
-- Reliability: Filter function prevents webhook failures
-
-## Related Modules
-
-- [`channels/slack-channels`](../channels/slack-channels/README.md) - Creates Slack channels for on-chain event notifications
-- [`onchain-event-handler`](../onchain-event-handler/README.md) - Processes webhooks
-- [`channels/sentry-bridge`](../channels/sentry-bridge/README.md) - Sentry → Slack bridge (application error monitoring)
-
-## References
-
-- [QuickNode Webhooks Documentation](https://www.quicknode.com/docs/webhooks)
-- [QuickNode REST API](https://www.quicknode.com/docs/webhooks) (see webhooks section)
-- [Safe Contracts Documentation](https://docs.safe.global/)
-- Event signatures are automatically extracted from the Safe contract ABI (`../onchain-event-handler/src/safe-abi.json`)
+The Cloud Function independently verifies the QuickNode HMAC signature, checks
+the timestamp replay window, validates the configured chain/address pair, and
+routes a failure for one event without aborting the rest of the batch.

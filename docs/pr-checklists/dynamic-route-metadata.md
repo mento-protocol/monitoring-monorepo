@@ -1,3 +1,15 @@
+---
+title: Dynamic Route Metadata and Private Data Checklist
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-17
+doc_type: checklist
+scope: ui-dashboard
+review_interval_days: 90
+garden_lane: pr-checklists-process
+---
+
 # Dynamic-route metadata + private data PR Checklist
 
 Use this checklist for any PR that adds or changes a Next.js dynamic route whose `generateMetadata` reads access-controlled data — labels, reports, anything Redis-backed, anything that should not be visible to an unauthenticated crawler.
@@ -43,7 +55,7 @@ Reports are NEVER public per AGENTS rules — never include report content in me
 export const revalidate = 0;
 ```
 
-Non-zero ISR caching means an editor toggling a label from public → private leaves the prior public tags served from the edge cache for the cache window. Privacy revocation must be honoured immediately. Per-request Redis cost is bounded by `withTimeout(5000)` and only fires for crawler unfurls — regular page loads use the client-side SWR provider, not this metadata path.
+Non-zero ISR caching means an editor toggling a label from public → private leaves the prior public tags served from the edge cache for the cache window. Privacy revocation must be honoured immediately. Per-request Redis cost is bounded by `withTimeout(5000)`; the route's normal client-side label reads remain in the SWR provider.
 
 ## 3. `withTimeout` every Redis call
 
@@ -55,7 +67,10 @@ const label = await withTimeout(
 ).catch(() => null);
 ```
 
-Without a per-call timeout, a hung Upstash REST endpoint blocks `generateMetadata` until Vercel's function timeout (300s) fires. That stalls every crawler unfurl and shared-link preview. The Upstash SDK doesn't expose a per-call signal — wrap each promise in `Promise.race` against a `setTimeout`.
+Without a per-call timeout, a hung Upstash REST endpoint can block
+`generateMetadata` until the platform function timeout. The Upstash SDK does
+not expose a per-call signal, so wrap each promise in `Promise.race` against a
+`setTimeout`.
 
 ## 4. Metadata helper lives in its own file (RSC leak guard scope)
 
@@ -63,21 +78,21 @@ The metadata-fetching body MUST live in a dedicated helper file:
 
 ```
 src/app/<route>/_lib/og-metadata.ts   ← exports buildOgMetadata(rawParam)
-src/app/<route>/layout.tsx            ← imports the helper, calls it from generateMetadata
+src/app/<route>/page.tsx              ← imports the helper, calls it from generateMetadata
 ```
 
-NOT inline in `layout.tsx` or `page.tsx`. Reason: the RSC label-leak guard test (`ui-dashboard/src/__tests__/rsc-label-leak-guard.test.ts`) allowlists files that legitimately read Redis. Allowlisting a whole layout means a future edit can quietly add an untrusted call inside the default render path and the guard silently passes. Helper-file scope keeps the guard tight — the layout itself never imports the Redis-backed module.
+NOT inline in `layout.tsx` or `page.tsx`. Reason: the RSC label-leak guard test (`ui-dashboard/src/__tests__/rsc-label-leak-guard.test.ts`) allowlists files that legitimately read Redis. Allowlisting a whole route entry means a future edit can quietly add an untrusted call inside the default render path and the guard silently passes. Helper-file scope keeps the guard tight — the page itself never imports the Redis-backed module.
 
 ## 5. Run the leak guard locally
 
 ```bash
-pnpm --filter ui-dashboard test src/__tests__/rsc-label-leak-guard.test.ts
+pnpm --filter @mento-protocol/ui-dashboard test src/__tests__/rsc-label-leak-guard.test.ts
 ```
 
 Confirm:
 
 - The new helper file is the ONLY addition to the allowlist
-- The layout/page itself is NOT in the allowlist
+- The route page/layout itself is NOT in the allowlist
 - The detector self-tests still pass (alias / relative / dynamic / submodule import shapes all detected)
 
 ## 6. Decline UI / "fail closed"

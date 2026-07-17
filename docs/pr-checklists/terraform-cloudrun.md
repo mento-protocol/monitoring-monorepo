@@ -1,3 +1,15 @@
+---
+title: Terraform and Cloud Run Checklist
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-17
+doc_type: checklist
+scope: terraform/infra
+review_interval_days: 90
+garden_lane: pr-checklists-process
+---
+
 # Terraform + Cloud Run checklist
 
 Use this checklist for any change to `terraform/` or to a deploy script that talks to GCP. Infra mistakes can wedge the apply, briefly drop public access, or block first-bootstrap of a new environment — all of which surface days later when nobody remembers the PR.
@@ -25,7 +37,10 @@ For every `google_cloud_run_v2_service`:
 - [ ] Probe paths use `/health`, NOT `/healthz`. Cloud Run v2 reserves `/healthz` at the frontend, so external `/healthz` returns a Google-branded 404
 - [ ] Memory ≥ `512Mi` if `cpu_idle = false` (always-allocated CPU floor)
 - [ ] `lifecycle.ignore_changes` covers `template[0].containers[0].image` and provider-visible Cloud Run API bookkeeping drift (`client`, `client_version`, `scaling[0].manual_instance_count`, `scaling[0].min_instance_count`, `template[0].revision`) when rollouts happen out-of-band via `gcloud run services update` (otherwise `terraform apply` reverts the image or re-applies cosmetic deploy metadata). Do not ignore the whole service-level `scaling` block, because `scaling_mode` is real runtime state. If a PR intentionally changes Terraform-owned template shape (`env`, probes, resources, or template scaling), re-audit/remove any `template[0].revision` ignore entry for that PR so Cloud Run can mint a fresh revision instead of pinning the old live revision.
-- [ ] Default/bootstrap `image` MUST respond to the configured probe path. `gcr.io/cloudrun/hello:latest` does NOT serve `/health` — using it as a default fails first-bootstrap because the service never becomes healthy
+- [ ] Default/bootstrap `image` MUST be pinned and respond to the configured
+      probe path. The current digest-pinned `gcr.io/cloudrun/hello` image uses a
+      catch-all handler and therefore serves `/health`; re-verify this contract
+      before replacing it
 - [ ] `depends_on = [google_project_service.run]` so `run.googleapis.com` is enabled before service creation
 
 ## 3. Cloud Run revision suffix (`--revision-suffix`)
@@ -37,8 +52,9 @@ Cloud Run revision names follow RFC 1035: must start with a lowercase letter `[a
 
 Current call sites to verify any new deploy path against:
 
-- `.github/workflows/metrics-bridge.yml:106`
-- `scripts/deploy-bridge.sh:113`
+- the `gcloud run services update` step in
+  `.github/workflows/metrics-bridge.yml`
+- the matching rollout in `scripts/deploy-bridge.sh`
 
 ## 4. Cloud Build source context
 
@@ -104,7 +120,9 @@ New GCP project, Cloud Function, or versioned-bucket stacks ship WITH retention 
 - PR #197 — bootstrap IAM only gated API enablement, not the project-level grants the impersonated SA needed
 - PR #198 — Cloud Run rejected `256Mi` because `cpu_idle = false` requires `≥512Mi`
 - PR #200 — Workload Identity Federation deploy failed at `getAccessToken` because deployer SA lacked `roles/iam.serviceAccountTokenCreator` on the runtime SA
-- PR #201 — removing `count` without `moved` blocks would have planned destroy on a `deletion_protection = true` service; default `gcr.io/cloudrun/hello:latest` would have failed `/health` probes; revision suffixes derived from raw SHA can start with a digit and fail the deploy
+- PR #201 — removing `count` without `moved` blocks would have planned destroy
+  on a `deletion_protection = true` service; the bootstrap image/probe contract
+  and revision suffix rules needed explicit verification
 - PR #835 — governance-watchdog's auto-created `gcf-artifacts` repo had accumulated 64 build images (~1.9 GB) with no retention; the first lifecycle attempt used `num_newer_versions`, which never fires for hash-named source zips — replaced with age-based expiry in review
 - PR #995 — metrics-bridge Cloud Build failed because root
   `pnpm.patchedDependencies` referenced `patches/@lhci__utils@0.15.1.patch`,

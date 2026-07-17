@@ -1,3 +1,15 @@
+---
+title: Keyboard Accessibility on Controlled Widgets Checklist
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-17
+doc_type: checklist
+scope: ui-dashboard
+review_interval_days: 90
+garden_lane: pr-checklists-process
+---
+
 # Keyboard a11y on controlled widgets PR Checklist
 
 Use this checklist for any PR that adds or changes keyboard handling on a controlled widget — `role="radiogroup"`, `role="tablist"`, `role="listbox"`, `role="menu"` — in `ui-dashboard/`.
@@ -12,36 +24,33 @@ The naive implementation — tying `tabIndex={0}` to a `selected` / `active` pro
 
 ## 1. Roving `tabIndex` follows focus, not the selected prop
 
-For every option in the group, derive `tabIndex` from a local `focusedIndex` state, NOT from the controlled prop:
+Use the shared `useRovingTabIndex` helper. It keeps the single tab stop on the
+locally focused item while treating the controlled prop as the active item:
 
 ```tsx
-const groupRef = useRef<HTMLDivElement>(null);
 const activeIndex = /* derive from selected prop */;
-const [focusedIndex, setFocusedIndex] = useState(activeIndex);
+const { groupRef, getItemProps, handleKeyDown } = useRovingTabIndex({
+  activeIndex,
+  itemCount: options.length,
+  activation: "manual", // or "automatic" for a radio group
+  arrowKeys: "horizontal",
+});
 
-// Re-sync to the active prop on external changes (e.g. browser back-button)
-// when focus is NOT in the group. Detected via a ref during render so we
-// don't trip `@eslint-react/hooks-extra/no-direct-set-state-in-use-effect`.
-const lastActiveIndexRef = useRef(activeIndex);
-if (lastActiveIndexRef.current !== activeIndex) {
-  lastActiveIndexRef.current = activeIndex;
-  if (!groupRef.current?.contains(document.activeElement)) {
-    setFocusedIndex(activeIndex);
-  }
-}
-
-// In each option:
+const rovingProps = getItemProps(i);
 <button
-  tabIndex={i === focusedIndex ? 0 : -1}
-  onFocus={() => setFocusedIndex(i)}
+  ref={rovingProps.ref}
+  tabIndex={rovingProps.tabIndex}
+  onFocus={rovingProps.onFocus}
   onClick={...}
 >
 ```
 
-- [ ] `tabIndex` derived from local `focusedIndex` state, NOT from the `selected` / `active` prop.
-- [ ] `onFocus` on each option updates `focusedIndex` synchronously.
-- [ ] External prop changes (e.g. browser back-button) re-sync `focusedIndex` only when focus is outside the group.
-- [ ] Re-sync is detected via a ref during render with `setState` inside the `if`, NOT via `useEffect` (that pattern trips the lint rule for legitimate prop-derived state).
+- [ ] The group uses `ui-dashboard/src/lib/use-roving-tab-index.ts` instead of
+      reimplementing keyboard/focus state.
+- [ ] Every option spreads the helper's `ref`, `tabIndex`, and `onFocus`
+      contract.
+- [ ] External prop changes (for example browser back) re-sync only when focus
+      is outside the group; the shared helper owns this behavior.
 
 **Why this rule:** under URL-backed callers (e.g. a filter that calls `router.replace` in `onChange`), the `selected` prop lags one render cycle behind keyboard activity. If `tabIndex={0}` is tied to the stale prop, the user can `Tab` from the focused option BACK to the stale tab stop instead of leaving the group. Codex flagged this on PR #350 round 3 (BridgeStatusFilter + PoolTablist). Manual activation patterns make the divergence permanent — focus can sit on a non-selected option indefinitely.
 
@@ -96,24 +105,13 @@ onChange(newValue);
 
 ---
 
-## 4. Test the orchestration, not just the helper
-
-If the widget composes multiple state phases (loading, supplemented, errored), the helper-level tests on the merge function are NOT enough. Add a hook-level interaction test that mocks each query phase and asserts:
-
-- [ ] Hero data renders with conservative totals while gated/supplemental queries are still loading.
-- [ ] Banners or degraded-state UI clears once supplemental queries resolve.
-- [ ] Side-query errors degrade only the side feature, not the primary.
-- [ ] Gated queries do NOT fire when the gate condition is false.
-
-**Why:** PR #352 cursor finding — `mergeHeroSnapshot` was unit-tested in isolation, but the cross-query state machine in `useHeroRollup` (first-pass merge → gate decision → second-pass merge with supplemental data) had no coverage. See `ui-dashboard/src/app/volume/_lib/__tests__/use-hero-rollup.test.tsx` for the established hook-test pattern (jsdom + `react-dom/client` + `act` + a `Probe` component, mock `@/lib/graphql`'s `useGQL` per query string).
-
----
-
-## 5. Common gotchas
+## 4. Common gotchas
 
 ### `@eslint-react/hooks-extra/no-direct-set-state-in-use-effect`
 
-The render-time prop-sync pattern from rule 1 avoids this lint by detecting prop change via a ref:
+The shared helper performs render-time prop sync, which avoids this lint rule.
+If a genuinely different widget cannot use the helper, use the same guarded
+pattern:
 
 ```tsx
 const lastSeenRef = useRef(prop);
@@ -153,5 +151,6 @@ When testing a tablist in isolation, render a stub `<div role="tabpanel" id="pan
 
 - `ui-dashboard/src/components/bridge-status-filter.tsx` — radiogroup reference impl (selection follows focus, no equality guard).
 - `ui-dashboard/src/app/pool/[poolId]/_components/pool-tablist.tsx` — tablist reference impl (manual activation).
+- `ui-dashboard/src/lib/use-roving-tab-index.ts` — shared focus and keyboard helper.
 - `ui-dashboard/src/__tests__/a11y/controls.a11y.test.tsx` — keyboard contract tests, including the roving-tabindex assertions and the tabpanel-stub pattern.
 - WAI-ARIA APG: [Tabs](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/), [Radio](https://www.w3.org/WAI/ARIA/apg/patterns/radio/).

@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: indexer-envio
 date: 2026-03
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0014 — Precompute snapshot/rollup entities; never rely on Hasura `_aggregate`

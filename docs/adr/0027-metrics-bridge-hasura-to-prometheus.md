@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: metrics-bridge
 date: 2026-04
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0027 — A Hasura→Prometheus bridge exists so v3 DB data can drive Grafana alerts

@@ -4,6 +4,10 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-07-05
+doc_type: runbook
+scope: repo-wide
+review_interval_days: 90
+garden_lane: operator-runbooks
 ---
 
 # Spoken Attention Nudge

@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: repo-wide
 date: 2026-03
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0003 — Hasura auto-generated GraphQL over Postgres is the read API

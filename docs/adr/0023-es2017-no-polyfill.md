@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: ui-dashboard
 date: 2026-05
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0023 — Ship ES2017 with no polyfill; ban immutable-array methods

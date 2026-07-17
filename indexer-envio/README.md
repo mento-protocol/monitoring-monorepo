@@ -1,17 +1,22 @@
+<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
+
 # Mento v3 Envio HyperIndex Indexer
 
 Multichain Envio HyperIndex indexer for Mento v3 — Ethereum reserve-yield (1),
 Celo Mainnet (42220), and Monad Mainnet (143). Tracks FPMM pool activity,
-oracle health, trading limits, rebalancer liveness, and event-only
-sUSDS/stETH reserve-yield accounting in the shared production indexer. The
-historical sUSDS `onBlock` heartbeat is intentionally excluded from the hosted
-path.
+oracle health, trading limits, rebalancer liveness, event-driven sUSDS reserve
+yield, and stETH reserve yield with a sub-daily wallet balance sampler that
+writes daily snapshots. The historical sUSDS `onBlock` heartbeat is
+intentionally excluded from the hosted path.
 
 ## What It Does
 
 Listens to on-chain events from Mento v3 contracts and writes structured entities to Postgres, exposed via Hasura GraphQL.
 
-### Events Indexed
+### Selected Events Indexed
+
+The production config is the source of truth for the complete contract and
+event list; the table highlights the main monitoring surfaces.
 
 | Contract              | Events                                                                                                                                                                                                                   |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -20,7 +25,7 @@ Listens to on-chain events from Mento v3 contracts and writes structured entitie
 | FPMM (pool)           | `Swap`, `Mint`, `Burn`, `Transfer`, `UpdateReserves`, `Rebalanced`, `TradingLimitConfigured`, `LiquidityStrategyUpdated`, `LPFeeUpdated`, `ProtocolFeeUpdated`, `RebalanceIncentiveUpdated`, `RebalanceThresholdUpdated` |
 | VirtualPool           | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`                                                                                                                                                                   |
 | VirtualPoolFactory    | `VirtualPoolDeployed`, `PoolDeprecated`                                                                                                                                                                                  |
-| SortedOracles         | `OracleReported`, `MedianUpdated`, `ReportExpirySet`, `TokenReportExpirySet`                                                                                                                                             |
+| SortedOracles         | `OracleAdded`, `OracleRemoved`, `OracleReported`, `MedianUpdated`, `ReportExpirySet`, `TokenReportExpirySet`                                                                                                             |
 | BiPoolManager         | `ExchangeCreated`, `ExchangeDestroyed`, `BucketsUpdated`, `SpreadUpdated`                                                                                                                                                |
 | OpenLiquidityStrategy | `PoolAdded`, `PoolRemoved`, `LiquidityMoved`, `RebalanceCooldownSet`                                                                                                                                                     |
 | ERC20FeeToken         | `Transfer` (dynamically registered from FPMMDeployed events)                                                                                                                                                             |
@@ -32,21 +37,21 @@ Listens to on-chain events from Mento v3 contracts and writes structured entitie
 
 ### Entities Written
 
-| Entity group            | Description                                                                                                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `TradingLimit`                                                                                                                                                |
-| Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                                                          |
-| Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                                                              |
-| Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                                                               |
-| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                                                                |
-| Broker aggregators      | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerVolumeWindowSnapshot`                                                                                                                    |
-| BiPoolManager           | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                                                    |
-| VirtualPools            | `VirtualPoolLifecycle`                                                                                                                                                                                              |
-| Open Liquidity Strategy | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                                                                 |
-| Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                                                                |
-| Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending`                                     |
-| Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                                                                 |
-| Reserve yield           | Event-only Ethereum handlers in the shared config: `SusdsYieldMovement`, `SusdsCostBasisLot`, `SusdsPosition`, `SusdsYieldSummary`, `StethYieldMovement`, `StethCostBasisLot`, `StethPosition`, `StethYieldSummary` |
+| Entity group            | Description                                                                                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `TradingLimit`                                                                                                            |
+| Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                      |
+| Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                          |
+| Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                           |
+| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                            |
+| Broker aggregators      | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerVolumeWindowSnapshot`                                                                                |
+| BiPoolManager           | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                |
+| VirtualPools            | `VirtualPoolLifecycle`                                                                                                                                                          |
+| Open Liquidity Strategy | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                             |
+| Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                            |
+| Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending` |
+| Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                             |
+| Reserve yield           | Ethereum sUSDS/stETH movement, cost-basis, position, summary, and daily-snapshot entities; stETH also records `StethWalletLaunchBaseline` for the balance sampler               |
 
 ### Pool ID Format
 
@@ -242,6 +247,6 @@ See [`STATUS.md`](./STATUS.md) for the static endpoint and deployment reference.
 | `src/EventHandlers.ts`              | Event → entity mapping                                  |
 | `src/helpers.ts`                    | `makePoolId`, `poolIdToAddress` utilities               |
 | `src/rpc.ts` + `src/rpc/`           | RPC read helpers (per-chain clients, effects, fallback) |
-| `config.multichain.mainnet.yaml`    | Production config (Celo + Monad)                        |
+| `config.multichain.mainnet.yaml`    | Production config (Ethereum + Celo + Monad)             |
 | `config/deployment-namespaces.json` | Vendored namespace map for hosted builds                |
 | `abis/`                             | Vendored contract ABI subsets                           |

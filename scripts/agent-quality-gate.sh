@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -640,6 +640,9 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/version-skew-check.test.mjs" "$reason"
   add_command "node scripts/override-prune-report.test.mjs" "$reason"
   add_command "node scripts/check-adr-reminder.test.mjs" "$reason"
+  add_command "node scripts/docs-index.test.mjs" "$reason"
+  add_command "node scripts/docs-audit.test.mjs" "$reason"
+  add_command "node scripts/agent-context-budget.test.mjs" "$reason"
 }
 
 # Advisory ADR reminder, fed the gate's own base/head + changed-path set so the
@@ -923,6 +926,21 @@ compact_turbo_quality_commands() {
 }
 
 while IFS= read -r path; do
+  case "$path" in
+    *.md)
+      add_surface "docs"
+      add_command "pnpm docs:index --check" "tracked documentation changed"
+      ;;
+  esac
+  case "$path" in
+    README.md|*/README.md)
+      add_command "pnpm agent:context-check" "README metadata may enroll canonical context"
+      ;;
+    AGENTS.md|*/AGENTS.md|.codex/config.toml)
+      add_surface "agent-context"
+      add_command "pnpm agent:context-budget" "agent instruction budget input changed"
+      ;;
+  esac
   case "$path" in
     package.json)
       root_package_json_class="$(get_root_package_json_class)"
@@ -1475,6 +1493,20 @@ while IFS= read -r path; do
           add_command "pnpm agent:context-check" "agent context checker changed"
           add_command "node scripts/check-agent-context.test.mjs" "agent context checker changed"
           ;;
+        scripts/docs-index.mjs|scripts/docs-index-helpers.mjs|scripts/docs-index.test.mjs)
+          add_command "pnpm docs:index:test" "documentation catalog helper changed"
+          add_command "pnpm docs:index --check" "documentation catalog helper changed"
+          add_command "pnpm agent:context-check" "documentation catalog metadata contract changed"
+          ;;
+        scripts/docs-audit.mjs|scripts/docs-audit-helpers.mjs|scripts/docs-audit.test.mjs)
+          add_command "pnpm docs:audit:test" "documentation audit planner changed"
+          add_command "pnpm docs:audit --dry-run" "documentation audit planner changed"
+          add_command "pnpm docs:index --check" "documentation audit planner consumes the catalog"
+          ;;
+        scripts/agent-context-budget.mjs|scripts/agent-context-budget.test.mjs)
+          add_command "pnpm agent:context-budget:test" "agent context budget helper changed"
+          add_command "pnpm agent:context-budget" "agent context budget helper changed"
+          ;;
         scripts/lighthouse-config.test.mjs)
           add_command "node scripts/lighthouse-config.test.mjs" "Lighthouse config assertion suite changed"
           ;;
@@ -1695,18 +1727,35 @@ hash_file() {
 write_command_plan() {
   local output_file="$1"
   local entry
+  local command
+  local reason
   : > "$output_file"
   for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}"; do
-    printf 'preflight\t%s\t%s\n' "${entry%%|*}" "${entry#*|}" >> "$output_file"
+    command="${entry%%|*}"
+    reason="${entry#*|}"
+    command="${command//"$changed_paths_file"/__CHANGED_PATHS_FILE__}"
+    printf 'preflight\t%s\t%s\n' "$command" "$reason" >> "$output_file"
   done
   for entry in "${codegen_commands[@]+"${codegen_commands[@]}"}"; do
-    printf 'codegen\t%s\t%s\n' "${entry%%|*}" "${entry#*|}" >> "$output_file"
+    command="${entry%%|*}"
+    reason="${entry#*|}"
+    command="${command//"$changed_paths_file"/__CHANGED_PATHS_FILE__}"
+    printf 'codegen\t%s\t%s\n' "$command" "$reason" >> "$output_file"
   done
   for entry in "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"; do
-    printf 'post-codegen\t%s\t%s\n' "${entry%%|*}" "${entry#*|}" >> "$output_file"
+    command="${entry%%|*}"
+    reason="${entry#*|}"
+    command="${command//"$changed_paths_file"/__CHANGED_PATHS_FILE__}"
+    printf 'post-codegen\t%s\t%s\n' "$command" "$reason" >> "$output_file"
   done
   for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
-    printf 'quality\t%s\t%s\n' "${entry%%|*}" "${entry#*|}" >> "$output_file"
+    command="${entry%%|*}"
+    reason="${entry#*|}"
+    # Some mapped commands consume the gate's randomized scratch path. The
+    # execution path may vary between identical runs, but it is not part of
+    # the validation plan and must not invalidate a fresh success stamp.
+    command="${command//"$changed_paths_file"/__CHANGED_PATHS_FILE__}"
+    printf 'quality\t%s\t%s\n' "$command" "$reason" >> "$output_file"
   done
 }
 

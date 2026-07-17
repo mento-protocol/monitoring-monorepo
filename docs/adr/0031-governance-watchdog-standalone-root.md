@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: governance-watchdog
 date: 2026-06
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0031 — governance-watchdog stays a standalone source root in its own GCP project

@@ -20,6 +20,10 @@ const repoRoot = resolve(dirname(scriptPath), "..");
 
 test("scopeForPath excludes generated files, non-Aegis tests, and dashboard types", () => {
   assert.equal(scopeForPath("indexer-envio/.envio/types.d.ts"), null);
+  assert.equal(
+    scopeForPath("ui-dashboard/src/lib/__generated__/graphql.ts"),
+    null,
+  );
   assert.equal(scopeForPath("ui-dashboard/src/lib/types.ts"), null);
   assert.equal(
     scopeForPath("ui-dashboard/src/lib/__tests__/foo.test.ts"),

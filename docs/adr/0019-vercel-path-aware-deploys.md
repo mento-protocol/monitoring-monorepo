@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: ui-dashboard
 date: 2026-03
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0019 — Dashboard deploys on Vercel Git integration with a path-aware skip script

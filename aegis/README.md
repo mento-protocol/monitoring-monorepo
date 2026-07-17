@@ -1,3 +1,5 @@
+<!-- agent-context: title="Aegis" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=aegis review_interval_days=90 garden_lane=package-readmes-reference -->
+
 # Aegis
 
 > The modern concept of doing something "under someone's aegis" means doing something under the protection of a powerful, knowledgeable, or benevolent source. The word Aegis is identified with protection by a strong force rooted in Greek mythology and adopted by the Romans.
@@ -98,8 +100,9 @@ versions in a fresh project, then follow the instructions in
 
 ### Deploying Grafana Resources
 
-Aegis Grafana dashboards and Aegis service-health alerts are managed in
-`aegis/terraform`. Preview locally with:
+The Aegis Grafana dashboard and folder are managed in `aegis/terraform`.
+Aegis service-health rules are managed with global routing in `alerts/rules`.
+Preview the Aegis stack locally with:
 
 ```sh
 pnpm aegis:tf:plan
@@ -107,7 +110,7 @@ pnpm aegis:tf:plan
 
 Apply runs in CI on merge to main via
 [`.github/workflows/aegis-terraform.yml`](../.github/workflows/aegis-terraform.yml),
-gated by the `production` GitHub Environment required-reviewer rule.
+gated by the `production-infra` GitHub Environment required-reviewer rule.
 
 Protocol alert rules and global Grafana notification routing live in
 `alerts/rules` (`pnpm alerts:rules:plan`). That stack also owns the Aegis
@@ -271,14 +274,14 @@ SortedOracles_isOldestReportExpired{rateFeed="CELOBRL",rateFeedValue="0xe8537a3d
 
 ## Terraform for Grafana
 
-We use Terraform to deploy the Aegis Grafana dashboard and Aegis service-health
-alerts. Protocol alert rules and global notification routing are managed in
-`alerts/rules`. The end-to-end Aegis flow is as follows:
+We use `aegis/terraform` to deploy the Aegis Grafana dashboard and folder.
+Service-health and protocol alert rules plus global notification routing are
+managed in `alerts/rules`. The end-to-end Aegis flow is as follows:
 
 1. The Aegis service executes view calls and forwards the results to Prometheus
 1. Grafana ingests Prometheus metrics and allow us to visualize and react to them
-1. Terraform deploys our metric visualizations into Grafana dashboards
-1. Terraform also deploys the Aegis service-health alert rules based on these metrics
+1. `aegis/terraform` deploys our metric visualizations into the Grafana dashboard
+1. `alerts/rules` deploys the Aegis service-health rules based on these metrics
 
 ### Set up Terraform
 
@@ -303,7 +306,7 @@ alerts. Protocol alert rules and global notification routing are managed in
 
    ```sh
    # Create the file
-   touch terraform/terraform.tfvars
+   touch terraform.tfvars
    ```
 
    ```hcl
@@ -311,7 +314,7 @@ alerts. Protocol alert rules and global notification routing are managed in
    # terraform.tfvars #
    ####################
 
-   # Grafana Cloud service account token for Aegis dashboards/service-health alerts.
+   # Grafana Cloud service account token for the Aegis dashboard and folder.
    grafana_service_account_token =
    ```
 
@@ -337,16 +340,15 @@ To update the dashboard, make the desired changes in [./terraform/grafana-dashbo
 
 ### Grafana Alerts
 
-Aegis owns only the Aegis service-health rule group (`service=aegis`) in this
-stack. Global contact points, Slack/Splunk routing, oracle-relayer
-rules, reserve-balance rules, trading-mode rules, and trading-limit rules live
-in `alerts/rules`.
+The Aegis stack owns the dashboard and its Grafana folder. The Aegis
+service-health rule group (`service=aegis`) lives with global contact points,
+Slack/Splunk routing, and the protocol rule groups in `alerts/rules`.
 
 To update Aegis service-health alert thresholds, edit
-[`terraform/aegis-service-alerts.tf`](./terraform/aegis-service-alerts.tf) and
-open a PR — CI plans and the production gate enforces review-before-apply.
-To update protocol alerts or global routing, edit `../alerts/rules` and run
-`pnpm alerts:rules:plan` (same auto-apply flow there).
+[`alerts/rules/rules-aegis-service.tf`](../alerts/rules/rules-aegis-service.tf).
+For those rules, other protocol alerts, or global routing, run
+`pnpm alerts:rules:plan`; CI plans the change and the production gate enforces
+review before apply.
 
 Grafana uses the following concepts for managing alerts:
 
@@ -391,9 +393,11 @@ The protocol alert groups below are owned by `alerts/rules`, not by Aegis:
 
 #### Terraform fails to delete Grafana Resources
 
-At times, we've seen Terraform throw 409s when trying to delete old Grafana Resources (to replace them with new ones).
-
-You have two choices when this happens:
-
-1. Nuke everything via `terraform destroy` and re-deploy everything from a clean slate via `terraform apply`
-2. OR try to manually delete the resources terraform is struggling with via the Grafana API. There is a little helper script that has some example API calls that you can use locally: [grafana-api-interactions.sh](./bin/grafana-api-interactions.sh)
+At times, Grafana returns 409 while Terraform is replacing a resource that is
+still referenced elsewhere. Do not destroy the stack or delete live resources
+ad hoc. Inspect the plan and Grafana references, prepare the smallest recovery
+change in a PR, and run `pnpm aegis:tf:plan`. Apply the reviewed recovery only
+through the `production-infra`-gated CI workflow. The read-only examples in
+[grafana-api-interactions.sh](./bin/grafana-api-interactions.sh) can help inspect
+Grafana state; mutating examples still require an explicitly approved recovery
+plan.

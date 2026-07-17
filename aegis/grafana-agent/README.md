@@ -1,3 +1,5 @@
+<!-- agent-context: title="Grafana Alloy" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=aegis/grafana-agent review_interval_days=90 garden_lane=operator-runbooks -->
+
 # Grafana Alloy
 
 ## Overview
@@ -26,7 +28,9 @@ Grafana Cloud BasicAuth credentials live in Secret Manager and are fetched at **
 - The container image filesystem in Artifact Registry
 - The Cloud Build VM disk (no `secretEnv` block; build doesn't read secrets)
 
-Rotation: `FORCE=1 pnpm aegis:agent:seed-secrets` writes new Secret Manager versions; the Alloy container picks them up at the next App Engine restart (forced by `pnpm aegis:agent:deploy` or an explicit `gcloud app services restart`).
+Rotation: `FORCE=1 pnpm aegis:agent:seed-secrets` writes new Secret Manager
+versions. Run `pnpm aegis:agent:deploy` to create a new App Engine version whose
+container fetches the rotated values at startup.
 
 > Prior versions rendered `agent.yaml` on the build VM via `template-agent.sh` (sed substitution) and shipped the plaintext file via `gcloud app deploy`. The rendered yaml then sat in the source-staging bucket AND inside the container image layer indefinitely — recoverable post-rotation by anyone with `storage.objects.get` on the staging bucket or `artifactregistry.reader` on the image. The runtime-fetch design above replaces that flow, and `config.alloy` keeps credentials out of the committed config by reading `sys.env(...)`.
 
@@ -47,7 +51,7 @@ Terraform (`terraform/aegis-bootstrap.tf` → `google_secret_manager_secret.graf
 - The Compute default SA (`<project-number>-compute@developer.gserviceaccount.com`) — kept for the legacy Cloud Build path and any future Compute-SA consumers.
 - The Cloud Build SA (`<project-number>@cloudbuild.gserviceaccount.com`) — historical; no longer required for this service but kept for other consumers.
 
-Terraform does NOT manage secret values (that would put Grafana Cloud credentials in TF state). Seed the first versions after `pnpm infra:apply`:
+Terraform does NOT manage secret values (that would put Grafana Cloud credentials in TF state). Seed the first versions after an approved platform Terraform apply has created the secret containers:
 
 ```sh
 GRAFANA_AGENT_ENDPOINT='https://...' \

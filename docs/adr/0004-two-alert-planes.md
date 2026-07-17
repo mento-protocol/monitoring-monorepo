@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: repo-wide
 date: 2026-04
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0004 — Two alert planes: Grafana metric thresholds and event-driven delivery

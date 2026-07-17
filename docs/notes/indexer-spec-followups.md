@@ -1,16 +1,21 @@
 ---
-title: Indexer SPEC §2 follow-up metrics (parked)
-status: parked
+title: Indexer SPEC §2 follow-up metrics (archived)
+status: archived
 owner: eng
-last_verified: 2026-05-29
+canonical: false
+last_verified: 2026-07-17
+doc_type: note
+scope: indexer-envio
+review_interval_days: 365
+garden_lane: notes-plans-archive
 ---
 
-# Indexer SPEC §2 follow-up metrics (parked)
+# Indexer SPEC §2 follow-up metrics (archived)
 
-Migrated off `BACKLOG.md` 2026-05-29. These are low-priority SPEC §2 aggregate
-metrics that no one has prioritized — parked here rather than filed as issues to
-avoid a stale `needs-grooming` pile. Promote any of these to a GitHub issue (with
-the agent-task form) when there is concrete demand.
+Migrated off `BACKLOG.md` 2026-05-29. These unprioritized SPEC §2 aggregate
+ideas are retained as non-canonical history rather than active work. Promote an
+item to a GitHub issue (with the agent-task form) only when there is concrete
+demand and the proposal has been reverified against the current schema.
 
 - **`turnoverCum` per pool** — cumulative `notionalCum / time-weighted-avg(tvlUsdM)`
   since T0. We track `notionalVolume0/1` but never compute time-weighted TVL;

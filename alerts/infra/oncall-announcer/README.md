@@ -1,3 +1,5 @@
+<!-- agent-context: title="On-call Announcer" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=alerts/infra/oncall-announcer review_interval_days=90 garden_lane=package-readmes-reference -->
+
 # On-call Announcer
 
 Cloud Function and Terraform module for announcing Splunk On-Call rotations to

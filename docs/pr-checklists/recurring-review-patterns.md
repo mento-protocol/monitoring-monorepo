@@ -4,6 +4,10 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-07-16
+doc_type: checklist
+scope: repo-wide
+review_interval_days: 90
+garden_lane: pr-checklists-process
 ---
 
 # Recurring PR Review Patterns

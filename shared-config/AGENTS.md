@@ -4,6 +4,10 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-07-08
+doc_type: agent-instructions
+scope: shared-config
+review_interval_days: 90
+garden_lane: agent-entry-points
 ---
 
 # AGENTS.md — Shared Config

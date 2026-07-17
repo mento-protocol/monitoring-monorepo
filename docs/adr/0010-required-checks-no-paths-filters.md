@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: ci/process
 date: 2026-04
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0010 — Required CI checks carry no `paths:` filters; only advisory jobs may

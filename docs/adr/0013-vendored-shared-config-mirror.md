@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-08
 scope: indexer-envio
 date: 2026-03
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0013 — The indexer vendors a mirror of `shared-config`, not a workspace link

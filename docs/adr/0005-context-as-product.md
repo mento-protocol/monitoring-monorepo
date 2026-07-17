@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: repo-wide
 date: 2026-07
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0005 — Context is product: canonical authority model with a metadata contract

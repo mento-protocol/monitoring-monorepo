@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: aegis
 date: 2026-05
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0026 — Aegis is a NestJS App Engine service polling view calls into Prometheus

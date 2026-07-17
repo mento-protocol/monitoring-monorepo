@@ -1,3 +1,5 @@
+<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
+
 # alerts/rules
 
 Grafana Cloud protocol alert rules, global routing, contact points, and message
@@ -21,14 +23,16 @@ Separate from `terraform/` (platform) and `aegis/terraform`: `gs://mento-terrafo
 
 ## Running
 
+From the repository root:
+
 ```bash
-cp terraform.tfvars.example terraform.tfvars
+cp alerts/rules/terraform.tfvars.example alerts/rules/terraform.tfvars
 # Paste the Slack bot token, Grafana SA token, and Splunk webhook into terraform.tfvars.
 
 pnpm alerts:rules:init
 pnpm alerts:rules:plan
 # Apply happens via CI on merge to main (.github/workflows/alerts-rules.yml).
-# The `production` GitHub Environment enforces required-reviewer approval before
+# The `production-infra` GitHub Environment enforces required-reviewer approval before
 # the apply job runs. Do not run `terraform -chdir=alerts/rules apply` locally
 # from a feature branch — it will fight CI on the next merge.
 ```
@@ -54,7 +58,13 @@ successful `view_call_query_duration_count` samples for `celoSepolia` and
 `no_data_state = "Alerting"` with a 5m grace, so a never-published series can
 fire immediately after apply.
 
-After `apply`, temporarily drop one threshold (e.g. set `params = [0.0]` on the Deviation Breach rule) and `terraform apply` again. Within ~2m, `#alerts-pools` should receive a fire, then a resolve after reverting the change. For deviation state transitions, the bridge emits a short-lived transition marker and the transition contact points intentionally do not send a second resolve message.
+After the gated apply, verify rule evaluation in Grafana and delivery to the
+expected Slack channel. A synthetic threshold test changes production alerting:
+obtain explicit approval and use a reviewed temporary PR plus a reviewed revert,
+each applied through the `production-infra` gate. Never run a local apply for
+the test. For deviation state transitions, the bridge emits a short-lived
+transition marker and the transition contact points intentionally do not send a
+second resolve message.
 
 ## Service label routing
 
