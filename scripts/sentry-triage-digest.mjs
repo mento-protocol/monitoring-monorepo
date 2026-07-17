@@ -193,13 +193,31 @@ export function parseVerdictComment(commentBody) {
   };
 }
 
-/** Latest verdict-marker comment on the issue. `gh issue view --json comments`
- * returns comments oldest-first, so the last match is the newest. */
+// Authorship fence (mirrors scripts/sentry-triage-project-core.mjs, where the
+// rationale lives): only comments the pipeline's own Actions bot posted may
+// supply the digest's rendered confidence/summary — this repo is public, so a
+// drive-by marker-bearing comment must not feed text into the Slack digest.
+// `gh issue view --json comments` (GraphQL) renders the bot author login as
+// "github-actions"; the REST shape is "github-actions[bot]" — accept both,
+// fail closed on missing/unknown authors.
+export const TRUSTED_COMMENT_AUTHORS = [
+  "github-actions",
+  "github-actions[bot]",
+];
+
+function isTrustedComment(comment) {
+  const login = comment?.author?.login ?? comment?.user?.login ?? "";
+  return TRUSTED_COMMENT_AUTHORS.includes(login);
+}
+
+/** Latest trusted verdict-marker comment on the issue. `gh issue view --json
+ * comments` returns comments oldest-first, so the last match is the newest. */
 export function findLatestVerdictComment(comments) {
   const marked = (comments ?? []).filter(
     (comment) =>
       typeof comment?.body === "string" &&
-      comment.body.startsWith(VERDICT_MARKER),
+      comment.body.startsWith(VERDICT_MARKER) &&
+      isTrustedComment(comment),
   );
   return marked.length ? marked[marked.length - 1].body : null;
 }

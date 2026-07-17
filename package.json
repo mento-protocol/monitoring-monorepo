@@ -41,6 +41,8 @@
     "sentry:ingest:test": "node scripts/sentry-triage-ingest.test.mjs",
     "sentry:digest": "node scripts/sentry-triage-digest.mjs",
     "sentry:digest:test": "node scripts/sentry-triage-digest.test.mjs",
+    "sentry:project": "node scripts/sentry-triage-project.mjs",
+    "sentry:project:test": "node scripts/sentry-triage-project.test.mjs",
     "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",

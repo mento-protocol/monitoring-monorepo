@@ -219,6 +219,23 @@ variable "sentry_triage_enabled" {
   }
 }
 
+variable "sentry_projection_token" {
+  description = <<-EOT
+    Fine-grained GitHub PAT for the Sentry triage VERDICT PROJECTION step
+    (ADR 0038): Issues Read+Write on EXACTLY the three owning repos
+    (frontend-monorepo, mento-analytics-api, minipay-dapp) and NOTHING else —
+    no contents, no pull-requests. Mirrors into the repo-level Actions secret
+    `SENTRY_PROJECTION_TOKEN`, which the projection step alone reads to file the
+    owning-repo issue. Leave empty until provisioned; the secret resource is
+    `count`-gated so `terraform apply` succeeds without it and the workflow
+    no-ops gracefully. See the runbook in docs/notes/sentry-triage-pipeline.md
+    for how to mint it.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ── Auth (Google OAuth / NextAuth) ─────────────────────────────────────────
 
 variable "auth_google_id" {

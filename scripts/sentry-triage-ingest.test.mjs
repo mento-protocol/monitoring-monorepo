@@ -21,6 +21,8 @@ import {
   normalizeRestIssues,
   parseArgs,
   parseLinkHeader,
+  PROJECTED_LABEL,
+  REOPEN_SHED_LABELS,
   resolveLookbackDays,
   resolveTokenGuard,
   runIngest,
@@ -839,7 +841,20 @@ await test("verdict label set is derived from the label definitions", () => {
   ]);
 });
 
-await test("reopen label edit re-queues triage and sheds stale verdicts", () => {
+await test("reopen shed set is every verdict label plus sentry:projected", () => {
+  // A reopened regression must not keep reading as verdicted OR projected —
+  // the old projection described the old occurrence (PR #1356 review).
+  assertDeepEqual(REOPEN_SHED_LABELS, [
+    "sentry:verdict-code-fix",
+    "sentry:verdict-config-fix",
+    "sentry:verdict-upstream",
+    "sentry:verdict-needs-human",
+    "sentry:projected",
+  ]);
+  assertEqual(PROJECTED_LABEL, "sentry:projected");
+});
+
+await test("reopen label edit re-queues triage and sheds stale verdict + projected labels", () => {
   const args = buildReopenLabelEditArgs(200, "owner/repo");
   assertDeepEqual(args, [
     "issue",
@@ -850,7 +865,7 @@ await test("reopen label edit re-queues triage and sheds stale verdicts", () => 
     "--add-label",
     "sentry:needs-triage",
     "--remove-label",
-    "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human",
+    "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human,sentry:projected",
   ]);
 });
 
