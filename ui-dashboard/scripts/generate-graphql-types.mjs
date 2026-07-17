@@ -512,7 +512,7 @@ function typeAlias(name, value) {
 function unionType(values) {
   if (values.length === 0) return "never";
   const oneLine = values.join(" | ");
-  if (values.length <= 3 && oneLine.length <= 56) return oneLine;
+  if (oneLine.length <= 56) return oneLine;
   return values.map((value) => `  | ${value}`).join("\n");
 }
 
