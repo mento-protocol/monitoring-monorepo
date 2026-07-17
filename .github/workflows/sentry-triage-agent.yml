@@ -302,3 +302,99 @@ jobs:
               echo "Issue #${QUEUE_ISSUE_NUMBER} verdict is needs-human; left open for human review."
               ;;
           esac
+  # ---------------------------------------------------------------------------
+  # digest: post ONE deterministic Slack digest per run — what was triaged,
+  # with what verdicts, with links — so verdict review needs zero GitHub
+  # polling (ADR 0036's failure mode is "unauditable automation going dark").
+  #
+  #   - if: always() + a non-zero select count. `always()` makes the digest
+  #     post even when some `triage` matrix jobs failed (partial visibility is
+  #     the point — the failed-triage bucket lists issues still labeled
+  #     sentry:needs-triage). The count gate keeps it SILENT on empty batches
+  #     and kill-switch no-ops (select emits count '0'/'' then), so a run where
+  #     nothing happened stays quiet.
+  #   - permissions: issues:read + contents:read ONLY — the digest reads issue
+  #     labels/comments and posts to Slack; it holds no write credential.
+  #   - This is a pure CONSUMER of the verdict contract: no LLM, no label
+  #     writes, no Sentry, no contract changes.
+  #   - A digest-job failure fails the whole run, which the main-failure
+  #     notifier (notify-slack-on-main-failure.yml, where this workflow is
+  #     registered) surfaces to #ci-failures — so a broken digest can't go dark.
+  # ---------------------------------------------------------------------------
+  digest:
+    needs: [select, triage]
+    if: ${{ always() && needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
+      # silently run new code. Bump via Dependabot (.github/dependabot.yml).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Build digest payload
+        env:
+          # Read-only: the digest job's GITHUB_TOKEN is issues:read + contents:read.
+          GH_TOKEN: ${{ github.token }}
+          # The exact batch this run selected (JSON int array from the select
+          # job). Passed via env — never interpolated into the shell command.
+          # No Slack token in this step: it only reads issues and emits JSON.
+          SENTRY_TRIAGE_ISSUES: ${{ needs.select.outputs.issues }}
+        run: |
+          set -euo pipefail
+          # The digest channel is DELIBERATELY hardcoded here (not a secret or
+          # repo variable): #engineering is the standing triage-review channel,
+          # and changing it is a one-line PR. The bot's chat:write.public scope
+          # lets it post to this public channel uninvited (same mechanism as
+          # notify-slack-on-main-failure.yml). The script prints ONLY the Slack
+          # payload JSON to stdout; diagnostics go to stderr.
+          # --repo: same source of truth as the select/triage jobs
+          # (GITHUB_REPOSITORY), so the digest reads the run's own repository
+          # instead of assuming the script's default (matters on forks/renames).
+          node scripts/sentry-triage-digest.mjs \
+            --channel '#engineering' \
+            --repo "${GITHUB_REPOSITORY}" \
+            > "${RUNNER_TEMP}/digest-payload.json"
+
+      - name: Post digest to #engineering
+        env:
+          # SLACK_BOT_TOKEN reaches ONLY this posting step's env — never the
+          # collector step, never echoed, never placed in a URL. Reuses the
+          # existing Terraform-managed bot token (no new secret).
+          SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Defense in depth: the job is already gated on a non-zero batch, but
+          # if the collector produced no payload (empty-batch guard), there is
+          # nothing to post — exit cleanly without touching Slack.
+          if [ ! -s "${RUNNER_TEMP}/digest-payload.json" ]; then
+            echo "::notice::No digest payload produced; nothing to post."
+            exit 0
+          fi
+
+          # POST the pre-built payload verbatim (--data @file); the summary text
+          # was already Slack-escaped by the collector. Mirrors the main-failure
+          # notifier's curl + ok-check pattern.
+          RESPONSE=$(curl -fsS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            --data @"${RUNNER_TEMP}/digest-payload.json")
+
+          # Slack returns 200 OK with {"ok": false, "error": "..."} on logical
+          # errors; fail loudly so a silently-broken digest turns the run red
+          # (the main-failure notifier then fires).
+          if [ "$(echo "$RESPONSE" | jq -r '.ok')" != "true" ]; then
+            echo "::error::Slack digest post failed: $(echo "$RESPONSE" | jq -r '.error // "unknown"')"
+            echo "Full response: $RESPONSE"
+            exit 1
+          fi
+          echo "Posted Sentry triage digest to #engineering."

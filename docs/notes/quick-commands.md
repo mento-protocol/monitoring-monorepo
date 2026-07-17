@@ -82,9 +82,11 @@ pnpm issue:release --issue 901                 # Release a mistaken claim back t
 pnpm issue:board sync                          # Re-project labels and close merged in-pr board items
 pnpm issue:board:test                          # Offline tests for the issue-board helper
 
-# Sentry triage pipeline (Stage A — deterministic ingest, ADR 0036)
+# Sentry triage pipeline (Stage A — deterministic ingest; Stage B — read-only triage + digest; ADR 0036)
 pnpm sentry:ingest --dry-run                   # Print queue-issue mutations without applying (needs local SENTRY_TRIAGE_TOKEN)
 pnpm sentry:ingest:test                        # Offline tests for the ingest helper (docs/notes/sentry-triage-pipeline.md)
+pnpm sentry:digest:test                        # Offline tests for the per-run Slack verdict-digest collector
+SENTRY_TRIAGE_ISSUES='[123]' pnpm sentry:digest --channel '#engineering'  # Print the Slack digest payload for a batch (needs gh auth; does not post)
 
 # Public config package
 pnpm --filter @mento-protocol/config build     # Build the public protocol metadata package
