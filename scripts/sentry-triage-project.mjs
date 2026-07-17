@@ -43,561 +43,30 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
-export const LOCAL_REPO = DEFAULT_REPO;
+// All pure logic — constants, neutralization, parsing, verdict selection,
+// allowlist validation, and body/title rendering — lives in the core module
+// (repo splitting convention, mirroring pr-feedback-state-core.mjs). Re-export
+// it so tests and consumers keep a single import surface.
+export * from "./sentry-triage-project-core.mjs";
 
-export const VERDICT_MARKER = "<!-- sentry-triage-verdict:v1 -->";
-// Stage A posts this fixed prefix when a closed stub regresses; the regression
-// fence below rejects a verdict comment that is not strictly newer than it.
-export const REGRESSION_PREFIX = "Regressed in Sentry (last seen ";
-
-export const PROJECTED_LABEL = "sentry:projected";
-
-// Only ACTIONABLE verdicts project. `needs-human` / `upstream-transient` stay
-// in the queue (verdict contract).
-export const PROJECTABLE_VERDICTS = ["code-fix", "config-fix"];
-
-// The FIXED projection allowlist — the three external owning repos. Anything
-// else (including this repo, whose errors are fixed here, not projected) is a
-// no-op. This list is the whole trust boundary for the cross-repo write.
-export const ALLOWED_OWNING_REPOS = [
-  "mento-protocol/frontend-monorepo",
-  "mento-protocol/mento-analytics-api",
-  "mento-protocol/minipay-dapp",
-];
-
-export const VALID_VERDICTS = [
-  "code-fix",
-  "config-fix",
-  "upstream-transient",
-  "needs-human",
-];
-export const VALID_CONFIDENCE = ["high", "medium", "low"];
-
-// Verdict VALUE -> verdict LABEL (label names are owned by the Stage A ingest
-// bootstrap). Note the deliberate asymmetry the verdict contract calls out:
-// value `upstream-transient` maps to label `sentry:verdict-upstream`.
-export const VERDICT_TO_LABEL = {
-  "code-fix": "sentry:verdict-code-fix",
-  "config-fix": "sentry:verdict-config-fix",
-  "upstream-transient": "sentry:verdict-upstream",
-  "needs-human": "sentry:verdict-needs-human",
-};
-
-// Sentry SHORT-IDs look like `GOVERNANCE-MENTO-ORG-51`. Validate the shape
-// before it goes into an HTML-comment marker or a search query — it is
-// Sentry-assigned but still transits an untrusted channel.
-const SHORT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
-const FOOTER =
-  "Filed by the Mento Sentry triage pipeline (ADR 0036 / ADR 0038 — verdict " +
-  "projection). Machine-filed from a triage verdict; advisory only, so confirm " +
-  "the root cause in Sentry before acting. The HTML comment marker at the top " +
-  "keys automatic de-duplication — please keep it.";
-
-// ---------------------------------------------------------------------------
-// Untrusted-text neutralization (mirrors the ingest's helpers).
-// ---------------------------------------------------------------------------
-
-/** Strip control chars/newlines and collapse whitespace to a single line. */
-export function sanitizeFreeText(text) {
-  return (
-    String(text ?? "")
-      // eslint-disable-next-line no-control-regex -- stripping control chars from untrusted agent text is the whole point here
-      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-      .replace(/[\r\n\t]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-}
-
-/** Replace every backtick with a look-alike so an attacker-controlled value can
- * never close a markdown code fence / inline-code span early. */
-export function defangBackticks(text) {
-  return String(text ?? "").replace(/`/g, "ˋ");
-}
-
-/** Insert a zero-width space after every `@` so `@user` / `@org/team` in
- * agent-reachable text can never become a live GitHub mention once embedded in
- * an issue body. Visual fidelity is preserved for review. */
-export function defangMentions(text) {
-  return String(text ?? "").replace(/@/g, "@\u200B");
-}
-
-/** Break every HTML-comment opener (`<!--` -> `<!` + zero-width space + `--`)
- * so agent text can never embed a marker-shaped sequence \u2014 e.g. a spoofed
- * `<!-- sentry-projection:v1 OTHER-ID -->` inside a rendered verdict field \u2014
- * into a projected issue body. The idempotency back-link marker must only
- * ever exist where buildProjectedBody itself emits it (the first body line);
- * this is defense in depth behind the first-line anchoring of
- * bodyBacklinksShortId. */
-export function defangHtmlComments(text) {
-  return String(text ?? "").replace(/<!--/g, "<!\u200B--");
-}
-
-/** Single-line neutralization for titles and inline fields. */
-export function neutralizeUntrusted(text) {
-  return defangMentions(
-    defangBackticks(defangHtmlComments(sanitizeFreeText(text))),
-  );
-}
-
-/** Multi-line neutralization for block fields (root cause / proposed action):
- * strip control chars but KEEP newlines, defang backticks + mentions + HTML
- * comments, and hard bound both line count and length. Rendered inside a
- * fenced block by the caller so any surviving markdown is inert. */
-export function neutralizeBlock(text, { maxLen = 600, maxLines = 8 } = {}) {
-  let s = String(text ?? "")
-    // eslint-disable-next-line no-control-regex -- keep \n (0x0a) + \t (0x09); strip the rest
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-    .replace(/\r/g, "");
-  s = defangMentions(defangBackticks(defangHtmlComments(s)));
-  s = s.split("\n").slice(0, maxLines).join("\n");
-  if (s.length > maxLen) s = `${s.slice(0, maxLen).trimEnd()}…`;
-  return s.trim();
-}
-
-export function truncate(text, maxLen) {
-  const clean = String(text ?? "");
-  if (clean.length <= maxLen) return clean;
-  return `${clean.slice(0, maxLen).trimEnd()}…`;
-}
-
-function stripYamlQuotes(value) {
-  const v = String(value ?? "").trim();
-  if (
-    v.length >= 2 &&
-    ((v.startsWith('"') && v.endsWith('"')) ||
-      (v.startsWith("'") && v.endsWith("'")))
-  ) {
-    return v.slice(1, -1);
-  }
-  return v;
-}
-
-// ---------------------------------------------------------------------------
-// Pure parsing: queue title, permalink, verdict comment (richer than digest).
-// ---------------------------------------------------------------------------
-
-// Queue contract v2 title: `[sentry] <SHORT-ID> (<project>, <level>)`.
-const QUEUE_TITLE_PATTERN = /^\[sentry\]\s+(\S+)\s+\(/;
-
-export function parseShortId(title) {
-  const match = QUEUE_TITLE_PATTERN.exec(String(title ?? ""));
-  return match ? match[1] : null;
-}
-
-export function isValidShortId(shortId) {
-  return (
-    typeof shortId === "string" &&
-    shortId.length > 0 &&
-    shortId.length <= 120 &&
-    SHORT_ID_PATTERN.test(shortId)
-  );
-}
-
-function isSafeSentryPermalink(url) {
-  try {
-    const parsed = new URL(String(url));
-    return (
-      parsed.protocol === "https:" && /(^|\.)sentry\.io$/.test(parsed.hostname)
-    );
-  } catch {
-    return false;
-  }
-}
-
-/** Pull the Sentry permalink out of the queue stub's yaml body. Only returned
- * when it parses as an https `*.sentry.io` URL — otherwise null (omitted). */
-export function extractPermalink(body) {
-  const match = /^permalink:\s*(.+)$/m.exec(String(body ?? ""));
-  if (!match) return null;
-  const value = stripYamlQuotes(match[1]);
-  return isSafeSentryPermalink(value) ? value : null;
-}
-
-export function extractYamlBlock(commentBody) {
-  const match = /```ya?ml[ \t]*\r?\n([\s\S]*?)\r?\n```/.exec(
-    String(commentBody ?? ""),
-  );
-  return match ? match[1] : "";
-}
-
-function parseInlineList(rest) {
-  const trimmed = String(rest ?? "").trim();
-  const inner = /^\[(.*)\]$/.exec(trimmed);
-  const raw = inner ? inner[1] : trimmed;
-  if (!raw.trim()) return [];
-  return raw
-    .split(",")
-    .map((s) => s.replace(/^["']|["']$/g, "").trim())
-    .filter(Boolean);
-}
-
-function collectDashList(lines, start) {
-  const items = [];
-  let j = start + 1;
-  for (; j < lines.length; j += 1) {
-    const line = lines[j];
-    if (line.trim() === "") continue;
-    const dash = /^\s+-\s+(.+?)\s*$/.exec(line);
-    if (dash) {
-      items.push(dash[1].replace(/^["']|["']$/g, ""));
-      continue;
-    }
-    if (/^\s/.test(line)) continue; // other indented content — skip
-    break;
-  }
-  return { items, next: j };
-}
-
-function collectBlockScalar(lines, start, rest) {
-  const trimmed = rest.trim();
-  if (!/^[|>][+-]?$/.test(trimmed)) {
-    // Inline scalar on the same line, not a block indicator.
-    return { text: stripYamlQuotes(trimmed), next: start + 1 };
-  }
-  const collected = [];
-  let j = start + 1;
-  for (; j < lines.length; j += 1) {
-    const line = lines[j];
-    if (line.trim() === "") {
-      collected.push("");
-      continue;
-    }
-    if (/^\s/.test(line)) {
-      collected.push(line.replace(/^[ \t]+/, ""));
-      continue;
-    }
-    break;
-  }
-  while (collected.length && collected[collected.length - 1] === "") {
-    collected.pop();
-  }
-  return { text: collected.join("\n"), next: j };
-}
-
-/** Only keep values that look like Sentry SHORT-IDs; drop everything else so a
- * hostile duplicate list can't inject markup. */
-export function sanitizeDuplicateIds(list) {
-  return (Array.isArray(list) ? list : [])
-    .map((value) => String(value ?? "").trim())
-    .filter(isValidShortId)
-    .slice(0, 20);
-}
-
-/**
- * Line-oriented, tolerant parse of the verdict yaml — deliberately NOT a real
- * yaml loader (the block is untrusted agent text). Reads verdict/confidence as
- * their leading enum token, affected_repo as the first `owner/name` slug,
- * summary as its full line value, root_cause/proposed_action as block scalars,
- * and duplicate_of as an inline `[...]` or a `- item` list.
- */
-export function parseVerdictYaml(block) {
-  const lines = String(block ?? "").split(/\r?\n/);
-  const out = {
-    verdict: null,
-    confidence: null,
-    affected_repo: "",
-    summary: "",
-    root_cause: "",
-    proposed_action: "",
-    duplicate_of: [],
-  };
-  for (let i = 0; i < lines.length; i += 1) {
-    const match = /^([a-z_]+):[ \t]*(.*)$/.exec(lines[i]);
-    if (!match) continue;
-    const key = match[1];
-    const rest = match[2];
-
-    if (key === "verdict") {
-      const token = /^([a-z-]+)/.exec(rest);
-      out.verdict = token ? token[1] : null;
-    } else if (key === "confidence") {
-      const token = /^([a-z]+)/.exec(rest);
-      out.confidence = token ? token[1] : null;
-    } else if (key === "affected_repo") {
-      const token = /([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)/.exec(rest);
-      out.affected_repo = token ? token[1] : "";
-    } else if (key === "summary") {
-      out.summary = stripYamlQuotes(rest);
-    } else if (key === "root_cause" || key === "proposed_action") {
-      const { text, next } = collectBlockScalar(lines, i, rest);
-      out[key] = text;
-      i = next - 1;
-    } else if (key === "duplicate_of") {
-      if (rest.trim() !== "") {
-        out.duplicate_of = parseInlineList(rest);
-      } else {
-        const { items, next } = collectDashList(lines, i);
-        out.duplicate_of = items;
-        i = next - 1;
-      }
-    }
-  }
-  out.duplicate_of = sanitizeDuplicateIds(out.duplicate_of);
-  return out;
-}
-
-/** Parse a verdict comment body into validated fields. Enums are constrained to
- * their closed sets (null otherwise); free-form fields are returned raw for
- * later neutralize+render. */
-export function parseVerdictComment(commentBody) {
-  const block = extractYamlBlock(commentBody) || String(commentBody ?? "");
-  const parsed = parseVerdictYaml(block);
-  return {
-    verdict: VALID_VERDICTS.includes(parsed.verdict) ? parsed.verdict : null,
-    confidence: VALID_CONFIDENCE.includes(parsed.confidence)
-      ? parsed.confidence
-      : null,
-    affectedRepo: parsed.affected_repo,
-    summary: parsed.summary,
-    rootCause: parsed.root_cause,
-    proposedAction: parsed.proposed_action,
-    duplicateOf: parsed.duplicate_of,
-  };
-}
-
-function compareCreatedAt(a, b) {
-  return String(a?.createdAt ?? "").localeCompare(String(b?.createdAt ?? ""));
-}
-
-// Authorship trust boundary for pipeline-driving comments. The verdict comment
-// is posted by the triage job's `gh issue comment` (github.token) and the
-// regression-reopen comment by the ingest workflow — both resolve to the
-// GitHub Actions bot. `gh issue view --json comments` (GraphQL) renders that
-// author login as "github-actions" (verified empirically on live queue issues,
-// e.g. monitoring-monorepo#1318); the REST shape is "github-actions[bot]" —
-// accept both. This repo is public, so WITHOUT this filter any drive-by
-// commenter could paste a marker-bearing comment and drive labeling, closing,
-// and (once the PAT exists) cross-repo issue creation. Comments with a
-// missing/unknown author are untrusted (fail closed).
-export const TRUSTED_COMMENT_AUTHORS = [
-  "github-actions",
-  "github-actions[bot]",
-];
-
-export function isTrustedComment(comment) {
-  const login = comment?.author?.login ?? comment?.user?.login ?? "";
-  return TRUSTED_COMMENT_AUTHORS.includes(login);
-}
-
-/**
- * Pick the verdict comment to act on. This is the SINGLE selection path for
- * both the workflow's label step (--parse-only) and projection, and it applies
- * two fences:
- *
- *   1. Authorship: only comments authored by the pipeline's own Actions bot
- *      count — both for verdict comments (a hostile commenter must not drive
- *      labels/closes/projection) and for regression-reopen comments (a hostile
- *      commenter must not be able to stale-out a legitimate verdict).
- *   2. Regression fence: a reopened regression still carries the previous
- *      round's verdict comment (Stage A's reopen path only sheds labels), so
- *      only accept the newest verdict comment when it is strictly newer than
- *      the newest regression-reopen comment.
- *
- * Returns `{ body, reason }` — body null when there is no trusted verdict
- * comment (`no-verdict-comment`) or the newest one is stale (`stale-verdict`).
- */
-export function selectVerdictComment(comments) {
-  const list = (comments ?? []).filter(
-    (comment) => typeof comment?.body === "string" && isTrustedComment(comment),
-  );
-  const verdicts = list
-    .filter((comment) => comment.body.startsWith(VERDICT_MARKER))
-    .sort(compareCreatedAt);
-  if (verdicts.length === 0)
-    return { body: null, reason: "no-verdict-comment" };
-  const newestVerdict = verdicts[verdicts.length - 1];
-
-  const regressions = list
-    .filter((comment) => comment.body.startsWith(REGRESSION_PREFIX))
-    .sort(compareCreatedAt);
-  if (regressions.length > 0) {
-    const newestRegression = regressions[regressions.length - 1];
-    if (
-      !(String(newestVerdict.createdAt) > String(newestRegression.createdAt))
-    ) {
-      return { body: null, reason: "stale-verdict" };
-    }
-  }
-  return { body: newestVerdict.body, reason: null };
-}
-
-/**
- * The SINGLE authoritative verdict resolution, shared by the workflow's label
- * step (`--parse-only`) and the projection flow: newest marker comment,
- * regression fence, closed-enum validation, label mapping. THROWS (fail loud)
- * on a missing, stale, or invalid verdict — never a silent skip. Two parsers
- * disagreeing here (the label step's old sed vs this parser) could label a
- * stub and then silently skip its projection while the stub closes as if
- * handled; funneling both steps through this one function removes that
- * divergence by construction (PR #1356 review).
- */
-export function resolveVerdict(issue, queueIssueNumber) {
-  const selected = selectVerdictComment(issue.comments);
-  if (!selected.body) {
-    throw new Error(
-      `No usable verdict comment on issue #${queueIssueNumber} (${selected.reason}).`,
-    );
-  }
-  const parsed = parseVerdictComment(selected.body);
-  if (!parsed.verdict) {
-    throw new Error(
-      `Verdict comment on issue #${queueIssueNumber} has a missing/invalid verdict value.`,
-    );
-  }
-  return {
-    parsed,
-    verdict: parsed.verdict,
-    label: VERDICT_TO_LABEL[parsed.verdict],
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Allowlist validation + idempotency marker.
-// ---------------------------------------------------------------------------
-
-/**
- * Validate the untrusted `affected_repo`. Returns `{ projectable, repo,
- * warning, reason }`:
- *   - an allowlisted external repo -> projectable, repo = that repo;
- *   - this repo -> not projectable (its errors are fixed here), no warning;
- *   - anything else -> not projectable, treated as this repo, with a warning.
- */
-export function validateAffectedRepo(repo) {
-  const value = String(repo ?? "").trim();
-  if (ALLOWED_OWNING_REPOS.includes(value)) {
-    return { projectable: true, repo: value, warning: null, reason: "allowed" };
-  }
-  if (value === LOCAL_REPO) {
-    return {
-      projectable: false,
-      repo: LOCAL_REPO,
-      warning: null,
-      reason: "local-repo",
-    };
-  }
-  return {
-    projectable: false,
-    repo: LOCAL_REPO,
-    warning: `affected_repo ${value ? `'${truncate(value, 80)}'` : "(empty)"} is not in the projection allowlist; treating as ${LOCAL_REPO} and not projecting.`,
-    reason: "unrecognized-repo",
-  };
-}
-
-export function buildProjectionMarker(shortId) {
-  return `<!-- sentry-projection:v1 ${shortId} -->`;
-}
-
-/**
- * True when `body` is a genuine projection back-link for `shortId`. The
- * marker is only accepted at its fixed structural position — the FIRST
- * non-empty line of the body, which is exactly where buildProjectedBody
- * emits it — never via a broad substring search: a marker-shaped sequence
- * embedded in a rendered free-text field of an UNRELATED projected issue
- * must not satisfy the idempotency check for a different SHORT-ID (which
- * would close that stub as "reused" without filing anything). Rendered
- * fields additionally defang `<!--` (defangHtmlComments) so such a sequence
- * cannot survive rendering intact in the first place.
- */
-export function bodyBacklinksShortId(body, shortId) {
-  if (!isValidShortId(shortId)) return false;
-  const firstNonEmptyLine = String(body ?? "")
-    .split(/\r?\n/)
-    .find((line) => line.trim() !== "");
-  return (
-    firstNonEmptyLine !== undefined &&
-    firstNonEmptyLine.trim() === buildProjectionMarker(shortId)
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Projected-issue rendering.
-// ---------------------------------------------------------------------------
-
-export function buildProjectedTitle(summary) {
-  const clean = neutralizeUntrusted(summary);
-  const base = clean || "(no summary provided)";
-  return `Sentry: ${truncate(base, 200)}`;
-}
-
-function fencedBlock(text) {
-  const body = neutralizeBlock(text);
-  if (!body) return "_(none provided)_";
-  return ["```text", body, "```"].join("\n");
-}
-
-// Hard bound for the one inline free-text field the body renders outside a
-// fence. Every other body field is already bounded: the title caps at 200,
-// block fields at 600 (neutralizeBlock), duplicates at 20 shape-validated
-// SHORT-IDs, shortId at 120, verdict/confidence are closed enums, and the
-// permalink is a Stage-A-bounded validated URL. Without this cap a
-// hostile/long single-line summary could blow the `gh issue create` request
-// and loop the retry compensation.
-const MAX_BODY_SUMMARY_LEN = 500;
-
-/**
- * Build the projected owning-repo issue body. `shortId`, `verdict`,
- * `confidence` are validated/closed-set (safe as inline code); `permalink` is a
- * validated https sentry.io URL; `queueIssueUrl` is a trusted github.com URL
- * built from the workflow's own repo/issue. Every other field is agent-derived
- * and neutralized before it lands here.
- */
-export function buildProjectedBody({
-  shortId,
-  verdict,
-  confidence,
-  summary,
-  rootCause,
-  proposedAction,
-  duplicateOf,
-  permalink,
-  queueIssueUrl,
-}) {
-  const safeSummary =
-    truncate(neutralizeUntrusted(summary), MAX_BODY_SUMMARY_LEN) ||
-    "_(no summary provided)_";
-  const dupIds = sanitizeDuplicateIds(duplicateOf);
-  const dupText = dupIds.length
-    ? dupIds.map((id) => `\`${id}\``).join(", ")
-    : "none";
-
-  const parts = [
-    buildProjectionMarker(shortId),
-    "",
-    "> Filed automatically by the Mento **Sentry triage pipeline** from an agent triage verdict.",
-    "> Verdict fields only — no raw Sentry payload is copied here. Confirm in Sentry before acting.",
-    "",
-    `**Sentry issue:** \`${shortId}\``,
-    `**Triage verdict:** \`${verdict}\`${confidence ? ` (confidence: \`${confidence}\`)` : ""}`,
-    "",
-    "**Summary**",
-    "",
-    safeSummary,
-    "",
-    "**Root cause**",
-    "",
-    fencedBlock(rootCause),
-    "",
-    "**Proposed action**",
-    "",
-    fencedBlock(proposedAction),
-    "",
-    `**Possible duplicate Sentry issues:** ${dupText}`,
-    "",
-    "**Links**",
-    "",
-  ];
-  if (permalink) parts.push(`- [View the error in Sentry](${permalink})`);
-  parts.push(`- Central triage queue stub: ${queueIssueUrl}`);
-  parts.push("");
-  parts.push("---");
-  parts.push("");
-  parts.push(FOOTER);
-  parts.push("");
-  return parts.join("\n");
-}
+import {
+  ALIAS_NOTE_PREFIX,
+  bodyBacklinksShortId,
+  buildAliasComment,
+  buildProjectedBody,
+  buildProjectedTitle,
+  commentBacklinksShortId,
+  DEFAULT_REPO,
+  extractPermalink,
+  isValidShortId,
+  MAX_DUPLICATE_LOOKUPS,
+  parseShortId,
+  PROJECTABLE_VERDICTS,
+  PROJECTED_LABEL,
+  resolveVerdict,
+  VALID_VERDICTS,
+  validateAffectedRepo,
+} from "./sentry-triage-project-core.mjs";
 
 // ---------------------------------------------------------------------------
 // GitHub I/O (via `gh`, mirroring the ingest/digest scripts). `runGh` is
@@ -665,7 +134,30 @@ async function readQueueIssue(localRun, repo, number) {
 // push the real projected issue past the result cap.
 const FOOTER_SEARCH_PHRASE = "Sentry triage pipeline";
 
-async function findExistingProjection(owningRun, owningRepo, shortId) {
+/** The projector identity is the PAT's own user: only issues IT authored can
+ * count as genuine projections. Resolved once per run via `gh api user` under
+ * the projection token; empty/failed resolution throws (fail loud) rather
+ * than falling back to an unauthenticated match. */
+async function fetchProjectorLogin(owningRun) {
+  const stdout = await owningRun(["api", "user", "--jq", ".login"]);
+  const login = String(stdout ?? "").trim();
+  if (!login) {
+    throw new Error(
+      "Could not resolve the projection token's own user login (gh api user returned empty); refusing to match existing projections without an author identity.",
+    );
+  }
+  return login;
+}
+
+async function findExistingProjection(
+  owningRun,
+  owningRepo,
+  shortId,
+  projectorLogin,
+) {
+  // `in:body,comments`: a SHORT-ID lives either in a primary projection's
+  // BODY (marker + visible fields) or in an alias COMMENT on a coalesced
+  // issue (buildAliasComment's visible note) — both carry the footer phrase.
   const stdout = await owningRun([
     "issue",
     "list",
@@ -674,9 +166,9 @@ async function findExistingProjection(owningRun, owningRepo, shortId) {
     "--state",
     "all",
     "--search",
-    `"${shortId}" "${FOOTER_SEARCH_PHRASE}" in:body`,
+    `"${shortId}" "${FOOTER_SEARCH_PHRASE}" in:body,comments`,
     "--json",
-    "number,url,body,state",
+    "number,url,body,state,author",
     "--limit",
     "200",
   ]);
@@ -684,18 +176,81 @@ async function findExistingProjection(owningRun, owningRepo, shortId) {
   // Search is a coarse pre-filter (GitHub search may not index HTML-comment
   // text, so the marker itself can't be the search term); the footer-phrase
   // AND keeps it sharp and the 200 cap (matching the duplicate search) keeps
-  // it deep. The authoritative check is the hidden marker in a candidate's
-  // body — search only narrows, never decides.
-  const match = (Array.isArray(items) ? items : []).find((item) =>
+  // it deep. The authoritative check is layered and author-verified — anyone
+  // with Issues access in the owning repo can pre-create marker-shaped
+  // content, and a hostile issue must not steal the projection slot (the
+  // stub would close "reused" pointing at attacker-controlled content):
+  //   1. the candidate ISSUE must be authored by the projector identity;
+  //   2. its body's leading marker block matches the SHORT-ID (primary
+  //      projection), OR a projector-authored alias comment does
+  //      (coalesced duplicate).
+  const authorMatched = (Array.isArray(items) ? items : []).filter(
+    (item) => (item.author?.login ?? "") === projectorLogin,
+  );
+  const toResult = (item) => ({
+    number: item.number,
+    url: item.url,
+    state: String(item.state ?? "").toUpperCase(),
+  });
+  // Cheap body-marker check across ALL author-matched candidates: the bodies
+  // are already in the search payload, so a genuine primary projection is
+  // found regardless of where best-match ranking placed it — other
+  // projector-authored issues legitimately mention this SHORT-ID in their
+  // rendered "Possible duplicates" lists, and any cap applied before this
+  // scan could rank those ahead of the real projection and miss it.
+  const direct = authorMatched.find((item) =>
     bodyBacklinksShortId(item.body, shortId),
   );
-  return match
-    ? {
-        number: match.number,
-        url: match.url,
-        state: String(match.state ?? "").toUpperCase(),
-      }
-    : null;
+  if (direct) return toResult(direct);
+
+  // Alias phase: a coalesced SHORT-ID lives in an alias COMMENT, not a body,
+  // so run a DEDICATED exact-phrase search (`"<prefix> <shortId>"` — the
+  // fixed lead-in buildAliasComment renders) that essentially only alias
+  // comments for this id can match; mere mentions of the id in rendered
+  // duplicate lists cannot. Candidates are author-filtered and their comments
+  // verified (the phrase alone is mimicable by anyone with Issues access).
+  // The per-candidate comments read is the expensive call, so the candidate
+  // set is bounded — but bounded by FAILING LOUD, never by truncating: a
+  // genuine alias must never be skipped because hostile mimics outranked it,
+  // so an implausible candidate count (> MAX_CANDIDATE_READS, when the
+  // genuine population per id is 0 or 1) aborts into the workflow's
+  // compensation path instead of risking a duplicate filing.
+  const aliasStdout = await owningRun([
+    "issue",
+    "list",
+    "-R",
+    owningRepo,
+    "--state",
+    "all",
+    "--search",
+    `"${ALIAS_NOTE_PREFIX} ${shortId}" in:comments`,
+    "--json",
+    "number,url,state,author",
+    "--limit",
+    "200",
+  ]);
+  const aliasItems =
+    aliasStdout && aliasStdout.trim() ? JSON.parse(aliasStdout) : [];
+  const aliasCandidates = (Array.isArray(aliasItems) ? aliasItems : []).filter(
+    (item) => (item.author?.login ?? "") === projectorLogin,
+  );
+  const MAX_CANDIDATE_READS = 10;
+  if (aliasCandidates.length > MAX_CANDIDATE_READS) {
+    throw new Error(
+      `Alias lookup for ${shortId} in ${owningRepo} returned ${aliasCandidates.length} projector-authored candidates (max ${MAX_CANDIDATE_READS}); refusing to risk missing the genuine alias — failing loud for retry.`,
+    );
+  }
+  for (const item of aliasCandidates) {
+    const hasAlias = await hasAliasComment(
+      owningRun,
+      owningRepo,
+      item.number,
+      shortId,
+      projectorLogin,
+    );
+    if (hasAlias) return toResult(item);
+  }
+  return null;
 }
 
 // Fixed, deterministic text — no agent-derived content.
@@ -745,6 +300,34 @@ async function createProjectedIssue(owningRun, owningRepo, title, body) {
     );
   }
   return url;
+}
+
+/** True when the owning-repo issue carries a genuine ALIAS for `shortId`: a
+ * comment authored by the projector identity whose first line is the marker
+ * (see buildAliasComment in the core module for why aliases are atomic
+ * comment appends, never body edits). */
+async function hasAliasComment(
+  owningRun,
+  owningRepo,
+  number,
+  shortId,
+  projectorLogin,
+) {
+  const stdout = await owningRun([
+    "issue",
+    "view",
+    String(number),
+    "-R",
+    owningRepo,
+    "--json",
+    "comments",
+  ]);
+  const comments = JSON.parse(stdout).comments ?? [];
+  return comments.some(
+    (comment) =>
+      (comment?.author?.login ?? "") === projectorLogin &&
+      commentBacklinksShortId(comment?.body, shortId),
+  );
 }
 
 async function markStubProjected(localRun, localRepo, issue, projectedUrl) {
@@ -853,17 +436,88 @@ export async function runProjection(options, deps = {}) {
   }
 
   const owningRepo = repoCheck.repo;
+  const queueIssueUrl =
+    issue.url ||
+    `https://github.com/${options.localRepo}/issues/${options.queueIssue}`;
+
+  // Author identity for genuine-projection matching (see
+  // findExistingProjection): only issues the PAT's own user filed count.
+  const projectorLogin = await fetchProjectorLogin(owningRun);
 
   // Idempotency: reuse an existing projected issue (any state) that back-links
   // this SHORT-ID rather than filing a duplicate. A CLOSED one is reopened
   // first so the regression resurfaces for the product team.
-  const existing = await findExistingProjection(owningRun, owningRepo, shortId);
+  const existing = await findExistingProjection(
+    owningRun,
+    owningRepo,
+    shortId,
+    projectorLogin,
+  );
   if (existing) {
     if (existing.state === "CLOSED") {
       await reopenProjectedIssue(owningRun, owningRepo, existing);
     }
     await markStubProjected(localRun, options.localRepo, issue, existing.url);
     return { status: "reused", url: existing.url };
+  }
+
+  // Duplicate coalescing: when the verdict marks this error a duplicate of
+  // another SHORT-ID that ALREADY has a genuine projection, reuse that issue
+  // (comment the new SHORT-ID onto it) instead of filing a second owning-repo
+  // issue for the same underlying bug. Dup IDs are agent-produced, so they
+  // are sanitized (shape-validated, deduplicated), the stub's own SHORT-ID is
+  // excluded, and only THEN is the lookup budget applied — a self-reference
+  // must not consume budget and push a real duplicate past the cap. Each
+  // entry costs bounded owning-repo lookups, never an open-ended fan-out.
+  // The same leading-marker + author checks apply, so a hostile marker-shaped
+  // issue can't capture the coalescing path either.
+  const dupIds = parsed.duplicateOf
+    .filter((dupId) => dupId !== shortId)
+    .slice(0, MAX_DUPLICATE_LOOKUPS);
+  for (const dupId of dupIds) {
+    const dupExisting = await findExistingProjection(
+      owningRun,
+      owningRepo,
+      dupId,
+      projectorLogin,
+    );
+    if (!dupExisting) continue;
+    if (dupExisting.state === "CLOSED") {
+      await reopenProjectedIssue(owningRun, owningRepo, dupExisting);
+    }
+    // Persist the coalesced SHORT-ID into the idempotency index as ONE atomic
+    // comment APPEND (marker-anchored alias comment — see buildAliasComment
+    // for why a comment, never a body edit). This is what makes coalescing
+    // durable AND race-free: a later regression whose fresh verdict
+    // omits/changes `duplicate_of` still resolves this SHORT-ID to the same
+    // issue via the primary lookup above (which matches alias comments), a
+    // retry after a partial failure takes the plain reused path without
+    // re-commenting, and parallel matrix jobs coalescing different SHORT-IDs
+    // onto this issue append independently — nothing to overwrite.
+    await owningRun([
+      "issue",
+      "comment",
+      String(dupExisting.number),
+      "-R",
+      owningRepo,
+      "--body",
+      buildAliasComment({
+        shortId,
+        queueIssueUrl,
+        verdict: parsed.verdict,
+        confidence: parsed.confidence,
+        summary: parsed.summary,
+        rootCause: parsed.rootCause,
+        proposedAction: parsed.proposedAction,
+      }),
+    ]);
+    await markStubProjected(
+      localRun,
+      options.localRepo,
+      issue,
+      dupExisting.url,
+    );
+    return { status: "reused", url: dupExisting.url };
   }
 
   const title = buildProjectedTitle(parsed.summary);
@@ -876,9 +530,7 @@ export async function runProjection(options, deps = {}) {
     proposedAction: parsed.proposedAction,
     duplicateOf: parsed.duplicateOf,
     permalink: extractPermalink(issue.body),
-    queueIssueUrl:
-      issue.url ||
-      `https://github.com/${options.localRepo}/issues/${options.queueIssue}`,
+    queueIssueUrl,
   });
 
   const url = await createProjectedIssue(owningRun, owningRepo, title, body);

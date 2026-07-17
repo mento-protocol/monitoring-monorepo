@@ -485,7 +485,9 @@ pipeline surfaces itself two ways, and a break in either turns a run red:
   GitHub polling. It is a pure CONSUMER of the verdict contract — no LLM, no
   label writes, no Sentry — driven by the collector `scripts/sentry-triage-digest.mjs`:
   for each batch issue it reads the current labels and the latest
-  `<!-- sentry-triage-verdict:v1 -->` comment and renders one line per issue
+  pipeline-bot-authored `<!-- sentry-triage-verdict:v1 -->` comment (the same
+  authorship fence as the label/projection steps — a drive-by marker comment
+  cannot feed text into the digest) and renders one line per issue
   (`<SHORT-ID> (<project>) — <verdict> (<confidence>): <summary>`, linked to the
   queue issue), with counts by verdict plus a `failed triage` bucket for batch
   issues still carrying `sentry:needs-triage` (their triage matrix job died —
@@ -527,7 +529,9 @@ is the deterministic, no-LLM step that turns a `code-fix`/`config-fix` verdict
 for an EXTERNAL owning repo into a proper, readable issue in that repo. It runs
 in `.github/workflows/sentry-triage-agent.yml` AFTER the verdict-label step and
 BEFORE the queue-close step, driven by `scripts/sentry-triage-project.mjs`
-(pure logic + `gh` I/O; tests in `scripts/sentry-triage-project.test.mjs`).
+(`gh` I/O + orchestration + CLI; the pure logic lives in
+`scripts/sentry-triage-project-core.mjs`, re-exported by the entry; tests in
+`scripts/sentry-triage-project.test.mjs`).
 
 It is a pure CONSUMER of the verdict contract — it re-reads the stub's title,
 yaml body, and latest `<!-- sentry-triage-verdict:v1 -->` comment through the
@@ -560,14 +564,49 @@ permalink, and back-link are shape-/scheme-validated before they render.
 **Idempotency.** Before creating, the owning repo is searched across **all**
 states (SHORT-ID ANDed with a fixed footer phrase as a sharp pre-filter, 200
 result cap; the hidden `<!-- sentry-projection:v1 SHORT-ID -->` back-link
-marker is the authoritative match — accepted only at its fixed position as the
-first body line, and HTML-comment openers are defanged in every rendered field
-so a spoofed marker inside verdict text can never impersonate it) for an
-existing projected issue; a match is reused, never duplicated. This makes projection safe across regression reopen →
-re-triage cycles (the same SHORT-ID reuses the same owning-repo issue). A
-**closed** match is reopened first, with a fixed regression comment, so the
-regression resurfaces for the product team instead of silently linking a
-closed issue.
+marker is the authoritative match — accepted only in the body's LEADING marker
+block (the first line plus any coalescing alias lines directly under it), and
+HTML-comment openers are defanged in every rendered field so a spoofed marker
+inside verdict text can never impersonate it) for an existing projected
+issue; a match is reused, never duplicated. A genuine match
+must ALSO be **authored by the projector identity itself** (the PAT's own
+login, resolved via `gh api user` under the projection token) — anyone with
+Issues access in an owning repo could pre-create a marker-shaped issue, and a
+hostile one must not steal the projection slot. This makes projection safe
+across regression reopen → re-triage cycles (the same SHORT-ID reuses the same
+owning-repo issue). A **closed** match is reopened first, with a fixed
+regression comment, so the regression resurfaces for the product team instead
+of silently linking a closed issue.
+
+**Duplicate coalescing.** When the verdict's `duplicate_of` names a SHORT-ID
+that already has a genuine projection (same leading-marker + author checks),
+that issue is reused instead of filing a second owning-repo issue for the same
+underlying bug: the new SHORT-ID is persisted as an **alias comment** on the
+reused issue — its first line is the marker (the authoritative alias
+predicate, accepted only from the projector identity) and its visible part
+carries the SHORT-ID, the footer phrase, the queue-stub back-link (the
+`in:body,comments` search pre-filter matches visible text) **and the new
+occurrence's full rendered verdict fields** (summary/root cause/proposed
+action, neutralized and bounded like the projected body). `duplicate_of` is a
+same-culprit/message **family** signal, not a confirmed exact duplicate, so
+nothing is discarded: the alias comment is the new finding's record, with an
+explicit invitation to split it into its own issue if it is actually
+distinct. An alias is deliberately a comment, never a body edit: comment
+creation is an atomic APPEND, so two parallel matrix jobs coalescing
+different SHORT-IDs onto the same issue can never lose each other's alias the
+way concurrent read-modify-write body edits could (GitHub offers no
+conditional body update), and it is the ONLY coalescing side effect, so a
+partial failure can never strand a half-recorded alias. Future regressions of
+that SHORT-ID then resolve to the same issue via the primary lookup even when
+a fresh verdict omits or changes `duplicate_of`, and retries take the plain
+reused path without re-commenting. Lookup cost is bounded without ever
+truncating past a genuine match: dup IDs are deduplicated, self-excluded, and
+only then capped (5); the cheap body-marker scan runs across ALL
+author-matched candidates; and alias comments are found via a dedicated
+exact-phrase search (`"Also tracking Sentry <SHORT-ID>" in:comments`) that
+essentially only genuine aliases can match — if that ever returns an
+implausible candidate count (>10 projector-authored issues), the lookup fails
+loud into the compensation path rather than risk skipping the real alias.
 
 **Queue-stub side effects.** On a successful projection (created or reused) the
 stub gets the `sentry:projected` label plus a comment linking the projected
@@ -583,14 +622,16 @@ stack (ADR 0030). It is exposed as **step-scoped** env on the projection step
 ONLY — never job-level — so it reaches neither the triage agent (whose allowlist
 and permissions are untouched) nor any other step. The local stub label/comment
 use the ambient `github.token` (issues:write on this repo); the PAT is never
-used for a local call. While the secret is absent the step is a graceful no-op
-(`::notice::`), and the close step records the skip in the stub's closing
-comment (visible, not silent). The token is additionally **ref-gated**: on any
-non-`main` ref (branch `workflow_dispatch` would run that branch's modified
-workflow/script code) the env expression resolves to empty and the step exits
-with a `::notice::` before invoking anything — the closing comment records
-"non-main dispatch". Durable GitHub-Environment protection for this dispatch
-surface is tracked in
+used for a local call. While the secret is absent on `main` the step is a
+graceful no-op (`::notice::`), and the close step records the skip in the
+stub's closing comment (visible, not silent). The token is additionally
+**ref-gated**: on any non-`main` ref (branch `workflow_dispatch` would run
+that branch's modified workflow/script code) the env expression resolves to
+empty — a local-repo verdict still resolves and closes normally, but an
+actionable EXTERNAL verdict is loudly re-queued (needs-triage restored,
+verdict + projected labels shed, job fails) so a non-main dispatch can never
+consume a stub that was never projected; the next `main`-ref run retries it.
+Durable GitHub-Environment protection for this dispatch surface is tracked in
 [#1289](https://github.com/mento-protocol/monitoring-monorepo/issues/1289).
 Cross-repo fix **PRs** remain a later phase (ADR 0036 Stage C Phase 3,
 [#1279](https://github.com/mento-protocol/monitoring-monorepo/issues/1279)) —
@@ -712,7 +753,11 @@ issues automatically:
 4. **Verify.** On the next `code-fix`/`config-fix` verdict for an external
    owning repo, confirm an owning-repo issue is filed, the queue stub carries
    `sentry:projected` + a link comment, and the stub closes with the projected
-   URL in its closing comment. To rotate, replace the tfvar value and re-apply.
+   URL in its closing comment. To rotate, replace the tfvar value and re-apply —
+   **with a PAT minted by the SAME account**: projected-issue reuse is
+   author-keyed to the PAT's own login, so switching to a different account
+   orphans existing projections' idempotency matching (re-projections would file
+   duplicates instead of reusing).
 
 **Backfill after an outage or at first activation:** the ingest's default
 firstSeen window is 8 days, so Sentry issues first seen during a longer inert

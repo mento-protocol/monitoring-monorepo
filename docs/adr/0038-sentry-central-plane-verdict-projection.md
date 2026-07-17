@@ -74,9 +74,13 @@ deterministic step.**
   the Sentry permalink, a back-link, and a fixed footer, with every
   agent-derived string neutralized (control-char strip, backtick-defang,
   mention-defang) and multi-line fields fenced. Idempotent by Sentry SHORT-ID
-  (a hidden back-link marker searched across all states; a closed match is
-  reopened so regressions resurface) so re-runs and regressions never
-  duplicate.
+  (a hidden back-link marker anchored to the body's leading marker block,
+  searched across all states, with a genuine match also required to be
+  authored by the projector identity itself; a closed match is reopened so
+  regressions resurface) so re-runs and regressions never duplicate — and
+  verdict-declared duplicates coalesce onto one owning-repo issue (the new
+  SHORT-ID persisted as a projector-authored alias comment: an atomic append,
+  race-free under parallel matrix jobs) instead of filing one per SHORT-ID.
 - **Issues-write ONLY, dedicated fine-grained PAT.** A `sentry-triage-projector`
   PAT with Issues Read+Write on exactly those three repos — no contents, no
   pull-requests — stored as the `count`-gated Actions secret

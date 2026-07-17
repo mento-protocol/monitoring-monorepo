@@ -2,9 +2,11 @@
 import {
   ALLOWED_OWNING_REPOS,
   bodyBacklinksShortId,
+  buildAliasComment,
   buildProjectedBody,
   buildProjectedTitle,
   buildProjectionMarker,
+  commentBacklinksShortId,
   defangBackticks,
   defangHtmlComments,
   defangMentions,
@@ -12,6 +14,7 @@ import {
   extractYamlBlock,
   isTrustedComment,
   isValidShortId,
+  leadingProjectionMarkers,
   neutralizeBlock,
   neutralizeUntrusted,
   parseArgs,
@@ -160,17 +163,54 @@ function queueIssue({
   };
 }
 
+// The login `gh api user` resolves for the projection PAT in tests — genuine
+// projected-issue fixtures carry it as their author.
+const PROJECTOR_LOGIN = "sentry-projector-bot";
+const PROJECTOR_AUTHOR = { login: PROJECTOR_LOGIN };
+
 // A mock `gh` runner covering the calls runProjection makes. Records every call
 // with the token it was invoked under so token routing is assertable.
-function makeRunGh({ issue, existing = [], createdUrl = null } = {}) {
+function makeRunGh({
+  issue,
+  existing = [],
+  createdUrl = null,
+  projectorLogin = PROJECTOR_LOGIN,
+} = {}) {
   const calls = [];
   const runGh = async (args, opts = {}) => {
     calls.push({ args, token: opts.token ?? null });
     const [a0, a1] = args;
+    if (a0 === "api" && a1 === "user") {
+      return `${projectorLogin}\n`;
+    }
     if (a0 === "issue" && a1 === "view") {
+      // A token means an OWNING-repo view (hasAliasComment's `--json
+      // comments` read); resolve it from the `existing` fixtures by issue
+      // number (each fixture may carry a `comments` array). Ambient views
+      // read the queue stub.
+      if (opts.token) {
+        const found = existing.find(
+          (e) => String(e.number) === String(args[2]),
+        );
+        return JSON.stringify({ comments: found?.comments ?? [] });
+      }
       return JSON.stringify(issue);
     }
     if (a0 === "issue" && a1 === "list") {
+      // Model GitHub search: the dedicated alias-phrase query only matches
+      // issues that actually have a comment containing the phrase; the
+      // body-oriented query returns every fixture.
+      const query = String(args[args.indexOf("--search") + 1] ?? "");
+      if (query.includes("Also tracking Sentry")) {
+        const withAliasComments = existing.filter((e) =>
+          (e.comments ?? []).some((c) =>
+            String(c?.body ?? "").includes("Also tracking Sentry"),
+          ),
+        );
+        return JSON.stringify(
+          withAliasComments.map(({ comments: _comments, ...rest }) => rest),
+        );
+      }
       return JSON.stringify(existing);
     }
     if (a0 === "issue" && a1 === "create") {
@@ -264,6 +304,11 @@ await test("isValidShortId accepts Sentry short ids and rejects junk", () => {
   assert(!isValidShortId("with/slash"), "expected slash rejected");
   assert(!isValidShortId(""), "expected empty rejected");
   assert(!isValidShortId("`inject`"), "expected backtick rejected");
+  // Sentry short ids are always <PROJECT-SLUG>-<SUFFIX> with a base-36
+  // suffix, so alphanumeric suffixes must validate while a bare common word
+  // must not (every accepted value can drive an owning-repo search).
+  assert(isValidShortId("APP-MENTO-ORG-2S"), "expected base-36 suffix valid");
+  assert(!isValidShortId("Sentry"), "expected a bare word rejected");
 });
 
 await test("extractPermalink returns the permalink only for an https sentry.io url", () => {
@@ -344,11 +389,15 @@ await test("parseVerdictComment reads a block-style duplicate_of list", () => {
   ]);
 });
 
-await test("sanitizeDuplicateIds drops anything that is not a short-id shape", () => {
+await test("sanitizeDuplicateIds drops junk, deduplicates, and bounds rendering", () => {
   assertDeepEqual(
-    sanitizeDuplicateIds(["APP-1", "has space", "`inject`", "OK-2"]),
+    sanitizeDuplicateIds(["APP-1", "has space", "`inject`", "OK-2", "APP-1"]),
     ["APP-1", "OK-2"],
   );
+  // Rendering/memory bound; the tighter LOOKUP budget (MAX_DUPLICATE_LOOKUPS)
+  // is applied in runProjection AFTER self-exclusion.
+  const many = Array.from({ length: 30 }, (_, i) => `DUP-${i}`);
+  assertEqual(sanitizeDuplicateIds(many).length, 20);
 });
 
 // ---------------------------------------------------------------------------
@@ -552,6 +601,93 @@ await test("bodyBacklinksShortId ignores a marker-shaped sequence embedded mid-b
   assert(
     bodyBacklinksShortId(unrelatedBody, "APP-MENTO-ORG-12"),
     "expected the genuine first-line marker still matched",
+  );
+});
+
+await test("leadingProjectionMarkers reads the contiguous leading block only", () => {
+  const body = [
+    buildProjectionMarker("MAIN-1"),
+    buildProjectionMarker("ALIAS-2"),
+    "",
+    `content ${buildProjectionMarker("SPOOF-3")} more`,
+  ].join("\n");
+  assertDeepEqual(leadingProjectionMarkers(body), ["MAIN-1", "ALIAS-2"]);
+  assertDeepEqual(leadingProjectionMarkers("no markers"), []);
+});
+
+await test("buildAliasComment anchors the marker first-line with a visible searchable note", () => {
+  const stubUrl =
+    "https://github.com/mento-protocol/monitoring-monorepo/issues/500";
+  const alias = buildAliasComment({
+    shortId: "ALIAS-2",
+    queueIssueUrl: stubUrl,
+    verdict: "code-fix",
+    confidence: "medium",
+    summary: "New occurrence summary",
+    rootCause: "Its own root cause.",
+    proposedAction: "Its own proposed action.",
+  });
+  assertEqual(alias.split("\n")[0], buildProjectionMarker("ALIAS-2"));
+  // The visible note carries the SHORT-ID + footer phrase (so the
+  // in:body,comments search pre-filter matches on visible text) + stub link.
+  assert(
+    alias.includes("Also tracking Sentry `ALIAS-2`"),
+    "expected the visible alias note",
+  );
+  assert(
+    alias.includes("Sentry triage pipeline"),
+    "expected the footer search phrase",
+  );
+  assert(alias.includes(stubUrl), "expected the queue-stub back-link");
+  // duplicate_of is a FAMILY signal, not a confirmed exact duplicate — the
+  // new occurrence's rendered verdict fields must not be discarded, and the
+  // note invites splitting a genuinely distinct finding into its own issue.
+  assert(
+    alias.includes("New occurrence summary"),
+    "expected the new occurrence's summary",
+  );
+  assert(alias.includes("Its own root cause."), "expected the root cause");
+  assert(
+    alias.includes("Its own proposed action."),
+    "expected the proposed action",
+  );
+  assert(alias.includes("`code-fix`"), "expected the verdict");
+  assert(
+    alias.includes("split it into its own issue"),
+    "expected the split-out invitation",
+  );
+  // Round-trip through the alias predicate.
+  assert(
+    commentBacklinksShortId(alias, "ALIAS-2"),
+    "expected the alias comment to match its own id",
+  );
+  assert(
+    !commentBacklinksShortId(alias, "OTHER-9"),
+    "expected an unrelated id rejected",
+  );
+  // Agent-derived fields are neutralized like the projected body.
+  const hostile = buildAliasComment({
+    shortId: "ALIAS-2",
+    queueIssueUrl: stubUrl,
+    verdict: "code-fix",
+    confidence: "low",
+    summary: "@channel ```js breakout",
+    rootCause: "```\n@here\n```",
+    proposedAction: "",
+  });
+  assert(!hostile.includes("@channel"), "expected mention defanged");
+  assert(!hostile.includes("```js"), "expected agent fence defanged");
+});
+
+await test("commentBacklinksShortId requires the first-line anchor", () => {
+  const spoofMidComment = `chatter\n${buildProjectionMarker("EVIL-1")}`;
+  assert(
+    !commentBacklinksShortId(spoofMidComment, "EVIL-1"),
+    "expected a mid-comment marker rejected",
+  );
+  assert(
+    commentBacklinksShortId(`\n${buildProjectionMarker("OK-1")}\ntext`, "OK-1"),
+    "expected leading blanks tolerated",
   );
 });
 
@@ -826,6 +962,7 @@ await test("runProjection is idempotent: reuses an existing OPEN back-linked iss
       url: "https://github.com/mento-protocol/frontend-monorepo/issues/42",
       body: `${buildProjectionMarker("APP-MENTO-ORG-12")}\nrest of body`,
       state: "OPEN",
+      author: PROJECTOR_AUTHOR,
     },
   ];
   // Stub does not yet carry the projected label -> reused path still marks it.
@@ -867,6 +1004,7 @@ await test("runProjection reopens a CLOSED existing projection so the regression
       url: "https://github.com/mento-protocol/frontend-monorepo/issues/42",
       body: buildProjectionMarker("APP-MENTO-ORG-12"),
       state: "CLOSED",
+      author: PROJECTOR_AUTHOR,
     },
   ];
   const issue = queueIssue({
@@ -912,6 +1050,7 @@ await test("runProjection propagates a failed reopen of a closed projection (fai
       url: "https://github.com/mento-protocol/frontend-monorepo/issues/42",
       body: buildProjectionMarker("APP-MENTO-ORG-12"),
       state: "CLOSED",
+      author: PROJECTOR_AUTHOR,
     },
   ];
   const issue = queueIssue({
@@ -943,6 +1082,7 @@ await test("runProjection reused path skips the stub comment when already projec
       url: "https://github.com/mento-protocol/frontend-monorepo/issues/42",
       body: buildProjectionMarker("APP-MENTO-ORG-12"),
       state: "OPEN",
+      author: PROJECTOR_AUTHOR,
     },
   ];
   const issue = queueIssue({
@@ -961,6 +1101,482 @@ await test("runProjection reused path skips the stub comment when already projec
   assert(
     !calls.some((c) => c.args[1] === "comment"),
     "expected no duplicate stub comment",
+  );
+});
+
+await test("runProjection resolves the projector identity under the PAT", async () => {
+  const { runGh, calls } = makeRunGh({
+    issue: queueIssue(),
+    createdUrl: CREATED_URL,
+  });
+  await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  const apiUser = calls.find(
+    (c) => c.args[0] === "api" && c.args[1] === "user",
+  );
+  assert(apiUser, "expected a gh api user identity call");
+  assertEqual(apiUser.token, PAT);
+});
+
+await test("runProjection fails loud when the projector identity cannot be resolved", async () => {
+  const { runGh } = makeRunGh({
+    issue: queueIssue(),
+    createdUrl: CREATED_URL,
+    projectorLogin: "",
+  });
+  await assertRejects(
+    runProjection(
+      {
+        localRepo: "mento-protocol/monitoring-monorepo",
+        queueIssue: 500,
+        projectionToken: PAT,
+      },
+      { runGh },
+    ),
+    /Could not resolve the projection token's own user login/,
+  );
+});
+
+await test("runProjection ignores a hostile pre-created marker issue (wrong author) and files its own", async () => {
+  // An attacker with Issues access in the owning repo pre-creates a
+  // marker-shaped issue for this SHORT-ID. It must NOT steal the projection
+  // slot: only issues authored by the projector identity count.
+  const existing = [
+    {
+      number: 66,
+      url: "https://github.com/mento-protocol/frontend-monorepo/issues/66",
+      body: `${buildProjectionMarker("APP-MENTO-ORG-12")}\nattacker content`,
+      state: "OPEN",
+      author: { login: "attacker" },
+    },
+  ];
+  const { runGh, calls } = makeRunGh({
+    issue: queueIssue(),
+    existing,
+    createdUrl: CREATED_URL,
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "projected");
+  assertEqual(result.url, CREATED_URL);
+  assert(
+    !calls.some((c) => c.args[1] === "reopen"),
+    "expected the hostile issue untouched",
+  );
+});
+
+await test("runProjection coalesces onto an existing duplicate projection instead of filing twice", async () => {
+  // Own SHORT-ID has no projection, but the verdict marks it a duplicate of
+  // DUP-1 which DOES have a genuine one -> reuse it, comment the new
+  // SHORT-ID onto it, and never create a second issue for the same bug.
+  const dupUrl =
+    "https://github.com/mento-protocol/frontend-monorepo/issues/77";
+  const existing = [
+    {
+      number: 77,
+      url: dupUrl,
+      body: `${buildProjectionMarker("DUP-1")}\nrest`,
+      state: "OPEN",
+      author: PROJECTOR_AUTHOR,
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({ duplicates: "[DUP-1]" }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({ issue, existing });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "reused");
+  assertEqual(result.url, dupUrl);
+  assert(
+    !calls.some((c) => c.args[1] === "create"),
+    "expected NO second issue",
+  );
+  // The alias is ONE atomic comment append: first line is the marker (the
+  // durable idempotency record — future regressions of the new SHORT-ID find
+  // this issue even when their fresh verdict omits duplicate_of), followed by
+  // the visible note with the SHORT-ID + stub back-link (so the
+  // in:body,comments search pre-filter matches on visible text).
+  const aliasComment = calls.find(
+    (c) => c.args[1] === "comment" && c.token === PAT && c.args[2] === "77",
+  );
+  assert(aliasComment, "expected an alias comment on the reused issue");
+  const aliasBody = aliasComment.args[aliasComment.args.indexOf("--body") + 1];
+  assert(
+    commentBacklinksShortId(aliasBody, "APP-MENTO-ORG-12"),
+    "expected the marker-anchored alias comment",
+  );
+  assert(
+    aliasBody.includes("Also tracking Sentry `APP-MENTO-ORG-12`"),
+    "expected the visible alias note",
+  );
+  assert(
+    aliasBody.includes("issues/500"),
+    "expected the queue-stub back-link in the alias note",
+  );
+  // duplicate_of is a family signal, not a confirmed exact duplicate — the
+  // new occurrence's rendered verdict fields ride along, nothing discarded.
+  assert(
+    aliasBody.includes("**Summary**") && aliasBody.includes("A short summary"),
+    "expected the new occurrence's summary in the alias comment",
+  );
+  // No owning-repo BODY edit — comment appends are atomic, so parallel matrix
+  // jobs coalescing different SHORT-IDs onto this issue cannot lose each
+  // other's alias the way concurrent read-modify-write body edits could.
+  assert(
+    !calls.some((c) => c.args[1] === "edit" && c.token === PAT),
+    "expected no owning-repo body edit",
+  );
+  // The stub still gets marked + linked locally.
+  assert(
+    calls.some((c) => c.args[1] === "edit" && c.token === null),
+    "expected the stub labeled sentry:projected",
+  );
+});
+
+await test("a persisted alias comment makes later lookups reuse directly, with no repeat comment", async () => {
+  // The dup issue already carries the alias COMMENT from an earlier
+  // coalescing run. The PRIMARY lookup for this SHORT-ID now matches it (via
+  // the projector-authored alias-comment check), so the plain reused path
+  // runs: no new comment — retries and regressions with changed/absent
+  // duplicate_of never duplicate anything.
+  const stubUrl =
+    "https://github.com/mento-protocol/monitoring-monorepo/issues/500";
+  const existing = [
+    {
+      number: 77,
+      url: "https://github.com/mento-protocol/frontend-monorepo/issues/77",
+      body: `${buildProjectionMarker("DUP-1")}\nrest`,
+      state: "OPEN",
+      author: PROJECTOR_AUTHOR,
+      comments: [
+        {
+          body: buildAliasComment({
+            shortId: "APP-MENTO-ORG-12",
+            queueIssueUrl: stubUrl,
+            verdict: "code-fix",
+            confidence: "medium",
+            summary: "earlier occurrence",
+            rootCause: "rc",
+            proposedAction: "pa",
+          }),
+          author: PROJECTOR_AUTHOR,
+        },
+      ],
+    },
+  ];
+  // Fresh verdict omits duplicate_of entirely — the alias alone must resolve.
+  const issue = queueIssue({
+    comments: [
+      botComment(verdictComment({ duplicates: "[]" }), "2026-07-17T10:00:00Z"),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({ issue, existing });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "reused");
+  assert(!calls.some((c) => c.args[1] === "create"), "expected no create");
+  assert(
+    !calls.some((c) => c.args[1] === "comment" && c.token === PAT),
+    "expected no repeat coalescing comment",
+  );
+});
+
+await test("a hostile alias comment (wrong author) cannot capture the lookup", async () => {
+  // Same marker-anchored alias comment, but authored by an attacker with
+  // Issues access — the alias check requires the projector identity, so the
+  // lookup ignores it and a genuine projection is filed.
+  const stubUrl =
+    "https://github.com/mento-protocol/monitoring-monorepo/issues/500";
+  const existing = [
+    {
+      number: 78,
+      url: "https://github.com/mento-protocol/frontend-monorepo/issues/78",
+      body: `${buildProjectionMarker("DUP-1")}\nrest`,
+      state: "OPEN",
+      author: PROJECTOR_AUTHOR,
+      comments: [
+        {
+          body: buildAliasComment({
+            shortId: "APP-MENTO-ORG-12",
+            queueIssueUrl: stubUrl,
+            verdict: "code-fix",
+            confidence: "medium",
+            summary: "earlier occurrence",
+            rootCause: "rc",
+            proposedAction: "pa",
+          }),
+          author: { login: "attacker" },
+        },
+      ],
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(verdictComment({ duplicates: "[]" }), "2026-07-17T10:00:00Z"),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({
+    issue,
+    existing,
+    createdUrl: CREATED_URL,
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "projected");
+  assert(
+    calls.some((c) => c.args[1] === "create"),
+    "expected a genuine projection to be filed",
+  );
+});
+
+await test("a genuine body-marker projection is found even when ranked last (cap only limits comment reads)", async () => {
+  // Eleven projector-authored issues merely MENTION this SHORT-ID (rendered
+  // "Possible duplicates" lists) and rank ahead of the genuine projection.
+  // The cheap body-marker scan runs across ALL candidates before the capped
+  // alias-comment reads, so the real projection is still found — no
+  // duplicate filing.
+  const decoys = Array.from({ length: 11 }, (_, i) => ({
+    number: 400 + i,
+    url: `https://github.com/mento-protocol/frontend-monorepo/issues/${400 + i}`,
+    body: `${buildProjectionMarker(`OTHER-${i}`)}\n**Possible duplicate Sentry issues:** \`APP-MENTO-ORG-12\``,
+    state: "OPEN",
+    author: PROJECTOR_AUTHOR,
+    comments: [],
+  }));
+  const genuine = {
+    number: 499,
+    url: "https://github.com/mento-protocol/frontend-monorepo/issues/499",
+    body: `${buildProjectionMarker("APP-MENTO-ORG-12")}\nrest`,
+    state: "OPEN",
+    author: PROJECTOR_AUTHOR,
+    comments: [],
+  };
+  const { runGh, calls } = makeRunGh({
+    issue: queueIssue(),
+    existing: [...decoys, genuine],
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "reused");
+  assertEqual(result.url, genuine.url);
+  assert(!calls.some((c) => c.args[1] === "create"), "expected no duplicate");
+  assert(
+    !calls.some((c) => c.args[1] === "view" && c.token === PAT),
+    "expected zero comment reads (body scan resolved it)",
+  );
+});
+
+await test("duplicate lookups are bounded: capped dup list, self-excluded, capped candidate reads", async () => {
+  // A hostile/verbose verdict names 30 duplicates (with repeats + the stub's
+  // own id) and the pre-filter returns 12 projector-authored candidates that
+  // never match. The total owning-repo traffic must stay bounded: 1 own +
+  // ≤5 dup searches, and ≤10 comment reads per search.
+  const dupList = `[${[
+    "APP-MENTO-ORG-12", // own id — excluded
+    ...Array.from({ length: 28 }, (_, i) => `DUP-${i % 14}`), // repeats
+  ].join(", ")}]`;
+  const existing = Array.from({ length: 12 }, (_, i) => ({
+    number: 300 + i,
+    url: `https://github.com/mento-protocol/frontend-monorepo/issues/${300 + i}`,
+    body: "no marker here",
+    state: "OPEN",
+    author: PROJECTOR_AUTHOR,
+    comments: [],
+  }));
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({ duplicates: dupList }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({
+    issue,
+    existing,
+    createdUrl: CREATED_URL,
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "projected");
+  // Each lookup runs at most 2 searches (body-oriented + dedicated alias
+  // phrase): 1 own + 5 dup lookups = 12 searches max, and here the alias
+  // searches return nothing so zero per-candidate comment reads happen.
+  const searches = calls.filter((c) => c.args[1] === "list" && c.token === PAT);
+  assert(
+    searches.length <= 12,
+    `expected at most (1 own + 5 dups) x 2 searches, got ${searches.length}`,
+  );
+  const commentReads = calls.filter(
+    (c) => c.args[1] === "view" && c.token === PAT,
+  );
+  assertEqual(commentReads.length, 0);
+});
+
+await test("a self-reference in duplicate_of cannot consume the lookup budget", async () => {
+  // Reviewer scenario: duplicate_of = [SELF, DUP-1..DUP-5] and only DUP-5 has
+  // an existing projection. The self id is excluded BEFORE the cap, so DUP-5
+  // stays within budget and the projection is reused, not duplicated.
+  const dupUrl =
+    "https://github.com/mento-protocol/frontend-monorepo/issues/95";
+  const existing = [
+    {
+      number: 95,
+      url: dupUrl,
+      body: `${buildProjectionMarker("DUP-5")}\nrest`,
+      state: "OPEN",
+      author: PROJECTOR_AUTHOR,
+      comments: [],
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          duplicates: "[APP-MENTO-ORG-12, DUP-1, DUP-2, DUP-3, DUP-4, DUP-5]",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({ issue, existing });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "reused");
+  assertEqual(result.url, dupUrl);
+  assert(!calls.some((c) => c.args[1] === "create"), "expected no duplicate");
+});
+
+await test("an implausible alias-candidate count fails loud instead of truncating", async () => {
+  // Eleven projector-authored issues all carry alias-phrase comments for this
+  // SHORT-ID (hostile mimicry or pathological state). Truncating could skip
+  // the genuine alias, so the lookup aborts into the compensation path.
+  const stubUrl =
+    "https://github.com/mento-protocol/monitoring-monorepo/issues/500";
+  const existing = Array.from({ length: 11 }, (_, i) => ({
+    number: 600 + i,
+    url: `https://github.com/mento-protocol/frontend-monorepo/issues/${600 + i}`,
+    body: `${buildProjectionMarker(`OTHER-${i}`)}\nrest`,
+    state: "OPEN",
+    author: PROJECTOR_AUTHOR,
+    comments: [
+      {
+        body: buildAliasComment({
+          shortId: "APP-MENTO-ORG-12",
+          queueIssueUrl: stubUrl,
+          verdict: "code-fix",
+          confidence: "low",
+          summary: "s",
+          rootCause: "r",
+          proposedAction: "p",
+        }),
+        author: { login: "attacker" },
+      },
+    ],
+  }));
+  const { runGh } = makeRunGh({ issue: queueIssue(), existing });
+  await assertRejects(
+    runProjection(
+      {
+        localRepo: "mento-protocol/monitoring-monorepo",
+        queueIssue: 500,
+        projectionToken: PAT,
+      },
+      { runGh },
+    ),
+    /refusing to risk missing the genuine alias/,
+  );
+});
+
+await test("runProjection ignores a hostile duplicate projection (wrong author) and creates", async () => {
+  const existing = [
+    {
+      number: 88,
+      url: "https://github.com/mento-protocol/frontend-monorepo/issues/88",
+      body: `${buildProjectionMarker("DUP-1")}\nattacker`,
+      state: "OPEN",
+      author: { login: "attacker" },
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({ duplicates: "[DUP-1]" }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({
+    issue,
+    existing,
+    createdUrl: CREATED_URL,
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "projected");
+  assert(
+    !calls.some((c) => c.args[1] === "comment" && c.token === PAT),
+    "expected no comment on the hostile issue",
   );
 });
 

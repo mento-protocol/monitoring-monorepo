@@ -2479,6 +2479,9 @@ assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)
 run_gate "scripts/sentry-triage-project.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
+run_gate "scripts/sentry-triage-project-core.mjs"
+assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+
 run_gate "scripts/sentry-triage-project.test.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
