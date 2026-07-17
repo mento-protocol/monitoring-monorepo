@@ -67,6 +67,7 @@ import {
   VALID_VERDICTS,
   validateAffectedRepo,
 } from "./sentry-triage-project-core.mjs";
+import { LABEL_DEFINITIONS } from "./sentry-triage-ingest.mjs";
 
 // ---------------------------------------------------------------------------
 // GitHub I/O (via `gh`, mirroring the ingest/digest scripts). `runGh` is
@@ -630,6 +631,36 @@ export async function runProjectionBatch(options, deps = {}) {
   const localRun = (args) => runGh(args, {});
   const registry = new Map();
   const results = [];
+
+  // Self-heal the projection label from the single source of truth (Stage A's
+  // LABEL_DEFINITIONS): this job can run before any post-deploy ingest has
+  // bootstrapped it, and gh errors on repo-nonexistent labels — which failed
+  // both the stub labeling and the compensation removals on first activation.
+  // Best-effort: if the ensure itself fails, per-row settling fails loudly
+  // with compensation as before.
+  const projectedDef = LABEL_DEFINITIONS.find(
+    (def) => def.name === PROJECTED_LABEL,
+  );
+  if (projectedDef) {
+    try {
+      await localRun([
+        "label",
+        "create",
+        projectedDef.name,
+        "--repo",
+        options.localRepo,
+        "--color",
+        projectedDef.color,
+        "--description",
+        projectedDef.description,
+        "--force",
+      ]);
+    } catch (error) {
+      process.stderr.write(
+        `warning: could not ensure label ${PROJECTED_LABEL}: ${error.message}\n`,
+      );
+    }
+  }
 
   for (const number of options.queueIssues) {
     let verdict = null;

@@ -229,6 +229,10 @@ function makeRunGh({
     ) {
       return "";
     }
+    if (a0 === "label" && a1 === "create") {
+      // runProjectionBatch's idempotent self-heal of sentry:projected.
+      return "";
+    }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
   return { runGh, calls };
@@ -973,7 +977,9 @@ await test("runProjection projects a code-fix for an external repo end-to-end", 
   assertEqual(result.status, "projected");
   assertEqual(result.url, CREATED_URL);
 
-  const create = calls.find((c) => c.args[1] === "create");
+  const create = calls.find(
+    (c) => c.args[0] === "issue" && c.args[1] === "create",
+  );
   assert(create, "expected an issue create call");
   // Cross-repo create uses the PAT and targets the owning repo.
   assertEqual(create.token, PAT);
@@ -1047,7 +1053,9 @@ await test("runProjection projects config-fix as well", async () => {
     { runGh },
   );
   assertEqual(result.status, "projected");
-  const create = calls.find((c) => c.args[1] === "create");
+  const create = calls.find(
+    (c) => c.args[0] === "issue" && c.args[1] === "create",
+  );
   assertEqual(
     create.args[create.args.indexOf("-R") + 1],
     "mento-protocol/mento-analytics-api",
@@ -1083,7 +1091,7 @@ await test("runProjection is idempotent: reuses an existing OPEN back-linked iss
     "https://github.com/mento-protocol/frontend-monorepo/issues/42",
   );
   assert(
-    !calls.some((c) => c.args[1] === "create"),
+    !calls.some((c) => c.args[0] === "issue" && c.args[1] === "create"),
     "expected NO create on the reused path",
   );
   assert(
@@ -1137,7 +1145,7 @@ await test("runProjection reopens a CLOSED existing projection so the regression
     "expected the fixed regression-reopen text",
   );
   assert(
-    !calls.some((c) => c.args[1] === "create"),
+    !calls.some((c) => c.args[0] === "issue" && c.args[1] === "create"),
     "expected NO create on the reused path",
   );
 });
@@ -1311,7 +1319,7 @@ await test("runProjection coalesces onto an existing duplicate projection instea
   assertEqual(result.status, "reused");
   assertEqual(result.url, dupUrl);
   assert(
-    !calls.some((c) => c.args[1] === "create"),
+    !calls.some((c) => c.args[0] === "issue" && c.args[1] === "create"),
     "expected NO second issue",
   );
   // The alias is ONE atomic comment append: first line is the marker (the
@@ -1403,7 +1411,10 @@ await test("a persisted alias comment makes later lookups reuse directly, with n
     { runGh },
   );
   assertEqual(result.status, "reused");
-  assert(!calls.some((c) => c.args[1] === "create"), "expected no create");
+  assert(
+    !calls.some((c) => c.args[0] === "issue" && c.args[1] === "create"),
+    "expected no create",
+  );
   assert(
     !calls.some((c) => c.args[1] === "comment" && c.token === PAT),
     "expected no repeat coalescing comment",
@@ -1459,7 +1470,7 @@ await test("a hostile alias comment (wrong author) cannot capture the lookup", a
   );
   assertEqual(result.status, "projected");
   assert(
-    calls.some((c) => c.args[1] === "create"),
+    calls.some((c) => c.args[0] === "issue" && c.args[1] === "create"),
     "expected a genuine projection to be filed",
   );
 });
@@ -1500,7 +1511,10 @@ await test("a genuine body-marker projection is found even when ranked last (cap
   );
   assertEqual(result.status, "reused");
   assertEqual(result.url, genuine.url);
-  assert(!calls.some((c) => c.args[1] === "create"), "expected no duplicate");
+  assert(
+    !calls.some((c) => c.args[0] === "issue" && c.args[1] === "create"),
+    "expected no duplicate",
+  );
   assert(
     !calls.some((c) => c.args[1] === "view" && c.token === PAT),
     "expected zero comment reads (body scan resolved it)",
@@ -1597,7 +1611,10 @@ await test("a self-reference in duplicate_of cannot consume the lookup budget", 
   );
   assertEqual(result.status, "reused");
   assertEqual(result.url, dupUrl);
-  assert(!calls.some((c) => c.args[1] === "create"), "expected no duplicate");
+  assert(
+    !calls.some((c) => c.args[0] === "issue" && c.args[1] === "create"),
+    "expected no duplicate",
+  );
 });
 
 await test("an implausible alias-candidate count fails loud instead of truncating", async () => {
@@ -1699,7 +1716,10 @@ await test("runProjection skips a non-actionable verdict (needs-human)", async (
     { runGh },
   );
   assertEqual(result.status, "skipped-verdict");
-  assert(!calls.some((c) => c.args[1] === "create"), "expected no create");
+  assert(
+    !calls.some((c) => c.args[0] === "issue" && c.args[1] === "create"),
+    "expected no create",
+  );
 });
 
 await test("runProjection skips when affected_repo is this repo", async () => {
@@ -1722,7 +1742,10 @@ await test("runProjection skips when affected_repo is this repo", async () => {
   );
   assertEqual(result.status, "skipped-repo");
   assertEqual(result.reason, "local-repo");
-  assert(!calls.some((c) => c.args[1] === "create"), "expected no create");
+  assert(
+    !calls.some((c) => c.args[0] === "issue" && c.args[1] === "create"),
+    "expected no create",
+  );
 });
 
 await test("runProjection skips an unrecognized affected_repo (no cross-repo write)", async () => {
@@ -1746,7 +1769,11 @@ await test("runProjection skips an unrecognized affected_repo (no cross-repo wri
   assertEqual(result.status, "skipped-repo");
   assertEqual(result.reason, "unrecognized-repo");
   assert(
-    !calls.some((c) => c.args[1] === "create" || c.args[1] === "list"),
+    !calls.some(
+      (c) =>
+        (c.args[0] === "issue" && c.args[1] === "create") ||
+        c.args[1] === "list",
+    ),
     "expected no owning-repo calls",
   );
 });
@@ -1763,7 +1790,7 @@ await test("runProjection no-ops gracefully without the projection token", async
   );
   assertEqual(result.status, "skipped-no-token");
   assert(
-    !calls.some((c) => c.args[1] === "create"),
+    !calls.some((c) => c.args[0] === "issue" && c.args[1] === "create"),
     "expected no create without a token",
   );
 });
@@ -1831,7 +1858,11 @@ await test("runProjection ignores a hostile-author verdict comment (fails loud, 
     /No usable verdict comment/,
   );
   assert(
-    !calls.some((c) => c.args[1] === "create" || c.args[1] === "list"),
+    !calls.some(
+      (c) =>
+        (c.args[0] === "issue" && c.args[1] === "create") ||
+        c.args[1] === "list",
+    ),
     "expected no owning-repo calls off a hostile comment",
   );
 });
@@ -1886,7 +1917,11 @@ await test("runProjection fails loud when its parse disagrees with the label ste
     /Verdict mismatch/,
   );
   assert(
-    !calls.some((c) => c.args[1] === "create" || c.args[1] === "list"),
+    !calls.some(
+      (c) =>
+        (c.args[0] === "issue" && c.args[1] === "create") ||
+        c.args[1] === "list",
+    ),
     "expected no cross-repo calls on a verdict mismatch",
   );
 });
@@ -2076,7 +2111,9 @@ await test("batch mode: same-run duplicate family coalesces via the in-run regis
   assertEqual(rows[0].url, CREATED_URL);
   assertEqual(rows[1].status, "reused");
   assertEqual(rows[1].url, CREATED_URL);
-  const creates = calls.filter((c) => c.args[1] === "create");
+  const creates = calls.filter(
+    (c) => c.args[0] === "issue" && c.args[1] === "create",
+  );
   assertEqual(creates.length, 1);
   // The coalescing alias comment landed on the JUST-created issue (#999 from
   // the create URL), naming the second stub's SHORT-ID.
@@ -2125,7 +2162,10 @@ await test("batch mode coalesces a duplicate family regardless of batch order", 
   assertEqual(rows[0].status, "projected");
   assertEqual(rows[1].status, "reused");
   assertEqual(rows[1].url, CREATED_URL);
-  assertEqual(calls.filter((c) => c.args[1] === "create").length, 1);
+  assertEqual(
+    calls.filter((c) => c.args[0] === "issue" && c.args[1] === "create").length,
+    1,
+  );
   // A's membership was persisted durably: an alias comment for 12 landed on
   // the created issue, so a future regression of 12 resolves via search.
   const aliasComment = calls.find(
@@ -2172,7 +2212,9 @@ await test("batch registry never aliases across owning repos", async () => {
   );
   assertEqual(rows[0].status, "projected");
   assertEqual(rows[1].status, "projected");
-  const creates = calls.filter((c) => c.args[1] === "create");
+  const creates = calls.filter(
+    (c) => c.args[0] === "issue" && c.args[1] === "create",
+  );
   assertEqual(creates.length, 2);
   assertDeepEqual(
     creates.map((c) => c.args[c.args.indexOf("-R") + 1]),
@@ -2213,9 +2255,12 @@ await test("batch mode skips closed, needs-triage, and non-actionable stubs unto
       [3, "skipped-state", "not-actionable"],
     ],
   );
-  // Reads only — no PAT calls, no writes of any kind.
+  // Reads only — no PAT calls, no stub writes of any kind. (The batch-start
+  // label self-heal is the one expected non-read: local token, repo metadata.)
   assert(
-    calls.every((c) => c.token === null && c.args[1] === "view"),
+    calls
+      .filter((c) => c.args[0] !== "label")
+      .every((c) => c.token === null && c.args[1] === "view"),
     "expected ambient reads only",
   );
 });
@@ -2245,7 +2290,10 @@ await test("batch mode isolates per-issue failures and continues", async () => {
     "expected the failure message recorded",
   );
   assertEqual(rows[1].status, "projected");
-  assertEqual(calls.filter((c) => c.args[1] === "create").length, 1);
+  assertEqual(
+    calls.filter((c) => c.args[0] === "issue" && c.args[1] === "create").length,
+    1,
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -2310,3 +2358,48 @@ if (failed > 0) {
 } else {
   process.stdout.write(`${passed} passed\n`);
 }
+
+await test("runProjectionBatch self-heals the sentry:projected label from LABEL_DEFINITIONS", async () => {
+  const stubs = { 500: queueIssue({ number: 500 }) };
+  const { runGh, calls } = makeRunGh({ stubs, createdUrl: CREATED_URL });
+  await runProjectionBatch(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssues: [500],
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  const ensure = calls.find(
+    (c) => c.args[0] === "label" && c.args[1] === "create",
+  );
+  assert(ensure, "expected a gh label create call before settling");
+  assertEqual(ensure.args[2], "sentry:projected");
+  assert(ensure.args.includes("--force"), "label ensure must be idempotent");
+  assert(
+    ensure.args.includes("0052cc"),
+    "label color must come from LABEL_DEFINITIONS (single source of truth)",
+  );
+  assert(
+    ensure.token == null || ensure.token === "",
+    "label ensure must use the local token, not the projection PAT",
+  );
+});
+
+await test("runProjectionBatch survives a failing label ensure", async () => {
+  const stubs = { 500: queueIssue({ number: 500 }) };
+  const base = makeRunGh({ stubs, createdUrl: CREATED_URL });
+  const runGh = async (args, opts) => {
+    if (args[0] === "label") throw new Error("boom");
+    return base.runGh(args, opts);
+  };
+  const rows = await runProjectionBatch(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssues: [500],
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(rows[0].status, "projected");
+});

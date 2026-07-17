@@ -402,18 +402,9 @@ jobs:
             --issues "${SENTRY_TRIAGE_ISSUES}" \
             > "${results_file}"
 
-          # Self-heal the projection label before the settle loop: Stage A's
-          # ingest bootstraps it, but this job can run before any post-deploy
-          # ingest has (first activation bit exactly this — 'sentry:projected'
-          # not found failed both the labeling AND the compensation removals,
-          # since gh errors on repo-nonexistent labels). Definition mirrors
-          # scripts/sentry-triage-ingest.mjs LABEL_DEFINITIONS.
-          gh label create "sentry:projected" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --color "0052cc" \
-            --description "Actionable verdict projected as an issue in the owning repo (ADR 0038)" \
-            --force
-
+          # (The batch script self-heals the sentry:projected label from
+          # Stage A's LABEL_DEFINITIONS before settling — see
+          # runProjectionBatch in scripts/sentry-triage-project.mjs.)
           failed=0
           while IFS= read -r row; do
             n=$(jq -r '.issue' <<<"${row}")
