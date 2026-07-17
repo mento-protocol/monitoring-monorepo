@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-16
+last_verified: 2026-07-17
 scope: ci/process
 ---
 
@@ -23,9 +23,14 @@ the org's six Sentry projects; twice a day the deterministic ingest turns every
 new or regressed issue group into one redacted queue issue in this repo; 45
 minutes later the triage agent picks the oldest pending batch, investigates
 each via read-only Sentry access, and posts a structured verdict; a
-deterministic workflow step validates the verdict and applies the matching
-label; humans consume verdicts by label — nothing is fixed, archived, or
-resolved automatically in Phase 1.
+deterministic workflow step validates the verdict, applies the matching label,
+and — for every bucket except `needs-human` — closes the queue issue (state
+reason: completed) with a fixed closing comment, so the queue reads as
+work-in-flight instead of a growing archive; humans consume verdicts by
+label — nothing is fixed, archived, or resolved **in Sentry** automatically in
+Phase 1; closing only ever touches this repo's local ledger issue, and a
+closed queue issue reopens automatically (Stage A's existing regression-reopen
+path) if the underlying Sentry issue regresses.
 
 ### Architecture
 
@@ -40,10 +45,11 @@ flowchart LR
         SEL["<b>Stage B — select</b><br/>6 oldest pending,<br/>oldest-first"]
         AGT["<b>Stage B — triage agents</b><br/>claude-code-action, ≤2 parallel<br/>read-only Sentry MCP"]
         LBL["<b>deterministic verdict step</b><br/>parse comment → validate →<br/>apply label (no LLM authority)"]
+        CLOSE["<b>deterministic close step</b><br/>code-fix/config-fix/upstream →<br/>close (completed); needs-human<br/>stays open (no LLM authority)"]
     end
 
     subgraph QUEUE["GitHub Issues — machine ledger"]
-        QI["queue issues<br/><code>[sentry] SHORT-ID (project, level)</code><br/>redacted coordinates only"]
+        QI["queue issues<br/><code>[sentry] SHORT-ID (project, level)</code><br/>redacted coordinates only<br/>closed once verdicted (except needs-human)"]
     end
 
     subgraph TF["Terraform platform stack"]
@@ -65,6 +71,8 @@ flowchart LR
     AGT -- "verdict comment" --> QI
     LBL -- "sentry:verdict-* label" --> QI
     AGT --> LBL
+    LBL --> CLOSE
+    CLOSE -- "close (completed),<br/>verdicted buckets only" --> QI
     SEC -. "gates + authenticates" .-> ING & SEL
     ING --> TRK
     GHA -.-> CIF
@@ -91,15 +99,22 @@ flowchart TD
     VALID -- "no" --> FAIL["job fails loudly;<br/>issue keeps sentry:needs-triage<br/>→ retried next run"]
     VALID -- "yes" --> SWAP["label swap →<br/>sentry:verdict-&lt;verdict&gt;"]
     SWAP --> DIGEST["run digest → #engineering<br/>(fast-follow #1336, in flight)"]
-    SWAP --> ROUTE{"verdict"}
+    SWAP --> CLOSESTEP["deterministic close step<br/>(same job step, after label swap)"]
+    CLOSESTEP --> ROUTE{"verdict bucket"}
     ROUTE -- "code-fix" --> OWN["human fixes in the owning repo<br/>(Phase 2b+: scoped fix-PR candidate)"]
     ROUTE -- "config-fix" --> CFG["human config/infra change<br/>(never automated)"]
-    ROUTE -- "needs-human" --> REV["human review"]
     ROUTE -- "upstream-transient" --> ARCH["Phase 2a (future): human-approved<br/>archive-until-escalating in Sentry"]
+    ROUTE -- "needs-human" --> REV["human review<br/>(queue issue stays OPEN —<br/>the one excluded bucket)"]
+    OWN --> CLOSED["queue issue closed (completed)<br/>fixed comment; reopens<br/>automatically on Sentry regression"]
+    CFG --> CLOSED
+    ARCH --> CLOSED
 ```
 
 Nothing in Phase 1 mutates Sentry or any codebase: the only writes anywhere
-are the queue issue, the verdict comment, the label, and the notifications.
+are the queue issue (create/reopen/close), the verdict comment, the label, and
+the notifications. Closing a queue issue never touches Sentry — the underlying
+Sentry issue keeps whatever status it already had; only the local ledger entry
+closes.
 
 ## Queue contract (v2)
 
@@ -168,6 +183,13 @@ bulk scan per run (not one search per issue): it pages through the complete
 `sentry-triage` label set, all states, with no result cap — a capped scan
 would silently start duplicating older regressed issues once the queue
 outgrows the cap.
+
+**Queue hygiene counterpart:** the deterministic close step (verdict contract
+below) closes verdicted queue issues so the tracker stays readable. This
+idempotency logic is its exact counterpart and needed no change to support
+it — a queue issue closed by the verdict-close step is, to this scan, just
+another "closed match," so the existing regressed/not-regressed branches above
+already reopen it on regression or leave it closed otherwise.
 
 ### Labels
 
@@ -326,6 +348,41 @@ owned by the Stage A queue contract / ingest bootstrap):
 Note the deliberate asymmetry: the verdict value `upstream-transient` maps to the
 label `sentry:verdict-upstream` (not `-upstream-transient`).
 
+### Queue closing (deterministic)
+
+Immediately after the label swap, in the same deterministic step and using the
+same already-validated `verdict` value (never agent-authored text), the step
+closes the queue issue for every bucket except `needs-human`:
+
+| verdict                                        | queue issue                                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `code-fix`, `config-fix`, `upstream-transient` | closed (`gh issue close --reason completed`)                                          |
+| `needs-human`                                  | stays **open** — the one bucket that wants human eyes; a human closes it after acting |
+
+The closing comment is fixed and deterministic — the verdict word is its only
+variable, and that word comes from the validated four-value enum above, never
+from agent-authored comment text:
+
+```text
+Triage complete: <verdict>. Ledger entry closed; reopens automatically on Sentry regression.
+```
+
+This is queue hygiene only: it closes this repo's local ledger issue, never
+the underlying Sentry issue (Sentry archival stays Phase 2a, human-approved,
+a separate write-scoped token — see "What Phase 2 does with verdicts" below).
+The regression-reopen path (Stage A's idempotency scan, above) is this step's
+exact counterpart and required no change: a queue issue closed here reopens
+automatically the next time ingest sees the underlying Sentry issue regress.
+
+Once a verdict-projection sibling issue exists in the owning repo (not yet
+built), `code-fix`/`config-fix` closing comments are expected to also link the
+projected owning-repo issue — forward-looking, not part of this contract yet.
+
+**One-off backfill (queue hygiene, 2026-07):** activation-era queue issues
+that already carried a non-`needs-human` verdict label predate this closing
+step and needed a single manual sweep — see "Backfill (queue hygiene closing,
+one-off)" in the operator runbook below for the exact command and when it ran.
+
 ### How to read a verdict
 
 - `code-fix` — a code change in the owning repo would fix it (bug, unhandled
@@ -441,6 +498,32 @@ or broken period fall outside the next scheduled scan. Run one manual
 `pnpm sentry:ingest --lookback-days 30` locally with a `SENTRY_TRIAGE_TOKEN`.
 Idempotency makes a too-wide window harmless — existing queue issues are
 skipped.
+
+**Backfill (queue hygiene closing, one-off):** the deterministic close step
+(#1338) only closes queue issues going forward, from the run it merges in. It
+does not retroactively close activation-era queue issues that already carry a
+non-`needs-human` verdict label. Run this once after the #1338 PR merges (not
+before — closing before the deterministic step exists would leave those
+issues without the fixed closing comment's guarantee that a future regression
+reopens them the same way). It is idempotent: `--state open` means a rerun is
+a no-op for issues the first run already closed.
+
+```bash
+REPO="mento-protocol/monitoring-monorepo"
+
+close_verdicted() {
+  local label="$1" verdict="$2"
+  gh issue list --repo "$REPO" --label sentry-triage --label "$label" --state open --json number --jq '.[].number' |
+    while read -r n; do
+      gh issue close "$n" --repo "$REPO" --reason completed \
+        --comment "Triage complete: ${verdict}. Ledger entry closed; reopens automatically on Sentry regression."
+    done
+}
+
+close_verdicted sentry:verdict-code-fix code-fix
+close_verdicted sentry:verdict-config-fix config-fix
+close_verdicted sentry:verdict-upstream upstream-transient
+```
 
 ## Verification
 

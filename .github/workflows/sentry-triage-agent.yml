@@ -249,3 +249,24 @@ jobs:
             --remove-label 'sentry:needs-triage' \
             --add-label "${label}"
           echo "Applied ${label} to issue #${QUEUE_ISSUE_NUMBER}."
+
+          # Queue hygiene (#1338): a verdicted queue issue is a closed ledger
+          # entry, not an archive record — close every bucket except
+          # needs-human, which is the one bucket that wants human eyes before
+          # it goes away. The comment text is fixed; `${verdict}` is the only
+          # variable and it was just constrained to the four-value closed set
+          # above, so this is not agent-derived text. Regression reopens this
+          # closed issue automatically (Stage A's reopen path in
+          # scripts/sentry-triage-ingest.mjs) — see docs/notes/sentry-triage-pipeline.md.
+          case "${verdict}" in
+            code-fix | config-fix | upstream-transient)
+              gh issue close "${QUEUE_ISSUE_NUMBER}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --reason completed \
+                --comment "Triage complete: ${verdict}. Ledger entry closed; reopens automatically on Sentry regression."
+              echo "Closed issue #${QUEUE_ISSUE_NUMBER} (verdict: ${verdict})."
+              ;;
+            needs-human)
+              echo "Issue #${QUEUE_ISSUE_NUMBER} verdict is needs-human; left open for human review."
+              ;;
+          esac
