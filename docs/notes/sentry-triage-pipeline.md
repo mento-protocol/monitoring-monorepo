@@ -53,7 +53,7 @@ flowchart LR
     subgraph OBS["Observability"]
         TRK["run record →<br/>tracker #1282"]
         CIF["workflow failures →<br/>#ci-failures"]
-        ENG["per-run verdict digest →<br/>#engineering"]
+        ENG["per-run verdict digest →<br/>#engineering<br/>(fast-follow #1336, in flight)"]
     end
 
     HUM["humans — review verdicts,<br/>act per owning repo"]
@@ -90,9 +90,10 @@ flowchart TD
     VC --> VALID{"deterministic step:<br/>valid verdict?"}
     VALID -- "no" --> FAIL["job fails loudly;<br/>issue keeps sentry:needs-triage<br/>→ retried next run"]
     VALID -- "yes" --> SWAP["label swap →<br/>sentry:verdict-&lt;verdict&gt;"]
-    SWAP --> DIGEST["run digest → #engineering"]
+    SWAP --> DIGEST["run digest → #engineering<br/>(fast-follow #1336, in flight)"]
     SWAP --> ROUTE{"verdict"}
-    ROUTE -- "code-fix /<br/>config-fix" --> OWN["human fixes in the owning repo<br/>(Phase 2b+: scoped fix PRs)"]
+    ROUTE -- "code-fix" --> OWN["human fixes in the owning repo<br/>(Phase 2b+: scoped fix-PR candidate)"]
+    ROUTE -- "config-fix" --> CFG["human config/infra change<br/>(never automated)"]
     ROUTE -- "needs-human" --> REV["human review"]
     ROUTE -- "upstream-transient" --> ARCH["Phase 2a (future): human-approved<br/>archive-until-escalating in Sentry"]
 ```
