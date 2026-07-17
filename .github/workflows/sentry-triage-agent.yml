@@ -304,8 +304,12 @@ jobs:
           # lets it post to this public channel uninvited (same mechanism as
           # notify-slack-on-main-failure.yml). The script prints ONLY the Slack
           # payload JSON to stdout; diagnostics go to stderr.
+          # --repo: same source of truth as the select/triage jobs
+          # (GITHUB_REPOSITORY), so the digest reads the run's own repository
+          # instead of assuming the script's default (matters on forks/renames).
           node scripts/sentry-triage-digest.mjs \
             --channel '#engineering' \
+            --repo "${GITHUB_REPOSITORY}" \
             > "${RUNNER_TEMP}/digest-payload.json"
 
       - name: Post digest to #engineering

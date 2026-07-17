@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {
   buildDigest,
+  chunkLines,
   classifyIssue,
   collectIssues,
   escapeSlackText,
@@ -8,6 +9,7 @@ import {
   findLatestVerdictComment,
   formatSummaryForSlack,
   LABEL_TO_VERDICT,
+  MAX_SECTION_TEXT_LEN,
   NEEDS_TRIAGE_LABEL,
   parseArgs,
   parseIssueNumbers,
@@ -324,6 +326,24 @@ await test("buildDigest produces a valid chat.postMessage payload shape", () => 
   JSON.parse(JSON.stringify(payload));
 });
 
+await test("every mrkdwn text object sets verbatim: true (no Slack auto-parsing)", () => {
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 1,
+        labels: ["sentry:verdict-code-fix"],
+        comments: [{ body: verdictComment({ summary: "@everyone #general" }) }],
+      }),
+      issueFixture({ number: 2, labels: [NEEDS_TRIAGE_LABEL] }),
+    ],
+    { channel: "#engineering", now: NOW },
+  );
+  assert(payload.blocks.length >= 3, "expected header/counts/lines blocks");
+  for (const block of payload.blocks) {
+    assertEqual(block.text.verbatim, true);
+  }
+});
+
 await test("buildDigest renders the counts line in contract order incl. failed triage", () => {
   const payload = buildDigest(
     [
@@ -473,6 +493,51 @@ await test("buildDigest tolerates an empty batch (defensive; job is gated upstre
 });
 
 // ---------------------------------------------------------------------------
+// Slack 3000-char text-object cap (escape expansion must never overflow one
+// section)
+// ---------------------------------------------------------------------------
+
+await test("chunkLines packs greedily and respects the per-chunk budget", () => {
+  assertDeepEqual(chunkLines([], 10), []);
+  assertDeepEqual(chunkLines(["aa", "bb", "cc"], 5), ["aa\nbb", "cc"]);
+  // Exact fit including the joining newline: "aa\nbb" is 5 chars.
+  assertDeepEqual(chunkLines(["aa", "bb"], 5), ["aa\nbb"]);
+  assertDeepEqual(chunkLines(["aa", "bb"], 4), ["aa", "bb"]);
+  // A single line longer than the budget still lands in its own chunk.
+  assertDeepEqual(chunkLines(["xxxxxxxxxx", "y"], 5), ["xxxxxxxxxx", "y"]);
+});
+
+await test("buildDigest splits a worst-case 6-issue batch across sections under the Slack cap", () => {
+  // Six 300-char all-`<` summaries escape-expand to 1200 chars each — the
+  // exact invalid_blocks scenario: one section would be ~7.9k chars.
+  const issues = Array.from({ length: 6 }, (_, i) =>
+    issueFixture({
+      number: 100 + i,
+      shortId: `WC-${i}`,
+      labels: ["sentry:verdict-code-fix"],
+      comments: [{ body: verdictComment({ summary: "<".repeat(300) }) }],
+    }),
+  );
+  const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
+
+  const lineBlocks = payload.blocks.slice(2);
+  assert(lineBlocks.length >= 2, "expected the lines split across sections");
+  for (const block of payload.blocks) {
+    assert(
+      block.text.text.length <= MAX_SECTION_TEXT_LEN,
+      `expected every section under the ${MAX_SECTION_TEXT_LEN}-char budget, got ${block.text.text.length}`,
+    );
+  }
+  // No line lost and order preserved across the chunk boundaries.
+  const allLines = lineBlocks.flatMap((block) => block.text.text.split("\n"));
+  assertEqual(allLines.length, 6);
+  assertDeepEqual(
+    allLines.map((line) => /\|(\S+)>/.exec(line)?.[1]),
+    ["WC-0", "WC-1", "WC-2", "WC-3", "WC-4", "WC-5"],
+  );
+});
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 
@@ -525,10 +590,39 @@ await test("collectIssues fetches each issue via the injected gh runner", async 
   assertEqual(calls[0][0], "issue");
   assertEqual(calls[0][1], "view");
   assert(calls[0].includes("number,title,url,labels,comments"), "json fields");
+  // The caller's repo (the workflow passes --repo "$GITHUB_REPOSITORY")
+  // propagates into every gh call — never the script's baked-in default.
+  const repoFlagIndex = calls[0].indexOf("--repo");
+  assert(repoFlagIndex !== -1, "expected --repo flag in gh args");
+  assertEqual(calls[0][repoFlagIndex + 1], "o/r");
+  assertEqual(calls[1][calls[1].indexOf("--repo") + 1], "o/r");
 
   // End-to-end: collected issues feed straight into a valid payload.
   const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
   assertEqual(payload.text, "Sentry triage — 2 issue(s) triaged");
+});
+
+await test("collectIssues propagates a single fetch failure (fail loud, no silent drop)", async () => {
+  // One bad `gh issue view` must fail the whole digest (and so the job/run),
+  // never silently omit that issue from the posted digest.
+  const runGh = async (args) => {
+    if (args[2] === "22") throw new Error("gh issue view failed: HTTP 502");
+    return JSON.stringify({
+      number: Number(args[2]),
+      title: `[sentry] X-${args[2]} (app-mento-org, error)`,
+      url: `https://github.com/o/r/issues/${args[2]}`,
+      labels: [],
+      comments: [],
+    });
+  };
+  let threw = null;
+  try {
+    await collectIssues("o/r", [11, 22, 33], { runGh });
+  } catch (err) {
+    threw = err;
+  }
+  assert(threw, "expected a single fetch failure to reject collectIssues");
+  assert(/HTTP 502/.test(threw.message), "expected the gh error to propagate");
 });
 
 if (failed > 0) {

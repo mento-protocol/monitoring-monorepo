@@ -286,6 +286,43 @@ function renderIssueLine(entry) {
   return `• ${linked} (${project}) — ${entry.verdict} (${confidence}): ${summary}`;
 }
 
+// Slack caps a text object at 3000 chars; escape expansion (`<` -> `&lt;`,
+// `&` -> `&amp;`) means six worst-case 300-char summaries would blow far past
+// it in one section, and chat.postMessage would reject the whole payload with
+// `invalid_blocks`. Budget per section, with headroom under the hard cap.
+export const MAX_SECTION_TEXT_LEN = 2800;
+
+function mrkdwnSection(text) {
+  // verbatim: true disables Slack's automatic parsing of this text object
+  // (defense in depth on top of escapeSlackText): raw `@everyone` / `#channel`
+  // strings in user-controlled text can otherwise be auto-linkified into live
+  // mentions by layout-block parsing. The explicit `<url|label>` links we emit
+  // are mrkdwn markup, not auto-parsing, and still render.
+  return { type: "section", text: { type: "mrkdwn", text, verbatim: true } };
+}
+
+/** Greedily pack already-escaped lines into newline-joined chunks that each
+ * stay within `maxLen` (a single oversized line gets its own chunk — with the
+ * 300-char summary bound a rendered line stays well under the Slack cap). */
+export function chunkLines(lines, maxLen = MAX_SECTION_TEXT_LEN) {
+  const chunks = [];
+  let current = [];
+  let currentLen = 0;
+  for (const line of lines) {
+    const extra = line.length + (current.length > 0 ? 1 : 0); // +1 for "\n"
+    if (current.length > 0 && currentLen + extra > maxLen) {
+      chunks.push(current.join("\n"));
+      current = [line];
+      currentLen = line.length;
+    } else {
+      current.push(line);
+      currentLen += extra;
+    }
+  }
+  if (current.length > 0) chunks.push(current.join("\n"));
+  return chunks;
+}
+
 /**
  * Build the deterministic Slack `chat.postMessage` payload for one batch.
  * `channel` is passed in (hardcoded by the workflow); `now` is injectable for
@@ -312,15 +349,17 @@ export function buildDigest(issues, { channel, now = new Date() } = {}) {
       if (entry.bucket === key) ordered.push(entry);
     }
   }
-  const linesText = ordered.map(renderIssueLine).join("\n");
+  const lines = ordered.map(renderIssueLine);
 
   const blocks = [
-    { type: "section", text: { type: "mrkdwn", text: headerText } },
-    { type: "section", text: { type: "mrkdwn", text: countsText } },
+    mrkdwnSection(headerText),
+    mrkdwnSection(countsText),
+    // Issue lines are split across as many sections as the per-section budget
+    // needs (order preserved) so escape-expanded summaries can never push a
+    // single text object past Slack's 3000-char cap. Batch cap is 6, so this
+    // stays far below Slack's 50-blocks-per-message limit.
+    ...chunkLines(lines).map(mrkdwnSection),
   ];
-  if (linesText) {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: linesText } });
-  }
 
   return {
     channel,
