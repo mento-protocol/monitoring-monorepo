@@ -39,7 +39,14 @@ function repoRoot() {
     : process.cwd();
 }
 
-function alertsInfraMultisigChains() {
+interface AlertsInfraMultisigContract {
+  chain: string;
+  network: string;
+  safeAddressPrefix: string;
+  webhookNamePrefix: string;
+}
+
+function alertsInfraMultisigContract(): AlertsInfraMultisigContract[] {
   const variables = readFileSync(
     join(repoRoot(), "alerts", "infra", "variables.tf"),
     "utf8",
@@ -58,35 +65,98 @@ function alertsInfraMultisigChains() {
     );
   }
 
-  const chains = new Set<string>();
-  const chainPattern = /chain\s+=\s+"([^"]+)"/g;
+  const networkByChain = new Map<string, string>();
+  const chainPattern =
+    /chain\s+=\s+"([^"]+)"\s+quicknode_network_name\s+=\s+"([^"]+)"/g;
   for (
     let match = chainPattern.exec(defaultBlock);
     match;
     match = chainPattern.exec(defaultBlock)
   ) {
-    chains.add(match[1]);
+    const [, chain, network] = match;
+    const existingNetwork = networkByChain.get(chain);
+    if (existingNetwork && existingNetwork !== network) {
+      throw new Error(
+        `alerts/infra multisigs configure conflicting networks for ${chain}`,
+      );
+    }
+    networkByChain.set(chain, network);
   }
 
-  return [...chains].sort();
+  const handlerConstants = readFileSync(
+    join(
+      repoRoot(),
+      "alerts",
+      "infra",
+      "onchain-event-handler",
+      "src",
+      "constants.ts",
+    ),
+    "utf8",
+  );
+  const safePrefixByChain = new Map<string, string>();
+  const safePrefixPattern =
+    /^ {2}([a-z]+): \{[\s\S]*?^ {4}safeAddressPrefix: "([^"]+)",/gm;
+  for (
+    let match = safePrefixPattern.exec(handlerConstants);
+    match;
+    match = safePrefixPattern.exec(handlerConstants)
+  ) {
+    safePrefixByChain.set(match[1], match[2]);
+  }
+
+  return [...networkByChain.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([chain, network]) => {
+      const safeAddressPrefix = safePrefixByChain.get(chain);
+      if (!safeAddressPrefix) {
+        throw new Error(
+          `alerts/infra handler has no Safe address prefix for ${chain}`,
+        );
+      }
+      return {
+        chain,
+        network,
+        safeAddressPrefix,
+        webhookNamePrefix: `safe-multisig-monitor-${chain}-`,
+      };
+    });
 }
 
-const ACTIVE_WEBHOOKS: FakeWebhook[] = [
-  { id: "1", name: "SortedOracles", status: "active", network: "celo-mainnet" },
-  { id: "2", name: "MentoGovernor", status: "active", network: "celo-mainnet" },
-  {
+const ACTIVE_WEBHOOK = {
+  sortedOracles: {
+    id: "1",
+    name: "SortedOracles",
+    status: "active",
+    network: "celo-mainnet",
+  },
+  mentoGovernor: {
+    id: "2",
+    name: "MentoGovernor",
+    status: "active",
+    network: "celo-mainnet",
+  },
+  celoSafe: {
     id: "3",
     name: "safe-multisig-monitor-celo-abc12345",
     status: "active",
     network: "celo-mainnet",
   },
-  {
+  ethereumSafe: {
     id: "4",
     name: "safe-multisig-monitor-ethereum-abc12345",
     status: "active",
     network: "ethereum-mainnet",
   },
-];
+  polygonSafe: {
+    id: "5",
+    name: "safe-multisig-monitor-polygon-abc12345",
+    status: "active",
+    network: "polygon-mainnet",
+  },
+} satisfies Record<string, FakeWebhook>;
+
+const ACTIVE_WEBHOOKS = Object.values(ACTIVE_WEBHOOK);
 
 describe("checkWebhookStatus", () => {
   beforeEach(() => {
@@ -118,14 +188,16 @@ describe("checkWebhookStatus", () => {
       "MentoGovernor (missing)",
       "safe-multisig-monitor-celo-* (missing or inactive)",
       "safe-multisig-monitor-ethereum-* (missing or inactive)",
+      "safe-multisig-monitor-polygon-* (missing or inactive)",
     ]);
   });
 
   it("reports unhealthy when one expected webhook is missing", async () => {
     mockWebhooksResponse([
-      ACTIVE_WEBHOOKS[0],
-      ACTIVE_WEBHOOKS[2],
-      ACTIVE_WEBHOOKS[3],
+      ACTIVE_WEBHOOK.sortedOracles,
+      ACTIVE_WEBHOOK.celoSafe,
+      ACTIVE_WEBHOOK.ethereumSafe,
+      ACTIVE_WEBHOOK.polygonSafe,
     ]);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
@@ -143,9 +215,10 @@ describe("checkWebhookStatus", () => {
         status: "active",
         network: "ethereum-mainnet",
       },
-      ACTIVE_WEBHOOKS[1],
-      ACTIVE_WEBHOOKS[2],
-      ACTIVE_WEBHOOKS[3],
+      ACTIVE_WEBHOOK.mentoGovernor,
+      ACTIVE_WEBHOOK.celoSafe,
+      ACTIVE_WEBHOOK.ethereumSafe,
+      ACTIVE_WEBHOOK.polygonSafe,
     ]);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
@@ -175,15 +248,16 @@ describe("checkWebhookStatus", () => {
 
   it("reports unhealthy when an expected webhook is present but not active", async () => {
     mockWebhooksResponse([
-      ACTIVE_WEBHOOKS[0],
+      ACTIVE_WEBHOOK.sortedOracles,
       {
         id: "2",
         name: "MentoGovernor",
         status: "paused",
         network: "celo-mainnet",
       },
-      ACTIVE_WEBHOOKS[2],
-      ACTIVE_WEBHOOKS[3],
+      ACTIVE_WEBHOOK.celoSafe,
+      ACTIVE_WEBHOOK.ethereumSafe,
+      ACTIVE_WEBHOOK.polygonSafe,
     ]);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
@@ -220,13 +294,16 @@ describe("checkWebhookStatus", () => {
 
   it("reports unhealthy when a Safe webhook prefix has no active match", async () => {
     mockWebhooksResponse([
-      ...ACTIVE_WEBHOOKS.slice(0, 3),
+      ACTIVE_WEBHOOK.sortedOracles,
+      ACTIVE_WEBHOOK.mentoGovernor,
+      ACTIVE_WEBHOOK.celoSafe,
       {
         id: "4",
         name: "safe-multisig-monitor-ethereum-abc12345",
         status: "paused",
         network: "ethereum-mainnet",
       },
+      ACTIVE_WEBHOOK.polygonSafe,
     ]);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
@@ -258,13 +335,16 @@ describe("checkWebhookStatus", () => {
 
   it("treats a Safe webhook on the wrong network as missing", async () => {
     mockWebhooksResponse([
-      ...ACTIVE_WEBHOOKS.slice(0, 3),
+      ACTIVE_WEBHOOK.sortedOracles,
+      ACTIVE_WEBHOOK.mentoGovernor,
+      ACTIVE_WEBHOOK.celoSafe,
       {
         id: "4",
         name: "safe-multisig-monitor-ethereum-abc12345",
         status: "active",
         network: "celo-mainnet",
       },
+      ACTIVE_WEBHOOK.polygonSafe,
     ]);
     const { checkWebhookStatus } = await import("../check-webhook-status.js");
 
@@ -276,8 +356,28 @@ describe("checkWebhookStatus", () => {
     ]);
   });
 
-  it("documents Safe webhook prefixes for every alerts/infra multisig chain", () => {
-    expect(alertsInfraMultisigChains()).toEqual(["celo", "ethereum"]);
+  it("covers every alerts/infra multisig chain with its network and Safe prefix", async () => {
+    const contract = alertsInfraMultisigContract();
+    expect(contract).toContainEqual({
+      chain: "polygon",
+      network: "polygon-mainnet",
+      safeAddressPrefix: "matic",
+      webhookNamePrefix: "safe-multisig-monitor-polygon-",
+    });
+
+    mockWebhooksResponse([]);
+    const { checkWebhookStatus } = await import("../check-webhook-status.js");
+    const result = await checkWebhookStatus();
+    const missingSafeWebhooks = result.unhealthyWebhooks.filter((message) =>
+      message.startsWith("safe-multisig-monitor-"),
+    );
+
+    expect(missingSafeWebhooks).toEqual(
+      contract.map(
+        ({ webhookNamePrefix }) =>
+          `${webhookNamePrefix}* (missing or inactive)`,
+      ),
+    );
   });
 
   it("reads the API key secret id from config", async () => {
