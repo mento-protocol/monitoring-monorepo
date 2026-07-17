@@ -16,6 +16,90 @@ section here so later stages (phased mutations, the push leg) extend this file
 instead of rewriting it. Phase 1 = Stage A (deterministic ingest) + Stage B
 (read-only triage verdicts).
 
+## How it fits together
+
+The life of a Sentry issue, in one paragraph: an error event lands in one of
+the org's six Sentry projects; twice a day the deterministic ingest turns every
+new or regressed issue group into one redacted queue issue in this repo; 45
+minutes later the triage agent picks the oldest pending batch, investigates
+each via read-only Sentry access, and posts a structured verdict; a
+deterministic workflow step validates the verdict and applies the matching
+label; humans consume verdicts by label — nothing is fixed, archived, or
+resolved automatically in Phase 1.
+
+### Architecture
+
+```mermaid
+flowchart LR
+    subgraph SENTRY["Sentry — mento-labs org (6 projects)"]
+        SE["error events,<br/>grouped into issues"]
+    end
+
+    subgraph GHA["GitHub Actions — this repo"]
+        ING["<b>Stage A — ingest</b><br/>sentry-triage-ingest.yml<br/>deterministic script, 2×/day"]
+        SEL["<b>Stage B — select</b><br/>6 oldest pending,<br/>oldest-first"]
+        AGT["<b>Stage B — triage agents</b><br/>claude-code-action, ≤2 parallel<br/>read-only Sentry MCP"]
+        LBL["<b>deterministic verdict step</b><br/>parse comment → validate →<br/>apply label (no LLM authority)"]
+    end
+
+    subgraph QUEUE["GitHub Issues — machine ledger"]
+        QI["queue issues<br/><code>[sentry] SHORT-ID (project, level)</code><br/>redacted coordinates only"]
+    end
+
+    subgraph TF["Terraform platform stack"]
+        SEC["SENTRY_TRIAGE_TOKEN (read-only)<br/>SENTRY_TRIAGE_ENABLED (kill switch)"]
+    end
+
+    subgraph OBS["Observability"]
+        TRK["run record →<br/>tracker #1282"]
+        CIF["workflow failures →<br/>#ci-failures"]
+        ENG["per-run verdict digest →<br/>#engineering"]
+    end
+
+    HUM["humans — review verdicts,<br/>act per owning repo"]
+
+    SE -- "REST: new + regressed<br/>(lookback window)" --> ING
+    ING -- "1 redacted issue per group,<br/>idempotent by SHORT-ID" --> QI
+    QI --> SEL --> AGT
+    SE -. "full payload read at<br/>triage time (read-only)" .-> AGT
+    AGT -- "verdict comment" --> QI
+    LBL -- "sentry:verdict-* label" --> QI
+    AGT --> LBL
+    SEC -. "gates + authenticates" .-> ING & SEL
+    ING --> TRK
+    GHA -.-> CIF
+    LBL --> ENG
+    QI --> HUM
+```
+
+### Process flow — life of one Sentry issue
+
+```mermaid
+flowchart TD
+    EV["Error event in any of the 6<br/>Sentry projects"] --> GRP["Sentry groups it into an<br/>issue (SHORT-ID)"]
+    GRP --> POLL["Ingest run (05:30 / 13:30 UTC)<br/>queries new + regressed issues"]
+    POLL --> KNOWN{"queue issue with this<br/>SHORT-ID exists?"}
+    KNOWN -- "no" --> CREATE["create queue issue<br/>sentry-triage + sentry:needs-triage<br/>(+ sentry:candidate-noise if heuristic hits)"]
+    KNOWN -- "open" --> SKIP["skip (already queued)"]
+    KNOWN -- "closed +<br/>regressed" --> REOPEN["reopen, shed stale verdict labels,<br/>re-add sentry:needs-triage"]
+    CREATE --> PEND["pending in queue"]
+    REOPEN --> PEND
+    PEND --> BATCH["next agent run picks ≤6<br/>oldest pending (06:15 / 14:15 UTC)"]
+    BATCH --> INV["agent investigates:<br/>Sentry payload (read-only MCP)<br/>+ repo checkout for ui-dashboard"]
+    INV --> VC["posts ONE redacted verdict comment<br/>(yaml: verdict/confidence/repo/<br/>summary/root cause/duplicates)"]
+    VC --> VALID{"deterministic step:<br/>valid verdict?"}
+    VALID -- "no" --> FAIL["job fails loudly;<br/>issue keeps sentry:needs-triage<br/>→ retried next run"]
+    VALID -- "yes" --> SWAP["label swap →<br/>sentry:verdict-&lt;verdict&gt;"]
+    SWAP --> DIGEST["run digest → #engineering"]
+    SWAP --> ROUTE{"verdict"}
+    ROUTE -- "code-fix /<br/>config-fix" --> OWN["human fixes in the owning repo<br/>(Phase 2b+: scoped fix PRs)"]
+    ROUTE -- "needs-human" --> REV["human review"]
+    ROUTE -- "upstream-transient" --> ARCH["Phase 2a (future): human-approved<br/>archive-until-escalating in Sentry"]
+```
+
+Nothing in Phase 1 mutates Sentry or any codebase: the only writes anywhere
+are the queue issue, the verdict comment, the label, and the notifications.
+
 ## Queue contract (v2)
 
 Stage A (`scripts/sentry-triage-ingest.mjs`, `.github/workflows/sentry-triage-ingest.yml`)
