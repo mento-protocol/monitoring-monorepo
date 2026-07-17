@@ -4,6 +4,10 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-07-16
+doc_type: agent-instructions
+scope: ui-dashboard
+review_interval_days: 90
+garden_lane: agent-entry-points
 ---
 
 # AGENTS.md — Monitoring Dashboard

@@ -4,6 +4,10 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-05-20
+doc_type: role
+scope: repo-wide
+review_interval_days: 90
+garden_lane: agent-entry-points
 ---
 
 # standards-enforcer

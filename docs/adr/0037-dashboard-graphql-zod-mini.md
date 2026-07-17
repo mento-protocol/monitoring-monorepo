@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-15
 scope: ui-dashboard
 date: 2026-07
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0037 — Dashboard native GraphQL transport and client-side Zod Mini

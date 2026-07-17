@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   DEPLOY_WORKFLOWS,
@@ -11,6 +12,18 @@ import {
 
 const now = new Date("2026-07-07T12:00:00Z");
 const workflow = DEPLOY_WORKFLOWS[0];
+const workflowYaml = readFileSync(
+  new URL(
+    "../.github/workflows/terraform-deploy-queue-watch.yml",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+assert.match(
+  workflowYaml,
+  /vars\.TERRAFORM_APPLY_SLACK_CHANNEL == '#ci-operations' && '#deploys' \|\| vars\.TERRAFORM_APPLY_SLACK_CHANNEL \|\| '#deploys'/,
+);
 
 const staleQueuedRun = {
   id: 101,

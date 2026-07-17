@@ -58,7 +58,7 @@ function normalizePath(path) {
 }
 
 export function isGenerated(path) {
-  return path.includes("/.envio/");
+  return path.includes("/.envio/") || path.includes("/__generated__/");
 }
 
 function isExcludedTest(path, scope) {

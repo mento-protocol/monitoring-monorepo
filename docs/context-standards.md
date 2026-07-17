@@ -3,7 +3,11 @@ title: Agent Context Standards
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
+doc_type: reference
+scope: repo-wide
+review_interval_days: 90
+garden_lane: package-readmes-reference
 ---
 
 # Agent Context Standards
@@ -45,12 +49,29 @@ Non-canonical context is useful history, intent, notes, or hypotheses. Agents ma
 
 Non-canonical context is allowed to be stale or contradictory. It should not be copied into canonical files without re-verification.
 
+## Documentation Catalog
+
+[`docs/README.md`](README.md) is the generated navigation index for every
+unique Markdown surface in the proposed working tree: tracked files plus
+non-ignored untracked additions, minus working-tree deletions. It excludes `CLAUDE.md` and
+`.claude/skills/**` runtime mirrors because their canonical sources are
+`AGENTS.md` and `.agents/skills/**` respectively. Regenerate the catalog with
+`pnpm docs:index --write`; `pnpm docs:index --check` fails when the index is
+stale or an internal Markdown target is broken.
+
+The catalog makes documents discoverable; it does not promote them. Its
+`canonical`, `non-canonical`, and `unmanaged` labels are derived from each
+document's metadata under the authority rules above.
+
 ## Metadata Contract
 
-Managed context files use YAML frontmatter with `title`, `status`, `owner`, `canonical`, and `last_verified` for canonical files. Root `README.md` uses the same keys in an invisible HTML comment instead:
+Managed context files use YAML frontmatter with `title`, `status`, `owner`,
+`canonical`, and `last_verified` for canonical files. README files may use the
+same keys in an invisible HTML comment so GitHub does not render a frontmatter
+block:
 
 ```html
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=YYYY-MM-DD -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=YYYY-MM-DD doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 ```
 
 Rules:
@@ -58,8 +79,16 @@ Rules:
 - `canonical: true` means the file is current operating truth.
 - `canonical: false` means the file is history, intent, or notes.
 - `owner` is the accountable reviewer for future cleanup.
-- `last_verified` is required for canonical files whose correctness depends on external systems or current repo structure.
+- `last_verified` is required for every canonical file and records the last semantic verification against its owning source.
 - `pnpm agent:context-check` fails once a `canonical: true` file's `last_verified` is more than 90 days old. Re-verify the content and bump the date; don't extend the window to make the check pass.
+
+The catalog also classifies every document with `doc_type`, `scope`,
+`review_interval_days`, and `garden_lane`. Canonical documents must declare all
+four fields explicitly. Non-canonical and unmanaged documents may rely on the
+path defaults tested in `scripts/docs-index-helpers.mjs`; explicit metadata can
+override those defaults. Canonical context normally uses a 90-day semantic
+review interval. Classification controls routing and gardening only; it never
+overrides `canonical` authority.
 
 ## Placement Rules
 
@@ -71,4 +100,12 @@ Rules:
 
 ## Maintenance Checks
 
-Run `pnpm agent:context-check` to verify managed metadata (including the `last_verified` staleness window), scoped AGENTS coverage, skill mirrors, and Cloud Run revision suffix guardrails. Skill mirrors must match their canonical `.agents/skills` source except for documented runtime-specific provenance literals, such as forensic-report writes using `source: "Codex"` in the Codex skill and `source: "claude"` in the Claude skill.
+Run `pnpm agent:context-check` to verify managed metadata (including the
+`last_verified` staleness window), scoped AGENTS coverage, skill mirrors, and
+Cloud Run revision suffix guardrails. Run `pnpm docs:index --check` for catalog
+drift and broken internal links. Run `pnpm agent:context-budget` to report the
+actual root-plus-scoped instruction bytes against Codex's configured limit;
+report mode is advisory until the strict-budget phase of #1341 lands. Skill
+mirrors must match their canonical `.agents/skills` source except for documented
+runtime-specific provenance literals, such as forensic-report writes using
+`source: "Codex"` in the Codex skill and `source: "claude"` in the Claude skill.

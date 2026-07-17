@@ -17,16 +17,20 @@ gate_cache_dir="$(mktemp -d)"
 turbo_facts_file="$(mktemp)"
 codex_hooks_backup="$(mktemp)"
 claude_settings_backup="$(mktemp)"
+codex_hooks_fixture="$(mktemp)"
+claude_settings_fixture="$(mktemp)"
 untracked_skill_artifact=".claude/skills/.agent-quality-gate-test.tmp"
 cp .codex/hooks.json "$codex_hooks_backup"
 cp .claude/settings.json "$claude_settings_backup"
+cp "$codex_hooks_backup" "$codex_hooks_fixture"
+cp "$claude_settings_backup" "$claude_settings_fixture"
 
 restore_hook_configs() {
-  cp "$codex_hooks_backup" .codex/hooks.json
-  cp "$claude_settings_backup" .claude/settings.json
+  cp "$codex_hooks_backup" "$codex_hooks_fixture"
+  cp "$claude_settings_backup" "$claude_settings_fixture"
 }
 
-trap 'restore_hook_configs; rm -rf "$gate_cache_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$codex_hooks_backup" "$claude_settings_backup"' EXIT
+trap 'restore_hook_configs; rm -rf "$gate_cache_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$codex_hooks_backup" "$claude_settings_backup" "$codex_hooks_fixture" "$claude_settings_fixture"' EXIT
 
 fail() {
   echo "agent-quality-gate test failed: $*" >&2
@@ -156,7 +160,10 @@ assert_not_contains_mapped() {
 
 run_context_check_expect_failure() {
   set +e
-  node scripts/check-agent-context.mjs > "$output_file" 2>&1
+  NODE_ENV=test \
+    AGENT_CONTEXT_CODEX_HOOKS_FILE="$codex_hooks_fixture" \
+    AGENT_CONTEXT_CLAUDE_SETTINGS_FILE="$claude_settings_fixture" \
+    node scripts/check-agent-context.mjs > "$output_file" 2>&1
   local exit_code=$?
   set -e
 
@@ -165,16 +172,17 @@ run_context_check_expect_failure() {
 }
 
 append_claude_allow() {
-  node - "$1" <<'NODE'
+  AGENT_CONTEXT_CLAUDE_SETTINGS_FILE="$claude_settings_fixture" node - "$1" <<'NODE'
 const fs = require("node:fs");
 const permission = process.argv[2];
-const settings = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
+const file = process.env.AGENT_CONTEXT_CLAUDE_SETTINGS_FILE;
+const settings = JSON.parse(fs.readFileSync(file, "utf8"));
 settings.permissions = settings.permissions || {};
 settings.permissions.allow = Array.isArray(settings.permissions.allow)
   ? settings.permissions.allow
   : [];
 settings.permissions.allow.push(permission);
-fs.writeFileSync(".claude/settings.json", `${JSON.stringify(settings, null, 2)}\n`);
+fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
 NODE
 }
 
@@ -1725,7 +1733,7 @@ quiet_success_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  printf 'fixture\n' > README.md
+  printf 'fixture\n' > fixture.txt
   mkdir -p tools
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
@@ -1735,11 +1743,11 @@ STUB
   chmod +x tools/trunk
   git add .
   git commit -qm init
-  printf 'changed\n' >> README.md
+  printf 'changed\n' >> fixture.txt
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
 )
 rm -rf "$quiet_success_repo"
-assert_contains "+ ./tools/trunk check README.md"
+assert_contains "+ ./tools/trunk check fixture.txt"
 assert_contains "Command elapsed-time summary:"
 assert_contains "- ok "
 assert_not_contains "expected fixture failure that should stay quiet"
@@ -1975,7 +1983,7 @@ fresh_stamp_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  printf 'fixture\n' > README.md
+  printf 'fixture\n' > fixture.txt
   mkdir -p tools
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
@@ -1991,14 +1999,14 @@ STUB
   git add .
   git commit -qm init
   base_ref="$(git rev-parse --verify HEAD)"
-  printf 'changed\n' >> README.md
+  printf 'changed\n' >> fixture.txt
   # Warm WITH --allow-package-script-changes; the skip run below passes NO such
   # flag (like the pre-push hook). With no package-script risk they must still
   # share a freshness stamp, so the flag-less run skips (allowPackageScripts is
   # folded out of the stamp when packageRisk is false).
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --allow-package-script-changes > "$output_file" 2>&1
-  git add README.md
+  git add fixture.txt
   git commit -qm "commit validated content"
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
@@ -2008,6 +2016,52 @@ STUB
 rm -rf "$fresh_stamp_repo"
 assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
+# Workflow changes add the ADR reminder command, whose execution argument uses
+# a randomized changed-paths scratch file. That volatile path must be
+# normalized out of the command-plan hash or an identical pre-push run can
+# never reuse the fresh success stamp.
+workflow_fresh_stamp_repo="$(mktemp -d)"
+(
+  cd "$workflow_fresh_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p .github/workflows bin tools
+  printf 'name: Metrics Bridge\n' > .github/workflows/metrics-bridge.yml
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/node bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  base_ref="$(git rev-parse --verify HEAD)"
+  printf '# changed\n' >> .github/workflows/metrics-bridge.yml
+  COUNTER_FILE="$workflow_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    PATH="$workflow_fresh_stamp_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run > "$output_file" 2>&1
+  COUNTER_FILE="$workflow_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    PATH="$workflow_fresh_stamp_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
+  [[ "$(cat "$workflow_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
+    fail "workflow fresh stamp changed with randomized changed-paths scratch file"
+)
+rm -rf "$workflow_fresh_stamp_repo"
+assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+
 package_risk_fresh_stamp_repo="$(mktemp -d)"
 (
   cd "$package_risk_fresh_stamp_repo"
@@ -2015,7 +2069,7 @@ package_risk_fresh_stamp_repo="$(mktemp -d)"
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
   mkdir -p bin tools
-  printf 'fixture\n' > README.md
+  printf 'fixture\n' > fixture.txt
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 counter_file="${COUNTER_FILE:?}"
@@ -2110,7 +2164,7 @@ stale_stamp_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  printf 'fixture\n' > README.md
+  printf 'fixture\n' > fixture.txt
   mkdir -p tools
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
@@ -2126,10 +2180,10 @@ STUB
   git add .
   git commit -qm init
   base_ref="$(git rev-parse --verify HEAD)"
-  printf 'changed\n' >> README.md
+  printf 'changed\n' >> fixture.txt
   COUNTER_FILE="$stale_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run > "$output_file" 2>&1
-  printf 'changed again\n' >> README.md
+  printf 'changed again\n' >> fixture.txt
   COUNTER_FILE="$stale_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
   [[ "$(cat "$stale_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "2" ]] ||
@@ -2144,7 +2198,7 @@ sha256sum_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  printf 'fixture\n' > README.md
+  printf 'fixture\n' > fixture.txt
   mkdir -p bin tools
   cat > bin/sha256sum <<'STUB'
 #!/usr/bin/env bash
@@ -2167,7 +2221,7 @@ STUB
   chmod +x bin/sha256sum tools/trunk
   git add .
   git commit -qm init
-  printf 'changed\n' >> README.md
+  printf 'changed\n' >> fixture.txt
   SHA256SUM_COUNTER_FILE="$sha256sum_repo/sha256sum-count" \
     PATH="$sha256sum_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
@@ -2175,7 +2229,7 @@ STUB
     fail "gate did not use sha256sum when it was available"
 )
 rm -rf "$sha256sum_repo"
-assert_contains "+ ./tools/trunk check README.md"
+assert_contains "+ ./tools/trunk check fixture.txt"
 
 quiet_failure_repo="$(mktemp -d)"
 (
@@ -2338,6 +2392,7 @@ assert_not_contains "- ./tools/trunk check --all"
 run_gate "docs/deployment.md"
 assert_contains "Detected surfaces:"
 assert_contains "- docs"
+assert_contains "- pnpm docs:index --check (tracked documentation changed)"
 assert_contains "- ./tools/trunk check docs/deployment.md (changed existing paths should pass targeted Trunk checks)"
 assert_not_contains "- ./tools/trunk check --all"
 
@@ -2347,7 +2402,21 @@ assert_contains "- pnpm agent:context-check (agent context standards changed)"
 
 run_gate "SPEC.md"
 assert_contains "- docs"
+assert_contains "- pnpm docs:index --check (tracked documentation changed)"
 assert_contains "- pnpm agent:context-check (technical specification changed)"
+
+run_gate "aegis/README.md"
+assert_contains "- docs"
+assert_contains "- pnpm docs:index --check (tracked documentation changed)"
+assert_contains "- pnpm agent:context-check (README metadata may enroll canonical context)"
+
+run_gate "ui-dashboard/AGENTS.md"
+assert_contains "- pnpm docs:index --check (tracked documentation changed)"
+assert_contains "- pnpm agent:context-budget (agent instruction budget input changed)"
+
+run_gate ".codex/config.toml"
+assert_contains "- agent-context"
+assert_contains "- pnpm agent:context-budget (agent instruction budget input changed)"
 
 # Any docs markdown may carry canonical: true frontmatter (discovery in
 # check-agent-context.mjs), so a discovered doc path must route through the
@@ -2360,17 +2429,27 @@ run_gate ".codex/hooks.json"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
 
-: > .codex/hooks.json
+set +e
+AGENT_CONTEXT_CODEX_HOOKS_FILE="$codex_hooks_fixture" \
+  node scripts/check-agent-context.mjs > "$output_file" 2>&1
+unscoped_override_status=$?
+set -e
+[[ "$unscoped_override_status" -ne 0 ]] ||
+  fail "expected an unscoped test input override to fail"
+assert_contains "AGENT_CONTEXT_CODEX_HOOKS_FILE: test-only override requires NODE_ENV=test"
+
+: > "$codex_hooks_fixture"
 run_context_check_expect_failure
 assert_contains ".codex/hooks.json: invalid JSON"
 restore_hook_configs
 
-node - <<'NODE'
+AGENT_CONTEXT_CODEX_HOOKS_FILE="$codex_hooks_fixture" node - <<'NODE'
 const fs = require("node:fs");
-const hooks = JSON.parse(fs.readFileSync(".codex/hooks.json", "utf8"));
+const file = process.env.AGENT_CONTEXT_CODEX_HOOKS_FILE;
+const hooks = JSON.parse(fs.readFileSync(file, "utf8"));
 hooks.hooks.SessionEnd[0].hooks[0].command =
   "bash -lc 'echo git rev-parse --show-toplevel && echo scripts/agent-session-end-hook.sh'";
-fs.writeFileSync(".codex/hooks.json", `${JSON.stringify(hooks, null, 2)}\n`);
+fs.writeFileSync(file, `${JSON.stringify(hooks, null, 2)}\n`);
 NODE
 run_context_check_expect_failure
 assert_contains ".codex/hooks.json: expected SessionEnd command to execute scripts/agent-session-end-hook.sh via resolved repo root"
@@ -2380,17 +2459,18 @@ run_gate ".claude/settings.json"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
 
-: > .claude/settings.json
+: > "$claude_settings_fixture"
 run_context_check_expect_failure
 assert_contains ".claude/settings.json: invalid JSON"
 restore_hook_configs
 
-node - <<'NODE'
+AGENT_CONTEXT_CLAUDE_SETTINGS_FILE="$claude_settings_fixture" node - <<'NODE'
 const fs = require("node:fs");
-const settings = JSON.parse(fs.readFileSync(".claude/settings.json", "utf8"));
+const file = process.env.AGENT_CONTEXT_CLAUDE_SETTINGS_FILE;
+const settings = JSON.parse(fs.readFileSync(file, "utf8"));
 settings.hooks.SessionEnd[0].hooks[0].command =
   "echo ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh";
-fs.writeFileSync(".claude/settings.json", `${JSON.stringify(settings, null, 2)}\n`);
+fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
 NODE
 run_context_check_expect_failure
 assert_contains '.claude/settings.json: expected SessionEnd command to execute quoted ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh with bash'
@@ -2470,6 +2550,12 @@ assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 run_gate "scripts/lockfile-lint.test.mjs"
 assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 
+run_gate "scripts/sentry-triage-digest.mjs"
+assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
+
+run_gate "scripts/sentry-triage-digest.test.mjs"
+assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
+
 run_gate "scripts/sanitize-terraform-output.sh"
 assert_contains "- pnpm sanitize:test (Terraform output sanitizer changed)"
 
@@ -2544,6 +2630,35 @@ assert_contains "- node scripts/check-agent-context.test.mjs (agent context chec
 run_gate "scripts/check-agent-context.test.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
 assert_contains "- node scripts/check-agent-context.test.mjs (agent context checker changed)"
+
+run_gate "scripts/docs-index.mjs"
+assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
+assert_contains "- pnpm docs:index --check (documentation catalog helper changed)"
+assert_contains "- pnpm agent:context-check (documentation catalog metadata contract changed)"
+
+run_gate "scripts/docs-index-helpers.mjs"
+assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
+
+run_gate "scripts/docs-index.test.mjs"
+assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
+
+run_gate "scripts/docs-audit.mjs"
+assert_contains "- pnpm docs:audit:test (documentation audit planner changed)"
+assert_contains "- pnpm docs:audit --dry-run (documentation audit planner changed)"
+assert_contains "- pnpm docs:index --check (documentation audit planner consumes the catalog)"
+
+run_gate "scripts/docs-audit-helpers.mjs"
+assert_contains "- pnpm docs:audit:test (documentation audit planner changed)"
+
+run_gate "scripts/docs-audit.test.mjs"
+assert_contains "- pnpm docs:audit:test (documentation audit planner changed)"
+
+run_gate "scripts/agent-context-budget.mjs"
+assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"
+assert_contains "- pnpm agent:context-budget (agent context budget helper changed)"
+
+run_gate "scripts/agent-context-budget.test.mjs"
+assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"
 
 run_gate "scripts/check-deviation-threshold-drift.mjs"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold drift checker changed)"

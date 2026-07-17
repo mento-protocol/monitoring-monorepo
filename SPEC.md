@@ -4,6 +4,10 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-07-17
+doc_type: reference
+scope: repo-wide
+review_interval_days: 90
+garden_lane: package-readmes-reference
 ---
 
 # Mento v3 Monitoring — Technical Specification

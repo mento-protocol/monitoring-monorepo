@@ -1,11 +1,30 @@
+---
+title: Deployment Guide
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-17
+doc_type: runbook
+scope: repo-wide
+review_interval_days: 90
+garden_lane: operator-runbooks
+---
+
 # Deployment Guide
 
 ## Architecture
 
-This monorepo deploys two services independently:
+This guide covers the two user-facing data surfaces that deploy independently:
 
 - **Indexer** (`indexer-envio/`) → Envio Hosted Service
 - **Dashboard** (`ui-dashboard/`) → Vercel (`monitoring-dashboard` project)
+
+The repo also deploys Metrics Bridge, Aegis, alerting infrastructure,
+integration probes, and Governance Watchdog. Use
+[`terraform.stacks.json`](../terraform.stacks.json),
+[`docs/terraform.md`](./terraform.md), and each package's `AGENTS.md` or README
+for those owning workflows; do not infer their deployment policy from this
+indexer/dashboard runbook.
 
 ---
 
@@ -21,7 +40,8 @@ The prod multichain indexer is driven by a single deploy branch that Envio watch
 
 ### Endpoint URL
 
-The indexer runs on the Envio **production medium** tier with a static endpoint - the hash does not change on redeployment:
+The indexer has a static production endpoint; the hash does not change on
+redeployment:
 
 ```text
 https://indexer.hyperindex.xyz/2f3dd15/v1/graphql
@@ -32,10 +52,9 @@ https://indexer.hyperindex.xyz/2f3dd15/v1/graphql
 **Redeploy the prod indexer:**
 
 ```bash
-# Push main to the envio branch (triggers Envio redeploy)
+# Push the guarded current HEAD to the envio branch (triggers Envio redeploy)
 COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
-# equivalent: git push origin main:envio
 ```
 
 Then wait for the deployment to catch up and promote it:
@@ -54,9 +73,9 @@ pnpm deploy:indexer:promote "$COMMIT"
 If Envio gets stuck or you need to retrigger without a code change:
 
 ```bash
-# Empty commit trick
+# A fresh SHA is required because pushing an unchanged ref emits no webhook.
 git commit --allow-empty -m "chore: retrigger envio deploy"
-git push origin main:envio
+pnpm deploy:indexer --yes
 ```
 
 ### After Redeployment Checklist
@@ -164,7 +183,7 @@ Protocol Grafana alerts and global Grafana routing use the separate
 service-health alert rules. Event-driven alert delivery uses `alerts-delivery`
 (`pnpm alerts:infra:plan`). Aegis dashboards use `aegis` (`pnpm aegis:tf:plan`).
 
-### Environment Variables
+### Key Environment Variables
 
 Most env vars are managed by Terraform (set for `production` and `preview` targets). Do not edit Terraform-managed vars manually in the Vercel dashboard. The Blob store identity variables are managed by the Vercel Blob store integration and should not be added to Terraform.
 
@@ -274,7 +293,7 @@ Run this once when setting up from scratch or recreating the Vercel project.
 
 ### Prerequisites
 
-- [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.5
+- [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.7
 - [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) — authenticated with ADC (`gcloud auth application-default login`). Your account needs `storage.objects.get`, `storage.objects.create`, and `storage.objects.list` on the `mento-terraform-tfstate-6ed6` GCS bucket (role: `roles/storage.objectUser` on the bucket, or broader project-level `roles/storage.admin`)
 - [Vercel CLI](https://vercel.com/docs/cli) (for blob store creation)
 - Vercel API token (create at [vercel.com/account/tokens](https://vercel.com/account/tokens))
@@ -311,27 +330,37 @@ pnpm infra:init
 
 If a local `terraform/terraform.tfstate` was present from before the GCS backend was introduced, `terraform init` will detect it and prompt to migrate. Enter `yes` to copy it to GCS. This is a one-time step — afterwards GCS is authoritative and the local file can be deleted.
 
-**5. Apply**
+**5. Plan and review**
+
+```bash
+pnpm infra:plan
+```
+
+Read the complete plan and get explicit human approval before applying.
+
+**6. Apply**
 
 ```bash
 pnpm infra:apply
 ```
 
-Terraform creates: Upstash Redis database + Vercel project + all env vars + custom domain + `.vercel/project.json`.
+Terraform creates the Upstash Redis database, Vercel project,
+Terraform-managed environment variables, custom domain, and
+`.vercel/project.json`.
 
-**6. Trigger first deploy**
+**7. Trigger first deploy**
 
-Push any commit touching `ui-dashboard/`, or force via:
+Push a dashboard-affecting commit, or run the guarded manual deploy wrapper:
 
 ```bash
-vercel deploy --prod --force --with-cache --archive=tgz --yes
+pnpm deploy:dashboard
 ```
 
-Run manual dashboard deploys from the monorepo root, not from
-`ui-dashboard/`. The Vercel project root directory is `ui-dashboard`, so the
-CLI needs the repository root plus the tracked root `.vercelignore`; running
-from the package directory can miss `vercel.json`, while running from the root
-without `.vercelignore` can upload local caches and dependencies.
+The wrapper anchors the deploy at the monorepo root, checks that the worktree
+is clean, verifies Vercel authentication, and uses the Terraform-written
+`.vercel/project.json`. Do not run a raw deploy from `ui-dashboard/`; its
+package directory does not match the Git integration's repository-root upload
+layout.
 
 ---
 
@@ -339,7 +368,7 @@ without `.vercelignore` can upload local caches and dependencies.
 
 ```text
 main
-├── 🚀 auto-deploys to Vercel (dashboard, when ui-dashboard/ changes)
+├── 🚀 auto-deploys to Vercel (when dashboard-affecting inputs change)
 └── feature branches → PR → main
 
 envio
@@ -380,16 +409,14 @@ anchors in order:
    to keep the resource-saving behavior.
 
 If the script cannot prove a deployment is dashboard-clean, it builds. For
-env-only changes that require a fresh production runtime, run the manual deploy
-from the monorepo root:
+env-only changes that require a fresh production runtime, run the guarded
+manual deploy wrapper from the monorepo root:
 
 ```bash
-vercel deploy --prod --force --with-cache --archive=tgz --yes
+pnpm deploy:dashboard
 ```
 
-Do not run that command from `ui-dashboard/`: the Vercel project already has
-`root_directory = ui-dashboard`, so package-directory deploys do not match the
-Git integration layout.
+The wrapper always deploys from the correct root and refuses a dirty worktree.
 
 ### Envio deployment fails
 
@@ -405,11 +432,17 @@ Check Envio dashboard → Metrics tab.
 
 - Stuck at 0% → check RPC URL in config
 - RPC rate-limited → contact Envio for HyperSync support
-- Start block wrong → must be ≤ first contract deployment block (`60664513` for mainnet)
+- Start block wrong → use a block at or before the first relevant event; the
+  configured Celo default is `60664500`
 
 ### Force a fresh Envio sync
 
-Delete the indexer in Envio dashboard → re-add it. This resets all state and starts from the configured start block.
+Do not delete the production indexer ad hoc. A fresh deploy SHA creates an
+independent deployment from the configured start blocks; use the status and
+verification commands above before promotion. If an incident requires an
+uncached rebuild, use Envio's dashboard cache controls or coordinate with Envio
+support so the current production deployment remains available until its
+replacement is verified.
 
 ### Terraform state recovery
 

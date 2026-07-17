@@ -5,6 +5,9 @@ owner: eng
 canonical: true
 last_verified: 2026-07-17
 scope: indexer-envio, ui-dashboard, metrics-bridge
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 date: 2026-07
 ---
 

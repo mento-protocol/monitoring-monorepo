@@ -6,6 +6,10 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-06-15
+doc_type: skill
+scope: repo-wide
+review_interval_days: 90
+garden_lane: agent-entry-points
 ---
 
 # Forensic Report

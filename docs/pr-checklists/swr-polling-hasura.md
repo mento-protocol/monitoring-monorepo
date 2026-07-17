@@ -1,3 +1,15 @@
+---
+title: SWR and Hasura Polling Checklist
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-17
+doc_type: checklist
+scope: ui-dashboard
+review_interval_days: 90
+garden_lane: pr-checklists-process
+---
+
 # SWR + Hasura polling checklist
 
 Use this checklist for any change that adds, removes, or reconfigures an SWR hook against Hasura. The dashboard fans out 15–20 polling hooks per pool page, so misconfigured defaults compound quickly into 429s and stale UIs.
@@ -8,22 +20,29 @@ Use this checklist for any change that adds, removes, or reconfigures an SWR hoo
 
 ## 1. Required SWR options for any Hasura-polling hook
 
-For any hook that polls Hasura on an interval (default 10s):
+For any hook that polls Hasura on an interval (`useGQL` defaults to 30s):
 
 - [ ] `revalidateOnFocus: false` — every alt-tab fans every active query at the endpoint, tripping Envio's 429 rate limit
 - [ ] `revalidateOnReconnect: false` — same fan-out on network blip
-- [ ] An explicit `refreshInterval` (caller-overridable, default 10_000)
-- [ ] An `AbortSignal.timeout(...)` on the request well below the refresh interval (e.g. 8s for a 10s interval) so a wedged TCP connection can't compound into unbounded backpressure
+- [ ] An explicit or wrapper-owned `refreshInterval` (caller-overridable;
+      `useGQL` and `useBridgeGQL` currently default to `30_000`)
+- [ ] An `AbortSignal.timeout(...)` well below the refresh interval for polling
+      paths that must fail/degrade rather than wait on a wedged request
 
-The canonical good example: `ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts:42-51`. The comment explains the why; copy that comment when wiring a new hook.
+Canonical implementations: `ui-dashboard/src/lib/graphql.ts` (`useGQL`) and
+`ui-dashboard/src/lib/bridge-flows/use-bridge-gql.ts` (`useBridgeGQL`).
 
-The current bug to fix: `useGQL` at `ui-dashboard/src/lib/graphql.ts:33-37` passes only `{ refreshInterval }` to `useSWR`. Every consumer of `useGQL` inherits the SWR defaults, which means **every pool-page query revalidates on focus**. Fix it at the wrapper so all call sites benefit at once. Do NOT push the fix into individual call sites — that creates drift.
+`useGQL` owns the focus/reconnect defaults centrally. Do not repeat those
+options at every call site unless that consumer deliberately overrides the
+wrapper contract.
 
 ## 2. Pause/retry interactions
 
 If you set BOTH `revalidateOnFocus: false` AND `revalidateOnReconnect: false`, then SWR's `onErrorRetry` no longer pauses for hidden/offline tabs (`onErrorRetry` is gated by `!revalidateOnFocus || !revalidateOnReconnect || isActive()`).
 
-- [ ] If the hook also uses `onErrorRetry`, gate retries explicitly on `document.visibilityState === "visible"` and `navigator.onLine`, OR keep one revalidation gate enabled
+- [ ] If the hook uses `onErrorRetry`, use the shared
+      `rateLimitAwareRetry` helper from `ui-dashboard/src/lib/gql-retry.ts`; it
+      defers retries until the document is visible and the browser is online
 - [ ] If the hook uses a "pause when hidden" interval helper that returns `0`, remember that `refreshInterval: 0` in SWR v2 STOPS scheduling the next tick. Either return a large interval instead (e.g. 1 hour) or pair with one of the revalidation gates so the loop resumes
 
 ## 3. Pagination + result-set caps
@@ -31,7 +50,11 @@ If you set BOTH `revalidateOnFocus: false` AND `revalidateOnReconnect: false`, t
 Hasura silently caps every query at **1000 rows** (Envio hosted Hasura config). On top of that, any custom `limit:` in the query (e.g. `limit: 100`) silently drops older data without a warning.
 
 - [ ] If the query feeds a metric that aggregates over the full lifetime (uptime %, breach count, cumulative volume), the data MUST come from a pre-rolled snapshot/rollup entity on the indexer — NOT from a paginated list
-- [ ] If pagination is genuinely needed, model it after the offset-pagination pattern in `ui-dashboard/src/hooks/use-all-networks-data.ts` (`fetchPaginatedSnapshotPages`): deterministic `order_by` with a tiebreaker, `SNAPSHOT_MAX_PAGES` safety cap, and a warning signal when the cap is hit
+- [ ] If pagination is genuinely needed, model it after
+      `fetchPaginatedRows` in
+      `ui-dashboard/src/lib/network-fetcher/pagination.ts`: deterministic
+      `order_by` with a tiebreaker, a safety cap, deduplication for concurrent
+      inserts, and an explicit truncation signal when the cap is hit
 - [ ] Never ship `_aggregate` queries to the dashboard against hosted Hasura — they're disabled
 - [ ] New query strings must live in a module covered by the GraphQL contract test (`QUERY_MODULES` in `ui-dashboard/src/lib/__tests__/graphql-contract.test.ts`, or `metrics-bridge/test/graphql-contract.test.ts`) so an indexer field rename fails CI instead of production. For dashboard queries, also run `pnpm dashboard:codegen` and consume generated operation types from `ui-dashboard/src/lib/__generated__/graphql.ts` at the fetch boundary when replacing a handwritten response mirror.
 - [ ] **Curl-verify** every new KPI query against the hosted endpoint with a representative pool (one with >1000 rows of history). Confirm the page count matches your local-dev assumption
@@ -67,7 +90,8 @@ PR #317 had the channel-collapse caught by cursor + chatgpt-codex-connector + cl
 
 ## 7. Lessons already paid for
 
-- PRs #202 (open) and #194 — focus/reconnect revalidation was missing from `useGQL` and `UptimeValue`'s breach hook; bots flagged it as the cause of bursty 429s
+- PRs #202 and #194 — focus/reconnect revalidation was missing from `useGQL`
+  and `UptimeValue`'s breach hook; bots flagged it as the cause of bursty 429s
 - PR #194 — `POOL_DEVIATION_BREACHES` capped at `limit: 100` silently inflated uptime % for pools with >100 breaches; fix was to use the indexer-side cumulative counter
 - PR #194 — `UptimeValue` rendered 100% during initial load
 - PR #185 — bridge-redeem hook fired toasts on transient RPC errors during component teardown; AbortSignal now bounds the request

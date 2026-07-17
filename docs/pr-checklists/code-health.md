@@ -1,3 +1,15 @@
+---
+title: Code Health Checklist
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-17
+doc_type: checklist
+scope: ci/process
+review_interval_days: 90
+garden_lane: pr-checklists-process
+---
+
 # Code Health PR Checklist
 
 Triggered when your change touches lint configs, package boundaries, package
@@ -6,7 +18,9 @@ dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 ## Before pushing
 
 - [ ] `pnpm code-health` is green (`code-health:knip` + `code-health:deps`).
-      The agent quality gate runs this per-package on changed paths.
+      The agent quality gate selects the changed package's `knip` task and the
+      workspace dependency-cruiser check; use the umbrella command for a full
+      local sweep.
 - [ ] If you added a new cross-package import, it goes via `shared-config`
       (or `@mento-protocol/contracts`), never indexer/dashboard/bridge ↔ each other.
 - [ ] If you added a new top-level dependency, knip can see it being used.
@@ -35,7 +49,7 @@ dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 | `indexer-handlers-no-rpc-internals` (dep-cruiser)         | **error**                                                                                   | handler importing from `rpc/pool-state`, `rpc/client`, etc. directly                                                                                                                 | Wrap the fetcher in a new effect in `rpc/effects.ts`, then call the effect from the handler; or use the `rpc.ts` barrel for DB-only helpers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `knip` files / deps / unlisted                            | **error**                                                                                   | unused files, unused listed deps, imports of unlisted deps                                                                                                                           | Delete file / remove dep / `pnpm add` the missing dep                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `knip` exports / types / enumMembers                      | warn                                                                                        | unused exports, types, enum entries                                                                                                                                                  | Delete on touch; not auto-blocking                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ESLint complexity budgets                                 | **error** (diff-aware baseline)                                                             | over-complex / long / nested / many-arg functions                                                                                                                                    | Refactor; any new `(file, ruleId, message)` tuple not in `<pkg>/eslint-baseline.json` fails the gate. After fixing: `pnpm --filter <pkg> lint:baseline:update`, then commit the regenerated baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ESLint complexity budgets                                 | **error** (diff-aware baseline)                                                             | over-complex / long / nested / many-arg functions                                                                                                                                    | Refactor; any new tuple that cannot be absorbed as a nearby refactor against `<pkg>/eslint-baseline.json` fails the gate. After fixing: `pnpm --filter <pkg> lint:baseline:update`, then commit the regenerated baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `sonarjs/no-redundant-jump`                               | **error**                                                                                   | dead control-flow jumps                                                                                                                                                              | Trivial fix; never opt out                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `sonarjs/cognitive-complexity`                            | **error** (diff-aware baseline)                                                             | hard-to-read nested logic                                                                                                                                                            | Extract sub-functions; new violations fail by tuple. Cleanup pattern: same as above (fix + regenerate baseline).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `sonarjs/no-identical-functions`                          | **error**                                                                                   | duplicate function bodies                                                                                                                                                            | Extract a helper, or — if intentionally parallel — disable per-occurrence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -44,17 +58,15 @@ dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 | `@typescript-eslint/switch-exhaustiveness-check`          | **error**                                                                                   | switch on enum/union missing a case (even when there's a `default:`)                                                                                                                 | Add an explicit `case "X":` branch for the missing union member; the default is fine but the rule wants intent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `noUncheckedIndexedAccess` (tsconfig)                     | **error** (all packages)                                                                    | `arr[i]` assumed defined when it could be `undefined`                                                                                                                                | Add a guard `if (item === undefined) continue` or destructure with `?? defaultValue`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `exactOptionalPropertyTypes` (tsconfig)                   | **error**                                                                                   | `{ x?: T }` vs `{ x: T \| undefined }` conflated                                                                                                                                     | Omit optional keys instead of assigning `undefined`: `...(val !== undefined && { key: val })`, or widen the destination type to `?: T \| undefined` when the value really can be present-and-undefined.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Bundle size (`pnpm dashboard:size-limit`)                 | **error**                                                                                   | manifest-referenced client JS or CSS brotli size exceeds budget in `.size-limit.cjs`                                                                                                 | Audit what grew (run `pnpm dashboard:build && pnpm dashboard:size-limit --json`), reduce deps or use dynamic imports. Budgets = baseline × 1.10; update `.size-limit.cjs` comment when tightening.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Bundle size (`pnpm dashboard:size-limit`)                 | **error**                                                                                   | manifest-referenced client JS or CSS brotli size exceeds budget in `ui-dashboard/.size-limit.cjs`                                                                                    | Audit what grew (run `pnpm dashboard:build && pnpm dashboard:size-limit --json`), reduce deps or use dynamic imports. Budgets = baseline × 1.10; update `ui-dashboard/.size-limit.cjs` comments when tightening.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `pnpm lockfile:lint`                                      | **error**                                                                                   | missing/invalid sha512 hash, custom registry config in `.npmrc` / `pnpm-workspace.yaml`, unbounded minimum override/resolution selector/value                                        | Re-run `pnpm install` from a known-good registry; remove `registry=` overrides from `.npmrc` / `registries:` from any `pnpm-workspace.yaml` (exact host check — lookalikes rejected); replace blanket override or `resolutions` floors with bounded selectors or same-major/capped values                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Lighthouse CI (`.github/workflows/lighthouse.yml`)        | accessibility + perf + CLS + INP + deterministic pool LCP **error**; live pool LCP **warn** | CWV/accessibility regression, scripted INP regression, deterministic pool render/hydration regression, incomplete 12-report preview matrix, stripped audit marker, or bypass failure | Preview LHCI collects three runs each for `/`, `/pools`, `/volume`, and canonical pool detail with `?lhci=live`. Median accessibility/performance/CLS remain blocking everywhere; root and `/pools` LCP block at 1 700 ms, `/volume` at 2 440 ms, and live pool LCP records a warning at the unchanged 1 700 ms ceiling. `pnpm dashboard:lighthouse:pool-fixture` separately builds the production app against deterministic fixtures, deliberately delays client breaker revalidation, proves the exact SSR Volume headline remains stable, and blocks canonical `?lhci=fixture` LCP above 1 700 ms. Fixture mode isolates app render/hydration cost but excludes Vercel edge/network variance, production analytics/Sentry, and live-indexer latency; preview mode still covers the deployed bundle/host and those live surfaces. Fork and Dependabot PRs run the secretless fixture while skipping trusted preview-only work. The 12-report guard requires the exact live pathname/query matrix and rejects redirects, runtime errors, and main-document failures. `scripts/lighthouse-config.test.mjs` proves exact URL-pattern non-overlap, severity, thresholds, and median aggregation. Both diagnostic reports are posted to the PR and uploaded as an artifact when the trusted preview lane runs; fixture artifacts are always uploaded. INP stays ≤ 200 ms. |
 | GraphQL schema diff (`.github/workflows/schema-diff.yml`) | advisory                                                                                    | field removal, type narrowing, required arg additions, enum value removal — any change that breaks existing Hasura queries or dashboard code                                         | Review the sticky PR comment; update Hasura queries + dashboard Zod schemas before merging if the change is intentional. Runs only when `indexer-envio/schema.graphql` changed. Local: `pnpm code-health:schema-diff`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Code-health history report                                | advisory                                                                                    | hotspots, change coupling, ownership risk                                                                                                                                            | Use the report to plan refactors; never gates merges                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
-## Ratchet pipeline (where this is going)
+## Current ESLint baseline mechanics
 
-PR 1: blocking knip + dep-cruiser cross-pkg + advisory history report.
-
-PR 2 (this PR): per-package ESLint complexity budgets (`complexity`,
+Per-package ESLint complexity budgets (`complexity`,
 `max-lines-per-function`, `max-depth`, `max-params`,
 `sonarjs/cognitive-complexity` plus four other sonarjs rules) ship at
 **`error` severity** with a diff-aware baseline in each package's
@@ -63,20 +75,20 @@ PR 2 (this PR): per-package ESLint complexity budgets (`complexity`,
 to the committed baseline and fails on any **new** tuple OR any
 **stale** baseline entry (violation removed but not pruned).
 
-Tuple identity is `(file, ruleId, message, linePreview)`, where
+Stored tuple identity is `(file, ruleId, message, line, linePreview)`, where
 `linePreview` is a three-line window of trimmed source content
 (`line-1 | line | line+1`, capped at 200 chars) around the violation's
-reported line. This content fingerprint:
+reported line. Comparison removes exact matches first, then pairs entries with
+the same stripped `(file, ruleId, message)` key when their lines are within the
+proximity window. Together these fields:
 
 - Distinguishes anonymous-function collisions (e.g. two arrows with
   identical `}): Promise<void> => {` signatures in the same file are
   separated by the differing next-statement line).
-- Absorbs pure line shifts: an unrelated edit above a baselined
-  violation moves the line number, but the source content at that
-  location is unchanged → same fingerprint → no diff to commit.
-- Catches swap-in-place: fixing one violation and adding another at a
-  different location yields different source content → different
-  fingerprint → check fails.
+- Absorb ordinary nearby line shifts caused by comments, formatting, or small
+  refactors.
+- Reject a new violation with no stripped-key match or one moved beyond the
+  proximity window.
 
 `lint:baseline:update` is **prune-only with line-proximity absorption**:
 
@@ -105,10 +117,9 @@ gets caught here even when local `update` was bypassed.
 **Known gap.** A swap-in-place within `ABSORB_LINE_DISTANCE` lines
 (fix one violation, add a different one with the same
 `(file, ruleId, message)` nearby) still absorbs. The line-proximity
-heuristic prefers refactor UX over catching this narrow attack —
-codex has flip-flopped on the trade-off across rounds; this is the
-current compromise. The PR diff makes the baseline rewrite visible
-to human reviewers, which is the actual safety net.
+heuristic prefers refactor usability over catching this narrow case. Review
+baseline rewrites in the PR diff rather than treating a green command as proof
+that a nearby swap did not occur.
 
 Cleanup workflow:
 
@@ -119,69 +130,30 @@ Cleanup workflow:
    entry from `eslint-baseline.json`.
 4. Commit the regenerated baseline alongside the code fix.
 
-Baseline sizes: shared-config 0, metrics-bridge 11, ui-dashboard 188,
-indexer-envio 63 entries (as of PR 4 / 425). The ui-dashboard count
-dropped from 191 → 188 in PR 4's `handleSnapshot` refactor.
+Baseline sizes verified on 2026-07-17: shared-config 0, integration-probes 0,
+metrics-bridge 6, aegis 2, indexer-envio 23, and ui-dashboard 57 entries.
+Treat these as a shrinking ceiling, not a target.
 
-Eight prior baseline mechanisms were rejected:
+## Advisory reports
 
-1. `--max-warnings <N>` (codex P2 #3253043406): total-count budgeting,
-   so a PR could delete one warning and add another without failing.
-2. ESLint 9.24+ bulk suppressions (codex P2 #3254553397): count-based
-   per `(file, ruleId)`, so swapping one function's `complexity`
-   violation for another's in the same file would still pass.
-3. Permissive `update` mode (codex P2, round 3): re-running update with
-   new violations silently grew the baseline. Now update is prune-only.
-4. Warn-and-pass on stale entries (codex P2, round 3): let an unrelated
-   fix leave the stale tuple committed, so a later PR could
-   re-introduce the same violation without detection. Now stale entries
-   fail CI.
-5. `(file, ruleId, message)` keys (codex P2 round 4 #3254614043,
-   #3254614044): collisions on anonymous-function violations (two
-   arrows in the same file with identical signatures share the same
-   message). Now keyed on `linePreview` content fingerprint instead.
-6. `(file, ruleId, message, line)` keys (codex P2 round 4 #3254614042):
-   pure line shifts (unrelated edit above a violation) treated as
-   additions, forcing reseeds for non-substantive changes. Now keyed
-   on source content, which is stable across shifts.
-7. Strict update mode (codex P2 round 5 #3254674897): adjacent edits
-   that shift the linePreview window around an existing violation
-   reported as forbidden additions, breaking the documented prune
-   workflow. Now `update` absorbs 1-for-1 swaps within the same
-   `(file, ruleId, message)` stripped key.
-8. No CI-side baseline-diff check (codex P2 round 5 #3254674887):
-   `update`'s prune-only guarantee didn't cover hand-edits or
-   `rm + update` reseeds. CI now runs a merge-base growth check on
-   PRs — same stripped-key rule applied to HEAD baseline vs main
-   baseline. Lint can be green locally while CI rejects baseline
-   growth that wasn't matched by removals.
-
-PR 3 (this PR): `jscpd` duplication check ships as a non-blocking CI job
-(`.github/workflows/code-health-duplication.yml`) with the HTML+JSON report
-uploaded as an artifact. Tests, handlers, route entry pages, layouts,
-opengraph images, and pure type modules are excluded (they're
-intentionally repetitive). Initial baseline: **218 clones** at min-tokens=50,
-min-lines=5. Run locally via `pnpm code-health:duplication`. The report
-is intended as an extract-helper-refactor backlog — non-blocking so PRs
-aren't gated on historical copy-paste, but visible so contributors can
-plan deduplication when they touch an affected file.
-
-PR 5: weekly cron renders `reports/code-health-history.md` and posts the
-hotspot/coupling delta to Slack.
-
-PR 6: continue chipping at the baseline files via cleanup PRs. The
-goal is `eslint-baseline.json` shrinking commit-by-commit until each
-package's file is empty (or removed) — at which point the rules behave
-as plain `error` with no baseline carve-out.
+- `pnpm code-health:duplication` runs the non-blocking `jscpd` report used by
+  `.github/workflows/code-health-duplication.yml`. Treat clones as an
+  extract-helper backlog when touching the affected code; the historical clone
+  count is not a merge budget.
+- `pnpm code-health:history` writes the local advisory hotspot/coupling report
+  to `reports/code-health-history.md`. It is not currently a scheduled or
+  merge-blocking workflow.
+- Continue shrinking every `eslint-baseline.json` until it is empty; once empty,
+  the configured rules behave as ordinary blocking errors.
 
 ## Decision log
 
 - `sonarjs/no-duplicate-string` is intentionally **off** — historically noisy.
-  Literal duplication is covered by `jscpd` (PR 3).
+  Literal duplication is covered by the advisory `jscpd` report.
 - `max-statements` is **off** — overlaps with `max-lines-per-function` without
   adding signal.
-- History report uses pure Node (no extra runtime deps) — spawns `git log`
-  directly. Adding it doesn't grow the supply-chain surface.
+- The history report uses pure Node (no extra runtime deps) and spawns
+  `git log` directly.
 - The historical `indexer-envio/src/pool.ts ↔ src/deviationBreach.ts`
   cycle was broken by importing health predicates directly from
   `pool/health.js` instead of through the `pool.js` barrel re-export.

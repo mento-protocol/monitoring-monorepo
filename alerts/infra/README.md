@@ -1,3 +1,5 @@
+<!-- agent-context: title="Mento Alerts Delivery Infrastructure" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=alerts/infra review_interval_days=90 garden_lane=operator-runbooks -->
+
 # Mento Alerts
 
 Terraform-managed alert infrastructure for monitoring Mento's infrastructure across multiple blockchain networks.
@@ -58,7 +60,7 @@ graph LR
 
 ## Prerequisites
 
-- **Terraform** >= 1.10.0
+- **Terraform** >= 1.11.0
 - **GCP account** with billing enabled
 - **Slack bot** with channel-management, chat, usergroup membership, and email lookup scopes
 - **Sentry account** (for JS error monitoring)
@@ -69,10 +71,10 @@ graph LR
 ### 1. Configure Variables
 
 ```bash
-cp terraform.tfvars.example terraform.tfvars
+cp alerts/infra/terraform.tfvars.example alerts/infra/terraform.tfvars
 ```
 
-Edit `terraform.tfvars`:
+Edit `alerts/infra/terraform.tfvars`:
 
 ```hcl
 # Sentry Configuration
@@ -151,22 +153,23 @@ additional_labels = {
 }
 ```
 
-### 2. Initialize & Deploy
+### 2. Initialize and plan
 
 ```bash
-terraform init
-terraform plan
-terraform apply
+pnpm alerts:infra:init
+pnpm alerts:infra:plan
 ```
 
-**Expected deployment time:** 5-10 minutes
+Open a PR with the stack change and review the CI plan. Apply happens only after
+merge to `main`, through `.github/workflows/alerts-infra.yml` and its
+`production-infra` required-reviewer gate. Do not run a local Terraform apply.
 
 ### 3. Verify Deployment
 
 ```bash
-terraform output
-terraform state list
-curl -X POST $(terraform output -raw cloud_function_url)  # Should return 401
+terraform -chdir=alerts/infra output
+FUNCTION_URL=$(terraform -chdir=alerts/infra output -json google_cloud | jq -r .cloud_function_url)
+curl -X POST "$FUNCTION_URL"  # Should return 401 without a signed webhook payload.
 ```
 
 ## 📖 Usage Examples
@@ -285,7 +288,7 @@ chain key.
 
 ### Add New Multisig
 
-Edit `terraform.tfvars`:
+Edit the committed default in `alerts/infra/variables.tf` and open a PR:
 
 ```hcl
 multisigs = {
@@ -299,21 +302,20 @@ multisigs = {
 }
 ```
 
-Then run `terraform apply`.
+Run `pnpm alerts:infra:plan`, review the webhook replacement, and let the
+merged PR apply through the `production-infra` gate.
 
 ### View Logs
 
 ```bash
-cd onchain-event-handler
-./scripts/get-logs.sh
+pnpm --filter @mento-protocol/alerts-onchain-event-handler logs
 ```
 
 ### Destroy Resources
 
-```bash
-terraform destroy -target=module.sentry_bridge  # Specific module
-terraform destroy  # Everything
-```
+Model removals in a PR and inspect `pnpm alerts:infra:plan`. Any destroy requires
+explicit human approval and must run through the `production-infra`-gated CI
+workflow. Never run an ad hoc local destroy of this stack.
 
 ## 🐛 Troubleshooting
 
@@ -327,13 +329,16 @@ Addresses must:
 
 ### Enable Debug Mode
 
-Add to `terraform.tfvars`:
+Add to `alerts/infra/terraform.tfvars`:
 
 ```hcl
 debug_mode = true
 ```
 
-This shows REST API requests/responses for troubleshooting.
+This shows full REST API requests and responses, including the QuickNode API
+key/signing secret and Slack bot token. Keep it false in CI, never share logs
+captured with it enabled, and use it only for an explicitly scoped local
+diagnostic session.
 
 ## 📚 Documentation
 
@@ -368,28 +373,14 @@ Follows [AWS Terraform best practices](https://docs.aws.amazon.com/prescriptive-
 - State file contains secrets - handle carefully
 - Webhook signatures validated for QuickNode requests
 
-## 💰 Cost Estimate
-
-~$5-20/month per chain (Cloud Function + Storage)
-
----
-
 **Quick Commands Reference:**
 
 ```bash
-# Initialization
-terraform init
-terraform plan
-terraform apply
-
-# Management
-terraform output
-terraform state list
-
-# Updates
-terraform plan
-terraform apply
-
-# Destruction
-terraform destroy
+pnpm alerts:infra:init
+pnpm alerts:infra:plan
+pnpm alerts:handler:typecheck
+pnpm alerts:handler:test
+pnpm alerts:oncall:typecheck
+pnpm alerts:oncall:test
+# Apply and approved removals run only through production-infra-gated CI.
 ```

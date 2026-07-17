@@ -1,3 +1,5 @@
+<!-- agent-context: title="Governance Watchdog" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=governance-watchdog review_interval_days=90 garden_lane=operator-runbooks -->
+
 # 🐕 Governance Watchdog
 
 > **Architecture decisions** for this service live in [`docs/adr/`](../docs/adr/README.md) (scope: `governance-watchdog`) — read the relevant ADR before changing how it deploys or is structured; it records the _why_ the code can't.
@@ -27,8 +29,8 @@ This service lives in its own dedicated GCP project (not `mento-alerts` or
 [`infra/main.tf`](./infra/main.tf) feeds `var.project_name`
 (`governance-watchdog`) into the project-factory module with
 `random_project_id = true`, so the real project ID carries a random suffix
-(e.g. `governance-watchdog-b2a6`) and is only knowable **after** the first
-`terraform apply`.
+(e.g. `governance-watchdog-b2a6`) and is only knowable after the first
+explicitly approved bootstrap apply.
 
 - **Existing deployment (the normal case):** the project already exists. Find
   its ID via
@@ -39,8 +41,8 @@ This service lives in its own dedicated GCP project (not `mento-alerts` or
   [DEPLOY_FROM_SCRATCH.md](./DEPLOY_FROM_SCRATCH.md) **first**. You need the
   org ID and billing account (`gcloud organizations list`,
   `gcloud billing accounts list`) plus `roles/iam.serviceAccountTokenCreator`
-  on the shared Terraform service account; `terraform apply` then creates the
-  project and everything in it. Every Local Setup step below that runs
+  on the shared Terraform service account; the explicitly approved bootstrap
+  apply then creates the project and everything in it. Every Local Setup step below that runs
   `gcloud secrets versions access` or `terraform state show` fails until that
   first apply has succeeded.
 
@@ -108,7 +110,10 @@ This service lives in its own dedicated GCP project (not `mento-alerts` or
    # This file is `.gitignore`d to avoid accidentally leaking sensitive data
    ```
 
-1. Add the following values to your `terraform.tfvars`. You can either follow the instructions in the comments to look up each value, or you can ask another dev to share his local `terraform.tfvars` with you
+1. Add the following values to `infra/terraform.tfvars`. Follow the lookup
+   instructions for each value or obtain individual values through their
+   approved owner and secret-sharing channel. Never share or copy another
+   developer's complete tfvars file.
 
    > These lookups read from the **deployed** project; for a from-scratch bootstrap use [DEPLOY_FROM_SCRATCH.md](./DEPLOY_FROM_SCRATCH.md) instead.
 
@@ -156,7 +161,8 @@ This service lives in its own dedicated GCP project (not `mento-alerts` or
    # Get it from the [QuickNode dashboard](https://dashboard.quicknode.com/api-keys)
    quicknode_api_key    = "<quicknode-api-key>"
 
-   # Get it via `echo "\nquicknode_security_token = \"$(gcloud secrets versions access latest --secret quicknode-security-token)\"" >> terraform.tfvars`
+   # Read the deployed value with `gcloud secrets versions access latest --secret quicknode-security-token`
+   # and place it in ./infra/terraform.tfvars.
    quicknode_security_token = "<quicknode-security-token>"
 
    # Required to send on-call alerts to VictorOps

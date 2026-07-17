@@ -4,6 +4,10 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-07-17
+doc_type: agent-instructions
+scope: metrics-bridge
+review_interval_days: 90
+garden_lane: agent-entry-points
 ---
 
 # AGENTS.md — Metrics Bridge
