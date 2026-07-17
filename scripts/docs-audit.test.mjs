@@ -17,6 +17,7 @@ import {
   shardDocuments,
   weeklySelection,
 } from "./docs-audit-helpers.mjs";
+import { MAX_ROUTE_LIMIT_BYTES } from "./agent-context-budget.mjs";
 
 const scriptPath = fileURLToPath(new URL("./docs-audit.mjs", import.meta.url));
 
@@ -171,7 +172,7 @@ test("packet contains evidence fields, safety rules, and stable Markdown", () =>
     assert.equal(packet.fingerprint, "docs-garden:operator-runbooks:1-of-1");
     assert.equal(packet.dry_run, true);
     assert.deepEqual(packet.safety.allowed_dispositions, AUDIT_DISPOSITIONS);
-    assert.equal(packet.context_budget.limit_bytes, 32 * 1024);
+    assert.equal(packet.context_budget.limit_bytes, MAX_ROUTE_LIMIT_BYTES);
     assert.deepEqual(packet.context_budget.routes, []);
     assert.equal(packet.files[0].orphan, true);
     assert.equal(packet.files[0].metadata_warnings.length, 1);

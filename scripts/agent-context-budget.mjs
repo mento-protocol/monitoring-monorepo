@@ -64,11 +64,15 @@ export function parseProjectDocMaxBytes(configText) {
   return value;
 }
 
-export function resolveProjectDocMaxBytes(repoRoot) {
+export function resolveProjectDocMaxBytes(
+  repoRoot,
+  fallbackBytes = DEFAULT_LIMIT_BYTES,
+) {
+  validatePositiveSafeInteger("fallbackBytes", fallbackBytes);
   const configPath = path.join(repoRoot, ".codex", "config.toml");
-  if (!existsSync(configPath)) return DEFAULT_LIMIT_BYTES;
+  if (!existsSync(configPath)) return fallbackBytes;
   const configured = parseProjectDocMaxBytes(readFileSync(configPath, "utf8"));
-  return configured ?? DEFAULT_LIMIT_BYTES;
+  return configured ?? fallbackBytes;
 }
 
 export function trackedInstructionFiles(repoRoot) {
@@ -351,7 +355,9 @@ export function runContextBudgetCli(argv) {
     return 0;
   }
   const repoRoot = realpathSync(path.resolve(options.repoRoot));
-  const limitBytes = options.limitBytes ?? resolveProjectDocMaxBytes(repoRoot);
+  const limitBytes =
+    options.limitBytes ??
+    resolveProjectDocMaxBytes(repoRoot, MAX_ROUTE_LIMIT_BYTES);
   if (limitBytes > MAX_ROUTE_LIMIT_BYTES) {
     throw new Error(
       `effective project-doc limit ${limitBytes} exceeds the repository policy maximum ${MAX_ROUTE_LIMIT_BYTES}; set project_doc_max_bytes at or below ${MAX_ROUTE_LIMIT_BYTES}`,

@@ -307,9 +307,34 @@ test("strict CLI reports an actionable root-file violation", () => {
   });
 });
 
+test("CLI uses the repository route policy when config omits a limit", () => {
+  for (const config of [null, '[mcp_servers.example]\ncommand = "x"\n']) {
+    withRepo((repo) => {
+      write(repo, "AGENTS.md", "small");
+      if (config !== null) write(repo, ".codex/config.toml", config);
+      track(repo, "AGENTS.md");
+      const result = spawnSync(
+        process.execPath,
+        [scriptPath, "--root", repo, "--json", "--strict"],
+        { encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(
+        JSON.parse(result.stdout).limit_bytes,
+        MAX_ROUTE_LIMIT_BYTES,
+      );
+    });
+  }
+});
+
 test("CLI refuses a configured route cap above repository policy", () => {
   withRepo((repo) => {
     write(repo, "AGENTS.md", "small");
+    write(
+      repo,
+      ".codex/config.toml",
+      `project_doc_max_bytes = ${DEFAULT_LIMIT_BYTES}\n`,
+    );
     track(repo, "AGENTS.md");
     const strict = spawnSync(
       process.execPath,
