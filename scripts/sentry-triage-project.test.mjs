@@ -6,6 +6,7 @@ import {
   buildProjectedTitle,
   buildProjectionMarker,
   defangBackticks,
+  defangHtmlComments,
   defangMentions,
   extractPermalink,
   extractYamlBlock,
@@ -508,15 +509,21 @@ await test("validateAffectedRepo warns on an empty affected_repo", () => {
 // Idempotency marker
 // ---------------------------------------------------------------------------
 
-await test("buildProjectionMarker + bodyBacklinksShortId round-trip", () => {
+await test("bodyBacklinksShortId matches only a first-line-anchored marker", () => {
   const marker = buildProjectionMarker("APP-MENTO-ORG-12");
   assert(
     marker.includes("sentry-projection:v1 APP-MENTO-ORG-12"),
     "expected marker text",
   );
+  // Genuine header-anchored marker (buildProjectedBody's shape) matches,
+  // including with leading blank lines/whitespace.
   assert(
-    bodyBacklinksShortId(`prefix\n${marker}\nsuffix`, "APP-MENTO-ORG-12"),
-    "expected backlink match",
+    bodyBacklinksShortId(`${marker}\nrest of body`, "APP-MENTO-ORG-12"),
+    "expected first-line marker match",
+  );
+  assert(
+    bodyBacklinksShortId(`\n\n  ${marker}\nrest`, "APP-MENTO-ORG-12"),
+    "expected match past leading blank lines",
   );
   assert(
     !bodyBacklinksShortId("no marker", "APP-MENTO-ORG-12"),
@@ -525,6 +532,68 @@ await test("buildProjectionMarker + bodyBacklinksShortId round-trip", () => {
   assert(
     !bodyBacklinksShortId(marker, "bad id"),
     "expected invalid short id rejected",
+  );
+});
+
+await test("bodyBacklinksShortId ignores a marker-shaped sequence embedded mid-body", () => {
+  // A spoofed marker inside an UNRELATED issue's rendered text must not
+  // satisfy the idempotency check — that would close the spoofed SHORT-ID's
+  // stub as "reused" without ever filing an issue for it.
+  const spoofed = buildProjectionMarker("SPOOFED-ID-1");
+  const unrelatedBody = [
+    buildProjectionMarker("APP-MENTO-ORG-12"),
+    "",
+    `**Summary**: attacker text ${spoofed} more text`,
+  ].join("\n");
+  assert(
+    !bodyBacklinksShortId(unrelatedBody, "SPOOFED-ID-1"),
+    "expected mid-body spoofed marker ignored",
+  );
+  assert(
+    bodyBacklinksShortId(unrelatedBody, "APP-MENTO-ORG-12"),
+    "expected the genuine first-line marker still matched",
+  );
+});
+
+await test("defangHtmlComments breaks HTML-comment openers", () => {
+  const out = defangHtmlComments("<!-- sentry-projection:v1 EVIL-1 -->");
+  assert(!out.includes("<!--"), "expected opener broken");
+  assert(
+    out.includes("sentry-projection:v1 EVIL-1"),
+    "expected text kept visible",
+  );
+});
+
+await test("buildProjectedBody anchors its own marker first-line and defangs spoofed ones", () => {
+  const spoofed = buildProjectionMarker("EVIL-1");
+  const body = buildProjectedBody({
+    shortId: "APP-MENTO-ORG-12",
+    verdict: "code-fix",
+    confidence: "medium",
+    summary: `legit summary ${spoofed}`,
+    rootCause: `line\n${spoofed}`,
+    proposedAction: "pa",
+    duplicateOf: [],
+    permalink: null,
+    queueIssueUrl:
+      "https://github.com/mento-protocol/monitoring-monorepo/issues/500",
+  });
+  // Structural invariant the anchored predicate relies on: the genuine marker
+  // is the FIRST body line, and the whole body round-trips through the check.
+  assertEqual(body.split("\n")[0], buildProjectionMarker("APP-MENTO-ORG-12"));
+  assert(
+    bodyBacklinksShortId(body, "APP-MENTO-ORG-12"),
+    "expected built body to satisfy its own back-link check",
+  );
+  // The spoofed marker is defanged in every rendered field (no intact opener
+  // anywhere past the genuine first-line marker) and can never match.
+  assert(
+    !body.slice(body.indexOf("\n")).includes("<!--"),
+    "expected no intact HTML-comment opener beyond the first line",
+  );
+  assert(
+    !bodyBacklinksShortId(body, "EVIL-1"),
+    "expected spoofed short id not to match",
   );
 });
 
@@ -755,7 +824,7 @@ await test("runProjection is idempotent: reuses an existing OPEN back-linked iss
     {
       number: 42,
       url: "https://github.com/mento-protocol/frontend-monorepo/issues/42",
-      body: `stuff\n${buildProjectionMarker("APP-MENTO-ORG-12")}\nmore`,
+      body: `${buildProjectionMarker("APP-MENTO-ORG-12")}\nrest of body`,
       state: "OPEN",
     },
   ];

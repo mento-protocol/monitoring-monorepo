@@ -560,8 +560,10 @@ permalink, and back-link are shape-/scheme-validated before they render.
 **Idempotency.** Before creating, the owning repo is searched across **all**
 states (SHORT-ID ANDed with a fixed footer phrase as a sharp pre-filter, 200
 result cap; the hidden `<!-- sentry-projection:v1 SHORT-ID -->` back-link
-marker is the authoritative match) for an existing projected issue; a match is
-reused, never duplicated. This makes projection safe across regression reopen →
+marker is the authoritative match — accepted only at its fixed position as the
+first body line, and HTML-comment openers are defanged in every rendered field
+so a spoofed marker inside verdict text can never impersonate it) for an
+existing projected issue; a match is reused, never duplicated. This makes projection safe across regression reopen →
 re-triage cycles (the same SHORT-ID reuses the same owning-repo issue). A
 **closed** match is reopened first, with a fixed regression comment, so the
 regression resurfaces for the product team instead of silently linking a

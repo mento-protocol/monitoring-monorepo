@@ -124,21 +124,34 @@ export function defangMentions(text) {
   return String(text ?? "").replace(/@/g, "@\u200B");
 }
 
+/** Break every HTML-comment opener (`<!--` -> `<!` + zero-width space + `--`)
+ * so agent text can never embed a marker-shaped sequence \u2014 e.g. a spoofed
+ * `<!-- sentry-projection:v1 OTHER-ID -->` inside a rendered verdict field \u2014
+ * into a projected issue body. The idempotency back-link marker must only
+ * ever exist where buildProjectedBody itself emits it (the first body line);
+ * this is defense in depth behind the first-line anchoring of
+ * bodyBacklinksShortId. */
+export function defangHtmlComments(text) {
+  return String(text ?? "").replace(/<!--/g, "<!\u200B--");
+}
+
 /** Single-line neutralization for titles and inline fields. */
 export function neutralizeUntrusted(text) {
-  return defangMentions(defangBackticks(sanitizeFreeText(text)));
+  return defangMentions(
+    defangBackticks(defangHtmlComments(sanitizeFreeText(text))),
+  );
 }
 
 /** Multi-line neutralization for block fields (root cause / proposed action):
- * strip control chars but KEEP newlines, defang backticks + mentions, and hard
- * bound both line count and length. Rendered inside a fenced block by the
- * caller so any surviving markdown is inert. */
+ * strip control chars but KEEP newlines, defang backticks + mentions + HTML
+ * comments, and hard bound both line count and length. Rendered inside a
+ * fenced block by the caller so any surviving markdown is inert. */
 export function neutralizeBlock(text, { maxLen = 600, maxLines = 8 } = {}) {
   let s = String(text ?? "")
     // eslint-disable-next-line no-control-regex -- keep \n (0x0a) + \t (0x09); strip the rest
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
     .replace(/\r/g, "");
-  s = defangMentions(defangBackticks(s));
+  s = defangMentions(defangBackticks(defangHtmlComments(s)));
   s = s.split("\n").slice(0, maxLines).join("\n");
   if (s.length > maxLen) s = `${s.slice(0, maxLen).trimEnd()}…`;
   return s.trim();
@@ -477,9 +490,26 @@ export function buildProjectionMarker(shortId) {
   return `<!-- sentry-projection:v1 ${shortId} -->`;
 }
 
+/**
+ * True when `body` is a genuine projection back-link for `shortId`. The
+ * marker is only accepted at its fixed structural position — the FIRST
+ * non-empty line of the body, which is exactly where buildProjectedBody
+ * emits it — never via a broad substring search: a marker-shaped sequence
+ * embedded in a rendered free-text field of an UNRELATED projected issue
+ * must not satisfy the idempotency check for a different SHORT-ID (which
+ * would close that stub as "reused" without filing anything). Rendered
+ * fields additionally defang `<!--` (defangHtmlComments) so such a sequence
+ * cannot survive rendering intact in the first place.
+ */
 export function bodyBacklinksShortId(body, shortId) {
   if (!isValidShortId(shortId)) return false;
-  return String(body ?? "").includes(buildProjectionMarker(shortId));
+  const firstNonEmptyLine = String(body ?? "")
+    .split(/\r?\n/)
+    .find((line) => line.trim() !== "");
+  return (
+    firstNonEmptyLine !== undefined &&
+    firstNonEmptyLine.trim() === buildProjectionMarker(shortId)
+  );
 }
 
 // ---------------------------------------------------------------------------
