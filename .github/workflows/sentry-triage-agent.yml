@@ -392,16 +392,19 @@ jobs:
               # outside the regression-reopen path. Compensate by restoring
               # sentry:needs-triage AND removing the verdict label (a retry may
               # land a DIFFERENT verdict, and two verdict labels would
-              # misclassify the issue for the digest and human label filters),
-              # then fail the job loudly so the main-failure notifier fires.
+              # misclassify the issue for the digest and human label filters)
+              # AND shedding sentry:projected — the projection step may have
+              # just applied it, and a needs-triage issue must not read as
+              # already projected (removing an absent label is a no-op). Then
+              # fail the job loudly so the main-failure notifier fires.
               if ! gh issue close "${QUEUE_ISSUE_NUMBER}" \
                 --repo "${GITHUB_REPOSITORY}" \
                 --reason completed \
                 --comment "Triage complete: ${VERDICT}.${projection_note} Ledger entry closed; reopens automatically on Sentry regression."; then
-                echo "::error::Failed to close issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage (and shedding ${VERDICT_LABEL}) for retry."
+                echo "::error::Failed to close issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage (and shedding ${VERDICT_LABEL} + sentry:projected) for retry."
                 gh issue edit "${QUEUE_ISSUE_NUMBER}" \
                   --repo "${GITHUB_REPOSITORY}" \
-                  --remove-label "${VERDICT_LABEL}" \
+                  --remove-label "${VERDICT_LABEL},sentry:projected" \
                   --add-label "sentry:needs-triage"
                 exit 1
               fi

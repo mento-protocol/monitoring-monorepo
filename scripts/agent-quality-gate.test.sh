@@ -2476,6 +2476,12 @@ assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)
 run_gate "scripts/sentry-triage-digest.test.mjs"
 assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
 
+run_gate "scripts/sentry-triage-project.mjs"
+assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+
+run_gate "scripts/sentry-triage-project.test.mjs"
+assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+
 run_gate "scripts/sanitize-terraform-output.sh"
 assert_contains "- pnpm sanitize:test (Terraform output sanitizer changed)"
 

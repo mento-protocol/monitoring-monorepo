@@ -1499,6 +1499,9 @@ while IFS= read -r path; do
         scripts/sentry-triage-digest.mjs|scripts/sentry-triage-digest.test.mjs)
           add_command "pnpm sentry:digest:test" "Sentry triage digest helper changed"
           ;;
+        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project.test.mjs)
+          add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
+          ;;
         scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
           ;;
