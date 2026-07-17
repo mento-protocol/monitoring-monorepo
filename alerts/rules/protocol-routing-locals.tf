@@ -86,12 +86,11 @@ locals {
     "polygon-amoy" = {
       title = "Polygon-Amoy"
       env   = "staging"
-      # Amoy signers hold only single-digit POL (faucet-funded), unlike the
-      # Monad testnet signers which carry mainnet-scale balances — so this
-      # threshold can't mirror the 500 POL mainnet value.
+      # Testnet threshold matching monad-testnet's 50, not mainnet's 500 —
+      # Amoy signers are manually topped up (~84 POL each as of 2026-07-16).
       metric              = "Native_balanceOf"
       symbol              = "POL"
-      threshold           = 1
+      threshold           = 50
       explorer            = "amoy.polygonscan.com"
       chain_id            = "80002"
       aegis_chain         = "polygonAmoy"
