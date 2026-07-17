@@ -32,6 +32,8 @@ dist/
 # jscpd HTML report — hundreds of generated files per run, surfaced via
 # CI artifact upload instead. The JSON summary is kept regenerable.
 reports/jscpd/
+# Advisory snapshot regenerated on demand by `pnpm code-health:history`.
+reports/code-health-history.md
 WORK.md
 CLAUDE.md
 .playwright-mcp/

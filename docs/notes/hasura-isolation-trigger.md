@@ -2,7 +2,12 @@
 title: Hasura isolation trigger
 status: active
 owner: eng
-last_verified: 2026-07-06
+canonical: true
+last_verified: 2026-07-17
+doc_type: runbook
+scope: repo-wide
+review_interval_days: 90
+garden_lane: operator-runbooks
 ---
 
 # Hasura isolation trigger

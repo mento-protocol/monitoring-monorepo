@@ -246,24 +246,19 @@ jobs:
               # job's baseline-diff semantic suite must re-run when the
               # producing action changes.
               - .github/actions/resolve-eslint-baseline/**
-              # check-agent-context inputs. The checker discovers canonical
-              # (frontmatter-managed) markdown across these roots — SPEC.md,
-              # AGENTS.md at any depth, docs/**, .agents/** — and separately
-              # validates SessionEnd hooks (.codex/hooks.json,
-              # .claude/settings.json) and .claude/skills mirror parity. A PR
-              # touching only one of these files must still run the checker
-              # in CI. docs/**/*.md is deliberately broad: discovery means
-              # any docs markdown can opt into canonical enforcement, and
-              # the scripts job is cheap. The checker's remaining inputs
-              # (scripts/*.sh guards, workflow revision-suffix guard) are
-              # already covered by the script/workflow globs above.
-              - SPEC.md
-              - AGENTS.md
-              - "**/AGENTS.md"
-              - "docs/**/*.md"
+              # Documentation catalog + context-check inputs. The catalog
+              # covers every tracked Markdown file (except runtime mirrors),
+              # while the context checker discovers canonical files and
+              # validates SessionEnd hooks + skill parity. Markdown changes
+              # therefore run this cheap root-scripts job regardless of path.
+              - "*.md"
+              - "**/*.md"
+              # Skill parity and hook checks also consume non-Markdown assets
+              # under the runtime-specific directories.
               - ".agents/**"
               - ".claude/skills/**"
               - .claude/settings.json
+              - .codex/config.toml
               - .codex/hooks.json
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
             # This runs independently of package quality jobs so a manifest-only
@@ -873,6 +868,19 @@ jobs:
         # frontmatter + last_verified staleness policy) — the unit tests
         # above only cover the pure helpers in isolation.
         run: pnpm agent:context-check
+      - name: Documentation catalog tests
+        run: pnpm docs:index:test
+      - name: Documentation catalog drift and link check
+        run: pnpm docs:index --check
+      - name: Documentation audit planner tests
+        run: pnpm docs:audit:test
+      - name: Documentation audit planner dry run
+        run: pnpm docs:audit --dry-run
+      - name: Agent context budget tests
+        run: pnpm agent:context-budget:test
+      - name: Agent context budget report
+        # Advisory until #1344 slims every route and enables strict mode.
+        run: pnpm agent:context-budget
       - name: PR description validator suite
         run: node scripts/check-pr-description.test.mjs
       - name: Deploy root-anchor regression suite

@@ -1,3 +1,5 @@
+<!-- agent-context: title="On-chain Event Handler Module" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=alerts/infra/onchain-event-handler review_interval_days=90 garden_lane=operator-runbooks -->
+
 # Onchain Event Handler Module
 
 Terraform module for deploying the Cloud Function that processes QuickNode webhooks and routes Safe multisig events to Slack.
@@ -25,8 +27,12 @@ This module:
 module "onchain_event_handler" {
   source = "./onchain-event-handler"
 
-  project_id    = var.gcp_project_id
-  region        = var.gcp_region
+  project_id    = local.project_id
+  region        = var.region
+  common_labels = local.common_labels
+
+  project_service_account_email = google_service_account.project_sa.email
+  cloudbuild_builder_dependency = google_project_iam_member.cloudbuild_builder.id
 
   quicknode_signing_secret = var.quicknode_signing_secret
 
@@ -41,23 +47,34 @@ module "onchain_event_handler" {
     }
   }
   slack_bot_token = var.slack_bot_token
+
+  depends_on = [
+    module.slack_channels,
+    module.project_factory,
+    google_service_account.project_sa,
+  ]
 }
 ```
 
 ## Inputs
 
-| Name                       | Description                                           | Type     | Default                   | Required |
-| -------------------------- | ----------------------------------------------------- | -------- | ------------------------- | -------- |
-| `project_id`               | GCP project ID                                        | `string` | -                         | yes      |
-| `region`                   | GCP region                                            | `string` | `"europe-west1"`          | no       |
-| `function_name`            | Function name                                         | `string` | `"onchain-event-handler"` | no       |
-| `memory_mb`                | Memory in MB                                          | `number` | `256`                     | no       |
-| `timeout_seconds`          | Timeout in seconds                                    | `number` | `300`                     | no       |
-| `max_instances`            | Max instances                                         | `number` | `10`                      | no       |
-| `min_instances`            | Min instances                                         | `number` | `0`                       | no       |
-| `quicknode_signing_secret` | QuickNode signing secret                              | `string` | -                         | yes      |
-| `multisig_notifications`   | Map of multisig configs with shared Slack channel IDs | `map`    | -                         | yes      |
-| `slack_bot_token`          | Slack bot OAuth token for `chat.postMessage`          | `string` | -                         | yes      |
+| Name                            | Description                                           | Type     | Default                      | Required |
+| ------------------------------- | ----------------------------------------------------- | -------- | ---------------------------- | -------- |
+| `project_id`                    | GCP project ID                                        | `string` | -                            | yes      |
+| `region`                        | GCP region                                            | `string` | `"europe-west1"`             | no       |
+| `common_labels`                 | Labels applied to module resources                    | `map`    | `{}`                         | no       |
+| `function_name`                 | Function name                                         | `string` | `"onchain-event-handler"`    | no       |
+| `memory_mb`                     | Memory in MB                                          | `number` | `256`                        | no       |
+| `timeout_seconds`               | Timeout in seconds                                    | `number` | `300`                        | no       |
+| `max_instances`                 | Max instances                                         | `number` | `10`                         | no       |
+| `min_instances`                 | Min instances                                         | `number` | `0`                          | no       |
+| `quicknode_signing_secret`      | QuickNode signing secret                              | `string` | -                            | yes      |
+| `multisig_notifications`        | Map of multisig configs with shared Slack channel IDs | `map`    | -                            | yes      |
+| `slack_bot_token`               | Slack bot OAuth token for `chat.postMessage`          | `string` | -                            | yes      |
+| `project_service_account_email` | Existing project service account for Cloud Build      | `string` | `null`                       | no       |
+| `cloudbuild_builder_dependency` | Opaque dependency on the Cloud Build IAM grant        | `string` | -                            | yes      |
+| `runtime`                       | Cloud Function runtime                                | `string` | `"nodejs24"`                 | no       |
+| `secret_name`                   | QuickNode signing-secret container name               | `string` | `"quicknode-signing-secret"` | no       |
 
 ## Outputs
 
@@ -69,57 +86,39 @@ module "onchain_event_handler" {
 
 ## Deployment
 
-### Step 1: Prerequisites Setup
+The parent `alerts/infra` stack owns the GCP project, APIs, service accounts,
+function, and CI deployment. Do not enable APIs, use service-account key files,
+or deploy this nested module independently.
 
-1. **Google Cloud Project Setup**
-
-   ```bash
-   # Set your GCP project
-   gcloud config set project YOUR_PROJECT_ID
-
-   # Enable required APIs
-   gcloud services enable cloudfunctions.googleapis.com
-   gcloud services enable cloudbuild.googleapis.com
-   gcloud services enable storage.googleapis.com
-   ```
-
-2. **Authentication**
-
-   ```bash
-   # Authenticate with GCP (if not already done)
-   gcloud auth application-default login
-
-   # Or use a service account key
-   export GOOGLE_APPLICATION_CREDENTIALS="path/to/service-account-key.json"
-   ```
-
-### Step 2: Build the Function
+### Step 1: Build and check the function
 
 **IMPORTANT**: Build TypeScript before deploying:
 
 ```bash
-cd onchain-event-handler
-pnpm install --frozen-lockfile --lockfile-dir .
-pnpm run build
+pnpm alerts:handler:build
+pnpm alerts:handler:typecheck
+pnpm alerts:handler:test
 ```
 
 The build compiles `src/` to `dist/`, including `src/safe-abi.json` as
 `dist/safe-abi.json`. Terraform packages the module for Cloud Build while
 excluding dev-only files, Terraform configs, local env files, and node_modules.
 
-### Step 3: Configure Terraform Variables
+### Step 2: Configure Terraform variables
 
-Ensure `terraform.tfvars` includes all required variables (see `terraform.tfvars.example` for full list).
+Ensure `alerts/infra/terraform.tfvars` includes all required local-plan values
+(see `alerts/infra/terraform.tfvars.example` for the full list).
 
-### Step 4: Deploy with Terraform
-
-From the repository root:
+### Step 3: Plan and deploy through the stack
 
 ```bash
-terraform init
-terraform plan
-terraform apply
+pnpm alerts:infra:init
+pnpm alerts:infra:plan
 ```
+
+Open a PR and review the CI plan. After merge, the apply runs through
+`.github/workflows/alerts-infra.yml` behind the `production-infra` approval
+gate. Do not run a local apply.
 
 **Deployment process:**
 
@@ -129,23 +128,25 @@ terraform apply
 4. Configures environment variables
 5. Sets up public IAM permissions for QuickNode webhook access
 
-### Step 5: Verify Deployment
+### Step 4: Verify deployment
 
 ```bash
-terraform output cloud_function_url
-curl $(terraform output -raw cloud_function_url)  # Should return 401 without webhook payload
+FUNCTION_URL=$(terraform -chdir=alerts/infra output -json google_cloud | jq -r .cloud_function_url)
+curl -X POST "$FUNCTION_URL"  # Should return 401 without a signed webhook payload.
 ```
 
 The function URL is used as the webhook endpoint in `onchain-event-listeners`.
 
-### Step 6: Update Function (Redeployment)
+### Updating the function
 
 ```bash
-cd onchain-event-handler && pnpm run build && cd ..
-terraform apply
+pnpm alerts:handler:build
+pnpm alerts:infra:plan
 ```
 
-Terraform detects `dist/` changes and creates a new archive, triggering a function update.
+Commit the source change and use the same reviewed PR and gated CI apply. The
+workflow builds `dist/`; Terraform archives it and creates a new function
+revision when the source hash changes.
 
 ## Development
 
@@ -157,7 +158,7 @@ Terraform detects `dist/` changes and creates a new archive, triggering a functi
 ### Setup
 
 ```bash
-cd onchain-event-handler
+cd alerts/infra/onchain-event-handler
 pnpm install --frozen-lockfile --lockfile-dir .
 ```
 
@@ -177,7 +178,8 @@ For local development, you'll need to set up environment variables. The function
 
 1. **Generate `.env` file:**
 
-   After `terraform apply`, generate `.env` from this directory:
+   After an explicit human approval for the targeted state mutation, generate
+   `.env` from this directory:
 
    ```bash
    pnpm run generate:env
@@ -211,7 +213,7 @@ For local development, you'll need to set up environment variables. The function
 - **Trigger**: HTTP/HTTPS
 - **Generation**: 2nd gen Cloud Functions
 - **Authentication**: Public (allUsers) for QuickNode webhook access
-- **Event Processing**: Processes all 16 Safe contract events
+- **Event Processing**: Processes all 17 Safe contract events
 - **Routing**: Routes security events to alerts channels, operational events to events channels
 - **Error Handling**: Continues processing other events if one fails
 
@@ -251,9 +253,8 @@ dead-lettered payload to its original Slack channel, then archives it to
 
 #### Error: API not enabled
 
-```bash
-gcloud services enable cloudfunctions.googleapis.com cloudbuild.googleapis.com storage.googleapis.com
-```
+The parent Terraform stack owns API enablement. Inspect `pnpm alerts:infra:plan`
+and the gated workflow rather than enabling APIs manually.
 
 #### Error: Permission denied
 
@@ -277,7 +278,8 @@ gcloud services enable cloudfunctions.googleapis.com cloudbuild.googleapis.com s
 
 - Verify the function URL is correct in QuickNode webhook configuration
 - Check IAM permissions allow `allUsers` to invoke the function
-- Review Cloud Function logs: `gcloud functions logs read onchain-event-handler --region=europe-west1`
+- Review Cloud Function logs with
+  `pnpm --filter @mento-protocol/alerts-onchain-event-handler logs`.
 
 ## Notes
 

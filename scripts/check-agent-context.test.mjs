@@ -14,7 +14,13 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,12 +81,15 @@ function writeFixtureJson(root, filePath, value) {
   writeFixtureFile(root, filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function createContextCheckFixture(readmeContent) {
+function createContextCheckFixture(readmeContent, extraFiles = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "check-agent-context-"));
 
   writeFixtureFile(root, "AGENTS.md", canonicalContextFile("Agents"));
   writeFixtureFile(root, "SPEC.md", canonicalContextFile("Spec"));
   writeFixtureFile(root, "README.md", readmeContent);
+  for (const [file, content] of Object.entries(extraFiles)) {
+    writeFixtureFile(root, file, content);
+  }
   writeFixtureFile(
     root,
     "docs/context-standards.md",
@@ -188,8 +197,8 @@ function createContextCheckFixture(readmeContent) {
   return root;
 }
 
-function runContextCheckFixture(readmeContent) {
-  const root = createContextCheckFixture(readmeContent);
+function runContextCheckFixture(readmeContent, extraFiles = {}) {
+  const root = createContextCheckFixture(readmeContent, extraFiles);
   try {
     return execFileSync(process.execPath, [checkerScriptPath], {
       cwd: root,
@@ -551,6 +560,44 @@ test("supports a hidden root README agent-context marker", () => {
     output.includes("Agent context check passed"),
     `expected README marker to pass, got ${JSON.stringify(output)}`,
   );
+});
+
+test("enrolls hidden canonical metadata on package README files", () => {
+  const today = isoDateWithOffset(0);
+  const output = runContextCheckFixture(
+    `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${today} -->\n`,
+    {
+      "demo/README.md": `# Demo\n\n<!-- agent-context: title="Demo README" status=active owner=demo canonical=true last_verified=${today} -->\n`,
+    },
+  );
+  assert(
+    output.includes("Agent context check passed"),
+    `expected package README marker to pass, got ${JSON.stringify(output)}`,
+  );
+});
+
+test("ignores a tracked canonical README deleted in the working tree", () => {
+  const today = isoDateWithOffset(0);
+  const root = createContextCheckFixture(
+    `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${today} -->\n`,
+    {
+      "demo/README.md": `# Demo\n\n<!-- agent-context: title="Demo README" status=active owner=demo canonical=true last_verified=${today} -->\n`,
+    },
+  );
+  try {
+    unlinkSync(path.join(root, "demo/README.md"));
+    const output = execFileSync(process.execPath, [checkerScriptPath], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert(
+      output.includes("Agent context check passed"),
+      `expected deleted README to leave the managed set, got ${JSON.stringify(output)}`,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("applies staleness checks to a hidden root README marker", () => {

@@ -2,7 +2,12 @@
 title: Terraform secret strategy hardening
 status: active
 owner: eng
-last_verified: 2026-07-08
+canonical: true
+last_verified: 2026-07-17
+doc_type: reference
+scope: terraform/infra
+review_interval_days: 90
+garden_lane: package-readmes-reference
 ---
 
 # Terraform Secret Strategy Hardening

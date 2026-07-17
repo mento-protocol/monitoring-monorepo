@@ -1,3 +1,15 @@
+---
+title: Mutation Testing Checklist
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-17
+doc_type: checklist
+scope: ci/process
+review_interval_days: 90
+garden_lane: pr-checklists-process
+---
+
 # Mutation Testing Checklist
 
 Use this checklist when changing mutation-test config, mutation-test scripts, or
@@ -15,8 +27,8 @@ one of the current mutation targets.
   limitation. Add tests only for real gaps.
 - **Mutation runs weekly + on-demand, not per-PR.** Each `stryker.config.mjs`
   sets a `break` floor at "rounded baseline score − 2" for measurement
-  noise; a run whose score drops below the floor fails the job. As of the
-  CI-cost work, `.github/workflows/mutation-testing.yml` triggers on the
+  noise; a run whose score drops below the floor fails the job.
+  `.github/workflows/mutation-testing.yml` currently triggers on the
   weekly `schedule` cron and `workflow_dispatch` only — it is **not** in the
   `main` ruleset's required checks, and per-PR mutation testing (3 runner
   boots on every push) was the single largest avoidable CI-cost line.

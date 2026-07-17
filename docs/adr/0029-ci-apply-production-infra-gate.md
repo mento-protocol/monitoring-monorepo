@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-08
 scope: terraform/infra
 date: 2026-05
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0029 — Infra applies on merge to `main` behind the `production-infra` environment gate

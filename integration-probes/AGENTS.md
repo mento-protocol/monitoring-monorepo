@@ -4,6 +4,10 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-06-01
+doc_type: agent-instructions
+scope: integration-probes
+review_interval_days: 90
+garden_lane: agent-entry-points
 ---
 
 # integration-probes

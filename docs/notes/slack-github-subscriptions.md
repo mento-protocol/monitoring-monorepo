@@ -2,7 +2,12 @@
 title: GitHub-to-Slack notifications for Terraform-applying workflows
 status: active
 owner: eng
-last_verified: 2026-07-07
+canonical: true
+last_verified: 2026-07-17
+doc_type: runbook
+scope: terraform/infra
+review_interval_days: 30
+garden_lane: operator-runbooks
 ---
 
 # GitHub-to-Slack notifications for Terraform-applying workflows
@@ -121,14 +126,16 @@ different failure mode: a post-merge Terraform deploy workflow can sit
 GitHub Slack App approval card and `scripts/notify-terraform-apply.mjs` summary
 cannot fire because the deploy workflow has not reached its `plan` job.
 
-The watcher runs daily, reads recent runs for the four
-`production-infra` deploy workflows, and posts to the same
-`TERRAFORM_APPLY_SLACK_CHANNEL` destination when a `push`/`workflow_dispatch`
-run is older than 60 minutes and still has zero started jobs. It fails its own
-workflow run after posting so the generic `#ci-failures` listener also has a
-machine-visible failure signal. It is observer-only: it does not join the
-deploy workflows' `*-deploy` concurrency groups, cancel runs, approve
-environments, or apply Terraform.
+The watcher runs daily, reads recent runs for the four `production-infra`
+deploy workflows, and uses the same `TERRAFORM_APPLY_SLACK_CHANNEL` destination
+and `#deploys` fallback as the apply-pending notifier steps. It also coerces the
+retired `#ci-operations` value to `#deploys`.
+
+It alerts when a `push`/`workflow_dispatch` run is older than 60 minutes and
+still has zero started jobs. It fails its own workflow run after posting so the
+generic `#ci-failures` listener also has a machine-visible failure signal. It
+is observer-only: it does not join the deploy workflows' `*-deploy` concurrency
+groups, cancel runs, approve environments, or apply Terraform.
 
 ## Out of scope
 

@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-08 -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-08 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -366,9 +366,10 @@ Sourced from the published [`@mento-protocol/contracts`](https://www.npmjs.com/p
 
 ## Documentation
 
-- [`indexer-envio/README.md`](./indexer-envio/README.md) — Indexer reference
-- [`indexer-envio/STATUS.md`](./indexer-envio/STATUS.md) — Static endpoint + deployment reference
-- [`docs/deployment.md`](./docs/deployment.md) — Full deployment guide
+- [`docs/README.md`](./docs/README.md) — Generated catalog of every unique documentation surface, grouped by gardening lane and authority
+- [`docs/context-standards.md`](./docs/context-standards.md) — Canonical versus historical context and metadata rules
+- [`docs/adr/README.md`](./docs/adr/README.md) — Architecture decision index and lifecycle
+- [`docs/deployment.md`](./docs/deployment.md) — Deployment guide
 
 ## License
 

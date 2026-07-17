@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: indexer-envio
 date: 2026-07
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0016 — Split effects/RPC from handlers; decompose `upsertPool` into pure heal-stages

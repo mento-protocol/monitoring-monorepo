@@ -1,16 +1,25 @@
 ---
 title: AI Review Process Integration Plan
-status: draft
+status: archived
 owner: eng
 canonical: false
+last_verified: 2026-07-17
+archived: 2026-07-17
+archived_reason: "All five planned review-process slices shipped in PRs #1034, #1037, #1039, #1040, and #1044; no follow-up PR is planned."
+doc_type: plan
+scope: ci/process
+review_interval_days: 365
+garden_lane: notes-plans-archive
 ---
 
 # AI Review Process Integration Plan
 
-This plan captures the Cloudflare AI code-review integration ideas that fit this
-repo's current agent workflow. It is intentionally non-canonical: treat it as a
-roadmap and verify current repo behavior before copying anything into AGENTS,
-skills, or gates.
+> **ARCHIVED** — All planned slices shipped. This document preserves the
+> workstream's intent and sequence; verify current behavior in AGENTS, scripts,
+> checklists, and readiness probes before relying on it.
+
+This plan captured the Cloudflare AI code-review integration ideas that fit the
+repo's agent workflow. It is intentionally non-canonical.
 
 ## Current Baseline
 

@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: integration-probes
 date: 2026-06
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0032 — Integration probes are quote-only, evidence-gated, and TTL-degraded
