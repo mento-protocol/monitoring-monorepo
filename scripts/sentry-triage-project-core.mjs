@@ -196,15 +196,52 @@ export function extractYamlBlock(commentBody) {
   return match ? match[1] : "";
 }
 
-function parseInlineList(rest) {
-  const trimmed = String(rest ?? "").trim();
-  const inner = /^\[(.*)\]$/.exec(trimmed);
-  const raw = inner ? inner[1] : trimmed;
-  if (!raw.trim()) return [];
+function splitListItems(raw) {
   return raw
     .split(",")
     .map((s) => s.replace(/^["']|["']$/g, "").trim())
     .filter(Boolean);
+}
+
+/** Strip a trailing yaml comment — but only a `#` that opens one at a valid
+ * boundary (preceded by whitespace, or the whole value). A bare `foo#bar` is
+ * part of the scalar in yaml, and truncating it would normalize malformed
+ * values into valid-looking ones (e.g. `<repo>#garbage` must NOT become an
+ * allowlisted repo). */
+function stripTrailingYamlComment(text) {
+  const s = String(text ?? "");
+  for (let i = 0; i < s.length; i += 1) {
+    if (s[i] === "#" && (i === 0 || /\s/.test(s[i - 1]))) {
+      return s.slice(0, i);
+    }
+  }
+  return s;
+}
+
+function parseInlineList(rest) {
+  const trimmed = String(rest ?? "").trim();
+  if (trimmed.startsWith("[")) {
+    // Parse the bracketed segment, tolerating ONLY a trailing yaml comment
+    // after the closing bracket — the verdict contract's own documented
+    // example is `duplicate_of: [] # list of Sentry SHORT-IDs (e.g.
+    // GOV…-51), …`, and an end-of-line-anchored match would fail on it,
+    // silently dropping the duplicates. Any other trailing garbage rejects
+    // the whole list (these IDs drive duplicate coalescing, so malformed
+    // agent output must not be normalized into valid-looking values).
+    const close = trimmed.indexOf("]");
+    if (close === -1) return [];
+    const remainder = trimmed.slice(close + 1);
+    if (remainder.trim() !== "" && !/^\s+#/.test(remainder)) return [];
+    const raw = trimmed.slice(1, close);
+    if (!raw.trim()) return [];
+    return splitListItems(raw);
+  }
+  // Bare (bracketless) scalar list: strip a boundary-valid trailing comment
+  // so a `# note` never leaks tokens into the ids (ids are shape-validated
+  // and can never legitimately contain `#`).
+  const withoutComment = stripTrailingYamlComment(trimmed).trim();
+  if (!withoutComment) return [];
+  return splitListItems(withoutComment);
 }
 
 function collectDashList(lines, start) {
@@ -305,8 +342,17 @@ export function parseVerdictYaml(block) {
       const token = /^([a-z]+)/.exec(rest);
       out.confidence = token ? token[1] : null;
     } else if (key === "affected_repo") {
-      const token = /([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)/.exec(rest);
-      out.affected_repo = token ? token[1] : "";
+      // EXACT whole-value match (after quote strip and a BOUNDARY-VALID
+      // trailing-comment strip — `<repo>#garbage` is one malformed scalar,
+      // not a repo plus comment) — never substring extraction: pulling an
+      // allowlisted slug out of surrounding text would turn e.g.
+      // "not mento-protocol/frontend-monorepo" into a projection target.
+      // Anything that isn't a bare owner/name slug parses as empty
+      // (-> treated as unrecognized, no projection).
+      const value = stripYamlQuotes(stripTrailingYamlComment(rest).trim());
+      out.affected_repo = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(value)
+        ? value
+        : "";
     } else if (key === "summary") {
       out.summary = stripYamlQuotes(rest);
     } else if (key === "root_cause" || key === "proposed_action") {
@@ -556,9 +602,6 @@ export function buildAliasComment({
   rootCause,
   proposedAction,
 }) {
-  const safeSummary =
-    truncate(neutralizeUntrusted(summary), MAX_BODY_SUMMARY_LEN) ||
-    "_(no summary provided)_";
   return [
     buildProjectionMarker(shortId),
     "",
@@ -572,7 +615,7 @@ export function buildAliasComment({
     "",
     "**Summary**",
     "",
-    safeSummary,
+    fencedBlock(summary),
     "",
     "**Root cause**",
     "",
@@ -605,20 +648,19 @@ export function buildProjectedTitle(summary) {
   return `Sentry: ${truncate(base, 200)}`;
 }
 
+// Every free-text field the body/alias renders — summary INCLUDED — goes
+// through this fenced, inert treatment: fencing is what stops markdown
+// (images, task lists, links, inline HTML) from rendering live in the
+// owning-repo issue, and neutralizeBlock bounds it (600 chars / 8 lines) and
+// defangs backticks so the fence can't be closed early. Everything else is
+// already bounded: title caps at 200, duplicates at 20 shape-validated
+// SHORT-IDs, shortId at 120, verdict/confidence are closed enums, and the
+// permalink is a Stage-A-bounded validated URL.
 function fencedBlock(text) {
   const body = neutralizeBlock(text);
   if (!body) return "_(none provided)_";
   return ["```text", body, "```"].join("\n");
 }
-
-// Hard bound for the one inline free-text field the body renders outside a
-// fence. Every other body field is already bounded: the title caps at 200,
-// block fields at 600 (neutralizeBlock), duplicates at 20 shape-validated
-// SHORT-IDs, shortId at 120, verdict/confidence are closed enums, and the
-// permalink is a Stage-A-bounded validated URL. Without this cap a
-// hostile/long single-line summary could blow the `gh issue create` request
-// and loop the retry compensation.
-const MAX_BODY_SUMMARY_LEN = 500;
 
 /**
  * Build the projected owning-repo issue body. `shortId`, `verdict`,
@@ -638,9 +680,6 @@ export function buildProjectedBody({
   permalink,
   queueIssueUrl,
 }) {
-  const safeSummary =
-    truncate(neutralizeUntrusted(summary), MAX_BODY_SUMMARY_LEN) ||
-    "_(no summary provided)_";
   const dupIds = sanitizeDuplicateIds(duplicateOf);
   const dupText = dupIds.length
     ? dupIds.map((id) => `\`${id}\``).join(", ")
@@ -657,7 +696,7 @@ export function buildProjectedBody({
     "",
     "**Summary**",
     "",
-    safeSummary,
+    fencedBlock(summary),
     "",
     "**Root cause**",
     "",

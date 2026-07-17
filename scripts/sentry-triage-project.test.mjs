@@ -389,6 +389,78 @@ await test("parseVerdictComment reads a block-style duplicate_of list", () => {
   ]);
 });
 
+await test("parseVerdictComment tolerates trailing yaml comments on duplicate_of (documented example shape)", () => {
+  // The verdict contract's own documented example carries a trailing comment
+  // that itself contains an ID-like token — the bracketed segment must parse
+  // and the comment must be ignored, not leak into the list.
+  const docExample = [
+    VERDICT_MARKER,
+    "```yaml",
+    "verdict: code-fix",
+    "confidence: low",
+    "affected_repo: mento-protocol/frontend-monorepo",
+    "summary: x",
+    "duplicate_of: [] # list of Sentry SHORT-IDs (e.g. GOVERNANCE-MENTO-ORG-51), possibly empty",
+    "```",
+  ].join("\n");
+  assertDeepEqual(parseVerdictComment(docExample).duplicateOf, []);
+
+  const withIds = docExample.replace(
+    "duplicate_of: [] #",
+    "duplicate_of: [MINIPAY-DAPP-3, MINIPAY-DAPP-9] #",
+  );
+  assertDeepEqual(parseVerdictComment(withIds).duplicateOf, [
+    "MINIPAY-DAPP-3",
+    "MINIPAY-DAPP-9",
+  ]);
+
+  // Only a boundary-valid comment is tolerated after the bracket — any other
+  // trailing garbage rejects the list rather than normalizing malformed yaml
+  // into valid-looking duplicate ids.
+  const garbage = docExample.replace(
+    "duplicate_of: [] # list of Sentry SHORT-IDs (e.g. GOVERNANCE-MENTO-ORG-51), possibly empty",
+    "duplicate_of: [APP-1] this is not valid YAML",
+  );
+  assertDeepEqual(parseVerdictComment(garbage).duplicateOf, []);
+});
+
+await test("affected_repo must be the exact whole value — no substring extraction", () => {
+  // "not <repo>" must NOT extract the allowlisted slug and project.
+  assertEqual(
+    parseVerdictComment(
+      verdictComment({
+        affectedRepo: "not mento-protocol/frontend-monorepo",
+      }),
+    ).affectedRepo,
+    "",
+  );
+  // A trailing yaml comment and surrounding quotes are tolerated.
+  assertEqual(
+    parseVerdictComment(
+      verdictComment({
+        affectedRepo: "mento-protocol/frontend-monorepo # main app",
+      }),
+    ).affectedRepo,
+    "mento-protocol/frontend-monorepo",
+  );
+  assertEqual(
+    parseVerdictComment(
+      verdictComment({ affectedRepo: '"mento-protocol/minipay-dapp"' }),
+    ).affectedRepo,
+    "mento-protocol/minipay-dapp",
+  );
+  // A `#` without a whitespace boundary is part of the scalar (malformed),
+  // not a comment — it must not be normalized into an allowlisted repo.
+  assertEqual(
+    parseVerdictComment(
+      verdictComment({
+        affectedRepo: "mento-protocol/frontend-monorepo#garbage",
+      }),
+    ).affectedRepo,
+    "",
+  );
+});
+
 await test("sanitizeDuplicateIds drops junk, deduplicates, and bounds rendering", () => {
   assertDeepEqual(
     sanitizeDuplicateIds(["APP-1", "has space", "`inject`", "OK-2", "APP-1"]),
@@ -789,7 +861,7 @@ await test("buildProjectedBody renders contract fields, links, footer, and marke
   assert(body.includes("ADR 0036 / ADR 0038"), "expected footer");
 });
 
-await test("buildProjectedBody hard-bounds the summary at 500 chars", () => {
+await test("buildProjectedBody renders the summary fenced (inert markdown) and bounded", () => {
   const base = {
     shortId: "APP-MENTO-ORG-12",
     verdict: "code-fix",
@@ -801,23 +873,45 @@ await test("buildProjectedBody hard-bounds the summary at 500 chars", () => {
     queueIssueUrl:
       "https://github.com/mento-protocol/monitoring-monorepo/issues/500",
   };
-  // Boundary: exactly 500 chars renders intact, no truncation ellipsis.
-  const atLimit = "s".repeat(500);
+  // A markdown-image payload must land INSIDE a fenced block — never as live
+  // markdown that would render (and fire the image request) in the owning
+  // repo issue. Same inert treatment as root cause / proposed action.
+  const img = "![exfil](https://evil.example/x.png)";
+  const bodyImg = buildProjectedBody({ ...base, summary: img });
+  assert(
+    bodyImg.includes(`**Summary**\n\n\`\`\`text\n${img}`),
+    "expected the summary rendered inside a text fence",
+  );
+  // Bounded like the other fenced fields: 600 chars via neutralizeBlock.
+  const atLimit = "s".repeat(600);
   const bodyAt = buildProjectedBody({ ...base, summary: atLimit });
-  assert(bodyAt.includes(atLimit), "expected 500-char summary intact");
+  assert(bodyAt.includes(atLimit), "expected 600-char summary intact");
   assert(
     !bodyAt.includes(`${atLimit}…`),
     "expected no ellipsis at the boundary",
   );
-  // Over limit: hard-truncated to the 500-char prefix + ellipsis.
-  const over = "x".repeat(700);
+  const over = "x".repeat(800);
   const bodyOver = buildProjectedBody({ ...base, summary: over });
   assert(!bodyOver.includes(over), "expected over-limit summary truncated");
   assert(
-    bodyOver.includes(`${"x".repeat(500)}…`),
-    "expected 500-char prefix + ellipsis",
+    bodyOver.includes(`${"x".repeat(600)}…`),
+    "expected 600-char prefix + ellipsis",
   );
-  assert(!bodyOver.includes("x".repeat(501)), "expected nothing past the cap");
+  assert(!bodyOver.includes("x".repeat(601)), "expected nothing past the cap");
+  // The alias comment fences its summary identically.
+  const alias = buildAliasComment({
+    shortId: "APP-MENTO-ORG-12",
+    queueIssueUrl: base.queueIssueUrl,
+    verdict: "code-fix",
+    confidence: "low",
+    summary: img,
+    rootCause: "rc",
+    proposedAction: "pa",
+  });
+  assert(
+    alias.includes(`**Summary**\n\n\`\`\`text\n${img}`),
+    "expected the alias summary fenced too",
+  );
 });
 
 await test("buildProjectedBody neutralizes a hostile summary and fenced blocks", () => {
