@@ -379,9 +379,10 @@ built), `code-fix`/`config-fix` closing comments are expected to also link the
 projected owning-repo issue — forward-looking, not part of this contract yet.
 
 **One-off backfill (queue hygiene, 2026-07):** activation-era queue issues
-that already carried a non-`needs-human` verdict label predate this closing
-step and needed a single manual sweep — see "Backfill (queue hygiene closing,
-one-off)" in the operator runbook below for the exact command and when it ran.
+that already carry a non-`needs-human` verdict label predate this closing step
+and need a single manual sweep, run once after this change merges — see
+"Backfill (queue hygiene closing, one-off)" in the operator runbook below for
+the exact command.
 
 ### How to read a verdict
 
