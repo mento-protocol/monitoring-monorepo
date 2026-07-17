@@ -180,6 +180,12 @@ export const LABEL_DEFINITIONS = [
     color: "d93f0b",
     description: "Triage verdict: needs human judgment",
   },
+  {
+    name: "sentry:projected",
+    color: "0052cc",
+    description:
+      "Actionable verdict projected as an issue in the owning repo (ADR 0038)",
+  },
 ];
 
 // Stage B's verdict namespace, derived from the definitions above so the two

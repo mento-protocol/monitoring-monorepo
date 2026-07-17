@@ -45,6 +45,7 @@ flowchart LR
         SEL["<b>Stage B — select</b><br/>6 oldest pending,<br/>oldest-first"]
         AGT["<b>Stage B — triage agents</b><br/>claude-code-action, ≤2 parallel<br/>read-only Sentry MCP"]
         LBL["<b>deterministic verdict step</b><br/>parse comment → validate →<br/>apply label (no LLM authority)"]
+        PROJ["<b>deterministic projection step</b><br/>code-fix/config-fix + external<br/>owning repo → owning-repo issue<br/>(Issues-write, no LLM authority)"]
         CLOSE["<b>deterministic close step</b><br/>code-fix/config-fix/upstream →<br/>close (completed); needs-human<br/>stays open (no LLM authority)"]
     end
 
@@ -52,8 +53,13 @@ flowchart LR
         QI["queue issues<br/><code>[sentry] SHORT-ID (project, level)</code><br/>redacted coordinates only<br/>closed once verdicted (except needs-human)"]
     end
 
+    subgraph OWN["Owning repos — product teams (ADR 0038)"]
+        REPOS["frontend-monorepo ·<br/>mento-analytics-api ·<br/>minipay-dapp<br/>(human-readable projected issues)"]
+    end
+
     subgraph TF["Terraform platform stack"]
         SEC["SENTRY_TRIAGE_TOKEN (read-only)<br/>SENTRY_TRIAGE_ENABLED (kill switch)"]
+        SECP["SENTRY_PROJECTION_TOKEN<br/>(Issues R/W, 3 owning repos)"]
     end
 
     subgraph OBS["Observability"]
@@ -71,13 +77,18 @@ flowchart LR
     AGT -- "verdict comment" --> QI
     LBL -- "sentry:verdict-* label" --> QI
     AGT --> LBL
-    LBL --> CLOSE
+    LBL --> PROJ
+    PROJ --> CLOSE
+    PROJ -- "actionable verdict,<br/>allowlisted owning repo" --> REPOS
+    PROJ -- "sentry:projected + link comment" --> QI
     CLOSE -- "close (completed),<br/>verdicted buckets only" --> QI
     SEC -. "gates + authenticates" .-> ING & SEL
+    SECP -. "authenticates (Issues-write)" .-> PROJ
     ING --> TRK
     GHA -.-> CIF
     LBL --> ENG
     QI --> HUM
+    REPOS --> HUM
 ```
 
 ### Process flow — life of one Sentry issue
@@ -100,22 +111,24 @@ flowchart TD
     VALID -- "no" --> FAIL["job fails loudly;<br/>issue keeps sentry:needs-triage<br/>→ retried next run"]
     VALID -- "yes" --> SWAP["label swap →<br/>sentry:verdict-&lt;verdict&gt;"]
     SWAP --> DIGEST["run digest → #engineering<br/>(fast-follow #1336, in flight)"]
-    SWAP --> CLOSESTEP["deterministic close step<br/>(same job step, after label swap)"]
-    CLOSESTEP --> ROUTE{"verdict bucket"}
-    ROUTE -- "code-fix" --> OWN["human fixes in the owning repo<br/>(Phase 2b+: scoped fix-PR candidate)"]
-    ROUTE -- "config-fix" --> CFG["human config/infra change<br/>(never automated)"]
-    ROUTE -- "upstream-transient" --> ARCH["Phase 2a (future): human-approved<br/>archive-until-escalating in Sentry"]
-    ROUTE -- "needs-human" --> REV["human review<br/>(queue issue stays OPEN —<br/>the one excluded bucket)"]
-    OWN --> CLOSED["queue issue closed (completed)<br/>fixed comment; reopens<br/>automatically on Sentry regression"]
-    CFG --> CLOSED
-    ARCH --> CLOSED
+    SWAP --> BUCKET{"verdict bucket"}
+    BUCKET -- "code-fix / config-fix" --> PROJ["deterministic projection step:<br/>affected_repo an allowlisted<br/>owning repo + token set?"]
+    PROJ -- "yes" --> FILE["file owning-repo issue<br/>(idempotent by SHORT-ID),<br/>label stub sentry:projected,<br/>comment projected URL"]
+    PROJ -- "no (this repo / unrecognized /<br/>token absent → visible skip)" --> CLOSESTEP
+    FILE --> OWNFIX["product team fixes in<br/>the owning repo<br/>(Phase 3 #1279: scoped fix-PR)"]
+    FILE --> CLOSESTEP
+    BUCKET -- "upstream-transient" --> CLOSESTEP
+    BUCKET -- "needs-human" --> REV["human review<br/>(queue stub stays OPEN —<br/>the one excluded bucket)"]
+    CLOSESTEP["deterministic close step<br/>(closing comment links the<br/>projected issue when present)"] --> CLOSED["queue stub closed (completed);<br/>reopens automatically on<br/>Sentry regression"]
 ```
 
-Nothing in Phase 1 mutates Sentry or any codebase: the only writes anywhere
-are the queue issue (create/reopen/close), the verdict comment, the label, and
-the notifications. Closing a queue issue never touches Sentry — the underlying
-Sentry issue keeps whatever status it already had; only the local ledger entry
-closes.
+Nothing in Phase 1 mutates Sentry or any codebase: the writes anywhere are the
+queue issue (create/reopen/close), the verdict comment, the label, the
+notifications, and — for actionable verdicts against an external owning repo —
+a human-readable **issue** projected into that repo (Issues-write only, no code;
+see "Verdict projection" below). Closing a queue issue never touches Sentry —
+the underlying Sentry issue keeps whatever status it already had; only the
+local ledger entry closes.
 
 ## Queue contract (v2)
 
@@ -217,10 +230,11 @@ queues can't cross-claim each other's work.
 
 The ingest script idempotently bootstraps every pipeline label on each run
 (`gh label create --force`), including the verdict labels Stage B will use
-before Stage B exists: `sentry-triage`, `sentry:needs-triage`,
-`sentry:candidate-noise`, `sentry:verdict-code-fix`,
+before Stage B exists, plus the `sentry:projected` marker the verdict-projection
+step applies (see "Verdict projection" below): `sentry-triage`,
+`sentry:needs-triage`, `sentry:candidate-noise`, `sentry:verdict-code-fix`,
 `sentry:verdict-config-fix`, `sentry:verdict-upstream`,
-`sentry:verdict-needs-human`.
+`sentry:verdict-needs-human`, `sentry:projected`.
 
 ### Body
 
@@ -382,13 +396,20 @@ closes the queue issue for every bucket except `needs-human`:
 | `code-fix`, `config-fix`, `upstream-transient` | closed (`gh issue close --reason completed`)                                          |
 | `needs-human`                                  | stays **open** — the one bucket that wants human eyes; a human closes it after acting |
 
-The closing comment is fixed and deterministic — the verdict word is its only
-variable, and that word comes from the validated four-value enum above, never
-from agent-authored comment text:
+The closing comment is fixed and deterministic — its only variables are the
+validated four-value verdict enum and, for `code-fix`/`config-fix`, a
+projection note built from the projection step's closed-enum status plus the
+`gh`-returned owning-repo issue URL (never agent-authored comment text):
 
 ```text
 Triage complete: <verdict>. Ledger entry closed; reopens automatically on Sentry regression.
 ```
+
+For `code-fix`/`config-fix` the comment additionally records the projection
+outcome between the verdict word and "Ledger entry closed" — the linked
+owning-repo issue when one was filed/reused, or an explicit "Projection skipped
+(SENTRY_PROJECTION_TOKEN not provisioned)." while the PAT is absent (visible,
+not silent). See "Verdict projection" below.
 
 This is queue hygiene only: it closes this repo's local ledger issue, never
 the underlying Sentry issue (Sentry archival stays Phase 2a, human-approved,
@@ -401,9 +422,10 @@ what keeps the pair loop-free — Sentry holds `substatus=regressed` for days,
 so without it an already-triaged, just-closed stub would re-match the
 regressed query and cycle reopen → re-triage → close every run.
 
-Once a verdict-projection sibling issue exists in the owning repo (not yet
-built), `code-fix`/`config-fix` closing comments are expected to also link the
-projected owning-repo issue — forward-looking, not part of this contract yet.
+For `code-fix`/`config-fix` verdicts against an external owning repo, the
+verdict-projection step (ADR 0038, "Verdict projection" below) runs between the
+label swap and this close, files the owning-repo issue, and the closing comment
+links it.
 
 **One-off backfill (queue hygiene, 2026-07):** activation-era queue issues
 that already carry a non-`needs-human` verdict label predate this closing step
@@ -477,6 +499,71 @@ previous phase's measured verdict accuracy — not on elapsed time:
   (Codex) review like any other PR.
 - `sentry:verdict-config-fix` and `sentry:verdict-needs-human` → stay with a
   person.
+
+## Verdict projection
+
+The central queue is a machine ledger; the human artifact for an actionable
+finding lives where the product team works. **Verdict projection** (ADR 0038)
+is the deterministic, no-LLM step that turns a `code-fix`/`config-fix` verdict
+for an EXTERNAL owning repo into a proper, readable issue in that repo. It runs
+in `.github/workflows/sentry-triage-agent.yml` AFTER the verdict-label step and
+BEFORE the queue-close step, driven by `scripts/sentry-triage-project.mjs`
+(pure logic + `gh` I/O; tests in `scripts/sentry-triage-project.test.mjs`).
+
+It is a pure CONSUMER of the verdict contract — it re-reads the stub's title,
+yaml body, and latest `<!-- sentry-triage-verdict:v1 -->` comment (re-applying
+the same regression fence as the label step), and never re-fetches Sentry, runs
+an LLM, or touches the verdict/label logic.
+
+**When it projects.** Only `code-fix`/`config-fix`; `needs-human` and
+`upstream-transient` never leave the queue. The verdict's `affected_repo` is
+UNTRUSTED agent text, validated against a FIXED allowlist —
+`mento-protocol/frontend-monorepo`, `mento-protocol/mento-analytics-api`,
+`mento-protocol/minipay-dapp`. Anything else is a no-op:
+`mento-protocol/monitoring-monorepo` (this repo — its errors are fixed here)
+quietly, an unrecognized value with a `::warning::` (treated as this repo). This
+allowlist is the entire trust boundary for the cross-repo write.
+
+**What it files.** Title `Sentry: <summary>`; body = only the
+redaction-governed verdict-contract fields (summary, root cause, proposed
+action, confidence, possible duplicates), the Sentry permalink, a back-link to
+the queue stub, and a fixed footer — no raw Sentry payload is fetched or copied.
+Every agent-derived string is neutralized the same way the Stage A queue body is
+(control chars stripped, backticks defanged so a hostile value can't break a
+code fence, `@` defanged so it can't become a live GitHub mention); multi-line
+fields render inside fenced blocks so embedded markdown is inert; the SHORT-IDs,
+permalink, and back-link are shape-/scheme-validated before they render.
+
+**Idempotency.** Before creating, the owning repo is searched across **all**
+states for an existing issue carrying a hidden
+`<!-- sentry-projection:v1 SHORT-ID -->` back-link marker; a match is reused,
+never duplicated. This makes projection safe across regression reopen →
+re-triage cycles (the same SHORT-ID reuses the same owning-repo issue).
+
+**Queue-stub side effects.** On a successful projection (created or reused) the
+stub gets the `sentry:projected` label plus a comment linking the projected
+issue, then the close step closes it as usual with the projected URL in the
+closing comment. The `sentry:projected` label is bootstrapped by the ingest
+label set (Stage A "Labels").
+
+**Credential + isolation.** The cross-repo create/search use a dedicated
+fine-grained PAT (`sentry-triage-projector`, Issues Read+Write on exactly the
+three owning repos — no contents, no pull-requests), stored as the
+`count`-gated Actions secret `SENTRY_PROJECTION_TOKEN` in the platform Terraform
+stack (ADR 0030). It is exposed as **step-scoped** env on the projection step
+ONLY — never job-level — so it reaches neither the triage agent (whose allowlist
+and permissions are untouched) nor any other step. The local stub label/comment
+use the ambient `github.token` (issues:write on this repo); the PAT is never
+used for a local call. While the secret is absent the step is a graceful no-op
+(`::notice::`), and the close step records the skip in the stub's closing
+comment (visible, not silent). Cross-repo fix **PRs** remain a later phase
+(ADR 0036 Stage C Phase 3, [#1279](https://github.com/mento-protocol/monitoring-monorepo/issues/1279)) —
+this step is Issues-write only.
+
+**Failure handling.** On any projection failure the step compensates exactly
+like the close step — restore `sentry:needs-triage`, shed the verdict label, and
+fail the job loudly so the main-failure notifier fires and the next scheduled
+run retries. Nothing strands.
 
 ## Operator runbook (Phase-1 activation)
 
@@ -553,6 +640,43 @@ branch-dispatch hardening is tracked in
 tracker issue
 [#1282](https://github.com/mento-protocol/monitoring-monorepo/issues/1282).
 
+### Activating verdict projection (ADR 0038)
+
+Projection is a separate, later activation from the read-only pipeline above:
+the projection step is a graceful `::notice::` no-op until its PAT exists, so
+the pipeline runs fine without it. When the team is ready to file owning-repo
+issues automatically:
+
+1. **Mint the `sentry-triage-projector` fine-grained PAT.** In GitHub (a bot or
+   service account with access to the three owning repos, or an owner), create a
+   **fine-grained** personal access token named `sentry-triage-projector`:
+   - **Resource owner:** `mento-protocol`.
+   - **Repository access → Only select repositories:** EXACTLY
+     `frontend-monorepo`, `mento-analytics-api`, `minipay-dapp` — no others.
+   - **Repository permissions → Issues: Read and write.** Set NOTHING else — no
+     Contents, no Pull requests, no metadata beyond the mandatory read. This is
+     the whole trust boundary; do not widen it (cross-repo fix PRs are Phase 3,
+     [#1279](https://github.com/mento-protocol/monitoring-monorepo/issues/1279),
+     and mint their own credential if/when approved).
+   - Give it a bounded expiry and copy the generated token.
+2. **Set it in the platform tfvars.** In your local, gitignored
+   `terraform/terraform.tfvars`, set `sentry_projection_token` (see
+   `terraform/terraform.tfvars.example` for the key and placeholder). Same value
+   source as the other `count`-gated platform secrets — never `gh secret set`,
+   never the GitHub UI.
+3. **Plan and apply the platform stack (human-approved local apply).** Run
+   `pnpm infra:plan` and confirm the new `github_actions_secret.sentry_projection_token`
+   resource appears (absent while the tfvar is empty). After human sign-off, run
+   `pnpm tf apply platform` from a clean `main` checkout. The apply mirrors the
+   value into the repo Actions secret `SENTRY_PROJECTION_TOKEN`. Unlike
+   `claude_code_oauth_token`, this secret is brand-new with no external consumer,
+   so it carries no `prevent_destroy` — emptying the tfvar later cleanly removes
+   it (projection reverts to the no-op).
+4. **Verify.** On the next `code-fix`/`config-fix` verdict for an external
+   owning repo, confirm an owning-repo issue is filed, the queue stub carries
+   `sentry:projected` + a link comment, and the stub closes with the projected
+   URL in its closing comment. To rotate, replace the tfvar value and re-apply.
+
 **Backfill after an outage or at first activation:** the ingest's default
 firstSeen window is 8 days, so Sentry issues first seen during a longer inert
 or broken period fall outside the next scheduled scan. Run one manual
@@ -594,6 +718,10 @@ close_verdicted sentry:verdict-upstream upstream-transient
 pnpm sentry:ingest --dry-run   # needs a local SENTRY_TRIAGE_TOKEN; prints mutations without applying them
 pnpm sentry:ingest:test        # node --test scripts/sentry-triage-ingest.test.mjs
 pnpm sentry:digest:test        # node --test scripts/sentry-triage-digest.test.mjs (offline)
+pnpm sentry:project:test       # node --test scripts/sentry-triage-project.test.mjs (offline)
 # Print the Slack digest payload for a batch without posting (needs gh auth):
 SENTRY_TRIAGE_ISSUES='[123,456]' pnpm sentry:digest --channel '#engineering'
+# Project a single verdicted stub (needs gh auth + SENTRY_PROJECTION_TOKEN for a
+# real cross-repo write; prints the JSON result). Absent token -> graceful no-op:
+SENTRY_PROJECTION_TOKEN=… pnpm sentry:project --issue 123
 ```

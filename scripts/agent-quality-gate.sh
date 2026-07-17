@@ -632,6 +632,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/agent-issue-board.test.mjs" "$reason"
   add_command "pnpm sentry:ingest:test" "$reason"
   add_command "pnpm sentry:digest:test" "$reason"
+  add_command "pnpm sentry:project:test" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
