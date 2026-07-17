@@ -13,7 +13,10 @@ const SOLIDITY_TYPE_BOUNDS = {
   int48: { min: -140737488355328n, max: 140737488355327n },
 } as const;
 
-const ORACLE_RATE_DECIMAL_SCALE = 1_000_000_000_000n;
+// Keep bigint-to-number fractional conversion below Number's safe-integer
+// boundary. Twelve decimal places are precise enough for alert thresholds and
+// leave a representable gap below the next whole unit at operational balances.
+const NUMBER_DECIMAL_SCALE = 1_000_000_000_000n;
 
 const inputName = (input: { name?: string }, index: number): string =>
   input.name ?? `in${index}`;
@@ -340,11 +343,10 @@ export class Metric {
       throw new Error(`Value ${integerPart} is too large to be a safe integer`);
     }
 
-    const scaledFraction =
-      (remainder * ORACLE_RATE_DECIMAL_SCALE) / denominator;
+    const scaledFraction = (remainder * NUMBER_DECIMAL_SCALE) / denominator;
     return (
       Number(integerPart) +
-      Number(scaledFraction) / Number(ORACLE_RATE_DECIMAL_SCALE)
+      Number(scaledFraction) / Number(NUMBER_DECIMAL_SCALE)
     );
   }
 
@@ -355,6 +357,16 @@ export class Metric {
     if (wholeUnits > Number.MAX_SAFE_INTEGER) {
       throw new Error(`Value ${wholeUnits} is too large to be a safe integer`);
     }
-    return Number(wholeUnits) + Number(fractionalUnits) / Number(divisor);
+
+    const fractionalScale =
+      divisor < NUMBER_DECIMAL_SCALE ? divisor : NUMBER_DECIMAL_SCALE;
+    let scaledFraction = (fractionalUnits * fractionalScale) / divisor;
+    if (fractionalUnits > 0n && scaledFraction === 0n) {
+      scaledFraction = 1n;
+    }
+
+    return (
+      Number(wholeUnits) + Number(scaledFraction) / Number(fractionalScale)
+    );
   }
 }

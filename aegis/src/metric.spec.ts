@@ -266,10 +266,25 @@ describe('Metric.parse', () => {
       expect(result).toBe(100);
     });
 
-    it('should preserve sub-unit balances', () => {
+    it('should preserve sub-unit balances at bounded decimal precision', () => {
       const dust = BigInt('123456789012345678'); // ~0.12 token
       const result = metric.parse(dust, 'Native', 'balanceOf');
-      expect(result).toBeCloseTo(0.12345678901234568, 15);
+      expect(result).toBe(0.123456789012);
+    });
+
+    it('should not round a sub-threshold balance up to the next whole token', () => {
+      const divisor = 1_000_000_000_000_000_000n;
+      const justBelowFiveHundred = 500n * divisor - 1n;
+
+      const result = metric.parse(justBelowFiveHundred, 'Native', 'balanceOf');
+
+      expect(result).toBeLessThan(500);
+      expect(result).toBeGreaterThan(499);
+      expect(metric.parse(500n * divisor, 'Native', 'balanceOf')).toBe(500);
+    });
+
+    it('should not collapse a positive wei balance to zero', () => {
+      expect(metric.parse(1n, 'Native', 'balanceOf')).toBeGreaterThan(0);
     });
 
     it('should throw when balance overflows safe integer range', () => {
