@@ -41,7 +41,7 @@ export default tseslint.config(
       "unused-imports/no-unused-imports": "error",
     },
   },
-  // File-size budget — see /AGENTS.md §"File-size budget".
+  // File-size budget — see docs/pr-checklists/recurring-review-patterns.md.
   {
     files: ["src/**/*.ts"],
     rules: {

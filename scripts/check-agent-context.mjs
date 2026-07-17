@@ -212,6 +212,8 @@ const delegatedOperatingRuleNotes = [
   "docs/notes/codex-agent-skills.md",
   "docs/notes/codex-cloud-setup.md",
   "docs/notes/cross-protocol-context.md",
+  "docs/notes/dashboard-verification.md",
+  "docs/notes/liquity-monitoring-invariants.md",
   "docs/notes/pr-ready-state.md",
   "docs/notes/quick-commands.md",
   "docs/notes/spoken-attention-nudge.md",
@@ -263,6 +265,7 @@ const coreContextFiles = [
   "SPEC.md",
   ...scopedAgentDirs.map((dir) => `${dir}/AGENTS.md`),
   "docs/context-standards.md",
+  "docs/pr-checklists/indexer-handler-invariants.md",
   "docs/pr-checklists/recurring-review-patterns.md",
   // Root-delegated operating-rule notes are pinned because root AGENTS.md or
   // another canonical entry point sends agents there for current behavior.

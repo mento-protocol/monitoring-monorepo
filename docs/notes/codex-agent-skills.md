@@ -3,7 +3,7 @@ title: Codex Agent Skills — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -13,7 +13,7 @@ garden_lane: operator-runbooks
 # Codex Agent Skills
 
 The invocation pointer (where skills live, autoreview command, Codex Cloud
-scripts) lives in the "Codex Agent Skills" section of root `AGENTS.md`. This
+scripts) lives in the "Agent Tooling and Setup" section of root `AGENTS.md`. This
 note holds the underlying mechanics.
 
 Repo-tracked project skills live under `.agents/skills/`. Keep durable,

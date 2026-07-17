@@ -5,7 +5,7 @@ import { z } from "zod";
 // fallback` / `x === "true"` semantics so operator typos (e.g.
 // `INDEXER_PERF_LOG_INTERVAL_EVENTS=abc`, `NODE_ENV=staging`,
 // `ENVIO_STRICT_START_BLOCK=1`) silently resolve instead of crashing the
-// indexer at module load. See AGENTS.md "Env-var validation".
+// indexer at module load. See docs/pr-checklists/indexer-handler-invariants.md.
 const envBool = z
   .string()
   .optional()

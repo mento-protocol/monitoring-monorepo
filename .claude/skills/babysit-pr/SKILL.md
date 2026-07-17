@@ -67,8 +67,10 @@ item required.
   body, URL, path, line, and id needed to understand the finding before making
   raw `gh api` calls. This does **not** replace the required full feedback
   sweep across review comments, review bodies, top-level comments, threads,
-  check annotations, and failing check logs before all-clear. Use the root
-  `AGENTS.md` reply templates. Do not resolve a thread without a reply first.
+  check annotations, and failing check logs before all-clear. Do not resolve a
+  thread without a reply first. Use these exact reply shapes:
+  - Fixed: `Fixed in <commit> — <what changed>`
+  - Won't fix: `Won't fix: <technical reason why>`
 - Codex current-head approval missing, stale, or in flight: wait for the
   automatic current-head review path before taking action. Codex re-reviews new
   pushes automatically in this repo; do not post `@codex review` as a routine

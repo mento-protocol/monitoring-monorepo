@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-06-05
+last_verified: 2026-07-17
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -246,6 +246,8 @@ Field expectations:
 ## Agent workflow
 
 1. Sweep feedback surfaces and reply to all review comments.
+   Use `Fixed in <commit> — <what changed>` or
+   `Won't fix: <technical reason why>`; never resolve a thread before replying.
 2. Batch review fixes locally, auditing sibling surfaces before pushing.
 3. Run the mapped local gate once for the batch.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,

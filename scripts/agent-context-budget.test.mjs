@@ -17,15 +17,20 @@ import assert from "node:assert/strict";
 import {
   buildContextBudgetReport,
   DEFAULT_LIMIT_BYTES,
+  MAX_ROUTE_LIMIT_BYTES,
   parseProjectDocMaxBytes,
+  ROOT_INSTRUCTION_LIMIT_BYTES,
   resolveProjectDocMaxBytes,
+  SCOPED_INSTRUCTION_LIMIT_BYTES,
   selectEffectiveInstructionFiles,
   trackedInstructionFiles,
+  WARNING_PERCENT,
 } from "./agent-context-budget.mjs";
 
 const scriptPath = fileURLToPath(
   new URL("./agent-context-budget.mjs", import.meta.url),
 );
+const repoRoot = path.resolve(path.dirname(scriptPath), "..");
 
 function withRepo(fn) {
   const repo = mkdtempSync(path.join(tmpdir(), "agent-context-budget-"));
@@ -142,12 +147,33 @@ test("report models root plus nested chains and largest contributors", () => {
       report.routes.map(({ route, bytes }) => [route, bytes]),
       [
         [".", 10],
-        ["pkg", 30],
-        ["pkg/deep", 35],
+        ["pkg", 32],
+        ["pkg/deep", 39],
       ],
     );
+    assert.equal(report.routes[2].content_bytes, 35);
+    assert.equal(report.routes[2].separator_bytes, 4);
     assert.equal(report.routes[2].contributors[0].path, "pkg/AGENTS.md");
     assert.deepEqual(report.oversized_routes, []);
+  });
+});
+
+test("empty instruction files are skipped like Codex discovery", () => {
+  withRepo((repo) => {
+    write(repo, "AGENTS.md", "");
+    write(repo, "pkg/AGENTS.md", "local");
+    const report = buildContextBudgetReport({
+      repoRoot: repo,
+      files: ["AGENTS.md", "pkg/AGENTS.md"],
+      limitBytes: 100,
+    });
+    assert.deepEqual(
+      report.instruction_files.map(({ path: file }) => file),
+      ["pkg/AGENTS.md"],
+    );
+    assert.deepEqual(report.routes[0].chain, [
+      { path: "pkg/AGENTS.md", bytes: 5 },
+    ]);
   });
 });
 
@@ -170,6 +196,41 @@ test("exact limit passes and one byte over fails", () => {
   });
 });
 
+test("warning threshold is visible but non-blocking", () => {
+  withRepo((repo) => {
+    write(repo, "AGENTS.md", "x".repeat(90));
+    const report = buildContextBudgetReport({
+      repoRoot: repo,
+      files: ["AGENTS.md"],
+      limitBytes: 100,
+      rootLimitBytes: 100,
+      scopedLimitBytes: 100,
+      warningPercent: 90,
+    });
+    assert.equal(report.instruction_files[0].state, "warning");
+    assert.equal(report.routes[0].state, "warning");
+    assert.deepEqual(report.warning_instruction_files, ["AGENTS.md"]);
+    assert.deepEqual(report.warning_routes, ["."]);
+    assert.deepEqual(report.oversized_instruction_files, []);
+    assert.deepEqual(report.oversized_routes, []);
+  });
+});
+
+test("file caps fail independently of aggregate route headroom", () => {
+  withRepo((repo) => {
+    write(repo, "AGENTS.md", "x".repeat(11));
+    const report = buildContextBudgetReport({
+      repoRoot: repo,
+      files: ["AGENTS.md"],
+      limitBytes: 100,
+      rootLimitBytes: 10,
+      scopedLimitBytes: 20,
+    });
+    assert.deepEqual(report.oversized_instruction_files, ["AGENTS.md"]);
+    assert.deepEqual(report.oversized_routes, []);
+  });
+});
+
 test("tracked symlink is measured by resolved content and CLAUDE mirrors are ignored", () => {
   withRepo((repo) => {
     write(repo, "source.md", "1234567");
@@ -178,7 +239,14 @@ test("tracked symlink is measured by resolved content and CLAUDE mirrors are ign
     track(repo, "source.md", "AGENTS.md", "CLAUDE.md");
     const result = spawnSync(
       process.execPath,
-      [scriptPath, "--root", repo, "--json"],
+      [
+        scriptPath,
+        "--root",
+        repo,
+        "--limit",
+        String(MAX_ROUTE_LIMIT_BYTES),
+        "--json",
+      ],
       {
         encoding: "utf8",
       },
@@ -212,4 +280,79 @@ test("strict CLI reports oversize with exit one while report mode stays zero", (
     assert.equal(report.status, 0);
     assert.equal(strict.status, 1);
   });
+});
+
+test("strict CLI reports an actionable root-file violation", () => {
+  withRepo((repo) => {
+    write(repo, "AGENTS.md", "x".repeat(ROOT_INSTRUCTION_LIMIT_BYTES + 1));
+    track(repo, "AGENTS.md");
+    const strict = spawnSync(
+      process.execPath,
+      [
+        scriptPath,
+        "--root",
+        repo,
+        "--limit",
+        String(MAX_ROUTE_LIMIT_BYTES),
+        "--strict",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(strict.status, 1, strict.stderr);
+    assert.match(
+      strict.stdout,
+      /AGENTS\.md exceeds its root file cap by 1 byte/,
+    );
+    assert.match(strict.stdout, /do not raise the cap/);
+  });
+});
+
+test("CLI refuses a configured route cap above repository policy", () => {
+  withRepo((repo) => {
+    write(repo, "AGENTS.md", "small");
+    track(repo, "AGENTS.md");
+    const strict = spawnSync(
+      process.execPath,
+      [scriptPath, "--root", repo, "--strict"],
+      { encoding: "utf8" },
+    );
+    assert.equal(strict.status, 2);
+    assert.match(strict.stderr, /exceeds the repository policy maximum/);
+  });
+});
+
+test("repository instruction files and every supported package route satisfy policy", () => {
+  const configuredLimit = resolveProjectDocMaxBytes(repoRoot);
+  assert.ok(configuredLimit <= MAX_ROUTE_LIMIT_BYTES);
+  const report = buildContextBudgetReport({
+    repoRoot,
+    files: trackedInstructionFiles(repoRoot),
+    limitBytes: configuredLimit,
+  });
+  assert.deepEqual(
+    report.routes.map(({ route }) => route),
+    [
+      ".",
+      "aegis",
+      "alerts",
+      "indexer-envio",
+      "integration-probes",
+      "metrics-bridge",
+      "scripts",
+      "shared-config",
+      "terraform",
+      "ui-dashboard",
+    ],
+  );
+  assert.equal(
+    report.root_instruction_limit_bytes,
+    ROOT_INSTRUCTION_LIMIT_BYTES,
+  );
+  assert.equal(
+    report.scoped_instruction_limit_bytes,
+    SCOPED_INSTRUCTION_LIMIT_BYTES,
+  );
+  assert.equal(report.warning_percent, WARNING_PERCENT);
+  assert.deepEqual(report.oversized_instruction_files, []);
+  assert.deepEqual(report.oversized_routes, []);
 });

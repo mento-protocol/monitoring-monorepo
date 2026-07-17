@@ -1035,7 +1035,7 @@ describe("GlobalPage — Traders tile", () => {
     expect(html).not.toContain(">N/A<");
   });
 
-  // Per AGENTS.md "Loading vs zero vs empty" — a `data === undefined &&
+  // Per docs/pr-checklists/swr-polling-hasura.md — a `data === undefined &&
   // !error` SWR slice must NOT render a happy-path zero. Without an
   // explicit `isLoading: true` mock, the prior tests don't exercise
   // this branch and a regression that swallowed the loading sentinel

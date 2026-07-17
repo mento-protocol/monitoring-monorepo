@@ -1,5 +1,13 @@
 # ROADMAP refresh + CDPs monitoring (Liquity v2 indexing & dashboard)
 
+> **Historical plan, not current operating truth.** The implementation has
+> evolved since this was written. In particular, the proposed
+> `systemDebt = activePoolDebt + defaultPoolDebt` model is superseded because
+> the deployed ActivePool does not emit debt updates. Use
+> [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md)
+> and current handlers/schema for debt accounting, redemption attribution, and
+> dashboard derivations.
+
 > **Naming convention.** User-facing surfaces (routes, nav, page titles, tile copy, headlines) use **CDPs** — Mento's product brand. Internal code (indexer handlers, ABIs, schema entities, GraphQL query exports) keeps **Liquity** since that's the protocol the contracts are forked from and the wire-level data shape we're indexing. Keeps Mento's brand clean without inventing a euphemism for what the contracts actually are.
 
 ## Context

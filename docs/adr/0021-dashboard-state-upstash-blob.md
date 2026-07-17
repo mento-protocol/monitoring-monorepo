@@ -3,7 +3,7 @@ title: Dashboard mutable state lives in Upstash Redis with Vercel Blob backups
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
 scope: ui-dashboard
 date: 2026-03
 doc_type: adr
@@ -48,4 +48,4 @@ Backup/restore use Vercel Blob OIDC through the project-linked store — no stat
 ## Evidence
 
 - Address book + Upstash + Terraform `0b4908d5` (2026-03-06); forensic-report tab PR #330 (2026-05-07).
-- Storage + backup detail in [`docs/deployment.md`](../deployment.md) §Address Book & Backup Cron; [`ui-dashboard/AGENTS.md`](../../ui-dashboard/AGENTS.md).
+- Storage + backup detail in [`docs/deployment.md`](../deployment.md) §Address Book & Backup Cron.
