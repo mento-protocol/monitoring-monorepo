@@ -23,6 +23,7 @@ import {
   PROJECTED_LABEL,
   runParseOnly,
   runProjection,
+  runProjectionBatch,
   sanitizeDuplicateIds,
   sanitizeFreeText,
   selectVerdictComment,
@@ -140,10 +141,12 @@ function queueIssue({
   shortId = "APP-MENTO-ORG-12",
   project = "app-mento-org",
   labels = ["sentry-triage", "sentry:verdict-code-fix"],
+  state = "OPEN",
   comments,
 } = {}) {
   return {
     number,
+    state,
     title: `[sentry] ${shortId} (${project}, error)`,
     body: [
       "<!-- sentry-triage:v1 -->",
@@ -169,9 +172,11 @@ const PROJECTOR_LOGIN = "sentry-projector-bot";
 const PROJECTOR_AUTHOR = { login: PROJECTOR_LOGIN };
 
 // A mock `gh` runner covering the calls runProjection makes. Records every call
-// with the token it was invoked under so token routing is assertable.
+// with the token it was invoked under so token routing is assertable. `stubs`
+// (number -> queue issue) serves batch mode's per-issue ambient views.
 function makeRunGh({
   issue,
+  stubs = null,
   existing = [],
   createdUrl = null,
   projectorLogin = PROJECTOR_LOGIN,
@@ -194,7 +199,7 @@ function makeRunGh({
         );
         return JSON.stringify({ comments: found?.comments ?? [] });
       }
-      return JSON.stringify(issue);
+      return JSON.stringify(stubs?.[String(args[2])] ?? issue);
     }
     if (a0 === "issue" && a1 === "list") {
       // Model GitHub search: the dedicated alias-phrase query only matches
@@ -1932,7 +1937,7 @@ await test("VERDICT_TO_LABEL encodes the upstream label/value asymmetry", () => 
   assertEqual(VERDICT_TO_LABEL["needs-human"], "sentry:verdict-needs-human");
 });
 
-await test("runParseOnly returns the validated verdict + mapped label", async () => {
+await test("runParseOnly returns the validated verdict + mapped label + projectability", async () => {
   const { runGh, calls } = makeRunGh({ issue: queueIssue() });
   const result = await runParseOnly(
     { localRepo: "mento-protocol/monitoring-monorepo", queueIssue: 500 },
@@ -1941,11 +1946,29 @@ await test("runParseOnly returns the validated verdict + mapped label", async ()
   assertDeepEqual(result, {
     verdict: "code-fix",
     label: "sentry:verdict-code-fix",
+    projectable: true,
   });
   // Read-only: exactly one `gh issue view` with the ambient token.
   assertEqual(calls.length, 1);
   assertEqual(calls[0].args[1], "view");
   assertEqual(calls[0].token, null);
+});
+
+await test("runParseOnly reports an actionable-but-local verdict as not projectable", async () => {
+  const local = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({ affectedRepo: "mento-protocol/monitoring-monorepo" }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const result = await runParseOnly(
+    { localRepo: "mento-protocol/monitoring-monorepo", queueIssue: 500 },
+    { runGh: makeRunGh({ issue: local }).runGh },
+  );
+  assertEqual(result.projectable, false);
+  assertEqual(result.verdict, "code-fix");
 });
 
 await test("runParseOnly maps upstream-transient to the asymmetric label", async () => {
@@ -1965,6 +1988,7 @@ await test("runParseOnly maps upstream-transient to the asymmetric label", async
   assertDeepEqual(result, {
     verdict: "upstream-transient",
     label: "sentry:verdict-upstream",
+    projectable: false,
   });
 });
 
@@ -2016,6 +2040,215 @@ await test("runParseOnly fails loud on missing, hostile-author, stale, and inval
 });
 
 // ---------------------------------------------------------------------------
+// --batch (the serialized project job's driver)
+// ---------------------------------------------------------------------------
+
+await test("batch mode: same-run duplicate family coalesces via the in-run registry (one create)", async () => {
+  // Stub 500 (APP-MENTO-ORG-12) and stub 501 (APP-MENTO-ORG-77, verdict lists
+  // 12 as a duplicate) are in the SAME batch. The owning-repo search returns
+  // NOTHING for either (models GitHub's search-index lag on the seconds-old
+  // created issue). Serial processing + the shared registry must still
+  // coalesce: exactly one create, the second stub reuses it via an alias.
+  const stubs = {
+    500: queueIssue({ number: 500 }),
+    501: queueIssue({
+      number: 501,
+      shortId: "APP-MENTO-ORG-77",
+      comments: [
+        botComment(
+          verdictComment({ duplicates: "[APP-MENTO-ORG-12]" }),
+          "2026-07-17T10:00:00Z",
+        ),
+      ],
+    }),
+  };
+  const { runGh, calls } = makeRunGh({ stubs, createdUrl: CREATED_URL });
+  const rows = await runProjectionBatch(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssues: [500, 501],
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(rows.length, 2);
+  assertEqual(rows[0].status, "projected");
+  assertEqual(rows[0].url, CREATED_URL);
+  assertEqual(rows[1].status, "reused");
+  assertEqual(rows[1].url, CREATED_URL);
+  const creates = calls.filter((c) => c.args[1] === "create");
+  assertEqual(creates.length, 1);
+  // The coalescing alias comment landed on the JUST-created issue (#999 from
+  // the create URL), naming the second stub's SHORT-ID.
+  const aliasComment = calls.find(
+    (c) => c.args[1] === "comment" && c.token === PAT,
+  );
+  assert(aliasComment, "expected the alias comment on the created issue");
+  assertEqual(aliasComment.args[2], "999");
+  assert(
+    aliasComment.args[aliasComment.args.indexOf("--body") + 1].includes(
+      "APP-MENTO-ORG-77",
+    ),
+    "expected the second short id in the alias comment",
+  );
+});
+
+await test("batch mode coalesces a duplicate family regardless of batch order", async () => {
+  // REVERSE order: the stub that DECLARES the duplicate (B, dup_of [12])
+  // processes FIRST and creates the family issue; the referenced stub (A,
+  // 12 itself, declaring no duplicates) comes second. Family registration —
+  // every settlement registers the issue under its own id AND its declared
+  // dups — must still coalesce: one create, A reuses via the registry and
+  // persists its membership with an alias comment.
+  const stubs = {
+    500: queueIssue({
+      number: 500,
+      shortId: "APP-MENTO-ORG-77",
+      comments: [
+        botComment(
+          verdictComment({ duplicates: "[APP-MENTO-ORG-12]" }),
+          "2026-07-17T10:00:00Z",
+        ),
+      ],
+    }),
+    501: queueIssue({ number: 501 }), // APP-MENTO-ORG-12, duplicates []
+  };
+  const { runGh, calls } = makeRunGh({ stubs, createdUrl: CREATED_URL });
+  const rows = await runProjectionBatch(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssues: [500, 501],
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(rows[0].status, "projected");
+  assertEqual(rows[1].status, "reused");
+  assertEqual(rows[1].url, CREATED_URL);
+  assertEqual(calls.filter((c) => c.args[1] === "create").length, 1);
+  // A's membership was persisted durably: an alias comment for 12 landed on
+  // the created issue, so a future regression of 12 resolves via search.
+  const aliasComment = calls.find(
+    (c) => c.args[1] === "comment" && c.token === PAT,
+  );
+  assert(aliasComment, "expected the alias comment for the referenced id");
+  assertEqual(aliasComment.args[2], "999");
+  assert(
+    aliasComment.args[aliasComment.args.indexOf("--body") + 1].includes(
+      "APP-MENTO-ORG-12",
+    ),
+    "expected the referenced short id in the alias comment",
+  );
+});
+
+await test("batch registry never aliases across owning repos", async () => {
+  // Same declared family, but the two verdicts name DIFFERENT owning repos —
+  // repo-qualified registry keys must keep them apart: two creates, one per
+  // repo, no cross-repo alias comment.
+  const stubs = {
+    500: queueIssue({ number: 500 }), // frontend-monorepo (fixture default)
+    501: queueIssue({
+      number: 501,
+      shortId: "APP-MENTO-ORG-77",
+      comments: [
+        botComment(
+          verdictComment({
+            affectedRepo: "mento-protocol/mento-analytics-api",
+            duplicates: "[APP-MENTO-ORG-12]",
+          }),
+          "2026-07-17T10:00:00Z",
+        ),
+      ],
+    }),
+  };
+  const { runGh, calls } = makeRunGh({ stubs, createdUrl: CREATED_URL });
+  const rows = await runProjectionBatch(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssues: [500, 501],
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(rows[0].status, "projected");
+  assertEqual(rows[1].status, "projected");
+  const creates = calls.filter((c) => c.args[1] === "create");
+  assertEqual(creates.length, 2);
+  assertDeepEqual(
+    creates.map((c) => c.args[c.args.indexOf("-R") + 1]),
+    ["mento-protocol/frontend-monorepo", "mento-protocol/mento-analytics-api"],
+  );
+  assert(
+    !calls.some((c) => c.args[1] === "comment" && c.token === PAT),
+    "expected no cross-repo alias comment",
+  );
+});
+
+await test("batch mode skips closed, needs-triage, and non-actionable stubs untouched", async () => {
+  const stubs = {
+    1: queueIssue({ number: 1, state: "CLOSED" }),
+    2: queueIssue({
+      number: 2,
+      labels: ["sentry-triage", "sentry:needs-triage"],
+    }),
+    3: queueIssue({
+      number: 3,
+      labels: ["sentry-triage", "sentry:verdict-needs-human"],
+    }),
+  };
+  const { runGh, calls } = makeRunGh({ stubs });
+  const rows = await runProjectionBatch(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssues: [1, 2, 3],
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertDeepEqual(
+    rows.map((r) => [r.issue, r.status, r.reason]),
+    [
+      [1, "skipped-state", "closed"],
+      [2, "skipped-state", "needs-triage"],
+      [3, "skipped-state", "not-actionable"],
+    ],
+  );
+  // Reads only — no PAT calls, no writes of any kind.
+  assert(
+    calls.every((c) => c.token === null && c.args[1] === "view"),
+    "expected ambient reads only",
+  );
+});
+
+await test("batch mode isolates per-issue failures and continues", async () => {
+  const stubs = {
+    600: queueIssue({
+      number: 600,
+      shortId: "APP-MENTO-ORG-60",
+      comments: [botComment("no verdict here", "2026-07-17T10:00:00Z")],
+    }),
+    601: queueIssue({ number: 601, shortId: "APP-MENTO-ORG-61" }),
+  };
+  const { runGh, calls } = makeRunGh({ stubs, createdUrl: CREATED_URL });
+  const rows = await runProjectionBatch(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssues: [600, 601],
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(rows[0].status, "failed");
+  assertEqual(rows[0].label, "sentry:verdict-code-fix");
+  assert(
+    /No usable verdict comment/.test(rows[0].message),
+    "expected the failure message recorded",
+  );
+  assertEqual(rows[1].status, "projected");
+  assertEqual(calls.filter((c) => c.args[1] === "create").length, 1);
+});
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 
@@ -2028,6 +2261,21 @@ await test("parseArgs reads --issue/--repo and the token from env", () => {
   assertEqual(options.projectionToken, "tok");
   assertEqual(options.parseOnly, false);
   assertEqual(options.expectedVerdict, null);
+});
+
+await test("parseArgs reads --batch/--issues and validates the array", () => {
+  const options = parseArgs(["--batch", "--issues", "[1,2]"], {});
+  assertEqual(options.batch, true);
+  assertDeepEqual(options.queueIssues, [1, 2]);
+  // --batch needs no --issue; bad members fail loud.
+  assertThrows(
+    () => parseArgs(["--batch", "--issues", "[0]"], {}),
+    /Invalid issue number/,
+  );
+  assertThrows(
+    () => parseArgs(["--batch", "--issues", "nope"], {}),
+    /JSON array/,
+  );
 });
 
 await test("parseArgs reads --parse-only and --verdict, validating the enum", () => {

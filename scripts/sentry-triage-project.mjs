@@ -113,7 +113,7 @@ async function readQueueIssue(localRun, repo, number) {
     "-R",
     repo,
     "--json",
-    "number,title,body,url,labels,comments",
+    "number,title,body,url,state,labels,comments",
   ]);
   const data = JSON.parse(stdout);
   return {
@@ -121,6 +121,7 @@ async function readQueueIssue(localRun, repo, number) {
     title: data.title ?? "",
     body: data.body ?? "",
     url: data.url ?? "",
+    state: String(data.state ?? "").toUpperCase(),
     labels: (data.labels ?? [])
       .map((label) => (typeof label === "string" ? label : label?.name))
       .filter(Boolean),
@@ -364,10 +365,14 @@ async function markStubProjected(localRun, localRepo, issue, projectedUrl) {
 /**
  * `--parse-only` mode: resolve and emit the validated verdict + mapped label
  * for the workflow's deterministic LABEL step, so labeling and projection run
- * the exact same parser (see resolveVerdict). Read-only — one `gh issue view`
- * with the ambient token; the projection PAT is never needed here. Throws on
- * missing/stale/invalid verdicts so the label step fails loudly and leaves
- * `sentry:needs-triage` in place for retry.
+ * the exact same parser (see resolveVerdict), plus `projectable` — whether
+ * this verdict is actionable AND its `affected_repo` is an allowlisted
+ * EXTERNAL owning repo. The matrix close step uses `projectable` to decide
+ * whether to close the stub itself (upstream/local/unrecognized) or defer it
+ * to the serialized `project` job (external actionable). Read-only — one
+ * `gh issue view` with the ambient token; the projection PAT is never needed
+ * here. Throws on missing/stale/invalid verdicts so the label step fails
+ * loudly and leaves `sentry:needs-triage` in place for retry.
  */
 export async function runParseOnly(options, deps = {}) {
   const runGh = deps.runGh ?? defaultRunGh;
@@ -377,8 +382,16 @@ export async function runParseOnly(options, deps = {}) {
     options.localRepo,
     options.queueIssue,
   );
-  const { verdict, label } = resolveVerdict(issue, options.queueIssue);
-  return { verdict, label };
+  const { parsed, verdict, label } = resolveVerdict(issue, options.queueIssue);
+  let projectable = false;
+  if (PROJECTABLE_VERDICTS.includes(verdict)) {
+    const repoCheck = validateAffectedRepo(parsed.affectedRepo);
+    if (repoCheck.warning) {
+      process.stderr.write(`::warning::${repoCheck.warning}\n`);
+    }
+    projectable = repoCheck.projectable;
+  }
+  return { verdict, label, projectable };
 }
 
 export async function runProjection(options, deps = {}) {
@@ -440,6 +453,70 @@ export async function runProjection(options, deps = {}) {
     issue.url ||
     `https://github.com/${options.localRepo}/issues/${options.queueIssue}`;
 
+  // Duplicate ids (agent-produced): sanitized (shape-validated, deduplicated),
+  // the stub's own SHORT-ID excluded, and only THEN budget-capped — a
+  // self-reference must not consume budget and push a real duplicate past the
+  // cap. Each entry costs bounded owning-repo lookups, never an open-ended
+  // fan-out.
+  const dupIds = parsed.duplicateOf
+    .filter((dupId) => dupId !== shortId)
+    .slice(0, MAX_DUPLICATE_LOOKUPS);
+
+  // In-run registry (batch mode): `<owningRepo>:<SHORT-ID>` -> issue
+  // projected/reused EARLIER IN THIS RUN. Consulted before every search
+  // because GitHub's search index lags issue creation — two duplicate-family
+  // stubs in one batch would otherwise both search, both miss the seconds-old
+  // issue, and double-file. Keys are REPO-QUALIFIED so a family whose members
+  // name different owning repos never aliases across repositories, and every
+  // settlement registers the issue under the stub's own SHORT-ID AND its
+  // declared duplicates (first entry wins) — so coalescing is symmetric in
+  // batch order: whether A or its duplicate B processes first, the second one
+  // finds the family issue in the registry.
+  const registry = options.registry;
+  const regKey = (id) => `${owningRepo}:${id}`;
+  const registerFamily = (entry) => {
+    if (!registry) return;
+    for (const id of [shortId, ...dupIds]) {
+      if (!registry.has(regKey(id))) registry.set(regKey(id), entry);
+    }
+  };
+  const postAliasComment = (targetNumber) =>
+    owningRun([
+      "issue",
+      "comment",
+      String(targetNumber),
+      "-R",
+      owningRepo,
+      "--body",
+      buildAliasComment({
+        shortId,
+        queueIssueUrl,
+        verdict: parsed.verdict,
+        confidence: parsed.confidence,
+        summary: parsed.summary,
+        rootCause: parsed.rootCause,
+        proposedAction: parsed.proposedAction,
+      }),
+    ]);
+
+  const fromRegistry = registry?.get(regKey(shortId));
+  if (fromRegistry) {
+    // An earlier batch stub registered this SHORT-ID (it declared this stub a
+    // duplicate). Persist the membership durably with the alias comment — the
+    // in-memory registration alone would let a future regression double-file
+    // once this run's registry is gone (the issue carries no marker/alias for
+    // this id yet).
+    await postAliasComment(fromRegistry.number);
+    registerFamily(fromRegistry);
+    await markStubProjected(
+      localRun,
+      options.localRepo,
+      issue,
+      fromRegistry.url,
+    );
+    return { status: "reused", url: fromRegistry.url };
+  }
+
   // Author identity for genuine-projection matching (see
   // findExistingProjection): only issues the PAT's own user filed count.
   const projectorLogin = await fetchProjectorLogin(owningRun);
@@ -457,6 +534,7 @@ export async function runProjection(options, deps = {}) {
     if (existing.state === "CLOSED") {
       await reopenProjectedIssue(owningRun, owningRepo, existing);
     }
+    registerFamily({ number: existing.number, url: existing.url });
     await markStubProjected(localRun, options.localRepo, issue, existing.url);
     return { status: "reused", url: existing.url };
   }
@@ -464,23 +542,20 @@ export async function runProjection(options, deps = {}) {
   // Duplicate coalescing: when the verdict marks this error a duplicate of
   // another SHORT-ID that ALREADY has a genuine projection, reuse that issue
   // (comment the new SHORT-ID onto it) instead of filing a second owning-repo
-  // issue for the same underlying bug. Dup IDs are agent-produced, so they
-  // are sanitized (shape-validated, deduplicated), the stub's own SHORT-ID is
-  // excluded, and only THEN is the lookup budget applied — a self-reference
-  // must not consume budget and push a real duplicate past the cap. Each
-  // entry costs bounded owning-repo lookups, never an open-ended fan-out.
-  // The same leading-marker + author checks apply, so a hostile marker-shaped
-  // issue can't capture the coalescing path either.
-  const dupIds = parsed.duplicateOf
-    .filter((dupId) => dupId !== shortId)
-    .slice(0, MAX_DUPLICATE_LOOKUPS);
+  // issue for the same underlying bug. The same leading-marker + author
+  // checks apply, so a hostile marker-shaped issue can't capture the
+  // coalescing path either.
   for (const dupId of dupIds) {
-    const dupExisting = await findExistingProjection(
-      owningRun,
-      owningRepo,
-      dupId,
-      projectorLogin,
-    );
+    // Registry first (see above): a duplicate-family issue projected earlier
+    // in this run is not yet searchable, but it IS in the registry.
+    const dupExisting =
+      registry?.get(regKey(dupId)) ??
+      (await findExistingProjection(
+        owningRun,
+        owningRepo,
+        dupId,
+        projectorLogin,
+      ));
     if (!dupExisting) continue;
     if (dupExisting.state === "CLOSED") {
       await reopenProjectedIssue(owningRun, owningRepo, dupExisting);
@@ -492,25 +567,10 @@ export async function runProjection(options, deps = {}) {
     // omits/changes `duplicate_of` still resolves this SHORT-ID to the same
     // issue via the primary lookup above (which matches alias comments), a
     // retry after a partial failure takes the plain reused path without
-    // re-commenting, and parallel matrix jobs coalescing different SHORT-IDs
-    // onto this issue append independently — nothing to overwrite.
-    await owningRun([
-      "issue",
-      "comment",
-      String(dupExisting.number),
-      "-R",
-      owningRepo,
-      "--body",
-      buildAliasComment({
-        shortId,
-        queueIssueUrl,
-        verdict: parsed.verdict,
-        confidence: parsed.confidence,
-        summary: parsed.summary,
-        rootCause: parsed.rootCause,
-        proposedAction: parsed.proposedAction,
-      }),
-    ]);
+    // re-commenting, and independent coalescers append — nothing to
+    // overwrite.
+    await postAliasComment(dupExisting.number);
+    registerFamily({ number: dupExisting.number, url: dupExisting.url });
     await markStubProjected(
       localRun,
       options.localRepo,
@@ -534,8 +594,102 @@ export async function runProjection(options, deps = {}) {
   });
 
   const url = await createProjectedIssue(owningRun, owningRepo, title, body);
+  registerFamily({ number: Number(url.split("/").pop()), url });
   await markStubProjected(localRun, options.localRepo, issue, url);
   return { status: "projected", url };
+}
+
+// Verdict labels that route through projection, mapped back to their verdict
+// values (deterministically applied by the matrix label step from the closed
+// enum — trusted input for the batch dispatch below).
+const ACTIONABLE_LABEL_TO_VERDICT = {
+  "sentry:verdict-code-fix": "code-fix",
+  "sentry:verdict-config-fix": "config-fix",
+};
+
+/**
+ * `--batch` mode: the serialized `project` job's driver. Processes the run's
+ * queue issues ONE AT A TIME in a single node process, which kills the
+ * same-run duplicate-family race by construction — no two projections are
+ * ever in flight together, and the shared in-run registry resolves
+ * SHORT-IDs created seconds ago that GitHub search has not indexed yet.
+ *
+ * Per issue: skip anything the matrix already settled (closed stubs,
+ * needs-triage retries, non-actionable verdict labels), then run the normal
+ * single-issue projection with the label-derived verdict as the
+ * cross-check. Per-issue failures are recorded (status "failed") and the
+ * batch CONTINUES — one broken stub must not strand the rest; the workflow
+ * compensates per failed row and turns the job red at the end.
+ *
+ * Emits one result row per issue; `verdict`/`label` ride along so the
+ * workflow can build closing comments and compensation label edits from
+ * closed-enum values only.
+ */
+export async function runProjectionBatch(options, deps = {}) {
+  const runGh = deps.runGh ?? defaultRunGh;
+  const localRun = (args) => runGh(args, {});
+  const registry = new Map();
+  const results = [];
+
+  for (const number of options.queueIssues) {
+    let verdict = null;
+    let label = null;
+    try {
+      const stub = await readQueueIssue(localRun, options.localRepo, number);
+      if (stub.state === "CLOSED") {
+        results.push({
+          issue: number,
+          status: "skipped-state",
+          reason: "closed",
+        });
+        continue;
+      }
+      if (stub.labels.includes("sentry:needs-triage")) {
+        results.push({
+          issue: number,
+          status: "skipped-state",
+          reason: "needs-triage",
+        });
+        continue;
+      }
+      label =
+        stub.labels.find((name) =>
+          Object.hasOwn(ACTIONABLE_LABEL_TO_VERDICT, name),
+        ) ?? null;
+      if (!label) {
+        results.push({
+          issue: number,
+          status: "skipped-state",
+          reason: "not-actionable",
+        });
+        continue;
+      }
+      verdict = ACTIONABLE_LABEL_TO_VERDICT[label];
+      const result = await runProjection(
+        {
+          ...options,
+          queueIssue: number,
+          expectedVerdict: verdict,
+          registry,
+        },
+        deps,
+      );
+      results.push({ issue: number, verdict, label, ...result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `Projection failed for queue issue #${number}: ${message}\n`,
+      );
+      results.push({
+        issue: number,
+        status: "failed",
+        verdict,
+        label,
+        message,
+      });
+    }
+  }
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -552,15 +706,24 @@ single-line JSON result ({"status": "...", "url": "..."}) to stdout; diagnostics
 and workflow annotations go to stderr.
 
 Statuses: projected | reused | skipped-verdict | skipped-repo | skipped-no-token
+(batch rows additionally: skipped-state | failed)
 
 Options:
-  --issue <number>     Queue issue number to project (required, positive int).
+  --issue <number>     Queue issue number to project (positive int; required
+                       unless --batch).
+  --batch              Serialized batch mode (the workflow's project job):
+                       process --issues one at a time in ONE process, sharing
+                       an in-run registry so duplicate-family SHORT-IDs can
+                       never double-file while GitHub search still lags issue
+                       creation. Emits a JSON array of per-issue result rows.
+  --issues <json>      JSON array of queue-issue numbers (batch mode).
   --repo <owner/name>  Repo the queue stub lives in (default: ${DEFAULT_REPO}).
-  --parse-only         Resolve and print the validated verdict + mapped label
-                       ({"verdict","label"} JSON) without projecting. Used by
-                       the workflow's label step so labeling and projection
-                       share ONE parser. Fails (exit 1) on a missing, stale
-                       pre-regression, or invalid verdict comment.
+  --parse-only         Resolve and print the validated verdict + mapped label +
+                       projectability ({"verdict","label","projectable"} JSON)
+                       without projecting. Used by the workflow's label step so
+                       labeling and projection share ONE parser. Fails (exit 1)
+                       on a missing, stale pre-regression, or invalid verdict
+                       comment.
   --verdict <value>    Already-validated verdict from the label step. When set,
                        the script fails loud if its own parse of the newest
                        verdict comment disagrees (never a silent skip).
@@ -574,14 +737,40 @@ Env:
 `;
 }
 
+/** Parse a `--issues` JSON array of positive integers (the select job's
+ * output). Fails loud on anything else. */
+export function parseIssueNumbers(raw) {
+  if (raw == null || String(raw).trim() === "") return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(String(raw));
+  } catch {
+    throw new Error(
+      `--issues must be a JSON array of issue numbers, got: ${raw}`,
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("--issues must be a JSON array of issue numbers");
+  }
+  return parsed.map((value) => {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(`Invalid issue number: ${JSON.stringify(value)}`);
+    }
+    return value;
+  });
+}
+
 export function parseArgs(argv, env = process.env) {
   const options = {
     localRepo: DEFAULT_REPO,
     queueIssue: null,
+    queueIssues: [],
+    batch: false,
     parseOnly: false,
     expectedVerdict: null,
     help: false,
   };
+  let issuesRaw = null;
   const args = [...argv];
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -593,6 +782,12 @@ export function parseArgs(argv, env = process.env) {
     switch (arg) {
       case "--issue":
         options.queueIssue = Number(readValue());
+        break;
+      case "--issues":
+        issuesRaw = readValue();
+        break;
+      case "--batch":
+        options.batch = true;
         break;
       case "--repo":
         options.localRepo = readValue();
@@ -621,7 +816,12 @@ export function parseArgs(argv, env = process.env) {
     }
   }
   if (!options.help) {
-    if (!Number.isInteger(options.queueIssue) || options.queueIssue <= 0) {
+    if (options.batch) {
+      options.queueIssues = parseIssueNumbers(issuesRaw);
+    } else if (
+      !Number.isInteger(options.queueIssue) ||
+      options.queueIssue <= 0
+    ) {
       throw new Error("--issue must be a positive integer");
     }
   }
@@ -635,9 +835,14 @@ async function main() {
     process.stdout.write(usage());
     return;
   }
-  const result = options.parseOnly
-    ? await runParseOnly(options)
-    : await runProjection(options);
+  let result;
+  if (options.batch) {
+    result = await runProjectionBatch(options);
+  } else if (options.parseOnly) {
+    result = await runParseOnly(options);
+  } else {
+    result = await runProjection(options);
+  }
   // ONLY the JSON result goes to stdout (the workflow captures it to decide
   // labeling / the closing comment); every diagnostic/annotation already went
   // to stderr.

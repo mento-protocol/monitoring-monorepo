@@ -197,9 +197,17 @@ export function extractYamlBlock(commentBody) {
 }
 
 function splitListItems(raw) {
+  // Trim BEFORE stripping quotes (then re-trim): `["A", "B"]` splits into
+  // ` "B"`, whose leading space would otherwise shield the opening quote from
+  // the anchored strip and leave `"B` to fail shape validation.
   return raw
     .split(",")
-    .map((s) => s.replace(/^["']|["']$/g, "").trim())
+    .map((s) =>
+      s
+        .trim()
+        .replace(/^["']|["']$/g, "")
+        .trim(),
+    )
     .filter(Boolean);
 }
 

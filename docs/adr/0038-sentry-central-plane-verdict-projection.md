@@ -55,14 +55,19 @@ deterministic step.**
   kill-switch, run-record, and accuracy measurement stay in one place, against
   one queue, so org-wide dedup/correlation and a single infra/quota/accuracy
   dataset are preserved.
-- **Verdict projection (deterministic, no LLM).** A new step in
-  `.github/workflows/sentry-triage-agent.yml`, driven by
-  `scripts/sentry-triage-project.mjs`, runs AFTER the deterministic verdict-label
-  step and BEFORE the queue-close step. For a `code-fix` / `config-fix` verdict
-  whose `affected_repo` is an EXTERNAL owning repo, it files an issue in that
-  repo, labels the stub `sentry:projected`, comments the projected URL, and the
-  stub still closes (queue hygiene). `needs-human` and `upstream-transient` are
-  never projected.
+- **Verdict projection (deterministic, no LLM, SERIALIZED).** A dedicated
+  `project` job in `.github/workflows/sentry-triage-agent.yml`, driven by
+  `scripts/sentry-triage-project.mjs --batch`, runs after the whole triage
+  matrix and processes the batch's actionable external verdicts one at a time
+  in one process. Serialization plus an in-run registry kills the
+  duplicate-family double-file race (a just-created issue is not searchable
+  for seconds-to-minutes), and it confines the projection token to this one
+  job — the matrix jobs hosting the LLM agent never see it. For a `code-fix` /
+  `config-fix` verdict whose `affected_repo` is an EXTERNAL owning repo, it
+  files an issue in that repo, labels the stub `sentry:projected`, comments
+  the projected URL, and closes the stub (queue hygiene; the matrix close
+  step settles all other buckets itself and defers these). `needs-human` and
+  `upstream-transient` are never projected.
 - **The trust boundary is a fixed allowlist plus authorship.** `affected_repo`
   is untrusted agent text, validated against exactly `frontend-monorepo`,
   `mento-analytics-api`, `minipay-dapp`; anything else (including this repo) is a

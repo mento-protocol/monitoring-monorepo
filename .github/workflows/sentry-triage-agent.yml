@@ -252,7 +252,10 @@ jobs:
           # as data, never interpolated into a command, and the emitted values
           # are closed-enum. Missing/stale/invalid verdict -> nonzero exit ->
           # fail the job loudly and leave sentry:needs-triage in place so the
-          # next scheduled run retries this issue.
+          # next scheduled run retries this issue. `projectable` (actionable
+          # verdict + allowlisted EXTERNAL owning repo) tells the close step
+          # whether this stub is settled here or deferred to the serialized
+          # `project` job.
           parse_file="${RUNNER_TEMP}/verdict-parse.json"
           if ! node scripts/sentry-triage-project.mjs \
               --parse-only \
@@ -264,173 +267,223 @@ jobs:
           fi
           verdict=$(jq -r '.verdict' "${parse_file}")
           label=$(jq -r '.label' "${parse_file}")
+          projectable=$(jq -r '.projectable' "${parse_file}")
           gh issue edit "${QUEUE_ISSUE_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
             --remove-label 'sentry:needs-triage' \
             --add-label "${label}"
           echo "Applied ${label} to issue #${QUEUE_ISSUE_NUMBER}."
           # Hand the VALIDATED verdict + mapped label (closed enums, never
-          # agent-authored text) to the projection and close steps below.
+          # agent-authored text) + projectability to the close step below.
           {
             echo "verdict=${verdict}"
             echo "label=${label}"
+            echo "projectable=${projectable}"
           } >> "${GITHUB_OUTPUT}"
 
       # -----------------------------------------------------------------------
-      # Verdict projection (deterministic, no LLM — ADR 0038). For an ACTIONABLE
-      # verdict (code-fix/config-fix) whose affected_repo is an EXTERNAL owning
-      # repo (fixed three-repo allowlist), file a human-readable issue there and
-      # mark the stub sentry:projected. Slots in AFTER labeling, BEFORE closing.
-      #
-      # SECURITY: SENTRY_PROJECTION_TOKEN is a STEP-level env here — NEVER
-      # job-level — so the cross-repo write credential reaches ONLY this step and
-      # never the triage agent's process (its allowlist/permissions are
-      # untouched). The script routes that fine-grained PAT (Issues R/W on the
-      # three owning repos ONLY) to the owning-repo create/search, and uses the
-      # ambient github.token (issues:write on THIS repo) for the local stub
-      # label/comment. affected_repo is untrusted and validated against the
-      # allowlist in-script (anything else -> ::warning:: + no projection).
-      #
-      # Absent PAT on main -> graceful no-op (::notice::); the close step still
-      # closes the stub and records that projection was skipped (visible, not
-      # silent). On a NON-MAIN ref an actionable external verdict is instead
-      # loudly re-queued (see the ref branch in the run block). On projection
-      # FAILURE this compensates exactly like the close step below (restore
-      # sentry:needs-triage, shed the verdict + projected labels, fail loud) so
-      # the main-failure notifier fires and the next run retries — nothing
-      # strands.
-      # -----------------------------------------------------------------------
-      - name: Project verdict to owning repo (deterministic)
-        id: project
-        if: ${{ steps.verdict.outputs.verdict == 'code-fix' || steps.verdict.outputs.verdict == 'config-fix' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # STEP-scoped: the ONLY place the cross-repo projection PAT is
-          # exposed — and only on the main ref. workflow_dispatch from a branch
-          # runs that branch's MODIFIED workflow/script code, and modified code
-          # + a cross-repo write token = exfiltration, so off-main this env
-          # expression resolves to '' and the secret never materializes in the
-          # step. Interim guard — the durable GitHub-Environment protection for
-          # this workflow's dispatch surface is tracked in #1289.
-          SENTRY_PROJECTION_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.SENTRY_PROJECTION_TOKEN || '' }}
-          QUEUE_ISSUE_NUMBER: ${{ matrix.issue }}
-          VERDICT: ${{ steps.verdict.outputs.verdict }}
-          VERDICT_LABEL: ${{ steps.verdict.outputs.label }}
-        run: |
-          set -euo pipefail
-          # --verdict hands the label step's already-validated verdict back to
-          # the script. Both steps run the SAME parser (--parse-only above), so
-          # a mismatch can only mean the issue changed between steps (e.g. a
-          # newer verdict comment landed) — the script then FAILS LOUD instead
-          # of silently skipping, landing in the compensation branch below.
-          # The script prints ONLY a single-line JSON result to stdout;
-          # diagnostics + ::notice::/::warning:: annotations go to stderr.
-          # Off-main the env expression above yields an EMPTY token, so the
-          # script cannot reach the owning repos; a local-repo verdict still
-          # resolves (skipped-repo) and may close normally, while an actionable
-          # EXTERNAL verdict reports skipped-no-token — which the ref branch
-          # below converts into a loud re-queue: a non-main dispatch must
-          # never consume an actionable stub that was never projected (the
-          # regression-reopen path would not bring it back).
-          result_file="${RUNNER_TEMP}/projection-result.json"
-          if node scripts/sentry-triage-project.mjs \
-              --issue "${QUEUE_ISSUE_NUMBER}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --verdict "${VERDICT}" \
-              > "${result_file}"; then
-            status=$(jq -r '.status // "unknown"' "${result_file}")
-            url=$(jq -r '.url // ""' "${result_file}")
-            if [ "${status}" = "skipped-no-token" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
-              echo "::error::Non-main ref (${GITHUB_REF}): cannot project the actionable external verdict on issue #${QUEUE_ISSUE_NUMBER} (SENTRY_PROJECTION_TOKEN is only exposed on main; see #1289). Restoring sentry:needs-triage so the next main-ref run retries."
-              gh issue edit "${QUEUE_ISSUE_NUMBER}" \
-                --repo "${GITHUB_REPOSITORY}" \
-                --remove-label "${VERDICT_LABEL},sentry:projected" \
-                --add-label "sentry:needs-triage"
-              exit 1
-            fi
-            {
-              echo "status=${status}"
-              echo "projected_url=${url}"
-            } >> "${GITHUB_OUTPUT}"
-            echo "Projection result for issue #${QUEUE_ISSUE_NUMBER}: ${status} ${url}"
-          else
-            # Shed sentry:projected too: a partial run may have applied it (or
-            # a previous round left it) before the failure, and a needs-triage
-            # issue must not read as already projected. Removing an absent
-            # label is a no-op for gh issue edit.
-            echo "::error::Verdict projection failed for issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage (and shedding ${VERDICT_LABEL} + sentry:projected) for retry."
-            gh issue edit "${QUEUE_ISSUE_NUMBER}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --remove-label "${VERDICT_LABEL},sentry:projected" \
-              --add-label "sentry:needs-triage"
-            exit 1
-          fi
-
-      # -----------------------------------------------------------------------
       # Queue hygiene (#1338/#1354): a verdicted queue issue is a closed ledger
-      # entry, not an archive record — close every bucket except needs-human,
-      # which is the one bucket that wants human eyes before it goes away. This
-      # runs after projection (skipped for non-projectable buckets, which never
-      # makes success() false). The comment text is fixed; the only variables
-      # are the closed-enum VERDICT and the projection outcome (PROJECTION_STATUS
-      # is a closed enum from the script; PROJECTED_URL is a github.com URL from
-      # `gh issue create`) — none of it is agent-authored text. Regression
-      # reopens this closed issue automatically (Stage A's reopen path in
-      # scripts/sentry-triage-ingest.mjs) — see docs/notes/sentry-triage-pipeline.md.
+      # entry, not an archive record. This step settles every bucket EXCEPT
+      # actionable EXTERNAL verdicts, which are deferred (left open,
+      # verdict-labeled) to the serialized `project` job below — projection and
+      # its close must run one-at-a-time to kill the same-run duplicate-family
+      # race, and the projection PAT must never reach these matrix jobs. The
+      # comment text is fixed; the only variables are closed-enum values —
+      # never agent-authored text. Regression reopens closed issues
+      # automatically (Stage A's reopen path in scripts/sentry-triage-ingest.mjs)
+      # — see docs/notes/sentry-triage-pipeline.md.
       # -----------------------------------------------------------------------
       - name: Close queue stub (deterministic)
         env:
           QUEUE_ISSUE_NUMBER: ${{ matrix.issue }}
           VERDICT: ${{ steps.verdict.outputs.verdict }}
           VERDICT_LABEL: ${{ steps.verdict.outputs.label }}
-          PROJECTION_STATUS: ${{ steps.project.outputs.status }}
-          PROJECTED_URL: ${{ steps.project.outputs.projected_url }}
+          PROJECTABLE: ${{ steps.verdict.outputs.projectable }}
         run: |
           set -euo pipefail
-          # Deterministic projection note for the closing comment. Empty for the
-          # non-projected buckets (upstream-transient/needs-human never run the
-          # projection step, so PROJECTION_STATUS is empty then).
           projection_note=""
-          case "${PROJECTION_STATUS:-}" in
-            projected | reused)
-              projection_note=" Projected to ${PROJECTED_URL}."
-              ;;
-            skipped-no-token)
-              projection_note=" Projection skipped (SENTRY_PROJECTION_TOKEN not provisioned)."
-              ;;
-            skipped-repo)
-              projection_note=" No external projection (owning repo is this repo or unrecognized)."
-              ;;
-          esac
           case "${VERDICT}" in
-            code-fix | config-fix | upstream-transient)
-              # If the close fails after the label swap, the issue would be
-              # stranded: open, verdict-labeled, no longer selectable and
-              # outside the regression-reopen path. Compensate by restoring
-              # sentry:needs-triage AND removing the verdict label (a retry may
-              # land a DIFFERENT verdict, and two verdict labels would
-              # misclassify the issue for the digest and human label filters)
-              # AND shedding sentry:projected — the projection step may have
-              # just applied it, and a needs-triage issue must not read as
-              # already projected (removing an absent label is a no-op). Then
-              # fail the job loudly so the main-failure notifier fires.
-              if ! gh issue close "${QUEUE_ISSUE_NUMBER}" \
-                --repo "${GITHUB_REPOSITORY}" \
-                --reason completed \
-                --comment "Triage complete: ${VERDICT}.${projection_note} Ledger entry closed; reopens automatically on Sentry regression."; then
-                echo "::error::Failed to close issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage (and shedding ${VERDICT_LABEL} + sentry:projected) for retry."
-                gh issue edit "${QUEUE_ISSUE_NUMBER}" \
-                  --repo "${GITHUB_REPOSITORY}" \
-                  --remove-label "${VERDICT_LABEL},sentry:projected" \
-                  --add-label "sentry:needs-triage"
-                exit 1
+            code-fix | config-fix)
+              if [ "${PROJECTABLE}" = "true" ]; then
+                echo "Issue #${QUEUE_ISSUE_NUMBER} has an actionable external verdict; leaving it open for the serialized project job."
+                exit 0
               fi
-              echo "Closed issue #${QUEUE_ISSUE_NUMBER} (verdict: ${VERDICT})."
+              # Actionable but LOCAL/unrecognized affected_repo: nothing to
+              # project anywhere — settle it here with the explicit note.
+              projection_note=" No external projection (owning repo is this repo or unrecognized)."
               ;;
             needs-human)
               echo "Issue #${QUEUE_ISSUE_NUMBER} verdict is needs-human; left open for human review."
+              exit 0
               ;;
           esac
+          # If the close fails after the label swap, the issue would be
+          # stranded: open, verdict-labeled, no longer selectable and outside
+          # the regression-reopen path. Compensate by restoring
+          # sentry:needs-triage AND removing the verdict label (a retry may
+          # land a DIFFERENT verdict, and two verdict labels would misclassify
+          # the issue for the digest and human label filters) AND shedding any
+          # stale sentry:projected (removing an absent label is a no-op), then
+          # fail the job loudly so the main-failure notifier fires.
+          if ! gh issue close "${QUEUE_ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --reason completed \
+            --comment "Triage complete: ${VERDICT}.${projection_note} Ledger entry closed; reopens automatically on Sentry regression."; then
+            echo "::error::Failed to close issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage (and shedding ${VERDICT_LABEL} + sentry:projected) for retry."
+            gh issue edit "${QUEUE_ISSUE_NUMBER}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --remove-label "${VERDICT_LABEL},sentry:projected" \
+              --add-label "sentry:needs-triage"
+            exit 1
+          fi
+          echo "Closed issue #${QUEUE_ISSUE_NUMBER} (verdict: ${VERDICT})."
+  # ---------------------------------------------------------------------------
+  # project: SERIALIZED verdict projection (deterministic, no LLM — ADR 0038).
+  # Runs ONCE per triage run, after every matrix job settles, and processes the
+  # batch's actionable EXTERNAL verdicts one at a time via the script's --batch
+  # mode (single node process, shared in-run registry). Serialization is the
+  # point:
+  #   - Two duplicate-family SHORT-IDs in one batch could otherwise both pass
+  #     the projection lookup in parallel matrix jobs (a just-created issue is
+  #     not searchable for seconds/minutes) and double-file — with one
+  #     serialized process and an in-memory registry the race class is gone.
+  #   - Token isolation: SENTRY_PROJECTION_TOKEN reaches ONLY this job's single
+  #     step — the triage matrix jobs (which host the LLM agent) never see it.
+  #     The env expression is ref-gated: off-main it resolves to '' (branch
+  #     dispatch runs branch-modified code; durable Environment protection is
+  #     #1289), and the run block re-queues actionable stubs loudly instead of
+  #     consuming them.
+  #   - if: always() + count gate (like the digest): failed matrix jobs leave
+  #     their stubs on sentry:needs-triage, which --batch skips; the rest of
+  #     the batch still projects.
+  # Per-row outcomes: projected/reused stubs are closed here with the
+  # projected URL in the fixed closing comment; skipped-no-token (main) closes
+  # with the visible "not provisioned" note; failed rows get the standard
+  # compensation (restore sentry:needs-triage, shed verdict + projected
+  # labels) and turn the job red so the main-failure notifier fires.
+  # ---------------------------------------------------------------------------
+  project:
+    needs: [select, triage]
+    if: ${{ always() && needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
+      # silently run new code. Bump via Dependabot (.github/dependabot.yml).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Project actionable external verdicts (serialized)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The ONLY place in this workflow the cross-repo projection PAT is
+          # exposed (see the job banner for the ref-gate rationale).
+          SENTRY_PROJECTION_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.SENTRY_PROJECTION_TOKEN || '' }}
+          # The exact batch this run selected (JSON int array from the select
+          # job). Passed via env — never interpolated into the shell command.
+          SENTRY_TRIAGE_ISSUES: ${{ needs.select.outputs.issues }}
+        run: |
+          set -euo pipefail
+          # The script emits ONE JSON result row per batch issue on stdout
+          # (diagnostics on stderr); every value consumed below is closed-enum
+          # or a gh-derived URL — never agent-authored text.
+          results_file="${RUNNER_TEMP}/projection-results.json"
+          node scripts/sentry-triage-project.mjs \
+            --batch \
+            --repo "${GITHUB_REPOSITORY}" \
+            --issues "${SENTRY_TRIAGE_ISSUES}" \
+            > "${results_file}"
+
+          failed=0
+          while IFS= read -r row; do
+            n=$(jq -r '.issue' <<<"${row}")
+            status=$(jq -r '.status' <<<"${row}")
+            url=$(jq -r '.url // ""' <<<"${row}")
+            verdict=$(jq -r '.verdict // ""' <<<"${row}")
+            label=$(jq -r '.label // ""' <<<"${row}")
+            # Compensation label set: shed the verdict label when known, and
+            # any sentry:projected either way (absent-label removal is a no-op).
+            labels_to_remove="sentry:projected"
+            if [ -n "${label}" ]; then
+              labels_to_remove="${label},sentry:projected"
+            fi
+            case "${status}" in
+              skipped-state)
+                # Closed / needs-triage / non-actionable — settled elsewhere.
+                continue
+                ;;
+              projected | reused)
+                note=" Projected to ${url}."
+                ;;
+              skipped-no-token)
+                if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+                  echo "::error::Non-main ref (${GITHUB_REF}): cannot project the actionable external verdict on issue #${n} (SENTRY_PROJECTION_TOKEN is only exposed on main; see #1289). Restoring sentry:needs-triage so the next main-ref run retries."
+                  # Compensation is guarded (never aborts the loop under
+                  # set -e): later rows have already had owning-repo side
+                  # effects and MUST still be settled below — a compensation
+                  # failure here turns the job red and is called out for
+                  # manual repair instead of stranding the rest of the batch.
+                  if ! gh issue edit "${n}" \
+                    --repo "${GITHUB_REPOSITORY}" \
+                    --remove-label "${labels_to_remove}" \
+                    --add-label "sentry:needs-triage"; then
+                    echo "::error::Compensation failed for issue #${n} — manually restore sentry:needs-triage (and remove ${labels_to_remove})."
+                  fi
+                  failed=1
+                  continue
+                fi
+                note=" Projection skipped (SENTRY_PROJECTION_TOKEN not provisioned)."
+                ;;
+              failed)
+                msg=$(jq -r '.message // "unknown"' <<<"${row}")
+                echo "::error::Projection failed for issue #${n}: ${msg}. Restoring sentry:needs-triage (and shedding ${labels_to_remove}) for retry."
+                if ! gh issue edit "${n}" \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --remove-label "${labels_to_remove}" \
+                  --add-label "sentry:needs-triage"; then
+                  echo "::error::Compensation failed for issue #${n} — manually restore sentry:needs-triage (and remove ${labels_to_remove})."
+                fi
+                failed=1
+                continue
+                ;;
+              *)
+                # skipped-verdict/skipped-repo cannot normally reach this job
+                # (the matrix settles those stubs) — surface anything
+                # unexpected instead of silently consuming it.
+                echo "::error::Unexpected projection status '${status}' for issue #${n}; leaving the stub as-is."
+                failed=1
+                continue
+                ;;
+            esac
+            # Close the projected stub (same fixed comment + compensation
+            # semantics as the matrix close step; the compensation edit is
+            # guarded so one failure cannot abort settlement of later rows).
+            if ! gh issue close "${n}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --reason completed \
+              --comment "Triage complete: ${verdict}.${note} Ledger entry closed; reopens automatically on Sentry regression."; then
+              echo "::error::Failed to close issue #${n}; restoring sentry:needs-triage (and shedding ${labels_to_remove}) for retry."
+              if ! gh issue edit "${n}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --remove-label "${labels_to_remove}" \
+                --add-label "sentry:needs-triage"; then
+                echo "::error::Compensation failed for issue #${n} — manually restore sentry:needs-triage (and remove ${labels_to_remove})."
+              fi
+              failed=1
+              continue
+            fi
+            echo "Closed issue #${n} (verdict: ${verdict}, ${status})."
+          done < <(jq -c '.[]' "${results_file}")
+          exit "${failed}"
+
   # ---------------------------------------------------------------------------
   # digest: post ONE deterministic Slack digest per run — what was triaged,
   # with what verdicts, with links — so verdict review needs zero GitHub
@@ -441,7 +494,8 @@ jobs:
   #     the point — the failed-triage bucket lists issues still labeled
   #     sentry:needs-triage). The count gate keeps it SILENT on empty batches
   #     and kill-switch no-ops (select emits count '0'/'' then), so a run where
-  #     nothing happened stays quiet.
+  #     nothing happened stays quiet. Runs after the project job so the digest
+  #     reflects final per-issue state (projected + closed, not in-between).
   #   - permissions: issues:read + contents:read ONLY — the digest reads issue
   #     labels/comments and posts to Slack; it holds no write credential.
   #   - This is a pure CONSUMER of the verdict contract: no LLM, no label
@@ -451,7 +505,7 @@ jobs:
   #     registered) surfaces to #ci-failures — so a broken digest can't go dark.
   # ---------------------------------------------------------------------------
   digest:
-    needs: [select, triage]
+    needs: [select, triage, project]
     if: ${{ always() && needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10

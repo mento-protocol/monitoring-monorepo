@@ -45,8 +45,8 @@ flowchart LR
         SEL["<b>Stage B — select</b><br/>6 oldest pending,<br/>oldest-first"]
         AGT["<b>Stage B — triage agents</b><br/>claude-code-action, ≤2 parallel<br/>read-only Sentry MCP"]
         LBL["<b>deterministic verdict step</b><br/>parse comment → validate →<br/>apply label (no LLM authority)"]
-        PROJ["<b>deterministic projection step</b><br/>code-fix/config-fix + external<br/>owning repo → owning-repo issue<br/>(Issues-write, no LLM authority)"]
-        CLOSE["<b>deterministic close step</b><br/>code-fix/config-fix/upstream →<br/>close (completed); needs-human<br/>stays open (no LLM authority)"]
+        CLOSE["<b>deterministic close step</b><br/>upstream + actionable-local →<br/>close (completed); needs-human<br/>stays open; external actionable<br/>deferred to the project job"]
+        PROJ["<b>project job — SERIALIZED</b><br/>after the whole matrix, one at a<br/>time: external code-fix/config-fix →<br/>owning-repo issue, then close<br/>(Issues-write, no LLM authority)"]
     end
 
     subgraph QUEUE["GitHub Issues — machine ledger"]
@@ -77,13 +77,13 @@ flowchart LR
     AGT -- "verdict comment" --> QI
     LBL -- "sentry:verdict-* label" --> QI
     AGT --> LBL
-    LBL --> PROJ
-    PROJ --> CLOSE
-    PROJ -- "actionable verdict,<br/>allowlisted owning repo" --> REPOS
-    PROJ -- "sentry:projected + link comment" --> QI
-    CLOSE -- "close (completed),<br/>verdicted buckets only" --> QI
+    LBL --> CLOSE
+    CLOSE -- "external actionable stubs<br/>deferred (left open)" --> PROJ
+    PROJ -- "one issue per family,<br/>allowlisted owning repos only" --> REPOS
+    PROJ -- "sentry:projected + link,<br/>then close (completed)" --> QI
+    CLOSE -- "close (completed),<br/>settled buckets" --> QI
     SEC -. "gates + authenticates" .-> ING & SEL
-    SECP -. "authenticates (Issues-write)" .-> PROJ
+    SECP -. "authenticates (Issues-write,<br/>project job ONLY)" .-> PROJ
     ING --> TRK
     GHA -.-> CIF
     LBL --> ENG
@@ -111,15 +111,16 @@ flowchart TD
     VALID -- "no" --> FAIL["job fails loudly;<br/>issue keeps sentry:needs-triage<br/>→ retried next run"]
     VALID -- "yes" --> SWAP["label swap →<br/>sentry:verdict-&lt;verdict&gt;"]
     SWAP --> DIGEST["run digest → #engineering<br/>(fast-follow #1336, in flight)"]
-    SWAP --> BUCKET{"verdict bucket"}
-    BUCKET -- "code-fix / config-fix" --> PROJ["deterministic projection step:<br/>affected_repo an allowlisted<br/>owning repo + token set?"]
-    PROJ -- "yes" --> FILE["file owning-repo issue<br/>(idempotent by SHORT-ID),<br/>label stub sentry:projected,<br/>comment projected URL"]
-    PROJ -- "no (this repo / unrecognized /<br/>token absent → visible skip)" --> CLOSESTEP
+    SWAP --> BUCKET{"verdict bucket +<br/>affected_repo"}
+    BUCKET -- "code-fix / config-fix,<br/>allowlisted EXTERNAL repo" --> PROJ["SERIALIZED project job<br/>(after the whole matrix, one<br/>stub at a time; in-run registry<br/>kills same-batch duplicate races)"]
+    PROJ -- "token set" --> FILE["file/reuse owning-repo issue<br/>(idempotent by SHORT-ID +<br/>projector authorship),<br/>label stub sentry:projected"]
+    PROJ -- "token absent →<br/>visible skip note" --> CLOSED
     FILE --> OWNFIX["product team fixes in<br/>the owning repo<br/>(Phase 3 #1279: scoped fix-PR)"]
-    FILE --> CLOSESTEP
+    FILE --> CLOSED
+    BUCKET -- "code-fix / config-fix,<br/>this repo / unrecognized" --> CLOSESTEP
     BUCKET -- "upstream-transient" --> CLOSESTEP
     BUCKET -- "needs-human" --> REV["human review<br/>(queue stub stays OPEN —<br/>the one excluded bucket)"]
-    CLOSESTEP["deterministic close step<br/>(closing comment links the<br/>projected issue when present)"] --> CLOSED["queue stub closed (completed);<br/>reopens automatically on<br/>Sentry regression"]
+    CLOSESTEP["matrix close step<br/>(settled buckets close here;<br/>external actionable stubs are<br/>deferred to the project job)"] --> CLOSED["queue stub closed (completed);<br/>closing comment links the projected<br/>issue when present; reopens<br/>automatically on Sentry regression"]
 ```
 
 Nothing in Phase 1 mutates Sentry or any codebase: the writes anywhere are the
@@ -525,21 +526,46 @@ previous phase's measured verdict accuracy — not on elapsed time:
 
 The central queue is a machine ledger; the human artifact for an actionable
 finding lives where the product team works. **Verdict projection** (ADR 0038)
-is the deterministic, no-LLM step that turns a `code-fix`/`config-fix` verdict
-for an EXTERNAL owning repo into a proper, readable issue in that repo. It runs
-in `.github/workflows/sentry-triage-agent.yml` AFTER the verdict-label step and
-BEFORE the queue-close step, driven by `scripts/sentry-triage-project.mjs`
-(`gh` I/O + orchestration + CLI; the pure logic lives in
+is the deterministic, no-LLM leg that turns a `code-fix`/`config-fix` verdict
+for an EXTERNAL owning repo into a proper, readable issue in that repo. It
+runs as a dedicated **SERIALIZED `project` job** in
+`.github/workflows/sentry-triage-agent.yml` — after the whole triage matrix
+settles — driven by `scripts/sentry-triage-project.mjs --batch` (`gh` I/O +
+orchestration + CLI; the pure logic lives in
 `scripts/sentry-triage-project-core.mjs`, re-exported by the entry; tests in
-`scripts/sentry-triage-project.test.mjs`).
+`scripts/sentry-triage-project.test.mjs`). Serialization is deliberate, for
+two reasons:
 
-It is a pure CONSUMER of the verdict contract — it re-reads the stub's title,
+- **Race-class kill.** Two duplicate-family SHORT-IDs in one batch could
+  otherwise both pass the projection lookup in parallel matrix jobs — a
+  just-created issue is not searchable for seconds-to-minutes — and
+  double-file. The batch runs in ONE node process, one stub at a time, with an
+  in-run registry of everything it already projected/reused, so a same-run
+  family always coalesces regardless of search-index lag. Registration is
+  symmetric in batch order (every settlement registers the issue under its own
+  SHORT-ID and its declared duplicates, so it coalesces whether the declaring
+  or the referenced stub processes first, and a registry-satisfied member
+  still persists its alias comment durably) and registry keys are
+  repo-qualified, so a family whose members name different owning repos never
+  aliases across repositories.
+- **Token isolation.** `SENTRY_PROJECTION_TOKEN` reaches only this job's
+  single step; the matrix jobs that host the LLM agent never see it.
+
+The matrix close step settles `upstream-transient`, actionable-LOCAL, and
+`needs-human` stubs itself (using `--parse-only`'s `projectable`
+classification) and DEFERS actionable EXTERNAL stubs — left open,
+verdict-labeled — to the project job, which projects and then closes each with
+the projected URL in the fixed closing comment. Per-stub failures compensate
+exactly like the matrix (restore `sentry:needs-triage`, shed verdict +
+projected labels) and turn the job red without blocking the rest of the batch.
+
+It is a pure CONSUMER of the verdict contract — it re-reads each stub's title,
 yaml body, and latest `<!-- sentry-triage-verdict:v1 -->` comment through the
-SAME authoritative parser the label step uses (`--parse-only` above), including
-the authorship and regression fences, and never re-fetches Sentry, runs an
-LLM, or touches the verdict/label logic. The workflow hands the label step's
-validated verdict back via `--verdict`; if the script's own read ever differs
-(only possible when the issue changed between steps), it fails loudly rather
+SAME authoritative parser the label step uses (`--parse-only` above),
+including the authorship and regression fences, and never re-fetches Sentry,
+runs an LLM, or touches the verdict/label logic. The label-derived verdict is
+cross-checked against the script's own fresh parse; if they ever differ (only
+possible when the issue changed between jobs), that stub fails loudly rather
 than silently skipping.
 
 **When it projects.** Only `code-fix`/`config-fix`; `needs-human` and
@@ -610,7 +636,7 @@ loud into the compensation path rather than risk skipping the real alias.
 
 **Queue-stub side effects.** On a successful projection (created or reused) the
 stub gets the `sentry:projected` label plus a comment linking the projected
-issue, then the close step closes it as usual with the projected URL in the
+issue, then the project job closes it with the projected URL in the fixed
 closing comment. The `sentry:projected` label is bootstrapped by the ingest
 label set (Stage A "Labels").
 
@@ -618,27 +644,27 @@ label set (Stage A "Labels").
 fine-grained PAT (`sentry-triage-projector`, Issues Read+Write on exactly the
 three owning repos — no contents, no pull-requests), stored as the
 `count`-gated Actions secret `SENTRY_PROJECTION_TOKEN` in the platform Terraform
-stack (ADR 0030). It is exposed as **step-scoped** env on the projection step
-ONLY — never job-level — so it reaches neither the triage agent (whose allowlist
-and permissions are untouched) nor any other step. The local stub label/comment
-use the ambient `github.token` (issues:write on this repo); the PAT is never
-used for a local call. While the secret is absent on `main` the step is a
-graceful no-op (`::notice::`), and the close step records the skip in the
-stub's closing comment (visible, not silent). The token is additionally
-**ref-gated**: on any non-`main` ref (branch `workflow_dispatch` would run
-that branch's modified workflow/script code) the env expression resolves to
-empty — a local-repo verdict still resolves and closes normally, but an
-actionable EXTERNAL verdict is loudly re-queued (needs-triage restored,
-verdict + projected labels shed, job fails) so a non-main dispatch can never
-consume a stub that was never projected; the next `main`-ref run retries it.
-Durable GitHub-Environment protection for this dispatch surface is tracked in
+stack (ADR 0030). It is exposed on the serialized project job's single step
+ONLY — the triage matrix jobs (which host the LLM agent, whose allowlist and
+permissions are untouched) never see it. The local stub label/comment use the
+ambient `github.token` (issues:write on this repo); the PAT is never used for
+a local call. While the secret is absent on `main` the job is a graceful
+per-stub no-op, and each stub's closing comment records the skip (visible, not
+silent). The token is additionally **ref-gated**: on any non-`main` ref
+(branch `workflow_dispatch` would run that branch's modified workflow/script
+code) the env expression resolves to empty — a local-repo verdict still
+resolves and closes normally in the matrix, but an actionable EXTERNAL
+verdict is loudly re-queued (needs-triage restored, verdict + projected
+labels shed, job fails) so a non-main dispatch can never consume a stub that
+was never projected; the next `main`-ref run retries it. Durable
+GitHub-Environment protection for this dispatch surface is tracked in
 [#1289](https://github.com/mento-protocol/monitoring-monorepo/issues/1289).
 Cross-repo fix **PRs** remain a later phase (ADR 0036 Stage C Phase 3,
 [#1279](https://github.com/mento-protocol/monitoring-monorepo/issues/1279)) —
-this step is Issues-write only.
+this job is Issues-write only.
 
-**Failure handling.** On any projection failure the step compensates exactly
-like the close step — restore `sentry:needs-triage`, shed the verdict label and
+**Failure handling.** On any projection failure the job compensates exactly
+like the matrix close step — restore `sentry:needs-triage`, shed the verdict label and
 any partially-applied `sentry:projected`, and fail the job loudly so the
 main-failure notifier fires and the next scheduled run retries. Nothing
 strands.
