@@ -105,8 +105,12 @@ pins the canonical GitHub repository. The owning-checkout default semantic
 helper, feedback-state modules, and checklist policy come from one pinned
 `origin/main` object rather than a PR-selected base, mutable worktree, or
 branch-controlled package scripts; wrapper-owned Node launches discard
-`NODE_OPTIONS` and `NODE_PATH`, and checklist edits remain diff evidence. Direct
-and prepared capture enforce a cumulative byte budget before review input
+`NODE_OPTIONS`, `NODE_PATH`, and loader/startup injection variables. Direct
+executables require trusted ownership and non-shared-writable ancestry; on
+Darwin, Homebrew-style paths are accepted only through sealed private native
+Mach-O snapshots with system-only library closure, while scripts and unsafe
+library closure fail closed. Checklist edits remain diff evidence. Direct and
+prepared capture enforce a cumulative byte budget before review input
 accumulates in memory or staging sidecars.
 Semantic engines run in an isolated empty workspace with restricted project
 configuration and environment; reviewer web search is disabled by default and

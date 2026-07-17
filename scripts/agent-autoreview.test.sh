@@ -12,10 +12,18 @@ tmp_dir="$(cd "$tmp_dir" && pwd -P)"
 repo_untracked="$repo_root/.agent-autoreview-test-untracked.$$.$RANDOM.txt"
 repo_node_test_dir="$repo_root/.agent-autoreview-node-test.$$.$RANDOM"
 trap 'rm -rf "$tmp_dir" "$repo_untracked" "$repo_node_test_dir"' EXIT
+original_path="$PATH"
 node_bin="$(command -v node)"
+node_exec_path="$("$node_bin" -p 'process.execPath')"
+trusted_test_node_dir="$tmp_dir/trusted-test-node"
+mkdir "$trusted_test_node_dir"
+ln -s "$node_exec_path" "$trusted_test_node_dir/node"
+PATH="$trusted_test_node_dir:$PATH"
+export PATH
 
 terminal_manifest_node_dir="$tmp_dir/terminal-manifest-node"
 terminal_manifest_node="$terminal_manifest_node_dir/node"
+terminal_manifest_node_source="$terminal_manifest_node_dir/node-proxy.c"
 terminal_manifest_preload="$terminal_manifest_node_dir/preload.cjs"
 mkdir "$terminal_manifest_node_dir"
 cat >"$terminal_manifest_preload" <<'NODE'
@@ -54,29 +62,75 @@ if (process.env.AUTOREVIEW_TEST_DIRECTORY_BASELINE) {
   };
 }
 NODE
-cat >"$terminal_manifest_node" <<'NODE'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == "-p" && "${2:-}" == "process.execPath" ]]; then
-  printf '%s\n' "$AUTOREVIEW_TEST_NODE_SELF"
-  exit 0
+cat >"$terminal_manifest_node_source" <<'NODE_PROXY'
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+int main(int argc, char **argv) {
+  const char *real_node = getenv("AUTOREVIEW_TEST_REAL_NODE");
+  const char *preload = getenv("AUTOREVIEW_TEST_PRELOAD");
+  const int inject_preload =
+      argc > 2 && real_node != NULL && preload != NULL &&
+      (getenv("AUTOREVIEW_TEST_TERMINAL_MANIFEST") != NULL ||
+       getenv("AUTOREVIEW_TEST_DIRECTORY_BASELINE") != NULL) &&
+      strcmp(argv[1], "-e") == 0 &&
+      strstr(argv[2], "prepared-bundle file changed after hashing:") != NULL;
+  const int injected_args = inject_preload ? 2 : 0;
+  char **child_argv;
+  int child_index = 0;
+
+  if (real_node == NULL || real_node[0] != '/') {
+    fputs("AUTOREVIEW_TEST_REAL_NODE must be an absolute path\n", stderr);
+    return 127;
+  }
+  child_argv = calloc((size_t)argc + (size_t)injected_args + 1, sizeof(char *));
+  if (child_argv == NULL) {
+    perror("calloc");
+    return 127;
+  }
+  if (inject_preload &&
+      getenv("AUTOREVIEW_TEST_TERMINAL_MANIFEST") != NULL) {
+    const char *bundle = argc > 3 ? argv[3] : NULL;
+    char *early_file;
+    size_t early_file_size;
+    if (bundle == NULL) {
+      fputs("terminal manifest fixture is missing its bundle path\n", stderr);
+      return 127;
+    }
+    early_file_size = strlen(bundle) + strlen("/README.md") + 1;
+    early_file = malloc(early_file_size);
+    if (early_file == NULL) {
+      perror("malloc");
+      return 127;
+    }
+    snprintf(early_file, early_file_size, "%s/README.md", bundle);
+    if (setenv("AUTOREVIEW_TEST_EARLY_FILE", early_file, 1) != 0) {
+      perror("setenv");
+      return 127;
+    }
+  }
+  child_argv[child_index++] = (char *)real_node;
+  if (inject_preload) {
+    child_argv[child_index++] = "-r";
+    child_argv[child_index++] = (char *)preload;
+  }
+  for (int index = 1; index < argc; ++index) {
+    child_argv[child_index++] = argv[index];
+  }
+  child_argv[child_index] = NULL;
+  execv(real_node, child_argv);
+  perror("execv");
+  free(child_argv);
+  return 127;
+}
+NODE_PROXY
+if [[ ! -x /usr/bin/cc ]]; then
+  printf 'autoreview adversarial tests require /usr/bin/cc\n' >&2
+  exit 1
 fi
-if [[
-  (
-    -n "${AUTOREVIEW_TEST_TERMINAL_MANIFEST:-}" ||
-      -n "${AUTOREVIEW_TEST_DIRECTORY_BASELINE:-}"
-  ) &&
-    "${1:-}" == "-e" &&
-    "${2:-}" == *"prepared-bundle file changed after hashing:"*
-]]; then
-  if [[ -n "${AUTOREVIEW_TEST_TERMINAL_MANIFEST:-}" ]]; then
-    export AUTOREVIEW_TEST_EARLY_FILE="${3%/}/README.md"
-  fi
-  exec "$AUTOREVIEW_TEST_REAL_NODE" -r "$AUTOREVIEW_TEST_PRELOAD" "$@"
-fi
-exec "$AUTOREVIEW_TEST_REAL_NODE" "$@"
-NODE
-chmod +x "$terminal_manifest_node"
+/usr/bin/cc -O2 -Wall -Wextra -o "$terminal_manifest_node" "$terminal_manifest_node_source"
 
 "$node_bin" "$repo_root/scripts/agent-autoreview-core.test.mjs"
 "$node_bin" "$repo_root/scripts/agent-autoreview-target-guard.test.mjs"
@@ -84,9 +138,10 @@ adapter_help="$("$node_bin" "$repo_root/scripts/agent-autoreview.mjs" --help)"
 if [[
   "$adapter_help" != *"--verify-bundle-dir <dir>"* ||
     "$adapter_help" != *"--expected-bundle-manifest <sha>"* ||
+    "$adapter_help" != *"--serialize-untracked-file <path>"* ||
     "$adapter_help" != *"a repo adapter should use --prepare-bundle-dir"*
 ]]; then
-  printf 'autoreview help omitted prepared-bundle verification options\n' >&2
+  printf 'autoreview help omitted prepared-bundle replacement options\n' >&2
   exit 1
 fi
 
@@ -277,7 +332,10 @@ run_adapter_expect_failure() {
   local status=$?
   set -e
   if [[ "$status" -eq 0 ]]; then
-    printf 'expected adapter to fail\nstdout:\n%s\nstderr:\n%s\n' "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    printf 'expected adapter call from line %s to fail\nstdout:\n%s\nstderr:\n%s\n' \
+      "${BASH_LINENO[0]:-unknown}" \
+      "$(cat "$stdout")" \
+      "$(cat "$stderr")" >&2
     exit 1
   fi
 }
@@ -1467,6 +1525,11 @@ run_frozen_checklist_provenance_regression() {
     --mode branch \
     --base origin/release \
     --engine local
+  if [[ ! -f "$branch_bundle/selected-checklists.txt" ]]; then
+    printf 'branch checklist bundle was not published\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
 
   run_helper_in_repo "$review_repo" \
     --prepare-bundle-dir "$commit_bundle" \
@@ -2335,15 +2398,26 @@ run_hostile_git_path_regression() {
   local review_repo="$tmp_dir/hostile-git-path"
   local fake_bin="$review_repo/bin"
   local outside_symlink_bin="$tmp_dir/outside-symlink-git-bin"
+  local group_writable_bin="$tmp_dir/group-writable-git-bin"
+  local world_writable_bin="$tmp_dir/world-writable-git-bin"
   local external_bin="$tmp_dir/external-git-bin"
   local repo_marker="$tmp_dir/repo-git-ran"
+  local group_writable_marker="$tmp_dir/group-writable-git-ran"
+  local world_writable_marker="$tmp_dir/world-writable-git-ran"
   local external_marker="$tmp_dir/external-git-ran"
   local system_git
   init_review_repo "$review_repo"
   printf 'base\n' >"$review_repo/README.md"
   commit_review_repo "$review_repo" init
   printf 'change\n' >>"$review_repo/README.md"
-  mkdir "$fake_bin" "$outside_symlink_bin" "$external_bin"
+  mkdir \
+    "$fake_bin" \
+    "$outside_symlink_bin" \
+    "$group_writable_bin" \
+    "$world_writable_bin" \
+    "$external_bin"
+  chmod 0775 "$group_writable_bin"
+  chmod 0757 "$world_writable_bin"
   cat >"$fake_bin/git" <<GIT
 #!/usr/bin/env bash
 printf 'unsafe\n' >"$repo_marker"
@@ -2351,6 +2425,17 @@ exit 99
 GIT
   chmod +x "$fake_bin/git"
   ln -s "$fake_bin/git" "$outside_symlink_bin/git"
+  cat >"$group_writable_bin/git" <<GIT
+#!/bin/bash
+printf 'unsafe\n' >"$group_writable_marker"
+exit 99
+GIT
+  cat >"$world_writable_bin/git" <<GIT
+#!/bin/bash
+printf 'unsafe\n' >"$world_writable_marker"
+exit 99
+GIT
+  chmod 0755 "$group_writable_bin/git" "$world_writable_bin/git"
   system_git="$(command -v git)"
   cat >"$external_bin/git" <<GIT
 #!/usr/bin/env bash
@@ -2359,13 +2444,300 @@ exec "$system_git" "\$@"
 GIT
   chmod +x "$external_bin/git"
 
-  run_helper_with_path_in_repo "$review_repo" "$fake_bin:$outside_symlink_bin:$external_bin" --mode local --engine local
+  run_helper_with_path_in_repo \
+    "$review_repo" \
+    "$fake_bin:$outside_symlink_bin:$group_writable_bin:$world_writable_bin:$external_bin" \
+    --mode local \
+    --engine local
   if [[ -e "$repo_marker" ]]; then
     printf 'repo-local git shim executed\n' >&2
     exit 1
   fi
+  if [[ -e "$group_writable_marker" ]]; then
+    printf 'git shim under group-writable ancestry executed\n' >&2
+    exit 1
+  fi
+  if [[ -e "$world_writable_marker" ]]; then
+    printf 'git shim under world-writable ancestry executed\n' >&2
+    exit 1
+  fi
   expect_file_exists "$external_marker"
   expect_stdout_contains "autoreview clean"
+  expect_empty_stderr
+}
+
+run_unsafe_script_fallback_regressions() {
+  local review_repo="$tmp_dir/unsafe-script-fallbacks"
+  local group_writable_bin="$tmp_dir/group-writable-script-bin"
+  local world_writable_bin="$tmp_dir/world-writable-script-bin"
+  local trusted_bin="$tmp_dir/trusted-script-fallback-bin"
+  local group_node_marker="$tmp_dir/group-writable-node-ran"
+  local world_node_marker="$tmp_dir/world-writable-node-ran"
+  local group_codex_marker="$tmp_dir/group-writable-codex-ran"
+  local world_codex_marker="$tmp_dir/world-writable-codex-ran"
+  local node_exec
+  local status=0
+  local system_git
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  mkdir "$group_writable_bin" "$world_writable_bin" "$trusted_bin"
+  chmod 0775 "$group_writable_bin"
+  chmod 0757 "$world_writable_bin"
+  chmod 0700 "$trusted_bin"
+  system_git="$(command -v git)"
+  node_exec="$("$node_bin" -p 'process.execPath')"
+  cat >"$trusted_bin/git" <<GIT
+#!/bin/bash
+exec "$system_git" "\$@"
+GIT
+  chmod 0755 "$trusted_bin/git"
+
+  cat >"$group_writable_bin/node" <<NODE
+#!/bin/bash
+printf 'unsafe\n' >"$group_node_marker"
+exit 99
+NODE
+  cat >"$world_writable_bin/node" <<NODE
+#!/bin/bash
+printf 'unsafe\n' >"$world_node_marker"
+exit 99
+NODE
+  chmod 0755 "$group_writable_bin/node" "$world_writable_bin/node"
+
+  : >"$stdout"
+  : >"$stderr"
+  status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$group_writable_bin:$world_writable_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      /bin/bash "$repo_root/scripts/agent-autoreview.sh" \
+      --mode local \
+      --engine local \
+      --dry-run >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'adapter accepted only node scripts under unsafe ancestry\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains "requires a trusted node executable"
+  if [[ -e "$group_node_marker" || -e "$world_node_marker" ]]; then
+    printf 'node script under shared-writable ancestry executed\n' >&2
+    exit 1
+  fi
+
+  ln -s "$node_exec" "$trusted_bin/node"
+  : >"$stdout"
+  : >"$stderr"
+  status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$group_writable_bin:$world_writable_bin:$trusted_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      /bin/bash "$repo_root/scripts/agent-autoreview.sh" \
+      --mode local \
+      --engine local \
+      --dry-run >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    printf 'adapter rejected trusted node after unsafe PATH scripts\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
+  if [[ -e "$group_node_marker" || -e "$world_node_marker" ]]; then
+    printf 'node script under shared-writable ancestry executed before trusted fallthrough\n' >&2
+    exit 1
+  fi
+
+  cat >"$group_writable_bin/codex" <<CODEX
+#!/bin/bash
+printf 'unsafe\n' >"$group_codex_marker"
+exit 99
+CODEX
+  cat >"$world_writable_bin/codex" <<CODEX
+#!/bin/bash
+printf 'unsafe\n' >"$world_codex_marker"
+exit 99
+CODEX
+  chmod 0755 "$group_writable_bin/codex" "$world_writable_bin/codex"
+
+  : >"$stdout"
+  : >"$stderr"
+  status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$group_writable_bin:$world_writable_bin:$trusted_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "$node_exec" "$repo_root/scripts/agent-autoreview.mjs" \
+      --mode local \
+      --engine codex >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'direct helper accepted codex scripts under unsafe ancestry\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains "codex CLI is not available"
+  if [[ -e "$group_codex_marker" || -e "$world_codex_marker" ]]; then
+    printf 'codex script under shared-writable ancestry executed\n' >&2
+    exit 1
+  fi
+}
+
+run_privileged_shebang_startup_regression() {
+  local review_repo="$tmp_dir/privileged-shebang-startup"
+  local startup_payload="$tmp_dir/hostile-bash-env.sh"
+  local bash_env_marker="$tmp_dir/hostile-bash-env-ran"
+  local function_marker="$tmp_dir/imported-pwd-function-ran"
+  local imported_function
+  local status=0
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+  printf 'printf '\''hostile startup payload ran\\n'\'' >"%s"\n' \
+    "$bash_env_marker" >"$startup_payload"
+  imported_function="() { printf 'hostile imported function ran\\n' >\"$function_marker\"; builtin pwd \"\$@\"; }"
+
+  env -i \
+    "PATH=/usr/bin:/bin" \
+    "BASH_ENV=$startup_payload" \
+    "BASH_FUNC_pwd%%=$imported_function" \
+    /bin/bash -c 'pwd >/dev/null'
+  expect_file_exists "$bash_env_marker"
+  expect_file_exists "$function_marker"
+  rm -f "$bash_env_marker" "$function_marker"
+
+  : >"$stdout"
+  : >"$stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "BASH_ENV=$startup_payload" \
+      "BASH_FUNC_pwd%%=$imported_function" \
+      "$repo_root/scripts/agent-autoreview.sh" \
+      --mode local \
+      --engine local \
+      --dry-run >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    printf 'privileged shebang startup regression failed\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
+  if [[ -e "$bash_env_marker" || -e "$function_marker" ]]; then
+    printf 'direct wrapper evaluated hostile Bash startup state before sanitizing it\n' >&2
+    exit 1
+  fi
+  expect_stdout_contains "engine: local"
+  expect_empty_stderr
+}
+
+run_hostile_volta_environment_regression() {
+  local review_repo="$tmp_dir/hostile-volta-environment"
+  local hostile_home="$tmp_dir/hostile-volta-home"
+  local hostile_volta_home="$hostile_home/.volta"
+  local shim_bin="$tmp_dir/hostile-volta-shim-bin"
+  local fake_node_marker="$tmp_dir/hostile-volta-node-ran"
+  local node_command
+  local node_resolved
+  local node_version
+  local fake_node
+  local hostile_selection
+  local optimized_path
+  local status=0
+  local volta_command
+  local fixed_node
+
+  optimized_path="$PATH"
+  PATH="$original_path"
+  node_command="$(command -v node || true)"
+  volta_command="$(command -v volta || true)"
+  PATH="$optimized_path"
+  [[ -n "$node_command" && -n "$volta_command" ]] || return 0
+  node_resolved="$(
+    /usr/bin/perl -MCwd=abs_path -e '
+      my $resolved = abs_path($ARGV[0]);
+      exit 1 if !defined($resolved);
+      print "$resolved\\n";
+    ' "$node_command" 2>/dev/null
+  )" || return 0
+  [[ "${node_resolved##*/}" == "volta-shim" ]] || return 0
+  for fixed_node in /usr/bin/node /bin/node /usr/sbin/node /sbin/node; do
+    [[ ! -x "$fixed_node" ]] || return 0
+  done
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+  node_version="$("$node_bin" -p 'process.versions.node')"
+  fake_node="$hostile_volta_home/tools/image/node/$node_version/bin/node"
+  mkdir -p \
+    "$hostile_volta_home/tools/user" \
+    "$hostile_volta_home/tools/inventory/node" \
+    "${fake_node%/*}" \
+    "$shim_bin"
+  printf \
+    '{"node":{"runtime":"%s","npm":null},"pnpm":null,"yarn":null}\n' \
+    "$node_version" >"$hostile_volta_home/tools/user/platform.json"
+  printf '10.0.0\n' \
+    >"$hostile_volta_home/tools/inventory/node/node-v${node_version}-npm"
+  cat >"$fake_node" <<NODE
+#!/bin/bash
+printf 'hostile Volta node ran\n' >"$fake_node_marker"
+exit 99
+NODE
+  chmod 0755 "$fake_node"
+  ln -s "$node_command" "$shim_bin/node"
+
+  hostile_selection="$(
+    env -i \
+      "PATH=/usr/bin:/bin" \
+      "HOME=$hostile_home" \
+      "VOLTA_HOME=$hostile_volta_home" \
+      "$volta_command" which node 2>/dev/null
+  )" || return 0
+  [[ "$hostile_selection" == "$fake_node" ]] || return 0
+
+  : >"$stdout"
+  : >"$stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$shim_bin" \
+      "HOME=$hostile_home" \
+      "VOLTA_HOME=$hostile_volta_home" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "$repo_root/scripts/agent-autoreview.sh" \
+      --mode local \
+      --engine local \
+      --dry-run >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    printf 'trusted Volta discovery failed with hostile HOME/VOLTA_HOME\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
+  if [[ -e "$fake_node_marker" ]]; then
+    printf 'hostile HOME/VOLTA_HOME selected and executed a fake node\n' >&2
+    exit 1
+  fi
+  expect_stdout_contains "engine: local"
   expect_empty_stderr
 }
 
@@ -2502,6 +2874,9 @@ run_bundle_output_deferred_regression
 run_claude_multi_pass_regression
 run_heartbeat_regression
 run_hostile_git_path_regression
+run_unsafe_script_fallback_regressions
+run_privileged_shebang_startup_regression
+run_hostile_volta_environment_regression
 run_sensitive_input_regressions
 run_override_untracked_serializer_regression
 
@@ -2772,7 +3147,6 @@ expect_stdout_contains "manifest $retained_bundle_manifest"
 terminal_manifest_alias="$tmp_dir/terminal-manifest-readme-link"
 run_adapter_expect_failure \
   "PATH=$terminal_manifest_node_dir:$PATH" \
-  "AUTOREVIEW_TEST_NODE_SELF=$terminal_manifest_node" \
   "AUTOREVIEW_TEST_REAL_NODE=$node_bin" \
   "AUTOREVIEW_TEST_PRELOAD=$terminal_manifest_preload" \
   AUTOREVIEW_TEST_TERMINAL_MANIFEST=1 \
@@ -2806,7 +3180,6 @@ else
 fi
 run_adapter_expect_failure \
   "PATH=$terminal_manifest_node_dir:$PATH" \
-  "AUTOREVIEW_TEST_NODE_SELF=$terminal_manifest_node" \
   "AUTOREVIEW_TEST_REAL_NODE=$node_bin" \
   "AUTOREVIEW_TEST_PRELOAD=$terminal_manifest_preload" \
   AUTOREVIEW_TEST_DIRECTORY_BASELINE=1 \

@@ -3,18 +3,26 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   accessSync,
+  chmodSync,
+  closeSync,
   constants as fsConstants,
   existsSync,
+  fchmodSync,
+  fstatSync,
+  fsyncSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readlinkSync,
   realpathSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -104,6 +112,12 @@ const FROZEN_TARGET_MODES = new Set([
 ]);
 const MAX_GIT_OUTPUT_BYTES = MAX_REVIEW_INPUT_BYTES + 12 * 1024 * 1024;
 const CLAUDE_SAFE_MODE_MIN_VERSION = [2, 1, 169];
+const trustedExecutableSnapshots = new Map();
+const trustedExecutableSnapshotsByPath = new Map();
+const trustedExecutableSnapshotDirs = new Set();
+const rejectedTrustedExecutableCandidates = new Set();
+const writeGrantingAclCache = new Map();
+let trustedExecutableCleanupRegistered = false;
 
 function usage() {
   console.log(`Usage:
@@ -127,6 +141,7 @@ Options:
   --prepare-only                     Build target/bundle metadata for subagent review, then exit
   --trusted-input-root <path>        Adapter-only root for generated review evidence
   --source-snapshot-only             Print a target-scoped source fingerprint and exit
+  --serialize-untracked-file <path>  Print bounded evidence for one repo-relative untracked file
   --timeout-seconds <seconds>        Reviewer process timeout (default: 1800)
   --dry-run                          Print target/engine without invoking a reviewer
   --no-tools                         Disable Claude tools and MCP servers; Codex requires read-only sandbox
@@ -316,6 +331,585 @@ function checkoutRootFrom(start) {
   }
 }
 
+function effectiveUid() {
+  if (typeof process.geteuid !== "function") {
+    throw new Error("trusted executable resolution requires an effective UID");
+  }
+  return BigInt(process.geteuid());
+}
+
+function trustedOwner(fileStat) {
+  const uid = effectiveUid();
+  return fileStat.uid === 0n || fileStat.uid === uid;
+}
+
+function sharedWritable(fileStat) {
+  return (fileStat.mode & 0o022n) !== 0n;
+}
+
+function sameFileMetadata(left, right) {
+  return [
+    "dev",
+    "ino",
+    "mode",
+    "nlink",
+    "uid",
+    "gid",
+    "rdev",
+    "size",
+    "mtimeNs",
+    "ctimeNs",
+  ].every((field) => left[field] === right[field]);
+}
+
+function sameDirectorySecurityMetadata(left, right) {
+  return ["dev", "ino", "mode", "uid", "gid"].every(
+    (field) => left[field] === right[field],
+  );
+}
+
+function aclMetadataKey(fileStat) {
+  return [
+    fileStat.dev,
+    fileStat.ino,
+    fileStat.mode,
+    fileStat.uid,
+    fileStat.gid,
+    fileStat.ctimeNs,
+  ].join(":");
+}
+
+function hasWriteGrantingAcl(candidate, fileStat) {
+  if (process.platform !== "darwin") return false;
+  const metadataKey = aclMetadataKey(fileStat);
+  const cached = writeGrantingAclCache.get(candidate);
+  if (cached?.metadataKey === metadataKey) return cached.result;
+  const result = spawnSync("/bin/ls", ["-lde", candidate], {
+    encoding: "utf8",
+    env: { LANG: "C", LC_ALL: "C", PATH: "/usr/bin:/bin" },
+    maxBuffer: 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`failed to inspect executable ACL at ${candidate}`);
+  }
+  const writeGrant =
+    /\ballow\b.*\b(?:write|append|delete|delete_child|writeattr|writeextattr|writesecurity|chown)\b/;
+  const value = result.stdout
+    .split("\n")
+    .slice(1)
+    .some((line) => writeGrant.test(line));
+  writeGrantingAclCache.set(candidate, { metadataKey, result: value });
+  return value;
+}
+
+function executableForCurrentUser(fileStat) {
+  const mode = fileStat.mode & 0o777n;
+  const uid = effectiveUid();
+  if (uid === 0n) return (mode & 0o111n) !== 0n;
+  if (fileStat.uid === uid) return (mode & 0o100n) !== 0n;
+  const groups = new Set(
+    [
+      ...(typeof process.getgroups === "function" ? process.getgroups() : []),
+      ...(typeof process.getegid === "function" ? [process.getegid()] : []),
+    ].map((group) => BigInt(group)),
+  );
+  if (groups.has(fileStat.gid)) return (mode & 0o010n) !== 0n;
+  return (mode & 0o001n) !== 0n;
+}
+
+function inspectTrustedDirectoryAncestry(directory) {
+  const records = [];
+  let current = directory;
+  while (true) {
+    const fileStat = lstatSync(current, { bigint: true });
+    if (!fileStat.isDirectory() || !trustedOwner(fileStat)) {
+      throw new Error(`untrusted executable directory ancestry at ${current}`);
+    }
+    records.push({
+      path: current,
+      fileStat,
+      writeGrantingAcl: hasWriteGrantingAcl(current, fileStat),
+    });
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return records;
+}
+
+function assertStableDirectoryAncestry(before, after) {
+  if (
+    before.length !== after.length ||
+    before.some(
+      (record, index) =>
+        record.path !== after[index].path ||
+        record.writeGrantingAcl !== after[index].writeGrantingAcl ||
+        !sameDirectorySecurityMetadata(record.fileStat, after[index].fileStat),
+    )
+  ) {
+    throw new Error("executable directory ancestry changed during validation");
+  }
+}
+
+function secureReadFlags() {
+  if (!Number.isInteger(fsConstants.O_NOFOLLOW)) {
+    throw new Error("O_NOFOLLOW is required for trusted executable resolution");
+  }
+  return (
+    fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (fsConstants.O_CLOEXEC || 0)
+  );
+}
+
+function secureWriteFlags() {
+  if (!Number.isInteger(fsConstants.O_NOFOLLOW)) {
+    throw new Error("O_NOFOLLOW is required for trusted executable snapshots");
+  }
+  return (
+    fsConstants.O_RDWR |
+    fsConstants.O_CREAT |
+    fsConstants.O_EXCL |
+    fsConstants.O_NOFOLLOW |
+    (fsConstants.O_CLOEXEC || 0)
+  );
+}
+
+function cleanupTrustedExecutableSnapshots() {
+  for (const directory of trustedExecutableSnapshotDirs) {
+    try {
+      rmSync(directory, { force: true, recursive: true });
+    } catch {
+      // Best-effort cleanup during process exit.
+    }
+  }
+  trustedExecutableSnapshotDirs.clear();
+  trustedExecutableSnapshots.clear();
+  trustedExecutableSnapshotsByPath.clear();
+  rejectedTrustedExecutableCandidates.clear();
+  writeGrantingAclCache.clear();
+}
+
+function registerTrustedExecutableCleanup() {
+  if (trustedExecutableCleanupRegistered) return;
+  trustedExecutableCleanupRegistered = true;
+  process.once("exit", cleanupTrustedExecutableSnapshots);
+  for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
+    process.once(signal, () => {
+      cleanupTrustedExecutableSnapshots();
+      process.kill(process.pid, signal);
+    });
+  }
+}
+
+function assertPrivateSnapshotDirectory(directory) {
+  const fileStat = lstatSync(directory, { bigint: true });
+  if (
+    !fileStat.isDirectory() ||
+    fileStat.uid !== effectiveUid() ||
+    (fileStat.mode & 0o077n) !== 0n ||
+    hasWriteGrantingAcl(directory, fileStat)
+  ) {
+    throw new Error("trusted executable snapshot directory is not private");
+  }
+}
+
+function assertPrivateSnapshotRecord(record) {
+  const directoryStat = lstatSync(record.directory, { bigint: true });
+  assertPrivateSnapshotDirectory(record.directory);
+  if (!sameDirectorySecurityMetadata(record.directoryStat, directoryStat)) {
+    throw new Error("trusted executable snapshot directory changed");
+  }
+  const fileStat = lstatSync(record.outputPath, { bigint: true });
+  if (
+    !fileStat.isFile() ||
+    fileStat.uid !== effectiveUid() ||
+    sharedWritable(fileStat) ||
+    (fileStat.mode & 0o6000n) !== 0n ||
+    fileStat.nlink !== 1n ||
+    hasWriteGrantingAcl(record.outputPath, fileStat) ||
+    !sameFileMetadata(record.fileStat, fileStat)
+  ) {
+    throw new Error("trusted executable snapshot changed");
+  }
+}
+
+function revalidateTrustedExecutableSnapshot(executable) {
+  const record = trustedExecutableSnapshotsByPath.get(executable);
+  if (record) assertPrivateSnapshotRecord(record);
+}
+
+function revalidateAllTrustedExecutableSnapshots() {
+  for (const record of trustedExecutableSnapshotsByPath.values()) {
+    assertPrivateSnapshotRecord(record);
+  }
+}
+
+function spawnTrustedSync(command, args, options) {
+  revalidateAllTrustedExecutableSnapshots();
+  return spawnSync(command, args, options);
+}
+
+function machoMagic(prefix) {
+  if (prefix.length < 4) return false;
+  const magic = prefix.subarray(0, 4).toString("hex");
+  return new Set([
+    "feedface",
+    "cefaedfe",
+    "feedfacf",
+    "cffaedfe",
+    "cafebabe",
+    "bebafeca",
+    "cafebabf",
+    "bfbafeca",
+  ]).has(magic);
+}
+
+function assertNativeMachOPrefix(prefix) {
+  if (prefix.subarray(0, 2).toString("utf8") === "#!" || !machoMagic(prefix)) {
+    throw new Error(
+      "unsafe executable ancestry fallback requires a native Mach-O binary",
+    );
+  }
+}
+
+function assertSafeMachOSnapshotClosure(repo, outputPath, prefix) {
+  if (process.platform !== "darwin") {
+    throw new Error(
+      "unsafe executable ancestry cannot be snapshotted on this platform",
+    );
+  }
+  assertNativeMachOPrefix(prefix);
+  const otool = trustedExecutableCandidate(
+    "/usr/bin/otool",
+    realpathSync(repo),
+    "otool",
+    { allowSnapshot: false },
+  );
+  const result = spawnTrustedSync(otool, ["-L", outputPath], {
+    encoding: "utf8",
+    env: {
+      LANG: "C",
+      LC_ALL: "C",
+      PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+    },
+    maxBuffer: 2 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error("failed to inspect Mach-O dependency closure");
+  }
+  let headers = 0;
+  for (const rawLine of result.stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith(outputPath) && line.endsWith(":")) {
+      headers += 1;
+      continue;
+    }
+    const match = line.match(/^(\S+)\s+\(compatibility version [^)]+\)$/);
+    const dependency = match?.[1] || "";
+    const normalizedDependency = path.posix.normalize(dependency);
+    if (
+      normalizedDependency !== dependency ||
+      (!dependency.startsWith("/usr/lib/") &&
+        !dependency.startsWith("/System/Library/"))
+    ) {
+      throw new Error(
+        `unsafe Mach-O dependency prevents executable snapshot: ${dependency || line}`,
+      );
+    }
+  }
+  if (headers === 0) {
+    throw new Error("otool did not identify the executable as Mach-O");
+  }
+  const loadCommands = spawnTrustedSync(otool, ["-l", outputPath], {
+    encoding: "utf8",
+    env: {
+      LANG: "C",
+      LC_ALL: "C",
+      PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+    },
+    maxBuffer: 8 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (loadCommands.error || loadCommands.status !== 0) {
+    throw new Error("failed to inspect Mach-O load commands");
+  }
+  let currentLoadCommand = "";
+  let sawSystemDylinker = false;
+  for (const rawLine of loadCommands.stdout.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "cmd LC_RPATH" || line === "cmd LC_DYLD_ENVIRONMENT") {
+      throw new Error("unsafe Mach-O loader command prevents snapshot");
+    }
+    if (line.startsWith("cmd ")) {
+      currentLoadCommand = line.slice("cmd ".length);
+      continue;
+    }
+    if (currentLoadCommand === "LC_LOAD_DYLINKER" && line.startsWith("name ")) {
+      const dylinkerMatch = line.match(/^name (.+) \(offset \d+\)$/);
+      const dylinker = dylinkerMatch?.[1] || "";
+      if (dylinker !== "/usr/lib/dyld") {
+        throw new Error("unsafe Mach-O dynamic linker prevents snapshot");
+      }
+      sawSystemDylinker = true;
+    }
+  }
+  if (!sawSystemDylinker) {
+    throw new Error("Mach-O snapshot omitted the system dynamic linker");
+  }
+}
+
+function streamAndHashExecutable(sourceDescriptor, outputDescriptor, size) {
+  if (size < 0n || size > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("trusted executable is too large to snapshot safely");
+  }
+  const expectedBytes = Number(size);
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  const sourceHash = createHash("sha256");
+  const prefix = Buffer.alloc(4);
+  let position = 0;
+  while (position < expectedBytes) {
+    const bytesRead = readSync(
+      sourceDescriptor,
+      buffer,
+      0,
+      Math.min(buffer.length, expectedBytes - position),
+      position,
+    );
+    if (bytesRead === 0) {
+      throw new Error("trusted executable changed while being snapshotted");
+    }
+    if (position < prefix.length) {
+      buffer.copy(
+        prefix,
+        position,
+        0,
+        Math.min(bytesRead, prefix.length - position),
+      );
+    }
+    sourceHash.update(buffer.subarray(0, bytesRead));
+    let written = 0;
+    while (written < bytesRead) {
+      const bytesWritten = writeSync(
+        outputDescriptor,
+        buffer,
+        written,
+        bytesRead - written,
+        position + written,
+      );
+      if (bytesWritten === 0) {
+        throw new Error("trusted executable snapshot write stalled");
+      }
+      written += bytesWritten;
+    }
+    position += bytesRead;
+  }
+  if (readSync(sourceDescriptor, buffer, 0, 1, position) !== 0) {
+    throw new Error("trusted executable grew while being snapshotted");
+  }
+
+  const outputHash = createHash("sha256");
+  position = 0;
+  while (position < expectedBytes) {
+    const bytesRead = readSync(
+      outputDescriptor,
+      buffer,
+      0,
+      Math.min(buffer.length, expectedBytes - position),
+      position,
+    );
+    if (bytesRead === 0) {
+      throw new Error("trusted executable snapshot is truncated");
+    }
+    outputHash.update(buffer.subarray(0, bytesRead));
+    position += bytesRead;
+  }
+  if (sourceHash.digest("hex") !== outputHash.digest("hex")) {
+    throw new Error("trusted executable snapshot digest mismatch");
+  }
+  return prefix;
+}
+
+function publishTrustedExecutableSnapshot(
+  repo,
+  sourcePath,
+  executableName,
+  sourceDescriptor,
+  sourceStat,
+  ancestryBefore,
+) {
+  const tempRoot = safeTempRoot(repo);
+  const directory = mkdtempSync(
+    path.join(tempRoot, "autoreview-trusted-exec."),
+  );
+  trustedExecutableSnapshotDirs.add(directory);
+  registerTrustedExecutableCleanup();
+  try {
+    chmodSync(directory, 0o700);
+    assertPrivateSnapshotDirectory(directory);
+    const safeName = /^[A-Za-z0-9._+-]+$/.test(executableName)
+      ? executableName
+      : "executable";
+    const outputPath = path.join(directory, safeName);
+    const descriptor = openSync(outputPath, secureWriteFlags(), 0o500);
+    let outputStat;
+    let prefix;
+    try {
+      prefix = streamAndHashExecutable(
+        sourceDescriptor,
+        descriptor,
+        sourceStat.size,
+      );
+      const sourceAfter = fstatSync(sourceDescriptor, { bigint: true });
+      const sourcePathAfter = lstatSync(sourcePath, { bigint: true });
+      if (
+        !sameFileMetadata(sourceStat, sourceAfter) ||
+        !sameFileMetadata(sourceStat, sourcePathAfter)
+      ) {
+        throw new Error(
+          "executable identity or metadata changed during snapshot",
+        );
+      }
+      const ancestryAfter = inspectTrustedDirectoryAncestry(
+        path.dirname(sourcePath),
+      );
+      assertStableDirectoryAncestry(ancestryBefore, ancestryAfter);
+      fchmodSync(descriptor, 0o500);
+      fsyncSync(descriptor);
+      outputStat = fstatSync(descriptor, { bigint: true });
+      if (
+        !outputStat.isFile() ||
+        outputStat.uid !== effectiveUid() ||
+        sharedWritable(outputStat) ||
+        (outputStat.mode & 0o6000n) !== 0n ||
+        outputStat.nlink !== 1n ||
+        outputStat.size !== sourceStat.size
+      ) {
+        throw new Error("trusted executable snapshot failed validation");
+      }
+      const pathStat = lstatSync(outputPath, { bigint: true });
+      if (!sameFileMetadata(outputStat, pathStat)) {
+        throw new Error("trusted executable snapshot changed during publish");
+      }
+    } finally {
+      closeSync(descriptor);
+    }
+    const record = {
+      directory,
+      directoryStat: lstatSync(directory, { bigint: true }),
+      fileStat: outputStat,
+      outputPath,
+    };
+    assertPrivateSnapshotRecord(record);
+    assertSafeMachOSnapshotClosure(repo, outputPath, prefix);
+    assertPrivateSnapshotRecord(record);
+    trustedExecutableSnapshots.set(sourcePath, record);
+    trustedExecutableSnapshotsByPath.set(outputPath, record);
+    revalidateTrustedExecutableSnapshot(outputPath);
+    return outputPath;
+  } catch (error) {
+    trustedExecutableSnapshotDirs.delete(directory);
+    rmSync(directory, { force: true, recursive: true });
+    throw error;
+  }
+}
+
+function trustedExecutableCandidate(
+  candidate,
+  root,
+  executableName,
+  { allowSnapshot = true } = {},
+) {
+  const resolved = realpathSync(candidate);
+  if (/[\r\n\0]/.test(resolved)) {
+    throw new Error("executable path contains a control character");
+  }
+  if (isWithin(path.resolve(candidate), root) || isWithin(resolved, root)) {
+    throw new Error("executable is inside the reviewed repository");
+  }
+  const pinnedSnapshot = trustedExecutableSnapshots.get(resolved);
+  if (pinnedSnapshot) {
+    if (!allowSnapshot) {
+      throw new Error("snapshotted executable is not allowed for this command");
+    }
+    revalidateTrustedExecutableSnapshot(pinnedSnapshot.outputPath);
+    return pinnedSnapshot.outputPath;
+  }
+
+  const descriptor = openSync(resolved, secureReadFlags());
+  try {
+    const before = fstatSync(descriptor, { bigint: true });
+    if (
+      !before.isFile() ||
+      !trustedOwner(before) ||
+      sharedWritable(before) ||
+      (before.mode & 0o6000n) !== 0n ||
+      hasWriteGrantingAcl(resolved, before) ||
+      !executableForCurrentUser(before)
+    ) {
+      throw new Error("executable file is not trusted");
+    }
+    const pathBefore = lstatSync(resolved, { bigint: true });
+    if (!sameFileMetadata(before, pathBefore)) {
+      throw new Error("executable identity changed before validation");
+    }
+    const ancestryBefore = inspectTrustedDirectoryAncestry(
+      path.dirname(resolved),
+    );
+    const directExecutionSafe =
+      (before.nlink === 1n || before.uid === 0n) &&
+      ancestryBefore.every(
+        ({ fileStat, writeGrantingAcl }) =>
+          !sharedWritable(fileStat) && !writeGrantingAcl,
+      );
+
+    if (directExecutionSafe) {
+      const after = fstatSync(descriptor, { bigint: true });
+      const pathAfter = lstatSync(resolved, { bigint: true });
+      if (
+        !sameFileMetadata(before, after) ||
+        !sameFileMetadata(before, pathAfter)
+      ) {
+        throw new Error(
+          "executable identity or metadata changed during validation",
+        );
+      }
+      const ancestryAfter = inspectTrustedDirectoryAncestry(
+        path.dirname(resolved),
+      );
+      assertStableDirectoryAncestry(ancestryBefore, ancestryAfter);
+      return resolved;
+    }
+    if (!allowSnapshot) {
+      throw new Error("executable ancestry is unsafe for direct execution");
+    }
+    if (process.platform !== "darwin") {
+      throw new Error(
+        "unsafe executable ancestry cannot be snapshotted on this platform",
+      );
+    }
+    if (before.nlink !== 1n) {
+      throw new Error("executable snapshots require a single-link source");
+    }
+    const prefix = Buffer.alloc(4);
+    if (readSync(descriptor, prefix, 0, prefix.length, 0) !== prefix.length) {
+      throw new Error("executable is too short to be a native Mach-O binary");
+    }
+    assertNativeMachOPrefix(prefix);
+    return publishTrustedExecutableSnapshot(
+      root,
+      resolved,
+      executableName,
+      descriptor,
+      before,
+      ancestryBefore,
+    );
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
   const candidates = path.isAbsolute(command)
     ? [command]
@@ -325,15 +919,17 @@ function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
         .map((entry) => path.join(entry, command));
   const root = realpathSync(rejectRoot);
   for (const candidate of candidates) {
+    if (rejectedTrustedExecutableCandidates.has(candidate)) continue;
     try {
       accessSync(candidate, fsConstants.X_OK);
-      const resolved = realpathSync(candidate);
-      if (isWithin(path.resolve(candidate), root) || isWithin(resolved, root)) {
-        continue;
-      }
-      if (!statSync(resolved).isFile()) continue;
-      return resolved;
+      return trustedExecutableCandidate(
+        candidate,
+        root,
+        path.basename(command) || "executable",
+        { allowSnapshot: path.basename(command) !== "git" },
+      );
     } catch {
+      rejectedTrustedExecutableCandidates.add(candidate);
       // Keep searching a bounded, absolute PATH for an external executable.
     }
   }
@@ -347,18 +943,19 @@ function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
 
 function trustedCurrentNode(rejectRoot) {
   const root = realpathSync(rejectRoot);
-  const resolved = realpathSync(process.execPath);
-  accessSync(resolved, fsConstants.X_OK);
-  if (isWithin(resolved, root) || !statSync(resolved).isFile()) {
+  try {
+    accessSync(process.execPath, fsConstants.X_OK);
+    return trustedExecutableCandidate(process.execPath, root, "node");
+  } catch {
     throw new Error("node runtime is not available outside the reviewed repo");
   }
-  return resolved;
 }
 
 function trustedToolPath(directory, commands) {
   const binDir = path.join(directory, "trusted-bin");
   mkdirSync(binDir);
   for (const [name, executable] of Object.entries(commands)) {
+    revalidateTrustedExecutableSnapshot(executable);
     symlinkSync(executable, path.join(binDir, name));
   }
   return [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(
@@ -400,7 +997,7 @@ function runGitBufferResult(
 ) {
   const rejectRoot = realpathSync(repo);
   const git = resolveTrustedCommand("git", rejectRoot);
-  const result = spawnSync(
+  const result = spawnTrustedSync(
     git,
     ["-c", "core.fsmonitor=false", "-c", "diff.renames=false", ...gitArgs],
     {
@@ -468,7 +1065,7 @@ function repoRoot() {
   const cwd = realpathSync(process.cwd());
   const rejectRoot = checkoutRootFrom(cwd);
   const git = resolveTrustedCommand("git", rejectRoot);
-  const result = spawnSync(
+  const result = spawnTrustedSync(
     git,
     ["-c", "core.fsmonitor=false", "rev-parse", "--show-toplevel"],
     {
@@ -522,7 +1119,7 @@ function detectPrBase(repo, branch) {
     if (process.env[key]) env[key] = process.env[key];
   }
   try {
-    const repoResult = spawnSync(
+    const repoResult = spawnTrustedSync(
       gh,
       ["repo", "view", repositorySlug, "--json", "owner"],
       {
@@ -556,7 +1153,7 @@ function detectPrBase(repo, branch) {
         "failed to inspect repository owner: gh omitted owner.login",
       );
     }
-    const result = spawnSync(
+    const result = spawnTrustedSync(
       gh,
       [
         "pr",
@@ -1062,14 +1659,30 @@ ${chunk.content}`;
 
 function safeTempRoot(repo) {
   const root = realpathSync(tmpdir());
-  if (!statSync(root).isDirectory()) {
-    throw new Error("temporary root must be a directory");
-  }
   if (isWithin(root, realpathSync(repo))) {
     throw new Error(
       "temporary directory must be outside the reviewed repository; relocate TMPDIR",
     );
   }
+  const ancestryBefore = inspectTrustedDirectoryAncestry(root);
+  for (const {
+    path: directory,
+    fileStat,
+    writeGrantingAcl,
+  } of ancestryBefore) {
+    if (writeGrantingAcl) {
+      throw new Error(
+        `write-granting ACL is not allowed on temporary directory ancestry: ${directory}`,
+      );
+    }
+    if (sharedWritable(fileStat) && (fileStat.mode & 0o1000n) === 0n) {
+      throw new Error(
+        `shared-writable temporary directory ancestry must be sticky: ${directory}`,
+      );
+    }
+  }
+  const ancestryAfter = inspectTrustedDirectoryAncestry(root);
+  assertStableDirectoryAncestry(ancestryBefore, ancestryAfter);
   return root;
 }
 
@@ -1235,6 +1848,7 @@ function runCommandWithInput(
   { env, label, stream = false, timeoutSeconds = 1800 } = {},
 ) {
   return new Promise((resolve, reject) => {
+    revalidateAllTrustedExecutableSnapshots();
     const child = spawn(command, commandArgs, {
       cwd,
       env,
@@ -1432,7 +2046,7 @@ function compareVersion(left, right) {
 }
 
 function ensureClaudeIsolationSupported(claude, repo, env, cwd) {
-  const versionResult = spawnSync(claude, ["--version"], {
+  const versionResult = spawnTrustedSync(claude, ["--version"], {
     cwd,
     env,
     encoding: "utf8",
@@ -1451,7 +2065,7 @@ function ensureClaudeIsolationSupported(claude, repo, env, cwd) {
       "claude engine requires Claude Code >= 2.1.169 for --safe-mode",
     );
   }
-  const helpResult = spawnSync(claude, ["--help"], {
+  const helpResult = spawnTrustedSync(claude, ["--help"], {
     cwd,
     env,
     encoding: "utf8",

@@ -1,5 +1,39 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
 set -euo pipefail
+
+# Privileged Bash mode suppresses BASH_ENV and imported shell functions before
+# this file starts. Strip child-runtime injection knobs before launching even
+# fixed-path system utilities.
+unset \
+  BASH_ENV \
+  ENV \
+  NODE_OPTIONS \
+  NODE_PATH \
+  PERL5LIB \
+  PERL5OPT \
+  PYTHONHOME \
+  PYTHONPATH \
+  RUBYLIB \
+  RUBYOPT \
+  LD_AUDIT \
+  LD_DEBUG \
+  LD_DEBUG_OUTPUT \
+  LD_LIBRARY_PATH \
+  LD_ORIGIN_PATH \
+  LD_PRELOAD \
+  LD_PROFILE \
+  LD_SHOW_AUXV \
+  DYLD_FALLBACK_FRAMEWORK_PATH \
+  DYLD_FALLBACK_LIBRARY_PATH \
+  DYLD_FRAMEWORK_PATH \
+  DYLD_IMAGE_SUFFIX \
+  DYLD_INSERT_LIBRARIES \
+  DYLD_LIBRARY_PATH \
+  DYLD_PRINT_TO_FILE \
+  DYLD_ROOT_PATH \
+  DYLD_SHARED_REGION \
+  DYLD_VERSIONED_FRAMEWORK_PATH \
+  DYLD_VERSIONED_LIBRARY_PATH
 
 script_path="${BASH_SOURCE[0]}"
 script_parent="${script_path%/*}"
@@ -68,108 +102,561 @@ external_command_path="$(build_external_path)"
 PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH
 
-realpath_bin=""
-for realpath_candidate in /usr/bin/realpath /bin/realpath; do
-  if [[ -x "$realpath_candidate" ]]; then
-    realpath_bin="$realpath_candidate"
-    break
-  fi
-done
-if [[ -z "$realpath_bin" ]]; then
-  IFS=: read -r -a realpath_entries <<<"$external_command_path"
-  for realpath_entry in "${realpath_entries[@]}"; do
-    realpath_candidate="$realpath_entry/realpath"
-    [[
-      "$realpath_candidate" == /* &&
-        -f "$realpath_candidate" &&
-        -x "$realpath_candidate" &&
-        ! -L "$realpath_candidate"
-    ]] || continue
-    path_is_rejected "$realpath_candidate" && continue
-    realpath_entry="$(cd -P -- "$realpath_entry" 2>/dev/null && pwd -P)" ||
-      continue
-    realpath_candidate="$realpath_entry/realpath"
-    [[
-      -f "$realpath_candidate" &&
-        -x "$realpath_candidate" &&
-        ! -L "$realpath_candidate"
-    ]] || continue
-    path_is_rejected "$realpath_candidate" && continue
-    realpath_bin="$realpath_candidate"
-    break
-  done
+if [[
+  ! -x /usr/bin/env ||
+    ! -x /usr/bin/perl ||
+    ! -x /usr/bin/mktemp ||
+    ! -x /usr/bin/uname ||
+    ! -x /bin/chmod ||
+    ! -x /bin/ls ||
+    ! -x /bin/mv ||
+    ! -x /bin/rm
+]]; then
+  echo "agent:autoreview requires trusted system env, perl, mktemp, uname, chmod, ls, mv, and rm executables" >&2
+  exit 127
 fi
+
+system_perl() {
+  /usr/bin/env -i \
+    PATH=/usr/bin:/bin \
+    LC_ALL=C \
+    /usr/bin/perl "$@"
+}
+
+# `system_perl -e` receives literal Perl source; its `$...` forms must not
+# expand in Bash.
+canonicalize_external_path() {
+  # shellcheck disable=SC2016
+  system_perl -MCwd=abs_path -e '
+    use strict;
+    use warnings;
+    my $resolved = abs_path($ARGV[0]);
+    exit 1 if !defined($resolved) || $resolved =~ /[\r\n\0]/;
+    print "$resolved\n";
+  ' "$1"
+}
+
+trusted_shared_temp_root() {
+  # shellcheck disable=SC2016
+  system_perl -MCwd=abs_path -MFcntl=:mode -MFile::Basename=dirname -e '
+    use strict;
+    use warnings;
+    my ($requested, $euid) = @ARGV;
+    my $current = abs_path($requested);
+    exit 1 if !defined($current) || $current =~ /[\r\n\0]/;
+    my $root = $current;
+    while (1) {
+      my @stat = lstat($current);
+      exit 1 if !@stat || !S_ISDIR($stat[2]) || S_ISLNK($stat[2]);
+      exit 1 if $stat[4] != 0 && $stat[4] != $euid;
+      my $shared_writable = ($stat[2] & 0022) != 0;
+      my $sticky = ($stat[2] & 01000) != 0;
+      exit 1 if $shared_writable && !$sticky;
+      my $parent = dirname($current);
+      last if $parent eq $current;
+      $current = $parent;
+    }
+    print "$root\n";
+  ' "$1" "$EUID"
+}
+
+path_acl_is_trusted() {
+  local candidate="$1"
+  local acl_output
+  local line
+  local first_line=1
+  [[ "$(/usr/bin/uname -s)" == "Darwin" ]] || return 0
+  acl_output="$(
+    /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C \
+      /bin/ls -lde "$candidate" 2>/dev/null
+  )" || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$first_line" -eq 1 ]]; then
+      first_line=0
+      continue
+    fi
+    if [[
+      "$line" =~ [[:space:]]allow[[:space:]].*(write|append|delete|delete_child|writeattr|writeextattr|writesecurity|chown)(,|[[:space:]]|$)
+    ]]; then
+      return 1
+    fi
+  done <<<"$acl_output"
+}
+
+command_path_is_strictly_trusted() {
+  local candidate="$1"
+  local current
+  local parent
+  # shellcheck disable=SC2016
+  system_perl -MFcntl=:mode -MFile::Basename=dirname -e '
+    use strict;
+    use warnings;
+    my ($candidate, $euid) = @ARGV;
+    my @before = lstat($candidate);
+    exit 1 if !@before || !S_ISREG($before[2]) || S_ISLNK($before[2]);
+    exit 1 if ($before[4] != 0 && $before[4] != $euid) || ($before[2] & 06022);
+    my $current = dirname($candidate);
+    while (1) {
+      my @stat = lstat($current);
+      exit 1 if !@stat || !S_ISDIR($stat[2]) || S_ISLNK($stat[2]);
+      exit 1 if ($stat[4] != 0 && $stat[4] != $euid) || ($stat[2] & 0022);
+      my $parent = dirname($current);
+      last if $parent eq $current;
+      $current = $parent;
+    }
+    my @after = lstat($candidate);
+    exit 1 if !@after;
+    for my $index (0, 1, 2, 3, 4, 7, 9, 10) {
+      exit 1 if $before[$index] != $after[$index];
+    }
+  ' "$candidate" "$EUID" || return 1
+  current="$candidate"
+  while true; do
+    path_acl_is_trusted "$current" || return 1
+    [[ "$current" != "/" ]] || break
+    parent="${current%/*}"
+    [[ -n "$parent" ]] || parent="/"
+    current="$parent"
+  done
+}
+
+trusted_temp_root="$(trusted_shared_temp_root /tmp || true)"
+if [[ -n "$trusted_temp_root" ]]; then
+  trusted_temp_ancestor="$trusted_temp_root"
+  while true; do
+    if ! path_acl_is_trusted "$trusted_temp_ancestor"; then
+      trusted_temp_root=""
+      break
+    fi
+    [[ "$trusted_temp_ancestor" != "/" ]] || break
+    trusted_temp_ancestor="${trusted_temp_ancestor%/*}"
+    [[ -n "$trusted_temp_ancestor" ]] || trusted_temp_ancestor="/"
+  done
+  unset trusted_temp_ancestor
+fi
+if [[ -z "$trusted_temp_root" ]]; then
+  echo "agent:autoreview requires a trusted sticky or private system temporary directory" >&2
+  exit 127
+fi
+command_runtime_dir="$(
+  /usr/bin/mktemp -d \
+    "$trusted_temp_root/agent-autoreview-command-runtime.XXXXXX" \
+    2>/dev/null || true
+)"
+if [[ -z "$command_runtime_dir" || ! -d "$command_runtime_dir" || -L "$command_runtime_dir" ]]; then
+  echo "agent:autoreview failed to create a private external-command runtime" >&2
+  exit 127
+fi
+/bin/chmod 0700 "$command_runtime_dir"
+command_runtime_dir="$(cd "$command_runtime_dir" && pwd -P)"
+if ! path_acl_is_trusted "$command_runtime_dir"; then
+  /bin/rm -rf -- "$command_runtime_dir"
+  echo "agent:autoreview failed to create an ACL-private external-command runtime" >&2
+  exit 127
+fi
+command_runtime_identity="$({
+  # shellcheck disable=SC2016
+  system_perl -MFcntl=:mode -e '
+    use strict;
+    use warnings;
+    my ($directory, $euid) = @ARGV;
+    my @stat = lstat($directory);
+    exit 1 if !@stat || !S_ISDIR($stat[2]) || S_ISLNK($stat[2]);
+    exit 1 if $stat[4] != $euid || ($stat[2] & 0077);
+    print join(":", @stat[0, 1, 2, 4]), "\n";
+  ' "$command_runtime_dir" "$EUID"
+} 2>/dev/null)" || command_runtime_identity=""
+if [[ -z "$command_runtime_identity" ]]; then
+  /bin/rm -rf -- "$command_runtime_dir"
+  echo "agent:autoreview failed to pin the private external-command runtime" >&2
+  exit 127
+fi
+
+cleanup_command_runtime() {
+  local current_identity=""
+  if [[
+    -n "${command_runtime_dir:-}" &&
+      "$command_runtime_dir" == "$trusted_temp_root"/agent-autoreview-command-runtime.* &&
+      -d "$command_runtime_dir" &&
+      ! -L "$command_runtime_dir"
+  ]]; then
+    current_identity="$({
+      # shellcheck disable=SC2016
+      system_perl -e '
+        use strict;
+        use warnings;
+        my @stat = lstat($ARGV[0]);
+        exit 1 if !@stat;
+        print join(":", @stat[0, 1, 2, 4]), "\n";
+      ' "$command_runtime_dir"
+    } 2>/dev/null)" || current_identity=""
+    if [[ "$current_identity" == "$command_runtime_identity" ]]; then
+      /bin/rm -rf -- "$command_runtime_dir"
+    else
+      echo "agent:autoreview: leaving changed external-command runtime for identity-safe cleanup: $command_runtime_dir" >&2
+    fi
+  fi
+}
+trap cleanup_command_runtime EXIT
+
+snapshot_path_is_trusted() {
+  local candidate="$1"
+  local current
+  local parent
+  # shellcheck disable=SC2016
+  system_perl -MDigest::SHA -MFcntl=:DEFAULT,:mode -MFile::Basename=dirname -e '
+    use strict;
+    use warnings;
+    my ($runtime, $expected_runtime, $candidate, $euid) = @ARGV;
+    exit 1 if index($candidate, "$runtime/") != 0;
+    my @runtime_stat = lstat($runtime);
+    exit 1 if !@runtime_stat || !S_ISDIR($runtime_stat[2]) || S_ISLNK($runtime_stat[2]);
+    exit 1 if $runtime_stat[4] != $euid || ($runtime_stat[2] & 0077);
+    exit 1 if join(":", @runtime_stat[0, 1, 2, 4]) ne $expected_runtime;
+    my $current = dirname($candidate);
+    while ($current ne $runtime) {
+      exit 1 if index($current, "$runtime/") != 0;
+      my @directory_stat = lstat($current);
+      exit 1 if !@directory_stat || !S_ISDIR($directory_stat[2]) || S_ISLNK($directory_stat[2]);
+      exit 1 if $directory_stat[4] != $euid || ($directory_stat[2] & 0077);
+      $current = dirname($current);
+    }
+    my @file_stat = lstat($candidate);
+    exit 1 if !@file_stat || !S_ISREG($file_stat[2]) || S_ISLNK($file_stat[2]);
+    exit 1 if $file_stat[4] != $euid || $file_stat[3] != 1;
+    exit 1 if ($file_stat[2] & 07777) != 0500;
+    my ($expected_digest) = $candidate =~ /\.([0-9a-f]{64})$/;
+    exit 1 if !defined($expected_digest);
+    sysopen(my $input, $candidate, O_RDONLY | O_NOFOLLOW) or exit 1;
+    binmode($input);
+    my $digest = Digest::SHA->new(256);
+    my $buffer;
+    while (1) {
+      my $read = sysread($input, $buffer, 65536);
+      exit 1 if !defined($read);
+      last if $read == 0;
+      $digest->add(substr($buffer, 0, $read));
+    }
+    close($input) or exit 1;
+    exit 1 if $digest->hexdigest ne $expected_digest;
+  ' "$command_runtime_dir" "$command_runtime_identity" "$candidate" "$EUID" || return 1
+  current="$candidate"
+  while true; do
+    path_acl_is_trusted "$current" || return 1
+    [[ "$current" != "$command_runtime_dir" ]] || break
+    parent="${current%/*}"
+    [[ -n "$parent" ]] || return 1
+    current="$parent"
+  done
+}
+
+native_executable_has_system_closure() {
+  local candidate="$1"
+  local libraries
+  local load_commands
+  local line
+  local trimmed
+  local dependency
+  local current_load_command=""
+  local saw_system_dylinker=0
+  local library_line_pattern='^(.+) \(compatibility version [^,]+, current version [^)]+\)$'
+  local dylinker_line_pattern='^name (.+) \(offset [0-9]+\)$'
+  [[ "$(/usr/bin/uname -s)" == "Darwin" && -x /usr/bin/otool ]] || return 1
+  libraries="$(
+    /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C \
+      /usr/bin/otool -L "$candidate" 2>/dev/null
+  )" || return 1
+  local saw_header=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == $'\t'* ]]; then
+      dependency="${line#$'\t'}"
+      [[ "$dependency" =~ $library_line_pattern ]] || return 1
+      dependency="${BASH_REMATCH[1]}"
+      case "$dependency/" in
+        *"/../"* | *"/./"* | *"//"*) return 1 ;;
+      esac
+      case "$dependency" in
+        /usr/lib/* | /System/Library/*) ;;
+        *) return 1 ;;
+      esac
+    elif [[ "$line" == "$candidate"*: ]]; then
+      saw_header=1
+    elif [[ -n "$line" ]]; then
+      return 1
+    fi
+  done <<<"$libraries"
+  [[ "$saw_header" -eq 1 ]] || return 1
+  load_commands="$(
+    /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C \
+      /usr/bin/otool -l "$candidate" 2>/dev/null
+  )" || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    case "$trimmed" in
+      "cmd LC_RPATH" | "cmd LC_DYLD_ENVIRONMENT")
+        return 1
+        ;;
+      "cmd "*)
+        current_load_command="${trimmed#cmd }"
+        ;;
+      "name "*)
+        if [[ "$current_load_command" == "LC_LOAD_DYLINKER" ]]; then
+          [[ "$trimmed" =~ $dylinker_line_pattern ]] || return 1
+          dependency="${BASH_REMATCH[1]}"
+          [[ "$dependency" == "/usr/lib/dyld" ]] || return 1
+          saw_system_dylinker=1
+        fi
+        ;;
+    esac
+  done <<<"$load_commands"
+  [[ "$saw_system_dylinker" -eq 1 ]] || return 1
+  return 0
+}
+
+snapshot_has_safe_native_closure() {
+  local candidate="$1"
+  snapshot_path_is_trusted "$candidate" || return 1
+  native_executable_has_system_closure "$candidate" || return 1
+  snapshot_path_is_trusted "$candidate"
+}
+
+snapshot_external_executable() {
+  local source="$1"
+  local command_name="$2"
+  local snapshot_dir
+  local destination
+  local digest
+  [[
+    "$command_name" == "node" ||
+      "$command_name" == "gh" ||
+      "$command_name" == "volta"
+  ]] || return 1
+  path_acl_is_trusted "$source" || return 1
+  snapshot_dir="$(
+    /usr/bin/mktemp -d \
+      "$command_runtime_dir/$command_name.XXXXXX" \
+      2>/dev/null || true
+  )"
+  [[ -n "$snapshot_dir" && -d "$snapshot_dir" && ! -L "$snapshot_dir" ]] || return 1
+  /bin/chmod 0700 "$snapshot_dir"
+  destination="$snapshot_dir/$command_name"
+  # shellcheck disable=SC2016
+  if ! digest="$(system_perl -MDigest::SHA -MFcntl=:DEFAULT,:mode -e '
+    use strict;
+    use warnings;
+    my ($source, $destination, $euid) = @ARGV;
+    sysopen(my $input, $source, O_RDONLY | O_NOFOLLOW) or exit 1;
+    binmode($input);
+    my @before = stat($input);
+    exit 1 if !@before || !S_ISREG($before[2]) || $before[3] != 1;
+    exit 1 if ($before[4] != 0 && $before[4] != $euid) || ($before[2] & 06022);
+    exit 1 if ($before[2] & 0111) == 0;
+    sysopen(my $output, $destination, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600) or exit 1;
+    binmode($output);
+    my $source_digest = Digest::SHA->new(256);
+    my $buffer;
+    while (1) {
+      my $read = sysread($input, $buffer, 65536);
+      exit 1 if !defined($read);
+      last if $read == 0;
+      $source_digest->add(substr($buffer, 0, $read));
+      my $offset = 0;
+      while ($offset < $read) {
+        my $written = syswrite($output, $buffer, $read - $offset, $offset);
+        exit 1 if !defined($written) || $written == 0;
+        $offset += $written;
+      }
+    }
+    close($output) or exit 1;
+    chmod(0500, $destination) == 1 or exit 1;
+    my @after = stat($input);
+    exit 1 if !@after;
+    for my $index (0, 1, 2, 3, 4, 7, 9, 10) {
+      exit 1 if $before[$index] != $after[$index];
+    }
+    my @published = lstat($destination);
+    exit 1 if !@published || !S_ISREG($published[2]) || S_ISLNK($published[2]);
+    exit 1 if $published[4] != $euid || $published[3] != 1;
+    exit 1 if ($published[2] & 07777) != 0500 || $published[7] != $before[7];
+    sysopen(my $published_input, $destination, O_RDONLY | O_NOFOLLOW) or exit 1;
+    binmode($published_input);
+    my $published_digest = Digest::SHA->new(256);
+    while (1) {
+      my $read = sysread($published_input, $buffer, 65536);
+      exit 1 if !defined($read);
+      last if $read == 0;
+      $published_digest->add(substr($buffer, 0, $read));
+    }
+    close($published_input) or exit 1;
+    my $source_hex = $source_digest->hexdigest;
+    exit 1 if $published_digest->hexdigest ne $source_hex;
+    print "$source_hex\n";
+  ' "$source" "$destination" "$EUID")"; then
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  fi
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  }
+  /bin/mv "$destination" "$destination.$digest"
+  destination="$destination.$digest"
+  if ! path_acl_is_trusted "$source" ||
+    ! snapshot_has_safe_native_closure "$destination"; then
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  fi
+  printf '%s\n' "$destination"
+}
 
 resolve_external_command() {
   local command_name="$1"
   local path_entries=()
   local path_entry
   local candidate
-  local candidate_name
   local resolved
+  local fallback_candidates=()
   IFS=: read -r -a path_entries <<<"$external_command_path"
   for path_entry in "${path_entries[@]}"; do
     candidate="$path_entry/$command_name"
     [[ "$candidate" == /* && -f "$candidate" && -x "$candidate" ]] || continue
     path_is_rejected "$candidate" && continue
-    candidate_name="${candidate##*/}"
-    if [[ -n "$realpath_bin" ]]; then
-      resolved="$("$realpath_bin" "$candidate" 2>/dev/null)" || continue
-    else
-      [[ ! -L "$candidate" ]] || continue
-      resolved="$path_entry/$candidate_name"
-    fi
+    resolved="$(canonicalize_external_path "$candidate" 2>/dev/null)" || continue
     [[ "$resolved" == /* && -f "$resolved" && -x "$resolved" ]] || continue
     path_is_rejected "$resolved" && continue
-    printf '%s\n' "$resolved"
-    return 0
+    if command_path_is_strictly_trusted "$resolved"; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+    fallback_candidates+=("$resolved")
   done
+  if [[ "$command_name" == "gh" ]]; then
+    for resolved in "${fallback_candidates[@]+"${fallback_candidates[@]}"}"; do
+      if resolved="$(snapshot_external_executable "$resolved" "$command_name")"; then
+        printf '%s\n' "$resolved"
+        return 0
+      fi
+    done
+  fi
   return 1
+}
+
+native_node_candidate_is_trusted() {
+  local candidate="$1"
+  case "$(/usr/bin/uname -s)" in
+    Darwin)
+      native_executable_has_system_closure "$candidate"
+      ;;
+    Linux)
+      # shellcheck disable=SC2016
+      system_perl -e '
+        use strict;
+        use warnings;
+        open(my $input, "<", $ARGV[0]) or exit 1;
+        binmode($input);
+        read($input, my $prefix, 4) == 4 or exit 1;
+        exit 1 if unpack("H*", $prefix) ne "7f454c46";
+      ' "$candidate"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+trusted_login_home() {
+  # shellcheck disable=SC2016
+  system_perl -MCwd=abs_path -e '
+    use strict;
+    use warnings;
+    my @entry = getpwuid($>);
+    exit 1 if !@entry;
+    my $home = abs_path($entry[7]);
+    exit 1 if !defined($home) || $home !~ m{^/} || $home =~ /[\r\n\0]/;
+    print "$home\n";
+  '
+}
+
+resolve_volta_node() {
+  local shim="$1"
+  local volta_candidate
+  local volta_bin=""
+  local resolved
+  local login_home
+  local executable
+  local volta_candidates=("${shim%/volta-shim}/volta")
+  if [[ "$shim" == */bin/volta-shim ]]; then
+    volta_candidates+=("${shim%/bin/volta-shim}/libexec/bin/volta")
+  fi
+  for volta_candidate in "${volta_candidates[@]}"; do
+    [[ -f "$volta_candidate" && -x "$volta_candidate" ]] || continue
+    resolved="$(canonicalize_external_path "$volta_candidate" 2>/dev/null)" || continue
+    path_is_rejected "$resolved" && continue
+    if command_path_is_strictly_trusted "$resolved" &&
+      native_node_candidate_is_trusted "$resolved"; then
+      volta_bin="$resolved"
+      break
+    fi
+    if volta_bin="$(snapshot_external_executable "$resolved" volta)"; then
+      break
+    fi
+    volta_bin=""
+  done
+  [[ -n "$volta_bin" ]] || return 1
+  snapshot_path_is_trusted "$volta_bin" 2>/dev/null ||
+    command_path_is_strictly_trusted "$volta_bin" || return 1
+  login_home="$(trusted_login_home)" || return 1
+  path_is_rejected "$login_home" && return 1
+  if ! executable="$(
+    /usr/bin/env -i \
+      "HOME=$login_home" \
+      PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+      "$volta_bin" which node 2>/dev/null
+  )"; then
+    return 1
+  fi
+  [[
+    "$executable" == /* &&
+      "$executable" != *$'\n'* &&
+      -f "$executable" &&
+      -x "$executable"
+  ]] || return 1
+  resolved="$(canonicalize_external_path "$executable" 2>/dev/null)" || return 1
+  path_is_rejected "$resolved" && return 1
+  command_path_is_strictly_trusted "$resolved" || return 1
+  native_node_candidate_is_trusted "$resolved" || return 1
+  printf '%s\n' "$resolved"
 }
 
 resolve_node_command() {
   local path_entries=()
   local path_entry
   local candidate
-  local executable
-  local executable_dir
-  local executable_name
   local resolved
+  local volta_shims=()
   IFS=: read -r -a path_entries <<<"$external_command_path"
   for path_entry in "${path_entries[@]}"; do
     candidate="$path_entry/node"
     [[ "$candidate" == /* && -f "$candidate" && -x "$candidate" ]] || continue
     path_is_rejected "$candidate" && continue
-    if [[ -n "$realpath_bin" ]]; then
-      resolved="$("$realpath_bin" "$candidate" 2>/dev/null)" || continue
-    else
-      [[ ! -L "$candidate" ]] || continue
-      resolved="$candidate"
-    fi
+    resolved="$(canonicalize_external_path "$candidate" 2>/dev/null)" || continue
     [[ "$resolved" == /* && -f "$resolved" && -x "$resolved" ]] || continue
     path_is_rejected "$resolved" && continue
-    if ! executable="$(
-      unset NODE_OPTIONS NODE_PATH
-      exec -a node "$resolved" -p 'process.execPath' 2>/dev/null
-    )"; then
+    if [[ "${resolved##*/}" == "volta-shim" ]]; then
+      volta_shims+=("$resolved")
       continue
     fi
-    [[ "$executable" == /* && -f "$executable" && -x "$executable" ]] || continue
-    if [[ -n "$realpath_bin" ]]; then
-      resolved="$("$realpath_bin" "$executable" 2>/dev/null)" || continue
-    else
-      [[ ! -L "$executable" ]] || continue
-      executable_dir="${executable%/*}"
-      executable_name="${executable##*/}"
-      executable_dir="$(
-        cd -P -- "$executable_dir" 2>/dev/null && pwd -P
-      )" || continue
-      resolved="$executable_dir/$executable_name"
+    if command_path_is_strictly_trusted "$resolved" &&
+      native_node_candidate_is_trusted "$resolved"; then
+      printf '%s\n' "$resolved"
+      return 0
     fi
-    [[ "$resolved" == /* && -f "$resolved" && -x "$resolved" ]] || continue
-    path_is_rejected "$resolved" && continue
-    printf '%s\n' "$resolved"
-    return 0
+  done
+  for resolved in "${volta_shims[@]+"${volta_shims[@]}"}"; do
+    if resolved="$(resolve_volta_node "$resolved")"; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
   done
   return 1
 }
@@ -198,10 +685,69 @@ if [[ -z "$node_bin" || ! -x "$node_bin" ]]; then
   exit 127
 fi
 
+command_file_identity() {
+  # shellcheck disable=SC2016
+  system_perl -MFcntl=:mode -e '
+    use strict;
+    use warnings;
+    my @stat = lstat($ARGV[0]);
+    exit 1 if !@stat || !S_ISREG($stat[2]) || S_ISLNK($stat[2]);
+    print join(":", @stat[0, 1, 2, 3, 4, 7, 9, 10]), "\n";
+  ' "$1"
+}
+
+git_bin_identity="$(command_file_identity "$git_bin")"
+node_bin_identity="$(command_file_identity "$node_bin")"
+
 prepared_helper_override=""
 
+resolved_command_is_trusted() {
+  local candidate="$1"
+  if [[ "$candidate" == "$command_runtime_dir"/* ]]; then
+    snapshot_path_is_trusted "$candidate"
+  elif [[ "$candidate" == "$git_bin" ]]; then
+    [[ "$(command_file_identity "$candidate" 2>/dev/null || true)" == "$git_bin_identity" ]]
+  elif [[ "$candidate" == "$node_bin" ]]; then
+    [[ "$(command_file_identity "$candidate" 2>/dev/null || true)" == "$node_bin_identity" ]]
+  else
+    command_path_is_strictly_trusted "$candidate"
+  fi
+}
+
+run_trusted_external() {
+  local executable="$1"
+  shift
+  resolved_command_is_trusted "$executable" || {
+    echo "agent:autoreview: resolved executable changed before launch: $executable" >&2
+    return 127
+  }
+  /usr/bin/env \
+    -u NODE_OPTIONS \
+    -u NODE_PATH \
+    -u LD_AUDIT \
+    -u LD_DEBUG \
+    -u LD_DEBUG_OUTPUT \
+    -u LD_PRELOAD \
+    -u LD_LIBRARY_PATH \
+    -u LD_ORIGIN_PATH \
+    -u LD_PROFILE \
+    -u LD_SHOW_AUXV \
+    -u DYLD_INSERT_LIBRARIES \
+    -u DYLD_LIBRARY_PATH \
+    -u DYLD_FRAMEWORK_PATH \
+    -u DYLD_FALLBACK_LIBRARY_PATH \
+    -u DYLD_FALLBACK_FRAMEWORK_PATH \
+    -u DYLD_IMAGE_SUFFIX \
+    -u DYLD_PRINT_TO_FILE \
+    -u DYLD_ROOT_PATH \
+    -u DYLD_SHARED_REGION \
+    -u DYLD_VERSIONED_FRAMEWORK_PATH \
+    -u DYLD_VERSIONED_LIBRARY_PATH \
+    "$executable" "$@"
+}
+
 run_trusted_node() {
-  /usr/bin/env -u NODE_OPTIONS -u NODE_PATH "$node_bin" "$@"
+  run_trusted_external "$node_bin" "$@"
 }
 
 run_helper() {
@@ -211,25 +757,66 @@ run_helper() {
   elif [[ "$helper" == "$default_helper" ]]; then
     PATH="$external_command_path" run_trusted_node "$helper" "$@"
   else
-    PATH="$external_command_path" "$helper" "$@"
+    PATH="$external_command_path" /usr/bin/env \
+      -u NODE_OPTIONS \
+      -u NODE_PATH \
+      -u LD_AUDIT \
+      -u LD_DEBUG \
+      -u LD_DEBUG_OUTPUT \
+      -u LD_PRELOAD \
+      -u LD_LIBRARY_PATH \
+      -u LD_ORIGIN_PATH \
+      -u LD_PROFILE \
+      -u LD_SHOW_AUXV \
+      -u DYLD_INSERT_LIBRARIES \
+      -u DYLD_LIBRARY_PATH \
+      -u DYLD_FRAMEWORK_PATH \
+      -u DYLD_FALLBACK_LIBRARY_PATH \
+      -u DYLD_FALLBACK_FRAMEWORK_PATH \
+      -u DYLD_IMAGE_SUFFIX \
+      -u DYLD_PRINT_TO_FILE \
+      -u DYLD_ROOT_PATH \
+      -u DYLD_SHARED_REGION \
+      -u DYLD_VERSIONED_FRAMEWORK_PATH \
+      -u DYLD_VERSIONED_LIBRARY_PATH \
+      "$helper" "$@"
   fi
 }
 
 run_external_command() {
-  PATH="$external_command_path" "$@"
+  PATH="$external_command_path" run_trusted_external "$@"
 }
 
 exec_helper() {
   if [[ -n "$prepared_helper_override" ]]; then
-    PATH="$external_command_path" exec /usr/bin/env \
-      -u NODE_OPTIONS -u NODE_PATH \
-      "$node_bin" "$prepared_helper_override" "$@"
+    PATH="$external_command_path" run_trusted_node \
+      "$prepared_helper_override" "$@"
   elif [[ "$helper" == "$default_helper" ]]; then
-    PATH="$external_command_path" exec /usr/bin/env \
-      -u NODE_OPTIONS -u NODE_PATH \
-      "$node_bin" "$helper" "$@"
+    PATH="$external_command_path" run_trusted_node "$helper" "$@"
   else
-    PATH="$external_command_path" exec "$helper" "$@"
+    PATH="$external_command_path" /usr/bin/env \
+      -u NODE_OPTIONS \
+      -u NODE_PATH \
+      -u LD_AUDIT \
+      -u LD_DEBUG \
+      -u LD_DEBUG_OUTPUT \
+      -u LD_PRELOAD \
+      -u LD_LIBRARY_PATH \
+      -u LD_ORIGIN_PATH \
+      -u LD_PROFILE \
+      -u LD_SHOW_AUXV \
+      -u DYLD_INSERT_LIBRARIES \
+      -u DYLD_LIBRARY_PATH \
+      -u DYLD_FRAMEWORK_PATH \
+      -u DYLD_FALLBACK_LIBRARY_PATH \
+      -u DYLD_FALLBACK_FRAMEWORK_PATH \
+      -u DYLD_IMAGE_SUFFIX \
+      -u DYLD_PRINT_TO_FILE \
+      -u DYLD_ROOT_PATH \
+      -u DYLD_SHARED_REGION \
+      -u DYLD_VERSIONED_FRAMEWORK_PATH \
+      -u DYLD_VERSIONED_LIBRARY_PATH \
+      "$helper" "$@"
   fi
 }
 
@@ -269,7 +856,15 @@ cleanup_prepare_staging() {
   fi
 }
 
-trap cleanup_prepare_staging EXIT
+cleanup_autoreview_runtime() {
+  local status=$?
+  trap - EXIT
+  cleanup_prepare_staging
+  cleanup_command_runtime
+  exit "$status"
+}
+
+trap cleanup_autoreview_runtime EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -325,7 +920,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-set -- "${forward_args[@]}"
+set -- "${forward_args[@]+"${forward_args[@]}"}"
 
 if [[ -n "$feedback_pr" && -z "$prepare_bundle_dir" ]]; then
   echo "agent:autoreview: --feedback-pr requires --prepare-bundle-dir" >&2
@@ -455,7 +1050,7 @@ detect_unique_pr_record() {
   if ! lookup="$(
     cd "$repo" &&
       unset GH_HOST GH_REPO &&
-      GH_PAGER=cat GH_PROMPT_DISABLED=1 "$gh_bin" pr list \
+      GH_PAGER=cat GH_PROMPT_DISABLED=1 run_trusted_external "$gh_bin" pr list \
         --repo "$repository_slug" \
         --head "$branch" \
         --state open \
@@ -507,7 +1102,7 @@ detect_unique_pr_record() {
       if ! repository_owner="$(
         cd "$repo" &&
           unset GH_HOST GH_REPO &&
-          GH_PAGER=cat GH_PROMPT_DISABLED=1 "$gh_bin" repo view \
+          GH_PAGER=cat GH_PROMPT_DISABLED=1 run_trusted_external "$gh_bin" repo view \
             "$repository_slug" \
             --json owner \
             --jq '.owner.login'
@@ -575,7 +1170,7 @@ git_output() {
     export GIT_PAGER=cat
     export GIT_TERMINAL_PROMPT=0
     export PAGER=cat
-    "$git_bin" \
+    run_trusted_external "$git_bin" \
       -c core.fsmonitor=false \
       -c core.quotePath=false \
       -c diff.renames=false \
@@ -902,6 +1497,14 @@ capture_feedback_state() {
     echo "agent:autoreview: PR feedback capture requires a trusted gh executable" >&2
     return 127
   fi
+  resolved_command_is_trusted "$gh_bin" || {
+    echo "agent:autoreview: resolved gh executable changed before feedback capture" >&2
+    return 127
+  }
+  resolved_command_is_trusted "$node_bin" || {
+    echo "agent:autoreview: resolved node executable changed before feedback capture" >&2
+    return 127
+  }
   mkdir "$trusted_bin"
   ln -s "$gh_bin" "$trusted_bin/gh"
   env_args=(
@@ -1286,7 +1889,8 @@ bundle_content_manifest() {
       }
     }
     process.stdout.write(`${digest}\n`);
-  ' "$root" "$expected_root_identity" "${ignored_root_entries[@]}"
+  ' "$root" "$expected_root_identity" \
+    "${ignored_root_entries[@]+"${ignored_root_entries[@]}"}"
 }
 
 publish_bundle_with_reservation() {
@@ -2157,9 +2761,9 @@ select_checklists() {
   local candidate
   local path
 
-  candidate="$(add_checklist "$repo" "docs/pr-checklists/recurring-review-patterns.md" "$source_ref" "${checklists[@]}" || true)"
+  candidate="$(add_checklist "$repo" "docs/pr-checklists/recurring-review-patterns.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
   [[ -n "$candidate" ]] && checklists+=("$candidate")
-  candidate="$(add_checklist "$repo" "docs/pr-checklists/review-prompt-exclusions.md" "$source_ref" "${checklists[@]}" || true)"
+  candidate="$(add_checklist "$repo" "docs/pr-checklists/review-prompt-exclusions.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
   [[ -n "$candidate" ]] && checklists+=("$candidate")
 
   while IFS= read -r path; do
@@ -2167,62 +2771,64 @@ select_checklists() {
 
     case "$path" in
       .github/workflows/*)
-        candidate="$(add_checklist "$repo" "docs/pr-checklists/ci-workflow-gates.md" "$source_ref" "${checklists[@]}" || true)"
+        candidate="$(add_checklist "$repo" "docs/pr-checklists/ci-workflow-gates.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
         [[ -n "$candidate" ]] && checklists+=("$candidate")
         ;;
     esac
 
     case "$path" in
       package.json|pnpm-lock.yaml|pnpm-workspace.yaml|.npmrc|patches/*|.dependency-cruiser.cjs|eslint.config.mjs|scripts/*)
-        candidate="$(add_checklist "$repo" "docs/pr-checklists/code-health.md" "$source_ref" "${checklists[@]}" || true)"
+        candidate="$(add_checklist "$repo" "docs/pr-checklists/code-health.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
         [[ -n "$candidate" ]] && checklists+=("$candidate")
         ;;
     esac
 
     case "$path" in
       indexer-envio/*|metrics-bridge/*|ui-dashboard/src/*)
-        candidate="$(add_checklist "$repo" "docs/pr-checklists/stateful-data-ui.md" "$source_ref" "${checklists[@]}" || true)"
+        candidate="$(add_checklist "$repo" "docs/pr-checklists/stateful-data-ui.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
         [[ -n "$candidate" ]] && checklists+=("$candidate")
         ;;
     esac
 
     case "$path" in
       ui-dashboard/src/*)
-        candidate="$(add_checklist "$repo" "docs/pr-checklists/swr-polling-hasura.md" "$source_ref" "${checklists[@]}" || true)"
+        candidate="$(add_checklist "$repo" "docs/pr-checklists/swr-polling-hasura.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
         [[ -n "$candidate" ]] && checklists+=("$candidate")
         ;;
     esac
 
     case "$path" in
       ui-dashboard/src/app/*|ui-dashboard/src/components/*)
-        candidate="$(add_checklist "$repo" "docs/pr-checklists/keyboard-a11y-controlled-widgets.md" "$source_ref" "${checklists[@]}" || true)"
+        candidate="$(add_checklist "$repo" "docs/pr-checklists/keyboard-a11y-controlled-widgets.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
         [[ -n "$candidate" ]] && checklists+=("$candidate")
         ;;
     esac
 
     case "$path" in
       ui-dashboard/src/app/*)
-        candidate="$(add_checklist "$repo" "docs/pr-checklists/dynamic-route-metadata.md" "$source_ref" "${checklists[@]}" || true)"
+        candidate="$(add_checklist "$repo" "docs/pr-checklists/dynamic-route-metadata.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
         [[ -n "$candidate" ]] && checklists+=("$candidate")
         ;;
     esac
 
     case "$path" in
       terraform/*|aegis/terraform/*|alerts/rules/*|scripts/deploy-*.sh)
-        candidate="$(add_checklist "$repo" "docs/pr-checklists/terraform-cloudrun.md" "$source_ref" "${checklists[@]}" || true)"
+        candidate="$(add_checklist "$repo" "docs/pr-checklists/terraform-cloudrun.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
         [[ -n "$candidate" ]] && checklists+=("$candidate")
         ;;
     esac
 
     case "$path" in
       *stryker*|.github/workflows/mutation-testing.yml|docs/mutation-testing.md)
-        candidate="$(add_checklist "$repo" "docs/pr-checklists/mutation-testing.md" "$source_ref" "${checklists[@]}" || true)"
+        candidate="$(add_checklist "$repo" "docs/pr-checklists/mutation-testing.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
         [[ -n "$candidate" ]] && checklists+=("$candidate")
         ;;
     esac
   done < "$changed_paths_file"
 
-  printf '%s\n' "${checklists[@]}"
+  if [[ "${#checklists[@]}" -gt 0 ]]; then
+    printf '%s\n' "${checklists[@]}"
+  fi
 }
 
 prepare_context_bundle() {
@@ -2585,7 +3191,7 @@ prepare_context_bundle() {
   esac
   local captured_checklist
   local captured_checklist_mode
-  for checklist in "${selected_checklists[@]}"; do
+  for checklist in "${selected_checklists[@]+"${selected_checklists[@]}"}"; do
     if ! captured_checklist_mode="$(
       git_blob_mode "$repo" "$protected_main_ref" "$checklist"
     )" ||
@@ -2602,7 +3208,11 @@ prepare_context_bundle() {
         "${protected_main_ref}:${checklist}"
     helper_args+=(--prompt-file "$captured_checklist")
   done
-  printf '%s\n' "${selected_checklists[@]}" >"$staging_dir/selected-checklists.txt"
+  if [[ "${#selected_checklists[@]}" -gt 0 ]]; then
+    printf '%s\n' "${selected_checklists[@]}" >"$staging_dir/selected-checklists.txt"
+  else
+    : >"$staging_dir/selected-checklists.txt"
+  fi
 
   if [[ "$pr_number" == "auto" ]]; then
     pr_number="$detected_pr_number"
@@ -2650,7 +3260,7 @@ prepare_context_bundle() {
     --bundle-output "$staging_dir/autoreview-prompt.md"
     --bundle-output-display "$bundle_dir/autoreview-prompt.md"
   )
-  if ! has_prepare_only "${helper_args[@]}"; then
+  if ! has_prepare_only "${helper_args[@]+"${helper_args[@]}"}"; then
     helper_args+=(--prepare-only)
   fi
 
@@ -2699,7 +3309,8 @@ prepare_context_bundle() {
     echo "agent:autoreview: failed to freeze wrapper-owned prepared-bundle evidence before helper execution" >&2
     return 1
   fi
-  (cd "$repo" && run_helper "${helper_args[@]}") >"$staging_dir/helper-output.txt"
+  (cd "$repo" && run_helper "${helper_args[@]+"${helper_args[@]}"}") \
+    >"$staging_dir/helper-output.txt"
   if ! post_helper_evidence_manifest="$(
     bundle_content_manifest \
       "$staging_dir" \

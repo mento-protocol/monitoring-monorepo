@@ -176,14 +176,21 @@ trusted checkout with an explicit compatible `AUTOREVIEW_HELPER`. Direct
 default-helper execution in the owning checkout uses the same frozen-HEAD and
 protected-main checks and materialized MJS runtime. Wrapper-owned Node launches,
 including executable discovery and validation helpers, discard `NODE_OPTIONS`
-and `NODE_PATH` so ambient startup hooks cannot run before the pinned helper. An
-explicit helper from a separate checkout remains an explicit trust decision.
-The adapter also
-requires the physical checkout root to match Git's top level, removes
-reviewed-repo directories from its executable search path, runs bare shell
-utilities from the system path, and resolves Git, Node, GitHub CLI, and
-semantic-engine executables outside the worktree before use. Git invocations
-ignore inherited repository-routing variables such as `GIT_DIR` and
+and `NODE_PATH`, plus dynamic-loader and interpreter startup-injection
+variables, so ambient hooks cannot run before the pinned helper. An explicit
+helper from a separate checkout remains an explicit trust decision. The adapter
+also requires the physical checkout root to match Git's top level, removes
+reviewed-repo directories from its executable search path, and runs bare shell
+utilities from the system path. Direct Git, Node, GitHub CLI, and semantic-engine
+executables and every canonical ancestor must be owned by the current user or
+root and must not be group/other-writable. On Darwin, Homebrew-style paths that
+fail only that ancestry rule are accepted solely through sealed private
+snapshots of native Mach-O executables whose linked-library closure is entirely
+system-only. Scripts and native executables with relative or non-system
+library closure fail closed. Node discovery never executes a version-manager
+shim: Volta is queried through a sealed native `volta which node`, and the
+returned Node path is revalidated before launch. Git invocations ignore
+inherited repository-routing variables such as `GIT_DIR` and
 `GIT_WORK_TREE`. Prepared repo-context bundles apply the same target-scoped
 before/after fingerprint while every artifact remains in an adjacent ephemeral
 directory. The destination parent's canonical inode and the freshly created

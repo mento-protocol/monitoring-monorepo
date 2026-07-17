@@ -43,7 +43,11 @@ trusted bundle directory are the exceptions. The owning-checkout default
 semantic helper and automatic feedback execute Node runtime from that same
 pinned `origin/main` object rather than a PR-selected base, mutable worktree, or
 package script; wrapper-owned Node launches discard `NODE_OPTIONS` and
-`NODE_PATH`. The helper reviews the complete target
+`NODE_PATH` plus loader/startup injection variables. Direct executables require
+trusted ownership and non-shared-writable ancestry. On Darwin, Homebrew-style
+paths are accepted only through sealed private native Mach-O snapshots with
+system-only library closure; scripts and unsafe library closure fail closed.
+The helper reviews the complete target
 without truncation. Reviewer network search is off by default; pass
 `--web-search` only when the review explicitly needs public documentation
 lookup. Direct semantic engines

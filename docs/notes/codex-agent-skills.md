@@ -149,8 +149,9 @@ trusted checkout with an explicit compatible helper. Direct default-helper
 execution in the owning checkout applies the same protected-main runtime pin.
 Wrapper-owned Node launches discard `NODE_OPTIONS` and `NODE_PATH` before
 executable probing, validation helpers, or the pinned MJS entry point can run;
-an explicit external helper remains caller-trusted. These checks protect review
-integrity but are not a
+dynamic-loader and interpreter startup-injection variables are scrubbed as
+well. An explicit external helper remains caller-trusted. These checks protect
+review integrity but are not a
 provenance boundary: invoking the repo command already trusts executable code
 in the active checkout. The adapter compares the target-scoped
 fingerprint around prepared-bundle staging, so a same-commit branch switch,
@@ -158,8 +159,16 @@ moving base ref, or relevant concurrent edit fails closed instead of mixing
 review snapshots. Its executable search path excludes the reviewed worktree,
 requires the physical checkout root to match Git's top level, uses the system
 path for bare shell utilities, and resolves Git, Node, GitHub CLI, and
-semantic-engine executables to external targets before use. Git commands ignore
-inherited repository-routing variables.
+semantic-engine executables to external targets before use. Direct targets and
+every canonical ancestor must be owned by the current user or root and must not
+be group/other-writable. On Darwin, Homebrew-style paths that fail only the
+ancestry rule are
+accepted through sealed private snapshots only when they are native Mach-O
+executables with an entirely system-only linked-library closure; scripts and
+relative or non-system library closure fail closed. Node discovery never
+executes a version-manager shim: Volta is queried through a sealed native
+`volta which node`, and the returned Node path is revalidated before launch.
+Git commands ignore inherited repository-routing variables.
 
 When no `--base` is supplied, automatic PR-base lookup falls back to
 `origin/main` only after a confirmed zero-match result or when GitHub CLI is

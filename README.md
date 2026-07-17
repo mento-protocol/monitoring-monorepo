@@ -113,7 +113,11 @@ including wallet recovery phrases; reviewer web search is off by default unless
 snapshot for checklist policy, the owning-checkout default semantic helper, and
 automatic-feedback modules, never a PR-selected base, mutable worktree, or
 branch-controlled package scripts. Wrapper-owned Node launches discard
-`NODE_OPTIONS` and `NODE_PATH` startup injection.
+`NODE_OPTIONS`, `NODE_PATH`, and loader/startup injection variables. Direct
+executables require trusted ownership and
+non-shared-writable ancestry. On Darwin, Homebrew-style paths are accepted only
+through sealed private native Mach-O snapshots with system-only library
+closure; scripts and unsafe library closure fail closed.
 Autoreview remains source review, so the quality gate and applicable browser or
 runtime verification are still required.
 
