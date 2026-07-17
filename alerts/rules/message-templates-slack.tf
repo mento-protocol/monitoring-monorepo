@@ -45,8 +45,8 @@ ${local.celo_relayer_signer_branches}
 {{ if or (eq .Labels.chain "monad") (eq .Labels.chain "monad-testnet") -}}
 ${local.monad_relayer_signer_branches}
 {{ end -}}
-{{/* polygon and polygon-amoy share signer addresses; split maps if testnet diverges. */ -}}
-{{ if or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-amoy") -}}
+{{/* polygon and polygon-testnet share signer addresses; split maps if testnet diverges. */ -}}
+{{ if or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-testnet") -}}
 ${local.polygon_relayer_signer_branches}
 {{ end -}}
 {{ $titleURL := .GeneratorURL -}}

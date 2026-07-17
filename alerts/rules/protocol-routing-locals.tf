@@ -83,8 +83,8 @@ locals {
       aegis_chain         = "monadTestnet"
       chainlink_feed_path = ""
     }
-    "polygon-amoy" = {
-      title = "Polygon-Amoy"
+    "polygon-testnet" = {
+      title = "Polygon-Testnet"
       env   = "staging"
       # Testnet threshold matching monad-testnet's 50, not mainnet's 500 —
       # Amoy signers are manually topped up (~84 POL each as of 2026-07-16).
@@ -93,7 +93,7 @@ locals {
       threshold           = 50
       explorer            = "amoy.polygonscan.com"
       chain_id            = "80002"
-      aegis_chain         = "polygonAmoy"
+      aegis_chain         = "polygonTestnet"
       chainlink_feed_path = ""
     }
   }
@@ -211,7 +211,7 @@ locals {
   # `Native_balanceOf` RelayerSigner variants (aegis/config.yaml), resolved
   # from the global RelayerSigner* vars — the addresses currently match the
   # Monad signer set, but keep the map separate for the same drift reasons.
-  # polygon and polygon-amoy share this signer set; split into separate maps
+  # polygon and polygon-testnet share this signer set; split into separate maps
   # if testnet signers diverge.
   polygon_relayer_signers = {
     EURUSD  = "0x7973B53c09Ec35cdCa71D46b98801ddeD856BB20"

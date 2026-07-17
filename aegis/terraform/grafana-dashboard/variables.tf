@@ -51,8 +51,8 @@ locals {
       symbol    = "MON"
       threshold = 50
     }
-    "polygon-amoy" = {
-      title     = "Polygon-Amoy"
+    "polygon-testnet" = {
+      title     = "Polygon-Testnet"
       metric    = "Native_balanceOf"
       symbol    = "POL"
       threshold = 50

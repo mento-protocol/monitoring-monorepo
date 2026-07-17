@@ -236,8 +236,8 @@ chains:
       JPYUSD: '0xb9aDdcD1d1CE7d49DBB540E2677F1C572Bc8D195'
       CHFUSD: '0x2EE56bE22D6af8c1b0ac97149b6F42D3B0BFb8C2'
 
-  - id: polygonAmoy
-    label: polygon-amoy
+  - id: polygonTestnet
+    label: polygon-testnet
     httpRpcUrl: https://rpc-amoy.polygon.technology
     contracts:
       # Same deterministic testnet deploy addresses as monadTestnet above.
@@ -567,7 +567,7 @@ metrics:
   - source: SortedOracles.isOldestReportExpired(address rateFeed)(bool isExpired,address oracle)
     schedule: 0/10 * * * * *
     type: gauge
-    chains: [polygon, polygonAmoy]
+    chains: [polygon, polygonTestnet]
     variants:
       - [USDCUSD]
       - [EURUSD]
@@ -577,7 +577,7 @@ metrics:
   - source: BreakerBox.getRateFeedTradingMode(address rateFeed)(uint8)
     schedule: 0/10 * * * * *
     type: gauge
-    chains: [polygon, polygonAmoy]
+    chains: [polygon, polygonTestnet]
     variants:
       - [USDCUSD]
       - [EURUSD]
@@ -684,11 +684,11 @@ metrics:
 
   # Native gas-token balance (POL) for Polygon relayer signers.
   # Uses eth_getBalance under the hood instead of an ERC20 balanceOf call.
-  # polygon and polygon-amoy share the same signer addresses.
+  # polygon and polygon-testnet share the same signer addresses.
   - source: Native.balanceOf(address owner)(uint256)
     schedule: 0 * * * * *
     type: gauge
-    chains: [polygon, polygonAmoy]
+    chains: [polygon, polygonTestnet]
     variants:
       - [RelayerSignerUSDCUSD]
       - [RelayerSignerEURUSD]
