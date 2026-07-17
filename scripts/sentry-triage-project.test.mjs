@@ -584,6 +584,37 @@ await test("buildProjectedBody renders contract fields, links, footer, and marke
   assert(body.includes("ADR 0036 / ADR 0038"), "expected footer");
 });
 
+await test("buildProjectedBody hard-bounds the summary at 500 chars", () => {
+  const base = {
+    shortId: "APP-MENTO-ORG-12",
+    verdict: "code-fix",
+    confidence: "medium",
+    rootCause: "rc",
+    proposedAction: "pa",
+    duplicateOf: [],
+    permalink: null,
+    queueIssueUrl:
+      "https://github.com/mento-protocol/monitoring-monorepo/issues/500",
+  };
+  // Boundary: exactly 500 chars renders intact, no truncation ellipsis.
+  const atLimit = "s".repeat(500);
+  const bodyAt = buildProjectedBody({ ...base, summary: atLimit });
+  assert(bodyAt.includes(atLimit), "expected 500-char summary intact");
+  assert(
+    !bodyAt.includes(`${atLimit}…`),
+    "expected no ellipsis at the boundary",
+  );
+  // Over limit: hard-truncated to the 500-char prefix + ellipsis.
+  const over = "x".repeat(700);
+  const bodyOver = buildProjectedBody({ ...base, summary: over });
+  assert(!bodyOver.includes(over), "expected over-limit summary truncated");
+  assert(
+    bodyOver.includes(`${"x".repeat(500)}…`),
+    "expected 500-char prefix + ellipsis",
+  );
+  assert(!bodyOver.includes("x".repeat(501)), "expected nothing past the cap");
+});
+
 await test("buildProjectedBody neutralizes a hostile summary and fenced blocks", () => {
   const body = buildProjectedBody({
     shortId: "APP-MENTO-ORG-12",

@@ -498,6 +498,15 @@ function fencedBlock(text) {
   return ["```text", body, "```"].join("\n");
 }
 
+// Hard bound for the one inline free-text field the body renders outside a
+// fence. Every other body field is already bounded: the title caps at 200,
+// block fields at 600 (neutralizeBlock), duplicates at 20 shape-validated
+// SHORT-IDs, shortId at 120, verdict/confidence are closed enums, and the
+// permalink is a Stage-A-bounded validated URL. Without this cap a
+// hostile/long single-line summary could blow the `gh issue create` request
+// and loop the retry compensation.
+const MAX_BODY_SUMMARY_LEN = 500;
+
 /**
  * Build the projected owning-repo issue body. `shortId`, `verdict`,
  * `confidence` are validated/closed-set (safe as inline code); `permalink` is a
@@ -516,7 +525,9 @@ export function buildProjectedBody({
   permalink,
   queueIssueUrl,
 }) {
-  const safeSummary = neutralizeUntrusted(summary) || "_(no summary provided)_";
+  const safeSummary =
+    truncate(neutralizeUntrusted(summary), MAX_BODY_SUMMARY_LEN) ||
+    "_(no summary provided)_";
   const dupIds = sanitizeDuplicateIds(duplicateOf);
   const dupText = dupIds.length
     ? dupIds.map((id) => `\`${id}\``).join(", ")
