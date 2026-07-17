@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -631,6 +631,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/review-materiality.test.mjs" "$reason"
   add_command "node scripts/agent-issue-board.test.mjs" "$reason"
   add_command "pnpm sentry:ingest:test" "$reason"
+  add_command "pnpm sentry:digest:test" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
@@ -1493,6 +1494,9 @@ while IFS= read -r path; do
           ;;
         scripts/sentry-triage-ingest.mjs|scripts/sentry-triage-ingest.test.mjs)
           add_command "pnpm sentry:ingest:test" "Sentry triage ingest helper changed"
+          ;;
+        scripts/sentry-triage-digest.mjs|scripts/sentry-triage-digest.test.mjs)
+          add_command "pnpm sentry:digest:test" "Sentry triage digest helper changed"
           ;;
         scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
