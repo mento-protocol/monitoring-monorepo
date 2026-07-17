@@ -534,11 +534,14 @@ pipeline surfaces itself two ways, and a break in either turns a run red:
   contract — no LLM, no label writes, no Sentry — driven by the collector
   `scripts/sentry-triage-digest.mjs`. For each batch issue it reads the current
   labels, the queue-issue body (for the Sentry permalink), and the latest
-  pipeline-bot-authored `<!-- sentry-triage-verdict:v1 -->` comment (parsed by
-  the SAME authoritative parser the label/projection steps use — `parseVerdictComment`
-  from `sentry-triage-project-core.mjs`, behind the SAME authorship fence, so a
-  drive-by marker comment cannot feed text into the digest and the digest can
-  never disagree with the pipeline about a verdict). It never re-validates
+  pipeline-bot-authored `<!-- sentry-triage-verdict:v1 -->` comment (selected
+  AND parsed by the SAME authoritative path the label/projection steps use —
+  `selectVerdictComment` + `parseVerdictComment` from
+  `sentry-triage-project-core.mjs`: authorship fence, explicit `createdAt`
+  ordering (never API array order), and the regression fence — so a drive-by
+  marker comment cannot feed text into the digest and the digest can never
+  render a different comment than the one the pipeline acted on). It never
+  re-validates
   `human_question`; that fail-loud gate is the `--parse-only` label step, so a
   `needs-human` stub reaching the digest already carries one.
 
@@ -589,7 +592,9 @@ failed triage`), then renders these sections **in this order, empty ones
   Slack mention/link syntax (`<!channel>`, `<@U…>`) inert — and every section
   text object keeps `verbatim: true`. Section text stays under Slack's
   3000-char cap by bounding each field before escaping and chunking each section
-  independently (2800/section). The URLs the digest turns into links are
+  independently (2800/section); the needs-human section chunks at whole-brief
+  boundaries, so a decision brief never splits across Slack blocks mid-entry.
+  The URLs the digest turns into links are
   shape-validated first (queue/projected/fix = https `github.com`, Sentry
   permalink = https `*.sentry.io`). The bot token
   (`secrets.TF_VAR_SLACK_BOT_TOKEN`, `chat:write.public`, reused — no new

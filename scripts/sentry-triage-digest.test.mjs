@@ -2,6 +2,7 @@
 import {
   AUTOFIX_COMMENT_PREFIX,
   buildDigest,
+  chunkBriefs,
   chunkLines,
   classifyIssue,
   collectIssues,
@@ -300,6 +301,47 @@ await test("findLatestVerdictComment ignores marker comments from untrusted auth
   );
 });
 
+await test("findLatestVerdictComment sorts by createdAt — never trusts API array order", () => {
+  // Out-of-order API response: the NEWEST verdict comes FIRST in the array.
+  const comments = [
+    {
+      body: verdictComment({ summary: "newest" }),
+      author: BOT_AUTHOR,
+      createdAt: "2026-07-17T12:00:00Z",
+    },
+    {
+      body: verdictComment({ summary: "older" }),
+      author: BOT_AUTHOR,
+      createdAt: "2026-07-17T09:00:00Z",
+    },
+  ];
+  const latest = findLatestVerdictComment(comments);
+  assert(
+    latest.includes("summary: newest"),
+    "expected createdAt (not array order) to pick the newest verdict",
+  );
+});
+
+await test("findLatestVerdictComment applies the regression fence (stale pre-regression verdict -> null)", () => {
+  // Same selection path as the label/projection steps (core's
+  // selectVerdictComment): a verdict older than the newest regression-reopen
+  // comment describes the previous occurrence and must not feed text into the
+  // digest.
+  const comments = [
+    {
+      body: verdictComment({ summary: "stale" }),
+      author: BOT_AUTHOR,
+      createdAt: "2026-07-17T09:00:00Z",
+    },
+    {
+      body: "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)",
+      author: BOT_AUTHOR,
+      createdAt: "2026-07-17T11:00:00Z",
+    },
+  ];
+  assertEqual(findLatestVerdictComment(comments), null);
+});
+
 await test("findLatestVerdictComment returns null when no marker comment exists", () => {
   assertEqual(
     findLatestVerdictComment([
@@ -415,6 +457,34 @@ await test("pointer lookup accepts a FRESH post-regression pointer over a stale 
     ]),
     PROJECTED_URL,
   );
+});
+
+await test("pointer lookup sorts by createdAt — never trusts API array order", () => {
+  // Out-of-order API response: the NEWEST pointer comes FIRST in the array;
+  // an older pointer (different URL) comes last. createdAt must win.
+  const newest = {
+    body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T12:00:00Z",
+  };
+  const older = {
+    body: `${PROJECTED_COMMENT_PREFIX}https://github.com/mento-protocol/frontend-monorepo/issues/1`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T09:00:00Z",
+  };
+  assertEqual(extractProjectedUrl([newest, older]), PROJECTED_URL);
+  // Same for the fix-PR pointer.
+  const newestFix = {
+    body: `${AUTOFIX_COMMENT_PREFIX}${FIX_PR_URL}`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T12:00:00Z",
+  };
+  const olderFix = {
+    body: `${AUTOFIX_COMMENT_PREFIX}https://github.com/mento-protocol/frontend-monorepo/pull/1`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T09:00:00Z",
+  };
+  assertEqual(extractAutofixUrl([newestFix, olderFix]), FIX_PR_URL);
 });
 
 // ---------------------------------------------------------------------------
@@ -1074,6 +1144,73 @@ await test("buildDigest keeps long needs-human briefs under the per-section cap"
   // Every brief's decision line survived (6 briefs, order preserved).
   const decisions = allText(payload).match(/\*Decision needed:\*/g) ?? [];
   assertEqual(decisions.length, 6);
+});
+
+await test("chunkBriefs packs whole briefs and splits only oversized single entries", () => {
+  // Whole-group packing under the budget.
+  assertDeepEqual(chunkBriefs("*H*", [["a"], ["b"]], 100), ["*H*\na\n\nb"]);
+  // Second brief would overflow -> new chunk at the ENTRY boundary.
+  assertDeepEqual(
+    chunkBriefs(
+      "*H*",
+      [
+        ["aaaa", "bbbb"],
+        ["cccc", "dddd"],
+      ],
+      16,
+    ),
+    ["*H*\naaaa\nbbbb", "cccc\ndddd"],
+  );
+  // A single oversized brief gets its own block(s), line-split, never packed
+  // with a neighbor.
+  assertDeepEqual(
+    chunkBriefs("*H*", [["x"], ["y".repeat(30), "z".repeat(30)], ["w"]], 40),
+    ["*H*\nx", "y".repeat(30), "z".repeat(30), "w"],
+  );
+  // No briefs -> just the header.
+  assertDeepEqual(chunkBriefs("*H*", [], 100), ["*H*"]);
+});
+
+await test("needs-human briefs never split across Slack blocks mid-entry", () => {
+  // Two ~1.8k-char briefs (no escape expansion — plain chars) against the
+  // 2800-char budget: greedy LINE packing would put the section header + brief
+  // 1 + the first lines of brief 2 into block one, splitting brief 2 mid-entry.
+  // Entry-boundary chunking must instead emit whole briefs per block.
+  const filler = "z".repeat(350);
+  const issues = Array.from({ length: 2 }, (_, i) =>
+    issueFixture({
+      number: 300 + i,
+      shortId: `NH-${i}`,
+      labels: ["sentry:verdict-needs-human"],
+      comments: [
+        {
+          body: verdictComment({
+            verdict: "needs-human",
+            humanQuestion: filler,
+            hypotheses: [filler],
+            investigated: [filler],
+            escalationReason: filler,
+          }),
+        },
+      ],
+    }),
+  );
+  const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
+  const briefBlocks = payload.blocks
+    .slice(2)
+    .map((block) => block.text.text)
+    .filter((text) => text.includes("*Decision needed:*"));
+  assert(briefBlocks.length >= 2, "expected the two briefs split into blocks");
+  for (const text of briefBlocks) {
+    assert(text.length <= MAX_SECTION_TEXT_LEN, "expected under the budget");
+    // A block contains only WHOLE briefs: every brief header line ("⚠️ *<…")
+    // is matched by its closing links line — a mid-entry split would strand a
+    // header without links (or links without a header) in some block.
+    const headers = text.match(/^⚠️ \*/gm) ?? [];
+    const linksLines = text.match(/\*Links:\*/g) ?? [];
+    assertEqual(headers.length, linksLines.length);
+    assert(headers.length >= 1, "expected at least one whole brief per block");
+  }
 });
 
 // ---------------------------------------------------------------------------

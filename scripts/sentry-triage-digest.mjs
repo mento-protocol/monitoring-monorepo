@@ -57,9 +57,11 @@ import { fileURLToPath } from "node:url";
 // projected-comment prefix are contract constants owned by the same module.
 import {
   extractPermalink,
+  isTrustedComment,
   parseVerdictComment,
   PROJECTED_COMMENT_PREFIX,
   REGRESSION_PREFIX,
+  selectVerdictComment,
 } from "./sentry-triage-project-core.mjs";
 
 // Re-export the authoritative parser under the digest's historical name so
@@ -235,33 +237,29 @@ export function parseQueueTitle(title) {
   return { shortId: match[1], project: match[2].trim() };
 }
 
-// Authorship fence (mirrors sentry-triage-project-core.mjs, where the rationale
-// lives): only comments the pipeline's own Actions bot posted may supply the
-// digest's rendered text — this repo is public, so a drive-by marker-bearing
-// comment must not feed text (or a projected/fix URL) into the Slack digest.
-// `gh issue view --json comments` (GraphQL) renders the bot author login as
-// "github-actions"; the REST shape is "github-actions[bot]" — accept both,
-// fail closed on missing/unknown authors.
-export const TRUSTED_COMMENT_AUTHORS = [
-  "github-actions",
-  "github-actions[bot]",
-];
+// Authorship fence: only comments the pipeline's own Actions bot posted may
+// supply the digest's rendered text — this repo is public, so a drive-by
+// marker-bearing comment must not feed text (or a projected/fix URL) into the
+// Slack digest. The predicate (and its rationale) lives in
+// sentry-triage-project-core.mjs (`isTrustedComment`, imported above);
+// re-export the login list so the digest's consumers keep one import surface.
+export { TRUSTED_COMMENT_AUTHORS } from "./sentry-triage-project-core.mjs";
 
-function isTrustedComment(comment) {
-  const login = comment?.author?.login ?? comment?.user?.login ?? "";
-  return TRUSTED_COMMENT_AUTHORS.includes(login);
+// Newest-first ordering must never trust API array order — sort by createdAt
+// explicitly (same comparator as core's selectVerdictComment; stable, so
+// fixtures without createdAt keep their relative order).
+function compareCreatedAt(a, b) {
+  return String(a?.createdAt ?? "").localeCompare(String(b?.createdAt ?? ""));
 }
 
-/** Latest trusted verdict-marker comment on the issue. `gh issue view --json
- * comments` returns comments oldest-first, so the last match is the newest. */
+/** The verdict comment to render text from — delegated to the pipeline's
+ * SINGLE selection path (`selectVerdictComment` in sentry-triage-project-core.mjs:
+ * trusted authors only, explicit createdAt sort — never API array order — and
+ * the regression fence), so the digest can never render a different comment
+ * than the one the label/projection steps acted on. Null when there is no
+ * usable verdict comment (none, or stale pre-regression). */
 export function findLatestVerdictComment(comments) {
-  const marked = (comments ?? []).filter(
-    (comment) =>
-      typeof comment?.body === "string" &&
-      comment.body.startsWith(VERDICT_MARKER) &&
-      isTrustedComment(comment),
-  );
-  return marked.length ? marked[marked.length - 1].body : null;
+  return selectVerdictComment(comments).body;
 }
 
 /** True for an https `github.com` URL. The projected-issue and fix-PR pointers
@@ -310,13 +308,17 @@ function newestRegressionAt(comments) {
  * `createdAt` after a regression fails closed (treated as stale). */
 function extractTrustedUrlComment(comments, prefix) {
   const regressionAt = newestRegressionAt(comments);
-  const matches = (comments ?? []).filter(
-    (comment) =>
-      typeof comment?.body === "string" &&
-      isTrustedComment(comment) &&
-      comment.body.startsWith(prefix) &&
-      (regressionAt === "" || String(comment.createdAt ?? "") > regressionAt),
-  );
+  const matches = (comments ?? [])
+    .filter(
+      (comment) =>
+        typeof comment?.body === "string" &&
+        isTrustedComment(comment) &&
+        comment.body.startsWith(prefix) &&
+        (regressionAt === "" || String(comment.createdAt ?? "") > regressionAt),
+    )
+    // Newest-first is decided by createdAt, never by API array order (same
+    // comparator as core's selectVerdictComment).
+    .sort(compareCreatedAt);
   for (let i = matches.length - 1; i >= 0; i -= 1) {
     const url =
       matches[i].body.slice(prefix.length).trim().split(/\s+/)[0] ?? "";
@@ -507,16 +509,12 @@ function renderFailedLine(entry) {
   return `• ${linked} (${project}) — triage incomplete (still \`${NEEDS_TRIAGE_LABEL}\`)`;
 }
 
-/** The body lines for one section (excluding its header). needs-human returns
- * multi-line briefs separated by a blank line; the rest one line per entry. */
+/** The body lines for one section (excluding its header), one line per entry.
+ * needs-human is NOT handled here — its multi-line briefs are atomic groups
+ * and go through chunkBriefs (see buildDigest) so a brief never splits across
+ * Slack blocks mid-entry. */
 function renderSectionBodyLines(section, entries) {
   switch (section) {
-    case NEEDS_HUMAN_SECTION:
-      return entries.flatMap((entry, index) =>
-        index === 0
-          ? renderNeedsHumanBrief(entry)
-          : ["", ...renderNeedsHumanBrief(entry)],
-      );
     case AUTOFIXED_SECTION:
       return entries.map((entry) =>
         renderArrowLine(entry, entry.autofixUrl, "fix PR"),
@@ -576,6 +574,45 @@ export function chunkLines(lines, maxLen = MAX_SECTION_TEXT_LEN) {
 }
 
 /**
+ * Chunk the needs-human section at ENTRY boundaries: each brief (one entry's
+ * line group) is ATOMIC — it never shares a block boundary mid-entry, so a
+ * reader can never see half a brief in one Slack block and the rest in the
+ * next. The section header leads the first chunk; briefs within a chunk are
+ * separated by a blank line (same rendering as before). A single brief longer
+ * than the budget gets its own block(s) — split at line granularity via
+ * chunkLines, still never interleaved with another entry.
+ */
+export function chunkBriefs(headerLine, briefs, maxLen = MAX_SECTION_TEXT_LEN) {
+  const chunks = [];
+  let current = headerLine;
+  const flush = () => {
+    if (current !== "") {
+      chunks.push(current);
+      current = "";
+    }
+  };
+  for (const lines of briefs) {
+    const text = lines.join("\n");
+    if (text.length > maxLen) {
+      // Oversized single entry: its own block(s), never packed with others.
+      flush();
+      chunks.push(...chunkLines(lines, maxLen));
+      continue;
+    }
+    // "\n" between the header and the first brief; a blank line between briefs.
+    const sep = current === "" ? "" : current === headerLine ? "\n" : "\n\n";
+    if (current !== "" && current.length + sep.length + text.length > maxLen) {
+      flush();
+    }
+    const sepAfterFlush =
+      current === "" ? "" : current === headerLine ? "\n" : "\n\n";
+    current = `${current}${sepAfterFlush}${text}`;
+  }
+  flush();
+  return chunks;
+}
+
+/**
  * Build the deterministic Slack `chat.postMessage` payload for one batch.
  * `channel` is passed in (hardcoded by the workflow); `now` is injectable for
  * tests. Pure — no I/O, no escaping omissions: every free-form value is routed
@@ -604,12 +641,19 @@ export function buildDigest(issues, { channel, now = new Date() } = {}) {
     const sectionEntries = bySection.get(section);
     if (sectionEntries.length === 0) continue; // omit empty sections
     const headerLine = `*${SECTION_TITLES[section]} (${sectionEntries.length})*`;
-    const bodyLines = renderSectionBodyLines(section, sectionEntries);
     // Chunk each section independently (header stays with its first chunk) so
-    // escape-expanded briefs can never push a single text object past Slack's
-    // 3000-char cap. Batch cap is 6, so this stays well under Slack's
-    // 50-blocks-per-message limit.
-    for (const chunk of chunkLines([headerLine, ...bodyLines])) {
+    // escape-expanded summaries/briefs can never push a single text object
+    // past Slack's 3000-char cap. needs-human chunks at ENTRY boundaries
+    // (chunkBriefs — a brief is atomic); one-line sections pack line-greedily.
+    // Batch cap is 6, so this stays well under Slack's 50-blocks limit.
+    const chunks =
+      section === NEEDS_HUMAN_SECTION
+        ? chunkBriefs(headerLine, sectionEntries.map(renderNeedsHumanBrief))
+        : chunkLines([
+            headerLine,
+            ...renderSectionBodyLines(section, sectionEntries),
+          ]);
+    for (const chunk of chunks) {
       blocks.push(mrkdwnSection(chunk));
     }
   }
