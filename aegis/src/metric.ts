@@ -58,18 +58,18 @@ export class Metric {
   private readonly metricParsers: Record<string, MetricParser> = {
     'BreakerBox.getRateFeedTradingMode': (output) =>
       this.bigintToSafeNumber(output as bigint),
-    'CELOToken.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 18),
+    'CELOToken.balanceOf': (output) => this.tokenAmountToUnits(output, 18),
     // Native handles non-ERC20 native gas tokens (e.g. MON, ETH) fetched via
     // eth_getBalance. Like CELO (which is ERC20-compatible), they use 18 decimals.
-    'Native.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 18),
-    'USDC.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
-    'USDT.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
-    'axlUSDC.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    'Native.balanceOf': (output) => this.tokenAmountToUnits(output, 18),
+    'USDC.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
+    'USDT.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
+    'axlUSDC.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
     // Monad reserve tokens (issue #707); both verified 6dp on-chain.
-    'USDT0.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
-    'AUSD.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    'USDT0.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
+    'AUSD.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
     // Polygon reserve token; verified 6dp on-chain.
-    'EUROP.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    'EUROP.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
     'SortedOracles.medianRate': (output) => this.parseMedianRate(output),
     'SortedOracles.isOldestReportExpired': (output) =>
       this.parseOldestReportExpired(output),
@@ -281,7 +281,7 @@ export class Metric {
     if (functionName !== 'totalSupply' || tokenDecimals === undefined) {
       return undefined;
     }
-    return this.tokenAmountToWholeUnits(output, tokenDecimals);
+    return this.tokenAmountToUnits(output, tokenDecimals);
   }
 
   private bigintToSafeNumber(value: bigint): number {
@@ -348,12 +348,13 @@ export class Metric {
     );
   }
 
-  private tokenAmountToWholeUnits(output: unknown, decimals: number): number {
+  private tokenAmountToUnits(output: unknown, decimals: number): number {
     const divisor = 10n ** BigInt(decimals);
     const wholeUnits = (output as bigint) / divisor;
+    const fractionalUnits = (output as bigint) % divisor;
     if (wholeUnits > Number.MAX_SAFE_INTEGER) {
       throw new Error(`Value ${wholeUnits} is too large to be a safe integer`);
     }
-    return Number(wholeUnits);
+    return Number(wholeUnits) + Number(fractionalUnits) / Number(divisor);
   }
 }

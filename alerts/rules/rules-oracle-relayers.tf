@@ -90,6 +90,7 @@ resource "grafana_rule_group" "oracle_relayers" {
       annotations = {
         summary        = "Low ${rule.value.symbol} balance for {{ $labels.owner }} on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.symbol}"
         currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }}"
+        threshold      = tostring(rule.value.threshold)
       }
 
       labels = {
