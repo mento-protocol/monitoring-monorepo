@@ -446,7 +446,10 @@ export function buildDocumentationInventory({ repoRoot, files }) {
   for (const [source, targets] of linksBySource) {
     // The catalog is derived output. Its targets are guaranteed by the same
     // inventory that renders it, and stale links must not prevent --write from
-    // repairing the generated file after a documentation deletion.
+    // repairing the generated file after a documentation deletion. Catalog
+    // links also must not earn inbound credit: because the catalog enumerates
+    // every document, counting those synthetic links would erase the useful
+    // signal that no independently maintained document points at a record.
     if (source === DOCS_INDEX_PATH) continue;
     for (const target of targets) {
       const resolved = resolveMarkdownTarget(normalizedRoot, source, target);

@@ -33,8 +33,9 @@ function usage() {
 
 The catalog models the proposed working tree from tracked and non-ignored
 untracked Markdown, excluding CLAUDE.md and .claude/skills mirrors. --write
-updates docs/README.md; --check fails on drift, invalid classification,
-canonical metadata gaps, or broken internal links.
+updates docs/README.md even when unrelated broken links remain, but still exits
+non-zero for unresolved inventory problems. --check also fails on catalog
+drift.
 `;
 }
 
@@ -79,12 +80,16 @@ function hasBlockingProblems(inventory) {
   );
 }
 
+function hasCatalogGenerationBlockers(inventory) {
+  return inventory.errors.length > 0 || inventory.warnings.length > 0;
+}
+
 function writeUntilStable(repoRoot) {
   const output = path.join(repoRoot, DOCS_INDEX_PATH);
   let result;
   for (let pass = 0; pass < 8; pass += 1) {
     result = collect(repoRoot);
-    if (hasBlockingProblems(result.inventory))
+    if (hasCatalogGenerationBlockers(result.inventory))
       return { ...result, stable: false };
     const current = existsSync(output) ? readFileSync(output, "utf8") : null;
     if (current === result.rendered) return { ...result, stable: true };
@@ -108,13 +113,13 @@ export function runDocsIndex(argv) {
   if (options.mode === "write") {
     const result = writeUntilStable(repoRoot);
     printProblems(result.inventory);
-    if (hasBlockingProblems(result.inventory)) return 1;
+    if (hasCatalogGenerationBlockers(result.inventory)) return 1;
     if (!result.stable) {
       process.stderr.write("docs-index: generated catalog did not converge\n");
       return 1;
     }
     process.stdout.write(`wrote ${DOCS_INDEX_PATH}\n`);
-    return 0;
+    return hasBlockingProblems(result.inventory) ? 1 : 0;
   }
 
   const { inventory, rendered } = collect(repoRoot);

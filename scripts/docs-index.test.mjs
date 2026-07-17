@@ -315,3 +315,23 @@ test("check fails for broken internal links", () => {
     assert.match(result.stderr, /broken link/);
   });
 });
+
+test("write repairs the catalog while reporting unrelated broken links", () => {
+  withRepo((repo) => {
+    write(
+      repo,
+      "README.md",
+      '# Root\n\n<!-- agent-context: title="Root" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->\n\n[Missing](missing.md)\n',
+    );
+    write(repo, "docs/.gitkeep", "");
+    track(repo, "README.md", "docs/.gitkeep");
+    const result = run(repo, "--write");
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /wrote docs\/README\.md/);
+    assert.match(result.stderr, /broken link/);
+    assert.match(
+      readFileSync(path.join(repo, "docs/README.md"), "utf8"),
+      /Documentation Catalog/,
+    );
+  });
+});
