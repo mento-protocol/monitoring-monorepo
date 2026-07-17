@@ -23,11 +23,30 @@ pnpm agent:autoreview $ARGUMENTS
 For a fresh-context Codex handoff, pass
 `--prepare-bundle-dir /tmp/autoreview-bundle` using a directory outside the repo
 worktree. Add `--feedback-pr <number>` when reviewing a feedback-fix batch.
-The bundle is published atomically after source validation and owns its
+The bundle parent must already exist. Every canonical ancestor must be owned by
+the current user or root; group/other-writable ancestors require sticky-bit
+protection. The adapter pins the freshly created staging directory's `dev:ino`
+before content generation and rechecks it throughout transfer. It manifests wrapper-owned evidence around helper
+execution and all evidence around the final helper source check, rejects
+externally linked regular files, exclusively reserves the destination, and
+writes `.agent-autoreview-complete` last with the verified manifest digest. Run
+`pnpm agent:autoreview --verify-bundle-dir /tmp/autoreview-bundle` immediately
+before reading every pass and retain its printed digest outside the bundle.
+After review, rerun with
+`--expected-bundle-manifest <retained-digest>`; this rehashes the no-follow
+evidence and fails if the marker, content, or pre/post digest changed. Never
+review an interrupted or unverified bundle. The bundle owns its
 `autoreview-prompt.md`; do not combine this mode with `--bundle-output`.
-Direct supplemental evidence must be repo-relative; the wrapper-generated
-feedback dataset inside the trusted bundle directory is the exception. The
-helper reviews the complete target without truncation. Direct semantic engines
+Direct supplemental evidence must be repo-relative;
+wrapper-generated feedback and protected-main checklist copies inside the
+trusted bundle directory are the exceptions. The owning-checkout default
+semantic helper and automatic feedback execute Node runtime from that same
+pinned `origin/main` object rather than a PR-selected base, mutable worktree, or
+package script; wrapper-owned Node launches discard `NODE_OPTIONS` and
+`NODE_PATH`. The helper reviews the complete target
+without truncation. Reviewer network search is off by default; pass
+`--web-search` only when the review explicitly needs public documentation
+lookup. Direct semantic engines
 fail closed if more than one prompt is required; prepared bundles retain
 bounded lossless passes that one fresh-context reviewer must inspect
 completely. Semantic engines use an isolated empty workspace, sensitive inputs

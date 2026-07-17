@@ -95,9 +95,12 @@ bounded parallelism (`--parallel <n>`, default `auto` capped at 4 workers, or
 Terraform init/validate chains, and shared-config build setup remain ordered
 prerequisites. Playwright browser install, dashboard `test:browser`, and
 build-backed `size-limit` stay serialized with each other, but are not global
-quality prerequisites: a browser setup failure still lets independent
-lint/typecheck/unit/knip feedback run. `--fail-fast` stays sequential so it
-still stops before starting the next mapped command.
+quality prerequisites. The quality-gate self-test is also serialized before the
+parallel pool because it temporarily mutates tracked fixture files; this keeps
+source-fingerprinting tests such as autoreview from observing synthetic drift.
+A browser setup failure still lets independent lint/typecheck/unit/knip
+feedback run. `--fail-fast` stays sequential so it still stops before starting
+the next mapped command.
 
 QuickNode webhook state parsing has a dedicated fail-closed regression suite.
 Changes to its shared parser, repair tool, shell test, or the listener
@@ -143,17 +146,110 @@ review cannot fit the bounded pass budget.
 The direct helper and prepared-bundle adapter enforce one cumulative input
 budget while capturing diffs, untracked files, checklists, and feedback, before
 those bytes can accumulate in memory or staging sidecars.
-The helper resolves a symbolic branch base or commit target once to an immutable
-object ID, fingerprints the symbolic branch or detached state, `HEAD`,
-staged/unstaged bytes, and untracked file or symlink state, and fails if that
-source changes during bundle construction or semantic review. The repo adapter
-also removes reviewed-repo directories from its executable search path and
-resolves Git/GitHub CLI targets outside the worktree before capture. Prepared
-repo-context bundles apply the same before/after fingerprint while every
-artifact remains in an adjacent ephemeral directory, then publish the complete
-bundle with one rename only after validation passes. The published
+For a real review, the helper resolves a symbolic branch base or commit target
+once to an immutable object ID. Direct `--dry-run` instead reports the requested
+ref without resolving or freezing it. Source fingerprints cover the symbolic
+branch or detached state, `HEAD`, and staged/unstaged bytes. They include
+untracked file or symlink state only when local working-tree content is part of
+the selected target (`local` or the adapter's branch-local target); explicit
+branch and commit snapshots ignore unrelated untracked files. The repo adapter
+first brackets target selection with a lightweight `HEAD`/branch/status
+fingerprint, so concurrent dirty-state or checkout changes still fail closed
+without reading untracked file contents. After the target is frozen, explicit
+branch and commit reviews use only the target-scoped source fingerprint, so
+unrelated untracked churn cannot invalidate them; automatic mode retains the
+status guard because its selected target depends on clean/dirty state. It also
+resolves `origin/main^{commit}` once to an independently protected baseline and
+sources checklist policy only from that pinned object ID in every target mode.
+Checklist edits in a local target, PR-selected base, current head, or selected
+commit stay visible as diff evidence but cannot rewrite the policy used to
+review themselves. The adapter also
+requires the current shell adapter's bytes and executable mode to match frozen
+`HEAD`. In every target mode it requires the shell, MJS helper, and core at that
+frozen `HEAD` to match the pinned protected-main object, then executes MJS files
+materialized from that protected object instead of a PR-selected base or
+mutable worktree. Commit mode also requires the selected commit's executable
+runtime to match the protected baseline. Local and branch-local prepared
+bundles require helper/core worktree bytes to match frozen `HEAD`. Any dirty or
+committed runtime change fails closed and must be reviewed from a separate
+trusted checkout with an explicit compatible `AUTOREVIEW_HELPER`. Direct
+default-helper execution in the owning checkout uses the same frozen-HEAD and
+protected-main checks and materialized MJS runtime. Wrapper-owned Node launches,
+including executable discovery and validation helpers, discard `NODE_OPTIONS`
+and `NODE_PATH` so ambient startup hooks cannot run before the pinned helper. An
+explicit helper from a separate checkout remains an explicit trust decision.
+The adapter also
+requires the physical checkout root to match Git's top level, removes
+reviewed-repo directories from its executable search path, runs bare shell
+utilities from the system path, and resolves Git, Node, GitHub CLI, and
+semantic-engine executables outside the worktree before use. Git invocations
+ignore inherited repository-routing variables such as `GIT_DIR` and
+`GIT_WORK_TREE`. Prepared repo-context bundles apply the same target-scoped
+before/after fingerprint while every artifact remains in an adjacent ephemeral
+directory. The destination parent's canonical inode and the freshly created
+staging directory's `dev:ino` are pinned before content generation. After
+the wrapper stages its evidence, it manifests that evidence before and after
+the helper runs, excluding only the helper-owned prompt and metadata outputs.
+After prompt validation, the adapter also hashes the complete staged evidence
+before and after the final helper source-fingerprint call. It rejects symlinks,
+special files, externally linked regular files, and any identity or content
+change. The
+validated Node runtime exclusively reserves the destination, rechecks the
+staging identity throughout transfer, and verifies the same manifest after
+transfer and again immediately before hard-linking
+`.agent-autoreview-complete` last. That marker contains the manifest digest;
+`pnpm agent:autoreview --verify-bundle-dir <dir>` reopens every file without
+following symlinks and checks the marker plus manifest. Run it immediately
+before reading every pass and retain its printed digest outside the bundle;
+after review, pass that digest back with
+`--expected-bundle-manifest <retained-digest>` so replacing the bundle and its
+marker cannot reset the second check. A destination created during the final
+race window is never replaced; an interrupted or unverified bundle must not be
+reviewed. Failure after an external helper sees the staging path leaves that
+staging tree in place with a warning instead of recursively deleting a
+potential replacement. The adapter cleans up its private marker while its inode
+still matches, but never recursively deletes a failed destination reservation;
+inspect and remove an incomplete, unmarked destination before retrying. The
+mutable repo helper is not re-entered for publication. The published
 `helper-output.txt` reports the final prompt/pass paths, never the discarded
 staging directory.
+Prepared bundles reject `--dry-run`: publication requires completed content
+validation and the main prompt plus every strictly ordered, deterministic
+indexed bounded pass. Prompt-index validation normalizes a UTF-8 BOM, CRLF line
+endings, and leading blank lines before applying the strict pass-order and
+companion-file checks, and rejects any undeclared extra pass file.
+Direct `--bundle-output` publication uses an exclusive same-directory link and
+refuses to replace any existing destination, including a file created during
+the final publication race window. A failed multi-pass write therefore cannot
+corrupt a previously valid index and its companions. Use a fresh output path or
+deliberately remove the old set first.
+
+When `--base` is omitted, automatic PR-base lookup falls back to `origin/main`
+only when GitHub CLI is absent or the lookup confirms zero matching PRs.
+Malformed output, multiple matching PRs, and operational lookup failures fail
+closed because they cannot prove the correct review target. When GitHub CLI is
+available, automatic lookup requires a canonical `github.com` origin, ignores
+inherited `GH_HOST` and `GH_REPO`, and addresses that origin repository
+explicitly. A unique match must also belong to the current repository owner,
+preventing a same-named branch in a fork from selecting the wrong PR. Pass
+`--base` explicitly as the offline escape hatch.
+When prepared-bundle feedback selection is `auto`, the adapter resolves the
+unique PR base, number, and canonical repository slug together and reuses that
+one GitHub snapshot for the frozen diff and `feedback-state.json`. It
+materializes the feedback-state Node runtime from the same pinned protected-main
+object ID used for checklist policy, never from the PR-selected base, current
+`HEAD`, or a selected commit's parent. Prepared-bundle generation fails closed
+when that protected baseline is unavailable; feedback capture also fails when
+its bounded regular runtime blobs are unavailable. It executes the pinned
+runtime directly from the repo root with frozen canonical `--repo` routing; no
+reviewed package script or pnpm lifecycle runs. Missing GitHub CLI, zero or
+multiple matches, and malformed metadata fail closed. Before publication it
+also verifies that the feedback ledger still names that PR, base branch, current
+head branch, and frozen head object ID.
+An explicit `--base` therefore requires an explicit `--feedback-pr` number
+instead of `auto`. Commit-mode reviews also require an explicit feedback PR
+number because the current branch's automatic PR cannot prove membership for an
+arbitrary selected commit.
 
 Semantic Codex and Claude passes run from an empty temporary workspace with
 repo/project instructions, hooks, plugins, and inherited environment restricted
@@ -164,12 +260,16 @@ and shared-file credential-chain locators. Credential/config file variables are
 canonicalized to existing regular files outside the reviewed repository; a
 repo-contained path fails closed before Claude starts.
 Direct supplemental-evidence paths must be repo-relative, regular UTF-8 files
-confined to the worktree. The narrow trusted exception is the adapter-generated
-`pr:feedback-state` dataset inside its prepared-bundle directory. Sensitive
-paths, credential-like content, private keys, and secret-bearing URLs fail
-closed before any prepared-bundle artifact is published or review input is sent
-to a semantic engine. A quiet semantic reviewer emits a progress heartbeat
-every 60 seconds.
+confined to the worktree. The narrow trusted exceptions are adapter-generated
+feedback state and protected-main checklist copies inside its
+prepared-bundle directory. Sensitive paths,
+credential-like content, private keys, wallet recovery phrases, Stripe live
+keys, common Slack/Discord/Telegram webhook URLs, and secret-bearing URL query parameters
+fail closed before any prepared-bundle artifact is published or review input is
+sent to a semantic engine. Evidence reads reject symlinks and verify that the
+opened descriptor still identifies the file that was inspected, closing
+path-swap races. A quiet semantic reviewer emits a progress heartbeat every 60
+seconds.
 
 Inside an active Codex sandbox, and only when no engine was selected explicitly,
 the adapter defaults to the helper's local deterministic engine because nested
@@ -178,25 +278,50 @@ the adapter defaults to the helper's local deterministic engine because nested
 and fails closed if that engine is unavailable; it never silently falls back.
 Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the
 pinned repo helper with a compatible implementation of its CLI contract.
-Prepared-bundle replacements must support `--source-snapshot-only` plus the
-helper's bundle-output and trusted-input flags. The old autoreview
+Prepared-bundle replacements must support `--source-snapshot-only`,
+`--serialize-untracked-file`, plus the helper's `--bundle-output`,
+`--bundle-output-display`, and
+`--trusted-input-root` flags. For compatibility, the adapter invokes replacement
+helpers with the bare `--source-snapshot-only` contract; target-mode snapshot
+scoping is passed only to the pinned repo helper. The old autoreview
 `--parallel-tests` path is removed: the mapped quality gate owns test execution
 and isolation.
+
+The repo command itself is executable code from the active checkout. The
+committed/pre-change runtime comparisons protect review integrity when the
+runtime is unchanged; they do not turn an untrusted checkout into trusted
+executable code. Inspect a potentially hostile branch from a separate trusted
+checkout rather than invoking that branch's package scripts.
 
 For a true Codex semantic pass from inside Codex, prepare a repo-context bundle
 and pass that bundle to a fresh-context reviewer:
 
 ```bash
 pnpm agent:autoreview --prepare-bundle-dir /tmp/autoreview-bundle
+pnpm agent:autoreview --verify-bundle-dir /tmp/autoreview-bundle
+pnpm agent:autoreview --verify-bundle-dir /tmp/autoreview-bundle \
+  --expected-bundle-manifest <digest-printed-by-the-pre-review-check>
 ```
 
-Use a directory outside the repo worktree so local-mode bundles do not include
-their own generated files. The bundle contains changed paths, patch files,
-repo-selected checklist/prompt context, and the helper's
+Use a directory outside the repo worktree whose parent already exists so
+local-mode bundles do not include their own generated files. Every canonical
+ancestor of that parent must be owned by the current user or root; a
+group/other-writable ancestor is accepted only when its sticky bit protects
+other users' entries (for example `/tmp`). The bundle
+contains changed paths, patch files, repo-selected checklist/prompt context,
+and the helper's
 `autoreview-prompt.md`. Add
 `--feedback-pr <number>` to include the current `pr:feedback-state` ledger as a
 review dataset for feedback-fix batches. Prepared-bundle mode owns that prompt
 path, so do not combine `--prepare-bundle-dir` with `--bundle-output`.
+Retain the pre-review digest in reviewer state outside the bundle. After the
+fresh-context reviewer has read every bounded pass, repeat
+`--verify-bundle-dir` with that digest as `--expected-bundle-manifest`; both
+checks must pass and must name the same digest. These checks detect persistent
+drift and retain/revalidate every staged entry during each scan. They are not an
+OS-level immutable filesystem against a malicious same-UID process that can
+mutate and restore files between checks, so external helpers must leave no
+background writer behind.
 
 Autoreview answers whether the source bundle contains review findings. It does
 not prove CLI/API behavior, generated artifacts, deployment/runtime behavior,

@@ -74,14 +74,26 @@ fresh-context reviewer must inspect completely.
 Semantic engines run from an isolated empty workspace with restricted project
 configuration and environment; sensitive inputs fail closed. Direct
 supplemental evidence must be repo-relative, except for adapter-generated PR
-feedback inside its trusted bundle directory. A quiet reviewer emits a
+feedback and protected-main checklist copies inside its trusted bundle
+directory. The owning-checkout default semantic helper and automatic feedback
+run Node modules pinned from that same `origin/main` object, not a PR-selected
+base, mutable worktree, or reviewed package scripts; wrapper-owned Node launches
+discard `NODE_OPTIONS` and `NODE_PATH`.
+Reviewer web search is off by default and requires explicit `--web-search`.
+A quiet reviewer emits a
 60-second heartbeat. Do not pass the removed `--parallel-tests` option; the
 quality gate owns test execution.
 
 If direct semantic execution refuses a multi-pass target, run
 `pnpm agent:autoreview --prepare-bundle-dir <dir>` with a directory outside the
-worktree and have one fresh-context reviewer inspect every pass listed by the
-bundle index.
+worktree whose parent already exists. Every canonical parent ancestor must be
+owned by the current user or root; group/other-writable ancestors require
+sticky-bit protection. Have one fresh-context reviewer
+inspect every pass listed by the bundle index. Run
+`pnpm agent:autoreview --verify-bundle-dir <dir>` immediately before review and
+retain its printed digest outside the bundle. After review, rerun with
+`--expected-bundle-manifest <retained-digest>`; both checks must pass with the
+same digest.
 
 Inside an active Codex sandbox, the adapter may choose the local deterministic
 engine only when no engine was explicitly selected. An explicitly selected

@@ -1500,7 +1500,7 @@ while IFS= read -r path; do
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in
-        scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs)
+        scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs|scripts/agent-autoreview-target-guard.test.mjs)
           add_command "bash scripts/agent-autoreview.test.sh" "agent autoreview helper changed"
           ;;
         scripts/check-agent-context.mjs|scripts/check-agent-context-helpers.mjs|scripts/check-agent-context.test.mjs)
@@ -2087,8 +2087,14 @@ is_quality_serial_command() {
   # each other, but they are not prerequisites for lint/typecheck/unit/knip.
   # Browser tests need Chromium installed first; browser tests start a Next dev
   # server while size-limit runs a build-backed Turbo task, and both touch
-  # ui-dashboard/.next, so keep those two mutually exclusive.
+  # ui-dashboard/.next, so keep those two mutually exclusive. The quality-gate
+  # self-test temporarily mutates tracked fixture files in the current checkout,
+  # so it must also finish before source-fingerprinting tests enter the parallel
+  # pool.
   case "$command" in
+    "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
+      return 0
+      ;;
     "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium")
       return 0
       ;;

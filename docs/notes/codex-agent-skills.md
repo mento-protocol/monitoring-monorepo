@@ -44,35 +44,132 @@ Explicit `--engine` arguments and `AUTOREVIEW_ENGINE` take precedence and fail
 closed when the selected engine is unavailable; there is no silent fallback
 from a semantic engine to local. Semantic engines run from an empty temporary
 workspace with project configuration and inherited environment restricted to
-the review contract. Claude preserves standard Vertex and AWS Bedrock
+the review contract. Reviewer web search is disabled by default to keep
+untrusted review evidence off the network; `--web-search` is an explicit opt-in
+for reviews that require public documentation lookup. Claude preserves standard Vertex and AWS Bedrock
 credential-chain inputs; path-valued AWS locators must resolve to regular files
 outside the reviewed repository. A quiet semantic reviewer emits a progress
 heartbeat every 60 seconds. `AUTOREVIEW_HELPER` is an escape hatch for
 intentional local testing or compatible replacement, not a Cloud prerequisite.
 Prepared-bundle replacements must implement the pinned helper CLI, including
-`--source-snapshot-only`, bundle-output, and trusted-input flags.
+`--source-snapshot-only`, `--serialize-untracked-file`, `--bundle-output`,
+`--bundle-output-display`, and `--trusted-input-root`. The adapter keeps
+replacement compatibility by invoking
+that snapshot flag without a target mode; target-mode snapshot scoping is
+passed only to the pinned repo helper.
 
 The adapter also exposes `--prepare-bundle-dir <dir>` to create a repo-context
 review bundle with changed paths, patch files, selected checklists, optional
 `--feedback-pr` feedback state, and the helper's prepared prompt. Supplemental
 evidence supplied directly must be a repo-relative regular UTF-8 file confined
-to the worktree. Adapter-generated feedback state inside the trusted prepared
-bundle directory is the only external-path exception. Sensitive paths and
-credential-like content fail closed before a semantic handoff. Every bundle
-artifact is staged together and the complete directory is published only after
-the source fingerprint still matches. Its `helper-output.txt` names the final
-published prompt/pass paths rather than ephemeral staging locations.
+to the worktree. Adapter-generated feedback state and protected-main checklist
+copies inside the trusted prepared-bundle directory are the only external-path
+exceptions. The adapter resolves `origin/main^{commit}` once and
+uses that protected snapshot as checklist policy in every target mode; checklist
+edits in the reviewed target remain diff evidence and cannot instruct their own
+review. Sensitive paths and
+credential-like content, private keys, wallet recovery phrases, Stripe live
+keys, common webhook URLs,
+and secret-bearing URL query parameters fail closed before a semantic handoff.
+Evidence reads reject symlinks and path-swap races. The requested bundle parent
+must already exist. Every canonical ancestor must be owned by the current user
+or root, and group/other-writable ancestors require sticky-bit protection. The
+adapter canonicalizes and pins that directory plus the
+freshly created staging directory's `dev:ino` before content generation. It
+stages every artifact beside the destination, manifests wrapper-owned evidence
+before and after helper execution, validates the prompt set, and hashes the
+complete evidence both before and after the final helper source check. The
+manifest rejects symlinks, special files, externally linked regular
+files, and any identity or content change. The validated Node runtime
+exclusively reserves the destination, rechecks the staging identity throughout
+transfer, and verifies that manifest after transfer and again immediately
+before hard-linking `.agent-autoreview-complete` last. That marker binds the
+manifest digest. Run `pnpm agent:autoreview --verify-bundle-dir <dir>`
+immediately before one reviewer reads every bounded pass and retain the printed
+digest outside the bundle. After review, rerun with
+`--expected-bundle-manifest <retained-digest>`; the command rehashes the
+no-follow evidence and rejects a changed marker, bundle, or pre/post digest. A
+destination created during the final race window is never replaced; an
+interrupted or unverified bundle must not be reviewed. Failure after an external
+helper sees the staging path leaves that tree for identity-safe inspection
+instead of recursively deleting a potential replacement. The adapter never
+recursively removes a failed destination reservation; inspect and remove an
+incomplete, unmarked directory before retrying. The repo helper is not
+re-entered for publication. Its `helper-output.txt` names the final published
+prompt/pass paths rather than ephemeral staging locations.
 Prepared-bundle mode owns its `autoreview-prompt.md`, so it cannot be combined
-with `--bundle-output`. The removed `--parallel-tests` mode must not be reintroduced;
+with `--bundle-output` or `--dry-run`; publication requires completed content
+validation and the main prompt plus every strictly ordered, deterministic
+indexed bounded pass. Prompt-index validation accepts a UTF-8 BOM, CRLF line
+endings, and leading blank lines only after normalization, then enforces the
+same strict pass order and exact companion-file set, rejecting undeclared pass
+files. Direct `--bundle-output` publication uses an exclusive same-directory
+link and refuses every existing destination, including a file created in the
+final race window, so partial multi-pass publication cannot corrupt a valid
+index and its companions; use a fresh path or remove the prior set deliberately.
+Automatic prepared-bundle
+feedback resolves the unique same-repository
+PR base, number, and canonical repository slug together, so the frozen patch
+and `feedback-state.json` share one GitHub snapshot. Capture materializes the
+pinned feedback-state Node modules from the same protected `origin/main` object
+used for checklist policy, never from a PR-selected base, current head, or
+selected commit. It runs that immutable entry point directly from the repo root;
+it does not invoke branch-controlled package scripts or pnpm. The ledger's PR
+number, base, head branch, and head object ID are revalidated before
+publication. Git metadata reads discard caller-selected routing such as
+`GIT_CONFIG`, `GIT_DIR`, and `GIT_WORK_TREE`; GitHub reads similarly discard
+`GH_HOST` and `GH_REPO`. Missing GitHub CLI, zero or multiple PR matches, and malformed
+metadata fail closed when `--feedback-pr auto` was explicitly requested. An
+explicit `--base` or commit-mode target requires an explicit `--feedback-pr`
+number rather than `auto`. The removed `--parallel-tests` mode must not be
+reintroduced;
 `pnpm agent:quality-gate --run` owns test execution and isolation.
 
-Branch and commit targets are frozen to one object ID before capture. The
-helper fingerprints symbolic-branch or detached identity plus the selected
-`HEAD`/worktree/untracked source, and the adapter compares that fingerprint
-around prepared-bundle staging, so a same-commit branch switch, moving base ref,
-or concurrent edit fails closed instead of mixing review snapshots. The
-adapter's executable search path excludes the reviewed worktree and resolves
-Git/GitHub CLI executables to external targets before capture.
+For a real review, branch and commit targets are frozen to one object ID before
+capture. Direct `--dry-run` reports the requested ref without resolving or
+freezing it. The helper fingerprints symbolic-branch or detached identity plus
+the selected `HEAD` and tracked worktree source. Untracked file and symlink
+state is included only when local working-tree content belongs to the selected
+target (`local` or branch-local); explicit branch and commit source snapshots
+exclude unrelated untracked files. A lightweight `HEAD`/branch/status
+fingerprint brackets target selection first, so a concurrent checkout or
+clean-to-dirty transition fails closed without reading untracked file contents.
+After target selection, explicit branch and commit reviews rely on the
+target-scoped fingerprint and ignore unrelated untracked churn; automatic mode
+retains the status guard because its target class depends on clean/dirty state.
+For explicit branch and commit bundles in the owning checkout, the shell
+adapter's bytes and executable mode must match frozen `HEAD`. The shell, MJS
+helper, and core at frozen `HEAD` must also match the pinned protected-main
+object in every target mode. Commit mode additionally compares the selected
+commit with that protected baseline. The adapter executes MJS files
+materialized from protected main, never from a PR-selected base or mutable
+worktree. Local and branch-local bundles also require helper/core worktree bytes
+to match frozen `HEAD`. Runtime changes fail closed for review from a separate
+trusted checkout with an explicit compatible helper. Direct default-helper
+execution in the owning checkout applies the same protected-main runtime pin.
+Wrapper-owned Node launches discard `NODE_OPTIONS` and `NODE_PATH` before
+executable probing, validation helpers, or the pinned MJS entry point can run;
+an explicit external helper remains caller-trusted. These checks protect review
+integrity but are not a
+provenance boundary: invoking the repo command already trusts executable code
+in the active checkout. The adapter compares the target-scoped
+fingerprint around prepared-bundle staging, so a same-commit branch switch,
+moving base ref, or relevant concurrent edit fails closed instead of mixing
+review snapshots. Its executable search path excludes the reviewed worktree,
+requires the physical checkout root to match Git's top level, uses the system
+path for bare shell utilities, and resolves Git, Node, GitHub CLI, and
+semantic-engine executables to external targets before use. Git commands ignore
+inherited repository-routing variables.
+
+When no `--base` is supplied, automatic PR-base lookup falls back to
+`origin/main` only after a confirmed zero-match result or when GitHub CLI is
+absent. Malformed output, ambiguous multiple matches, and operational failures
+fail closed. With GitHub CLI available, lookup requires a canonical
+`github.com` origin, ignores inherited `GH_HOST` and `GH_REPO`, and explicitly
+addresses that origin repository. A unique match must also belong to the
+current repository owner, so a fork PR with the same branch name cannot select
+the review base. Use an explicit `--base` when GitHub lookup is unavailable or
+intentionally bypassed.
 
 Keep the repo-local helper as the source of truth for this repo's required ship
 gate; update it deliberately when taking upstream improvements from a

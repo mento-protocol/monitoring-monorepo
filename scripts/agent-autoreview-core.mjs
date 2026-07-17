@@ -1,10 +1,13 @@
 import {
   closeSync,
+  constants as fsConstants,
   fstatSync,
+  linkSync,
   lstatSync,
   openSync,
   readSync,
   realpathSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -55,16 +58,38 @@ export function normalizedGitFileMode(fileStat) {
   return fileStat.mode & 0o111 ? "100755" : "100644";
 }
 
+export function assertStableFileRead(initialStat, finalStat, label) {
+  if (
+    !sameFileIdentity(initialStat, finalStat) ||
+    initialStat.mode !== finalStat.mode ||
+    initialStat.size !== finalStat.size ||
+    initialStat.mtimeMs !== finalStat.mtimeMs ||
+    initialStat.ctimeMs !== finalStat.ctimeMs
+  ) {
+    throw new Error(`${label} changed while it was being read`);
+  }
+}
+
 export function readBoundedRegularFile(
   filePath,
   label,
   maxBytes = MAX_REVIEW_INPUT_BYTES,
 ) {
-  const descriptor = openSync(filePath, "r");
+  const pathStat = lstatSync(filePath);
+  if (!pathStat.isFile()) {
+    throw new Error(`${label} must be a regular file`);
+  }
+  const descriptor = openSync(
+    filePath,
+    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0),
+  );
   try {
     const initialStat = fstatSync(descriptor);
     if (!initialStat.isFile()) {
       throw new Error(`${label} must be a regular file`);
+    }
+    if (initialStat.dev !== pathStat.dev || initialStat.ino !== pathStat.ino) {
+      throw new Error(`${label} changed while it was being opened`);
     }
     if (initialStat.size > maxBytes) {
       const error = new Error(
@@ -90,9 +115,11 @@ export function readBoundedRegularFile(
       error.code = "AUTOREVIEW_INPUT_TOO_LARGE";
       throw error;
     }
+    const finalStat = fstatSync(descriptor);
+    assertStableFileRead(initialStat, finalStat, label);
     return {
       data: Buffer.concat(chunks, totalBytes),
-      fileStat: fstatSync(descriptor),
+      fileStat: finalStat,
     };
   } finally {
     closeSync(descriptor);
@@ -492,16 +519,165 @@ export function reviewPromptOutputPaths(outputPath, promptCount) {
   ];
 }
 
+function sameFileIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function lstatIfPresent(filePath) {
+  try {
+    return lstatSync(filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function prepareReviewOutputPath(outputPath) {
+  const absolute = path.resolve(outputPath);
+  const parent = realpathSync(path.dirname(absolute));
+  const parentStat = lstatSync(parent);
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+    throw new Error(
+      `review prompt output parent must be a real directory: ${parent}`,
+    );
+  }
+  const destination = path.join(parent, path.basename(absolute));
+  const destinationStat = lstatIfPresent(destination);
+  if (
+    destinationStat &&
+    (!destinationStat.isFile() || destinationStat.isSymbolicLink())
+  ) {
+    throw new Error(
+      `refusing unsafe review prompt output path: ${destination}`,
+    );
+  }
+  return { destination, parent, parentStat };
+}
+
+function assertStableReviewOutputParent(plan) {
+  const resolvedParent = realpathSync(plan.parent);
+  const parentStat = lstatSync(resolvedParent);
+  if (
+    resolvedParent !== plan.parent ||
+    !parentStat.isDirectory() ||
+    !sameFileIdentity(parentStat, plan.parentStat)
+  ) {
+    throw new Error(
+      `review prompt output parent changed while publishing: ${plan.parent}`,
+    );
+  }
+}
+
+let reviewOutputTemporaryId = 0;
+
+function writeReviewOutputAtomically(plan, content) {
+  assertStableReviewOutputParent(plan);
+  const existing = lstatIfPresent(plan.destination);
+  if (existing) {
+    throw new Error(
+      `refusing to replace an existing review prompt output: ${plan.destination}`,
+    );
+  }
+
+  let descriptor = null;
+  let temporaryPath = null;
+  try {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      reviewOutputTemporaryId += 1;
+      temporaryPath = path.join(
+        plan.parent,
+        `.${path.basename(plan.destination)}.autoreview-${process.pid}-${reviewOutputTemporaryId}.tmp`,
+      );
+      try {
+        descriptor = openSync(
+          temporaryPath,
+          fsConstants.O_WRONLY |
+            fsConstants.O_CREAT |
+            fsConstants.O_EXCL |
+            (fsConstants.O_NOFOLLOW || 0),
+          0o600,
+        );
+        break;
+      } catch (error) {
+        if (error?.code !== "EEXIST") throw error;
+      }
+    }
+    if (descriptor === null || temporaryPath === null) {
+      throw new Error(
+        `unable to reserve a temporary review prompt output in ${plan.parent}`,
+      );
+    }
+    writeFileSync(descriptor, content, "utf8");
+    const temporaryStat = fstatSync(descriptor);
+    closeSync(descriptor);
+    descriptor = null;
+
+    assertStableReviewOutputParent(plan);
+    const destinationStat = lstatIfPresent(plan.destination);
+    if (destinationStat) {
+      throw new Error(
+        `refusing to replace an existing review prompt output: ${plan.destination}`,
+      );
+    }
+    try {
+      linkSync(temporaryPath, plan.destination);
+    } catch (error) {
+      if (error?.code === "EEXIST") {
+        throw new Error(
+          `refusing to replace an existing review prompt output: ${plan.destination}`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    const publishedStat = lstatSync(plan.destination);
+    if (
+      !publishedStat.isFile() ||
+      publishedStat.isSymbolicLink() ||
+      !sameFileIdentity(publishedStat, temporaryStat)
+    ) {
+      const current = lstatIfPresent(plan.destination);
+      if (
+        current?.isFile() &&
+        !current.isSymbolicLink() &&
+        sameFileIdentity(current, temporaryStat)
+      ) {
+        unlinkSync(plan.destination);
+      }
+      throw new Error(
+        `review prompt output changed while publishing: ${plan.destination}`,
+      );
+    }
+    unlinkSync(temporaryPath);
+    temporaryPath = null;
+    return publishedStat;
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
+    if (temporaryPath !== null) {
+      try {
+        unlinkSync(temporaryPath);
+      } catch {
+        // Preserve the primary publication failure if best-effort cleanup loses.
+      }
+    }
+  }
+}
+
 export function writeReviewPromptOutputs(outputPath, prompts) {
   const outputs = reviewPromptOutputPaths(outputPath, prompts.length);
+  const plans = outputs.map(prepareReviewOutputPath);
   if (prompts.length === 1) {
-    writeFileSync(outputs[0], prompts[0]);
+    writeReviewOutputAtomically(plans[0], prompts[0]);
     return outputs;
   }
+  for (const plan of plans) {
+    if (lstatIfPresent(plan.destination)) {
+      throw new Error(
+        `refusing to replace an existing multi-pass review prompt set: ${plan.destination}`,
+      );
+    }
+  }
   const companions = outputs.slice(1);
-  companions.forEach((companion, index) => {
-    writeFileSync(companion, prompts[index]);
-  });
   const lines = [
     "# Autoreview Prompt Index",
     "",
@@ -513,7 +689,33 @@ export function writeReviewPromptOutputs(outputPath, prompts) {
     ),
     "",
   ];
-  writeFileSync(outputPath, lines.join("\n"));
+  const published = [];
+  try {
+    plans.slice(1).forEach((plan, index) => {
+      published.push({
+        plan,
+        stat: writeReviewOutputAtomically(plan, prompts[index]),
+      });
+    });
+    writeReviewOutputAtomically(plans[0], lines.join("\n"));
+  } catch (error) {
+    for (const { plan, stat } of published.reverse()) {
+      try {
+        assertStableReviewOutputParent(plan);
+        const current = lstatIfPresent(plan.destination);
+        if (
+          current?.isFile() &&
+          !current.isSymbolicLink() &&
+          sameFileIdentity(current, stat)
+        ) {
+          unlinkSync(plan.destination);
+        }
+      } catch {
+        // Preserve the publication error if best-effort rollback loses a race.
+      }
+    }
+    throw error;
+  }
   return outputs;
 }
 
@@ -562,22 +764,633 @@ export function sensitivePathReason(rawPath) {
 }
 
 function placeholderValue(value) {
+  const trimmed = value.trim();
   return (
-    /(?:\$\{|\$[A-Z_]|process\.env|secrets\.|vars\.|var\.)/i.test(value) ||
-    /(?:^|[^a-z0-9])(?:redacted|placeholder|example|dummy|test|changeme|replace[-_ ]?me|not[-_ ]?set)(?:[^a-z0-9]|$)/i.test(
-      value,
+    /^(?:\$\{(?:[A-Z_][A-Z0-9_]*|(?:secrets|vars|var)\.[A-Z0-9_.-]+|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\]))\}|\$\{\{\s*(?:secrets|vars)\.[A-Z0-9_.-]+\s*\}\}|\$[A-Z_][A-Z0-9_]*|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\])|(?:secrets|vars|var)\.[A-Z0-9_.-]+)$/i.test(
+      trimmed,
     ) ||
-    /^<[^>]+>$/.test(value)
+    /^(?:process(?:\.|\?\.)env(?:(?:\.|\?\.)[A-Z_][A-Z0-9_]*|(?:\?\.)?\[["'][A-Z_][A-Z0-9_]*["']\])|\$\{process(?:\.|\?\.)env(?:(?:\.|\?\.)[A-Z_][A-Z0-9_]*|(?:\?\.)?\[["'][A-Z_][A-Z0-9_]*["']\])\})$/i.test(
+      trimmed,
+    ) ||
+    /^(?:(?:redacted|placeholder|example|sample|dummy|test|fixture|prefix|suffix)(?:[-_ ](?:api|auth|access|service|client|private|secret|key|token|credential|value|placeholder|example|sample|dummy|test|fixture|prefix|suffix))*|changeme|replace[-_ ]?me|not[-_ ]?set)$/i.test(
+      trimmed,
+    ) ||
+    /^<[^>]+>$/.test(trimmed)
+  );
+}
+
+function normalizeCredentialKey(rawKey) {
+  return rawKey
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase();
+}
+
+const RECOVERY_PHRASE_WORD_COUNTS = new Set([12, 15, 18, 21, 24]);
+
+function recoveryPhraseAssignmentKey(rawKey) {
+  const key = normalizeCredentialKey(rawKey);
+  return /(?:^|[_-])(?:mnemonic(?:[_-]?(?:phrase|words))?|seed(?:[_-]?(?:phrase|words))?|recovery[_-]?(?:phrase|words|seed)|backup[_-]?(?:phrase|words|seed))$/.test(
+    key,
+  );
+}
+
+function recoveryPhraseValue(value) {
+  const candidate = value.trim();
+  if (!candidate || placeholderValue(candidate)) return false;
+  const words = candidate.split(/\s+/u);
+  return (
+    RECOVERY_PHRASE_WORD_COUNTS.has(words.length) &&
+    words.every((word) => /^[\p{L}\p{M}]+$/u.test(word))
+  );
+}
+
+function unquotedRecoveryPhraseValue(value) {
+  return value
+    .replace(/[ \t]+(?:#|\/\/).*$/u, "")
+    .replace(/[ \t]+\/\*[^\r\n]*\*\/[ \t]*$/u, "")
+    .replace(/[;,][ \t]*$/u, "")
+    .trim();
+}
+
+function diffPayloadLine(line) {
+  return /^[+-]/u.test(line) ? line.slice(1) : line;
+}
+
+function collectionRecoveryPhraseValue(value) {
+  const candidate = unquotedRecoveryPhraseValue(
+    value.split(/\r?\n/u).map(diffPayloadLine).join("\n"),
+  );
+  const closing = { "(": ")", "[": "]" }[candidate[0]];
+  if (
+    !closing ||
+    candidate.at(-1) !== closing ||
+    !balancedDelimitedExpression(candidate, 0)
+  ) {
+    return null;
+  }
+  const body = candidate.slice(1, -1);
+  const items = [];
+  for (let index = 0; index < body.length; index += 1) {
+    if (/[,\s]/u.test(body[index])) continue;
+    const quoted = readQuotedLiteral(body, index);
+    if (quoted) {
+      if (quoted.interpolated) return null;
+      items.push(quoted.value);
+      index = quoted.end;
+      continue;
+    }
+    let end = index;
+    while (end < body.length && !/[,\s]/u.test(body[end])) end += 1;
+    const item = body.slice(index, end);
+    if (!/^[\p{L}\p{M}]+$/u.test(item)) return null;
+    items.push(item);
+    index = end - 1;
+  }
+  if (items.length === 0) return null;
+  return items.join(" ");
+}
+
+function yamlRecoveryPhraseValue(text) {
+  const lines = text.split(/\r?\n/u);
+  for (let index = 0; index < lines.length; index += 1) {
+    const headerLine = diffPayloadLine(lines[index]);
+    const header =
+      /^\s*["']?([A-Za-z][A-Za-z0-9_-]*)["']?\s*:\s*([|>](?:[1-9][+-]?|[+-][1-9]?)?)?\s*(?:#.*)?$/u.exec(
+        headerLine,
+      );
+    if (!header || !recoveryPhraseAssignmentKey(header[1])) continue;
+    if (header[2]) {
+      const headerIndent = /^\s*/u.exec(headerLine)?.[0].length ?? 0;
+      const fragments = [];
+      for (
+        let blockIndex = index + 1;
+        blockIndex < lines.length;
+        blockIndex += 1
+      ) {
+        const line = diffPayloadLine(lines[blockIndex]);
+        if (/^\s*$/u.test(line)) {
+          fragments.push("");
+          continue;
+        }
+        const indentation = /^\s*/u.exec(line)?.[0].length ?? 0;
+        if (indentation <= headerIndent) break;
+        fragments.push(line.trim());
+      }
+      const candidate = fragments.join(" ");
+      if (recoveryPhraseValue(candidate)) return candidate;
+      continue;
+    }
+    const items = [];
+    for (let itemIndex = index + 1; itemIndex < lines.length; itemIndex += 1) {
+      const line = diffPayloadLine(lines[itemIndex]);
+      if (/^\s*$/u.test(line)) {
+        if (items.length > 0) continue;
+        break;
+      }
+      const item =
+        /^\s*-\s+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([\p{L}\p{M}]+))\s*(?:#.*)?$/u.exec(
+          line,
+        );
+      if (!item) break;
+      items.push(item[1] ?? item[2] ?? item[3]);
+      if (items.length > Math.max(...RECOVERY_PHRASE_WORD_COUNTS)) break;
+    }
+    const candidate = items.join(" ");
+    if (recoveryPhraseValue(candidate)) return candidate;
+  }
+  return null;
+}
+
+function balancedDelimitedExpression(value, openingIndex) {
+  const stack = [];
+  let quote = null;
+  let escaped = false;
+  for (let index = openingIndex; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+      continue;
+    }
+    if (character === "(" || character === "[" || character === "{") {
+      stack.push(character);
+      continue;
+    }
+    if (character === ")" || character === "]" || character === "}") {
+      const expected = character === ")" ? "(" : character === "]" ? "[" : "{";
+      if (stack.pop() !== expected) return false;
+      if (stack.length === 0 && index !== value.length - 1) return false;
+    }
+  }
+  return quote === null && stack.length === 0;
+}
+
+function unwrapBalancedExpression(value) {
+  let expression = value.trim();
+  const closingDelimiter = { "(": ")", "[": "]", "{": "}" };
+  while (
+    expression.length >= 2 &&
+    closingDelimiter[expression[0]] === expression.at(-1) &&
+    balancedDelimitedExpression(expression, 0)
+  ) {
+    expression = expression.slice(1, -1).trim();
+  }
+  return expression;
+}
+
+function unquotedCodeExpression(value, trailingComma, propertyContext = false) {
+  const expression = unwrapBalancedExpression(value);
+  if (
+    propertyContext &&
+    (/^[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.|\?\.)[A-Za-z_$][A-Za-z0-9_$]*)+$/.test(
+      expression,
+    ) ||
+      (trailingComma && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(expression)))
+  ) {
+    return true;
+  }
+
+  const callHead =
+    /^(?:await\s+)?(?:new\s+)?[A-Za-z_$][A-Za-z0-9_$]*(?:(?:\.|\?\.)[A-Za-z_$][A-Za-z0-9_$]*)*\s*\(/.exec(
+      expression,
+    );
+  if (!callHead || !expression.endsWith(")")) return false;
+
+  const openingIndex = callHead[0].lastIndexOf("(");
+  return balancedDelimitedExpression(expression, openingIndex);
+}
+
+function wrappedQuotedLiteral(value) {
+  const expression = unwrapBalancedExpression(value);
+  const quote = expression[0];
+  if (
+    (quote !== '"' && quote !== "'" && quote !== "`") ||
+    expression.length < 2
+  ) {
+    return null;
+  }
+  const parsed = readQuotedLiteral(expression, 0);
+  if (!parsed || parsed.end !== expression.length - 1 || parsed.interpolated) {
+    return null;
+  }
+  return parsed.value;
+}
+
+function readQuotedLiteral(source, start) {
+  const quote = source[start];
+  if (quote !== '"' && quote !== "'" && quote !== "`") return null;
+  let value = "";
+  let escaped = false;
+  let interpolated = false;
+  for (let index = start + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (escaped) {
+      value += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote === "`" && character === "$" && source[index + 1] === "{") {
+      interpolated = true;
+      const closingIndex = findTemplateInterpolationEnd(source, index + 1);
+      if (closingIndex !== null) {
+        value += source.slice(index, closingIndex + 1);
+        index = closingIndex;
+        continue;
+      }
+    }
+    if (character === quote) {
+      return { end: index, interpolated, value };
+    }
+    value += character;
+  }
+  return null;
+}
+
+function findTemplateInterpolationEnd(source, openingIndex) {
+  const stack = ["{"];
+  let quote = null;
+  let escaped = false;
+  for (let index = openingIndex + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+      continue;
+    }
+    if (character === "(" || character === "[" || character === "{") {
+      stack.push(character);
+      continue;
+    }
+    if (character === ")" || character === "]" || character === "}") {
+      const expected = character === ")" ? "(" : character === "]" ? "[" : "{";
+      if (stack.pop() !== expected) return null;
+      if (stack.length === 0) return index;
+    }
+  }
+  return null;
+}
+
+function templateLiteralValues(source) {
+  const staticValue = staticTemplateValue(source);
+  if (staticValue !== null) return [staticValue];
+  const values = [];
+  let chunk = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "\\" && index + 1 < source.length) {
+      chunk += source[index + 1];
+      index += 1;
+      continue;
+    }
+    if (character === "$" && source[index + 1] === "{") {
+      if (chunk) values.push(chunk);
+      chunk = "";
+      const closingIndex = findTemplateInterpolationEnd(source, index + 1);
+      if (closingIndex === null) {
+        chunk += source.slice(index);
+        break;
+      }
+      values.push(
+        ...quotedLiteralValues(source.slice(index + 2, closingIndex)),
+      );
+      index = closingIndex;
+      continue;
+    }
+    chunk += character;
+  }
+  if (chunk) values.push(chunk);
+  return values;
+}
+
+function staticConcatenation(source, first) {
+  if (first.interpolated) return null;
+  let combined = first.value;
+  let count = 1;
+  let end = first.end;
+  while (end + 1 < source.length) {
+    const separator =
+      /^(?:(?:\r?\n[+ -]?[ \t]*|[ \t]+|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n[+ -]?[ \t]*|$))*)\+(?:(?:\r?\n[+ -]?[ \t]*|[ \t]+|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n[+ -]?[ \t]*|$))*)/.exec(
+        source.slice(end + 1),
+      );
+    if (!separator) break;
+    const nextStart = end + 1 + separator[0].length;
+    const next = readQuotedLiteral(source, nextStart);
+    if (!next || next.interpolated) break;
+    combined += next.value;
+    count += 1;
+    end = next.end;
+  }
+  return count > 1 ? { end, value: combined } : null;
+}
+
+function staticStringExpression(source) {
+  const expression = unwrapBalancedExpression(source);
+  const first = readQuotedLiteral(expression, 0);
+  if (!first) return null;
+  const concatenation = staticConcatenation(expression, first);
+  if (concatenation) {
+    return expression.slice(concatenation.end + 1).trim() === ""
+      ? concatenation.value
+      : null;
+  }
+  if (first.end !== expression.length - 1) return null;
+  if (first.interpolated) {
+    return staticTemplateValue(expression.slice(1, first.end));
+  }
+  return first.value;
+}
+
+function staticTemplateValue(source) {
+  let value = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "\\" && index + 1 < source.length) {
+      value += source[index + 1];
+      index += 1;
+      continue;
+    }
+    if (character === "$" && source[index + 1] === "{") {
+      const closingIndex = findTemplateInterpolationEnd(source, index + 1);
+      if (closingIndex === null) return null;
+      const interpolation = staticStringExpression(
+        source.slice(index + 2, closingIndex),
+      );
+      if (interpolation === null) return null;
+      value += interpolation;
+      index = closingIndex;
+      continue;
+    }
+    value += character;
+  }
+  return value;
+}
+
+function processEnvironmentPropertyLiteral(source, start, end) {
+  return (
+    /process\s*(?:\.|\?\.)\s*env\s*(?:\?\.)?\s*\[\s*$/i.test(
+      source.slice(0, start),
+    ) && /^\s*\]/.test(source.slice(end + 1))
+  );
+}
+
+function quotedLiteralContainingPositionOnLine(source, position) {
+  const lineStart = source.lastIndexOf("\n", position - 1) + 1;
+  for (let index = lineStart; index <= position; index += 1) {
+    const quoted = readQuotedLiteral(source, index);
+    if (!quoted) continue;
+    if (quoted.end >= position) return quoted;
+    index = quoted.end;
+  }
+  return null;
+}
+
+function inlineAssignmentLiteralEnd(source, match, key, computed) {
+  const matchStart = match.index ?? 0;
+  if (computed) {
+    return (
+      quotedLiteralContainingPositionOnLine(source, matchStart)?.end ?? null
+    );
+  }
+  const keyOffset = match[0].indexOf(key);
+  if (keyOffset < 0) return matchStart;
+  const keyPosition = matchStart + keyOffset;
+  const preceding = source[keyPosition - 1];
+  const following = source[keyPosition + key.length];
+  const contextPosition = "\"'`".includes(preceding)
+    ? following === preceding
+      ? keyPosition - 2
+      : keyPosition - 1
+    : keyPosition;
+  return (
+    quotedLiteralContainingPositionOnLine(source, contextPosition)?.end ?? null
+  );
+}
+
+function quotedLiteralValues(source) {
+  const values = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const parsed = readQuotedLiteral(source, index);
+    if (!parsed) continue;
+    if (processEnvironmentPropertyLiteral(source, index, parsed.end)) {
+      index = parsed.end;
+      continue;
+    }
+    if (parsed.interpolated) {
+      values.push(
+        ...templateLiteralValues(source.slice(index + 1, parsed.end)),
+      );
+      index = parsed.end;
+      continue;
+    }
+    const concatenation = staticConcatenation(source, parsed);
+    if (concatenation) {
+      values.push(concatenation.value);
+      index = concatenation.end;
+      continue;
+    }
+    values.push(parsed.value);
+    index = parsed.end;
+  }
+  return values;
+}
+
+function expressionContinuesBetweenLines(currentSource, nextSource) {
+  const currentLine = currentSource.replace(/^[+ -]?\s*/, "").trimEnd();
+  const nextLine = nextSource.replace(/^[+ -]?\s*/, "").trimStart();
+  return (
+    /(?:\?\?|\|\||&&|[+*/%?:=.,([{!<>-])$/.test(currentLine) ||
+    /^(?:\?\?|\|\||&&|[+*/%?:=.,)\]}!<>-])/.test(nextLine)
+  );
+}
+
+function assignmentContinuesAcrossLine(source, lineStart, newlineIndex) {
+  const nextLineEnd = source.indexOf("\n", newlineIndex + 1);
+  return expressionContinuesBetweenLines(
+    source.slice(lineStart, newlineIndex),
+    source.slice(
+      newlineIndex + 1,
+      nextLineEnd === -1 ? source.length : nextLineEnd,
+    ),
+  );
+}
+
+function boundedAssignmentExpression(source, start) {
+  const maximumEnd = Math.min(source.length, start + 65536);
+  const stack = [];
+  let lineStart = start;
+  let linePrefixPending = start === 0 || source[start - 1] === "\n";
+  let sawContent = false;
+  for (let index = start; index < maximumEnd; index += 1) {
+    const character = source[index];
+    if (character === "\r") continue;
+    if (character === "\n") {
+      if (
+        stack.length === 0 &&
+        sawContent &&
+        !assignmentContinuesAcrossLine(source, lineStart, index)
+      ) {
+        return source.slice(start, index);
+      }
+      lineStart = index + 1;
+      linePrefixPending = true;
+      continue;
+    }
+    if (linePrefixPending) {
+      linePrefixPending = false;
+      if (character === "+" || character === "-" || character === " ") {
+        continue;
+      }
+    }
+    if (/\s/.test(character)) continue;
+
+    const quoted = readQuotedLiteral(source, index);
+    if (quoted) {
+      sawContent = true;
+      index = quoted.end;
+      continue;
+    }
+    if (
+      character === "/" &&
+      source[index + 1] === "/" &&
+      source[index - 1] !== ":"
+    ) {
+      const newline = source.indexOf("\n", index + 2);
+      if (newline === -1) {
+        return maximumEnd < source.length ? null : source.slice(start, index);
+      }
+      if (newline >= maximumEnd) {
+        return null;
+      }
+      const nextLineEnd = source.indexOf("\n", newline + 1);
+      if (
+        stack.length === 0 &&
+        sawContent &&
+        !expressionContinuesBetweenLines(
+          source.slice(lineStart, index),
+          source.slice(
+            newline + 1,
+            nextLineEnd === -1 ? source.length : nextLineEnd,
+          ),
+        )
+      ) {
+        return source.slice(start, index);
+      }
+      index = newline;
+      lineStart = newline + 1;
+      linePrefixPending = true;
+      continue;
+    }
+    if (character === "/" && source[index + 1] === "*") {
+      const closing = source.indexOf("*/", index + 2);
+      if (closing === -1 || closing + 2 > maximumEnd) {
+        return null;
+      }
+      index = closing + 1;
+      continue;
+    }
+    if (character === "(" || character === "[" || character === "{") {
+      stack.push(character);
+      sawContent = true;
+      continue;
+    }
+    if (character === ")" || character === "]" || character === "}") {
+      const expected = character === ")" ? "(" : character === "]" ? "[" : "{";
+      if (stack.at(-1) !== expected) return source.slice(start, index);
+      stack.pop();
+      sawContent = true;
+      continue;
+    }
+    if (stack.length === 0 && (character === "," || character === ";")) {
+      return source.slice(start, index);
+    }
+    sawContent = true;
+  }
+  return maximumEnd < source.length ? null : source.slice(start, maximumEnd);
+}
+
+function completeAssignmentExpression(value) {
+  const expression = value.trim();
+  const quoted = readQuotedLiteral(expression, 0);
+  if (quoted?.end === expression.length - 1) return true;
+  if (
+    expression.length >= 2 &&
+    "([{".includes(expression[0]) &&
+    balancedDelimitedExpression(expression, 0)
+  ) {
+    return true;
+  }
+  return unquotedCodeExpression(expression, true, true);
+}
+
+function stripTrailingExpressionComment(value) {
+  const expression = value.trim();
+  for (let index = 0; index < expression.length - 1; index += 1) {
+    const quoted = readQuotedLiteral(expression, index);
+    if (quoted) {
+      index = quoted.end;
+      continue;
+    }
+    if (
+      expression[index] !== "/" ||
+      (expression[index + 1] !== "/" && expression[index + 1] !== "*")
+    ) {
+      continue;
+    }
+    let prefix = expression.slice(0, index).trimEnd();
+    if (prefix.endsWith(",")) prefix = prefix.slice(0, -1).trimEnd();
+    if (completeAssignmentExpression(prefix)) return prefix;
+  }
+  return expression;
+}
+
+function literalAuthorizationCredential(value) {
+  const trimmed = value.trim();
+  if (placeholderValue(trimmed)) return false;
+  const scheme = /^(?:bearer|basic|token|digest|apikey)\s+(.+)$/i.exec(trimmed);
+  const credential = (scheme?.[1] ?? trimmed).trim();
+  return (
+    credential.length >= (scheme ? 8 : 12) && !placeholderValue(credential)
   );
 }
 
 export function secretLikeReason(text) {
+  const privateKeyHeader =
+    /-----BEGIN (?:(?:[A-Z0-9][A-Z0-9 -]* )?PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----/g;
+  for (const match of text.matchAll(privateKeyHeader)) {
+    const remainder = text.slice((match.index ?? 0) + match[0].length);
+    if (/^[ \t]*(?:(?:\r?\n)[+ -]?\s*|\\n|\\r\\n)\S/.test(remainder)) {
+      return "private key material";
+    }
+  }
   if (
-    /(?:^|\n)[+ -]?\s*-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(
+    /\bauthorization\b\s*["']?\s*[:=]\s*["'`]?\s*bearer\s+[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/i.test(
       text,
     )
   ) {
-    return "private key material";
+    return "Bearer JWT";
   }
   const strongPatterns = [
     /\bgh[pousr]_[A-Za-z0-9]{30,}\b/,
@@ -586,38 +1399,305 @@ export function secretLikeReason(text) {
     /\bAIza[0-9A-Za-z_-]{30,}\b/,
     /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/,
     /\bsk-[A-Za-z0-9_-]{24,}\b/,
+    /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/,
+    /\bnpm_[A-Za-z0-9]{30,}\b/,
   ];
   if (strongPatterns.some((pattern) => pattern.test(text))) {
     return "credential-like token";
   }
+  const secretUrlPatterns = [
+    /https:\/\/hooks\.slack\.com\/services\/[A-Z0-9]{8,}\/[A-Z0-9]{8,}\/[A-Za-z0-9]{20,}/i,
+    /https:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api\/webhooks\/[0-9]{15,20}\/[A-Za-z0-9._-]{20,}/i,
+    /https:\/\/api\.telegram\.org\/bot[0-9]{6,12}:[A-Za-z0-9_-]{30,}/i,
+  ];
+  if (secretUrlPatterns.some((pattern) => pattern.test(text))) {
+    return "secret-bearing webhook URL";
+  }
   if (/\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/i.test(text)) {
     return "credentialed URL";
   }
+  const sensitiveQueryNames = new Set([
+    "access-token",
+    "access_token",
+    "apikey",
+    "api-key",
+    "api_key",
+    "auth",
+    "key",
+    "secret",
+    "sig",
+    "signature",
+    "token",
+    "x-amz-signature",
+    "x-goog-signature",
+  ]);
+  for (const match of text.matchAll(/\bhttps?:\/\/[^\s"'`<>]+/gi)) {
+    let parsed;
+    try {
+      parsed = new URL(match[0]);
+    } catch {
+      continue;
+    }
+    for (const [name, rawValue] of parsed.searchParams) {
+      const value = rawValue.trim();
+      if (
+        sensitiveQueryNames.has(name.toLowerCase()) &&
+        value.length >= 12 &&
+        !placeholderValue(value)
+      ) {
+        return "secret-bearing URL";
+      }
+    }
+  }
   const awsCredentialPattern =
-    /^[+ -]?\s*["'`]?aws[_-]?(?:access[_-]?key[_-]?id|secret[_-]?access[_-]?key|session[_-]?token)["'`]?\s*[:=]\s*["'`]?([^"'`\r\n]+?)["'`]?[ \t]*(?:[#;][^\r\n]*)?$/gim;
+    /^[+ -]?\s*["'`]?aws[_-]?(?:access[_-]?key[_-]?id|secret[_-]?access[_-]?key|session[_-]?token)["'`]?\s*[:=]\s*["'`]?([^"'`\r\n]+?)["'`]?(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
   for (const match of text.matchAll(awsCredentialPattern)) {
     const value = match[1].trim();
     if (value.length >= 12 && !placeholderValue(value)) {
       return "literal AWS credential assignment";
     }
   }
+  const authorizationPattern =
+    /^[+ -]?\s*["'`]?authorization["'`]?\s*([:=])\s*(["'`]?)([^"'`\r\n]+?)\2[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[\s\S]*?\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+  for (const match of text.matchAll(authorizationPattern)) {
+    const value = match[3].trim();
+    if (
+      !match[2] &&
+      unquotedCodeExpression(value, match[4] === ",", match[1] === ":")
+    ) {
+      continue;
+    }
+    if (literalAuthorizationCredential(value)) {
+      return "literal Authorization credential";
+    }
+  }
+  const credentialAssignmentKey = (rawKey) => {
+    const key = normalizeCredentialKey(rawKey);
+    return /(?:^|[_-])(?:api[_-]?key|client[_-]?secret|secret[_-]?key|vercel[_-]?token|access[_-]?token|refresh[_-]?token|auth[_-]?token|npm[_-]?token|token|password|private[_-]?key|secret)$/.test(
+      key,
+    );
+  };
+  const awsCredentialAssignmentKey = (rawKey) =>
+    /^aws[_-]?(?:access[_-]?key[_-]?id|secret[_-]?access[_-]?key|session[_-]?token)$/.test(
+      normalizeCredentialKey(rawKey),
+    );
+  const publicTokenAddressForKey = (rawKey, value) => {
+    const key = normalizeCredentialKey(rawKey);
+    return key === "token" && /^0x[0-9a-f]{40}$/i.test(value);
+  };
+  const inlineQuotedAssignmentPatterns = [
+    {
+      computed: false,
+      pattern:
+        /(?:^|[^A-Za-z0-9_-])["'`]?([A-Za-z][A-Za-z0-9_-]*)["'`]?\s*[:=]\s*/gim,
+    },
+    {
+      computed: true,
+      pattern: /\[\s*["'`]([A-Za-z][A-Za-z0-9_-]*)["'`]\s*\]\s*[:=]\s*/gim,
+    },
+  ];
+  for (const { computed, pattern } of inlineQuotedAssignmentPatterns) {
+    for (const match of text.matchAll(pattern)) {
+      const key = match[1];
+      const authorizationKey = normalizeCredentialKey(key) === "authorization";
+      const awsCredentialKey = awsCredentialAssignmentKey(key);
+      const recoveryPhraseKey = recoveryPhraseAssignmentKey(key);
+      if (
+        !authorizationKey &&
+        !awsCredentialKey &&
+        !recoveryPhraseKey &&
+        !credentialAssignmentKey(key)
+      ) {
+        continue;
+      }
+      const valueStart = (match.index ?? 0) + match[0].length;
+      const first = readQuotedLiteral(text, valueStart);
+      const literalEnd = first
+        ? null
+        : inlineAssignmentLiteralEnd(text, match, key, computed);
+      const concatenation = first ? staticConcatenation(text, first) : null;
+      const directLiteral = Boolean(
+        first && !concatenation && !first.interpolated,
+      );
+      const multilineDirectTemplate = Boolean(
+        directLiteral &&
+        text[valueStart] === "`" &&
+        /[\r\n]/.test(first?.value ?? ""),
+      );
+      let candidates;
+      let recoveryCollection = null;
+      if (first) {
+        candidates = concatenation
+          ? [concatenation.value]
+          : first.interpolated
+            ? templateLiteralValues(text.slice(valueStart + 1, first.end))
+            : [first.value];
+      } else {
+        const expression =
+          literalEnd === null
+            ? boundedAssignmentExpression(text, valueStart)
+            : text.slice(valueStart, literalEnd);
+        if (expression === null) {
+          return "credential assignment exceeds scan bound";
+        }
+        candidates = quotedLiteralValues(expression);
+        if (recoveryPhraseKey) {
+          recoveryCollection = collectionRecoveryPhraseValue(expression);
+        }
+      }
+      if (
+        recoveryPhraseKey &&
+        (recoveryPhraseValue(recoveryCollection ?? "") ||
+          recoveryPhraseValue(candidates.join(" ")))
+      ) {
+        return "literal wallet recovery phrase";
+      }
+      if (candidates.length === 0) continue;
+      for (const value of candidates) {
+        if (recoveryPhraseKey) {
+          if (recoveryPhraseValue(value)) {
+            return "literal wallet recovery phrase";
+          }
+          continue;
+        }
+        if (authorizationKey) {
+          if (literalAuthorizationCredential(value)) {
+            return "literal Authorization credential";
+          }
+          continue;
+        }
+        if (awsCredentialKey) {
+          if (value.length >= 12 && !placeholderValue(value)) {
+            return "literal AWS credential assignment";
+          }
+          continue;
+        }
+        if (directLiteral && !computed && !multilineDirectTemplate) continue;
+        if (
+          value.length >= 12 &&
+          !publicTokenAddressForKey(key, value) &&
+          !placeholderValue(value)
+        ) {
+          return directLiteral
+            ? "literal credential assignment"
+            : "literal credential expression";
+        }
+      }
+    }
+  }
+  const unquotedRecoveryPhraseAssignmentPattern =
+    /^[+ -]?\s*(?:(?:export\s+)?(?:const|let|var)\s+|export\s+)?["'`]?([A-Za-z][A-Za-z0-9_-]*)["'`]?\s*[:=]\s*([^"'`\r\n]+?)\s*$/gim;
+  for (const match of text.matchAll(unquotedRecoveryPhraseAssignmentPattern)) {
+    if (!recoveryPhraseAssignmentKey(match[1])) continue;
+    const unquotedValue = unquotedRecoveryPhraseValue(match[2]);
+    if (
+      recoveryPhraseValue(
+        collectionRecoveryPhraseValue(unquotedValue) ?? unquotedValue,
+      )
+    ) {
+      return "literal wallet recovery phrase";
+    }
+  }
+  if (yamlRecoveryPhraseValue(text) !== null) {
+    return "literal wallet recovery phrase";
+  }
+  const genericTokenAssignmentPattern =
+    /^[+ -]?\s*["'`]?(token|[a-z][a-z0-9]*(?:_[a-z0-9]+)*_token)["'`]?\s*([:=])\s*(["'`]?)([^"'`\r\n]+?)\3[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+  for (const match of text.matchAll(genericTokenAssignmentPattern)) {
+    const key = match[1];
+    const quoted = Boolean(match[3]);
+    const value = match[4].trim();
+    const trailingComma = match[5] === ",";
+    if (
+      !quoted &&
+      unquotedCodeExpression(value, trailingComma, match[2] === ":")
+    ) {
+      continue;
+    }
+    if (
+      value.length >= 12 &&
+      !publicTokenAddressForKey(key, value) &&
+      !placeholderValue(value)
+    ) {
+      return "literal generic token assignment";
+    }
+  }
   const keyPattern =
-    /(?:api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|password|private[_-]?key|secret)\s*["']?\s*[:=]\s*["'`]([^"'`\r\n]{12,})["'`]/gi;
+    /(?:^|[^A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]*)\s*["']?\s*[:=]\s*(["'`])((?:\\.|(?!\2)[^\\\r\n]){12,})\2/gim;
   for (const match of text.matchAll(keyPattern)) {
-    if (!placeholderValue(match[1].trim()))
+    const key = match[1];
+    const value = match[3].trim();
+    if (
+      credentialAssignmentKey(key) &&
+      !publicTokenAddressForKey(key, value) &&
+      !placeholderValue(value)
+    )
       return "literal credential assignment";
   }
+  const wrappedQuotedKeyPattern =
+    /^[+ -]?\s*["'`]?([A-Za-z][A-Za-z0-9_-]*)["'`]?\s*[:=]\s*(.+?)[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[\s\S]*?\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+  for (const match of text.matchAll(wrappedQuotedKeyPattern)) {
+    const key = match[1];
+    const authorizationKey = normalizeCredentialKey(key) === "authorization";
+    const awsCredentialKey = awsCredentialAssignmentKey(key);
+    if (
+      !authorizationKey &&
+      !awsCredentialKey &&
+      !credentialAssignmentKey(key)
+    ) {
+      continue;
+    }
+    const assignmentValue = stripTrailingExpressionComment(match[2]);
+    if (placeholderValue(unwrapBalancedExpression(assignmentValue))) {
+      continue;
+    }
+    const wrappedValue = wrappedQuotedLiteral(assignmentValue);
+    const candidates =
+      wrappedValue === null
+        ? quotedLiteralValues(assignmentValue)
+        : [wrappedValue];
+    for (const value of candidates) {
+      if (authorizationKey) {
+        if (literalAuthorizationCredential(value)) {
+          return "literal Authorization credential";
+        }
+        continue;
+      }
+      if (awsCredentialKey) {
+        if (value.length >= 12 && !placeholderValue(value)) {
+          return "literal AWS credential assignment";
+        }
+        continue;
+      }
+      if (
+        value.length >= 12 &&
+        !publicTokenAddressForKey(key, value) &&
+        !placeholderValue(value)
+      ) {
+        return "literal credential expression";
+      }
+    }
+  }
   const registryAuthPattern =
-    /^[+ -]?\s*\/\/[^=\r\n]+\/?:_(?:authToken|auth|password)\s*=\s*["'`]?([^"'`\r\n]+?)["'`]?[ \t]*(?:[#;][^\r\n]*)?$/gim;
+    /^[+ -]?\s*\/\/[^=\r\n]+\/?:_(?:authToken|auth|password)\s*=\s*["'`]?([^"'`\r\n]+?)["'`]?(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
   for (const match of text.matchAll(registryAuthPattern)) {
     const value = match[1].trim();
     if (value.length >= 12 && !placeholderValue(value))
       return "literal registry credential assignment";
   }
   const unquotedKeyPattern =
-    /^[+ -]?\s*(?:api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|password|private[_-]?key|secret)\s*[:=]\s*([A-Za-z0-9_+./=-]{16,})[ \t]*(?:[#;][^\r\n]*)?$/gim;
+    /^[+ -]?\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_-]*)\s*([:=])\s*([A-Za-z0-9_$+./=:@%!?~^-]{12,})[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
   for (const match of text.matchAll(unquotedKeyPattern)) {
-    if (!placeholderValue(match[1].trim()))
+    const key = match[1];
+    const value = match[3].trim();
+    if (unquotedCodeExpression(value, match[4] === ",", match[2] === ":")) {
+      continue;
+    }
+    if (
+      credentialAssignmentKey(key) &&
+      !publicTokenAddressForKey(key, value) &&
+      !placeholderValue(value)
+    )
       return "literal credential assignment";
   }
   return null;
@@ -653,6 +1733,37 @@ function assertNoSymlinkComponents(root, candidate, label) {
       throw new Error(`refusing symlinked ${label}`);
     }
   }
+}
+
+export function assertStableEvidencePathAfterRead({
+  root,
+  candidate,
+  rootStat,
+  fileStat,
+  label,
+}) {
+  const postReadRoot = realpathSync(root);
+  const postReadRootStat = lstatSync(postReadRoot);
+  if (
+    postReadRoot !== root ||
+    !postReadRootStat.isDirectory() ||
+    !sameFileIdentity(postReadRootStat, rootStat)
+  ) {
+    throw new Error(`${label} root changed while it was being read`);
+  }
+  const postReadResolved = realpathSync(candidate);
+  if (!isWithin(postReadResolved, postReadRoot)) {
+    throw new Error(`${label} escapes its allowed root after opening`);
+  }
+  const postReadPathStat = lstatSync(postReadResolved);
+  if (
+    !postReadPathStat.isFile() ||
+    postReadPathStat.isSymbolicLink() ||
+    !sameFileIdentity(postReadPathStat, fileStat)
+  ) {
+    throw new Error(`${label} changed while it was being read`);
+  }
+  return postReadResolved;
 }
 
 export function readSafeEvidenceFile({
@@ -700,6 +1811,10 @@ export function readSafeEvidenceFile({
     displayPath = path.relative(repoReal, candidate).split(path.sep).join("/");
   }
 
+  const rootStat = lstatSync(root);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new Error(`${label} root must be a real directory`);
+  }
   assertNoSymlinkComponents(root, candidate, label);
   const resolved = realpathSync(candidate);
   if (!isWithin(resolved, root))
@@ -707,12 +1822,19 @@ export function readSafeEvidenceFile({
   const pathRisk = sensitivePathReason(displayPath);
   if (pathRisk) throw new Error(`refusing sensitive ${label} (${pathRisk})`);
   const { data, fileStat } = readBoundedRegularFile(resolved, label, maxBytes);
+  const postReadResolved = assertStableEvidencePathAfterRead({
+    root,
+    candidate,
+    rootStat,
+    fileStat,
+    label,
+  });
   const content = decodeUtf8(data, label);
   assertNoSecretLikeContent(`${label} ${displayPath}`, content);
   return {
     content,
     displayPath,
-    resolved,
+    resolved: postReadResolved,
     mode: normalizedGitFileMode(fileStat),
   };
 }

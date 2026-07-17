@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-16 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -94,15 +94,26 @@ Codex Cloud does not inherit a developer's local `~/.agents` directory, so the
 repo vendors the required autoreview helper at `scripts/agent-autoreview.mjs`.
 Set `AUTOREVIEW_HELPER` only when intentionally replacing that helper with a
 compatible implementation of its CLI contract. Prepared-bundle replacements
-must support source snapshots plus the pinned helper's bundle-output and
-trusted-input flags. The setup and maintenance scripts fail fast when the
-effective helper is missing because PR shipping requires `pnpm agent:autoreview`.
+must support `--source-snapshot-only`, `--serialize-untracked-file`,
+`--bundle-output`, `--bundle-output-display`, and `--trusted-input-root`. The
+setup and maintenance scripts fail fast when the effective helper is missing
+because PR shipping requires `pnpm agent:autoreview`.
 Semantic review uses the complete branch-local target and an isolated empty
 reviewer workspace. Oversized direct semantic runs fail closed; prepared
 bundles preserve bounded lossless passes for one fresh-context reviewer to
-inspect together. Capture enforces a cumulative byte budget before diffs,
-untracked files, and supplemental evidence accumulate. Sensitive review input
-fails closed.
+inspect together. Run
+`pnpm agent:autoreview --verify-bundle-dir <dir>` immediately before that
+reviewer reads every pass, retain its printed manifest digest outside the
+bundle, then rerun with `--expected-bundle-manifest <retained-digest>` after
+review; the completion marker binds the verified evidence manifest. Capture
+enforces a cumulative byte budget before diffs, untracked files, and
+supplemental evidence accumulate. Sensitive review input fails closed,
+including wallet recovery phrases; reviewer web search is off by default unless
+`--web-search` is explicit. Prepared bundles pin one protected `origin/main`
+snapshot for checklist policy, the owning-checkout default semantic helper, and
+automatic-feedback modules, never a PR-selected base, mutable worktree, or
+branch-controlled package scripts. Wrapper-owned Node launches discard
+`NODE_OPTIONS` and `NODE_PATH` startup injection.
 Autoreview remains source review, so the quality gate and applicable browser or
 runtime verification are still required.
 

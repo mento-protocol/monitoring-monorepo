@@ -3,7 +3,7 @@ title: Codex Cloud Setup and Maintenance
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -17,9 +17,10 @@ Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
 repo-local helper at `scripts/agent-autoreview.mjs`; they fail fast only if that
 repo-owned executable is missing or an explicit compatible `AUTOREVIEW_HELPER`
 override is not executable. Prepared-bundle overrides must implement the pinned
-helper CLI contract, including source snapshots and bundle-output flags. PR
-shipping requires `pnpm agent:autoreview` as the structured batch-boundary
-review.
+helper CLI contract, including `--source-snapshot-only`,
+`--serialize-untracked-file`, `--bundle-output`, `--bundle-output-display`, and
+`--trusted-input-root`. PR shipping requires
+`pnpm agent:autoreview` as the structured batch-boundary review.
 Configure the Codex Cloud environment setup script as:
 
 ```bash

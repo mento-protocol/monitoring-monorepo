@@ -1818,6 +1818,61 @@ assert_contains "+ pnpm agent:prewarm:test"
 assert_contains "All mapped commands passed."
 assert_not_contains "parallel marker was not created"
 
+serialized_repo_mutation_repo="$(mktemp -d)"
+(
+  cd "$serialized_repo_mutation_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  cat > scripts/agent-quality-gate.sh <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > scripts/agent-autoreview.sh <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > scripts/agent-autoreview.test.sh <<'STUB'
+#!/usr/bin/env bash
+if [[ ! -f "${SERIAL_MUTATION_MARKER:?}" ]]; then
+  echo "autoreview test overlapped the repo-mutating quality-gate self-test"
+  exit 1
+fi
+STUB
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "agent:quality-gate:test" ]]; then
+  sleep 0.2
+  : > "${SERIAL_MUTATION_MARKER:?}"
+fi
+STUB
+  chmod +x bin/pnpm scripts/agent-autoreview.sh scripts/agent-autoreview.test.sh scripts/agent-quality-gate.sh tools/trunk
+  git add .
+  git commit -qm init
+  printf '%s\n' \
+    "scripts/agent-autoreview.sh" \
+    "scripts/agent-quality-gate.sh" \
+    > changed-paths.txt
+  SERIAL_MUTATION_MARKER="$serialized_repo_mutation_repo/serial-marker" \
+    PATH="$serialized_repo_mutation_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 4 \
+      > "$output_file" 2>&1
+)
+rm -rf "$serialized_repo_mutation_repo"
+assert_contains "+ pnpm agent:quality-gate:test"
+assert_contains "+ bash scripts/agent-autoreview.test.sh"
+assert_contains "All mapped commands passed."
+assert_not_contains "autoreview test overlapped the repo-mutating quality-gate self-test"
+
 auto_parallel_quality_repo="$(mktemp -d)"
 (
   cd "$auto_parallel_quality_repo"
@@ -2658,6 +2713,10 @@ assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
 
 run_gate "scripts/agent-autoreview-core.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+
+run_gate "scripts/agent-autoreview-target-guard.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
 

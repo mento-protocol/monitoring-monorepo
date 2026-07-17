@@ -281,12 +281,24 @@ Field expectations:
 
    ```bash
    pnpm agent:autoreview --prepare-bundle-dir <dir>
+   pnpm agent:autoreview --verify-bundle-dir <dir>
+   # Retain the printed digest outside the bundle, review every pass, then:
+   pnpm agent:autoreview --verify-bundle-dir <dir> \
+     --expected-bundle-manifest <retained-pre-review-digest>
    ```
 
-   Use a directory outside the repo worktree so local-mode bundles do not
-   include themselves. Direct supplemental evidence must be repo-relative;
-   adapter-generated `--feedback-pr <number>` state inside the trusted bundle
-   directory is the narrow exception. Do not pass the removed
+   Use a directory outside the repo worktree whose parent already exists so
+   local-mode bundles do not include themselves. Every canonical parent
+   ancestor must be owned by the current user or root; group/other-writable
+   ancestors require sticky-bit protection. Direct supplemental evidence
+   must be repo-relative; adapter-generated `--feedback-pr <number>` state and
+   protected-main checklist copies inside the trusted bundle directory are the
+   narrow exceptions. The owning-checkout default semantic helper and automatic
+   feedback use Node modules from that same pinned `origin/main` object with
+   canonical repository routing rather than a PR-selected base, mutable
+   worktree, or package scripts; wrapper-owned Node launches discard
+   `NODE_OPTIONS` and `NODE_PATH`. Reviewer web search is disabled by
+   default; opt in only with `--web-search`. Do not pass the removed
    `--parallel-tests` option; the quality gate owns tests. A clean source review
    does not prove UI, CLI/API, generated-artifact, or runtime behavior, so keep
    all applicable verification in the validation record.

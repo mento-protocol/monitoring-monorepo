@@ -13,6 +13,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -95,13 +96,19 @@ const REVIEW_SCHEMA = {
 
 const ENGINES = new Set(["codex", "claude", "local"]);
 const TARGET_MODES = new Set(["auto", "local", "branch", "commit"]);
+const FROZEN_TARGET_MODES = new Set([
+  "local",
+  "branch",
+  "branch-local",
+  "commit",
+]);
 const MAX_GIT_OUTPUT_BYTES = MAX_REVIEW_INPUT_BYTES + 12 * 1024 * 1024;
 const CLAUDE_SAFE_MODE_MIN_VERSION = [2, 1, 169];
 
 function usage() {
   console.log(`Usage:
   scripts/agent-autoreview.mjs [options]
-  pnpm agent:autoreview -- [options]  # when a repo exposes an adapter
+  pnpm agent:autoreview [adapter options] -- [review options]
 
 Options:
   --mode <auto|local|branch|commit>  Review target mode (default: auto)
@@ -116,17 +123,28 @@ Options:
   --output <path>                    Write human output to a file as well as stdout
   --json-output <path>               Write validated structured JSON
   --bundle-output <path>             Write the full review prompt/change bundle
+  --bundle-output-display <path>     Adapter-facing display path for bundle output
   --prepare-only                     Build target/bundle metadata for subagent review, then exit
+  --trusted-input-root <path>        Adapter-only root for generated review evidence
+  --source-snapshot-only             Print a target-scoped source fingerprint and exit
   --timeout-seconds <seconds>        Reviewer process timeout (default: 1800)
   --dry-run                          Print target/engine without invoking a reviewer
   --no-tools                         Disable Claude tools and MCP servers; Codex requires read-only sandbox
-  --no-web-search                    Disable Claude WebSearch/WebFetch tools
+  --web-search                       Enable reviewer web search (disabled by default)
+  --no-web-search                    Disable reviewer web search explicitly
   --stream-engine-output             Show raw engine output before structured parsing
   --help                             Show this help
 
+Adapter-only options (pnpm agent:autoreview, before any -- separator):
+  --prepare-bundle-dir <dir>         Publish a verified fresh-context review bundle
+  --feedback-pr <number|auto>        Include normalized PR feedback in that bundle
+  --verify-bundle-dir <dir>          Rehash a published bundle and print its manifest
+  --expected-bundle-manifest <sha>   Bind a post-review check to the retained pre-check digest
+
 Note:
-  Inside an active Codex session, prefer --prepare-only --bundle-output <path>
-  and spawn a fresh-context read-only subagent instead of nested codex exec.
+  Inside an active Codex session, a repo adapter should use --prepare-bundle-dir
+  plus its bound pre/post verification flow. For this standalone helper only,
+  use --prepare-only --bundle-output <path> instead of nested codex exec.
 `);
 }
 
@@ -148,9 +166,11 @@ function parseArgs(argv) {
     prepareOnly: false,
     trustedInputRoot: null,
     sourceSnapshotOnly: false,
+    frozenTargetMode: null,
+    frozenHeadOid: null,
     dryRun: false,
     tools: true,
-    webSearch: true,
+    webSearch: false,
     streamEngineOutput: false,
     timeoutSeconds: 1800,
   };
@@ -222,6 +242,12 @@ function parseArgs(argv) {
       case "--source-snapshot-only":
         args.sourceSnapshotOnly = true;
         break;
+      case "--frozen-target-mode":
+        args.frozenTargetMode = next();
+        break;
+      case "--frozen-head-oid":
+        args.frozenHeadOid = next();
+        break;
       case "--parallel-tests":
         next();
         throw new Error(
@@ -238,6 +264,9 @@ function parseArgs(argv) {
         break;
       case "--no-tools":
         args.tools = false;
+        break;
+      case "--web-search":
+        args.webSearch = true;
         break;
       case "--no-web-search":
         args.webSearch = false;
@@ -257,6 +286,16 @@ function parseArgs(argv) {
 
   if (!TARGET_MODES.has(args.mode)) {
     throw new Error(`invalid --mode: ${args.mode}`);
+  }
+  if (
+    (args.frozenTargetMode === null) !== (args.frozenHeadOid === null) ||
+    (args.frozenTargetMode !== null &&
+      (!FROZEN_TARGET_MODES.has(args.frozenTargetMode) ||
+        !/^[0-9a-f]{40,64}$/i.test(args.frozenHeadOid)))
+  ) {
+    throw new Error(
+      "--frozen-target-mode and --frozen-head-oid require a valid paired frozen target",
+    );
   }
   if (!ENGINES.has(args.engine)) {
     throw new Error(`invalid --engine: ${args.engine}`);
@@ -293,7 +332,7 @@ function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
         continue;
       }
       if (!statSync(resolved).isFile()) continue;
-      return path.resolve(candidate);
+      return resolved;
     } catch {
       // Keep searching a bounded, absolute PATH for an external executable.
     }
@@ -304,6 +343,27 @@ function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
     );
   }
   return null;
+}
+
+function trustedCurrentNode(rejectRoot) {
+  const root = realpathSync(rejectRoot);
+  const resolved = realpathSync(process.execPath);
+  accessSync(resolved, fsConstants.X_OK);
+  if (isWithin(resolved, root) || !statSync(resolved).isFile()) {
+    throw new Error("node runtime is not available outside the reviewed repo");
+  }
+  return resolved;
+}
+
+function trustedToolPath(directory, commands) {
+  const binDir = path.join(directory, "trusted-bin");
+  mkdirSync(binDir);
+  for (const [name, executable] of Object.entries(commands)) {
+    symlinkSync(executable, path.join(binDir, name));
+  }
+  return [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(
+    path.delimiter,
+  );
 }
 
 function gitEnvironment() {
@@ -317,6 +377,7 @@ function gitEnvironment() {
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_SYSTEM: "/dev/null",
     GIT_EXTERNAL_DIFF: "",
+    GIT_NO_REPLACE_OBJECTS: "1",
     GIT_OPTIONAL_LOCKS: "0",
     GIT_PAGER: "cat",
     GIT_TERMINAL_PROMPT: "0",
@@ -332,7 +393,7 @@ function decodeGitOutput(data, label) {
   }
 }
 
-function runGitResult(
+function runGitBufferResult(
   repo,
   gitArgs,
   { maxBuffer = MAX_GIT_OUTPUT_BYTES } = {},
@@ -359,8 +420,21 @@ function runGitResult(
   }
   return {
     status: result.status,
-    stdout: decodeGitOutput(result.stdout || Buffer.alloc(0), "git"),
-    stderr: decodeGitOutput(result.stderr || Buffer.alloc(0), "git stderr"),
+    stdout: result.stdout || Buffer.alloc(0),
+    stderr: result.stderr || Buffer.alloc(0),
+  };
+}
+
+function runGitResult(
+  repo,
+  gitArgs,
+  { maxBuffer = MAX_GIT_OUTPUT_BYTES } = {},
+) {
+  const result = runGitBufferResult(repo, gitArgs, { maxBuffer });
+  return {
+    status: result.status,
+    stdout: decodeGitOutput(result.stdout, "git"),
+    stderr: decodeGitOutput(result.stderr, "git stderr"),
   };
 }
 
@@ -413,12 +487,18 @@ function repoRoot() {
   return repo;
 }
 
-function currentBranch(repo) {
-  return runGit(repo, ["branch", "--show-current"], { check: false }).trim();
-}
-
-function isDirty(repo) {
-  return runGit(repo, ["status", "--porcelain"]).trim() !== "";
+function githubRepositorySlug(repo) {
+  const origin = runGit(repo, ["remote", "get-url", "origin"]).trim();
+  const normalized = origin.replace(/\.git$/i, "");
+  const match = normalized.match(
+    /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/,
+  );
+  if (!match) {
+    throw new Error(
+      "automatic PR lookup requires a canonical github.com origin remote",
+    );
+  }
+  return `${match[1]}/${match[2]}`;
 }
 
 function detectPrBase(repo, branch) {
@@ -426,82 +506,143 @@ function detectPrBase(repo, branch) {
   const gh = resolveTrustedCommand("gh", repo, { required: false });
   if (!gh) return null;
   const git = resolveTrustedCommand("git", repo);
+  const repositorySlug = githubRepositorySlug(repo);
+  const runtimeDir = mkdtempSync(
+    path.join(safeTempRoot(repo), "autoreview-gh."),
+  );
   const env = {
     HOME: process.env.HOME || tmpdir(),
     LANG: process.env.LANG || "C.UTF-8",
     LC_ALL: process.env.LC_ALL || "C.UTF-8",
-    PATH: [
-      path.dirname(gh),
-      path.dirname(git),
-      "/usr/bin",
-      "/bin",
-      "/usr/sbin",
-      "/sbin",
-    ]
-      .filter((entry, index, entries) => entries.indexOf(entry) === index)
-      .join(path.delimiter),
+    PATH: trustedToolPath(runtimeDir, { gh, git }),
     GH_PAGER: "cat",
     GH_PROMPT_DISABLED: "1",
   };
   for (const key of ["GH_TOKEN", "GITHUB_TOKEN"]) {
     if (process.env[key]) env[key] = process.env[key];
   }
-  const result = spawnSync(
-    gh,
-    [
-      "pr",
-      "list",
-      "--head",
-      branch,
-      "--state",
-      "open",
-      "--limit",
-      "2",
-      "--json",
-      "baseRefName",
-    ],
-    {
-      cwd: repo,
-      env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  if (result.error) {
-    throw new Error(`failed to inspect PR base: ${result.error.message}`);
-  }
-  if (result.status !== 0) {
-    throw new Error(
-      `failed to inspect PR base: ${(result.stderr || result.stdout).trim() || `gh exited ${result.status}`}`,
-    );
-  }
-  let prs;
   try {
-    prs = JSON.parse(result.stdout);
-  } catch {
-    throw new Error("failed to inspect PR base: gh returned invalid JSON");
-  }
-  if (!Array.isArray(prs)) {
-    throw new Error(
-      "failed to inspect PR base: gh returned a non-array result",
+    const repoResult = spawnSync(
+      gh,
+      ["repo", "view", repositorySlug, "--json", "owner"],
+      {
+        cwd: repo,
+        env,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
-  }
-  if (prs.length > 1) {
-    throw new Error(
-      `multiple open PRs match head branch ${branch}; pass --base explicitly`,
+    if (repoResult.error) {
+      throw new Error(
+        `failed to inspect repository owner: ${repoResult.error.message}`,
+      );
+    }
+    if (repoResult.status !== 0) {
+      throw new Error(
+        `failed to inspect repository owner: ${(repoResult.stderr || repoResult.stdout).trim() || `gh exited ${repoResult.status}`}`,
+      );
+    }
+    let repository;
+    try {
+      repository = JSON.parse(repoResult.stdout);
+    } catch {
+      throw new Error(
+        "failed to inspect repository owner: gh returned invalid JSON",
+      );
+    }
+    const repositoryOwner = repository?.owner?.login;
+    if (typeof repositoryOwner !== "string" || !repositoryOwner) {
+      throw new Error(
+        "failed to inspect repository owner: gh omitted owner.login",
+      );
+    }
+    const result = spawnSync(
+      gh,
+      [
+        "pr",
+        "list",
+        "--repo",
+        repositorySlug,
+        "--head",
+        branch,
+        "--state",
+        "open",
+        "--limit",
+        "2",
+        "--json",
+        "baseRefName,headRepositoryOwner",
+      ],
+      {
+        cwd: repo,
+        env,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
+    if (result.error) {
+      throw new Error(`failed to inspect PR base: ${result.error.message}`);
+    }
+    if (result.status !== 0) {
+      throw new Error(
+        `failed to inspect PR base: ${(result.stderr || result.stdout).trim() || `gh exited ${result.status}`}`,
+      );
+    }
+    let prs;
+    try {
+      prs = JSON.parse(result.stdout);
+    } catch {
+      throw new Error("failed to inspect PR base: gh returned invalid JSON");
+    }
+    if (!Array.isArray(prs)) {
+      throw new Error(
+        "failed to inspect PR base: gh returned a non-array result",
+      );
+    }
+    if (prs.length > 1) {
+      throw new Error(
+        `multiple open PRs match head branch ${branch}; pass --base explicitly`,
+      );
+    }
+    if (prs.length === 0) return null;
+    const base = prs[0]?.baseRefName;
+    if (typeof base !== "string" || !base) {
+      throw new Error("failed to inspect PR base: gh omitted baseRefName");
+    }
+    const headRepositoryOwner = prs[0]?.headRepositoryOwner?.login;
+    if (
+      typeof headRepositoryOwner !== "string" ||
+      !headRepositoryOwner ||
+      headRepositoryOwner !== repositoryOwner
+    ) {
+      throw new Error(
+        `open PR for head branch ${branch} is not owned by ${repositoryOwner}; pass --base explicitly`,
+      );
+    }
+    return `origin/${base}`;
+  } finally {
+    rmSync(runtimeDir, { recursive: true, force: true });
   }
-  if (prs.length === 0) return null;
-  const base = prs[0]?.baseRefName;
-  if (typeof base !== "string" || !base) {
-    throw new Error("failed to inspect PR base: gh omitted baseRefName");
-  }
-  return `origin/${base}`;
 }
 
-function chooseTarget(repo, args) {
-  const branch = currentBranch(repo);
-  const dirty = isDirty(repo);
+function chooseTarget(repo, args, selectionState) {
+  const { branch, dirty } = selectionState;
+  if (args.frozenTargetMode) {
+    if (selectionState.headOid !== args.frozenHeadOid) {
+      throw new Error(
+        "frozen review head no longer matches the checkout; rerun autoreview",
+      );
+    }
+    if (args.frozenTargetMode === "local") {
+      return { mode: "local", ref: null };
+    }
+    if (args.frozenTargetMode === "commit") {
+      return { mode: "commit", ref: args.commit };
+    }
+    if (!args.base) {
+      throw new Error("frozen branch targets require --base");
+    }
+    return { mode: args.frozenTargetMode, ref: args.base };
+  }
   const branchTarget = branch && branch !== "main";
   if (
     args.mode === "local" ||
@@ -528,8 +669,13 @@ function chooseTarget(repo, args) {
   throw new Error("no review target: clean main checkout and no forced mode");
 }
 
-function freezeTargetRef(repo, target) {
-  if (!target.ref) return target;
+function freezeTargetRef(repo, target, selectionState) {
+  const frozenTarget = {
+    ...target,
+    branch: selectionState.branch,
+    head: selectionState.headOid,
+  };
+  if (!target.ref) return frozenTarget;
   const requestedRef = target.ref;
   if (
     requestedRef.startsWith("-") ||
@@ -538,23 +684,30 @@ function freezeTargetRef(repo, target) {
   ) {
     throw new Error(`invalid review ref: ${requestedRef}`);
   }
-  const result = runGitResult(repo, [
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    "--end-of-options",
-    `${requestedRef}^{commit}`,
-  ]);
-  if (result.status !== 0) {
-    throw new Error(`review ref does not resolve to a commit: ${requestedRef}`);
+  let ref;
+  if (requestedRef === "HEAD") {
+    ref = selectionState.headOid;
+  } else {
+    const result = runGitResult(repo, [
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      "--end-of-options",
+      `${requestedRef}^{commit}`,
+    ]);
+    if (result.status !== 0) {
+      throw new Error(
+        `review ref does not resolve to a commit: ${requestedRef}`,
+      );
+    }
+    ref = result.stdout.trim();
   }
-  const ref = result.stdout.trim();
   if (!/^[0-9a-f]{40,64}$/i.test(ref)) {
     throw new Error(
       `review ref did not resolve to an object ID: ${requestedRef}`,
     );
   }
-  return { ...target, ref, requested_ref: requestedRef };
+  return { ...frozenTarget, ref, requested_ref: requestedRef };
 }
 
 function readText(filePath) {
@@ -592,7 +745,7 @@ function gitBundlePart(collector, label, repo, gitArgs) {
   collector.add(label, output);
 }
 
-function appendLocalBundle(repo, collector) {
+function appendLocalBundle(repo, target, collector) {
   collector.add("git status heading", "# Git Status");
   gitBundlePart(collector, "git status", repo, ["status", "--short"]);
   collector.add("staged diff heading", "# Staged Diff");
@@ -601,15 +754,19 @@ function appendLocalBundle(repo, collector) {
     "--no-ext-diff",
     "--no-textconv",
     "--cached",
+    target.head,
     "--stat",
+    "--",
   ]);
   gitBundlePart(collector, "staged diff", repo, [
     "diff",
     "--no-ext-diff",
     "--no-textconv",
     "--cached",
+    target.head,
     "--patch",
     "--no-renames",
+    "--",
   ]);
   collector.add("unstaged diff heading", "# Unstaged Diff");
   gitBundlePart(collector, "unstaged diff stat", repo, [
@@ -652,21 +809,22 @@ function appendLocalBundle(repo, collector) {
   }
 }
 
-function localBundle(repo) {
+function localBundle(repo, target) {
   const collector = createReviewInputCollector();
-  appendLocalBundle(repo, collector);
+  appendLocalBundle(repo, target, collector);
   return collector.toString();
 }
 
-function appendBranchBundle(repo, baseRef, collector) {
+function appendBranchBundle(repo, target, collector) {
   collector.add("branch diff heading", "# Branch Diff");
-  collector.add("branch base", `base: ${baseRef}`);
+  collector.add("branch base", `base: ${target.ref}`);
+  collector.add("branch head", `head: ${target.head}`);
   gitBundlePart(collector, "branch diff stat", repo, [
     "diff",
     "--no-ext-diff",
     "--no-textconv",
     "--stat",
-    `${baseRef}...HEAD`,
+    `${target.ref}...${target.head}`,
     "--",
   ]);
   gitBundlePart(collector, "branch diff", repo, [
@@ -675,22 +833,22 @@ function appendBranchBundle(repo, baseRef, collector) {
     "--no-textconv",
     "--patch",
     "--no-renames",
-    `${baseRef}...HEAD`,
+    `${target.ref}...${target.head}`,
     "--",
   ]);
 }
 
-function branchBundle(repo, baseRef) {
+function branchBundle(repo, target) {
   const collector = createReviewInputCollector();
-  appendBranchBundle(repo, baseRef, collector);
+  appendBranchBundle(repo, target, collector);
   return collector.toString();
 }
 
-function branchLocalBundle(repo, baseRef) {
+function branchLocalBundle(repo, target) {
   const collector = createReviewInputCollector();
-  appendBranchBundle(repo, baseRef, collector);
+  appendBranchBundle(repo, target, collector);
   collector.add("local diff heading", "# Local Diff");
-  appendLocalBundle(repo, collector);
+  appendLocalBundle(repo, target, collector);
   return collector.toString();
 }
 
@@ -733,6 +891,8 @@ function changedPaths(repo, target) {
             "--name-only",
             "--cached",
             "-z",
+            target.head,
+            "--",
           ]),
           gitPathList(repo, [
             "diff",
@@ -756,7 +916,7 @@ function changedPaths(repo, target) {
               "--no-textconv",
               "--name-only",
               "-z",
-              `${target.ref}...HEAD`,
+              `${target.ref}...${target.head}`,
               "--",
             ]),
           ]
@@ -768,7 +928,7 @@ function changedPaths(repo, target) {
                 "--no-textconv",
                 "--name-only",
                 "-z",
-                `${target.ref}...HEAD`,
+                `${target.ref}...${target.head}`,
                 "--",
               ]),
               gitPathList(repo, [
@@ -778,6 +938,8 @@ function changedPaths(repo, target) {
                 "--name-only",
                 "--cached",
                 "-z",
+                target.head,
+                "--",
               ]),
               gitPathList(repo, [
                 "diff",
@@ -824,6 +986,8 @@ function loadExtras(repo, args, maxBytes) {
       repo,
       rawPath: file,
       label: "--prompt-file",
+      trustedRoot: args.trustedInputRoot,
+      allowTrustedRoot: Boolean(args.trustedInputRoot),
       maxBytes: collector.remainingBytes(),
     });
     collector.add(
@@ -951,7 +1115,7 @@ function copyExternalRegularFileEnv(env, repo, key) {
   env[key] = resolved;
 }
 
-function safeEngineEnv(repo, engine, executable, tempRoot) {
+function safeEngineEnv(repo, engine, runtimeDir) {
   const common = new Set([
     "ALL_PROXY",
     "HTTP_PROXY",
@@ -1049,19 +1213,9 @@ function safeEngineEnv(repo, engine, executable, tempRoot) {
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
   }
   const git = resolveTrustedCommand("git", repo);
-  const node = resolveTrustedCommand("node", repo);
-  env.PATH = [
-    path.dirname(executable),
-    path.dirname(node),
-    path.dirname(git),
-    "/usr/bin",
-    "/bin",
-    "/usr/sbin",
-    "/sbin",
-  ]
-    .filter((entry, index, entries) => entries.indexOf(entry) === index)
-    .join(path.delimiter);
-  env.TMPDIR = tempRoot;
+  const node = trustedCurrentNode(repo);
+  env.PATH = trustedToolPath(runtimeDir, { git, node });
+  env.TMPDIR = runtimeDir;
   env.GIT_CONFIG_GLOBAL = "/dev/null";
   env.GIT_CONFIG_NOSYSTEM = "1";
   env.GIT_CONFIG_SYSTEM = "/dev/null";
@@ -1251,7 +1405,7 @@ async function runCodex(repo, args, prompt) {
       workspace,
       prompt,
       {
-        env: safeEngineEnv(repo, "codex", codex, tempRoot),
+        env: safeEngineEnv(repo, "codex", tempDir),
         label: "codex",
         stream: args.streamEngineOutput,
         timeoutSeconds: args.timeoutSeconds,
@@ -1326,10 +1480,12 @@ async function runClaude(repo, args, prompt) {
     throw new Error("claude CLI is not available");
   }
   const tempRoot = safeTempRoot(repo);
-  const env = safeEngineEnv(repo, "claude", claude, tempRoot);
-  const workspace = mkdtempSync(
+  const tempDir = mkdtempSync(
     path.join(tempRoot, "autoreview-claude-workspace."),
   );
+  const workspace = path.join(tempDir, "workspace");
+  mkdirSync(workspace);
+  const env = safeEngineEnv(repo, "claude", tempDir);
   try {
     ensureClaudeIsolationSupported(claude, repo, env, workspace);
     const claudeArgs = [
@@ -1371,7 +1527,7 @@ async function runClaude(repo, args, prompt) {
     );
     return result.stdout;
   } finally {
-    rmSync(workspace, { recursive: true, force: true });
+    rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
@@ -1519,16 +1675,20 @@ function lineNumber(text, needle) {
 
 function targetTreeRef(target) {
   if (!target) return null;
-  if (target.mode === "branch") return "HEAD";
+  if (target.mode === "branch") return target.head;
   if (target.mode === "commit") return target.ref;
   return null;
 }
 
 function readGitBlob(repo, treeRef, rel) {
-  const result = runGitResult(repo, ["show", `${treeRef}:${rel}`]);
+  const result = runGitBufferResult(repo, ["show", `${treeRef}:${rel}`]);
   if (result.status !== 0) return null;
-  if (result.stdout.includes("\0")) return "[binary file omitted]";
-  return result.stdout;
+  if (result.stdout.includes(0)) return "[binary file omitted]";
+  try {
+    return decodeGitOutput(result.stdout, "git blob");
+  } catch {
+    return "[binary file omitted]";
+  }
 }
 
 function readRepoFile(repo, rel, target = null) {
@@ -1682,10 +1842,10 @@ function deletedFileReferenceChecks(repo, target) {
         "--name-only",
         "--diff-filter=D",
         "-z",
-        `${target.ref}...HEAD`,
+        `${target.ref}...${target.head}`,
         "--",
       ]),
-      "HEAD",
+      target.head,
     );
   }
   if (target.mode === "branch-local") {
@@ -1697,7 +1857,7 @@ function deletedFileReferenceChecks(repo, target) {
         "--name-only",
         "--diff-filter=D",
         "-z",
-        `${target.ref}...HEAD`,
+        `${target.ref}...${target.head}`,
         "--",
       ]),
       null,
@@ -1730,6 +1890,8 @@ function deletedFileReferenceChecks(repo, target) {
         "--diff-filter=D",
         "--cached",
         "-z",
+        target.head,
+        "--",
       ]),
       null,
     );
@@ -1833,7 +1995,7 @@ function reviewDocsDrift(repo, target, paths, findings) {
 
 function diffCheckCommands(target) {
   if (target.mode === "branch") {
-    return [["diff", "--check", `${target.ref}...HEAD`]];
+    return [["diff", "--check", `${target.ref}...${target.head}`]];
   }
   if (target.mode === "commit") {
     return [["show", "--format=", "--check", target.ref]];
@@ -1842,7 +2004,7 @@ function diffCheckCommands(target) {
     return [["diff", "--check", target.ref]];
   }
   return [
-    ["diff", "--cached", "--check"],
+    ["diff", "--cached", "--check", target.head],
     ["diff", "--check"],
   ];
 }
@@ -1935,6 +2097,8 @@ function numstatSources(repo, target) {
         "--no-textconv",
         "--numstat",
         "--cached",
+        target.head,
+        "--",
       ]),
       runGit(repo, ["diff", "--no-ext-diff", "--no-textconv", "--numstat"]),
     ];
@@ -1946,7 +2110,7 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
-        `${target.ref}...HEAD`,
+        `${target.ref}...${target.head}`,
       ]),
     ];
   }
@@ -1957,7 +2121,7 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
-        `${target.ref}...HEAD`,
+        `${target.ref}...${target.head}`,
       ]),
       runGit(repo, [
         "diff",
@@ -1965,6 +2129,8 @@ function numstatSources(repo, target) {
         "--no-textconv",
         "--numstat",
         "--cached",
+        target.head,
+        "--",
       ]),
       runGit(repo, ["diff", "--no-ext-diff", "--no-textconv", "--numstat"]),
     ];
@@ -2058,96 +2224,221 @@ function assertReviewableBundle(paths, bundle) {
   assertNoSecretLikeContent("selected change", bundle);
 }
 
-function sourceSnapshot(repo) {
-  const hash = createHash("sha256");
+function hashHeadIdentity(hash, state) {
   hash.update("\0head-oid\0");
-  hash.update(runGit(repo, ["rev-parse", "HEAD"]));
+  hash.update(state.headOid);
   hash.update("\0head-ref\0");
-  const symbolicHead = runGitResult(repo, ["symbolic-ref", "--quiet", "HEAD"]);
-  if (symbolicHead.status === 0) {
-    const symbolicRef = symbolicHead.stdout.trim();
-    if (!symbolicRef) {
-      throw new Error("git symbolic-ref --quiet HEAD returned an empty ref");
-    }
-    hash.update(`symbolic:${symbolicRef}`);
-  } else if (symbolicHead.status === 1) {
-    hash.update("detached");
-  } else {
+  hash.update(
+    state.branch ? `symbolic:refs/heads/${state.branch}` : "detached",
+  );
+}
+
+function targetSelectionState(repo) {
+  const status = runGitBufferResult(repo, [
+    "status",
+    "--porcelain=v2",
+    "--branch",
+    "--no-ahead-behind",
+    "-z",
+    "--untracked-files=normal",
+  ]);
+  if (status.status !== 0) {
+    const stderr = decodeGitOutput(status.stderr, "git status stderr").trim();
     throw new Error(
-      `git symbolic-ref --quiet HEAD failed: ${symbolicHead.stderr || symbolicHead.stdout}`,
+      `git status failed while selecting the review target: ${stderr || `git exited ${status.status}`}`,
     );
   }
-  hash.update("\0staged\0");
+  let headOid = "";
+  let branch = "";
+  let dirty = false;
+  let sawStatusRecord = false;
+  let offset = 0;
+  while (offset < status.stdout.length) {
+    let end = status.stdout.indexOf(0, offset);
+    if (end < 0) end = status.stdout.length;
+    const record = status.stdout.subarray(offset, end);
+    if (
+      !sawStatusRecord &&
+      record.subarray(0, 13).toString("ascii") === "# branch.oid "
+    ) {
+      headOid = decodeGitOutput(
+        record.subarray(13),
+        "git status branch.oid",
+      ).trim();
+    } else if (
+      !sawStatusRecord &&
+      record.subarray(0, 14).toString("ascii") === "# branch.head "
+    ) {
+      const head = decodeGitOutput(
+        record.subarray(14),
+        "git status branch.head",
+      ).trim();
+      branch = head === "(detached)" ? "" : head;
+    } else if (record.length > 0 && !sawStatusRecord && record[0] === 0x23) {
+      // Other branch metadata may precede the first status record.
+    } else if (record.length > 0) {
+      sawStatusRecord = true;
+      dirty = true;
+    }
+    offset = end + 1;
+  }
+  if (!/^[0-9a-f]{40,64}$/i.test(headOid)) {
+    throw new Error("git status omitted a valid branch.oid");
+  }
+  return {
+    branch,
+    dirty,
+    headOid,
+    snapshot: createHash("sha256").update(status.stdout).digest("hex"),
+  };
+}
+
+function targetSelectionSnapshot(repo) {
+  return targetSelectionState(repo).snapshot;
+}
+
+function sourceSnapshot(
+  repo,
+  { includeLocalChanges = true, includeUntracked = true } = {},
+) {
+  const hash = createHash("sha256");
+  const selectionState = targetSelectionState(repo);
+  hashHeadIdentity(hash, selectionState);
   hash.update(
-    runGit(repo, [
-      "diff",
-      "--no-ext-diff",
-      "--no-textconv",
-      "--binary",
-      "--cached",
-      "HEAD",
-      "--",
-    ]),
+    `\0local-changes\0${includeLocalChanges ? "included" : "excluded"}`,
   );
-  hash.update("\0unstaged\0");
-  hash.update(
-    runGit(repo, ["diff", "--no-ext-diff", "--no-textconv", "--binary", "--"]),
-  );
-  for (const relativePath of gitPathList(repo, [
-    "ls-files",
-    "--others",
-    "--exclude-standard",
-    "-z",
-  ]).sort()) {
-    hash.update("\0path\0");
-    hash.update(relativePath);
-    const filePath = path.join(repo, relativePath);
-    try {
-      const fileStat = lstatSync(filePath);
-      if (fileStat.isSymbolicLink()) {
-        hash.update("\0symlink\0");
-        hash.update("\0mode\0");
-        hash.update("120000");
-        hash.update(readlinkSync(filePath));
-      } else if (fileStat.isFile()) {
-        const resolved = realpathSync(filePath);
-        if (!isWithin(resolved, repo)) {
-          hash.update("\0outside\0");
+  if (includeLocalChanges) {
+    hash.update("\0staged\0");
+    hash.update(
+      runGit(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--binary",
+        "--cached",
+        selectionState.headOid,
+        "--",
+      ]),
+    );
+    hash.update("\0unstaged\0");
+    hash.update(
+      runGit(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--binary",
+        "--",
+      ]),
+    );
+  }
+  hash.update(`\0untracked\0${includeUntracked ? "included" : "excluded"}`);
+  if (includeUntracked) {
+    for (const relativePath of gitPathList(repo, [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      "-z",
+    ]).sort()) {
+      hash.update("\0path\0");
+      hash.update(relativePath);
+      const filePath = path.join(repo, relativePath);
+      try {
+        const fileStat = lstatSync(filePath);
+        if (fileStat.isSymbolicLink()) {
+          hash.update("\0symlink\0");
+          hash.update("\0mode\0");
+          hash.update("120000");
+          hash.update(readlinkSync(filePath));
+        } else if (fileStat.isFile()) {
+          const resolved = realpathSync(filePath);
+          if (!isWithin(resolved, repo)) {
+            hash.update("\0outside\0");
+          } else {
+            const { data, fileStat: openedStat } = readBoundedRegularFile(
+              resolved,
+              "untracked file",
+            );
+            hash.update("\0file\0");
+            hash.update(`\0mode\0${normalizedGitFileMode(openedStat)}`);
+            hash.update(data);
+          }
         } else {
-          const { data, fileStat: openedStat } = readBoundedRegularFile(
-            resolved,
-            "untracked file",
-          );
-          hash.update("\0file\0");
-          hash.update(`\0mode\0${normalizedGitFileMode(openedStat)}`);
-          hash.update(data);
+          hash.update("\0non-file\0");
         }
-      } else {
-        hash.update("\0non-file\0");
+      } catch (error) {
+        if (error.code === "AUTOREVIEW_INPUT_TOO_LARGE") throw error;
+        hash.update(`\0unreadable\0${error.code || error.name}`);
       }
-    } catch (error) {
-      if (error.code === "AUTOREVIEW_INPUT_TOO_LARGE") throw error;
-      hash.update(`\0unreadable\0${error.code || error.name}`);
     }
   }
   return hash.digest("hex");
 }
 
-function assertSourceSnapshot(repo, expected, message) {
-  if (sourceSnapshot(repo) !== expected) throw new Error(message);
+function snapshotOptionsForTarget(target) {
+  const includeLocalChanges =
+    target.mode === "local" || target.mode === "branch-local";
+  return {
+    includeLocalChanges,
+    includeUntracked: includeLocalChanges,
+  };
+}
+
+function assertSourceSnapshot(repo, expected, target, message) {
+  if (sourceSnapshot(repo, snapshotOptionsForTarget(target)) !== expected) {
+    throw new Error(message);
+  }
+}
+
+function assertTargetSelectionSnapshot(repo, expected, message) {
+  if (targetSelectionSnapshot(repo) !== expected) {
+    throw new Error(message);
+  }
+}
+
+function assertReviewSourceState(
+  repo,
+  expectedSource,
+  target,
+  expectedTargetSelection,
+  guardTargetSelection,
+  message,
+) {
+  if (guardTargetSelection) {
+    assertTargetSelectionSnapshot(repo, expectedTargetSelection, message);
+  }
+  assertSourceSnapshot(repo, expectedSource, target, message);
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  const repo = repoRoot();
-  if (args.sourceSnapshotOnly) {
-    console.log(sourceSnapshot(repo));
+  const argv = process.argv.slice(2);
+  if (argv[0] === "--serialize-untracked-file") {
+    if (argv.length !== 2 || !argv[1]) {
+      throw new Error(
+        "--serialize-untracked-file requires exactly one repo-relative path",
+      );
+    }
+    process.stdout.write(serializeSafeUntrackedFile(repoRoot(), argv[1]));
     return 0;
   }
-  const reviewSourceSnapshot = args.dryRun ? null : sourceSnapshot(repo);
+  const args = parseArgs(argv);
+  const repo = repoRoot();
+  if (args.sourceSnapshotOnly) {
+    const includeLocalChanges = !["branch", "commit"].includes(args.mode);
+    console.log(
+      sourceSnapshot(repo, {
+        includeLocalChanges,
+        includeUntracked: includeLocalChanges,
+      }),
+    );
+    return 0;
+  }
+  const selectionState = targetSelectionState(repo);
+  const targetSelectionSourceSnapshot = args.dryRun
+    ? null
+    : selectionState.snapshot;
   let target;
   try {
-    target = chooseTarget(repo, args);
+    target = chooseTarget(repo, args, selectionState);
   } catch (error) {
     if (
       args.dryRun &&
@@ -2159,8 +2450,26 @@ async function main() {
       throw error;
     }
   }
-  target = freezeTargetRef(repo, target);
-  const branch = currentBranch(repo) || "detached";
+  let reviewSourceSnapshot = null;
+  if (!args.dryRun) {
+    target = freezeTargetRef(repo, target, selectionState);
+    assertTargetSelectionSnapshot(
+      repo,
+      targetSelectionSourceSnapshot,
+      "source changed while the review target was being selected; rerun autoreview against the updated tree",
+    );
+    reviewSourceSnapshot = sourceSnapshot(
+      repo,
+      snapshotOptionsForTarget(target),
+    );
+    assertTargetSelectionSnapshot(
+      repo,
+      targetSelectionSourceSnapshot,
+      "source changed while the review target was being selected; rerun autoreview against the updated tree",
+    );
+  }
+  const guardTargetSelectionDuringReview = args.mode === "auto";
+  const branch = selectionState.branch || "detached";
 
   console.log(`autoreview target: ${target.mode}`);
   console.log(`branch: ${branch}`);
@@ -2174,9 +2483,12 @@ async function main() {
 
   const paths = changedPaths(repo, target);
   if (paths.size === 0) {
-    assertSourceSnapshot(
+    assertReviewSourceState(
       repo,
       reviewSourceSnapshot,
+      target,
+      targetSelectionSourceSnapshot,
+      guardTargetSelectionDuringReview,
       "source changed while the review target was being selected; rerun autoreview against the updated tree",
     );
     console.log("autoreview clean: no changed files for selected target");
@@ -2199,11 +2511,11 @@ async function main() {
   if (needsBundle) {
     const bundle =
       target.mode === "local"
-        ? localBundle(repo)
+        ? localBundle(repo, target)
         : target.mode === "branch"
-          ? branchBundle(repo, target.ref)
+          ? branchBundle(repo, target)
           : target.mode === "branch-local"
-            ? branchLocalBundle(repo, target.ref)
+            ? branchLocalBundle(repo, target)
             : commitBundle(repo, target.ref);
     assertReviewableBundle(paths, bundle);
     assertNoSecretLikeContent("current branch", branch);
@@ -2219,9 +2531,12 @@ async function main() {
     prompts = buildBoundedReviewPrompts(bundle, (chunk, position) =>
       renderReviewPrompt(target, branch, baseline, chunk, extras, position),
     );
-    assertSourceSnapshot(
+    assertReviewSourceState(
       repo,
       reviewSourceSnapshot,
+      target,
+      targetSelectionSourceSnapshot,
+      guardTargetSelectionDuringReview,
       "source changed while the review bundle was being created; rerun autoreview against the updated tree",
     );
     console.log(
@@ -2253,7 +2568,7 @@ async function main() {
             bundle_outputs: bundleOutputs,
             behavior_validation_required: true,
             recommended_next_step:
-              "Inside Codex, have a fresh-context read-only subagent review every listed bounded pass; then run the separate quality, browser, runtime, or generated-artifact proof required by the change.",
+              "Inside Codex, adapter-published bundles must follow their README: verify before review, retain the printed manifest digest, have one fresh-context read-only subagent inspect every listed bounded pass, then run the bound post-review check with that retained digest. Standalone-helper output may proceed directly to the reviewer. In either case, also run the separate quality, browser, runtime, or generated-artifact proof required by the change.",
           },
           null,
           2,
@@ -2265,27 +2580,36 @@ async function main() {
 
   if (args.engine !== "local" && prompts.length > 1) {
     throw new Error(
-      `semantic review requires ${prompts.length} bounded passes, but independent engine invocations cannot safely detect cross-pass defects; rerun with --prepare-only --bundle-output <path> and have one fresh-context reviewer inspect every listed pass`,
+      `semantic review requires ${prompts.length} bounded passes, but independent engine invocations cannot safely detect cross-pass defects; through a repo adapter, rerun with --prepare-bundle-dir <dir> and follow its bound pre/post verification flow; standalone-helper users should rerun with --prepare-only --bundle-output <path>; have one fresh-context reviewer inspect every listed pass`,
     );
   }
 
   let report;
   if (args.engine === "local") {
-    assertSourceSnapshot(
+    assertReviewSourceState(
       repo,
       reviewSourceSnapshot,
+      target,
+      targetSelectionSourceSnapshot,
+      guardTargetSelectionDuringReview,
       "source changed before local review; rerun autoreview against the updated tree",
     );
     report = runLocalReview(repo, target, paths);
-    assertSourceSnapshot(
+    assertReviewSourceState(
       repo,
       reviewSourceSnapshot,
+      target,
+      targetSelectionSourceSnapshot,
+      guardTargetSelectionDuringReview,
       "source changed during local review; rerun autoreview against the updated tree",
     );
   } else {
-    assertSourceSnapshot(
+    assertReviewSourceState(
       repo,
       reviewSourceSnapshot,
+      target,
+      targetSelectionSourceSnapshot,
+      guardTargetSelectionDuringReview,
       "source changed before semantic review; rerun autoreview against the updated tree",
     );
     const raw =
@@ -2293,9 +2617,12 @@ async function main() {
         ? await runCodex(repo, args, prompts[0])
         : await runClaude(repo, args, prompts[0]);
     report = validateReport(extractReviewJson(raw), paths);
-    assertSourceSnapshot(
+    assertReviewSourceState(
       repo,
       reviewSourceSnapshot,
+      target,
+      targetSelectionSourceSnapshot,
+      guardTargetSelectionDuringReview,
       "source changed during semantic review; rerun autoreview against the updated tree",
     );
   }
@@ -2323,7 +2650,11 @@ async function main() {
   return 0;
 }
 
-main()
+async function entrypoint() {
+  return main();
+}
+
+entrypoint()
   .then((code) => {
     process.exitCode = code;
   })

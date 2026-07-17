@@ -82,6 +82,7 @@ local-only checks:
 pnpm agent:quality-gate
 pnpm agent:quality-gate --run
 pnpm agent:autoreview # non-trivial completed batches
+pnpm agent:autoreview --verify-bundle-dir <dir>  # pre-review check; retain the printed manifest for the bound post-check
 ```
 
 The gate never deploys or applies Terraform. It refuses package-script or
@@ -96,11 +97,21 @@ tracked and untracked work), deterministic Mento checks, and repo-selected
 checklist/feedback context. It reviews that complete target without truncation,
 but direct semantic engines fail closed when the target needs more than one
 prompt. Prepared bundles retain a bounded, lossless pass index that one
-fresh-context reviewer must inspect completely. Direct and prepared capture
-enforce a cumulative byte budget before review input accumulates in memory or
-staging sidecars.
+fresh-context reviewer must inspect completely. Their completion marker binds
+the evidence manifest; run `--verify-bundle-dir` immediately before review,
+retain its printed digest outside the bundle, then pass that digest to the
+post-review check with `--expected-bundle-manifest`. Automatic feedback capture
+pins the canonical GitHub repository. The owning-checkout default semantic
+helper, feedback-state modules, and checklist policy come from one pinned
+`origin/main` object rather than a PR-selected base, mutable worktree, or
+branch-controlled package scripts; wrapper-owned Node launches discard
+`NODE_OPTIONS` and `NODE_PATH`, and checklist edits remain diff evidence. Direct
+and prepared capture enforce a cumulative byte budget before review input
+accumulates in memory or staging sidecars.
 Semantic engines run in an isolated empty workspace with restricted project
-configuration and environment; review inputs fail closed on sensitive content.
+configuration and environment; reviewer web search is disabled by default and
+requires explicit `--web-search`. Review inputs fail closed on sensitive
+content, including wallet recovery phrases.
 Inside an active Codex sandbox, the adapter may choose its local deterministic
 engine only when no engine was explicitly selected; an explicitly selected
 unavailable semantic engine fails closed. Autoreview does not run tests;
