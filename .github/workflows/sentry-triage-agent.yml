@@ -260,10 +260,22 @@ jobs:
           # scripts/sentry-triage-ingest.mjs) — see docs/notes/sentry-triage-pipeline.md.
           case "${verdict}" in
             code-fix | config-fix | upstream-transient)
-              gh issue close "${QUEUE_ISSUE_NUMBER}" \
+              # If the close fails after the label swap, the issue would be
+              # stranded: open, verdict-labeled, no longer selectable and
+              # outside the regression-reopen path. Compensate by restoring
+              # sentry:needs-triage (so the next scheduled run re-triages and
+              # re-attempts the close) and fail the job loudly so the
+              # main-failure notifier fires.
+              if ! gh issue close "${QUEUE_ISSUE_NUMBER}" \
                 --repo "${GITHUB_REPOSITORY}" \
                 --reason completed \
-                --comment "Triage complete: ${verdict}. Ledger entry closed; reopens automatically on Sentry regression."
+                --comment "Triage complete: ${verdict}. Ledger entry closed; reopens automatically on Sentry regression."; then
+                echo "::error::Failed to close issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage for retry."
+                gh issue edit "${QUEUE_ISSUE_NUMBER}" \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --add-label "sentry:needs-triage"
+                exit 1
+              fi
               echo "Closed issue #${QUEUE_ISSUE_NUMBER} (verdict: ${verdict})."
               ;;
             needs-human)
