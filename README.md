@@ -118,6 +118,9 @@ executables require trusted ownership and
 non-shared-writable ancestry. On Darwin, Homebrew-style paths are accepted only
 through sealed private native Mach-O snapshots with system-only library
 closure; scripts and unsafe library closure fail closed.
+Runtime-changing PRs use a clean, compatible wrapper/helper from the last
+independently reviewed pre-change commit; the exact external-runtime review
+sequence is documented in `docs/notes/agent-quality-gate-mechanics.md`.
 Autoreview remains source review, so the quality gate and applicable browser or
 runtime verification are still required.
 

@@ -95,6 +95,32 @@ retain its printed digest outside the bundle. After review, rerun with
 `--expected-bundle-manifest <retained-digest>`; both checks must pass with the
 same digest.
 
+If the change edits the executable autoreview runtime and the owning checkout
+refuses with `executable autoreview runtime differs from its trusted pre-change
+snapshot`, keep that refusal intact. From the reviewed checkout, invoke a clean,
+detached, protocol-compatible wrapper/helper from the last independently
+reviewed pre-change commit (or protected main when it is compatible):
+
+```bash
+reviewed_checkout=/absolute/path/to/reviewed-checkout
+trusted_checkout=/absolute/path/to/trusted-pre-change-checkout
+bundle_parent=/tmp/autoreview-runtime-review
+mkdir -p "$bundle_parent"
+(
+  cd "$reviewed_checkout"
+  AUTOREVIEW_HELPER="$trusted_checkout/scripts/agent-autoreview.mjs" \
+    "$trusted_checkout/scripts/agent-autoreview.sh" \
+    --prepare-bundle-dir "$bundle_parent/context-bundle" \
+    --mode auto --base origin/main --feedback-pr <number>
+)
+"$trusted_checkout/scripts/agent-autoreview.sh" \
+  --verify-bundle-dir "$bundle_parent/context-bundle"
+```
+
+Use that same trusted wrapper for the bound post-review manifest check. Never
+point either path at the runtime-changing checkout, and never invoke that
+checkout's package scripts to bootstrap the review.
+
 Inside an active Codex sandbox, the adapter may choose the local deterministic
 engine only when no engine was explicitly selected. An explicitly selected
 unavailable semantic engine, or a missing repo helper, is a hard stop: report

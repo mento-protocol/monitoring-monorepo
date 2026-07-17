@@ -147,6 +147,10 @@ worktree. Local and branch-local bundles also require helper/core worktree bytes
 to match frozen `HEAD`. Runtime changes fail closed for review from a separate
 trusted checkout with an explicit compatible helper. Direct default-helper
 execution in the owning checkout applies the same protected-main runtime pin.
+Run the trusted wrapper from the reviewed checkout, keep its MJS path explicit
+in `AUTOREVIEW_HELPER`, and use the same wrapper for both manifest checks; the
+exact runtime-changing-PR command sequence lives in
+[`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 Wrapper-owned Node launches discard `NODE_OPTIONS` and `NODE_PATH` before
 executable probing, validation helpers, or the pinned MJS entry point can run;
 dynamic-loader and interpreter startup-injection variables are scrubbed as

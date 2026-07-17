@@ -1610,9 +1610,16 @@ function loadExtras(repo, args, maxBytes) {
 }
 
 function renderReviewPrompt(target, branch, baseline, chunk, extras, position) {
-  const targetLine = target.ref
-    ? `${target.mode} ${target.requested_ref || target.ref} (frozen commit ${target.ref})`
-    : target.mode;
+  const displayedRef = target.requested_ref || target.ref;
+  const targetLine =
+    target.mode === "commit" && target.ref
+      ? `commit ${displayedRef} (frozen reviewed commit ${target.ref})`
+      : (target.mode === "branch" || target.mode === "branch-local") &&
+          target.ref
+        ? `${target.mode} base ${displayedRef} (frozen base ${target.ref}; frozen reviewed head ${target.head})`
+        : target.head
+          ? `${target.mode} (frozen reviewed HEAD ${target.head})`
+          : target.mode;
   const chunkPolicy = position
     ? `Oversized review bundle pass: ${position.index}/${position.total}
 - The complete validated change is distributed across all ${position.total} passes.
@@ -3091,6 +3098,7 @@ async function main() {
   if (target.requested_ref)
     console.log(`requested_ref: ${target.requested_ref}`);
   if (target.ref) console.log(`ref: ${target.ref}`);
+  if (target.head) console.log(`head: ${target.head}`);
   console.log(`tools: ${args.tools ? "on" : "off"}`);
   console.log(`web_search: ${args.webSearch ? "on" : "off"}`);
   if (args.dryRun) return 0;

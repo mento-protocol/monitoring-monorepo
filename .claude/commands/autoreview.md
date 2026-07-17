@@ -58,6 +58,14 @@ fail closed, and a quiet reviewer emits a 60-second heartbeat.
 Do not pass the removed `--parallel-tests` option; run tests through the quality
 gate.
 
+If this checkout changes the executable autoreview runtime and the owning
+adapter refuses its self-review, keep the refusal intact. Invoke a clean,
+detached, compatible wrapper/helper from the last independently reviewed
+pre-change commit while the current directory remains this reviewed checkout,
+then use that same trusted wrapper for both manifest checks. Follow the exact
+sequence in `docs/notes/agent-quality-gate-mechanics.md`; never point the trusted
+paths at this runtime-changing checkout.
+
 3. Verify every accepted finding before editing. Do not blindly apply review
    output.
 4. If fixes are made, rerun focused checks and autoreview for the fixed batch.

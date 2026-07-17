@@ -4,16 +4,54 @@ if [[ "${AUTOREVIEW_TEST_SYSTEM_BASH:-}" != "1" && -x /bin/bash ]]; then
   exec /bin/bash "$0" "$@"
 fi
 set -euo pipefail
+umask 077
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
-tmp_dir="$(mktemp -d)"
+original_path="$PATH"
+node_bin="$(command -v node)"
+trusted_fixture_parent=""
+for fixture_parent_candidate in \
+  "${TMPDIR:-/tmp}" \
+  "${XDG_RUNTIME_DIR:-}" \
+  "${HOME:-}" \
+  "${repo_root%/*}"; do
+  [[ -n "$fixture_parent_candidate" && -d "$fixture_parent_candidate" ]] || continue
+  if "$node_bin" -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const candidate = fs.realpathSync(process.argv[1]);
+    const repo = fs.realpathSync(process.argv[2]);
+    const euid = BigInt(process.geteuid());
+    if (candidate === repo || candidate.startsWith(repo + path.sep)) process.exit(1);
+    fs.accessSync(candidate, fs.constants.W_OK);
+    let current = candidate;
+    for (;;) {
+      const stat = fs.lstatSync(current, { bigint: true });
+      if (
+        !stat.isDirectory() ||
+        stat.isSymbolicLink() ||
+        (stat.uid !== 0n && stat.uid !== euid) ||
+        (stat.mode & 0o022n) !== 0n
+      ) process.exit(1);
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  ' "$fixture_parent_candidate" "$repo_root"; then
+    trusted_fixture_parent="$(cd "$fixture_parent_candidate" && pwd -P)"
+    break
+  fi
+done
+if [[ -z "$trusted_fixture_parent" ]]; then
+  printf 'autoreview adversarial tests require a writable fixture parent with non-shared-writable ancestry\n' >&2
+  exit 1
+fi
+tmp_dir="$(/usr/bin/mktemp -d "$trusted_fixture_parent/agent-autoreview-test.XXXXXX")"
 tmp_dir="$(cd "$tmp_dir" && pwd -P)"
 repo_untracked="$repo_root/.agent-autoreview-test-untracked.$$.$RANDOM.txt"
 repo_node_test_dir="$repo_root/.agent-autoreview-node-test.$$.$RANDOM"
 trap 'rm -rf "$tmp_dir" "$repo_untracked" "$repo_node_test_dir"' EXIT
-original_path="$PATH"
-node_bin="$(command -v node)"
 node_exec_path="$("$node_bin" -p 'process.execPath')"
 trusted_test_node_dir="$tmp_dir/trusted-test-node"
 mkdir "$trusted_test_node_dir"
@@ -63,10 +101,108 @@ if (process.env.AUTOREVIEW_TEST_DIRECTORY_BASELINE) {
 }
 NODE
 cat >"$terminal_manifest_node_source" <<'NODE_PROXY'
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
+static int replace_direct_runtime_for_identity_test(int argc, char **argv) {
+  const char *marker = getenv("AUTOREVIEW_TEST_DIRECT_IDENTITY_MARKER");
+  const char *runtime;
+  char *helper;
+  char *backup;
+  FILE *output;
+  size_t helper_size;
+  size_t backup_size;
+
+  if (marker == NULL || argc < 4 || strcmp(argv[1], "-e") != 0 ||
+      strstr(argv[2], "stat.dev") == NULL) {
+    return 0;
+  }
+  runtime = argv[3];
+  if (strstr(runtime, "/agent-autoreview-direct.") == NULL) {
+    return 0;
+  }
+  helper_size = strlen(runtime) + strlen("/scripts/agent-autoreview.mjs") + 1;
+  helper = malloc(helper_size);
+  if (helper == NULL) {
+    perror("malloc");
+    return 127;
+  }
+  snprintf(helper, helper_size, "%s/scripts/agent-autoreview.mjs", runtime);
+  if (access(helper, F_OK) != 0) {
+    free(helper);
+    return 0;
+  }
+  free(helper);
+
+  backup_size = strlen(runtime) + strlen(".identity-test-original") + 1;
+  backup = malloc(backup_size);
+  if (backup == NULL) {
+    perror("malloc");
+    return 127;
+  }
+  snprintf(backup, backup_size, "%s.identity-test-original", runtime);
+  if (rename(runtime, backup) != 0 || mkdir(runtime, 0700) != 0) {
+    perror("replace direct runtime");
+    free(backup);
+    return 127;
+  }
+  free(backup);
+  output = fopen(marker, "w");
+  if (output == NULL) {
+    perror("direct identity marker");
+    return 127;
+  }
+  fprintf(output, "%s\n", runtime);
+  fclose(output);
+  return 0;
+}
+
+static void record_node_argv0(int argc, char **argv) {
+  const char *marker = getenv("AUTOREVIEW_TEST_NODE_ARGV0_MARKER");
+  FILE *output;
+
+  if (marker == NULL || argc < 2 ||
+      strstr(argv[1], "/scripts/agent-autoreview.mjs") == NULL) {
+    return;
+  }
+  output = fopen(marker, "w");
+  if (output == NULL) {
+    return;
+  }
+  fprintf(output, "%s\n", argv[0]);
+  fclose(output);
+}
+
+static void mark_direct_tmp_use(int argc, char **argv) {
+  const char *root = getenv("AUTOREVIEW_TEST_DIRECT_TMP_ROOT");
+  const char *marker = getenv("AUTOREVIEW_TEST_DIRECT_TMP_MARKER");
+  DIR *directory;
+  struct dirent *entry;
+
+  if (root == NULL || marker == NULL || argc < 2 ||
+      strstr(argv[1], "/scripts/agent-autoreview.mjs") == NULL) {
+    return;
+  }
+  directory = opendir(root);
+  if (directory == NULL) {
+    return;
+  }
+  while ((entry = readdir(directory)) != NULL) {
+    if (strncmp(entry->d_name, "agent-autoreview-direct.", 24) == 0) {
+      FILE *output = fopen(marker, "w");
+      if (output != NULL) {
+        fputs("caller TMPDIR contained the direct-helper runtime\n", output);
+        fclose(output);
+      }
+      break;
+    }
+  }
+  closedir(directory);
+}
 
 int main(int argc, char **argv) {
   const char *real_node = getenv("AUTOREVIEW_TEST_REAL_NODE");
@@ -85,6 +221,11 @@ int main(int argc, char **argv) {
     fputs("AUTOREVIEW_TEST_REAL_NODE must be an absolute path\n", stderr);
     return 127;
   }
+  if (replace_direct_runtime_for_identity_test(argc, argv) != 0) {
+    return 127;
+  }
+  record_node_argv0(argc, argv);
+  mark_direct_tmp_use(argc, argv);
   child_argv = calloc((size_t)argc + (size_t)injected_args + 1, sizeof(char *));
   if (child_argv == NULL) {
     perror("calloc");
@@ -132,8 +273,9 @@ if [[ ! -x /usr/bin/cc ]]; then
 fi
 /usr/bin/cc -O2 -Wall -Wextra -o "$terminal_manifest_node" "$terminal_manifest_node_source"
 
-"$node_bin" "$repo_root/scripts/agent-autoreview-core.test.mjs"
-"$node_bin" "$repo_root/scripts/agent-autoreview-target-guard.test.mjs"
+TMPDIR="$tmp_dir" "$node_bin" "$repo_root/scripts/agent-autoreview-core.test.mjs"
+TMPDIR="$tmp_dir" \
+  "$node_bin" "$repo_root/scripts/agent-autoreview-target-guard.test.mjs"
 adapter_help="$("$node_bin" "$repo_root/scripts/agent-autoreview.mjs" --help)"
 if [[
   "$adapter_help" != *"--verify-bundle-dir <dir>"* ||
@@ -654,6 +796,35 @@ run_parallel_tests_removed_regression() {
   run_helper_in_repo_expect_failure "$review_repo" --mode local --engine local --parallel-tests true
   expect_stderr_contains "--parallel-tests was removed"
   expect_stderr_contains "pnpm agent:quality-gate --run"
+}
+
+run_review_target_metadata_regression() {
+  local review_repo="$tmp_dir/review-target-metadata"
+  local prompt="$tmp_dir/review-target-metadata.md"
+  local base_oid
+  local head_oid
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  base_oid="$(git -C "$review_repo" rev-parse HEAD)"
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'feature\n' >>"$review_repo/README.md"
+  commit_review_repo "$review_repo" feature
+  head_oid="$(git -C "$review_repo" rev-parse HEAD)"
+
+  run_helper_in_repo "$review_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$prompt"
+  expect_file_contains \
+    "$prompt" \
+    "Review target: branch base main (frozen base $base_oid; frozen reviewed head $head_oid)"
+  expect_file_not_contains "$prompt" "frozen commit $base_oid"
+  expect_stdout_contains "ref: $base_oid"
+  expect_stdout_contains "head: $head_oid"
+  expect_empty_stderr
 }
 
 run_branch_diff_check_regression() {
@@ -1685,12 +1856,21 @@ run_trusted_helper_runtime_regression() {
   local hostile_base_bundle="$tmp_dir/trusted-helper-hostile-base-bundle"
   local hostile_base_trusted_bundle="$tmp_dir/trusted-helper-hostile-base-trusted-bundle"
   local hostile_base_marker="$tmp_dir/trusted-helper-hostile-base-ran"
+  local hostile_direct_tmp="$tmp_dir/trusted-helper-hostile-direct-tmp"
+  local hostile_direct_tmp_marker="$tmp_dir/trusted-helper-hostile-direct-tmp-ran"
+  local direct_identity_marker="$tmp_dir/trusted-helper-direct-identity-changed"
+  local repo_local_direct_tmp="$hostile_base_repo/.agent-autoreview-direct-tmp"
+  local repo_local_direct_tmp_marker="$tmp_dir/trusted-helper-repo-direct-tmp-ran"
+  local unsafe_native_node_bin="$tmp_dir/trusted-helper-unsafe-native-node-bin"
+  local native_node_argv0_marker="$tmp_dir/trusted-helper-native-node-argv0"
   local node_options_hook="$tmp_dir/trusted-helper-node-options.cjs"
   local node_options_marker="$tmp_dir/trusted-helper-node-options-ran"
   local local_stdout="$tmp_dir/trusted-helper.stdout"
   local local_stderr="$tmp_dir/trusted-helper.stderr"
   local changed_runtime_commit
   local changed_runtime_parent
+  local changed_runtime_path
+  local native_node_argv0
   local status=0
   init_review_repo "$review_repo"
   mkdir -p "$review_repo/scripts"
@@ -2067,6 +2247,150 @@ run_trusted_helper_runtime_regression() {
     printf 'protected direct review wrote stderr:\n%s\n' \
       "$(cat "$local_stderr")" >&2
     exit 1
+  fi
+
+  mkdir "$hostile_direct_tmp" "$repo_local_direct_tmp"
+  chmod 0777 "$hostile_direct_tmp"
+  (
+    cd "$hostile_base_repo"
+    env -i \
+      "PATH=$terminal_manifest_node_dir" \
+      "HOME=$HOME" \
+      "TMPDIR=$hostile_direct_tmp" \
+      "AUTOREVIEW_TEST_REAL_NODE=$node_bin" \
+      "AUTOREVIEW_TEST_DIRECT_TMP_ROOT=$hostile_direct_tmp" \
+      "AUTOREVIEW_TEST_DIRECT_TMP_MARKER=$hostile_direct_tmp_marker" \
+      "$hostile_base_repo/scripts/agent-autoreview.sh" \
+      --mode branch \
+      --base release \
+      --engine local \
+      --dry-run >"$local_stdout" 2>"$local_stderr"
+  )
+  expect_file_contains "$local_stdout" "engine: local"
+  if [[ -e "$hostile_direct_tmp_marker" ]]; then
+    printf 'direct helper runtime used caller-controlled shared-writable TMPDIR\n' >&2
+    exit 1
+  fi
+  if [[ -s "$local_stderr" ]]; then
+    printf 'hostile-TMPDIR direct review wrote stderr:\n%s\n' \
+      "$(cat "$local_stderr")" >&2
+    exit 1
+  fi
+
+  (
+    cd "$hostile_base_repo"
+    env -i \
+      "PATH=$terminal_manifest_node_dir" \
+      "HOME=$HOME" \
+      "TMPDIR=$repo_local_direct_tmp" \
+      "AUTOREVIEW_TEST_REAL_NODE=$node_bin" \
+      "AUTOREVIEW_TEST_DIRECT_TMP_ROOT=$repo_local_direct_tmp" \
+      "AUTOREVIEW_TEST_DIRECT_TMP_MARKER=$repo_local_direct_tmp_marker" \
+      "$hostile_base_repo/scripts/agent-autoreview.sh" \
+      --mode branch \
+      --base release \
+      --engine local \
+      --dry-run >"$local_stdout" 2>"$local_stderr"
+  )
+  expect_file_contains "$local_stdout" "engine: local"
+  if [[ -e "$repo_local_direct_tmp_marker" ]]; then
+    printf 'direct helper runtime contaminated a repo-local TMPDIR\n' >&2
+    exit 1
+  fi
+  if [[ -s "$local_stderr" ]]; then
+    printf 'repo-local-TMPDIR direct review wrote stderr:\n%s\n' \
+      "$(cat "$local_stderr")" >&2
+    exit 1
+  fi
+
+  set +e
+  (
+    cd "$hostile_base_repo"
+    env -i \
+      "PATH=$terminal_manifest_node_dir" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AUTOREVIEW_TEST_REAL_NODE=$node_bin" \
+      "AUTOREVIEW_TEST_DIRECT_IDENTITY_MARKER=$direct_identity_marker" \
+      "$hostile_base_repo/scripts/agent-autoreview.sh" \
+      --mode branch \
+      --base release \
+      --engine local \
+      --dry-run >"$local_stdout" 2>"$local_stderr"
+  )
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    printf 'direct review ignored a changed helper-runtime identity\n' >&2
+    exit 1
+  fi
+  expect_file_exists "$direct_identity_marker"
+  expect_file_contains \
+    "$local_stderr" \
+    "direct helper runtime identity changed before launch"
+  expect_file_not_contains "$local_stdout" "engine: local"
+  changed_runtime_path="$(cat "$direct_identity_marker")"
+  case "$changed_runtime_path" in
+    /tmp/agent-autoreview-direct.* | /private/tmp/agent-autoreview-direct.*) ;;
+    *)
+      printf 'identity test reported an unexpected runtime path: %s\n' \
+        "$changed_runtime_path" >&2
+      exit 1
+      ;;
+  esac
+  if [[ -L "$changed_runtime_path" || -L "$changed_runtime_path.identity-test-original" ]]; then
+    printf 'identity test runtime cleanup target became a symlink\n' >&2
+    exit 1
+  fi
+  rm -rf -- \
+    "$changed_runtime_path" \
+    "$changed_runtime_path.identity-test-original"
+
+  if [[
+    "$(/usr/bin/uname -s)" == "Darwin" &&
+      ! -x /usr/bin/node &&
+      ! -x /bin/node &&
+      ! -x /usr/sbin/node &&
+      ! -x /sbin/node
+  ]]; then
+    mkdir "$unsafe_native_node_bin"
+    chmod 0777 "$unsafe_native_node_bin"
+    cp "$terminal_manifest_node" "$unsafe_native_node_bin/node"
+    chmod 0755 "$unsafe_native_node_bin/node"
+    (
+      cd "$hostile_base_repo"
+      env -i \
+        "PATH=$unsafe_native_node_bin" \
+        "HOME=$HOME" \
+        "TMPDIR=${TMPDIR:-/tmp}" \
+        "AUTOREVIEW_TEST_REAL_NODE=$node_bin" \
+        "AUTOREVIEW_TEST_NODE_ARGV0_MARKER=$native_node_argv0_marker" \
+        "$hostile_base_repo/scripts/agent-autoreview.sh" \
+        --mode branch \
+        --base release \
+        --engine local \
+        --dry-run >"$local_stdout" 2>"$local_stderr"
+    )
+    expect_file_contains "$local_stdout" "engine: local"
+    expect_file_exists "$native_node_argv0_marker"
+    native_node_argv0="$(cat "$native_node_argv0_marker")"
+    if [[ "$native_node_argv0" == "$unsafe_native_node_bin/node" ]]; then
+      printf 'unsafe native Node candidate executed without a sealed snapshot\n' >&2
+      exit 1
+    fi
+    case "$native_node_argv0" in
+      */agent-autoreview-command-runtime.*/node.*) ;;
+      *)
+        printf 'native Node did not execute from the sealed command runtime: %s\n' \
+          "$native_node_argv0" >&2
+        exit 1
+        ;;
+    esac
+    if [[ -s "$local_stderr" ]]; then
+      printf 'snapshotted native-node direct review wrote stderr:\n%s\n' \
+        "$(cat "$local_stderr")" >&2
+      exit 1
+    fi
   fi
 }
 
@@ -2838,47 +3162,65 @@ run_default_adapter_with_inline_engine
 expect_stdout_contains "engine: local"
 expect_empty_stderr
 
-run_parallel_tests_removed_regression
-run_branch_diff_check_regression
-run_local_deleted_reference_regression
-run_commit_target_reads_selected_ref_regression
-run_non_utf8_git_blob_regression
-run_non_utf8_git_path_regression
-run_auto_dirty_branch_regression
-run_branch_local_diff_check_fixed_regression
-run_branch_local_deleted_reference_regression
-run_branch_local_deleted_reference_fixed_regression
-run_requested_codex_missing_regression
-run_claude_no_tools_regression
-run_codex_isolation_regression
-run_symlinked_node_codex_regression
-run_repo_controlled_node_regression
-run_pr_base_detection_regression
-run_target_selection_drift_regression
-run_dry_run_unresolved_ref_regression
-run_dirty_source_drift_regression
-run_untracked_churn_scope_regression
-run_index_source_drift_regression
-run_mode_source_drift_regression
-run_branch_identity_source_drift_regression
-run_explicit_snapshot_scope_regression
-run_frozen_checklist_provenance_regression
-run_frozen_checklist_symlink_regression
-run_git_replace_ref_regression
-run_trusted_helper_runtime_regression
-run_prepared_untracked_symlink_regression
-run_feedback_runtime_aggregate_regression
-run_large_untracked_bound_regression
-run_aggregate_untracked_bound_regression
-run_bundle_output_deferred_regression
-run_claude_multi_pass_regression
-run_heartbeat_regression
-run_hostile_git_path_regression
-run_unsafe_script_fallback_regressions
-run_privileged_shebang_startup_regression
-run_hostile_volta_environment_regression
-run_sensitive_input_regressions
-run_override_untracked_serializer_regression
+test_focus="${AUTOREVIEW_TEST_FOCUS:-all}"
+case "$test_focus" in
+  review-target-trust)
+    run_review_target_metadata_regression
+    run_trusted_helper_runtime_regression
+    printf 'focused autoreview target/trust tests passed\n'
+    exit 0
+    ;;
+  adapter | all) ;;
+  *)
+    printf 'unknown AUTOREVIEW_TEST_FOCUS: %s\n' "$AUTOREVIEW_TEST_FOCUS" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$test_focus" == "all" ]]; then
+  run_parallel_tests_removed_regression
+  run_review_target_metadata_regression
+  run_branch_diff_check_regression
+  run_local_deleted_reference_regression
+  run_commit_target_reads_selected_ref_regression
+  run_non_utf8_git_blob_regression
+  run_non_utf8_git_path_regression
+  run_auto_dirty_branch_regression
+  run_branch_local_diff_check_fixed_regression
+  run_branch_local_deleted_reference_regression
+  run_branch_local_deleted_reference_fixed_regression
+  run_requested_codex_missing_regression
+  run_claude_no_tools_regression
+  run_codex_isolation_regression
+  run_symlinked_node_codex_regression
+  run_repo_controlled_node_regression
+  run_pr_base_detection_regression
+  run_target_selection_drift_regression
+  run_dry_run_unresolved_ref_regression
+  run_dirty_source_drift_regression
+  run_untracked_churn_scope_regression
+  run_index_source_drift_regression
+  run_mode_source_drift_regression
+  run_branch_identity_source_drift_regression
+  run_explicit_snapshot_scope_regression
+  run_frozen_checklist_provenance_regression
+  run_frozen_checklist_symlink_regression
+  run_git_replace_ref_regression
+  run_trusted_helper_runtime_regression
+  run_prepared_untracked_symlink_regression
+  run_feedback_runtime_aggregate_regression
+  run_large_untracked_bound_regression
+  run_aggregate_untracked_bound_regression
+  run_bundle_output_deferred_regression
+  run_claude_multi_pass_regression
+  run_heartbeat_regression
+  run_hostile_git_path_regression
+  run_unsafe_script_fallback_regressions
+  run_privileged_shebang_startup_regression
+  run_hostile_volta_environment_regression
+  run_sensitive_input_regressions
+  run_override_untracked_serializer_regression
+fi
 
 run_adapter CODEX_SANDBOX=seatbelt --dry-run
 expect_args $'--engine\nlocal\n--dry-run'
@@ -3095,8 +3437,13 @@ fi
 
 bundle_dir="$tmp_dir/context-bundle"
 canonical_bundle_dir="$(cd "$(dirname "$bundle_dir")" && pwd -P)/$(basename "$bundle_dir")"
+frozen_base="$(git -C "$repo_root" rev-parse HEAD^)"
 frozen_head="$(git -C "$repo_root" rev-parse HEAD)"
-run_adapter --prepare-bundle-dir "$bundle_dir" --mode branch --base HEAD
+if [[ "$frozen_base" == "$frozen_head" ]]; then
+  printf 'metadata regression requires distinct base and reviewed commits\n' >&2
+  exit 1
+fi
+run_adapter --prepare-bundle-dir "$bundle_dir" --mode branch --base "$frozen_base"
 captured_bundle_output="$(awk 'previous == "--bundle-output" { print; exit } { previous = $0 }' "$capture")"
 captured_staging_dir="$(dirname "$captured_bundle_output")"
 case "$captured_bundle_output" in
@@ -3106,7 +3453,7 @@ case "$captured_bundle_output" in
     exit 1
     ;;
 esac
-expect_args $'--mode\nbranch\n--base\nHEAD\n--trusted-input-root\n'"$captured_staging_dir"$'\n--base\n'"$frozen_head"$'\n--prompt-file\n'"$captured_staging_dir"$'/checklists/recurring-review-patterns.md\n--prompt-file\n'"$captured_staging_dir"$'/checklists/review-prompt-exclusions.md\n--bundle-output\n'"$captured_bundle_output"$'\n--bundle-output-display\n'"$canonical_bundle_dir"$'/autoreview-prompt.md\n--prepare-only'
+expect_args $'--mode\nbranch\n--base\n'"$frozen_base"$'\n--trusted-input-root\n'"$captured_staging_dir"$'\n--base\n'"$frozen_base"$'\n--prompt-file\n'"$captured_staging_dir"$'/checklists/recurring-review-patterns.md\n--prompt-file\n'"$captured_staging_dir"$'/checklists/review-prompt-exclusions.md\n--prompt-file\n'"$captured_staging_dir"$'/checklists/code-health.md\n--bundle-output\n'"$captured_bundle_output"$'\n--bundle-output-display\n'"$canonical_bundle_dir"$'/autoreview-prompt.md\n--prepare-only'
 expect_empty_stderr
 expect_file_exists "$canonical_bundle_dir/README.md"
 expect_file_exists "$canonical_bundle_dir/changed-paths.txt"
@@ -3117,6 +3464,9 @@ expect_file_exists "$canonical_bundle_dir/autoreview-prompt.md"
 expect_file_exists "$canonical_bundle_dir/helper-output.txt"
 expect_file_exists "$canonical_bundle_dir/.agent-autoreview-complete"
 expect_file_contains "$canonical_bundle_dir/README.md" "Autoreview Context Bundle"
+expect_file_contains "$canonical_bundle_dir/README.md" "- Frozen base commit: $frozen_base"
+expect_file_contains "$canonical_bundle_dir/README.md" "- Frozen reviewed HEAD: $frozen_head"
+expect_file_not_contains "$canonical_bundle_dir/README.md" "Frozen target commit"
 expect_file_contains "$canonical_bundle_dir/.agent-autoreview-complete" "autoreview-bundle-v2"
 expect_file_contains "$canonical_bundle_dir/.agent-autoreview-complete" "manifest-sha256:"
 expect_file_contains "$canonical_bundle_dir/selected-checklists.txt" "docs/pr-checklists/review-prompt-exclusions.md"

@@ -300,6 +300,30 @@ runtime is unchanged; they do not turn an untrusted checkout into trusted
 executable code. Inspect a potentially hostile branch from a separate trusted
 checkout rather than invoking that branch's package scripts.
 
+For a runtime-changing PR, run the clean, detached wrapper and compatible MJS
+helper from the last independently reviewed pre-change commit while the current
+directory remains the reviewed checkout. Protected main is acceptable only when
+its helper still supports the current bundle protocol:
+
+```bash
+reviewed_checkout=/absolute/path/to/reviewed-checkout
+trusted_checkout=/absolute/path/to/trusted-pre-change-checkout
+bundle_parent=/tmp/autoreview-runtime-review
+mkdir -p "$bundle_parent"
+(
+  cd "$reviewed_checkout"
+  AUTOREVIEW_HELPER="$trusted_checkout/scripts/agent-autoreview.mjs" \
+    "$trusted_checkout/scripts/agent-autoreview.sh" \
+    --prepare-bundle-dir "$bundle_parent/context-bundle" \
+    --mode auto --base origin/main --feedback-pr <number>
+)
+"$trusted_checkout/scripts/agent-autoreview.sh" \
+  --verify-bundle-dir "$bundle_parent/context-bundle"
+```
+
+Use that same trusted wrapper for `--expected-bundle-manifest` after the review.
+Never point `trusted_checkout` at the runtime-changing checkout.
+
 For a true Codex semantic pass from inside Codex, prepare a repo-context bundle
 and pass that bundle to a fresh-context reviewer:
 

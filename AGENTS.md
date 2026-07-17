@@ -109,9 +109,13 @@ branch-controlled package scripts; wrapper-owned Node launches discard
 executables require trusted ownership and non-shared-writable ancestry; on
 Darwin, Homebrew-style paths are accepted only through sealed private native
 Mach-O snapshots with system-only library closure, while scripts and unsafe
-library closure fail closed. Checklist edits remain diff evidence. Direct and
-prepared capture enforce a cumulative byte budget before review input
-accumulates in memory or staging sidecars.
+library closure fail closed. Runtime-changing PRs must keep the owning-checkout
+refusal intact and use the compatible last-reviewed pre-change wrapper from the
+reviewed checkout; the exact command sequence is in
+`docs/notes/agent-quality-gate-mechanics.md`.
+Checklist edits remain diff evidence. Direct and prepared capture enforce a
+cumulative byte budget before review input accumulates in memory or staging
+sidecars.
 Semantic engines run in an isolated empty workspace with restricted project
 configuration and environment; reviewer web search is disabled by default and
 requires explicit `--web-search`. Review inputs fail closed on sensitive

@@ -584,6 +584,7 @@ resolve_volta_node() {
   local resolved
   local login_home
   local executable
+  local snapshotted_node
   local volta_candidates=("${shim%/volta-shim}/volta")
   if [[ "$shim" == */bin/volta-shim ]]; then
     volta_candidates+=("${shim%/bin/volta-shim}/libexec/bin/volta")
@@ -623,9 +624,16 @@ resolve_volta_node() {
   ]] || return 1
   resolved="$(canonicalize_external_path "$executable" 2>/dev/null)" || return 1
   path_is_rejected "$resolved" && return 1
-  command_path_is_strictly_trusted "$resolved" || return 1
-  native_node_candidate_is_trusted "$resolved" || return 1
-  printf '%s\n' "$resolved"
+  if command_path_is_strictly_trusted "$resolved" &&
+    native_node_candidate_is_trusted "$resolved"; then
+    printf '%s\n' "$resolved"
+    return 0
+  fi
+  if snapshotted_node="$(snapshot_external_executable "$resolved" node)"; then
+    printf '%s\n' "$snapshotted_node"
+    return 0
+  fi
+  return 1
 }
 
 resolve_node_command() {
@@ -633,6 +641,7 @@ resolve_node_command() {
   local path_entry
   local candidate
   local resolved
+  local fallback_candidates=()
   local volta_shims=()
   IFS=: read -r -a path_entries <<<"$external_command_path"
   for path_entry in "${path_entries[@]}"; do
@@ -651,9 +660,16 @@ resolve_node_command() {
       printf '%s\n' "$resolved"
       return 0
     fi
+    fallback_candidates+=("$resolved")
   done
   for resolved in "${volta_shims[@]+"${volta_shims[@]}"}"; do
     if resolved="$(resolve_volta_node "$resolved")"; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  done
+  for resolved in "${fallback_candidates[@]+"${fallback_candidates[@]}"}"; do
+    if resolved="$(snapshot_external_executable "$resolved" node)"; then
       printf '%s\n' "$resolved"
       return 0
     fi
@@ -3271,9 +3287,18 @@ prepare_context_bundle() {
       printf ' %s' "$target_display_ref"
     fi
     printf '\n'
-    if [[ -n "$target_ref" ]]; then
-      printf -- '- Frozen target commit: %s\n' "$target_ref"
-    fi
+    case "$target_mode" in
+      branch | branch-local)
+        printf -- '- Frozen base commit: %s\n' "$target_ref"
+        printf -- '- Frozen reviewed HEAD: %s\n' "$frozen_head_oid"
+        ;;
+      commit)
+        printf -- '- Frozen reviewed commit: %s\n' "$target_ref"
+        ;;
+      local)
+        printf -- '- Frozen reviewed HEAD: %s\n' "$frozen_head_oid"
+        ;;
+    esac
     printf -- '- Branch: %s\n' "${branch:-detached}"
     printf -- '- Generated: %s\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf '## Contents\n\n'
@@ -3423,16 +3448,42 @@ if [[ "$helper" == "$default_helper" ]]; then
         "$frozen_head_oid"
       verify_current_helper_matches_ref "$direct_repo" "$frozen_head_oid"
       direct_helper_runtime_dir="$(
-        mktemp -d "${TMPDIR:-/tmp}/agent-autoreview-direct.XXXXXX"
+        /usr/bin/mktemp -d \
+          "$trusted_temp_root/agent-autoreview-direct.XXXXXX" \
+          2>/dev/null || true
       )"
+      if [[
+        -z "$direct_helper_runtime_dir" ||
+          ! -d "$direct_helper_runtime_dir" ||
+          -L "$direct_helper_runtime_dir"
+      ]]; then
+        echo "agent:autoreview: failed to create a private direct-helper runtime" >&2
+        exit 127
+      fi
+      /bin/chmod 0700 "$direct_helper_runtime_dir"
       direct_helper_runtime_identity="$(path_identity "$direct_helper_runtime_dir")"
+      if ! path_acl_is_trusted "$direct_helper_runtime_dir"; then
+        echo "agent:autoreview: failed to create an ACL-private direct-helper runtime" >&2
+        exit 127
+      fi
       materialize_trusted_autoreview_runtime \
         "$direct_repo" \
         "$direct_protected_main_ref" \
         "$direct_helper_runtime_dir"
       prepared_helper_override="$direct_helper_runtime_dir/scripts/agent-autoreview.mjs"
       direct_status=0
-      (cd "$direct_repo" && run_helper "$@") || direct_status=$?
+      direct_helper_runtime_current_identity="$(
+        path_identity "$direct_helper_runtime_dir" 2>/dev/null || true
+      )"
+      if [[
+        -z "$direct_helper_runtime_current_identity" ||
+          "$direct_helper_runtime_current_identity" != "$direct_helper_runtime_identity"
+      ]]; then
+        echo "agent:autoreview: direct helper runtime identity changed before launch" >&2
+        direct_status=1
+      else
+        (cd "$direct_repo" && run_helper "$@") || direct_status=$?
+      fi
       if ! safe_remove_tree \
         "$direct_helper_runtime_dir" \
         "$direct_helper_runtime_identity" \
