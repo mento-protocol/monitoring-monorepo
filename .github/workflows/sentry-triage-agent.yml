@@ -171,6 +171,13 @@ jobs:
         with:
           fetch-depth: 1
 
+      # The deterministic verdict-label and projection steps below run
+      # scripts/sentry-triage-project.mjs, so pin node to .node-version rather
+      # than relying on the runner image's system node (mirrors the digest job).
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+
       - name: Render triage prompt
         id: render
         env:
@@ -217,54 +224,34 @@ jobs:
           set -euo pipefail
           # The agent's only write is the verdict comment. The label swap is
           # applied HERE, deterministically, so a prompt-injected agent cannot
-          # touch labels at all: parse the verdict out of the newest
-          # marker-bearing comment, validate it against the four allowed
-          # values, and apply the mapped label. If no valid verdict comment
-          # exists, fail the job loudly and leave sentry:needs-triage in place
-          # so the next scheduled run retries this issue.
-          # NOTE: the comment body is agent-authored from untrusted Sentry
-          # data — it is only ever handled as quoted data here (never
-          # interpolated into a command), and the extracted verdict is
-          # constrained to the closed label set by the case statement.
-          comments=$(gh issue view "${QUEUE_ISSUE_NUMBER}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --json comments)
-          body=$(printf '%s' "${comments}" | jq -r \
-            '[.comments[] | select(.body | startswith("<!-- sentry-triage-verdict:v1 -->"))] | sort_by(.createdAt) | last | .body // ""')
-          if [ -z "${body}" ]; then
-            echo "::error::No verdict comment with the sentry-triage-verdict:v1 marker found on issue #${QUEUE_ISSUE_NUMBER}; leaving sentry:needs-triage in place for retry."
+          # touch labels at all. The PARSE is delegated to
+          # scripts/sentry-triage-project.mjs --parse-only — the exact same
+          # parser the projection step runs — so labeling and projection can
+          # never disagree about what the verdict is (single-parser rule: a
+          # sed-vs-script divergence here could apply a label and then have the
+          # projection silently skip while the stub closes as if handled). The
+          # script reads the newest <!-- sentry-triage-verdict:v1 --> comment,
+          # applies the regression fence (only a verdict strictly newer than
+          # the newest "Regressed in Sentry (last seen " reopen comment counts,
+          # so a stale pre-regression verdict never re-labels a regressed
+          # issue), validates the verdict against the closed four-value enum,
+          # and emits {"verdict","label"} JSON. The comment body is
+          # agent-authored from untrusted Sentry data — it is only ever parsed
+          # as data, never interpolated into a command, and the emitted values
+          # are closed-enum. Missing/stale/invalid verdict -> nonzero exit ->
+          # fail the job loudly and leave sentry:needs-triage in place so the
+          # next scheduled run retries this issue.
+          parse_file="${RUNNER_TEMP}/verdict-parse.json"
+          if ! node scripts/sentry-triage-project.mjs \
+              --parse-only \
+              --issue "${QUEUE_ISSUE_NUMBER}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              > "${parse_file}"; then
+            echo "::error::No usable verdict on issue #${QUEUE_ISSUE_NUMBER} (missing, stale pre-regression, or invalid verdict comment — see the log above); leaving sentry:needs-triage in place for retry."
             exit 1
           fi
-          # Regression fence: a reopened regression keeps the PREVIOUS run's
-          # verdict comment (Stage A's reopen path only sheds labels). If the
-          # re-triage agent fails to post a fresh verdict, the newest marker
-          # comment would be the stale pre-regression one — and acting on it
-          # would re-label (and re-close) the regressed issue with a verdict
-          # that never investigated the regression. Only accept a verdict
-          # comment strictly newer than the newest regression-reopen comment
-          # (Stage A posts the fixed prefix "Regressed in Sentry (last seen ");
-          # ISO-8601 UTC timestamps compare correctly as strings. When no
-          # regression comment exists (normal first triage), the fence is a
-          # no-op.
-          verdict_created=$(printf '%s' "${comments}" | jq -r \
-            '[.comments[] | select(.body | startswith("<!-- sentry-triage-verdict:v1 -->"))] | sort_by(.createdAt) | last | .createdAt // ""')
-          regressed_created=$(printf '%s' "${comments}" | jq -r \
-            '[.comments[] | select(.body | startswith("Regressed in Sentry (last seen "))] | sort_by(.createdAt) | last | .createdAt // ""')
-          if [ -n "${regressed_created}" ] && ! [[ "${verdict_created}" > "${regressed_created}" ]]; then
-            echo "::error::Newest verdict comment on issue #${QUEUE_ISSUE_NUMBER} (${verdict_created}) is not newer than the newest regression-reopen comment (${regressed_created}) — stale pre-regression verdict; leaving sentry:needs-triage in place for retry."
-            exit 1
-          fi
-          verdict=$(printf '%s\n' "${body}" | sed -n 's/^verdict:[[:space:]]*\([a-z-]*\).*$/\1/p' | head -n 1)
-          case "${verdict}" in
-            code-fix) label="sentry:verdict-code-fix" ;;
-            config-fix) label="sentry:verdict-config-fix" ;;
-            upstream-transient) label="sentry:verdict-upstream" ;;
-            needs-human) label="sentry:verdict-needs-human" ;;
-            *)
-              echo "::error::Verdict comment on issue #${QUEUE_ISSUE_NUMBER} has missing/invalid verdict value; leaving sentry:needs-triage in place for retry."
-              exit 1
-              ;;
-          esac
+          verdict=$(jq -r '.verdict' "${parse_file}")
+          label=$(jq -r '.label' "${parse_file}")
           gh issue edit "${QUEUE_ISSUE_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
             --remove-label 'sentry:needs-triage' \
@@ -303,18 +290,41 @@ jobs:
         if: ${{ steps.verdict.outputs.verdict == 'code-fix' || steps.verdict.outputs.verdict == 'config-fix' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          # STEP-scoped: the ONLY place the cross-repo projection PAT is exposed.
-          SENTRY_PROJECTION_TOKEN: ${{ secrets.SENTRY_PROJECTION_TOKEN }}
+          # STEP-scoped: the ONLY place the cross-repo projection PAT is
+          # exposed — and only on the main ref. workflow_dispatch from a branch
+          # runs that branch's MODIFIED workflow/script code, and modified code
+          # + a cross-repo write token = exfiltration, so off-main this env
+          # expression resolves to '' and the secret never materializes in the
+          # step (the run block below also exits before invoking anything).
+          # Interim guard — the durable GitHub-Environment protection for this
+          # workflow's dispatch surface is tracked in #1289.
+          SENTRY_PROJECTION_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.SENTRY_PROJECTION_TOKEN || '' }}
           QUEUE_ISSUE_NUMBER: ${{ matrix.issue }}
+          VERDICT: ${{ steps.verdict.outputs.verdict }}
           VERDICT_LABEL: ${{ steps.verdict.outputs.label }}
         run: |
           set -euo pipefail
+          # Ref gate (see the env note): no cross-repo projection off main.
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::notice::Non-main ref (${GITHUB_REF}): cross-repo verdict projection is disabled (SENTRY_PROJECTION_TOKEN is only exposed on main; durable hardening tracked in #1289)."
+            {
+              echo "status=skipped-ref"
+              echo "projected_url="
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # --verdict hands the label step's already-validated verdict back to
+          # the script. Both steps run the SAME parser (--parse-only above), so
+          # a mismatch can only mean the issue changed between steps (e.g. a
+          # newer verdict comment landed) — the script then FAILS LOUD instead
+          # of silently skipping, landing in the compensation branch below.
           # The script prints ONLY a single-line JSON result to stdout;
           # diagnostics + ::notice::/::warning:: annotations go to stderr.
           result_file="${RUNNER_TEMP}/projection-result.json"
           if node scripts/sentry-triage-project.mjs \
               --issue "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}" \
+              --verdict "${VERDICT}" \
               > "${result_file}"; then
             status=$(jq -r '.status // "unknown"' "${result_file}")
             url=$(jq -r '.url // ""' "${result_file}")
@@ -324,10 +334,14 @@ jobs:
             } >> "${GITHUB_OUTPUT}"
             echo "Projection result for issue #${QUEUE_ISSUE_NUMBER}: ${status} ${url}"
           else
-            echo "::error::Verdict projection failed for issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage (and shedding ${VERDICT_LABEL}) for retry."
+            # Shed sentry:projected too: a partial run may have applied it (or
+            # a previous round left it) before the failure, and a needs-triage
+            # issue must not read as already projected. Removing an absent
+            # label is a no-op for gh issue edit.
+            echo "::error::Verdict projection failed for issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage (and shedding ${VERDICT_LABEL} + sentry:projected) for retry."
             gh issue edit "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --remove-label "${VERDICT_LABEL}" \
+              --remove-label "${VERDICT_LABEL},sentry:projected" \
               --add-label "sentry:needs-triage"
             exit 1
           fi
@@ -363,6 +377,9 @@ jobs:
               ;;
             skipped-no-token)
               projection_note=" Projection skipped (SENTRY_PROJECTION_TOKEN not provisioned)."
+              ;;
+            skipped-ref)
+              projection_note=" Projection skipped (non-main dispatch; see #1289)."
               ;;
             skipped-repo)
               projection_note=" No external projection (owning repo is this repo or unrecognized)."

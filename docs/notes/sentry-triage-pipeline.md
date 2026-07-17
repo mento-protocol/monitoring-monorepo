@@ -100,7 +100,7 @@ flowchart TD
     POLL --> KNOWN{"queue issue with this<br/>SHORT-ID exists?"}
     KNOWN -- "no" --> CREATE["create queue issue<br/>sentry-triage + sentry:needs-triage<br/>(+ sentry:candidate-noise if heuristic hits)"]
     KNOWN -- "open" --> SKIP["skip (already queued)"]
-    KNOWN -- "closed + regressed +<br/>events since close<br/>(lastSeen &gt; closedAt)" --> REOPEN["reopen, shed stale verdict labels,<br/>re-add sentry:needs-triage"]
+    KNOWN -- "closed + regressed +<br/>events since close<br/>(lastSeen &gt; closedAt)" --> REOPEN["reopen, shed stale verdict +<br/>projected labels,<br/>re-add sentry:needs-triage"]
     KNOWN -- "closed, otherwise" --> STAY["skip (stays closed:<br/>not regressed, or regression<br/>already triaged before close)"]
     CREATE --> PEND["pending in queue"]
     REOPEN --> PEND
@@ -187,9 +187,12 @@ equals `<SHORT-ID>`:
 - **Closed match, Sentry issue is regressed, and its `lastSeen` is strictly
   newer than the queue issue's `closed_at`** → reopen it, comment
   `Regressed in Sentry (last seen <ts>)`, re-add `sentry:needs-triage`, and
-  remove any stale `sentry:verdict-*` labels — the old verdict described the
-  old occurrence, and a reopened issue must read as awaiting triage, not as
-  carrying a verdict and needs-triage at once. The timestamp gate exists
+  remove any stale `sentry:verdict-*` labels plus the stale `sentry:projected`
+  marker — the old verdict/projection described the old occurrence, and a
+  reopened issue must read as awaiting triage, not as carrying a verdict (or a
+  projection claim) and needs-triage at once. If the re-triage round lands on
+  an actionable verdict again, the projection step re-applies the marker,
+  idempotently reusing the same owning-repo issue. The timestamp gate exists
   because Sentry keeps `substatus=regressed` for days after a regression:
   without it, a verdict-closed stub would loop reopen → re-triage → close on
   every ingest run until Sentry flips the substatus. Missing or unparsable
@@ -362,6 +365,22 @@ comment exists, the step fails the job loudly (`::error::` + exit 1) and leaves
 `sentry:needs-triage` in place so the next scheduled run retries the issue — a
 failed triage never silently strands an unlabeled issue.
 
+**Single parser:** the parse itself is delegated to
+`scripts/sentry-triage-project.mjs --parse-only` — the exact same
+selection/validation code the verdict-projection step runs — so labeling and
+projection can never disagree about what a verdict says. The projection step
+additionally receives the label step's validated verdict back (`--verdict`)
+and fails loudly if its own read ever differs (only possible if the issue
+changed between steps), never silently skipping.
+
+**Authorship fence:** only comments authored by the pipeline's own GitHub
+Actions bot (`github-actions`; REST shape `github-actions[bot]`) are
+considered — both for verdict comments and for regression-reopen comments.
+This repo is public, so without the fence any drive-by commenter could paste a
+marker-bearing comment and drive labels, closes, and (once the projection PAT
+exists) cross-repo issue creation, or stale-out a legitimate verdict with a
+fake regression comment. Comments with a missing/unknown author fail closed.
+
 **Regression fence:** a reopened regression still carries the previous round's
 verdict comment (Stage A's reopen path sheds labels, not comments). The step
 therefore only accepts a verdict comment that is strictly newer than the
@@ -511,9 +530,13 @@ BEFORE the queue-close step, driven by `scripts/sentry-triage-project.mjs`
 (pure logic + `gh` I/O; tests in `scripts/sentry-triage-project.test.mjs`).
 
 It is a pure CONSUMER of the verdict contract — it re-reads the stub's title,
-yaml body, and latest `<!-- sentry-triage-verdict:v1 -->` comment (re-applying
-the same regression fence as the label step), and never re-fetches Sentry, runs
-an LLM, or touches the verdict/label logic.
+yaml body, and latest `<!-- sentry-triage-verdict:v1 -->` comment through the
+SAME authoritative parser the label step uses (`--parse-only` above), including
+the authorship and regression fences, and never re-fetches Sentry, runs an
+LLM, or touches the verdict/label logic. The workflow hands the label step's
+validated verdict back via `--verdict`; if the script's own read ever differs
+(only possible when the issue changed between steps), it fails loudly rather
+than silently skipping.
 
 **When it projects.** Only `code-fix`/`config-fix`; `needs-human` and
 `upstream-transient` never leave the queue. The verdict's `affected_repo` is
@@ -535,10 +558,14 @@ fields render inside fenced blocks so embedded markdown is inert; the SHORT-IDs,
 permalink, and back-link are shape-/scheme-validated before they render.
 
 **Idempotency.** Before creating, the owning repo is searched across **all**
-states for an existing issue carrying a hidden
-`<!-- sentry-projection:v1 SHORT-ID -->` back-link marker; a match is reused,
-never duplicated. This makes projection safe across regression reopen →
-re-triage cycles (the same SHORT-ID reuses the same owning-repo issue).
+states (SHORT-ID ANDed with a fixed footer phrase as a sharp pre-filter, 200
+result cap; the hidden `<!-- sentry-projection:v1 SHORT-ID -->` back-link
+marker is the authoritative match) for an existing projected issue; a match is
+reused, never duplicated. This makes projection safe across regression reopen →
+re-triage cycles (the same SHORT-ID reuses the same owning-repo issue). A
+**closed** match is reopened first, with a fixed regression comment, so the
+regression resurfaces for the product team instead of silently linking a
+closed issue.
 
 **Queue-stub side effects.** On a successful projection (created or reused) the
 stub gets the `sentry:projected` label plus a comment linking the projected
@@ -556,14 +583,22 @@ and permissions are untouched) nor any other step. The local stub label/comment
 use the ambient `github.token` (issues:write on this repo); the PAT is never
 used for a local call. While the secret is absent the step is a graceful no-op
 (`::notice::`), and the close step records the skip in the stub's closing
-comment (visible, not silent). Cross-repo fix **PRs** remain a later phase
-(ADR 0036 Stage C Phase 3, [#1279](https://github.com/mento-protocol/monitoring-monorepo/issues/1279)) —
+comment (visible, not silent). The token is additionally **ref-gated**: on any
+non-`main` ref (branch `workflow_dispatch` would run that branch's modified
+workflow/script code) the env expression resolves to empty and the step exits
+with a `::notice::` before invoking anything — the closing comment records
+"non-main dispatch". Durable GitHub-Environment protection for this dispatch
+surface is tracked in
+[#1289](https://github.com/mento-protocol/monitoring-monorepo/issues/1289).
+Cross-repo fix **PRs** remain a later phase (ADR 0036 Stage C Phase 3,
+[#1279](https://github.com/mento-protocol/monitoring-monorepo/issues/1279)) —
 this step is Issues-write only.
 
 **Failure handling.** On any projection failure the step compensates exactly
-like the close step — restore `sentry:needs-triage`, shed the verdict label, and
-fail the job loudly so the main-failure notifier fires and the next scheduled
-run retries. Nothing strands.
+like the close step — restore `sentry:needs-triage`, shed the verdict label and
+any partially-applied `sentry:projected`, and fail the job loudly so the
+main-failure notifier fires and the next scheduled run retries. Nothing
+strands.
 
 ## Operator runbook (Phase-1 activation)
 

@@ -63,23 +63,30 @@ deterministic step.**
   repo, labels the stub `sentry:projected`, comments the projected URL, and the
   stub still closes (queue hygiene). `needs-human` and `upstream-transient` are
   never projected.
-- **The trust boundary is a fixed allowlist.** `affected_repo` is untrusted
-  agent text, validated against exactly `frontend-monorepo`,
+- **The trust boundary is a fixed allowlist plus authorship.** `affected_repo`
+  is untrusted agent text, validated against exactly `frontend-monorepo`,
   `mento-analytics-api`, `minipay-dapp`; anything else (including this repo) is a
-  no-op with a `::warning::`. The projected body renders only
-  redaction-governed verdict-contract fields, the Sentry permalink, a back-link,
-  and a fixed footer, with every agent-derived string neutralized (control-char
-  strip, backtick-defang, mention-defang) and multi-line fields fenced.
-  Idempotent by Sentry SHORT-ID (a hidden back-link marker searched across all
-  states) so re-runs and regressions never duplicate.
+  no-op with a `::warning::`. Only verdict comments authored by the pipeline's
+  own Actions bot are honored (this repo is public — a drive-by commenter must
+  not drive labels, closes, or cross-repo writes), and labeling and projection
+  share ONE parser (`--parse-only`) so they can never disagree about a verdict.
+  The projected body renders only redaction-governed verdict-contract fields,
+  the Sentry permalink, a back-link, and a fixed footer, with every
+  agent-derived string neutralized (control-char strip, backtick-defang,
+  mention-defang) and multi-line fields fenced. Idempotent by Sentry SHORT-ID
+  (a hidden back-link marker searched across all states; a closed match is
+  reopened so regressions resurface) so re-runs and regressions never
+  duplicate.
 - **Issues-write ONLY, dedicated fine-grained PAT.** A `sentry-triage-projector`
   PAT with Issues Read+Write on exactly those three repos — no contents, no
   pull-requests — stored as the `count`-gated Actions secret
   `SENTRY_PROJECTION_TOKEN` in the platform Terraform stack (ADR 0030), like
   `SENTRY_TRIAGE_TOKEN`. The token is step-scoped env so it reaches only the
   projection step, never the triage agent; the agent's allowlist and permissions
-  are untouched. Absent PAT → graceful no-op. Cross-repo fix **PRs** remain a
-  later phase (ADR 0036 Stage C Phase 3, tracked in #1279) — this ADR authorizes
+  are untouched. It is also ref-gated to `main` (a branch `workflow_dispatch`
+  runs branch-modified workflow code; durable Environment protection is #1289).
+  Absent PAT → graceful no-op. Cross-repo fix **PRs** remain a later phase
+  (ADR 0036 Stage C Phase 3, tracked in #1279) — this ADR authorizes
   Issues-write only.
 
 ## Alternatives considered

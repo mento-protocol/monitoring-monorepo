@@ -74,6 +74,16 @@ export const VALID_VERDICTS = [
 ];
 export const VALID_CONFIDENCE = ["high", "medium", "low"];
 
+// Verdict VALUE -> verdict LABEL (label names are owned by the Stage A ingest
+// bootstrap). Note the deliberate asymmetry the verdict contract calls out:
+// value `upstream-transient` maps to label `sentry:verdict-upstream`.
+export const VERDICT_TO_LABEL = {
+  "code-fix": "sentry:verdict-code-fix",
+  "config-fix": "sentry:verdict-config-fix",
+  "upstream-transient": "sentry:verdict-upstream",
+  "needs-human": "sentry:verdict-needs-human",
+};
+
 // Sentry SHORT-IDs look like `GOVERNANCE-MENTO-ORG-51`. Validate the shape
 // before it goes into an HTML-comment marker or a search query — it is
 // Sentry-assigned but still transits an untrusted channel.
@@ -339,18 +349,46 @@ function compareCreatedAt(a, b) {
   return String(a?.createdAt ?? "").localeCompare(String(b?.createdAt ?? ""));
 }
 
+// Authorship trust boundary for pipeline-driving comments. The verdict comment
+// is posted by the triage job's `gh issue comment` (github.token) and the
+// regression-reopen comment by the ingest workflow — both resolve to the
+// GitHub Actions bot. `gh issue view --json comments` (GraphQL) renders that
+// author login as "github-actions" (verified empirically on live queue issues,
+// e.g. monitoring-monorepo#1318); the REST shape is "github-actions[bot]" —
+// accept both. This repo is public, so WITHOUT this filter any drive-by
+// commenter could paste a marker-bearing comment and drive labeling, closing,
+// and (once the PAT exists) cross-repo issue creation. Comments with a
+// missing/unknown author are untrusted (fail closed).
+export const TRUSTED_COMMENT_AUTHORS = [
+  "github-actions",
+  "github-actions[bot]",
+];
+
+export function isTrustedComment(comment) {
+  const login = comment?.author?.login ?? comment?.user?.login ?? "";
+  return TRUSTED_COMMENT_AUTHORS.includes(login);
+}
+
 /**
- * Pick the verdict comment to act on, applying the SAME regression fence as the
- * workflow's deterministic label step: a reopened regression still carries the
- * previous round's verdict comment (Stage A's reopen path only sheds labels),
- * so only accept the newest verdict comment when it is strictly newer than the
- * newest regression-reopen comment. Returns `{ body, reason }` — body null when
- * there is no verdict comment (`no-verdict-comment`) or the newest one is stale
- * (`stale-verdict`).
+ * Pick the verdict comment to act on. This is the SINGLE selection path for
+ * both the workflow's label step (--parse-only) and projection, and it applies
+ * two fences:
+ *
+ *   1. Authorship: only comments authored by the pipeline's own Actions bot
+ *      count — both for verdict comments (a hostile commenter must not drive
+ *      labels/closes/projection) and for regression-reopen comments (a hostile
+ *      commenter must not be able to stale-out a legitimate verdict).
+ *   2. Regression fence: a reopened regression still carries the previous
+ *      round's verdict comment (Stage A's reopen path only sheds labels), so
+ *      only accept the newest verdict comment when it is strictly newer than
+ *      the newest regression-reopen comment.
+ *
+ * Returns `{ body, reason }` — body null when there is no trusted verdict
+ * comment (`no-verdict-comment`) or the newest one is stale (`stale-verdict`).
  */
 export function selectVerdictComment(comments) {
   const list = (comments ?? []).filter(
-    (comment) => typeof comment?.body === "string",
+    (comment) => typeof comment?.body === "string" && isTrustedComment(comment),
   );
   const verdicts = list
     .filter((comment) => comment.body.startsWith(VERDICT_MARKER))
@@ -371,6 +409,36 @@ export function selectVerdictComment(comments) {
     }
   }
   return { body: newestVerdict.body, reason: null };
+}
+
+/**
+ * The SINGLE authoritative verdict resolution, shared by the workflow's label
+ * step (`--parse-only`) and the projection flow: newest marker comment,
+ * regression fence, closed-enum validation, label mapping. THROWS (fail loud)
+ * on a missing, stale, or invalid verdict — never a silent skip. Two parsers
+ * disagreeing here (the label step's old sed vs this parser) could label a
+ * stub and then silently skip its projection while the stub closes as if
+ * handled; funneling both steps through this one function removes that
+ * divergence by construction (PR #1356 review).
+ */
+export function resolveVerdict(issue, queueIssueNumber) {
+  const selected = selectVerdictComment(issue.comments);
+  if (!selected.body) {
+    throw new Error(
+      `No usable verdict comment on issue #${queueIssueNumber} (${selected.reason}).`,
+    );
+  }
+  const parsed = parseVerdictComment(selected.body);
+  if (!parsed.verdict) {
+    throw new Error(
+      `Verdict comment on issue #${queueIssueNumber} has a missing/invalid verdict value.`,
+    );
+  }
+  return {
+    parsed,
+    verdict: parsed.verdict,
+    label: VERDICT_TO_LABEL[parsed.verdict],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -550,6 +618,12 @@ async function readQueueIssue(localRun, repo, number) {
   };
 }
 
+// Fixed, markup-free phrase from the projected-issue footer, ANDed with the
+// SHORT-ID in the idempotency pre-filter so only pipeline-filed issues
+// surface — a bare SHORT-ID substring could over-match in a busy repo and
+// push the real projected issue past the result cap.
+const FOOTER_SEARCH_PHRASE = "Sentry triage pipeline";
+
 async function findExistingProjection(owningRun, owningRepo, shortId) {
   const stdout = await owningRun([
     "issue",
@@ -559,19 +633,57 @@ async function findExistingProjection(owningRun, owningRepo, shortId) {
     "--state",
     "all",
     "--search",
-    `"${shortId}" in:body`,
+    `"${shortId}" "${FOOTER_SEARCH_PHRASE}" in:body`,
     "--json",
-    "number,url,body",
+    "number,url,body,state",
     "--limit",
-    "50",
+    "200",
   ]);
   const items = stdout && stdout.trim() ? JSON.parse(stdout) : [];
-  // Search is a coarse pre-filter (it can miss text inside HTML comments); the
-  // authoritative check is the hidden marker in a candidate's body.
+  // Search is a coarse pre-filter (GitHub search may not index HTML-comment
+  // text, so the marker itself can't be the search term); the footer-phrase
+  // AND keeps it sharp and the 200 cap (matching the duplicate search) keeps
+  // it deep. The authoritative check is the hidden marker in a candidate's
+  // body — search only narrows, never decides.
   const match = (Array.isArray(items) ? items : []).find((item) =>
     bodyBacklinksShortId(item.body, shortId),
   );
-  return match ? match.url : null;
+  return match
+    ? {
+        number: match.number,
+        url: match.url,
+        state: String(match.state ?? "").toUpperCase(),
+      }
+    : null;
+}
+
+// Fixed, deterministic text — no agent-derived content.
+const REPROJECTION_REOPEN_COMMENT =
+  "Reopened by the Mento Sentry triage pipeline: the underlying Sentry issue " +
+  "regressed and was re-triaged as actionable.";
+
+/** A regression that re-projects onto a CLOSED owning-repo issue must
+ * resurface for the product team — silently linking a closed issue would bury
+ * the regression. Reopen it and leave a fixed comment (Issues R/W covers
+ * both); a failure here rejects, landing in the workflow's loud compensation
+ * path. */
+async function reopenProjectedIssue(owningRun, owningRepo, existing) {
+  await owningRun([
+    "issue",
+    "reopen",
+    String(existing.number),
+    "-R",
+    owningRepo,
+  ]);
+  await owningRun([
+    "issue",
+    "comment",
+    String(existing.number),
+    "-R",
+    owningRepo,
+    "--body",
+    REPROJECTION_REOPEN_COMMENT,
+  ]);
 }
 
 async function createProjectedIssue(owningRun, owningRepo, title, body) {
@@ -625,6 +737,26 @@ async function markStubProjected(localRun, localRepo, issue, projectedUrl) {
 // with mocked I/O and assert token routing + gh args.
 // ---------------------------------------------------------------------------
 
+/**
+ * `--parse-only` mode: resolve and emit the validated verdict + mapped label
+ * for the workflow's deterministic LABEL step, so labeling and projection run
+ * the exact same parser (see resolveVerdict). Read-only — one `gh issue view`
+ * with the ambient token; the projection PAT is never needed here. Throws on
+ * missing/stale/invalid verdicts so the label step fails loudly and leaves
+ * `sentry:needs-triage` in place for retry.
+ */
+export async function runParseOnly(options, deps = {}) {
+  const runGh = deps.runGh ?? defaultRunGh;
+  const localRun = (args) => runGh(args, {});
+  const issue = await readQueueIssue(
+    localRun,
+    options.localRepo,
+    options.queueIssue,
+  );
+  const { verdict, label } = resolveVerdict(issue, options.queueIssue);
+  return { verdict, label };
+}
+
 export async function runProjection(options, deps = {}) {
   const runGh = deps.runGh ?? defaultRunGh;
   const localRun = (args) => runGh(args, {});
@@ -643,15 +775,20 @@ export async function runProjection(options, deps = {}) {
     );
   }
 
-  const selected = selectVerdictComment(issue.comments);
-  if (!selected.body) {
-    // No verdict comment, or a stale pre-regression one — fail loud so the
-    // workflow compensates (restore needs-triage, shed verdict label).
+  // Same single parser as the label step (resolveVerdict). Missing, stale, or
+  // invalid verdicts THROW — fail loud so the workflow compensates (restore
+  // needs-triage, shed verdict label) instead of closing an unhandled stub.
+  const { parsed } = resolveVerdict(issue, options.queueIssue);
+
+  // The workflow passes the label step's already-validated verdict back via
+  // --verdict. Both steps run the same parser, so a mismatch can only mean the
+  // issue changed between steps (e.g. a newer verdict comment landed) — refuse
+  // to project against divergent state, loudly, never silently skip.
+  if (options.expectedVerdict && parsed.verdict !== options.expectedVerdict) {
     throw new Error(
-      `No usable verdict comment on issue #${options.queueIssue} (${selected.reason}); cannot project.`,
+      `Verdict mismatch on issue #${options.queueIssue}: the label step validated '${options.expectedVerdict}' but the newest verdict comment parses as '${parsed.verdict}'; refusing to project against divergent state.`,
     );
   }
-  const parsed = parseVerdictComment(selected.body);
 
   if (!PROJECTABLE_VERDICTS.includes(parsed.verdict)) {
     return { status: "skipped-verdict", verdict: parsed.verdict };
@@ -677,15 +814,15 @@ export async function runProjection(options, deps = {}) {
   const owningRepo = repoCheck.repo;
 
   // Idempotency: reuse an existing projected issue (any state) that back-links
-  // this SHORT-ID rather than filing a duplicate.
-  const existingUrl = await findExistingProjection(
-    owningRun,
-    owningRepo,
-    shortId,
-  );
-  if (existingUrl) {
-    await markStubProjected(localRun, options.localRepo, issue, existingUrl);
-    return { status: "reused", url: existingUrl };
+  // this SHORT-ID rather than filing a duplicate. A CLOSED one is reopened
+  // first so the regression resurfaces for the product team.
+  const existing = await findExistingProjection(owningRun, owningRepo, shortId);
+  if (existing) {
+    if (existing.state === "CLOSED") {
+      await reopenProjectedIssue(owningRun, owningRepo, existing);
+    }
+    await markStubProjected(localRun, options.localRepo, issue, existing.url);
+    return { status: "reused", url: existing.url };
   }
 
   const title = buildProjectedTitle(parsed.summary);
@@ -726,6 +863,14 @@ Statuses: projected | reused | skipped-verdict | skipped-repo | skipped-no-token
 Options:
   --issue <number>     Queue issue number to project (required, positive int).
   --repo <owner/name>  Repo the queue stub lives in (default: ${DEFAULT_REPO}).
+  --parse-only         Resolve and print the validated verdict + mapped label
+                       ({"verdict","label"} JSON) without projecting. Used by
+                       the workflow's label step so labeling and projection
+                       share ONE parser. Fails (exit 1) on a missing, stale
+                       pre-regression, or invalid verdict comment.
+  --verdict <value>    Already-validated verdict from the label step. When set,
+                       the script fails loud if its own parse of the newest
+                       verdict comment disagrees (never a silent skip).
   -h, --help           Show this help.
 
 Env:
@@ -737,7 +882,13 @@ Env:
 }
 
 export function parseArgs(argv, env = process.env) {
-  const options = { localRepo: DEFAULT_REPO, queueIssue: null, help: false };
+  const options = {
+    localRepo: DEFAULT_REPO,
+    queueIssue: null,
+    parseOnly: false,
+    expectedVerdict: null,
+    help: false,
+  };
   const args = [...argv];
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -753,6 +904,21 @@ export function parseArgs(argv, env = process.env) {
       case "--repo":
         options.localRepo = readValue();
         break;
+      case "--parse-only":
+        options.parseOnly = true;
+        break;
+      case "--verdict": {
+        // Comes from the label step's closed-enum output; anything else is a
+        // wiring bug — fail loud rather than carrying an invalid expectation.
+        const value = readValue();
+        if (!VALID_VERDICTS.includes(value)) {
+          throw new Error(
+            `--verdict must be one of ${VALID_VERDICTS.join(", ")}, got: ${value}`,
+          );
+        }
+        options.expectedVerdict = value;
+        break;
+      }
       case "-h":
       case "--help":
         options.help = true;
@@ -776,9 +942,12 @@ async function main() {
     process.stdout.write(usage());
     return;
   }
-  const result = await runProjection(options);
-  // ONLY the JSON result goes to stdout (the workflow captures it to decide the
-  // closing comment); every diagnostic/annotation already went to stderr.
+  const result = options.parseOnly
+    ? await runParseOnly(options)
+    : await runProjection(options);
+  // ONLY the JSON result goes to stdout (the workflow captures it to decide
+  // labeling / the closing comment); every diagnostic/annotation already went
+  // to stderr.
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 

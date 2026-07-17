@@ -9,6 +9,7 @@ import {
   defangMentions,
   extractPermalink,
   extractYamlBlock,
+  isTrustedComment,
   isValidShortId,
   neutralizeBlock,
   neutralizeUntrusted,
@@ -16,12 +17,14 @@ import {
   parseShortId,
   parseVerdictComment,
   PROJECTED_LABEL,
+  runParseOnly,
   runProjection,
   sanitizeDuplicateIds,
   sanitizeFreeText,
   selectVerdictComment,
   validateAffectedRepo,
   VERDICT_MARKER,
+  VERDICT_TO_LABEL,
 } from "./sentry-triage-project.mjs";
 
 let passed = 0;
@@ -120,6 +123,14 @@ function verdictComment({
 
 const PERMALINK = "https://mento-labs.sentry.io/issues/6197137101/";
 
+// Comments as `gh issue view --json comments` (GraphQL) returns them:
+// pipeline-authored comments resolve to the Actions bot login "github-actions"
+// (verified empirically on live queue issues, e.g. monitoring-monorepo#1318).
+const BOT_AUTHOR = { login: "github-actions" };
+function botComment(body, createdAt) {
+  return { body, createdAt, author: BOT_AUTHOR };
+}
+
 function queueIssue({
   number = 500,
   shortId = "APP-MENTO-ORG-12",
@@ -143,7 +154,7 @@ function queueIssue({
     url: `https://github.com/mento-protocol/monitoring-monorepo/issues/${number}`,
     labels: labels.map((name) => ({ name })),
     comments: comments ?? [
-      { body: verdictComment(), createdAt: "2026-07-17T10:00:00Z" },
+      botComment(verdictComment(), "2026-07-17T10:00:00Z"),
     ],
   };
 }
@@ -166,7 +177,10 @@ function makeRunGh({ issue, existing = [], createdUrl = null } = {}) {
         throw new Error("gh issue create failed: HTTP 403");
       return `${createdUrl}\n`;
     }
-    if (a0 === "issue" && (a1 === "edit" || a1 === "comment")) {
+    if (
+      a0 === "issue" &&
+      (a1 === "edit" || a1 === "comment" || a1 === "reopen")
+    ) {
       return "";
     }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
@@ -337,32 +351,93 @@ await test("sanitizeDuplicateIds drops anything that is not a short-id shape", (
 });
 
 // ---------------------------------------------------------------------------
-// Regression fence (mirrors the workflow label step)
+// Comment selection: authorship trust boundary + regression fence (the single
+// authoritative path shared by the workflow label step and projection)
 // ---------------------------------------------------------------------------
+
+await test("isTrustedComment accepts both bot login shapes, rejects others and missing", () => {
+  assert(
+    isTrustedComment({ author: { login: "github-actions" } }),
+    "expected GraphQL bot login trusted",
+  );
+  assert(
+    isTrustedComment({ user: { login: "github-actions[bot]" } }),
+    "expected REST bot login trusted",
+  );
+  assert(
+    !isTrustedComment({ author: { login: "drive-by-user" } }),
+    "expected other author untrusted",
+  );
+  assert(!isTrustedComment({}), "expected missing author to fail closed");
+});
 
 await test("selectVerdictComment returns the newest verdict comment", () => {
   const comments = [
-    {
-      body: verdictComment({ summary: "older" }),
-      createdAt: "2026-07-17T09:00:00Z",
-    },
-    { body: "chatter", createdAt: "2026-07-17T09:30:00Z" },
-    {
-      body: verdictComment({ summary: "newest" }),
-      createdAt: "2026-07-17T10:00:00Z",
-    },
+    botComment(verdictComment({ summary: "older" }), "2026-07-17T09:00:00Z"),
+    botComment("chatter", "2026-07-17T09:30:00Z"),
+    botComment(verdictComment({ summary: "newest" }), "2026-07-17T10:00:00Z"),
   ];
   const selected = selectVerdictComment(comments);
   assert(selected.body.includes("summary: newest"), "expected newest verdict");
 });
 
-await test("selectVerdictComment rejects a stale pre-regression verdict", () => {
+await test("selectVerdictComment ignores marker comments from untrusted authors", () => {
+  // A drive-by public commenter pasting a marker-bearing comment must not be
+  // able to drive labeling/closing/projection.
   const comments = [
-    { body: verdictComment(), createdAt: "2026-07-17T09:00:00Z" },
+    {
+      body: verdictComment({ summary: "hostile" }),
+      createdAt: "2026-07-17T10:00:00Z",
+      author: { login: "drive-by-user" },
+    },
+  ];
+  assertDeepEqual(selectVerdictComment(comments), {
+    body: null,
+    reason: "no-verdict-comment",
+  });
+});
+
+await test("selectVerdictComment keeps the bot verdict over a NEWER hostile marker comment", () => {
+  const comments = [
+    botComment(verdictComment({ summary: "legit" }), "2026-07-17T09:00:00Z"),
+    {
+      body: verdictComment({ summary: "hostile override" }),
+      createdAt: "2026-07-17T10:00:00Z",
+      author: { login: "attacker" },
+    },
+  ];
+  const selected = selectVerdictComment(comments);
+  assert(
+    selected.body.includes("summary: legit"),
+    "expected the bot verdict, not the hostile override",
+  );
+});
+
+await test("a hostile regression comment cannot stale-out a bot verdict", () => {
+  // The regression fence only honors regression comments the ingest bot
+  // posted — an attacker must not be able to DoS labeling by pasting one.
+  const comments = [
+    botComment(verdictComment({ summary: "legit" }), "2026-07-17T09:00:00Z"),
     {
       body: "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)",
       createdAt: "2026-07-17T10:00:00Z",
+      author: { login: "attacker" },
     },
+  ];
+  const selected = selectVerdictComment(comments);
+  assert(
+    selected.body !== null && selected.body.includes("summary: legit"),
+    "expected the bot verdict still selected",
+  );
+});
+
+await test("selectVerdictComment rejects a stale pre-regression verdict", () => {
+  const comments = [
+    botComment(verdictComment(), "2026-07-17T09:00:00Z"),
+    botComment(
+      "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)",
+      "2026-07-17T10:00:00Z",
+    ),
   ];
   const selected = selectVerdictComment(comments);
   assertEqual(selected.body, null);
@@ -371,18 +446,12 @@ await test("selectVerdictComment rejects a stale pre-regression verdict", () => 
 
 await test("selectVerdictComment accepts a fresh post-regression verdict", () => {
   const comments = [
-    {
-      body: verdictComment({ summary: "old" }),
-      createdAt: "2026-07-17T09:00:00Z",
-    },
-    {
-      body: "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)",
-      createdAt: "2026-07-17T10:00:00Z",
-    },
-    {
-      body: verdictComment({ summary: "fresh" }),
-      createdAt: "2026-07-17T12:00:00Z",
-    },
+    botComment(verdictComment({ summary: "old" }), "2026-07-17T09:00:00Z"),
+    botComment(
+      "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)",
+      "2026-07-17T10:00:00Z",
+    ),
+    botComment(verdictComment({ summary: "fresh" }), "2026-07-17T12:00:00Z"),
   ];
   const selected = selectVerdictComment(comments);
   assert(
@@ -392,7 +461,7 @@ await test("selectVerdictComment accepts a fresh post-regression verdict", () =>
 });
 
 await test("selectVerdictComment reports no-verdict-comment when none present", () => {
-  assertDeepEqual(selectVerdictComment([{ body: "hi", createdAt: "x" }]), {
+  assertDeepEqual(selectVerdictComment([botComment("hi", "x")]), {
     body: null,
     reason: "no-verdict-comment",
   });
@@ -561,6 +630,8 @@ await test("runProjection projects a code-fix for an external repo end-to-end", 
       localRepo: "mento-protocol/monitoring-monorepo",
       queueIssue: 500,
       projectionToken: PAT,
+      // Mirrors the workflow: the label step's validated verdict comes back in.
+      expectedVerdict: "code-fix",
     },
     { runGh },
   );
@@ -576,9 +647,21 @@ await test("runProjection projects a code-fix for an external repo end-to-end", 
     "mento-protocol/frontend-monorepo",
   );
 
-  // The idempotency search also used the PAT + owning repo.
+  // The idempotency search also used the PAT + owning repo, ANDs the quoted
+  // SHORT-ID with the fixed footer phrase (sharp pre-filter), and pages deep
+  // (200) so the real projected issue can't fall off the cap.
   const list = calls.find((c) => c.args[1] === "list");
   assertEqual(list.token, PAT);
+  const searchQuery = list.args[list.args.indexOf("--search") + 1];
+  assert(
+    searchQuery.includes('"APP-MENTO-ORG-12"'),
+    "expected quoted short id in search",
+  );
+  assert(
+    searchQuery.includes('"Sentry triage pipeline"'),
+    "expected footer phrase ANDed into search",
+  );
+  assertEqual(list.args[list.args.indexOf("--limit") + 1], "200");
 
   // Local stub mutations use the ambient token (null), never the PAT.
   const edit = calls.find((c) => c.args[1] === "edit");
@@ -606,13 +689,13 @@ await test("runProjection projects config-fix as well", async () => {
   const issue = queueIssue({
     labels: ["sentry-triage", "sentry:verdict-config-fix"],
     comments: [
-      {
-        body: verdictComment({
+      botComment(
+        verdictComment({
           verdict: "config-fix",
           affectedRepo: "mento-protocol/mento-analytics-api",
         }),
-        createdAt: "2026-07-17T10:00:00Z",
-      },
+        "2026-07-17T10:00:00Z",
+      ),
     ],
   });
   const { runGh, calls } = makeRunGh({
@@ -636,12 +719,13 @@ await test("runProjection projects config-fix as well", async () => {
   );
 });
 
-await test("runProjection is idempotent: reuses an existing back-linked issue", async () => {
+await test("runProjection is idempotent: reuses an existing OPEN back-linked issue without reopening", async () => {
   const existing = [
     {
       number: 42,
       url: "https://github.com/mento-protocol/frontend-monorepo/issues/42",
       body: `stuff\n${buildProjectionMarker("APP-MENTO-ORG-12")}\nmore`,
+      state: "OPEN",
     },
   ];
   // Stub does not yet carry the projected label -> reused path still marks it.
@@ -667,8 +751,88 @@ await test("runProjection is idempotent: reuses an existing back-linked issue", 
     "expected NO create on the reused path",
   );
   assert(
+    !calls.some((c) => c.args[1] === "reopen"),
+    "expected NO reopen for an already-open projection",
+  );
+  assert(
     calls.some((c) => c.args[1] === "edit"),
     "expected the stub still gets labeled",
+  );
+});
+
+await test("runProjection reopens a CLOSED existing projection so the regression resurfaces", async () => {
+  const existing = [
+    {
+      number: 42,
+      url: "https://github.com/mento-protocol/frontend-monorepo/issues/42",
+      body: buildProjectionMarker("APP-MENTO-ORG-12"),
+      state: "CLOSED",
+    },
+  ];
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:verdict-code-fix"],
+  });
+  const { runGh, calls } = makeRunGh({ issue, existing });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "reused");
+  // Reopen + fixed comment on the OWNING-repo issue, both under the PAT.
+  const reopen = calls.find((c) => c.args[1] === "reopen");
+  assert(reopen, "expected the closed projected issue to be reopened");
+  assertEqual(reopen.token, PAT);
+  assertEqual(reopen.args[2], "42");
+  assertEqual(
+    reopen.args[reopen.args.indexOf("-R") + 1],
+    "mento-protocol/frontend-monorepo",
+  );
+  const owningComment = calls.find(
+    (c) => c.args[1] === "comment" && c.token === PAT,
+  );
+  assert(owningComment, "expected a reopen comment on the owning-repo issue");
+  assert(
+    owningComment.args.some((a) => String(a).includes("regressed")),
+    "expected the fixed regression-reopen text",
+  );
+  assert(
+    !calls.some((c) => c.args[1] === "create"),
+    "expected NO create on the reused path",
+  );
+});
+
+await test("runProjection propagates a failed reopen of a closed projection (fail loud)", async () => {
+  const existing = [
+    {
+      number: 42,
+      url: "https://github.com/mento-protocol/frontend-monorepo/issues/42",
+      body: buildProjectionMarker("APP-MENTO-ORG-12"),
+      state: "CLOSED",
+    },
+  ];
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:verdict-code-fix"],
+  });
+  const base = makeRunGh({ issue, existing });
+  const runGh = async (args, opts) => {
+    if (args[1] === "reopen")
+      throw new Error("gh issue reopen failed: HTTP 403");
+    return base.runGh(args, opts);
+  };
+  await assertRejects(
+    runProjection(
+      {
+        localRepo: "mento-protocol/monitoring-monorepo",
+        queueIssue: 500,
+        projectionToken: PAT,
+      },
+      { runGh },
+    ),
+    /reopen failed: HTTP 403/,
   );
 });
 
@@ -678,6 +842,7 @@ await test("runProjection reused path skips the stub comment when already projec
       number: 42,
       url: "https://github.com/mento-protocol/frontend-monorepo/issues/42",
       body: buildProjectionMarker("APP-MENTO-ORG-12"),
+      state: "OPEN",
     },
   ];
   const issue = queueIssue({
@@ -703,10 +868,10 @@ await test("runProjection skips a non-actionable verdict (needs-human)", async (
   const issue = queueIssue({
     labels: ["sentry-triage", "sentry:verdict-needs-human"],
     comments: [
-      {
-        body: verdictComment({ verdict: "needs-human" }),
-        createdAt: "2026-07-17T10:00:00Z",
-      },
+      botComment(
+        verdictComment({ verdict: "needs-human" }),
+        "2026-07-17T10:00:00Z",
+      ),
     ],
   });
   const { runGh, calls } = makeRunGh({ issue });
@@ -725,12 +890,10 @@ await test("runProjection skips a non-actionable verdict (needs-human)", async (
 await test("runProjection skips when affected_repo is this repo", async () => {
   const issue = queueIssue({
     comments: [
-      {
-        body: verdictComment({
-          affectedRepo: "mento-protocol/monitoring-monorepo",
-        }),
-        createdAt: "2026-07-17T10:00:00Z",
-      },
+      botComment(
+        verdictComment({ affectedRepo: "mento-protocol/monitoring-monorepo" }),
+        "2026-07-17T10:00:00Z",
+      ),
     ],
   });
   const { runGh, calls } = makeRunGh({ issue });
@@ -750,10 +913,10 @@ await test("runProjection skips when affected_repo is this repo", async () => {
 await test("runProjection skips an unrecognized affected_repo (no cross-repo write)", async () => {
   const issue = queueIssue({
     comments: [
-      {
-        body: verdictComment({ affectedRepo: "attacker/evil-repo" }),
-        createdAt: "2026-07-17T10:00:00Z",
-      },
+      botComment(
+        verdictComment({ affectedRepo: "attacker/evil-repo" }),
+        "2026-07-17T10:00:00Z",
+      ),
     ],
   });
   const { runGh, calls } = makeRunGh({ issue });
@@ -809,11 +972,11 @@ await test("runProjection fails loud when there is no usable verdict comment", a
 await test("runProjection fails loud on a stale pre-regression verdict", async () => {
   const issue = queueIssue({
     comments: [
-      { body: verdictComment(), createdAt: "2026-07-17T09:00:00Z" },
-      {
-        body: "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)",
-        createdAt: "2026-07-17T10:00:00Z",
-      },
+      botComment(verdictComment(), "2026-07-17T09:00:00Z"),
+      botComment(
+        "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)",
+        "2026-07-17T10:00:00Z",
+      ),
     ],
   });
   const { runGh } = makeRunGh({ issue });
@@ -827,6 +990,89 @@ await test("runProjection fails loud on a stale pre-regression verdict", async (
       { runGh },
     ),
     /stale-verdict/,
+  );
+});
+
+await test("runProjection ignores a hostile-author verdict comment (fails loud, no writes)", async () => {
+  const issue = queueIssue({
+    comments: [
+      {
+        body: verdictComment(),
+        createdAt: "2026-07-17T10:00:00Z",
+        author: { login: "attacker" },
+      },
+    ],
+  });
+  const { runGh, calls } = makeRunGh({ issue });
+  await assertRejects(
+    runProjection(
+      {
+        localRepo: "mento-protocol/monitoring-monorepo",
+        queueIssue: 500,
+        projectionToken: PAT,
+      },
+      { runGh },
+    ),
+    /No usable verdict comment/,
+  );
+  assert(
+    !calls.some((c) => c.args[1] === "create" || c.args[1] === "list"),
+    "expected no owning-repo calls off a hostile comment",
+  );
+});
+
+await test("runProjection fails loud on an out-of-enum verdict value (no silent skip)", async () => {
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({ verdict: "totally-bogus" }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh } = makeRunGh({ issue });
+  await assertRejects(
+    runProjection(
+      {
+        localRepo: "mento-protocol/monitoring-monorepo",
+        queueIssue: 500,
+        projectionToken: PAT,
+      },
+      { runGh },
+    ),
+    /missing\/invalid verdict value/,
+  );
+});
+
+await test("runProjection fails loud when its parse disagrees with the label step's verdict", async () => {
+  // Pins the divergent-verdict case: the label step validated code-fix, but by
+  // projection time the newest trusted comment parses as config-fix (e.g. a
+  // fresh verdict landed between steps). Must FAIL (workflow compensation
+  // path), never silently skip or project the wrong verdict.
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({ verdict: "config-fix" }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({ issue });
+  await assertRejects(
+    runProjection(
+      {
+        localRepo: "mento-protocol/monitoring-monorepo",
+        queueIssue: 500,
+        projectionToken: PAT,
+        expectedVerdict: "code-fix",
+      },
+      { runGh },
+    ),
+    /Verdict mismatch/,
+  );
+  assert(
+    !calls.some((c) => c.args[1] === "create" || c.args[1] === "list"),
+    "expected no cross-repo calls on a verdict mismatch",
   );
 });
 
@@ -863,6 +1109,103 @@ await test("runProjection propagates a cross-repo create failure (fail loud)", a
 });
 
 // ---------------------------------------------------------------------------
+// --parse-only (the workflow label step's single authoritative parser)
+// ---------------------------------------------------------------------------
+
+await test("VERDICT_TO_LABEL encodes the upstream label/value asymmetry", () => {
+  assertEqual(
+    VERDICT_TO_LABEL["upstream-transient"],
+    "sentry:verdict-upstream",
+  );
+  assertEqual(VERDICT_TO_LABEL["code-fix"], "sentry:verdict-code-fix");
+  assertEqual(VERDICT_TO_LABEL["config-fix"], "sentry:verdict-config-fix");
+  assertEqual(VERDICT_TO_LABEL["needs-human"], "sentry:verdict-needs-human");
+});
+
+await test("runParseOnly returns the validated verdict + mapped label", async () => {
+  const { runGh, calls } = makeRunGh({ issue: queueIssue() });
+  const result = await runParseOnly(
+    { localRepo: "mento-protocol/monitoring-monorepo", queueIssue: 500 },
+    { runGh },
+  );
+  assertDeepEqual(result, {
+    verdict: "code-fix",
+    label: "sentry:verdict-code-fix",
+  });
+  // Read-only: exactly one `gh issue view` with the ambient token.
+  assertEqual(calls.length, 1);
+  assertEqual(calls[0].args[1], "view");
+  assertEqual(calls[0].token, null);
+});
+
+await test("runParseOnly maps upstream-transient to the asymmetric label", async () => {
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({ verdict: "upstream-transient" }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh } = makeRunGh({ issue });
+  const result = await runParseOnly(
+    { localRepo: "mento-protocol/monitoring-monorepo", queueIssue: 500 },
+    { runGh },
+  );
+  assertDeepEqual(result, {
+    verdict: "upstream-transient",
+    label: "sentry:verdict-upstream",
+  });
+});
+
+await test("runParseOnly fails loud on missing, hostile-author, stale, and invalid verdicts", async () => {
+  const opts = {
+    localRepo: "mento-protocol/monitoring-monorepo",
+    queueIssue: 500,
+  };
+  const cases = [
+    // No verdict comment at all.
+    { comments: [botComment("chatter", "x")], pattern: /no-verdict-comment/ },
+    // Marker comment from an untrusted author.
+    {
+      comments: [
+        {
+          body: verdictComment(),
+          createdAt: "2026-07-17T10:00:00Z",
+          author: { login: "attacker" },
+        },
+      ],
+      pattern: /no-verdict-comment/,
+    },
+    // Stale pre-regression verdict.
+    {
+      comments: [
+        botComment(verdictComment(), "2026-07-17T09:00:00Z"),
+        botComment(
+          "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)",
+          "2026-07-17T10:00:00Z",
+        ),
+      ],
+      pattern: /stale-verdict/,
+    },
+    // Out-of-enum verdict value.
+    {
+      comments: [
+        botComment(
+          verdictComment({ verdict: "bogus-value" }),
+          "2026-07-17T10:00:00Z",
+        ),
+      ],
+      pattern: /missing\/invalid verdict value/,
+    },
+  ];
+  for (const { comments, pattern } of cases) {
+    const { runGh } = makeRunGh({ issue: queueIssue({ comments }) });
+    await assertRejects(runParseOnly(opts, { runGh }), pattern);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // CLI arg parsing
 // ---------------------------------------------------------------------------
 
@@ -873,6 +1216,22 @@ await test("parseArgs reads --issue/--repo and the token from env", () => {
   assertEqual(options.queueIssue, 500);
   assertEqual(options.localRepo, "o/r");
   assertEqual(options.projectionToken, "tok");
+  assertEqual(options.parseOnly, false);
+  assertEqual(options.expectedVerdict, null);
+});
+
+await test("parseArgs reads --parse-only and --verdict, validating the enum", () => {
+  const parseOnly = parseArgs(["--issue", "5", "--parse-only"], {});
+  assertEqual(parseOnly.parseOnly, true);
+  const withVerdict = parseArgs(
+    ["--issue", "5", "--verdict", "config-fix"],
+    {},
+  );
+  assertEqual(withVerdict.expectedVerdict, "config-fix");
+  assertThrows(
+    () => parseArgs(["--issue", "5", "--verdict", "bogus"], {}),
+    /--verdict must be one of/,
+  );
 });
 
 await test("parseArgs defaults repo and empties an absent token", () => {
