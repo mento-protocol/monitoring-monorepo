@@ -111,22 +111,30 @@ function formatFixed4(value: bigint, decimals: number): string {
  * Returns `null` when token addresses are missing, both abs amounts are zero,
  * or neither side is in `USD_PEGGED_SYMBOLS`.
  */
+interface TokenAmount {
+  token: string | undefined;
+  amount: bigint;
+  decimals: number;
+}
+
 function pickPeggedSide(
   chainId: number,
-  token0: string | undefined,
-  token1: string | undefined,
-  abs0: bigint,
-  abs1: bigint,
-  decimals0: number,
-  decimals1: number,
+  side0: TokenAmount,
+  side1: TokenAmount,
 ): { peggedAmount: bigint; peggedDecimals: number } | null {
-  if (!token0 || !token1 || (abs0 === 0n && abs1 === 0n)) return null;
+  if (
+    !side0.token ||
+    !side1.token ||
+    (side0.amount === 0n && side1.amount === 0n)
+  ) {
+    return null;
+  }
 
   const sym0 = KNOWN_TOKEN_META.get(
-    `${chainId}:${token0.toLowerCase()}`,
+    `${chainId}:${side0.token.toLowerCase()}`,
   )?.symbol;
   const sym1 = KNOWN_TOKEN_META.get(
-    `${chainId}:${token1.toLowerCase()}`,
+    `${chainId}:${side1.token.toLowerCase()}`,
   )?.symbol;
   const peg0 = sym0 !== undefined && USD_PEGGED_SYMBOLS.has(sym0);
   const peg1 = sym1 !== undefined && USD_PEGGED_SYMBOLS.has(sym1);
@@ -135,10 +143,11 @@ function pickPeggedSide(
   const useToken0 =
     peg0 &&
     (!peg1 ||
-      abs0 * 10n ** BigInt(decimals1) >= abs1 * 10n ** BigInt(decimals0));
+      side0.amount * 10n ** BigInt(side1.decimals) >=
+        side1.amount * 10n ** BigInt(side0.decimals));
   return useToken0
-    ? { peggedAmount: abs0, peggedDecimals: decimals0 }
-    : { peggedAmount: abs1, peggedDecimals: decimals1 };
+    ? { peggedAmount: side0.amount, peggedDecimals: side0.decimals }
+    : { peggedAmount: side1.amount, peggedDecimals: side1.decimals };
 }
 
 export interface RebalanceUsdInput {
@@ -204,12 +213,16 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
 
   const picked = pickPeggedSide(
     chainId,
-    token0,
-    token1,
-    bAbs(amount0Delta),
-    bAbs(amount1Delta),
-    token0Decimals,
-    token1Decimals,
+    {
+      token: token0,
+      amount: bAbs(amount0Delta),
+      decimals: token0Decimals,
+    },
+    {
+      token: token1,
+      amount: bAbs(amount1Delta),
+      decimals: token1Decimals,
+    },
   );
   if (picked === null) return { notionalUsd: "", rewardUsd: "" };
 
@@ -298,12 +311,8 @@ export function computeSwapUsdWei(
 
   const picked = pickPeggedSide(
     chainId,
-    token0,
-    token1,
-    a0,
-    a1,
-    token0Decimals,
-    token1Decimals,
+    { token: token0, amount: a0, decimals: token0Decimals },
+    { token: token1, amount: a1, decimals: token1Decimals },
   );
   if (picked !== null) {
     return scaleToUsdWei(picked.peggedAmount, picked.peggedDecimals);
