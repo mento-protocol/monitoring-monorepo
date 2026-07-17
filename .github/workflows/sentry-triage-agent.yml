@@ -283,16 +283,19 @@ jobs:
               # If the close fails after the label swap, the issue would be
               # stranded: open, verdict-labeled, no longer selectable and
               # outside the regression-reopen path. Compensate by restoring
-              # sentry:needs-triage (so the next scheduled run re-triages and
-              # re-attempts the close) and fail the job loudly so the
-              # main-failure notifier fires.
+              # sentry:needs-triage AND removing the just-applied verdict
+              # label (a retry may land a DIFFERENT verdict, and two verdict
+              # labels would misclassify the issue for the digest and human
+              # label filters), then fail the job loudly so the main-failure
+              # notifier fires.
               if ! gh issue close "${QUEUE_ISSUE_NUMBER}" \
                 --repo "${GITHUB_REPOSITORY}" \
                 --reason completed \
                 --comment "Triage complete: ${verdict}. Ledger entry closed; reopens automatically on Sentry regression."; then
-                echo "::error::Failed to close issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage for retry."
+                echo "::error::Failed to close issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage (and shedding ${label}) for retry."
                 gh issue edit "${QUEUE_ISSUE_NUMBER}" \
                   --repo "${GITHUB_REPOSITORY}" \
+                  --remove-label "${label}" \
                   --add-label "sentry:needs-triage"
                 exit 1
               fi

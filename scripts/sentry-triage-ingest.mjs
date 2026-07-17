@@ -211,16 +211,32 @@ export function indexQueueIssuesByShortId(issues) {
 
 /**
  * Idempotency rule (normative): open match -> skip. Closed match + the
- * Sentry issue is regressed -> reopen. Closed match, not regressed -> skip
- * (stays closed). No match -> create.
+ * Sentry issue is regressed -> reopen ONLY when the Sentry issue's lastSeen
+ * is strictly newer than the queue issue's closedAt. Sentry keeps
+ * `substatus=regressed` for days after a regression, so an unconditional
+ * reopen would loop a verdict-closed, already-triaged stub through
+ * reopen -> re-triage -> close on every run until Sentry flips the
+ * substatus (the counterpart of the Stage B queue-closing step). Missing or
+ * unparsable timestamps fail open toward triage (reopen): a wrongly
+ * skipped regression is silent, a wrongly reopened one merely re-triages.
+ * Closed match, not regressed -> skip (stays closed). No match -> create.
  */
-export function decideDedupAction({ existingIssue, isRegressed }) {
+export function decideDedupAction({ existingIssue, isRegressed, lastSeen }) {
   if (!existingIssue) return { action: "create" };
   if (existingIssue.state === "OPEN") {
     return { action: "skip", reason: "already open" };
   }
-  if (isRegressed) return { action: "reopen" };
-  return { action: "skip", reason: "closed, not regressed" };
+  if (!isRegressed) return { action: "skip", reason: "closed, not regressed" };
+  // Date.parse (not string comparison): Sentry lastSeen can carry fractional
+  // seconds while GitHub closed_at does not, and lexicographic comparison
+  // would order "…00.500Z" BEFORE "…00Z".
+  const closedAtMs = Date.parse(existingIssue.closedAt ?? "");
+  const lastSeenMs = Date.parse(lastSeen ?? "");
+  if (Number.isNaN(closedAtMs) || Number.isNaN(lastSeenMs)) {
+    return { action: "reopen" };
+  }
+  if (lastSeenMs > closedAtMs) return { action: "reopen" };
+  return { action: "skip", reason: "closed, no events since close" };
 }
 
 export function buildRegressedComment(lastSeen) {
@@ -545,7 +561,8 @@ async function ensureLabelsExist(options) {
 }
 
 // Normalize a REST-API issue (lowercase `state`, `pull_request` marker on
-// PRs) into the shape decideDedupAction expects. Exported for tests.
+// PRs, `closed_at` for the regression-reopen timestamp gate) into the shape
+// decideDedupAction expects. Exported for tests.
 export function normalizeRestIssues(pages) {
   return (pages ?? [])
     .flat()
@@ -554,6 +571,7 @@ export function normalizeRestIssues(pages) {
       number: issue.number,
       title: issue.title ?? "",
       state: String(issue.state ?? "").toUpperCase(),
+      closedAt: issue.closed_at ?? null,
     }));
 }
 
@@ -768,6 +786,7 @@ export async function runIngest(options, deps = {}) {
       const decision = decideDedupAction({
         existingIssue,
         isRegressed: sentryIssue.isRegressed,
+        lastSeen: sentryIssue.lastSeen,
       });
       if (decision.action === "skip") {
         counts.skippedExisting += 1;

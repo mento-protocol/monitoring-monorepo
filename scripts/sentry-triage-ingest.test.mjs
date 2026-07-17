@@ -437,6 +437,72 @@ await test("dedup: closed match reopens only when regressed", () => {
   );
 });
 
+await test("dedup: regressed-but-stale closed match stays closed (no reopen loop)", () => {
+  // Sentry keeps substatus=regressed for days after a regression; every
+  // event predates the close, so this occurrence was already triaged before
+  // the ledger entry closed — reopening would loop reopen -> re-triage ->
+  // close on every run.
+  const decision = decideDedupAction({
+    existingIssue: { state: "CLOSED", closedAt: "2026-07-17T08:00:00Z" },
+    isRegressed: true,
+    lastSeen: "2026-07-16T10:00:00Z",
+  });
+  assertEqual(decision.action, "skip");
+});
+
+await test("dedup: regressed closed match with a fresh event reopens", () => {
+  assertEqual(
+    decideDedupAction({
+      existingIssue: { state: "CLOSED", closedAt: "2026-07-17T08:00:00Z" },
+      isRegressed: true,
+      lastSeen: "2026-07-17T09:30:00Z",
+    }).action,
+    "reopen",
+  );
+});
+
+await test("dedup: lastSeen equal to closedAt stays closed (conservative)", () => {
+  assertEqual(
+    decideDedupAction({
+      existingIssue: { state: "CLOSED", closedAt: "2026-07-17T08:00:00Z" },
+      isRegressed: true,
+      lastSeen: "2026-07-17T08:00:00Z",
+    }).action,
+    "skip",
+  );
+});
+
+await test("dedup: fractional-second lastSeen compares numerically, not lexically", () => {
+  // String comparison would order "…00.500Z" BEFORE "…00Z" and wrongly skip
+  // this genuinely-newer event.
+  assertEqual(
+    decideDedupAction({
+      existingIssue: { state: "CLOSED", closedAt: "2026-07-17T08:00:00Z" },
+      isRegressed: true,
+      lastSeen: "2026-07-17T08:00:00.500Z",
+    }).action,
+    "reopen",
+  );
+});
+
+await test("dedup: missing closedAt or lastSeen fails open toward triage (reopen)", () => {
+  assertEqual(
+    decideDedupAction({
+      existingIssue: { state: "CLOSED" },
+      isRegressed: true,
+      lastSeen: "2026-07-17T09:30:00Z",
+    }).action,
+    "reopen",
+  );
+  assertEqual(
+    decideDedupAction({
+      existingIssue: { state: "CLOSED", closedAt: "2026-07-17T08:00:00Z" },
+      isRegressed: true,
+    }).action,
+    "reopen",
+  );
+});
+
 await test("regressed comment matches the contract phrasing", () => {
   assertEqual(
     buildRegressedComment("2026-07-14T10:00:00Z"),
@@ -615,11 +681,16 @@ await test("ghPaginate fails loud on runaway pagination and non-array responses"
   assert(/non-array/.test(threw.message), "wrong non-array error");
 });
 
-await test("REST issue normalization flattens pages, drops PRs, uppercases state", () => {
+await test("REST issue normalization flattens pages, drops PRs, uppercases state, carries closed_at", () => {
   const normalized = normalizeRestIssues([
     [
       { number: 1, title: "[sentry] X-1: a", state: "open" },
-      { number: 2, title: "[sentry] X-2: b", state: "closed" },
+      {
+        number: 2,
+        title: "[sentry] X-2: b",
+        state: "closed",
+        closed_at: "2026-07-16T12:00:00Z",
+      },
       {
         number: 3,
         title: "a PR, not an issue",
@@ -630,9 +701,14 @@ await test("REST issue normalization flattens pages, drops PRs, uppercases state
     [{ number: 4, title: "[sentry] X-4: c", state: "closed" }],
   ]);
   assertDeepEqual(normalized, [
-    { number: 1, title: "[sentry] X-1: a", state: "OPEN" },
-    { number: 2, title: "[sentry] X-2: b", state: "CLOSED" },
-    { number: 4, title: "[sentry] X-4: c", state: "CLOSED" },
+    { number: 1, title: "[sentry] X-1: a", state: "OPEN", closedAt: null },
+    {
+      number: 2,
+      title: "[sentry] X-2: b",
+      state: "CLOSED",
+      closedAt: "2026-07-16T12:00:00Z",
+    },
+    { number: 4, title: "[sentry] X-4: c", state: "CLOSED", closedAt: null },
   ]);
 });
 
@@ -864,6 +940,9 @@ await test("a regressed, previously closed issue is reopened exactly once", asyn
       number: 200,
       title: buildQueueTitle("X-9", "unknown", "error"),
       state: "CLOSED",
+      // Closed BEFORE the Sentry lastSeen above, so the reopen flows through
+      // the events-since-close gate, not the missing-timestamp fail-open.
+      closedAt: "2026-07-14T00:00:00Z",
     },
   ];
   let reopenCount = 0;

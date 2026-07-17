@@ -29,8 +29,8 @@ reason: completed) with a fixed closing comment, so the queue reads as
 work-in-flight instead of a growing archive; humans consume verdicts by
 label — nothing is fixed, archived, or resolved **in Sentry** automatically in
 Phase 1; closing only ever touches this repo's local ledger issue, and a
-closed queue issue reopens automatically (Stage A's existing regression-reopen
-path) if the underlying Sentry issue regresses.
+closed queue issue reopens automatically (Stage A's regression-reopen path)
+once the underlying Sentry issue records events newer than the close.
 
 ### Architecture
 
@@ -89,7 +89,8 @@ flowchart TD
     POLL --> KNOWN{"queue issue with this<br/>SHORT-ID exists?"}
     KNOWN -- "no" --> CREATE["create queue issue<br/>sentry-triage + sentry:needs-triage<br/>(+ sentry:candidate-noise if heuristic hits)"]
     KNOWN -- "open" --> SKIP["skip (already queued)"]
-    KNOWN -- "closed +<br/>regressed" --> REOPEN["reopen, shed stale verdict labels,<br/>re-add sentry:needs-triage"]
+    KNOWN -- "closed + regressed +<br/>events since close<br/>(lastSeen &gt; closedAt)" --> REOPEN["reopen, shed stale verdict labels,<br/>re-add sentry:needs-triage"]
+    KNOWN -- "closed, otherwise" --> STAY["skip (stays closed:<br/>not regressed, or regression<br/>already triaged before close)"]
     CREATE --> PEND["pending in queue"]
     REOPEN --> PEND
     PEND --> BATCH["next agent run picks ≤6<br/>oldest pending (06:15 / 14:15 UTC)"]
@@ -170,12 +171,20 @@ title whose first whitespace-delimited token after the `[sentry]` prefix
 equals `<SHORT-ID>`:
 
 - **Open match** → skip.
-- **Closed match, Sentry issue is regressed** → reopen it, comment
+- **Closed match, Sentry issue is regressed, and its `lastSeen` is strictly
+  newer than the queue issue's `closed_at`** → reopen it, comment
   `Regressed in Sentry (last seen <ts>)`, re-add `sentry:needs-triage`, and
   remove any stale `sentry:verdict-*` labels — the old verdict described the
   old occurrence, and a reopened issue must read as awaiting triage, not as
-  carrying a verdict and needs-triage at once.
-- **Closed match, not regressed** → skip (stays closed).
+  carrying a verdict and needs-triage at once. The timestamp gate exists
+  because Sentry keeps `substatus=regressed` for days after a regression:
+  without it, a verdict-closed stub would loop reopen → re-triage → close on
+  every ingest run until Sentry flips the substatus. Missing or unparsable
+  timestamps fail open toward triage (reopen) — a wrongly skipped regression
+  is silent, a wrongly reopened one merely re-triages.
+- **Closed match, otherwise** → skip (stays closed): not regressed, or a
+  regression whose events all predate the close and were therefore already
+  triaged before the ledger entry closed.
 - **No match** → create.
 
 At ~31 new issue groups/week org-wide, the ingest script does this as one
@@ -185,11 +194,12 @@ would silently start duplicating older regressed issues once the queue
 outgrows the cap.
 
 **Queue hygiene counterpart:** the deterministic close step (verdict contract
-below) closes verdicted queue issues so the tracker stays readable. This
-idempotency logic is its exact counterpart and needed no change to support
-it — a queue issue closed by the verdict-close step is, to this scan, just
-another "closed match," so the existing regressed/not-regressed branches above
-already reopen it on regression or leave it closed otherwise.
+below) closes verdicted queue issues so the tracker stays readable. To this
+scan, a queue issue closed by the verdict-close step is just another "closed
+match" — and the `lastSeen`-vs-`closed_at` gate above is what makes the
+pairing loop-free: a regression with events newer than the close reopens for
+re-triage, while Sentry's days-long `substatus=regressed` tail on an
+already-triaged occurrence leaves the ledger entry closed.
 
 ### Labels
 
@@ -384,8 +394,12 @@ This is queue hygiene only: it closes this repo's local ledger issue, never
 the underlying Sentry issue (Sentry archival stays Phase 2a, human-approved,
 a separate write-scoped token — see "What Phase 2 does with verdicts" below).
 The regression-reopen path (Stage A's idempotency scan, above) is this step's
-exact counterpart and required no change: a queue issue closed here reopens
-automatically the next time ingest sees the underlying Sentry issue regress.
+exact counterpart: a queue issue closed here reopens automatically once the
+underlying Sentry issue records an event newer than the close (`lastSeen`
+strictly newer than the queue issue's `closed_at`). That timestamp gate is
+what keeps the pair loop-free — Sentry holds `substatus=regressed` for days,
+so without it an already-triaged, just-closed stub would re-match the
+regressed query and cycle reopen → re-triage → close every run.
 
 Once a verdict-projection sibling issue exists in the owning repo (not yet
 built), `code-fix`/`config-fix` closing comments are expected to also link the
