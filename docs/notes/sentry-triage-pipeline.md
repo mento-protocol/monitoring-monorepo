@@ -258,6 +258,41 @@ A missing verdict comment on a `sentry:needs-triage` issue after a scheduled run
 means the triage agent did not run or did not finish — treat it as a signal,
 not as "no issues found".
 
+### Observability (run record + per-run Slack digest)
+
+ADR 0036's dominant failure mode is _unauditable automation going dark_, so the
+pipeline surfaces itself two ways, and a break in either turns a run red:
+
+- **Run record (Stage A).** Every ingest run updates the rolling
+  `<!-- sentry-triage-ingest:run-record:v1 -->` comment on tracker issue
+  [#1282](https://github.com/mento-protocol/monitoring-monorepo/issues/1282)
+  with counts (see the Stage A "Run record" section). A missing update is a
+  dead-man-switch signal.
+- **Per-run Slack digest (Stage B).** After every triage run that processed at
+  least one queue issue, the `digest` job in `sentry-triage-agent.yml` posts a
+  deterministic digest to Slack `#engineering` so verdict review needs zero
+  GitHub polling. It is a pure CONSUMER of the verdict contract — no LLM, no
+  label writes, no Sentry — driven by the collector `scripts/sentry-triage-digest.mjs`:
+  for each batch issue it reads the current labels and the latest
+  `<!-- sentry-triage-verdict:v1 -->` comment and renders one line per issue
+  (`<SHORT-ID> (<project>) — <verdict> (<confidence>): <summary>`, linked to the
+  queue issue), with counts by verdict plus a `failed triage` bucket for batch
+  issues still carrying `sentry:needs-triage` (their triage matrix job died —
+  kept visible, never hidden). The job runs `if: always()` gated on a non-zero
+  select count, so it posts even when some triage matrix jobs failed (partial
+  visibility) but stays silent on empty batches and kill-switch no-ops.
+
+  Security: verdict summaries are agent-authored from untrusted Sentry data, so
+  every free-form value embedded in the payload is neutralized and Slack-escaped
+  with the same `& < >` escape the main-failure notifier uses
+  (`.github/workflows/notify-slack-on-main-failure.yml`) — the escape that
+  makes Slack mention/link syntax (`<!channel>`, `<@U…>`) inert. The bot token
+  (`secrets.TF_VAR_SLACK_BOT_TOKEN`, `chat:write.public`, reused — no new
+  secret) reaches only the posting step; the channel is hardcoded in the
+  workflow (changing it is a one-line PR). A digest-job failure fails the run,
+  which `notify-slack-on-main-failure.yml` (where this workflow is registered)
+  surfaces to `#ci-failures`.
+
 ### What Phase 2 does with verdicts (forward-looking)
 
 Phase 1 is read-only by design: verdicts and labels only, no fixes and no Sentry
@@ -362,4 +397,7 @@ skipped.
 ```bash
 pnpm sentry:ingest --dry-run   # needs a local SENTRY_TRIAGE_TOKEN; prints mutations without applying them
 pnpm sentry:ingest:test        # node --test scripts/sentry-triage-ingest.test.mjs
+pnpm sentry:digest:test        # node --test scripts/sentry-triage-digest.test.mjs (offline)
+# Print the Slack digest payload for a batch without posting (needs gh auth):
+SENTRY_TRIAGE_ISSUES='[123,456]' pnpm sentry:digest --channel '#engineering'
 ```
