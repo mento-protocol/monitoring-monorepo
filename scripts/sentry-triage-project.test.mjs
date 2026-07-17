@@ -12,6 +12,7 @@ import {
   defangMentions,
   extractPermalink,
   extractYamlBlock,
+  isDecisionReadyQuestion,
   isTrustedComment,
   isValidShortId,
   leadingProjectionMarkers,
@@ -97,7 +98,9 @@ async function assertRejects(promise, pattern) {
   throw new Error("expected promise to reject");
 }
 
-// Build a verdict comment body the way the triage agent would.
+// Build a verdict comment body the way the triage agent would. The needs-human
+// brief fields (humanQuestion/hypotheses/investigated/escalationReason) are
+// appended only when provided — they are optional-absent for other verdicts.
 function verdictComment({
   verdict = "code-fix",
   confidence = "medium",
@@ -106,8 +109,12 @@ function verdictComment({
   rootCause = "  Some abstract root cause.\n  Second line.",
   proposedAction = "  Some abstract action.",
   duplicates = "[]",
+  humanQuestion = null,
+  hypotheses = null,
+  investigated = null,
+  escalationReason = null,
 } = {}) {
-  return [
+  const lines = [
     VERDICT_MARKER,
     "",
     "```yaml",
@@ -120,10 +127,21 @@ function verdictComment({
     "proposed_action: |",
     proposedAction,
     `duplicate_of: ${duplicates}`,
-    "```",
-    "",
-    "Prose diagnosis goes here.",
-  ].join("\n");
+  ];
+  if (humanQuestion != null) {
+    lines.push("human_question: |", `  ${humanQuestion}`);
+  }
+  if (hypotheses != null) {
+    lines.push("hypotheses:", ...hypotheses.map((h) => `  - ${h}`));
+  }
+  if (investigated != null) {
+    lines.push("investigated:", ...investigated.map((it) => `  - ${it}`));
+  }
+  if (escalationReason != null) {
+    lines.push("escalation_reason: |", `  ${escalationReason}`);
+  }
+  lines.push("```", "", "Prose diagnosis goes here.");
+  return lines.join("\n");
 }
 
 const PERMALINK = "https://mento-labs.sentry.io/issues/6197137101/";
@@ -365,6 +383,60 @@ await test("parseVerdictComment rejects out-of-enum verdict/confidence to null",
   );
   assertEqual(parsed.verdict, null);
   assertEqual(parsed.confidence, null);
+});
+
+await test("parseVerdictComment surfaces the needs-human brief fields (block scalar + dash lists)", () => {
+  const parsed = parseVerdictComment(
+    verdictComment({
+      verdict: "needs-human",
+      confidence: "low",
+      humanQuestion: "Decide whether to rotate the signing key or hold.",
+      hypotheses: [
+        "Likely a race in the wallet-connect flow (lean: medium)",
+        "Possibly upstream RPC flap (lean: low)",
+      ],
+      investigated: [
+        "Read the connect handler; no obvious null guard missing",
+        "Searched the queue for duplicates; none found",
+      ],
+      escalationReason: "Security-sensitive surface plus conflicting evidence.",
+    }),
+  );
+  assertEqual(
+    parsed.humanQuestion,
+    "Decide whether to rotate the signing key or hold.",
+  );
+  assertDeepEqual(parsed.hypotheses, [
+    "Likely a race in the wallet-connect flow (lean: medium)",
+    "Possibly upstream RPC flap (lean: low)",
+  ]);
+  assertDeepEqual(parsed.investigated, [
+    "Read the connect handler; no obvious null guard missing",
+    "Searched the queue for duplicates; none found",
+  ]);
+  assertEqual(
+    parsed.escalationReason,
+    "Security-sensitive surface plus conflicting evidence.",
+  );
+});
+
+await test("parseVerdictComment leaves the brief fields empty when absent (other verdicts)", () => {
+  const parsed = parseVerdictComment(verdictComment({ verdict: "code-fix" }));
+  assertEqual(parsed.humanQuestion, "");
+  assertDeepEqual(parsed.hypotheses, []);
+  assertDeepEqual(parsed.investigated, []);
+  assertEqual(parsed.escalationReason, "");
+});
+
+await test("parseVerdictComment bounds a hostile/verbose brief list to MAX_BRIEF_LIST_ITEMS", () => {
+  const parsed = parseVerdictComment(
+    verdictComment({
+      verdict: "needs-human",
+      humanQuestion: "Decide X or Y.",
+      hypotheses: Array.from({ length: 12 }, (_, i) => `hypothesis ${i}`),
+    }),
+  );
+  assertEqual(parsed.hypotheses.length, 5);
 });
 
 await test("parseVerdictComment extracts a bare repo slug from affected_repo, else empty", () => {
@@ -1684,7 +1756,10 @@ await test("runProjection skips a non-actionable verdict (needs-human)", async (
     labels: ["sentry-triage", "sentry:verdict-needs-human"],
     comments: [
       botComment(
-        verdictComment({ verdict: "needs-human" }),
+        verdictComment({
+          verdict: "needs-human",
+          humanQuestion: "Decide whether to rotate the key or wait.",
+        }),
         "2026-07-17T10:00:00Z",
       ),
     ],
@@ -2037,6 +2112,85 @@ await test("runParseOnly fails loud on missing, hostile-author, stale, and inval
     const { runGh } = makeRunGh({ issue: queueIssue({ comments }) });
     await assertRejects(runParseOnly(opts, { runGh }), pattern);
   }
+});
+
+await test("isDecisionReadyQuestion rejects blanks/placeholders, accepts real decisions", () => {
+  // Blatant non-decisions (normalized: lowercased, trailing punctuation
+  // stripped) are rejected.
+  for (const bad of [
+    "",
+    "   ",
+    "?",
+    "please look",
+    "Please look.",
+    "INVESTIGATE THIS!!!",
+    "needs human review",
+    "TBD",
+    "n/a",
+  ]) {
+    assert(!isDecisionReadyQuestion(bad), `expected '${bad}' rejected`);
+  }
+  // A real "decide X or Y" that merely CONTAINS a placeholder word is accepted
+  // (exact-match only — no false positives).
+  for (const good of [
+    "Decide whether to rotate the signing key or wait for upstream.",
+    "Confirm whether the review gate should block or warn.",
+    "Should we investigate the RPC provider or roll back the release?",
+  ]) {
+    assert(isDecisionReadyQuestion(good), `expected '${good}' accepted`);
+  }
+});
+
+await test("runParseOnly fails loud on a needs-human verdict missing/placeholder human_question", async () => {
+  // A decision-ready escalation must name the exact question. A lazy
+  // needs-human — no human_question, OR a blatant non-decision placeholder — is
+  // treated exactly like an invalid verdict: the label step exits nonzero and
+  // keeps sentry:needs-triage so the next run re-triages it.
+  for (const humanQuestion of [null, "please look", "investigate this"]) {
+    const issue = queueIssue({
+      labels: ["sentry-triage", "sentry:needs-triage"],
+      comments: [
+        botComment(
+          verdictComment({ verdict: "needs-human", humanQuestion }),
+          "2026-07-17T10:00:00Z",
+        ),
+      ],
+    });
+    const { runGh } = makeRunGh({ issue });
+    await assertRejects(
+      runParseOnly(
+        { localRepo: "mento-protocol/monitoring-monorepo", queueIssue: 500 },
+        { runGh },
+      ),
+      /no decision-ready 'human_question'/,
+    );
+  }
+});
+
+await test("runParseOnly accepts a needs-human verdict WITH human_question", async () => {
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:needs-triage"],
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "needs-human",
+          humanQuestion:
+            "Decide whether to rotate the key or wait for upstream.",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh } = makeRunGh({ issue });
+  const result = await runParseOnly(
+    { localRepo: "mento-protocol/monitoring-monorepo", queueIssue: 500 },
+    { runGh },
+  );
+  assertDeepEqual(result, {
+    verdict: "needs-human",
+    label: "sentry:verdict-needs-human",
+    projectable: false,
+  });
 });
 
 // ---------------------------------------------------------------------------

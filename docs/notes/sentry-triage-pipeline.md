@@ -337,6 +337,19 @@ root_cause: |
 proposed_action: |
   <1-3 lines>
 duplicate_of: [] # list of Sentry SHORT-IDs (e.g. GOVERNANCE-MENTO-ORG-51), possibly empty
+# The four fields below are needs-human ONLY (absent for every other verdict).
+# They turn an escalation into a decision-ready brief the #engineering digest
+# renders first. human_question is REQUIRED for needs-human — the parser fails
+# loud without it (see "Needs-human decision-ready brief" below).
+human_question: |
+  Decide whether to X or Y (the single concrete decision a human must make).
+hypotheses:
+  - Candidate root cause A (lean: medium)
+  - Candidate root cause B (lean: low)
+investigated:
+  - What was checked / ruled out (payload evidence, code paths, dedup search)
+escalation_reason: |
+  Why this could not be resolved to a confident verdict.
 ```
 
 Field semantics:
@@ -357,6 +370,37 @@ Field semantics:
   **all** issue states (`gh issue list --state all`) — verdicted queue issues
   auto-close (see "Queue closing" below), so the ledger's triage history lives
   mostly in closed issues.
+
+The four **needs-human decision-ready brief** fields are present ONLY on
+`needs-human` verdicts (optional-absent, and ignored if present, for every
+other verdict). They exist so each escalation reads as a decision, not "please
+look" — the digest renders them first (see the digest section below):
+
+- `human_question` — **REQUIRED for `needs-human`.** The single concrete
+  question/decision a human must answer for the issue to proceed (1–2 lines;
+  "decide X or Y", not "please look"). The single authoritative parser
+  (`scripts/sentry-triage-project-core.mjs` `resolveVerdict`, run by the
+  workflow's `--parse-only` label step) treats a `needs-human` verdict whose
+  `human_question` is **absent OR a blatant non-decision placeholder** (an exact
+  normalized match against a small denylist — "please look", "investigate
+  this", "tbd", …) exactly like a missing/invalid verdict: **fail loud**, keep
+  `sentry:needs-triage`, retry next run. This forces a lazy escalation to be
+  redone rather than silently landing an undecidable `needs-human` label. The
+  denylist is a deterministic backstop only — matched exactly so a real
+  question that merely contains such a word is never rejected; the prompt makes
+  the agent responsible for the actual decision quality.
+- `hypotheses` — a yaml list (1–3) of candidate root causes with the agent's
+  confidence lean.
+- `investigated` — a yaml list of what the agent checked/ruled out (payload
+  evidence, code paths read, dedup search).
+- `escalation_reason` — why this could not be resolved to a confident verdict
+  (ambiguity / security-sensitive surface / conflicting evidence).
+
+Redaction applies to these fields exactly like the rest of the diagnosis:
+abstract descriptions only, never Sentry payload text verbatim. They are
+consumed only by the #engineering digest's needs-human brief (they never reach
+a projected owning-repo issue — `needs-human` never projects), and every value
+is neutralized + Slack-escaped there.
 
 ### Verdict label application (deterministic)
 
@@ -485,25 +529,69 @@ pipeline surfaces itself two ways, and a break in either turns a run red:
   dead-man-switch signal.
 - **Per-run Slack digest (Stage B).** After every triage run that processed at
   least one queue issue, the `digest` job in `sentry-triage-agent.yml` posts a
-  deterministic digest to Slack `#engineering` so verdict review needs zero
-  GitHub polling. It is a pure CONSUMER of the verdict contract — no LLM, no
-  label writes, no Sentry — driven by the collector `scripts/sentry-triage-digest.mjs`:
-  for each batch issue it reads the current labels and the latest
-  pipeline-bot-authored `<!-- sentry-triage-verdict:v1 -->` comment (the same
-  authorship fence as the label/projection steps — a drive-by marker comment
-  cannot feed text into the digest) and renders one line per issue
-  (`<SHORT-ID> (<project>) — <verdict> (<confidence>): <summary>`, linked to the
-  queue issue), with counts by verdict plus a `failed triage` bucket for batch
-  issues still carrying `sentry:needs-triage` (their triage matrix job died —
-  kept visible, never hidden). The job runs `if: always()` gated on a non-zero
-  select count, so it posts even when some triage matrix jobs failed (partial
-  visibility) but stays silent on empty batches and kill-switch no-ops.
+  deterministic, OUTCOME-oriented digest to Slack `#engineering` so verdict
+  review needs zero GitHub polling. It is a pure CONSUMER of the verdict
+  contract — no LLM, no label writes, no Sentry — driven by the collector
+  `scripts/sentry-triage-digest.mjs`. For each batch issue it reads the current
+  labels, the queue-issue body (for the Sentry permalink), and the latest
+  pipeline-bot-authored `<!-- sentry-triage-verdict:v1 -->` comment (parsed by
+  the SAME authoritative parser the label/projection steps use — `parseVerdictComment`
+  from `sentry-triage-project-core.mjs`, behind the SAME authorship fence, so a
+  drive-by marker comment cannot feed text into the digest and the digest can
+  never disagree with the pipeline about a verdict). It never re-validates
+  `human_question`; that fail-loud gate is the `--parse-only` label step, so a
+  `needs-human` stub reaching the digest already carries one.
 
-  Security: verdict summaries are agent-authored from untrusted Sentry data, so
-  every free-form value embedded in the payload is neutralized and Slack-escaped
-  with the same `& < >` escape the main-failure notifier uses
-  (`.github/workflows/notify-slack-on-main-failure.yml`) — the escape that
-  makes Slack mention/link syntax (`<!channel>`, `<@U…>`) inert. The bot token
+  The digest keeps a header line (`N issue(s) triaged`) and the by-verdict
+  counts line (`code-fix / config-fix / upstream-transient / needs-human /
+failed triage`), then renders these sections **in this order, empty ones
+  omitted**:
+  1. **⚠️ Needs human — decisions required** — FIRST and visually distinct:
+     each item is a decision-ready brief — the exact `human_question`, the
+     `hypotheses`, what was `investigated`, the `escalation_reason`, and links
+     to the queue issue + the Sentry permalink.
+  2. **🤖 Autofixed** — actionable verdicts with recorded fix-PR data, each
+     linking its fix PR. Renders ONLY when non-empty; stays empty until Phase 2b
+     ([#1278](https://github.com/mento-protocol/monitoring-monorepo/issues/1278))
+     lands. **#1278 emission interface:** the autofix leg posts a trusted-bot
+     comment on the queue stub whose body is exactly
+     `Autofixed by PR: <https github.com PR url>` (the `AUTOFIX_COMMENT_PREFIX`
+     constant, mirroring the projection pointer below); the digest reads the
+     newest such comment (authorship-fenced, URL shape-validated, and
+     regression-fenced — see below) and links it.
+  3. **📮 Routed to owning repo** — `code-fix`/`config-fix` verdicts, each
+     `SHORT-ID — summary → link`. The link is the PROJECTED owning-repo issue,
+     read from the projection step's machine-parseable
+     `Projected to owning repo: <url>` pointer comment (the `PROJECTED_COMMENT_PREFIX`
+     contract constant in `sentry-triage-project-core.mjs`). When projection was
+     skipped (no PAT / local / unrecognized repo), it falls back to linking the
+     queue-issue verdict. Both outcome pointers are **regression-fenced**: a
+     queue stub reopened on a Sentry regression keeps its old pre-regression
+     pointer comments, so the digest only reads a pointer strictly newer than
+     the newest `Regressed in Sentry (last seen …)` comment — a re-triaged issue
+     can't inherit a stale projection link or be misplaced into Autofixed off a
+     previous occurrence's fix PR.
+  4. **🙅 Wontfix / transient** — `upstream-transient` verdicts, each linking
+     the rationale (the verdict comment lives on the linked queue issue).
+  5. **🛑 Failed triage** — batch issues still carrying `sentry:needs-triage`
+     (their matrix job died before a verdict landed) — kept visible, never
+     hidden.
+
+  The job runs `if: always()` gated on a non-zero select count, so it posts even
+  when some triage matrix jobs failed (partial visibility via the failed-triage
+  section) but stays silent on empty batches and kill-switch no-ops.
+
+  Security: every free-form value (summary + the four needs-human brief fields,
+  plus the short-id/project lifted from the queue title) is agent-authored from
+  untrusted Sentry data, so it is neutralized and Slack-escaped with the same
+  `& < >` escape the main-failure notifier uses
+  (`.github/workflows/notify-slack-on-main-failure.yml`) — the escape that makes
+  Slack mention/link syntax (`<!channel>`, `<@U…>`) inert — and every section
+  text object keeps `verbatim: true`. Section text stays under Slack's
+  3000-char cap by bounding each field before escaping and chunking each section
+  independently (2800/section). The URLs the digest turns into links are
+  shape-validated first (queue/projected/fix = https `github.com`, Sentry
+  permalink = https `*.sentry.io`). The bot token
   (`secrets.TF_VAR_SLACK_BOT_TOKEN`, `chat:write.public`, reused — no new
   secret) reaches only the posting step; the channel is hardcoded in the
   workflow (changing it is a one-line PR). A digest-job failure fails the run,
@@ -640,8 +728,13 @@ loud into the compensation path rather than risk skipping the real alias.
 **Queue-stub side effects.** On a successful projection (created or reused) the
 stub gets the `sentry:projected` label plus a comment linking the projected
 issue, then the project job closes it with the projected URL in the fixed
-closing comment. The `sentry:projected` label is bootstrapped by the ingest
-label set (Stage A "Labels").
+closing comment. That pointer comment has a fixed, machine-parseable form —
+`Projected to owning repo: <url>` (the `PROJECTED_COMMENT_PREFIX` constant in
+`scripts/sentry-triage-project-core.mjs`) — because the outcome digest's
+"Routed" section reads it (authorship-fenced, URL shape-validated) to link the
+projected owning-repo issue. Keep the two in sync via that shared constant. The
+`sentry:projected` label is bootstrapped by the ingest label set (Stage A
+"Labels").
 
 **Credential + isolation.** The cross-repo create/search use a dedicated
 fine-grained PAT (`sentry-triage-projector`, Issues Read+Write on exactly the
