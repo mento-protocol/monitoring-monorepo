@@ -114,6 +114,10 @@ function useBridgeParamActions(replaceParams: ReplaceBridgeParams) {
 }
 
 export function useBridgeFlowUrlState(): BridgeFlowUrlState {
+  // BridgeFlowsPageClient wraps BridgeFlowsContent, the sole consumer of this
+  // hook, in Suspense in the same module; the static rule cannot follow that
+  // call boundary.
+  // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const initialParams = searchParams.toString();

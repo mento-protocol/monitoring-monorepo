@@ -34,12 +34,10 @@ function toURLSearchParams(searchParams: PageSearchParams): URLSearchParams {
   return params;
 }
 
-// Same expression the client's `useHeroRollup` memoizes for the today-partial
-// query variables. UTC-midnight edge: if the server computes day N and the
-// client hydrates on day N+1, the view descriptors disagree and the client
-// simply drops the fallback (loading path). If both land on day N but the day
-// flips before the first poll, the today-partial fallback is one day off for
-// ≤30s until SWR revalidates — self-healing, acceptable.
+// Same UTC-day value the client uses for the today-partial query variables.
+// It is also passed across the Server/Client boundary so hydration starts from
+// one clock snapshot; the client reconciles to its own clock immediately after
+// mount, covering the UTC-midnight edge without rendering mismatched markup.
 function currentUtcDayStartSeconds(nowMs = Date.now()): number {
   return Math.floor(nowMs / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
 }
@@ -70,6 +68,7 @@ export default async function VolumePage({
   const includeProtocolActors = canUseVolumeFilters
     ? readActorFilterFromParams(params) === "all"
     : true;
+  const todayMidnight = currentUtcDayStartSeconds();
 
   // SSR-prefetch the unconditional hero queries (window snapshot + today
   // partial + firstDay slice) so the headline and KPI tiles paint populated
@@ -80,7 +79,7 @@ export default async function VolumePage({
     venue,
     range,
     includeProtocolActors,
-    currentUtcDayStartSeconds(),
+    todayMidnight,
     chainIdIn,
   );
 
@@ -90,6 +89,7 @@ export default async function VolumePage({
         canUseVolumeFilters={canUseVolumeFilters}
         chainOptions={chainOptions}
         initialData={initialData}
+        initialUtcDayKey={todayMidnight / SECONDS_PER_DAY}
       />
     </Suspense>
   );

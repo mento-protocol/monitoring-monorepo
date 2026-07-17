@@ -142,12 +142,9 @@ export function useHeroRollup({
 } {
   // Today's UTC midnight in seconds. The hero snapshot's upper bound is
   // yesterday, so today's TraderDailySnapshot rows fill in the gap.
-  // Memoised on `utcDayKey` so it flips at midnight without retriggering
-  // every minute.
-  const todayMidnight = useMemo(
-    () => Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY,
-    [utcDayKey],
-  );
+  // Derived from the route's explicit day key so SSR and hydration use the
+  // same query identity; the URL-state hook advances the key at midnight.
+  const todayMidnight = utcDayKey * SECONDS_PER_DAY;
 
   // View-parity gate for the SSR prefetch: only attach fallbackData when the
   // prefetched descriptor matches this render's key ingredients exactly (the

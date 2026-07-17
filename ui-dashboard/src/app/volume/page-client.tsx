@@ -69,6 +69,7 @@ export function VolumeClient({
   canUseVolumeFilters,
   chainOptions,
   initialData,
+  initialUtcDayKey,
 }: {
   canUseVolumeFilters: boolean;
   chainOptions?: readonly ChainFilterOption[] | undefined;
@@ -77,8 +78,15 @@ export function VolumeClient({
    *  tiles paint populated on first render. `undefined` degrades to the
    *  client-only loading path. */
   initialData?: VolumeHeroInitialData | undefined;
+  /** UTC day selected by the Server Component. The client hydrates from the
+   *  same value, then reconciles to its own clock after mount. */
+  initialUtcDayKey?: number | undefined;
 }) {
-  const urlState = useVolumeUrlState({ canUseVolumeFilters, chainOptions });
+  const urlState = useVolumeUrlState({
+    canUseVolumeFilters,
+    chainOptions,
+    initialUtcDayKey,
+  });
   return (
     <VolumeDataClient
       key={urlState.chainId ?? "all"}

@@ -68,7 +68,7 @@ export function useBridgePaginationData(
   // react-doctor-disable-next-line react-doctor/no-derived-state-effect
   useEffect(() => {
     if (countReady && page !== rawPage) {
-      // react-doctor-disable-next-line effect/no-derived-state
+      // react-doctor-disable-next-line effect/no-derived-state, effect/no-pass-data-to-parent -- the parent callback commits a validated page to browser URL state after the async count resolves
       setPage(page);
     }
   }, [countReady, page, rawPage, setPage]);

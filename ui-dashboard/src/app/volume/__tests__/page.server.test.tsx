@@ -8,6 +8,7 @@ type VolumeClientProps = {
   canUseVolumeFilters: boolean;
   chainOptions: readonly ChainFilterOption[];
   initialData?: VolumeHeroInitialData | undefined;
+  initialUtcDayKey?: number | undefined;
 };
 
 const { mockGetAuthSession, mockFetchVolumeHeroForSSR, mockVolumeClient } =
@@ -92,6 +93,7 @@ describe("VolumePage server component", () => {
       canUseVolumeFilters: false,
       chainOptions: CHAIN_OPTIONS,
       initialData: INITIAL_DATA,
+      initialUtcDayKey: TODAY_MIDNIGHT / 86_400,
     });
   });
 
@@ -123,6 +125,7 @@ describe("VolumePage server component", () => {
       canUseVolumeFilters: true,
       chainOptions: CHAIN_OPTIONS,
       initialData: INITIAL_DATA,
+      initialUtcDayKey: TODAY_MIDNIGHT / 86_400,
     });
   });
 
@@ -173,6 +176,7 @@ describe("VolumePage server component", () => {
       canUseVolumeFilters: false,
       chainOptions: CHAIN_OPTIONS,
       initialData: undefined,
+      initialUtcDayKey: TODAY_MIDNIGHT / 86_400,
     });
   });
 });

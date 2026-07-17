@@ -22,9 +22,11 @@ export function chainFilterOptions(
 }
 
 export function configuredProductionChainOptions(): ChainFilterOption[] {
-  return chainFilterOptions(
-    NETWORK_IDS.filter(isConfiguredNetworkId).map((id) => NETWORKS[id]),
-  );
+  const configuredNetworks: Network[] = [];
+  for (const id of NETWORK_IDS) {
+    if (isConfiguredNetworkId(id)) configuredNetworks.push(NETWORKS[id]);
+  }
+  return chainFilterOptions(configuredNetworks);
 }
 
 export function availableProductionChainOptions(

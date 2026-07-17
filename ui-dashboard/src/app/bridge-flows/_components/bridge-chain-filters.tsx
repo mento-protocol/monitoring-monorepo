@@ -2,7 +2,7 @@
 
 import { NETWORK_IDS, NETWORKS } from "@/lib/networks";
 
-export const BRIDGE_NETWORKS = NETWORK_IDS.flatMap((id) => {
+const BRIDGE_NETWORKS = NETWORK_IDS.flatMap((id) => {
   const network = NETWORKS[id];
   return network.local || network.testnet ? [] : [network];
 });
