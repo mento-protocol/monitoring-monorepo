@@ -60,15 +60,16 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### ci / process
 
-| ADR                                                 | Decision                                                                        |
-| --------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [0006](0006-github-issues-backlog.md)               | GitHub Issues (not `BACKLOG.md`) are the canonical agent work queue             |
-| [0007](0007-agent-quality-gate-and-merge-oracle.md) | Local agent quality gate + `pr:ready-state` merge oracle + Codex approval gate  |
-| [0008](0008-mandatory-hazard-checklists.md)         | Cross-layer/stateful changes must run the dedicated PR checklists before review |
-| [0009](0009-supply-chain-hardening.md)              | Supply-chain posture: release-age gate, lockfile-lint, SHA-pinned Actions       |
-| [0010](0010-required-checks-no-paths-filters.md)    | Required CI checks carry no `paths:` filters; only advisory jobs may            |
-| [0033](0033-adr-process-and-gate.md)                | ADRs record architectural decisions, enforced by a reminder gate                |
-| [0036](0036-sentry-triage-pipeline.md)              | Sentry triage/autofix: staged GitHub Actions agent pipeline + GH-Issue queue    |
+| ADR                                                     | Decision                                                                        |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [0006](0006-github-issues-backlog.md)                   | GitHub Issues (not `BACKLOG.md`) are the canonical agent work queue             |
+| [0007](0007-agent-quality-gate-and-merge-oracle.md)     | Local agent quality gate + `pr:ready-state` merge oracle + Codex approval gate  |
+| [0008](0008-mandatory-hazard-checklists.md)             | Cross-layer/stateful changes must run the dedicated PR checklists before review |
+| [0009](0009-supply-chain-hardening.md)                  | Supply-chain posture: release-age gate, lockfile-lint, SHA-pinned Actions       |
+| [0010](0010-required-checks-no-paths-filters.md)        | Required CI checks carry no `paths:` filters; only advisory jobs may            |
+| [0033](0033-adr-process-and-gate.md)                    | ADRs record architectural decisions, enforced by a reminder gate                |
+| [0036](0036-sentry-triage-pipeline.md)                  | Sentry triage/autofix: staged GitHub Actions agent pipeline + GH-Issue queue    |
+| [0038](0038-sentry-central-plane-verdict-projection.md) | Central Sentry triage plane; actionable verdicts projected into owning repos    |
 
 ### shared-config
 

@@ -632,6 +632,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/agent-issue-board.test.mjs" "$reason"
   add_command "pnpm sentry:ingest:test" "$reason"
   add_command "pnpm sentry:digest:test" "$reason"
+  add_command "pnpm sentry:project:test" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
@@ -1529,6 +1530,9 @@ while IFS= read -r path; do
           ;;
         scripts/sentry-triage-digest.mjs|scripts/sentry-triage-digest.test.mjs)
           add_command "pnpm sentry:digest:test" "Sentry triage digest helper changed"
+          ;;
+        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs)
+          add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
           ;;
         scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"

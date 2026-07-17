@@ -194,20 +194,56 @@ await test("parseVerdictComment rejects out-of-enum verdict/confidence to null",
   assertEqual(parsed.confidence, null);
 });
 
-await test("findLatestVerdictComment returns the newest marker-bearing comment", () => {
+// Pipeline-authored comments resolve to the Actions bot login (see the
+// collector's authorship fence). Fixtures default to it; hostile-author tests
+// pass an explicit `author`, which wins via spread order.
+const BOT_AUTHOR = { login: "github-actions" };
+
+await test("findLatestVerdictComment returns the newest trusted marker-bearing comment", () => {
   const comments = [
-    { body: "not a verdict" },
-    { body: verdictComment({ summary: "older" }) },
-    { body: "another chatter comment" },
-    { body: verdictComment({ summary: "newest" }) },
+    { body: "not a verdict", author: BOT_AUTHOR },
+    { body: verdictComment({ summary: "older" }), author: BOT_AUTHOR },
+    { body: "another chatter comment", author: BOT_AUTHOR },
+    { body: verdictComment({ summary: "newest" }), author: BOT_AUTHOR },
   ];
   const latest = findLatestVerdictComment(comments);
   assert(latest.includes("summary: newest"), "expected newest verdict comment");
 });
 
+await test("findLatestVerdictComment ignores marker comments from untrusted authors", () => {
+  // A drive-by public commenter must not feed summary text into the digest —
+  // a newer hostile marker comment cannot shadow the bot's verdict either.
+  const comments = [
+    { body: verdictComment({ summary: "legit" }), author: BOT_AUTHOR },
+    {
+      body: verdictComment({ summary: "hostile override" }),
+      author: { login: "attacker" },
+    },
+  ];
+  const latest = findLatestVerdictComment(comments);
+  assert(latest.includes("summary: legit"), "expected the bot verdict kept");
+  assertEqual(
+    findLatestVerdictComment([
+      {
+        body: verdictComment({ summary: "only hostile" }),
+        author: { login: "x" },
+      },
+    ]),
+    null,
+  );
+  assertEqual(
+    findLatestVerdictComment([{ body: verdictComment() }]),
+    null,
+    "expected a missing author to fail closed",
+  );
+});
+
 await test("findLatestVerdictComment returns null when no marker comment exists", () => {
   assertEqual(
-    findLatestVerdictComment([{ body: "hi" }, { body: "bye" }]),
+    findLatestVerdictComment([
+      { body: "hi", author: BOT_AUTHOR },
+      { body: "bye", author: BOT_AUTHOR },
+    ]),
     null,
   );
   assertEqual(findLatestVerdictComment([]), null);
@@ -229,7 +265,7 @@ function issueFixture({
     title: `[sentry] ${shortId} (${project}, error)`,
     url: `https://github.com/mento-protocol/monitoring-monorepo/issues/${number}`,
     labels: labels.map((name) => ({ name })),
-    comments,
+    comments: comments.map((comment) => ({ author: BOT_AUTHOR, ...comment })),
   };
 }
 

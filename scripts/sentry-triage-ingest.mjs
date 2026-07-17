@@ -180,7 +180,15 @@ export const LABEL_DEFINITIONS = [
     color: "d93f0b",
     description: "Triage verdict: needs human judgment",
   },
+  {
+    name: "sentry:projected",
+    color: "0052cc",
+    description:
+      "Actionable verdict projected as an issue in the owning repo (ADR 0038)",
+  },
 ];
+
+export const PROJECTED_LABEL = "sentry:projected";
 
 // Stage B's verdict namespace, derived from the definitions above so the two
 // can't drift. A reopened regression must shed its previous verdict — the
@@ -189,6 +197,14 @@ export const LABEL_DEFINITIONS = [
 export const VERDICT_LABELS = LABEL_DEFINITIONS.map(
   (label) => label.name,
 ).filter((name) => name.startsWith("sentry:verdict-"));
+
+// Labels a regression reopen must shed: the stale verdict labels PLUS the
+// stale `sentry:projected` marker (ADR 0038) — the old projection described
+// the old occurrence, and leaving it would show a needs-triage issue as
+// already projected. If the re-triage round lands on an actionable verdict
+// again, the projection step re-applies it, idempotently reusing the same
+// owning-repo issue.
+export const REOPEN_SHED_LABELS = [...VERDICT_LABELS, PROJECTED_LABEL];
 
 // Short ID is the first whitespace-delimited token after the `[sentry] `
 // prefix (queue contract v2 title: `[sentry] <SHORT-ID> (<project>, <level>)`).
@@ -651,11 +667,13 @@ async function createQueueIssue(options, sentryIssue) {
 
 /**
  * Label edit for the regression-reopen path: re-queue for triage AND shed
- * any stale `sentry:verdict-*` labels from the previous triage round — the
- * old verdict described the old occurrence, and leaving it would show
- * downstream consumers both a verdict and needs-triage at once. Removing an
- * absent label is a no-op for `gh issue edit` (the labels themselves always
- * exist because ensureLabelsExist runs first). Exported for tests.
+ * any stale `sentry:verdict-*` labels plus the stale `sentry:projected`
+ * marker from the previous triage round — the old verdict/projection
+ * described the old occurrence, and leaving them would show downstream
+ * consumers a needs-triage issue that also reads as verdicted/projected.
+ * Removing an absent label is a no-op for `gh issue edit` (the labels
+ * themselves always exist because ensureLabelsExist runs first). Exported
+ * for tests.
  */
 export function buildReopenLabelEditArgs(issueNumber, repo) {
   return [
@@ -667,7 +685,7 @@ export function buildReopenLabelEditArgs(issueNumber, repo) {
     "--add-label",
     "sentry:needs-triage",
     "--remove-label",
-    VERDICT_LABELS.join(","),
+    REOPEN_SHED_LABELS.join(","),
   ];
 }
 

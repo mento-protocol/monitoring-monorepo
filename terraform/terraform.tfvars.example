@@ -98,6 +98,15 @@ upstash_api_key = "..."
 # re-apply, never via the GitHub UI.
 # sentry_triage_enabled = "false"
 
+# Fine-grained GitHub PAT for the verdict-projection step (ADR 0038): Issues
+# Read+Write on EXACTLY frontend-monorepo, mento-analytics-api, minipay-dapp —
+# no contents, no pull-requests, no other repos. Leave empty until provisioned;
+# the GitHub Actions secret resource is `count`-gated so `terraform apply`
+# succeeds without it and the workflow no-ops gracefully. Brand-new, no external
+# consumers, so no `prevent_destroy`. See docs/notes/sentry-triage-pipeline.md
+# for how to mint the `sentry-triage-projector` PAT.
+# sentry_projection_token = "github_pat_xxx-issues-rw-three-repos-xxx"
+
 # ── Arkham Intelligence ───────────────────────────────────────────────────────
 # API key for manual /api/arkham/enrich counterparty tagging.
 # Apply for access at https://intel.arkm.com/api — gated, no self-serve signup.

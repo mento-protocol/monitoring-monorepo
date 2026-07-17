@@ -174,6 +174,25 @@ resource "github_actions_secret" "sentry_triage_token" {
   value       = var.sentry_triage_token
 }
 
+# SENTRY_PROJECTION_TOKEN is brand-new (ADR 0038): a fine-grained GitHub PAT
+# with Issues Read+Write on EXACTLY the three owning repos (frontend-monorepo,
+# mento-analytics-api, minipay-dapp) and no other scope. The verdict-projection
+# step in `.github/workflows/sentry-triage-agent.yml` is its ONLY consumer, and
+# only for cross-repo issue create/search; the step no-ops gracefully while the
+# secret is absent. Like `sentry_triage_token` above — and UNLIKE
+# `claude_code_oauth_token` below — no live secret of this name exists and no
+# external consumer depends on it, so plain `count` gating is enough and it
+# carries NO `prevent_destroy`: destroying it while unused breaks nothing.
+resource "github_actions_secret" "sentry_projection_token" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.sentry_projection_token == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "SENTRY_PROJECTION_TOKEN"
+  value       = var.sentry_projection_token
+}
+
 resource "github_actions_secret" "claude_code_oauth_token" {
   # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
   # `vercel_automation_bypass`; see the comment above for the threat model.
