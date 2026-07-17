@@ -6,6 +6,10 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-05-28
+doc_type: skill
+scope: repo-wide
+review_interval_days: 90
+garden_lane: agent-entry-points
 ---
 
 # Ship

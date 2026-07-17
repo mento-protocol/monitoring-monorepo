@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-07
 scope: indexer-envio
 date: 2026-07
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0034 — stETH actuals use a launch-aligned sub-daily wallet balance sampler

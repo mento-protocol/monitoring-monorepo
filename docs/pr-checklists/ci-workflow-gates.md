@@ -1,3 +1,15 @@
+---
+title: CI Workflow Gates Checklist
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-17
+doc_type: checklist
+scope: ci/process
+review_interval_days: 90
+garden_lane: pr-checklists-process
+---
+
 # CI workflow gates checklist
 
 Use this checklist for any change to `.github/workflows/`. CI mistakes don't surface until the next merge — and by then the bad pattern is already shipped to other workflows by copy-paste.
@@ -53,7 +65,8 @@ advisory schema-diff workflow in the PR UI.
 - [ ] Every deploy job MUST include `if: github.ref == 'refs/heads/main'` (or equivalent environment guard) at the job level
 - [ ] Don't rely on the `push.branches: [main]` filter alone — `workflow_dispatch` doesn't honor it
 
-Canonical good example: `.github/workflows/metrics-bridge.yml:41`.
+Canonical good example: the `deploy` job guard in
+`.github/workflows/metrics-bridge.yml`.
 
 ## 3. Pinning third-party actions
 
@@ -63,14 +76,16 @@ A `uses: org/action@v4` line trusts whoever owns that tag to never re-point it a
 - [ ] Local relative actions such as `uses: ./.github/actions/pnpm-install` are allowed; the scanner follows their `action.yml` / `action.yaml` targets and checks nested third-party `uses:` entries too.
 - [ ] Run `node scripts/check-github-action-pins.mjs` locally when editing `.github/workflows/**`, `.github/actions/**`, or `.trunk/setup-ci/**`; the required `Code Quality` workflow runs the same check on every PR.
 
-Canonical good example: `.github/workflows/metrics-bridge.yml:59,62,68,117` — every external action SHA-pinned.
+Canonical good example: `.github/workflows/metrics-bridge.yml` — every external
+action is SHA-pinned.
 
 ## 4. Concurrency and serialization
 
 - [ ] Deploy workflows MUST set a concurrency group that serializes ALL invocations against the same target (e.g. `group: ${{ github.workflow }}`, with `cancel-in-progress: false`). Two close main-merges racing on `gcloud run services update` can otherwise stomp each other
 - [ ] Non-deploy workflows MAY use a per-ref concurrency group with `cancel-in-progress: true` to drop stale runs on force-push
 
-Canonical good example: `.github/workflows/metrics-bridge.yml:29-31`.
+Canonical good example: the workflow-level `concurrency` block in
+`.github/workflows/metrics-bridge.yml`.
 
 ## 5. Caching keys
 
@@ -125,7 +140,11 @@ Decision framework for `runs-on` (applied in PR #822 — partial migration savin
 
 - [ ] **Network/IO-bound job** (terraform, gcloud, curl-driven, external-API polling) → ARM. Runtime is parity; the 37.5% rate cut is pure savings.
 - [ ] **Sub-minute on both architectures** (paths-filter `changes` detectors, format checks, lockfile lint) → ARM. Both bill 1 minute; rate cut is pure savings.
-- [ ] **CPU-bound job** (vitest/typecheck/lint suites, Next builds, browser tests, Stryker) → **x64**. ARM's ~2× slowdown crosses billing-minute boundaries AND doubles hot-path PR latency.
+- [ ] **CPU-bound hot-path job** (vitest/typecheck/lint suites, Next builds,
+      browser tests) → **x64** when the measured ARM slowdown crosses billing
+      boundaries or materially delays PR feedback. The weekly, bounded Stryker
+      jobs are a measured exception and currently run on ARM; remeasure before
+      changing that workflow.
 - [ ] **Anything launching Chrome via chrome-launcher/puppeteer/lhci** → x64, hard requirement: Google publishes no Chrome for linux-arm64. (Playwright's own Chromium DOES ship arm64 — only Chrome-dependent tooling is blocked.)
 - [ ] Jobs that generate artifacts consumed by another job (`update-snapshots.yml` baselines ↔ ci.yml `ui` snapshot assertions) MUST stay on the same architecture as their consumer.
 - [ ] Before migrating any job class, **measure** warm runtime on the target arch (throwaway PR with two pushes — cold then warm caches; `workflow_dispatch` for cron workflows) and compare the ratio against 1.6×. Don't extrapolate from the price sheet.

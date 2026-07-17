@@ -5,6 +5,9 @@ owner: eng
 canonical: true
 last_verified: 2026-07-17
 scope: ci/process
+doc_type: runbook
+review_interval_days: 90
+garden_lane: operator-runbooks
 ---
 
 # Sentry triage pipeline

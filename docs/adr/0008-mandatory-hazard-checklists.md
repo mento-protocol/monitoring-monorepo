@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-06
 scope: ci/process
 date: 2026-05
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0008 — Cross-layer / stateful changes must run dedicated PR checklists

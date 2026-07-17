@@ -33,6 +33,11 @@ lint:
         # documentation — prose rules like MD041 (first line must be an H1) don't
         # apply. Prettier still normalizes their formatting.
         - .github/prompts/**
+    - linters: [prettier]
+      paths:
+        # Generated deterministically by scripts/docs-index.mjs. Formatting it
+        # independently would make `docs:index --check` report false drift.
+        - docs/README.md
     - linters: [osv-scanner]
       paths:
         - indexer-envio/pnpm-lock.yaml

@@ -1,3 +1,15 @@
+---
+title: Stateful Data and UI Checklist
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-17
+doc_type: checklist
+scope: repo-wide
+review_interval_days: 90
+garden_lane: pr-checklists-process
+---
+
 # Stateful Data + UI PR Checklist
 
 Use this checklist for any PR that changes stateful data flow across layers.
@@ -110,7 +122,8 @@ If the PR touches a table with pagination, sort, filter, search, or linked chart
 ### Time units (FX-pool metrics)
 
 - [ ] Are all duration values on the entity in the same unit (trading-seconds, not wall-clock)?
-- [ ] Does the live "open" path use `tradingSecondsInRange(start, now)` (`ui-dashboard/src/lib/weekend.ts:110`) instead of `now - start`?
+- [ ] Does the live "open" path use `tradingSecondsInRange(start, now)` from
+      `ui-dashboard/src/lib/weekend.ts` instead of `now - start`?
 - [ ] Do open and closed rows of the same column use the same unit?
 - [ ] Are threshold-derived metrics (peak severity %, etc.) computed from the per-event threshold captured at event time, NOT from the live `pool.rebalanceThreshold`?
 
@@ -118,7 +131,7 @@ If the PR touches a table with pagination, sort, filter, search, or linked chart
 
 - [ ] Is table state URL-backed or intentionally local?
 - [ ] If local-only, is that explicitly called out as an intentional scope decision?
-- [ ] If URL-backed, does the URL canonicalize after data-driven clamping (no stale `?page=N` past totalPages, no `?page=1` default, no malformed `?page=foo` lingering)? Pattern: `lib/use-table-sort.ts:156-174` mount-time canonicalization + the bridge-flows pager `page=1` URL-clearing test. PR #653 shipped with this failure mode: `?page=999` rendered page 2 (clamped) but kept `?page=999` in the address bar, breaking refresh/share fidelity.
+- [ ] If URL-backed, does the URL canonicalize after data-driven clamping (no stale `?page=N` past totalPages, no `?page=1` default, no malformed `?page=foo` lingering)? Pattern: the mount-time canonicalization in `ui-dashboard/src/lib/use-table-sort.ts` plus the bridge-flows pager `page=1` URL-clearing test. PR #653 shipped with this failure mode: `?page=999` rendered page 2 (clamped) but kept `?page=999` in the address bar, breaking refresh/share fidelity.
 
 ---
 
@@ -156,7 +169,8 @@ For each non-happy path, decide the behavior explicitly.
         fallback on chain + feed still matching the current row.
   - [ ] **`fetchedAt` age gate** carried inside the cached value (Next
         `unstable_cache` stale-serve is UNBOUNDED — see
-        `recurring-review-patterns.md` and the `server-cache.ts` pattern).
+        `recurring-review-patterns.md` and
+        `ui-dashboard/src/lib/network-fetcher/server-cache.ts`).
   - [ ] **Cache key salted by deploy id + endpoint**
         (`VERCEL_DEPLOYMENT_ID ?? VERCEL_GIT_COMMIT_SHA ?? "dev"` + the resolved
         Hasura URL) — the Data Cache survives deploys and endpoint switches.
@@ -280,7 +294,7 @@ These are not theoretical.
 - Cross-layer features need both indexer and UI regression coverage.
 - Approximate-data badges on rolled-up rows must derive from the data's actual coverage (e.g. the chain's oldest returned transfer's timestamp vs each window's lower bound), not just a global `isTruncated` flag — otherwise busy chains that cross the cap inside a recent window render as exact (PR #306).
 - URL-backed stateful UI controls that write via async `router.replace` (Next.js App Router) must dedupe rapid successive interactions via a ref-tracked intent — reading state from the `useCallback` closure on a fast double-click reads the stale pre-navigation URL and silently drops the second toggle (PR #307).
-- Client components that read URL state via Next's `useSearchParams()` only see the snapshot from the last RSC payload — own writes via `window.history.replaceState` (e.g. `lib/use-table-sort.ts:139`, `volume/_lib/url-state.ts`) don't refresh it, and `popstate` only fires for back/forward navigation, never for own `replaceState` calls. If you need the live URL at click/action time (callbackUrl construction, share-link copy, deep-link generation, etc.), read `window.location.{pathname,search}` directly with an SSR-safe fallback to `useSearchParams`. Bit PR #335 (header "Sign in" link sent OAuth through a stale `callbackUrl` on `/pools` and `/volume`).
+- Client components that read URL state via Next's `useSearchParams()` only see the snapshot from the last RSC payload — own writes via `window.history.replaceState` (for example in `ui-dashboard/src/lib/use-table-sort.ts` and `ui-dashboard/src/app/volume/_lib/url-state.ts`) do not refresh it, and `popstate` only fires for back/forward navigation, never for own `replaceState` calls. If you need the live URL at click/action time (callbackUrl construction, share-link copy, deep-link generation, etc.), read `window.location.{pathname,search}` directly with an SSR-safe fallback to `useSearchParams`. Bit PR #335 (header "Sign in" link sent OAuth through a stale `callbackUrl` on `/pools` and `/volume`).
 
 ---
 

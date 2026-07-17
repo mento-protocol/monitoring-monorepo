@@ -23,9 +23,13 @@ function fail(message) {
   failures.push(message);
 }
 
+function resolveInputPath(filePath) {
+  return path.isAbsolute(filePath) ? filePath : path.join(repoRoot, filePath);
+}
+
 function exists(filePath) {
   try {
-    statSync(path.join(repoRoot, filePath));
+    statSync(resolveInputPath(filePath));
     return true;
   } catch {
     return false;
@@ -33,26 +37,36 @@ function exists(filePath) {
 }
 
 function read(filePath) {
-  return readFileSync(path.join(repoRoot, filePath), "utf8");
+  return readFileSync(resolveInputPath(filePath), "utf8");
 }
 
-function readRequired(filePath) {
+function readRequired(filePath, displayPath = filePath) {
   if (!exists(filePath)) {
-    fail(`${filePath}: required guard input is missing`);
+    fail(`${displayPath}: required guard input is missing`);
     return null;
   }
   return read(filePath);
 }
 
-function readJsonRequired(filePath) {
-  const content = readRequired(filePath);
+function readJsonRequired(filePath, displayPath = filePath) {
+  const content = readRequired(filePath, displayPath);
   if (content === null) return null;
   try {
     return JSON.parse(content);
   } catch (error) {
-    fail(`${filePath}: invalid JSON (${error.message})`);
+    fail(`${displayPath}: invalid JSON (${error.message})`);
     return null;
   }
+}
+
+function testOnlyInputPath(environmentVariable, canonicalPath) {
+  const override = process.env[environmentVariable];
+  if (!override) return canonicalPath;
+  if (process.env.NODE_ENV !== "test") {
+    fail(`${environmentVariable}: test-only override requires NODE_ENV=test`);
+    return canonicalPath;
+  }
+  return override;
 }
 
 function normalizeSkillContent(filePath, content) {
@@ -101,7 +115,9 @@ function parseReadmeContextMarker(content) {
 function parseContextMetadata(filePath, content) {
   const frontmatter = parseFrontmatter(content);
   if (frontmatter) return frontmatter;
-  if (filePath === "README.md") return parseReadmeContextMarker(content);
+  if (path.posix.basename(filePath) === "README.md") {
+    return parseReadmeContextMarker(content);
+  }
   return null;
 }
 
@@ -124,7 +140,14 @@ function trackedFiles(dir, predicate = () => true, { required = false } = {}) {
     }
     return [];
   }
-  const files = output.split("\n").filter(Boolean).filter(predicate);
+  const files = output
+    .split("\n")
+    .filter(Boolean)
+    // Model the proposed working tree, not only the Git index. A tracked file
+    // deleted by the current change must leave the canonical-context set
+    // before the deletion is staged.
+    .filter((file) => exists(file))
+    .filter(predicate);
   if (required && files.length === 0) {
     fail(`${dir}: expected tracked files`);
   }
@@ -135,7 +158,7 @@ function requireMetadata(filePath) {
   const data = parseContextMetadata(filePath, read(filePath));
   if (!data) {
     fail(
-      `${filePath}: missing context metadata${filePath === "README.md" ? " (YAML frontmatter or hidden agent-context marker)" : ""}`,
+      `${filePath}: missing context metadata${path.posix.basename(filePath) === "README.md" ? " (YAML frontmatter or hidden agent-context marker)" : ""}`,
     );
     return;
   }
@@ -211,20 +234,22 @@ const claudeSkillFiles = trackedFiles(
 // The enforced set is discovered, not hardcoded: every tracked markdown file
 // in the discovery roots (see isCanonicalDiscoveryPath) whose frontmatter
 // declares `canonical: true` gets full metadata + staleness enforcement, so
-// new canonical files are picked up automatically. Root README.md uses a
-// hidden metadata marker instead of visible frontmatter, so it is enrolled
+// new canonical files are picked up automatically. README files may use a
+// hidden metadata marker instead of visible frontmatter, so they are enrolled
 // with the same metadata parser used by requireMetadata.
 const trackedRepoFiles = trackedFiles(".");
 const managedContextFiles = discoverCanonicalFiles(trackedRepoFiles, (file) =>
   exists(file) ? read(file) : "",
 );
-if (trackedRepoFiles.includes("README.md")) {
-  const readmeMetadata = parseContextMetadata("README.md", read("README.md"));
+for (const readme of trackedRepoFiles.filter(
+  (file) => path.posix.basename(file) === "README.md",
+)) {
+  const readmeMetadata = parseContextMetadata(readme, read(readme));
   if (
     readmeMetadata?.canonical === "true" &&
-    !managedContextFiles.includes("README.md")
+    !managedContextFiles.includes(readme)
   ) {
-    managedContextFiles.push("README.md");
+    managedContextFiles.push(readme);
   }
 }
 
@@ -416,7 +441,13 @@ function validateClaudePermissions(settings) {
   }
 }
 
-const codexHooks = readJsonRequired(".codex/hooks.json");
+// Test-only input overrides let the regression suite mutate disposable
+// fixtures instead of tracked runtime configuration. Fail closed if an
+// override leaks into a normal invocation.
+const codexHooks = readJsonRequired(
+  testOnlyInputPath("AGENT_CONTEXT_CODEX_HOOKS_FILE", ".codex/hooks.json"),
+  ".codex/hooks.json",
+);
 if (codexHooks) {
   const commands = sessionEndCommands(codexHooks, ".codex/hooks.json");
   if (commands.some((command) => command.includes("/Users/"))) {
@@ -429,7 +460,13 @@ if (codexHooks) {
   }
 }
 
-const claudeSettings = readJsonRequired(".claude/settings.json");
+const claudeSettings = readJsonRequired(
+  testOnlyInputPath(
+    "AGENT_CONTEXT_CLAUDE_SETTINGS_FILE",
+    ".claude/settings.json",
+  ),
+  ".claude/settings.json",
+);
 if (claudeSettings) {
   validateClaudePermissions(claudeSettings);
 

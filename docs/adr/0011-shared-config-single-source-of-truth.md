@@ -6,6 +6,9 @@ canonical: true
 last_verified: 2026-07-08
 scope: shared-config
 date: 2026-03
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
 ---
 
 # ADR 0011 — `shared-config` is the single source of truth for chain/token metadata

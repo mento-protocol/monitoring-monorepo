@@ -1,3 +1,5 @@
+<!-- agent-context: title="Sentry Alerts Module" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=alerts/infra/channels/sentry-bridge review_interval_days=90 garden_lane=operator-runbooks -->
+
 # Sentry Alerts Module
 
 This module configures Sentry → **Slack** error monitoring for every project
@@ -21,7 +23,7 @@ Both rules use the new `sentry_alert` supertype resource (introduced in
 The new resource is triggered by monitor lifecycle events, so it's
 fundamentally less noisy than the old per-event firing model.
 
-## Pre-flight (before terraform apply)
+## Pre-flight (before planning)
 
 These steps happen outside Terraform and must be done first:
 
@@ -42,7 +44,7 @@ These steps happen outside Terraform and must be done first:
    private `#alerts-critical`, `/invite @Sentry` once.
 5. **Click-ops Sentry alert rules removed.** Any non-Terraform-managed rules
    pointing to Slack will fire in parallel and double-post — delete them in
-   the Sentry UI before apply.
+   the Sentry UI before planning the Terraform-managed replacement.
 
 The per-project `#sentry-<project-slug>` channels are created BY this
 module via `restapi_object.sentry_slack_channel` and do not need to be
@@ -81,7 +83,8 @@ channels" below).
 
 If a `#sentry-<slug>` channel already exists in Slack (e.g. from a prior
 manual setup), Terraform will fail on `conversations.create` with
-`name_taken`. Import each one once:
+`name_taken`. After explicit approval for the state mutation, import each one
+once from the repository root:
 
 ```bash
 # Find the channel ID via the Slack admin UI → channel → About → Channel ID
@@ -92,7 +95,7 @@ terraform -chdir=alerts/infra import \
 
 The companion `restapi_object.sentry_slack_channel_member` resource will
 automatically join the bot to the imported channel via `conversations.join`
-on the next apply — no manual `/invite` needed. The bot must be a member
+on the next gated apply — no manual `/invite` needed. The bot must be a member
 for `conversations.archive` to succeed on destroy; `conversations.join` is
 idempotent (Slack returns `ok=true, already_in_channel=true` if the bot
 was added to the channel some other way), so freshly-created channels are
@@ -103,26 +106,30 @@ a no-op for that resource.
 1. Create the project in Sentry (UI or API). Terraform does not manage
    project creation. Sentry auto-creates the default issue-stream monitor
    at project creation — usually instantaneous.
-2. Run `terraform apply` — the project is auto-discovered and Terraform
-   creates the matching `#sentry-<project-slug>` Slack channel, the two
-   `sentry_alert` rules, and wires the alert action's `channel_id` to the
-   new channel automatically.
+2. Confirm the project's Monitors tab is populated, then run
+   `pnpm alerts:infra:plan` from the repository root.
+3. Dispatch `.github/workflows/alerts-infra.yml`, review its plan, and approve
+   the `production-infra` gate. Terraform creates the matching
+   `#sentry-<project-slug>` Slack channel, the two `sentry_alert` rules, and
+   wires the alert action's `channel_id` to the new channel automatically.
 
 > **Known limitation:** if a brand-new Sentry project lands in the org
 > before its default issue-stream monitor has been provisioned (rare;
 > Sentry creates it eagerly), the `data.sentry_project_issue_stream_monitor`
 > lookup fails for _that_ project and the `for_each` plan errors out for
-> _all_ projects in the same apply. Mitigation: confirm the new project's
-> "Monitors" tab is non-empty in the Sentry UI before re-running apply.
+> _all_ projects. Mitigation: confirm the new project's "Monitors" tab is
+> non-empty in the Sentry UI before re-running the plan.
 
 ## Removing a project
 
 1. Delete the project in Sentry. Terraform won't delete projects.
-2. Run `terraform apply` — auto-discovery drops the project from the
-   `for_each` and both alert rules are destroyed AND the matching Slack
-   channel is archived (Slack doesn't support true channel deletion — the
-   channel becomes a tombstone in the workspace until a Slack admin purges
-   it via the admin UI if desired).
+2. Run `pnpm alerts:infra:plan` and review the proposed rule deletion and Slack
+   channel archival.
+3. Dispatch `.github/workflows/alerts-infra.yml` and approve the
+   `production-infra` gate. Auto-discovery drops the project from `for_each`,
+   destroys both alert rules, and archives the matching Slack channel. Slack
+   does not support true channel deletion; an administrator may later purge
+   the archived channel in the Slack UI.
 
 ## Behavioral notes
 
@@ -145,11 +152,13 @@ revert also creates alert resources that reference those channel names, those
 alerts post to archived channels (silent delivery failure). To revert safely
 without orphaning alerts in archived channels:
 
-1. `terraform state rm 'module.sentry_bridge.restapi_object.sentry_slack_channel["<slug>"]'`
-   for each project (drops the channels from state without archiving them).
-2. Then `git revert <PR-SHA>` + `terraform apply`.
-3. The channels remain in Slack with their history intact; the alerts route
-   to them normally.
+1. Obtain explicit approval for the state recovery. From `alerts/infra`, run
+   `terraform state rm 'module.sentry_bridge.restapi_object.sentry_slack_channel["<slug>"]'`
+   once per project to drop the channels from state without archiving them.
+2. Revert the owning PR and inspect `pnpm alerts:infra:plan`.
+3. Merge the reviewed revert and approve the `production-infra` apply. The
+   channels remain in Slack with their history intact and the alerts continue
+   routing to them.
 
 Other rollback caveats:
 
@@ -160,8 +169,6 @@ Other rollback caveats:
   if any were manually tuned via the Sentry UI between apply and revert,
   that tuning is lost.
 
-For a less-destructive recovery, consider re-applying ONLY the new
-`sentry_alert` resources in the previous (pre-revert) state via
-`terraform apply -target=module.sentry_bridge.sentry_alert.slack_default
--target=module.sentry_bridge.sentry_alert.slack_critical_fanout`, then
-patching the Slack channel name out-of-band.
+Do not use a local targeted apply or patch channel routing out of band. If the
+normal revert is unsafe, stop and prepare an explicitly approved, state-aware
+recovery plan before mutating either Terraform state or Slack.

@@ -1,81 +1,56 @@
 ---
-title: Terraform CI/CD hardening — decisions recorded
-status: active
+title: Terraform CI/CD hardening — declined alternatives
+status: archived
 owner: eng
-last_verified: 2026-07-08
+canonical: false
+last_verified: 2026-07-17
+doc_type: note
+scope: terraform/infra
+review_interval_days: 365
+garden_lane: notes-plans-archive
 ---
 
-# Terraform CI/CD hardening — decisions recorded
+# Terraform CI/CD hardening — declined alternatives
 
-Migrated off `BACKLOG.md` 2026-05-29. PR #622 shipped a saved-plan-style
-"skip-when-no-changes" + production-environment gate refactor for `alerts/rules/`
-and `alerts/infra/`. Follow-up PRs added Aegis auto-apply, scheduled drift
-detection, and the local Terraform apply guard. GCP/state plan-credential
-hardening is complete: the read-only plan SA (`metrics-bridge-plan-readonly@` →
-`org-terraform-plan-readonly@…seed`, `objectViewer` on the state bucket only)
-runs every PR-triggered Terraform plan job — grafana-only stacks (`alerts-rules`,
-`aegis`) via `-backend-config` + `-lock=false`, and `alerts/infra` via the same
-plus `-refresh=false`. `terraform-drift.yml` applies the same per-leg least
-privilege (registry-driven via `matrix.planSa`).
+This is a historical decision record from the 2026-05 Terraform hardening
+workstream. Everything actionable in that workstream shipped. Current plan and
+apply behavior belongs in
+[`ADR 0029`](../adr/0029-ci-apply-production-infra-gate.md),
+[`docs/terraform.md`](../terraform.md), and
+[`terraform-secret-strategy-2026-07.md`](terraform-secret-strategy-2026-07.md).
 
-**Everything actionable shipped.** The two decisions below were evaluated and
-**declined by design** — recorded here so they are not re-litigated. (See also
-PR #686, which recorded the fully-read-only drift cron as declined on
-cost/benefit.) Follow-up PR hardening in 2026-07 also removed production
-`TF_VAR_*` values from same-repo PR plan environments for the secret-bearing
-Terraform workflows: PRs use validation-safe placeholders, while
-push/dispatch plans and `production-infra`-gated applies keep the real secrets.
-`aegis` and `governance-watchdog` run full config-vs-state PR plans with
-placeholders and no refresh. `alerts-rules` targets
-`terraform_data.pr_plan_secretless_guard` plus the non-secret rule groups that
-route through the global notification policy without direct contact-point
-dependencies. It still leaves contact points, notification policies, and rule
-groups with direct `notification_settings` to trusted main/apply plans. The
-`alerts/infra` PR path is also intentionally narrower: after init/validate it
-targets `terraform_data.pr_plan_secretless_guard` only. The handler module still
-depends on Slack channel outputs and placeholder-backed Secret Manager versions;
-the sentinels remain for Grafana/Sentry/Slack/QuickNode/GitHub resources that
-perform authenticated plan-time checks and cannot run with placeholders.
+The two alternatives below were deliberately declined. They remain here so a
+future change in constraints can reopen the decision without treating it as
+forgotten work.
 
-## Declined: full-refresh read-only plan for the `alerts/infra` leg (PR plan and drift)
+## Declined: full-refresh read-only planning for alerts delivery
 
-The `alerts/infra` PR plan (targeted secretless sentinel plan + `-refresh=false`)
-and its drift leg (kept on the write SA) stop short of a full-refresh read-only
-plan for the same irreducible reason: the read-only seed SA has no project
-roles, so refreshing the stack's google-provider resources would 403 (the
-grafana legs were free to flip because grafana refreshes over its own token,
-never touching GCP). Closing it needs a read identity with access to the
-`project_factory`-managed project.
+The alerts-delivery stack could not use the state-only plan identity for a
+full-refresh plan: refreshing its Google-provider resources requires project
+read access, while that identity intentionally has access only to read the
+Terraform state object.
 
-- **PR plan:** don't. The only way to full-refresh the PR plan is to arm the
-  read-only plan SA — the SA a malicious same-repo PR can mint via a plan-time
-  data source — with project read, _widening_ the PR attack surface.
-  The targeted secretless sentinel plan plus `-refresh=false` is a _functional_
-  limitation (the PR plan won't surface full-stack diffs or out-of-band drift),
-  not a security gap; drift is caught daily and push/apply paths re-plan fully.
-- **Drift leg:** evaluated explicitly (incl. an operator offering to create the
-  grant, 2026-05-29) and declined on cost/benefit. The only sound build is a
-  _dedicated_ `*-drift-readonly@` SA (never PR-reachable) with a hand-scoped read
-  role on the alerts project + a human-reviewed apply on the `terraform/`
-  platform stack — moderate, recurring cost (the scoped role must track the
-  stack's resource set). The gain is low and partial: it takes the daily
-  unattended cron to 0 write-SA legs, but the same `org-terraform@` deployer is
-  minted by the apply jobs on every merge via the same pinned actions, so a
-  supply-chain compromise of a shared action is unaffected; and drift is
-  schedule/dispatch-only, so the malicious-PR vector never applied here.
-  **Reopen only under a stated "no unattended CI job holds write credentials"
-  invariant** (audit/compliance, or expanding what auto-applies) — then it's one
-  line-item in machinery you're building anyway.
+- **Same-repository PR plans:** granting project read to an identity reachable
+  by checked-out PR code would widen the PR attack surface. The accepted
+  limitation is a targeted, secretless, no-refresh PR plan; trusted main and
+  apply paths remain authoritative.
+- **Scheduled drift:** a dedicated drift-only identity with a hand-scoped read
+  role was considered and declined on cost/benefit. Its role would need to
+  track the stack's resource set, while apply jobs would still require the
+  write deployer and pinned shared actions.
+
+Reopen this only under a stated invariant that no unattended CI job may hold
+write credentials, such as a new audit requirement or a material expansion in
+what auto-applies.
 
 ## Declined: saved-plan binding via KMS
 
-PR #622's audit considered re-introducing the binary `tfplan` artifact via KMS
-envelope encryption to recover the "binding plan" property (byte-for-byte
-equality between PR-time review and apply-time execution). Cost/value: alerts
-stacks change ~1-2× per month, blast radius is alert delivery (recoverable on
-15-min cycle), and the drift window between plan and apply is mitigated by the
-re-plan at the apply gate. **Hard prerequisite to revisit: keep scheduled drift
-detection healthy for every auto-applied stack.** Once drift is caught within 24h
-regardless of which plan ran, the marginal value of binding-plan approaches zero.
-Reopen only if a higher-blast-radius stack (e.g. `terraform/` platform) moves to
-auto-apply.
+The hardening audit considered encrypting a binary `tfplan` with KMS to recover
+byte-for-byte binding between the reviewed plan and apply. It was declined
+because these alerting stacks change infrequently, their blast radius is
+recoverable, and the environment-gated apply path re-plans before mutation.
+
+The prerequisite for reconsidering saved-plan binding is a higher-blast-radius
+stack moving to auto-apply, or loss of healthy scheduled drift detection for an
+auto-applied stack. Without one of those changes, the added artifact, key, and
+decryption machinery is not justified.
