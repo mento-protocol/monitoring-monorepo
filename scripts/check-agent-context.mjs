@@ -59,6 +59,16 @@ function readJsonRequired(filePath, displayPath = filePath) {
   }
 }
 
+function testOnlyInputPath(environmentVariable, canonicalPath) {
+  const override = process.env[environmentVariable];
+  if (!override) return canonicalPath;
+  if (process.env.NODE_ENV !== "test") {
+    fail(`${environmentVariable}: test-only override requires NODE_ENV=test`);
+    return canonicalPath;
+  }
+  return override;
+}
+
 function normalizeSkillContent(filePath, content) {
   if (!filePath.endsWith("forensic-report/SKILL.md")) return content;
   return content
@@ -432,10 +442,10 @@ function validateClaudePermissions(settings) {
 }
 
 // Test-only input overrides let the regression suite mutate disposable
-// fixtures instead of tracked runtime configuration. Normal invocations read
-// the repository files because these variables are unset.
+// fixtures instead of tracked runtime configuration. Fail closed if an
+// override leaks into a normal invocation.
 const codexHooks = readJsonRequired(
-  process.env.AGENT_CONTEXT_CODEX_HOOKS_FILE ?? ".codex/hooks.json",
+  testOnlyInputPath("AGENT_CONTEXT_CODEX_HOOKS_FILE", ".codex/hooks.json"),
   ".codex/hooks.json",
 );
 if (codexHooks) {
@@ -451,7 +461,10 @@ if (codexHooks) {
 }
 
 const claudeSettings = readJsonRequired(
-  process.env.AGENT_CONTEXT_CLAUDE_SETTINGS_FILE ?? ".claude/settings.json",
+  testOnlyInputPath(
+    "AGENT_CONTEXT_CLAUDE_SETTINGS_FILE",
+    ".claude/settings.json",
+  ),
   ".claude/settings.json",
 );
 if (claudeSettings) {

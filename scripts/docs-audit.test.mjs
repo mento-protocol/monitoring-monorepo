@@ -116,6 +116,21 @@ test("weekly selection is deterministic and explicit selection is one-based", ()
     () => weeklySelection("2026-02-31", laneShards),
     /invalid date/,
   );
+  const laneShardsWithEmptyLane = new Map(laneShards);
+  laneShardsWithEmptyLane.set("notes-plans-archive", []);
+  const empty = weeklySelection("2026-07-17", laneShardsWithEmptyLane, {
+    lane: "notes-plans-archive",
+  });
+  assert.equal(empty.shardIndex, null);
+  assert.equal(empty.shardCount, 0);
+  assert.throws(
+    () =>
+      weeklySelection("2026-07-17", laneShardsWithEmptyLane, {
+        lane: "notes-plans-archive",
+        shard: 1,
+      }),
+    /lane has no documents/,
+  );
 });
 
 test("finds bounded version-reference candidates", () => {
@@ -196,6 +211,22 @@ test("CLI emits a dry-run JSON packet and rejects bad shards", () => {
     );
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).dry_run, true);
+    const empty = spawnSync(
+      process.execPath,
+      [
+        scriptPath,
+        "--root",
+        repo,
+        "--lane",
+        "notes-plans-archive",
+        "--format",
+        "json",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.equal(JSON.parse(empty.stdout).empty_lane, true);
+    assert.equal(JSON.parse(empty.stdout).shard, null);
     const invalid = spawnSync(
       process.execPath,
       [
@@ -211,5 +242,12 @@ test("CLI emits a dry-run JSON packet and rejects bad shards", () => {
     );
     assert.equal(invalid.status, 2);
     assert.match(invalid.stderr, /shard must be between/);
+    const missingLane = spawnSync(
+      process.execPath,
+      [scriptPath, "--root", repo, "--lane"],
+      { encoding: "utf8" },
+    );
+    assert.equal(missingLane.status, 2);
+    assert.match(missingLane.stderr, /--lane requires a value/);
   });
 });

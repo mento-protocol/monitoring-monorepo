@@ -104,6 +104,17 @@ test("classification is single-valued and explicit metadata overrides defaults",
     classifyDocumentation("pkg/AGENTS.md").doc_type,
     "agent-instructions",
   );
+  for (const file of [
+    "alerts/infra/onchain-event-listeners/WEBHOOK_STATE_MANAGEMENT.md",
+    "governance-watchdog/ADDING_EVENTS.md",
+    "governance-watchdog/DEPLOY_FROM_SCRATCH.md",
+  ]) {
+    assert.equal(
+      classifyDocumentation(file).garden_lane,
+      "operator-runbooks",
+      file,
+    );
+  }
   const override = classifyDocumentation("docs/notes/example.md", {
     doc_type: "reference",
     garden_lane: "package-readmes-reference",
@@ -178,7 +189,7 @@ test("inventory reports stable ordering, inbound sources, archived state, and br
     write(
       repo,
       "docs/guide.md",
-      "---\ntitle: Guide\nstatus: archived\nowner: eng\ncanonical: false\n---\n# Guide\n\n[Missing](missing.md)\n",
+      "---\ntitle: Guide\nstatus: archived\nowner: eng\ncanonical: false\n---\n# Guide\n\n[Self](./guide.md#guide)\n[Missing](missing.md)\n",
     );
     const inventory = buildDocumentationInventory({
       repoRoot: repo,
@@ -268,6 +279,20 @@ test("render groups documents in deterministic lane order", () => {
         rendered.indexOf("## operator-runbooks"),
     );
     assert.ok(rendered.includes("`AGENTS.md`"));
+  });
+});
+
+test("render percent-encodes Markdown-sensitive document paths", () => {
+  withRepo((repo) => {
+    write(repo, "docs/plan (draft).md", "# Draft\n");
+    const inventory = buildDocumentationInventory({
+      repoRoot: repo,
+      files: ["docs/plan (draft).md"],
+    });
+    const rendered = renderDocumentationIndex(inventory, {
+      lastVerified: "2026-07-17",
+    });
+    assert.match(rendered, /\]\(plan%20%28draft%29\.md\)/);
   });
 });
 

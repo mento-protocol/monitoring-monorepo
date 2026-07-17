@@ -160,7 +160,8 @@ assert_not_contains_mapped() {
 
 run_context_check_expect_failure() {
   set +e
-  AGENT_CONTEXT_CODEX_HOOKS_FILE="$codex_hooks_fixture" \
+  NODE_ENV=test \
+    AGENT_CONTEXT_CODEX_HOOKS_FILE="$codex_hooks_fixture" \
     AGENT_CONTEXT_CLAUDE_SETTINGS_FILE="$claude_settings_fixture" \
     node scripts/check-agent-context.mjs > "$output_file" 2>&1
   local exit_code=$?
@@ -2427,6 +2428,15 @@ assert_contains "- pnpm agent:context-check (docs markdown may be canonical (fro
 run_gate ".codex/hooks.json"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
+
+set +e
+AGENT_CONTEXT_CODEX_HOOKS_FILE="$codex_hooks_fixture" \
+  node scripts/check-agent-context.mjs > "$output_file" 2>&1
+unscoped_override_status=$?
+set -e
+[[ "$unscoped_override_status" -ne 0 ]] ||
+  fail "expected an unscoped test input override to fail"
+assert_contains "AGENT_CONTEXT_CODEX_HOOKS_FILE: test-only override requires NODE_ENV=test"
 
 : > "$codex_hooks_fixture"
 run_context_check_expect_failure

@@ -32,7 +32,9 @@ Every unique document belongs to exactly one lane:
 `pnpm docs:audit --dry-run` deterministically selects one lane each week.
 UTC weeks start on Monday. After all six lanes have been selected, the next
 rotation advances to the next shard within that lane. The rule uses only the
-date and current catalog, so it needs no mutable cursor file.
+date and current catalog, so it needs no mutable cursor file. If the selected
+lane currently has no documents, the planner emits a no-op packet instead of
+failing CI or requiring placeholder documentation.
 
 Each shard contains at most 10 documents and 15,000 source words. A document
 that exceeds 15,000 words forms a singleton shard. Use explicit selection when

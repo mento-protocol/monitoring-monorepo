@@ -55,7 +55,7 @@ const PACKAGE_ROOTS = new Set([
 ]);
 
 const OPERATOR_NAME_PATTERN =
-  /(?:deploy|deployment|rollback|terraform|quick-commands|webhook-state|adding-events|from-scratch)/i;
+  /(?:deploy|deployment|rollback|terraform|quick[_-]commands|webhook[_-]state|adding[_-]events|from[_-]scratch)/i;
 
 function parseFieldList(raw) {
   const data = {};
@@ -458,6 +458,7 @@ export function buildDocumentationInventory({ repoRoot, files }) {
       } else if (
         resolved.kind === "valid" &&
         resolved.path &&
+        resolved.path !== source &&
         documentSet.has(resolved.path)
       ) {
         if (!inboundSources.has(resolved.path))
@@ -492,7 +493,13 @@ function escapeCell(value) {
 }
 
 function relativeCatalogLink(file) {
-  return path.posix.relative("docs", file) || "README.md";
+  const relative = path.posix.relative("docs", file) || "README.md";
+  return relative
+    .split("/")
+    .map((segment) =>
+      encodeURIComponent(segment).replaceAll("(", "%28").replaceAll(")", "%29"),
+    )
+    .join("/");
 }
 
 function reviewCell(record) {

@@ -87,6 +87,11 @@ test("project_doc_max_bytes rejects invalid and duplicate values", () => {
       ),
     /top-level key/,
   );
+  assert.throws(
+    () =>
+      parseProjectDocMaxBytes("[[plugins]]\nproject_doc_max_bytes = 4096\n"),
+    /top-level key/,
+  );
 });
 
 test("unreadable config surfaces a direct filesystem error", () => {

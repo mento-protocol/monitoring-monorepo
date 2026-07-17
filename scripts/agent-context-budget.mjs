@@ -24,9 +24,9 @@ export function parseProjectDocMaxBytes(configText) {
   for (const [index, line] of configText.split("\n").entries()) {
     const trimmed = line.replace(/\s+#.*$/, "").trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
-    const tableMatch = /^\[([^\]]+)]$/.exec(trimmed);
+    const tableMatch = /^(?:\[([^\]]+)]|\[\[([^\]]+)]])$/.exec(trimmed);
     if (tableMatch) {
-      table = tableMatch[1];
+      table = tableMatch[1] ?? tableMatch[2];
       continue;
     }
     const keyMatch = /^project_doc_max_bytes\s*=\s*(\S+)$/.exec(trimmed);

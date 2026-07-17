@@ -20,20 +20,22 @@ function parseArgs(argv) {
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--root") options.repoRoot = argv[(index += 1)];
-    else if (arg === "--date") options.date = argv[(index += 1)];
-    else if (arg === "--lane") options.lane = argv[(index += 1)];
-    else if (arg === "--shard") options.shard = Number(argv[(index += 1)]);
-    else if (arg === "--format") options.format = argv[(index += 1)];
+    const takeValue = () => {
+      const value = argv[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error(`${arg} requires a value`);
+      }
+      index += 1;
+      return value;
+    };
+    if (arg === "--root") options.repoRoot = takeValue();
+    else if (arg === "--date") options.date = takeValue();
+    else if (arg === "--lane") options.lane = takeValue();
+    else if (arg === "--shard") options.shard = Number(takeValue());
+    else if (arg === "--format") options.format = takeValue();
     else if (arg === "--dry-run") options.dryRun = true;
     else if (arg === "--help") options.help = true;
     else throw new Error(`unknown argument: ${arg}`);
-  }
-  for (const [flag, value] of [
-    ["--root", options.repoRoot],
-    ["--date", options.date],
-  ]) {
-    if (!value) throw new Error(`${flag} requires a value`);
   }
   if (!["markdown", "json"].includes(options.format)) {
     throw new Error("--format must be markdown or json");

@@ -87,8 +87,19 @@ export function weeklySelection(dateInput, laneShards, explicit = {}) {
     ];
   if (!GARDEN_LANES.includes(lane)) throw new Error(`unknown lane: ${lane}`);
   const shards = laneShards.get(lane) || [];
-  if (shards.length === 0) throw new Error(`lane has no documents: ${lane}`);
   const cycle = Math.floor(weekSerial / GARDEN_LANES.length);
+  if (shards.length === 0) {
+    if (explicit.shard !== undefined) {
+      throw new Error(`lane has no documents: ${lane}`);
+    }
+    return {
+      lane,
+      shardIndex: null,
+      weekSerial,
+      cycle,
+      shardCount: 0,
+    };
+  }
   const defaultShard =
     ((cycle % shards.length) + shards.length) % shards.length;
   const shardIndex =
@@ -150,7 +161,10 @@ export function buildAuditPacket({
 }) {
   const laneShards = buildLaneShards(inventory.records);
   const selection = weeklySelection(date, laneShards, { lane, shard });
-  const records = laneShards.get(selection.lane)[selection.shardIndex];
+  const records =
+    selection.shardIndex === null
+      ? []
+      : laneShards.get(selection.lane)[selection.shardIndex];
   const files = records.map((record) => {
     const content = readFileSync(path.join(repoRoot, record.path), "utf8");
     return {
@@ -175,20 +189,26 @@ export function buildAuditPacket({
     files: trackedInstructionFiles(repoRoot),
     limitBytes: resolveProjectDocMaxBytes(repoRoot),
   });
+  const shardNumber =
+    selection.shardIndex === null ? null : selection.shardIndex + 1;
   return {
     schema_version: 1,
-    fingerprint: `docs-garden:${selection.lane}:${selection.shardIndex + 1}-of-${selection.shardCount}`,
+    fingerprint:
+      shardNumber === null
+        ? `docs-garden:${selection.lane}:empty`
+        : `docs-garden:${selection.lane}:${shardNumber}-of-${selection.shardCount}`,
     selected_for: date,
     dry_run: dryRun,
     cycle: {
       cadence: "weekly",
-      rule: "Monday-based UTC week selects one of six lanes; each completed six-week rotation advances that lane's shard modulo its current shard count.",
+      rule: "Monday-based UTC week selects one of six lanes; each completed six-week rotation advances that lane's shard modulo its current shard count. Empty lanes produce a no-op packet.",
       week_serial: selection.weekSerial,
       rotation: selection.cycle,
     },
     lane: selection.lane,
-    shard: selection.shardIndex + 1,
+    shard: shardNumber,
     shard_count: selection.shardCount,
+    empty_lane: selection.shardCount === 0,
     document_count: files.length,
     source_words: wordCount,
     oversized_singleton: files.length === 1 && files[0].words > MAX_SHARD_WORDS,
@@ -211,8 +231,11 @@ function escapeCell(value) {
 }
 
 export function renderAuditPacket(packet) {
+  const shardLabel = packet.empty_lane
+    ? "empty"
+    : `${packet.shard}/${packet.shard_count}`;
   const lines = [
-    `# Documentation garden packet: ${packet.lane} ${packet.shard}/${packet.shard_count}`,
+    `# Documentation garden packet: ${packet.lane} ${shardLabel}`,
     "",
     `Fingerprint: \`${packet.fingerprint}\``,
     `Selected for: ${packet.selected_for} · ${packet.document_count} documents · ${packet.source_words.toLocaleString("en-US")} source words${packet.oversized_singleton ? " · oversized singleton" : ""}`,
@@ -222,10 +245,18 @@ export function renderAuditPacket(packet) {
     `Allowed dispositions: ${AUDIT_DISPOSITIONS.join(", ")}. Every disposition requires evidence.`,
     "",
     `Agent-context budget: ${packet.context_budget.oversized_routes.length} oversized route(s) at a ${packet.context_budget.limit_bytes.toLocaleString("en-US")}-byte limit${packet.context_budget.oversized_routes.length ? ` (${packet.context_budget.oversized_routes.join(", ")})` : ""}.`,
+  ];
+  if (packet.empty_lane) {
+    lines.push(
+      "",
+      "This lane currently contains no documents; no audit work is scheduled.",
+    );
+  }
+  lines.push(
     "",
     "| Document | Authority / lifecycle | Type / scope | Owner | Words / inbound | Last verified / changed | Signals | Disposition | Evidence |",
     "| --- | --- | --- | --- | ---: | --- | --- | --- | --- |",
-  ];
+  );
   for (const record of packet.files) {
     const signals = [
       record.orphan ? "orphan" : null,
