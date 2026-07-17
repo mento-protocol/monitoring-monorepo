@@ -322,7 +322,10 @@ Field semantics:
   no source checkout, so this is derived from Sentry evidence alone and says so.
 - `proposed_action` — 1–3 lines describing the fix/config change/escalation.
 - `duplicate_of` — Sentry SHORT-IDs of other queue issues in the same
-  culprit/message family; empty when none found.
+  culprit/message family; empty when none found. The duplicate search spans
+  **all** issue states (`gh issue list --state all`) — verdicted queue issues
+  auto-close (see "Queue closing" below), so the ledger's triage history lives
+  mostly in closed issues.
 
 ### Verdict label application (deterministic)
 
@@ -334,6 +337,16 @@ validates it against exactly the four allowed values, removes
 comment exists, the step fails the job loudly (`::error::` + exit 1) and leaves
 `sentry:needs-triage` in place so the next scheduled run retries the issue — a
 failed triage never silently strands an unlabeled issue.
+
+**Regression fence:** a reopened regression still carries the previous round's
+verdict comment (Stage A's reopen path sheds labels, not comments). The step
+therefore only accepts a verdict comment that is strictly newer than the
+newest regression-reopen comment (`Regressed in Sentry (last seen …)`,
+compared by comment `createdAt`); a stale pre-regression verdict is treated
+exactly like a missing one — fail loudly, keep `sentry:needs-triage` — so a
+regressed issue can never be re-labeled or re-closed off a verdict that never
+investigated the regression. On first triage (no regression comment) the
+fence is a no-op.
 
 The verdict **value** maps to the verdict **label** as follows (label names are
 owned by the Stage A queue contract / ingest bootstrap):

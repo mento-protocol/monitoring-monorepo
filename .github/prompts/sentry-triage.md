@@ -8,7 +8,7 @@ Investigate:
 
 1. Fetch the Sentry issue + latest event via the Sentry MCP tools (stack trace, breadcrumbs, tags, event/user counts, first/last seen, environment, release).
 2. If the affected project is analytics-mento-org, the source is in this checkout under ui-dashboard/ — read the relevant code paths. For other projects (analytics-api → mento-protocol/mento-analytics-api; app/governance/reserve-mento-org → mento-protocol/frontend-monorepo; minipay-dapp → mento-protocol/minipay-dapp) you do NOT have the source; triage from Sentry evidence alone and say so.
-3. Check for duplicates: search open queue issues (label sentry-triage) for the same underlying error (same culprit/message family across SHORT-IDs).
+3. Check for duplicates: search queue issues across ALL states — pass `--state all` to `gh issue list` (label sentry-triage; the default is open-only) — for the same underlying error (same culprit/message family across SHORT-IDs). Verdicted queue issues auto-close, so most of the ledger's triage history lives in closed issues.
 
 Classify (verdict):
 

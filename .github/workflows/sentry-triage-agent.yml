@@ -225,12 +225,32 @@ jobs:
           # data — it is only ever handled as quoted data here (never
           # interpolated into a command), and the extracted verdict is
           # constrained to the closed label set by the case statement.
-          body=$(gh issue view "${QUEUE_ISSUE_NUMBER}" \
+          comments=$(gh issue view "${QUEUE_ISSUE_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --json comments \
-            --jq '[.comments[].body | select(startswith("<!-- sentry-triage-verdict:v1 -->"))] | last // ""')
+            --json comments)
+          body=$(printf '%s' "${comments}" | jq -r \
+            '[.comments[] | select(.body | startswith("<!-- sentry-triage-verdict:v1 -->"))] | sort_by(.createdAt) | last | .body // ""')
           if [ -z "${body}" ]; then
             echo "::error::No verdict comment with the sentry-triage-verdict:v1 marker found on issue #${QUEUE_ISSUE_NUMBER}; leaving sentry:needs-triage in place for retry."
+            exit 1
+          fi
+          # Regression fence: a reopened regression keeps the PREVIOUS run's
+          # verdict comment (Stage A's reopen path only sheds labels). If the
+          # re-triage agent fails to post a fresh verdict, the newest marker
+          # comment would be the stale pre-regression one — and acting on it
+          # would re-label (and re-close) the regressed issue with a verdict
+          # that never investigated the regression. Only accept a verdict
+          # comment strictly newer than the newest regression-reopen comment
+          # (Stage A posts the fixed prefix "Regressed in Sentry (last seen ");
+          # ISO-8601 UTC timestamps compare correctly as strings. When no
+          # regression comment exists (normal first triage), the fence is a
+          # no-op.
+          verdict_created=$(printf '%s' "${comments}" | jq -r \
+            '[.comments[] | select(.body | startswith("<!-- sentry-triage-verdict:v1 -->"))] | sort_by(.createdAt) | last | .createdAt // ""')
+          regressed_created=$(printf '%s' "${comments}" | jq -r \
+            '[.comments[] | select(.body | startswith("Regressed in Sentry (last seen "))] | sort_by(.createdAt) | last | .createdAt // ""')
+          if [ -n "${regressed_created}" ] && ! [[ "${verdict_created}" > "${regressed_created}" ]]; then
+            echo "::error::Newest verdict comment on issue #${QUEUE_ISSUE_NUMBER} (${verdict_created}) is not newer than the newest regression-reopen comment (${regressed_created}) — stale pre-regression verdict; leaving sentry:needs-triage in place for retry."
             exit 1
           fi
           verdict=$(printf '%s\n' "${body}" | sed -n 's/^verdict:[[:space:]]*\([a-z-]*\).*$/\1/p' | head -n 1)
