@@ -62,6 +62,7 @@ import {
   MAX_DUPLICATE_LOOKUPS,
   parseShortId,
   PROJECTABLE_VERDICTS,
+  PROJECTED_COMMENT_PREFIX,
   PROJECTED_LABEL,
   resolveVerdict,
   VALID_VERDICTS,
@@ -352,7 +353,7 @@ async function markStubProjected(localRun, localRepo, issue, projectedUrl) {
       "-R",
       localRepo,
       "--body",
-      `Projected to owning repo: ${projectedUrl}`,
+      `${PROJECTED_COMMENT_PREFIX}${projectedUrl}`,
     ]);
   }
 }

@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 import {
+  AUTOFIX_COMMENT_PREFIX,
   buildDigest,
+  chunkBriefs,
   chunkLines,
   classifyIssue,
   collectIssues,
   escapeSlackText,
+  extractAutofixUrl,
+  extractProjectedUrl,
   extractVerdictYamlBlock,
   findLatestVerdictComment,
+  formatBriefList,
+  formatBriefText,
   formatSummaryForSlack,
   LABEL_TO_VERDICT,
   MAX_SECTION_TEXT_LEN,
@@ -15,6 +21,7 @@ import {
   parseIssueNumbers,
   parseQueueTitle,
   parseVerdictComment,
+  PROJECTED_COMMENT_PREFIX,
   sanitizeSummary,
   VERDICT_MARKER,
 } from "./sentry-triage-digest.mjs";
@@ -69,13 +76,20 @@ function assertThrows(fn, pattern) {
   throw new Error("expected function to throw");
 }
 
-// Build a verdict comment body the way the triage agent would.
+const SENTRY_PERMALINK = "https://mento-labs.sentry.io/issues/6197137101/";
+
+// Build a verdict comment body the way the triage agent would. The needs-human
+// brief fields are appended only when provided (optional-absent otherwise).
 function verdictComment({
   verdict = "code-fix",
   confidence = "medium",
   summary = "A short summary",
+  humanQuestion = null,
+  hypotheses = null,
+  investigated = null,
+  escalationReason = null,
 } = {}) {
-  return [
+  const lines = [
     VERDICT_MARKER,
     "",
     "```yaml",
@@ -88,9 +102,31 @@ function verdictComment({
     "proposed_action: |",
     "  Some abstract action.",
     "duplicate_of: []",
+  ];
+  if (humanQuestion != null)
+    lines.push("human_question: |", `  ${humanQuestion}`);
+  if (hypotheses != null) {
+    lines.push("hypotheses:", ...hypotheses.map((h) => `  - ${h}`));
+  }
+  if (investigated != null) {
+    lines.push("investigated:", ...investigated.map((it) => `  - ${it}`));
+  }
+  if (escalationReason != null) {
+    lines.push("escalation_reason: |", `  ${escalationReason}`);
+  }
+  lines.push("```", "", "Prose diagnosis goes here.");
+  return lines.join("\n");
+}
+
+function queueBody(permalink = SENTRY_PERMALINK) {
+  return [
+    "<!-- sentry-triage:v1 -->",
+    "",
+    "```yaml",
+    `permalink: "${permalink}"`,
     "```",
     "",
-    "Prose diagnosis goes here.",
+    `[View in Sentry](${permalink})`,
   ].join("\n");
 }
 
@@ -104,7 +140,6 @@ await test("escapeSlackText escapes & < > with & first", () => {
 });
 
 await test("escapeSlackText neutralizes Slack mention/link control syntax", () => {
-  // <!channel>, <@U123>, <url|text> all require < and >, which we escape.
   const injected = "<!channel> ping <@U999999> click <https://evil|here>";
   const escaped = escapeSlackText(injected);
   assert(!escaped.includes("<"), "expected all < escaped");
@@ -123,7 +158,6 @@ await test("sanitizeSummary collapses newlines/control chars to single spaces", 
 });
 
 await test("formatSummaryForSlack sanitizes, hard-bounds, then escapes", () => {
-  // A hostile multi-line summary with mention syntax and a fence-breakout try.
   const hostile =
     "<!channel> please\n```\nrm -rf\n``` " + "z".repeat(400) + " <@U1>";
   const out = formatSummaryForSlack(hostile);
@@ -132,6 +166,21 @@ await test("formatSummaryForSlack sanitizes, hard-bounds, then escapes", () => {
   assert(!out.includes(">"), "expected > escaped");
   assert(out.endsWith("…"), "expected hard-truncation ellipsis");
   assert(out.length <= 320, "expected bounded length (<=300 + entities)");
+});
+
+await test("formatBriefText sanitizes, bounds, and escapes a brief field", () => {
+  const out = formatBriefText("Decide <X> or <Y>\nnow");
+  assertEqual(out, "Decide &lt;X&gt; or &lt;Y&gt; now");
+  const long = "z".repeat(500);
+  const bounded = formatBriefText(long);
+  assert(bounded.endsWith("…"), "expected truncation at MAX_BRIEF_LEN");
+  assert(bounded.length <= 405, "expected bound (<=400 + ellipsis)");
+});
+
+await test("formatBriefList joins items with '; ', escapes, and empties to ''", () => {
+  assertEqual(formatBriefList(["a <b>", "c & d"]), "a &lt;b&gt;; c &amp; d");
+  assertEqual(formatBriefList([]), "");
+  assertEqual(formatBriefList(["", "  "]), "");
 });
 
 // ---------------------------------------------------------------------------
@@ -155,7 +204,7 @@ await test("parseQueueTitle returns nulls for a non-queue title", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Verdict-comment parsing (marker + yaml)
+// Verdict-comment parsing (authoritative parser, re-exported from core)
 // ---------------------------------------------------------------------------
 
 await test("extractVerdictYamlBlock pulls the fenced yaml block only", () => {
@@ -172,18 +221,9 @@ await test("parseVerdictComment reads verdict/confidence/summary, ignoring inlin
       summary: "CSP allowlist missing a domain",
     }),
   );
-  assertDeepEqual(parsed, {
-    verdict: "config-fix",
-    confidence: "high",
-    summary: "CSP allowlist missing a domain",
-  });
-});
-
-await test("parseVerdictComment strips one layer of surrounding quotes from summary", () => {
-  const parsed = parseVerdictComment(
-    verdictComment({ summary: '"quoted summary with # hash kept"' }),
-  );
-  assertEqual(parsed.summary, "quoted summary with # hash kept");
+  assertEqual(parsed.verdict, "config-fix");
+  assertEqual(parsed.confidence, "high");
+  assertEqual(parsed.summary, "CSP allowlist missing a domain");
 });
 
 await test("parseVerdictComment rejects out-of-enum verdict/confidence to null", () => {
@@ -192,6 +232,31 @@ await test("parseVerdictComment rejects out-of-enum verdict/confidence to null",
   );
   assertEqual(parsed.verdict, null);
   assertEqual(parsed.confidence, null);
+});
+
+await test("parseVerdictComment surfaces the needs-human brief fields", () => {
+  const parsed = parseVerdictComment(
+    verdictComment({
+      verdict: "needs-human",
+      humanQuestion: "Decide whether to rotate the key or wait.",
+      hypotheses: ["race in connect flow", "upstream RPC flap"],
+      investigated: ["read the handler", "searched for duplicates"],
+      escalationReason: "Security-sensitive surface.",
+    }),
+  );
+  assertEqual(
+    parsed.humanQuestion,
+    "Decide whether to rotate the key or wait.",
+  );
+  assertDeepEqual(parsed.hypotheses, [
+    "race in connect flow",
+    "upstream RPC flap",
+  ]);
+  assertDeepEqual(parsed.investigated, [
+    "read the handler",
+    "searched for duplicates",
+  ]);
+  assertEqual(parsed.escalationReason, "Security-sensitive surface.");
 });
 
 // Pipeline-authored comments resolve to the Actions bot login (see the
@@ -211,8 +276,6 @@ await test("findLatestVerdictComment returns the newest trusted marker-bearing c
 });
 
 await test("findLatestVerdictComment ignores marker comments from untrusted authors", () => {
-  // A drive-by public commenter must not feed summary text into the digest —
-  // a newer hostile marker comment cannot shadow the bot's verdict either.
   const comments = [
     { body: verdictComment({ summary: "legit" }), author: BOT_AUTHOR },
     {
@@ -238,6 +301,47 @@ await test("findLatestVerdictComment ignores marker comments from untrusted auth
   );
 });
 
+await test("findLatestVerdictComment sorts by createdAt — never trusts API array order", () => {
+  // Out-of-order API response: the NEWEST verdict comes FIRST in the array.
+  const comments = [
+    {
+      body: verdictComment({ summary: "newest" }),
+      author: BOT_AUTHOR,
+      createdAt: "2026-07-17T12:00:00Z",
+    },
+    {
+      body: verdictComment({ summary: "older" }),
+      author: BOT_AUTHOR,
+      createdAt: "2026-07-17T09:00:00Z",
+    },
+  ];
+  const latest = findLatestVerdictComment(comments);
+  assert(
+    latest.includes("summary: newest"),
+    "expected createdAt (not array order) to pick the newest verdict",
+  );
+});
+
+await test("findLatestVerdictComment applies the regression fence (stale pre-regression verdict -> null)", () => {
+  // Same selection path as the label/projection steps (core's
+  // selectVerdictComment): a verdict older than the newest regression-reopen
+  // comment describes the previous occurrence and must not feed text into the
+  // digest.
+  const comments = [
+    {
+      body: verdictComment({ summary: "stale" }),
+      author: BOT_AUTHOR,
+      createdAt: "2026-07-17T09:00:00Z",
+    },
+    {
+      body: "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)",
+      author: BOT_AUTHOR,
+      createdAt: "2026-07-17T11:00:00Z",
+    },
+  ];
+  assertEqual(findLatestVerdictComment(comments), null);
+});
+
 await test("findLatestVerdictComment returns null when no marker comment exists", () => {
   assertEqual(
     findLatestVerdictComment([
@@ -250,7 +354,141 @@ await test("findLatestVerdictComment returns null when no marker comment exists"
 });
 
 // ---------------------------------------------------------------------------
-// Classification (label-driven bucket + failed-triage bucket)
+// Projected / fix-PR pointer comment extraction (authorship + shape fenced)
+// ---------------------------------------------------------------------------
+
+const PROJECTED_URL =
+  "https://github.com/mento-protocol/frontend-monorepo/issues/42";
+const FIX_PR_URL = "https://github.com/mento-protocol/frontend-monorepo/pull/9";
+
+await test("extractProjectedUrl reads a trusted, github-shaped projected-issue pointer", () => {
+  const comments = [
+    { body: "chatter", author: BOT_AUTHOR },
+    { body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}`, author: BOT_AUTHOR },
+  ];
+  assertEqual(extractProjectedUrl(comments), PROJECTED_URL);
+});
+
+await test("extractProjectedUrl rejects untrusted authors and non-github urls", () => {
+  assertEqual(
+    extractProjectedUrl([
+      {
+        body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}`,
+        author: { login: "attacker" },
+      },
+    ]),
+    null,
+  );
+  assertEqual(
+    extractProjectedUrl([
+      {
+        body: `${PROJECTED_COMMENT_PREFIX}https://evil.example.com/x`,
+        author: BOT_AUTHOR,
+      },
+    ]),
+    null,
+  );
+  assertEqual(extractProjectedUrl([]), null);
+});
+
+await test("extractAutofixUrl reads the #1278 fix-PR pointer (trusted + github-shaped)", () => {
+  const comments = [
+    { body: `${AUTOFIX_COMMENT_PREFIX}${FIX_PR_URL}`, author: BOT_AUTHOR },
+  ];
+  assertEqual(extractAutofixUrl(comments), FIX_PR_URL);
+  assertEqual(
+    extractAutofixUrl([
+      {
+        body: `${AUTOFIX_COMMENT_PREFIX}${FIX_PR_URL}`,
+        author: { login: "x" },
+      },
+    ]),
+    null,
+  );
+  assertEqual(extractAutofixUrl([]), null);
+});
+
+const REGRESSION_COMMENT =
+  "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)";
+
+await test("pointer lookup drops a STALE pre-regression pointer (regression fence)", () => {
+  // The stub was projected/autofixed, closed, then regressed + reopened. The
+  // old pointers survive but describe the PREVIOUS occurrence — a re-triaged
+  // issue must not inherit them.
+  const staleProjected = {
+    body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T09:00:00Z",
+  };
+  const staleAutofix = {
+    body: `${AUTOFIX_COMMENT_PREFIX}${FIX_PR_URL}`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T09:30:00Z",
+  };
+  const regression = {
+    body: REGRESSION_COMMENT,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T11:00:00Z",
+  };
+  assertEqual(extractProjectedUrl([staleProjected, regression]), null);
+  assertEqual(extractAutofixUrl([staleAutofix, regression]), null);
+});
+
+await test("pointer lookup accepts a FRESH post-regression pointer over a stale one", () => {
+  const regression = {
+    body: REGRESSION_COMMENT,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T11:00:00Z",
+  };
+  const freshProjected = {
+    body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T12:00:00Z",
+  };
+  assertEqual(
+    extractProjectedUrl([
+      {
+        body: `${PROJECTED_COMMENT_PREFIX}https://github.com/mento-protocol/frontend-monorepo/issues/1`,
+        author: BOT_AUTHOR,
+        createdAt: "2026-07-17T09:00:00Z",
+      },
+      regression,
+      freshProjected,
+    ]),
+    PROJECTED_URL,
+  );
+});
+
+await test("pointer lookup sorts by createdAt — never trusts API array order", () => {
+  // Out-of-order API response: the NEWEST pointer comes FIRST in the array;
+  // an older pointer (different URL) comes last. createdAt must win.
+  const newest = {
+    body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T12:00:00Z",
+  };
+  const older = {
+    body: `${PROJECTED_COMMENT_PREFIX}https://github.com/mento-protocol/frontend-monorepo/issues/1`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T09:00:00Z",
+  };
+  assertEqual(extractProjectedUrl([newest, older]), PROJECTED_URL);
+  // Same for the fix-PR pointer.
+  const newestFix = {
+    body: `${AUTOFIX_COMMENT_PREFIX}${FIX_PR_URL}`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T12:00:00Z",
+  };
+  const olderFix = {
+    body: `${AUTOFIX_COMMENT_PREFIX}https://github.com/mento-protocol/frontend-monorepo/pull/1`,
+    author: BOT_AUTHOR,
+    createdAt: "2026-07-17T09:00:00Z",
+  };
+  assertEqual(extractAutofixUrl([newestFix, olderFix]), FIX_PR_URL);
+});
+
+// ---------------------------------------------------------------------------
+// Classification (label-driven bucket + section assignment)
 // ---------------------------------------------------------------------------
 
 function issueFixture({
@@ -259,11 +497,13 @@ function issueFixture({
   project = "app-mento-org",
   labels = [],
   comments = [],
+  body = queueBody(),
 } = {}) {
   return {
     number,
     title: `[sentry] ${shortId} (${project}, error)`,
     url: `https://github.com/mento-protocol/monitoring-monorepo/issues/${number}`,
+    body,
     labels: labels.map((name) => ({ name })),
     comments: comments.map((comment) => ({ author: BOT_AUTHOR, ...comment })),
   };
@@ -283,26 +523,84 @@ await test("classifyIssue buckets by the verdict label, not the comment text", (
   assertEqual(entry.verdict, "config-fix");
   assertEqual(entry.confidence, "medium");
   assertEqual(entry.summary, "sum");
+  // No projected/fix pointer -> the Routed section.
+  assertEqual(entry.section, "routed");
 });
 
-await test("classifyIssue maps the upstream label to the upstream-transient verdict", () => {
+await test("classifyIssue routes upstream-transient to the wontfix section", () => {
   const entry = classifyIssue(
     issueFixture({ labels: ["sentry-triage", "sentry:verdict-upstream"] }),
   );
   assertEqual(entry.bucket, "upstream-transient");
+  assertEqual(entry.section, "wontfix");
 });
 
-await test("classifyIssue puts still-needs-triage issues in the failed bucket", () => {
+await test("classifyIssue routes needs-human to the needs-human section with the brief", () => {
+  const entry = classifyIssue(
+    issueFixture({
+      labels: ["sentry-triage", "sentry:verdict-needs-human"],
+      comments: [
+        {
+          body: verdictComment({
+            verdict: "needs-human",
+            humanQuestion: "Decide X or Y.",
+            hypotheses: ["h1"],
+            investigated: ["i1"],
+            escalationReason: "ambiguous",
+          }),
+        },
+      ],
+    }),
+  );
+  assertEqual(entry.section, "needs-human");
+  assertEqual(entry.humanQuestion, "Decide X or Y.");
+  assertDeepEqual(entry.hypotheses, ["h1"]);
+  assertDeepEqual(entry.investigated, ["i1"]);
+  assertEqual(entry.escalationReason, "ambiguous");
+  assertEqual(entry.sentryPermalink, SENTRY_PERMALINK);
+});
+
+await test("classifyIssue routes an actionable verdict with fix-PR data to the autofixed section", () => {
+  const entry = classifyIssue(
+    issueFixture({
+      labels: ["sentry-triage", "sentry:verdict-code-fix"],
+      comments: [
+        { body: verdictComment({ verdict: "code-fix" }) },
+        { body: `${AUTOFIX_COMMENT_PREFIX}${FIX_PR_URL}` },
+      ],
+    }),
+  );
+  assertEqual(entry.section, "autofixed");
+  assertEqual(entry.autofixUrl, FIX_PR_URL);
+});
+
+await test("classifyIssue picks up a projected-issue pointer for the routed link", () => {
+  const entry = classifyIssue(
+    issueFixture({
+      labels: ["sentry-triage", "sentry:verdict-code-fix"],
+      comments: [
+        { body: verdictComment({ verdict: "code-fix" }) },
+        { body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}` },
+      ],
+    }),
+  );
+  assertEqual(entry.section, "routed");
+  assertEqual(entry.projectedUrl, PROJECTED_URL);
+});
+
+await test("classifyIssue puts still-needs-triage issues in the failed bucket/section", () => {
   const entry = classifyIssue(
     issueFixture({ labels: ["sentry-triage", NEEDS_TRIAGE_LABEL] }),
   );
   assertEqual(entry.bucket, "failed");
+  assertEqual(entry.section, "failed");
   assertEqual(entry.verdict, null);
 });
 
 await test("classifyIssue treats an unlabeled batch issue as failed (visible, not dropped)", () => {
   const entry = classifyIssue(issueFixture({ labels: ["sentry-triage"] }));
   assertEqual(entry.bucket, "failed");
+  assertEqual(entry.section, "failed");
 });
 
 await test("classifyIssue falls back to #number when the title does not parse", () => {
@@ -310,15 +608,16 @@ await test("classifyIssue falls back to #number when the title does not parse", 
     number: 42,
     title: "not a queue title",
     url: "",
+    body: "",
     labels: [{ name: "sentry:verdict-needs-human" }],
     comments: [],
   });
   assertEqual(entry.shortId, "#42");
   assertEqual(entry.project, "unknown");
   assertEqual(entry.bucket, "needs-human");
+  assertEqual(entry.section, "needs-human");
 });
 
-// LABEL_TO_VERDICT preserves the contract's upstream asymmetry.
 await test("LABEL_TO_VERDICT encodes the upstream label/value asymmetry", () => {
   assertEqual(
     LABEL_TO_VERDICT["sentry:verdict-upstream"],
@@ -328,10 +627,15 @@ await test("LABEL_TO_VERDICT encodes the upstream label/value asymmetry", () => 
 });
 
 // ---------------------------------------------------------------------------
-// Digest payload assembly (shape, counts, ordering, escaping)
+// Digest payload assembly (shape, counts, section ordering/omission)
 // ---------------------------------------------------------------------------
 
 const NOW = new Date("2026-07-17T14:20:33.000Z");
+
+/** All block text joined — handy for order/substring assertions. */
+function allText(payload) {
+  return payload.blocks.map((block) => block.text.text).join("\n");
+}
 
 await test("buildDigest produces a valid chat.postMessage payload shape", () => {
   const payload = buildDigest(
@@ -358,7 +662,6 @@ await test("buildDigest produces a valid chat.postMessage payload shape", () => 
     payload.blocks[0].text.text.includes("2026-07-17 14:20 UTC"),
     "expected UTC timestamp",
   );
-  // Payload must be JSON-serializable (the workflow curls it verbatim).
   JSON.parse(JSON.stringify(payload));
 });
 
@@ -374,31 +677,41 @@ await test("every mrkdwn text object sets verbatim: true (no Slack auto-parsing)
     ],
     { channel: "#engineering", now: NOW },
   );
-  assert(payload.blocks.length >= 3, "expected header/counts/lines blocks");
+  assert(payload.blocks.length >= 3, "expected header/counts/section blocks");
   for (const block of payload.blocks) {
     assertEqual(block.text.verbatim, true);
   }
 });
 
-await test("buildDigest renders the counts line in contract order incl. failed triage", () => {
+await test("buildDigest keeps the counts header line in contract order incl. failed triage", () => {
   const payload = buildDigest(
     [
       issueFixture({ number: 1, labels: ["sentry:verdict-code-fix"] }),
       issueFixture({ number: 2, labels: ["sentry:verdict-code-fix"] }),
       issueFixture({ number: 3, labels: ["sentry:verdict-config-fix"] }),
-      issueFixture({ number: 4, labels: ["sentry:verdict-needs-human"] }),
+      issueFixture({
+        number: 4,
+        labels: ["sentry:verdict-needs-human"],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "needs-human",
+              humanQuestion: "Decide X.",
+            }),
+          },
+        ],
+      }),
       issueFixture({ number: 5, labels: [NEEDS_TRIAGE_LABEL] }),
     ],
     { channel: "#engineering", now: NOW },
   );
-  const countsText = payload.blocks[1].text.text;
   assertEqual(
-    countsText,
+    payload.blocks[1].text.text,
     "code-fix: 2 · config-fix: 1 · upstream-transient: 0 · needs-human: 1 · failed triage: 1",
   );
 });
 
-await test("buildDigest orders issue lines: code/config, needs-human, upstream, failed last", () => {
+await test("buildDigest renders sections in order (needs-human first) and omits empty ones", () => {
   const payload = buildDigest(
     [
       issueFixture({
@@ -416,7 +729,14 @@ await test("buildDigest orders issue lines: code/config, needs-human, upstream, 
         number: 3,
         shortId: "NH-1",
         labels: ["sentry:verdict-needs-human"],
-        comments: [{ body: verdictComment({ verdict: "needs-human" }) }],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "needs-human",
+              humanQuestion: "Decide it.",
+            }),
+          },
+        ],
       }),
       issueFixture({
         number: 4,
@@ -427,12 +747,22 @@ await test("buildDigest orders issue lines: code/config, needs-human, upstream, 
     ],
     { channel: "#engineering", now: NOW },
   );
-  const lines = payload.blocks[2].text.text.split("\n");
-  const order = lines.map((line) => /\|(\S+)>/.exec(line)?.[1]);
-  assertDeepEqual(order, ["CF-1", "NH-1", "UP-1", "FAIL-1"]);
+  const text = allText(payload);
+  const nh = text.indexOf("Needs human — decisions required");
+  const routed = text.indexOf("Routed to owning repo");
+  const wontfix = text.indexOf("Wontfix / transient");
+  const failedTriage = text.indexOf("🛑 Failed triage");
+  assert(nh !== -1, "expected needs-human section");
+  assert(nh < routed, "expected needs-human before routed");
+  assert(routed < wontfix, "expected routed before wontfix");
+  assert(wontfix < failedTriage, "expected wontfix before failed");
+  // Autofixed section has no members here -> omitted entirely.
+  assert(!text.includes("🤖 Autofixed"), "expected empty autofixed omitted");
+  // needs-human renders as a decision-ready brief, not a one-liner.
+  assert(text.includes("*Decision needed:*"), "expected the needs-human brief");
 });
 
-await test("buildDigest renders a linked, escaped per-issue line for a verdict", () => {
+await test("buildDigest renders a routed line linking the projected owning-repo issue", () => {
   const payload = buildDigest(
     [
       issueFixture({
@@ -444,8 +774,98 @@ await test("buildDigest renders a linked, escaped per-issue line for a verdict",
           {
             body: verdictComment({
               verdict: "code-fix",
-              confidence: "high",
               summary: "unhandled <null> & missing guard",
+            }),
+          },
+          { body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}` },
+        ],
+      }),
+    ],
+    { channel: "#engineering", now: NOW },
+  );
+  const text = allText(payload);
+  assert(
+    text.includes(
+      "<https://github.com/mento-protocol/monitoring-monorepo/issues/7|APP-7>",
+    ),
+    "expected linked short id (queue issue)",
+  );
+  assert(text.includes("(app-mento-org)"), "expected project");
+  assert(
+    text.includes(`→ <${PROJECTED_URL}|owning-repo issue>`),
+    "expected the arrow to link the projected issue",
+  );
+  // The summary's < > & must be escaped, not raw.
+  assert(
+    text.includes("unhandled &lt;null&gt; &amp; missing guard"),
+    "expected escaped summary",
+  );
+  assert(!/unhandled <null>/.test(text), "expected no raw angle brackets");
+});
+
+await test("routed section falls back to the queue-issue verdict when projection was skipped", () => {
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 8,
+        shortId: "CF-8",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [{ body: verdictComment({ verdict: "code-fix" }) }],
+      }),
+    ],
+    { channel: "#engineering", now: NOW },
+  );
+  const text = allText(payload);
+  assert(
+    text.includes(
+      "→ <https://github.com/mento-protocol/monitoring-monorepo/issues/8|triage verdict>",
+    ),
+    "expected the fallback arrow to link the queue issue",
+  );
+});
+
+await test("autofixed section renders only when fix-PR data exists, linking the PR", () => {
+  const withFix = buildDigest(
+    [
+      issueFixture({
+        number: 9,
+        shortId: "CF-9",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [
+          {
+            body: verdictComment({ verdict: "code-fix", summary: "fixed it" }),
+          },
+          { body: `${AUTOFIX_COMMENT_PREFIX}${FIX_PR_URL}` },
+        ],
+      }),
+    ],
+    { channel: "#engineering", now: NOW },
+  );
+  const text = allText(withFix);
+  assert(text.includes("🤖 Autofixed (1)"), "expected the autofixed section");
+  assert(text.includes(`→ <${FIX_PR_URL}|fix PR>`), "expected the fix-PR link");
+  assert(!text.includes("📮 Routed"), "expected it not to also route");
+});
+
+await test("buildDigest renders a decision-ready needs-human brief with all fields + links", () => {
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 11,
+        shortId: "NH-11",
+        project: "app-mento-org",
+        labels: ["sentry:verdict-needs-human"],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "needs-human",
+              confidence: "low",
+              humanQuestion:
+                "Decide whether to rotate the signing key or wait.",
+              hypotheses: ["wallet-connect race", "upstream RPC flap"],
+              investigated: ["read the connect handler", "no dup in the queue"],
+              escalationReason:
+                "Security-sensitive surface + conflicting evidence.",
             }),
           },
         ],
@@ -453,43 +873,160 @@ await test("buildDigest renders a linked, escaped per-issue line for a verdict",
     ],
     { channel: "#engineering", now: NOW },
   );
-  const line = payload.blocks[2].text.text;
+  const text = allText(payload);
+  assert(text.includes("⚠️ *<"), "expected the highlighted needs-human header");
+  assert(text.includes("confidence: low"), "expected confidence");
   assert(
-    line.includes(
-      "<https://github.com/mento-protocol/monitoring-monorepo/issues/7|APP-7>",
+    text.includes(
+      "*Decision needed:* Decide whether to rotate the signing key or wait.",
     ),
-    "expected linked short id",
+    "expected the decision line",
   );
-  assert(line.includes("(app-mento-org)"), "expected project");
-  assert(line.includes("code-fix (high):"), "expected verdict + confidence");
-  // The summary's < > & must be escaped, not raw.
   assert(
-    line.includes("unhandled &lt;null&gt; &amp; missing guard"),
-    "expected escaped summary",
+    text.includes("*Hypotheses:* wallet-connect race; upstream RPC flap"),
+    "expected the hypotheses line",
   );
-  assert(!/unhandled <null>/.test(line), "expected no raw angle brackets");
+  assert(
+    text.includes(
+      "*Already investigated:* read the connect handler; no dup in the queue",
+    ),
+    "expected the investigated line",
+  );
+  assert(
+    text.includes(
+      "*Why escalated:* Security-sensitive surface + conflicting evidence.",
+    ),
+    "expected the escalation-reason line",
+  );
+  assert(
+    text.includes(
+      "*Links:* <https://github.com/mento-protocol/monitoring-monorepo/issues/11|queue issue> · " +
+        `<${SENTRY_PERMALINK}|Sentry>`,
+    ),
+    "expected queue + Sentry links",
+  );
+});
+
+await test("needs-human brief shows a placeholder when human_question is somehow absent", () => {
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 12,
+        shortId: "NH-12",
+        labels: ["sentry:verdict-needs-human"],
+        comments: [{ body: verdictComment({ verdict: "needs-human" }) }],
+      }),
+    ],
+    { channel: "#engineering", now: NOW },
+  );
+  assert(
+    allText(payload).includes("_(no decision recorded — re-triage)_"),
+    "expected the missing-decision placeholder",
+  );
+});
+
+await test("needs-human brief escapes every agent-derived field", () => {
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 13,
+        shortId: "NH-13",
+        labels: ["sentry:verdict-needs-human"],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "needs-human",
+              humanQuestion: "Decide <A> or <B>",
+              hypotheses: ["<script>alert(1)</script>", "a & b"],
+              investigated: ["checked <thing>"],
+              escalationReason: "conflicting <evidence>",
+            }),
+          },
+        ],
+      }),
+    ],
+    { channel: "#engineering", now: NOW },
+  );
+  const text = allText(payload);
+  assert(
+    !/Decide <A>/.test(text),
+    "expected no raw angle brackets in decision",
+  );
+  assert(
+    text.includes("Decide &lt;A&gt; or &lt;B&gt;"),
+    "expected escaped decision",
+  );
+  assert(
+    text.includes("&lt;script&gt;alert(1)&lt;/script&gt;; a &amp; b"),
+    "expected escaped hypotheses",
+  );
+  assert(
+    text.includes("checked &lt;thing&gt;"),
+    "expected escaped investigated",
+  );
+  assert(
+    text.includes("conflicting &lt;evidence&gt;"),
+    "expected escaped escalation reason",
+  );
+  assert(!text.includes("<script>"), "expected no raw script tag");
+});
+
+await test("wontfix line links the queue-issue rationale with confidence", () => {
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 14,
+        shortId: "UP-14",
+        labels: ["sentry:verdict-upstream"],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "upstream-transient",
+              confidence: "high",
+              summary: "third-party outage",
+            }),
+          },
+        ],
+      }),
+    ],
+    { channel: "#engineering", now: NOW },
+  );
+  const text = allText(payload);
+  assert(
+    text.includes(
+      "• <https://github.com/mento-protocol/monitoring-monorepo/issues/14|UP-14> (app-mento-org) — third-party outage (high)",
+    ),
+    "expected the wontfix line linking the queue issue",
+  );
 });
 
 await test("buildDigest renders a distinct failed-triage line with no verdict", () => {
   const payload = buildDigest(
-    [issueFixture({ number: 9, shortId: "F-9", labels: [NEEDS_TRIAGE_LABEL] })],
+    [
+      issueFixture({
+        number: 15,
+        shortId: "F-15",
+        labels: [NEEDS_TRIAGE_LABEL],
+      }),
+    ],
     { channel: "#engineering", now: NOW },
   );
-  const line = payload.blocks[2].text.text;
-  assert(line.includes("triage incomplete"), "expected failed-triage phrasing");
+  const text = allText(payload);
+  assert(text.includes("🛑 Failed triage (1)"), "expected the failed section");
+  assert(text.includes("triage incomplete"), "expected failed-triage phrasing");
   assert(
-    line.includes(NEEDS_TRIAGE_LABEL),
+    text.includes(NEEDS_TRIAGE_LABEL),
     "expected needs-triage label named",
   );
 });
 
-await test("buildDigest shows a placeholder when a verdict issue has no parseable summary", () => {
+await test("routed line shows a placeholder when a verdict issue has no parseable summary", () => {
   const payload = buildDigest(
     [issueFixture({ number: 3, labels: ["sentry:verdict-code-fix"] })],
     { channel: "#engineering", now: NOW },
   );
   assert(
-    payload.blocks[2].text.text.includes("_(no summary)_"),
+    allText(payload).includes("_(no summary)_"),
     "expected no-summary placeholder",
   );
 });
@@ -526,26 +1063,26 @@ await test("buildDigest tolerates an empty batch (defensive; job is gated upstre
     payload.blocks[1].text.text,
     "code-fix: 0 · config-fix: 0 · upstream-transient: 0 · needs-human: 0 · failed triage: 0",
   );
+  // No section blocks when nothing was triaged.
+  assertEqual(payload.blocks.length, 2);
 });
 
 // ---------------------------------------------------------------------------
-// Slack 3000-char text-object cap (escape expansion must never overflow one
-// section)
+// Slack 3000-char text-object cap (escape expansion / long briefs must never
+// overflow one section)
 // ---------------------------------------------------------------------------
 
 await test("chunkLines packs greedily and respects the per-chunk budget", () => {
   assertDeepEqual(chunkLines([], 10), []);
   assertDeepEqual(chunkLines(["aa", "bb", "cc"], 5), ["aa\nbb", "cc"]);
-  // Exact fit including the joining newline: "aa\nbb" is 5 chars.
   assertDeepEqual(chunkLines(["aa", "bb"], 5), ["aa\nbb"]);
   assertDeepEqual(chunkLines(["aa", "bb"], 4), ["aa", "bb"]);
-  // A single line longer than the budget still lands in its own chunk.
   assertDeepEqual(chunkLines(["xxxxxxxxxx", "y"], 5), ["xxxxxxxxxx", "y"]);
 });
 
-await test("buildDigest splits a worst-case 6-issue batch across sections under the Slack cap", () => {
+await test("buildDigest splits a worst-case 6-issue routed batch across sections under the Slack cap", () => {
   // Six 300-char all-`<` summaries escape-expand to 1200 chars each — the
-  // exact invalid_blocks scenario: one section would be ~7.9k chars.
+  // exact invalid_blocks scenario if packed into one section.
   const issues = Array.from({ length: 6 }, (_, i) =>
     issueFixture({
       number: 100 + i,
@@ -556,8 +1093,11 @@ await test("buildDigest splits a worst-case 6-issue batch across sections under 
   );
   const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
 
-  const lineBlocks = payload.blocks.slice(2);
-  assert(lineBlocks.length >= 2, "expected the lines split across sections");
+  const sectionBlocks = payload.blocks.slice(2);
+  assert(
+    sectionBlocks.length >= 2,
+    "expected the routed lines split across sections",
+  );
   for (const block of payload.blocks) {
     assert(
       block.text.text.length <= MAX_SECTION_TEXT_LEN,
@@ -565,12 +1105,112 @@ await test("buildDigest splits a worst-case 6-issue batch across sections under 
     );
   }
   // No line lost and order preserved across the chunk boundaries.
-  const allLines = lineBlocks.flatMap((block) => block.text.text.split("\n"));
-  assertEqual(allLines.length, 6);
-  assertDeepEqual(
-    allLines.map((line) => /\|(\S+)>/.exec(line)?.[1]),
-    ["WC-0", "WC-1", "WC-2", "WC-3", "WC-4", "WC-5"],
+  const lineIds = sectionBlocks
+    .flatMap((block) => block.text.text.split("\n"))
+    .map((line) => /^• <[^|]+\|(WC-\d+)>/.exec(line)?.[1])
+    .filter(Boolean);
+  assertDeepEqual(lineIds, ["WC-0", "WC-1", "WC-2", "WC-3", "WC-4", "WC-5"]);
+});
+
+await test("buildDigest keeps long needs-human briefs under the per-section cap", () => {
+  // Six needs-human briefs whose every field is a long all-`<` string — the
+  // brief renderer must keep each section text object under the Slack cap.
+  const big = "<".repeat(500);
+  const issues = Array.from({ length: 6 }, (_, i) =>
+    issueFixture({
+      number: 200 + i,
+      shortId: `NH-${i}`,
+      labels: ["sentry:verdict-needs-human"],
+      comments: [
+        {
+          body: verdictComment({
+            verdict: "needs-human",
+            humanQuestion: big,
+            hypotheses: [big, big],
+            investigated: [big, big],
+            escalationReason: big,
+          }),
+        },
+      ],
+    }),
   );
+  const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
+  for (const block of payload.blocks) {
+    assert(
+      block.text.text.length <= MAX_SECTION_TEXT_LEN,
+      `expected every section under the cap, got ${block.text.text.length}`,
+    );
+  }
+  // Every brief's decision line survived (6 briefs, order preserved).
+  const decisions = allText(payload).match(/\*Decision needed:\*/g) ?? [];
+  assertEqual(decisions.length, 6);
+});
+
+await test("chunkBriefs packs whole briefs and splits only oversized single entries", () => {
+  // Whole-group packing under the budget.
+  assertDeepEqual(chunkBriefs("*H*", [["a"], ["b"]], 100), ["*H*\na\n\nb"]);
+  // Second brief would overflow -> new chunk at the ENTRY boundary.
+  assertDeepEqual(
+    chunkBriefs(
+      "*H*",
+      [
+        ["aaaa", "bbbb"],
+        ["cccc", "dddd"],
+      ],
+      16,
+    ),
+    ["*H*\naaaa\nbbbb", "cccc\ndddd"],
+  );
+  // A single oversized brief gets its own block(s), line-split, never packed
+  // with a neighbor.
+  assertDeepEqual(
+    chunkBriefs("*H*", [["x"], ["y".repeat(30), "z".repeat(30)], ["w"]], 40),
+    ["*H*\nx", "y".repeat(30), "z".repeat(30), "w"],
+  );
+  // No briefs -> just the header.
+  assertDeepEqual(chunkBriefs("*H*", [], 100), ["*H*"]);
+});
+
+await test("needs-human briefs never split across Slack blocks mid-entry", () => {
+  // Two ~1.8k-char briefs (no escape expansion — plain chars) against the
+  // 2800-char budget: greedy LINE packing would put the section header + brief
+  // 1 + the first lines of brief 2 into block one, splitting brief 2 mid-entry.
+  // Entry-boundary chunking must instead emit whole briefs per block.
+  const filler = "z".repeat(350);
+  const issues = Array.from({ length: 2 }, (_, i) =>
+    issueFixture({
+      number: 300 + i,
+      shortId: `NH-${i}`,
+      labels: ["sentry:verdict-needs-human"],
+      comments: [
+        {
+          body: verdictComment({
+            verdict: "needs-human",
+            humanQuestion: filler,
+            hypotheses: [filler],
+            investigated: [filler],
+            escalationReason: filler,
+          }),
+        },
+      ],
+    }),
+  );
+  const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
+  const briefBlocks = payload.blocks
+    .slice(2)
+    .map((block) => block.text.text)
+    .filter((text) => text.includes("*Decision needed:*"));
+  assert(briefBlocks.length >= 2, "expected the two briefs split into blocks");
+  for (const text of briefBlocks) {
+    assert(text.length <= MAX_SECTION_TEXT_LEN, "expected under the budget");
+    // A block contains only WHOLE briefs: every brief header line ("⚠️ *<…")
+    // is matched by its closing links line — a mid-entry split would strand a
+    // header without links (or links without a header) in some block.
+    const headers = text.match(/^⚠️ \*/gm) ?? [];
+    const linksLines = text.match(/\*Links:\*/g) ?? [];
+    assertEqual(headers.length, linksLines.length);
+    assert(headers.length >= 1, "expected at least one whole brief per block");
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -613,6 +1253,7 @@ await test("collectIssues fetches each issue via the injected gh runner", async 
       number: Number(number),
       title: `[sentry] X-${number} (app-mento-org, error)`,
       url: `https://github.com/o/r/issues/${number}`,
+      body: queueBody(),
       labels: [{ name: "sentry:verdict-code-fix" }],
       comments: [{ body: verdictComment({ summary: `sum ${number}` }) }],
     });
@@ -622,31 +1263,30 @@ await test("collectIssues fetches each issue via the injected gh runner", async 
   assertEqual(issues.length, 2);
   assertEqual(issues[0].number, 11);
   assertDeepEqual(issues[0].labels, ["sentry:verdict-code-fix"]);
-  // Each call is a read-only `gh issue view ... --json ...`.
   assertEqual(calls[0][0], "issue");
   assertEqual(calls[0][1], "view");
-  assert(calls[0].includes("number,title,url,labels,comments"), "json fields");
-  // The caller's repo (the workflow passes --repo "$GITHUB_REPOSITORY")
-  // propagates into every gh call — never the script's baked-in default.
+  // The digest now reads `body` too (needs-human Sentry permalink).
+  assert(
+    calls[0].includes("number,title,url,body,labels,comments"),
+    "json fields include body",
+  );
   const repoFlagIndex = calls[0].indexOf("--repo");
   assert(repoFlagIndex !== -1, "expected --repo flag in gh args");
   assertEqual(calls[0][repoFlagIndex + 1], "o/r");
   assertEqual(calls[1][calls[1].indexOf("--repo") + 1], "o/r");
 
-  // End-to-end: collected issues feed straight into a valid payload.
   const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
   assertEqual(payload.text, "Sentry triage — 2 issue(s) triaged");
 });
 
 await test("collectIssues propagates a single fetch failure (fail loud, no silent drop)", async () => {
-  // One bad `gh issue view` must fail the whole digest (and so the job/run),
-  // never silently omit that issue from the posted digest.
   const runGh = async (args) => {
     if (args[2] === "22") throw new Error("gh issue view failed: HTTP 502");
     return JSON.stringify({
       number: Number(args[2]),
       title: `[sentry] X-${args[2]} (app-mento-org, error)`,
       url: `https://github.com/o/r/issues/${args[2]}`,
+      body: "",
       labels: [],
       comments: [],
     });

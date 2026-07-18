@@ -20,6 +20,14 @@ export const REGRESSION_PREFIX = "Regressed in Sentry (last seen ";
 
 export const PROJECTED_LABEL = "sentry:projected";
 
+// Machine-parseable prefix of the pointer comment the projection step posts on
+// the queue stub (`markStubProjected`). It is the CONTRACT the outcome digest's
+// "Routed to owning repo" section reads to link the projected owning-repo issue
+// (a trusted-bot comment `<prefix><https github.com url>`). Defined here — the
+// pure contract module — so the emitter (sentry-triage-project.mjs) and the
+// consumer (sentry-triage-digest.mjs) can never drift.
+export const PROJECTED_COMMENT_PREFIX = "Projected to owning repo: ";
+
 // Only ACTIONABLE verdicts project. `needs-human` / `upstream-transient` stay
 // in the queue (verdict contract).
 export const PROJECTABLE_VERDICTS = ["code-fix", "config-fix"];
@@ -304,6 +312,44 @@ function collectBlockScalar(lines, start, rest) {
 // consume budget and push a real duplicate past the cap.
 export const MAX_DUPLICATE_LOOKUPS = 5;
 
+// Hard bound on how many free-text brief-list items (needs-human `hypotheses`
+// / `investigated`) are retained. These are agent-produced from untrusted
+// Sentry content and consumed ONLY by the outcome digest's needs-human brief
+// (they never reach an owning-repo issue — needs-human never projects), so a
+// scannable handful is enough; per-item text is neutralized+bounded by the
+// digest at render time.
+export const MAX_BRIEF_LIST_ITEMS = 5;
+
+/** Parse a free-text yaml list value (needs-human `hypotheses`/`investigated`):
+ * an inline `[a, b]`, a single inline scalar, or a block `- item` list. Unlike
+ * sanitizeDuplicateIds these entries are prose, so nothing is shape-validated
+ * away — the digest neutralizes+escapes them at render. Returns `{items,
+ * next}` mirroring collectDashList so the caller advances the line cursor. */
+function parseFreeTextList(lines, i, rest) {
+  const trimmed = String(rest ?? "").trim();
+  if (trimmed !== "") {
+    if (trimmed.startsWith("[")) {
+      const close = trimmed.indexOf("]");
+      const inner = close === -1 ? trimmed.slice(1) : trimmed.slice(1, close);
+      const items = inner
+        .split(",")
+        .map((s) => stripYamlQuotes(s.trim()))
+        .filter(Boolean);
+      return { items, next: i + 1 };
+    }
+    return { items: [stripYamlQuotes(trimmed)], next: i + 1 };
+  }
+  return collectDashList(lines, i);
+}
+
+/** Trim, drop empties, and cap a free-text brief list for memory safety. */
+export function sanitizeBriefList(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .slice(0, MAX_BRIEF_LIST_ITEMS);
+}
+
 /** Only keep unique values that look like Sentry SHORT-IDs, bounded for
  * rendering/memory (the LOOKUP budget is MAX_DUPLICATE_LOOKUPS, applied
  * later); drop everything else so a hostile duplicate list can neither inject
@@ -336,6 +382,12 @@ export function parseVerdictYaml(block) {
     root_cause: "",
     proposed_action: "",
     duplicate_of: [],
+    // needs-human decision-ready brief fields (optional-absent for other
+    // verdicts; resolveVerdict requires human_question for needs-human).
+    human_question: "",
+    hypotheses: [],
+    investigated: [],
+    escalation_reason: "",
   };
   for (let i = 0; i < lines.length; i += 1) {
     const match = /^([a-z_]+):[ \t]*(.*)$/.exec(lines[i]);
@@ -363,7 +415,12 @@ export function parseVerdictYaml(block) {
         : "";
     } else if (key === "summary") {
       out.summary = stripYamlQuotes(rest);
-    } else if (key === "root_cause" || key === "proposed_action") {
+    } else if (
+      key === "root_cause" ||
+      key === "proposed_action" ||
+      key === "human_question" ||
+      key === "escalation_reason"
+    ) {
       const { text, next } = collectBlockScalar(lines, i, rest);
       out[key] = text;
       i = next - 1;
@@ -375,9 +432,15 @@ export function parseVerdictYaml(block) {
         out.duplicate_of = items;
         i = next - 1;
       }
+    } else if (key === "hypotheses" || key === "investigated") {
+      const { items, next } = parseFreeTextList(lines, i, rest);
+      out[key] = items;
+      i = next - 1;
     }
   }
   out.duplicate_of = sanitizeDuplicateIds(out.duplicate_of);
+  out.hypotheses = sanitizeBriefList(out.hypotheses);
+  out.investigated = sanitizeBriefList(out.investigated);
   return out;
 }
 
@@ -397,6 +460,11 @@ export function parseVerdictComment(commentBody) {
     rootCause: parsed.root_cause,
     proposedAction: parsed.proposed_action,
     duplicateOf: parsed.duplicate_of,
+    // needs-human decision-ready brief fields (empty for other verdicts).
+    humanQuestion: parsed.human_question,
+    hypotheses: parsed.hypotheses,
+    investigated: parsed.investigated,
+    escalationReason: parsed.escalation_reason,
   };
 }
 
@@ -466,6 +534,56 @@ export function selectVerdictComment(comments) {
   return { body: newestVerdict.body, reason: null };
 }
 
+// Blatant non-decision placeholders that defeat the point of a needs-human
+// escalation — "please look" is not a decision. This is a DETERMINISTIC
+// BACKSTOP against the laziest bypasses, not a full decision-quality judge (a
+// parser can't reliably assess that — the prompt makes decision quality the
+// agent's responsibility). Matched EXACTLY against the normalized question
+// (lowercased, trailing punctuation stripped) so a real "decide X or Y" that
+// merely CONTAINS one of these words is never falsely rejected.
+const NON_DECISION_QUESTIONS = new Set([
+  "",
+  "?",
+  "look",
+  "look into this",
+  "take a look",
+  "please look",
+  "please look into this",
+  "please investigate",
+  "investigate",
+  "investigate this",
+  "needs investigation",
+  "needs looking into",
+  "needs human",
+  "needs human review",
+  "needs review",
+  "review",
+  "review this",
+  "check this",
+  "tbd",
+  "todo",
+  "n/a",
+  "na",
+  "none",
+  "unknown",
+  "unsure",
+]);
+
+/** Normalize a human_question for the placeholder check: single-line, lowered,
+ * trailing sentence punctuation stripped. */
+function normalizeHumanQuestion(text) {
+  return sanitizeFreeText(text)
+    .toLowerCase()
+    .replace(/[.!?]+$/, "")
+    .trim();
+}
+
+/** True when a needs-human `human_question` is a real decision request (present
+ * and not a blatant non-decision placeholder). */
+export function isDecisionReadyQuestion(text) {
+  return !NON_DECISION_QUESTIONS.has(normalizeHumanQuestion(text));
+}
+
 /**
  * The SINGLE authoritative verdict resolution, shared by the workflow's label
  * step (`--parse-only`) and the projection flow: newest marker comment,
@@ -487,6 +605,21 @@ export function resolveVerdict(issue, queueIssueNumber) {
   if (!parsed.verdict) {
     throw new Error(
       `Verdict comment on issue #${queueIssueNumber} has a missing/invalid verdict value.`,
+    );
+  }
+  // A needs-human verdict is a DECISION request, not "please look": it is only
+  // valid when it states the exact question a human must answer. Enforce it in
+  // the single authoritative resolver so the workflow's --parse-only label step
+  // fails loud (exit 1, sentry:needs-triage kept) on a lazy escalation — an
+  // absent `human_question` OR a blatant non-decision placeholder — and the
+  // next scheduled run re-triages it, the same fail-loud contract as a
+  // missing/invalid verdict above.
+  if (
+    parsed.verdict === "needs-human" &&
+    !isDecisionReadyQuestion(parsed.humanQuestion)
+  ) {
+    throw new Error(
+      `needs-human verdict on issue #${queueIssueNumber} has no decision-ready 'human_question' (missing or a non-decision placeholder like "please look"); a needs-human escalation must name the exact question/decision a human must answer. Leaving sentry:needs-triage in place for re-triage.`,
     );
   }
   return {

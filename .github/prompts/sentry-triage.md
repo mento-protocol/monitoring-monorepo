@@ -19,4 +19,11 @@ Classify (verdict):
 
 Then post EXACTLY ONE comment on queue issue #$QUEUE_ISSUE_NUMBER via `gh issue comment`, following the verdict contract in docs/notes/sentry-triage-pipeline.md (marker line, yaml block with verdict/confidence/affected_repo/summary/root_cause/proposed_action/duplicate_of, short prose diagnosis). Do NOT edit labels: a deterministic workflow step reads the verdict value from your comment and applies the matching verdict label.
 
+For a `needs-human` verdict, the escalation must be DECISION-READY — a human reads it as a brief and acts. Add these four fields to the yaml block (they are omitted for every other verdict). The same redaction rule applies: abstract descriptions only, never Sentry payload text/stack frames/URLs/user data verbatim.
+
+- `human_question:` — REQUIRED. The single concrete decision a human must make for this issue to move (1–2 lines). Phrase it as "decide X or Y" / "confirm whether Z", never "please look" or "investigate this". A needs-human verdict without a real `human_question` is rejected by the deterministic parser (the label step fails loudly and the issue is re-triaged next run), so do not escalate without stating the decision.
+- `hypotheses:` — a yaml list (1–3 dash items) of candidate root causes, each with your confidence lean (e.g. "likely a race in the connect flow (lean: medium)").
+- `investigated:` — a yaml list of what you already checked/ruled out (payload evidence read, code paths inspected, duplicate search run).
+- `escalation_reason:` — why you could not reach a confident verdict (ambiguity / security-sensitive surface / conflicting evidence).
+
 Hard rules: max ~10 Sentry MCP calls; no Sentry mutations; no pushes/PRs/file edits; if anything fails irrecoverably, post a needs-human verdict explaining the failure rather than exiting silently.
