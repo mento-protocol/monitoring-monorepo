@@ -19,7 +19,6 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
   writeSync,
@@ -111,13 +110,20 @@ const FROZEN_TARGET_MODES = new Set([
   "commit",
 ]);
 const MAX_GIT_OUTPUT_BYTES = MAX_REVIEW_INPUT_BYTES + 12 * 1024 * 1024;
+const MAX_TRUSTED_ENGINE_FILE_BYTES = 16 * 1024 * 1024;
 const CLAUDE_SAFE_MODE_MIN_VERSION = [2, 1, 169];
 const trustedExecutableSnapshots = new Map();
 const trustedExecutableSnapshotsByPath = new Map();
 const trustedExecutableSnapshotDirs = new Set();
+const engineRuntimeDirectories = new Map();
+const activeReviewerChildren = new Set();
+const activeReviewerAborters = new Map();
+const terminationSignalHandlers = new Map();
 const rejectedTrustedExecutableCandidates = new Set();
 const writeGrantingAclCache = new Map();
 let trustedExecutableCleanupRegistered = false;
+let pendingTerminationSignal = null;
+let reviewerForceKillTimer = null;
 
 function usage() {
   console.log(`Usage:
@@ -379,7 +385,7 @@ function aclMetadataKey(fileStat) {
   ].join(":");
 }
 
-function hasWriteGrantingAcl(candidate, fileStat) {
+function hasWriteGrantingAcl(candidate, fileStat, label = "executable") {
   if (process.platform !== "darwin") return false;
   const metadataKey = aclMetadataKey(fileStat);
   const cached = writeGrantingAclCache.get(candidate);
@@ -391,10 +397,10 @@ function hasWriteGrantingAcl(candidate, fileStat) {
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (result.error || result.status !== 0) {
-    throw new Error(`failed to inspect executable ACL at ${candidate}`);
+    throw new Error(`failed to inspect ${label} ACL at ${candidate}`);
   }
   const writeGrant =
-    /\ballow\b.*\b(?:write|append|delete|delete_child|writeattr|writeextattr|writesecurity|chown)\b/;
+    /\ballow\b.*\b(?:write|append|add_file|add_subdirectory|delete|delete_child|writeattr|writeextattr|writesecurity|chown)\b/;
   const value = result.stdout
     .split("\n")
     .slice(1)
@@ -418,18 +424,18 @@ function executableForCurrentUser(fileStat) {
   return (mode & 0o001n) !== 0n;
 }
 
-function inspectTrustedDirectoryAncestry(directory) {
+function inspectTrustedDirectoryAncestry(directory, label = "executable") {
   const records = [];
   let current = directory;
   while (true) {
     const fileStat = lstatSync(current, { bigint: true });
     if (!fileStat.isDirectory() || !trustedOwner(fileStat)) {
-      throw new Error(`untrusted executable directory ancestry at ${current}`);
+      throw new Error(`untrusted ${label} directory ancestry at ${current}`);
     }
     records.push({
       path: current,
       fileStat,
-      writeGrantingAcl: hasWriteGrantingAcl(current, fileStat),
+      writeGrantingAcl: hasWriteGrantingAcl(current, fileStat, label),
     });
     const parent = path.dirname(current);
     if (parent === current) break;
@@ -438,7 +444,7 @@ function inspectTrustedDirectoryAncestry(directory) {
   return records;
 }
 
-function assertStableDirectoryAncestry(before, after) {
+function assertStableDirectoryAncestry(before, after, label = "executable") {
   if (
     before.length !== after.length ||
     before.some(
@@ -448,16 +454,24 @@ function assertStableDirectoryAncestry(before, after) {
         !sameDirectorySecurityMetadata(record.fileStat, after[index].fileStat),
     )
   ) {
-    throw new Error("executable directory ancestry changed during validation");
+    throw new Error(`${label} directory ancestry changed during validation`);
   }
 }
 
-function secureReadFlags() {
+function secureReadFlags({ nonBlocking = false } = {}) {
   if (!Number.isInteger(fsConstants.O_NOFOLLOW)) {
     throw new Error("O_NOFOLLOW is required for trusted executable resolution");
   }
+  if (nonBlocking && !Number.isInteger(fsConstants.O_NONBLOCK)) {
+    throw new Error(
+      "O_NONBLOCK is required for trusted external file snapshots",
+    );
+  }
   return (
-    fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (fsConstants.O_CLOEXEC || 0)
+    fsConstants.O_RDONLY |
+    fsConstants.O_NOFOLLOW |
+    (fsConstants.O_CLOEXEC || 0) |
+    (nonBlocking ? fsConstants.O_NONBLOCK : 0)
   );
 }
 
@@ -475,6 +489,9 @@ function secureWriteFlags() {
 }
 
 function cleanupTrustedExecutableSnapshots() {
+  for (const directory of [...engineRuntimeDirectories.keys()]) {
+    removeEngineRuntimeDirectory(directory, { bestEffort: true });
+  }
   for (const directory of trustedExecutableSnapshotDirs) {
     try {
       rmSync(directory, { force: true, recursive: true });
@@ -489,15 +506,186 @@ function cleanupTrustedExecutableSnapshots() {
   writeGrantingAclCache.clear();
 }
 
+function registerEngineRuntimeDirectory(directory) {
+  const fileStat = lstatSync(directory, { bigint: true });
+  if (
+    !fileStat.isDirectory() ||
+    fileStat.uid !== effectiveUid() ||
+    (fileStat.mode & 0o077n) !== 0n ||
+    hasWriteGrantingAcl(directory, fileStat, "engine runtime directory")
+  ) {
+    throw new Error("engine runtime directory is not private");
+  }
+  engineRuntimeDirectories.set(directory, {
+    credentialSnapshots: new Map(),
+    fileStat,
+  });
+  registerTrustedExecutableCleanup();
+}
+
+function createRegisteredEngineRuntimeDirectory(root, prefix) {
+  const directory = mkdtempSync(path.join(root, prefix));
+  try {
+    registerEngineRuntimeDirectory(directory);
+    return directory;
+  } catch (error) {
+    rmSync(directory, { force: true, recursive: true });
+    throw error;
+  }
+}
+
+function registerEngineCredentialSnapshot(runtimeDir, outputPath, fileStat) {
+  const record = engineRuntimeDirectories.get(runtimeDir);
+  if (!record) {
+    throw new Error("engine runtime is not registered for credential cleanup");
+  }
+  record.credentialSnapshots.set(outputPath, fileStat);
+}
+
+function removeEngineCredentialSnapshots(
+  directory,
+  { bestEffort = false } = {},
+) {
+  const record = engineRuntimeDirectories.get(directory);
+  if (!record) return;
+  for (const [outputPath, expected] of record.credentialSnapshots) {
+    let removed = false;
+    try {
+      let current;
+      try {
+        current = lstatSync(outputPath, { bigint: true });
+      } catch (error) {
+        if (error.code === "ENOENT") {
+          removed = true;
+          continue;
+        }
+        throw error;
+      }
+      if (
+        !current.isFile() ||
+        current.uid !== effectiveUid() ||
+        !sameFileMetadata(expected, current)
+      ) {
+        throw new Error("engine credential snapshot identity changed");
+      }
+      rmSync(outputPath, { force: true });
+      removed = true;
+    } catch (error) {
+      if (!bestEffort) throw error;
+    } finally {
+      if (removed) record.credentialSnapshots.delete(outputPath);
+    }
+  }
+}
+
+function removeAllEngineCredentialSnapshots({ bestEffort = false } = {}) {
+  for (const directory of engineRuntimeDirectories.keys()) {
+    removeEngineCredentialSnapshots(directory, { bestEffort });
+  }
+}
+
+function removeEngineRuntimeDirectory(directory, { bestEffort = false } = {}) {
+  const record = engineRuntimeDirectories.get(directory);
+  if (!record) return;
+  try {
+    removeEngineCredentialSnapshots(directory, { bestEffort });
+    let current;
+    try {
+      current = lstatSync(directory, { bigint: true });
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    if (
+      !current.isDirectory() ||
+      current.uid !== effectiveUid() ||
+      !sameDirectorySecurityMetadata(record.fileStat, current)
+    ) {
+      throw new Error("engine runtime directory identity changed");
+    }
+    rmSync(directory, { force: true, recursive: true });
+  } catch (error) {
+    if (!bestEffort) throw error;
+  } finally {
+    engineRuntimeDirectories.delete(directory);
+  }
+}
+
+function clearReviewerForceKillTimer() {
+  if (!reviewerForceKillTimer) return;
+  clearTimeout(reviewerForceKillTimer);
+  reviewerForceKillTimer = null;
+}
+
+function signalReviewerProcessGroup(child, signal) {
+  try {
+    if (process.platform !== "win32" && Number.isInteger(child.pid)) {
+      process.kill(-child.pid, signal);
+    } else {
+      child.kill(signal);
+    }
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+  }
+}
+
+function terminateActiveReviewerChildren(signal = "SIGTERM") {
+  for (const child of activeReviewerChildren) {
+    try {
+      signalReviewerProcessGroup(child, signal);
+    } catch {
+      // The close/error path will finish process cleanup.
+    }
+  }
+  if (
+    signal !== "SIGKILL" &&
+    activeReviewerChildren.size > 0 &&
+    !reviewerForceKillTimer
+  ) {
+    reviewerForceKillTimer = setTimeout(() => {
+      reviewerForceKillTimer = null;
+      terminateActiveReviewerChildren("SIGKILL");
+      for (const abort of [...activeReviewerAborters.values()]) {
+        abort(new Error("reviewer process group did not terminate"));
+      }
+    }, 5000);
+    reviewerForceKillTimer.unref?.();
+  }
+}
+
+function requestProcessTermination(signal) {
+  if (pendingTerminationSignal) {
+    removeAllEngineCredentialSnapshots({ bestEffort: true });
+    terminateActiveReviewerChildren("SIGKILL");
+    return;
+  }
+  pendingTerminationSignal = signal;
+  removeAllEngineCredentialSnapshots({ bestEffort: true });
+  terminateActiveReviewerChildren();
+  setImmediate(() => terminateActiveReviewerChildren());
+}
+
+function finishPendingProcessTermination() {
+  if (!pendingTerminationSignal) return;
+  const signal = pendingTerminationSignal;
+  pendingTerminationSignal = null;
+  clearReviewerForceKillTimer();
+  cleanupTrustedExecutableSnapshots();
+  for (const [registeredSignal, handler] of terminationSignalHandlers) {
+    process.off(registeredSignal, handler);
+  }
+  terminationSignalHandlers.clear();
+  process.kill(process.pid, signal);
+}
+
 function registerTrustedExecutableCleanup() {
   if (trustedExecutableCleanupRegistered) return;
   trustedExecutableCleanupRegistered = true;
   process.once("exit", cleanupTrustedExecutableSnapshots);
   for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
-    process.once(signal, () => {
-      cleanupTrustedExecutableSnapshots();
-      process.kill(process.pid, signal);
-    });
+    const handler = () => requestProcessTermination(signal);
+    terminationSignalHandlers.set(signal, handler);
+    process.on(signal, handler);
   }
 }
 
@@ -660,9 +848,19 @@ function assertSafeMachOSnapshotClosure(repo, outputPath, prefix) {
   }
 }
 
-function streamAndHashExecutable(sourceDescriptor, outputDescriptor, size) {
-  if (size < 0n || size > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new Error("trusted executable is too large to snapshot safely");
+function streamAndHashRegularFile(
+  sourceDescriptor,
+  outputDescriptor,
+  size,
+  label,
+  maxBytes = Number.MAX_SAFE_INTEGER,
+) {
+  if (
+    size < 0n ||
+    size > BigInt(Number.MAX_SAFE_INTEGER) ||
+    size > BigInt(maxBytes)
+  ) {
+    throw new Error(`${label} is too large to snapshot safely`);
   }
   const expectedBytes = Number(size);
   const buffer = Buffer.allocUnsafe(1024 * 1024);
@@ -678,7 +876,7 @@ function streamAndHashExecutable(sourceDescriptor, outputDescriptor, size) {
       position,
     );
     if (bytesRead === 0) {
-      throw new Error("trusted executable changed while being snapshotted");
+      throw new Error(`${label} changed while being snapshotted`);
     }
     if (position < prefix.length) {
       buffer.copy(
@@ -699,14 +897,14 @@ function streamAndHashExecutable(sourceDescriptor, outputDescriptor, size) {
         position + written,
       );
       if (bytesWritten === 0) {
-        throw new Error("trusted executable snapshot write stalled");
+        throw new Error(`${label} snapshot write stalled`);
       }
       written += bytesWritten;
     }
     position += bytesRead;
   }
   if (readSync(sourceDescriptor, buffer, 0, 1, position) !== 0) {
-    throw new Error("trusted executable grew while being snapshotted");
+    throw new Error(`${label} grew while being snapshotted`);
   }
 
   const outputHash = createHash("sha256");
@@ -720,15 +918,24 @@ function streamAndHashExecutable(sourceDescriptor, outputDescriptor, size) {
       position,
     );
     if (bytesRead === 0) {
-      throw new Error("trusted executable snapshot is truncated");
+      throw new Error(`${label} snapshot is truncated`);
     }
     outputHash.update(buffer.subarray(0, bytesRead));
     position += bytesRead;
   }
   if (sourceHash.digest("hex") !== outputHash.digest("hex")) {
-    throw new Error("trusted executable snapshot digest mismatch");
+    throw new Error(`${label} snapshot digest mismatch`);
   }
   return prefix;
+}
+
+function streamAndHashExecutable(sourceDescriptor, outputDescriptor, size) {
+  return streamAndHashRegularFile(
+    sourceDescriptor,
+    outputDescriptor,
+    size,
+    "trusted executable",
+  );
 }
 
 function publishTrustedExecutableSnapshot(
@@ -1723,16 +1930,156 @@ function externalPath(repo, value) {
   }
 }
 
-function copyExternalRegularFileEnv(env, repo, key) {
+function assertTrustedExternalFileAncestry(records, key) {
+  for (const { path: directory, fileStat, writeGrantingAcl } of records) {
+    if (writeGrantingAcl) {
+      throw new Error(`${key} has write-granting ACL ancestry at ${directory}`);
+    }
+    if (sharedWritable(fileStat) && (fileStat.mode & 0o1000n) === 0n) {
+      throw new Error(
+        `${key} has non-sticky shared-writable ancestry at ${directory}`,
+      );
+    }
+  }
+}
+
+function assertPrivateEngineFileSnapshotDirectory(record) {
+  const fileStat = lstatSync(record.directory, { bigint: true });
+  if (
+    !fileStat.isDirectory() ||
+    fileStat.uid !== effectiveUid() ||
+    (fileStat.mode & 0o777n) !== 0o700n ||
+    hasWriteGrantingAcl(
+      record.directory,
+      fileStat,
+      "trusted engine-file snapshot directory",
+    ) ||
+    !sameDirectorySecurityMetadata(record.fileStat, fileStat)
+  ) {
+    throw new Error("trusted engine-file snapshot directory changed");
+  }
+}
+
+function createEngineFileSnapshotDirectory(runtimeDir) {
+  const runtimeStat = lstatSync(runtimeDir, { bigint: true });
+  if (
+    !runtimeStat.isDirectory() ||
+    runtimeStat.uid !== effectiveUid() ||
+    (runtimeStat.mode & 0o077n) !== 0n ||
+    hasWriteGrantingAcl(runtimeDir, runtimeStat, "reviewer runtime directory")
+  ) {
+    throw new Error("reviewer runtime directory is not private");
+  }
+  const directory = path.join(runtimeDir, "external-env-files");
+  mkdirSync(directory, { mode: 0o700 });
+  chmodSync(directory, 0o700);
+  const record = {
+    directory,
+    fileStat: lstatSync(directory, { bigint: true }),
+  };
+  assertPrivateEngineFileSnapshotDirectory(record);
+  return record;
+}
+
+function snapshotExternalRegularFileEnv(env, repo, snapshotRecord, key) {
   const value = process.env[key];
   if (!value) return;
   const resolved = externalPath(repo, value);
-  if (!resolved || !statSync(resolved).isFile()) {
+  if (!resolved || /[\r\n\0]/.test(resolved)) {
     throw new Error(
       `${key} must point to an existing regular file outside the reviewed repository`,
     );
   }
-  env[key] = resolved;
+  assertPrivateEngineFileSnapshotDirectory(snapshotRecord);
+  const sourceDescriptor = openSync(
+    resolved,
+    secureReadFlags({ nonBlocking: true }),
+  );
+  try {
+    const sourceBefore = fstatSync(sourceDescriptor, { bigint: true });
+    if (
+      !sourceBefore.isFile() ||
+      !trustedOwner(sourceBefore) ||
+      sharedWritable(sourceBefore) ||
+      (sourceBefore.mode & 0o6000n) !== 0n ||
+      sourceBefore.nlink !== 1n ||
+      sourceBefore.size > BigInt(MAX_TRUSTED_ENGINE_FILE_BYTES) ||
+      hasWriteGrantingAcl(resolved, sourceBefore, key)
+    ) {
+      throw new Error(`${key} must point to a trusted regular file`);
+    }
+    const sourcePathBefore = lstatSync(resolved, { bigint: true });
+    if (!sameFileMetadata(sourceBefore, sourcePathBefore)) {
+      throw new Error(`${key} source identity changed before snapshot`);
+    }
+    const ancestryBefore = inspectTrustedDirectoryAncestry(
+      path.dirname(resolved),
+      `${key} source`,
+    );
+    assertTrustedExternalFileAncestry(ancestryBefore, key);
+
+    const outputName = key.toLowerCase().replaceAll("_", "-");
+    const outputPath = path.join(snapshotRecord.directory, outputName);
+    const outputDescriptor = openSync(outputPath, secureWriteFlags(), 0o600);
+    let outputStat;
+    try {
+      streamAndHashRegularFile(
+        sourceDescriptor,
+        outputDescriptor,
+        sourceBefore.size,
+        key,
+        MAX_TRUSTED_ENGINE_FILE_BYTES,
+      );
+      const sourceAfter = fstatSync(sourceDescriptor, { bigint: true });
+      const sourcePathAfter = lstatSync(resolved, { bigint: true });
+      if (
+        !sameFileMetadata(sourceBefore, sourceAfter) ||
+        !sameFileMetadata(sourceBefore, sourcePathAfter)
+      ) {
+        throw new Error(`${key} source identity changed during snapshot`);
+      }
+      const ancestryAfter = inspectTrustedDirectoryAncestry(
+        path.dirname(resolved),
+        `${key} source`,
+      );
+      assertTrustedExternalFileAncestry(ancestryAfter, key);
+      assertStableDirectoryAncestry(
+        ancestryBefore,
+        ancestryAfter,
+        `${key} source`,
+      );
+
+      fchmodSync(outputDescriptor, 0o600);
+      fsyncSync(outputDescriptor);
+      outputStat = fstatSync(outputDescriptor, { bigint: true });
+      if (
+        !outputStat.isFile() ||
+        outputStat.uid !== effectiveUid() ||
+        (outputStat.mode & 0o777n) !== 0o600n ||
+        (outputStat.mode & 0o6000n) !== 0n ||
+        outputStat.nlink !== 1n ||
+        outputStat.size !== sourceBefore.size ||
+        hasWriteGrantingAcl(outputPath, outputStat, key)
+      ) {
+        throw new Error(`${key} snapshot failed validation`);
+      }
+      const outputPathStat = lstatSync(outputPath, { bigint: true });
+      if (!sameFileMetadata(outputStat, outputPathStat)) {
+        throw new Error(`${key} snapshot identity changed during publish`);
+      }
+    } finally {
+      closeSync(outputDescriptor);
+    }
+    assertPrivateEngineFileSnapshotDirectory(snapshotRecord);
+    registerEngineCredentialSnapshot(
+      path.dirname(snapshotRecord.directory),
+      outputPath,
+      outputStat,
+    );
+    env[key] = outputPath;
+  } finally {
+    closeSync(sourceDescriptor);
+  }
 }
 
 function safeEngineEnv(repo, engine, runtimeDir) {
@@ -1809,6 +2156,25 @@ function safeEngineEnv(repo, engine, runtimeDir) {
       );
     }
   }
+  const externalFileKeys = [
+    ...(process.env.SSL_CERT_FILE ? ["SSL_CERT_FILE"] : []),
+    ...(engine === "claude"
+      ? [
+          "AWS_CONFIG_FILE",
+          "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+          "AWS_SHARED_CREDENTIALS_FILE",
+          "AWS_WEB_IDENTITY_TOKEN_FILE",
+          "GOOGLE_APPLICATION_CREDENTIALS",
+        ].filter((key) => process.env[key])
+      : []),
+  ];
+  if (externalFileKeys.length > 0) {
+    const snapshotRecord = createEngineFileSnapshotDirectory(runtimeDir);
+    for (const key of externalFileKeys) {
+      snapshotExternalRegularFileEnv(env, repo, snapshotRecord, key);
+    }
+    assertPrivateEngineFileSnapshotDirectory(snapshotRecord);
+  }
   const home = externalPath(repo, process.env.HOME);
   if (home) env.HOME = home;
   if (engine === "codex") {
@@ -1821,15 +2187,6 @@ function safeEngineEnv(repo, engine, runtimeDir) {
   if (engine === "claude") {
     const claudeConfig = externalPath(repo, process.env.CLAUDE_CONFIG_DIR);
     if (claudeConfig) env.CLAUDE_CONFIG_DIR = claudeConfig;
-    for (const key of [
-      "AWS_CONFIG_FILE",
-      "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
-      "AWS_SHARED_CREDENTIALS_FILE",
-      "AWS_WEB_IDENTITY_TOKEN_FILE",
-      "GOOGLE_APPLICATION_CREDENTIALS",
-    ]) {
-      copyExternalRegularFileEnv(env, repo, key);
-    }
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
   }
   const git = resolveTrustedCommand("git", repo);
@@ -1858,13 +2215,17 @@ function runCommandWithInput(
     revalidateAllTrustedExecutableSnapshots();
     const child = spawn(command, commandArgs, {
       cwd,
+      detached: process.platform !== "win32",
       env,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    activeReviewerChildren.add(child);
+    if (pendingTerminationSignal) terminateActiveReviewerChildren();
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     let killTimer = null;
+    let settled = false;
     const configuredHeartbeat = Number.parseInt(
       process.env.AUTOREVIEW_HEARTBEAT_SECONDS || "60",
       10,
@@ -1882,10 +2243,49 @@ function runCommandWithInput(
     }, heartbeatSeconds * 1000);
     heartbeat.unref?.();
 
-    const timeout = setTimeout(() => {
+    let timeout;
+    const finishTracking = () => {
+      activeReviewerChildren.delete(child);
+      activeReviewerAborters.delete(child);
+      if (activeReviewerChildren.size === 0) clearReviewerForceKillTimer();
+      clearTimeout(timeout);
+      clearInterval(heartbeat);
+      if (killTimer) clearTimeout(killTimer);
+    };
+    const rejectOnce = (error) => {
+      if (settled) return;
+      settled = true;
+      finishTracking();
+      reject(error);
+    };
+    const resolveOnce = (value) => {
+      if (settled) return;
+      settled = true;
+      finishTracking();
+      resolve(value);
+    };
+    const forceAbort = (error) => {
+      try {
+        signalReviewerProcessGroup(child, "SIGKILL");
+      } catch {
+        // Pipe destruction below still bounds command settlement.
+      }
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      rejectOnce(error);
+    };
+    activeReviewerAborters.set(child, forceAbort);
+    timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), 5000);
+      signalReviewerProcessGroup(child, "SIGTERM");
+      killTimer = setTimeout(
+        () =>
+          forceAbort(
+            new Error(`${command} timed out after ${timeoutSeconds}s`),
+          ),
+        5000,
+      );
       killTimer.unref?.();
     }, timeoutSeconds * 1000);
 
@@ -1900,28 +2300,22 @@ function runCommandWithInput(
       if (stream) process.stderr.write(text);
     });
     child.on("error", (error) => {
-      clearTimeout(timeout);
-      clearInterval(heartbeat);
-      if (killTimer) clearTimeout(killTimer);
-      reject(error);
+      rejectOnce(error);
     });
     child.on("close", (code, signal) => {
-      clearTimeout(timeout);
-      clearInterval(heartbeat);
-      if (killTimer) clearTimeout(killTimer);
       if (timedOut) {
-        reject(new Error(`${command} timed out after ${timeoutSeconds}s`));
+        rejectOnce(new Error(`${command} timed out after ${timeoutSeconds}s`));
         return;
       }
       if (code !== 0) {
-        reject(
+        rejectOnce(
           new Error(
             `${command} failed (${code ?? signal}): ${stderr || stdout}`,
           ),
         );
         return;
       }
-      resolve({ stdout, stderr });
+      resolveOnce({ stdout, stderr });
     });
     child.stdin.end(prompt);
   });
@@ -1945,17 +2339,20 @@ async function runCodex(repo, args, prompt) {
     );
   }
   const tempRoot = safeTempRoot(repo);
-  const tempDir = mkdtempSync(path.join(tempRoot, "autoreview-codex."));
+  const tempDir = createRegisteredEngineRuntimeDirectory(
+    tempRoot,
+    "autoreview-codex.",
+  );
   const workspace = path.join(tempDir, "workspace");
   const stateDir = path.join(tempDir, "state");
   const logDir = path.join(tempDir, "log");
-  mkdirSync(workspace);
-  mkdirSync(stateDir);
-  mkdirSync(logDir);
   const schemaPath = path.join(tempDir, "schema.json");
   const outputPath = path.join(tempDir, "last-message.json");
-  writeFileSync(schemaPath, JSON.stringify(REVIEW_SCHEMA));
   try {
+    mkdirSync(workspace);
+    mkdirSync(stateDir);
+    mkdirSync(logDir);
+    writeFileSync(schemaPath, JSON.stringify(REVIEW_SCHEMA));
     const toolEnv = tomlInlineTable({
       GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_CONFIG_NOSYSTEM: "1",
@@ -2036,7 +2433,7 @@ async function runCodex(repo, args, prompt) {
       ? readFileSync(outputPath, "utf8")
       : result.stdout;
   } finally {
-    rmSync(tempDir, { recursive: true, force: true });
+    removeEngineRuntimeDirectory(tempDir);
   }
 }
 
@@ -2052,33 +2449,39 @@ function compareVersion(left, right) {
   return 0;
 }
 
-function ensureClaudeIsolationSupported(claude, repo, env, cwd) {
-  const versionResult = spawnTrustedSync(claude, ["--version"], {
-    cwd,
-    env,
-    encoding: "utf8",
-    maxBuffer: 1024 * 1024,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const version = parseVersion(
-    `${versionResult.stdout || ""}\n${versionResult.stderr || ""}`,
-  );
-  if (
-    versionResult.status !== 0 ||
-    !version ||
-    compareVersion(version, CLAUDE_SAFE_MODE_MIN_VERSION) < 0
-  ) {
+async function ensureClaudeIsolationSupported(claude, repo, env, cwd) {
+  let versionResult;
+  try {
+    versionResult = await runCommandWithInput(claude, ["--version"], cwd, "", {
+      env,
+      label: "claude version probe",
+      timeoutSeconds: 15,
+    });
+  } catch {
     throw new Error(
       "claude engine requires Claude Code >= 2.1.169 for --safe-mode",
     );
   }
-  const helpResult = spawnTrustedSync(claude, ["--help"], {
-    cwd,
-    env,
-    encoding: "utf8",
-    maxBuffer: 2 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const version = parseVersion(
+    `${versionResult.stdout || ""}\n${versionResult.stderr || ""}`,
+  );
+  if (!version || compareVersion(version, CLAUDE_SAFE_MODE_MIN_VERSION) < 0) {
+    throw new Error(
+      "claude engine requires Claude Code >= 2.1.169 for --safe-mode",
+    );
+  }
+  let helpResult;
+  try {
+    helpResult = await runCommandWithInput(claude, ["--help"], cwd, "", {
+      env,
+      label: "claude help probe",
+      timeoutSeconds: 15,
+    });
+  } catch {
+    throw new Error(
+      "claude engine is missing required isolation flags: --help failed",
+    );
+  }
   const help = `${helpResult.stdout || ""}\n${helpResult.stderr || ""}`;
   const required = [
     "--safe-mode",
@@ -2088,7 +2491,7 @@ function ensureClaudeIsolationSupported(claude, repo, env, cwd) {
     "--tools",
   ];
   const missing = required.filter((flag) => !help.includes(flag));
-  if (helpResult.status !== 0 || missing.length > 0) {
+  if (missing.length > 0) {
     throw new Error(
       `claude engine is missing required isolation flags: ${missing.join(", ") || "--help failed"}`,
     );
@@ -2101,14 +2504,15 @@ async function runClaude(repo, args, prompt) {
     throw new Error("claude CLI is not available");
   }
   const tempRoot = safeTempRoot(repo);
-  const tempDir = mkdtempSync(
-    path.join(tempRoot, "autoreview-claude-workspace."),
+  const tempDir = createRegisteredEngineRuntimeDirectory(
+    tempRoot,
+    "autoreview-claude-workspace.",
   );
   const workspace = path.join(tempDir, "workspace");
-  mkdirSync(workspace);
-  const env = safeEngineEnv(repo, "claude", tempDir);
   try {
-    ensureClaudeIsolationSupported(claude, repo, env, workspace);
+    mkdirSync(workspace);
+    const env = safeEngineEnv(repo, "claude", tempDir);
+    await ensureClaudeIsolationSupported(claude, repo, env, workspace);
     const claudeArgs = [
       "--safe-mode",
       "--setting-sources",
@@ -2148,7 +2552,7 @@ async function runClaude(repo, args, prompt) {
     );
     return result.stdout;
   } finally {
-    rmSync(tempDir, { recursive: true, force: true });
+    removeEngineRuntimeDirectory(tempDir);
   }
 }
 
@@ -3281,6 +3685,9 @@ entrypoint()
     process.exitCode = code;
   })
   .catch((error) => {
-    console.error(`autoreview failed: ${error.message}`);
+    if (!pendingTerminationSignal) {
+      console.error(`autoreview failed: ${error.message}`);
+    }
     process.exitCode = 1;
-  });
+  })
+  .finally(finishPendingProcessTermination);

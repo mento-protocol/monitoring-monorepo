@@ -786,7 +786,10 @@ run_helper_with_path_in_repo() {
     AWS_SDK_LOAD_CONFIG \
     AWS_SHARED_CREDENTIALS_FILE \
     AWS_WEB_IDENTITY_TOKEN_FILE \
-    GOOGLE_APPLICATION_CREDENTIALS; do
+    GOOGLE_APPLICATION_CREDENTIALS \
+    SSL_CERT_FILE \
+    AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER \
+    AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE; do
     value="${!key-}"
     if [[ -n "$value" ]]; then
       env_args+=("$key=$value")
@@ -1053,36 +1056,53 @@ run_requested_codex_missing_regression() {
 run_claude_no_tools_regression() {
   local review_repo="$tmp_dir/claude-no-tools"
   local fake_bin="$tmp_dir/fake-claude-bin"
-  local aws_config_file="$tmp_dir/aws-config"
-  local aws_credentials_file="$tmp_dir/aws-credentials"
+  local aws_config_file="$tmp_dir/aws-config-source/shared-config"
+  local aws_credentials_file="$tmp_dir/aws-credentials-source/shared-config"
   local aws_container_auth_file="$tmp_dir/aws-container-authorization"
   local aws_web_identity_target="$tmp_dir/aws-web-identity-token"
   local aws_web_identity_file="$tmp_dir/aws-web-identity-token-link"
   local google_application_credentials="$tmp_dir/google-application-credentials.json"
+  local ssl_cert_file="$tmp_dir/reviewer-ca.pem"
+  local credential_process_marker="$tmp_dir/credential-process-ran"
   local canonical_aws_config_file
   local canonical_aws_credentials_file
   local canonical_aws_container_auth_file
   local canonical_aws_web_identity_file
   local canonical_google_application_credentials
+  local canonical_ssl_cert_file
   init_review_repo "$review_repo"
   printf 'base\n' >"$review_repo/README.md"
   commit_review_repo "$review_repo" init
   printf 'change\n' >>"$review_repo/README.md"
+  mkdir -p "$(dirname "$aws_config_file")" "$(dirname "$aws_credentials_file")"
   printf '[default]\nregion = us-east-1\n' >"$aws_config_file"
   printf '[default]\naws_access_key_id = test\n' >"$aws_credentials_file"
   printf 'container-authorization-placeholder\n' >"$aws_container_auth_file"
   printf 'web-identity-placeholder\n' >"$aws_web_identity_target"
   printf '{"type":"external_account"}\n' >"$google_application_credentials"
+  printf '%s\n' '-----BEGIN CERTIFICATE-----' 'placeholder-ca' '-----END CERTIFICATE-----' >"$ssl_cert_file"
+  chmod 0600 \
+    "$aws_config_file" \
+    "$aws_credentials_file" \
+    "$aws_container_auth_file" \
+    "$aws_web_identity_target" \
+    "$google_application_credentials"
+  chmod 0644 "$ssl_cert_file"
   ln -s "$(basename "$aws_web_identity_target")" "$aws_web_identity_file"
   canonical_aws_config_file="$(cd "$(dirname "$aws_config_file")" && printf '%s/%s' "$(pwd -P)" "$(basename "$aws_config_file")")"
   canonical_aws_credentials_file="$(cd "$(dirname "$aws_credentials_file")" && printf '%s/%s' "$(pwd -P)" "$(basename "$aws_credentials_file")")"
   canonical_aws_container_auth_file="$(cd "$(dirname "$aws_container_auth_file")" && printf '%s/%s' "$(pwd -P)" "$(basename "$aws_container_auth_file")")"
   canonical_aws_web_identity_file="$(cd "$(dirname "$aws_web_identity_target")" && printf '%s/%s' "$(pwd -P)" "$(basename "$aws_web_identity_target")")"
   canonical_google_application_credentials="$(cd "$(dirname "$google_application_credentials")" && printf '%s/%s' "$(pwd -P)" "$(basename "$google_application_credentials")")"
+  canonical_ssl_cert_file="$(cd "$(dirname "$ssl_cert_file")" && printf '%s/%s' "$(pwd -P)" "$(basename "$ssl_cert_file")")"
   mkdir "$fake_bin"
   cat >"$fake_bin/claude" <<'CLAUDE'
 #!/usr/bin/env bash
 printf 'invoked\n' >"$AUTOREVIEW_FAKE_CAPTURE.invoked"
+if [[ -n "${AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE:-}" ]]; then
+  printf '[default]\ncredential_process = attacker-controlled-command\n' \
+    >"$AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE"
+fi
 if [[ "${1:-}" == "--version" ]]; then
   printf '2.1.210\n'
   exit 0
@@ -1094,6 +1114,38 @@ fi
 printf '%s\n' "$@" >"$AUTOREVIEW_FAKE_CAPTURE"
 pwd >"$AUTOREVIEW_FAKE_CAPTURE.cwd"
 env >"$AUTOREVIEW_FAKE_CAPTURE.env"
+node - <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const keys = [
+  "AWS_CONFIG_FILE",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+  "AWS_SHARED_CREDENTIALS_FILE",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "SSL_CERT_FILE",
+];
+const capture = process.env.AUTOREVIEW_FAKE_CAPTURE;
+let metadata = "";
+for (const key of keys) {
+  const value = process.env[key];
+  if (!value) continue;
+  const fileStat = fs.lstatSync(value, { bigint: true });
+  const parentStat = fs.lstatSync(path.dirname(value), { bigint: true });
+  metadata += `${key}=${value}\n`;
+  metadata += `${key}_FILE=${fileStat.isFile()}\n`;
+  metadata += `${key}_SYMLINK=${fileStat.isSymbolicLink()}\n`;
+  metadata += `${key}_MODE=${Number(fileStat.mode & 0o777n).toString(8)}\n`;
+  metadata += `${key}_NLINK=${fileStat.nlink}\n`;
+  metadata += `${key}_PARENT_MODE=${Number(parentStat.mode & 0o777n).toString(8)}\n`;
+  fs.writeFileSync(`${capture}.${key}`, fs.readFileSync(value));
+}
+fs.writeFileSync(`${capture}.snapshots`, metadata);
+NODE
+if [[ -n "${AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER:-}" ]] && \
+  /usr/bin/grep -q 'credential_process[[:space:]]*=' "$AWS_CONFIG_FILE"; then
+  : >"$AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER"
+fi
 cat >/dev/null
 cat <<'JSON'
 {"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}
@@ -1114,6 +1166,7 @@ CLAUDE
     AWS_SHARED_CREDENTIALS_FILE="$aws_credentials_file" \
     AWS_WEB_IDENTITY_TOKEN_FILE="$aws_web_identity_file" \
     GOOGLE_APPLICATION_CREDENTIALS="$google_application_credentials" \
+    SSL_CERT_FILE="$ssl_cert_file" \
     run_helper_with_path_in_repo "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
   expect_capture_contains_line "--tools"
   expect_capture_contains_line "--mcp-config"
@@ -1128,21 +1181,202 @@ CLAUDE
   expect_file_not_contains "$capture.cwd" "$review_repo"
   expect_file_contains "$capture.cwd" "autoreview-claude-workspace."
   expect_file_contains "$capture.env" "ANTHROPIC_VERTEX_PROJECT_ID=autoreview-vertex-project"
-  expect_file_contains "$capture.env" "AWS_CONFIG_FILE=$canonical_aws_config_file"
   expect_file_contains "$capture.env" "AWS_CONTAINER_AUTHORIZATION_TOKEN=placeholder-auth-token"
-  expect_file_contains "$capture.env" "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE=$canonical_aws_container_auth_file"
   expect_file_contains "$capture.env" "AWS_CONTAINER_CREDENTIALS_FULL_URI=http://169.254.170.2/v2/credentials"
   expect_file_contains "$capture.env" "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI=/v2/credentials"
   expect_file_contains "$capture.env" "AWS_EC2_METADATA_DISABLED=true"
   expect_file_contains "$capture.env" "AWS_ROLE_ARN=arn:aws:iam::123456789012:role/autoreview-test"
   expect_file_contains "$capture.env" "AWS_ROLE_SESSION_NAME=autoreview-session"
   expect_file_contains "$capture.env" "AWS_SDK_LOAD_CONFIG=1"
-  expect_file_contains "$capture.env" "AWS_SHARED_CREDENTIALS_FILE=$canonical_aws_credentials_file"
-  expect_file_contains "$capture.env" "AWS_WEB_IDENTITY_TOKEN_FILE=$canonical_aws_web_identity_file"
-  expect_file_contains "$capture.env" "GOOGLE_APPLICATION_CREDENTIALS=$canonical_google_application_credentials"
+  local key
+  local snapshot_path
+  local expected_source
+  local aws_config_snapshot
+  local aws_credentials_snapshot
+  for key in \
+    AWS_CONFIG_FILE \
+    AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE \
+    AWS_SHARED_CREDENTIALS_FILE \
+    AWS_WEB_IDENTITY_TOKEN_FILE \
+    GOOGLE_APPLICATION_CREDENTIALS \
+    SSL_CERT_FILE; do
+    snapshot_path="$(sed -n "s/^${key}=//p" "$capture.snapshots")"
+    if [[ -z "$snapshot_path" ]]; then
+      printf 'Claude did not receive a snapshot for %s\n' "$key" >&2
+      exit 1
+    fi
+    case "$key" in
+      AWS_CONFIG_FILE)
+        expected_source="$canonical_aws_config_file"
+        aws_config_snapshot="$snapshot_path"
+        ;;
+      AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE)
+        expected_source="$canonical_aws_container_auth_file"
+        ;;
+      AWS_SHARED_CREDENTIALS_FILE)
+        expected_source="$canonical_aws_credentials_file"
+        aws_credentials_snapshot="$snapshot_path"
+        ;;
+      AWS_WEB_IDENTITY_TOKEN_FILE)
+        expected_source="$canonical_aws_web_identity_file"
+        ;;
+      GOOGLE_APPLICATION_CREDENTIALS)
+        expected_source="$canonical_google_application_credentials"
+        ;;
+      SSL_CERT_FILE)
+        expected_source="$canonical_ssl_cert_file"
+        ;;
+    esac
+    if [[ "$snapshot_path" == "$expected_source" ]]; then
+      printf 'Claude received the original %s path instead of a snapshot\n' "$key" >&2
+      exit 1
+    fi
+    expect_file_contains "$capture.snapshots" "${key}_FILE=true"
+    expect_file_contains "$capture.snapshots" "${key}_SYMLINK=false"
+    expect_file_contains "$capture.snapshots" "${key}_MODE=600"
+    expect_file_contains "$capture.snapshots" "${key}_NLINK=1"
+    expect_file_contains "$capture.snapshots" "${key}_PARENT_MODE=700"
+    expect_file_contains "$capture.env" "${key}=$snapshot_path"
+    expect_file_not_contains "$capture.env" "${key}=$expected_source"
+    cmp "$capture.$key" "$expected_source"
+    if [[ -e "$snapshot_path" ]]; then
+      printf 'Claude %s snapshot survived engine cleanup: %s\n' "$key" "$snapshot_path" >&2
+      exit 1
+    fi
+  done
+  if [[ "$aws_config_snapshot" == "$aws_credentials_snapshot" ]]; then
+    printf 'same-basename AWS inputs collided in the snapshot directory\n' >&2
+    exit 1
+  fi
   expect_file_not_contains "$capture.env" "UNRELATED_SECRET"
   expect_stdout_contains "autoreview clean"
   expect_empty_stderr
+
+  printf '[default]\nregion = us-east-1\n' >"$aws_config_file"
+  rm -f "$capture.invoked" "$credential_process_marker"
+  AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER="$credential_process_marker" \
+    AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE="$aws_config_file" \
+    AWS_CONFIG_FILE="$aws_config_file" \
+    run_helper_with_path_in_repo "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
+  expect_file_contains "$capture.AWS_CONFIG_FILE" "region = us-east-1"
+  expect_file_not_contains "$capture.AWS_CONFIG_FILE" "credential_process"
+  expect_file_contains "$aws_config_file" "credential_process = attacker-controlled-command"
+  if [[ -e "$credential_process_marker" ]]; then
+    printf 'Claude observed a post-snapshot AWS credential_process mutation\n' >&2
+    exit 1
+  fi
+  expect_stdout_contains "autoreview clean"
+  expect_empty_stderr
+
+  printf '[default]\ncredential_process = attacker-controlled-command\n' >"$aws_config_file"
+  chmod 0666 "$aws_config_file"
+  rm -f "$capture.invoked" "$credential_process_marker"
+  TMPDIR="$tmp_dir" \
+    AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER="$credential_process_marker" \
+    AWS_CONFIG_FILE="$aws_config_file" \
+    SSL_CERT_FILE="$ssl_cert_file" \
+    run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
+  chmod 0600 "$aws_config_file"
+  expect_stderr_contains "AWS_CONFIG_FILE must point to a trusted regular file"
+  if [[ -e "$capture.invoked" || -e "$credential_process_marker" ]]; then
+    printf 'Claude executed with an untrusted AWS credential_process config\n' >&2
+    exit 1
+  fi
+  if find "$tmp_dir" -maxdepth 1 -type d -name 'autoreview-claude-workspace.*' -print -quit | grep -q .; then
+    printf 'Claude credential snapshot workspace survived setup failure\n' >&2
+    exit 1
+  fi
+
+  local fifo_credential_file="$tmp_dir/aws-config-fifo"
+  local fifo_helper_pid
+  local fifo_completed=0
+  mkfifo "$fifo_credential_file"
+  chmod 0600 "$fifo_credential_file"
+  rm -f "$capture.invoked"
+  (
+    AWS_CONFIG_FILE="$fifo_credential_file" \
+      run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
+  ) &
+  fifo_helper_pid=$!
+  for _ in {1..200}; do
+    if ! kill -0 "$fifo_helper_pid" 2>/dev/null; then
+      fifo_completed=1
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$fifo_completed" -eq 0 ]]; then
+    "$node_bin" -e '
+      const fs = require("node:fs");
+      try {
+        const fd = fs.openSync(
+          process.argv[1],
+          fs.constants.O_WRONLY | fs.constants.O_NONBLOCK,
+        );
+        fs.writeSync(fd, "unblock-regression\n");
+        fs.closeSync(fd);
+      } catch {}
+    ' "$fifo_credential_file"
+  fi
+  wait "$fifo_helper_pid"
+  if [[ "$fifo_completed" -eq 0 ]]; then
+    printf 'AWS config FIFO blocked before regular-file validation\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains "AWS_CONFIG_FILE must point to a trusted regular file"
+  if [[ -e "$capture.invoked" ]]; then
+    printf 'Claude executed with an AWS config FIFO\n' >&2
+    exit 1
+  fi
+  rm "$fifo_credential_file"
+
+  local unsafe_credential_parent="$tmp_dir/unsafe-credential-parent"
+  local unsafe_credential_file="$unsafe_credential_parent/aws-config"
+  mkdir "$unsafe_credential_parent"
+  printf '[default]\nregion = us-east-1\n' >"$unsafe_credential_file"
+  chmod 0600 "$unsafe_credential_file"
+  chmod 0777 "$unsafe_credential_parent"
+  rm -f "$capture.invoked"
+  AWS_CONFIG_FILE="$unsafe_credential_file" \
+    run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
+  chmod 0700 "$unsafe_credential_parent"
+  expect_stderr_contains "AWS_CONFIG_FILE has non-sticky shared-writable ancestry"
+  if [[ -e "$capture.invoked" ]]; then
+    printf 'Claude executed through unsafe AWS config ancestry\n' >&2
+    exit 1
+  fi
+
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    printf '[default]\nregion = us-east-1\n' >"$aws_config_file"
+    /bin/chmod +a 'everyone allow write,delete' "$aws_config_file"
+    rm -f "$capture.invoked"
+    AWS_CONFIG_FILE="$aws_config_file" \
+      run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
+    /bin/chmod -N "$aws_config_file"
+    expect_stderr_contains "AWS_CONFIG_FILE must point to a trusted regular file"
+    if [[ -e "$capture.invoked" ]]; then
+      printf 'Claude executed with a write-ACL AWS config\n' >&2
+      exit 1
+    fi
+
+    local acl_credential_parent="$tmp_dir/acl-credential-parent"
+    local acl_credential_file="$acl_credential_parent/aws-config"
+    mkdir "$acl_credential_parent"
+    printf '[default]\nregion = us-east-1\n' >"$acl_credential_file"
+    chmod 0600 "$acl_credential_file"
+    /bin/chmod +a \
+      'everyone allow add_file,delete_child' \
+      "$acl_credential_parent"
+    rm -f "$capture.invoked"
+    AWS_CONFIG_FILE="$acl_credential_file" \
+      run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
+    /bin/chmod -N "$acl_credential_parent"
+    expect_stderr_contains "AWS_CONFIG_FILE has write-granting ACL ancestry"
+    if [[ -e "$capture.invoked" ]]; then
+      printf 'Claude executed through write-ACL AWS config ancestry\n' >&2
+      exit 1
+    fi
+  fi
 
   printf 'repo-controlled-token\n' >"$review_repo/.git/aws-web-identity-token"
   rm -f "$capture.invoked"
@@ -1168,16 +1402,41 @@ CLAUDE
 run_codex_isolation_regression() {
   local review_repo="$tmp_dir/codex-isolation"
   local fake_bin="$tmp_dir/fake-codex-bin"
+  local ssl_cert_file="$tmp_dir/codex-reviewer-ca.pem"
+  local ssl_snapshot_path
   init_review_repo "$review_repo"
   printf 'base\n' >"$review_repo/README.md"
   commit_review_repo "$review_repo" init
   printf 'change\n' >>"$review_repo/README.md"
+  printf '%s\n' '-----BEGIN CERTIFICATE-----' 'codex-placeholder-ca' '-----END CERTIFICATE-----' >"$ssl_cert_file"
+  chmod 0644 "$ssl_cert_file"
   mkdir "$fake_bin"
   cat >"$fake_bin/codex" <<'CODEX'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"$AUTOREVIEW_FAKE_CAPTURE"
 pwd >"$AUTOREVIEW_FAKE_CAPTURE.cwd"
 env >"$AUTOREVIEW_FAKE_CAPTURE.env"
+node - <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const value = process.env.SSL_CERT_FILE;
+const fileStat = fs.lstatSync(value, { bigint: true });
+const parentStat = fs.lstatSync(path.dirname(value), { bigint: true });
+const metadata = [
+  `SSL_CERT_FILE=${value}`,
+  `SSL_CERT_FILE_FILE=${fileStat.isFile()}`,
+  `SSL_CERT_FILE_SYMLINK=${fileStat.isSymbolicLink()}`,
+  `SSL_CERT_FILE_MODE=${Number(fileStat.mode & 0o777n).toString(8)}`,
+  `SSL_CERT_FILE_NLINK=${fileStat.nlink}`,
+  `SSL_CERT_FILE_PARENT_MODE=${Number(parentStat.mode & 0o777n).toString(8)}`,
+  "",
+].join("\n");
+fs.writeFileSync(`${process.env.AUTOREVIEW_FAKE_CAPTURE}.codex-ssl`, metadata);
+fs.writeFileSync(
+  `${process.env.AUTOREVIEW_FAKE_CAPTURE}.codex-ssl-content`,
+  fs.readFileSync(value),
+);
+NODE
 output=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -1195,7 +1454,8 @@ printf '%s\n' '{"findings":[],"overall_correctness":"patch is correct","overall_
 CODEX
   chmod +x "$fake_bin/codex"
 
-  run_helper_with_path_in_repo "$review_repo" "$fake_bin" --mode local --engine codex
+  SSL_CERT_FILE="$ssl_cert_file" \
+    run_helper_with_path_in_repo "$review_repo" "$fake_bin" --mode local --engine codex
   expect_capture_contains_line "--ask-for-approval"
   expect_capture_contains_line "never"
   expect_capture_contains_line "--ignore-user-config"
@@ -1208,15 +1468,308 @@ CODEX
   expect_capture_not_contains_line "--search"
   expect_file_not_contains "$capture.cwd" "$review_repo"
   expect_file_contains "$capture.cwd" "/workspace"
+  ssl_snapshot_path="$(sed -n 's/^SSL_CERT_FILE=//p' "$capture.codex-ssl")"
+  if [[ -z "$ssl_snapshot_path" || "$ssl_snapshot_path" == "$ssl_cert_file" ]]; then
+    printf 'Codex did not receive a private SSL_CERT_FILE snapshot\n' >&2
+    exit 1
+  fi
+  expect_file_contains "$capture.codex-ssl" "SSL_CERT_FILE_FILE=true"
+  expect_file_contains "$capture.codex-ssl" "SSL_CERT_FILE_SYMLINK=false"
+  expect_file_contains "$capture.codex-ssl" "SSL_CERT_FILE_MODE=600"
+  expect_file_contains "$capture.codex-ssl" "SSL_CERT_FILE_NLINK=1"
+  expect_file_contains "$capture.codex-ssl" "SSL_CERT_FILE_PARENT_MODE=700"
+  expect_file_contains "$capture.env" "SSL_CERT_FILE=$ssl_snapshot_path"
+  expect_file_not_contains "$capture.env" "SSL_CERT_FILE=$ssl_cert_file"
+  cmp "$capture.codex-ssl-content" "$ssl_cert_file"
+  if [[ -e "$ssl_snapshot_path" ]]; then
+    printf 'Codex SSL_CERT_FILE snapshot survived engine cleanup\n' >&2
+    exit 1
+  fi
   expect_file_not_contains "$capture.env" "UNRELATED_SECRET"
   expect_stdout_contains "autoreview clean"
   expect_empty_stderr
 
-  run_helper_with_path_in_repo "$review_repo" "$fake_bin" \
-    --mode local --engine codex --web-search
+  SSL_CERT_FILE="$ssl_cert_file" \
+    run_helper_with_path_in_repo "$review_repo" "$fake_bin" \
+      --mode local --engine codex --web-search
   expect_capture_contains_line "--search"
   expect_stdout_contains "autoreview clean"
   expect_empty_stderr
+}
+
+run_engine_signal_cleanup_regression() {
+  local review_repo="$tmp_dir/engine-signal-cleanup"
+  local fake_bin="$tmp_dir/engine-signal-bin"
+  local signal_tmp="$tmp_dir/engine-signal-tmp"
+  local ssl_cert_file="$tmp_dir/engine-signal-ca.pem"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+  mkdir "$fake_bin" "$signal_tmp"
+  chmod 0700 "$signal_tmp"
+  printf '%s\n' '-----BEGIN CERTIFICATE-----' 'signal-placeholder-ca' '-----END CERTIFICATE-----' >"$ssl_cert_file"
+  chmod 0600 "$ssl_cert_file"
+
+  cat >"$fake_bin/claude" <<'CLAUDE'
+#!/usr/bin/env node
+const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+function captureAndHang() {
+  process.on("SIGTERM", () => {});
+  const grandchild = spawn(
+    process.execPath,
+    [
+      "-e",
+      'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);',
+    ],
+    {
+      detached: Boolean(process.env.AUTOREVIEW_FAKE_DETACH_GRANDCHILD),
+      stdio: ["ignore", "inherit", "inherit"],
+    },
+  );
+  fs.writeFileSync(
+    `${process.env.AUTOREVIEW_FAKE_CAPTURE}.child-pid`,
+    `${process.pid}\n`,
+  );
+  fs.writeFileSync(
+    `${process.env.AUTOREVIEW_FAKE_CAPTURE}.helper-pid`,
+    `${process.ppid}\n`,
+  );
+  fs.writeFileSync(
+    `${process.env.AUTOREVIEW_FAKE_CAPTURE}.grandchild-pid`,
+    `${grandchild.pid}\n`,
+  );
+  fs.writeFileSync(
+    `${process.env.AUTOREVIEW_FAKE_CAPTURE}.snapshot`,
+    `${process.env.SSL_CERT_FILE}\n`,
+  );
+  setInterval(() => {}, 1000);
+}
+if (
+  process.argv[2] === "--version" &&
+  !process.env.AUTOREVIEW_FAKE_HANG_CLAUDE_PROBE
+) {
+  process.stdout.write("2.1.210\n");
+  process.exit(0);
+}
+if (process.argv[2] === "--help") {
+  process.stdout.write(
+    "--safe-mode\n--setting-sources\n--strict-mcp-config\n--disallowedTools\n--tools\n",
+  );
+  process.exit(0);
+}
+captureAndHang();
+CLAUDE
+  cat >"$fake_bin/codex" <<'CODEX'
+#!/usr/bin/env node
+const { spawn } = require("node:child_process");
+const fs = require("node:fs");
+process.on("SIGTERM", () => {});
+const grandchild = spawn(
+  process.execPath,
+  [
+    "-e",
+    'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);',
+  ],
+  {
+    detached: Boolean(process.env.AUTOREVIEW_FAKE_DETACH_GRANDCHILD),
+    stdio: ["ignore", "inherit", "inherit"],
+  },
+);
+fs.writeFileSync(
+  `${process.env.AUTOREVIEW_FAKE_CAPTURE}.child-pid`,
+  `${process.pid}\n`,
+);
+fs.writeFileSync(
+  `${process.env.AUTOREVIEW_FAKE_CAPTURE}.helper-pid`,
+  `${process.ppid}\n`,
+);
+fs.writeFileSync(
+  `${process.env.AUTOREVIEW_FAKE_CAPTURE}.grandchild-pid`,
+  `${grandchild.pid}\n`,
+);
+fs.writeFileSync(
+  `${process.env.AUTOREVIEW_FAKE_CAPTURE}.snapshot`,
+  `${process.env.SSL_CERT_FILE}\n`,
+);
+setInterval(() => {}, 1000);
+CODEX
+  chmod +x "$fake_bin/claude" "$fake_bin/codex"
+
+  local scenario
+  local engine
+  local engine_capture
+  local engine_pid
+  local helper_pid
+  local child_pid
+  local grandchild_pid
+  local snapshot_path
+  local launched
+  local snapshot_unlinked
+  local helper_exited
+  local descendants_exited
+  local wait_status
+  local launch_dir
+  local -a signal_env_args
+  launch_dir="$(pwd -P)"
+  for scenario in claude-probe claude codex; do
+    engine="${scenario%%-*}"
+    engine_capture="$tmp_dir/engine-signal-$scenario"
+    rm -f \
+      "$engine_capture.child-pid" \
+      "$engine_capture.grandchild-pid" \
+      "$engine_capture.helper-pid" \
+      "$engine_capture.snapshot"
+    signal_env_args=(
+      "PATH=$fake_bin:$PATH"
+      "HOME=$HOME"
+      "TMPDIR=$signal_tmp"
+      "SSL_CERT_FILE=$ssl_cert_file"
+      "AUTOREVIEW_FAKE_CAPTURE=$engine_capture"
+      "AUTOREVIEW_HEARTBEAT_SECONDS=60"
+    )
+    if [[ "$scenario" == "claude-probe" ]]; then
+      signal_env_args+=(
+        "AUTOREVIEW_FAKE_DETACH_GRANDCHILD=1"
+        "AUTOREVIEW_FAKE_HANG_CLAUDE_PROBE=1"
+      )
+    fi
+    cd "$review_repo"
+    /usr/bin/env -i "${signal_env_args[@]}" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      --mode local --engine "$engine" >"$engine_capture.stdout" 2>"$engine_capture.stderr" &
+    engine_pid=$!
+    cd "$launch_dir"
+    launched=0
+    for _ in {1..200}; do
+      if [[
+        -s "$engine_capture.child-pid" &&
+          -s "$engine_capture.grandchild-pid" &&
+          -s "$engine_capture.helper-pid" &&
+          -s "$engine_capture.snapshot"
+      ]]; then
+        launched=1
+        break
+      fi
+      if ! kill -0 "$engine_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$launched" -ne 1 ]]; then
+      kill -TERM "$engine_pid" 2>/dev/null || true
+      wait "$engine_pid" 2>/dev/null || true
+      printf '%s did not reach the signal-cleanup fixture\n' "$scenario" >&2
+      cat "$engine_capture.stderr" >&2
+      exit 1
+    fi
+    child_pid="$(cat "$engine_capture.child-pid")"
+    grandchild_pid="$(cat "$engine_capture.grandchild-pid")"
+    helper_pid="$(cat "$engine_capture.helper-pid")"
+    snapshot_path="$(cat "$engine_capture.snapshot")"
+    if [[ ! -f "$snapshot_path" ]]; then
+      printf '%s engine credential snapshot was absent before interruption\n' "$engine" >&2
+      exit 1
+    fi
+    kill -TERM "$helper_pid"
+    snapshot_unlinked=0
+    for _ in {1..40}; do
+      if [[ ! -e "$snapshot_path" ]]; then
+        snapshot_unlinked=1
+        break
+      fi
+      if ! kill -0 "$helper_pid" 2>/dev/null; then
+        break
+      fi
+      if [[ "$scenario" == "claude-probe" ]] && ! kill -0 "$grandchild_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$snapshot_unlinked" -ne 1 ]]; then
+      kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      wait "$engine_pid" 2>/dev/null || true
+      printf '%s credential snapshot remained readable during interruption grace period\n' "$scenario" >&2
+      exit 1
+    fi
+    if ! kill -0 "$helper_pid" 2>/dev/null; then
+      kill -KILL "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      printf '%s helper exited before credential snapshot cleanup was observed\n' "$scenario" >&2
+      cat "$engine_capture.stderr" >&2
+      exit 1
+    fi
+    if [[ "$scenario" == "claude-probe" ]] && ! kill -0 "$grandchild_pid" 2>/dev/null; then
+      kill -KILL "$helper_pid" "$engine_pid" "$child_pid" 2>/dev/null || true
+      wait "$engine_pid" 2>/dev/null || true
+      printf 'detached probe grandchild exited before credential snapshot cleanup was observed\n' >&2
+      exit 1
+    fi
+    kill -TERM "$helper_pid"
+    helper_exited=0
+    for _ in {1..240}; do
+      if ! kill -0 "$helper_pid" 2>/dev/null; then
+        helper_exited=1
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$helper_exited" -ne 1 ]]; then
+      kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      wait "$engine_pid" 2>/dev/null || true
+      printf '%s helper did not terminate within the signal-cleanup deadline\n' "$scenario" >&2
+      exit 1
+    fi
+    set +e
+    wait "$engine_pid" 2>/dev/null
+    wait_status=$?
+    set -e
+    if [[ "$wait_status" -eq 0 ]]; then
+      printf '%s helper exited successfully after SIGTERM\n' "$scenario" >&2
+      exit 1
+    fi
+    descendants_exited=0
+    for _ in {1..100}; do
+      if ! kill -0 "$child_pid" 2>/dev/null; then
+        descendants_exited=1
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$descendants_exited" -ne 1 ]]; then
+      kill -KILL "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      printf '%s direct engine child survived helper interruption\n' "$scenario" >&2
+      exit 1
+    fi
+    if [[ -e "$snapshot_path" ]]; then
+      kill -KILL "$grandchild_pid" 2>/dev/null || true
+      printf '%s credential snapshot survived SIGTERM cleanup: %s\n' "$scenario" "$snapshot_path" >&2
+      exit 1
+    fi
+    if [[ "$scenario" != "claude-probe" ]]; then
+      descendants_exited=0
+      for _ in {1..100}; do
+        if ! kill -0 "$grandchild_pid" 2>/dev/null; then
+          descendants_exited=1
+          break
+        fi
+        sleep 0.05
+      done
+      if [[ "$descendants_exited" -ne 1 ]]; then
+        kill -KILL "$grandchild_pid" 2>/dev/null || true
+        printf '%s same-group grandchild survived helper interruption\n' "$scenario" >&2
+        exit 1
+      fi
+    fi
+    if find "$signal_tmp" -mindepth 1 -maxdepth 1 -type d -name 'autoreview-*' -print -quit | grep -q .; then
+      kill -KILL "$grandchild_pid" 2>/dev/null || true
+      printf '%s engine runtime survived SIGTERM cleanup\n' "$scenario" >&2
+      exit 1
+    fi
+    if [[ "$scenario" == "claude-probe" ]]; then
+      kill -KILL "$grandchild_pid" 2>/dev/null || true
+    fi
+  done
 }
 
 run_symlinked_node_codex_regression() {
@@ -3193,6 +3746,18 @@ expect_empty_stderr
 
 test_focus="${AUTOREVIEW_TEST_FOCUS:-all}"
 case "$test_focus" in
+  engine-isolation)
+    run_claude_no_tools_regression
+    run_codex_isolation_regression
+    run_engine_signal_cleanup_regression
+    printf 'focused autoreview engine-isolation tests passed\n'
+    exit 0
+    ;;
+  signal-cleanup)
+    run_engine_signal_cleanup_regression
+    printf 'focused autoreview signal-cleanup tests passed\n'
+    exit 0
+    ;;
   review-target-trust)
     run_review_target_metadata_regression
     run_trusted_helper_runtime_regression
@@ -3221,6 +3786,7 @@ if [[ "$test_focus" == "all" ]]; then
   run_requested_codex_missing_regression
   run_claude_no_tools_regression
   run_codex_isolation_regression
+  run_engine_signal_cleanup_regression
   run_symlinked_node_codex_regression
   run_repo_controlled_node_regression
   run_pr_base_detection_regression

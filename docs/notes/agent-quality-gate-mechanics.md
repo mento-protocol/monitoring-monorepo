@@ -266,9 +266,19 @@ repo/project instructions, hooks, plugins, and inherited environment restricted
 to the review contract. Reviewer credentials remain available only to launch
 the selected engine; repository tooling and unrelated environment state do not.
 For Claude/Bedrock this includes standard AWS web-identity, container, profile,
-and shared-file credential-chain locators. Credential/config file variables are
-canonicalized to existing regular files outside the reviewed repository; a
-repo-contained path fails closed before Claude starts.
+and shared-file credential-chain locators. Claude's file-valued cloud
+credential/config locators, plus `SSL_CERT_FILE` for both Claude and Codex, must
+resolve outside the reviewed repository to a root- or reviewer-owned regular
+file with no shared-write mode, unsafe non-sticky ancestry, or write-granting
+ACL. The helper opens each source no-follow, revalidates its identity and
+ancestry while copying it into a private per-run `0600` snapshot, and passes
+only that snapshot to the selected engine. Snapshot files are removed with the
+engine workspace during normal completion and partial setup failure. On process
+interruption they are identity-checked and unlinked before the bounded
+process-group termination path settles, so even an escaped descendant holding
+reviewer pipes cannot retain a credential path or block parent termination. An
+untrusted or repo-contained source fails closed before the selected engine
+starts.
 Direct supplemental-evidence paths must be repo-relative, regular UTF-8 files
 confined to the worktree. The narrow trusted exceptions are adapter-generated
 feedback state and protected-main checklist copies inside its

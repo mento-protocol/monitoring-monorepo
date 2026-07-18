@@ -47,9 +47,15 @@ workspace with project configuration and inherited environment restricted to
 the review contract. Reviewer web search is disabled by default to keep
 untrusted review evidence off the network; `--web-search` is an explicit opt-in
 for reviews that require public documentation lookup. Claude preserves standard Vertex and AWS Bedrock
-credential-chain inputs; path-valued AWS locators must resolve to regular files
-outside the reviewed repository. A quiet semantic reviewer emits a progress
-heartbeat every 60 seconds. `AUTOREVIEW_HELPER` is an escape hatch for
+credential-chain inputs. Claude's file-valued cloud locators, plus
+`SSL_CERT_FILE` for both Claude and Codex, must resolve outside the reviewed
+repository to trusted owner/mode/ancestry/ACL state; the helper opens each
+source no-follow with identity revalidation and passes a private per-run `0600`
+snapshot rather than the mutable source path. Those snapshots are removed with
+the isolated engine workspace after normal completion or partial setup failure.
+Interruption unlinks them before bounded process-group termination, including
+when an escaped descendant holds reviewer pipes. A quiet semantic reviewer
+emits a progress heartbeat every 60 seconds. `AUTOREVIEW_HELPER` is an escape hatch for
 intentional local testing or compatible replacement, not a Cloud prerequisite.
 Prepared-bundle replacements must implement the pinned helper CLI, including
 `--source-snapshot-only`, `--serialize-untracked-file`, `--bundle-output`,
