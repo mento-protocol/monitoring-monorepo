@@ -219,7 +219,10 @@ still matches, but never recursively deletes a failed destination reservation;
 inspect and remove an incomplete, unmarked destination before retrying. The
 mutable repo helper is not re-entered for publication. The published
 `helper-output.txt` reports the final prompt/pass paths, never the discarded
-staging directory.
+staging directory. A detached producing wrapper can verify the bundle from a
+non-Git working directory. On macOS, preparation, publication, and verification
+also reject write-granting extended ACLs on every canonical parent ancestor and
+bundle entry; those ACL checks bracket evidence hashing.
 Prepared bundles reject `--dry-run`: publication requires completed content
 validation and the main prompt plus every strictly ordered, deterministic
 indexed bounded pass. Prompt-index validation normalizes a UTF-8 BOM, CRLF line
@@ -338,13 +341,17 @@ Use a directory outside the repo worktree whose parent already exists so
 local-mode bundles do not include their own generated files. Every canonical
 ancestor of that parent must be owned by the current user or root; a
 group/other-writable ancestor is accepted only when its sticky bit protects
-other users' entries (for example `/tmp`). The bundle
+other users' entries (for example `/tmp`), and macOS write-granting ACLs are
+always rejected. The bundle
 contains changed paths, patch files, repo-selected checklist/prompt context,
 and the helper's
 `autoreview-prompt.md`. Add
 `--feedback-pr <number>` to include the current `pr:feedback-state` ledger as a
 review dataset for feedback-fix batches. Prepared-bundle mode owns that prompt
 path, so do not combine `--prepare-bundle-dir` with `--bundle-output`.
+The generated README names the exact producing wrapper in both verification
+commands; a runtime-changing review must not replace those commands with the
+reviewed checkout's package script.
 Retain the pre-review digest in reviewer state outside the bundle. After the
 fresh-context reviewer has read every bounded pass, repeat
 `--verify-bundle-dir` with that digest as `--expected-bundle-manifest`; both

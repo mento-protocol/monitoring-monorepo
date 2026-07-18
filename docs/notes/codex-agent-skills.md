@@ -73,7 +73,9 @@ keys, common webhook URLs,
 and secret-bearing URL query parameters fail closed before a semantic handoff.
 Evidence reads reject symlinks and path-swap races. The requested bundle parent
 must already exist. Every canonical ancestor must be owned by the current user
-or root, and group/other-writable ancestors require sticky-bit protection. The
+or root, and group/other-writable ancestors require sticky-bit protection. On
+macOS, write-granting ACLs on parent ancestors or bundle entries fail
+preparation or verification. The
 adapter canonicalizes and pins that directory plus the
 freshly created staging directory's `dev:ino` before content generation. It
 stages every artifact beside the destination, manifests wrapper-owned evidence

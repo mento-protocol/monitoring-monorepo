@@ -100,7 +100,9 @@ prompt. Prepared bundles retain a bounded, lossless pass index that one
 fresh-context reviewer must inspect completely. Their completion marker binds
 the evidence manifest; run `--verify-bundle-dir` immediately before review,
 retain its printed digest outside the bundle, then pass that digest to the
-post-review check with `--expected-bundle-manifest`. Automatic feedback capture
+post-review check with `--expected-bundle-manifest`. On macOS, write-granting
+ACLs on bundle-parent ancestors or entries fail preparation or verification.
+Automatic feedback capture
 pins the canonical GitHub repository. The owning-checkout default semantic
 helper, feedback-state modules, and checklist policy come from one pinned
 `origin/main` object rather than a PR-selected base, mutable worktree, or

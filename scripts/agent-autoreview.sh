@@ -45,7 +45,9 @@ repo_root="$(cd -- "$script_dir/.." && pwd -P)"
 default_helper="$repo_root/scripts/agent-autoreview.mjs"
 helper="${AUTOREVIEW_HELPER:-$default_helper}"
 
-checkout_root="$(pwd -P)"
+invocation_cwd="$(pwd -P)"
+checkout_root="$invocation_cwd"
+checkout_root_found=0
 while [[ ! -e "$checkout_root/.git" ]]; do
   checkout_parent="${checkout_root%/*}"
   if [[ -z "$checkout_parent" ]]; then
@@ -56,10 +58,19 @@ while [[ ! -e "$checkout_root/.git" ]]; do
   fi
   checkout_root="$checkout_parent"
 done
+if [[ -e "$checkout_root/.git" ]]; then
+  checkout_root_found=1
+fi
 
 rejected_command_roots=("$repo_root")
-if [[ "$checkout_root" != "$repo_root" ]]; then
+if [[ "$checkout_root_found" -eq 1 && "$checkout_root" != "$repo_root" ]]; then
   rejected_command_roots+=("$checkout_root")
+elif [[
+  "$checkout_root_found" -eq 0 &&
+    "$invocation_cwd" != "/" &&
+    "$invocation_cwd" != "$repo_root"
+]]; then
+  rejected_command_roots+=("$invocation_cwd")
 fi
 
 path_is_rejected() {
@@ -176,7 +187,7 @@ path_acl_is_trusted() {
       continue
     fi
     if [[
-      "$line" =~ [[:space:]]allow[[:space:]].*(write|append|delete|delete_child|writeattr|writeextattr|writesecurity|chown)(,|[[:space:]]|$)
+      "$line" =~ [[:space:]]allow[[:space:]].*(write|append|add_file|add_subdirectory|delete|delete_child|writeattr|writeextattr|writesecurity|chown)(,|[[:space:]]|$)
     ]]; then
       return 1
     fi
@@ -1641,15 +1652,31 @@ path_identity() {
   ' "$1"
 }
 
+assert_bundle_ancestry_acl_trusted() {
+  local current="$1"
+  local ancestor
+  while true; do
+    if ! path_acl_is_trusted "$current"; then
+      echo "agent:autoreview: unsafe prepared-bundle parent ACL: $current" >&2
+      return 1
+    fi
+    [[ "$current" != "/" ]] || break
+    ancestor="${current%/*}"
+    [[ -n "$ancestor" ]] || ancestor="/"
+    current="$ancestor"
+  done
+}
+
 assert_safe_bundle_parent_ancestry() {
   local bundle_parent="$1"
   # A sticky, root-owned shared directory such as /tmp is safe because another
   # unprivileged UID cannot replace this user's children. Every other ancestor
   # must be private against group/other writers, and an attacker-owned sticky
   # directory is never trusted.
+  assert_bundle_ancestry_acl_trusted "$bundle_parent" || return 1
   # The single-quoted string is JavaScript source, not shell interpolation.
   # shellcheck disable=SC2016
-  run_trusted_node -e '
+  if ! run_trusted_node -e '
     const fs = require("node:fs");
     const path = require("node:path");
     const parent = process.argv[1];
@@ -1677,7 +1704,131 @@ assert_safe_bundle_parent_ancestry() {
       if (ancestor === current) break;
       current = ancestor;
     }
-  ' "$bundle_parent"
+  ' "$bundle_parent"; then
+    return 1
+  fi
+  assert_bundle_ancestry_acl_trusted "$bundle_parent"
+}
+
+assert_bundle_tree_acl_trusted() {
+  local root="$1"
+  local expected_root_identity="$2"
+  [[ "$(/usr/bin/uname -s)" == "Darwin" ]] || return 0
+  # macOS exposes NFSv4-style ACLs through ls rather than Node fs.stat. Walk
+  # every entry from a pinned root and reject write-granting allow entries.
+  # shellcheck disable=SC2016
+  run_trusted_node -e '
+    const { execFileSync } = require("node:child_process");
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const [root, expectedRootIdentity] = process.argv.slice(1);
+    const statIdentity = (stat) => `${stat.dev}:${stat.ino}`;
+    const assertRoot = () => {
+      const stat = fs.lstatSync(root, { bigint: true });
+      if (
+        stat.isSymbolicLink() ||
+        !stat.isDirectory() ||
+        statIdentity(stat) !== expectedRootIdentity
+      ) {
+        throw new Error("prepared-bundle staging identity changed");
+      }
+    };
+    const forbidden =
+      /(?:^|[,\s])(write|append|add_file|add_subdirectory|delete|delete_child|writeattr|writeextattr|writesecurity|chown)(?:,|\s|$)/;
+    const hasUnsafeAcl = (output) =>
+      output
+        .split(/\r?\n/)
+        .some(
+          (line) =>
+            /^\s*\d+:\s+.*\sallow\s/.test(line) && forbidden.test(line),
+        );
+    const readAcls = (candidates) =>
+      execFileSync("/bin/ls", ["-lde", ...candidates], {
+        encoding: "utf8",
+        env: { LC_ALL: "C", PATH: "/usr/bin:/bin" },
+        maxBuffer: 8 * 1024 * 1024,
+      });
+    const assertAclBatch = (entries) => {
+      let chunk = [];
+      let chunkBytes = 0;
+      const flush = () => {
+        if (chunk.length === 0) return;
+        if (hasUnsafeAcl(readAcls(chunk))) {
+          for (const candidate of chunk) {
+            if (hasUnsafeAcl(readAcls([candidate]))) {
+              throw new Error(
+                `unsafe prepared-bundle ACL grants write access: ${candidate}`,
+              );
+            }
+          }
+          throw new Error(
+            "unsafe prepared-bundle ACL grants write access",
+          );
+        }
+        chunk = [];
+        chunkBytes = 0;
+      };
+      for (const { candidate } of entries) {
+        const candidateBytes = Buffer.byteLength(candidate) + 1;
+        if (chunk.length >= 128 || chunkBytes + candidateBytes > 64 * 1024) {
+          flush();
+        }
+        chunk.push(candidate);
+        chunkBytes += candidateBytes;
+      }
+      flush();
+    };
+    const entries = [];
+    const visit = (candidate) => {
+      assertRoot();
+      const stat = fs.lstatSync(candidate, { bigint: true });
+      if (stat.isSymbolicLink()) {
+        throw new Error(`prepared-bundle ACL scan refuses symlink: ${candidate}`);
+      }
+      if (!stat.isDirectory() && !stat.isFile()) {
+        throw new Error(`prepared-bundle ACL scan refuses special file: ${candidate}`);
+      }
+      entries.push({
+        candidate,
+        identity: statIdentity(stat),
+        isDirectory: stat.isDirectory(),
+        mode: stat.mode,
+        size: stat.size,
+        nlink: stat.nlink,
+        mtimeNs: stat.mtimeNs,
+        ctimeNs: stat.ctimeNs,
+      });
+      if (stat.isDirectory()) {
+        for (const name of fs.readdirSync(candidate).sort()) {
+          visit(path.join(candidate, name));
+        }
+      }
+      assertRoot();
+    };
+    const assertEntriesUnchanged = () => {
+      for (const entry of entries) {
+        const stat = fs.lstatSync(entry.candidate, { bigint: true });
+        if (
+          stat.isSymbolicLink() ||
+          statIdentity(stat) !== entry.identity ||
+          stat.isDirectory() !== entry.isDirectory ||
+          stat.mode !== entry.mode ||
+          stat.size !== entry.size ||
+          stat.nlink !== entry.nlink ||
+          stat.mtimeNs !== entry.mtimeNs ||
+          stat.ctimeNs !== entry.ctimeNs
+        ) {
+          throw new Error(
+            `prepared-bundle entry changed during ACL scan: ${entry.candidate}`,
+          );
+        }
+      }
+      assertRoot();
+    };
+    visit(root);
+    assertAclBatch(entries);
+    assertEntriesUnchanged();
+  ' "$root" "$expected_root_identity"
 }
 
 safe_remove_tree() {
@@ -1706,9 +1857,11 @@ bundle_content_manifest() {
   local expected_root_identity="$2"
   shift 2
   local ignored_root_entries=("$@")
+  local digest
+  assert_bundle_tree_acl_trusted "$root" "$expected_root_identity" || return 1
   # The single-quoted string is JavaScript source, not shell interpolation.
   # shellcheck disable=SC2016
-  run_trusted_node -e '
+  if ! digest="$(run_trusted_node -e '
     const crypto = require("node:crypto");
     const fs = require("node:fs");
     const path = require("node:path");
@@ -1906,7 +2059,11 @@ bundle_content_manifest() {
     }
     process.stdout.write(`${digest}\n`);
   ' "$root" "$expected_root_identity" \
-    "${ignored_root_entries[@]+"${ignored_root_entries[@]}"}"
+    "${ignored_root_entries[@]+"${ignored_root_entries[@]}"}")"; then
+    return 1
+  fi
+  assert_bundle_tree_acl_trusted "$root" "$expected_root_identity" || return 1
+  printf '%s\n' "$digest"
 }
 
 publish_bundle_with_reservation() {
@@ -1916,6 +2073,12 @@ publish_bundle_with_reservation() {
   local bundle_parent_identity="$4"
   local staging_identity="$5"
   local expected_bundle_manifest="$6"
+  local published_identity
+  if ! assert_safe_bundle_parent_ancestry "$bundle_parent" ||
+    ! assert_bundle_tree_acl_trusted "$staging_dir" "$staging_identity"; then
+    echo "agent:autoreview: failed to publish the prepared bundle safely" >&2
+    return 1
+  fi
   # The single-quoted string is JavaScript source, not shell interpolation.
   # shellcheck disable=SC2016
   if ! run_trusted_node -e '
@@ -2305,6 +2468,13 @@ publish_bundle_with_reservation() {
     echo "agent:autoreview: failed to publish the prepared bundle safely" >&2
     return 1
   fi
+  if ! assert_safe_bundle_parent_ancestry "$bundle_parent" ||
+    [[ "$(path_identity "$bundle_parent")" != "$bundle_parent_identity" ]] ||
+    ! published_identity="$(path_identity "$bundle_dir")" ||
+    ! assert_bundle_tree_acl_trusted "$bundle_dir" "$published_identity"; then
+    echo "agent:autoreview: published bundle ACL or parent state changed" >&2
+    return 1
+  fi
 }
 
 bundle_completion_record() {
@@ -2420,6 +2590,10 @@ verify_context_bundle() {
     return 1
   fi
   bundle_identity="$(path_identity "$bundle_dir")"
+  if ! assert_bundle_tree_acl_trusted "$bundle_dir" "$bundle_identity"; then
+    echo "agent:autoreview: refusing to verify a bundle with unsafe entry ACLs" >&2
+    return 1
+  fi
   validate_prepared_prompt_outputs "$bundle_dir"
   if ! completion_before="$(
     bundle_completion_record "$bundle_dir" "$bundle_identity"
@@ -3313,13 +3487,19 @@ prepare_context_bundle() {
       printf '%s\n' "- \`feedback-state.json\`: \`pr:feedback-state\` ledger for PR #$pr_number."
     fi
     printf '\n## Verification\n\n'
-    # Backticks are literal Markdown delimiters in the single-quoted format.
-    # shellcheck disable=SC2016
-    printf 'Before review, run `pnpm agent:autoreview --verify-bundle-dir %s` and retain its manifest digest outside this bundle.\n' \
+    printf 'Before review, run the same trusted wrapper that produced this bundle:\n\n'
+    printf '```bash\n'
+    printf '%q --verify-bundle-dir %q\n' \
+      "$script_dir/agent-autoreview.sh" \
       "$bundle_dir"
-    # shellcheck disable=SC2016
-    printf 'After reading every pass, run `pnpm agent:autoreview --verify-bundle-dir %s --expected-bundle-manifest <retained-digest>`.\n' \
-      "$bundle_dir"
+    printf '```\n\n'
+    printf 'Retain its manifest digest outside this bundle. After reading every pass, run:\n\n'
+    printf '```bash\n'
+    printf '%q --verify-bundle-dir %q --expected-bundle-manifest %q\n' \
+      "$script_dir/agent-autoreview.sh" \
+      "$bundle_dir" \
+      '<retained-digest>'
+    printf '```\n\n'
     printf 'External helpers must leave no background writer behind; these checks do not create OS-level immutability against a malicious same-UID process that mutates and restores evidence between checks.\n'
   } >"$staging_dir/README.md"
 

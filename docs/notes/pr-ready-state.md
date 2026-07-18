@@ -290,7 +290,8 @@ Field expectations:
    Use a directory outside the repo worktree whose parent already exists so
    local-mode bundles do not include themselves. Every canonical parent
    ancestor must be owned by the current user or root; group/other-writable
-   ancestors require sticky-bit protection. Direct supplemental evidence
+   ancestors require sticky-bit protection. On macOS, write-granting ACLs on
+   parent ancestors or bundle entries fail preparation or verification. Direct supplemental evidence
    must be repo-relative; adapter-generated `--feedback-pr <number>` state and
    protected-main checklist copies inside the trusted bundle directory are the
    narrow exceptions. The owning-checkout default semantic helper and automatic

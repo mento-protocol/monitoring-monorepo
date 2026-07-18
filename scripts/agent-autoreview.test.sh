@@ -177,6 +177,21 @@ static void record_node_argv0(int argc, char **argv) {
   fclose(output);
 }
 
+static void mark_hostile_cwd_node_use(void) {
+  const char *marker = getenv("AUTOREVIEW_TEST_HOSTILE_CWD_MARKER");
+  FILE *output;
+
+  if (marker == NULL) {
+    return;
+  }
+  output = fopen(marker, "w");
+  if (output == NULL) {
+    return;
+  }
+  fputs("hostile cwd Node executed\n", output);
+  fclose(output);
+}
+
 static void mark_direct_tmp_use(int argc, char **argv) {
   const char *root = getenv("AUTOREVIEW_TEST_DIRECT_TMP_ROOT");
   const char *marker = getenv("AUTOREVIEW_TEST_DIRECT_TMP_MARKER");
@@ -224,6 +239,7 @@ int main(int argc, char **argv) {
   if (replace_direct_runtime_for_identity_test(argc, argv) != 0) {
     return 127;
   }
+  mark_hostile_cwd_node_use();
   record_node_argv0(argc, argv);
   mark_direct_tmp_use(argc, argv);
   child_argv = calloc((size_t)argc + (size_t)injected_args + 1, sizeof(char *));
@@ -418,6 +434,19 @@ if [[ -n "${AUTOREVIEW_FAKE_CREATE_BUNDLE_DESTINATION:-}" ]]; then
 fi
 if [[ -n "${AUTOREVIEW_FAKE_UNSAFE_BUNDLE_PARENT:-}" ]]; then
   chmod 0777 "$AUTOREVIEW_FAKE_UNSAFE_BUNDLE_PARENT"
+fi
+if [[ -n "${AUTOREVIEW_FAKE_UNSAFE_BUNDLE_PARENT_ACL:-}" ]]; then
+  /bin/chmod +a \
+    "everyone allow add_file,delete_child" \
+    "$AUTOREVIEW_FAKE_UNSAFE_BUNDLE_PARENT_ACL"
+fi
+if [[
+  -n "${AUTOREVIEW_FAKE_UNSAFE_BUNDLE_ENTRY_ACL:-}" &&
+    -n "$bundle_output"
+]]; then
+  /bin/chmod +a \
+    "everyone allow write,delete" \
+    "${bundle_output%/*}/README.md"
 fi
 printf 'fake helper complete\n'
 HELPER
@@ -3467,6 +3496,12 @@ expect_file_contains "$canonical_bundle_dir/README.md" "Autoreview Context Bundl
 expect_file_contains "$canonical_bundle_dir/README.md" "- Frozen base commit: $frozen_base"
 expect_file_contains "$canonical_bundle_dir/README.md" "- Frozen reviewed HEAD: $frozen_head"
 expect_file_not_contains "$canonical_bundle_dir/README.md" "Frozen target commit"
+expect_file_contains \
+  "$canonical_bundle_dir/README.md" \
+  "$repo_root/scripts/agent-autoreview.sh --verify-bundle-dir $canonical_bundle_dir"
+expect_file_not_contains \
+  "$canonical_bundle_dir/README.md" \
+  "pnpm agent:autoreview --verify-bundle-dir"
 expect_file_contains "$canonical_bundle_dir/.agent-autoreview-complete" "autoreview-bundle-v2"
 expect_file_contains "$canonical_bundle_dir/.agent-autoreview-complete" "manifest-sha256:"
 expect_file_contains "$canonical_bundle_dir/selected-checklists.txt" "docs/pr-checklists/review-prompt-exclusions.md"
@@ -3493,6 +3528,93 @@ run_adapter \
   --verify-bundle-dir "$canonical_bundle_dir" \
   --expected-bundle-manifest "$retained_bundle_manifest"
 expect_stdout_contains "manifest $retained_bundle_manifest"
+if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+  canonical_acl_entry="$canonical_bundle_dir/README.md"
+  /bin/chmod +a "everyone allow write,delete" "$canonical_acl_entry"
+  run_adapter_expect_failure \
+    --verify-bundle-dir "$canonical_bundle_dir" \
+    --expected-bundle-manifest "$retained_bundle_manifest"
+  expect_stderr_contains \
+    "unsafe prepared-bundle ACL grants write access: $canonical_acl_entry"
+  expect_stderr_contains "refusing to verify a bundle with unsafe entry ACLs"
+  /bin/chmod -N "$canonical_acl_entry"
+  run_adapter \
+    --verify-bundle-dir "$canonical_bundle_dir" \
+    --expected-bundle-manifest "$retained_bundle_manifest"
+  expect_stdout_contains "manifest $retained_bundle_manifest"
+fi
+
+external_runtime="$tmp_dir/external-autoreview-runtime"
+external_wrapper="$external_runtime/scripts/agent-autoreview.sh"
+external_bundle="$tmp_dir/external-wrapper-context-bundle"
+external_stdout="$tmp_dir/external-wrapper.stdout"
+external_stderr="$tmp_dir/external-wrapper.stderr"
+standalone_verify_cwd="$tmp_dir/standalone-verify-cwd"
+hostile_cwd_node_marker="$tmp_dir/standalone-hostile-cwd-node-ran"
+mkdir -p \
+  "$external_runtime/scripts" \
+  "$standalone_verify_cwd/bin"
+cp "$terminal_manifest_node" "$standalone_verify_cwd/bin/node"
+chmod +x "$standalone_verify_cwd/bin/node"
+cp \
+  "$repo_root/scripts/agent-autoreview.sh" \
+  "$repo_root/scripts/agent-autoreview.mjs" \
+  "$repo_root/scripts/agent-autoreview-core.mjs" \
+  "$external_runtime/scripts/"
+chmod +x \
+  "$external_wrapper" \
+  "$external_runtime/scripts/agent-autoreview.mjs"
+(
+  cd "$repo_root"
+  env -i \
+    "PATH=$PATH" \
+    "HOME=$HOME" \
+    "TMPDIR=${TMPDIR:-/tmp}" \
+    "AUTOREVIEW_HELPER=$helper" \
+    "AUTOREVIEW_CAPTURE=$capture" \
+    "AUTOREVIEW_SNAPSHOT_HELPER=$repo_root/scripts/agent-autoreview.mjs" \
+    "$external_wrapper" \
+    --prepare-bundle-dir "$external_bundle" \
+    --mode branch \
+    --base HEAD >"$external_stdout" 2>"$external_stderr"
+)
+if [[ -s "$external_stderr" ]]; then
+  printf 'external wrapper bundle preparation wrote stderr:\n%s\n' \
+    "$(cat "$external_stderr")" >&2
+  exit 1
+fi
+expect_file_contains \
+  "$external_bundle/README.md" \
+  "$external_wrapper --verify-bundle-dir $external_bundle"
+expect_file_not_contains \
+  "$external_bundle/README.md" \
+  "$repo_root/scripts/agent-autoreview.sh --verify-bundle-dir"
+expect_file_not_contains \
+  "$external_bundle/README.md" \
+  "pnpm agent:autoreview --verify-bundle-dir"
+(
+  cd "$standalone_verify_cwd"
+  env -i \
+    "PATH=$standalone_verify_cwd/bin:$PATH" \
+    "HOME=$HOME" \
+    "TMPDIR=${TMPDIR:-/tmp}" \
+    "AUTOREVIEW_TEST_REAL_NODE=$node_bin" \
+    "AUTOREVIEW_TEST_HOSTILE_CWD_MARKER=$hostile_cwd_node_marker" \
+    "$external_wrapper" \
+    --verify-bundle-dir "$external_bundle" >"$external_stdout" 2>"$external_stderr"
+)
+if [[ -s "$external_stderr" ]]; then
+  printf 'standalone detached-wrapper verification wrote stderr:\n%s\n' \
+    "$(cat "$external_stderr")" >&2
+  exit 1
+fi
+if [[ -e "$hostile_cwd_node_marker" ]]; then
+  printf 'standalone verification executed Node from its non-Git cwd\n' >&2
+  exit 1
+fi
+expect_file_contains \
+  "$external_stdout" \
+  "agent:autoreview verified context bundle: $external_bundle"
 
 terminal_manifest_alias="$tmp_dir/terminal-manifest-readme-link"
 run_adapter_expect_failure \
@@ -3601,6 +3723,36 @@ chmod 0700 "$unsafe_publication_parent"
 if [[ -e "$unsafe_publication_bundle" ]]; then
   printf 'bundle was published after its parent became unsafe\n' >&2
   exit 1
+fi
+
+if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+  acl_publication_parent="$tmp_dir/acl-publication-parent"
+  acl_publication_bundle="$acl_publication_parent/review"
+  mkdir "$acl_publication_parent"
+  run_adapter_expect_failure \
+    "AUTOREVIEW_FAKE_UNSAFE_BUNDLE_PARENT_ACL=$acl_publication_parent" \
+    --prepare-bundle-dir "$acl_publication_bundle" \
+    --mode branch \
+    --base HEAD
+  expect_stderr_contains \
+    "unsafe prepared-bundle parent ACL: $acl_publication_parent"
+  /bin/chmod -N "$acl_publication_parent"
+  if [[ -e "$acl_publication_bundle" ]]; then
+    printf 'bundle was published after its parent gained a write ACL\n' >&2
+    exit 1
+  fi
+
+  acl_staging_bundle="$tmp_dir/acl-staging-entry-bundle"
+  run_adapter_expect_failure \
+    AUTOREVIEW_FAKE_UNSAFE_BUNDLE_ENTRY_ACL=1 \
+    --prepare-bundle-dir "$acl_staging_bundle" \
+    --mode branch \
+    --base HEAD
+  expect_stderr_contains "unsafe prepared-bundle ACL grants write access:"
+  if [[ -e "$acl_staging_bundle" ]]; then
+    printf 'bundle with a write-granting staging ACL was published\n' >&2
+    exit 1
+  fi
 fi
 
 staging_swap_bundle="$tmp_dir/context-bundle-staging-swap"
@@ -4221,6 +4373,21 @@ if [[ -e "$unsafe_bundle_parent/review" ]]; then
 fi
 chmod 0700 "$unsafe_bundle_ancestor"
 
+if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+  acl_bundle_parent="$tmp_dir/acl-bundle-parent"
+  mkdir "$acl_bundle_parent"
+  /bin/chmod +a \
+    "everyone allow add_file,delete_child" \
+    "$acl_bundle_parent"
+  run_adapter_expect_failure \
+    --prepare-bundle-dir "$acl_bundle_parent/review" \
+    --mode branch \
+    --base HEAD
+  expect_stderr_contains "unsafe prepared-bundle parent ACL: $acl_bundle_parent"
+  expect_stderr_contains "--prepare-bundle-dir parent ancestry is unsafe"
+  /bin/chmod -N "$acl_bundle_parent"
+fi
+
 unsafe_verify_parent="$tmp_dir/unsafe-verify-parent"
 unsafe_verify_bundle="$unsafe_verify_parent/review"
 mkdir "$unsafe_verify_parent"
@@ -4235,6 +4402,17 @@ expect_stderr_contains "refusing to verify a bundle through unsafe parent ancest
 chmod 0700 "$unsafe_verify_parent"
 run_adapter --verify-bundle-dir "$unsafe_verify_bundle"
 expect_stdout_contains "agent:autoreview verified context bundle: $unsafe_verify_bundle"
+if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+  /bin/chmod +a \
+    "everyone allow write,delete" \
+    "$unsafe_verify_bundle/README.md"
+  run_adapter_expect_failure --verify-bundle-dir "$unsafe_verify_bundle"
+  expect_stderr_contains "unsafe prepared-bundle ACL grants write access:"
+  expect_stderr_contains "refusing to verify a bundle with unsafe entry ACLs"
+  /bin/chmod -N "$unsafe_verify_bundle/README.md"
+  run_adapter --verify-bundle-dir "$unsafe_verify_bundle"
+  expect_stdout_contains "agent:autoreview verified context bundle: $unsafe_verify_bundle"
+fi
 
 nonempty_bundle="$tmp_dir/nonempty-bundle"
 mkdir -p "$nonempty_bundle"

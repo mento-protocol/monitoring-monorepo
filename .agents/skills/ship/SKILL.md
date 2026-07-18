@@ -88,7 +88,8 @@ If direct semantic execution refuses a multi-pass target, run
 `pnpm agent:autoreview --prepare-bundle-dir <dir>` with a directory outside the
 worktree whose parent already exists. Every canonical parent ancestor must be
 owned by the current user or root; group/other-writable ancestors require
-sticky-bit protection. Have one fresh-context reviewer
+sticky-bit protection. On macOS, write-granting ACLs on parent ancestors or
+bundle entries fail preparation or verification. Have one fresh-context reviewer
 inspect every pass listed by the bundle index. Run
 `pnpm agent:autoreview --verify-bundle-dir <dir>` immediately before review and
 retain its printed digest outside the bundle. After review, rerun with

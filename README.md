@@ -117,7 +117,9 @@ branch-controlled package scripts. Wrapper-owned Node launches discard
 executables require trusted ownership and
 non-shared-writable ancestry. On Darwin, Homebrew-style paths are accepted only
 through sealed private native Mach-O snapshots with system-only library
-closure; scripts and unsafe library closure fail closed.
+closure; scripts and unsafe library closure fail closed. Prepared-bundle
+creation and verification also reject macOS write-granting ACLs on parent
+ancestors or bundle entries.
 Runtime-changing PRs use a clean, compatible wrapper/helper from the last
 independently reviewed pre-change commit; the exact external-runtime review
 sequence is documented in `docs/notes/agent-quality-gate-mechanics.md`.

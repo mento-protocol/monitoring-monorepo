@@ -25,8 +25,10 @@ For a fresh-context Codex handoff, pass
 worktree. Add `--feedback-pr <number>` when reviewing a feedback-fix batch.
 The bundle parent must already exist. Every canonical ancestor must be owned by
 the current user or root; group/other-writable ancestors require sticky-bit
-protection. The adapter pins the freshly created staging directory's `dev:ino`
-before content generation and rechecks it throughout transfer. It manifests wrapper-owned evidence around helper
+protection. On macOS, write-granting ACLs on parent ancestors or bundle entries
+fail preparation or verification. The adapter pins the freshly created staging
+directory's `dev:ino` before content generation and rechecks it throughout
+transfer. It manifests wrapper-owned evidence around helper
 execution and all evidence around the final helper source check, rejects
 externally linked regular files, exclusively reserves the destination, and
 writes `.agent-autoreview-complete` last with the verified manifest digest. Run
