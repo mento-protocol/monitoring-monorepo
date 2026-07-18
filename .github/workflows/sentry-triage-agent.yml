@@ -406,6 +406,9 @@ jobs:
             --issues "${SENTRY_TRIAGE_ISSUES}" \
             > "${results_file}"
 
+          # (The batch script self-heals the sentry:projected label from
+          # Stage A's LABEL_DEFINITIONS before settling — see
+          # runProjectionBatch in scripts/sentry-triage-project.mjs.)
           failed=0
           while IFS= read -r row; do
             n=$(jq -r '.issue' <<<"${row}")
