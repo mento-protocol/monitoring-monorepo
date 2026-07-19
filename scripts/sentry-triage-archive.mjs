@@ -27,8 +27,8 @@ import {
   ARCHIVED_LABEL,
   LABEL_DEFINITIONS,
   neutralizeUntrusted,
+  REOPEN_SHED_LABELS,
   truncateTitle,
-  VERDICT_LABELS,
 } from "./sentry-triage-ingest.mjs";
 
 const NEEDS_TRIAGE_LABEL = "sentry:needs-triage";
@@ -705,8 +705,10 @@ export async function runArchive(options, deps = {}) {
   // escalating, DO NOT archive: closing the stub after that regression's
   // lastSeen would make ingest's reopen gate skip it permanently (see
   // isActivelyRegressing). Re-queue the stub for fresh triage instead — shed
-  // the approval + verdict labels, add sentry:needs-triage, leave it OPEN — so
-  // the triage agent re-investigates and a new human approval is required.
+  // the SAME label set ingest sheds on a regression reopen (verdicts, the
+  // projection marker, and both archive markers — REOPEN_SHED_LABELS, so the
+  // two reopen paths can't drift), add sentry:needs-triage, leave it OPEN —
+  // so the triage agent re-investigates and a new human approval is required.
   if (isActivelyRegressing(current)) {
     process.stderr.write(
       `::notice::Sentry issue ${meta.shortId} (${issueId}) is a live regression/escalation; refusing to archive over it and re-queuing the stub for triage.\n`,
@@ -729,7 +731,7 @@ export async function runArchive(options, deps = {}) {
       "--add-label",
       NEEDS_TRIAGE_LABEL,
       "--remove-label",
-      [APPROVED_ARCHIVE_LABEL, ARCHIVED_LABEL, ...VERDICT_LABELS].join(","),
+      REOPEN_SHED_LABELS.join(","),
     ]);
     return {
       issue: queueIssue,
