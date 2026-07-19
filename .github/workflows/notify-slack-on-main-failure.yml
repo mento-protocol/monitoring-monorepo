@@ -50,6 +50,7 @@ on:
       - Terraform Deploy Queue Watch
       - Sentry Triage Agent
       - Sentry Triage Ingest
+      - Sentry Autofix
     types: [completed]
   # workflow_dispatch (no inputs — checkov/CKV_GHA_7 forbids them) lets you
   # smoke-test the Slack wiring by manually running this workflow from the
