@@ -9,14 +9,20 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const script = fileURLToPath(
   new URL("./agent-autoreview.mjs", import.meta.url),
 );
-const root = mkdtempSync(path.join(tmpdir(), "agent-autoreview-target-guard."));
+const fixtureParent = process.env.AUTOREVIEW_TEST_TRUSTED_FIXTURE_PARENT;
+assert.ok(
+  fixtureParent,
+  "AUTOREVIEW_TEST_TRUSTED_FIXTURE_PARENT must name the suite's private fixture directory",
+);
+const root = mkdtempSync(
+  path.join(fixtureParent, "agent-autoreview-target-guard."),
+);
 const repo = path.join(root, "repo");
 const bin = path.join(root, "bin");
 const claude = path.join(bin, "claude");

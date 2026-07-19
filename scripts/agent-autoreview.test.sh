@@ -291,7 +291,8 @@ fi
 /usr/bin/cc -O2 -Wall -Wextra -o "$terminal_manifest_node" "$terminal_manifest_node_source"
 
 TMPDIR="$tmp_dir" "$node_bin" "$repo_root/scripts/agent-autoreview-core.test.mjs"
-TMPDIR="$tmp_dir" \
+AUTOREVIEW_TEST_TRUSTED_FIXTURE_PARENT="$tmp_dir" \
+  TMPDIR="$tmp_dir" \
   "$node_bin" "$repo_root/scripts/agent-autoreview-target-guard.test.mjs"
 adapter_help="$("$node_bin" "$repo_root/scripts/agent-autoreview.mjs" --help)"
 if [[
