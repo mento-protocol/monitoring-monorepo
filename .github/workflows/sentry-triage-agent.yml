@@ -14,9 +14,10 @@ name: Sentry Triage Agent
 
 on:
   schedule:
-    # 45 min after the ingest workflow (30 5, 30 13) so the queue is fresh.
-    - cron: 15 6 * * *
-    - cron: 15 14 * * *
+    # Weekdays only, 45 min after the ingest workflow (15 7 * * 1-5) so the
+    # queue is fresh; the digest job at the end of this run is the one daily
+    # Slack notification (~08:15 UTC, later with GitHub cron drift).
+    - cron: 0 8 * * 1-5
   workflow_dispatch:
     # checkov:skip=CKV_GHA_7: issue_number is a single-issue dry-run selector,
     # validated to ^[0-9]+$ before use (see the select job). It only narrows
@@ -42,7 +43,7 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # select: pick up to 6 oldest pending queue issues and emit them as a matrix.
+  # select: pick up to 10 oldest pending queue issues and emit them as a matrix.
   # This job ALWAYS runs and ALWAYS emits a valid JSON array — both the kill
   # switch (SENTRY_TRIAGE_ENABLED, same repo variable as the ingest workflow)
   # and the secret guard live inside the first step, so a disabled or
@@ -101,7 +102,9 @@ jobs:
               exit 1
             fi
           else
-            # Oldest-first, capped at 6 per run (mandatory quota cap — do not raise).
+            # Oldest-first, capped at 10 per run (mandatory quota cap — do not
+            # raise without re-checking the daily envelope: one weekday run at
+            # 10 stays under the original 2-runs-of-6-per-day budget).
             # `gh issue list` returns newest-first by default, so a bare --limit
             # would window to the newest 100 and starve genuinely older queue
             # issues. `--search 'sort:created-asc'` makes the API return
@@ -115,7 +118,7 @@ jobs:
               --search 'sort:created-asc' \
               --json number,createdAt \
               --limit 100 \
-              --jq '[sort_by(.createdAt)[].number][0:6]')
+              --jq '[sort_by(.createdAt)[].number][0:10]')
           fi
 
           count=$(printf '%s' "${issues}" | jq 'length')
@@ -223,7 +226,7 @@ jobs:
           # sole permission source.
           claude_args: |
             --model claude-sonnet-5
-            --max-turns 40
+            --max-turns 50
             --setting-sources user
             --mcp-config '{"mcpServers":{"sentry":{"command":"npx","args":["-y","@sentry/mcp-server@0.37.0"],"env":{"SENTRY_ACCESS_TOKEN":"${SENTRY_TRIAGE_TOKEN}","SENTRY_HOST":"us.sentry.io"}}}}'
             --allowedTools 'Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue comment ${{ matrix.issue }}:*),mcp__sentry__find_organizations,mcp__sentry__find_projects,mcp__sentry__get_issue_details,mcp__sentry__get_event_stacktrace,mcp__sentry__get_issue_tag_values,mcp__sentry__get_issue_activity,mcp__sentry__search_issues,mcp__sentry__search_events,mcp__sentry__search_issue_events,mcp__sentry__get_sentry_resource'
