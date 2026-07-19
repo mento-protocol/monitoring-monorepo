@@ -48,3 +48,24 @@ resource "github_actions_variable" "sentry_triage_enabled" {
   variable_name = "SENTRY_TRIAGE_ENABLED"
   value         = var.sentry_triage_enabled
 }
+
+# Sentry triage archive kill switch (Phase 2a)
+# ──────────────────────────────────────────────
+#
+# `SENTRY_ARCHIVE_ENABLED` is the ADR 0036 / ADR 0030 kill switch for the
+# human-approved Sentry archive workflow (`.github/workflows/
+# sentry-triage-archive.yml`). That workflow reads this repo variable and
+# no-ops unless it equals "true", so the archive leg stays inert after its
+# write-scoped token is provisioned until an operator deliberately activates it.
+#
+# Like `sentry_triage_enabled`, this resource is unconditional so the switch
+# always exists for the workflow to read; `var.sentry_archive_enabled` defaults
+# to "false", so the first apply provisions the switch in its off position.
+# Activation is a follow-up tfvar change to "true" plus a re-apply (still IaC,
+# not the GitHub UI). Runbook: `docs/notes/sentry-triage-pipeline.md`.
+
+resource "github_actions_variable" "sentry_archive_enabled" {
+  repository    = "monitoring-monorepo"
+  variable_name = "SENTRY_ARCHIVE_ENABLED"
+  value         = var.sentry_archive_enabled
+}

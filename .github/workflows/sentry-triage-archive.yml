@@ -1,0 +1,252 @@
+name: Sentry Triage Archive
+
+# Phase 2a of the Sentry triage pipeline (ADR 0036 Stage C): the deterministic,
+# human-approved, ZERO-LLM archive leg. A human reviews a verdicted queue stub
+# and applies the `sentry:approved-archive` label; this workflow then archives
+# the underlying Sentry issue as `archived_until_escalating` (NEVER a hard
+# resolve — escalation must resurface a mistake), leaves an audit trail on the
+# queue stub, and closes it.
+#
+# Inert until activation: the `SENTRY_ARCHIVE_ENABLED` repo variable gates the
+# whole job, and it additionally no-ops unless the `SENTRY_ARCHIVE_TOKEN` secret
+# is provisioned. Both are Terraform-owned (ADR 0030). This is NOT a required
+# check.
+
+on:
+  issues:
+    # Fires on every label add; the job `if` narrows to the approval label on a
+    # sentry-triage stub. Plus a manual retry path for an already-labeled stub.
+    types: [labeled]
+  workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: issue_number is a single-issue selector, validated
+    # to ^[0-9]+$ before use (see the ctx step). It only narrows which queue
+    # stub is settled — it cannot affect any build/deploy output (this workflow
+    # archives a Sentry issue and settles a GitHub issue; it builds nothing).
+    inputs:
+      issue_number:
+        description: Queue issue number to archive (must already carry sentry:approved-archive + a verdict label).
+        required: true
+        type: string
+
+# Serialize per queue issue so an overlapping label event + dispatch can't
+# double-settle the same stub. Never cancel an in-flight archive.
+concurrency:
+  group: sentry-triage-archive-${{ github.event.issue.number || github.event.inputs.issue_number }}
+  cancel-in-progress: false
+
+# Minimal top-level default; the job below replaces this with its own
+# least-privilege set (job permissions REPLACE workflow permissions).
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # archive: deterministic, human-gated Sentry archive.
+  #
+  # Security containment (this leg mutates Sentry with a write-scoped token, so
+  # the bar is higher than the read-only legs):
+  #   - permissions: issues:write + contents:read ONLY. No pull-requests, no
+  #     id-token, no packages.
+  #   - No LLM anywhere in this job. Every decision is deterministic bash + the
+  #     archive script; the only free-form value that renders is the approver
+  #     login (a GitHub username, `[A-Za-z0-9-]`) and Sentry-assigned
+  #     identifiers, all neutralized before embedding.
+  #   - Approval authority is checked deterministically BEFORE any mutation: the
+  #     actor who applied the label (or dispatched) must be a human User (login
+  #     not ending in `[bot]`) with `admin`/`write` permission. A failed check
+  #     removes the label, posts an audit comment, and exits 0 — a policy
+  #     refusal, not a red run.
+  #   - The stub must carry a `sentry:verdict-*` label (it must have been
+  #     triaged) AND the `sentry:approved-archive` marker; an un-verdicted or
+  #     unapproved stub is refused (comment + exit 0), never archived.
+  #   - SENTRY_ARCHIVE_TOKEN reaches ONLY the archive step's env (never echoed,
+  #     never on a command line); the queue-stub gh mutations use the ambient
+  #     github.token. Sentry archival is capped at `archived_until_escalating`
+  #     by the script's frozen payload constant.
+  # ---------------------------------------------------------------------------
+  archive:
+    name: Archive approved Sentry issue
+    # Main-ref guard: `issues` events always run the default-branch workflow, but
+    # `workflow_dispatch` can target any branch — without this, a dispatch from
+    # an experimental branch would execute unreviewed workflow/script code with
+    # SENTRY_ARCHIVE_TOKEN. Same pattern as sentry-triage-ingest.yml's job guard
+    # (durable Environment protection for the dispatch surface: #1289).
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.label.name == 'sentry:approved-archive' &&
+        contains(github.event.issue.labels.*.name, 'sentry-triage')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Guard (kill switch + secret)
+        id: guard
+        env:
+          ENABLED: ${{ vars.SENTRY_ARCHIVE_ENABLED }}
+          # Presence-only guard: masked in logs, only tested for emptiness here.
+          SENTRY_ARCHIVE_TOKEN: ${{ secrets.SENTRY_ARCHIVE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${ENABLED:-}" != "true" ]; then
+            echo "::notice::SENTRY_ARCHIVE_ENABLED is not 'true' — archive loop kill switch off, no-op."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "${SENTRY_ARCHIVE_TOKEN:-}" ]; then
+            echo "::notice::SENTRY_ARCHIVE_TOKEN not provisioned yet — no-op."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve target issue + approver
+        id: ctx
+        if: steps.guard.outputs.proceed == 'true'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          LABELED_ISSUE: ${{ github.event.issue.number }}
+          # The actor who applied the label (labeled event) — the approver.
+          LABELED_ACTOR: ${{ github.event.sender.login }}
+          DISPATCH_ISSUE: ${{ github.event.inputs.issue_number }}
+          # The dispatching actor is the approver on the manual retry path.
+          DISPATCH_ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            issue="${DISPATCH_ISSUE:-}"
+            actor="${DISPATCH_ACTOR}"
+          else
+            issue="${LABELED_ISSUE:-}"
+            actor="${LABELED_ACTOR}"
+          fi
+          if ! [[ "${issue}" =~ ^[0-9]+$ ]]; then
+            echo "::error::Could not resolve a plain-integer issue number (got '${issue:-}')."
+            exit 1
+          fi
+          {
+            echo "issue=${issue}"
+            echo "actor=${actor}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Approval authority check (deterministic)
+        id: approval
+        if: steps.guard.outputs.proceed == 'true'
+        env:
+          ISSUE: ${{ steps.ctx.outputs.issue }}
+          ACTOR: ${{ steps.ctx.outputs.actor }}
+        run: |
+          set -euo pipefail
+          # A refusal removes the approval label, posts an audit comment, and
+          # exits 0 — a policy refusal is not a failed run.
+          refuse() {
+            echo "::warning::Archive request refused for issue #${ISSUE}: $1"
+            gh issue edit "${ISSUE}" --repo "${GITHUB_REPOSITORY}" \
+              --remove-label 'sentry:approved-archive' || true
+            gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" \
+              --body "Archive request refused: $1 The \`sentry:approved-archive\` label has been removed. A repository admin or writer must apply it to approve archiving the underlying Sentry issue." || true
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          }
+
+          # Bots and empty logins can never approve.
+          if [ -z "${ACTOR:-}" ] || [[ "${ACTOR}" == *'[bot]' ]]; then
+            refuse "the approver must be a human user (got '${ACTOR:-unknown}')."
+            exit 0
+          fi
+
+          # Resolve the actor's repository permission. `GET .../collaborators/
+          # {user}/permission` returns { permission, role_name, user: { type } }.
+          # `.permission` is the LEGACY effective base role — GitHub maps
+          # maintain -> write and triage -> read — so admin/write there already
+          # means "effective write-or-higher" (including maintainers and any
+          # custom role that collapses to write). We additionally honor the
+          # granular `.role_name` for maintain explicitly (a write-or-higher
+          # operator role). Require a human User type; any lookup failure is a
+          # refusal (fail closed), never a silent proceed.
+          if ! perm_json=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${ACTOR}/permission" 2>/dev/null); then
+            refuse "could not resolve repository permission for '${ACTOR}' (not a collaborator, or the lookup failed)."
+            exit 0
+          fi
+          permission=$(jq -r '.permission // ""' <<<"${perm_json}")
+          role_name=$(jq -r '.role_name // ""' <<<"${perm_json}")
+          user_type=$(jq -r '.user.type // ""' <<<"${perm_json}")
+          authorized=false
+          case "${permission}" in admin | write) authorized=true ;; esac
+          case "${role_name}" in admin | write | maintain) authorized=true ;; esac
+          if [ "${authorized}" != "true" ] || [ "${user_type}" != "User" ]; then
+            refuse "'${ACTOR}' lacks write/admin permission (permission='${permission:-none}', role='${role_name:-unknown}', type='${user_type:-unknown}')."
+            exit 0
+          fi
+          echo "Approver '${ACTOR}' authorized (permission=${permission}, role=${role_name})."
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verdict guard (deterministic)
+        id: verdict
+        if: steps.guard.outputs.proceed == 'true' && steps.approval.outputs.proceed == 'true'
+        env:
+          ISSUE: ${{ steps.ctx.outputs.issue }}
+        run: |
+          set -euo pipefail
+          labels_json=$(gh issue view "${ISSUE}" --repo "${GITHUB_REPOSITORY}" \
+            --json labels --jq '[.labels[].name]')
+          has() { jq -e --arg n "$1" 'any(.[]; . == $n)' <<<"${labels_json}" >/dev/null 2>&1; }
+          has_verdict() { jq -e 'any(.[]; startswith("sentry:verdict-"))' <<<"${labels_json}" >/dev/null 2>&1; }
+
+          refuse() {
+            echo "::warning::Archive refused for issue #${ISSUE}: $1"
+            gh issue comment "${ISSUE}" --repo "${GITHUB_REPOSITORY}" \
+              --body "Archive request refused: $1 No Sentry issue was archived." || true
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          }
+
+          # Must be a triage queue stub carrying the human approval marker.
+          # (On the labeled event the job `if` already guarantees these; the
+          # explicit checks make the dispatch retry path safe too.)
+          if ! has "sentry-triage"; then
+            refuse "issue #${ISSUE} is not a Sentry triage queue stub (missing the sentry-triage label)."
+            exit 0
+          fi
+          if ! has "sentry:approved-archive"; then
+            refuse "issue #${ISSUE} does not carry the sentry:approved-archive approval label."
+            exit 0
+          fi
+          # The stub must have been triaged to a verdict before it can be
+          # archived; an un-verdicted stub loses its approval label and is
+          # refused so it can't be archived without triage.
+          if ! has_verdict; then
+            gh issue edit "${ISSUE}" --repo "${GITHUB_REPOSITORY}" \
+              --remove-label 'sentry:approved-archive' || true
+            refuse "issue #${ISSUE} has no sentry:verdict-* label; it must be triaged before it can be archived. The sentry:approved-archive label has been removed."
+            exit 0
+          fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+      # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
+      # silently run new code. Bump via Dependabot (.github/dependabot.yml).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: steps.guard.outputs.proceed == 'true' && steps.approval.outputs.proceed == 'true' && steps.verdict.outputs.proceed == 'true'
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        if: steps.guard.outputs.proceed == 'true' && steps.approval.outputs.proceed == 'true' && steps.verdict.outputs.proceed == 'true'
+        with:
+          node-version-file: .node-version
+
+      - name: Archive the Sentry issue (deterministic)
+        if: steps.guard.outputs.proceed == 'true' && steps.approval.outputs.proceed == 'true' && steps.verdict.outputs.proceed == 'true'
+        env:
+          # Write-scoped Sentry token — this is the ONLY step it is exposed to.
+          # Read from env by the script; never echoed, never on a command line.
+          SENTRY_ARCHIVE_TOKEN: ${{ secrets.SENTRY_ARCHIVE_TOKEN }}
+          # The approving human's login, rendered (neutralized) into the audit
+          # comment. Passed via env — never interpolated into the shell command.
+          ARCHIVE_APPROVER: ${{ steps.ctx.outputs.actor }}
+          QUEUE_ISSUE_NUMBER: ${{ steps.ctx.outputs.issue }}
+        run: |
+          set -euo pipefail
+          node scripts/sentry-triage-archive.mjs \
+            --issue "${QUEUE_ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}"
