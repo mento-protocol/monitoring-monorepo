@@ -278,7 +278,12 @@ interruption they are identity-checked and unlinked before the bounded
 process-group termination path settles, so even an escaped descendant holding
 reviewer pipes cannot retain a credential path or block parent termination. An
 untrusted or repo-contained source fails closed before the selected engine
-starts.
+starts. Semantic autoreview rejects non-empty `SSL_CERT_DIR` because a
+directory of trust anchors loaded on demand cannot be frozen safely; unset it
+or provide a trusted external PEM bundle through snapshotted `SSL_CERT_FILE`.
+Once timeout or interruption termination begins, closure of the direct engine
+leader triggers immediate `SIGKILL` for its remaining process group before
+tracking or escalation timers are released.
 Direct supplemental-evidence paths must be repo-relative, regular UTF-8 files
 confined to the worktree. The narrow trusted exceptions are adapter-generated
 feedback state and protected-main checklist copies inside its

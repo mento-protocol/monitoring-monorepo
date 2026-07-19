@@ -54,8 +54,11 @@ source no-follow with identity revalidation and passes a private per-run `0600`
 snapshot rather than the mutable source path. Those snapshots are removed with
 the isolated engine workspace after normal completion or partial setup failure.
 Interruption unlinks them before bounded process-group termination, including
-when an escaped descendant holds reviewer pipes. A quiet semantic reviewer
-emits a progress heartbeat every 60 seconds. `AUTOREVIEW_HELPER` is an escape hatch for
+when an escaped descendant holds reviewer pipes. Non-empty `SSL_CERT_DIR` is
+rejected; use a trusted external PEM bundle through `SSL_CERT_FILE` instead.
+After timeout or interruption starts, direct engine-leader closure immediately
+force-kills any remaining process group before cleanup tracking is released. A
+quiet semantic reviewer emits a progress heartbeat every 60 seconds. `AUTOREVIEW_HELPER` is an escape hatch for
 intentional local testing or compatible replacement, not a Cloud prerequisite.
 Prepared-bundle replacements must implement the pinned helper CLI, including
 `--source-snapshot-only`, `--serialize-untracked-file`, `--bundle-output`,

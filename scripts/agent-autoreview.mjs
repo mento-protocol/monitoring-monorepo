@@ -2083,6 +2083,11 @@ function snapshotExternalRegularFileEnv(env, repo, snapshotRecord, key) {
 }
 
 function safeEngineEnv(repo, engine, runtimeDir) {
+  if (process.env.SSL_CERT_DIR) {
+    throw new Error(
+      "SSL_CERT_DIR cannot be safely preserved for semantic autoreview; unset it or use SSL_CERT_FILE with a trusted PEM bundle outside the reviewed repository",
+    );
+  }
   const common = new Set([
     "ALL_PROXY",
     "HTTP_PROXY",
@@ -2090,7 +2095,6 @@ function safeEngineEnv(repo, engine, runtimeDir) {
     "LANG",
     "LC_ALL",
     "NO_PROXY",
-    "SSL_CERT_DIR",
     "SSL_CERT_FILE",
     "all_proxy",
     "http_proxy",
@@ -2303,6 +2307,9 @@ function runCommandWithInput(
       rejectOnce(error);
     });
     child.on("close", (code, signal) => {
+      if (timedOut || pendingTerminationSignal) {
+        signalReviewerProcessGroup(child, "SIGKILL");
+      }
       if (timedOut) {
         rejectOnce(new Error(`${command} timed out after ${timeoutSeconds}s`));
         return;

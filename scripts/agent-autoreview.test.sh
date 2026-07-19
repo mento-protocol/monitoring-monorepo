@@ -5,6 +5,7 @@ if [[ "${AUTOREVIEW_TEST_SYSTEM_BASH:-}" != "1" && -x /bin/bash ]]; then
 fi
 set -euo pipefail
 umask 077
+unset SSL_CERT_DIR
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
@@ -787,6 +788,7 @@ run_helper_with_path_in_repo() {
     AWS_SHARED_CREDENTIALS_FILE \
     AWS_WEB_IDENTITY_TOKEN_FILE \
     GOOGLE_APPLICATION_CREDENTIALS \
+    SSL_CERT_DIR \
     SSL_CERT_FILE \
     AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER \
     AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE; do
@@ -1062,6 +1064,7 @@ run_claude_no_tools_regression() {
   local aws_web_identity_target="$tmp_dir/aws-web-identity-token"
   local aws_web_identity_file="$tmp_dir/aws-web-identity-token-link"
   local google_application_credentials="$tmp_dir/google-application-credentials.json"
+  local ssl_cert_dir="$review_repo/repo-controlled-certificates"
   local ssl_cert_file="$tmp_dir/reviewer-ca.pem"
   local credential_process_marker="$tmp_dir/credential-process-ran"
   local canonical_aws_config_file
@@ -1080,6 +1083,7 @@ run_claude_no_tools_regression() {
   printf 'container-authorization-placeholder\n' >"$aws_container_auth_file"
   printf 'web-identity-placeholder\n' >"$aws_web_identity_target"
   printf '{"type":"external_account"}\n' >"$google_application_credentials"
+  mkdir "$ssl_cert_dir"
   printf '%s\n' '-----BEGIN CERTIFICATE-----' 'placeholder-ca' '-----END CERTIFICATE-----' >"$ssl_cert_file"
   chmod 0600 \
     "$aws_config_file" \
@@ -1397,11 +1401,26 @@ CLAUDE
     printf 'Claude executed despite a repo-contained Google credential path\n' >&2
     exit 1
   fi
+
+  rm -f "$capture.invoked"
+  TMPDIR="$tmp_dir" \
+    SSL_CERT_DIR="$ssl_cert_dir" \
+    run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
+  expect_stderr_contains "SSL_CERT_DIR cannot be safely preserved for semantic autoreview"
+  if [[ -e "$capture.invoked" ]]; then
+    printf 'Claude executed with SSL_CERT_DIR enabled\n' >&2
+    exit 1
+  fi
+  if find "$tmp_dir" -maxdepth 1 -type d -name 'autoreview-claude-workspace.*' -print -quit | grep -q .; then
+    printf 'Claude workspace survived SSL_CERT_DIR rejection\n' >&2
+    exit 1
+  fi
 }
 
 run_codex_isolation_regression() {
   local review_repo="$tmp_dir/codex-isolation"
   local fake_bin="$tmp_dir/fake-codex-bin"
+  local ssl_cert_dir="$tmp_dir/codex-reviewer-certificates"
   local ssl_cert_file="$tmp_dir/codex-reviewer-ca.pem"
   local ssl_snapshot_path
   init_review_repo "$review_repo"
@@ -1410,9 +1429,10 @@ run_codex_isolation_regression() {
   printf 'change\n' >>"$review_repo/README.md"
   printf '%s\n' '-----BEGIN CERTIFICATE-----' 'codex-placeholder-ca' '-----END CERTIFICATE-----' >"$ssl_cert_file"
   chmod 0644 "$ssl_cert_file"
-  mkdir "$fake_bin"
+  mkdir "$fake_bin" "$ssl_cert_dir"
   cat >"$fake_bin/codex" <<'CODEX'
 #!/usr/bin/env bash
+printf 'invoked\n' >"$AUTOREVIEW_FAKE_CAPTURE.codex-invoked"
 printf '%s\n' "$@" >"$AUTOREVIEW_FAKE_CAPTURE"
 pwd >"$AUTOREVIEW_FAKE_CAPTURE.cwd"
 env >"$AUTOREVIEW_FAKE_CAPTURE.env"
@@ -1488,6 +1508,21 @@ CODEX
   expect_file_not_contains "$capture.env" "UNRELATED_SECRET"
   expect_stdout_contains "autoreview clean"
   expect_empty_stderr
+
+  rm -f "$capture.codex-invoked"
+  TMPDIR="$tmp_dir" \
+    SSL_CERT_DIR="$ssl_cert_dir" \
+    SSL_CERT_FILE="$ssl_cert_file" \
+    run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" --mode local --engine codex
+  expect_stderr_contains "SSL_CERT_DIR cannot be safely preserved for semantic autoreview"
+  if [[ -e "$capture.codex-invoked" ]]; then
+    printf 'Codex executed with SSL_CERT_DIR enabled\n' >&2
+    exit 1
+  fi
+  if find "$tmp_dir" -maxdepth 1 -type d -name 'autoreview-codex-workspace.*' -print -quit | grep -q .; then
+    printf 'Codex workspace survived SSL_CERT_DIR rejection\n' >&2
+    exit 1
+  fi
 
   SSL_CERT_FILE="$ssl_cert_file" \
     run_helper_with_path_in_repo "$review_repo" "$fake_bin" \
@@ -1565,16 +1600,23 @@ CLAUDE
 #!/usr/bin/env node
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
-process.on("SIGTERM", () => {});
+const leaderExitsOnTermination = Boolean(
+  process.env.AUTOREVIEW_FAKE_EXIT_LEADER_ON_TERM,
+);
+process.on("SIGTERM", () => {
+  if (leaderExitsOnTermination) process.exit(0);
+});
 const grandchild = spawn(
   process.execPath,
   [
     "-e",
-    'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);',
+    'const fs = require("node:fs"); process.on("SIGTERM", () => {}); fs.writeFileSync(`${process.env.AUTOREVIEW_FAKE_CAPTURE}.grandchild-ready`, "ready\\n"); setInterval(() => {}, 1000);',
   ],
   {
     detached: Boolean(process.env.AUTOREVIEW_FAKE_DETACH_GRANDCHILD),
-    stdio: ["ignore", "inherit", "inherit"],
+    stdio: leaderExitsOnTermination
+      ? ["ignore", "ignore", "ignore"]
+      : ["ignore", "inherit", "inherit"],
   },
 );
 fs.writeFileSync(
@@ -1603,15 +1645,18 @@ CODEX
   local engine_pid
   local helper_pid
   local child_pid
+  local descendant_pid
   local grandchild_pid
   local snapshot_path
   local launched
   local snapshot_unlinked
   local helper_exited
   local descendants_exited
+  local termination_mode
   local wait_status
   local launch_dir
   local -a signal_env_args
+  local -a termination_args
   launch_dir="$(pwd -P)"
   for scenario in claude-probe claude codex; do
     engine="${scenario%%-*}"
@@ -1768,6 +1813,121 @@ CODEX
     fi
     if [[ "$scenario" == "claude-probe" ]]; then
       kill -KILL "$grandchild_pid" 2>/dev/null || true
+    fi
+  done
+
+  for termination_mode in signal timeout; do
+    engine_capture="$tmp_dir/engine-leader-exit-$termination_mode"
+    rm -f \
+      "$engine_capture.child-pid" \
+      "$engine_capture.grandchild-pid" \
+      "$engine_capture.grandchild-ready" \
+      "$engine_capture.helper-pid" \
+      "$engine_capture.snapshot"
+    signal_env_args=(
+      "PATH=$fake_bin:$PATH"
+      "HOME=$HOME"
+      "TMPDIR=$signal_tmp"
+      "SSL_CERT_FILE=$ssl_cert_file"
+      "AUTOREVIEW_FAKE_CAPTURE=$engine_capture"
+      "AUTOREVIEW_FAKE_EXIT_LEADER_ON_TERM=1"
+      "AUTOREVIEW_HEARTBEAT_SECONDS=60"
+    )
+    termination_args=(--mode local --engine codex)
+    if [[ "$termination_mode" == "timeout" ]]; then
+      termination_args+=(--timeout-seconds 3)
+    fi
+    cd "$review_repo"
+    /usr/bin/env -i "${signal_env_args[@]}" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      "${termination_args[@]}" >"$engine_capture.stdout" 2>"$engine_capture.stderr" &
+    engine_pid=$!
+    cd "$launch_dir"
+    launched=0
+    for _ in {1..200}; do
+      if [[
+        -s "$engine_capture.child-pid" &&
+          -s "$engine_capture.grandchild-pid" &&
+          -s "$engine_capture.grandchild-ready" &&
+          -s "$engine_capture.helper-pid" &&
+          -s "$engine_capture.snapshot"
+      ]]; then
+        launched=1
+        break
+      fi
+      if ! kill -0 "$engine_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$launched" -ne 1 ]]; then
+      kill -KILL "$engine_pid" 2>/dev/null || true
+      wait "$engine_pid" 2>/dev/null || true
+      printf 'leader-exit %s fixture did not launch\n' "$termination_mode" >&2
+      cat "$engine_capture.stderr" >&2
+      exit 1
+    fi
+    child_pid="$(cat "$engine_capture.child-pid")"
+    grandchild_pid="$(cat "$engine_capture.grandchild-pid")"
+    helper_pid="$(cat "$engine_capture.helper-pid")"
+    snapshot_path="$(cat "$engine_capture.snapshot")"
+    if [[ ! -f "$snapshot_path" ]]; then
+      kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      printf 'leader-exit %s credential snapshot was absent before termination\n' "$termination_mode" >&2
+      exit 1
+    fi
+    if [[ "$termination_mode" == "signal" ]]; then
+      kill -TERM "$helper_pid"
+    fi
+    helper_exited=0
+    for _ in {1..240}; do
+      if ! kill -0 "$helper_pid" 2>/dev/null; then
+        helper_exited=1
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$helper_exited" -ne 1 ]]; then
+      kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      wait "$engine_pid" 2>/dev/null || true
+      printf 'leader-exit %s helper did not terminate within the deadline\n' "$termination_mode" >&2
+      exit 1
+    fi
+    set +e
+    wait "$engine_pid" 2>/dev/null
+    wait_status=$?
+    set -e
+    if [[ "$wait_status" -eq 0 ]]; then
+      kill -KILL "$child_pid" "$grandchild_pid" 2>/dev/null || true
+      printf 'leader-exit %s helper exited successfully\n' "$termination_mode" >&2
+      exit 1
+    fi
+    for descendant_pid in "$child_pid" "$grandchild_pid"; do
+      descendants_exited=0
+      for _ in {1..100}; do
+        if ! kill -0 "$descendant_pid" 2>/dev/null; then
+          descendants_exited=1
+          break
+        fi
+        sleep 0.05
+      done
+      if [[ "$descendants_exited" -ne 1 ]]; then
+        kill -KILL "$descendant_pid" 2>/dev/null || true
+        printf 'leader-exit %s descendant survived termination: %s\n' \
+          "$termination_mode" "$descendant_pid" >&2
+        exit 1
+      fi
+    done
+    if [[ -e "$snapshot_path" ]]; then
+      printf 'leader-exit %s credential snapshot survived termination\n' "$termination_mode" >&2
+      exit 1
+    fi
+    if find "$signal_tmp" -mindepth 1 -maxdepth 1 -type d -name 'autoreview-*' -print -quit | grep -q .; then
+      printf 'leader-exit %s engine runtime survived termination\n' "$termination_mode" >&2
+      exit 1
+    fi
+    if [[ "$termination_mode" == "timeout" ]]; then
+      expect_file_contains "$engine_capture.stderr" "timed out after 3s"
     fi
   done
 }
