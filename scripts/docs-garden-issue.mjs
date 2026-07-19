@@ -171,10 +171,13 @@ export async function ghPaginate(
   return pages;
 }
 
-async function defaultListIssues(options) {
-  const pages = await ghPaginate(
-    `repos/${options.repo}/issues?labels=source%3Aaudit&state=all`,
-  );
+export async function listGithubIssues(options, { runner = runGh } = {}) {
+  // Structural body markers own queue identity. Enumerate the complete issue
+  // set so a removed routing label cannot hide a live garden item and allow a
+  // duplicate. normalizeGithubIssuePages removes pull requests locally.
+  const pages = await ghPaginate(`repos/${options.repo}/issues?state=all`, {
+    runner,
+  });
   return normalizeGithubIssuePages(pages);
 }
 
@@ -237,7 +240,7 @@ function defaultPacketForWeekSerial(options, weekSerial) {
 
 export async function runDocsGardenIssue(options, deps = {}) {
   const {
-    listIssues = defaultListIssues,
+    listIssues = listGithubIssues,
     ensureLabels = ensureLabelsExist,
     createIssue = defaultCreateIssue,
     packetForWeekSerial = (weekSerial) =>

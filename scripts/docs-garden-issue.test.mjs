@@ -18,6 +18,7 @@ import {
 import {
   ensureLabelsExist,
   ghPaginate,
+  listGithubIssues,
   parseArgs,
   runDocsGardenIssue,
 } from "./docs-garden-issue.mjs";
@@ -224,6 +225,33 @@ await test("full GitHub pagination stops only after a short page", async () => {
   });
   assert.equal(calls.length, 2);
   assert.equal(result.flat().length, 3);
+});
+
+await test("queue discovery scans all issues instead of trusting routing labels", async () => {
+  const auditPacket = packet();
+  const calls = [];
+  const issues = await listGithubIssues(
+    { repo: "owner/repo" },
+    {
+      runner: async (args) => {
+        calls.push(args);
+        return JSON.stringify([
+          {
+            number: 11,
+            state: "open",
+            body: `${DOCS_GARDEN_MARKER}\n${packetMarker(auditPacket)}\n`,
+            labels: [{ name: "agent-ready" }],
+          },
+          { number: 12, state: "open", pull_request: {}, body: "" },
+        ]);
+      },
+    },
+  );
+  assert.deepEqual(calls, [
+    ["api", "repos/owner/repo/issues?state=all&per_page=100&page=1"],
+  ]);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].marker.week_serial, auditPacket.cycle.week_serial);
 });
 
 await test("label setup creates only missing labels and never force-edits shared labels", async () => {

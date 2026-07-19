@@ -283,7 +283,6 @@ export function buildDocsGardenIssueSpec(
   }
 
   return {
-    packetKey: packet.cycle.week_serial,
     title,
     body,
     labels: [...BASE_LABELS, `risk:${risk}`],
