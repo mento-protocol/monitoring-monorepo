@@ -235,7 +235,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
 | `ENABLE_EXPERIMENTAL_COREPACK`             | Vercel Corepack opt-in so hosted builds honor the repo `packageManager` pnpm version (Terraform-managed)   |
 | `NEXT_PUBLIC_HASURA_URL`                   | Prod Envio GraphQL endpoint (shared by Celo, Monad, Polygon, and Ethereum reserve-yield data)              |
-| `NEXT_PUBLIC_HASURA_URL_TESTNET`           | Optional shared Monad Testnet + Polygon Amoy Envio GraphQL endpoint                                       |
+| `NEXT_PUBLIC_HASURA_URL_TESTNET`           | Optional shared Monad Testnet + Polygon Amoy Envio GraphQL endpoint                                        |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`      | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
 | `NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET`      | Optional Polygon RPC override (default: `https://polygon.drpc.org`)                                        |
 | `NEXT_PUBLIC_RPC_URL_POLYGON_AMOY`         | Optional Polygon Amoy RPC override (default: `https://rpc-amoy.polygon.technology`)                        |
