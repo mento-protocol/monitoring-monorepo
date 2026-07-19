@@ -1534,9 +1534,9 @@ describe("aggregator quote builders", () => {
   it("uses each provider's canonical Polygon chain identifier", () => {
     const env = {
       LIFI_API_KEY: "lifi-key",
-      OPENOCEAN_API_KEY: "openocean-key",
+      OPENOCEAN_API_KEY: "test-openocean-key",
       ZEROX_API_KEY: "0x-key",
-      ONEINCH_API_KEY: "one-inch-key",
+      ONEINCH_API_KEY: "test-one-inch-key",
       SOCKET_API_KEY: "socket-key",
       SQUID_INTEGRATOR_ID: "squid-id",
     };
