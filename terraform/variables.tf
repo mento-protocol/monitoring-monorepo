@@ -236,6 +236,43 @@ variable "sentry_projection_token" {
   default     = ""
 }
 
+variable "sentry_archive_token" {
+  description = <<-EOT
+    WRITE-SCOPED Sentry internal-integration token for the Phase 2a
+    human-approved archive leg (ADR 0036 Stage C). Scopes: Issue & Event
+    Read + Write — NOTHING else. The archive workflow
+    (`.github/workflows/sentry-triage-archive.yml`) is its ONLY consumer, and
+    only to set a Sentry issue to `archived_until_escalating` (never a hard
+    resolve). Mirrors into the repo-level Actions secret `SENTRY_ARCHIVE_TOKEN`.
+    Separate from the read-only `sentry_triage_token` by design — do NOT reuse
+    that token here. Leave empty until provisioned; the secret resource is
+    `count`-gated so `terraform apply` succeeds without it and the workflow
+    no-ops gracefully. See the runbook in docs/notes/sentry-triage-pipeline.md
+    for how to mint it.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "sentry_archive_enabled" {
+  description = <<-EOT
+    Kill switch for the Phase 2a human-approved Sentry archive workflow
+    (ADR 0036, ADR 0030). Mirrors into the repo-level Actions variable
+    `SENTRY_ARCHIVE_ENABLED`; the archive workflow no-ops unless it equals
+    "true". Defaults to "false" so the archive leg stays inert until
+    deliberately activated by a follow-up tfvar change plus a re-apply, even
+    after `sentry_archive_token` is provisioned.
+  EOT
+  type        = string
+  default     = "false"
+
+  validation {
+    condition     = contains(["true", "false"], var.sentry_archive_enabled)
+    error_message = "sentry_archive_enabled must be the string \"true\" or \"false\"."
+  }
+}
+
 # ── Auth (Google OAuth / NextAuth) ─────────────────────────────────────────
 
 variable "auth_google_id" {
