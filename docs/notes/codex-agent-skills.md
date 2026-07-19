@@ -46,13 +46,20 @@ from a semantic engine to local. Semantic engines run from an empty temporary
 workspace with project configuration and inherited environment restricted to
 the review contract. Reviewer web search is disabled by default to keep
 untrusted review evidence off the network; `--web-search` is an explicit opt-in
-for reviews that require public documentation lookup. Claude preserves standard Vertex and AWS Bedrock
-credential-chain inputs. Claude's file-valued cloud locators, plus
+for reviews that require public documentation lookup. Claude preserves
+standard Vertex and AWS Bedrock credential-chain inputs. Explicit
+`AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` locators opt into trusted
+static/profile files; their private snapshots reject `credential_process`.
+When either locator is absent, Claude receives a private empty snapshot
+instead, disabling implicit fallback to `~/.aws/config` or
+`~/.aws/credentials`; set the locator explicitly to use a trusted file.
+Claude's other file-valued cloud locators, plus
 `SSL_CERT_FILE` for both Claude and Codex, must resolve outside the reviewed
 repository to trusted owner/mode/ancestry/ACL state; the helper opens each
-source no-follow with identity revalidation and passes a private per-run `0600`
-snapshot rather than the mutable source path. Those snapshots are removed with
-the isolated engine workspace after normal completion or partial setup failure.
+explicit source no-follow with identity revalidation and passes a private
+per-run `0600` snapshot rather than the mutable source path. Those snapshots
+are removed with the isolated engine workspace after normal completion or
+partial setup failure.
 Interruption unlinks them before bounded process-group termination, including
 when an escaped descendant holds reviewer pipes. Non-empty `SSL_CERT_DIR` is
 rejected; use a trusted external PEM bundle through `SSL_CERT_FILE` instead.
@@ -61,12 +68,20 @@ group before cleanup tracking is released, including ordinary success and
 failure as well as timeout or interruption. A quiet semantic reviewer emits a
 progress heartbeat every 60 seconds. `AUTOREVIEW_HELPER` is an escape hatch for
 intentional local testing or compatible replacement, not a Cloud prerequisite.
-Prepared-bundle replacements must implement the pinned helper CLI, including
-`--source-snapshot-only`, `--serialize-untracked-file`, `--bundle-output`,
-`--bundle-output-display`, and `--trusted-input-root`. The adapter keeps
-replacement compatibility by invoking
-that snapshot flag without a target mode; target-mode snapshot scoping is
-passed only to the pinned repo helper.
+Prepared-bundle replacements receive only the final prompt handoff and must
+implement `--bundle-output`, `--bundle-output-display`, and
+`--trusted-input-root`. The wrapper-attested helper retains ownership of source
+fingerprints and untracked-file serialization. A trusted wrapper physically
+outside the reviewed checkout uses a private, no-follow, manifest-bound copy of
+its sibling helper/core after pinning the source directory and validating stable
+POSIX ancestry plus non-write-granting macOS ACLs. The same copy is used when
+`AUTOREVIEW_HELPER` explicitly names that default sibling; a nested wrapper is rejected. The owning
+checkout instead requires its shell wrapper to match pinned protected main and
+materializes compatible helper/core blobs from that object; when it cannot, the
+review must run from a separate trusted checkout. An explicit replacement does
+not run before wrapper-owned recursive cleanup finishes. After the handoff,
+the wrapper retains its command runtime and any failed staging without
+recursive deletion because the replacement may have left a same-UID writer.
 
 The adapter also exposes `--prepare-bundle-dir <dir>` to create a repo-context
 review bundle with changed paths, patch files, selected checklists, optional
@@ -102,11 +117,19 @@ digest outside the bundle. After review, rerun with
 `--expected-bundle-manifest <retained-digest>`; the command rehashes the
 no-follow evidence and rejects a changed marker, bundle, or pre/post digest. A
 destination created during the final race window is never replaced; an
-interrupted or unverified bundle must not be reviewed. Failure after an external
-helper sees the staging path leaves that tree for identity-safe inspection
-instead of recursively deleting a potential replacement. The adapter never
-recursively removes a failed destination reservation; inspect and remove an
-incomplete, unmarked directory before retrying. The repo helper is not
+interrupted or unverified bundle must not be reviewed. Failures before an
+explicit helper runs, plus failures from the wrapper-attested default helper,
+receive pinned-identity cleanup: the adapter moves the candidate into a random
+adjacent quarantine, opens it without following symlinks, verifies the recorded
+`dev:ino`, and pins that inode with `fchdir` before recursive deletion. Later
+pathname cleanup is non-recursive and retains replacements on identity drift.
+After an explicit `AUTOREVIEW_HELPER` runs, failed staging is retained without
+recursive deletion because an unattested same-UID writer could substitute a
+child directory beneath the pinned root. Canonical secret-scan failures use the
+attested helper and are cleaned without leaving raw diff sidecars. It never
+recursively removes a failed
+destination reservation; inspect and remove an incomplete, unmarked directory
+before retrying. The repo helper is not
 re-entered for publication. Its `helper-output.txt` names the final published
 prompt/pass paths rather than ephemeral staging locations.
 Prepared-bundle mode owns its `autoreview-prompt.md`, so it cannot be combined
@@ -149,6 +172,10 @@ clean-to-dirty transition fails closed without reading untracked file contents.
 After target selection, explicit branch and commit reviews rely on the
 target-scoped fingerprint and ignore unrelated untracked churn; automatic mode
 retains the status guard because its target class depends on clean/dirty state.
+Every Git path collection uses NUL-delimited output, so enumeration does not
+depend on Git quoting or newline splitting. Because the published changed-path
+and prompt metadata are line-oriented, paths containing tabs or line breaks
+are rejected before review; rename such a path before running autoreview.
 For explicit branch and commit bundles in the owning checkout, the shell
 adapter's bytes and executable mode must match frozen `HEAD`. The shell, MJS
 helper, and core at frozen `HEAD` must also match the pinned protected-main
@@ -159,9 +186,10 @@ worktree. Local and branch-local bundles also require helper/core worktree bytes
 to match frozen `HEAD`. Runtime changes fail closed for review from a separate
 trusted checkout with an explicit compatible helper. Direct default-helper
 execution in the owning checkout applies the same protected-main runtime pin.
-Run the trusted wrapper from the reviewed checkout, keep its MJS path explicit
-in `AUTOREVIEW_HELPER`, and use the same wrapper for both manifest checks; the
-exact runtime-changing-PR command sequence lives in
+From the reviewed checkout as the working directory, invoke the wrapper from
+the separate trusted checkout, keep that checkout's MJS path explicit in
+`AUTOREVIEW_HELPER`, and use the same wrapper for both manifest checks; the exact
+runtime-changing-PR command sequence lives in
 [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 Wrapper-owned Node launches discard `NODE_OPTIONS` and `NODE_PATH` before
 executable probing, validation helpers, or the pinned MJS entry point can run;

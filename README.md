@@ -94,10 +94,16 @@ Codex Cloud does not inherit a developer's local `~/.agents` directory, so the
 repo vendors the required autoreview helper at `scripts/agent-autoreview.mjs`.
 Set `AUTOREVIEW_HELPER` only when intentionally replacing that helper with a
 compatible implementation of its CLI contract. Prepared-bundle replacements
-must support `--source-snapshot-only`, `--serialize-untracked-file`,
-`--bundle-output`, `--bundle-output-display`, and `--trusted-input-root`. The
-setup and maintenance scripts fail fast when the effective helper is missing
-because PR shipping requires `pnpm agent:autoreview`.
+receive only the final prompt handoff and must support `--bundle-output`,
+`--bundle-output-display`, and `--trusted-input-root`; the wrapper-attested
+helper owns source fingerprinting and untracked-file serialization from a
+private manifest-bound runtime created before that handoff. In the owning
+checkout that runtime must come from compatible pinned protected-main blobs;
+runtime-changing reviews must use a separate trusted wrapper checkout
+physically outside the reviewed checkout. Its default sibling helper is still
+privately attested when named explicitly through `AUTOREVIEW_HELPER`. The setup
+and maintenance scripts fail fast when the effective helper is missing because
+PR shipping requires `pnpm agent:autoreview`.
 Semantic review uses the complete branch-local target and an isolated empty
 reviewer workspace. Oversized direct semantic runs fail closed; prepared
 bundles preserve bounded lossless passes for one fresh-context reviewer to

@@ -307,6 +307,8 @@ fi
 helper="$tmp_dir/autoreview-helper"
 trusted_direct_helper_dir="$tmp_dir/trusted-direct-helper"
 trusted_direct_helper="$trusted_direct_helper_dir/agent-autoreview.mjs"
+adapter_runtime="$tmp_dir/adapter-runtime"
+adapter_wrapper="$adapter_runtime/scripts/agent-autoreview.sh"
 capture="$tmp_dir/args"
 stdout="$tmp_dir/stdout"
 stderr="$tmp_dir/stderr"
@@ -316,6 +318,19 @@ cp "$repo_root/scripts/agent-autoreview.mjs" \
   "$repo_root/scripts/agent-autoreview-core.mjs" \
   "$trusted_direct_helper_dir/"
 chmod +x "$trusted_direct_helper"
+
+# Explicit-helper adapter tests must use the production trust topology: the
+# wrapper runtime is outside the reviewed checkout and independently trusted by
+# the caller. Same-checkout behavior has its own fail-closed regression below.
+mkdir -p "$adapter_runtime/scripts"
+cp \
+  "$repo_root/scripts/agent-autoreview.sh" \
+  "$repo_root/scripts/agent-autoreview.mjs" \
+  "$repo_root/scripts/agent-autoreview-core.mjs" \
+  "$adapter_runtime/scripts/"
+chmod +x \
+  "$adapter_wrapper" \
+  "$adapter_runtime/scripts/agent-autoreview.mjs"
 
 cat >"$helper" <<'HELPER'
 #!/usr/bin/env bash
@@ -332,6 +347,10 @@ if [[ "${1:-}" == "--source-snapshot-only" ]]; then
   fi
   if [[ -n "${AUTOREVIEW_FAKE_BAD_SNAPSHOT:-}" ]]; then
     printf 'not-a-source-snapshot\n'
+    exit 0
+  fi
+  if [[ -n "${AUTOREVIEW_FAKE_SOURCE_SNAPSHOT:-}" ]]; then
+    printf '%s\n' "$AUTOREVIEW_FAKE_SOURCE_SNAPSHOT"
     exit 0
   fi
   exec "$AUTOREVIEW_SNAPSHOT_HELPER" --source-snapshot-only
@@ -449,9 +468,36 @@ if [[
     "everyone allow write,delete" \
     "${bundle_output%/*}/README.md"
 fi
+if [[
+  -n "${AUTOREVIEW_FAKE_CLEANUP_CHILD_SWAP:-}" &&
+    -n "$bundle_output" &&
+    -n "${AUTOREVIEW_FAKE_CLEANUP_VICTIM:-}"
+]]; then
+  staging_dir="${bundle_output%/*}"
+  mv -- "$staging_dir/patches" "$staging_dir/patches.original"
+  mv -- "$AUTOREVIEW_FAKE_CLEANUP_VICTIM" "$staging_dir/patches"
+  exit 42
+fi
 printf 'fake helper complete\n'
 HELPER
 chmod +x "$helper"
+
+cleanup_retained_test_command_runtimes() {
+  local stderr_file="${1:-$stderr}"
+  local retained
+  while IFS= read -r retained; do
+    case "$retained" in
+      /tmp/agent-autoreview-command-runtime.* | \
+        /private/tmp/agent-autoreview-command-runtime.*)
+        rm -rf -- "$retained"
+        ;;
+    esac
+  done < <(
+    sed -n \
+      's/^agent:autoreview: leaving external-command runtime because an explicit helper may have surviving same-UID writers: //p' \
+      "$stderr_file"
+  )
+}
 
 run_adapter() {
   : >"$capture"
@@ -473,7 +519,8 @@ run_adapter() {
   done
 
   local status=0
-  env -i "${env_args[@]}" "$repo_root/scripts/agent-autoreview.sh" "$@" >"$stdout" 2>"$stderr" || status=$?
+  env -i "${env_args[@]}" "$adapter_wrapper" "$@" >"$stdout" 2>"$stderr" || status=$?
+  cleanup_retained_test_command_runtimes
   if [[ "$status" -ne 0 ]]; then
     printf 'adapter failed\nstdout:\n%s\nstderr:\n%s\n' "$(cat "$stdout")" "$(cat "$stderr")" >&2
     return "$status"
@@ -500,9 +547,10 @@ run_adapter_expect_failure() {
   done
 
   set +e
-  env -i "${env_args[@]}" "$repo_root/scripts/agent-autoreview.sh" "$@" >"$stdout" 2>"$stderr"
+  env -i "${env_args[@]}" "$adapter_wrapper" "$@" >"$stdout" 2>"$stderr"
   local status=$?
   set -e
+  cleanup_retained_test_command_runtimes
   if [[ "$status" -eq 0 ]]; then
     printf 'expected adapter call from line %s to fail\nstdout:\n%s\nstderr:\n%s\n' \
       "${BASH_LINENO[0]:-unknown}" \
@@ -563,8 +611,14 @@ expect_stdout_not_contains() {
 }
 
 expect_empty_stderr() {
-  if [[ -s "$stderr" ]]; then
-    printf 'expected empty stderr, got:\n%s\n' "$(cat "$stderr")" >&2
+  local unexpected
+  unexpected="$(
+    grep -v \
+      '^agent:autoreview: leaving external-command runtime because an explicit helper may have surviving same-UID writers: ' \
+      "$stderr" || true
+  )"
+  if [[ -n "$unexpected" ]]; then
+    printf 'expected empty stderr, got:\n%s\n' "$unexpected" >&2
     exit 1
   fi
 }
@@ -582,6 +636,15 @@ expect_file_contains() {
   local expected="$2"
   if ! grep -Fq -- "$expected" "$path"; then
     printf 'expected %s to contain %s\nactual:\n%s\n' "$path" "$expected" "$(cat "$path")" >&2
+    exit 1
+  fi
+}
+
+expect_file_contains_line() {
+  local path="$1"
+  local expected="$2"
+  if ! grep -Fxq -- "$expected" "$path"; then
+    printf 'expected %s to contain exact line %s\nactual:\n%s\n' "$path" "$expected" "$(cat "$path")" >&2
     exit 1
   fi
 }
@@ -627,8 +690,9 @@ run_default_adapter() {
     "HOME=$HOME" \
     "TMPDIR=${TMPDIR:-/tmp}" \
     "AUTOREVIEW_HELPER=$trusted_direct_helper" \
-    "$repo_root/scripts/agent-autoreview.sh" \
+    "$adapter_wrapper" \
     --base origin/main --engine local --dry-run >"$stdout" 2>"$stderr"
+  cleanup_retained_test_command_runtimes
 }
 
 run_default_adapter_in_clean_main() {
@@ -651,9 +715,10 @@ run_default_adapter_in_clean_main() {
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
       "AUTOREVIEW_HELPER=$trusted_direct_helper" \
-      "$repo_root/scripts/agent-autoreview.sh" \
+      "$adapter_wrapper" \
       --engine local --dry-run >"$stdout" 2>"$stderr"
   )
+  cleanup_retained_test_command_runtimes
 }
 
 run_default_adapter_with_inline_engine() {
@@ -664,8 +729,9 @@ run_default_adapter_with_inline_engine() {
     "HOME=$HOME" \
     "TMPDIR=${TMPDIR:-/tmp}" \
     "AUTOREVIEW_HELPER=$trusted_direct_helper" \
-    "$repo_root/scripts/agent-autoreview.sh" \
+    "$adapter_wrapper" \
     --base origin/main --engine=local --dry-run >"$stdout" 2>"$stderr"
+  cleanup_retained_test_command_runtimes
 }
 
 init_review_repo() {
@@ -690,6 +756,316 @@ commit_review_repo() {
   fi
 }
 
+run_same_checkout_explicit_helper_fail_closed_regression() {
+  local review_repo="$tmp_dir/same-checkout-explicit-helper"
+  local bundle_parent="$tmp_dir/same-checkout-explicit-helper-output"
+  local bundle_dir="$bundle_parent/context-bundle"
+  local same_checkout_capture="$tmp_dir/same-checkout-explicit-helper.capture"
+  local same_checkout_stdout="$tmp_dir/same-checkout-explicit-helper.stdout"
+  local same_checkout_stderr="$tmp_dir/same-checkout-explicit-helper.stderr"
+  local status=0
+
+  init_review_repo "$review_repo"
+  mkdir -p "$review_repo/scripts" "$bundle_parent"
+  cp \
+    "$repo_root/scripts/agent-autoreview.sh" \
+    "$repo_root/scripts/agent-autoreview.mjs" \
+    "$repo_root/scripts/agent-autoreview-core.mjs" \
+    "$review_repo/scripts/"
+  chmod +x \
+    "$review_repo/scripts/agent-autoreview.sh" \
+    "$review_repo/scripts/agent-autoreview.mjs"
+  printf 'same-checkout explicit-helper fixture\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+
+  printf '\n# runtime change under review\n' \
+    >>"$review_repo/scripts/agent-autoreview.sh"
+  : >"$same_checkout_capture"
+  : >"$same_checkout_stdout"
+  : >"$same_checkout_stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AUTOREVIEW_HELPER=$helper" \
+      "AUTOREVIEW_CAPTURE=$same_checkout_capture" \
+      "AUTOREVIEW_SNAPSHOT_HELPER=$adapter_runtime/scripts/agent-autoreview.mjs" \
+      "$review_repo/scripts/agent-autoreview.sh" \
+      --prepare-bundle-dir "$bundle_dir" \
+      --mode local \
+      --engine local >"$same_checkout_stdout" 2>"$same_checkout_stderr"
+  ) || status=$?
+  cleanup_retained_test_command_runtimes "$same_checkout_stderr"
+
+  if [[ "$status" -eq 0 ]]; then
+    printf 'same-checkout explicit helper accepted a changed owning wrapper\n' >&2
+    exit 1
+  fi
+  if [[ -s "$same_checkout_capture" ]]; then
+    printf 'same-checkout explicit helper ran before the trust check failed\n' >&2
+    exit 1
+  fi
+  if ! grep -Fq \
+    'Prepare this review from a separate trusted checkout and invoke that checkout'"'"'s compatible wrapper and helper.' \
+    "$same_checkout_stderr"; then
+    printf 'same-checkout explicit-helper failure omitted trusted-checkout guidance\nstderr:\n%s\n' \
+      "$(cat "$same_checkout_stderr")" >&2
+    exit 1
+  fi
+  if [[ -e "$bundle_dir" ]] ||
+    [[ -n "$(find "$bundle_parent" -mindepth 1 -print -quit)" ]]; then
+    printf 'same-checkout explicit-helper failure left prepared-bundle residue\n' >&2
+    exit 1
+  fi
+}
+
+run_same_checkout_protected_runtime_regression() {
+  local review_repo="$tmp_dir/same-checkout-protected-runtime"
+  local bundle_parent="$tmp_dir/same-checkout-protected-runtime-output"
+  local bundle_dir="$bundle_parent/context-bundle"
+  local protected_capture="$tmp_dir/same-checkout-protected-runtime.capture"
+  local protected_stdout="$tmp_dir/same-checkout-protected-runtime.stdout"
+  local protected_stderr="$tmp_dir/same-checkout-protected-runtime.stderr"
+  local status=0
+
+  init_review_repo "$review_repo"
+  mkdir -p "$review_repo/scripts" "$bundle_parent"
+  cp \
+    "$repo_root/scripts/agent-autoreview.sh" \
+    "$repo_root/scripts/agent-autoreview.mjs" \
+    "$repo_root/scripts/agent-autoreview-core.mjs" \
+    "$review_repo/scripts/"
+  chmod +x \
+    "$review_repo/scripts/agent-autoreview.sh" \
+    "$review_repo/scripts/agent-autoreview.mjs"
+  printf 'same-checkout protected runtime fixture\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'reviewed non-runtime change\n' >>"$review_repo/README.md"
+
+  : >"$protected_capture"
+  : >"$protected_capture.snapshot"
+  : >"$protected_capture.bundle-output"
+  : >"$protected_stdout"
+  : >"$protected_stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AUTOREVIEW_HELPER=$helper" \
+      "AUTOREVIEW_CAPTURE=$protected_capture" \
+      "AUTOREVIEW_SNAPSHOT_HELPER=$adapter_runtime/scripts/agent-autoreview.mjs" \
+      "$review_repo/scripts/agent-autoreview.sh" \
+      --prepare-bundle-dir "$bundle_dir" \
+      --mode local \
+      --engine local >"$protected_stdout" 2>"$protected_stderr"
+  ) || status=$?
+  cleanup_retained_test_command_runtimes "$protected_stderr"
+
+  if [[ "$status" -ne 0 ]]; then
+    printf 'same-checkout protected-main runtime failed\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$protected_stdout")" \
+      "$(cat "$protected_stderr")" >&2
+    exit 1
+  fi
+  if [[ ! -s "$protected_capture" ]]; then
+    printf 'same-checkout protected-main runtime never reached the explicit final handoff\n' >&2
+    exit 1
+  fi
+  if [[ -s "$protected_capture.snapshot" ]]; then
+    printf 'explicit helper handled a protected-main source fingerprint\n' >&2
+    exit 1
+  fi
+  if [[ ! -f "$bundle_dir/.agent-autoreview-complete" ]]; then
+    printf 'same-checkout protected-main runtime did not publish a complete bundle\n' >&2
+    exit 1
+  fi
+  local unexpected_stderr
+  unexpected_stderr="$(
+    grep -v \
+      '^agent:autoreview: leaving external-command runtime because an explicit helper may have surviving same-UID writers: ' \
+      "$protected_stderr" || true
+  )"
+  if [[ -n "$unexpected_stderr" ]]; then
+    printf 'same-checkout protected-main runtime wrote unexpected stderr:\n%s\n' \
+      "$unexpected_stderr" >&2
+    exit 1
+  fi
+}
+
+run_nested_wrapper_fail_closed_regression() {
+  local review_repo="$tmp_dir/nested-wrapper-review"
+  local nested_runtime="$review_repo/.trusted-wrapper"
+  local nested_wrapper="$nested_runtime/scripts/agent-autoreview.sh"
+  local bundle_parent="$tmp_dir/nested-wrapper-output"
+  local bundle_dir="$bundle_parent/context-bundle"
+  local nested_capture="$tmp_dir/nested-wrapper.capture"
+  local nested_stdout="$tmp_dir/nested-wrapper.stdout"
+  local nested_stderr="$tmp_dir/nested-wrapper.stderr"
+  local status=0
+
+  init_review_repo "$review_repo"
+  mkdir "$bundle_parent"
+  printf 'nested-wrapper fixture\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  mkdir -p "$nested_runtime/scripts"
+  cp \
+    "$repo_root/scripts/agent-autoreview.sh" \
+    "$repo_root/scripts/agent-autoreview.mjs" \
+    "$repo_root/scripts/agent-autoreview-core.mjs" \
+    "$nested_runtime/scripts/"
+  chmod +x \
+    "$nested_wrapper" \
+    "$nested_runtime/scripts/agent-autoreview.mjs"
+
+  : >"$nested_capture"
+  : >"$nested_stdout"
+  : >"$nested_stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AUTOREVIEW_HELPER=$helper" \
+      "AUTOREVIEW_CAPTURE=$nested_capture" \
+      "AUTOREVIEW_SNAPSHOT_HELPER=$adapter_runtime/scripts/agent-autoreview.mjs" \
+      "$nested_wrapper" \
+      --prepare-bundle-dir "$bundle_dir" \
+      --mode local \
+      --engine local >"$nested_stdout" 2>"$nested_stderr"
+  ) || status=$?
+  cleanup_retained_test_command_runtimes "$nested_stderr"
+
+  if [[ "$status" -eq 0 ]]; then
+    printf 'wrapper nested inside the reviewed checkout was accepted as trusted\n' >&2
+    exit 1
+  fi
+  if [[ -s "$nested_capture" ]]; then
+    printf 'nested reviewed wrapper reached the explicit helper handoff\n' >&2
+    exit 1
+  fi
+  if ! grep -Fq \
+    'an explicit-helper trusted wrapper must be outside the reviewed checkout' \
+    "$nested_stderr"; then
+    printf 'nested-wrapper rejection omitted the external-wrapper requirement\nstderr:\n%s\n' \
+      "$(cat "$nested_stderr")" >&2
+    exit 1
+  fi
+  if [[ -e "$bundle_dir" ]] ||
+    [[ -n "$(find "$bundle_parent" -mindepth 1 -print -quit)" ]]; then
+    printf 'nested-wrapper rejection left prepared-bundle residue\n' >&2
+    exit 1
+  fi
+}
+
+run_external_wrapper_source_trust_regression() {
+  local review_repo="$tmp_dir/external-source-trust-review"
+  local external_runtime="$tmp_dir/external-source-trust-runtime"
+  local external_wrapper="$external_runtime/scripts/agent-autoreview.sh"
+  local source_helper="$external_runtime/scripts/agent-autoreview.mjs"
+  local source_parent="$external_runtime/scripts"
+  local source_capture="$tmp_dir/external-source-trust.capture"
+  local source_stdout="$tmp_dir/external-source-trust.stdout"
+  local source_stderr="$tmp_dir/external-source-trust.stderr"
+  local scenario
+  local bundle_parent
+  local bundle_dir
+  local status
+  local selected_helper
+  local scenarios=(unsafe-mode default-unsafe-mode)
+
+  if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
+    scenarios+=(file-acl default-file-acl parent-acl)
+  fi
+  init_review_repo "$review_repo"
+  printf 'external source trust fixture\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  mkdir -p "$source_parent"
+  cp \
+    "$repo_root/scripts/agent-autoreview.sh" \
+    "$repo_root/scripts/agent-autoreview.mjs" \
+    "$repo_root/scripts/agent-autoreview-core.mjs" \
+    "$source_parent/"
+  chmod +x "$external_wrapper" "$source_helper"
+
+  for scenario in "${scenarios[@]}"; do
+    bundle_parent="$tmp_dir/external-source-trust-output-$scenario"
+    bundle_dir="$bundle_parent/context-bundle"
+    mkdir "$bundle_parent"
+    selected_helper="$helper"
+    case "$scenario" in
+      default-*) selected_helper="$source_helper" ;;
+    esac
+    case "$scenario" in
+      unsafe-mode | default-unsafe-mode)
+        chmod 0777 "$source_parent"
+        ;;
+      file-acl | default-file-acl)
+        /bin/chmod +a "everyone allow write,delete" "$source_helper"
+        ;;
+      parent-acl)
+        /bin/chmod +a \
+          "everyone allow add_file,delete_child" \
+          "$source_parent"
+        ;;
+    esac
+
+    : >"$source_capture"
+    : >"$source_stdout"
+    : >"$source_stderr"
+    status=0
+    (
+      cd "$review_repo"
+      env -i \
+        "PATH=$PATH" \
+          "HOME=$HOME" \
+          "TMPDIR=${TMPDIR:-/tmp}" \
+          "AUTOREVIEW_HELPER=$selected_helper" \
+        "AUTOREVIEW_CAPTURE=$source_capture" \
+        "AUTOREVIEW_SNAPSHOT_HELPER=$adapter_runtime/scripts/agent-autoreview.mjs" \
+        "$external_wrapper" \
+        --prepare-bundle-dir "$bundle_dir" \
+        --mode local \
+        --engine local >"$source_stdout" 2>"$source_stderr"
+    ) || status=$?
+    case "$scenario" in
+      unsafe-mode | default-unsafe-mode) chmod 0700 "$source_parent" ;;
+      file-acl | default-file-acl) /bin/chmod -N "$source_helper" ;;
+      parent-acl) /bin/chmod -N "$source_parent" ;;
+    esac
+    cleanup_retained_test_command_runtimes "$source_stderr"
+
+    if [[ "$status" -eq 0 ]]; then
+      printf 'external wrapper accepted unsafe runtime source state: %s\n' \
+        "$scenario" >&2
+      exit 1
+    fi
+    if [[ -s "$source_capture" ]]; then
+      printf 'unsafe external wrapper runtime reached the explicit helper: %s\n' \
+        "$scenario" >&2
+      exit 1
+    fi
+    if ! grep -Fq \
+      'external wrapper runtime source has unsafe ACL, ancestry, or identity state' \
+      "$source_stderr"; then
+      printf 'unsafe external runtime rejection omitted source-trust guidance (%s)\nstderr:\n%s\n' \
+        "$scenario" \
+        "$(cat "$source_stderr")" >&2
+      exit 1
+    fi
+    if [[ -e "$bundle_dir" ]] ||
+      [[ -n "$(find "$bundle_parent" -mindepth 1 -print -quit)" ]]; then
+      printf 'unsafe external runtime rejection left bundle residue: %s\n' \
+        "$scenario" >&2
+      exit 1
+    fi
+  done
+}
+
 run_helper_in_repo() {
   local review_repo="$1"
   shift
@@ -702,9 +1078,10 @@ run_helper_in_repo() {
       "PATH=$PATH" \
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
-      "$repo_root/scripts/agent-autoreview.sh" \
+      "$adapter_wrapper" \
       "$@" >"$stdout" 2>"$stderr"
   ) || status=$?
+  cleanup_retained_test_command_runtimes
   if [[ "$status" -ne 0 ]]; then
     printf 'helper failed unexpectedly\nstdout:\n%s\nstderr:\n%s\n' \
       "$(cat "$stdout")" "$(cat "$stderr")" >&2
@@ -724,9 +1101,10 @@ run_helper_in_repo_expect_failure() {
       "PATH=$PATH" \
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
-      "$repo_root/scripts/agent-autoreview.sh" \
+      "$adapter_wrapper" \
       "$@" >"$stdout" 2>"$stderr"
   ) || status=$?
+  cleanup_retained_test_command_runtimes
   if [[ "$status" -eq 0 ]]; then
     printf 'expected helper to fail\nstdout:\n%s\nstderr:\n%s\n' "$(cat "$stdout")" "$(cat "$stderr")" >&2
     exit 1
@@ -800,7 +1178,7 @@ run_helper_with_path_in_repo() {
   (
     cd "$review_repo"
     env -i "${env_args[@]}" \
-      "$repo_root/scripts/agent-autoreview.sh" \
+      "$adapter_wrapper" \
       "$@" >"$stdout" 2>"$stderr"
   )
 }
@@ -1064,9 +1442,11 @@ run_claude_no_tools_regression() {
   local aws_web_identity_target="$tmp_dir/aws-web-identity-token"
   local aws_web_identity_file="$tmp_dir/aws-web-identity-token-link"
   local google_application_credentials="$tmp_dir/google-application-credentials.json"
+  local implicit_aws_home="$tmp_dir/implicit-aws-home"
   local ssl_cert_dir="$review_repo/repo-controlled-certificates"
   local ssl_cert_file="$tmp_dir/reviewer-ca.pem"
   local credential_process_marker="$tmp_dir/credential-process-ran"
+  local credential_process_command="$review_repo/credential-process.sh"
   local canonical_aws_config_file
   local canonical_aws_credentials_file
   local canonical_aws_container_auth_file
@@ -1145,11 +1525,33 @@ for (const key of keys) {
   fs.writeFileSync(`${capture}.${key}`, fs.readFileSync(value));
 }
 fs.writeFileSync(`${capture}.snapshots`, metadata);
+const credentialProcessMarker =
+  process.env.AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER;
+if (credentialProcessMarker) {
+  for (const credentialFile of [
+    process.env.AWS_CONFIG_FILE || path.join(process.env.HOME, ".aws/config"),
+    process.env.AWS_SHARED_CREDENTIALS_FILE ||
+      path.join(process.env.HOME, ".aws/credentials"),
+  ]) {
+    if (!fs.existsSync(credentialFile)) continue;
+    const hasCredentialProcess = fs
+      .readFileSync(credentialFile, "utf8")
+      .split(/\r\n?|\n/u)
+      .some((line) => {
+        const assignment = line.trimStart();
+        const separator = assignment.indexOf("=");
+        return (
+          separator >= 0 &&
+          assignment.slice(0, separator).trimEnd().toLowerCase() ===
+            "credential_process"
+        );
+      });
+    if (hasCredentialProcess) {
+      fs.writeFileSync(credentialProcessMarker, "");
+    }
+  }
+}
 NODE
-if [[ -n "${AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER:-}" ]] && \
-  /usr/bin/grep -q 'credential_process[[:space:]]*=' "$AWS_CONFIG_FILE"; then
-  : >"$AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER"
-fi
 cat >/dev/null
 cat <<'JSON'
 {"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}
@@ -1256,6 +1658,57 @@ CLAUDE
   expect_stdout_contains "autoreview clean"
   expect_empty_stderr
 
+  mkdir -p "$implicit_aws_home/.aws"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "credential-process-ran\n"' \
+    >"$credential_process_command"
+  chmod 0755 "$credential_process_command"
+  printf '[default]\n  CrEdEnTiAl_PrOcEsS = %s\n' \
+    "$credential_process_command" >"$implicit_aws_home/.aws/config"
+  printf '[default]\ncredential_process = %s\n' \
+    "$credential_process_command" >"$implicit_aws_home/.aws/credentials"
+  chmod 0700 "$implicit_aws_home" "$implicit_aws_home/.aws"
+  chmod 0600 \
+    "$implicit_aws_home/.aws/config" \
+    "$implicit_aws_home/.aws/credentials"
+  rm -f "$capture.invoked" "$credential_process_marker"
+  TMPDIR="$tmp_dir" \
+    HOME="$implicit_aws_home" \
+    AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER="$credential_process_marker" \
+    run_helper_with_path_in_repo \
+      "$review_repo" \
+      "$fake_bin" \
+      --mode local \
+      --engine claude \
+      --no-tools
+  for key in AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE; do
+    snapshot_path="$(sed -n "s/^${key}=//p" "$capture.snapshots")"
+    if [[ -z "$snapshot_path" ]]; then
+      printf 'Claude did not receive an empty fallback-blocking snapshot for %s\n' "$key" >&2
+      exit 1
+    fi
+    expect_file_contains "$capture.snapshots" "${key}_FILE=true"
+    expect_file_contains "$capture.snapshots" "${key}_MODE=600"
+    expect_file_contains "$capture.snapshots" "${key}_NLINK=1"
+    expect_file_contains "$capture.snapshots" "${key}_PARENT_MODE=700"
+    if [[ -s "$capture.$key" ]]; then
+      printf 'Claude inherited implicit HOME AWS configuration through %s\n' "$key" >&2
+      exit 1
+    fi
+    if [[ -e "$snapshot_path" ]]; then
+      printf 'Claude fallback-blocking %s snapshot survived cleanup: %s\n' \
+        "$key" "$snapshot_path" >&2
+      exit 1
+    fi
+  done
+  if [[ -e "$credential_process_marker" ]]; then
+    printf 'Claude observed an implicit HOME credential_process provider\n' >&2
+    exit 1
+  fi
+  expect_stdout_contains "autoreview clean"
+  expect_empty_stderr
+
   printf '[default]\nregion = us-east-1\n' >"$aws_config_file"
   rm -f "$capture.invoked" "$credential_process_marker"
   AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER="$credential_process_marker" \
@@ -1271,6 +1724,58 @@ CLAUDE
   fi
   expect_stdout_contains "autoreview clean"
   expect_empty_stderr
+
+  printf '[default]\n\357\273\277  CrEdEnTiAl_PrOcEsS \f= %s\n' \
+    "$credential_process_command" >"$aws_config_file"
+  chmod 0600 "$aws_config_file"
+  rm -f "$capture.invoked" "$credential_process_marker"
+  TMPDIR="$tmp_dir" \
+    AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER="$credential_process_marker" \
+    AWS_CONFIG_FILE="$aws_config_file" \
+    SSL_CERT_FILE="$ssl_cert_file" \
+    run_helper_with_path_in_repo_expect_failure \
+      "$review_repo" \
+      "$fake_bin" \
+      --mode local \
+      --engine claude \
+      --no-tools
+  expect_stderr_contains \
+    "AWS_CONFIG_FILE cannot contain credential_process for semantic autoreview"
+  if [[ -e "$capture.invoked" || -e "$credential_process_marker" ]]; then
+    printf 'Claude executed with credential_process in trusted AWS_CONFIG_FILE\n' >&2
+    exit 1
+  fi
+  if find "$tmp_dir" -maxdepth 1 -type d -name 'autoreview-claude-workspace.*' -print -quit | grep -q .; then
+    printf 'Claude AWS_CONFIG_FILE rejection left runtime residue\n' >&2
+    exit 1
+  fi
+
+  printf '[default]\nregion = us-east-1\n' >"$aws_config_file"
+  printf '[default]\n\fcredential_process\f = %s\n' \
+    "$credential_process_command" >"$aws_credentials_file"
+  chmod 0600 "$aws_credentials_file"
+  rm -f "$capture.invoked" "$credential_process_marker"
+  TMPDIR="$tmp_dir" \
+    AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER="$credential_process_marker" \
+    AWS_SHARED_CREDENTIALS_FILE="$aws_credentials_file" \
+    SSL_CERT_FILE="$ssl_cert_file" \
+    run_helper_with_path_in_repo_expect_failure \
+      "$review_repo" \
+      "$fake_bin" \
+      --mode local \
+      --engine claude \
+      --no-tools
+  expect_stderr_contains \
+    "AWS_SHARED_CREDENTIALS_FILE cannot contain credential_process for semantic autoreview"
+  if [[ -e "$capture.invoked" || -e "$credential_process_marker" ]]; then
+    printf 'Claude executed with credential_process in trusted AWS_SHARED_CREDENTIALS_FILE\n' >&2
+    exit 1
+  fi
+  if find "$tmp_dir" -maxdepth 1 -type d -name 'autoreview-claude-workspace.*' -print -quit | grep -q .; then
+    printf 'Claude AWS_SHARED_CREDENTIALS_FILE rejection left runtime residue\n' >&2
+    exit 1
+  fi
+  printf '[default]\naws_access_key_id = test\n' >"$aws_credentials_file"
 
   printf '[default]\ncredential_process = attacker-controlled-command\n' >"$aws_config_file"
   chmod 0666 "$aws_config_file"
@@ -2531,11 +3036,15 @@ run_frozen_checklist_provenance_regression() {
   local commit_bundle="$tmp_dir/trusted-checklist-commit-bundle"
   local local_bundle="$tmp_dir/trusted-checklist-local-bundle"
   local checked_bundle
+  local tracked_quote_path='terraform/quote"name.tf'
+  local tracked_backslash_path='terraform/back\slash.tf'
+  local untracked_quoted_path='notes/back\slash"body.txt'
   init_review_repo "$review_repo"
   mkdir -p \
     "$review_repo/docs/pr-checklists" \
     "$review_repo/indexer-envio/src" \
-    "$review_repo/scripts"
+    "$review_repo/scripts" \
+    "$review_repo/terraform"
   printf 'base\n' >"$review_repo/README.md"
   printf 'base recurring checklist\n' \
     >"$review_repo/docs/pr-checklists/recurring-review-patterns.md"
@@ -2545,6 +3054,8 @@ run_frozen_checklist_provenance_regression() {
     >"$review_repo/docs/pr-checklists/code-health.md"
   printf 'trusted pre-change indexer-handler checklist\n' \
     >"$review_repo/docs/pr-checklists/indexer-handler-invariants.md"
+  printf 'trusted pre-change terraform checklist\n' \
+    >"$review_repo/docs/pr-checklists/terraform-cloudrun.md"
   commit_review_repo "$review_repo" init
   git -C "$review_repo" switch -c release >/dev/null 2>&1
   printf 'malicious PR-base checklist injection\n' \
@@ -2555,6 +3066,10 @@ run_frozen_checklist_provenance_regression() {
   printf 'review branch script\n' >"$review_repo/scripts/café.mjs"
   printf 'review branch indexer handler\n' \
     >"$review_repo/indexer-envio/src/EventHandlers.ts"
+  printf 'review branch quoted terraform path\n' \
+    >"$review_repo/$tracked_quote_path"
+  printf 'review branch backslash terraform path\n' \
+    >"$review_repo/$tracked_backslash_path"
   printf 'malicious reviewed checklist injection\n' \
     >"$review_repo/docs/pr-checklists/code-health.md"
   commit_review_repo "$review_repo" feature
@@ -2576,13 +3091,14 @@ run_frozen_checklist_provenance_regression() {
     --commit HEAD \
     --engine local
 
-  printf 'branch-local review body\n' >"$review_repo/local.txt"
+  mkdir "$review_repo/notes"
+  printf 'branch-local review body\n' >"$review_repo/$untracked_quoted_path"
   run_helper_in_repo "$review_repo" \
     --prepare-bundle-dir "$branch_local_bundle" \
     --mode auto \
     --base origin/release \
     --engine local
-  rm "$review_repo/local.txt"
+  rm -rf "$review_repo/notes"
 
   git -C "$review_repo" switch main >/dev/null 2>&1
   mkdir -p "$review_repo/scripts"
@@ -2641,12 +3157,44 @@ run_frozen_checklist_provenance_regression() {
     expect_prompt_policy_contains \
       "$checked_bundle/autoreview-prompt.md" \
       "trusted pre-change indexer-handler checklist"
+    expect_file_contains \
+      "$checked_bundle/selected-checklists.txt" \
+      "docs/pr-checklists/terraform-cloudrun.md"
+    expect_file_contains \
+      "$checked_bundle/checklists/terraform-cloudrun.md" \
+      "trusted pre-change terraform checklist"
+    expect_prompt_policy_contains \
+      "$checked_bundle/autoreview-prompt.md" \
+      "trusted pre-change terraform checklist"
   done
 
   expect_file_contains "$branch_bundle/changed-paths.txt" "scripts/café.mjs"
   expect_file_contains \
     "$branch_bundle/changed-paths.txt" \
     "indexer-envio/src/EventHandlers.ts"
+  for checked_bundle in \
+    "$branch_bundle" \
+    "$branch_local_bundle" \
+    "$commit_bundle"; do
+    expect_file_contains_line \
+      "$checked_bundle/changed-paths.txt" \
+      "$tracked_quote_path"
+    expect_file_contains_line \
+      "$checked_bundle/changed-paths.txt" \
+      "$tracked_backslash_path"
+  done
+  expect_file_contains_line \
+    "$branch_local_bundle/changed-paths.txt" \
+    "$untracked_quoted_path"
+  expect_file_contains_line \
+    "$branch_local_bundle/patches/untracked-paths.txt" \
+    "$untracked_quoted_path"
+  expect_file_contains \
+    "$branch_local_bundle/patches/untracked.diff" \
+    "branch-local review body"
+  expect_file_not_contains \
+    "$branch_local_bundle/patches/untracked.diff" \
+    "untracked non-file omitted"
   expect_file_contains \
     "$branch_bundle/patches/branch.diff" \
     "malicious reviewed checklist injection"
@@ -2660,6 +3208,65 @@ run_frozen_checklist_provenance_regression() {
     "$local_bundle/patches/unstaged.diff" \
     "malicious local checklist injection"
   expect_empty_stderr
+}
+
+run_prepared_unsupported_path_regressions() {
+  local label
+  local hostile_path
+  local review_repo
+  local bundle_parent
+  local bundle_dir
+  local status
+
+  for label in tab line-break; do
+    case "$label" in
+      tab) hostile_path=$'notes/tab\tname.txt' ;;
+      line-break) hostile_path=$'notes/line\nbreak.txt' ;;
+    esac
+    review_repo="$tmp_dir/prepared-unsupported-path-$label"
+    bundle_parent="$tmp_dir/prepared-unsupported-path-$label-output"
+    bundle_dir="$bundle_parent/context-bundle"
+    init_review_repo "$review_repo"
+    mkdir "$review_repo/notes" "$bundle_parent"
+    printf 'base\n' >"$review_repo/README.md"
+    commit_review_repo "$review_repo" init
+    printf 'unsupported path body\n' >"$review_repo/$hostile_path"
+
+    : >"$capture"
+    : >"$capture.snapshot"
+    : >"$capture.bundle-output"
+    : >"$stdout"
+    : >"$stderr"
+    status=0
+    (
+      cd "$review_repo"
+      env -i \
+        "PATH=$PATH" \
+        "HOME=$HOME" \
+        "TMPDIR=${TMPDIR:-/tmp}" \
+        "AUTOREVIEW_HELPER=$helper" \
+        "AUTOREVIEW_CAPTURE=$capture" \
+        "AUTOREVIEW_SNAPSHOT_HELPER=$repo_root/scripts/agent-autoreview.mjs" \
+        "$adapter_wrapper" \
+        --prepare-bundle-dir "$bundle_dir" \
+        --mode local \
+        --engine local >"$stdout" 2>"$stderr"
+    ) || status=$?
+    if [[ "$status" -eq 0 ]]; then
+      printf 'prepared bundle accepted unsupported %s path\n' "$label" >&2
+      exit 1
+    fi
+    expect_stderr_contains \
+      "changed paths containing tabs or line breaks are unsupported; rename the path before autoreview"
+    if [[ -e "$bundle_dir" ]]; then
+      printf 'unsupported %s path published a prepared bundle\n' "$label" >&2
+      exit 1
+    fi
+    if [[ -n "$(find "$bundle_parent" -mindepth 1 -print -quit)" ]]; then
+      printf 'unsupported %s path left prepared-bundle staging residue\n' "$label" >&2
+      exit 1
+    fi
+  done
 }
 
 run_frozen_checklist_symlink_regression() {
@@ -2778,7 +3385,7 @@ run_trusted_helper_runtime_regression() {
   printf '\nthis is intentionally invalid JavaScript\n' \
     >>"$review_repo/scripts/agent-autoreview-core.mjs"
 
-  (
+  if ! (
     cd "$review_repo"
     env -i \
       "PATH=$PATH" \
@@ -2789,7 +3396,12 @@ run_trusted_helper_runtime_regression() {
       --mode branch \
       --base main \
       --engine local >"$local_stdout" 2>"$local_stderr"
-  )
+  ); then
+    printf 'trusted protected-main helper runtime failed\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$local_stdout")" \
+      "$(cat "$local_stderr")" >&2
+    exit 1
+  fi
   expect_file_exists "$branch_bundle/autoreview-prompt.md"
   if grep -Fq "intentionally invalid JavaScript" \
     "$branch_bundle/autoreview-prompt.md"; then
@@ -3954,8 +4566,10 @@ NODE
 run_sensitive_input_regressions() {
   local review_repo="$tmp_dir/sensitive-inputs"
   local bundle_output="$tmp_dir/sensitive-prompt.md"
-  local adapter_bundle="$tmp_dir/sensitive-adapter-bundle"
+  local adapter_parent="$tmp_dir/sensitive-adapter-parent"
+  local adapter_bundle="$adapter_parent/context-bundle"
   init_review_repo "$review_repo"
+  mkdir "$adapter_parent"
   printf 'base\n' >"$review_repo/README.md"
   commit_review_repo "$review_repo" init
   printf 'api_key = "%s%s"\n' "live-value-" "abcdefghijklmnopqrstuvwxyz" >>"$review_repo/README.md"
@@ -3971,6 +4585,10 @@ run_sensitive_input_regressions() {
   expect_stderr_contains "refusing to include secret-like content"
   if [[ -e "$adapter_bundle" ]]; then
     printf 'rejected sensitive prepared bundle was published: %s\n' "$adapter_bundle" >&2
+    exit 1
+  fi
+  if [[ -n "$(find "$adapter_parent" -mindepth 1 -print -quit)" ]]; then
+    printf 'rejected sensitive prepared bundle left staging residue in %s\n' "$adapter_parent" >&2
     exit 1
   fi
 
@@ -4003,7 +4621,7 @@ run_sensitive_input_regressions() {
   expect_stderr_contains "refusing to include sensitive changed paths"
 }
 
-run_override_untracked_serializer_regression() {
+run_attested_untracked_serializer_regression() {
   local review_repo="$tmp_dir/override-untracked-serializer"
   local bundle_dir="$tmp_dir/override-untracked-serializer-bundle"
   init_review_repo "$review_repo"
@@ -4021,17 +4639,55 @@ run_override_untracked_serializer_regression() {
       "AUTOREVIEW_HELPER=$helper" \
       "AUTOREVIEW_CAPTURE=$capture" \
       "AUTOREVIEW_SNAPSHOT_HELPER=$repo_root/scripts/agent-autoreview.mjs" \
-      "$repo_root/scripts/agent-autoreview.sh" \
+      "$adapter_wrapper" \
       --prepare-bundle-dir "$bundle_dir" \
       --mode local \
       --engine local >"$stdout" 2>"$stderr"
   )
 
-  expect_file_contains "$capture.serialize" "untracked.txt"
+  if [[ -s "$capture.serialize" ]]; then
+    printf 'explicit helper handled wrapper-owned untracked serialization\n' >&2
+    exit 1
+  fi
   expect_file_contains \
     "$bundle_dir/patches/untracked.diff" \
     'path: "untracked.txt"'
   expect_empty_stderr
+}
+
+run_untrusted_cleanup_retention_regression() {
+  local cleanup_race_bundle="$tmp_dir/context-bundle-untrusted-cleanup"
+  local cleanup_race_victim="$tmp_dir/untrusted-cleanup-victim"
+  local cleanup_race_output
+  local cleanup_race_staging
+
+  mkdir "$cleanup_race_victim"
+  printf 'replacement must survive cleanup\n' \
+    >"$cleanup_race_victim/replacement-evidence.txt"
+  run_adapter_expect_failure \
+    AUTOREVIEW_FAKE_CLEANUP_CHILD_SWAP=1 \
+    "AUTOREVIEW_FAKE_CLEANUP_VICTIM=$cleanup_race_victim" \
+    --prepare-bundle-dir "$cleanup_race_bundle" \
+    --mode branch \
+    --base HEAD
+  expect_stderr_contains \
+    "leaving failed prepared-bundle staging directory because an explicit helper may have surviving same-UID writers"
+  if [[ -e "$cleanup_race_bundle" ]]; then
+    printf 'cleanup-raced prepared bundle was published\n' >&2
+    exit 1
+  fi
+
+  cleanup_race_output="$(awk 'previous == "--bundle-output" { print; exit } { previous = $0 }' "$capture")"
+  cleanup_race_staging="$(dirname "$cleanup_race_output")"
+  if [[ ! -f "$cleanup_race_staging/patches/replacement-evidence.txt" ]]; then
+    printf 'untrusted helper child replacement was deleted during cleanup\n' >&2
+    exit 1
+  fi
+  if [[ ! -d "$cleanup_race_staging/patches.original" ]]; then
+    printf 'failed explicit-helper staging was not retained intact\n' >&2
+    exit 1
+  fi
+  rm -rf -- "$cleanup_race_staging"
 }
 
 run_default_adapter
@@ -4065,7 +4721,23 @@ case "$test_focus" in
   review-target-trust)
     run_review_target_metadata_regression
     run_trusted_helper_runtime_regression
+    run_same_checkout_explicit_helper_fail_closed_regression
+    run_same_checkout_protected_runtime_regression
+    run_nested_wrapper_fail_closed_regression
+    run_external_wrapper_source_trust_regression
     printf 'focused autoreview target/trust tests passed\n'
+    exit 0
+    ;;
+  prepared-bundle-safety)
+    run_frozen_checklist_provenance_regression
+    run_prepared_unsupported_path_regressions
+    run_sensitive_input_regressions
+    printf 'focused autoreview prepared-bundle safety tests passed\n'
+    exit 0
+    ;;
+  cleanup-race)
+    run_untrusted_cleanup_retention_regression
+    printf 'focused autoreview cleanup-race tests passed\n'
     exit 0
     ;;
   adapter | all) ;;
@@ -4074,6 +4746,13 @@ case "$test_focus" in
     exit 2
     ;;
 esac
+
+if [[ "$test_focus" == "adapter" || "$test_focus" == "all" ]]; then
+  run_same_checkout_explicit_helper_fail_closed_regression
+  run_same_checkout_protected_runtime_regression
+  run_nested_wrapper_fail_closed_regression
+  run_external_wrapper_source_trust_regression
+fi
 
 if [[ "$test_focus" == "all" ]]; then
   run_parallel_tests_removed_regression
@@ -4103,6 +4782,7 @@ if [[ "$test_focus" == "all" ]]; then
   run_branch_identity_source_drift_regression
   run_explicit_snapshot_scope_regression
   run_frozen_checklist_provenance_regression
+  run_prepared_unsupported_path_regressions
   run_frozen_checklist_symlink_regression
   run_git_replace_ref_regression
   run_trusted_helper_runtime_regression
@@ -4118,7 +4798,7 @@ if [[ "$test_focus" == "all" ]]; then
   run_privileged_shebang_startup_regression
   run_hostile_volta_environment_regression
   run_sensitive_input_regressions
-  run_override_untracked_serializer_regression
+  run_attested_untracked_serializer_regression
 fi
 
 run_adapter CODEX_SANDBOX=seatbelt --dry-run
@@ -4197,18 +4877,6 @@ run_adapter_expect_failure \
 expect_stderr_contains "--bundle-output cannot be combined with --prepare-bundle-dir"
 if [[ -e "$conflicting_bundle" || -e "$conflicting_output" ]]; then
   printf 'conflicting prepared-bundle output was created\n' >&2
-  exit 1
-fi
-
-bad_snapshot_bundle="$tmp_dir/bad-snapshot-context-bundle"
-run_adapter_expect_failure \
-  AUTOREVIEW_FAKE_BAD_SNAPSHOT=1 \
-  --prepare-bundle-dir "$bad_snapshot_bundle" \
-  --mode branch \
-  --base HEAD
-expect_stderr_contains "AUTOREVIEW_HELPER --source-snapshot-only must print exactly one SHA-256 fingerprint"
-if [[ -e "$bad_snapshot_bundle" ]]; then
-  printf 'prepared bundle was published with an invalid replacement-helper snapshot\n' >&2
   exit 1
 fi
 
@@ -4293,18 +4961,6 @@ run_adapter_expect_failure \
 expect_stderr_contains "helper produced an invalid review pass path"
 if [[ -e "$self_pass_bundle" ]]; then
   printf 'prepared bundle was published with a self-referential review pass\n' >&2
-  exit 1
-fi
-
-snapshot_mutation_bundle="$tmp_dir/context-bundle-snapshot-mutation"
-run_adapter_expect_failure \
-  AUTOREVIEW_FAKE_MUTATE_ON_SECOND_SNAPSHOT=1 \
-  --prepare-bundle-dir "$snapshot_mutation_bundle" \
-  --mode branch \
-  --base HEAD
-expect_stderr_contains "prepared-bundle evidence changed during final source validation"
-if [[ -e "$snapshot_mutation_bundle" ]]; then
-  printf 'prepared bundle was published after final snapshot evidence mutation\n' >&2
   exit 1
 fi
 
@@ -4436,7 +5092,7 @@ expect_file_contains "$canonical_bundle_dir/README.md" "- Frozen reviewed HEAD: 
 expect_file_not_contains "$canonical_bundle_dir/README.md" "Frozen target commit"
 expect_file_contains \
   "$canonical_bundle_dir/README.md" \
-  "$repo_root/scripts/agent-autoreview.sh --verify-bundle-dir $canonical_bundle_dir"
+  "$adapter_wrapper --verify-bundle-dir $canonical_bundle_dir"
 expect_file_not_contains \
   "$canonical_bundle_dir/README.md" \
   "pnpm agent:autoreview --verify-bundle-dir"
@@ -4448,8 +5104,8 @@ expect_file_not_contains "$canonical_bundle_dir/helper-output.txt" ".agent-autor
 expect_stdout_contains "$canonical_bundle_dir/autoreview-prompt.md"
 expect_stdout_not_contains ".agent-autoreview-context."
 expect_file_contains "$stdout" "agent:autoreview context bundle: $canonical_bundle_dir"
-if [[ "$(wc -l <"$capture.snapshot" | tr -d ' ')" != "2" ]]; then
-  printf 'replacement helper did not provide both prepared-bundle source snapshots\n' >&2
+if [[ -s "$capture.snapshot" ]]; then
+  printf 'explicit helper handled wrapper-owned prepared-bundle source snapshots\n' >&2
   exit 1
 fi
 
@@ -4516,9 +5172,15 @@ chmod +x \
     --mode branch \
     --base HEAD >"$external_stdout" 2>"$external_stderr"
 )
-if [[ -s "$external_stderr" ]]; then
+cleanup_retained_test_command_runtimes "$external_stderr"
+external_unexpected_stderr="$(
+  grep -v \
+    '^agent:autoreview: leaving external-command runtime because an explicit helper may have surviving same-UID writers: ' \
+    "$external_stderr" || true
+)"
+if [[ -n "$external_unexpected_stderr" ]]; then
   printf 'external wrapper bundle preparation wrote stderr:\n%s\n' \
-    "$(cat "$external_stderr")" >&2
+    "$external_unexpected_stderr" >&2
   exit 1
 fi
 expect_file_contains \
@@ -4693,6 +5355,8 @@ if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
   fi
 fi
 
+run_untrusted_cleanup_retention_regression
+
 staging_swap_bundle="$tmp_dir/context-bundle-staging-swap"
 run_adapter_expect_failure \
   "AUTOREVIEW_FAKE_SWAP_STAGING=1" \
@@ -4701,7 +5365,8 @@ run_adapter_expect_failure \
   --base HEAD
 expect_stderr_contains "prepared-bundle staging identity changed"
 expect_stderr_contains "helper changed wrapper-owned prepared-bundle evidence"
-expect_stderr_contains "leaving failed prepared-bundle staging directory for identity-safe cleanup"
+expect_stderr_contains \
+  "leaving failed prepared-bundle staging directory because an explicit helper may have surviving same-UID writers"
 if [[ -e "$staging_swap_bundle" ]]; then
   printf 'swapped prepared-bundle staging tree was published\n' >&2
   exit 1
@@ -4710,6 +5375,10 @@ swapped_bundle_output="$(awk 'previous == "--bundle-output" { print; exit } { pr
 swapped_staging_dir="$(dirname "$swapped_bundle_output")"
 if [[ ! -f "$swapped_staging_dir/swapped-evidence.txt" ]]; then
   printf 'identity-swapped staging replacement was deleted during cleanup\n' >&2
+  exit 1
+fi
+if [[ ! -d "${swapped_staging_dir}.swapped-original" ]]; then
+  printf 'identity-swapped original staging was deleted during cleanup\n' >&2
   exit 1
 fi
 

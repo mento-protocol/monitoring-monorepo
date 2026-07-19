@@ -35,6 +35,8 @@ unset \
   DYLD_VERSIONED_FRAMEWORK_PATH \
   DYLD_VERSIONED_LIBRARY_PATH
 
+untrusted_helper_exposed=0
+
 script_path="${BASH_SOURCE[0]}"
 script_parent="${script_path%/*}"
 if [[ "$script_parent" == "$script_path" ]]; then
@@ -291,6 +293,10 @@ cleanup_command_runtime() {
       -d "$command_runtime_dir" &&
       ! -L "$command_runtime_dir"
   ]]; then
+    if [[ "$untrusted_helper_exposed" -eq 1 ]]; then
+      echo "agent:autoreview: leaving external-command runtime because an explicit helper may have surviving same-UID writers: $command_runtime_dir" >&2
+      return 0
+    fi
     current_identity="$({
       # shellcheck disable=SC2016
       system_perl -e '
@@ -727,6 +733,10 @@ git_bin_identity="$(command_file_identity "$git_bin")"
 node_bin_identity="$(command_file_identity "$node_bin")"
 
 prepared_helper_override=""
+attested_helper_override=""
+attested_helper_runtime_dir=""
+attested_helper_runtime_identity=""
+attested_helper_runtime_manifest=""
 
 resolved_command_is_trusted() {
   local candidate="$1"
@@ -778,7 +788,9 @@ run_trusted_node() {
 }
 
 run_helper() {
-  if [[ -n "$prepared_helper_override" ]]; then
+  if [[ -n "$attested_helper_override" && "$helper" == "$default_helper" ]]; then
+    run_attested_helper "$@"
+  elif [[ -n "$prepared_helper_override" ]]; then
     PATH="$external_command_path" \
       run_trusted_node "$prepared_helper_override" "$@"
   elif [[ "$helper" == "$default_helper" ]]; then
@@ -808,6 +820,47 @@ run_helper() {
       -u DYLD_VERSIONED_LIBRARY_PATH \
       "$helper" "$@"
   fi
+}
+
+run_attested_helper() {
+  local attested_helper
+  local after_manifest
+  local status=0
+  if [[ -n "$attested_helper_override" ]]; then
+    attested_helper="$attested_helper_override"
+    if [[
+      -z "$attested_helper_runtime_dir" ||
+        -z "$attested_helper_runtime_identity" ||
+        -z "$attested_helper_runtime_manifest"
+    ]] || ! after_manifest="$(
+      bundle_content_manifest \
+        "$attested_helper_runtime_dir" \
+        "$attested_helper_runtime_identity"
+    )" || [[ "$after_manifest" != "$attested_helper_runtime_manifest" ]]; then
+      echo "agent:autoreview: wrapper-attested helper runtime changed before launch" >&2
+      return 1
+    fi
+  elif [[ -n "$prepared_helper_override" ]]; then
+    attested_helper="$prepared_helper_override"
+  else
+    attested_helper="$default_helper"
+  fi
+  if [[ ! -x "$attested_helper" ]]; then
+    echo "agent:autoreview: wrapper-attested helper runtime is unavailable: $attested_helper" >&2
+    return 127
+  fi
+  PATH="$external_command_path" run_trusted_node "$attested_helper" "$@" || status=$?
+  if [[ -n "$attested_helper_override" ]]; then
+    if ! after_manifest="$(
+      bundle_content_manifest \
+        "$attested_helper_runtime_dir" \
+        "$attested_helper_runtime_identity"
+    )" || [[ "$after_manifest" != "$attested_helper_runtime_manifest" ]]; then
+      echo "agent:autoreview: wrapper-attested helper runtime changed during launch" >&2
+      return 1
+    fi
+  fi
+  return "$status"
 }
 
 run_external_command() {
@@ -858,7 +911,6 @@ feedback_pr=""
 forward_args=()
 prepare_staging_dir=""
 prepare_staging_identity=""
-prepare_staging_exposed=0
 direct_helper_runtime_dir=""
 direct_helper_runtime_identity=""
 
@@ -866,13 +918,13 @@ cleanup_prepare_staging() {
   if [[ -n "$prepare_staging_dir" ]]; then
     if [[ ! -e "$prepare_staging_dir" && ! -L "$prepare_staging_dir" ]]; then
       :
-    elif [[ "$prepare_staging_exposed" -eq 1 ]]; then
+    elif [[ "$untrusted_helper_exposed" -eq 1 ]]; then
+      echo "agent:autoreview: leaving failed prepared-bundle staging directory because an explicit helper may have surviving same-UID writers: $prepare_staging_dir" >&2
+    elif ! safe_remove_tree \
+      "$prepare_staging_dir" \
+      "$prepare_staging_identity" \
+      "prepared-bundle staging"; then
       echo "agent:autoreview: leaving failed prepared-bundle staging directory for identity-safe cleanup: $prepare_staging_dir" >&2
-    else
-      safe_remove_tree \
-        "$prepare_staging_dir" \
-        "$prepare_staging_identity" \
-        "prepared-bundle staging" || true
     fi
   fi
   if [[ -n "$direct_helper_runtime_dir" ]]; then
@@ -1395,8 +1447,11 @@ materialize_trusted_autoreview_runtime() {
   local relative_path
   local output_path
   local mode
+  local sealed_mode
   local size
   local size_value
+  local expected_oid
+  local materialized_oid
   local total_size=0
   local max_runtime_bytes=2097152
   local runtime_paths=(
@@ -1430,6 +1485,7 @@ materialize_trusted_autoreview_runtime() {
   done
 
   mkdir -p "$runtime_dir/scripts"
+  /bin/chmod 0700 "$runtime_dir/scripts"
   for relative_path in "${runtime_paths[@]}"; do
     output_path="$runtime_dir/$relative_path"
     if ! git_output "$repo" cat-file blob \
@@ -1437,7 +1493,210 @@ materialize_trusted_autoreview_runtime() {
       echo "agent:autoreview: failed to materialize trusted helper runtime file: $relative_path" >&2
       return 1
     fi
+    if [[ "$relative_path" == "scripts/agent-autoreview.mjs" ]]; then
+      sealed_mode=0700
+    else
+      sealed_mode=0600
+    fi
+    /bin/chmod "$sealed_mode" "$output_path"
+    # The embedded Perl program is intentionally literal.
+    # shellcheck disable=SC2016
+    if ! expected_oid="$(
+      git_output "$repo" rev-parse --verify --end-of-options \
+        "${snapshot_ref}:${relative_path}"
+    )" ||
+      ! materialized_oid="$(
+        git_output "$repo" hash-object --no-filters -- "$output_path"
+      )" ||
+      [[ "$materialized_oid" != "$expected_oid" ]] ||
+      ! system_perl -MFcntl=:mode -MFile::Basename=dirname -e '
+        use strict;
+        use warnings;
+        my ($path, $euid, $expected_mode) = @ARGV;
+        my $parent = dirname($path);
+        my @parent_stat = lstat($parent);
+        exit 1 if !@parent_stat ||
+          !S_ISDIR($parent_stat[2]) ||
+          S_ISLNK($parent_stat[2]) ||
+          $parent_stat[4] != $euid ||
+          ($parent_stat[2] & 0077);
+        my @file_stat = lstat($path);
+        exit 1 if !@file_stat ||
+          !S_ISREG($file_stat[2]) ||
+          S_ISLNK($file_stat[2]) ||
+          $file_stat[3] != 1 ||
+          $file_stat[4] != $euid ||
+          ($file_stat[2] & 07777) != oct($expected_mode);
+      ' "$output_path" "$EUID" "$sealed_mode"; then
+      echo "agent:autoreview: failed to validate trusted helper runtime file: $relative_path" >&2
+      return 1
+    fi
   done
+}
+
+wrapper_runtime_source_snapshot() {
+  local source_scripts_dir="$1"
+  # shellcheck disable=SC2016
+  system_perl -MFcntl=:mode -MFile::Basename=dirname -e '
+    use strict;
+    use warnings;
+    my ($source_dir, $euid) = @ARGV;
+    exit 1 if $source_dir !~ m{^/} || $source_dir =~ /[\r\n\0]/;
+    my $current = $source_dir;
+    while (1) {
+      my @stat = lstat($current);
+      exit 1 if !@stat || !S_ISDIR($stat[2]) || S_ISLNK($stat[2]);
+      exit 1 if $stat[4] != 0 && $stat[4] != $euid;
+      my $shared_writable = ($stat[2] & 0022) != 0;
+      my $sticky = ($stat[2] & 01000) != 0;
+      exit 1 if $shared_writable && !$sticky;
+      # Shared sticky ancestors can legitimately gain unrelated entries while
+      # this wrapper runs. Bind their identity, ownership, and mode without
+      # treating ambient directory size/time churn as source substitution.
+      print join(":", "directory", @stat[0, 1, 2, 4]), "\n";
+      my $parent = dirname($current);
+      last if $parent eq $current;
+      $current = $parent;
+    }
+    for my $name ("agent-autoreview.mjs", "agent-autoreview-core.mjs") {
+      my @stat = lstat("$source_dir/$name");
+      exit 1 if !@stat ||
+        !S_ISREG($stat[2]) ||
+        S_ISLNK($stat[2]) ||
+        $stat[3] != 1 ||
+        ($stat[4] != 0 && $stat[4] != $euid) ||
+        ($stat[2] & 0022);
+      print join(":", "file", @stat[0, 1, 2, 3, 4, 7, 9, 10]), "\n";
+    }
+  ' "$source_scripts_dir" "$EUID"
+}
+
+wrapper_runtime_source_acl_is_trusted() {
+  local source_scripts_dir="$1"
+  local current="$source_scripts_dir"
+  local parent
+  local source_file
+  for source_file in \
+    "$source_scripts_dir/agent-autoreview.mjs" \
+    "$source_scripts_dir/agent-autoreview-core.mjs"; do
+    path_acl_is_trusted "$source_file" || return 1
+  done
+  while true; do
+    path_acl_is_trusted "$current" || return 1
+    [[ "$current" != "/" ]] || break
+    parent="${current%/*}"
+    [[ -n "$parent" ]] || parent="/"
+    current="$parent"
+  done
+}
+
+materialize_filesystem_autoreview_runtime() {
+  local source_scripts_dir="$1"
+  local runtime_dir="$2"
+  mkdir "$runtime_dir/scripts"
+  /bin/chmod 0700 "$runtime_dir/scripts"
+  # Copy the wrapper sibling runtime before an explicit helper can run. Each
+  # source is opened no-follow and revalidated after the private copy closes.
+  # shellcheck disable=SC2016
+  system_perl -MFcntl=:DEFAULT,:mode,O_DIRECTORY,O_NOFOLLOW -e '
+    use strict;
+    use warnings;
+
+    my ($source_dir, $runtime_dir, $euid) = @ARGV;
+    my @names = (
+      "agent-autoreview.mjs",
+      "agent-autoreview-core.mjs",
+    );
+    my $aggregate = 0;
+    my $aggregate_limit = 2 * 1024 * 1024;
+    sysopen(my $source_dir_fh, $source_dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+      or die "cannot pin wrapper runtime source directory: $source_dir: $!";
+    my @source_dir_before = stat($source_dir_fh);
+    die "unsafe wrapper runtime source directory: $source_dir"
+      if !@source_dir_before ||
+        !S_ISDIR($source_dir_before[2]) ||
+        ($source_dir_before[4] != 0 && $source_dir_before[4] != $euid) ||
+        ($source_dir_before[2] & 0022);
+    chdir($source_dir_fh)
+      or die "cannot enter pinned wrapper runtime source directory: $source_dir: $!";
+    for my $name (@names) {
+      my $source = "$source_dir/$name";
+      my $destination = "$runtime_dir/scripts/$name";
+      sysopen(my $input, $name, O_RDONLY | O_NOFOLLOW)
+        or die "cannot open wrapper runtime source: $source: $!";
+      binmode($input);
+      my @before = stat($input);
+      die "unsafe wrapper runtime source: $source"
+        if !@before ||
+          !S_ISREG($before[2]) ||
+          $before[3] != 1 ||
+          ($before[4] != 0 && $before[4] != $euid) ||
+          ($before[2] & 0022);
+      $aggregate += $before[7];
+      die "wrapper runtime exceeds aggregate size limit"
+        if $aggregate > $aggregate_limit;
+      my $mode = $name eq "agent-autoreview.mjs" ? 0500 : 0400;
+      sysopen(
+        my $output,
+        $destination,
+        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
+        0600,
+      ) or die "cannot create wrapper runtime snapshot: $destination: $!";
+      binmode($output);
+      my $buffer;
+      while (1) {
+        my $read = sysread($input, $buffer, 65536);
+        die "cannot read wrapper runtime source: $source: $!"
+          if !defined($read);
+        last if $read == 0;
+        my $offset = 0;
+        while ($offset < $read) {
+          my $written = syswrite(
+            $output,
+            $buffer,
+            $read - $offset,
+            $offset,
+          );
+          die "cannot write wrapper runtime snapshot: $destination: $!"
+            if !defined($written) || $written == 0;
+          $offset += $written;
+        }
+      }
+      chmod($mode, $output) == 1
+        or die "cannot seal wrapper runtime snapshot: $destination: $!";
+      close($output)
+        or die "cannot close wrapper runtime snapshot: $destination: $!";
+      my @after = stat($input);
+      die "wrapper runtime source changed while copying: $source"
+        if !@after;
+      for my $index (0, 1, 2, 3, 4, 7, 9, 10) {
+        die "wrapper runtime source changed while copying: $source"
+          if $before[$index] != $after[$index];
+      }
+      close($input)
+        or die "cannot close wrapper runtime source: $source: $!";
+      my @published = lstat($destination);
+      die "invalid wrapper runtime snapshot: $destination"
+        if !@published ||
+          !S_ISREG($published[2]) ||
+          S_ISLNK($published[2]) ||
+          $published[3] != 1 ||
+          $published[4] != $euid ||
+          ($published[2] & 07777) != $mode ||
+          $published[7] != $before[7];
+    }
+    my @source_dir_after = stat($source_dir_fh);
+    my @source_dir_path = lstat($source_dir);
+    die "wrapper runtime source directory changed while copying: $source_dir"
+      if !@source_dir_after || !@source_dir_path;
+    for my $index (0, 1, 2, 3, 4, 7, 9, 10) {
+      die "wrapper runtime source directory changed while copying: $source_dir"
+        if $source_dir_before[$index] != $source_dir_after[$index] ||
+          $source_dir_before[$index] != $source_dir_path[$index];
+    }
+    close($source_dir_fh)
+      or die "cannot close wrapper runtime source directory: $source_dir: $!";
+  ' "$source_scripts_dir" "$runtime_dir" "$EUID"
 }
 
 materialize_feedback_runtime() {
@@ -1617,26 +1876,24 @@ source_snapshot() {
   local target_mode="$2"
   local snapshot
   local snapshot_args=(--source-snapshot-only)
-  if [[ "$helper" == "$default_helper" || -n "$prepared_helper_override" ]]; then
-    case "$target_mode" in
-      local | branch-local)
-        snapshot_args+=(--mode local)
-        ;;
-      branch | commit)
-        snapshot_args+=(--mode "$target_mode")
-        ;;
-      *)
-        echo "agent:autoreview: unsupported source snapshot target: $target_mode" >&2
-        return 2
-        ;;
-    esac
-  fi
-  if ! snapshot="$(cd "$repo" && run_helper "${snapshot_args[@]}")"; then
-    echo "agent:autoreview: AUTOREVIEW_HELPER must implement --source-snapshot-only for prepared bundles" >&2
+  case "$target_mode" in
+    local | branch-local)
+      snapshot_args+=(--mode local)
+      ;;
+    branch | commit)
+      snapshot_args+=(--mode "$target_mode")
+      ;;
+    *)
+      echo "agent:autoreview: unsupported source snapshot target: $target_mode" >&2
+      return 2
+      ;;
+  esac
+  if ! snapshot="$(cd "$repo" && run_attested_helper "${snapshot_args[@]}")"; then
+    echo "agent:autoreview: wrapper-attested helper could not fingerprint the prepared-bundle source" >&2
     return 1
   fi
   if [[ ! "$snapshot" =~ ^[0-9a-fA-F]{64}$ ]]; then
-    echo "agent:autoreview: AUTOREVIEW_HELPER --source-snapshot-only must print exactly one SHA-256 fingerprint" >&2
+    echo "agent:autoreview: wrapper-attested helper source fingerprint must be exactly one SHA-256 digest" >&2
     return 1
   fi
   printf '%s\n' "$snapshot"
@@ -1835,21 +2092,215 @@ safe_remove_tree() {
   local path="$1"
   local expected_identity="$2"
   local label="$3"
-  local current_identity
   if [[ ! -e "$path" && ! -L "$path" ]]; then
     return 0
   fi
-  if [[ -z "$expected_identity" ]] ||
-    ! current_identity="$(path_identity "$path" 2>/dev/null)" ||
-    [[ "$current_identity" != "$expected_identity" ]]; then
-    echo "agent:autoreview: refusing to remove $label after its identity changed: $path" >&2
-    return 1
-  fi
-  rm -rf -- "$path"
-  if [[ -e "$path" || -L "$path" ]]; then
-    echo "agent:autoreview: failed to remove $label safely: $path" >&2
-    return 1
-  fi
+  # Move the candidate to a random sibling, open the exact moved inode, and
+  # recurse only after fchdir pins that inode as the cleanup root. A helper may
+  # rename either pathname after that point, but it cannot retarget recursive
+  # deletion at a replacement tree. Later pathname cleanup is non-recursive
+  # and fails closed on any identity mismatch.
+  # shellcheck disable=SC2016
+  system_perl \
+    -MFcntl=:DEFAULT,:mode,O_DIRECTORY,O_NOFOLLOW \
+    -MFile::Basename=basename,dirname \
+    -MFile::Path=remove_tree \
+    -MFile::Temp=tempdir \
+    -e '
+      use strict;
+      use warnings;
+
+      my ($candidate, $expected_identity, $label) = @ARGV;
+      my $identity_changed = 0;
+      my $failure = "";
+      my $quarantine = "";
+      my $quarantine_name = "";
+      my $quarantine_identity = "";
+      my $quarantined = "";
+      my $root_cleaned = 0;
+      my ($origin_fh, $parent_fh, $tree_fh);
+
+      sub identity {
+        my (@stat) = @_;
+        return "$stat[0]:$stat[1]";
+      }
+
+      sub path_exists {
+        my ($target) = @_;
+        my @stat = lstat($target);
+        return scalar(@stat) != 0;
+      }
+
+      sub directory_matches {
+        my ($target, $expected) = @_;
+        my @stat = lstat($target);
+        return 0 if !@stat || S_ISLNK($stat[2]) || !S_ISDIR($stat[2]);
+        return identity(@stat) eq $expected;
+      }
+
+      if ($expected_identity !~ /\A[0-9]+:[0-9]+\z/) {
+        print STDERR "agent:autoreview: failed to remove $label safely: $candidate\n";
+        exit 1;
+      }
+      if (!directory_matches($candidate, $expected_identity)) {
+        print STDERR "agent:autoreview: refusing to remove $label after its identity changed: $candidate\n";
+        exit 1;
+      }
+
+      my $parent = dirname($candidate);
+      my $candidate_name = basename($candidate);
+      if ($candidate_name eq "" || $candidate_name eq "." || $candidate_name eq "..") {
+        print STDERR "agent:autoreview: failed to remove $label safely: $candidate\n";
+        exit 1;
+      }
+
+      eval {
+        sysopen($origin_fh, ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+          or die "cannot open original working directory: $!";
+        sysopen($parent_fh, $parent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+          or die "cannot open cleanup parent: $!";
+
+        $quarantine = tempdir(
+          ".agent-autoreview-cleanup.XXXXXXXX",
+          DIR => $parent,
+          CLEANUP => 0,
+        );
+        my @quarantine_stat = lstat($quarantine);
+        die "cannot stat cleanup quarantine"
+          if !@quarantine_stat ||
+            S_ISLNK($quarantine_stat[2]) ||
+            !S_ISDIR($quarantine_stat[2]);
+        $quarantine_identity = identity(@quarantine_stat);
+        $quarantine_name = basename($quarantine);
+        $quarantined = "$quarantine_name/tree";
+
+        chdir($parent_fh) or die "cannot pin cleanup parent: $!";
+        if (!directory_matches($candidate_name, $expected_identity)) {
+          $identity_changed = 1;
+          die "candidate identity changed before quarantine";
+        }
+        if (!directory_matches($quarantine_name, $quarantine_identity)) {
+          $identity_changed = 1;
+          die "quarantine identity changed before move";
+        }
+        rename($candidate_name, $quarantined)
+          or die "cannot quarantine cleanup candidate: $!";
+
+        if (!directory_matches($quarantined, $expected_identity)) {
+          $identity_changed = 1;
+          die "candidate identity changed while entering quarantine";
+        }
+        sysopen($tree_fh, $quarantined, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+          or die "cannot open quarantined cleanup root: $!";
+        my @opened_stat = stat($tree_fh);
+        if (
+          !@opened_stat ||
+          !S_ISDIR($opened_stat[2]) ||
+          identity(@opened_stat) ne $expected_identity
+        ) {
+          $identity_changed = 1;
+          die "opened cleanup root identity changed";
+        }
+        chdir($tree_fh) or die "cannot pin quarantined cleanup root: $!";
+        my @pinned_stat = stat(".");
+        if (
+          !@pinned_stat ||
+          !S_ISDIR($pinned_stat[2]) ||
+          identity(@pinned_stat) ne $expected_identity
+        ) {
+          $identity_changed = 1;
+          die "pinned cleanup root identity changed";
+        }
+
+        my $errors;
+        remove_tree(
+          ".",
+          {
+            safe => 1,
+            keep_root => 1,
+            error => \$errors,
+          },
+        );
+        if ($errors && @{$errors}) {
+          die "descriptor-rooted recursive cleanup failed";
+        }
+        my @after_stat = stat($tree_fh);
+        if (
+          !@after_stat ||
+          !S_ISDIR($after_stat[2]) ||
+          identity(@after_stat) ne $expected_identity
+        ) {
+          $identity_changed = 1;
+          die "cleanup root identity changed during recursive removal";
+        }
+        opendir(my $verify_fh, ".") or die "cannot verify cleanup root: $!";
+        my @remaining = grep { $_ ne "." && $_ ne ".." } readdir($verify_fh);
+        closedir($verify_fh) or die "cannot close cleanup verification: $!";
+        die "cleanup root is not empty" if @remaining;
+        $root_cleaned = 1;
+        1;
+      } or do {
+        $failure = $@ || "unknown cleanup failure";
+      };
+
+      if (defined($parent_fh)) {
+        if (!chdir($parent_fh)) {
+          $failure ||= "cannot return to pinned cleanup parent: $!";
+        }
+      }
+
+      if ($root_cleaned && $quarantined ne "") {
+        if (directory_matches($quarantined, $expected_identity)) {
+          if (!rmdir($quarantined)) {
+            $failure ||= "cannot remove empty cleanup root: $!";
+          }
+        }
+        else {
+          $identity_changed = 1;
+          $failure ||= "cleanup root pathname identity changed";
+        }
+      }
+
+      if (path_exists($candidate_name)) {
+        $identity_changed = 1;
+        $failure ||= "replacement appeared at cleanup source";
+      }
+
+      if ($quarantine_name ne "") {
+        if (directory_matches($quarantine_name, $quarantine_identity)) {
+          if (!rmdir($quarantine_name) && !$failure) {
+            $failure = "cannot remove cleanup quarantine: $!";
+          }
+        }
+        elsif (path_exists($quarantine_name)) {
+          $identity_changed = 1;
+          $failure ||= "cleanup quarantine identity changed";
+        }
+      }
+
+      if (defined($origin_fh) && !chdir($origin_fh)) {
+        $failure ||= "cannot restore original working directory: $!";
+      }
+      close($tree_fh) if defined($tree_fh);
+      close($parent_fh) if defined($parent_fh);
+      close($origin_fh) if defined($origin_fh);
+
+      if ($failure ne "") {
+        if ($identity_changed) {
+          print STDERR "agent:autoreview: refusing to remove $label after its identity changed: $candidate\n";
+        }
+        else {
+          print STDERR "agent:autoreview: failed to remove $label safely: $candidate\n";
+        }
+        if ($quarantine ne "" && path_exists($quarantine)) {
+          print STDERR "agent:autoreview: retained cleanup quarantine: $quarantine\n";
+        }
+        exit 1;
+      }
+    ' \
+    "$path" \
+    "$expected_identity" \
+    "$label"
 }
 
 bundle_content_manifest() {
@@ -2856,7 +3307,7 @@ serialize_safe_untracked_file() {
   local relative_path="$2"
   (
     cd "$repo"
-    run_helper --serialize-untracked-file "$relative_path"
+    run_attested_helper --serialize-untracked-file "$relative_path"
   )
 }
 
@@ -2882,14 +3333,36 @@ capture_untracked_files() {
   done <"$paths_file"
 }
 
+emit_validated_git_path_lines() {
+  local path
+  while IFS= read -r -d '' path; do
+    if [[
+      "$path" == *$'\t'* ||
+        "$path" == *$'\r'* ||
+        "$path" == *$'\n'*
+    ]]; then
+      echo "agent:autoreview: changed paths containing tabs or line breaks are unsupported; rename the path before autoreview" >&2
+      return 1
+    fi
+    printf '%s\n' "$path"
+  done
+}
+
+emit_untracked_paths() {
+  local repo="$1"
+  git_output "$repo" ls-files --others --exclude-standard -z |
+    emit_validated_git_path_lines |
+    LC_ALL=C sort -u
+}
+
 emit_local_changed_paths() {
   local repo="$1"
   local head_oid="$2"
   {
-    git_output "$repo" diff --name-only --cached "$head_oid" --
-    git_output "$repo" diff --name-only
-    git_output "$repo" ls-files --others --exclude-standard
-  } | sort -u
+    git_output "$repo" diff --name-only -z --cached "$head_oid" --
+    git_output "$repo" diff --name-only -z
+    git_output "$repo" ls-files --others --exclude-standard -z
+  } | emit_validated_git_path_lines | LC_ALL=C sort -u
 }
 
 emit_branch_local_changed_paths() {
@@ -2897,26 +3370,28 @@ emit_branch_local_changed_paths() {
   local target_ref="$2"
   local head_oid="$3"
   {
-    git_output "$repo" diff --name-only "$target_ref...$head_oid" --
-    git_output "$repo" diff --name-only --cached "$head_oid" --
-    git_output "$repo" diff --name-only
-    git_output "$repo" ls-files --others --exclude-standard
-  } | sort -u
+    git_output "$repo" diff --name-only -z "$target_ref...$head_oid" --
+    git_output "$repo" diff --name-only -z --cached "$head_oid" --
+    git_output "$repo" diff --name-only -z
+    git_output "$repo" ls-files --others --exclude-standard -z
+  } | emit_validated_git_path_lines | LC_ALL=C sort -u
 }
 
 emit_branch_changed_paths() {
   local repo="$1"
   local target_ref="$2"
   local head_oid="$3"
-  git_output "$repo" diff --name-only "$target_ref...$head_oid" -- | sort -u
+  git_output "$repo" diff --name-only -z "$target_ref...$head_oid" -- |
+    emit_validated_git_path_lines |
+    LC_ALL=C sort -u
 }
 
 emit_commit_changed_paths() {
   local repo="$1"
   local target_ref="$2"
-  git_output "$repo" show --name-only --format= "$target_ref" |
-    sed '/^$/d' |
-    sort -u
+  git_output "$repo" show --name-only --format= -z --end-of-options "$target_ref" -- |
+    emit_validated_git_path_lines |
+    LC_ALL=C sort -u
 }
 
 add_checklist() {
@@ -3154,6 +3629,8 @@ prepare_context_bundle() {
   local trusted_helper_runtime_dir=""
   local trusted_helper_runtime_identity=""
   local trusted_helper_runtime_ref=""
+  local external_runtime_source_snapshot=""
+  local external_runtime_source_snapshot_after=""
   local protected_main_ref
   mode="$(arg_value --mode auto "$@")"
   target_selection_source_snapshot="$(target_selection_snapshot "$repo")"
@@ -3283,12 +3760,93 @@ prepare_context_bundle() {
       "$trusted_helper_runtime_dir"
     prepared_helper_override="$trusted_helper_runtime_dir/scripts/agent-autoreview.mjs"
   fi
+  if [[
+    -z "$prepared_helper_override" &&
+      ( "$helper" != "$default_helper" || "$repo_abs" != "$repo_root" )
+  ]]; then
+    attested_helper_runtime_dir="$({
+      /usr/bin/mktemp -d \
+        "$command_runtime_dir/attested-autoreview-runtime.XXXXXX"
+    } 2>/dev/null)" || attested_helper_runtime_dir=""
+    if [[
+      -z "$attested_helper_runtime_dir" ||
+        ! -d "$attested_helper_runtime_dir" ||
+        -L "$attested_helper_runtime_dir"
+    ]]; then
+      echo "agent:autoreview: failed to create a private wrapper-attested helper runtime" >&2
+      return 1
+    fi
+    /bin/chmod 0700 "$attested_helper_runtime_dir"
+    attested_helper_runtime_identity="$(path_identity "$attested_helper_runtime_dir")"
+    if [[ "$repo_abs" == "$repo_root" ]]; then
+      if ! verify_current_wrapper_matches_ref \
+        "$repo" \
+        "$protected_main_ref" ||
+        ! materialize_trusted_autoreview_runtime \
+          "$repo" \
+          "$protected_main_ref" \
+          "$attested_helper_runtime_dir"; then
+        cat >&2 <<'EOF'
+agent:autoreview: cannot attest an explicit helper from the runtime-changing owning checkout.
+Prepare this review from a separate trusted checkout and invoke that checkout's compatible wrapper and helper.
+EOF
+        return 1
+      fi
+    else
+      case "$repo_root" in
+        "$repo_abs"/*)
+          cat >&2 <<'EOF'
+agent:autoreview: an explicit-helper trusted wrapper must be outside the reviewed checkout.
+Prepare this review from a separate trusted checkout and invoke that checkout's compatible wrapper and helper.
+EOF
+          return 1
+          ;;
+      esac
+      if ! external_runtime_source_snapshot="$(
+        wrapper_runtime_source_snapshot "$script_dir"
+      )" ||
+        ! wrapper_runtime_source_acl_is_trusted "$script_dir" ||
+        ! external_runtime_source_snapshot_after="$(
+          wrapper_runtime_source_snapshot "$script_dir"
+        )" ||
+        [[ "$external_runtime_source_snapshot_after" != "$external_runtime_source_snapshot" ]]; then
+        echo "agent:autoreview: external wrapper runtime source has unsafe ACL, ancestry, or identity state" >&2
+        return 1
+      fi
+      if ! materialize_filesystem_autoreview_runtime \
+        "$script_dir" \
+        "$attested_helper_runtime_dir"; then
+        echo "agent:autoreview: failed to copy the pinned external wrapper runtime source" >&2
+        return 1
+      fi
+      if ! external_runtime_source_snapshot_after="$(
+        wrapper_runtime_source_snapshot "$script_dir"
+      )" ||
+        [[ "$external_runtime_source_snapshot_after" != "$external_runtime_source_snapshot" ]] ||
+        ! wrapper_runtime_source_acl_is_trusted "$script_dir" ||
+        ! external_runtime_source_snapshot_after="$(
+          wrapper_runtime_source_snapshot "$script_dir"
+        )" ||
+        [[ "$external_runtime_source_snapshot_after" != "$external_runtime_source_snapshot" ]]; then
+        echo "agent:autoreview: external wrapper runtime source changed during ACL validation or copying" >&2
+        return 1
+      fi
+    fi
+    attested_helper_override="$attested_helper_runtime_dir/scripts/agent-autoreview.mjs"
+    if ! attested_helper_runtime_manifest="$(
+      bundle_content_manifest \
+        "$attested_helper_runtime_dir" \
+        "$attested_helper_runtime_identity"
+    )"; then
+      echo "agent:autoreview: failed to seal the wrapper-attested helper runtime" >&2
+      return 1
+    fi
+  fi
   target_selection_snapshot_after="$(target_selection_snapshot "$repo")"
   if [[ "$target_selection_snapshot_after" != "$target_selection_source_snapshot" ]]; then
     echo "agent:autoreview: source changed while the review target was being selected; rerun autoreview" >&2
     exit 1
   fi
-  prepare_staging_exposed=1
   source_snapshot_before="$(source_snapshot "$repo" "$target_mode")"
   target_selection_snapshot_after="$(target_selection_snapshot "$repo")"
   if [[ "$target_selection_snapshot_after" != "$target_selection_source_snapshot" ]]; then
@@ -3311,7 +3869,7 @@ prepare_context_bundle() {
       capture_output_file "$staging_dir/patches/unstaged.diff" "unstaged diff" 0 \
         git_output "$repo" diff --patch --no-renames --no-ext-diff --no-textconv
       capture_output_file "$staging_dir/patches/untracked-paths.txt" "untracked paths" 0 \
-        git_output "$repo" ls-files --others --exclude-standard
+        emit_untracked_paths "$repo"
       capture_untracked_files \
         "$repo" \
         "$staging_dir/patches/untracked-paths.txt" \
@@ -3343,7 +3901,7 @@ prepare_context_bundle() {
       capture_output_file "$staging_dir/patches/unstaged.diff" "unstaged diff" 0 \
         git_output "$repo" diff --patch --no-renames --no-ext-diff --no-textconv
       capture_output_file "$staging_dir/patches/untracked-paths.txt" "untracked paths" 0 \
-        git_output "$repo" ls-files --others --exclude-standard
+        emit_untracked_paths "$repo"
       capture_untracked_files \
         "$repo" \
         "$staging_dir/patches/untracked-paths.txt" \
@@ -3521,6 +4079,12 @@ prepare_context_bundle() {
     echo "agent:autoreview: failed to freeze wrapper-owned prepared-bundle evidence before helper execution" >&2
     return 1
   fi
+  if [[ "$helper" != "$default_helper" && -z "$prepared_helper_override" ]]; then
+    # The wrapper-owned snapshot, serialization, feedback, and staging-runtime
+    # cleanup has finished. An explicit helper is the final untrusted handoff;
+    # after it runs no recursive cleanup may resolve same-UID-controlled paths.
+    untrusted_helper_exposed=1
+  fi
   (cd "$repo" && run_helper "${helper_args[@]+"${helper_args[@]}"}") \
     >"$staging_dir/helper-output.txt"
   if ! post_helper_evidence_manifest="$(
@@ -3594,7 +4158,6 @@ prepare_context_bundle() {
     "$expected_bundle_manifest"
   prepare_staging_dir=""
   prepare_staging_identity=""
-  prepare_staging_exposed=0
   verify_context_bundle "$bundle_dir" "$expected_bundle_manifest" >/dev/null
   cat "$bundle_dir/helper-output.txt"
   printf 'agent:autoreview context bundle: %s\n' "$bundle_dir"
@@ -3685,4 +4248,7 @@ if [[ "$helper" == "$default_helper" ]]; then
   fi
 fi
 
+if [[ "$helper" != "$default_helper" && -z "$prepared_helper_override" ]]; then
+  untrusted_helper_exposed=1
+fi
 exec_helper "$@"

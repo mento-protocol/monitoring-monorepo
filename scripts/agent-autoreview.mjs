@@ -112,6 +112,10 @@ const FROZEN_TARGET_MODES = new Set([
 const MAX_GIT_OUTPUT_BYTES = MAX_REVIEW_INPUT_BYTES + 12 * 1024 * 1024;
 const MAX_TRUSTED_ENGINE_FILE_BYTES = 16 * 1024 * 1024;
 const CLAUDE_SAFE_MODE_MIN_VERSION = [2, 1, 169];
+const AWS_CREDENTIAL_CONFIG_KEYS = new Set([
+  "AWS_CONFIG_FILE",
+  "AWS_SHARED_CREDENTIALS_FILE",
+]);
 const trustedExecutableSnapshots = new Map();
 const trustedExecutableSnapshotsByPath = new Map();
 const trustedExecutableSnapshotDirs = new Set();
@@ -1981,6 +1985,133 @@ function createEngineFileSnapshotDirectory(runtimeDir) {
   return record;
 }
 
+function engineFileSnapshotOutputPath(snapshotRecord, key) {
+  const outputName = key.toLowerCase().replaceAll("_", "-");
+  return path.join(snapshotRecord.directory, outputName);
+}
+
+function validateEngineFileSnapshot(
+  snapshotRecord,
+  outputPath,
+  outputDescriptor,
+  expectedSize,
+  key,
+) {
+  fchmodSync(outputDescriptor, 0o600);
+  fsyncSync(outputDescriptor);
+  const outputStat = fstatSync(outputDescriptor, { bigint: true });
+  if (
+    !outputStat.isFile() ||
+    outputStat.uid !== effectiveUid() ||
+    (outputStat.mode & 0o777n) !== 0o600n ||
+    (outputStat.mode & 0o6000n) !== 0n ||
+    outputStat.nlink !== 1n ||
+    outputStat.size !== expectedSize ||
+    hasWriteGrantingAcl(outputPath, outputStat, key)
+  ) {
+    throw new Error(`${key} snapshot failed validation`);
+  }
+  const outputPathStat = lstatSync(outputPath, { bigint: true });
+  if (!sameFileMetadata(outputStat, outputPathStat)) {
+    throw new Error(`${key} snapshot identity changed during publish`);
+  }
+  assertPrivateEngineFileSnapshotDirectory(snapshotRecord);
+  return outputStat;
+}
+
+function registerEngineFileSnapshotEnv(
+  env,
+  snapshotRecord,
+  key,
+  outputPath,
+  outputStat,
+) {
+  assertPrivateEngineFileSnapshotDirectory(snapshotRecord);
+  registerEngineCredentialSnapshot(
+    path.dirname(snapshotRecord.directory),
+    outputPath,
+    outputStat,
+  );
+  env[key] = outputPath;
+}
+
+function assertNoAwsCredentialProcess(
+  outputDescriptor,
+  outputPath,
+  outputStat,
+  key,
+) {
+  if (!AWS_CREDENTIAL_CONFIG_KEYS.has(key)) return;
+  const contents = Buffer.alloc(Number(outputStat.size));
+  let position = 0;
+  while (position < contents.length) {
+    const bytesRead = readSync(
+      outputDescriptor,
+      contents,
+      position,
+      contents.length - position,
+      position,
+    );
+    if (bytesRead === 0) {
+      throw new Error(`${key} snapshot changed during credential validation`);
+    }
+    position += bytesRead;
+  }
+  const outputAfter = fstatSync(outputDescriptor, { bigint: true });
+  const outputPathAfter = lstatSync(outputPath, { bigint: true });
+  if (
+    !sameFileMetadata(outputStat, outputAfter) ||
+    !sameFileMetadata(outputStat, outputPathAfter)
+  ) {
+    throw new Error(`${key} snapshot changed during credential validation`);
+  }
+  let decoded;
+  try {
+    decoded = new TextDecoder("utf-8", { fatal: true }).decode(contents);
+  } catch {
+    throw new Error(`${key} must contain valid UTF-8 configuration`);
+  }
+  const containsCredentialProcess = decoded.split(/\r\n?|\n/u).some((line) => {
+    const assignment = line.trimStart();
+    const separator = assignment.indexOf("=");
+    if (separator < 0) return false;
+    return (
+      assignment.slice(0, separator).trimEnd().toLowerCase() ===
+      "credential_process"
+    );
+  });
+  if (containsCredentialProcess) {
+    throw new Error(
+      `${key} cannot contain credential_process for semantic autoreview`,
+    );
+  }
+}
+
+function createEmptyEngineFileSnapshotEnv(env, snapshotRecord, key) {
+  assertPrivateEngineFileSnapshotDirectory(snapshotRecord);
+  const outputPath = engineFileSnapshotOutputPath(snapshotRecord, key);
+  const outputDescriptor = openSync(outputPath, secureWriteFlags(), 0o600);
+  let outputStat;
+  try {
+    outputStat = validateEngineFileSnapshot(
+      snapshotRecord,
+      outputPath,
+      outputDescriptor,
+      0n,
+      key,
+    );
+  } finally {
+    closeSync(outputDescriptor);
+  }
+  registerEngineFileSnapshotEnv(
+    env,
+    snapshotRecord,
+    key,
+    outputPath,
+    outputStat,
+  );
+}
+
 function snapshotExternalRegularFileEnv(env, repo, snapshotRecord, key) {
   const value = process.env[key];
   if (!value) return;
@@ -2018,8 +2149,7 @@ function snapshotExternalRegularFileEnv(env, repo, snapshotRecord, key) {
     );
     assertTrustedExternalFileAncestry(ancestryBefore, key);
 
-    const outputName = key.toLowerCase().replaceAll("_", "-");
-    const outputPath = path.join(snapshotRecord.directory, outputName);
+    const outputPath = engineFileSnapshotOutputPath(snapshotRecord, key);
     const outputDescriptor = openSync(outputPath, secureWriteFlags(), 0o600);
     let outputStat;
     try {
@@ -2049,34 +2179,29 @@ function snapshotExternalRegularFileEnv(env, repo, snapshotRecord, key) {
         `${key} source`,
       );
 
-      fchmodSync(outputDescriptor, 0o600);
-      fsyncSync(outputDescriptor);
-      outputStat = fstatSync(outputDescriptor, { bigint: true });
-      if (
-        !outputStat.isFile() ||
-        outputStat.uid !== effectiveUid() ||
-        (outputStat.mode & 0o777n) !== 0o600n ||
-        (outputStat.mode & 0o6000n) !== 0n ||
-        outputStat.nlink !== 1n ||
-        outputStat.size !== sourceBefore.size ||
-        hasWriteGrantingAcl(outputPath, outputStat, key)
-      ) {
-        throw new Error(`${key} snapshot failed validation`);
-      }
-      const outputPathStat = lstatSync(outputPath, { bigint: true });
-      if (!sameFileMetadata(outputStat, outputPathStat)) {
-        throw new Error(`${key} snapshot identity changed during publish`);
-      }
+      outputStat = validateEngineFileSnapshot(
+        snapshotRecord,
+        outputPath,
+        outputDescriptor,
+        sourceBefore.size,
+        key,
+      );
+      assertNoAwsCredentialProcess(
+        outputDescriptor,
+        outputPath,
+        outputStat,
+        key,
+      );
     } finally {
       closeSync(outputDescriptor);
     }
-    assertPrivateEngineFileSnapshotDirectory(snapshotRecord);
-    registerEngineCredentialSnapshot(
-      path.dirname(snapshotRecord.directory),
+    registerEngineFileSnapshotEnv(
+      env,
+      snapshotRecord,
+      key,
       outputPath,
       outputStat,
     );
-    env[key] = outputPath;
   } finally {
     closeSync(sourceDescriptor);
   }
@@ -2160,22 +2285,29 @@ function safeEngineEnv(repo, engine, runtimeDir) {
       );
     }
   }
+  const claudeFallbackBlockingKeys = [...AWS_CREDENTIAL_CONFIG_KEYS];
   const externalFileKeys = [
     ...(process.env.SSL_CERT_FILE ? ["SSL_CERT_FILE"] : []),
     ...(engine === "claude"
       ? [
-          "AWS_CONFIG_FILE",
+          ...claudeFallbackBlockingKeys,
           "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
-          "AWS_SHARED_CREDENTIALS_FILE",
           "AWS_WEB_IDENTITY_TOKEN_FILE",
           "GOOGLE_APPLICATION_CREDENTIALS",
-        ].filter((key) => process.env[key])
+        ].filter(
+          (key) =>
+            AWS_CREDENTIAL_CONFIG_KEYS.has(key) || Boolean(process.env[key]),
+        )
       : []),
   ];
   if (externalFileKeys.length > 0) {
     const snapshotRecord = createEngineFileSnapshotDirectory(runtimeDir);
     for (const key of externalFileKeys) {
-      snapshotExternalRegularFileEnv(env, repo, snapshotRecord, key);
+      if (AWS_CREDENTIAL_CONFIG_KEYS.has(key) && !process.env[key]) {
+        createEmptyEngineFileSnapshotEnv(env, snapshotRecord, key);
+      } else {
+        snapshotExternalRegularFileEnv(env, repo, snapshotRecord, key);
+      }
     }
     assertPrivateEngineFileSnapshotDirectory(snapshotRecord);
   }

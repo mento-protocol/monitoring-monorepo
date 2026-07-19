@@ -161,9 +161,14 @@ fingerprint, so concurrent dirty-state or checkout changes still fail closed
 without reading untracked file contents. After the target is frozen, explicit
 branch and commit reviews use only the target-scoped source fingerprint, so
 unrelated untracked churn cannot invalidate them; automatic mode retains the
-status guard because its selected target depends on clean/dirty state. It also
-resolves `origin/main^{commit}` once to an independently protected baseline and
-sources checklist policy only from that pinned object ID in every target mode.
+status guard because its selected target depends on clean/dirty state. Every
+Git path collection uses NUL-delimited output, so enumeration does not depend
+on Git quoting or newline splitting. Because the published changed-path and
+prompt metadata are line-oriented, paths containing tabs or line breaks are
+rejected before review; rename such a path before running autoreview. The
+adapter also resolves `origin/main^{commit}` once to an independently protected
+baseline and sources checklist policy only from that pinned object ID in every
+target mode.
 Checklist edits in a local target, PR-selected base, current head, or selected
 commit stay visible as diff evidence but cannot rewrite the policy used to
 review themselves. The adapter also
@@ -215,10 +220,19 @@ after review, pass that digest back with
 `--expected-bundle-manifest <retained-digest>` so replacing the bundle and its
 marker cannot reset the second check. A destination created during the final
 race window is never replaced; an interrupted or unverified bundle must not be
-reviewed. Failure after an external helper sees the staging path leaves that
-staging tree in place with a warning instead of recursively deleting a
-potential replacement. The adapter cleans up its private marker while its inode
-still matches, but never recursively deletes a failed destination reservation;
+reviewed. Failures before an explicit helper runs, plus failures from the
+wrapper-attested default helper runtime, receive pinned-identity cleanup. The
+adapter atomically moves the candidate into a random adjacent quarantine, opens
+the moved directory without following symlinks, verifies its recorded
+`dev:ino`, and pins that inode with `fchdir` before recursive deletion. Later
+pathname cleanup is non-recursive and fails closed on identity drift. Once an
+explicit `AUTOREVIEW_HELPER` has run, however, the adapter retains failed
+staging without recursive deletion: an unattested helper may leave a same-UID
+writer that can substitute child directories even beneath a descriptor-pinned
+root. Canonical secret-scan failures use the attested helper and therefore do
+not leave raw diff sidecars behind. It cleans up its private marker while its
+inode still
+matches, but never recursively deletes a failed destination reservation;
 inspect and remove an incomplete, unmarked destination before retrying. The
 mutable repo helper is not re-entered for publication. The published
 `helper-output.txt` reports the final prompt/pass paths, never the discarded
@@ -268,17 +282,23 @@ Semantic Codex and Claude passes run from an empty temporary workspace with
 repo/project instructions, hooks, plugins, and inherited environment restricted
 to the review contract. Reviewer credentials remain available only to launch
 the selected engine; repository tooling and unrelated environment state do not.
-For Claude/Bedrock this includes standard AWS web-identity, container, profile,
-and shared-file credential-chain locators. Claude's file-valued cloud
-credential/config locators, plus `SSL_CERT_FILE` for both Claude and Codex, must
-resolve outside the reviewed repository to a root- or reviewer-owned regular
-file with no shared-write mode, unsafe non-sticky ancestry, or write-granting
-ACL. The helper opens each source no-follow, revalidates its identity and
-ancestry while copying it into a private per-run `0600` snapshot, and passes
-only that snapshot to the selected engine. Snapshot files are removed with the
-engine workspace during normal completion and partial setup failure. On process
-interruption they are identity-checked and unlinked before the bounded
-process-group termination path settles, so even an escaped descendant holding
+For Claude/Bedrock this includes standard AWS web-identity and container
+credential-chain inputs. Explicit `AWS_CONFIG_FILE` and
+`AWS_SHARED_CREDENTIALS_FILE` locators opt into trusted static/profile files;
+their private snapshots reject `credential_process`. When either locator is
+absent, the helper supplies a private empty snapshot so the AWS SDK cannot fall
+back implicitly to `~/.aws/config` or `~/.aws/credentials`; users who need
+those files must set the locators explicitly. Claude's other file-valued cloud
+credential/config locators, plus `SSL_CERT_FILE` for both Claude and Codex,
+must resolve outside the reviewed repository to a root- or reviewer-owned
+regular file with no shared-write mode, unsafe non-sticky ancestry, or
+write-granting ACL. The helper opens each explicit source no-follow, revalidates
+its identity and ancestry while copying it into a private per-run `0600`
+snapshot, and passes only that snapshot to the selected engine. Snapshot files
+are removed with the engine workspace during normal completion and partial
+setup failure. On process interruption they are identity-checked and unlinked
+before the bounded process-group termination path settles, so even an escaped
+descendant holding
 reviewer pipes cannot retain a credential path or block parent termination. An
 untrusted or repo-contained source fails closed before the selected engine
 starts. Semantic autoreview rejects non-empty `SSL_CERT_DIR` because a
@@ -306,12 +326,25 @@ the adapter defaults to the helper's local deterministic engine because nested
 and fails closed if that engine is unavailable; it never silently falls back.
 Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the
 pinned repo helper with a compatible implementation of its CLI contract.
-Prepared-bundle replacements must support `--source-snapshot-only`,
-`--serialize-untracked-file`, plus the helper's `--bundle-output`,
-`--bundle-output-display`, and
-`--trusted-input-root` flags. For compatibility, the adapter invokes replacement
-helpers with the bare `--source-snapshot-only` contract; target-mode snapshot
-scoping is passed only to the pinned repo helper. The old autoreview
+Prepared-bundle replacements receive only the final prompt handoff and must
+support the helper's `--bundle-output`, `--bundle-output-display`, and
+`--trusted-input-root` flags. Source fingerprints and untracked-file
+serialization remain wrapper-owned operations executed by the attested helper;
+a trusted wrapper physically outside the reviewed checkout copies its sibling helper/core no-follow into the
+private command runtime and binds that snapshot to an identity plus full
+content manifest before use. The source directory is descriptor-pinned across
+both copies; its POSIX ancestry, source identities, and macOS ACLs are stable
+and non-write-granting before and after the copy. This attestation also applies
+when an explicit `AUTOREVIEW_HELPER` resolves to that external wrapper's own
+default sibling helper, as in the runtime-review command below. In the owning checkout, an explicit override is
+accepted only when the current shell wrapper matches pinned protected main and
+compatible helper/core blobs can be materialized from that same protected
+object. Otherwise the command fails closed with the separate-trusted-checkout
+instruction used for runtime-changing reviews; a wrapper nested anywhere inside
+the reviewed checkout is never treated as external. An explicit replacement cannot
+run before wrapper-owned recursive cleanup is finished. After that handoff, the wrapper performs no recursive cleanup and
+retains its command runtime plus failed staging because the replacement may
+have left a same-UID writer. The old autoreview
 `--parallel-tests` path is removed: the mapped quality gate owns test execution
 and isolation.
 

@@ -17,9 +17,15 @@ Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
 repo-local helper at `scripts/agent-autoreview.mjs`; they fail fast only if that
 repo-owned executable is missing or an explicit compatible `AUTOREVIEW_HELPER`
 override is not executable. Prepared-bundle overrides must implement the pinned
-helper CLI contract, including `--source-snapshot-only`,
-`--serialize-untracked-file`, `--bundle-output`, `--bundle-output-display`, and
-`--trusted-input-root`. PR shipping requires
+helper's final handoff contract, including `--bundle-output`,
+`--bundle-output-display`, and `--trusted-input-root`. The wrapper-attested
+helper owns source fingerprinting and untracked-file serialization from a
+private manifest-bound runtime created before the final handoff. The owning
+checkout must match the pinned protected-main wrapper and materialize compatible
+helper/core blobs from that object; runtime-changing reviews use a separate
+trusted wrapper checkout physically outside the reviewed checkout. An explicit
+override that names that external wrapper's default sibling is still privately
+attested before use. PR shipping requires
 `pnpm agent:autoreview` as the structured batch-boundary review.
 Configure the Codex Cloud environment setup script as:
 
