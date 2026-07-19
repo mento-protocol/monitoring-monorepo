@@ -1291,8 +1291,9 @@ fine without it. When the team is ready to open scoped fix PRs automatically:
    and the App is applied, set `sentry_autofix_enabled = "true"` in
    `terraform.tfvars` and re-apply the platform stack (still IaC, not the GitHub
    UI). The scheduled autofix workflow activates on its next weekday run; verify
-   with a single-issue `workflow_dispatch` dry-run against a known local
-   `code-fix` stub first.
+   with a single-issue `workflow_dispatch` LIVE run against a known local
+   `code-fix` stub first — there is no dry-run mode: an eligible stub gets a
+   real agent run and a real fix PR (which is the verification).
 5. **Verify + the merge-stays-human rule.** On the next local `code-fix` verdict,
    confirm a `sentry-autofix/<short-id-lower>` branch and PR are opened by the
    App bot, required CI and Codex review run on the PR, the queue stub carries

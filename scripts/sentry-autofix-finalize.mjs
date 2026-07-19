@@ -316,6 +316,54 @@ export function buildAutofixRunRecordBody({
   ].join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Mechanical redaction of the agent-authored summary before it becomes public.
+// Fencing (neutralizeBlock) makes the summary's markdown INERT but does not
+// stop DISCLOSURE: text lands verbatim in a public PR/issue at create time,
+// before any human review. The fix agent's only legitimate inputs are the
+// already-public verdict comment and this repo's public code, so anything
+// credential-shaped, payload-shaped, or externally-addressed in its summary is
+// either an injected echo or an attempted secret exfiltration (the documented
+// process-env residual) — mask it rather than publish it. Allowlist over
+// blocklist for URLs: only this org's GitHub and the org's Sentry hosts
+// survive; everything else is masked. Heuristic by nature (a determined
+// paraphrase can evade token-shape rules), but it mechanically closes the
+// high-value channels: runner tokens, long payload dumps, emails, and
+// attacker-controlled links.
+// ---------------------------------------------------------------------------
+const SUMMARY_URL_PATTERN = /\bhttps?:\/\/[^\s)>\]"'`]+/g;
+const SUMMARY_ALLOWED_URL =
+  /^https:\/\/(github\.com\/mento-protocol\/|(?:[a-z0-9-]+\.)?sentry\.io\/)/;
+const SUMMARY_REDACTIONS = [
+  // Known credential shapes: GitHub tokens (App/installation/PAT/OAuth),
+  // fine-grained PATs, Anthropic keys, Slack tokens, AWS access key ids.
+  [/\b(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{16,}\b/g, "[redacted-token]"],
+  [/\bgithub_pat_[A-Za-z0-9_]{16,}\b/g, "[redacted-token]"],
+  [/\bsk-ant-[A-Za-z0-9-]{8,}\b/g, "[redacted-token]"],
+  [/\bxox[a-z]-[A-Za-z0-9-]{8,}\b/g, "[redacted-token]"],
+  [/\bAKIA[A-Z0-9]{16}\b/g, "[redacted-token]"],
+  // Long high-entropy runs (base64/hex-alphabet, 40+ chars): token or payload
+  // dump shaped. Dots and slashes break the run, so file paths survive.
+  [/\b[A-Za-z0-9+=_-]{40,}\b/g, "[redacted-long-string]"],
+  // Email-shaped strings (Sentry user data must never reach a public surface).
+  [/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g, "[redacted-email]"],
+];
+
+/** Mask credential-, payload-, and user-data-shaped content plus any
+ * non-allowlisted URL in the agent-authored summary. Runs BEFORE
+ * neutralizeBlock (redact raw text first, then defang + bound). Exported for
+ * tests. */
+export function redactUntrustedSummary(text) {
+  let out = String(text ?? "");
+  out = out.replace(SUMMARY_URL_PATTERN, (url) =>
+    SUMMARY_ALLOWED_URL.test(url) ? url : "[redacted-url]",
+  );
+  for (const [pattern, replacement] of SUMMARY_REDACTIONS) {
+    out = out.replace(pattern, replacement);
+  }
+  return out;
+}
+
 /**
  * The no-PR analysis comment posted on the queue stub when the diff guard
  * refuses (empty/oversized/forbidden diff) or the agent declined to fix. The
@@ -325,12 +373,17 @@ export function buildAutofixRunRecordBody({
  */
 export function buildAnalysisComment(reason, summary) {
   const parts = ["**Autofix: no PR opened.**", "", String(reason ?? "").trim()];
-  // neutralizeBlock (the same helper the projection body uses) strips control
-  // chars, DEFANGS backticks so an embedded ``` run cannot close the fence and
-  // reactivate markdown, defangs @-mentions/HTML-comment openers, and bounds
-  // the length. The agent summary is untrusted-influenced text on a public
-  // issue, so it must stay inert.
-  const bounded = neutralizeBlock(summary, { maxLen: 2000, maxLines: 40 });
+  // Redact FIRST (credential/payload/user-data shapes, non-allowlisted URLs —
+  // fencing alone does not stop disclosure), then neutralizeBlock (the same
+  // helper the projection body uses) strips control chars, DEFANGS backticks
+  // so an embedded ``` run cannot close the fence and reactivate markdown,
+  // defangs @-mentions/HTML-comment openers, and bounds the length. The agent
+  // summary is untrusted-influenced text on a public issue, so it must stay
+  // inert AND disclosure-scrubbed.
+  const bounded = neutralizeBlock(redactUntrustedSummary(summary), {
+    maxLen: 2000,
+    maxLines: 40,
+  });
   if (bounded) {
     parts.push(
       "",
@@ -381,12 +434,14 @@ function provenanceSection(shortId, queueIssue) {
  * markdown. It is run through `neutralizeBlock` (backticks, @-mentions, and
  * HTML-comment openers defanged; control chars stripped; length + line bounded,
  * same bounds as the no-PR analysis comment) and embedded inside a clearly
- * labeled fenced block as inert advisory data. This closes the disclosure path
- * where an injected verdict steers the agent into copying Sentry payload / user
- * data straight into a PUBLIC PR body at `gh pr create` time, before any human
- * review — and keeps the fence unbreakable (a `` ``` `` inside the summary is
- * defanged, so it cannot close the block and reactivate markdown). The
- * mechanical parts stay OUTSIDE the fence so they remain trustworthy.
+ * labeled fenced block as inert advisory data — and, because fencing alone
+ * neutralizes markdown but not DISCLOSURE, the summary is first run through
+ * `redactUntrustedSummary`, which masks credential-shaped strings, long
+ * high-entropy runs, email-shaped user data, and every non-allowlisted URL
+ * before the text ever reaches the public PR body at `gh pr create` time. The
+ * fence stays unbreakable (a `` ``` `` inside the summary is defanged, so it
+ * cannot close the block and reactivate markdown), and the mechanical parts
+ * stay OUTSIDE the fence so they remain trustworthy.
  */
 export function buildPrBody({ shortId, queueIssue, summary }) {
   if (!isValidShortId(shortId)) {
@@ -412,13 +467,16 @@ export function buildPrBody({ shortId, queueIssue, summary }) {
     "- A small code change addresses the triaged root cause. Review the diff against the linked Sentry issue.",
   ];
 
-  const bounded = neutralizeBlock(summary, { maxLen: 2000, maxLines: 40 });
+  const bounded = neutralizeBlock(redactUntrustedSummary(summary), {
+    maxLen: 2000,
+    maxLines: 40,
+  });
   if (bounded) {
     parts.push(
       "",
       "---",
       "",
-      "Agent analysis (advisory — machine-generated from an untrusted triage verdict, included as inert data):",
+      "Agent analysis (advisory — machine-generated from an untrusted triage verdict, included as inert, mechanically-redacted data):",
       "",
       "```text",
       bounded,

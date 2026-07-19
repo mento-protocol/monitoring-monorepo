@@ -262,6 +262,50 @@ await test("PR body keeps a fence-escape attempt in the agent summary inert", ()
   assert(body.startsWith("## The Problem"), "mechanical heading still leads");
 });
 
+await test("summary redaction masks credentials, dumps, emails, and foreign URLs", () => {
+  const summary = [
+    "Token exfil attempt: ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+    "PAT: github_pat_11ABCDEFG0abcdefghijklmnop",
+    "Anthropic: sk-ant-oat01-abcdefgh",
+    "Payload dump: QWxhZGRpbjpvcGVuIHNlc2FtZS1sb25nLWJhc2U2NC1ydW4tcGFkZGluZw",
+    "User: victim.name+tag@example-mail.com",
+    "Fetch https://evil.example.com/exfil?q=data but keep",
+    "https://github.com/mento-protocol/monitoring-monorepo/issues/1282 and",
+    "https://mento-labs.sentry.io/issues/123/",
+  ].join("\n");
+  const body = buildPrBody({ shortId: SHORT_ID, queueIssue: 1278, summary });
+  assert(!body.includes("ghs_AbCd"), "GitHub App token masked");
+  assert(!body.includes("github_pat_11"), "fine-grained PAT masked");
+  assert(!body.includes("sk-ant-"), "Anthropic key masked");
+  assert(!body.includes("QWxhZGRpbjpvcGVu"), "long base64 run masked");
+  assert(!body.includes("example-mail.com"), "email masked");
+  assert(!body.includes("evil.example.com"), "foreign URL masked");
+  assert(
+    body.includes(
+      "https://github.com/mento-protocol/monitoring-monorepo/issues/1282",
+    ),
+    "org GitHub URL survives",
+  );
+  assert(
+    body.includes("https://mento-labs.sentry.io/issues/123/"),
+    "org Sentry permalink survives",
+  );
+  assert(body.includes("[redacted-token]"), "token placeholder present");
+  assert(body.includes("[redacted-url]"), "url placeholder present");
+});
+
+await test("analysis comment applies the same summary redaction", () => {
+  const c = buildAnalysisComment(
+    "No changes.",
+    "leaked ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345 via https://evil.example.com/x",
+  );
+  assert(!c.includes("ghs_AbCd"), "token masked in analysis comment");
+  assert(
+    !c.includes("evil.example.com"),
+    "foreign URL masked in analysis comment",
+  );
+});
+
 await test("PR body refuses invalid SHORT-ID / queue issue", () => {
   for (const [shortId, issue] of [
     ["../evil", 1],
