@@ -5,7 +5,7 @@
 // with the exact same parsing + defaults the client hook uses — a silently
 // diverging server-side re-implementation would attach `fallbackData` to the
 // wrong SWR key. Zero runtime dependencies: safe on both sides of the
-// server/client module boundary (see ui-dashboard/AGENTS.md).
+// server/client boundary (see docs/pr-checklists/recurring-review-patterns.md).
 
 import type { VolumeRangeKey } from "@/lib/volume";
 

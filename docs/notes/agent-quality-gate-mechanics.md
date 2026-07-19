@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -12,11 +12,42 @@ garden_lane: operator-runbooks
 
 # Agent Quality Gate — Mechanics
 
-The invocation contract (which commands to run, in what order, before opening
-or updating an agent-authored PR) lives in the "Agent Quality Gate" section of
-root `AGENTS.md`. This note holds the underlying mechanics: how the gate maps
-paths to commands, its parallelism and caching behavior, and the package-script
-refusal guard.
+This runbook owns the invocation contract and the mechanics behind it: how the
+gate maps paths to commands, its parallelism and caching behavior, and the
+package-script refusal guard. Root `AGENTS.md` keeps only the mandatory trigger
+and routes here.
+
+## Invocation contract
+
+Before opening or updating an agent-authored PR:
+
+```bash
+pnpm agent:quality-gate          # inspect mapped commands and checklists
+pnpm agent:quality-gate --run    # execute the safe local mapped commands
+pnpm agent:autoreview            # required for a non-trivial completed batch
+```
+
+The gate is local-only and never deploys or runs Terraform apply. Do not assume
+the pre-push hook is installed; run the gate explicitly.
+
+For a manual full-repository reproduction of the server-side pre-push baseline,
+including when hooks are absent or uncertain, use:
+
+```bash
+git fetch origin main:refs/remotes/origin/main
+./tools/trunk fmt --all
+./tools/trunk check --all
+pnpm dashboard:react-doctor:diff
+pnpm dashboard:codegen
+pnpm --filter @mento-protocol/ui-dashboard typecheck
+pnpm --filter @mento-protocol/indexer-envio typecheck
+pnpm --filter @mento-protocol/indexer-envio test:coverage
+pnpm indexer:codegen
+pnpm --filter @mento-protocol/ui-dashboard test:coverage
+```
+
+Cross-layer/stateful UI work also applies
+[`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md).
 
 The gate defaults to dry-run mode and maps changed paths to the package checks
 and PR checklists that apply. Review the checklist output, then run the mapped

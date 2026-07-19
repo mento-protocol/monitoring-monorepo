@@ -2412,11 +2412,11 @@ assert_contains "- pnpm agent:context-check (README metadata may enroll canonica
 
 run_gate "ui-dashboard/AGENTS.md"
 assert_contains "- pnpm docs:index --check (tracked documentation changed)"
-assert_contains "- pnpm agent:context-budget (agent instruction budget input changed)"
+assert_contains "- pnpm agent:context-budget --strict (agent instruction budget input changed)"
 
 run_gate ".codex/config.toml"
 assert_contains "- agent-context"
-assert_contains "- pnpm agent:context-budget (agent instruction budget input changed)"
+assert_contains "- pnpm agent:context-budget --strict (agent instruction budget input changed)"
 
 # Any docs markdown may carry canonical: true frontmatter (discovery in
 # check-agent-context.mjs), so a discovered doc path must route through the
@@ -2664,7 +2664,7 @@ assert_contains "- pnpm docs:audit:test (documentation audit planner changed)"
 
 run_gate "scripts/agent-context-budget.mjs"
 assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"
-assert_contains "- pnpm agent:context-budget (agent context budget helper changed)"
+assert_contains "- pnpm agent:context-budget --strict (agent context budget helper changed)"
 
 run_gate "scripts/agent-context-budget.test.mjs"
 assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"

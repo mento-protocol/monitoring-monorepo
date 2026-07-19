@@ -35,7 +35,7 @@ Full rules in the linked checklist.
 
 ### SWR + Hasura polling — `docs/pr-checklists/swr-polling-hasura.md`
 
-tldr: every Hasura-polling SWR hook MUST set `revalidateOnFocus:false` + `revalidateOnReconnect:false` (defaulted at `useGQL` in `ui-dashboard/src/lib/graphql.ts`) and `AbortSignal.timeout(8_000)` paired with the 10s interval. Respect the 1000-row cap with pre-rolled snapshots or the `fetchAllFeeSnapshotPages` offset-pagination helper (`ui-dashboard/src/lib/network-fetcher/fetch.ts:333`). New indexer schema fields ship in an isolated query (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern) — NEVER mixed into the page's primary pool query (hosted Hasura rejects unknown columns during the deploy+resync window). Distinguish `isLoading` from "data resolved to zero" — NEVER render "100% / no breaches" while `data === undefined`. Full rules in the linked checklist.
+tldr: every Hasura-polling SWR hook MUST set `revalidateOnFocus:false` + `revalidateOnReconnect:false` (defaulted at `useGQL` in `ui-dashboard/src/lib/graphql.ts`). `useGQL` and `useBridgeGQL` default to a 30s interval; the bridge wrapper owns an 8s timeout, while other fail-fast paths set an explicit timeout below their refresh interval. Respect the 1000-row cap with pre-rolled snapshots or the `fetchPaginatedRows` helper (`ui-dashboard/src/lib/network-fetcher/pagination.ts`). New indexer schema fields ship in an isolated query (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern) — NEVER mixed into the page's primary pool query (hosted Hasura rejects unknown columns during the deploy+resync window). Distinguish `isLoading` from "data resolved to zero" — NEVER render "100% / no breaches" while `data === undefined`. Full rules in the linked checklist.
 
 ### `unstable_cache` usage (server-side SSR/OG caches)
 
@@ -62,10 +62,14 @@ tldr: roving `tabIndex` follows FOCUS not `selected` (track `focusedIndex` local
 
 - When a config file has a name → metadata lookup pattern (e.g. `aggregators.json`'s `cluster-*` keys ↔ `$clusters` block, or any future `name: "X"` per-chain entry pointing at a separate `$X` metadata block), add a test that asserts every name used in the per-chain entries has a corresponding metadata entry. A typo in either side silently breaks the consumer (e.g. `getClusterMetadata("cluster-7dc08ec28f299c07")` returning `undefined` if you typo the address by one digit). This was caught during PR #316 review.
 
-### Indexer RPC self-heal (`rpc.ts`)
+### Indexer handlers and self-heal — `docs/pr-checklists/indexer-handler-invariants.md`
 
-- Multi-getter RPC helpers (`fetchFees` etc.) use `Promise.allSettled` + distinct sentinels: `-1` = not yet attempted (retry), `-2` = viem "returned no data" signature = getter missing from bytecode (stop retrying). All-or-nothing `Promise.all` loses wins from fulfilled getters; a single sentinel creates forever-retry loops on older deployments lacking a getter (bit us on PR #222)
-- Every `rpc.ts` helper that calls `getRpcClient` wraps it in try/catch. `getRpcClient` throws synchronously on unknown chainIds + missing HyperRPC tokens; unwrapped throws escape into handlers and stall indexing. Regressed twice in PR #222 — if you touch fee/rebalancing RPC helpers, check the outer guard is still in place
+tldr: RPC caches are bounded; multi-getter effects preserve partial wins and
+distinct retry/unsupported sentinels; median-derived values require the full
+freshness gate; heal stages widen every downstream predicate/query and retry
+partial side effects; handler tests mock every reachable RPC path. Entity IDs,
+rollups, environment parsing, and Vitest bridge rules live in the linked
+checklist.
 
 ### Terraform + Cloud Run — `docs/pr-checklists/terraform-cloudrun.md`
 
@@ -92,9 +96,31 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 
 ### Security / CSP
 
-- CSP `connect-src` MUST include every Hasura + RPC endpoint the dashboard calls (source of truth: `ui-dashboard/src/lib/csp.ts`'s `CSP_CONNECT_SRC`)
-- Do NOT widen `script-src` with `unsafe-eval` without proof a library actually needs it — the current policy is deliberately tight and Plotly runs fine without it
+- CSP is set exclusively by `ui-dashboard/src/middleware.ts`; never add a
+  second policy in `next.config.ts`, because browsers intersect duplicate
+  headers.
+- `buildCspWithNonce` generates a fresh request nonce, injects it into request
+  headers for Next's inline scripts, and echoes the policy on the response.
+  `script-src` intentionally omits `unsafe-inline` and `unsafe-eval`; custom
+  inline scripts need the request nonce or must move to an external file.
+- `style-src` retains `unsafe-inline`: nonces do not authorize React's
+  attribute-level `style={}` output.
+- CSP `connect-src` must include every Hasura and RPC endpoint the dashboard
+  calls. `ui-dashboard/src/lib/csp.ts` is authoritative; change
+  `csp.test.ts` with the allowlist.
 - Auth/allowlist constants must be centralized — don't repeat domain literals across files
+
+### Dashboard server/client module boundaries
+
+- Modules importing `useSWR`, `useNetwork`, `next-auth`, or React-only APIs are
+  client-only. Server routes, OG helpers/images, and API handlers must not
+  import them directly or transitively.
+- Shared constants belong in zero-dependency modules such as
+  `ui-dashboard/src/lib/hasura-timeout.ts`. The client GraphQL module keeps a
+  compatibility re-export, but new server imports target the zero-dependency
+  owner.
+- Audit the full import graph when moving a constant. A clean typecheck does
+  not prove the Next server bundle is free of SWR/React client dependencies.
 
 ### Migration discipline
 

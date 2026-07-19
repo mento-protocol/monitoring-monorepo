@@ -938,7 +938,7 @@ while IFS= read -r path; do
       ;;
     AGENTS.md|*/AGENTS.md|.codex/config.toml)
       add_surface "agent-context"
-      add_command "pnpm agent:context-budget" "agent instruction budget input changed"
+      add_command "pnpm agent:context-budget --strict" "agent instruction budget input changed"
       ;;
   esac
   case "$path" in
@@ -1505,7 +1505,7 @@ while IFS= read -r path; do
           ;;
         scripts/agent-context-budget.mjs|scripts/agent-context-budget.test.mjs)
           add_command "pnpm agent:context-budget:test" "agent context budget helper changed"
-          add_command "pnpm agent:context-budget" "agent context budget helper changed"
+          add_command "pnpm agent:context-budget --strict" "agent context budget helper changed"
           ;;
         scripts/lighthouse-config.test.mjs)
           add_command "node scripts/lighthouse-config.test.mjs" "Lighthouse config assertion suite changed"

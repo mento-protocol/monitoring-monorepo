@@ -3,7 +3,7 @@ title: Plotly.js basic-dist plus enforced bundle-size budgets
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-07
+last_verified: 2026-07-17
 scope: ui-dashboard
 date: 2026-03
 doc_type: adr
@@ -51,4 +51,4 @@ imports the lean bundle through `react-plotly.js/factory`.
 
 ## Evidence
 
-- Plotly present since initial setup `6e001aac`; `basic-dist` + `size-limit` budgets in [`ui-dashboard/AGENTS.md`](../../ui-dashboard/AGENTS.md) and `ui-dashboard` size-limit config.
+- Plotly present since initial setup `6e001aac`; `basic-dist` + `size-limit` budgets in `ui-dashboard/.size-limit.cjs` and the root command reference.

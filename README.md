@@ -157,7 +157,8 @@ pnpm dev --hostname 127.0.0.1 --port 3210
 Open <http://127.0.0.1:3210>. Use no Auth.js session cookie for logged-out
 checks. To simulate a signed-in `@mentolabs.xyz` user locally, mint an
 `authjs.session-token` with `next-auth/jwt` using the same `AUTH_SECRET`; the
-exact agent workflow lives in [`ui-dashboard/AGENTS.md`](./ui-dashboard/AGENTS.md).
+exact agent workflow lives in
+[`docs/notes/dashboard-verification.md`](./docs/notes/dashboard-verification.md).
 
 ### Run Aegis
 
@@ -219,7 +220,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | `ENVIO_RPC_URL_143`                        | Monad Mainnet primary RPC endpoint                                                                             |
 | `ENVIO_RPC_URL_137`                        | Polygon Mainnet primary RPC endpoint                                                                           |
 | `ENVIO_RPC_URL_80002`                      | Polygon Amoy primary RPC endpoint                                                                              |
-| `ENVIO_RPC_FALLBACK_URL_<chainId>`         | (optional) per-chain fallback RPC for archive-depth + rate-limit failover (see `indexer-envio/AGENTS.md`)      |
+| `ENVIO_RPC_FALLBACK_URL_<chainId>`         | (optional) per-chain fallback RPC for archive-depth + rate-limit failover (see `indexer-envio/README.md`)      |
 | `ENVIO_START_BLOCK_CELO`                   | Celo start block (default: 60664500)                                                                           |
 | `ENVIO_START_BLOCK_MONAD`                  | Monad start block (default: 60710000)                                                                          |
 | `ENVIO_START_BLOCK_POLYGON`                | Polygon start block (default: 90273661)                                                                        |
@@ -234,7 +235,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
 | `ENABLE_EXPERIMENTAL_COREPACK`             | Vercel Corepack opt-in so hosted builds honor the repo `packageManager` pnpm version (Terraform-managed)   |
 | `NEXT_PUBLIC_HASURA_URL`                   | Prod Envio GraphQL endpoint (shared by Celo, Monad, Polygon, and Ethereum reserve-yield data)              |
-| `NEXT_PUBLIC_HASURA_URL_TESTNET`           | Optional Monad Testnet Envio GraphQL endpoint                                                              |
+| `NEXT_PUBLIC_HASURA_URL_TESTNET`           | Optional shared Monad Testnet + Polygon Amoy Envio GraphQL endpoint                                       |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`      | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
 | `NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET`      | Optional Polygon RPC override (default: `https://polygon.drpc.org`)                                        |
 | `NEXT_PUBLIC_RPC_URL_POLYGON_AMOY`         | Optional Polygon Amoy RPC override (default: `https://rpc-amoy.polygon.technology`)                        |

@@ -31,10 +31,11 @@ For a narrow verify (specific page or feature), skip the list and go directly to
 3. **Choose auth state deliberately.** Do not rely on whatever cookies happen
    to be in the browser. For public/logged-out checks, use an isolated browser
    context or clear `authjs.session-token` and `__Secure-authjs.session-token`.
-   For logged-in localhost checks, follow `ui-dashboard/AGENTS.md` to mint a
-   local `authjs.session-token` for `dev@mentolabs.xyz` using the same
-   `AUTH_SECRET` as the dev server. Session-dependent surfaces should be checked
-   in both states.
+   For logged-in localhost checks, follow
+   `docs/notes/dashboard-verification.md` to mint a local
+   `authjs.session-token` for `dev@mentolabs.xyz` using the same `AUTH_SECRET`
+   as the dev server. Session-dependent surfaces should be checked in both
+   states.
 
 4. **Verify content** using `evaluate_script` for targeted checks (~50 tokens each):
    - Page heading and key text rendered correctly

@@ -98,14 +98,32 @@ overrides `canonical` authority.
 - Put verification personas in `.agents/roles`; roles are opt-in and do not run automatically.
 - Keep root `AGENTS.md` small enough that every line earns its default-token cost.
 
+## Change-coupled drift audit
+
+When a PR adds or changes a command, script, environment variable, hook,
+deploy/rollback step, or canonical operator workflow, audit every live entry
+point that can still teach the old sequence. Search root and package
+`AGENTS.md`, README files, `docs/**`, `.agents/skills/**`,
+`.claude/skills/**`, `.claude/commands/**`, workflows, and related deploy,
+rollback, and babysit scripts. Update stale ordered runbooks and stale
+file/directory descriptions in the same PR.
+
+Treat deploy, rollback, and babysit as one workflow family: a new promotion or
+verification gate normally belongs in each applicable path. Search for the old
+command or invariant after editing and inspect every remaining hit; a concise
+router is not permission to leave a detailed owner stale.
+
 ## Maintenance Checks
 
 Run `pnpm agent:context-check` to verify managed metadata (including the
 `last_verified` staleness window), scoped AGENTS coverage, skill mirrors, and
 Cloud Run revision suffix guardrails. Run `pnpm docs:index --check` for catalog
-drift and broken internal links. Run `pnpm agent:context-budget` to report the
-actual root-plus-scoped instruction bytes against Codex's configured limit;
-report mode is advisory until the strict-budget phase of #1341 lands. Skill
+drift and broken internal links. Run `pnpm agent:context-budget --strict` to
+enforce a 12 KiB root-file cap, 16 KiB per scoped file, and 28 KiB per combined
+root-to-directory route. The report warns at 90% and includes the blank-line
+separators Codex inserts between layered files. These limits deliberately stay
+below Codex's truncation boundary; route detail into the narrowest canonical
+note, checklist, or skill instead of raising them. Skill
 mirrors must match their canonical `.agents/skills` source except for documented
 runtime-specific provenance literals, such as forensic-report writes using
 `source: "Codex"` in the Codex skill and `source: "claude"` in the Claude skill.

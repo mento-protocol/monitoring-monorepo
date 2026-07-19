@@ -51,7 +51,7 @@ pnpm agent:autoreview              # Structured closeout review; use --prepare-b
 pnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown
 pnpm docs:index --check            # Fail on catalog drift, invalid classification, or broken internal Markdown links
 pnpm docs:audit --dry-run          # Print this week's bounded semantic-review packet without mutating documentation
-pnpm agent:context-budget          # Report root-plus-scoped AGENTS bytes against the Codex project-doc limit (advisory)
+pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
 node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
@@ -67,7 +67,7 @@ pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Se
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
 # Dashboard
-pnpm dashboard:dev            # Dev server; see ui-dashboard/AGENTS.md for logged-in/out localhost verification
+pnpm dashboard:dev            # Dev server; see docs/notes/dashboard-verification.md for auth-state verification
 pnpm dashboard:codegen        # Generate dashboard GraphQL operation types from indexer-envio/schema.graphql
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check bundle size against budgets (run after build)

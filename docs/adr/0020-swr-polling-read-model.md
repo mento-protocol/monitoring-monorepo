@@ -3,7 +3,7 @@ title: Read model is SWR polling plus client-side aggregation at current pool sc
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
 scope: ui-dashboard
 date: 2026-03
 doc_type: adr
@@ -46,4 +46,4 @@ scalability bug unless the assumptions change materially.
 
 ## Evidence
 
-- Polling discipline in [`docs/pr-checklists/swr-polling-hasura.md`](../pr-checklists/swr-polling-hasura.md); the 30–50-pool exclusion in [`docs/pr-checklists/review-prompt-exclusions.md`](../pr-checklists/review-prompt-exclusions.md) and [`AGENTS.md`](../../AGENTS.md).
+- Polling discipline in [`docs/pr-checklists/swr-polling-hasura.md`](../pr-checklists/swr-polling-hasura.md); the 30–50-pool exclusion in [`docs/pr-checklists/review-prompt-exclusions.md`](../pr-checklists/review-prompt-exclusions.md).

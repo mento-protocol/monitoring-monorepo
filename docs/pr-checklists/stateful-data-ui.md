@@ -131,6 +131,16 @@ If the PR touches a table with pagination, sort, filter, search, or linked chart
 
 - [ ] Is table state URL-backed or intentionally local?
 - [ ] If local-only, is that explicitly called out as an intentional scope decision?
+- [ ] For URL state that does not need a server render (sort, in-page filters,
+      pagination, tabs), use `window.history.replaceState` rather than
+      `router.replace`; App Router navigation refetches the current RSC payload.
+- [ ] Initialize SSR-visible state from `useSearchParams()`, not
+      `window.location.search`. Lazy initializers execute on the server and do
+      not rerun during hydration; use `window.location` only after mount or at
+      action/popstate time.
+- [ ] When one page mixes `replaceState` and router-backed URL writers, rebuild
+      action-time URLs from `window.location.search`; the `useSearchParams`
+      snapshot does not observe history-only writes and can drop sibling params.
 - [ ] If URL-backed, does the URL canonicalize after data-driven clamping (no stale `?page=N` past totalPages, no `?page=1` default, no malformed `?page=foo` lingering)? Pattern: the mount-time canonicalization in `ui-dashboard/src/lib/use-table-sort.ts` plus the bridge-flows pager `page=1` URL-clearing test. PR #653 shipped with this failure mode: `?page=999` rendered page 2 (clamped) but kept `?page=999` in the address bar, breaking refresh/share fidelity.
 
 ---

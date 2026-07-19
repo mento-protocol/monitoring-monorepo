@@ -3,7 +3,7 @@ title: New Worktree / Clone Setup and Claude Code on the Web Setup
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -12,9 +12,8 @@ garden_lane: operator-runbooks
 
 # New Worktree / Clone Setup and Claude Code on the Web Setup
 
-The invocation pointers live in the "New Worktree / Clone Setup" and "Claude
-Code on the web setup" sections of root `AGENTS.md`. This note holds the
-underlying mechanics.
+The invocation pointer lives in the "Agent Tooling and Setup" section of root
+`AGENTS.md`. This note holds the underlying mechanics.
 
 ## New Worktree / Clone Setup
 

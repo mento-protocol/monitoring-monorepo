@@ -76,7 +76,7 @@ type HeroV2Data = { brokerVolumeWindowSnapshots: VolumeWindowRow[] };
  *     intentionally doesn't pull in the trader/aggregator queries.
  *
  * Lives in its own file so `page-client.tsx` stays under the 600-line
- * soft cap (see repo-root AGENTS.md "File-size budget"). The hero data
+ * soft cap (see docs/pr-checklists/recurring-review-patterns.md). The hero data
  * slice is small but its derivation chain is dense — naming the slice
  * keeps the parent client readable.
  */

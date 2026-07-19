@@ -105,8 +105,8 @@ function replaceVolumeUrlSearch(params: URLSearchParams) {
  * Reads happen via `useSearchParams` on initial mount; writes go through
  * `window.history.replaceState` (NOT `router.replace`) — the App Router's
  * `router.replace` triggers an RSC payload refetch on the current segment
- * (`?_rsc=...`) every URL write, which adds ~700ms latency. See AGENTS.md
- * "URL state in client-only tables / filters" + PR #314 for the rule.
+ * (`?_rsc=...`) every URL write, which adds ~700ms latency. See
+ * docs/pr-checklists/stateful-data-ui.md + PR #314 for the rule.
  *
  * Also owns the UTC-day rollover ticker (`utcDayKey`) that flushes
  * `cutoff` at midnight (codex finding 3183954662) and the precomputed
