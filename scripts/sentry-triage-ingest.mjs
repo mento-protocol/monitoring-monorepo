@@ -186,9 +186,31 @@ export const LABEL_DEFINITIONS = [
     description:
       "Actionable verdict projected as an issue in the owning repo (ADR 0038)",
   },
+  {
+    name: "sentry:approved-archive",
+    color: "1a7f37",
+    description:
+      "Human-approved: archive the underlying Sentry issue (Phase 2a, ADR 0036)",
+  },
+  {
+    name: "sentry:archived",
+    color: "6e7681",
+    description:
+      "Underlying Sentry issue archived (archived_until_escalating) via the human-approved archive loop (Phase 2a, ADR 0036)",
+  },
 ];
 
 export const PROJECTED_LABEL = "sentry:projected";
+
+// Phase 2a human-approved archive loop (ADR 0036 Stage C,
+// scripts/sentry-triage-archive.mjs + .github/workflows/sentry-triage-archive.yml).
+// APPROVED_ARCHIVE_LABEL is the human-applied approval marker that triggers the
+// archive workflow; ARCHIVED_LABEL is the terminal audit marker the archive
+// script applies once the Sentry issue is archived. Both are bootstrapped by
+// the ingest label set above and self-healed by the archive script — single
+// source of truth for their colors/descriptions.
+export const APPROVED_ARCHIVE_LABEL = "sentry:approved-archive";
+export const ARCHIVED_LABEL = "sentry:archived";
 
 // Stage B's verdict namespace, derived from the definitions above so the two
 // can't drift. A reopened regression must shed its previous verdict — the
@@ -198,13 +220,23 @@ export const VERDICT_LABELS = LABEL_DEFINITIONS.map(
   (label) => label.name,
 ).filter((name) => name.startsWith("sentry:verdict-"));
 
-// Labels a regression reopen must shed: the stale verdict labels PLUS the
-// stale `sentry:projected` marker (ADR 0038) — the old projection described
-// the old occurrence, and leaving it would show a needs-triage issue as
-// already projected. If the re-triage round lands on an actionable verdict
-// again, the projection step re-applies it, idempotently reusing the same
-// owning-repo issue.
-export const REOPEN_SHED_LABELS = [...VERDICT_LABELS, PROJECTED_LABEL];
+// Labels a regression reopen must shed: the stale verdict labels, the stale
+// `sentry:projected` marker (ADR 0038), AND the stale Phase-2a archive markers
+// (`sentry:approved-archive` / `sentry:archived`) — all described the OLD
+// occurrence, and leaving them would show a needs-triage issue as already
+// projected/approved/archived. Shedding the approval marker is also an
+// authority-boundary guard: a regression must not carry a stale human archive
+// approval into a fresh occurrence (a workflow_dispatch retry would otherwise
+// read it as still-approved and re-archive without re-review). If the
+// re-triage round lands on an actionable verdict again, the projection step
+// re-applies its marker (idempotently reusing the same owning-repo issue), and
+// a fresh archive needs a fresh human approval.
+export const REOPEN_SHED_LABELS = [
+  ...VERDICT_LABELS,
+  PROJECTED_LABEL,
+  APPROVED_ARCHIVE_LABEL,
+  ARCHIVED_LABEL,
+];
 
 // Short ID is the first whitespace-delimited token after the `[sentry] `
 // prefix (queue contract v2 title: `[sentry] <SHORT-ID> (<project>, <level>)`).

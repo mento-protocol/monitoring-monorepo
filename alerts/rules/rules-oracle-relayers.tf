@@ -14,7 +14,7 @@ resource "grafana_rule_group" "oracle_relayers" {
       no_data_state  = "NoData"
 
       annotations = {
-        summary = "The {{ $labels.rateFeed }} rate feed is stale on {{ $labels.chain | title }}. {{ if eq $labels.rateFeed \"EUROPEUR\" }}Check the deployment/migration owner responsible for the fixed SortedOracles report.{{ else }}Check for possible issues with the oracle relayer.{{ end }}"
+        summary = "{{ $labels.rateFeed }} oracle report expired on {{ $labels.chain | title }}. Swaps using this feed may revert. {{ if and (eq $labels.chain \"polygon\") (eq $labels.rateFeed \"EUROPEUR\") }}Check the deployment/migration owner responsible for the fixed 1.0 SortedOracles report.{{ else }}Check whether the oracle relayer is executing and inspect errors for this feed.{{ end }}"
       }
 
       labels = {
