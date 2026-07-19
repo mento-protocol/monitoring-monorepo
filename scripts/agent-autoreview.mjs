@@ -2307,9 +2307,7 @@ function runCommandWithInput(
       rejectOnce(error);
     });
     child.on("close", (code, signal) => {
-      if (timedOut || pendingTerminationSignal) {
-        signalReviewerProcessGroup(child, "SIGKILL");
-      }
+      signalReviewerProcessGroup(child, "SIGKILL");
       if (timedOut) {
         rejectOnce(new Error(`${command} timed out after ${timeoutSeconds}s`));
         return;

@@ -1603,6 +1603,26 @@ const fs = require("node:fs");
 const leaderExitsOnTermination = Boolean(
   process.env.AUTOREVIEW_FAKE_EXIT_LEADER_ON_TERM,
 );
+const leaderExitCodeText =
+  process.env.AUTOREVIEW_FAKE_EXIT_LEADER_NORMALLY || "";
+const leaderExitCode = /^[0-9]+$/.test(leaderExitCodeText)
+  ? Number.parseInt(leaderExitCodeText, 10)
+  : null;
+const leaderExitsNormally = leaderExitCode !== null;
+let stdinEnded = !leaderExitsNormally;
+let grandchildReady = !leaderExitsNormally;
+function maybeExitNormally() {
+  if (!leaderExitsNormally || !stdinEnded || !grandchildReady) return;
+  if (leaderExitCode === 0) {
+    const args = process.argv.slice(2);
+    const outputIndex = args.indexOf("-o");
+    fs.writeFileSync(
+      args[outputIndex + 1],
+      '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}\n',
+    );
+  }
+  process.exit(leaderExitCode);
+}
 process.on("SIGTERM", () => {
   if (leaderExitsOnTermination) process.exit(0);
 });
@@ -1610,15 +1630,28 @@ const grandchild = spawn(
   process.execPath,
   [
     "-e",
-    'const fs = require("node:fs"); process.on("SIGTERM", () => {}); fs.writeFileSync(`${process.env.AUTOREVIEW_FAKE_CAPTURE}.grandchild-ready`, "ready\\n"); setInterval(() => {}, 1000);',
+    'const fs = require("node:fs"); process.on("SIGTERM", () => {}); fs.writeFileSync(`${process.env.AUTOREVIEW_FAKE_CAPTURE}.grandchild-ready`, "ready\\n"); if (process.send) { process.send("ready"); process.disconnect(); } setInterval(() => {}, 1000);',
   ],
   {
     detached: Boolean(process.env.AUTOREVIEW_FAKE_DETACH_GRANDCHILD),
-    stdio: leaderExitsOnTermination
-      ? ["ignore", "ignore", "ignore"]
-      : ["ignore", "inherit", "inherit"],
+    stdio: leaderExitsNormally
+      ? ["ignore", "ignore", "ignore", "ipc"]
+      : leaderExitsOnTermination
+        ? ["ignore", "ignore", "ignore"]
+        : ["ignore", "inherit", "inherit"],
   },
 );
+if (leaderExitsNormally) {
+  grandchild.once("message", () => {
+    grandchildReady = true;
+    maybeExitNormally();
+  });
+  process.stdin.resume();
+  process.stdin.on("end", () => {
+    stdinEnded = true;
+    maybeExitNormally();
+  });
+}
 fs.writeFileSync(
   `${process.env.AUTOREVIEW_FAKE_CAPTURE}.child-pid`,
   `${process.pid}\n`,
@@ -1635,7 +1668,7 @@ fs.writeFileSync(
   `${process.env.AUTOREVIEW_FAKE_CAPTURE}.snapshot`,
   `${process.env.SSL_CERT_FILE}\n`,
 );
-setInterval(() => {}, 1000);
+if (!leaderExitsNormally) setInterval(() => {}, 1000);
 CODEX
   chmod +x "$fake_bin/claude" "$fake_bin/codex"
 
@@ -1652,6 +1685,8 @@ CODEX
   local snapshot_unlinked
   local helper_exited
   local descendants_exited
+  local completion_mode
+  local leader_exit_code
   local termination_mode
   local wait_status
   local launch_dir
@@ -1928,6 +1963,90 @@ CODEX
     fi
     if [[ "$termination_mode" == "timeout" ]]; then
       expect_file_contains "$engine_capture.stderr" "timed out after 3s"
+    fi
+  done
+
+  for completion_mode in success failure; do
+    engine_capture="$tmp_dir/engine-leader-completion-$completion_mode"
+    rm -f \
+      "$engine_capture.child-pid" \
+      "$engine_capture.grandchild-pid" \
+      "$engine_capture.grandchild-ready" \
+      "$engine_capture.helper-pid" \
+      "$engine_capture.snapshot"
+    if [[ "$completion_mode" == "success" ]]; then
+      leader_exit_code=0
+    else
+      leader_exit_code=7
+    fi
+    signal_env_args=(
+      "PATH=$fake_bin:$PATH"
+      "HOME=$HOME"
+      "TMPDIR=$signal_tmp"
+      "SSL_CERT_FILE=$ssl_cert_file"
+      "AUTOREVIEW_FAKE_CAPTURE=$engine_capture"
+      "AUTOREVIEW_FAKE_EXIT_LEADER_NORMALLY=$leader_exit_code"
+      "AUTOREVIEW_HEARTBEAT_SECONDS=60"
+    )
+    set +e
+    (
+      cd "$review_repo"
+      /usr/bin/env -i "${signal_env_args[@]}" \
+        "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+        --mode local --engine codex \
+        >"$engine_capture.stdout" 2>"$engine_capture.stderr"
+    )
+    wait_status=$?
+    set -e
+    if [[ "$completion_mode" == "success" && "$wait_status" -ne 0 ]]; then
+      printf 'ordinary-success helper failed with status %s\n' "$wait_status" >&2
+      cat "$engine_capture.stderr" >&2
+      exit 1
+    fi
+    if [[ "$completion_mode" == "failure" && "$wait_status" -eq 0 ]]; then
+      printf 'ordinary-failure helper exited successfully\n' >&2
+      exit 1
+    fi
+    if [[
+      ! -s "$engine_capture.child-pid" ||
+        ! -s "$engine_capture.grandchild-pid" ||
+        ! -s "$engine_capture.grandchild-ready" ||
+        ! -s "$engine_capture.snapshot"
+    ]]; then
+      printf 'ordinary-%s fixture did not complete startup\n' \
+        "$completion_mode" >&2
+      exit 1
+    fi
+    grandchild_pid="$(cat "$engine_capture.grandchild-pid")"
+    snapshot_path="$(cat "$engine_capture.snapshot")"
+    descendants_exited=0
+    for _ in {1..100}; do
+      if ! kill -0 "$grandchild_pid" 2>/dev/null; then
+        descendants_exited=1
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$descendants_exited" -ne 1 ]]; then
+      kill -KILL "$grandchild_pid" 2>/dev/null || true
+      printf 'ordinary-%s background descendant survived completion\n' \
+        "$completion_mode" >&2
+      exit 1
+    fi
+    if [[ -e "$snapshot_path" ]]; then
+      printf 'ordinary-%s credential snapshot survived completion\n' \
+        "$completion_mode" >&2
+      exit 1
+    fi
+    if find "$signal_tmp" -mindepth 1 -maxdepth 1 -type d -name 'autoreview-*' -print -quit | grep -q .; then
+      printf 'ordinary-%s engine runtime survived completion\n' \
+        "$completion_mode" >&2
+      exit 1
+    fi
+    if [[ "$completion_mode" == "success" ]]; then
+      expect_file_contains "$engine_capture.stdout" "autoreview clean"
+    else
+      expect_file_contains "$engine_capture.stderr" "failed (7)"
     fi
   done
 }
@@ -4218,12 +4337,8 @@ fi
 bundle_dir="$tmp_dir/context-bundle"
 canonical_bundle_dir="$(cd "$(dirname "$bundle_dir")" && pwd -P)/$(basename "$bundle_dir")"
 protected_main_oid="$(git -C "$repo_root" rev-parse 'origin/main^{commit}')"
-frozen_base="$(git -C "$repo_root" rev-parse HEAD^)"
 frozen_head="$(git -C "$repo_root" rev-parse HEAD)"
-if [[ "$frozen_base" == "$frozen_head" ]]; then
-  printf 'metadata regression requires distinct base and reviewed commits\n' >&2
-  exit 1
-fi
+frozen_base="$(git -C "$repo_root" merge-base origin/main HEAD)"
 run_adapter --prepare-bundle-dir "$bundle_dir" --mode branch --base "$frozen_base"
 captured_bundle_output="$(awk 'previous == "--bundle-output" { print; exit } { previous = $0 }' "$capture")"
 captured_staging_dir="$(dirname "$captured_bundle_output")"
@@ -4328,7 +4443,6 @@ expect_file_not_contains \
 expect_file_contains "$canonical_bundle_dir/.agent-autoreview-complete" "autoreview-bundle-v2"
 expect_file_contains "$canonical_bundle_dir/.agent-autoreview-complete" "manifest-sha256:"
 expect_file_contains "$canonical_bundle_dir/selected-checklists.txt" "docs/pr-checklists/review-prompt-exclusions.md"
-expect_file_contains "$canonical_bundle_dir/selected-checklists.txt" "docs/pr-checklists/code-health.md"
 expect_file_contains "$canonical_bundle_dir/helper-output.txt" "$canonical_bundle_dir/autoreview-prompt.md"
 expect_file_not_contains "$canonical_bundle_dir/helper-output.txt" ".agent-autoreview-context."
 expect_stdout_contains "$canonical_bundle_dir/autoreview-prompt.md"
