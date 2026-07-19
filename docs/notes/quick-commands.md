@@ -51,6 +51,7 @@ pnpm agent:autoreview              # Structured closeout review; use --prepare-b
 pnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown
 pnpm docs:index --check            # Fail on catalog drift, invalid classification, or broken internal Markdown links
 pnpm docs:audit --dry-run          # Print this week's bounded semantic-review packet without mutating documentation
+pnpm docs:garden --dry-run --json  # Read the garden queue and preview the exact weekly issue decision without mutations
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
 node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics

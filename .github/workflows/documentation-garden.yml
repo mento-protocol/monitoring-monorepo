@@ -1,0 +1,73 @@
+name: Documentation Garden
+
+# Deterministic issue-only scheduler for ADR 0039. The workflow reads the
+# repository documentation catalog, then creates or refreshes at most one
+# bounded Agent Task issue. It never edits repository content, invokes an LLM,
+# opens a PR, merges, deploys, or touches production state.
+
+on:
+  schedule:
+    # Monday morning UTC, off the hour to avoid scheduler contention.
+    - cron: 47 8 * * 1
+  workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: lane/shard choose a bounded read-only planner
+    # packet and dry_run defaults to true. Values are passed only through env
+    # and validated by Node; none are interpolated into shell source.
+    inputs:
+      lane:
+        description: Documentation lane to schedule, or auto for the weekly rotation
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - agent-entry-points
+          - operator-runbooks
+          - pr-checklists-process
+          - adrs-architecture
+          - package-readmes-reference
+          - notes-plans-archive
+      shard:
+        description: Optional one-based shard override within the selected lane
+        required: false
+        type: string
+      dry_run:
+        description: Plan and report the queue decision without mutating GitHub Issues
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: documentation-garden
+  cancel-in-progress: false
+
+jobs:
+  schedule-issue:
+    name: Schedule the bounded documentation garden issue
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+        github.ref_name == github.event.repository.default_branch)
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # The planner's last_content_change evidence uses git log. A shallow
+          # checkout would report null for documents unchanged at HEAD.
+          fetch-depth: 0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+      - name: Plan and synchronize the garden issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOCS_GARDEN_REPO: ${{ github.repository }}
+          DOCS_GARDEN_LANE: ${{ inputs.lane || 'auto' }}
+          DOCS_GARDEN_SHARD: ${{ inputs.shard || '' }}
+          DOCS_GARDEN_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+        run: node scripts/docs-garden-issue.mjs --json

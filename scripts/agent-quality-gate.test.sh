@@ -613,6 +613,8 @@ validator_repo="$(mktemp -d)"
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/review-materiality.mjs",
     "agent:review-materiality:test": "node scripts/review-materiality.test.mjs",
+    "docs:garden": "node scripts/docs-garden-issue.mjs",
+    "docs:garden:test": "node scripts/docs-garden-issue.test.mjs",
     "issue:board": "node scripts/agent-issue-board.mjs",
     "issue:board:test": "node scripts/agent-issue-board.test.mjs",
     "issue:claim": "node scripts/agent-issue-board.mjs claim",
@@ -785,7 +787,7 @@ JSON
   node - <<'NODE'
 const fs = require("fs");
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-pkg.scripts["agent:quality-gate:test"] = "bash scripts/agent-quality-gate.test.sh --fixture";
+pkg.scripts["docs:garden:test"] = "node scripts/docs-garden-issue.test.mjs --fixture";
 fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
 NODE
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
@@ -797,6 +799,7 @@ assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/review-materiality.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/agent-issue-board.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/docs-garden-issue.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
@@ -1455,6 +1458,11 @@ assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workf
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
 assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
+
+run_gate ".github/workflows/documentation-garden.yml"
+assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
+assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
+assert_contains "node scripts/check-adr-reminder.mjs"
 
 run_gate ".lighthouserc.cjs"
 assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse CI budget config changed)"
@@ -2661,6 +2669,17 @@ assert_contains "- pnpm docs:audit:test (documentation audit planner changed)"
 
 run_gate "scripts/docs-audit.test.mjs"
 assert_contains "- pnpm docs:audit:test (documentation audit planner changed)"
+
+run_gate "scripts/docs-garden-issue.mjs"
+assert_contains "- pnpm docs:garden:test (documentation garden issue automation changed)"
+assert_contains "- pnpm docs:audit --dry-run (documentation garden issue automation consumes the planner)"
+assert_contains "- pnpm docs:index --check (documentation garden issue automation consumes the catalog)"
+
+run_gate "scripts/docs-garden-issue-helpers.mjs"
+assert_contains "- pnpm docs:garden:test (documentation garden issue automation changed)"
+
+run_gate "scripts/docs-garden-issue.test.mjs"
+assert_contains "- pnpm docs:garden:test (documentation garden issue automation changed)"
 
 run_gate "scripts/agent-context-budget.mjs"
 assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"

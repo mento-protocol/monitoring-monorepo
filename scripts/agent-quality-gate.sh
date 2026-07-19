@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -642,6 +642,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/check-adr-reminder.test.mjs" "$reason"
   add_command "node scripts/docs-index.test.mjs" "$reason"
   add_command "node scripts/docs-audit.test.mjs" "$reason"
+  add_command "node scripts/docs-garden-issue.test.mjs" "$reason"
   add_command "node scripts/agent-context-budget.test.mjs" "$reason"
 }
 
@@ -1502,6 +1503,11 @@ while IFS= read -r path; do
           add_command "pnpm docs:audit:test" "documentation audit planner changed"
           add_command "pnpm docs:audit --dry-run" "documentation audit planner changed"
           add_command "pnpm docs:index --check" "documentation audit planner consumes the catalog"
+          ;;
+        scripts/docs-garden-issue.mjs|scripts/docs-garden-issue-helpers.mjs|scripts/docs-garden-issue.test.mjs)
+          add_command "pnpm docs:garden:test" "documentation garden issue automation changed"
+          add_command "pnpm docs:audit --dry-run" "documentation garden issue automation consumes the planner"
+          add_command "pnpm docs:index --check" "documentation garden issue automation consumes the catalog"
           ;;
         scripts/agent-context-budget.mjs|scripts/agent-context-budget.test.mjs)
           add_command "pnpm agent:context-budget:test" "agent context budget helper changed"

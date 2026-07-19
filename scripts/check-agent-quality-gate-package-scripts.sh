@@ -20,6 +20,8 @@ const expectedScripts = {
   "docs:index:test": "node scripts/docs-index.test.mjs",
   "docs:audit": "node scripts/docs-audit.mjs",
   "docs:audit:test": "node scripts/docs-audit.test.mjs",
+  "docs:garden": "node scripts/docs-garden-issue.mjs",
+  "docs:garden:test": "node scripts/docs-garden-issue.test.mjs",
   "adr:check": "node scripts/check-adr-reminder.mjs",
   "adr:check:test": "node scripts/check-adr-reminder.test.mjs",
   "agent:autoreview": "./scripts/agent-autoreview.sh",
