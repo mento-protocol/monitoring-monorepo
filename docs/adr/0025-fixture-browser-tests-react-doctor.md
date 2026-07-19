@@ -3,7 +3,7 @@ title: Fixture-driven browser tests, visual snapshots, and a react-doctor score 
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
 scope: ui-dashboard
 date: 2026-05
 doc_type: adr
@@ -50,4 +50,4 @@ Two gates:
 ## Evidence
 
 - Browser interaction suite PR #403 (2026-05-13); react-doctor PR-diff gate PR #367 (2026-05-09).
-- Commands + gates in [`ui-dashboard/AGENTS.md`](../../ui-dashboard/AGENTS.md); [`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md).
+- Commands + gates in [`docs/notes/dashboard-verification.md`](../notes/dashboard-verification.md); [`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md).

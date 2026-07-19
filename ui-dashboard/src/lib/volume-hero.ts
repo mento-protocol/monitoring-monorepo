@@ -14,7 +14,7 @@
  * the snapshot only needs to supply the exact denominator.
  *
  * Extracted from `lib/volume.ts` to keep that file under the
- * 600-line soft cap (see repo-root AGENTS.md "File-size budget").
+ * 600-line soft cap (see docs/pr-checklists/recurring-review-patterns.md).
  */
 
 import { SECONDS_PER_DAY } from "@/lib/time-series";

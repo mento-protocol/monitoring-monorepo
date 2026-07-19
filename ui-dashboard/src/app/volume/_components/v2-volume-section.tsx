@@ -25,7 +25,7 @@ import { TableSectionTitle } from "./table-section-title";
  * markup out of the page-client.
  *
  * Lives in its own file so `page-client.tsx` stays under the 600-line
- * soft cap (see repo-root AGENTS.md "File-size budget").
+ * soft cap (see docs/pr-checklists/recurring-review-patterns.md).
  */
 export function V2VolumeSection({
   rangeLabel,

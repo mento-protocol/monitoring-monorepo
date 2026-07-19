@@ -878,9 +878,8 @@ jobs:
         run: pnpm docs:audit --dry-run
       - name: Agent context budget tests
         run: pnpm agent:context-budget:test
-      - name: Agent context budget report
-        # Advisory until #1344 slims every route and enables strict mode.
-        run: pnpm agent:context-budget
+      - name: Enforce agent context budgets
+        run: pnpm agent:context-budget --strict
       - name: PR description validator suite
         run: node scripts/check-pr-description.test.mjs
       - name: Deploy root-anchor regression suite

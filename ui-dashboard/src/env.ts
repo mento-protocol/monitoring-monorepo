@@ -4,8 +4,8 @@ import { z } from "zod/mini";
 // `"yes"`, `"TRUE"`, operator typos, missing) → false. Matches the prior
 // `process.env.X === "true"` semantics exactly. Using an optional string
 // instead of `z.enum(["true","false"])` so a typo
-// doesn't crash the dashboard at module load. See AGENTS.md "Env-var
-// validation".
+// doesn't crash the dashboard at module load. See
+// docs/pr-checklists/recurring-review-patterns.md "Env-var validation".
 const envBool = z.pipe(
   z.optional(z.string()),
   z.transform((value) => value === "true"),

@@ -87,7 +87,7 @@ jobs:
 
             Otherwise (the user asked a specific question or for a fix/refactor/explain), follow their instruction directly — no review framing needed.
 
-            PROJECT CONVENTIONS — AGENTS.md and CLAUDE.md are authoritative. Pay attention to: Envio handler patterns, SWR backoff / polling discipline, the Mento brand split (user-facing surfaces use Mento branding, internal code keeps upstream protocol names), supply-chain hardening (SHA-pinned actions, dependabot), worktree-per-PR workflow. Skip generic "consider adding a comment" or "consider extracting a helper" unless the benefit is concrete.
+            PROJECT CONVENTIONS — AGENTS.md, package AGENTS.md files, and their linked canonical checklists are authoritative. Pay attention to: Envio handler patterns, SWR backoff / polling discipline, the Mento brand split (user-facing surfaces use Mento branding, internal code keeps upstream protocol names), supply-chain hardening (SHA-pinned actions, dependabot), worktree-per-PR workflow. Skip generic "consider adding a comment" or "consider extracting a helper" unless the benefit is concrete.
 
   auto-review:
     # Skip fork PRs and Dependabot PRs — both run without access to repo
@@ -134,4 +134,4 @@ jobs:
 
             SEVERITY tag every finding: [P1] correctness/security/breaking, [P2] quality/perf/maintainability, [P3] suggestion/style.
 
-            PROJECT CONVENTIONS — AGENTS.md and CLAUDE.md are authoritative. Pay attention to: Envio handler patterns, SWR backoff / polling discipline, the Mento brand split (user-facing surfaces use Mento branding, internal code keeps upstream protocol names), supply-chain hardening (SHA-pinned actions, dependabot), worktree-per-PR workflow. Skip generic "consider adding a comment" or "consider extracting a helper" unless the benefit is concrete.
+            PROJECT CONVENTIONS — AGENTS.md, package AGENTS.md files, and their linked canonical checklists are authoritative. Pay attention to: Envio handler patterns, SWR backoff / polling discipline, the Mento brand split (user-facing surfaces use Mento branding, internal code keeps upstream protocol names), supply-chain hardening (SHA-pinned actions, dependabot), worktree-per-PR workflow. Skip generic "consider adding a comment" or "consider extracting a helper" unless the benefit is concrete.

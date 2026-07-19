@@ -1,3 +1,5 @@
+project_doc_max_bytes = 28_672
+
 [mcp_servers.chrome-devtools]
 args = ["chrome-devtools-mcp@latest"]
 command = "npx"

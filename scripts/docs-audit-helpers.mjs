@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   buildContextBudgetReport,
+  MAX_ROUTE_LIMIT_BYTES,
   resolveProjectDocMaxBytes,
   trackedInstructionFiles,
 } from "./agent-context-budget.mjs";
@@ -187,7 +188,7 @@ export function buildAuditPacket({
   const contextBudget = buildContextBudgetReport({
     repoRoot,
     files: trackedInstructionFiles(repoRoot),
-    limitBytes: resolveProjectDocMaxBytes(repoRoot),
+    limitBytes: resolveProjectDocMaxBytes(repoRoot, MAX_ROUTE_LIMIT_BYTES),
   });
   const shardNumber =
     selection.shardIndex === null ? null : selection.shardIndex + 1;

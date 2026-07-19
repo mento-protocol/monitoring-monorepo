@@ -150,7 +150,8 @@ pnpm dev --hostname 127.0.0.1 --port 3210
 Open <http://127.0.0.1:3210>. Use no Auth.js session cookie for logged-out
 checks. To simulate a signed-in `@mentolabs.xyz` user locally, mint an
 `authjs.session-token` with `next-auth/jwt` using the same `AUTH_SECRET`; the
-exact agent workflow lives in [`ui-dashboard/AGENTS.md`](./ui-dashboard/AGENTS.md).
+exact agent workflow lives in
+[`docs/notes/dashboard-verification.md`](./docs/notes/dashboard-verification.md).
 
 ### Run Aegis
 
@@ -210,7 +211,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `ENVIO_RPC_URL_42220`                      | Celo Mainnet primary RPC endpoint                                                                              |
 | `ENVIO_RPC_URL_143`                        | Monad Mainnet primary RPC endpoint                                                                             |
-| `ENVIO_RPC_FALLBACK_URL_<chainId>`         | (optional) per-chain fallback RPC for archive-depth + rate-limit failover (see `indexer-envio/AGENTS.md`)      |
+| `ENVIO_RPC_FALLBACK_URL_<chainId>`         | (optional) per-chain fallback RPC for archive-depth + rate-limit failover (see `indexer-envio/README.md`)      |
 | `ENVIO_START_BLOCK_CELO`                   | Celo start block (default: 60664500)                                                                           |
 | `ENVIO_START_BLOCK_MONAD`                  | Monad start block (default: 60710000)                                                                          |
 | `ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD` | Ethereum reserve-yield start block (default: 19111760)                                                         |

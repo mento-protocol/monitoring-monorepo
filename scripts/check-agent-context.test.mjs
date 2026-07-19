@@ -100,12 +100,19 @@ function createContextCheckFixture(readmeContent, extraFiles = {}) {
     "docs/pr-checklists/recurring-review-patterns.md",
     canonicalContextFile("Recurring Review Patterns"),
   );
+  writeFixtureFile(
+    root,
+    "docs/pr-checklists/indexer-handler-invariants.md",
+    canonicalContextFile("Indexer Handler Invariants"),
+  );
   for (const note of [
     "agent-issue-workflow",
     "agent-quality-gate-mechanics",
     "codex-agent-skills",
     "codex-cloud-setup",
     "cross-protocol-context",
+    "dashboard-verification",
+    "liquity-monitoring-invariants",
     "pr-ready-state",
     "quick-commands",
     "spoken-attention-nudge",

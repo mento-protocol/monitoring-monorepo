@@ -88,6 +88,8 @@ Deploy branch: `envio` → triggers hosted reindex on push.
 cp indexer-envio/.env.example indexer-envio/.env
 # Mainnet defaults (forno, rpc2.monad.xyz) work out of the box.
 # For testnet, set ENVIO_API_TOKEN or override ENVIO_RPC_URL_10143.
+# For a custom Celo Sepolia provider, set ENVIO_RPC_URL_CELO_SEPOLIA for event
+# sync and ENVIO_RPC_URL_11142220 for handler eth_call reads.
 # For reserve-yield, set ENVIO_RPC_URL_1 to an archive-capable Ethereum RPC
 # before replaying old sUSDS/stETH events locally.
 
@@ -97,6 +99,24 @@ pnpm indexer:codegen && pnpm indexer:dev
 
 Hasura console: `http://localhost:8080` (admin secret: `testing`)
 GraphQL endpoint: `http://localhost:8080/v1/graphql`
+
+### Local stack invariants
+
+- The wrapper reads `indexer-envio/.env`; `.env.example` is the current variable
+  reference. Do not set generic `ENVIO_RPC_URL` in multichain mode because it
+  routes chain-specific reads to one endpoint. Per-chain fallback RPCs must
+  cover the full replay/archive window as well as rate-limit failover. Celo
+  Sepolia event sync uses `ENVIO_RPC_URL_CELO_SEPOLIA`; handler contract reads
+  use `ENVIO_RPC_URL_11142220`, so a full provider override sets both.
+- Hasura must use port 8080. Envio's startup liveness URL is hard-coded to that
+  port, so a different `HASURA_EXTERNAL_PORT` stalls startup. All configs also
+  share Docker project `generated`; run only one local indexer at a time.
+- Run codegen through the package scripts, not `envio codegen` directly. The
+  wrapper patches the generated Postgres service with the `pg_isready`
+  healthcheck that Envio's dev loop requires.
+- Every config points at `src/EventHandlers.ts`. New handler modules must be
+  side-effect imported there, followed by `pnpm indexer:codegen`, or Envio will
+  not register them.
 
 ### Available Commands (from repo root)
 
@@ -127,6 +147,32 @@ pnpm stop       # Stop Docker containers
 pnpm test:mutation     # Targeted StrykerJS pure-logic baseline
 pnpm knip:report       # Report-only unused-file/export/dependency scan
 ```
+
+### Promoting a new contracts deployment
+
+When a new `@mento-protocol/contracts` version is published:
+
+1. Update the version in `indexer-envio/package.json` and
+   `ui-dashboard/package.json`.
+2. Update the affected namespace in
+   `shared-config/deployment-namespaces.json`.
+3. Run `pnpm install` from the repository root.
+4. From `indexer-envio/`, run `pnpm generate:abis` and commit any vendored ABI
+   changes.
+5. Run the dashboard and indexer typechecks selected by the root quality gate.
+
+### Adding a contract to the index
+
+1. If the ABI ships in `@mento-protocol/contracts`, add its filename to
+   `scripts/generateAbis.mjs` and run `pnpm generate:abis`. Otherwise hand-vendor
+   the minimal ABI under `abis/` and record the exclusion in that script's
+   header.
+2. Add the contract to every applicable `config.multichain.*.yaml`.
+3. Add or update entities in `schema.graphql`.
+4. Add the handler under `src/handlers/` and import a new handler module from
+   `src/EventHandlers.ts`.
+5. Run `pnpm codegen` and the cross-layer checklist in
+   [`docs/pr-checklists/stateful-data-ui.md`](../docs/pr-checklists/stateful-data-ui.md).
 
 ### Performance Diagnostics
 
