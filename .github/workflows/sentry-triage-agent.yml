@@ -252,7 +252,11 @@ jobs:
           # as data, never interpolated into a command, and the emitted values
           # are closed-enum. Missing/stale/invalid verdict -> nonzero exit ->
           # fail the job loudly and leave sentry:needs-triage in place so the
-          # next scheduled run retries this issue. `projectable` (actionable
+          # next scheduled run retries this issue. A `needs-human` verdict that
+          # omits the required `human_question` field is treated exactly like an
+          # invalid verdict (same fail-loud + retry) so a lazy, non-decision
+          # escalation never lands a label — see the verdict contract in
+          # docs/notes/sentry-triage-pipeline.md. `projectable` (actionable
           # verdict + allowlisted EXTERNAL owning repo) tells the close step
           # whether this stub is settled here or deferred to the serialized
           # `project` job.
@@ -402,6 +406,9 @@ jobs:
             --issues "${SENTRY_TRIAGE_ISSUES}" \
             > "${results_file}"
 
+          # (The batch script self-heals the sentry:projected label from
+          # Stage A's LABEL_DEFINITIONS before settling — see
+          # runProjectionBatch in scripts/sentry-triage-project.mjs.)
           failed=0
           while IFS= read -r row; do
             n=$(jq -r '.issue' <<<"${row}")
