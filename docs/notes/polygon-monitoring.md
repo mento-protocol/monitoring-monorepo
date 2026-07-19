@@ -36,7 +36,7 @@ NTT helper deployments. The first three `FPMMDeployed` events are at block
 | -------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | FPMM factory               | `0xa849b475FE5a4B5C9C3280152c7a1945b907613b`       | Dynamic pool discovery, configuration, swaps, liquidity, limits, fees, oracle state, breakers, and rebalances |
 | USDC / USDm                | `0x463c0d1F04bcd99A1efCF94AC2a75bc19Ea4A7E5`       | Pools table/detail, TVL, 24h volume, global volume, reserve strategy state                                    |
-| EURm / USDm                | `0x93e15A22fDa39FEfcCCe82D387A09cCF030EAD61`       | Pools table/detail, TVL, 24h volume, global volume, reserve strategy state                                    |
+| EURm / USDm                | `0x93e15A22fDa39FEfcCCe82D387A09cCF030EAD61`       | Pools table/detail, TVL, 24h volume, global volume, open strategy state                                       |
 | EURm / EUROP               | `0xCd8C6811d975981F57E7fB32e59f0BeE66aF3201`       | Pools table/detail, TVL, historical USD volume, open and reserve strategy state                               |
 | Open liquidity strategy    | `0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f`       | Strategy registry plus OLS liquidity/lifecycle history                                                        |
 | Reserve liquidity strategy | `0xa0fB8b16ce6AF3634fF9F3f4F40E49E1C1ae4f0B`       | Strategy registry and live rebalance probes                                                                   |
@@ -48,9 +48,10 @@ NTT helper deployments. The first three `FPMMDeployed` events are at block
 
 `PoolLiquidityStrategy` is the canonical many-to-many registry. The legacy
 single `Pool.rebalancerAddress` pointer remains populated for old readers, but
-new consumers must read the registry. This matters on EURm/EUROP: the reserve
-strategy was active at launch and the open strategy was registered later, so
-the launch transaction alone is not the complete configuration.
+new consumers must read the registry. At launch, USDC/USDm and EURm/EUROP used
+the reserve strategy while EURm/USDm used the open strategy. EURm/EUROP then
+registered the open strategy later, so the launch transaction alone is not the
+complete configuration.
 
 ## Data and dashboard coverage
 
@@ -105,9 +106,10 @@ Roll out in this order:
 1. From the reviewed PR head, deploy the multichain Envio candidate to the
    `envio` branch without promoting it.
 2. Wait for every chain to reach the hosted head. At the candidate endpoint,
-   verify the three Polygon pools, two NTT tokens, strategy registry, and
-   bridge handlers, then run the repository's commit-scoped deployment
-   verifier.
+   verify the three Polygon pools, two NTT tokens, bridge handlers, and exactly
+   four active Polygon strategy rows: USDC/USDm Reserve, EURm/USDm Open, plus
+   EURm/EUROP Reserve and Open. Then run the repository's commit-scoped
+   deployment verifier.
 3. Merge the PR. This starts the metrics-bridge and Aegis production-service
    deploys and the protected Terraform workflows in parallel. Keep the
    `alerts-rules` `production-infra` approval pending.

@@ -369,6 +369,19 @@ test("Slack trading-mode bodies suppress duplicate single-alert headings", () =>
   );
 });
 
+test("EUROPEUR staleness summary points to the fixed-report owner", () => {
+  const source = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/rules-oracle-relayers.tf"),
+    "utf8",
+  );
+  assert(
+    source.includes(
+      String.raw`{{ if eq $labels.rateFeed \"EUROPEUR\" }}Check the deployment/migration owner responsible for the fixed SortedOracles report.{{ else }}Check for possible issues with the oracle relayer.{{ end }}`,
+    ),
+    "EUROPEUR should bypass oracle-relayer guidance while other feeds keep it",
+  );
+});
+
 test("trading-mode Splunk pages repeat slowly per rate feed", () => {
   const source = readFileSync(
     path.resolve(__dirname, "..", "alerts/rules/notification-policies.tf"),

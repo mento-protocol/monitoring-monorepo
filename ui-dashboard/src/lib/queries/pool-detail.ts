@@ -183,7 +183,7 @@ export const POOL_CONFIG_EXT = `
 `;
 
 // A pool may authorize more than one strategy simultaneously (Polygon's
-// EURm/EUROP pool launches with both Open and Reserve). Keep this isolated
+// EURm/EUROP pool added Open after launching with Reserve). Keep this isolated
 // from POOL_DETAIL_WITH_HEALTH so the detail page survives the indexer
 // deploy+resync window and falls back to Pool.rebalancerAddress meanwhile.
 export type PoolLiquidityStrategiesResponse = {
