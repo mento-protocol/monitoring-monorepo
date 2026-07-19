@@ -12,17 +12,21 @@
  *     This is a hard mechanical limit, NOT just a prompt instruction — a
  *     prompt-injected or over-eager agent cannot get a forbidden-path or
  *     oversized diff pushed.
- *   - `buildPrBody(...)` — assembles the repo-standard PR body from an
- *     agent-written Problem/Solution summary, splicing in `Fixes <SHORT-ID>`
- *     (Sentry release-linked auto-resolve) + `Refs #<queue issue>` + a
- *     machine-authored provenance note. Falls back to a fully templated body
- *     when the agent's summary is missing or junk.
+ *   - `buildPrBody(...)` — assembles the fix-PR body from a DETERMINISTIC
+ *     Problem/Solution template (splicing in `Fixes <SHORT-ID>` (Sentry
+ *     release-linked auto-resolve) + `Refs #<queue issue>` + a provenance note),
+ *     with the agent's untrusted write-up neutralized and fenced as inert
+ *     advisory data — never rendered as live markdown, so an injected verdict
+ *     cannot publish Sentry payload into the public PR body.
  *   - `buildAutofixComment(url)` — the exact `Autofixed by PR: <url>` queue-stub
  *     comment the outcome digest reads (AUTOFIX_COMMENT_PREFIX, imported from
  *     the digest so the contract can never drift).
- *   - `fixPrOpenedLabelDef()` — the `sentry:fix-pr-opened` label definition from
- *     the ingest's LABEL_DEFINITIONS (single source of truth), so the workflow
- *     can self-heal the label before applying it.
+ *   - `fixPrOpenedLabelDef()` / `fixRefusedLabelDef()` — the `sentry:fix-pr-opened`
+ *     and `sentry:fix-refused` label definitions from the ingest's
+ *     LABEL_DEFINITIONS (single source of truth), so the workflow can self-heal
+ *     the label before applying it.
+ *   - `buildAutofixRunRecordBody(...)` — the tracker run-record comment body
+ *     (mirrors the ingest run record), for the workflow's always-run record job.
  *
  * Every credential is confined to the workflow's deterministic steps: the LLM
  * step holds no write token, so nothing here can be reached with agent-supplied
@@ -37,6 +41,7 @@ import { createHash } from "node:crypto";
 import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
 import {
   FIX_PR_OPENED_LABEL,
+  FIX_REFUSED_LABEL,
   LABEL_DEFINITIONS,
 } from "./sentry-triage-ingest.mjs";
 import {
@@ -193,22 +198,92 @@ export function evaluateDiffGuard(files) {
   return { ok: true };
 }
 
-/** The `sentry:fix-pr-opened` label definition from the single source of truth
- * (ingest LABEL_DEFINITIONS), so the workflow self-heals it before labeling. */
-export function fixPrOpenedLabelDef() {
-  const def = LABEL_DEFINITIONS.find((d) => d.name === FIX_PR_OPENED_LABEL);
+/** Look up a label definition from the ingest's single source of truth, failing
+ * loud if the label single-source drifted. */
+function labelDefByName(name) {
+  const def = LABEL_DEFINITIONS.find((d) => d.name === name);
   if (!def) {
     throw new Error(
-      `${FIX_PR_OPENED_LABEL} is missing from LABEL_DEFINITIONS; the label single-source drifted.`,
+      `${name} is missing from LABEL_DEFINITIONS; the label single-source drifted.`,
     );
   }
   return def;
+}
+
+/** The `sentry:fix-pr-opened` label definition from the single source of truth
+ * (ingest LABEL_DEFINITIONS), so the workflow self-heals it before labeling. */
+export function fixPrOpenedLabelDef() {
+  return labelDefByName(FIX_PR_OPENED_LABEL);
+}
+
+/** The `sentry:fix-refused` label definition from the same single source, so the
+ * workflow's refused path self-heals it before marking a stub as refused. */
+export function fixRefusedLabelDef() {
+  return labelDefByName(FIX_REFUSED_LABEL);
 }
 
 /** The exact queue-stub comment the outcome digest reads to link the fix PR
  * (AUTOFIX_COMMENT_PREFIX). Body is exactly `Autofixed by PR: <url>`. */
 export function buildAutofixComment(url) {
   return `${AUTOFIX_COMMENT_PREFIX}${String(url ?? "").trim()}`;
+}
+
+// ---------------------------------------------------------------------------
+// Tracker run record. Mirrors the ingest's rolling-comment run record
+// (buildRunRecordBody / RUN_RECORD_MARKER, sentry-triage-ingest.mjs) so the
+// autofix leg also leaves a durable per-run record on the pipeline tracker
+// issue — the ADR 0036 observability invariant (every run leaves a record, so a
+// silently-dead schedule is detectable even when the leg is disabled,
+// unprovisioned, or finds zero candidates). This module only BUILDS the body
+// (pure); the workflow's always-run record job does the best-effort
+// rolling-comment upsert keyed by the marker below.
+// ---------------------------------------------------------------------------
+
+export const AUTOFIX_RUN_RECORD_MARKER =
+  "<!-- sentry-autofix:run-record:v1 -->";
+
+function nonNegativeInt(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 ? n : 0;
+}
+
+/** One-line, control-char-free rendering of a workflow-controlled label
+ * (trigger/disposition are not agent/Sentry-derived, but this comment lands on
+ * a public issue, so keep it single-line as defense in depth). */
+function oneLine(value, fallback) {
+  const s = String(value ?? "")
+    .replace(/[\r\n\t]+/g, " ")
+    .trim();
+  return s || fallback;
+}
+
+/**
+ * Build the autofix run-record comment body — same shape/family as the ingest
+ * run record so the two rolling comments on the tracker read consistently.
+ * `trigger` and `disposition` are workflow-controlled; the counters are coerced
+ * to non-negative integers.
+ */
+export function buildAutofixRunRecordBody({
+  timestampIso,
+  trigger,
+  disposition,
+  candidates,
+  opened,
+  refused,
+  incomplete,
+}) {
+  return [
+    AUTOFIX_RUN_RECORD_MARKER,
+    "",
+    `**Sentry autofix — last run:** ${oneLine(timestampIso, "unknown")}`,
+    "",
+    `- Trigger: ${oneLine(trigger, "unknown")}`,
+    `- State: ${oneLine(disposition, "unknown")}`,
+    `- Candidates selected: ${nonNegativeInt(candidates)}`,
+    `- Fix PRs opened: ${nonNegativeInt(opened)}`,
+    `- Refused (no PR): ${nonNegativeInt(refused)}`,
+    `- Incomplete / errored: ${nonNegativeInt(incomplete)}`,
+  ].join("\n");
 }
 
 /**
@@ -241,40 +316,13 @@ export function buildAnalysisComment(reason, summary) {
   return `${parts.join("\n")}\n`;
 }
 
-// A usable agent summary must carry both repo-standard headings with real
-// content under them. Anything else falls back to the fully templated body so a
-// blank/junk summary can never produce an empty or malformed PR description.
+// Repo-standard PR-description headings. The fix-PR body ALWAYS leads with these
+// two mechanical sections (the fix PR's own required PR-description check
+// enforces `## The Problem` then `## The Solution`); the agent's untrusted
+// write-up is fenced separately as advisory data, never rendered as the live
+// heading content.
 const PROBLEM_HEADING = "## The Problem";
 const SOLUTION_HEADING = "## The Solution";
-
-/** True when the agent-written summary has both required headings and some
- * non-heading content — otherwise the caller uses the templated fallback. */
-export function isUsableSummary(text) {
-  const raw = String(text ?? "");
-  if (!raw.includes(PROBLEM_HEADING) || !raw.includes(SOLUTION_HEADING)) {
-    return false;
-  }
-  // Require some non-blank, non-heading line so "## The Problem\n## The
-  // Solution" alone is rejected.
-  const meaningful = raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !line.startsWith("#"));
-  return meaningful.length > 0;
-}
-
-/** Strip control chars and hard-bound the agent summary before it lands in a PR
- * body. It is agent-authored text; this is defense in depth (the PR still goes
- * through human + required-CI review), not the trust boundary. */
-function boundSummary(text, { maxLen = 4000 } = {}) {
-  let s = String(text ?? "")
-    // eslint-disable-next-line no-control-regex -- strip control chars from agent text; keep \n + \t
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-    .replace(/\r/g, "")
-    .trim();
-  if (s.length > maxLen) s = `${s.slice(0, maxLen).trimEnd()}…`;
-  return s;
-}
 
 function provenanceSection(shortId, queueIssue) {
   return [
@@ -293,10 +341,22 @@ function provenanceSection(shortId, queueIssue) {
 }
 
 /**
- * Assemble the repo-standard PR body. When the agent's Problem/Solution summary
- * is usable it leads (so the body starts with `## The Problem`, per the repo PR
- * standard); otherwise a fully templated Problem/Solution is used. Either way
- * the provenance + `Fixes`/`Refs` footer is appended deterministically.
+ * Assemble the fix-PR body. The DETERMINISTIC template is the only mechanical
+ * structure: it always leads with `## The Problem` then `## The Solution` (the
+ * repo PR-description standard, enforced by the fix PR's own required check) and
+ * closes with the provenance + `Fixes`/`Refs` footer.
+ *
+ * The agent's Problem/Solution write-up is UNTRUSTED — it is machine-generated
+ * from a second-order untrusted Sentry verdict — so it is NEVER rendered as live
+ * markdown. It is run through `neutralizeBlock` (backticks, @-mentions, and
+ * HTML-comment openers defanged; control chars stripped; length + line bounded,
+ * same bounds as the no-PR analysis comment) and embedded inside a clearly
+ * labeled fenced block as inert advisory data. This closes the disclosure path
+ * where an injected verdict steers the agent into copying Sentry payload / user
+ * data straight into a PUBLIC PR body at `gh pr create` time, before any human
+ * review — and keeps the fence unbreakable (a `` ``` `` inside the summary is
+ * defanged, so it cannot close the block and reactivate markdown). The
+ * mechanical parts stay OUTSIDE the fence so they remain trustworthy.
  */
 export function buildPrBody({ shortId, queueIssue, summary }) {
   if (!isValidShortId(shortId)) {
@@ -311,23 +371,32 @@ export function buildPrBody({ shortId, queueIssue, summary }) {
     );
   }
 
-  let head;
-  if (isUsableSummary(summary)) {
-    head = boundSummary(summary);
-  } else {
-    head = [
-      PROBLEM_HEADING,
+  const parts = [
+    PROBLEM_HEADING,
+    "",
+    `- A Sentry-triaged code bug (\`${shortId}\`) was verdicted \`code-fix\` for this repo.`,
+    "- A scoped, mechanically-bounded fix is proposed in the diff; the autofix agent's own write-up is included below as advisory data.",
+    "",
+    SOLUTION_HEADING,
+    "",
+    "- A small code change addresses the triaged root cause. Review the diff against the linked Sentry issue.",
+  ];
+
+  const bounded = neutralizeBlock(summary, { maxLen: 2000, maxLines: 40 });
+  if (bounded) {
+    parts.push(
       "",
-      `- A Sentry-triaged code bug (\`${shortId}\`) was verdicted \`code-fix\` for this repo.`,
-      "- The autofix agent implemented a scoped fix but did not leave a usable Problem/Solution summary.",
+      "---",
       "",
-      SOLUTION_HEADING,
+      "Agent analysis (advisory — machine-generated from an untrusted triage verdict, included as inert data):",
       "",
-      "- A small, mechanically-bounded code change addresses the triaged root cause. See the diff for specifics and confirm against the linked Sentry issue.",
-    ].join("\n");
+      "```text",
+      bounded,
+      "```",
+    );
   }
 
-  return `${head}\n\n${provenanceSection(shortId, issue)}\n`;
+  return `${parts.join("\n")}\n\n${provenanceSection(shortId, issue)}\n`;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +424,11 @@ Commands:
       Print the deterministic branch name (sentry-autofix/<short-id-lower>).
   label-def
       Print the sentry:fix-pr-opened label definition as JSON.
+  refused-label-def
+      Print the sentry:fix-refused label definition as JSON.
+  run-record --timestamp <iso> --trigger <t> --disposition <d> \\
+             --candidates <n> --opened <n> --refused <n> --incomplete <n>
+      Print the tracker run-record comment body (rolling comment, marker-keyed).
   -h, --help
 `;
 }
@@ -419,6 +493,24 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
     }
     case "label-def": {
       stdout.write(`${JSON.stringify(fixPrOpenedLabelDef())}\n`);
+      return;
+    }
+    case "refused-label-def": {
+      stdout.write(`${JSON.stringify(fixRefusedLabelDef())}\n`);
+      return;
+    }
+    case "run-record": {
+      stdout.write(
+        `${buildAutofixRunRecordBody({
+          timestampIso: readFlag(args, "--timestamp"),
+          trigger: readFlag(args, "--trigger"),
+          disposition: readFlag(args, "--disposition"),
+          candidates: readFlag(args, "--candidates"),
+          opened: readFlag(args, "--opened"),
+          refused: readFlag(args, "--refused"),
+          incomplete: readFlag(args, "--incomplete"),
+        })}\n`,
+      );
       return;
     }
     case "-h":

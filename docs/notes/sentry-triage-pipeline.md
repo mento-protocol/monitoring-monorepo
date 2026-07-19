@@ -793,7 +793,8 @@ GitHub App token. It is **PR-only** — nothing ever merges automatically; merge
 stays human. It runs as its own scheduled workflow
 (`.github/workflows/sentry-autofix.yml`), separate from the triage workflow, on
 a weekday cron (`30 8 * * 1-5`, after the ~07:55 triage run) plus a
-single-issue `workflow_dispatch` dry-run. Helpers:
+single-issue `workflow_dispatch` live run (opens a real fix PR if the issue is
+eligible — there is no non-mutating dry-run mode). Helpers:
 `scripts/sentry-autofix-select.mjs` (selection) and
 `scripts/sentry-autofix-finalize.mjs` (diff guard + PR-body assembly), both with
 offline tests.
@@ -838,11 +839,17 @@ triage label step uses (`sentry-triage-project-core.mjs` `resolveVerdict`), and
 keeps only stubs whose `affected_repo` resolves to EXACTLY
 `mento-protocol/monitoring-monorepo` (an unrecognized value is not treated as a
 confident local classification, so it is skipped). Dedup: a stub already
-carrying `sentry:fix-pr-opened`, or whose SHORT-ID any existing PR already
-references (`gh pr list --state all`), is skipped — the leg never opens a second
-PR for the same Sentry issue. Oldest-first, **hard-capped at 2 per run** (quota
-cap). The `workflow_dispatch` dry-run evaluates a single requested issue through
-the same filters. The whole workflow runs **only from `main`** (the select job
+carrying `sentry:fix-pr-opened` (a PR was opened) or `sentry:fix-refused` (an
+attempt declined to open one), or whose SHORT-ID is quoted-referenced by an
+**open** PR (`gh pr list --state open --search "\"<SHORT-ID>\""`), is skipped.
+Quoting forces exact-phrase matching so an unrelated PR that merely mentions the
+tokens — or a longer SHORT-ID sharing the prefix — can't falsely dedup an
+eligible stub; scoping to open PRs means a merged/closed fix PR no longer blocks
+— once a fixed issue regresses, the ingest reopen sheds the autofix markers
+(`REOPEN_SHED_LABELS`) and the stub is re-attemptable by design. Oldest-first,
+**hard-capped at 2 per run** (quota cap). The single-issue `workflow_dispatch`
+live run evaluates one requested issue through the same filters (an eligible
+issue opens a real PR). The whole workflow runs **only from `main`** (the select job
 no-ops on any other ref): the pristine base is pinned to `github.sha`, so a
 dispatch from a feature ref would make that ref the base and its divergence from
 `main` would bypass the 3-file diff guard and land in the PR (which opens against
@@ -850,12 +857,20 @@ dispatch from a feature ref would make that ref the base and its divergence from
 
 **Diff guard (mechanical, not just prompt-enforced).** After the agent edits,
 the finalize step detects the changes and refuses — posting a no-PR analysis
-comment on the queue stub, applying no label, exiting cleanly — when the diff
-has zero changes, more than 3 changed files, or ANY changed path under a
-forbidden prefix: `.github/`, `terraform/`, all of `scripts/`, `patches/`, any
-`package.json`, `pnpm-lock.yaml`, `.npmrc`, any `pnpmfile`, `.trunk/`, `tools/`.
-The prompt states the same limits, but the guard enforces them in code so an
-over-eager or injected agent cannot land a forbidden-path or sprawling diff.
+comment on the queue stub, marking it `sentry:fix-refused`, exiting cleanly —
+when the diff has zero changes, more than 3 changed files, or ANY changed path
+under a forbidden prefix: `.github/`, `terraform/`, all of `scripts/`,
+`patches/`, any `package.json`, `pnpm-lock.yaml`, `.npmrc`, any `pnpmfile`,
+`.trunk/`, `tools/`. The prompt states the same limits, but the guard enforces
+them in code so an over-eager or injected agent cannot land a forbidden-path or
+sprawling diff.
+
+The `sentry:fix-refused` marker is what stops a genuinely unfixable stub from
+being re-picked on every schedule and burning the per-run cap forever
+(starvation): the selector excludes it server-side exactly like
+`sentry:fix-pr-opened`. A human retries a refused stub by **removing the label**;
+a regression reopen sheds it automatically (`REOPEN_SHED_LABELS`), since it
+described the old occurrence.
 
 **Tainted-checkout containment (no git on the checkout, ever).** The agent has
 `Write` access to the checkout, which includes the untracked `.git/` — so a
@@ -918,6 +933,21 @@ outcome digest's authorship fence) — posts the machine-parseable
 digest's "Autofixed" section reads) and applies the `sentry:fix-pr-opened`
 label, self-healed first from the ingest's `LABEL_DEFINITIONS` single source.
 The App token is never used for these local writes.
+
+**Run record (observability).** A final `record-run` job runs on EVERY autofix
+run — including when the leg is off-main, disabled, unprovisioned, finds zero
+candidates, or selection itself failed — and upserts a single rolling comment
+(its own `<!-- sentry-autofix:run-record:v1 -->` marker, distinct from the
+ingest's) on tracker issue
+[#1282](https://github.com/mento-protocol/monitoring-monorepo/issues/1282) with
+the timestamp, trigger, disposition, and the candidates-selected /
+PRs-opened / refused / incomplete tallies (read back from the selected stubs'
+`sentry:fix-pr-opened` / `sentry:fix-refused` labels, so no matrix-output
+plumbing is needed). It is best-effort and least-privileged (`issues: write`
+only, no Claude/App credential): a failed tracker write never reds the run,
+because a MISSING record is itself the dead-man-switch signal. This mirrors the
+ingest run record and satisfies the ADR 0036 observability invariant that every
+run leaves a durable record on the tracker.
 
 **Merge stays human.** Nothing in this leg merges. The fix PR is an ordinary PR:
 required CI, independent Codex review, and a human approving the merge —

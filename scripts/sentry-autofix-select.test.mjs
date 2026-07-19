@@ -7,7 +7,10 @@ import {
   selectAutofixCandidates,
 } from "./sentry-autofix-select.mjs";
 import { VERDICT_MARKER } from "./sentry-triage-project-core.mjs";
-import { FIX_PR_OPENED_LABEL } from "./sentry-triage-ingest.mjs";
+import {
+  FIX_PR_OPENED_LABEL,
+  FIX_REFUSED_LABEL,
+} from "./sentry-triage-ingest.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -84,7 +87,9 @@ function stub({
  * Mock `gh`:
  *  - issue list -> the stub summaries (number/title/labels/createdAt)
  *  - issue view -> the full stub (with comments)
- *  - pr list    -> [] unless the searched SHORT-ID is in `prShortIds`
+ *  - pr list    -> [] unless the searched SHORT-ID is in `prShortIds` (the
+ *                  fixture models an OPEN-PR reference; the selector passes
+ *                  `--state open` and a quoted term, which the mock unwraps)
  */
 function makeRunGh({ stubs = [], prShortIds = [] } = {}) {
   const calls = [];
@@ -114,9 +119,10 @@ function makeRunGh({ stubs = [], prShortIds = [] } = {}) {
     }
     if (a0 === "pr" && a1 === "list") {
       const searched = args[args.indexOf("--search") + 1];
-      return JSON.stringify(
-        prShortIds.includes(searched) ? [{ number: 1 }] : [],
-      );
+      // The selector quotes the SHORT-ID for exact-phrase matching; unwrap the
+      // surrounding quotes so the fixture keys stay the bare SHORT-ID.
+      const term = searched.replace(/^"|"$/g, "");
+      return JSON.stringify(prShortIds.includes(term) ? [{ number: 1 }] : []);
     }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
@@ -170,11 +176,51 @@ await test("skips a stub already labeled sentry:fix-pr-opened", async () => {
   assertDeepEqual(selected, [{ issue: 21, shortId: "APP-MENTO-ORG-6W" }]);
 });
 
-await test("skips a stub whose SHORT-ID an existing PR references", async () => {
+await test("skips a stub whose SHORT-ID an OPEN PR references (quoted, open-only)", async () => {
   const stubs = [stub({ number: 30, shortId: "APP-MENTO-ORG-7X" })];
-  const { runGh } = makeRunGh({ stubs, prShortIds: ["APP-MENTO-ORG-7X"] });
+  const { runGh, calls } = makeRunGh({
+    stubs,
+    prShortIds: ["APP-MENTO-ORG-7X"],
+  });
   const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
   assertDeepEqual(selected, []);
+  // The dedup PR search must be scoped to OPEN PRs (a merged/closed PR must not
+  // strand a regressed stub) and must quote the SHORT-ID (exact phrase, not a
+  // tokenized substring match).
+  const prCall = calls.find((c) => c[0] === "pr" && c[1] === "list");
+  assert(prCall, "pr list was queried");
+  const state = prCall[prCall.indexOf("--state") + 1];
+  const searched = prCall[prCall.indexOf("--search") + 1];
+  assert(state === "open", `pr search must be open-only, got ${state}`);
+  assert(
+    searched === '"APP-MENTO-ORG-7X"',
+    `pr search term must be quoted, got ${searched}`,
+  );
+});
+
+await test("skips a stub already labeled sentry:fix-refused (retry needs a human)", async () => {
+  const stubs = [
+    stub({
+      number: 32,
+      shortId: "APP-MENTO-ORG-7Y",
+      labels: [AUTOFIX_SELECT_LABEL, FIX_REFUSED_LABEL],
+    }),
+    stub({
+      number: 33,
+      shortId: "APP-MENTO-ORG-7Z",
+      createdAt: "2026-07-22T00:00:00Z",
+    }),
+  ];
+  const { runGh, calls } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
+  assertDeepEqual(selected, [{ issue: 33, shortId: "APP-MENTO-ORG-7Z" }]);
+  // Deduped by label before any PR query for the refused stub.
+  assert(
+    !calls.some(
+      (c) => c[0] === "issue" && c[1] === "view" && String(c[2]) === "32",
+    ),
+    "refused stub should never be view-read",
+  );
 });
 
 await test("skips a stub whose verdict targets an external owning repo", async () => {
@@ -263,7 +309,7 @@ await test("batch list pre-filters out non-local Sentry projects by title", asyn
   );
 });
 
-await test("single-issue dry-run evaluates only that issue through the filters", async () => {
+await test("single-issue live run evaluates only that issue through the filters", async () => {
   const stubs = [
     stub({ number: 80, shortId: "APP-MENTO-ORG-DD" }),
     stub({ number: 81, shortId: "APP-MENTO-ORG-EE" }),
@@ -276,7 +322,7 @@ await test("single-issue dry-run evaluates only that issue through the filters",
   assertDeepEqual(selected, [{ issue: 81, shortId: "APP-MENTO-ORG-EE" }]);
 });
 
-await test("single-issue dry-run rejects an ineligible issue (external repo)", async () => {
+await test("single-issue live run rejects an ineligible issue (external repo)", async () => {
   const stubs = [
     stub({
       number: 90,

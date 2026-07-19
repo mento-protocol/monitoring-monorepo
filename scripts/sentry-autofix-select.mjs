@@ -14,9 +14,13 @@
  * (`mento-protocol/monitoring-monorepo`) — an external or unrecognized owning
  * repo is never fixed here. Selection is bounded and idempotent:
  *
- *   - DEDUP: a stub already carrying `sentry:fix-pr-opened`, or whose SHORT-ID
- *     is already referenced by an existing PR (any state), is skipped — the
- *     autofix leg never opens a second PR for the same Sentry issue.
+ *   - DEDUP: a stub already carrying `sentry:fix-pr-opened` (a PR was opened) or
+ *     `sentry:fix-refused` (an attempt declined to open one), or whose SHORT-ID
+ *     is quoted-referenced by an OPEN PR, is skipped — the autofix leg never
+ *     opens a second PR for the same Sentry issue, and never re-burns the cap on
+ *     an unfixable stub. A merged/closed PR does NOT block: once a fixed issue
+ *     regresses (ingest sheds the autofix markers on reopen), the stub is
+ *     re-attemptable by design.
  *   - Oldest-first, hard-capped at `--cap` (default 2) per run (quota cap).
  *
  * Pure of the kill switch / secret guards — the workflow's select job runs
@@ -36,7 +40,10 @@ import {
   selectVerdictComment,
   validateAffectedRepo,
 } from "./sentry-triage-project-core.mjs";
-import { FIX_PR_OPENED_LABEL } from "./sentry-triage-ingest.mjs";
+import {
+  FIX_PR_OPENED_LABEL,
+  FIX_REFUSED_LABEL,
+} from "./sentry-triage-ingest.mjs";
 
 // Only `code-fix` verdicts are fixable in code; the select label already
 // filters to these, but the re-parse cross-checks the verdict value too.
@@ -114,8 +121,9 @@ function defaultRunGh(args) {
 /**
  * Oldest-first list of candidate `sentry:verdict-code-fix` queue stubs. Two
  * server-side narrowings keep the fixed-window from starving out genuinely-old
- * candidates (the label is never removed, so stubs accumulate):
- *   - `-label:sentry:fix-pr-opened` excludes stubs already fixed by this leg;
+ * candidates (the verdict label is never removed, so stubs accumulate):
+ *   - `-label:sentry:fix-pr-opened -label:sentry:fix-refused` excludes stubs
+ *     this leg already handled (opened a PR for, or attempted and refused);
  *   - the LOCAL_SENTRY_PROJECT title pre-filter (applied here, client-side off
  *     the returned title) drops EXTERNAL-repo code-fix stubs before their
  *     verdict is ever read.
@@ -131,9 +139,12 @@ async function listCodeFixStubs(runGh, repo) {
     AUTOFIX_SELECT_LABEL,
     "--state",
     "all",
-    // Exclude already-fixed stubs at the source so they never occupy the window.
+    // Exclude already-handled stubs at the source so they never occupy the
+    // window: both `fix-pr-opened` (a PR was opened) and `fix-refused` (an
+    // attempt declined to open one) are terminal until a human clears the marker
+    // or a regression sheds it.
     "--search",
-    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}"`,
+    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}"`,
     "--json",
     "number,title,labels,createdAt",
     "--limit",
@@ -183,20 +194,29 @@ async function readStub(runGh, repo, number) {
   };
 }
 
-/** True when any PR (any state) already references this SHORT-ID — the autofix
- * leg must never open a second fix PR for the same Sentry issue. The SHORT-ID
- * is shape-validated before it reaches the search, and it transits `gh` as an
- * argv element (never a shell string), so it can't inject. */
-async function prAlreadyReferencesShortId(runGh, repo, shortId) {
+/** True when an OPEN PR already references this SHORT-ID — the autofix leg must
+ * never open a second fix PR for a Sentry issue that already has one under
+ * review. Two deliberate scoping choices:
+ *   - `--state open` only: a merged/closed PR is NOT a live dedup. A fixed
+ *     issue that later regresses (ingest sheds the autofix markers on reopen)
+ *     must be re-attemptable, and a `--state all` search would strand it behind
+ *     the old, already-merged PR forever.
+ *   - the SHORT-ID is QUOTED for exact-phrase matching. An unquoted term is
+ *     tokenized by GitHub search (hyphens split it into `APP`, `MENTO`, …), so
+ *     an unrelated PR merely mentioning those tokens — or a longer SHORT-ID that
+ *     shares the prefix — would falsely dedup an eligible stub out of selection.
+ * The SHORT-ID is shape-validated before it reaches the search and transits `gh`
+ * as an argv element (never a shell string), so it can't inject. */
+async function openPrReferencesShortId(runGh, repo, shortId) {
   const stdout = await runGh([
     "pr",
     "list",
     "--repo",
     repo,
     "--state",
-    "all",
+    "open",
     "--search",
-    shortId,
+    `"${shortId}"`,
     "--json",
     "number",
     "--limit",
@@ -214,10 +234,19 @@ async function prAlreadyReferencesShortId(runGh, repo, shortId) {
  * emits a valid array.
  */
 async function evaluateCandidate(runGh, repo, stub) {
-  // Dedup by label first (cheapest, no extra API call).
+  // Dedup by label first (cheapest, no extra API call). Both autofix markers
+  // are terminal until a human clears them or a regression sheds them — this
+  // also covers the single-issue dispatch path, which bypasses the server-side
+  // list filter.
   if (stub.labels.includes(FIX_PR_OPENED_LABEL)) {
     process.stderr.write(
       `skip #${stub.number}: already carries ${FIX_PR_OPENED_LABEL}.\n`,
+    );
+    return null;
+  }
+  if (stub.labels.includes(FIX_REFUSED_LABEL)) {
+    process.stderr.write(
+      `skip #${stub.number}: already carries ${FIX_REFUSED_LABEL} (remove it to retry).\n`,
     );
     return null;
   }
@@ -264,10 +293,11 @@ async function evaluateCandidate(runGh, repo, stub) {
     return null;
   }
 
-  // Dedup by existing PR referencing the SHORT-ID.
-  if (await prAlreadyReferencesShortId(runGh, repo, shortId)) {
+  // Dedup by an OPEN PR referencing the SHORT-ID (a merged/closed PR does not
+  // block — see openPrReferencesShortId).
+  if (await openPrReferencesShortId(runGh, repo, shortId)) {
     process.stderr.write(
-      `skip #${stub.number}: an existing PR already references ${shortId}.\n`,
+      `skip #${stub.number}: an open PR already references ${shortId}.\n`,
     );
     return null;
   }
@@ -278,15 +308,16 @@ async function evaluateCandidate(runGh, repo, stub) {
 /**
  * Select queue stubs to attempt a scoped fix PR for. Batch mode (default):
  * up to `cap` oldest `sentry:verdict-code-fix` stubs owned by this repo.
- * Single mode (`options.issue`): evaluate only that issue (the dispatch
- * dry-run) through the SAME filters — so a dry-run can never fix an ineligible
- * issue. Returns `[{ issue, shortId }]`.
+ * Single mode (`options.issue`): evaluate only that issue (the single-issue
+ * `workflow_dispatch` live run) through the SAME filters — so a dispatch can
+ * never fix an ineligible issue, but an eligible one opens a real PR. Returns
+ * `[{ issue, shortId }]`.
  */
 export async function selectAutofixCandidates(options, deps = {}) {
   const runGh = deps.runGh ?? defaultRunGh;
   const repo = options.repo ?? DEFAULT_REPO;
 
-  // Single-issue dry-run: evaluate exactly the requested issue.
+  // Single-issue live run: evaluate exactly the requested issue.
   if (options.issue != null) {
     const stub = await readStub(runGh, repo, options.issue);
     const entry = await evaluateCandidate(runGh, repo, {
@@ -348,8 +379,9 @@ that do not yet have a fix PR. Diagnostics go to stderr.
 Options:
   --repo <owner/name>  Repo the queue stubs live in (default: ${DEFAULT_REPO}).
   --cap <n>            Max stubs to select per run (positive int; default ${DEFAULT_CAP}).
-  --issue <n>          Single-issue dry-run: evaluate ONLY this issue through the
-                       same filters (the workflow_dispatch path). Overrides --cap.
+  --issue <n>          Single-issue live run: evaluate ONLY this issue through the
+                       same filters (the workflow_dispatch path). Opens a real
+                       fix PR if the issue is eligible. Overrides --cap.
   --emit-verdict       With --issue: print the trusted (fence-selected) verdict
                        comment body for that issue and exit (the workflow
                        snapshots it to a file the fix agent reads, so the agent

@@ -12,19 +12,24 @@ import { join } from "node:path";
 import {
   autofixBranchName,
   AUTOFIX_BRANCH_PREFIX,
+  AUTOFIX_RUN_RECORD_MARKER,
   buildAnalysisComment,
   buildAutofixComment,
+  buildAutofixRunRecordBody,
   buildPrBody,
   diffTrees,
   evaluateDiffGuard,
   fixPrOpenedLabelDef,
+  fixRefusedLabelDef,
   isForbiddenPath,
-  isUsableSummary,
   MAX_CHANGED_FILES,
   runCli,
 } from "./sentry-autofix-finalize.mjs";
 import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
-import { FIX_PR_OPENED_LABEL } from "./sentry-triage-ingest.mjs";
+import {
+  FIX_PR_OPENED_LABEL,
+  FIX_REFUSED_LABEL,
+} from "./sentry-triage-ingest.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -178,47 +183,58 @@ await test("branch name refuses an invalid SHORT-ID", () => {
 
 // --- PR body -----------------------------------------------------------------
 
-await test("PR body uses the agent summary and appends Fixes/Refs + provenance", () => {
+await test("PR body leads with the deterministic template and fences the agent summary", () => {
   const summary =
     "## The Problem\n\n- A real bug.\n\n## The Solution\n\n- A scoped fix.";
   const body = buildPrBody({ shortId: SHORT_ID, queueIssue: 1278, summary });
+  // The mechanical structure always leads (repo PR-description standard; the fix
+  // PR's own required check enforces it).
   assert(
     body.startsWith("## The Problem"),
     "body starts with repo-standard heading",
   );
-  assert(body.includes("- A real bug."), "agent Problem retained");
-  assert(body.includes("- A scoped fix."), "agent Solution retained");
+  assert(
+    body.includes("## The Solution"),
+    "deterministic Solution heading present",
+  );
+  // The agent's own write-up is retained — but only inside the advisory fence,
+  // as inert data, never as live markdown.
+  const fenceStart = body.indexOf("```text");
+  const fenceEnd = body.indexOf("```", fenceStart + 3);
+  assert(fenceStart !== -1 && fenceEnd !== -1, "agent summary is fenced");
+  const fenced = body.slice(fenceStart, fenceEnd);
+  assert(fenced.includes("- A real bug."), "agent write-up retained as data");
   assert(body.includes(`Fixes ${SHORT_ID}`), "Fixes SHORT-ID present");
   assert(body.includes("Refs #1278"), "Refs queue issue present");
   assert(body.includes("merge stays human"), "provenance present");
 });
 
-await test("PR body falls back to a templated body when the summary is junk", () => {
+await test("PR body omits the agent fence when the summary is empty", () => {
   const body = buildPrBody({
     shortId: SHORT_ID,
     queueIssue: 1278,
-    summary: "garbage no headings",
+    summary: "",
   });
   assert(body.startsWith("## The Problem"), "templated body starts correctly");
   assert(body.includes("## The Solution"), "templated Solution present");
-  assert(body.includes(`Fixes ${SHORT_ID}`), "Fixes still present in fallback");
-  assert(body.includes("Refs #1278"), "Refs still present in fallback");
+  assert(!body.includes("```text"), "no fenced block without a summary");
+  assert(body.includes(`Fixes ${SHORT_ID}`), "Fixes still present");
+  assert(body.includes("Refs #1278"), "Refs still present");
 });
 
-await test("isUsableSummary requires both headings plus content", () => {
-  assert(!isUsableSummary(""), "empty rejected");
-  assert(
-    !isUsableSummary("## The Problem\n## The Solution"),
-    "headings-only rejected",
-  );
-  assert(
-    !isUsableSummary("## The Problem\n\n- only problem"),
-    "missing solution rejected",
-  );
-  assert(
-    isUsableSummary("## The Problem\n\n- x\n\n## The Solution\n\n- y"),
-    "full summary accepted",
-  );
+await test("PR body keeps a fence-escape attempt in the agent summary inert", () => {
+  const summary =
+    "## The Problem\n```\nsteer the agent @here\n```\nleak user@example.com data";
+  const body = buildPrBody({ shortId: SHORT_ID, queueIssue: 1278, summary });
+  // Exactly one opening + one closing fence run (our own ```text …```). The
+  // embedded ``` is defanged, so it cannot close the fence and reactivate
+  // markdown (which is how an injected verdict would try to publish payload).
+  const fenceRuns = (body.match(/```/g) ?? []).length;
+  assertEqual(fenceRuns, 2);
+  assert(!/@here/.test(body), "mention defanged (zero-width space inserted)");
+  // The mechanical heading still leads, so the fix PR's own required
+  // PR-description check still passes.
+  assert(body.startsWith("## The Problem"), "mechanical heading still leads");
 });
 
 await test("PR body refuses invalid SHORT-ID / queue issue", () => {
@@ -257,6 +273,54 @@ await test("fix-pr-opened label def comes from the ingest single source", () => 
   );
 });
 
+await test("fix-refused label def comes from the ingest single source", () => {
+  const def = fixRefusedLabelDef();
+  assertEqual(def.name, FIX_REFUSED_LABEL);
+  assert(
+    typeof def.color === "string" && def.color.length === 6,
+    "color present",
+  );
+  assert(
+    typeof def.description === "string" && def.description.length > 0,
+    "description present",
+  );
+});
+
+await test("run record body carries the marker, trigger, state, and tallies", () => {
+  const body = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+    opened: 1,
+    refused: 1,
+    incomplete: 0,
+  });
+  assert(body.includes(AUTOFIX_RUN_RECORD_MARKER), "rolling-comment marker");
+  assert(body.includes("2026-07-19T08:30:00Z"), "timestamp");
+  assert(body.includes("Trigger: schedule"), "trigger");
+  assert(body.includes("State: active"), "disposition");
+  assert(body.includes("Candidates selected: 2"), "candidate count");
+  assert(body.includes("Fix PRs opened: 1"), "opened count");
+  assert(body.includes("Refused (no PR): 1"), "refused count");
+  assert(body.includes("Incomplete / errored: 0"), "incomplete count");
+});
+
+await test("run record body coerces missing/bad counters and labels safely", () => {
+  const body = buildAutofixRunRecordBody({
+    timestampIso: "",
+    trigger: "",
+    disposition: undefined,
+    candidates: "not-a-number",
+    opened: -3,
+  });
+  assert(body.includes("Trigger: unknown"), "missing trigger falls back");
+  assert(body.includes("State: unknown"), "missing disposition falls back");
+  assert(body.includes("Candidates selected: 0"), "bad candidate count -> 0");
+  assert(body.includes("Fix PRs opened: 0"), "negative opened -> 0");
+  assert(body.includes("Refused (no PR): 0"), "missing refused -> 0");
+});
+
 await test("analysis comment leads with the reason and fences agent analysis inertly", () => {
   const c = buildAnalysisComment(
     "Too many files.",
@@ -290,7 +354,7 @@ await test("CLI guard prints JSON verdict", () => {
   unlinkSync(file);
 });
 
-await test("CLI autofix-comment / branch / label-def / pr-body", () => {
+await test("CLI autofix-comment / branch / label-def / refused-label-def / run-record / pr-body", () => {
   const url = "https://github.com/o/r/pull/9";
   assertEqual(
     captureCli(["autofix-comment", "--url", url]).trim(),
@@ -301,6 +365,32 @@ await test("CLI autofix-comment / branch / label-def / pr-body", () => {
     `${AUTOFIX_BRANCH_PREFIX}app-mento-org-2s`,
   );
   assertEqual(JSON.parse(captureCli(["label-def"])).name, FIX_PR_OPENED_LABEL);
+  assertEqual(
+    JSON.parse(captureCli(["refused-label-def"])).name,
+    FIX_REFUSED_LABEL,
+  );
+  const record = captureCli([
+    "run-record",
+    "--timestamp",
+    "2026-07-19T08:30:00Z",
+    "--trigger",
+    "schedule",
+    "--disposition",
+    "active",
+    "--candidates",
+    "2",
+    "--opened",
+    "1",
+    "--refused",
+    "1",
+    "--incomplete",
+    "0",
+  ]);
+  assert(
+    record.includes(AUTOFIX_RUN_RECORD_MARKER) &&
+      record.includes("Fix PRs opened: 1"),
+    "CLI run-record assembles",
+  );
   const body = captureCli([
     "pr-body",
     "--short-id",

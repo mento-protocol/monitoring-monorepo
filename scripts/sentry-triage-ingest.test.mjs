@@ -841,20 +841,23 @@ await test("verdict label set is derived from the label definitions", () => {
   ]);
 });
 
-await test("reopen shed set is every verdict label plus sentry:projected", () => {
-  // A reopened regression must not keep reading as verdicted OR projected —
-  // the old projection described the old occurrence (PR #1356 review).
+await test("reopen shed set is every verdict label plus projected + autofix markers", () => {
+  // A reopened regression is a NEW occurrence: it must not keep reading as
+  // verdicted, projected, OR autofixed/refused — the old markers described the
+  // old occurrence, and a stale autofix marker also blocks re-autofix.
   assertDeepEqual(REOPEN_SHED_LABELS, [
     "sentry:verdict-code-fix",
     "sentry:verdict-config-fix",
     "sentry:verdict-upstream",
     "sentry:verdict-needs-human",
     "sentry:projected",
+    "sentry:fix-pr-opened",
+    "sentry:fix-refused",
   ]);
   assertEqual(PROJECTED_LABEL, "sentry:projected");
 });
 
-await test("reopen label edit re-queues triage and sheds stale verdict + projected labels", () => {
+await test("reopen label edit re-queues triage and sheds stale verdict + projected + autofix labels", () => {
   const args = buildReopenLabelEditArgs(200, "owner/repo");
   assertDeepEqual(args, [
     "issue",
@@ -865,7 +868,7 @@ await test("reopen label edit re-queues triage and sheds stale verdict + project
     "--add-label",
     "sentry:needs-triage",
     "--remove-label",
-    "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human,sentry:projected",
+    "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human,sentry:projected,sentry:fix-pr-opened,sentry:fix-refused",
   ]);
 });
 
