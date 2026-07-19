@@ -47,7 +47,9 @@ ${local.monad_relayer_signer_branches}
 {{ end -}}
 {{ $titleURL := .GeneratorURL -}}
 {{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
-*<{{ $titleURL }}|Stale price for the {{ $slash }} rate feed on {{ $chain }}>*
+*<{{ $titleURL }}|{{ $slash }} oracle report expired on {{ $chain }}> — swaps using this feed may revert until a fresh report is relayed*
+Next action: confirm the relayer is executing, then inspect errors for this feed.
+- If this is an FX feed during the weekend market closure, snooze it and escalate the monitoring configuration; this alert should have been muted
 - Check the latest transactions of the {{ if $relayer -}}<https://{{ .Labels.explorer }}/address/{{ $relayer }}|{{ $slash }} relayer on {{ $chain }}>{{- else -}}{{ $slash }} relayer on {{ $chain }}{{- end }}
 - Check if the <https://console.cloud.google.com/logs/query;query=resource.labels.service_name%3D%22relay-{{ .Labels.chain }}%22%20AND%20labels.rateFeed%3D%22{{ $enc }}%22?project=${local.oracle_relayer_mainnet_project_id}|relayer cloud function> is still being triggered regularly
 
@@ -58,7 +60,7 @@ ${local.monad_relayer_signer_branches}
 {{ $chain := .Labels.chain | title -}}
 {{ $titleURL := .GeneratorURL -}}
 {{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
-*<{{ $titleURL }}|{{ $slash }} price is fresh again on {{ $chain }}>*
+*<{{ $titleURL }}|{{ $slash }} oracle report is fresh again on {{ $chain }}> — swap availability has recovered*
 {{ end -}}
 {{ end }}
 EOT

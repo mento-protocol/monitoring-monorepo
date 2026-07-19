@@ -14,7 +14,7 @@ resource "grafana_rule_group" "oracle_relayers" {
       no_data_state  = "NoData"
 
       annotations = {
-        summary = "The {{ $labels.rateFeed }} rate feed is stale on {{ $labels.chain | title }}. Check for possible issues with the oracle relayer."
+        summary = "{{ $labels.rateFeed }} oracle report expired on {{ $labels.chain | title }}. Swaps using this feed may revert until a fresh report is relayed."
       }
 
       labels = {

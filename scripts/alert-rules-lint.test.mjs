@@ -344,6 +344,62 @@ test("trading-mode notification templates avoid single-alert duplicate headings"
   );
 });
 
+test("oracle expiry notifications lead with human impact and action", () => {
+  const victorops = readFileSync(
+    path.resolve(
+      __dirname,
+      "..",
+      "alerts/rules/message-templates-victorops.tf",
+    ),
+    "utf8",
+  );
+  assert(
+    victorops.includes("P1 {{ range") &&
+      victorops.includes("oracle report expired"),
+    "VictorOps title should identify the page, chain, feed, and failure",
+  );
+  assert(
+    victorops.includes(
+      "{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end -}}",
+    ),
+    "VictorOps title should surface both states in mixed notification batches",
+  );
+  assert(
+    victorops.includes("Swaps using this feed may revert") &&
+      victorops.includes("ACTION: Check whether relay-"),
+    "VictorOps message should state impact and the next action",
+  );
+  assert(
+    !victorops.includes("FIRING: Stale price for"),
+    "VictorOps message should not use the old ambiguous stale-price copy",
+  );
+  const staleMessageStart = victorops.indexOf(
+    'resource "grafana_message_template" "victorops_oracle_stale_price_alert_message"',
+  );
+  const staleMessageEnd = victorops.indexOf(
+    'resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_title"',
+  );
+  assert(
+    staleMessageStart >= 0 && staleMessageEnd > staleMessageStart,
+    "stale-price VictorOps message template not found",
+  );
+  const staleMessage = victorops.slice(staleMessageStart, staleMessageEnd);
+  assert(
+    !staleMessage.includes("No alerts are currently firing."),
+    "resolve-only pages should start directly with the recovery message",
+  );
+  const slack = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/message-templates-slack.tf"),
+    "utf8",
+  );
+  assert(
+    slack.includes(
+      "If this is an FX feed during the weekend market closure, snooze it and escalate the monitoring configuration",
+    ),
+    "Slack should carry the same weekend-FX routing guidance as VictorOps",
+  );
+});
+
 test("Slack trading-mode bodies suppress duplicate single-alert headings", () => {
   const source = readFileSync(
     path.resolve(__dirname, "..", "alerts/rules/message-templates-slack.tf"),
