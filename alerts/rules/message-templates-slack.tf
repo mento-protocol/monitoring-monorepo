@@ -51,7 +51,7 @@ ${local.polygon_relayer_signer_branches}
 {{ end -}}
 {{ $titleURL := .GeneratorURL -}}
 {{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
-{{ if and (eq .Labels.chain "polygon") (eq .Labels.rateFeed "EUROPEUR") -}}
+{{ if and (or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-testnet")) (eq .Labels.rateFeed "EUROPEUR") -}}
 *<{{ $titleURL }}|{{ $slash }} fixed oracle report expired on {{ $chain }}> — swaps using this feed may revert until the fixed report is refreshed*
 Next action: inspect the fixed 1.0 EUR-parity report in this chain's SortedOracles, then contact the deployment/migration owner responsible for it.
 {{ else -}}

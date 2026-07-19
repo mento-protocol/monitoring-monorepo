@@ -28,7 +28,7 @@ resource "grafana_message_template" "victorops_oracle_stale_price_alert_message"
 {{ range .Alerts.Firing -}}
 {{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $enc := reReplaceAll "/" "%2F" $slash -}}
-{{ if and (eq .Labels.chain "polygon") (eq .Labels.rateFeed "EUROPEUR") -}}
+{{ if and (or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-testnet")) (eq .Labels.rateFeed "EUROPEUR") -}}
 PROBLEM: The fixed 1.0 EUR-parity report in SortedOracles on {{ .Labels.chain | title }} has expired. Swaps using this feed may revert until the fixed report is refreshed.
 ACTION: Inspect the fixed report, then contact the deployment/migration owner responsible for it.
 {{ else -}}

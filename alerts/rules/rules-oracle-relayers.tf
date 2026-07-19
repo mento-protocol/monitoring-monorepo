@@ -14,7 +14,7 @@ resource "grafana_rule_group" "oracle_relayers" {
       no_data_state  = "NoData"
 
       annotations = {
-        summary = "{{ $labels.rateFeed }} oracle report expired on {{ $labels.chain | title }}. Swaps using this feed may revert. {{ if and (eq $labels.chain \"polygon\") (eq $labels.rateFeed \"EUROPEUR\") }}Check the deployment/migration owner responsible for the fixed 1.0 SortedOracles report.{{ else }}Check whether the oracle relayer is executing and inspect errors for this feed.{{ end }}"
+        summary = "{{ $labels.rateFeed }} oracle report expired on {{ $labels.chain | title }}. Swaps using this feed may revert. {{ if and (or (eq $labels.chain \"polygon\") (eq $labels.chain \"polygon-testnet\")) (eq $labels.rateFeed \"EUROPEUR\") }}Check the deployment/migration owner responsible for the fixed 1.0 SortedOracles report.{{ else }}Check whether the oracle relayer is executing and inspect errors for this feed.{{ end }}"
       }
 
       labels = {
