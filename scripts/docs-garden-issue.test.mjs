@@ -660,6 +660,11 @@ await test("scheduled workflow fetches the history required by packet evidence",
     /actions\/checkout@[a-f0-9]+[^\n]*\n\s+with:\n(?:\s+#[^\n]*\n)*\s+#[^\n]*\n\s+fetch-depth: 0/,
   );
   assert.match(workflow, /id-token: write/);
+  assert.match(
+    workflow,
+    /github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)/,
+  );
+  assert.doesNotMatch(workflow, /github\.ref_name ==/);
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
