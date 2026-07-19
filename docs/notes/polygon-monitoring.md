@@ -3,7 +3,7 @@ title: Polygon monitoring coverage and rollout
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-19
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -93,23 +93,57 @@ must not guess them. Stuck bridge-transfer paging is tracked in #1362.
 ## Rollout order and proof
 
 The code being merged is configuration, not proof that production has already
-cut over. Roll out in this order:
+cut over. The `Polygon Pool Coverage Incomplete` rule intentionally treats no
+data as alerting after 10 minutes, and the per-chain Aegis liveness rule does
+the same after 5 minutes. The repository has no rollout mute for these rules;
+the weekend mute timing is only for scheduled FX-market closure. Producer
+telemetry must therefore be live before the protected `alerts-rules` apply is
+approved.
 
-1. Merge and apply the alert Terraform plans through their normal protected
-   production workflows. Never apply either stack from an agent session.
-2. Deploy the multichain Envio configuration to the `envio` branch.
-3. Wait for chain `137` to reach the hosted head and verify the three pools,
-   two NTT tokens, strategy registry, and bridge handlers at the candidate
-   deployment endpoint.
-4. Promote the candidate to the static production endpoint.
-5. Verify metrics-bridge exposes exactly three Polygon
-   `mento_pool_health_status` series and successful strategy probes.
-6. Verify the public dashboard in a browser: Polygon pool and volume filters,
+Roll out in this order:
+
+1. From the reviewed PR head, deploy the multichain Envio candidate to the
+   `envio` branch without promoting it.
+2. Wait for every chain to reach the hosted head. At the candidate endpoint,
+   verify the three Polygon pools, two NTT tokens, strategy registry, and
+   bridge handlers, then run the repository's commit-scoped deployment
+   verifier.
+3. Merge the PR. This starts the metrics-bridge and Aegis production-service
+   deploys and the protected Terraform workflows in parallel. Keep the
+   `alerts-rules` `production-infra` approval pending.
+4. With explicit human approval, promote the already caught-up candidate as
+   soon as the PR lands, then wait for the static production endpoint to
+   switch to it.
+5. Wait for both service deploys to finish. Verify the static endpoint serves
+   the Polygon rows, metrics-bridge exposes exactly three Polygon
+   `mento_pool_health_status{chain_id="137"}` series plus successful strategy
+   probes, and Aegis has recent successful
+   `view_call_query_duration_count{chain="polygon",status="success"}` samples.
+6. Only after those producer checks pass, approve the `alerts-rules` apply
+   through its `production-infra` gate. Never apply the stack from an agent
+   session. Other protected Polygon stacks still require their own reviewed
+   plans and approvals, but they do not activate these no-data rules.
+7. Verify the public dashboard in a browser: Polygon pool and volume filters,
    both NTT stable rows, bridge source/destination filters, pool detail for the
    dual-strategy EURm/EUROP pool, and integrations state.
-7. Confirm the Polygon coverage and Aegis liveness rules are `Normal`, then
+8. Confirm the Polygon coverage and Aegis liveness rules are `Normal`, then
    exercise alert delivery only through the repository's documented safe test
    path.
 
-Until steps 2-5 finish, `Configured` is the correct status; do not describe
-Polygon as live at the static production endpoint.
+Until the static endpoint and producer checks in steps 4-5 pass, `Configured`
+is the correct status; do not describe Polygon as live.
+
+### Rollback order
+
+Rollback follows the dependency graph in reverse:
+
+1. If the rollback target still publishes all required Polygon telemetry, use
+   the normal commit-scoped Envio or service rollback and re-run the producer
+   checks above.
+2. If an Envio, metrics-bridge, or Aegis rollback would withdraw Polygon
+   telemetry, first merge the corresponding Polygon alert-rule revert and wait
+   for its protected `alerts-rules` apply to remove the dependent no-data rule.
+   Confirm the rule is absent before rolling back the producer.
+3. Roll back the producer, then verify the static endpoint, remaining metrics,
+   and public dashboard. Do not use the FX-weekend mute timing as a deployment
+   silence.

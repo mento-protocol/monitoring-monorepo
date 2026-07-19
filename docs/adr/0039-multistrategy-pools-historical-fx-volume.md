@@ -11,7 +11,7 @@ garden_lane: adrs-architecture
 date: 2026-07
 ---
 
-# ADR 0038 — Model pool strategies many-to-many and price same-currency swaps from historical FX crosses
+# ADR 0039 — Model pool strategies many-to-many and price same-currency swaps from historical FX crosses
 
 **Status:** Accepted (Jul 2026), in force.
 **Scope:** indexer-envio, ui-dashboard, metrics-bridge

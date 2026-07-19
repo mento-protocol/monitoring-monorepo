@@ -174,3 +174,22 @@ describe("StablesSparklineGrid — loading-branch skeleton parity", () => {
     expect(div.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
   });
 });
+
+describe("StablesSparklineGrid — chain labels", () => {
+  it("uses the canonical Polygon label for chain 137 cards", () => {
+    const div = renderGrid({
+      latestPerToken: [
+        snapshot({
+          chainId: 137,
+          timestamp: String(NOW_TS),
+          totalSupply: "1000000000000000000",
+        }),
+      ],
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(div.textContent).toContain("USDm on Polygon");
+    expect(div.textContent).not.toContain("Chain 137");
+  });
+});

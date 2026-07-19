@@ -1,5 +1,6 @@
 "use client";
 
+import { chainLabel } from "@mento-protocol/config/chains";
 import { useMemo } from "react";
 import { formatUSD } from "@/lib/format";
 import { displayLabel } from "@/lib/stables";
@@ -257,12 +258,6 @@ function SparklineCard({
       </div>
     </article>
   );
-}
-
-function chainLabel(chainId: number): string {
-  if (chainId === 143) return "Monad";
-  if (chainId === 42220) return "Celo";
-  return `Chain ${chainId}`;
 }
 
 function MiniSparkline({

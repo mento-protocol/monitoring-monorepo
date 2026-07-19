@@ -90,7 +90,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0017](0017-broker-denormalization-volume-dedup.md)      | Denormalize the v2 Broker swap path to de-duplicate router-routed volume            |
 | [0018](0018-indexer-observability-loki.md)               | Indexer observability is structured logs → Loki → Grafana, not Sentry               |
 | [0034](0034-steth-wallet-daily-sampler.md)               | stETH actuals use a launch-aligned sub-daily wallet balance sampler                 |
-| [0038](0038-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses     |
+| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses     |
 
 ### ui-dashboard
 
@@ -104,7 +104,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0024](0024-plotly-basic-dist-bundle-budgets.md)         | Plotly.js `basic-dist` + enforced bundle-size budgets                             |
 | [0025](0025-fixture-browser-tests-react-doctor.md)       | Fixture-driven browser tests + visual snapshots + a react-doctor score gate       |
 | [0037](0037-dashboard-graphql-zod-mini.md)               | Native GraphQL transport + Zod Mini for browser-reachable validation              |
-| [0038](0038-multistrategy-pools-historical-fx-volume.md) | Pool detail renders every active strategy from the indexed many-to-many registry  |
+| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool detail renders every active strategy from the indexed many-to-many registry  |
 
 ### aegis
 
@@ -117,7 +117,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | ADR                                                      | Decision                                                                     |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | [0027](0027-metrics-bridge-hasura-to-prometheus.md)      | A Hasura→Prometheus bridge exists so v3 DB data can drive Grafana alerts     |
-| [0038](0038-multistrategy-pools-historical-fx-volume.md) | Pool blockage requires every active indexed strategy to be confirmed blocked |
+| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool blockage requires every active indexed strategy to be confirmed blocked |
 
 ### terraform / infra
 
