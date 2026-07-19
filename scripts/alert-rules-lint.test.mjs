@@ -367,6 +367,21 @@ test("oracle expiry notifications lead with human impact and action", () => {
     !victorops.includes("FIRING: Stale price for"),
     "VictorOps message should not use the old ambiguous stale-price copy",
   );
+  const staleMessageStart = victorops.indexOf(
+    'resource "grafana_message_template" "victorops_oracle_stale_price_alert_message"',
+  );
+  const staleMessageEnd = victorops.indexOf(
+    'resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_title"',
+  );
+  assert(
+    staleMessageStart >= 0 && staleMessageEnd > staleMessageStart,
+    "stale-price VictorOps message template not found",
+  );
+  const staleMessage = victorops.slice(staleMessageStart, staleMessageEnd);
+  assert(
+    !staleMessage.includes("No alerts are currently firing."),
+    "resolve-only pages should start directly with the recovery message",
+  );
 });
 
 test("Slack trading-mode bodies suppress duplicate single-alert headings", () => {

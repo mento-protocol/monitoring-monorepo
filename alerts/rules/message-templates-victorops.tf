@@ -22,7 +22,6 @@ resource "grafana_message_template" "victorops_oracle_stale_price_alert_message"
   name     = "VictorOps - Stale Price Alert Message"
   template = <<-EOT
 {{ define "victorops.oracle_stale_price_alert_message" }}
-{{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
 {{ range .Alerts.Firing -}}
 {{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $enc := reReplaceAll "/" "%2F" $slash -}}
