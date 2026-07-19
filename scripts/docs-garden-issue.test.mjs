@@ -328,6 +328,16 @@ await test("claimed and in-PR occurrences preserve their scope", () => {
   }
 });
 
+await test("a needs-grooming occurrence remains the live blocked packet", () => {
+  const auditPacket = packet();
+  const decision = planDocsGardenIssueSync({
+    packet: auditPacket,
+    issues: [issueForPacket(auditPacket, { labels: ["needs-grooming"] })],
+  });
+  assert.equal(decision.action, "skip-blocked");
+  assert.match(decision.reason, /human clarification/);
+});
+
 await test("a different live occurrence blocks a new packet", () => {
   const current = packet();
   const prior = packet({ serial: current.cycle.week_serial - 1 });

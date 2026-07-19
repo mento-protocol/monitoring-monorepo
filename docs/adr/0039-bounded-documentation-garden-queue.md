@@ -42,11 +42,13 @@ Run the documentation garden through a deterministic, issue-only scheduler:
   lane/shard fingerprint; queue labels are never used as the identity because
   claiming deliberately changes them.
 - A published issue is immutable whether it is `agent-ready`, `agent-active`,
-  or `in-pr`. Reruns retain it without changing its body, title, or labels; this
-  removes the otherwise unavoidable race between a non-conditional GitHub issue
-  update and an agent claim. A subsequent occurrence is opened only after the
-  prior issue closes. Multiple live markers or conflicting state labels fail
-  loudly for manual recovery.
+  `in-pr`, or `needs-grooming`. Reruns retain it without changing its body,
+  title, or labels; this removes the otherwise unavoidable race between a
+  non-conditional GitHub issue update and an agent claim. A blocked
+  `needs-grooming` occurrence remains the one live packet until a human resolves
+  or closes it. A subsequent occurrence is opened only after the prior issue
+  closes. Multiple live markers or conflicting state labels fail loudly for
+  manual recovery.
 - Every generated issue contains all Agent Task sections, the complete planner
   packet, epic #1341, exact routing/risk/priority labels, and the verification
   and non-goal contract needed for independent execution.

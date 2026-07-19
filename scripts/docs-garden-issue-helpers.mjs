@@ -341,6 +341,13 @@ export function planDocsGardenIssueSync({ packet, issues }) {
         issue,
       };
     }
+    if (states[0] === "needs-grooming") {
+      return {
+        action: "skip-blocked",
+        reason: `issue #${issue.number} needs grooming; preserving blocked scope for human clarification`,
+        issue,
+      };
+    }
     throw new Error(
       `open docs-garden issue #${issue.number} is not claimable or in progress (${states[0]})`,
     );

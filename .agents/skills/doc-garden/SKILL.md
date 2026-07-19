@@ -25,7 +25,8 @@ editing.
    `docs-garden-issue:v1` and `docs-garden-packet:v1` markers. Confirm all
    eight Agent Task sections and the complete generated planner packet exist.
 2. Claim the issue through `pnpm issue:claim` before semantic edits. Do not
-   overwrite a packet already labeled `agent-active` or `in-pr`.
+   overwrite a packet already labeled `needs-grooming`, `agent-active`, or
+   `in-pr`; it remains the one live packet until resolved or closed.
 3. Reproduce the packet when needed:
 
 ```bash

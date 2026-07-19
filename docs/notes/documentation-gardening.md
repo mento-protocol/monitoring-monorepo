@@ -65,6 +65,8 @@ The queue is deliberately serialized:
 - planner scope drift before claim: preserve the issued scope and report a
   fail-closed no-op for manual review;
 - live occurrence `agent-active` or `in-pr`: leave its scope unchanged;
+- live occurrence `needs-grooming`: retain it as the one blocked packet until a
+  human resolves or closes it;
 - prior occurrence closed: advance to the next week serial and create the next
   bounded packet;
 - multiple live markers or conflicting queue-state labels: fail closed for
