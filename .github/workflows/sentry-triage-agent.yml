@@ -14,10 +14,12 @@ name: Sentry Triage Agent
 
 on:
   schedule:
-    # Weekdays only, 45 min after the ingest workflow (15 7 * * 1-5) so the
-    # queue is fresh; the digest job at the end of this run is the one daily
-    # Slack notification (~08:15 UTC, later with GitHub cron drift).
-    - cron: 0 8 * * 1-5
+    # Weekdays only, after the same-morning ingest run (30 5 * * *, which
+    # stays 2x/day every day for coverage) so the queue is fresh; the digest
+    # job at the end of this run is the one daily Slack notification
+    # (~08:10 UTC, later with GitHub cron drift). Off-the-hour like the
+    # ingest workflow to dodge cron contention on GitHub's scheduler.
+    - cron: 55 7 * * 1-5
   workflow_dispatch:
     # checkov:skip=CKV_GHA_7: issue_number is a single-issue dry-run selector,
     # validated to ^[0-9]+$ before use (see the select job). It only narrows

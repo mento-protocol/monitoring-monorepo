@@ -30,12 +30,15 @@ name: Sentry Triage Ingest
 
 on:
   schedule:
-    # Once per weekday, 45 min before the agent workflow (0 8 * * 1-5) so the
-    # queue is fresh for the single daily triage run — org-wide volume (~4-5
-    # new Sentry issues/day) doesn't need push-based latency, and one weekday
-    # digest keeps Slack quiet. Off-the-hour to dodge cron contention on
-    # GitHub's scheduler.
-    - cron: 15 7 * * 1-5
+    # 2x/day EVERY day, deliberately more frequent than the weekday-daily agent
+    # workflow (55 7 * * 1-5): ingest queries filter on is:unresolved, so a
+    # sparser schedule would silently skip issues that appear and get resolved
+    # in Sentry between runs (the weekend gap especially). Stubs created
+    # outside agent hours just wait in the durable queue — ingest itself posts
+    # nothing to Slack, so this costs no notification noise. Off-the-hour to
+    # dodge cron contention on GitHub's scheduler.
+    - cron: 30 5 * * *
+    - cron: 30 13 * * *
   workflow_dispatch:
     # checkov:skip=CKV_GHA_7: lookback_days only widens the Sentry firstSeen
     # search window for backfill after an outage or at first activation. It is

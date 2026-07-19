@@ -22,10 +22,11 @@ instead of rewriting it. Phase 1 = Stage A (deterministic ingest) + Stage B
 ## How it fits together
 
 The life of a Sentry issue, in one paragraph: an error event lands in one of
-the org's six Sentry projects; each weekday morning the deterministic ingest
-turns every new or regressed issue group into one redacted queue issue in this
-repo; 45
-minutes later the triage agent picks the oldest pending batch, investigates
+the org's six Sentry projects; twice a day — every day, so nothing that
+appears and gets resolved between sparser runs is missed — the deterministic
+ingest turns every new or regressed issue group into one redacted queue issue
+in this repo; each weekday morning the triage agent picks the oldest pending
+batch, investigates
 each via read-only Sentry access, and posts a structured verdict; a
 deterministic workflow step validates the verdict, applies the matching label,
 and — for every bucket except `needs-human` — closes the queue issue (state
@@ -45,7 +46,7 @@ flowchart LR
     end
 
     subgraph GHA["GitHub Actions — this repo"]
-        ING["<b>Stage A — ingest</b><br/>sentry-triage-ingest.yml<br/>deterministic script, weekday-daily"]
+        ING["<b>Stage A — ingest</b><br/>sentry-triage-ingest.yml<br/>deterministic script, 2×/day"]
         SEL["<b>Stage B — select</b><br/>10 oldest pending,<br/>oldest-first"]
         AGT["<b>Stage B — triage agents</b><br/>claude-code-action, ≤2 parallel<br/>read-only Sentry MCP"]
         LBL["<b>deterministic verdict step</b><br/>parse comment → validate →<br/>apply label (no LLM authority)"]
@@ -100,7 +101,7 @@ flowchart LR
 ```mermaid
 flowchart TD
     EV["Error event in any of the 6<br/>Sentry projects"] --> GRP["Sentry groups it into an<br/>issue (SHORT-ID)"]
-    GRP --> POLL["Ingest run (07:15 UTC Mon–Fri)<br/>queries new + regressed issues"]
+    GRP --> POLL["Ingest run (05:30 / 13:30 UTC daily)<br/>queries new + regressed issues"]
     POLL --> KNOWN{"queue issue with this<br/>SHORT-ID exists?"}
     KNOWN -- "no" --> CREATE["create queue issue<br/>sentry-triage + sentry:needs-triage<br/>(+ sentry:candidate-noise if heuristic hits)"]
     KNOWN -- "open" --> SKIP["skip (already queued)"]
@@ -108,7 +109,7 @@ flowchart TD
     KNOWN -- "closed, otherwise" --> STAY["skip (stays closed:<br/>not regressed, or regression<br/>already triaged before close)"]
     CREATE --> PEND["pending in queue"]
     REOPEN --> PEND
-    PEND --> BATCH["next agent run picks ≤10<br/>oldest pending (08:00 UTC Mon–Fri)"]
+    PEND --> BATCH["next agent run picks ≤10<br/>oldest pending (07:55 UTC Mon–Fri)"]
     BATCH --> INV["agent investigates:<br/>Sentry payload (read-only MCP)<br/>+ repo checkout for ui-dashboard"]
     INV --> VC["posts ONE redacted verdict comment<br/>(yaml: verdict/confidence/repo/<br/>summary/root cause/duplicates)"]
     VC --> VALID{"deterministic step:<br/>valid verdict?"}
@@ -836,8 +837,8 @@ other `count`-gated platform secrets) — never committed, never set through
 To pause the pipeline at any time, set `sentry_triage_enabled = "false"` and
 re-apply; the secrets can stay in place.
 
-After flipping the switch, watch the next scheduled runs (ingest 07:15 UTC,
-agent 08:00 UTC, weekdays only) or trigger `workflow_dispatch` manually from the
+After flipping the switch, watch the next scheduled runs (ingest 05:30/13:30
+UTC daily, agent 07:55 UTC weekdays) or trigger `workflow_dispatch` manually from the
 `main` ref. Only the ingest workflow guards against dispatch from other refs
 (`github.ref == 'refs/heads/main'` job guard); the agent workflow's
 branch-dispatch hardening is tracked in
