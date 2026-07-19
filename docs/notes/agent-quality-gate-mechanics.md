@@ -48,6 +48,9 @@ pnpm --filter @mento-protocol/ui-dashboard test:coverage
 
 Cross-layer/stateful UI work also applies
 [`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md).
+Indexer changes additionally route the protected
+[`docs/pr-checklists/indexer-handler-invariants.md`](../pr-checklists/indexer-handler-invariants.md)
+policy into prepared autoreview bundles.
 
 The gate defaults to dry-run mode and maps changed paths to the package checks
 and PR checklists that apply. Review the checklist output, then run the mapped

@@ -2981,6 +2981,13 @@ select_checklists() {
     esac
 
     case "$path" in
+      indexer-envio/*)
+        candidate="$(add_checklist "$repo" "docs/pr-checklists/indexer-handler-invariants.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
+        [[ -n "$candidate" ]] && checklists+=("$candidate")
+        ;;
+    esac
+
+    case "$path" in
       ui-dashboard/src/*)
         candidate="$(add_checklist "$repo" "docs/pr-checklists/swr-polling-hasura.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
         [[ -n "$candidate" ]] && checklists+=("$candidate")

@@ -2413,7 +2413,10 @@ run_frozen_checklist_provenance_regression() {
   local local_bundle="$tmp_dir/trusted-checklist-local-bundle"
   local checked_bundle
   init_review_repo "$review_repo"
-  mkdir -p "$review_repo/docs/pr-checklists" "$review_repo/scripts"
+  mkdir -p \
+    "$review_repo/docs/pr-checklists" \
+    "$review_repo/indexer-envio/src" \
+    "$review_repo/scripts"
   printf 'base\n' >"$review_repo/README.md"
   printf 'base recurring checklist\n' \
     >"$review_repo/docs/pr-checklists/recurring-review-patterns.md"
@@ -2421,6 +2424,8 @@ run_frozen_checklist_provenance_regression() {
     >"$review_repo/docs/pr-checklists/review-prompt-exclusions.md"
   printf 'trusted pre-change code-health checklist\n' \
     >"$review_repo/docs/pr-checklists/code-health.md"
+  printf 'trusted pre-change indexer-handler checklist\n' \
+    >"$review_repo/docs/pr-checklists/indexer-handler-invariants.md"
   commit_review_repo "$review_repo" init
   git -C "$review_repo" switch -c release >/dev/null 2>&1
   printf 'malicious PR-base checklist injection\n' \
@@ -2429,6 +2434,8 @@ run_frozen_checklist_provenance_regression() {
   git -C "$review_repo" update-ref refs/remotes/origin/release HEAD
   git -C "$review_repo" switch -c feature >/dev/null 2>&1
   printf 'review branch script\n' >"$review_repo/scripts/café.mjs"
+  printf 'review branch indexer handler\n' \
+    >"$review_repo/indexer-envio/src/EventHandlers.ts"
   printf 'malicious reviewed checklist injection\n' \
     >"$review_repo/docs/pr-checklists/code-health.md"
   commit_review_repo "$review_repo" feature
@@ -2502,7 +2509,25 @@ run_frozen_checklist_provenance_regression() {
       "malicious local checklist injection"
   done
 
+  for checked_bundle in \
+    "$branch_bundle" \
+    "$branch_local_bundle" \
+    "$commit_bundle"; do
+    expect_file_contains \
+      "$checked_bundle/selected-checklists.txt" \
+      "docs/pr-checklists/indexer-handler-invariants.md"
+    expect_file_contains \
+      "$checked_bundle/checklists/indexer-handler-invariants.md" \
+      "trusted pre-change indexer-handler checklist"
+    expect_prompt_policy_contains \
+      "$checked_bundle/autoreview-prompt.md" \
+      "trusted pre-change indexer-handler checklist"
+  done
+
   expect_file_contains "$branch_bundle/changed-paths.txt" "scripts/café.mjs"
+  expect_file_contains \
+    "$branch_bundle/changed-paths.txt" \
+    "indexer-envio/src/EventHandlers.ts"
   expect_file_contains \
     "$branch_bundle/patches/branch.diff" \
     "malicious reviewed checklist injection"
@@ -4192,6 +4217,7 @@ fi
 
 bundle_dir="$tmp_dir/context-bundle"
 canonical_bundle_dir="$(cd "$(dirname "$bundle_dir")" && pwd -P)/$(basename "$bundle_dir")"
+protected_main_oid="$(git -C "$repo_root" rev-parse 'origin/main^{commit}')"
 frozen_base="$(git -C "$repo_root" rev-parse HEAD^)"
 frozen_head="$(git -C "$repo_root" rev-parse HEAD)"
 if [[ "$frozen_base" == "$frozen_head" ]]; then
@@ -4208,7 +4234,78 @@ case "$captured_bundle_output" in
     exit 1
     ;;
 esac
-expect_args $'--mode\nbranch\n--base\n'"$frozen_base"$'\n--trusted-input-root\n'"$captured_staging_dir"$'\n--base\n'"$frozen_base"$'\n--prompt-file\n'"$captured_staging_dir"$'/checklists/recurring-review-patterns.md\n--prompt-file\n'"$captured_staging_dir"$'/checklists/review-prompt-exclusions.md\n--prompt-file\n'"$captured_staging_dir"$'/checklists/code-health.md\n--bundle-output\n'"$captured_bundle_output"$'\n--bundle-output-display\n'"$canonical_bundle_dir"$'/autoreview-prompt.md\n--prepare-only'
+expect_file_exists "$canonical_bundle_dir/selected-checklists.txt"
+first_selected_checklist="$(sed -n '1p' "$canonical_bundle_dir/selected-checklists.txt")"
+second_selected_checklist="$(sed -n '2p' "$canonical_bundle_dir/selected-checklists.txt")"
+if [[
+  "$first_selected_checklist" != "docs/pr-checklists/recurring-review-patterns.md" ||
+    "$second_selected_checklist" != "docs/pr-checklists/review-prompt-exclusions.md"
+]]; then
+  printf 'prepared bundle omitted or reordered mandatory review policy\n' >&2
+  exit 1
+fi
+expected_helper_args=$'--mode\nbranch\n--base\n'"$frozen_base"$'\n--trusted-input-root\n'"$captured_staging_dir"$'\n--base\n'"$frozen_base"
+selected_checklists_seen="$tmp_dir/selected-checklists-seen"
+selected_basenames_seen="$tmp_dir/selected-checklist-basenames-seen"
+: >"$selected_checklists_seen"
+: >"$selected_basenames_seen"
+while IFS= read -r selected_checklist; do
+  [[ -z "$selected_checklist" ]] && continue
+  case "$selected_checklist" in
+    docs/pr-checklists/recurring-review-patterns.md | \
+      docs/pr-checklists/review-prompt-exclusions.md | \
+      docs/pr-checklists/ci-workflow-gates.md | \
+      docs/pr-checklists/code-health.md | \
+      docs/pr-checklists/stateful-data-ui.md | \
+      docs/pr-checklists/indexer-handler-invariants.md | \
+      docs/pr-checklists/swr-polling-hasura.md | \
+      docs/pr-checklists/keyboard-a11y-controlled-widgets.md | \
+      docs/pr-checklists/dynamic-route-metadata.md | \
+      docs/pr-checklists/terraform-cloudrun.md | \
+      docs/pr-checklists/mutation-testing.md) ;;
+    *)
+      printf 'prepared bundle selected an unknown checklist: %s\n' \
+        "$selected_checklist" >&2
+      exit 1
+      ;;
+  esac
+  selected_basename="${selected_checklist##*/}"
+  if grep -Fxq -- "$selected_checklist" "$selected_checklists_seen"; then
+    printf 'prepared bundle selected a duplicate checklist: %s\n' \
+      "$selected_checklist" >&2
+    exit 1
+  fi
+  if grep -Fxq -- "$selected_basename" "$selected_basenames_seen"; then
+    printf 'prepared bundle selected colliding checklist basenames: %s\n' \
+      "$selected_basename" >&2
+    exit 1
+  fi
+  printf '%s\n' "$selected_checklist" >>"$selected_checklists_seen"
+  printf '%s\n' "$selected_basename" >>"$selected_basenames_seen"
+  captured_checklist="$canonical_bundle_dir/checklists/$selected_basename"
+  expect_file_exists "$captured_checklist"
+  protected_checklist_mode="$(
+    git -C "$repo_root" ls-tree "$protected_main_oid" -- "$selected_checklist" |
+      awk 'NR == 1 { print $1 }'
+  )"
+  if [[
+    "$protected_checklist_mode" != "100644" &&
+      "$protected_checklist_mode" != "100755"
+  ]]; then
+    printf 'selected protected-main checklist is not a regular blob: %s\n' \
+      "$selected_checklist" >&2
+    exit 1
+  fi
+  if ! git -C "$repo_root" cat-file blob \
+    "${protected_main_oid}:${selected_checklist}" | cmp -s - "$captured_checklist"; then
+    printf 'captured checklist differs from protected main: %s\n' \
+      "$selected_checklist" >&2
+    exit 1
+  fi
+  expected_helper_args+=$'\n--prompt-file\n'"$captured_staging_dir/checklists/$selected_basename"
+done <"$canonical_bundle_dir/selected-checklists.txt"
+expected_helper_args+=$'\n--bundle-output\n'"$captured_bundle_output"$'\n--bundle-output-display\n'"$canonical_bundle_dir/autoreview-prompt.md"$'\n--prepare-only'
+expect_args "$expected_helper_args"
 expect_empty_stderr
 expect_file_exists "$canonical_bundle_dir/README.md"
 expect_file_exists "$canonical_bundle_dir/changed-paths.txt"
@@ -4231,6 +4328,7 @@ expect_file_not_contains \
 expect_file_contains "$canonical_bundle_dir/.agent-autoreview-complete" "autoreview-bundle-v2"
 expect_file_contains "$canonical_bundle_dir/.agent-autoreview-complete" "manifest-sha256:"
 expect_file_contains "$canonical_bundle_dir/selected-checklists.txt" "docs/pr-checklists/review-prompt-exclusions.md"
+expect_file_contains "$canonical_bundle_dir/selected-checklists.txt" "docs/pr-checklists/code-health.md"
 expect_file_contains "$canonical_bundle_dir/helper-output.txt" "$canonical_bundle_dir/autoreview-prompt.md"
 expect_file_not_contains "$canonical_bundle_dir/helper-output.txt" ".agent-autoreview-context."
 expect_stdout_contains "$canonical_bundle_dir/autoreview-prompt.md"
