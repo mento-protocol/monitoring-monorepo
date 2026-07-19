@@ -1,8 +1,9 @@
 name: Documentation Garden
 
 # Deterministic issue-only scheduler for ADR 0039. The workflow reads the
-# repository documentation catalog, then creates or refreshes at most one
-# bounded Agent Task issue. It never edits repository content, invokes an LLM,
+# repository documentation catalog, then creates at most one bounded Agent Task
+# issue. A published issue is immutable until it closes. The workflow never
+# edits repository content, invokes an LLM,
 # opens a PR, merges, deploys, or touches production state.
 
 on:

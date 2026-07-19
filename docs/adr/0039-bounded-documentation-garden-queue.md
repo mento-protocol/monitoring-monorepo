@@ -37,17 +37,16 @@ Run the documentation garden through a deterministic, issue-only scheduler:
   dispatches with lane, shard, and dry-run controls.
 - The existing read-only planner supplies one packet of at most 10 documents or
   15,000 source words. No LLM or credential is involved in selection.
-- The scheduler creates or refreshes at most one live Agent Task issue. Two
-  leading structural markers identify the queue item and its week serial plus
+- The scheduler creates at most one live Agent Task issue. Two leading
+  structural markers identify the queue item and its week serial plus
   lane/shard fingerprint; queue labels are never used as the identity because
   claiming deliberately changes them.
-- An unclaimed `agent-ready` issue for the same occurrence may be refreshed only
-  while its file-scope digest is unchanged. The writer re-reads the issue at the
-  mutation boundary and aborts on any marker, version, lifecycle, body, title,
-  or label change; refreshes never patch lifecycle labels. An `agent-active` or
-  `in-pr` issue is never overwritten. A subsequent occurrence is opened only
-  after the prior issue closes. Multiple live markers or conflicting state
-  labels fail loudly for manual recovery.
+- A published issue is immutable whether it is `agent-ready`, `agent-active`,
+  or `in-pr`. Reruns retain it without changing its body, title, or labels; this
+  removes the otherwise unavoidable race between a non-conditional GitHub issue
+  update and an agent claim. A subsequent occurrence is opened only after the
+  prior issue closes. Multiple live markers or conflicting state labels fail
+  loudly for manual recovery.
 - Every generated issue contains all Agent Task sections, the complete planner
   packet, epic #1341, exact routing/risk/priority labels, and the verification
   and non-goal contract needed for independent execution.

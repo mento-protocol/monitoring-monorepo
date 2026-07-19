@@ -9,7 +9,6 @@ import { pathToFileURL } from "node:url";
 import { buildAuditPacket } from "./docs-audit-helpers.mjs";
 import {
   buildDocsGardenIssueSpec,
-  ISSUE_STATE_LABELS,
   LABEL_DEFINITIONS,
   mondayForWeekSerial,
   normalizeGithubIssuePages,
@@ -87,7 +86,7 @@ export function parseArgs(argv, env = process.env) {
 function usage() {
   return `Usage: node scripts/docs-garden-issue.mjs [options]
 
-Create or refresh the one bounded documentation-garden queue issue. The
+Create or retain the one bounded documentation-garden queue issue. The
 documentation planner remains read-only; this command mutates GitHub Issues
 only, and --dry-run performs all reads and planning without any mutation.
 
@@ -215,60 +214,6 @@ async function defaultCreateIssue(options, spec) {
   ]);
 }
 
-function sameValues(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-export function assertIssueStillRefreshable(expected, current) {
-  const currentStates = current.labels.filter((label) =>
-    ISSUE_STATE_LABELS.includes(label),
-  );
-  if (
-    current.state !== "OPEN" ||
-    !current.marker ||
-    !sameValues(current.marker, expected.marker) ||
-    currentStates.length !== 1 ||
-    currentStates[0] !== "agent-ready" ||
-    !expected.updatedAt ||
-    current.updatedAt !== expected.updatedAt ||
-    current.title !== expected.title ||
-    current.body !== expected.body ||
-    !sameValues([...current.labels].sort(), [...expected.labels].sort())
-  ) {
-    throw new Error(
-      `docs-garden issue #${expected.number} changed after planning; refusing to refresh a possibly claimed or edited issue`,
-    );
-  }
-}
-
-async function defaultUpdateIssue(options, issue, spec) {
-  // GitHub does not support conditional PATCH requests for this endpoint.
-  // Re-read at the mutation boundary and fail closed on any lifecycle, marker,
-  // version, body, title, or label change. Never PATCH labels during a refresh,
-  // so even a claim in the remaining GET/PATCH interval cannot be reverted to
-  // agent-ready. The scope digest separately prevents file-list changes.
-  const stdout = await runGh([
-    "api",
-    `repos/${options.repo}/issues/${issue.number}`,
-  ]);
-  const current = normalizeGithubIssuePages([[JSON.parse(stdout)]])[0];
-  if (!current) {
-    throw new Error(`docs-garden issue #${issue.number} disappeared`);
-  }
-  assertIssueStillRefreshable(issue, current);
-  const args = [
-    "api",
-    "--method",
-    "PATCH",
-    `repos/${options.repo}/issues/${issue.number}`,
-    "-f",
-    `title=${spec.title}`,
-    "-f",
-    `body=${spec.body}`,
-  ];
-  return runGh(args);
-}
-
 function defaultPacketForWeekSerial(options, weekSerial) {
   const repoRoot = realpathSync(path.resolve(options.repoRoot));
   const inventory = buildDocumentationInventory({
@@ -295,7 +240,6 @@ export async function runDocsGardenIssue(options, deps = {}) {
     listIssues = defaultListIssues,
     ensureLabels = ensureLabelsExist,
     createIssue = defaultCreateIssue,
-    updateIssue = defaultUpdateIssue,
     packetForWeekSerial = (weekSerial) =>
       defaultPacketForWeekSerial(options, weekSerial),
   } = deps;
@@ -310,17 +254,9 @@ export async function runDocsGardenIssue(options, deps = {}) {
   let mutated = false;
   let mutationResult = null;
 
-  if (["create", "update"].includes(decision.action) && !options.dryRun) {
+  if (decision.action === "create" && !options.dryRun) {
     await ensureLabels(options);
-    if (decision.action === "create") {
-      mutationResult = await createIssue(options, decision.spec);
-    } else {
-      mutationResult = await updateIssue(
-        options,
-        decision.issue,
-        decision.spec,
-      );
-    }
+    mutationResult = await createIssue(options, decision.spec);
     mutated = true;
   }
 

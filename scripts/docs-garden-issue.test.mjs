@@ -16,7 +16,6 @@ import {
   weekSerialForDate,
 } from "./docs-garden-issue-helpers.mjs";
 import {
-  assertIssueStillRefreshable,
   ensureLabelsExist,
   ghPaginate,
   parseArgs,
@@ -267,13 +266,13 @@ await test("a closed occurrence advances to the next week serial", () => {
   );
 });
 
-await test("same unclaimed occurrence updates instead of duplicating", () => {
+await test("same unclaimed occurrence remains immutable instead of duplicating", () => {
   const auditPacket = packet();
   const decision = planDocsGardenIssueSync({
     packet: auditPacket,
     issues: [issueForPacket(auditPacket)],
   });
-  assert.equal(decision.action, "update");
+  assert.equal(decision.action, "keep-current");
 });
 
 await test("an unclaimed occurrence with changed file scope is never overwritten", () => {
@@ -346,36 +345,6 @@ await test("an empty lane is a no-op", () => {
   assert.equal(decision.action, "noop-empty");
 });
 
-await test("refresh guard rejects a concurrent claim or issue edit", () => {
-  const auditPacket = packet();
-  const expected = {
-    ...issueForPacket(auditPacket),
-    title: "garden",
-    updatedAt: "2026-07-19T10:00:00Z",
-  };
-  assert.doesNotThrow(() =>
-    assertIssueStillRefreshable(expected, { ...expected }),
-  );
-  assert.throws(
-    () =>
-      assertIssueStillRefreshable(expected, {
-        ...expected,
-        labels: ["agent-active"],
-        updatedAt: "2026-07-19T10:00:01Z",
-      }),
-    /changed after planning/,
-  );
-  assert.throws(
-    () =>
-      assertIssueStillRefreshable(expected, {
-        ...expected,
-        body: `${expected.body}\nhuman edit`,
-        updatedAt: "2026-07-19T10:00:01Z",
-      }),
-    /changed after planning/,
-  );
-});
-
 function options(auditPacket, overrides = {}) {
   return {
     repo: "owner/repo",
@@ -392,7 +361,7 @@ function options(auditPacket, overrides = {}) {
 
 await test("dry-run reads and plans but performs zero mutations", async () => {
   const auditPacket = packet();
-  const calls = { list: 0, ensure: 0, create: 0, update: 0 };
+  const calls = { list: 0, ensure: 0, create: 0 };
   const result = await runDocsGardenIssue(
     options(auditPacket, { dryRun: true }),
     {
@@ -407,21 +376,17 @@ await test("dry-run reads and plans but performs zero mutations", async () => {
       createIssue: async () => {
         calls.create += 1;
       },
-      updateIssue: async () => {
-        calls.update += 1;
-      },
     },
   );
   assert.equal(result.action, "create");
   assert.equal(result.mutated, false);
-  assert.deepEqual(calls, { list: 1, ensure: 0, create: 0, update: 0 });
+  assert.deepEqual(calls, { list: 1, ensure: 0, create: 0 });
 });
 
 await test("two runs create at most one live issue", async () => {
   const auditPacket = packet();
   const store = [];
   let created = 0;
-  let updated = 0;
   const deps = {
     listIssues: async () => store,
     packetForWeekSerial: async () => auditPacket,
@@ -435,16 +400,12 @@ await test("two runs create at most one live issue", async () => {
         }),
       );
     },
-    updateIssue: async () => {
-      updated += 1;
-    },
   };
   const first = await runDocsGardenIssue(options(auditPacket), deps);
   const second = await runDocsGardenIssue(options(auditPacket), deps);
   assert.equal(first.action, "create");
-  assert.equal(second.action, "update");
+  assert.equal(second.action, "keep-current");
   assert.equal(created, 1);
-  assert.equal(updated, 1);
   assert.equal(store.filter((issue) => issue.state === "OPEN").length, 1);
 });
 

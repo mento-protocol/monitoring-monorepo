@@ -60,9 +60,8 @@ closeout.
 The queue is deliberately serialized:
 
 - no live marked issue: create the selected occurrence as `agent-ready`;
-- same occurrence still `agent-ready`: refresh only when its bounded file scope
-  and issue version are unchanged; re-read immediately before the body update
-  and never rewrite lifecycle labels;
+- same occurrence still `agent-ready`: retain the immutable published packet
+  without changing its title, body, or labels;
 - planner scope drift before claim: preserve the issued scope and report a
   fail-closed no-op for manual review;
 - live occurrence `agent-active` or `in-pr`: leave its scope unchanged;
@@ -111,8 +110,9 @@ Every document receives one evidence-backed disposition: **Keep**,
 - Repair inbound navigation when merging, moving, archiving, or deleting.
 - Escalate unclear ownership or contradictory canonical sources instead of
   choosing silently.
-- `docs:audit` is read-only. `docs:garden` may create or refresh only the GitHub
-  issue envelope. Semantic edits use a claimed issue and a normal reviewed PR.
+- `docs:audit` is read-only. `docs:garden` may create only the GitHub issue
+  envelope; once published, that envelope is immutable until closure. Semantic
+  edits use a claimed issue and a normal reviewed PR.
 
 Run `pnpm docs:index --check` after a gardening batch. If classification changed,
 regenerate the catalog with `pnpm docs:index --write` and review the generated

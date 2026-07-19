@@ -158,7 +158,6 @@ export function normalizeGithubIssuePages(pages) {
       state: String(issue.state ?? "").toUpperCase(),
       labels: (issue.labels ?? []).map(labelName).filter(Boolean),
       url: issue.html_url ?? null,
-      updatedAt: issue.updated_at ?? null,
       marker: parseLeadingDocsGardenMarkers(issue.body),
     }));
 }
@@ -331,10 +330,9 @@ export function planDocsGardenIssueSync({ packet, issues }) {
         };
       }
       return {
-        action: "update",
-        reason: "refresh the unclaimed issue for the same packet occurrence",
+        action: "keep-current",
+        reason: `issue #${issue.number} already owns this packet occurrence; published scope is immutable until it closes`,
         issue,
-        spec: buildDocsGardenIssueSpec(packet),
       };
     }
     if (states[0] === "agent-active" || states[0] === "in-pr") {
