@@ -341,11 +341,17 @@ jobs:
             --work "${GITHUB_WORKSPACE}" \
             > "${RUNNER_TEMP}/changed.txt"
 
-          # guard: refuse on zero changes, >3 files, or ANY forbidden path (incl.
-          # all of scripts/). Enforced in code, from the pristine clone — a
-          # prompt-injected or over-eager agent cannot get a forbidden-path or
-          # oversized diff pushed.
-          guard=$(node "${fin}" guard --files-file "${RUNNER_TEMP}/changed.txt")
+          # guard: refuse on zero changes, >3 files, ANY forbidden path (incl.
+          # all of scripts/), or a changed path the agent turned into a SYMLINK.
+          # Enforced in code, from the pristine clone, with NO write token in env
+          # (this whole step is credential-free) — so a prompt-injected or
+          # over-eager agent cannot get a forbidden-path, oversized, or
+          # symlink-exfiltration diff past this point, and the symlink rejection
+          # happens BEFORE the App token is ever minted. `--work` is lstat-only
+          # (no dereference, no read, no git filter) against the tainted checkout.
+          guard=$(node "${fin}" guard \
+            --files-file "${RUNNER_TEMP}/changed.txt" \
+            --work "${GITHUB_WORKSPACE}")
           if [ "$(jq -r '.ok' <<<"${guard}")" != "true" ]; then
             jq -r '.reason' <<<"${guard}" > "${RUNNER_TEMP}/refuse-reason.txt"
             echo "proceed=false" >> "${GITHUB_OUTPUT}"
@@ -469,7 +475,13 @@ jobs:
             cp -a "${base}" "${push}"
             while IFS= read -r f; do
               [ -n "${f}" ] || continue
-              if [ -e "${GITHUB_WORKSPACE}/${f}" ]; then
+              # Copy ONLY genuine regular files, never symlinks: `-f` alone would
+              # follow a symlink and `cp` would dereference it, so an agent that
+              # replaced an allowed source file with a symlink to a secret-bearing
+              # path (e.g. /proc/self/environ) could publish this step's tokens.
+              # The guard above already refuses such diffs; this `! -L` check is
+              # defense in depth at the exact point APP_TOKEN is in scope.
+              if [ -f "${GITHUB_WORKSPACE}/${f}" ] && [ ! -L "${GITHUB_WORKSPACE}/${f}" ]; then
                 mkdir -p "${push}/$(dirname "${f}")"
                 cp "${GITHUB_WORKSPACE}/${f}" "${push}/${f}"
               else

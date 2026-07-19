@@ -34,7 +34,7 @@
  */
 
 import { fileURLToPath } from "node:url";
-import { readFileSync, readdirSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -165,12 +165,33 @@ export function isForbiddenPath(path) {
   return false;
 }
 
+/** True when `path` under `workRoot` is a symlink (lstat, so it never
+ * dereferences). A genuine deletion (absent in the work tree) or an lstat error
+ * is treated as NOT a symlink — the caller only cares about paths the agent
+ * turned INTO a symlink. Pure lstat: no read, no git filter, no dereference. */
+function isWorkTreeSymlink(workRoot, path) {
+  try {
+    return lstatSync(join(workRoot, path)).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The mechanical diff guard. Returns `{ ok: true }` when the changed-file set
  * is a legitimate scoped autofix, or `{ ok: false, reason }` otherwise. The
  * reason is posted verbatim onto the queue stub as the no-PR analysis note.
+ *
+ * When `workRoot` is supplied (the credential-free guard step passes the tainted
+ * checkout), any changed path that is a SYMLINK in the work tree is refused. The
+ * filter-free change detector intentionally does not dereference symlinks, so an
+ * agent that replaces an allowed source file with a symlink (e.g. ->
+ * `/proc/self/environ`) shows up only as an ordinary changed path; the later
+ * credentialed byte-copy would then dereference it and publish the runner's
+ * `APP_TOKEN`/`GH_TOKEN` into the public fix branch. Rejecting symlinks here —
+ * before any write token is minted — closes that exfiltration path.
  */
-export function evaluateDiffGuard(files) {
+export function evaluateDiffGuard(files, { workRoot = null } = {}) {
   const changed = (Array.isArray(files) ? files : [])
     .map((f) => String(f ?? "").trim())
     .filter(Boolean);
@@ -194,6 +215,15 @@ export function evaluateDiffGuard(files) {
       ok: false,
       reason: `The autofix diff touches forbidden path(s): ${forbidden.join(", ")}. Deploy/CI/infra, dependency-manager, and toolchain surfaces are out of scope for autofix. No PR opened.`,
     };
+  }
+  if (workRoot) {
+    const symlinks = changed.filter((f) => isWorkTreeSymlink(workRoot, f));
+    if (symlinks.length > 0) {
+      return {
+        ok: false,
+        reason: `The autofix diff replaces path(s) with a symlink: ${symlinks.join(", ")}. Symlinked paths are refused — a symlink would be dereferenced by the credentialed byte-copy and could exfiltrate runner secrets. No PR opened.`,
+      };
+    }
   }
   return { ok: true };
 }
@@ -411,9 +441,10 @@ Commands:
       Print (newline-separated) the root-relative paths that differ between two
       trees, compared with pure filesystem reads (NO git — honors no agent
       filter/attribute). Used to detect the agent's changes filter-free.
-  guard --files-file <path>
+  guard --files-file <path> [--work <dir>]
       Read a newline-separated changed-file list and print {"ok":bool,"reason"?}
-      JSON to stdout (always exit 0 — the caller branches on .ok).
+      JSON to stdout (always exit 0 — the caller branches on .ok). With --work
+      (the tainted checkout), refuse any changed path that is a symlink there.
   pr-body --short-id <ID> --issue <n> [--summary-file <path>]
       Print the assembled repo-standard PR body to stdout.
   autofix-comment --url <url>
@@ -463,11 +494,16 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
     }
     case "guard": {
       const filesFile = readFlag(args, "--files-file");
+      // Optional: the tainted work tree, so the guard can refuse changed paths
+      // the agent turned into symlinks (credential-free, before token minting).
+      const workRoot = readFlag(args, "--work");
       const files = readFileMaybe(filesFile)
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean);
-      stdout.write(`${JSON.stringify(evaluateDiffGuard(files))}\n`);
+      stdout.write(
+        `${JSON.stringify(evaluateDiffGuard(files, { workRoot }))}\n`,
+      );
       return;
     }
     case "pr-body": {

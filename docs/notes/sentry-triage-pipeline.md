@@ -886,12 +886,18 @@ dispatch from a feature ref would make that ref the base and its divergence from
 **Diff guard (mechanical, not just prompt-enforced).** After the agent edits,
 the finalize step detects the changes and refuses — posting a no-PR analysis
 comment on the queue stub, marking it `sentry:fix-refused`, exiting cleanly —
-when the diff has zero changes, more than 3 changed files, or ANY changed path
-under a forbidden prefix: `.github/`, `terraform/`, all of `scripts/`,
+when the diff has zero changes, more than 3 changed files, ANY changed path
+under a forbidden prefix (`.github/`, `terraform/`, all of `scripts/`,
 `patches/`, any `package.json`, `pnpm-lock.yaml`, `.npmrc`, any `pnpmfile`,
-`.trunk/`, `tools/`. The prompt states the same limits, but the guard enforces
-them in code so an over-eager or injected agent cannot land a forbidden-path or
-sprawling diff.
+`.trunk/`, `tools/`), or a changed path the agent turned into a **symlink**. The
+symlink rejection is credential-free (it runs in the guard step, before the App
+token is minted) and lstat-only: the filter-free detector does not dereference
+symlinks, so without it an agent could replace an allowed source file with a
+symlink to a secret-bearing path (e.g. `/proc/self/environ`) that the later
+credentialed byte-copy would dereference and publish into the public fix branch.
+The prompt states the same limits, but the guard enforces them in code so an
+over-eager or injected agent cannot land a forbidden-path, sprawling, or
+secret-exfiltrating diff.
 
 The `sentry:fix-refused` marker is what stops a genuinely unfixable stub from
 being re-picked on every schedule and burning the per-run cap forever

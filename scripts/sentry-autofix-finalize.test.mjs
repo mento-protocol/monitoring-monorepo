@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
+  symlinkSync,
   unlinkSync,
   rmSync,
 } from "node:fs";
@@ -110,6 +111,30 @@ await test("guard refuses forbidden prefixes and dependency/toolchain files", ()
     const r = evaluateDiffGuard(["ui-dashboard/ok.ts", path]);
     assert(!r.ok && /forbidden/i.test(r.reason), `guard should refuse ${path}`);
   }
+});
+
+await test("guard refuses a changed path the agent turned into a symlink", () => {
+  const dir = mkdtempSync(join(tmpdir(), "autofix-symlink-"));
+  mkdirSync(join(dir, "ui-dashboard"), { recursive: true });
+  writeFileSync(join(dir, "ui-dashboard", "ok.ts"), "real\n");
+  // The agent replaced an allowed source path with a symlink to a secret-bearing
+  // path; the target need not exist for lstat to report a symlink.
+  symlinkSync("/proc/self/environ", join(dir, "ui-dashboard", "evil.ts"));
+  const r = evaluateDiffGuard(["ui-dashboard/ok.ts", "ui-dashboard/evil.ts"], {
+    workRoot: dir,
+  });
+  assert(!r.ok && /symlink/i.test(r.reason), "symlinked changed path refused");
+  // A genuine deletion (path absent in the work tree) is not a symlink.
+  assert(
+    evaluateDiffGuard(["ui-dashboard/deleted.ts"], { workRoot: dir }).ok,
+    "genuine deletion is not treated as a symlink",
+  );
+  // Back-compat: without workRoot the symlink check is skipped.
+  assert(
+    evaluateDiffGuard(["ui-dashboard/ok.ts"]).ok,
+    "no workRoot -> no symlink check",
+  );
+  rmSync(dir, { recursive: true, force: true });
 });
 
 await test("guard allows ordinary product source", () => {
