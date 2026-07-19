@@ -186,9 +186,22 @@ export const LABEL_DEFINITIONS = [
     description:
       "Actionable verdict projected as an issue in the owning repo (ADR 0038)",
   },
+  {
+    name: "sentry:fix-pr-opened",
+    color: "006b75",
+    description:
+      "Autofix leg opened a scoped fix PR for this verdict (ADR 0036 Phase 2b)",
+  },
 ];
 
 export const PROJECTED_LABEL = "sentry:projected";
+
+// Applied to a `code-fix` queue stub once the autofix leg (ADR 0036 Phase 2b,
+// `.github/workflows/sentry-autofix.yml`) has opened a scoped fix PR for it.
+// The autofix select step reads it as a dedup marker so a stub is never
+// re-fixed. Bootstrapped from LABEL_DEFINITIONS above (single source of truth)
+// and self-healed by the autofix finalize step before it labels the stub.
+export const FIX_PR_OPENED_LABEL = "sentry:fix-pr-opened";
 
 // Stage B's verdict namespace, derived from the definitions above so the two
 // can't drift. A reopened regression must shed its previous verdict — the

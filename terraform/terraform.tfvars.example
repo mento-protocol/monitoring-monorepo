@@ -107,6 +107,33 @@ upstash_api_key = "..."
 # for how to mint the `sentry-triage-projector` PAT.
 # sentry_projection_token = "github_pat_xxx-issues-rw-three-repos-xxx"
 
+# ── Sentry autofix PRs (ADR 0036 Phase 2b) ────────────────────────────────────
+# GitHub App credential for the autofix leg's branch push + PR create (so
+# required CI + Codex review fire on the fix PR — a `github.token` push does
+# not trigger downstream workflows). Create the App once, then set both values.
+# Runbook: docs/notes/sentry-triage-pipeline.md → "Activating autofix PRs".
+#   GitHub → Settings → Developer settings → GitHub Apps → New GitHub App:
+#     - Permissions: Contents Read & write, Pull requests Read & write. Nothing
+#       else — no Issues, no Actions, no webhooks. This is the whole trust
+#       boundary.
+#     - Install on `mento-protocol/monitoring-monorepo` ONLY.
+#     - Record the App ID; generate a private key (downloads a PEM).
+# Both are `count`-gated so `terraform apply` succeeds while empty and the
+# autofix workflow no-ops. Brand-new, no external consumers, so no
+# `prevent_destroy`.
+# autofix_app_id = "123456"
+# autofix_app_private_key = <<-PEM
+#   -----BEGIN RSA PRIVATE KEY-----
+#   ...paste the generated PEM here...
+#   -----END RSA PRIVATE KEY-----
+# PEM
+
+# Kill switch for the scheduled autofix workflow (string "true"/"false", default
+# "false"). SEPARATE from sentry_triage_enabled — flip to "true" only after this
+# workflow PR merges AND the App above is provisioned. Still IaC — set it here
+# and re-apply, never via the GitHub UI.
+# sentry_autofix_enabled = "false"
+
 # ── Arkham Intelligence ───────────────────────────────────────────────────────
 # API key for manual /api/arkham/enrich counterparty tagging.
 # Apply for access at https://intel.arkm.com/api — gated, no self-serve signup.

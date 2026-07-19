@@ -236,6 +236,57 @@ variable "sentry_projection_token" {
   default     = ""
 }
 
+variable "autofix_app_id" {
+  description = <<-EOT
+    GitHub App ID for the Sentry AUTOFIX leg (ADR 0036 Phase 2b): the App the
+    autofix finalize step uses to push the fix branch and open the PR, so
+    required CI + Codex review actually fire on it (a `github.token` push does
+    not trigger downstream workflows). Mirrors into the repo-level Actions
+    variable `AUTOFIX_APP_ID`. Leave empty until provisioned; the variable
+    resource is `count`-gated so `terraform apply` succeeds without it and the
+    autofix workflow no-ops. See the runbook in
+    docs/notes/sentry-triage-pipeline.md for how to create the App.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "autofix_app_private_key" {
+  description = <<-EOT
+    PEM private key for the Sentry autofix GitHub App (see `autofix_app_id`).
+    Mirrors into the repo-level Actions secret `AUTOFIX_APP_PRIVATE_KEY`, which
+    the autofix finalize step alone reads to mint a short-lived installation
+    token for the branch push + PR create. The App is installed on
+    `mento-protocol/monitoring-monorepo` only, with Contents: Read&Write +
+    Pull requests: Read&Write and no webhooks — the whole trust boundary. Leave
+    empty until provisioned; the secret resource is `count`-gated so
+    `terraform apply` succeeds without it. Brand-new, no external consumer, so
+    no `prevent_destroy`. See the runbook in docs/notes/sentry-triage-pipeline.md.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "sentry_autofix_enabled" {
+  description = <<-EOT
+    Kill switch for the scheduled Sentry AUTOFIX workflow (ADR 0036 Phase 2b,
+    ADR 0030). Mirrors into the repo-level Actions variable
+    `SENTRY_AUTOFIX_ENABLED`; the workflow no-ops unless it equals "true".
+    Separate from `sentry_triage_enabled` so the read-only triage pipeline and
+    the PR-writing autofix leg activate independently. Defaults to "false" so
+    autofix stays inert until deliberately activated by a follow-up tfvar change
+    plus a re-apply.
+  EOT
+  type        = string
+  default     = "false"
+
+  validation {
+    condition     = contains(["true", "false"], var.sentry_autofix_enabled)
+    error_message = "sentry_autofix_enabled must be the string \"true\" or \"false\"."
+  }
+}
+
 # ── Auth (Google OAuth / NextAuth) ─────────────────────────────────────────
 
 variable "auth_google_id" {

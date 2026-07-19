@@ -193,6 +193,25 @@ resource "github_actions_secret" "sentry_projection_token" {
   value       = var.sentry_projection_token
 }
 
+# AUTOFIX_APP_PRIVATE_KEY is brand-new (ADR 0036 Phase 2b): the PEM private key
+# of the `sentry-autofix` GitHub App. The autofix finalize step in
+# `.github/workflows/sentry-autofix.yml` is its ONLY consumer, and only to mint
+# a short-lived installation token for the fix-branch push + PR create (which is
+# what makes required CI + Codex review fire, unlike a `github.token` push). Like
+# `sentry_triage_token`/`sentry_projection_token` above — and UNLIKE
+# `claude_code_oauth_token` below — no live secret of this name exists and no
+# external consumer depends on it, so plain `count` gating is enough and it
+# carries NO `prevent_destroy`: destroying it while unused breaks nothing.
+resource "github_actions_secret" "autofix_app_private_key" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.autofix_app_private_key == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "AUTOFIX_APP_PRIVATE_KEY"
+  value       = var.autofix_app_private_key
+}
+
 resource "github_actions_secret" "claude_code_oauth_token" {
   # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
   # `vercel_automation_bypass`; see the comment above for the threat model.

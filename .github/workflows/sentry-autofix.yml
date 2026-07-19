@@ -1,0 +1,475 @@
+name: Sentry Autofix
+
+# Stage C / Phase 2b of the Sentry triage pipeline (ADR 0036): for queue stubs
+# verdicted `code-fix` whose parsed `affected_repo` is EXACTLY this repo, a
+# claude-code-action agent implements a scoped fix in a fresh checkout, then a
+# DETERMINISTIC finalize step commits, pushes a branch, and opens a PR via a
+# GitHub App token. PR-ONLY — nothing ever merges automatically; merge stays
+# human (ADR 0036).
+#
+# Prompt-injection containment is the whole design point (the verdict is
+# second-order UNTRUSTED Sentry data):
+#   - NO Sentry access for the fix agent (no MCP, no --mcp-config). Its only
+#     inputs are the already-posted, redacted verdict comment and this repo's
+#     own code — the injection surface stays confined to the read-only triage
+#     leg.
+#   - NO code execution and NO GitHub token for the fix agent: its allowlist is
+#     Read/Grep/Glob + Edit/Write/MultiEdit ONLY (mirroring claude.yml) — no
+#     pnpm/node/git/Bash and no `gh`. The verdict is pre-fetched to a file it
+#     reads, so it needs no gh tool or token in env. It cannot execute code, so
+#     an injected verdict cannot exfiltrate secrets by running JS. A
+#     prompt-injected agent can, at most, produce a bad DIFF, which the mechanical
+#     diff guard + required CI + human review catch. (Residual: claude-code-action
+#     itself holds its `github_token` input + the Claude OAuth token in the CLI
+#     process env, which the agent's Read tool could in principle reach via a
+#     process-env surface — inherent to the action, same as claude.yml, tracked
+#     as a sandboxing follow-up.)
+#   - NO git AT ALL against the agent-tainted checkout, and NO write credential
+#     in the LLM step. The agent has Write access to the checkout INCLUDING
+#     .git/, so any git command there would run agent-planted hooks / clean-smudge
+#     filters / url.insteadOf (code execution / token redirect). Instead:
+#     `persist-credentials: false` keeps the checkout token out of .git/config;
+#     the agent's changes are detected against a PRISTINE clone with pure
+#     filesystem reads (`diff-trees`, no git) and re-created by byte-copying the
+#     guard-approved files; every deterministic node helper runs FROM the
+#     pristine clone (the helper scripts are themselves agent-editable in the
+#     checkout); and the App token (contents:write + pull-requests:write) touches
+#     only pristine-config clones. An injected instruction cannot execute code,
+#     push, or open a PR — the LLM step has no credential and nothing the later
+#     credentialed steps run comes from the tainted checkout.
+#
+# Inert until activation: the `SENTRY_AUTOFIX_ENABLED` repo variable gates the
+# whole workflow, and the select job additionally no-ops unless the Claude OAuth
+# secret, the App private key secret, and the App ID variable are all present.
+# All Terraform-owned (ADR 0030), provisioned by the operator. NOT a required
+# check.
+
+on:
+  schedule:
+    # Weekdays, off-the-hour at 08:30 UTC — after the ~07:55 triage run finishes
+    # so the day's fresh `code-fix` verdicts are available, and off GitHub's
+    # top-of-hour cron contention (same dodge as the ingest/triage workflows).
+    - cron: 30 8 * * 1-5
+  workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: issue_number is a single-issue dry-run selector,
+    # validated to ^[0-9]+$ before use (see the select job) and re-run through
+    # the SAME selection filters as the scheduled batch, so a dispatch can never
+    # fix an ineligible issue. It only narrows WHICH queue stub is considered.
+    inputs:
+      issue_number:
+        description: Single queue issue number to autofix (dry-run). Leave blank for the normal oldest-first batch.
+        required: false
+        type: string
+
+# Serialize runs so an overlapping schedule + dispatch can't double-open a PR
+# for the same queue stub. Never cancel an in-flight fix.
+concurrency:
+  group: sentry-autofix
+  cancel-in-progress: false
+
+# Minimal top-level default; every job below replaces this with its own
+# least-privilege set (job permissions REPLACE workflow permissions).
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # select: pick the capped batch of code-fix queue stubs owned by THIS repo
+  # that do not yet have a fix PR, and emit them as a matrix. ALWAYS runs and
+  # ALWAYS emits a valid JSON array — the kill switch and the secret/App guards
+  # live in the first step, so a disabled or unprovisioned state is a clean
+  # no-op (`[]`, exit 0), never a failure and never an empty matrix expression
+  # downstream. The selection logic (verdict re-parse, exact-local repo check,
+  # dedup, cap) lives in scripts/sentry-autofix-select.mjs (+ tests), not inline.
+  # ---------------------------------------------------------------------------
+  select:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      # The dedup check calls `gh pr list`; unspecified GITHUB_TOKEN scopes
+      # default to none, so the PR read must be granted explicitly.
+      pull-requests: read
+    outputs:
+      entries: ${{ steps.select.outputs.entries }}
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Select autofix candidates (kill-switch + App guarded)
+        id: select
+        env:
+          ENABLED: ${{ vars.SENTRY_AUTOFIX_ENABLED }}
+          # Presence-only guards: masked in logs, only tested for emptiness here.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          AUTOFIX_APP_PRIVATE_KEY: ${{ secrets.AUTOFIX_APP_PRIVATE_KEY }}
+          AUTOFIX_APP_ID: ${{ vars.AUTOFIX_APP_ID }}
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_ISSUE: ${{ github.event.inputs.issue_number }}
+        run: |
+          set -euo pipefail
+
+          # Always emit a valid JSON array so the downstream matrix never sees
+          # an empty string.
+          entries='[]'
+
+          if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+            # Autofix runs ONLY from main: the pristine base is pinned to
+            # github.sha, and a workflow_dispatch from a feature ref would make
+            # that base the feature branch — its pre-existing divergence from
+            # main would then bypass the 3-file diff guard and land in the PR (it
+            # opens against main). Refuse off-main so the guard's scope guarantee
+            # always holds. (Scheduled runs are always on main.)
+            echo "::notice::Not on main (${GITHUB_REF:-unknown}); autofix only runs from main — no-op."
+          elif [ "${ENABLED:-}" != "true" ]; then
+            echo "::notice::SENTRY_AUTOFIX_ENABLED is not 'true' — kill switch off, no-op."
+          elif [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ] || [ -z "${AUTOFIX_APP_PRIVATE_KEY}" ] || [ -z "${AUTOFIX_APP_ID}" ]; then
+            echo "::notice::Autofix secrets/App not provisioned yet (need CLAUDE_CODE_OAUTH_TOKEN + AUTOFIX_APP_PRIVATE_KEY + AUTOFIX_APP_ID) — no-op."
+          elif [ -n "${DISPATCH_ISSUE:-}" ]; then
+            # Dry-run path: evaluate exactly the requested issue through the same
+            # filters. Reject anything that isn't a bare integer before it
+            # reaches the selector / matrix.
+            if [[ "${DISPATCH_ISSUE}" =~ ^[0-9]+$ ]]; then
+              entries=$(node scripts/sentry-autofix-select.mjs \
+                --repo "${GITHUB_REPOSITORY}" \
+                --issue "${DISPATCH_ISSUE}")
+            else
+              echo "::error::workflow_dispatch input issue_number must be a plain integer"
+              exit 1
+            fi
+          else
+            # Oldest-first, capped at 2 per run (quota cap — do not raise
+            # without re-checking the daily envelope against the Max window).
+            entries=$(node scripts/sentry-autofix-select.mjs \
+              --repo "${GITHUB_REPOSITORY}" \
+              --cap 2)
+          fi
+
+          count=$(printf '%s' "${entries}" | jq 'length')
+          {
+            echo "entries=${entries}"
+            echo "count=${count}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "Selected ${count} candidate(s): ${entries}"
+
+  # ---------------------------------------------------------------------------
+  # autofix: one claude-code-action fix + deterministic PR per selected stub.
+  # max-parallel 1 so two runtime pushes never race; fail-fast false so one bad
+  # stub doesn't strand the rest.
+  #
+  # Permissions: contents:read + issues:write ONLY at the GITHUB_TOKEN level.
+  # Branch push + PR creation authority comes EXCLUSIVELY from the App token
+  # minted inside the finalize steps — the LLM step holds no write credential.
+  # ---------------------------------------------------------------------------
+  autofix:
+    needs: select
+    if: ${{ needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        entry: ${{ fromJSON(needs.select.outputs.entries) }}
+    permissions:
+      contents: read
+      issues: write
+    # Deliberately NO GH_TOKEN at job level: it must not reach the claude-code
+    # LLM step's process env, where a prompt-injected agent could read it from a
+    # process-environment surface. Each deterministic step that needs GitHub auth
+    # sets GH_TOKEN itself. (Residual: claude-code-action still holds its own
+    # `github_token` input + the Claude OAuth token in the CLI process; see the
+    # containment note — that exposure is inherent to the action and tracked as a
+    # sandboxing follow-up.) These non-secret vars are safe at job level.
+    env:
+      QUEUE_ISSUE: ${{ matrix.entry.issue }}
+      SHORT_ID: ${{ matrix.entry.shortId }}
+      REPO: ${{ github.repository }}
+      # The commit the agent worked from — taken from the GitHub context, NOT
+      # read back from the agent-tainted checkout. Pinned to github.sha, which is
+      # main's HEAD (the select job refuses to run off main). The pristine clone
+      # (which runs every post-agent deterministic node helper) pins to this SHA.
+      BASE_SHA: ${{ github.sha }}
+    steps:
+      # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
+      # silently run new code. Bump via Dependabot (.github/dependabot.yml).
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          # The agent has Write access to this checkout, INCLUDING .git/. Do NOT
+          # persist the checkout credential in .git/config — otherwise the agent
+          # could read the token out of the config and copy it into its summary
+          # or an edited file (which would land in the public PR). The
+          # credentialed git work happens in a separate PRISTINE clone (see the
+          # "Open fix PR" step), never against this tainted checkout.
+          persist-credentials: false
+
+      # setup-node only — the deterministic select/finalize scripts are
+      # dependency-free node, and the fix AGENT deliberately runs no code (see
+      # the allowlist below), so no `pnpm install` is needed. Verification of the
+      # fix happens in the fix PR's own required CI, not in this job.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Validate matrix inputs
+        run: |
+          set -euo pipefail
+          # Defense in depth: the entries come from our own select script (which
+          # shape-validates), but re-validate before they touch sed / branch
+          # names / git refs. SHORT_ID charset is sed- and git-ref-safe.
+          if ! [[ "${QUEUE_ISSUE}" =~ ^[0-9]+$ ]]; then
+            echo "::error::matrix issue '${QUEUE_ISSUE}' is not an integer"; exit 1
+          fi
+          if ! [[ "${SHORT_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9]+$ ]]; then
+            echo "::error::matrix shortId '${SHORT_ID}' is not a valid Sentry SHORT-ID"; exit 1
+          fi
+
+      # Snapshot the trusted (fence-selected) verdict comment to a file the agent
+      # READS — instead of giving the agent a `gh` tool + a GitHub token in its
+      # env (which a prompt-injected agent could try to exfiltrate). Runs
+      # pre-agent from the still-clean checkout with github.token; the snapshot
+      # goes to /tmp (never the checkout, so the diff guard never sees it).
+      - name: Snapshot verdict for the agent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/sentry-autofix-select.mjs \
+            --repo "${REPO}" --issue "${QUEUE_ISSUE}" --emit-verdict \
+            > /tmp/autofix-verdict.md
+
+      - name: Render autofix prompt
+        id: render
+        run: |
+          set -euo pipefail
+          # Wire only the validated queue-issue number + SHORT-ID into the
+          # checked-in prompt file; the SECURITY + guardrail sections stay
+          # verbatim. sed is safe here because both replacements are validated
+          # against tight charsets above (integer / Sentry SHORT-ID).
+          {
+            echo 'prompt<<SENTRY_AUTOFIX_PROMPT_EOF'
+            sed -e "s/\$QUEUE_ISSUE_NUMBER/${QUEUE_ISSUE}/g" \
+                -e "s/\$SHORT_ID/${SHORT_ID}/g" \
+                .github/prompts/sentry-autofix.md
+            echo 'SENTRY_AUTOFIX_PROMPT_EOF'
+          } >> "${GITHUB_OUTPUT}"
+
+      - uses: anthropics/claude-code-action@f87768c6d25f92ae6efa7175e223ef77d4cbf97f # v1.0.166
+        with:
+          github_token: ${{ github.token }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.render.outputs.prompt }}
+          # NO --mcp-config: the fix agent gets no Sentry access at all — its
+          # inputs are the redacted verdict (pre-fetched to /tmp/autofix-verdict.md)
+          # and this repo's code only (containment; see the workflow header).
+          #
+          # --setting-sources user: do NOT load the checked-out repo's
+          # .claude/settings.json — its permissions.allow list would otherwise
+          # widen this contained agent past the allowlist below. On the CI runner
+          # `user` settings are absent, so --allowedTools is the sole permission
+          # source.
+          #
+          # --allowedTools: file-edit tools + Read/Grep/Glob ONLY. NO
+          # code-execution tool (no pnpm/node/Bash/git) AND no `gh`/network. This
+          # mirrors the repo's other claude-code-action agents (claude.yml):
+          # because the verdict is UNTRUSTED (second-order Sentry data), a
+          # code-execution tool would let a prompt-injected agent run arbitrary JS
+          # and exfiltrate the runner's env secrets. Denying execution removes that
+          # path; the agent can only read + edit files. It reads the verdict from
+          # the pre-fetched snapshot, so it needs no gh tool or GitHub token in
+          # env. Verification is not the agent's job; the fix PR runs the repo's
+          # full required CI + independent review, which is why merge stays human.
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 60
+            --setting-sources user
+            --allowedTools 'Read,Grep,Glob,Edit,Write,MultiEdit'
+
+      # Clone the repo at BASE_SHA into a PRISTINE location. This clone is the
+      # ONLY place post-agent node runs (the deterministic helper and its imports
+      # are themselves agent-editable in the checkout) AND the reference tree the
+      # agent's changes are detected against. No agent code runs here — it is a
+      # plain clone from origin — so github.token is safe.
+      - name: Clone pristine base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="${RUNNER_TEMP}/base"
+          rm -rf "${base}"
+          git -C "${RUNNER_TEMP}" clone --filter=blob:none --no-tags \
+            "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" base
+          git -C "${base}" checkout --quiet "${BASE_SHA}"
+
+      # Detect the agent's changes WITHOUT git and run the guard — CREDENTIAL-FREE.
+      # `diff-trees` compares the tainted checkout against the pristine clone with
+      # pure filesystem reads, so NO git runs against the tainted checkout at all:
+      # git add/diff/status would execute agent-controlled clean/smudge filters +
+      # textconv from .gitattributes/.git/config (arbitrary code execution that
+      # hardened flags do NOT disable). Both this detector and the guard run from
+      # the pristine clone (code the agent never touched), with no token in env.
+      - name: Detect changes (filter-free) + diff guard (deterministic)
+        id: guard
+        env:
+          GH_TOKEN: ""
+        run: |
+          set -euo pipefail
+          fin="${RUNNER_TEMP}/base/scripts/sentry-autofix-finalize.mjs"
+          node "${fin}" diff-trees \
+            --base "${RUNNER_TEMP}/base" \
+            --work "${GITHUB_WORKSPACE}" \
+            > "${RUNNER_TEMP}/changed.txt"
+
+          # guard: refuse on zero changes, >3 files, or ANY forbidden path (incl.
+          # all of scripts/). Enforced in code, from the pristine clone — a
+          # prompt-injected or over-eager agent cannot get a forbidden-path or
+          # oversized diff pushed.
+          guard=$(node "${fin}" guard --files-file "${RUNNER_TEMP}/changed.txt")
+          if [ "$(jq -r '.ok' <<<"${guard}")" != "true" ]; then
+            jq -r '.reason' <<<"${guard}" > "${RUNNER_TEMP}/refuse-reason.txt"
+            echo "proceed=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Autofix refused for #${QUEUE_ISSUE}: $(cat "${RUNNER_TEMP}/refuse-reason.txt")"
+            exit 0
+          fi
+          echo "proceed=true" >> "${GITHUB_OUTPUT}"
+          echo "Diff guard passed for #${QUEUE_ISSUE}."
+
+      - name: Post no-PR analysis (refused)
+        if: ${{ steps.guard.outputs.proceed == 'false' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Runs the analysis-comment helper FROM THE PRISTINE CLONE (never the
+          # tainted checkout) with github.token. The agent's advisory summary is
+          # fenced + neutralized by the helper before it lands on the public issue.
+          node "${RUNNER_TEMP}/base/scripts/sentry-autofix-finalize.mjs" analysis-comment \
+            --reason "$(cat "${RUNNER_TEMP}/refuse-reason.txt")" \
+            --summary-file /tmp/autofix-pr-summary.md \
+            > "${RUNNER_TEMP}/analysis.md"
+          gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" --body-file "${RUNNER_TEMP}/analysis.md"
+
+      # Mint an App installation token — ONLY when proceeding, and ONLY in these
+      # deterministic steps (never in the LLM step's env). This is the sole
+      # branch-push + PR-create credential; using an App token (not github.token)
+      # is what makes required CI + Codex review actually fire on the fix PR.
+      - name: Mint App token
+        id: app-token
+        if: ${{ steps.guard.outputs.proceed == 'true' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.AUTOFIX_APP_ID }}
+          private-key: ${{ secrets.AUTOFIX_APP_PRIVATE_KEY }}
+
+      # Open the PR from the pristine clone. EVERY node helper here runs from
+      # ${RUNNER_TEMP}/base (agent never touched it). The agent's changes are
+      # re-created in a SEPARATE copy (${RUNNER_TEMP}/push) by BYTE-COPYING the
+      # guard-approved files with `cp` (never `git` against the tainted checkout),
+      # and git runs only against that pristine-config copy — so no agent code and
+      # no agent git config ever executes while APP_TOKEN is in scope.
+      - name: Open fix PR from a pristine clone (deterministic)
+        if: ${{ steps.guard.outputs.proceed == 'true' }}
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          # github.token for the queue-stub marks (comment/label) — authored by
+          # github-actions (the digest's authorship fence). The App token is used
+          # only for the branch push + PR create.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="${RUNNER_TEMP}/base"
+          fin="${base}/scripts/sentry-autofix-finalize.mjs"
+
+          branch=$(node "${fin}" branch --short-id "${SHORT_ID}")
+
+          # Dup guard (defense in depth; the selector's SHORT-ID PR-search
+          # normally stops this): if the branch already has a PR, it may be under
+          # review — leave it untouched and just mark the stub. `gh` reads the API
+          # (never git config), so this cannot be redirected by the tainted repo.
+          existing_pr=$(GH_TOKEN="${APP_TOKEN}" gh pr list \
+            --repo "${REPO}" --head "${branch}" --state all \
+            --json url --jq '.[0].url // ""')
+
+          if [ -n "${existing_pr}" ]; then
+            echo "::notice::Branch ${branch} already has PR ${existing_pr}; marking the stub, no new PR."
+            pr_url="${existing_pr}"
+          else
+            # Re-create the agent's guard-approved changes in a copy of the
+            # pristine clone (its .git config is pristine — no agent hooks /
+            # url.insteadOf / filters). Files are copied BYTE-FOR-BYTE from the
+            # tainted checkout with `cp`, never read via git, so no filter/hook
+            # ever runs; git then only touches this pristine copy.
+            push="${RUNNER_TEMP}/push"
+            rm -rf "${push}"
+            cp -a "${base}" "${push}"
+            while IFS= read -r f; do
+              [ -n "${f}" ] || continue
+              if [ -e "${GITHUB_WORKSPACE}/${f}" ]; then
+                mkdir -p "${push}/$(dirname "${f}")"
+                cp "${GITHUB_WORKSPACE}/${f}" "${push}/${f}"
+              else
+                rm -f "${push}/${f}"
+              fi
+            done < "${RUNNER_TEMP}/changed.txt"
+
+            # Commit as the App bot identity (user id resolved for the noreply
+            # email, per the create-github-app-token README) so the push is
+            # App-attributed and downstream required CI fires. Force-push covers
+            # the orphan-branch case (a prior run pushed but failed to open the
+            # PR): the branch holds no PR, lives in our own `sentry-autofix/`
+            # namespace, and runs are concurrency-serialized, so nothing under
+            # review is clobbered — and THIS run's content pairs with THIS run's
+            # summary, keeping the PR's diff and description consistent.
+            app_user_id=$(GH_TOKEN="${APP_TOKEN}" gh api "/users/${APP_SLUG}[bot]" --jq '.id')
+            git -C "${push}" config user.name "${APP_SLUG}[bot]"
+            git -C "${push}" config user.email "${app_user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+            git -C "${push}" checkout -b "${branch}"
+            git -C "${push}" add -A
+            git -C "${push}" commit -m "fix: Sentry autofix ${SHORT_ID} (#${QUEUE_ISSUE})"
+            git -C "${push}" push --force \
+              "https://x-access-token:${APP_TOKEN}@github.com/${REPO}.git" \
+              "HEAD:refs/heads/${branch}"
+
+            node "${fin}" pr-body \
+              --short-id "${SHORT_ID}" \
+              --issue "${QUEUE_ISSUE}" \
+              --summary-file /tmp/autofix-pr-summary.md \
+              > "${RUNNER_TEMP}/pr-body.md"
+
+            pr_url=$(GH_TOKEN="${APP_TOKEN}" gh pr create \
+              --repo "${REPO}" \
+              --base main \
+              --head "${branch}" \
+              --title "fix: Sentry autofix ${SHORT_ID}" \
+              --body-file "${RUNNER_TEMP}/pr-body.md")
+            echo "Opened ${pr_url}"
+          fi
+
+          # Record the outcome on the queue stub with the AMBIENT github.token
+          # (job env) so the comment is authored by github-actions (the digest's
+          # authorship fence) — NOT the App bot. All helpers still run from the
+          # pristine `base` clone. Idempotent: the selector's dedup (SHORT-ID in an
+          # open PR OR the fix-pr-opened label) stops the stub from being
+          # re-picked, so it does not re-comment on later runs. Self-heal the label
+          # from the ingest's single-source definition before applying it (the stub
+          # may predate a label bootstrap; gh errors on a missing repo label).
+          gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
+            --body "$(node "${fin}" autofix-comment --url "${pr_url}")"
+
+          def=$(node "${fin}" label-def)
+          gh label create "$(jq -r '.name' <<<"${def}")" \
+            --repo "${REPO}" \
+            --color "$(jq -r '.color' <<<"${def}")" \
+            --description "$(jq -r '.description' <<<"${def}")" \
+            --force
+          gh issue edit "${QUEUE_ISSUE}" --repo "${REPO}" \
+            --add-label "$(jq -r '.name' <<<"${def}")"
