@@ -54,8 +54,11 @@ Run the documentation garden through a deterministic, issue-only scheduler:
   and non-goal contract needed for independent execution.
 - The workflow has only `contents: read` and `issues: write`, a default-branch
   guard, pinned actions, one non-cancelling concurrency group, and Slack failure
-  notification coverage. It cannot write repository content, open or merge a
-  PR, deploy, or mutate production.
+  notification coverage. Live issue creation is accepted only from this exact
+  scheduled/manual workflow context, so a local CLI cannot race the Actions
+  concurrency group; local invocations remain dry-run previews. The workflow
+  cannot write repository content, open or merge a PR, deploy, or mutate
+  production.
 - The repo-tracked `doc-garden` skill defines the human/agent semantic-review
   procedure. Evidence, a claimed issue, a normal reviewed PR, link repair, and
   catalog verification remain required before documentation changes land.

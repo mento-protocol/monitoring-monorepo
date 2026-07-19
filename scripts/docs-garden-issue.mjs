@@ -23,6 +23,16 @@ import {
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 
+export function isAuthorizedGardenWorkflow(env = process.env) {
+  return (
+    env.GITHUB_ACTIONS === "true" &&
+    ["schedule", "workflow_dispatch"].includes(env.GITHUB_EVENT_NAME) &&
+    String(env.GITHUB_WORKFLOW_REF ?? "").includes(
+      "/.github/workflows/documentation-garden.yml@",
+    )
+  );
+}
+
 function parseBoolean(value, name) {
   if (value == null || String(value).trim() === "") return false;
   const normalized = String(value).trim().toLowerCase();
@@ -41,6 +51,7 @@ export function parseArgs(argv, env = process.env) {
     lane: envLane && envLane !== "auto" ? envLane : undefined,
     shard: envShard ? Number(envShard) : undefined,
     dryRun: parseBoolean(env.DOCS_GARDEN_DRY_RUN, "DOCS_GARDEN_DRY_RUN"),
+    liveCreationAuthorized: isAuthorizedGardenWorkflow(env),
     json: false,
     help: false,
   };
@@ -86,9 +97,9 @@ export function parseArgs(argv, env = process.env) {
 function usage() {
   return `Usage: node scripts/docs-garden-issue.mjs [options]
 
-Create or retain the one bounded documentation-garden queue issue. The
-documentation planner remains read-only; this command mutates GitHub Issues
-only, and --dry-run performs all reads and planning without any mutation.
+Create or retain the one bounded documentation-garden queue issue. Local
+invocations are preview-only and must use --dry-run; live issue creation is
+restricted to the serialized Documentation Garden GitHub Actions workflow.
 
 Options:
   --repo OWNER/REPO   GitHub repository (default: current GITHUB_REPOSITORY)
@@ -258,6 +269,11 @@ export async function runDocsGardenIssue(options, deps = {}) {
   let mutationResult = null;
 
   if (decision.action === "create" && !options.dryRun) {
+    if (!options.liveCreationAuthorized) {
+      throw new Error(
+        "live issue creation is restricted to the Documentation Garden workflow; use --dry-run locally or dispatch that workflow on the default branch",
+      );
+    }
     await ensureLabels(options);
     mutationResult = await createIssue(options, decision.spec);
     mutated = true;

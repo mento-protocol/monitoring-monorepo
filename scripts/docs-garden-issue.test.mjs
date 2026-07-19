@@ -18,6 +18,7 @@ import {
 import {
   ensureLabelsExist,
   ghPaginate,
+  isAuthorizedGardenWorkflow,
   listGithubIssues,
   parseArgs,
   runDocsGardenIssue,
@@ -391,6 +392,7 @@ function options(auditPacket, overrides = {}) {
     lane: undefined,
     shard: undefined,
     dryRun: false,
+    liveCreationAuthorized: true,
     json: true,
     help: false,
     ...overrides,
@@ -419,6 +421,28 @@ await test("dry-run reads and plans but performs zero mutations", async () => {
   assert.equal(result.action, "create");
   assert.equal(result.mutated, false);
   assert.deepEqual(calls, { list: 1, ensure: 0, create: 0 });
+});
+
+await test("live creation is rejected outside the serialized workflow", async () => {
+  const auditPacket = packet();
+  let mutations = 0;
+  await assert.rejects(
+    runDocsGardenIssue(
+      options(auditPacket, { liveCreationAuthorized: false }),
+      {
+        listIssues: async () => [],
+        packetForWeekSerial: async () => auditPacket,
+        ensureLabels: async () => {
+          mutations += 1;
+        },
+        createIssue: async () => {
+          mutations += 1;
+        },
+      },
+    ),
+    /restricted to the Documentation Garden workflow/,
+  );
+  assert.equal(mutations, 0);
 });
 
 await test("two runs create at most one live issue", async () => {
@@ -497,6 +521,23 @@ await test("CLI parsing validates shard and workflow dry-run controls", () => {
       GITHUB_REPOSITORY: "owner/repo",
     }).dryRun,
     true,
+  );
+  const workflowEnv = {
+    GITHUB_REPOSITORY: "owner/repo",
+    GITHUB_ACTIONS: "true",
+    GITHUB_EVENT_NAME: "schedule",
+    GITHUB_WORKFLOW_REF:
+      "owner/repo/.github/workflows/documentation-garden.yml@refs/heads/main",
+  };
+  assert.equal(isAuthorizedGardenWorkflow(workflowEnv), true);
+  assert.equal(parseArgs([], workflowEnv).liveCreationAuthorized, true);
+  assert.equal(
+    isAuthorizedGardenWorkflow({
+      ...workflowEnv,
+      GITHUB_WORKFLOW_REF:
+        "owner/repo/.github/workflows/ci.yml@refs/heads/main",
+    }),
+    false,
   );
   assert.throws(
     () =>

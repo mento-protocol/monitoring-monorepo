@@ -80,7 +80,8 @@ cannot identify an occurrence because claiming intentionally moves
 
 Use the CLI for a local or operator preview. Dry-run still reads the full issue
 set and computes the exact decision but performs no label, issue, or repository
-mutation:
+mutation. Live creation from a local CLI is rejected so it cannot race the
+workflow's concurrency group:
 
 ```bash
 pnpm docs:garden --dry-run --json
