@@ -134,6 +134,24 @@ upstash_api_key = "..."
 # and re-apply, never via the GitHub UI.
 # sentry_autofix_enabled = "false"
 
+# ── Sentry triage archive loop (ADR 0036 Phase 2a) ────────────────────────────
+# WRITE-scoped Sentry token for the Phase 2a human-approved archive leg
+# (ADR 0036 Stage C). Mint a SECOND internal integration in Sentry (org
+# mento-labs) → Settings → Developer Settings → New Internal Integration, name
+# `sentry-triage-archiver`, scopes Issue & Event: Read + Write and NOTHING else
+# (no Project, no Organization, no Member). Do NOT reuse the read-only
+# sentry_triage_token here. Leave empty until provisioned; the GitHub Actions
+# secret resource is `count`-gated so `terraform apply` succeeds without it and
+# the archive workflow no-ops gracefully. Brand-new, no external consumers, so
+# no `prevent_destroy`. See docs/notes/sentry-triage-pipeline.md.
+# sentry_archive_token = "xxx-write-scoped-sentry-archive-token-xxx"
+
+# Kill switch for the Phase 2a Sentry archive workflow (string "true"/"false",
+# default "false"). Flip to "true" only after the archive workflow PR is merged
+# AND sentry_archive_token above is provisioned. Still IaC — set it here and
+# re-apply, never via the GitHub UI.
+# sentry_archive_enabled = "false"
+
 # ── Arkham Intelligence ───────────────────────────────────────────────────────
 # API key for manual /api/arkham/enrich counterparty tagging.
 # Apply for access at https://intel.arkm.com/api — gated, no self-serve signup.

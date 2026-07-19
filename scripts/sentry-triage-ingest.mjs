@@ -198,6 +198,18 @@ export const LABEL_DEFINITIONS = [
     description:
       "Autofix attempt declined to open a PR (no change or guard-refused); remove the label to allow a retry (ADR 0036 Phase 2b)",
   },
+  {
+    name: "sentry:approved-archive",
+    color: "1a7f37",
+    description:
+      "Human-approved: archive the underlying Sentry issue (Phase 2a, ADR 0036)",
+  },
+  {
+    name: "sentry:archived",
+    color: "6e7681",
+    description:
+      "Underlying Sentry issue archived (archived_until_escalating) via the human-approved archive loop (Phase 2a, ADR 0036)",
+  },
 ];
 
 export const PROJECTED_LABEL = "sentry:projected";
@@ -218,6 +230,16 @@ export const FIX_PR_OPENED_LABEL = "sentry:fix-pr-opened";
 // self-healed by the autofix workflow's refused path before it labels the stub.
 export const FIX_REFUSED_LABEL = "sentry:fix-refused";
 
+// Phase 2a human-approved archive loop (ADR 0036 Stage C,
+// scripts/sentry-triage-archive.mjs + .github/workflows/sentry-triage-archive.yml).
+// APPROVED_ARCHIVE_LABEL is the human-applied approval marker that triggers the
+// archive workflow; ARCHIVED_LABEL is the terminal audit marker the archive
+// script applies once the Sentry issue is archived. Both are bootstrapped by
+// the ingest label set above and self-healed by the archive script — single
+// source of truth for their colors/descriptions.
+export const APPROVED_ARCHIVE_LABEL = "sentry:approved-archive";
+export const ARCHIVED_LABEL = "sentry:archived";
+
 // Stage B's verdict namespace, derived from the definitions above so the two
 // can't drift. A reopened regression must shed its previous verdict — the
 // old verdict described the old occurrence, and downstream consumers filter
@@ -227,21 +249,29 @@ export const VERDICT_LABELS = LABEL_DEFINITIONS.map(
 ).filter((name) => name.startsWith("sentry:verdict-"));
 
 // Labels a regression reopen must shed: the stale verdict labels, the stale
-// `sentry:projected` marker (ADR 0038), AND the stale autofix markers
-// (`sentry:fix-pr-opened` / `sentry:fix-refused`, ADR 0036 Phase 2b). A
-// regression is a NEW occurrence, so every trace of how the OLD occurrence was
+// `sentry:projected` marker (ADR 0038), the stale autofix markers
+// (`sentry:fix-pr-opened` / `sentry:fix-refused`, ADR 0036 Phase 2b), AND the
+// stale Phase-2a archive markers (`sentry:approved-archive` / `sentry:archived`).
+// A regression is a NEW occurrence, so every trace of how the OLD occurrence was
 // handled must clear: leaving a verdict/projection would misrepresent a
-// needs-triage stub as already verdicted/projected, and leaving an autofix
-// marker would both misrepresent it as fixed/refused AND block the re-triage
-// round from ever being autofixed again (the select step dedups on those
-// markers). If the re-triage round lands on an actionable verdict again, the
-// projection/autofix steps re-apply their markers, idempotently reusing the
-// same owning-repo issue / opening a fresh fix PR.
+// needs-triage stub as already verdicted/projected; leaving an autofix marker
+// would both misrepresent it as fixed/refused AND block the re-triage round from
+// ever being autofixed again (the select step dedups on those markers); and
+// leaving an archive marker would misrepresent it as approved/archived —
+// shedding the approval marker is also an authority-boundary guard, since a
+// regression must not carry a stale human archive approval into a fresh
+// occurrence (a workflow_dispatch retry would otherwise read it as
+// still-approved and re-archive without re-review). If the re-triage round lands
+// on an actionable verdict again, the projection/autofix steps re-apply their
+// markers (idempotently reusing the same owning-repo issue / opening a fresh fix
+// PR), and a fresh archive needs a fresh human approval.
 export const REOPEN_SHED_LABELS = [
   ...VERDICT_LABELS,
   PROJECTED_LABEL,
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
+  APPROVED_ARCHIVE_LABEL,
+  ARCHIVED_LABEL,
 ];
 
 // Short ID is the first whitespace-delimited token after the `[sentry] `

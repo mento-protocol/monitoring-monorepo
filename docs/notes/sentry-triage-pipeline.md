@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-19
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -53,6 +53,7 @@ flowchart LR
         CLOSE["<b>deterministic close step</b><br/>upstream + actionable-local →<br/>close (completed); needs-human<br/>stays open; external actionable<br/>deferred to the project job"]
         PROJ["<b>project job — SERIALIZED</b><br/>after the whole matrix, one at a<br/>time: external code-fix/config-fix →<br/>owning-repo issue, then close<br/>(Issues-write, no LLM authority)"]
         AFX["<b>autofix leg — Phase 2b</b><br/>sentry-autofix.yml (separate cron)<br/>LOCAL code-fix stubs → scoped fix<br/>agent (no Sentry access) → diff guard<br/>→ PR via App token (merge stays human)"]
+        ARCH["<b>Phase 2a — archive</b><br/>sentry-triage-archive.yml<br/>human-approved, deterministic<br/>archived_until_escalating<br/>(never hard-resolve)"]
     end
 
     subgraph FIXES["Fix PRs — this repo (Phase 2b)"]
@@ -71,6 +72,7 @@ flowchart LR
         SEC["SENTRY_TRIAGE_TOKEN (read-only)<br/>SENTRY_TRIAGE_ENABLED (kill switch)"]
         SECP["SENTRY_PROJECTION_TOKEN<br/>(Issues R/W, 3 owning repos)"]
         SECA["AUTOFIX_APP_* (App id + PEM)<br/>SENTRY_AUTOFIX_ENABLED (kill switch)"]
+        SECAR["SENTRY_ARCHIVE_TOKEN (Issue R/W)<br/>SENTRY_ARCHIVE_ENABLED (kill switch)"]
     end
 
     subgraph OBS["Observability"]
@@ -99,6 +101,10 @@ flowchart LR
     SEC -. "gates + authenticates" .-> ING & SEL
     SECP -. "authenticates (Issues-write,<br/>project job ONLY)" .-> PROJ
     SECA -. "gates + authenticates<br/>(App token, autofix ONLY)" .-> AFX
+    HUM -- "apply sentry:approved-archive<br/>on a verdicted stub" --> ARCH
+    ARCH -- "archived_until_escalating<br/>(never hard-resolve)" --> SE
+    ARCH -- "audit + sentry:archived,<br/>close (completed)" --> QI
+    SECAR -. "gates + authenticates<br/>(archive job ONLY)" .-> ARCH
     ING --> TRK
     GHA -.-> CIF
     LBL --> ENG
@@ -250,11 +256,33 @@ queues can't cross-claim each other's work.
 
 The ingest script idempotently bootstraps every pipeline label on each run
 (`gh label create --force`), including the verdict labels Stage B will use
-before Stage B exists, plus the `sentry:projected` marker the verdict-projection
-step applies (see "Verdict projection" below): `sentry-triage`,
+before Stage B exists, the `sentry:projected` marker the verdict-projection
+step applies (see "Verdict projection" below), and the Phase-2a archive-loop
+markers (see "Archive loop (Phase 2a)" below): `sentry-triage`,
 `sentry:needs-triage`, `sentry:candidate-noise`, `sentry:verdict-code-fix`,
 `sentry:verdict-config-fix`, `sentry:verdict-upstream`,
-`sentry:verdict-needs-human`, `sentry:projected`.
+`sentry:verdict-needs-human`, `sentry:projected`, `sentry:approved-archive`,
+`sentry:archived`.
+
+Label glossary (namespace `sentry:*`, disjoint from the dev-backlog labels):
+
+| label                        | applied by         | meaning                                                                  |
+| ---------------------------- | ------------------ | ------------------------------------------------------------------------ |
+| `sentry-triage`              | ingest             | queue-namespace marker, kept for the stub's whole lifetime               |
+| `sentry:needs-triage`        | ingest / reopen    | awaiting a triage-agent verdict                                          |
+| `sentry:candidate-noise`     | ingest             | raw title matched a noise heuristic (in-memory only)                     |
+| `sentry:verdict-code-fix`    | verdict label step | verdict: fixable in the owning repo's code                               |
+| `sentry:verdict-config-fix`  | verdict label step | verdict: fixable via configuration                                       |
+| `sentry:verdict-upstream`    | verdict label step | verdict: upstream/third-party, not fixable here                          |
+| `sentry:verdict-needs-human` | verdict label step | verdict: needs human judgment                                            |
+| `sentry:projected`           | project job        | actionable verdict projected into the owning repo (ADR 0038)             |
+| `sentry:approved-archive`    | **a human**        | human approval to archive the underlying Sentry issue (Phase 2a)         |
+| `sentry:archived`            | archive script     | terminal: underlying Sentry issue archived (`archived_until_escalating`) |
+
+A regression reopen (Stage A's idempotency scan) sheds every non-lifetime
+marker — verdict, `sentry:projected`, `sentry:approved-archive`, AND
+`sentry:archived` — so a reopened stub reads as awaiting fresh triage and never
+carries a stale human archive approval into a new occurrence.
 
 ### Body
 
@@ -955,6 +983,156 @@ identical to any hand-written change. This is the accepted residual in ADR 0036:
 a `code-fix` verdict triggers automated branch/PR creation bounded by the
 per-run cap, the diff guard, and the review gauntlet — but never an automated
 merge.
+
+## Archive loop (Phase 2a)
+
+Phase 2a is the first leg that mutates **Sentry**. It is deterministic
+(zero-LLM) and human-gated: a person decides, the workflow executes. It runs as
+`.github/workflows/sentry-triage-archive.yml` driven by
+`scripts/sentry-triage-archive.mjs` (tests: `pnpm sentry:archive:test`).
+
+**The one thing automation may ever do to a Sentry issue here:** set it to
+`archived_until_escalating` — never a hard resolve (ADR 0036). Escalation must
+be able to resurface a mistaken archive; hard-resolve stays a human action
+everywhere.
+
+### Human approval flow
+
+1. A human reviews a verdicted queue stub (typically a `sentry:verdict-upstream`
+   noise finding, but any verdict qualifies) and, if they want the underlying
+   Sentry issue archived, applies the **`sentry:approved-archive`** label.
+2. The `labeled` event triggers the archive workflow, which — before any
+   mutation — runs two deterministic guards:
+   - **Approval authority.** The actor who applied the label (or, on the
+     `workflow_dispatch` retry path, the dispatching actor) must be a human
+     (`type == "User"`, login not ending in `[bot]`) with `admin` or `write`
+     permission on this repo, checked via
+     `GET /repos/{owner}/{repo}/collaborators/{login}/permission`. A drive-by
+     label from anyone else is refused: the label is removed, an audit comment
+     explains why, and the run **exits 0** (a policy refusal, not a red run).
+   - **Verdict guard.** The stub must carry the `sentry-triage` marker, the
+     `sentry:approved-archive` approval, AND at least one `sentry:verdict-*`
+     label. An un-verdicted stub is refused (comment + approval label removed +
+     exit 0) so nothing is archived without triage.
+3. On success the archive script archives the Sentry issue
+   (`archived_until_escalating`, idempotent — an already-archived issue is a
+   logged no-op), posts an audit comment on the queue stub, swaps
+   `sentry:approved-archive` → `sentry:archived`, and closes the stub
+   (`completed`).
+
+The LLM triage agent holds NO part of this: it never applies
+`sentry:approved-archive` (only a human does) and never sees the write-scoped
+token. The approval label is the entire human-in-the-loop gate.
+
+### What qualifies
+
+Any verdicted stub a human chooses. The workflow does not restrict archiving to
+`upstream-transient` — an operator may legitimately archive a `needs-human` or
+`config-fix` stub they have decided to accept — but it hard-refuses anything
+un-verdicted. Because a Sentry issue archived here only stays archived **until
+it escalates**, a wrong archive is self-correcting: Sentry resurfaces it and the
+regression-reopen path re-queues it (see below).
+
+### Never auto-archive
+
+Archiving is never triggered by a verdict alone. ADR 0036 fixes this as the
+trust boundary: a leaked or wrong verdict cannot mutate Sentry by itself —
+archiving requires a human-applied approval label, and the token that performs
+it is write-scoped and reachable only from this one workflow's one step.
+
+To keep that approval from going stale under a concurrent regression, the
+archive script re-reads the stub's LIVE labels twice — once immediately before
+the Sentry mutation and again immediately before it closes/relabels the stub —
+and refuses if the `sentry:approved-archive` or verdict labels have been shed
+(e.g. by an ingest regression-reopen) in between. If the reopen lands during the
+Sentry I/O — after the archive PUT but before settlement — the script actively
+**reverts** its own archive (restores the Sentry issue to `unresolved`) rather
+than leaving it hidden, so the regression stays surfaced and the queue stub is
+left open for re-triage. The common path is already race-free because ingest
+only ever reopens a CLOSED stub, and the stub stays OPEN throughout the archive
+until the final settle. The sub-second residual between the last re-read and the
+close is irreducible without cross-workflow lock-step serialization (GitHub has
+no conditional close); tightening that is a tracked follow-up.
+
+### Audit trail
+
+Every archive leaves a fixed-marker (`<!-- sentry-triage-archive:v1 -->`) audit
+comment on the queue stub recording the approver login, a UTC timestamp, what
+was archived, and the Sentry permalink, before the stub closes. The marker also
+makes the settle idempotent: a `workflow_dispatch` retry of an already-settled
+stub does not double-post.
+
+### Escalation → auto-reopen accuracy loop
+
+`archived_until_escalating` is the pivot that makes archiving low-risk. When an
+archived issue escalates/regresses in Sentry, Stage A's ingest sees it in the
+`is:regressed` query and — because its `lastSeen` is now newer than the queue
+stub's `closed_at` — reopens the stub, sheds every stale marker (verdict,
+`sentry:projected`, `sentry:approved-archive`, `sentry:archived`), and re-adds
+`sentry:needs-triage`. The reopened stub reads as awaiting fresh triage and
+carries no stale human approval, so a fresh archive needs a fresh approval. A
+wrong archive therefore costs, at most, one escalation round-trip — the loop
+measures and self-corrects instead of silently burying a real bug.
+
+**Don't close over an in-flight regression.** That reopen gate has a sharp edge:
+a regression that lands while the stub is still OPEN (between the human approval
+and the archive run) is invisible to ingest — `decideDedupAction` skips OPEN
+stubs — so it never sheds the approval. If the archive then closed the stub
+_after_ that regression's `lastSeen`, ingest's `lastSeen > closedAt` gate would
+skip the regression forever (until some further event). The archive script
+therefore checks Sentry's live substatus first and, if the issue is currently
+`regressed`/`escalating`, refuses to archive: it re-queues the stub
+(`sentry:needs-triage`, approval + verdict labels shed) for fresh triage instead
+of closing over the regression. The residual — a regression Sentry has not yet
+flagged when the archive runs — is tightened only by full ingest/archive
+synchronization (tracked follow-up).
+
+### Undocumented Sentry comment endpoint (caveat)
+
+The archive script also attempts a best-effort link-back note on the Sentry
+issue pointing at the queue stub. Sentry's issue-comment ("note") REST endpoint
+is **not in the public API reference** (verified 2026-07), so the call is
+wrapped in try/catch and a failure only logs a `::notice::` — it can NEVER fail
+the run, because the archive itself already succeeded. The exact endpoint/payload
+**needs a live test at activation** (see the `NEEDS A LIVE TEST` code comment in
+`scripts/sentry-triage-archive.mjs`).
+
+### Activating the archive loop
+
+The archive leg is a separate, later activation from Phase 1 and verdict
+projection. It stays a graceful no-op until BOTH its write-scoped token exists
+AND `SENTRY_ARCHIVE_ENABLED` is `"true"`.
+
+1. **Mint the write-scoped Sentry token.** In Sentry (org `mento-labs`), create
+   a SECOND internal integration named `sentry-triage-archiver` with scopes
+   **Issue & Event: Read + Write** and NOTHING else (no Project, no
+   Organization, no Member). Do NOT reuse or widen the read-only
+   `sentry-triage-reader` token — the read and write credentials are deliberately
+   separate. Copy the generated token.
+2. **Set it in the platform tfvars.** In your local, gitignored
+   `terraform/terraform.tfvars`, set `sentry_archive_token` (see
+   `terraform/terraform.tfvars.example` for the key). Same value source as the
+   other `count`-gated platform secrets — never `gh secret set`, never the
+   GitHub UI.
+3. **Plan and apply the platform stack (human-approved local apply).** Run
+   `pnpm infra:plan` and confirm the new
+   `github_actions_secret.sentry_archive_token` resource appears (absent while
+   the tfvar is empty); `SENTRY_ARCHIVE_ENABLED` is provisioned by the same
+   apply in its default `"false"` (off) position. After human sign-off, run
+   `pnpm tf apply platform` from a clean `main` checkout. The apply mirrors the
+   value into the repo Actions secret `SENTRY_ARCHIVE_TOKEN`. Brand-new, no
+   external consumer, so no `prevent_destroy` — emptying the tfvar later cleanly
+   removes it (the workflow reverts to the no-op).
+4. **Flip the kill switch to activate.** Once the archive workflow PR is merged
+   and the token is applied, set `sentry_archive_enabled = "true"` in
+   `terraform.tfvars` and re-apply the platform stack (still IaC). The workflow
+   activates on the next `sentry:approved-archive` label.
+5. **Verify.** Apply `sentry:approved-archive` to a verdicted stub as a
+   write/admin user and confirm the Sentry issue flips to
+   `archived_until_escalating`, the stub gets the audit comment + `sentry:archived`
+   and closes, and (at activation) confirm the undocumented Sentry link-back
+   note either lands or fails gracefully. To pause, set
+   `sentry_archive_enabled = "false"` and re-apply; the token can stay in place.
 
 ## Operator runbook (Phase-1 activation)
 

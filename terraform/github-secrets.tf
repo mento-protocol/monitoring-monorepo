@@ -212,6 +212,25 @@ resource "github_actions_secret" "autofix_app_private_key" {
   value       = var.autofix_app_private_key
 }
 
+# SENTRY_ARCHIVE_TOKEN is brand-new (ADR 0036 Stage C, Phase 2a): a WRITE-scoped
+# Sentry internal-integration token (Issue & Event: Read + Write, nothing else),
+# consumed ONLY by `.github/workflows/sentry-triage-archive.yml` to set an issue
+# to `archived_until_escalating`. Deliberately separate from the read-only
+# `sentry_triage_token` (that token must never gain write scopes). Like
+# `sentry_triage_token`/`sentry_projection_token` above — and UNLIKE
+# `claude_code_oauth_token` below — no live secret of this name exists and no
+# external consumer depends on it, so plain `count` gating is enough and it
+# carries NO `prevent_destroy`: destroying it while unused breaks nothing.
+resource "github_actions_secret" "sentry_archive_token" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.sentry_archive_token == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "SENTRY_ARCHIVE_TOKEN"
+  value       = var.sentry_archive_token
+}
+
 resource "github_actions_secret" "claude_code_oauth_token" {
   # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
   # `vercel_automation_bypass`; see the comment above for the threat model.
