@@ -878,6 +878,184 @@ test("requires root review comment replies from an allowed agent author", () => 
   );
 });
 
+test("accepts trusted maintainer takeover replies without accepting self-replies or contributors", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      author: { login: "nvtaveras" },
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    reviewComments: [
+      {
+        id: 10,
+        body: "root with maintainer takeover reply",
+        path: "a.ts",
+        line: 1,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 11,
+        in_reply_to_id: 10,
+        body: "fixed",
+        author_association: "MEMBER",
+        user: { login: "chapati23", type: "User" },
+      },
+      {
+        id: 12,
+        body: "root with owner takeover reply",
+        path: "a.ts",
+        line: 2,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 13,
+        in_reply_to_id: 12,
+        body: "fixed by owner",
+        authorAssociation: "OWNER",
+        user: { login: "owner", type: "User" },
+      },
+      {
+        id: 14,
+        body: "root with collaborator takeover reply",
+        path: "a.ts",
+        line: 3,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 15,
+        in_reply_to_id: 14,
+        body: "fixed by collaborator",
+        author_association: "COLLABORATOR",
+        user: { login: "collaborator", type: "User" },
+      },
+      {
+        id: 16,
+        body: "root with original PR author reply",
+        path: "a.ts",
+        line: 4,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 17,
+        in_reply_to_id: 16,
+        body: "fixed by author",
+        user: { login: "nvtaveras", type: "User" },
+      },
+      {
+        id: 18,
+        body: "root with exact Codex bot reply",
+        path: "a.ts",
+        line: 5,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 19,
+        in_reply_to_id: 18,
+        body: "fixed by Codex",
+        user: { login: "chatgpt-codex-connector[bot]", type: "Bot" },
+      },
+      {
+        id: 20,
+        body: "root with trusted reviewer self-reply",
+        path: "b.ts",
+        line: 2,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 21,
+        in_reply_to_id: 20,
+        body: "reviewer follow-up",
+        authorAssociation: "OWNER",
+        user: { login: "reviewer", type: "User" },
+      },
+      {
+        id: 30,
+        body: "root with contributor reply",
+        path: "c.ts",
+        line: 3,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 31,
+        in_reply_to_id: 30,
+        body: "drive-by reply",
+        author_association: "CONTRIBUTOR",
+        user: { login: "contributor", type: "User" },
+      },
+      {
+        id: 40,
+        body: "root with bot claiming a trusted association",
+        path: "d.ts",
+        line: 4,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 41,
+        in_reply_to_id: 40,
+        body: "bot reply",
+        author_association: "COLLABORATOR",
+        user: { login: "untrusted[bot]", type: "Bot" },
+      },
+    ],
+  });
+
+  assertDeepEqual(
+    summary.unrepliedRootReviewComments.map((comment) => comment.id),
+    [20, 30, 40],
+  );
+  assertEqual(summary.gates.reviewCommentReplies.unrepliedCount, 3);
+});
+
+test("clears the reply gate when a member takes over a teammate's PR", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      author: { login: "nvtaveras" },
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    reviewComments: [
+      {
+        id: 10,
+        body: "please fix",
+        path: "a.ts",
+        line: 1,
+        user: { login: "reviewer" },
+      },
+      {
+        id: 11,
+        in_reply_to_id: 10,
+        body: "Fixed in abc123",
+        author_association: "MEMBER",
+        user: { login: "chapati23", type: "User" },
+      },
+    ],
+    includeFeedbackDetails: true,
+  });
+
+  assertEqual(summary.gates.reviewCommentReplies.ready, true);
+  assertEqual(summary.gates.reviewCommentReplies.unrepliedCount, 0);
+  assertDeepEqual(summary.unrepliedRootReviewComments, []);
+  assertEqual(summary.rootReviewComments[0].replied, true);
+});
+
 test("summarize ready state ignores self-authored roots but not reviewer self-replies", () => {
   const summary = summarizeReadyState({
     pr: {

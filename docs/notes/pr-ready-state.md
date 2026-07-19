@@ -44,7 +44,13 @@ Required blockers:
   split.
 - Required GitHub review state, including requested changes or required review
   still pending.
-- Unreplied review comments that repo policy requires agents to answer.
+- Unreplied review comments that repo policy requires agents to answer. A
+  direct reply satisfies this gate when it comes from the PR author, the Codex
+  review bot, or a different human GitHub `OWNER`, `MEMBER`, or
+  `COLLABORATOR`. This lets a maintainer take over a teammate's PR without
+  borrowing the original author's credentials. A reviewer's reply to their own
+  root comment does not satisfy the gate, and neither does a reply from an
+  untrusted contributor or a bot merely carrying a trusted association.
 - The Codex PR-description approval gate for the current head. The bot `+1`
   reaction must be created at or after the current-head update lower bound:
   the head commit's GitHub push timestamp when available, otherwise the first
