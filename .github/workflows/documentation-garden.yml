@@ -40,6 +40,9 @@ on:
 
 permissions:
   contents: read
+  # Issues are the only mutable resource. OIDC supplies runner-bound identity
+  # proof and does not grant write access to a GitHub or cloud resource.
+  id-token: write
   issues: write
 
 concurrency:

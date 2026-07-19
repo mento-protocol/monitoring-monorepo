@@ -22,16 +22,9 @@ import {
 } from "./docs-index-helpers.mjs";
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
-
-export function isAuthorizedGardenWorkflow(env = process.env) {
-  return (
-    env.GITHUB_ACTIONS === "true" &&
-    ["schedule", "workflow_dispatch"].includes(env.GITHUB_EVENT_NAME) &&
-    String(env.GITHUB_WORKFLOW_REF ?? "").includes(
-      "/.github/workflows/documentation-garden.yml@",
-    )
-  );
-}
+const GARDEN_OIDC_AUDIENCE = "mento-docs-garden";
+const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
+const GITHUB_OIDC_REQUEST_HOST = "pipelines.actions.githubusercontent.com";
 
 function parseBoolean(value, name) {
   if (value == null || String(value).trim() === "") return false;
@@ -51,7 +44,6 @@ export function parseArgs(argv, env = process.env) {
     lane: envLane && envLane !== "auto" ? envLane : undefined,
     shard: envShard ? Number(envShard) : undefined,
     dryRun: parseBoolean(env.DOCS_GARDEN_DRY_RUN, "DOCS_GARDEN_DRY_RUN"),
-    liveCreationAuthorized: isAuthorizedGardenWorkflow(env),
     json: false,
     help: false,
   };
@@ -153,6 +145,101 @@ export function runGh(args) {
   });
 }
 
+function decodeOidcClaims(token) {
+  const segments = String(token ?? "").split(".");
+  if (segments.length !== 3) {
+    throw new Error("GitHub OIDC response did not contain a JWT");
+  }
+  try {
+    return JSON.parse(Buffer.from(segments[1], "base64url").toString("utf8"));
+  } catch (error) {
+    throw new Error("GitHub OIDC token payload is malformed", { cause: error });
+  }
+}
+
+function audienceIncludes(audience, expected) {
+  return Array.isArray(audience)
+    ? audience.includes(expected)
+    : audience === expected;
+}
+
+export async function assertAuthorizedGardenWorkflow(
+  options,
+  {
+    env = process.env,
+    fetchImpl = globalThis.fetch,
+    now = () => Date.now(),
+  } = {},
+) {
+  const eventName = String(env.GITHUB_EVENT_NAME ?? "");
+  const workflowRef = String(env.GITHUB_WORKFLOW_REF ?? "");
+  const expectedWorkflowRef = `${options.repo}/.github/workflows/documentation-garden.yml@${env.GITHUB_REF ?? ""}`;
+  if (
+    env.GITHUB_ACTIONS !== "true" ||
+    !["schedule", "workflow_dispatch"].includes(eventName) ||
+    workflowRef !== expectedWorkflowRef
+  ) {
+    throw new Error(
+      "live issue creation is restricted to the Documentation Garden workflow; use --dry-run locally or dispatch that workflow on the default branch",
+    );
+  }
+
+  const requestToken = String(env.ACTIONS_ID_TOKEN_REQUEST_TOKEN ?? "");
+  let requestUrl;
+  try {
+    requestUrl = new URL(String(env.ACTIONS_ID_TOKEN_REQUEST_URL ?? ""));
+  } catch (error) {
+    throw new Error("GitHub Actions OIDC request URL is missing or invalid", {
+      cause: error,
+    });
+  }
+  if (
+    requestUrl.protocol !== "https:" ||
+    requestUrl.hostname !== GITHUB_OIDC_REQUEST_HOST ||
+    !requestToken
+  ) {
+    throw new Error("GitHub Actions OIDC runner credentials are unavailable");
+  }
+  requestUrl.searchParams.set("audience", GARDEN_OIDC_AUDIENCE);
+
+  const response = await fetchImpl(requestUrl, {
+    headers: {
+      accept: "application/json",
+      authorization: `bearer ${requestToken}`,
+    },
+    redirect: "error",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `GitHub Actions OIDC identity request failed with status ${response.status}`,
+    );
+  }
+  const oidcResponse = await response.json();
+  const claims = decodeOidcClaims(oidcResponse?.value);
+  const nowSeconds = Math.floor(now() / 1000);
+  const valid =
+    claims.iss === GITHUB_OIDC_ISSUER &&
+    audienceIncludes(claims.aud, GARDEN_OIDC_AUDIENCE) &&
+    String(claims.repository ?? "").toLowerCase() ===
+      options.repo.toLowerCase() &&
+    claims.workflow === "Documentation Garden" &&
+    claims.workflow_ref === expectedWorkflowRef &&
+    claims.workflow_sha === env.GITHUB_SHA &&
+    claims.event_name === eventName &&
+    claims.ref === env.GITHUB_REF &&
+    String(claims.run_id ?? "") === String(env.GITHUB_RUN_ID ?? "") &&
+    String(claims.run_attempt ?? "") === String(env.GITHUB_RUN_ATTEMPT ?? "") &&
+    Number(claims.nbf) <= nowSeconds + 30 &&
+    Number(claims.iat) <= nowSeconds + 30 &&
+    Number(claims.exp) > nowSeconds;
+  if (!valid) {
+    throw new Error(
+      "GitHub OIDC identity does not match the active Documentation Garden workflow run",
+    );
+  }
+  return claims;
+}
+
 export async function ghPaginate(
   apiPath,
   { perPage = 100, maxPages = 200, runner = runGh } = {},
@@ -252,6 +339,7 @@ function defaultPacketForWeekSerial(options, weekSerial) {
 export async function runDocsGardenIssue(options, deps = {}) {
   const {
     listIssues = listGithubIssues,
+    authorizeLiveCreation = assertAuthorizedGardenWorkflow,
     ensureLabels = ensureLabelsExist,
     createIssue = defaultCreateIssue,
     packetForWeekSerial = (weekSerial) =>
@@ -269,11 +357,7 @@ export async function runDocsGardenIssue(options, deps = {}) {
   let mutationResult = null;
 
   if (decision.action === "create" && !options.dryRun) {
-    if (!options.liveCreationAuthorized) {
-      throw new Error(
-        "live issue creation is restricted to the Documentation Garden workflow; use --dry-run locally or dispatch that workflow on the default branch",
-      );
-    }
+    await authorizeLiveCreation(options);
     await ensureLabels(options);
     mutationResult = await createIssue(options, decision.spec);
     mutated = true;

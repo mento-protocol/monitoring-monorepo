@@ -16,9 +16,9 @@ import {
   weekSerialForDate,
 } from "./docs-garden-issue-helpers.mjs";
 import {
+  assertAuthorizedGardenWorkflow,
   ensureLabelsExist,
   ghPaginate,
-  isAuthorizedGardenWorkflow,
   listGithubIssues,
   parseArgs,
   runDocsGardenIssue,
@@ -195,7 +195,7 @@ await test("package README lane receives the documented low-risk label", () => {
   assert.ok(!spec.labels.includes("risk:medium"));
 });
 
-await test("REST normalization paginates pages, filters PRs, and parses markers", () => {
+await test("REST normalization deduplicates pages, filters PRs, and parses markers", () => {
   const auditPacket = packet();
   const pages = [
     [
@@ -206,6 +206,14 @@ await test("REST normalization paginates pages, filters PRs, and parses markers"
         labels: [{ name: "agent-ready" }],
       },
       { number: 2, state: "open", pull_request: {}, body: "" },
+    ],
+    [
+      {
+        number: 1,
+        state: "open",
+        body: `${DOCS_GARDEN_MARKER}\n${packetMarker(auditPacket)}\n`,
+        labels: [{ name: "agent-ready" }],
+      },
     ],
   ];
   const normalized = normalizeGithubIssuePages(pages);
@@ -392,7 +400,6 @@ function options(auditPacket, overrides = {}) {
     lane: undefined,
     shard: undefined,
     dryRun: false,
-    liveCreationAuthorized: true,
     json: true,
     help: false,
     ...overrides,
@@ -427,19 +434,21 @@ await test("live creation is rejected outside the serialized workflow", async ()
   const auditPacket = packet();
   let mutations = 0;
   await assert.rejects(
-    runDocsGardenIssue(
-      options(auditPacket, { liveCreationAuthorized: false }),
-      {
-        listIssues: async () => [],
-        packetForWeekSerial: async () => auditPacket,
-        ensureLabels: async () => {
-          mutations += 1;
-        },
-        createIssue: async () => {
-          mutations += 1;
-        },
+    runDocsGardenIssue(options(auditPacket), {
+      listIssues: async () => [],
+      packetForWeekSerial: async () => auditPacket,
+      authorizeLiveCreation: async () => {
+        throw new Error(
+          "live issue creation is restricted to the Documentation Garden workflow",
+        );
       },
-    ),
+      ensureLabels: async () => {
+        mutations += 1;
+      },
+      createIssue: async () => {
+        mutations += 1;
+      },
+    }),
     /restricted to the Documentation Garden workflow/,
   );
   assert.equal(mutations, 0);
@@ -452,6 +461,7 @@ await test("two runs create at most one live issue", async () => {
   const deps = {
     listIssues: async () => store,
     packetForWeekSerial: async () => auditPacket,
+    authorizeLiveCreation: async () => {},
     ensureLabels: async () => {},
     createIssue: async (_options, spec) => {
       created += 1;
@@ -481,6 +491,7 @@ await test("closing the live issue lets the next occurrence advance", async () =
       requestedSerial = serial;
       return packet({ serial });
     },
+    authorizeLiveCreation: async () => {},
     ensureLabels: async () => {},
     createIssue: async () => {},
   });
@@ -522,23 +533,6 @@ await test("CLI parsing validates shard and workflow dry-run controls", () => {
     }).dryRun,
     true,
   );
-  const workflowEnv = {
-    GITHUB_REPOSITORY: "owner/repo",
-    GITHUB_ACTIONS: "true",
-    GITHUB_EVENT_NAME: "schedule",
-    GITHUB_WORKFLOW_REF:
-      "owner/repo/.github/workflows/documentation-garden.yml@refs/heads/main",
-  };
-  assert.equal(isAuthorizedGardenWorkflow(workflowEnv), true);
-  assert.equal(parseArgs([], workflowEnv).liveCreationAuthorized, true);
-  assert.equal(
-    isAuthorizedGardenWorkflow({
-      ...workflowEnv,
-      GITHUB_WORKFLOW_REF:
-        "owner/repo/.github/workflows/ci.yml@refs/heads/main",
-    }),
-    false,
-  );
   assert.throws(
     () =>
       parseArgs(["--shard", "0"], {
@@ -556,6 +550,106 @@ await test("CLI parsing validates shard and workflow dry-run controls", () => {
   );
 });
 
+function oidcToken(claims) {
+  const encode = (value) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "RS256", typ: "JWT" })}.${encode(claims)}.signature`;
+}
+
+function workflowOidcFixture(nowSeconds = 1_800_000_000) {
+  const env = {
+    GITHUB_ACTIONS: "true",
+    GITHUB_EVENT_NAME: "schedule",
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_SHA: "abc123",
+    GITHUB_RUN_ID: "77",
+    GITHUB_RUN_ATTEMPT: "2",
+    GITHUB_WORKFLOW_REF:
+      "owner/repo/.github/workflows/documentation-garden.yml@refs/heads/main",
+    ACTIONS_ID_TOKEN_REQUEST_URL:
+      "https://pipelines.actions.githubusercontent.com/example/idtoken?api-version=2.0",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "runner-bound-token",
+  };
+  const claims = {
+    iss: "https://token.actions.githubusercontent.com",
+    aud: "mento-docs-garden",
+    repository: "owner/repo",
+    workflow: "Documentation Garden",
+    workflow_ref: env.GITHUB_WORKFLOW_REF,
+    workflow_sha: env.GITHUB_SHA,
+    event_name: env.GITHUB_EVENT_NAME,
+    ref: env.GITHUB_REF,
+    run_id: env.GITHUB_RUN_ID,
+    run_attempt: env.GITHUB_RUN_ATTEMPT,
+    nbf: nowSeconds - 10,
+    iat: nowSeconds - 10,
+    exp: nowSeconds + 60,
+  };
+  return { claims, env, nowSeconds };
+}
+
+await test("OIDC authorization binds creation to the exact workflow run", async () => {
+  const { claims, env, nowSeconds } = workflowOidcFixture();
+  let request;
+  const result = await assertAuthorizedGardenWorkflow(
+    { repo: "owner/repo" },
+    {
+      env,
+      now: () => nowSeconds * 1000,
+      fetchImpl: async (url, init) => {
+        request = { url: String(url), init };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ value: oidcToken(claims) }),
+        };
+      },
+    },
+  );
+  assert.equal(result.run_id, "77");
+  assert.match(request.url, /audience=mento-docs-garden/);
+  assert.equal(request.init.redirect, "error");
+  assert.equal(request.init.headers.authorization, "bearer runner-bound-token");
+});
+
+await test("OIDC authorization rejects env spoofing and claim drift", async () => {
+  const { claims, env, nowSeconds } = workflowOidcFixture();
+  let fetched = false;
+  await assert.rejects(
+    assertAuthorizedGardenWorkflow(
+      { repo: "owner/repo" },
+      {
+        env: {
+          ...env,
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: "",
+        },
+        fetchImpl: async () => {
+          fetched = true;
+        },
+      },
+    ),
+    /runner credentials are unavailable/,
+  );
+  assert.equal(fetched, false);
+  await assert.rejects(
+    assertAuthorizedGardenWorkflow(
+      { repo: "owner/repo" },
+      {
+        env,
+        now: () => nowSeconds * 1000,
+        fetchImpl: async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            value: oidcToken({ ...claims, workflow: "CI" }),
+          }),
+        }),
+      },
+    ),
+    /does not match the active Documentation Garden workflow run/,
+  );
+});
+
 await test("scheduled workflow fetches the history required by packet evidence", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/documentation-garden.yml", import.meta.url),
@@ -565,6 +659,7 @@ await test("scheduled workflow fetches the history required by packet evidence",
     workflow,
     /actions\/checkout@[a-f0-9]+[^\n]*\n\s+with:\n(?:\s+#[^\n]*\n)*\s+#[^\n]*\n\s+fetch-depth: 0/,
   );
+  assert.match(workflow, /id-token: write/);
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

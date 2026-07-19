@@ -81,7 +81,10 @@ cannot identify an occurrence because claiming intentionally moves
 Use the CLI for a local or operator preview. Dry-run still reads the full issue
 set and computes the exact decision but performs no label, issue, or repository
 mutation. Live creation from a local CLI is rejected so it cannot race the
-workflow's concurrency group:
+workflow's concurrency group. The live path requires a short-lived GitHub OIDC
+identity bound to the exact repository, workflow ref and SHA, event, branch,
+run, and attempt; spoofed `GITHUB_*` environment values and a user token are not
+enough:
 
 ```bash
 pnpm docs:garden --dry-run --json

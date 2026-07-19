@@ -148,18 +148,21 @@ function labelName(label) {
 }
 
 export function normalizeGithubIssuePages(pages) {
-  return (pages ?? [])
-    .flat()
-    .filter((issue) => issue && !issue.pull_request)
-    .map((issue) => ({
-      number: issue.number,
-      title: String(issue.title ?? ""),
-      body: String(issue.body ?? ""),
-      state: String(issue.state ?? "").toUpperCase(),
-      labels: (issue.labels ?? []).map(labelName).filter(Boolean),
-      url: issue.html_url ?? null,
-      marker: parseLeadingDocsGardenMarkers(issue.body),
-    }));
+  const uniqueIssues = new Map();
+  for (const issue of (pages ?? []).flat()) {
+    if (!issue || issue.pull_request || uniqueIssues.has(issue.number))
+      continue;
+    uniqueIssues.set(issue.number, issue);
+  }
+  return [...uniqueIssues.values()].map((issue) => ({
+    number: issue.number,
+    title: String(issue.title ?? ""),
+    body: String(issue.body ?? ""),
+    state: String(issue.state ?? "").toUpperCase(),
+    labels: (issue.labels ?? []).map(labelName).filter(Boolean),
+    url: issue.html_url ?? null,
+    marker: parseLeadingDocsGardenMarkers(issue.body),
+  }));
 }
 
 export function resolveTargetWeekSerial(currentWeekSerial, issues) {
