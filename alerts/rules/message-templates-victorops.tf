@@ -6,9 +6,13 @@ resource "grafana_message_template" "victorops_oracle_stale_price_alert_title" {
   name     = "VictorOps - Stale Price Alert Title"
   template = <<-EOT
 {{ define "victorops.oracle_stale_price_alert_title" }}
-[{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
-{{ if (len .Alerts.Firing) }}Firing: {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end }}{{ $alert.Labels.rateFeed }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
-{{ if (len .Alerts.Resolved) }}Resolved: {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end }}{{ $alert.Labels.rateFeed }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
+{{ if (len .Alerts.Firing) -}}
+P1 {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" $alert.Labels.rateFeed -}}{{ $alert.Labels.chain | title }} {{ $slash }} oracle report expired{{ end -}}
+{{ else if (len .Alerts.Resolved) -}}
+RESOLVED {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" $alert.Labels.rateFeed -}}{{ $alert.Labels.chain | title }} {{ $slash }} oracle report fresh{{ end -}}
+{{ else -}}
+Oracle report status unknown
+{{ end -}}
 {{ end }}
 EOT
 }
@@ -19,14 +23,20 @@ resource "grafana_message_template" "victorops_oracle_stale_price_alert_message"
   template = <<-EOT
 {{ define "victorops.oracle_stale_price_alert_message" }}
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
-{{ range .Alerts.Firing }}
-FIRING: Stale price for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain | title }}
-1. Check the latest transactions of the {{ .Labels.rateFeed }} relayer on {{ .Labels.chain | title }}
-2. Check if the relayer cloud function is still being triggered regularly
-{{ end }}
-{{ range .Alerts.Resolved }}
-RESOLVED: Price is fresh again for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain }}
-{{ end }}
+{{ range .Alerts.Firing -}}
+{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+{{ $enc := reReplaceAll "/" "%2F" $slash -}}
+PROBLEM: The {{ $slash }} on-chain oracle report on {{ .Labels.chain | title }} has expired. Swaps using this feed may revert until a fresh report is relayed.
+ACTION: Check whether relay-{{ .Labels.chain }} is executing and inspect the {{ $slash }} relayer errors. If this is an FX feed during the weekend market closure, the alert routing is misconfigured; snooze it and escalate the monitoring configuration.
+Logs: https://console.cloud.google.com/logs/query;query=resource.labels.service_name%3D%22relay-{{ .Labels.chain }}%22%20AND%20labels.rateFeed%3D%22{{ $enc }}%22?project=${local.oracle_relayer_mainnet_project_id}
+Alert: {{ .GeneratorURL }}
+Started: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
+{{ end -}}
+{{ range .Alerts.Resolved -}}
+{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+RESOLVED: The {{ $slash }} oracle report on {{ .Labels.chain | title }} is fresh again.
+Resolved: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
+{{ end -}}
 {{ end }}
 EOT
 }

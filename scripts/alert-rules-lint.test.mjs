@@ -344,6 +344,31 @@ test("trading-mode notification templates avoid single-alert duplicate headings"
   );
 });
 
+test("oracle expiry notifications lead with human impact and action", () => {
+  const victorops = readFileSync(
+    path.resolve(
+      __dirname,
+      "..",
+      "alerts/rules/message-templates-victorops.tf",
+    ),
+    "utf8",
+  );
+  assert(
+    victorops.includes("P1 {{ range") &&
+      victorops.includes("oracle report expired"),
+    "VictorOps title should identify the page, chain, feed, and failure",
+  );
+  assert(
+    victorops.includes("Swaps using this feed may revert") &&
+      victorops.includes("ACTION: Check whether relay-"),
+    "VictorOps message should state impact and the next action",
+  );
+  assert(
+    !victorops.includes("FIRING: Stale price for"),
+    "VictorOps message should not use the old ambiguous stale-price copy",
+  );
+});
+
 test("Slack trading-mode bodies suppress duplicate single-alert headings", () => {
   const source = readFileSync(
     path.resolve(__dirname, "..", "alerts/rules/message-templates-slack.tf"),
