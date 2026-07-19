@@ -359,6 +359,12 @@ test("oracle expiry notifications lead with human impact and action", () => {
     "VictorOps title should identify the page, chain, feed, and failure",
   );
   assert(
+    victorops.includes(
+      "{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end -}}",
+    ),
+    "VictorOps title should surface both states in mixed notification batches",
+  );
+  assert(
     victorops.includes("Swaps using this feed may revert") &&
       victorops.includes("ACTION: Check whether relay-"),
     "VictorOps message should state impact and the next action",
@@ -381,6 +387,16 @@ test("oracle expiry notifications lead with human impact and action", () => {
   assert(
     !staleMessage.includes("No alerts are currently firing."),
     "resolve-only pages should start directly with the recovery message",
+  );
+  const slack = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/message-templates-slack.tf"),
+    "utf8",
+  );
+  assert(
+    slack.includes(
+      "If this is an FX feed during the weekend market closure, snooze it and escalate the monitoring configuration",
+    ),
+    "Slack should carry the same weekend-FX routing guidance as VictorOps",
   );
 });
 

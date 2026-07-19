@@ -8,9 +8,12 @@ resource "grafana_message_template" "victorops_oracle_stale_price_alert_title" {
 {{ define "victorops.oracle_stale_price_alert_title" }}
 {{ if (len .Alerts.Firing) -}}
 P1 {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" $alert.Labels.rateFeed -}}{{ $alert.Labels.chain | title }} {{ $slash }} oracle report expired{{ end -}}
-{{ else if (len .Alerts.Resolved) -}}
+{{ end -}}
+{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end -}}
+{{ if (len .Alerts.Resolved) -}}
 RESOLVED {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" $alert.Labels.rateFeed -}}{{ $alert.Labels.chain | title }} {{ $slash }} oracle report fresh{{ end -}}
-{{ else -}}
+{{ end -}}
+{{ if and (eq (len .Alerts.Firing) 0) (eq (len .Alerts.Resolved) 0) -}}
 Oracle report status unknown
 {{ end -}}
 {{ end }}
