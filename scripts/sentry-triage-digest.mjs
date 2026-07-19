@@ -151,7 +151,7 @@ const SECTION_TITLES = {
 
 // Hard bound on the summary field we embed. "Truncate hard" mirrors the Stage A
 // queue-body defense; also keeps every Slack section well under the 3000-char
-// block limit (batch is capped at 6 issues upstream).
+// block limit (batch is capped at 10 issues upstream).
 const MAX_SUMMARY_LEN = 300;
 
 // Hard bound on each needs-human brief field (decision/hypotheses/investigated/
