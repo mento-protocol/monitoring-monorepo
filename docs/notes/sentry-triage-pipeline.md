@@ -1030,7 +1030,7 @@ ingest run record and satisfies the ADR 0036 observability invariant, whose
 purpose is to detect a silently-dead **schedule**. An **off-`main`
 `workflow_dispatch`** (a developer testing the workflow from a feature branch)
 deliberately leaves **no** tracker record: the `record-run` job is gated to
-`github.ref == refs/heads/main` because a dispatch runs the *dispatched ref's*
+`github.ref == refs/heads/main` because a dispatch runs the _dispatched ref's_
 workflow + helper code, so recording off-main would mean executing unreviewed
 feature-branch code with the `issues:write` token. An off-main dispatch is not
 a scheduled run, so its absence from the ledger is not a false-healthy signal —
