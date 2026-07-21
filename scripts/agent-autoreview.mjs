@@ -14,7 +14,6 @@ import {
   mkdtempSync,
   mkdirSync,
   openSync,
-  readdirSync,
   readFileSync,
   readSync,
   readlinkSync,
@@ -126,7 +125,6 @@ const activeReviewerAborters = new Map();
 const terminationSignalHandlers = new Map();
 const rejectedTrustedExecutableCandidates = new Set();
 const writeGrantingAclCache = new Map();
-const attestedNodeLibraryPathRecords = new Map();
 let trustedExecutableCleanupRegistered = false;
 let pendingTerminationSignal = null;
 let reviewerForceKillTimer = null;
@@ -510,7 +508,6 @@ function cleanupTrustedExecutableSnapshots() {
   trustedExecutableSnapshotsByPath.clear();
   rejectedTrustedExecutableCandidates.clear();
   writeGrantingAclCache.clear();
-  attestedNodeLibraryPathRecords.clear();
 }
 
 function registerEngineRuntimeDirectory(directory) {
@@ -1175,206 +1172,6 @@ function trustedToolPath(directory, commands) {
   return [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(
     path.delimiter,
   );
-}
-
-function assertLinuxDynamicPreloadAbsent() {
-  try {
-    lstatSync("/etc/ld.so.preload", { bigint: true });
-  } catch (error) {
-    if (error?.code === "ENOENT") return;
-    throw error;
-  }
-  throw new Error(
-    "attested Node runtime requires /etc/ld.so.preload to be absent",
-  );
-}
-
-function attestedRuntimeAncestryIsTrusted(ancestry) {
-  return ancestry.every(
-    ({ fileStat, writeGrantingAcl }) =>
-      !writeGrantingAcl &&
-      (!sharedWritable(fileStat) ||
-        (fileStat.uid === 0n && (fileStat.mode & 0o1000n) !== 0n)),
-  );
-}
-
-function inspectAttestedNodeAliases(directory, repo) {
-  const names = readdirSync(directory, { encoding: "utf8" }).sort();
-  if (names.length === 0 || names.length > 1024) {
-    throw new Error("attested Node library aliases are missing or excessive");
-  }
-  return names.map((name) => {
-    if (!/^[A-Za-z0-9_+.-]+$/.test(name) || name === "." || name === "..") {
-      throw new Error("attested Node library alias name is unsafe");
-    }
-    const aliasPath = path.join(directory, name);
-    const aliasStat = lstatSync(aliasPath, { bigint: true });
-    const target = readlinkSync(aliasPath, "utf8");
-    if (
-      !aliasStat.isSymbolicLink() ||
-      aliasStat.uid !== 0n ||
-      !path.isAbsolute(target) ||
-      /[\r\n\0]/.test(target) ||
-      realpathSync(aliasPath) !== target ||
-      isWithin(target, repo)
-    ) {
-      throw new Error("attested Node library alias is unsafe");
-    }
-    const targetStat = lstatSync(target, { bigint: true });
-    if (
-      !targetStat.isFile() ||
-      targetStat.uid !== 0n ||
-      sharedWritable(targetStat) ||
-      (targetStat.mode & 0o6000n) !== 0n ||
-      targetStat.nlink < 1n ||
-      hasWriteGrantingAcl(target, targetStat, "attested Node library")
-    ) {
-      throw new Error("attested Node library target is unsafe");
-    }
-    const targetAncestry = inspectTrustedDirectoryAncestry(
-      path.dirname(target),
-      "attested Node library target",
-    );
-    if (
-      targetAncestry.some(
-        ({ fileStat, writeGrantingAcl }) =>
-          sharedWritable(fileStat) || writeGrantingAcl,
-      )
-    ) {
-      throw new Error("attested Node library target ancestry is writable");
-    }
-    return { aliasPath, aliasStat, name, target, targetAncestry, targetStat };
-  });
-}
-
-function assertAttestedNodeRuntimeRecord(record) {
-  assertLinuxDynamicPreloadAbsent();
-  assertPrivateSnapshotDirectory(record.directory);
-  const directoryStat = lstatSync(record.directory, { bigint: true });
-  if (!sameDirectorySecurityMetadata(record.directoryStat, directoryStat)) {
-    throw new Error("attested Node library directory changed");
-  }
-  const ancestry = inspectTrustedDirectoryAncestry(
-    path.dirname(record.directory),
-    "attested Node runtime",
-  );
-  if (!attestedRuntimeAncestryIsTrusted(ancestry)) {
-    throw new Error("attested Node runtime ancestry is unsafe");
-  }
-  assertStableDirectoryAncestry(
-    record.ancestry,
-    ancestry,
-    "attested Node runtime",
-  );
-  const executableStat = lstatSync(record.executable, { bigint: true });
-  if (
-    !sameFileMetadata(record.executableStat, executableStat) ||
-    realpathSync(process.execPath) !== record.executable ||
-    realpathSync(`/proc/${process.pid}/exe`) !== record.executable
-  ) {
-    throw new Error("attested Node executable changed");
-  }
-  const aliases = inspectAttestedNodeAliases(record.directory, record.repo);
-  if (
-    aliases.length !== record.aliases.length ||
-    aliases.some((alias, index) => {
-      const expected = record.aliases[index];
-      try {
-        assertStableDirectoryAncestry(
-          expected.targetAncestry,
-          alias.targetAncestry,
-          "attested Node library target",
-        );
-      } catch {
-        return true;
-      }
-      return (
-        alias.name !== expected.name ||
-        alias.target !== expected.target ||
-        !sameFileMetadata(alias.aliasStat, expected.aliasStat) ||
-        !sameFileMetadata(alias.targetStat, expected.targetStat)
-      );
-    })
-  ) {
-    throw new Error("attested Node library aliases changed");
-  }
-}
-
-function attestedNodeRuntime(repo) {
-  const requested = process.env.AUTOREVIEW_ATTESTED_NODE_LIBRARY_PATH;
-  if (!requested) return null;
-  if (
-    process.platform !== "linux" ||
-    effectiveUid() !== 0n ||
-    !path.isAbsolute(requested) ||
-    /[\r\n\0]/.test(requested)
-  ) {
-    throw new Error("attested Node library path is invalid");
-  }
-  const directory = realpathSync(requested);
-  const executable = realpathSync(process.execPath);
-  if (
-    directory !== requested ||
-    path.dirname(directory) !== path.dirname(executable) ||
-    isWithin(directory, realpathSync(repo))
-  ) {
-    throw new Error("attested Node library path is outside its runtime");
-  }
-  if (
-    process.env.LD_LIBRARY_PATH !== directory ||
-    process.env.GLIBC_TUNABLES ||
-    process.env.OPENSSL_CONF ||
-    process.env.OPENSSL_MODULES ||
-    Object.keys(process.env).some(
-      (key) => key.startsWith("LD_") && key !== "LD_LIBRARY_PATH",
-    )
-  ) {
-    throw new Error("attested Node runtime inherited unsafe loader state");
-  }
-  let record = attestedNodeLibraryPathRecords.get(directory);
-  if (!record) {
-    assertPrivateSnapshotDirectory(directory);
-    const executableStat = lstatSync(executable, { bigint: true });
-    if (
-      !executableStat.isFile() ||
-      executableStat.uid !== 0n ||
-      (executableStat.mode & 0o7777n) !== 0o500n ||
-      executableStat.nlink !== 1n ||
-      hasWriteGrantingAcl(
-        executable,
-        executableStat,
-        "attested Node runtime",
-      ) ||
-      realpathSync(`/proc/${process.pid}/exe`) !== executable
-    ) {
-      throw new Error("attested Node executable is unsafe");
-    }
-    const ancestry = inspectTrustedDirectoryAncestry(
-      path.dirname(directory),
-      "attested Node runtime",
-    );
-    if (!attestedRuntimeAncestryIsTrusted(ancestry)) {
-      throw new Error("attested Node runtime ancestry is unsafe");
-    }
-    record = {
-      aliases: inspectAttestedNodeAliases(directory, realpathSync(repo)),
-      ancestry,
-      directory,
-      directoryStat: lstatSync(directory, { bigint: true }),
-      executable,
-      executableStat,
-      repo: realpathSync(repo),
-    };
-    attestedNodeLibraryPathRecords.set(directory, record);
-  }
-  assertAttestedNodeRuntimeRecord(record);
-  return record;
-}
-
-function assertAllAttestedNodeLibraryPaths() {
-  for (const record of attestedNodeLibraryPathRecords.values()) {
-    assertAttestedNodeRuntimeRecord(record);
-  }
 }
 
 function gitEnvironment() {
@@ -2529,10 +2326,8 @@ function safeEngineEnv(repo, engine, runtimeDir) {
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
   }
   const git = resolveTrustedCommand("git", repo);
-  const nodeRuntime = attestedNodeRuntime(repo);
-  const node = nodeRuntime?.executable || trustedCurrentNode(repo);
+  const node = trustedCurrentNode(repo);
   env.PATH = trustedToolPath(runtimeDir, { git, node });
-  if (nodeRuntime) env.LD_LIBRARY_PATH = nodeRuntime.directory;
   env.TMPDIR = runtimeDir;
   env.GIT_CONFIG_GLOBAL = "/dev/null";
   env.GIT_CONFIG_NOSYSTEM = "1";
@@ -2554,7 +2349,6 @@ function runCommandWithInput(
 ) {
   return new Promise((resolve, reject) => {
     revalidateAllTrustedExecutableSnapshots();
-    assertAllAttestedNodeLibraryPaths();
     const child = spawn(command, commandArgs, {
       cwd,
       detached: process.platform !== "win32",
@@ -2646,12 +2440,6 @@ function runCommandWithInput(
     });
     child.on("close", (code, signal) => {
       signalReviewerProcessGroup(child, "SIGKILL");
-      try {
-        assertAllAttestedNodeLibraryPaths();
-      } catch (error) {
-        rejectOnce(error);
-        return;
-      }
       if (timedOut) {
         rejectOnce(new Error(`${command} timed out after ${timeoutSeconds}s`));
         return;

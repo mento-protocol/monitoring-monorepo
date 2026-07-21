@@ -877,23 +877,6 @@ jobs:
         # Proves ignored operator tfvars stay outside the explicit format target
         # list while tracked and non-ignored source paths remain covered.
         run: node scripts/terraform-fmt-check.test.mjs
-      - name: Autoreview root-container Node trust regression
-        # Exercise the Linux/root-only fallback with a foreign-owned ancestor
-        # Node and the canonical wrapper's live-ancestor attestation. The full
-        # autoreview suite stays local because it is intentionally much longer.
-        run: |
-          set -euo pipefail
-          node_path="$(command -v node)"
-          root_prefix=()
-          if [[ "$EUID" -ne 0 ]]; then
-            root_prefix=(/usr/bin/sudo)
-          fi
-          "${root_prefix[@]}" /usr/bin/env -i \
-            "PATH=$PATH" \
-            HOME=/root \
-            CI=true \
-            AUTOREVIEW_TEST_TRUSTED_FIXTURE_PARENT=/root \
-            "$node_path" scripts/agent-autoreview-target-guard.test.mjs
       - name: Hermetic Vitest setup consistency
         run: node scripts/check-hermetic-vitest-setup.mjs
       - name: Hermetic Vitest setup consistency suite

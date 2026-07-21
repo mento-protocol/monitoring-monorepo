@@ -209,14 +209,7 @@ be group/other-writable. On Darwin, Homebrew-style paths that fail only the
 ancestry rule are
 accepted through sealed private snapshots only when they are native Mach-O
 executables with an entirely system-only linked-library closure; scripts and
-relative or non-system library closure fail closed. On Linux, a root-run
-wrapper may recover a foreign-owned Node only when its inode belongs to a live
-wrapper ancestor through an uninterrupted all-root chain; direct helper
-invocation stays fail-closed. It seals that exact ELF plus a glibc-only,
-recursively validated static dependency closure behind a private alias
-directory and controlled `LD_LIBRARY_PATH`. The helper revalidates the snapshot
-and alias handoff around semantic-engine launches. This does not attest later
-application-level dynamic loads. Node discovery never
+relative or non-system library closure fail closed. Node discovery never
 executes a version-manager shim: Volta is queried through a sealed native
 `volta which node`, and the returned Node path is revalidated before launch.
 Git commands ignore inherited repository-routing variables.
