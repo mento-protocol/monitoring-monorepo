@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-21 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -123,7 +123,12 @@ branch-controlled package scripts. Wrapper-owned Node launches discard
 executables require trusted ownership and
 non-shared-writable ancestry. On Darwin, Homebrew-style paths are accepted only
 through sealed private native Mach-O snapshots with system-only library
-closure; scripts and unsafe library closure fail closed. Prepared-bundle
+closure. On Linux, a root-run wrapper may recover an otherwise foreign-owned
+Node only when it is a live ancestor of the canonical wrapper across an
+uninterrupted all-root UID chain; direct helper invocation remains fail-closed.
+The wrapper seals the exact ELF inode and its validated glibc startup closure,
+then the helper revalidates that handoff around semantic-engine launches.
+Scripts and unsafe library closure fail closed. Prepared-bundle
 creation and verification also reject macOS write-granting ACLs on parent
 ancestors or bundle entries.
 Runtime-changing PRs use a clean, compatible wrapper/helper from the last

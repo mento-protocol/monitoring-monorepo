@@ -48,7 +48,12 @@ package script; wrapper-owned Node launches discard `NODE_OPTIONS` and
 `NODE_PATH` plus loader/startup injection variables. Direct executables require
 trusted ownership and non-shared-writable ancestry. On Darwin, Homebrew-style
 paths are accepted only through sealed private native Mach-O snapshots with
-system-only library closure; scripts and unsafe library closure fail closed.
+system-only library closure. On Linux, a root-run wrapper may recover only the
+foreign-owned Node inode from a live, uninterrupted all-root ancestor chain;
+direct helper invocation gets no such exception. The wrapper seals the exact
+inode and its validated glibc startup closure, then the helper revalidates that
+handoff before and after semantic-engine launches. Scripts and unsafe library
+closure fail closed.
 The helper reviews the complete target
 without truncation. Reviewer network search is off by default; pass
 `--web-search` only when the review explicitly needs public documentation
