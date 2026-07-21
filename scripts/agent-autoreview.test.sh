@@ -1169,6 +1169,7 @@ run_helper_with_path_in_repo() {
     GOOGLE_APPLICATION_CREDENTIALS \
     SSL_CERT_DIR \
     SSL_CERT_FILE \
+    AUTOREVIEW_FAKE_STDIN_EXIT_CODE \
     AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER \
     AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE; do
     value="${!key-}"
@@ -2555,6 +2556,51 @@ CODEX
       expect_file_contains "$engine_capture.stderr" "failed (7)"
     fi
   done
+}
+
+run_stdin_epipe_regression() {
+  local review_repo="$tmp_dir/stdin-epipe"
+  local fake_bin="$tmp_dir/stdin-epipe-bin"
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  "$node_bin" -e \
+    'require("node:fs").writeFileSync(process.argv[1], "x".repeat(180 * 1024))' \
+    "$review_repo/large-review.txt"
+  mkdir "$fake_bin"
+  cat >"$fake_bin/codex" <<'CODEX'
+#!/usr/bin/env node
+const fs = require("node:fs");
+const exitCode = Number.parseInt(
+  process.env.AUTOREVIEW_FAKE_STDIN_EXIT_CODE || "7",
+  10,
+);
+
+fs.closeSync(0);
+process.stderr.write(
+  exitCode === 0
+    ? "reviewer closed stdin early\n"
+    : "reviewer rejected startup\n",
+);
+setTimeout(() => process.exit(exitCode), 25);
+CODEX
+  chmod +x "$fake_bin/codex"
+
+  AUTOREVIEW_FAKE_STDIN_EXIT_CODE=7 run_helper_with_path_in_repo_expect_failure \
+    "$review_repo" "$fake_bin" --mode local --engine codex
+  expect_stderr_contains "failed (7): reviewer rejected startup"
+  if grep -Fq -- "write EPIPE" "$stderr"; then
+    printf 'reviewer stdin EPIPE escaped the controlled failure path\nstderr:\n%s\n' \
+      "$(cat "$stderr")" >&2
+    exit 1
+  fi
+
+  AUTOREVIEW_FAKE_STDIN_EXIT_CODE=0 run_helper_with_path_in_repo_expect_failure \
+    "$review_repo" "$fake_bin" --mode local --engine codex
+  expect_stderr_contains \
+    "exited successfully after closing stdin before the complete review prompt was written"
+  expect_stderr_contains "reviewer closed stdin early"
 }
 
 run_symlinked_node_codex_regression() {
@@ -4711,6 +4757,7 @@ case "$test_focus" in
     run_claude_no_tools_regression
     run_codex_isolation_regression
     run_engine_signal_cleanup_regression
+    run_stdin_epipe_regression
     printf 'focused autoreview engine-isolation tests passed\n'
     exit 0
     ;;
@@ -4771,6 +4818,7 @@ if [[ "$test_focus" == "all" ]]; then
   run_claude_no_tools_regression
   run_codex_isolation_regression
   run_engine_signal_cleanup_regression
+  run_stdin_epipe_regression
   run_symlinked_node_codex_regression
   run_repo_controlled_node_regression
   run_pr_base_detection_regression

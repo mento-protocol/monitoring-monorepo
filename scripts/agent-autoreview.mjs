@@ -2362,6 +2362,7 @@ function runCommandWithInput(
     let timedOut = false;
     let killTimer = null;
     let settled = false;
+    let stdinWriteError = null;
     const configuredHeartbeat = Number.parseInt(
       process.env.AUTOREVIEW_HEARTBEAT_SECONDS || "60",
       10,
@@ -2438,6 +2439,15 @@ function runCommandWithInput(
     child.on("error", (error) => {
       rejectOnce(error);
     });
+    const handleStdinError = (error) => {
+      if (settled) return;
+      if (error?.code === "EPIPE") {
+        stdinWriteError = error;
+        return;
+      }
+      forceAbort(error);
+    };
+    child.stdin.on("error", handleStdinError);
     child.on("close", (code, signal) => {
       signalReviewerProcessGroup(child, "SIGKILL");
       if (timedOut) {
@@ -2452,9 +2462,21 @@ function runCommandWithInput(
         );
         return;
       }
+      if (stdinWriteError) {
+        rejectOnce(
+          new Error(
+            `${command} exited successfully after closing stdin before the complete review prompt was written: ${stderr || stdout}`,
+          ),
+        );
+        return;
+      }
       resolveOnce({ stdout, stderr });
     });
-    child.stdin.end(prompt);
+    try {
+      child.stdin.end(prompt);
+    } catch (error) {
+      handleStdinError(error);
+    }
   });
 }
 
