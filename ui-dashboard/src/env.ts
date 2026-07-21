@@ -34,7 +34,7 @@ const clientSchema = z.object({
   ),
   NEXT_PUBLIC_RPC_URL_POLYGON_AMOY: z.catch(
     z.url(),
-    "https://rpc-amoy.polygon.technology",
+    "https://polygon-amoy.drpc.org",
   ),
   NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA: z.catch(
     z.url(),

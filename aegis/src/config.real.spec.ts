@@ -14,4 +14,13 @@ describe('production config.yaml', () => {
       expect(m.source.functionAbi.name).toBeTruthy();
     }
   });
+
+  it('uses the supported Polygon Amoy RPC endpoint', () => {
+    const config = loadConfig();
+    const polygonAmoy = config.chains.find(
+      (chain) => chain.id === 'polygonTestnet',
+    );
+
+    expect(polygonAmoy?.httpRpcUrl).toBe('https://polygon-amoy.drpc.org');
+  });
 });

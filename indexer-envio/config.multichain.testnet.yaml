@@ -428,7 +428,7 @@ chains:
     # Earliest canonical deployment receipt: SortedOracles at block 37555761.
     # The first replayable FPMM factory events land at block 42219919.
     rpc:
-      url: ${ENVIO_RPC_URL_80002:-https://rpc-amoy.polygon.technology}
+      url: ${ENVIO_RPC_URL_80002:-https://polygon-amoy.drpc.org}
     start_block: ${ENVIO_START_BLOCK_POLYGON_AMOY:-37555761}
     contracts:
       - name: Broker

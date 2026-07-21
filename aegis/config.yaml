@@ -238,7 +238,7 @@ chains:
 
   - id: polygonTestnet
     label: polygon-testnet
-    httpRpcUrl: https://rpc-amoy.polygon.technology
+    httpRpcUrl: https://polygon-amoy.drpc.org
     contracts:
       # Same deterministic testnet deploy addresses as monadTestnet above.
       # Verified on-chain (chainId 80002): only the three Polygon rate feeds

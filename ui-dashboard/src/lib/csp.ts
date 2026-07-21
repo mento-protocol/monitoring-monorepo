@@ -46,7 +46,7 @@ const CSP_CONNECT_SRC = [
   "https://rpc2.monad.xyz",
   "https://testnet-rpc.monad.xyz",
   "https://polygon.drpc.org",
-  "https://rpc-amoy.polygon.technology",
+  "https://polygon-amoy.drpc.org",
   ...configuredHasuraConnectSrc(),
 ].join(" ");
 
