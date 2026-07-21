@@ -14,4 +14,21 @@ describe('production config.yaml', () => {
       expect(m.source.functionAbi.name).toBeTruthy();
     }
   });
+
+  it('uses independent primary and fallback Polygon Amoy RPC endpoints', () => {
+    const config = loadConfig();
+    const polygonAmoy = config.chains.find(
+      (chain) => chain.id === 'polygonTestnet',
+    );
+
+    expect(polygonAmoy?.httpRpcUrl).toBe(
+      'https://polygon-amoy-bor-rpc.publicnode.com',
+    );
+    expect(polygonAmoy?.fallbackHttpRpcUrl).toBe(
+      'https://polygon-amoy.drpc.org',
+    );
+    expect(new URL(polygonAmoy?.httpRpcUrl ?? '').hostname).not.toBe(
+      new URL(polygonAmoy?.fallbackHttpRpcUrl ?? '').hostname,
+    );
+  });
 });

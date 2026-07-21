@@ -238,7 +238,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`           | Optional shared Monad Testnet + Polygon Amoy Envio GraphQL endpoint                                        |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`      | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
 | `NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET`      | Optional Polygon RPC override (default: `https://polygon.drpc.org`)                                        |
-| `NEXT_PUBLIC_RPC_URL_POLYGON_AMOY`         | Optional Polygon Amoy RPC override (default: `https://rpc-amoy.polygon.technology`)                        |
+| `NEXT_PUBLIC_RPC_URL_POLYGON_AMOY`         | Optional Polygon Amoy RPC override (default: `https://polygon-amoy.drpc.org`)                              |
 | `NEXT_PUBLIC_EXPLORER_URL_POLYGON_MAINNET` | Optional Polygon explorer-base override (default: `https://polygonscan.com`)                               |
 | `NEXT_PUBLIC_EXPLORER_URL_POLYGON_AMOY`    | Optional Polygon Amoy explorer-base override (default: `https://amoy.polygonscan.com`)                     |
 | `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`        | Set to `true` with the per-testnet endpoint URL to show hosted testnet networks                            |
