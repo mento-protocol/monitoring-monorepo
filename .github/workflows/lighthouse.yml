@@ -112,6 +112,11 @@ jobs:
       statuses: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # The fixture lane builds and serves the PR head's production
+          # dashboard in this job; do not leave the write-scoped job token in
+          # .git/config where that PR-controlled server code could read it.
+          persist-credentials: false
 
       - id: filter
         # `continue-on-error: true` keeps a failed path-detection step from
@@ -170,6 +175,12 @@ jobs:
           # required check blocking routine dependency updates. They still run
           # the secretless deterministic fixture.
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # Sentry-autofix PRs are same-repo and non-dependabot, but their
+          # diffs are MACHINE-AUTHORED from untrusted Sentry input, so they are
+          # untrusted-in-effect. The branch namespace is the reliable
+          # identifier (the App slug is operator-chosen). Passed via env and
+          # compared quoted — a branch name never reaches shell interpolation.
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           if [[ "$FILTER_OUTCOME" != "success" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
@@ -189,6 +200,16 @@ jobs:
             echo "preview=false" >> "$GITHUB_OUTPUT"
             echo "comment=false" >> "$GITHUB_OUTPUT"
             echo "PR from dependabot[bot] — running the secretless fixture and skipping the Vercel preview lane."
+          elif [[ "$PR_HEAD_REF" == sentry-autofix/* ]]; then
+            # Autofix PRs must NEVER reach the Vercel preview lane: the lane
+            # sends VERCEL_AUTOMATION_BYPASS_SECRET as a request header to the
+            # preview, which serves the PR's OWN server code — an injected
+            # autofix diff could read the header server-side and exfiltrate
+            # the secret before any human review. The secretless deterministic
+            # fixture still runs, so the required check stays meaningful.
+            echo "preview=false" >> "$GITHUB_OUTPUT"
+            echo "comment=false" >> "$GITHUB_OUTPUT"
+            echo "Machine-authored autofix PR (sentry-autofix/*) — running the secretless fixture and skipping the Vercel preview lane."
           elif [[ -z "$PR_HEAD_REPO" ]]; then
             echo "preview=false" >> "$GITHUB_OUTPUT"
             echo "comment=false" >> "$GITHUB_OUTPUT"

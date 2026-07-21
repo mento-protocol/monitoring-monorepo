@@ -19,6 +19,12 @@ name: Dependabot auto-merge
 # Workflow-injection hygiene: every PR-derived value is passed through env:
 # instead of interpolated into run: scripts (see
 # https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/).
+#
+# autofix-ci-trust: the single job is hard-gated on
+# `github.event.pull_request.user.login == 'dependabot[bot]'`, so a
+# machine-authored sentry-autofix PR (App-authored, different login) can never
+# reach the secret-bearing steps — and no step checks out or executes PR-head
+# code anyway. See check-autofix-ci-trust.mjs.
 
 # Explicit `types:` drops the default `reopened` event. Otherwise a human
 # closing a Dependabot PR (the canonical "do not merge this") would be
