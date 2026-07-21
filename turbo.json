@@ -97,7 +97,7 @@
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
         "$TURBO_ROOT$/turbo.json"
       ],
-      "env": ["VERCEL_ENV"],
+      "env": ["VERCEL_ENV", "VERCEL_DEPLOYMENT_ID", "VERCEL_GIT_COMMIT_SHA"],
       "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"]
     },
     "size-limit": {

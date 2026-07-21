@@ -107,7 +107,9 @@ if (process.env.TF_STACKS_TEST_FAIL_ON_GIT === "1") {
   process.exit(91);
 }
 
-if (command === "rev-parse --abbrev-ref HEAD") {
+if (args[0] === "-C" && args[2] === "ls-files") {
+  process.stdout.write("main.tf\\0");
+} else if (command === "rev-parse --abbrev-ref HEAD") {
   process.stdout.write((process.env.TF_STACKS_TEST_BRANCH ?? "main") + "\\n");
 } else if (command === "status --porcelain") {
   process.stdout.write(process.env.TF_STACKS_TEST_STATUS ?? "");
@@ -181,6 +183,38 @@ function assertApplyRefused(result) {
     result.stderr,
     "Override for a deliberate local apply: pass --force-local-apply.",
     "refusal should explain the override",
+  );
+}
+
+function runValidateFormatTest(tempDir) {
+  const fixtureRoot = path.join(tempDir, "validate-format");
+  mkdirSync(fixtureRoot);
+  const fakeTools = makeFakeTools(fixtureRoot);
+
+  run(["validate", "platform"], { env: fakeTools.env });
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["fmt", "init", "validate"],
+    "validate should format Git-visible sources before init and validate",
+  );
+
+  const [formatCall] = terraformCalls(fakeTools.terraformLog);
+  assert(
+    formatCall[0] === `-chdir=${path.join(repoRoot, "terraform")}`,
+    `format helper should bind the stack root: ${JSON.stringify(formatCall)}`,
+  );
+  assert(
+    formatCall.includes("./main.tf"),
+    `format helper should pass an explicit Git-visible target: ${JSON.stringify(formatCall)}`,
+  );
+  assert(
+    gitCalls(fakeTools.gitLog).some(
+      (call) =>
+        call.startsWith(`-C ${path.join(repoRoot, "terraform")} ls-files `) &&
+        call.includes("--exclude-standard") &&
+        call.includes("-z"),
+    ),
+    "validate should enumerate non-ignored Terraform sources through Git",
   );
 }
 
@@ -450,6 +484,10 @@ for (const stack of registry.stacks) {
     stack.changedPathPatterns.includes("scripts/tf-stacks.mjs"),
     `${stack.id} must react to wrapper edits`,
   );
+  assert(
+    stack.changedPathPatterns.includes("scripts/terraform-fmt-check.mjs"),
+    `${stack.id} must react to format-helper edits`,
+  );
 }
 
 assertDriftWorkflowEnvCoversAutoAppliedStackVars(registry.stacks);
@@ -485,6 +523,7 @@ try {
     "docs-only Terraform overview should not run Terraform validate",
   );
 
+  runValidateFormatTest(tempDir);
   runApplyGuardTests(tempDir);
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
