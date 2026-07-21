@@ -68,8 +68,9 @@ tldr: RPC caches are bounded; multi-getter effects preserve partial wins and
 distinct retry/unsupported sentinels; median-derived values require the full
 freshness gate; heal stages widen every downstream predicate/query and retry
 partial side effects; direct effects must preload the identical key before a
-positive preload return or carry a bounded-cardinality exemption enforced by
-the blocking AST invariant; handler tests mock every reachable RPC path. Entity
+positive preload return and before entity-dependent early returns, or carry a
+bounded-cardinality exemption enforced by the blocking AST invariant; handler
+tests mock every reachable RPC path. Entity
 IDs, rollups, environment parsing, and Vitest bridge rules live in the linked
 checklist.
 

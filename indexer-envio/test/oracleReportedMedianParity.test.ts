@@ -9,11 +9,13 @@ import {
   _clearBootstrapCaches,
   _clearBreakerMocks,
   _clearMockMedianTimestamps,
+  _clearMockReportExpiry,
   _setMockBreakerDefaults,
   _setMockBreakerFeedState,
   _setMockBreakerKind,
   _setMockBreakerList,
   _setMockMedianTimestamp,
+  _setMockReportExpiry,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 import { makePool } from "./helpers/makePool.js";
@@ -65,6 +67,7 @@ describe("SortedOracles.OracleReported median parity", () => {
   afterEach(() => {
     _clearBreakerMocks();
     _clearMockMedianTimestamps();
+    _clearMockReportExpiry();
   });
 
   async function processReport({
@@ -164,6 +167,17 @@ describe("SortedOracles.OracleReported median parity", () => {
 
     const pool = mockDb.entities.Pool.get(poolId)!;
     assert.equal(pool.lastOracleReportAt, medianTimestamp);
+  });
+
+  it("preloads a report-expiry retry before healing an unseeded pool", async () => {
+    _setMockReportExpiry(CHAIN_ID, FEED, 31_536_000n);
+    const { mockDb, poolId } = await processReport({
+      lastMedianPrice: ONE,
+      oracleExpiry: 0n,
+      value: ONE,
+    });
+
+    assert.equal(mockDb.entities.Pool.get(poolId)?.oracleExpiry, 31_536_000n);
   });
 
   it("opens a breach for a deviating median even when the reporter quote looks in-band", async () => {

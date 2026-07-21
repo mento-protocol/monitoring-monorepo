@@ -259,6 +259,16 @@ function isPreloadPhaseCondition(condition: string): boolean {
   return condition.includes("context.isPreload");
 }
 
+function containsReturnOutsideNestedFunction(node: ts.Node): boolean {
+  if (ts.isReturnStatement(node)) return true;
+  if (isFunctionLikeNode(node)) return false;
+  let found = false;
+  ts.forEachChild(node, (child) => {
+    if (!found && containsReturnOutsideNestedFunction(child)) found = true;
+  });
+  return found;
+}
+
 function eagerPreloadStatements(
   statement: ts.Statement,
 ): ts.Statement[] | undefined {
@@ -345,13 +355,19 @@ function findEffectsHiddenBehindPreloadReturnInSource(
         effect.conditions,
       ]),
     );
-    const beforeGuardEffects = body.statements
-      .slice(0, preloadReturnIndex)
-      .flatMap((statement) =>
-        collectPhaseEffectCalls(statement, sourceFile, {
-          includeEagerCallbacks: true,
-        }),
-      );
+    const statementsBeforeGuard = body.statements.slice(0, preloadReturnIndex);
+    const firstEarlyReturn = statementsBeforeGuard.findIndex(
+      containsReturnOutsideNestedFunction,
+    );
+    const eagerlyReachedStatements =
+      firstEarlyReturn < 0
+        ? statementsBeforeGuard
+        : statementsBeforeGuard.slice(0, firstEarlyReturn);
+    const beforeGuardEffects = eagerlyReachedStatements.flatMap((statement) =>
+      collectPhaseEffectCalls(statement, sourceFile, {
+        includeEagerCallbacks: true,
+      }),
+    );
     const insidePreloadEffects = (
       eagerPreloadStatements(preloadReturn.thenStatement) ?? []
     ).flatMap((statement) =>
@@ -497,6 +513,21 @@ describe("indexer code quality invariants", () => {
         }
       `),
       ["afterGuardEffect"],
+    );
+    assert.deepEqual(
+      hiddenEffectNames(`
+        async function handler(context, id) {
+          const entity = await context.Pool.get(id);
+          if (!entity) return;
+          const warmed = context.effect(afterEntityReturnEffect, { id });
+          if (context.isPreload) {
+            await warmed;
+            return;
+          }
+          await warmed;
+        }
+      `),
+      ["afterEntityReturnEffect"],
     );
     assert.deepEqual(
       hiddenEffectNames(`

@@ -37,9 +37,16 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
   before writes must be requested before or inside the positive
   `context.isPreload` return, then reused with the identical effect + input key
   during processing. An event-only input is not a processing-only dependency.
+- Start event-derived effects before any entity-dependent early return. A
+  concurrent preload pass can see an empty lookup while ordered processing for
+  the same event sees a row created by an earlier event in the batch.
+- For state-dependent retry effects, carry an event-scoped in-memory marker
+  only when preload actually scheduled the key. Processing must stay
+  fail-closed and defer newly visible rows until the next event rather than
+  issuing an un-preloaded call.
 - The blocking code-quality invariant rejects a direct effect that exists only
-  after a positive preload return. A genuinely processing-dependent or
-  permanently bounded call must carry an adjacent
+  after a positive preload return or after an earlier return-bearing branch. A
+  genuinely processing-dependent or permanently bounded call must carry an adjacent
   `// preload-effect-exempt: <bounded-cardinality reason>` comment. Do not use
   the exemption for an effect that scales with swaps, reports, transfers, or
   another replay-traffic event stream.
