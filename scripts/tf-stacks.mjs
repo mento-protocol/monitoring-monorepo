@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { checkTerraformFormat } from "./terraform-fmt-check.mjs";
+
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -282,8 +284,9 @@ function validateStacks(stackIds) {
     process.stdout.write(
       `\n==> terraform validate stack ${stack.id} (${stack.path})\n`,
     );
-    runTerraform(stack, ["fmt", "-check", "-recursive"], {
-      env: { TF_DATA_DIR: tfDataDir },
+    checkTerraformFormat(stack.path, {
+      env: { ...process.env, TF_DATA_DIR: tfDataDir },
+      repoRoot,
     });
     runTerraform(stack, ["init", "-backend=false", "-input=false"], {
       env: { TF_DATA_DIR: tfDataDir },

@@ -22,6 +22,7 @@
       "changedPathPatterns": [
         "terraform/**",
         "terraform.stacks.json",
+        "scripts/terraform-fmt-check.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
         ".github/workflows/infra.yml"
@@ -48,6 +49,7 @@
       "changedPathPatterns": [
         "alerts/rules/**",
         "terraform.stacks.json",
+        "scripts/terraform-fmt-check.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
         ".github/workflows/infra.yml",
@@ -85,6 +87,7 @@
       "changedPathPatterns": [
         "alerts/infra/**",
         "terraform.stacks.json",
+        "scripts/terraform-fmt-check.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
         ".github/workflows/infra.yml",
@@ -112,6 +115,7 @@
       "changedPathPatterns": [
         "aegis/terraform/**",
         "terraform.stacks.json",
+        "scripts/terraform-fmt-check.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
         ".github/workflows/infra.yml",
@@ -156,6 +160,7 @@
         "governance-watchdog/tsconfig.json",
         "governance-watchdog/tsconfig.build.json",
         "terraform.stacks.json",
+        "scripts/terraform-fmt-check.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
         ".github/workflows/infra.yml",

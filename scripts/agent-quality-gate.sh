@@ -638,6 +638,7 @@ add_root_tooling_package_script_checks() {
   add_command "pnpm sentry:archive:test" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
+  add_command "node scripts/terraform-fmt-check.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
   add_command "node scripts/lockfile-lint.test.mjs" "$reason"
   add_command "node scripts/version-skew-check.test.mjs" "$reason"
@@ -720,7 +721,7 @@ add_terraform_validate_commands() {
   local module="$1"
   local reason="$2"
   local tf_data_dir="${module}/.terraform-agent-gate"
-  add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} fmt -check -recursive" "$reason"
+  add_command "TF_DATA_DIR=${tf_data_dir} node scripts/terraform-fmt-check.mjs $(quote_path "$module")" "$reason"
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} init -backend=false -input=false" "$reason"
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} validate -no-color" "$reason"
 }
@@ -1579,6 +1580,18 @@ while IFS= read -r path; do
           add_terraform_validate_commands "aegis/terraform" "Terraform stack wrapper changed"
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack wrapper changed"
           ;;
+        scripts/terraform-fmt-check.mjs)
+          add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper changed"
+          add_command "pnpm tf:test" "Terraform format helper changed"
+          add_terraform_validate_commands "terraform" "Terraform format helper changed"
+          add_terraform_validate_commands "alerts/rules" "Terraform format helper changed"
+          add_terraform_validate_commands "alerts/infra" "Terraform format helper changed"
+          add_terraform_validate_commands "aegis/terraform" "Terraform format helper changed"
+          add_terraform_validate_commands "governance-watchdog/infra" "Terraform format helper changed"
+          ;;
+        scripts/terraform-fmt-check.test.mjs)
+          add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper test changed"
+          ;;
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
           ;;
@@ -1793,6 +1806,8 @@ implementation_signature() {
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
     scripts/check-agent-quality-gate-package-scripts.sh \
+    scripts/terraform-fmt-check.mjs \
+    scripts/terraform-fmt-check.test.mjs \
     turbo.json \
     .trunk/trunk.yaml; do
     if [[ -f "$path" ]]; then
@@ -2074,6 +2089,9 @@ is_quality_setup_command() {
       return 0
       ;;
     TF_DATA_DIR=*terraform\ -chdir=*)
+      return 0
+      ;;
+    TF_DATA_DIR=*node\ scripts/terraform-fmt-check.mjs\ *)
       return 0
       ;;
   esac

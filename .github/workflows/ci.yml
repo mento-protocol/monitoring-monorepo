@@ -161,6 +161,7 @@ jobs:
               - aegis/terraform/**
               - governance-watchdog/**
               - terraform.stacks.json
+              - scripts/terraform-fmt-check.mjs
               - scripts/tf-stacks.mjs
               - .github/workflows/alerts-infra.yml
               - .github/workflows/infra.yml
@@ -872,6 +873,10 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
+      - name: Terraform source-format target regression suite
+        # Proves ignored operator tfvars stay outside the explicit format target
+        # list while tracked and non-ignored source paths remain covered.
+        run: node scripts/terraform-fmt-check.test.mjs
       - name: Autoreview root-container Node trust regression
         # Exercise the Linux/root-only fallback with a foreign-owned ancestor
         # Node and the canonical wrapper's live-ancestor attestation. The full

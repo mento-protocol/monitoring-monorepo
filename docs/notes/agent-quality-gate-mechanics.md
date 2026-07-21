@@ -62,7 +62,10 @@ pnpm agent:quality-gate --run
 
 The execution mode is intentionally local-only: lint, typecheck, tests, codegen,
 Trunk, and formatting/validation commands. It never runs deploy commands or
-Terraform apply. If any package manifest, `pnpm-lock.yaml`,
+Terraform apply. Terraform formatting receives an explicit Git-visible source
+list, so tracked and non-ignored untracked Terraform files are checked without
+letting gitignored operator-held `*.tfvars` affect a branch-source gate. If any
+package manifest, `pnpm-lock.yaml`,
 `pnpm-workspace.yaml`, `.npmrc`, pnpmfile, or `patches/**` file changed,
 `--run` refuses to execute until you review package scripts/lifecycle hooks and pass
 `--allow-package-script-changes`. The narrow exception is a root `package.json`

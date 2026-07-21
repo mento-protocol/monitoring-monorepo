@@ -17,6 +17,7 @@ on:
       - governance-watchdog/tsconfig.json
       - governance-watchdog/tsconfig.build.json
       - terraform.stacks.json
+      - scripts/terraform-fmt-check.mjs
       - scripts/tf-stacks.mjs
       - .github/workflows/alerts-infra.yml
       - .github/workflows/infra.yml
@@ -36,6 +37,7 @@ on:
       - governance-watchdog/tsconfig.json
       - governance-watchdog/tsconfig.build.json
       - terraform.stacks.json
+      - scripts/terraform-fmt-check.mjs
       - scripts/tf-stacks.mjs
       - .github/workflows/alerts-infra.yml
       - .github/workflows/infra.yml
