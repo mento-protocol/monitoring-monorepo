@@ -45,11 +45,27 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
   fail-closed and defer newly visible rows until the next event rather than
   issuing an un-preloaded call.
 - The blocking code-quality invariant rejects a direct effect that exists only
-  after a positive preload return or after an earlier return-bearing branch. A
-  genuinely processing-dependent or permanently bounded call must carry an adjacent
-  `// preload-effect-exempt: <bounded-cardinality reason>` comment. Do not use
-  the exemption for an effect that scales with swaps, reports, transfers, or
-  another replay-traffic event stream.
+  after a positive preload return (including exact `maybePreloadPool(...)` and
+  `maybePreloadBreaker(...)` wrappers)
+  or after an earlier return-bearing branch. A call that must remain
+  processing-only for ordered-state correctness, or is permanently bounded,
+  must carry an adjacent call-site
+  `// preload-effect-exempt: <ordered-state or bounded-cardinality reason>`
+  comment. A comment on the preload guard does not suppress direct-effect
+  checks.
+- When code that preload cannot eagerly reach—after an entity-dependent return
+  or a positive preload return—calls a helper that directly or transitively
+  reaches `context.effect`, the invariant derives that boundary from TypeScript
+  symbols. Declare the exact used set with one or more adjacent
+  `// preload-effect-helpers: <helper names>` lines. Pair the declaration with
+  a non-empty `// preload-handler-note: <reason>` line. Missing and unused
+  declarations both fail so a broad handler marker cannot hide a future
+  effect. A phase-stable event-derived filter is valid only when the effect is
+  still awaited during preload; state that fact in the note. Do not exempt an
+  effect that scales with swaps, reports, transfers,
+  or another replay-traffic event stream merely for convenience. When preload
+  would violate sequential state semantics, name the exact ordering invariant
+  and track a preload-safe redesign.
 - When adding an effect to a replayed handler, audit the event's historical
   cardinality and add preload-aware coverage. Processing-only correctness tests
   do not prove that hosted replay will batch the external calls.

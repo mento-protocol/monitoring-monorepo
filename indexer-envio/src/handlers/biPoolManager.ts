@@ -353,6 +353,8 @@ indexer.onEvent(
 
     // Preload phase: warm entity reads only. The bounded ExchangeCreated RPC
     // backfill remains processing-only under the explicit exemption below.
+    // preload-handler-note: exchange creation reconciliation is bounded to one event per exchange.
+    // preload-effect-helpers: syncWrappedPoolFromCreatedExchange
     if (context.isPreload) {
       await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
       return;
@@ -417,6 +419,8 @@ indexer.onEvent(
     const blockTimestamp = asBigInt(event.block.timestamp);
 
     // Preload: warm both entity reads we'll need in the processing pass.
+    // preload-handler-note: bounded governance destruction may complete an ordered wrapper link.
+    // preload-effect-helpers: mirrorTokensAndDecimalsToPool
     if (context.isPreload) {
       await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
       return;
@@ -536,6 +540,8 @@ indexer.onEvent(
     // VP linked in the same processing batch could be missed by the cold
     // getWhere read. The cache:false `poolExchangeEffect` is intentionally
     // NOT called here (RPC stays in processing only).
+    // preload-handler-note: preload warms link reads, but high-frequency self-healing needs ordered exchange state; see #1394.
+    // preload-effect-helpers: ensureBiPoolExchange
     if (context.isPreload) {
       await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
       return;
@@ -592,6 +598,8 @@ indexer.onEvent(
     const exchangeId = event.params.exchangeId.toLowerCase();
     // Preload: warm both reads ensureBiPoolExchange may use — see
     // BucketsUpdated for the full rationale.
+    // preload-handler-note: bounded spread configuration uses the preload-warmed exchange link.
+    // preload-effect-helpers: ensureBiPoolExchange
     if (context.isPreload) {
       await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
       return;

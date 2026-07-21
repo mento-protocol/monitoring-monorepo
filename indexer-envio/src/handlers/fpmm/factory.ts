@@ -144,6 +144,8 @@ indexer.onEvent(
     const poolId = makePoolId(event.chainId, poolAddr); // namespaced ID for DB entities
     // See UpdateReserves handler — heavy RPC fan-out (6+ Promise.all reads)
     // gets skipped during preload and runs only in processing.
+    // preload-handler-note: FPMM deployment is bounded to one event per pool.
+    // preload-effect-helpers: upsertPool
     if (await maybePreloadPool(context, poolId)) return;
     const token0 = asAddress(event.params.token0);
     const token1 = asAddress(event.params.token1);
@@ -161,6 +163,7 @@ indexer.onEvent(
       invertRateFeedRaw,
       fees,
     ] = await Promise.all([
+      // preload-effect-exempt: one deployment-time feed lookup per pool.
       context.effect(referenceRateFeedIDEffect, {
         chainId: event.chainId,
         poolAddress: poolAddr,
@@ -169,28 +172,33 @@ indexer.onEvent(
       // unlike getRebalancingState() which reverts on stale/expired oracle data.
       // Read at the deploy block so historical replay sees the deploy-time
       // configuration, not whatever governance has changed it to since.
+      // preload-effect-exempt: one deployment-time threshold lookup per pool.
       context.effect(rebalanceThresholdsEffect, {
         chainId: event.chainId,
         poolAddress: poolAddr,
         blockNumber,
       }),
       // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
+      // preload-effect-exempt: one deployment-time token0 lookup per pool.
       context.effect(tokenDecimalsScalingEffect, {
         chainId: event.chainId,
         poolAddress: poolAddr,
         fn: "decimals0",
         fallbackTokenAddress: token0,
       }),
+      // preload-effect-exempt: one deployment-time token1 lookup per pool.
       context.effect(tokenDecimalsScalingEffect, {
         chainId: event.chainId,
         poolAddress: poolAddr,
         fn: "decimals1",
         fallbackTokenAddress: token1,
       }),
+      // preload-effect-exempt: one deployment-time direction lookup per pool.
       context.effect(invertRateFeedEffect, {
         chainId: event.chainId,
         poolAddress: poolAddr,
       }),
+      // preload-effect-exempt: one deployment-time fee lookup per pool.
       context.effect(feesEffect, {
         chainId: event.chainId,
         poolAddress: poolAddr,
@@ -203,16 +211,19 @@ indexer.onEvent(
       // Seed oracleExpiry and oracleNumReporters at pool creation so oracle
       // handlers can read them from the DB without per-event RPC calls.
       const [oracleExpiry, numReporters, medianTimestamp] = await Promise.all([
+        // preload-effect-exempt: one deployment-time expiry lookup per pool.
         context.effect(reportExpiryEffect, {
           chainId: event.chainId,
           rateFeedID,
           blockNumber,
         }),
+        // preload-effect-exempt: one deployment-time reporter lookup per pool.
         context.effect(numReportersEffect, {
           chainId: event.chainId,
           rateFeedID,
           blockNumber,
         }),
+        // preload-effect-exempt: one deployment-time median lookup per pool.
         context.effect(medianTimestampEffect, {
           chainId: event.chainId,
           rateFeedID,

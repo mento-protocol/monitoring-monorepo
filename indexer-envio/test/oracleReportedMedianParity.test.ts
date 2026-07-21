@@ -169,6 +169,28 @@ describe("SortedOracles.OracleReported median parity", () => {
     assert.equal(pool.lastOracleReportAt, medianTimestamp);
   });
 
+  it("skips the median timestamp RPC when preload sees no tracked pools", async () => {
+    registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, []);
+    const blockTimestamp = 1_700_002_000;
+    const mockDb = await SortedOracles.OracleReported.processEvent({
+      event: SortedOracles.OracleReported.createMockEvent({
+        token: FEED,
+        reporter: "0x00000000000000000000000000000000000000aa",
+        value: ONE,
+        timestamp: BigInt(blockTimestamp - 100),
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 7,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 60_664_501, timestamp: blockTimestamp },
+        },
+      }),
+      mockDb: MockDb.createMockDb(),
+    });
+
+    assert.deepEqual(mockDb.entities.Pool.getAll(), []);
+  });
+
   it("preloads a report-expiry retry before healing an unseeded pool", async () => {
     _setMockReportExpiry(CHAIN_ID, FEED, 31_536_000n);
     const { mockDb, poolId } = await processReport({
