@@ -1,6 +1,6 @@
 {
   "name": "@mento-protocol/config",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
   "description": "Public Mento protocol metadata for chain IDs, deployment namespaces, token labels, FX calendars, thresholds, and shared ABIs.",
