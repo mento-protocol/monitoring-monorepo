@@ -89,7 +89,9 @@ pnpm agent:autoreview --verify-bundle-dir <dir>  # pre-review check; retain the 
 The gate never deploys or applies Terraform. It refuses package-script or
 package-manager changes until their lifecycle risk is reviewed and explicitly
 acknowledged. Do not run a competing dashboard server/browser suite or second
-gate in the same worktree. Invocation details, parallelism, cache behavior, the
+gate in the same worktree. Run `--run` gates and `git push` in the background;
+a 600s foreground kill discards the freshness stamp.
+Invocation details, parallelism, cache behavior, the
 server-side full-repository fallback, and common traps live in
 [`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md).
 

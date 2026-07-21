@@ -146,4 +146,8 @@ pnpm alerts:rules:init / alerts:rules:plan
 # Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
 # The production-infra gate enforces required-reviewer approval and allows
 # self-review for the sole-maintainer workflow.
+
+# Dev janitor
+bash scripts/dev-janitor.sh            # Dry-run: report stale trunk repo caches, pnpm store, git worktrees, /private/tmp trees
+bash scripts/dev-janitor.sh --apply    # Delete stale trunk repo caches, prune pnpm store, and run git worktree prune
 ```

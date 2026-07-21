@@ -17,6 +17,7 @@ gha-creds-*.json
 .turbo/
 dist/
 *.tsbuildinfo
+.eslintcache
 .DS_Store
 .vercel/
 .vercel
