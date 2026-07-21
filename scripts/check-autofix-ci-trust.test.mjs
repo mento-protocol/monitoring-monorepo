@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {
   evaluateWorkflow,
+  hasUnanalyzableTriggers,
   hasPullRequestTrigger,
   hasTrigger,
   referencesSecrets,
@@ -462,6 +463,47 @@ test("secretless pull_request workflows and non-PR workflows pass untouched", ()
     "schedule-only workflow with secrets",
   );
   assert(hasPullRequestTrigger("on:\n  pull_request:\n"), "detector sanity");
+});
+
+test("aliased/anchored or multi-line flow on: declarations FAIL CLOSED", () => {
+  const aliased = [
+    "events: &pr_events",
+    "  pull_request:",
+    "on: *pr_events",
+    "jobs:",
+    "  x:",
+    SECRET_LINE,
+  ].join("\n");
+  assert(hasUnanalyzableTriggers(aliased), "alias detected");
+  const v = evaluateWorkflow(aliased);
+  assert(!v.ok && /anchors|alias/i.test(v.reason), "aliased on: refused");
+
+  const multilineFlow = [
+    "on: [pull_request,",
+    "  push]",
+    "jobs:",
+    "  x:",
+    SECRET_LINE,
+  ].join("\n");
+  assert(
+    !evaluateWorkflow(multilineFlow).ok,
+    "unterminated flow on: refused (fail closed)",
+  );
+
+  // Ordinary literal forms remain analyzable.
+  assert(
+    !hasUnanalyzableTriggers("on:\n  pull_request:\n    branches: [main]"),
+    "literal block form analyzable",
+  );
+});
+
+test("quoted secrets key forwarding inherit still counts", () => {
+  assert(
+    referencesSecrets(
+      '    uses: ./.github/workflows/x.yml\n    "secrets": inherit',
+    ),
+    "quoted secrets key with inherit counts",
+  );
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

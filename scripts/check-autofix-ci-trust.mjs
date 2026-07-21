@@ -100,6 +100,40 @@ function stripComments(body) {
 }
 
 /**
+ * True when the `on:` declaration uses YAML the textual analyzer cannot
+ * affirmatively resolve: anchors/aliases (`on: *pr_events`, `&anchor`) or a
+ * flow sequence/mapping left unterminated on the `on:` line (multi-line
+ * `on: [pull_request,`). Aliases can carry a pull_request trigger defined
+ * elsewhere in the document, so the only safe answer is to REFUSE analysis
+ * (fail closed) and make the author write triggers literally.
+ */
+export function hasUnanalyzableTriggers(body) {
+  const stripped = stripComments(body);
+  for (const line of stripped.split("\n")) {
+    const m = line.match(/^(['"]?)on\1\s*:\s*(.*)$/);
+    if (!m) continue;
+    const value = m[2].trim();
+    if (/^[*&]/.test(value)) return true; // alias or anchor as the on: value
+    // Unterminated flow form: opens [ or { without closing on the same line.
+    const opens = (value.match(/[[{]/g) ?? []).length;
+    const closes = (value.match(/[\]}]/g) ?? []).length;
+    if (opens > closes) return true;
+  }
+  // Anchors/aliases on trigger keys inside a block-form on: region.
+  const lines = stripped.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^(['"]?)on\1\s*:\s*$/.test(lines[i])) continue;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const l = lines[j];
+      if (l.trim() === "") continue;
+      if (!/^\s/.test(l)) break;
+      if (/[*&]\w/.test(l)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * True when the comment-stripped body declares the given trigger in ANY valid
  * GitHub Actions form:
  *   - block mapping:  `on:` newline `  pull_request:` (or bare `pull_request`)
@@ -162,11 +196,12 @@ export function referencesSecrets(body) {
   if (/\$\{\{[^}]*\bsecrets\b/.test(body)) return true;
   const stripped = stripComments(body);
   // `inherit` may be a quoted YAML scalar with identical semantics.
-  if (/^\s*secrets\s*:\s*(['"]?)inherit\1\s*$/m.test(stripped)) return true;
+  if (/^\s*(['"]?)secrets\1\s*:\s*(['"]?)inherit\2\s*$/m.test(stripped))
+    return true;
   // Explicit `secrets:` mapping on a reusable-workflow call. Only meaningful
   // when the block also calls a workflow (`uses: .../.github/workflows/...`).
   if (
-    /^\s*secrets\s*:\s*$/m.test(stripped) &&
+    /^\s*(['"]?)secrets\1\s*:\s*$/m.test(stripped) &&
     /^\s*uses\s*:\s*\S*\.github\/workflows\//m.test(stripped)
   ) {
     return true;
@@ -285,6 +320,13 @@ export function jobIfGuarded(block) {
  * Exported for tests.
  */
 export function evaluateWorkflow(body) {
+  if (hasUnanalyzableTriggers(body)) {
+    return {
+      ok: false,
+      reason:
+        "the on: declaration uses YAML anchors/aliases or a multi-line flow form this checker cannot resolve — write triggers literally (fail-closed: an alias could smuggle a pull_request trigger past the analysis)",
+    };
+  }
   if (usesPullRequestTarget(body)) {
     return {
       ok: false,
