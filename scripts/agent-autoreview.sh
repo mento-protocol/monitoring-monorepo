@@ -602,15 +602,16 @@ native_node_candidate_is_trusted() {
 
 strict_linux_elf_metadata() {
   local candidate="$1"
-  local require_interpreter="$2"
+  local interpreter_policy="$2"
   # Parse the bounded ELF structures directly. readelf renders unescaped
   # string-table bytes and therefore is not a security authority here.
   # shellcheck disable=SC2016
   system_perl -MConfig -MFcntl=:DEFAULT,:mode -e '
     use strict;
     use warnings;
-    my ($candidate, $require_interpreter) = @ARGV;
-    exit 1 if $Config{ivsize} < 8 || $require_interpreter !~ /\A[01]\z/;
+    my ($candidate, $interpreter_policy) = @ARGV;
+    exit 1 if $Config{ivsize} < 8 ||
+      $interpreter_policy !~ /\A(?:required|forbidden|optional)\z/;
 
     my $same_metadata = sub {
       my ($left, $right) = @_;
@@ -722,10 +723,13 @@ strict_linux_elf_metadata() {
       }
     }
     exit 1 if @dynamics != 1;
-    exit 1 if $require_interpreter ? @interpreters != 1 : @interpreters != 0;
+    exit 1 if
+      ($interpreter_policy eq "required" && @interpreters != 1) ||
+      ($interpreter_policy eq "forbidden" && @interpreters != 0) ||
+      ($interpreter_policy eq "optional" && @interpreters > 1);
 
     my $interpreter = "";
-    if ($require_interpreter) {
+    if (@interpreters == 1) {
       my ($offset, $size) = @{$interpreters[0]};
       exit 1 if $size < 2 || $size > 4096;
       my $bytes = $read_exact->($input, $offset, $size);
@@ -846,10 +850,10 @@ strict_linux_elf_metadata() {
       !$same_metadata->(\@before, \@after) ||
       !$same_metadata->(\@before, \@path_after);
     close($input) or exit 1;
-    print "interpreter\t$interpreter\n" if $require_interpreter;
+    print "interpreter\t$interpreter\n" if $interpreter ne "";
     print "soname\t$soname\n" if $soname ne "";
     print "needed\t$_\n" for @needed;
-  ' "$candidate" "$require_interpreter"
+  ' "$candidate" "$interpreter_policy"
 }
 
 strict_linux_loader_list_metadata() {
@@ -913,19 +917,36 @@ strict_linux_loader_list_metadata() {
       exit 1 if keys(%aliases) + keys(%standalone) + keys(%virtuals) > 1024;
     }
     exit 1 if !keys(%paths);
-    for my $name (@needed) {
-      exit 1 if !exists($aliases{$name});
-    }
     my @interpreter_stat = stat($resolved_interpreter);
     exit 1 if !@interpreter_stat || !S_ISREG($interpreter_stat[2]);
     my $self_matches = 0;
+    my $matched_interpreter_path = "";
     for my $path (keys(%standalone)) {
       my @path_stat = stat($path);
       exit 1 if !@path_stat || !S_ISREG($path_stat[2]);
-      $self_matches++ if $path_stat[0] == $interpreter_stat[0] &&
-        $path_stat[1] == $interpreter_stat[1];
+      if ($path_stat[0] == $interpreter_stat[0] &&
+          $path_stat[1] == $interpreter_stat[1]) {
+        $self_matches++;
+        $matched_interpreter_path = $path;
+      }
     }
     exit 1 if $self_matches != 1;
+    my ($interpreter_name) =
+      $matched_interpreter_path =~ m{/([A-Za-z0-9_+.-]+)\z};
+    exit 1 if !defined($interpreter_name) || $interpreter_name eq "." ||
+      $interpreter_name eq "..";
+    my %seen_needed;
+    my $self_needed = 0;
+    for my $name (@needed) {
+      exit 1 if $name !~ /\A[A-Za-z0-9_+.-]+\z/ || $name eq "." ||
+        $name eq ".." || $seen_needed{$name}++;
+      # glibc renders its own interpreter as the one standalone path even when
+      # the executable also declares the loader SONAME in DT_NEEDED. Bind that
+      # exceptional name to the inode-matched interpreter; every other needed
+      # object must still appear in the explicit alias map.
+      next if exists($aliases{$name});
+      exit 1 if $name ne $interpreter_name || $self_needed++;
+    }
     my $digest = Digest::SHA->new(256);
     for my $name (sort keys(%aliases)) {
       $digest->add("alias\0$name\0$aliases{$name}\0");
@@ -934,6 +955,7 @@ strict_linux_loader_list_metadata() {
     $digest->add("standalone\0$_\0") for sort keys(%standalone);
     $digest->add("virtual\0$_\0") for sort keys(%virtuals);
     print "digest\t", $digest->hexdigest, "\n";
+    print "interpreter\t$interpreter_name\t$matched_interpreter_path\n";
     print "alias\t$_\t$aliases{$_}\n" for sort keys(%aliases);
     print "standalone\t$_\n" for sort keys(%standalone);
     print "path\t$_\n" for sort keys(%paths);
@@ -1398,6 +1420,40 @@ linux_node_add_needed_name() {
   needed_names+=("$name")
 }
 
+strict_linux_dependency_elf_metadata() {
+  local candidate="$1"
+  local expected_interpreter_record="$2"
+  local metadata
+  local metadata_kind
+  local metadata_value
+  local metadata_extra
+  local interpreter_count=0
+  metadata="$({
+    strict_linux_elf_metadata "$candidate" optional
+  } 2>/dev/null)" || return 1
+  while IFS=$'\t' read -r metadata_kind metadata_value metadata_extra; do
+    [[ -z "$metadata_extra" ]] || return 1
+    case "$metadata_kind" in
+      interpreter)
+        [[ "$interpreter_count" -eq 0 && "$metadata_value" == /* ]] || return 1
+        interpreter_count=1
+        [[
+          "$({
+            strict_linux_loader_path_fingerprint \
+              "$metadata_value" \
+              1 \
+              "${rejected_command_roots[@]}"
+          } 2>/dev/null)" == "$expected_interpreter_record"
+        ]] || return 1
+        ;;
+      needed | soname)
+        printf '%s\t%s\n' "$metadata_kind" "$metadata_value"
+        ;;
+      *) return 1 ;;
+    esac
+  done <<<"$metadata"
+}
+
 linux_node_closure_manifest_path() {
   local candidate="$1"
   local manifests=("$candidate".loader-closure.*)
@@ -1468,6 +1524,7 @@ linux_node_snapshot_closure_is_trusted() {
   local metadata_third
   local metadata_extra
   local current_loader_digest=""
+  local loader_interpreter_count=0
   local needed_names=()
   local needed_targets=()
   local manifest_alias_names=()
@@ -1685,7 +1742,10 @@ linux_node_snapshot_closure_is_trusted() {
     return 1
   fi
   loader_metadata="$({
-    strict_linux_loader_list_metadata "$loader_output" "$loader_resolved"
+    strict_linux_loader_list_metadata \
+      "$loader_output" \
+      "$loader_resolved" \
+      "${needed_names[@]+"${needed_names[@]}"}"
   } 2>/dev/null)" || {
     /bin/rm -f -- "$loader_output" "$loader_error"
     return 1
@@ -1694,6 +1754,16 @@ linux_node_snapshot_closure_is_trusted() {
   while IFS=$'\t' read -r metadata_kind metadata_value metadata_third metadata_extra; do
     [[ -z "$metadata_extra" ]] || return 1
     case "$metadata_kind" in
+      interpreter)
+        [[
+          "$loader_interpreter_count" -eq 0 &&
+            "$metadata_value" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$metadata_value" != "." &&
+            "$metadata_value" != ".." &&
+            "$metadata_third" == /*
+        ]] || return 1
+        loader_interpreter_count=1
+        ;;
       digest)
         [[
           -z "$current_loader_digest" &&
@@ -1714,7 +1784,10 @@ linux_node_snapshot_closure_is_trusted() {
       *) return 1 ;;
     esac
   done <<<"$loader_metadata"
-  [[ "$current_loader_digest" == "$expected_loader_digest" ]] || return 1
+  [[
+    "$loader_interpreter_count" -eq 1 &&
+      "$current_loader_digest" == "$expected_loader_digest"
+  ]] || return 1
 
   for index in "${!record_requested[@]}"; do
     if [[ "${record_kinds[$index]}" == "alias" ]]; then
@@ -1767,6 +1840,12 @@ linux_node_snapshot_has_safe_closure() {
   local loader_metadata
   local ambient_loader_digest=""
   local controlled_loader_digest=""
+  local ambient_interpreter_count=0
+  local ambient_interpreter_name=""
+  local ambient_interpreter_path=""
+  local controlled_interpreter_count=0
+  local controlled_interpreter_name=""
+  local controlled_interpreter_path=""
   local ambient_alias_names=()
   local ambient_alias_paths=()
   local closure_paths=()
@@ -1807,7 +1886,9 @@ linux_node_snapshot_has_safe_closure() {
   linux_glibc_preload_is_absent || return 1
   snapshot_path_is_trusted "$candidate" || return 1
   native_node_candidate_is_trusted "$candidate" || return 1
-  elf_metadata="$({ strict_linux_elf_metadata "$candidate" 1; } 2>/dev/null)" ||
+  elf_metadata="$({
+    strict_linux_elf_metadata "$candidate" required
+  } 2>/dev/null)" ||
     return 1
   while IFS=$'\t' read -r metadata_kind metadata_value metadata_extra; do
     [[ -z "$metadata_extra" ]] || return 1
@@ -1850,7 +1931,8 @@ linux_node_snapshot_has_safe_closure() {
       "$interpreter_fingerprint" =~ ^[0-9a-f]{64}$
   ]] || return 1
   path_is_rejected "$resolved_interpreter" && return 1
-  strict_linux_elf_metadata "$resolved_interpreter" 0 >/dev/null 2>&1 || return 1
+  strict_linux_elf_metadata "$resolved_interpreter" forbidden >/dev/null 2>&1 ||
+    return 1
   strict_linux_glibc_loader_is_supported "$resolved_interpreter" || return 1
   [[
     "$({
@@ -1879,7 +1961,10 @@ linux_node_snapshot_has_safe_closure() {
     return 1
   fi
   loader_metadata="$({
-    strict_linux_loader_list_metadata "$loader_output" "$resolved_interpreter"
+    strict_linux_loader_list_metadata \
+      "$loader_output" \
+      "$resolved_interpreter" \
+      "${needed_names[@]+"${needed_names[@]}"}"
   } 2>/dev/null)" || {
     /bin/rm -f -- "$loader_output" "$loader_error"
     return 1
@@ -1888,6 +1973,18 @@ linux_node_snapshot_has_safe_closure() {
   while IFS=$'\t' read -r metadata_kind metadata_value metadata_third metadata_extra; do
     [[ -z "$metadata_extra" ]] || return 1
     case "$metadata_kind" in
+      interpreter)
+        [[
+          "$ambient_interpreter_count" -eq 0 &&
+            "$metadata_value" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$metadata_value" != "." &&
+            "$metadata_value" != ".." &&
+            "$metadata_third" == /*
+        ]] || return 1
+        ambient_interpreter_count=1
+        ambient_interpreter_name="$metadata_value"
+        ambient_interpreter_path="$metadata_third"
+        ;;
       digest)
         [[
           -z "$ambient_loader_digest" &&
@@ -1919,7 +2016,24 @@ linux_node_snapshot_has_safe_closure() {
         ;;
     esac
   done <<<"$loader_metadata"
-  [[ -n "$ambient_loader_digest" && "${#closure_paths[@]}" -gt 0 ]] || return 1
+  [[
+    "$ambient_interpreter_count" -eq 1 &&
+      -n "$ambient_loader_digest" &&
+      "${#closure_paths[@]}" -gt 0 &&
+      "$({
+        strict_linux_loader_path_fingerprint \
+          "$ambient_interpreter_path" \
+          1 \
+          "${rejected_command_roots[@]}"
+      } 2>/dev/null)" == "$interpreter_record"
+  ]] || return 1
+
+  for metadata_value in "${needed_names[@]+"${needed_names[@]}"}"; do
+    if [[ "$metadata_value" == "$ambient_interpreter_name" ]]; then
+      linux_node_add_name_mapping "$metadata_value" "$resolved_interpreter" ||
+        return 1
+    fi
+  done
 
   # Parse every object selected by the clean glibc resolver.  Collect the full
   # recursive DT_NEEDED name set and bind each SONAME/requested alias to one
@@ -1951,7 +2065,9 @@ linux_node_snapshot_has_safe_closure() {
     done
     if [[ "$already_inspected" -eq 0 ]]; then
       file_metadata="$({
-        strict_linux_elf_metadata "$resolved_path" 0
+        strict_linux_dependency_elf_metadata \
+          "$resolved_path" \
+          "$interpreter_record"
       } 2>/dev/null)" || return 1
       file_soname=""
       while IFS=$'\t' read -r metadata_kind metadata_value metadata_extra; do
@@ -2067,7 +2183,10 @@ linux_node_snapshot_has_safe_closure() {
     return 1
   fi
   loader_metadata="$({
-    strict_linux_loader_list_metadata "$loader_output" "$resolved_interpreter"
+    strict_linux_loader_list_metadata \
+      "$loader_output" \
+      "$resolved_interpreter" \
+      "${needed_names[@]+"${needed_names[@]}"}"
   } 2>/dev/null)" || {
     /bin/rm -f -- "$loader_output" "$loader_error"
     return 1
@@ -2076,6 +2195,18 @@ linux_node_snapshot_has_safe_closure() {
   while IFS=$'\t' read -r metadata_kind metadata_value metadata_third metadata_extra; do
     [[ -z "$metadata_extra" ]] || return 1
     case "$metadata_kind" in
+      interpreter)
+        [[
+          "$controlled_interpreter_count" -eq 0 &&
+            "$metadata_value" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$metadata_value" != "." &&
+            "$metadata_value" != ".." &&
+            "$metadata_third" == /*
+        ]] || return 1
+        controlled_interpreter_count=1
+        controlled_interpreter_name="$metadata_value"
+        controlled_interpreter_path="$metadata_third"
+        ;;
       digest)
         [[
           -z "$controlled_loader_digest" &&
@@ -2103,7 +2234,15 @@ linux_node_snapshot_has_safe_closure() {
     esac
   done <<<"$loader_metadata"
   [[
-    "$controlled_loader_digest" =~ ^[0-9a-f]{64}$ &&
+    "$controlled_interpreter_count" -eq 1 &&
+      "$controlled_interpreter_name" == "$ambient_interpreter_name" &&
+      "$({
+        strict_linux_loader_path_fingerprint \
+          "$controlled_interpreter_path" \
+          1 \
+          "${rejected_command_roots[@]}"
+      } 2>/dev/null)" == "$interpreter_record" &&
+      "$controlled_loader_digest" =~ ^[0-9a-f]{64}$ &&
       "${#controlled_paths[@]}" -gt 0
   ]] || return 1
 
@@ -2168,7 +2307,9 @@ linux_node_snapshot_has_safe_closure() {
       [[ "${name_map_targets[$mapping_index]}" != "$resolved_path" ]] || found=1
     done
     [[ "$found" -eq 1 ]] || return 1
-    strict_linux_elf_metadata "$resolved_path" 0 >/dev/null 2>&1 || return 1
+    strict_linux_dependency_elf_metadata \
+      "$resolved_path" \
+      "$interpreter_record" >/dev/null 2>&1 || return 1
     after_fingerprint_record="$({
       strict_linux_loader_path_fingerprint \
         "$closure_path" \
@@ -2368,10 +2509,7 @@ snapshot_linux_root_ancestor_node() {
     my @candidate_before = stat($candidate);
     exit 1 if !@candidate_before || !S_ISREG($candidate_before[2]);
     exit 1 if $candidate_before[4] == 0 || $candidate_before[4] == $euid;
-    # Image/tool caches may hard-link the active runtime. The live descriptor,
-    # complete before/after metadata (including nlink and ctime), and digest
-    # bind the copied bytes; only the published snapshot must be single-link.
-    exit 1 if $candidate_before[3] < 1 || ($candidate_before[2] & 06022);
+    exit 1 if $candidate_before[3] != 1 || ($candidate_before[2] & 06022);
     exit 1 if ($candidate_before[2] & 0111) == 0;
     exit 1 if $candidate_before[7] <= 0 || $candidate_before[7] > $maximum_size;
     my $prefix;

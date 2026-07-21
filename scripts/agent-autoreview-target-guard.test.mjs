@@ -7,7 +7,6 @@ import {
   chownSync,
   copyFileSync,
   existsSync,
-  linkSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
@@ -112,7 +111,7 @@ function extractStrictElfMetadataProgram() {
   const functionOffset = source.indexOf("strict_linux_elf_metadata() {");
   const programMarker = "system_perl -MConfig -MFcntl=:DEFAULT,:mode -e '\n";
   const programOffset = source.indexOf(programMarker, functionOffset);
-  const endMarker = '\n  \' "$candidate" "$require_interpreter"\n}';
+  const endMarker = '\n  \' "$candidate" "$interpreter_policy"\n}';
   const endOffset = source.indexOf(endMarker, programOffset);
   assert.ok(functionOffset >= 0, "strict ELF metadata function is missing");
   assert.ok(programOffset >= 0, "strict ELF metadata program is missing");
@@ -121,6 +120,52 @@ function extractStrictElfMetadataProgram() {
     "strict ELF metadata program is malformed",
   );
   return source.slice(programOffset + programMarker.length, endOffset);
+}
+
+function extractStrictLoaderListMetadataProgram() {
+  const source = readFileSync(wrapper, "utf8");
+  const functionOffset = source.indexOf(
+    "strict_linux_loader_list_metadata() {",
+  );
+  const programMarker =
+    "system_perl -MDigest::SHA -MFcntl=:DEFAULT,:mode -e '\n";
+  const programOffset = source.indexOf(programMarker, functionOffset);
+  const endMarker = '\n  \' "$output" "$resolved_interpreter" "$EUID" "$@"\n}';
+  const endOffset = source.indexOf(endMarker, programOffset);
+  assert.ok(
+    functionOffset >= 0,
+    "strict loader-list metadata function is missing",
+  );
+  assert.ok(
+    programOffset >= 0,
+    "strict loader-list metadata program is missing",
+  );
+  assert.ok(
+    endOffset > programOffset,
+    "strict loader-list metadata program is malformed",
+  );
+  return source.slice(programOffset + programMarker.length, endOffset);
+}
+
+function assertStrictLoaderListMetadataWiring() {
+  const lines = readFileSync(wrapper, "utf8").split("\n");
+  const calls = lines.flatMap((line, index) =>
+    line.trim() === "strict_linux_loader_list_metadata \\"
+      ? [lines.slice(index, index + 4)]
+      : [],
+  );
+  assert.equal(
+    calls.length,
+    3,
+    "every loader-list metadata call must share the strict needed-name policy",
+  );
+  for (const call of calls) {
+    assert.equal(
+      call[3]?.trim(),
+      '"${needed_names[@]+"${needed_names[@]}"}"',
+      "loader-list metadata call omitted the collected DT_NEEDED names",
+    );
+  }
 }
 
 function writeUnsigned(buffer, offset, bytes, value, littleEndian) {
@@ -146,6 +191,7 @@ function writeUnsigned(buffer, offset, bytes, value, littleEndian) {
 function syntheticElf({
   dynamicEntries,
   elf64 = true,
+  extraInterpreter = false,
   extraLoad = false,
   interpreter,
   littleEndian = true,
@@ -175,7 +221,8 @@ function syntheticElf({
       (elf64 ? "/lib64/ld-linux-x86-64.so.2\0" : "/lib/ld-linux.so.2\0"),
     "latin1",
   );
-  const programHeaderCount = 2 + Number(withInterpreter) + Number(extraLoad);
+  const programHeaderCount =
+    2 + Number(withInterpreter) + Number(extraInterpreter) + Number(extraLoad);
   buffer.set([0x7f, 0x45, 0x4c, 0x46, elf64 ? 2 : 1, littleEndian ? 1 : 2, 1]);
   writeUnsigned(buffer, 16, 2, 3, littleEndian);
   writeUnsigned(buffer, 20, 4, 1, littleEndian);
@@ -249,6 +296,16 @@ function syntheticElf({
     nextProgramHeader += 1;
     buffer.set(interpreterBytes, interpreterOffset);
   }
+  if (extraInterpreter) {
+    writeProgramHeader(
+      nextProgramHeader,
+      3,
+      interpreterOffset,
+      virtualBase + BigInt(interpreterOffset),
+      interpreterBytes.length,
+    );
+    nextProgramHeader += 1;
+  }
   if (extraLoad) {
     writeProgramHeader(nextProgramHeader, 1, 0, virtualBase, size);
   }
@@ -273,7 +330,7 @@ function syntheticElf({
   };
 }
 
-function runStrictElfMetadata(fixture, requireInterpreter) {
+function runStrictElfMetadata(fixture, interpreterPolicy) {
   const perl = ["/usr/bin/perl", "/bin/perl"].find((candidate) =>
     existsSync(candidate),
   );
@@ -291,7 +348,7 @@ function runStrictElfMetadata(fixture, requireInterpreter) {
       "-e",
       extractStrictElfMetadataProgram(),
       candidate,
-      requireInterpreter ? "1" : "0",
+      interpreterPolicy,
     ],
     {
       encoding: "utf8",
@@ -302,8 +359,8 @@ function runStrictElfMetadata(fixture, requireInterpreter) {
 }
 runStrictElfMetadata.sequence = 0;
 
-function assertStrictElfAccepted(fixture, requireInterpreter = true) {
-  const result = runStrictElfMetadata(fixture, requireInterpreter);
+function assertStrictElfAccepted(fixture, interpreterPolicy = "required") {
+  const result = runStrictElfMetadata(fixture, interpreterPolicy);
   assert.equal(
     result.status,
     0,
@@ -312,8 +369,8 @@ function assertStrictElfAccepted(fixture, requireInterpreter = true) {
   return result.stdout;
 }
 
-function assertStrictElfRejected(fixture, requireInterpreter = true) {
-  const result = runStrictElfMetadata(fixture, requireInterpreter);
+function assertStrictElfRejected(fixture, interpreterPolicy = "required") {
+  const result = runStrictElfMetadata(fixture, interpreterPolicy);
   assert.notEqual(
     result.status,
     0,
@@ -330,12 +387,25 @@ function exerciseStrictElfMetadataParser() {
       );
       assertStrictElfAccepted(
         syntheticElf({ elf64, littleEndian, withInterpreter: false }),
-        false,
+        "forbidden",
+      );
+      assert.match(
+        assertStrictElfAccepted(
+          syntheticElf({ elf64, littleEndian }),
+          "optional",
+        ),
+        /interpreter\t\/lib(?:64)?\/ld-linux/,
+      );
+      assertStrictElfAccepted(
+        syntheticElf({ elf64, littleEndian, withInterpreter: false }),
+        "optional",
       );
     }
   }
   assertStrictElfRejected(syntheticElf({ withInterpreter: false }));
-  assertStrictElfRejected(syntheticElf(), false);
+  assertStrictElfRejected(syntheticElf(), "forbidden");
+  assertStrictElfRejected(syntheticElf({ extraInterpreter: true }), "optional");
+  assertStrictElfRejected(syntheticElf(), "invalid");
   assertStrictElfRejected(syntheticElf({ extraLoad: true }));
   assertStrictElfRejected(syntheticElf({ interpreter: "relative/ld.so\0" }));
   assertStrictElfRejected(
@@ -452,8 +522,69 @@ function exerciseStrictElfMetadataParser() {
   );
 }
 
+function exerciseStrictLoaderListMetadataParser() {
+  const perl = ["/usr/bin/perl", "/bin/perl"].find((candidate) =>
+    existsSync(candidate),
+  );
+  assert.ok(perl, "strict loader-list tests require system Perl");
+  const output = path.join(root, "strict-loader-list.out");
+  const interpreterAlias = path.join(root, "ld-fixture.so.2");
+  symlinkSync(process.execPath, interpreterAlias);
+  writeFileSync(
+    output,
+    `${interpreterAlias} (0x7f0000000000)\nlibfixture.so.1 => ${process.execPath} (0x7f0000001000)\n`,
+  );
+  const run = (...neededNames) =>
+    spawnSync(
+      perl,
+      [
+        "-MDigest::SHA",
+        "-MFcntl=:DEFAULT,:mode",
+        "-e",
+        extractStrictLoaderListMetadataProgram(),
+        output,
+        process.execPath,
+        String(process.geteuid?.() ?? process.getuid()),
+        ...neededNames,
+      ],
+      {
+        encoding: "utf8",
+        env: { LANG: "C", LC_ALL: "C", PATH: "/usr/bin:/bin" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+  const interpreterName = path.basename(interpreterAlias);
+  const accepted = run(interpreterName, "libfixture.so.1");
+  assert.equal(
+    accepted.status,
+    0,
+    `strict loader-list parser rejected an inode-matched DT_NEEDED interpreter: ${accepted.stderr}`,
+  );
+  assert.match(accepted.stdout, /^standalone\t/mu);
+  assert.ok(
+    accepted.stdout.includes(
+      `interpreter\t${interpreterName}\t${interpreterAlias}\n`,
+    ),
+    "strict loader-list parser did not expose the inode-matched standalone path",
+  );
+  const canonicalBasename = run(path.basename(process.execPath));
+  assert.notEqual(
+    canonicalBasename.status,
+    0,
+    "strict loader-list parser used the resolved interpreter basename instead of the matched output path",
+  );
+  const rejected = run("libmissing.so.1");
+  assert.notEqual(
+    rejected.status,
+    0,
+    "strict loader-list parser accepted a missing non-interpreter dependency",
+  );
+}
+
 try {
   exerciseStrictElfMetadataParser();
+  assertStrictLoaderListMetadataWiring();
+  exerciseStrictLoaderListMetadataParser();
   mkdirSync(repo);
   mkdirSync(bin);
   git(["init", "-q"]);
@@ -582,13 +713,6 @@ printf '%s\\n' '{"findings":[],"overall_correctness":"patch is correct","overall
   if (process.platform === "linux" && process.geteuid?.() === 0) {
     const foreignNodeDir = path.join(root, "foreign-node-bin");
     const foreignNode = createForeignNodeFixture(foreignNodeDir);
-    const foreignNodeAlias = path.join(root, "foreign-node-hardlink");
-    linkSync(foreignNode, foreignNodeAlias);
-    assert.equal(
-      lstatSync(foreignNode, { bigint: true }).nlink,
-      2n,
-      "root regression requires a hard-linked image-owned Node source",
-    );
     const gitOnlyDir = path.join(root, "git-only-bin");
     mkdirSync(gitOnlyDir);
     assert.ok(
