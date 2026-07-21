@@ -32,6 +32,7 @@ overrides:
   # exponential {} expansion; both transitive, floors match the sibling roots.
   "js-yaml@>=4.0.0 <4.3.0": 4.3.0
   "brace-expansion@^1.0.0": ^1.1.16
+  "brace-expansion@>=2.0.0 <3": ^2.1.2
   "brace-expansion@>=5.0.0 <6": ^5.0.7
   # isows resolves ws@8.20.1 through viem; 8.21.0 contains the GHSA-96hv-2xvq-fx4p
   # fix and stays compatible with isows' ws peer range.
