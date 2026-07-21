@@ -238,7 +238,12 @@ chains:
 
   - id: polygonTestnet
     label: polygon-testnet
-    httpRpcUrl: https://polygon-amoy.drpc.org
+    # The six concurrent 10-second oracle/breaker polls exceed dRPC's anonymous
+    # free-tier burst limit. PublicNode handled the production-shaped burst in
+    # verification; keep the official Polygon-listed dRPC endpoint as the
+    # independent single fallback.
+    httpRpcUrl: https://polygon-amoy-bor-rpc.publicnode.com
+    fallbackHttpRpcUrl: https://polygon-amoy.drpc.org
     contracts:
       # Same deterministic testnet deploy addresses as monadTestnet above.
       # Verified on-chain (chainId 80002): only the three Polygon rate feeds

@@ -93,4 +93,9 @@ chains:
     fallbackHttpRpcUrl: https://rpc.ankr.com/celo
 ```
 
-Verify the URL is reachable with a simple `eth_blockNumber` call before committing. Leave testnets and low-metric-count chains as single-endpoint (the fallback field is optional).
+Verify the URL with the chain's real concurrent polling shape before committing;
+an `eth_blockNumber` smoke test alone does not expose burst throttling. Testnets
+and low-metric-count chains should normally remain single-endpoint, but add an
+independent-provider fallback when production logs demonstrate throttling or
+availability failures. Polygon Amoy is the current exception: its six-call
+oracle/breaker burst uses PublicNode first and dRPC as the single fallback.
