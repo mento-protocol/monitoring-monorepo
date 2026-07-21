@@ -5,7 +5,7 @@ title: Envio Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-09
+last_verified: 2026-07-21
 allowed-tools: Bash, Read, Grep, Glob, WebFetch
 doc_type: skill
 scope: repo-wide
@@ -29,6 +29,9 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 - Treat this repo as HyperIndex V3-first. Verify the exact installed package with `pnpm --filter @mento-protocol/indexer-envio exec envio --version`; the pinned version in `indexer-envio/package.json` is `envio@3.2.1`.
 - V3 preload optimization is always on. There is no `preload_handlers:` config flag, and loader-era patterns should be translated into normal handler code.
 - V3 handlers run twice: a concurrent preload pass for DB reads/effects, then an ordered processing pass for writes. Do not put expensive `context.effect(...)` calls behind an early `if (context.isPreload) return`; do keep writes out of preload.
+- `indexer-envio/test/code-quality-invariants.test.ts` blocks direct effects that exist only after a positive preload return (including exact `await maybePreloadPool(...)` and `await maybePreloadBreaker(...)` wrappers) or after an earlier entity-dependent return. Start event-derived effects before lookups whose empty result can differ between concurrent preload and ordered processing, then reuse the identical effect + input key across both passes. An effect that must remain processing-only for ordered-state correctness, or is permanently bounded, needs an adjacent call-site `// preload-effect-exempt: <ordered-state or bounded-cardinality reason>` comment. A comment on the preload guard never suppresses direct-effect checks.
+- When code that preload cannot eagerly reach—after an entity-dependent return or a positive preload return—calls a helper that directly or transitively reaches `context.effect`, the invariant derives that boundary from TypeScript symbols. Declare the exact used set with one or more adjacent `// preload-effect-helpers: <helper names>` lines plus a non-empty `// preload-handler-note: <reason>` line. Missing and unused helper declarations both fail. A phase-stable event-derived filter may be declared only when the effect is still awaited during preload; say that explicitly. Never exempt replay-traffic-scaled effects merely for convenience; when preloading would violate sequential semantics, state the exact ordering invariant and track a preload-safe redesign.
+- For an effect that is needed only when preloaded entity state meets a condition, carry an event-scoped in-memory preload marker into processing. If a row appears only during ordered processing, stay fail-closed and defer the RPC until the next event instead of issuing a serialized call.
 - Prefer the installed CLI help over stale docs when they disagree. In this baseline, `envio metrics`, `envio metrics runtime`, `envio tools search-docs`, and `envio tools fetch-docs` exist; `envio benchmark-summary` does not.
 
 ## Mento repo quick reference

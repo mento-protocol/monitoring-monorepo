@@ -530,6 +530,8 @@ indexer.onEvent(
     const exchangeSnapshotId = `${event.chainId}-${exchangeProvider}-${exchangeId}-${dayTs}`;
     const brokerCallerPoolId = makePoolId(event.chainId, brokerCaller);
 
+    // preload-handler-note: high-frequency caller-pool healing depends on ordered Pool state; see #1394.
+    // preload-effect-helpers: maybeHealBrokerCallerPool
     if (context.isPreload)
       return preloadBrokerSwapInputs({
         context,

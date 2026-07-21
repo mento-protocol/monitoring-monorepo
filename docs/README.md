@@ -25,7 +25,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md) | Babysit PR Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-28 |
 | [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md) | Deploy Indexer Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-29 |
 | [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-19 |
-| [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-09 |
+| [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md) | Forensic Report Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-06-15 |
 | [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md) | 0xADDRESS_CASE_PRESERVED — Display Name (persona/ENS if known) | unmanaged / unmanaged | skill / repo-wide | unowned | 90d |
 | [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md) | Monorepo Import Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-26 |
@@ -92,10 +92,10 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/pr-checklists/ci-workflow-gates.md`](pr-checklists/ci-workflow-gates.md) | CI Workflow Gates Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/code-health.md`](pr-checklists/code-health.md) | Code Health Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/dynamic-route-metadata.md`](pr-checklists/dynamic-route-metadata.md) | Dynamic Route Metadata and Private Data Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |
-| [`docs/pr-checklists/indexer-handler-invariants.md`](pr-checklists/indexer-handler-invariants.md) | Indexer Handler Invariants | canonical / active | checklist / indexer-envio | eng | 90d; verified 2026-07-17 |
+| [`docs/pr-checklists/indexer-handler-invariants.md`](pr-checklists/indexer-handler-invariants.md) | Indexer Handler Invariants | canonical / active | checklist / indexer-envio | eng | 90d; verified 2026-07-21 |
 | [`docs/pr-checklists/keyboard-a11y-controlled-widgets.md`](pr-checklists/keyboard-a11y-controlled-widgets.md) | Keyboard Accessibility on Controlled Widgets Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/mutation-testing.md`](pr-checklists/mutation-testing.md) | Mutation Testing Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
-| [`docs/pr-checklists/recurring-review-patterns.md`](pr-checklists/recurring-review-patterns.md) | Recurring PR Review Patterns | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-16 |
+| [`docs/pr-checklists/recurring-review-patterns.md`](pr-checklists/recurring-review-patterns.md) | Recurring PR Review Patterns | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`docs/pr-checklists/review-prompt-exclusions.md`](pr-checklists/review-prompt-exclusions.md) | Review Prompt Exclusions | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-03 |
 | [`docs/pr-checklists/stateful-data-ui.md`](pr-checklists/stateful-data-ui.md) | Stateful Data and UI Checklist | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/swr-polling-hasura.md`](pr-checklists/swr-polling-hasura.md) | SWR and Hasura Polling Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |

@@ -124,6 +124,8 @@ export async function handleStableTokenCustodyTransfer({
   if (!state) return;
 
   if (!state.supplyBaselineSeeded) {
+    // preload-effect-exempt: one successful baseline per token/manager;
+    // eligibility depends on the ordered custody state above.
     const baseline = await context.effect(stableBalanceOfEffect, {
       chainId,
       tokenAddress,

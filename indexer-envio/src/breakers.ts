@@ -540,6 +540,8 @@ export async function handleDefaultCooldownTimeUpdated({
 }): Promise<void> {
   const breakerAddress = asAddress(event.srcAddress);
   const breakerId = makeBreakerId(event.chainId, breakerAddress);
+  // preload-handler-note: default cooldown changes are bounded configuration events.
+  // preload-effect-helpers: ensureBreaker
   if (await maybePreloadBreaker(context, breakerId)) return;
 
   const breaker = await ensureBreaker(
@@ -567,6 +569,8 @@ export async function handleDefaultRateChangeThresholdUpdated({
 }): Promise<void> {
   const breakerAddress = asAddress(event.srcAddress);
   const breakerId = makeBreakerId(event.chainId, breakerAddress);
+  // preload-handler-note: default threshold changes are bounded configuration events.
+  // preload-effect-helpers: ensureBreaker
   if (await maybePreloadBreaker(context, breakerId)) return;
 
   const breaker = await ensureBreaker(
@@ -596,6 +600,8 @@ export async function handleRateFeedCooldownTimeUpdated({
   const blockNumber = BigInt(event.block.number);
   const blockTimestamp = BigInt(event.block.timestamp);
 
+  // preload-handler-note: per-feed cooldown changes are bounded configuration events.
+  // preload-effect-helpers: ensureBreaker, ensureBreakerConfig
   if (await maybePreloadBreaker(context, breakerId)) return;
 
   const breaker = await ensureBreaker(
@@ -640,6 +646,8 @@ export async function handleRateChangeThresholdUpdated({
   const blockNumber = BigInt(event.block.number);
   const blockTimestamp = BigInt(event.block.timestamp);
 
+  // preload-handler-note: per-feed threshold changes are bounded configuration events.
+  // preload-effect-helpers: ensureBreaker, ensureBreakerConfig
   if (await maybePreloadBreaker(context, breakerId)) return;
 
   const breaker = await ensureBreaker(

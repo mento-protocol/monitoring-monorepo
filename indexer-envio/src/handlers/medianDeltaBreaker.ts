@@ -60,6 +60,8 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
+    // preload-handler-note: smoothing-factor changes are bounded configuration whose bootstrap follows ordered state.
+    // preload-effect-helpers: ensureBreaker, ensureBreakerConfig
     if (await maybePreloadBreaker(context, breakerId)) return;
 
     const breaker = await ensureBreaker(
@@ -94,6 +96,8 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
+    // preload-handler-note: EMA resets are bounded configuration whose bootstrap follows ordered state.
+    // preload-effect-helpers: ensureBreaker, ensureBreakerConfig
     if (await maybePreloadBreaker(context, breakerId)) return;
 
     const breaker = await ensureBreaker(

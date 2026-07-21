@@ -456,10 +456,14 @@ export async function handleStethLaunchBaseline({
   block: { number: number | bigint };
   context: StethContext;
 }): Promise<boolean> {
+  // preload-handler-note: the launch baseline runs once at the configured block.
+  // preload-effect-helpers: recordStethWalletLaunchBaselines
   if (context.isPreload) return false;
   const blockNumber = BigInt(block.number);
   if (blockNumber !== BigInt(V3_REVENUE_LAUNCH_BLOCK)) return false;
 
+  // preload-effect-exempt: this runs once at the configured launch block, so
+  // its processing-only RPC cardinality is permanently bounded.
   const sampledAtTimestamp = await context.effect(blockTimestampEffect, {
     chainId: ETHEREUM_CHAIN_ID,
     blockNumber,
@@ -475,6 +479,9 @@ export async function handleStethYieldDailySnapshotHeartbeat({
   block: { number: number | bigint };
   context: StethContext;
 }): Promise<boolean> {
+  // preload-handler-note: heartbeat writes need ordered daily state; preload-safe
+  // block and balance reads are tracked in #1396.
+  // preload-effect-helpers: recordStethYieldHeartbeatSnapshots
   if (context.isPreload) return false;
   return recordStethYieldHeartbeatSnapshots(context, BigInt(block.number));
 }
