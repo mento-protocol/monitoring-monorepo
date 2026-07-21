@@ -70,6 +70,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0033](0033-adr-process-and-gate.md)                    | ADRs record architectural decisions, enforced by a reminder gate                |
 | [0036](0036-sentry-triage-pipeline.md)                  | Sentry triage/autofix: staged GitHub Actions agent pipeline + GH-Issue queue    |
 | [0038](0038-sentry-central-plane-verdict-projection.md) | Central Sentry triage plane; actionable verdicts projected into owning repos    |
+| [0040](0040-bounded-documentation-garden-queue.md)      | Weekly bounded documentation packets enter one serialized GitHub Issue queue    |
 
 ### shared-config
 

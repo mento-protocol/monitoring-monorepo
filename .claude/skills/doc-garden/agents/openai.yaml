@@ -1,0 +1,4 @@
+interface:
+  display_name: Documentation Garden
+  short_description: Audit and prune bounded documentation lanes
+  default_prompt: Use $doc-garden to audit a bounded documentation packet and prepare evidence-backed updates.

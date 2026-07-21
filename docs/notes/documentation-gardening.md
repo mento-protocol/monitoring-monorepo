@@ -3,7 +3,7 @@ title: Documentation gardening
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-19
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -49,6 +49,59 @@ The packet records authority, lifecycle, ownership, size, inbound links,
 content-change dates, broken links, metadata gaps, orphan signals, and likely
 version references. These are triage signals, not semantic conclusions.
 
+## Recurring issue queue
+
+The `Documentation Garden` workflow runs at 08:47 UTC every Monday. It turns the
+selected packet into one fully specified Agent Task linked to epic #1341. The
+workflow owns only the issue envelope; `eng` owns the cadence and recovery
+contract, while the eventual issue assignee owns semantic review and PR
+closeout.
+
+The queue is deliberately serialized:
+
+- no live marked issue: create the selected occurrence as `agent-ready`;
+- same occurrence still `agent-ready`: retain the immutable published packet
+  without changing its title, body, or labels;
+- planner scope drift before claim: preserve the issued scope and report a
+  fail-closed no-op for manual review;
+- live occurrence `agent-active` or `in-pr`: leave its scope unchanged;
+- live occurrence `needs-grooming`: retain it as the one blocked packet until a
+  human resolves or closes it;
+- prior occurrence closed: advance to the next week serial and create the next
+  bounded packet;
+- multiple live markers or conflicting queue-state labels: fail closed for
+  manual recovery;
+- empty selected lane: report a no-op and create nothing.
+
+Identity comes from the two leading `docs-garden-issue:v1` and
+`docs-garden-packet:v1` markers. Do not remove or hand-copy them. Queue labels
+cannot identify an occurrence because claiming intentionally moves
+`agent-ready` to `agent-active` and then `in-pr`.
+
+Use the CLI for a local or operator preview. Dry-run still reads the full issue
+set and computes the exact decision but performs no label, issue, or repository
+mutation. Live creation from a local CLI is rejected so it cannot race the
+workflow's concurrency group. The live path requires a short-lived GitHub OIDC
+identity bound to the exact repository, workflow ref and SHA, event, branch,
+run, and attempt; spoofed `GITHUB_*` environment values and a user token are not
+enough:
+
+```bash
+pnpm docs:garden --dry-run --json
+pnpm docs:garden --dry-run --date 2026-07-20 --lane adrs-architecture --shard 1 --json
+```
+
+For a live manual run, use the Actions `Documentation Garden` dispatch from the
+default branch, first with its default `dry_run: true`. Review the reported
+decision, then rerun with `dry_run: false`. Manual lane and shard values are
+validated by Node and never interpolated into shell source.
+
+If recovery is required, inspect every open issue with the leading marker.
+Close a true duplicate or restore exactly one lifecycle label only after
+confirming which issue owns the active work; preserve the markers and claimed
+scope. Rerun a manual dry-run afterward. Scheduled failures are registered with
+the main-branch Slack failure notifier.
+
 ## Review contract
 
 Every document receives one evidence-backed disposition: **Keep**,
@@ -63,8 +116,9 @@ Every document receives one evidence-backed disposition: **Keep**,
 - Repair inbound navigation when merging, moving, archiving, or deleting.
 - Escalate unclear ownership or contradictory canonical sources instead of
   choosing silently.
-- The planner is read-only. Semantic edits use a claimed GitHub issue and a
-  normal reviewed PR.
+- `docs:audit` is read-only. `docs:garden` may create only the GitHub issue
+  envelope; once published, that envelope is immutable until closure. Semantic
+  edits use a claimed issue and a normal reviewed PR.
 
 Run `pnpm docs:index --check` after a gardening batch. If classification changed,
 regenerate the catalog with `pnpm docs:index --write` and review the generated

@@ -876,6 +876,8 @@ jobs:
         run: pnpm docs:audit:test
       - name: Documentation audit planner dry run
         run: pnpm docs:audit --dry-run
+      - name: Documentation garden issue automation tests
+        run: pnpm docs:garden:test
       - name: Agent context budget tests
         run: pnpm agent:context-budget:test
       - name: Enforce agent context budgets

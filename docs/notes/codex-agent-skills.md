@@ -3,7 +3,7 @@ title: Codex Agent Skills — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-19
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -53,6 +53,11 @@ For workflow continuity, this repo includes thin repo-local `ship` and
 `.claude/skills/` mirrors. They preserve the familiar command names while
 backing the behavior with repo-visible commands: `pnpm agent:quality-gate`,
 `pnpm agent:autoreview` when available, and `pnpm pr:ready-state`.
+
+The repo-local `doc-garden` skill uses the same exact-mirror contract. It turns
+a generated bounded packet into evidence-backed dispositions, guarded semantic
+edits, link/catalog repair, and normal PR closeout; the detailed cadence and
+queue behavior stay in `docs/notes/documentation-gardening.md`.
 
 ## SessionEnd hook (reflect nudge)
 
