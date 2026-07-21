@@ -2578,7 +2578,11 @@ const exitCode = Number.parseInt(
 );
 
 fs.closeSync(0);
-if (exitCode !== 0) process.stderr.write("reviewer rejected startup\n");
+process.stderr.write(
+  exitCode === 0
+    ? "reviewer closed stdin early\n"
+    : "reviewer rejected startup\n",
+);
 setTimeout(() => process.exit(exitCode), 25);
 CODEX
   chmod +x "$fake_bin/codex"
@@ -2596,6 +2600,7 @@ CODEX
     "$review_repo" "$fake_bin" --mode local --engine codex
   expect_stderr_contains \
     "exited successfully after closing stdin before the complete review prompt was written"
+  expect_stderr_contains "reviewer closed stdin early"
 }
 
 run_symlinked_node_codex_regression() {

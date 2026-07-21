@@ -2465,7 +2465,7 @@ function runCommandWithInput(
       if (stdinWriteError) {
         rejectOnce(
           new Error(
-            `${command} exited successfully after closing stdin before the complete review prompt was written`,
+            `${command} exited successfully after closing stdin before the complete review prompt was written: ${stderr || stdout}`,
           ),
         );
         return;
