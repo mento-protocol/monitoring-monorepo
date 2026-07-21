@@ -115,22 +115,46 @@ function stripComments(body) {
 export function hasUnanalyzableTriggers(body) {
   const stripped = stripComments(body);
   const lines = stripped.split("\n");
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
     // Anchor/alias token in a YAML VALUE position — the only places YAML
     // grammar allows them: as a mapping value (`key: &name` / `key: *name`),
     // as a list item (`- *name`), or as a flow-sequence element
     // (`on: [*pr]`). Content INSIDE quoted strings (Slack mrkdwn `*bold*`,
     // glob patterns) starts with a quote or other char at the value boundary
     // and therefore never matches.
-    if (/(?:^|:\s+|-\s+|[[,{]\s*)[&*][A-Za-z_][A-Za-z0-9_-]*\b/.test(line))
-      return true;
+    // Anchor names may be ANY non-space run (incl. numeric `&1`).
+    if (/(?:^|:\s+|-\s+|[[,{]\s*)[&*][^\s,\]}]+/.test(line)) return true;
+    // YAML explicit-key syntax (`? pull_request`) is valid for triggers and
+    // invisible to the block matcher — refuse it (write keys plainly).
+    if (/^\s*\?\s/.test(line)) return true;
     const m = line.match(/^(['"]?)on\1\s*:\s*(.*)$/);
-    if (!m) continue;
-    const value = m[2].trim();
-    // Unterminated flow form: opens [ or { without closing on the same line.
-    const opens = (value.match(/[[{]/g) ?? []).length;
-    const closes = (value.match(/[\]}]/g) ?? []).length;
-    if (opens > closes) return true;
+    if (m) {
+      const value = m[2].trim();
+      // Unterminated flow form: opens [ or { without closing on the same line.
+      const opens = (value.match(/[[{]/g) ?? []).length;
+      const closes = (value.match(/[\]}]/g) ?? []).length;
+      if (opens > closes) return true;
+    }
+    // Block-scalar introducer (`run: |`, `script: >-`, `- |2`): every deeper-
+    // indented line that follows is STRING content with zero YAML semantics
+    // (JS ternaries starting `? `, markdown `- **bold**`, shell globs), so
+    // skipping it is exact, not a heuristic. This skip runs AFTER the checks
+    // above so an introducer line like `key: &a |` still fails on its anchor.
+    // A false introducer (plain scalar ending in ` |`) is harmless: deeper
+    // lines after a scalar-valued key can only be scalar continuations or
+    // YAML errors, never active structure.
+    if (/(?:^|\s)[|>][0-9+-]{0,2}\s*$/.test(line)) {
+      const indent = /^ */.exec(line)[0].length;
+      let j = i + 1;
+      while (
+        j < lines.length &&
+        (lines[j].trim() === "" || /^ */.exec(lines[j])[0].length > indent)
+      ) {
+        j += 1;
+      }
+      i = j - 1;
+    }
   }
   return false;
 }
@@ -360,13 +384,40 @@ export function evaluateWorkflow(body) {
   // EVERY job, so a header secret makes every job secret-bearing even when no
   // job block contains the textual reference itself.
   const headerHasSecrets = referencesSecrets(header);
+  // `id-token: write` is a CREDENTIAL even with zero secrets references: this
+  // repo's WIF pool (terraform/ci-wif.tf) trusts any OIDC token carrying this
+  // repository's `attribute.repository`, so a PR job holding the permission
+  // can mint a token and exchange it for the plan-readonly service account —
+  // the same state-reading identity the Terraform lanes guard. Match block
+  // and inline-flow permission forms plus `permissions: write-all` (which
+  // includes id-token), at job level or inherited from the workflow header.
+  // Non-anchored on purpose: matching prose that merely mentions the string
+  // only ADDS scrutiny (fail-safe direction).
+  const grantsOidc = (text) => {
+    const s = stripComments(text);
+    return (
+      /(['"]?)\bid-token\1\s*:\s*(['"]?)write\2/.test(s) ||
+      /(['"]?)\bpermissions\1\s*:\s*(['"]?)write-all\2/.test(s)
+    );
+  };
+  const headerGrantsOidc = grantsOidc(header);
   const offenders = [];
   for (const [job, block] of blocks) {
     if (job === "") continue;
     // A job bound to a GitHub ENVIRONMENT receives that environment's secrets
     // server-side with no textual secrets reference in the YAML at all.
     const environmentBound = /^ {4}(['"]?)environment\1\s*:/m.test(block);
-    if (!referencesSecrets(block) && !headerHasSecrets && !environmentBound)
+    // Workflow-level permissions are inherited unless the job declares its
+    // own `permissions:` key, but a job that overrides COULD still include
+    // id-token — grantsOidc(block) catches that; treating a narrowing
+    // override as still-inheriting only over-approximates (fail-safe).
+    const oidcCapable = grantsOidc(block) || headerGrantsOidc;
+    if (
+      !referencesSecrets(block) &&
+      !headerHasSecrets &&
+      !environmentBound &&
+      !oidcCapable
+    )
       continue;
     if (fileAnnotated) continue;
     if (jobIfGuarded(block) || hasAnnotation(block)) continue;

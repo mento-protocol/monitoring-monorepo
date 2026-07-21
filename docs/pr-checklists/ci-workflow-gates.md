@@ -170,6 +170,12 @@ job exposes to their PR-head code is an exfiltration channel (issue #1388).
 `scripts` CI job.
 
 - [ ] If the workflow triggers on `pull_request` (any form — block, `on: [pull_request]`, inline mapping) and a JOB references `${{ secrets.* }}`, either exclude autofix PRs in THAT job (`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')` on its `if:`, or route them to a secretless lane like lighthouse.yml's fixture path), or add an `# autofix-ci-trust: <why the secret is unreachable from PR-head code>` annotation inside that job (a file-level annotation above `jobs:` covers every job). The checker is per-job: one guarded job does not vouch for an unguarded sibling
+- [ ] "Secret-bearing" is broader than `${{ secrets.* }}`: a job bound to a
+      GitHub `environment:`, holding `id-token: write` (this repo's WIF pool
+      trusts any OIDC token from this repository — `terraform/ci-wif.tf` —
+      so the permission alone exchanges into the plan-readonly service
+      account), or granted `permissions: write-all` counts too and needs
+      the same guard or annotation
 - [ ] Never introduce `pull_request_target` — the checker refuses it outright
 - [ ] Checkouts in jobs that execute PR-head code set `persist-credentials: false` (the checkout token in `.git/config` is readable by any test/build the PR controls)
 - [ ] `node scripts/check-autofix-ci-trust.mjs` must pass after the change

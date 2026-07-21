@@ -572,5 +572,119 @@ test("environment-bound jobs are secret-bearing even with no textual secrets", (
   assert(evaluateWorkflow(guarded).ok, "guarded environment job passes");
 });
 
+test("anchors/aliases with non-identifier names (numeric, dashed) are refused", () => {
+  assert(
+    hasUnanalyzableTriggers("events: &1\n  pull_request:\non: *1\n"),
+    "numeric anchor + alias refused",
+  );
+  assert(
+    hasUnanalyzableTriggers("on: *-x\n"),
+    "dash-leading alias name refused",
+  );
+});
+
+test("YAML explicit-key syntax in mappings is refused", () => {
+  assert(
+    hasUnanalyzableTriggers("on:\n  ? pull_request\n  : null\n"),
+    "explicit trigger key refused",
+  );
+  assert(
+    hasUnanalyzableTriggers('on:\n  ? "pull_request"\n'),
+    "quoted explicit key refused",
+  );
+});
+
+test("block-scalar content is inert text, not YAML (no false positives)", () => {
+  const ternary = [
+    "on:",
+    "  push:",
+    "jobs:",
+    "  a:",
+    "    steps:",
+    "      - run: |",
+    "          const x = cond",
+    "            ? a",
+    "            : b;",
+  ].join("\n");
+  assert(!hasUnanalyzableTriggers(ternary), "JS ternary in run block ignored");
+
+  const mrkdwn = [
+    "jobs:",
+    "  a:",
+    "    steps:",
+    "      - uses: actions/github-script@v7",
+    "        with:",
+    "          script: |",
+    "            const s = `- **${x}** &y`;",
+    "            const t = `*${z}*`;",
+  ].join("\n");
+  assert(!hasUnanalyzableTriggers(mrkdwn), "markdown in script block ignored");
+
+  // The introducer line itself is still scanned: an anchor BEFORE the block
+  // scalar (`run: &tpl |`) must fail before the content skip kicks in.
+  assert(
+    hasUnanalyzableTriggers(
+      "jobs:\n  a:\n    steps:\n      - run: &tpl |\n          echo hi\n",
+    ),
+    "anchored block scalar refused",
+  );
+});
+
+test("id-token: write is a credential (WIF token exchange), like a secret", () => {
+  const base = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    "PERMS",
+    "    steps:",
+    "      - uses: actions/checkout@v4",
+  ].join("\n");
+  const block = base.replace(
+    "PERMS",
+    "    permissions:\n      id-token: write",
+  );
+  let v = evaluateWorkflow(block);
+  assert(!v.ok && /\[leak\]/.test(v.reason), "block-form id-token refused");
+
+  const inline = base.replace("PERMS", "    permissions: { id-token: write }");
+  v = evaluateWorkflow(inline);
+  assert(!v.ok && /\[leak\]/.test(v.reason), "inline-flow id-token refused");
+
+  const writeAll = base.replace("PERMS", "    permissions: write-all");
+  v = evaluateWorkflow(writeAll);
+  assert(!v.ok && /\[leak\]/.test(v.reason), "permissions: write-all refused");
+
+  const readOnly = base.replace("PERMS", "    permissions: read-all");
+  assert(
+    evaluateWorkflow(readOnly).ok,
+    "read-only permissions without secrets passes",
+  );
+
+  const header = [
+    "on:",
+    "  pull_request:",
+    "permissions:",
+    "  id-token: write",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@v4",
+  ].join("\n");
+  v = evaluateWorkflow(header);
+  assert(
+    !v.ok && /\[leak\]/.test(v.reason),
+    "workflow-level id-token inherited by jobs",
+  );
+
+  const guarded = block.replace(
+    "    runs-on: ubuntu-latest",
+    "    runs-on: ubuntu-latest\n    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+  );
+  assert(evaluateWorkflow(guarded).ok, "guarded id-token job passes");
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exitCode = 1;
