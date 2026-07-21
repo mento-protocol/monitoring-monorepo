@@ -63,6 +63,11 @@ The catalog makes documents discoverable; it does not promote them. Its
 `canonical`, `non-canonical`, and `unmanaged` labels are derived from each
 document's metadata under the authority rules above.
 
+The committed catalog intentionally contains stable navigation metadata only.
+Volatile analytics such as word counts and inbound-link counts remain available
+from `pnpm docs:index --json` and `pnpm docs:audit`; they are not committed into
+the catalog, so prose-only edits do not churn this shared file.
+
 ## Metadata Contract
 
 Managed context files use YAML frontmatter with `title`, `status`, `owner`,
