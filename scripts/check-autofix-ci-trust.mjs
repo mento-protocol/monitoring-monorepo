@@ -100,35 +100,37 @@ function stripComments(body) {
 }
 
 /**
- * True when the `on:` declaration uses YAML the textual analyzer cannot
- * affirmatively resolve: anchors/aliases (`on: *pr_events`, `&anchor`) or a
- * flow sequence/mapping left unterminated on the `on:` line (multi-line
- * `on: [pull_request,`). Aliases can carry a pull_request trigger defined
- * elsewhere in the document, so the only safe answer is to REFUSE analysis
- * (fail closed) and make the author write triggers literally.
+ * True when the file uses YAML the textual analyzer cannot affirmatively
+ * resolve, ANYWHERE in the document:
+ *   - any YAML anchor (`&name`) or alias (`*name`) — an alias can carry a
+ *     pull_request trigger, a secret-bearing env mapping, or a whole job body
+ *     defined elsewhere, so every occurrence is a potential smuggling channel
+ *     for BOTH the trigger analysis and the per-job secret analysis;
+ *   - a flow sequence/mapping left unterminated on the `on:` line
+ *     (multi-line `on: [pull_request,`).
+ * The only safe answer is to REFUSE analysis (fail closed) and make the
+ * author write the workflow literally — no repo workflow uses anchors, and
+ * the repo's prettier/trunk YAML style never produces them.
  */
 export function hasUnanalyzableTriggers(body) {
   const stripped = stripComments(body);
-  for (const line of stripped.split("\n")) {
+  const lines = stripped.split("\n");
+  for (const line of lines) {
+    // Anchor/alias token in a YAML VALUE position — the only places YAML
+    // grammar allows them: as a mapping value (`key: &name` / `key: *name`),
+    // as a list item (`- *name`), or as a flow-sequence element
+    // (`on: [*pr]`). Content INSIDE quoted strings (Slack mrkdwn `*bold*`,
+    // glob patterns) starts with a quote or other char at the value boundary
+    // and therefore never matches.
+    if (/(?:^|:\s+|-\s+|[[,{]\s*)[&*][A-Za-z_][A-Za-z0-9_-]*\b/.test(line))
+      return true;
     const m = line.match(/^(['"]?)on\1\s*:\s*(.*)$/);
     if (!m) continue;
     const value = m[2].trim();
-    if (/^[*&]/.test(value)) return true; // alias or anchor as the on: value
     // Unterminated flow form: opens [ or { without closing on the same line.
     const opens = (value.match(/[[{]/g) ?? []).length;
     const closes = (value.match(/[\]}]/g) ?? []).length;
     if (opens > closes) return true;
-  }
-  // Anchors/aliases on trigger keys inside a block-form on: region.
-  const lines = stripped.split("\n");
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!/^(['"]?)on\1\s*:\s*$/.test(lines[i])) continue;
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const l = lines[j];
-      if (l.trim() === "") continue;
-      if (!/^\s/.test(l)) break;
-      if (/[*&]\w/.test(l)) return true;
-    }
   }
   return false;
 }
@@ -361,7 +363,11 @@ export function evaluateWorkflow(body) {
   const offenders = [];
   for (const [job, block] of blocks) {
     if (job === "") continue;
-    if (!referencesSecrets(block) && !headerHasSecrets) continue;
+    // A job bound to a GitHub ENVIRONMENT receives that environment's secrets
+    // server-side with no textual secrets reference in the YAML at all.
+    const environmentBound = /^ {4}(['"]?)environment\1\s*:/m.test(block);
+    if (!referencesSecrets(block) && !headerHasSecrets && !environmentBound)
+      continue;
     if (fileAnnotated) continue;
     if (jobIfGuarded(block) || hasAnnotation(block)) continue;
     offenders.push(job);

@@ -506,5 +506,71 @@ test("quoted secrets key forwarding inherit still counts", () => {
   );
 });
 
+test("aliases ANYWHERE (inline lists, secret-carrying anchors) fail closed; mrkdwn strings do not", () => {
+  // Alias inside a valid inline trigger list.
+  const inlineAlias = [
+    "name: &pr pull_request",
+    "on: [*pr]",
+    "jobs:",
+    "  x:",
+    SECRET_LINE,
+  ].join("\n");
+  assert(!evaluateWorkflow(inlineAlias).ok, "inline-list alias refused");
+
+  // Anchor carrying a secret env mapping consumed by a later job.
+  const anchorSecrets = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  safe:",
+    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+    "    env: &shared_secrets",
+    "      TOKEN: ${{ secrets.TOKEN }}",
+    "  leak:",
+    "    env: *shared_secrets",
+    "    steps:",
+    "      - run: pnpm test",
+  ].join("\n");
+  assert(!evaluateWorkflow(anchorSecrets).ok, "anchor-carried secrets refused");
+
+  // Slack mrkdwn bold inside a quoted string is NOT a YAML alias.
+  const mrkdwn = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    steps:",
+    '      - run: echo "🧪 *wiring test*"',
+  ].join("\n");
+  assert(!hasUnanalyzableTriggers(mrkdwn), "mrkdwn bold not an alias");
+  assert(evaluateWorkflow(mrkdwn).ok, "secretless mrkdwn workflow passes");
+});
+
+test("environment-bound jobs are secret-bearing even with no textual secrets", () => {
+  const envJob = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    environment: production-infra",
+    "    steps:",
+    "      - run: pnpm deploy",
+  ].join("\n");
+  const v = evaluateWorkflow(envJob);
+  assert(!v.ok && /\[x\]/.test(v.reason), "environment secrets counted");
+
+  const guarded = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+    "    environment: production-infra",
+    "    steps:",
+    "      - run: pnpm deploy",
+  ].join("\n");
+  assert(evaluateWorkflow(guarded).ok, "guarded environment job passes");
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exitCode = 1;
