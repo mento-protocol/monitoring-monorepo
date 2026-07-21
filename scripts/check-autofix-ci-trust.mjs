@@ -215,9 +215,7 @@ export function splitJobs(body) {
     if (inJobs) {
       // Job IDs may be quoted (valid YAML): `"leak":` — accept optional
       // matching quotes so a quoted job cannot hide inside a sibling's block.
-      const jobKey = line.match(
-        /^ {2}(['\"]?)([A-Za-z0-9_-]+)\1\s*:\s*(#.*)?$/,
-      );
+      const jobKey = line.match(/^ {2}(['"]?)([A-Za-z0-9_-]+)\1\s*:\s*(#.*)?$/);
       if (jobKey) {
         if (current !== null) flush();
         current = jobKey[2];
