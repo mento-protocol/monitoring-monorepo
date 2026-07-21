@@ -83,6 +83,7 @@ function makeDetailPool(overrides: Record<string, unknown> = {}) {
     oraclePrice: "1000000000000000000000000",
     oracleOk: true,
     oracleTimestamp: String(nowSec),
+    lastOracleReportAt: String(nowSec),
     oracleExpiry: "300",
     reserves0: "1000000000000000000000000",
     reserves1: "1000000000000000000000000",
@@ -293,6 +294,7 @@ describe("fetchPoolOgDataUncached", () => {
     const nowSec = Math.floor(Date.now() / 1000);
     const detailPool = makeDetailPool({
       oracleTimestamp: String(nowSec - 3600),
+      lastOracleReportAt: String(nowSec - 3600),
       oracleExpiry: "300",
     });
     mockRequest((q) => {
@@ -311,6 +313,7 @@ describe("fetchPoolOgDataUncached", () => {
     const observedAt = Math.floor(Date.now() / 1000);
     const detailPool = makeDetailPool({
       oracleTimestamp: String(observedAt - 240),
+      lastOracleReportAt: String(observedAt - 240),
     });
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>

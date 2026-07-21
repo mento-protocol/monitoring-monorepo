@@ -17,6 +17,7 @@ import {
   decodeInvertRateFeedEffectResult,
   feesEffect,
   invertRateFeedEffect,
+  medianTimestampEffect,
   numReportersEffect,
   rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
@@ -201,7 +202,7 @@ indexer.onEvent(
     if (rateFeedID) {
       // Seed oracleExpiry and oracleNumReporters at pool creation so oracle
       // handlers can read them from the DB without per-event RPC calls.
-      const [oracleExpiry, numReporters] = await Promise.all([
+      const [oracleExpiry, numReporters, medianTimestamp] = await Promise.all([
         context.effect(reportExpiryEffect, {
           chainId: event.chainId,
           rateFeedID,
@@ -212,12 +213,23 @@ indexer.onEvent(
           rateFeedID,
           blockNumber,
         }),
+        context.effect(medianTimestampEffect, {
+          chainId: event.chainId,
+          rateFeedID,
+          blockNumber,
+        }),
       ]);
       if (oracleExpiry !== null) {
         oracleDelta.oracleExpiry = oracleExpiry;
       }
       if (numReporters !== null) {
         oracleDelta.oracleNumReporters = numReporters;
+      }
+      if (medianTimestamp !== null && medianTimestamp > 0n) {
+        // OracleAdapter validates FPMM reads against this exact anchor. The
+        // following same-transaction UpdateReserves event will seed price and
+        // health state without pretending pool deployment renewed the report.
+        oracleDelta.lastOracleReportAt = medianTimestamp;
       }
     }
     // `referenceRateFeedID` flows through the dedicated upsertPool param

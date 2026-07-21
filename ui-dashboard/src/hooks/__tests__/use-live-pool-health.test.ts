@@ -23,6 +23,7 @@ function makePool(overrides: Partial<Pool> = {}): Pool {
     updatedAtTimestamp: "2000",
     oracleOk: true,
     oracleTimestamp: "1800",
+    lastOracleReportAt: "1800",
     priceDifference: "10",
     ...overrides,
   };
@@ -47,6 +48,7 @@ function makeLiveRow(
     updatedAtTimestamp: "2100",
     oracleOk: true,
     oracleTimestamp: "2050",
+    lastOracleReportAt: "2050",
     oracleExpiry: "300",
     oracleNumReporters: 3,
     priceDifference: "20",

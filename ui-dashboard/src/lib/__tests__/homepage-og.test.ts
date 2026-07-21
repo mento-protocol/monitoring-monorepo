@@ -106,6 +106,7 @@ function makePool(
     oraclePrice: "1000000000000000000000000", // 1.0 at 24dp
     oracleOk: true,
     oracleTimestamp: String(nowSec),
+    lastOracleReportAt: String(nowSec),
     oracleExpiry: "300",
     reserves0: "1000000000000000000000000", // 1M
     reserves1: "1000000000000000000000000", // 1M
@@ -301,7 +302,10 @@ describe("fetchHomepageOgDataUncached", () => {
       POOL_CELO,
       ADDR_USDM_CELO,
       ADDR_CUSD_CELO,
-      { oracleTimestamp: String(observedAt - 240) },
+      {
+        oracleTimestamp: String(observedAt - 240),
+        lastOracleReportAt: String(observedAt - 240),
+      },
     );
     routeByChain({
       42220: (doc) => {

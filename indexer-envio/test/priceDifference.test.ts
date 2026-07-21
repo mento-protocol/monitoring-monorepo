@@ -547,7 +547,14 @@ describe("tryDeriveRebalanceState", () => {
     );
   });
 
-  it("returns null when median is stale (lastOracleReportAt + expiry <= eventTimestamp)", () => {
+  it("derives at the inclusive contract expiry boundary", () => {
+    const derived = tryDeriveRebalanceState(ausdPool(), {
+      eventTimestamp: 1_003_600n,
+    });
+    assert.ok(derived != null, "the OracleAdapter boundary is inclusive");
+  });
+
+  it("returns null when median is past its expiry boundary", () => {
     // lastOracleReportAt 1_000_000n + expiry 3_600n = 1_003_600n.
     // eventTimestamp 1_003_700n is past the expiry → contract reverts.
     assert.equal(

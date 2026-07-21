@@ -140,6 +140,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             oracleOk
             oraclePrice
             oracleTimestamp
+            lastOracleReportAt
             oracleTxHash
             priceDifference
             rebalanceThreshold
@@ -373,6 +374,8 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             id
             lastOracleSnapshotTimestamp
             lastDeviationRatio
+            lastOracleReportAt
+            oracleExpiry
           }
         }
       `),

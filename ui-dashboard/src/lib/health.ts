@@ -400,20 +400,21 @@ function computeVirtualPoolHealthStatus(
  *    remains a faithful reserve-skew signal but is excluded from deviation
  *    health accounting
  *
- * Staleness uses the last successful observation time plus indexed
- * `oracleExpiry` (per-feed), with a wall-clock fallback for unobserved callers
- * and `ORACLE_STALE_SECONDS` for pools that pre-date the field. The deviation
- * tier mirrors the indexer's `computeHealthStatus` (parity test lives in
+ * FPMM staleness uses the exact SortedOracles median report timestamp plus
+ * indexed `oracleExpiry` (per-feed), with `ORACLE_STALE_SECONDS` only when the
+ * expiry itself predates indexing. The raw pool-event observation timestamp is
+ * diagnostic and never renews freshness. The deviation tier mirrors the
+ * indexer's `computeHealthStatus` (parity test lives in
  * `indexer-envio/test/healthStatusParity.test.ts`).
  *
  * The `hasHealthData` short-circuit is a dashboard-side defense for the
  * indexer's decimals-unknown early-return path (codex P2 #3214513402,
  * PR 1.6): the homepage table + OG card recompute health here without
- * checking `hasHealthData`, so without this gate a pool whose indexer
- * advanced raw oracle timestamps from before the freshness-cursor preserve
- * fix landed would render OK / fresh while its `priceDifference` is
- * still stale / default. Strict `=== false` so callers from queries
- * that don't fetch the field (older snapshots) keep the prior behaviour.
+ * checking `hasHealthData`, so without this gate a pool whose indexer advanced
+ * oracle freshness independently of a trustworthy deviation sample could
+ * render OK while its `priceDifference` is still stale/default. Strict
+ * `=== false` so callers from queries that don't fetch the field (older
+ * snapshots) keep the prior behaviour.
  */
 export function computeHealthStatus(
   pool: PoolHealthState,
@@ -544,8 +545,6 @@ function clampedPct(binary: number, total: number): number | null {
   return Math.max(0, Math.min(100, (binary / total) * 100));
 }
 
-const MAX_HEALTH_CARRY_SECONDS = DEVIATION_BREACH_GRACE_SECONDS;
-
 type HealthCounterState = {
   source: string;
   wrappedExchangeId?: string | null | undefined;
@@ -553,6 +552,7 @@ type HealthCounterState = {
   healthBinarySeconds?: string | undefined;
   lastOracleSnapshotTimestamp?: string | undefined;
   lastDeviationRatio?: string | undefined;
+  lastOracleReportAt?: string | undefined;
   oracleExpiry?: string | undefined;
 };
 
@@ -633,11 +633,19 @@ function freshnessCarrySeconds(args: {
   nowSeconds: number;
 }): number {
   const indexedExpiry = Number(args.pool.oracleExpiry ?? "0");
-  const freshnessLimit = Math.min(
-    indexedExpiry > 0 ? indexedExpiry : MAX_HEALTH_CARRY_SECONDS,
-    MAX_HEALTH_CARRY_SECONDS,
-  );
-  const carryEnd = Math.min(args.nowSeconds, args.lastTs + freshnessLimit);
+  const reportTimestamp = Number(args.pool.lastOracleReportAt ?? "0");
+  // Match OracleAdapter and the indexer accumulator exactly. A pool event does
+  // not renew the feed TTL: carry only until medianTimestamp + feed expiry.
+  // Unknown inputs fail closed instead of manufacturing healthy time.
+  if (
+    !Number.isFinite(indexedExpiry) ||
+    indexedExpiry <= 0 ||
+    !Number.isFinite(reportTimestamp) ||
+    reportTimestamp <= 0
+  ) {
+    return 0;
+  }
+  const carryEnd = Math.min(args.nowSeconds, reportTimestamp + indexedExpiry);
   return carryEnd > args.intervalStart
     ? tradingSecondsInRange(args.intervalStart, carryEnd)
     : 0;
@@ -686,11 +694,17 @@ export function liveHealthCounters(
 }
 
 export function oracleFreshnessTimestamp(pool: {
+  source?: string | undefined;
+  wrappedExchangeId?: string | null | undefined;
   oracleTimestamp?: string | undefined;
   vpOracleTimestamp?: string | undefined;
   lastOracleReportAt?: string | undefined;
 }): number {
-  return Number(pool.vpOracleTimestamp ?? pool.oracleTimestamp ?? "0");
+  return Number(
+    isVirtualPool(pool)
+      ? (pool.vpOracleTimestamp ?? pool.oracleTimestamp ?? "0")
+      : (pool.lastOracleReportAt ?? "0"),
+  );
 }
 
 /**
@@ -842,6 +856,7 @@ export function computeEffectiveStatus(
     token1?: string | null | undefined;
     oracleOk?: boolean | undefined;
     oracleTimestamp?: string | undefined;
+    lastOracleReportAt?: string | undefined;
     oracleFreshnessCheckedAt?: number | undefined;
     vpOracleFreshnessCheckedAt?: number | undefined;
     vpOracleTimestamp?: string | undefined;

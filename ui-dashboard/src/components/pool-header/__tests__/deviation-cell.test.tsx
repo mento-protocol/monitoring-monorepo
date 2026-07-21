@@ -63,6 +63,7 @@ const BASE_POOL: Pool = {
   updatedAtTimestamp: "2000",
   hasHealthData: true,
   oracleTimestamp: FRESH_TS,
+  lastOracleReportAt: FRESH_TS,
   oracleExpiry: "300",
   rebalanceThreshold: 5000,
 };

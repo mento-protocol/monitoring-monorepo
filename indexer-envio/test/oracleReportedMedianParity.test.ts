@@ -8,10 +8,12 @@ import {
 import {
   _clearBootstrapCaches,
   _clearBreakerMocks,
+  _clearMockMedianTimestamps,
   _setMockBreakerDefaults,
   _setMockBreakerFeedState,
   _setMockBreakerKind,
   _setMockBreakerList,
+  _setMockMedianTimestamp,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 import { makePool } from "./helpers/makePool.js";
@@ -62,6 +64,7 @@ describe("SortedOracles.OracleReported median parity", () => {
 
   afterEach(() => {
     _clearBreakerMocks();
+    _clearMockMedianTimestamps();
   });
 
   async function processReport({
@@ -72,6 +75,7 @@ describe("SortedOracles.OracleReported median parity", () => {
     existingPriceDifference = 0n,
     value,
     blockTimestamp = 1_700_002_000,
+    medianTimestamp = BigInt(blockTimestamp - 50),
   }: {
     lastMedianPrice: bigint;
     lastOracleReportAt?: bigint;
@@ -80,8 +84,10 @@ describe("SortedOracles.OracleReported median parity", () => {
     existingPriceDifference?: bigint;
     value: bigint;
     blockTimestamp?: number;
+    medianTimestamp?: bigint;
   }) {
     registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, []);
+    _setMockMedianTimestamp(CHAIN_ID, FEED, medianTimestamp);
 
     let mockDb = MockDb.createMockDb();
     const poolId = makePoolId(
@@ -147,6 +153,19 @@ describe("SortedOracles.OracleReported median parity", () => {
     assert.equal(snapshot.oraclePrice, 3n * ONE);
   });
 
+  it("refreshes the exact median timestamp when a flat report emits no MedianUpdated", async () => {
+    const medianTimestamp = 1_700_001_950n;
+    const { mockDb, poolId } = await processReport({
+      lastMedianPrice: ONE,
+      lastOracleReportAt: 1_700_000_000n,
+      value: ONE,
+      medianTimestamp,
+    });
+
+    const pool = mockDb.entities.Pool.get(poolId)!;
+    assert.equal(pool.lastOracleReportAt, medianTimestamp);
+  });
+
   it("opens a breach for a deviating median even when the reporter quote looks in-band", async () => {
     const { mockDb, poolId, blockTimestamp } = await processReport({
       lastMedianPrice: 3n * ONE,
@@ -180,6 +199,7 @@ describe("SortedOracles.OracleReported median parity", () => {
       oracleExpiry: 100n,
       existingPriceDifference: 123n,
       value: ONE,
+      medianTimestamp: 1_700_000_000n,
     });
 
     const pool = mockDb.entities.Pool.get(poolId)!;

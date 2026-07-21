@@ -120,6 +120,7 @@ const PoolDetailRowSchema = z.object({
   oracleOk: OptionalBooleanSchema,
   oraclePrice: OptionalStringSchema,
   oracleTimestamp: OptionalStringSchema,
+  lastOracleReportAt: OptionalStringSchema,
   oracleTxHash: OptionalStringSchema,
   oracleExpiry: OptionalStringSchema,
   oracleNumReporters: OptionalNumberSchema,

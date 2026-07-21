@@ -3,7 +3,7 @@ title: Polygon monitoring coverage and rollout
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-19
+last_verified: 2026-07-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -70,6 +70,28 @@ transfer remains `SENT` for 1 hour, `ATTESTED` for 15 minutes, or
 `QUEUED_INBOUND` for 24 hours. Alert delivery for those ages is intentionally
 tracked separately in #1362 because it requires a new bounded-cardinality
 exporter and degraded-mode contract.
+
+### Oracle freshness semantics
+
+FPMM freshness follows `OracleAdapter` exactly: a rate remains valid until the
+SortedOracles median report timestamp plus that feed's configured expiry. Pool
+events and RPC reconciliation timestamps are diagnostic observations; they do
+not renew the feed TTL. This distinction matters for sparse Polygon FX feeds,
+including the one-year expiries used by the EURm pools.
+
+The indexer reads the median timestamp at the event block, stores it in
+`Pool.lastOracleReportAt`, and uses the prior report timestamp and prior expiry
+when closing each health-counter interval. The dashboard and metrics bridge use
+that exact anchor for status, uptime tails, and `mento_pool_oracle_ok`.
+`Pool.oracleTimestamp` and `mento_pool_oracle_timestamp` remain raw diagnostic
+timestamps only.
+
+Deploying a change to these semantics requires a full Envio resync before
+promotion. Existing rows and cumulative health counters were derived with the
+older bounded-carry approximation and cannot be repaired safely in place.
+Verify a candidate only after replay has populated positive
+`lastOracleReportAt` values for all FPMMs and the EURm Polygon pools stay healthy
+inside their configured one-year window.
 
 ## Alert conditions
 

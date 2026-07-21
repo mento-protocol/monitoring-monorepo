@@ -238,6 +238,8 @@ export type PoolHealthCursorResult = {
     id: string;
     lastOracleSnapshotTimestamp?: string;
     lastDeviationRatio?: string;
+    lastOracleReportAt?: string;
+    oracleExpiry?: string;
   }[];
 };
 
