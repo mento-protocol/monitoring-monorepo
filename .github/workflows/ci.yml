@@ -52,6 +52,8 @@ jobs:
       versionSkew: ${{ steps.filter.outputs.versionSkew }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - id: filter
         uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         with:
@@ -289,6 +291,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/pnpm-install
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
@@ -327,6 +331,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           # react-doctor --diff needs the base ref's history to compute the
           # changed-files set against origin/${{ github.base_ref }}.
           fetch-depth: 0
@@ -450,6 +455,8 @@ jobs:
       ENVIO_STRICT_START_BLOCK: "true"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/pnpm-install
       # Envio codegen output is deterministic on (envio version, config*.yaml,
       # schema.graphql, abis). v3 emits to `.envio/types.d.ts`, which the
@@ -524,6 +531,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/pnpm-install
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
@@ -560,6 +569,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/pnpm-install
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
@@ -595,6 +606,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/pnpm-install
       # Cloud Build deploys alerts/infra/onchain-event-handler/ as a standalone
       # source root. Install from the package-local pnpm-lock.yaml before the
@@ -681,6 +694,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/pnpm-install
       # Cloud Build deploys governance-watchdog/ as a standalone source root.
       # Install from the package-local pnpm-lock.yaml before the checks so CI
@@ -741,6 +756,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Deviation threshold drift check
         run: node scripts/check-deviation-threshold-drift.mjs
@@ -792,6 +808,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
           submodules: true
       - name: Initialize forge-std test dependency
         run: git -C aegis/lib/forge-std submodule update --init --depth=1 lib/ds-test
@@ -839,6 +856,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/pnpm-install
       - name: ESLint root scripts
         run: pnpm lint:scripts
@@ -940,6 +959,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/pnpm-install
       - name: Version skew check
         # Required via the `ci` sentinel. Prevents catalog/literal package drift
@@ -968,6 +989,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/pnpm-install
       - name: dependency-cruiser (cross-package boundaries, blocking)
         run: pnpm code-health:deps

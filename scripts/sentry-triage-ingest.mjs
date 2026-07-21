@@ -187,6 +187,18 @@ export const LABEL_DEFINITIONS = [
       "Actionable verdict projected as an issue in the owning repo (ADR 0038)",
   },
   {
+    name: "sentry:fix-pr-opened",
+    color: "006b75",
+    description:
+      "Autofix leg opened a scoped fix PR for this verdict (ADR 0036 Phase 2b)",
+  },
+  {
+    name: "sentry:fix-refused",
+    color: "bfdadc",
+    description:
+      "Autofix attempt declined to open a PR (no change or guard-refused); remove the label to allow a retry (ADR 0036 Phase 2b)",
+  },
+  {
     name: "sentry:approved-archive",
     color: "1a7f37",
     description:
@@ -201,6 +213,22 @@ export const LABEL_DEFINITIONS = [
 ];
 
 export const PROJECTED_LABEL = "sentry:projected";
+
+// Applied to a `code-fix` queue stub once the autofix leg (ADR 0036 Phase 2b,
+// `.github/workflows/sentry-autofix.yml`) has opened a scoped fix PR for it.
+// The autofix select step reads it as a dedup marker so a stub is never
+// re-fixed. Bootstrapped from LABEL_DEFINITIONS above (single source of truth)
+// and self-healed by the autofix finalize step before it labels the stub.
+export const FIX_PR_OPENED_LABEL = "sentry:fix-pr-opened";
+
+// Applied to a `code-fix` queue stub when an autofix attempt declined to open a
+// PR — the agent made no change or the mechanical diff guard refused the diff.
+// Without it the same unfixable stub is re-picked every run and burns the
+// per-run cap forever (starvation). The autofix select step reads it as a dedup
+// marker exactly like FIX_PR_OPENED_LABEL; a human clears it (removes the label)
+// to allow a fresh retry. Bootstrapped from LABEL_DEFINITIONS above and
+// self-healed by the autofix workflow's refused path before it labels the stub.
+export const FIX_REFUSED_LABEL = "sentry:fix-refused";
 
 // Phase 2a human-approved archive loop (ADR 0036 Stage C,
 // scripts/sentry-triage-archive.mjs + .github/workflows/sentry-triage-archive.yml).
@@ -221,19 +249,27 @@ export const VERDICT_LABELS = LABEL_DEFINITIONS.map(
 ).filter((name) => name.startsWith("sentry:verdict-"));
 
 // Labels a regression reopen must shed: the stale verdict labels, the stale
-// `sentry:projected` marker (ADR 0038), AND the stale Phase-2a archive markers
-// (`sentry:approved-archive` / `sentry:archived`) — all described the OLD
-// occurrence, and leaving them would show a needs-triage issue as already
-// projected/approved/archived. Shedding the approval marker is also an
-// authority-boundary guard: a regression must not carry a stale human archive
-// approval into a fresh occurrence (a workflow_dispatch retry would otherwise
-// read it as still-approved and re-archive without re-review). If the
-// re-triage round lands on an actionable verdict again, the projection step
-// re-applies its marker (idempotently reusing the same owning-repo issue), and
-// a fresh archive needs a fresh human approval.
+// `sentry:projected` marker (ADR 0038), the stale autofix markers
+// (`sentry:fix-pr-opened` / `sentry:fix-refused`, ADR 0036 Phase 2b), AND the
+// stale Phase-2a archive markers (`sentry:approved-archive` / `sentry:archived`).
+// A regression is a NEW occurrence, so every trace of how the OLD occurrence was
+// handled must clear: leaving a verdict/projection would misrepresent a
+// needs-triage stub as already verdicted/projected; leaving an autofix marker
+// would both misrepresent it as fixed/refused AND block the re-triage round from
+// ever being autofixed again (the select step dedups on those markers); and
+// leaving an archive marker would misrepresent it as approved/archived —
+// shedding the approval marker is also an authority-boundary guard, since a
+// regression must not carry a stale human archive approval into a fresh
+// occurrence (a workflow_dispatch retry would otherwise read it as
+// still-approved and re-archive without re-review). If the re-triage round lands
+// on an actionable verdict again, the projection/autofix steps re-apply their
+// markers (idempotently reusing the same owning-repo issue / opening a fresh fix
+// PR), and a fresh archive needs a fresh human approval.
 export const REOPEN_SHED_LABELS = [
   ...VERDICT_LABELS,
   PROJECTED_LABEL,
+  FIX_PR_OPENED_LABEL,
+  FIX_REFUSED_LABEL,
   APPROVED_ARCHIVE_LABEL,
   ARCHIVED_LABEL,
 ];
