@@ -59,6 +59,19 @@ test("trigger detection covers block, bare-key, inline-list, inline-scalar, inli
     usesPullRequestTarget("on:\n  pull_request_target:\n"),
     "block pull_request_target detected",
   );
+  // Quoted YAML scalars/keys are valid trigger spellings.
+  assert(
+    hasTrigger('on: ["pull_request"]\n', "pull_request"),
+    "quoted inline list",
+  );
+  assert(
+    hasTrigger("on:\n  'pull_request':\n    branches: [main]", "pull_request"),
+    "quoted block key",
+  );
+  assert(
+    usesPullRequestTarget('on: ["pull_request_target"]\n'),
+    "quoted pull_request_target detected",
+  );
   // Comments and step names never count as triggers.
   assert(
     !hasTrigger("on:\n  push:\n# pull_request would be nice", "pull_request"),

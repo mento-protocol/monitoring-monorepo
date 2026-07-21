@@ -28,6 +28,16 @@
  *           of a new secret lane to reason about the autofix trust boundary
  *           in the diff, where review sees it.
  *
+ * SCOPE / STATED LIMITATION: this is a textual tripwire, not an expression
+ * evaluator. It verifies the excluding guard is PRESENT on the job-level
+ * `if:`; it cannot prove the surrounding expression ENFORCES it (e.g. a guard
+ * OR-ed against a bypass would pass — as would any semantics a YAML/expression
+ * theorem prover would need). That residual is owned by human review of the
+ * workflow diff, which this checker forces to happen by refusing silent
+ * additions; the reviewed annotation is the escape hatch for anything the
+ * pattern cannot express. Do not weaken the guard pattern to "contains the
+ * branch name" — see the test suite for the shapes deliberately refused.
+ *
  * No external dependencies — reads files with pure Node.js.
  *
  * Run: `node scripts/check-autofix-ci-trust.mjs`
@@ -79,15 +89,19 @@ function stripComments(body) {
  *   - inline list:    `on: [push, pull_request]`
  *   - inline scalar:  `on: pull_request`
  *   - inline mapping: `on: { pull_request: { … } }`
- * A pure line-anchored match misses the inline forms, which would let a
- * workflow adopt the trigger while bypassing this check entirely.
+ *   - any of the above with the event name in single or double QUOTES
+ *     (`on: ["pull_request"]`, `"pull_request":` — valid YAML scalars/keys)
+ * A pure line-anchored match misses the inline/quoted forms, which would let
+ * a workflow adopt the trigger while bypassing this check entirely.
  */
 export function hasTrigger(body, trigger) {
   const stripped = stripComments(body);
   // Word-ish boundary that will not let `pull_request` match inside
-  // `pull_request_target` (nor `_target` match a longer name).
+  // `pull_request_target` (nor `_target` match a longer name). Optional
+  // single/double quote on either side covers quoted YAML scalars and keys.
   const t = trigger.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const asKeyOrItem = new RegExp(`(^|[\\s\\[{,])${t}(?![\\w-])`, "m");
+  const q = `['"]?`;
+  const asKeyOrItem = new RegExp(`(^|[\\s\\[{,])${q}${t}${q}(?![\\w-])`, "m");
   // Only consider occurrences in trigger position: either inside the value of
   // a top-level `on:` line (inline forms) or as an indented key/item in the
   // block following `on:`. Scanning the whole body for the bare word would
@@ -95,15 +109,18 @@ export function hasTrigger(body, trigger) {
   const lines = stripped.split("\n");
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
-    const onInline = line.match(/^on\s*:\s*(.+)$/);
-    if (onInline && asKeyOrItem.test(onInline[1])) return true;
-    if (/^on\s*:\s*$/.test(line)) {
+    const onInline = line.match(/^(['"]?)on\1\s*:\s*(.+)$/);
+    if (onInline && asKeyOrItem.test(onInline[2])) return true;
+    if (/^(['"]?)on\1\s*:\s*$/.test(line)) {
       for (let j = i + 1; j < lines.length; j += 1) {
         const l = lines[j];
         if (l.trim() === "") continue;
         if (!/^\s/.test(l)) break; // left the `on:` block
-        // Trigger names appear as 2-space-indented keys or list items.
-        if (new RegExp(`^\\s{2}-?\\s*${t}(?![\\w-])`).test(l)) return true;
+        // Trigger names appear as 2-space-indented keys or list items,
+        // optionally quoted.
+        if (new RegExp(`^\\s{2}-?\\s*${q}${t}${q}(?![\\w-])`).test(l)) {
+          return true;
+        }
         // Deeper-indented lines are trigger CONFIG (branches/paths), skip.
       }
     }
