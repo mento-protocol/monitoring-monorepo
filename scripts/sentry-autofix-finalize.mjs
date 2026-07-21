@@ -44,10 +44,7 @@ import {
   FIX_REFUSED_LABEL,
   LABEL_DEFINITIONS,
 } from "./sentry-triage-ingest.mjs";
-import {
-  isValidShortId,
-  neutralizeBlock,
-} from "./sentry-triage-project-core.mjs";
+import { isValidShortId } from "./sentry-triage-project-core.mjs";
 
 // The agent's diff may touch at most this many files — a scoped Sentry fix is
 // small by construction, and a large diff is a signal the agent over-reached.
@@ -392,93 +389,43 @@ export function buildAutofixRunRecordBody({
 }
 
 // ---------------------------------------------------------------------------
-// Mechanical redaction of the agent-authored summary before it becomes public.
-// Fencing (neutralizeBlock) makes the summary's markdown INERT but does not
-// stop DISCLOSURE: text lands verbatim in a public PR/issue at create time,
-// before any human review. The fix agent's only legitimate inputs are the
-// already-public verdict comment and this repo's public code, so anything
-// credential-shaped, payload-shaped, or externally-addressed in its summary is
-// either an injected echo or an attempted secret exfiltration (the documented
-// process-env residual) — mask it rather than publish it. Allowlist over
-// blocklist for URLs: only this org's GitHub and the org's Sentry hosts
-// survive; everything else is masked. Heuristic by nature (a determined
-// paraphrase can evade token-shape rules), but it mechanically closes the
-// high-value channels: runner tokens, long payload dumps, emails, and
-// attacker-controlled links.
+// Agent free-text is NEVER published.
+//
+// The fix agent's summary is untrusted second-order Sentry data, and it runs
+// with a Read tool that can reach the runner's process environment (the
+// documented residual). Any pattern-based redactor is bypassable — a token can
+// be fragmented across whitespace (`ghs_ABC DEF …`) so no single chunk matches
+// a credential shape or a length threshold, then reconstructed by a reader.
+// The only non-bypassable policy for arbitrary untrusted text on a PUBLIC
+// surface is to not publish it at all. Both the fix-PR body and the no-PR
+// analysis comment are therefore assembled from DETERMINISTIC text only; the
+// authoritative artifact is the reviewed diff (for a fix PR) or the
+// deterministic guard `reason` (for a refusal). The agent's working notes stay
+// in the run logs, which are not a public artifact.
 // ---------------------------------------------------------------------------
-const SUMMARY_URL_PATTERN = /\bhttps?:\/\/[^\s)>\]"'`]+/g;
-const SUMMARY_ALLOWED_URL =
-  /^https:\/\/(github\.com\/mento-protocol\/|(?:[a-z0-9-]+\.)?sentry\.io\/)/;
-const SUMMARY_REDACTIONS = [
-  // Known credential shapes: GitHub tokens (App/installation/PAT/OAuth),
-  // fine-grained PATs, Anthropic keys, Slack tokens, AWS access key ids.
-  [/\b(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{16,}\b/g, "[redacted-token]"],
-  [/\bgithub_pat_[A-Za-z0-9_]{16,}\b/g, "[redacted-token]"],
-  [/\bsk-ant-[A-Za-z0-9-]{8,}\b/g, "[redacted-token]"],
-  [/\bxox[a-z]-[A-Za-z0-9-]{8,}\b/g, "[redacted-token]"],
-  [/\bAKIA[A-Z0-9]{16}\b/g, "[redacted-token]"],
-  // Long high-entropy runs (base64/hex-alphabet, 40+ chars): token or payload
-  // dump shaped. Dots and slashes break the run, so file paths survive.
-  [/\b[A-Za-z0-9+=_-]{40,}\b/g, "[redacted-long-string]"],
-  // Email-shaped strings (Sentry user data must never reach a public surface).
-  [/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g, "[redacted-email]"],
-];
-
-/** Mask credential-, payload-, and user-data-shaped content plus any
- * non-allowlisted URL in the agent-authored summary. Runs BEFORE
- * neutralizeBlock (redact raw text first, then defang + bound). Exported for
- * tests. */
-export function redactUntrustedSummary(text) {
-  let out = String(text ?? "");
-  out = out.replace(SUMMARY_URL_PATTERN, (url) =>
-    SUMMARY_ALLOWED_URL.test(url) ? url : "[redacted-url]",
-  );
-  for (const [pattern, replacement] of SUMMARY_REDACTIONS) {
-    out = out.replace(pattern, replacement);
-  }
-  return out;
-}
 
 /**
  * The no-PR analysis comment posted on the queue stub when the diff guard
- * refuses (empty/oversized/forbidden diff) or the agent declined to fix. The
- * deterministic `reason` leads; the agent's advisory analysis (if any) is
- * fenced so its markdown is inert and length-bounded — it is agent-authored
- * text on a public issue, so it is treated as data, not trusted prose.
+ * refuses (empty/oversized/forbidden diff) or the agent declined to fix. Fully
+ * deterministic: the guard `reason` is machine-generated, so it is safe to
+ * render. No agent free-text is included (see the note above).
  */
-export function buildAnalysisComment(reason, summary) {
-  const parts = ["**Autofix: no PR opened.**", "", String(reason ?? "").trim()];
-  // Redact FIRST (credential/payload/user-data shapes, non-allowlisted URLs —
-  // fencing alone does not stop disclosure), then neutralizeBlock (the same
-  // helper the projection body uses) strips control chars, DEFANGS backticks
-  // so an embedded ``` run cannot close the fence and reactivate markdown,
-  // defangs @-mentions/HTML-comment openers, and bounds the length. The agent
-  // summary is untrusted-influenced text on a public issue, so it must stay
-  // inert AND disclosure-scrubbed.
-  const bounded = neutralizeBlock(redactUntrustedSummary(summary), {
-    maxLen: 2000,
-    maxLines: 40,
-  });
-  if (bounded) {
-    parts.push(
+export function buildAnalysisComment(reason) {
+  return (
+    [
+      "**Autofix: no PR opened.**",
       "",
-      "---",
+      String(reason ?? "").trim(),
       "",
-      "Agent analysis (advisory):",
-      "",
-      "```text",
-      bounded,
-      "```",
-    );
-  }
-  return `${parts.join("\n")}\n`;
+      "_The agent's working notes are omitted by policy (untrusted-input " +
+        "surface); see the run logs for detail._",
+    ].join("\n") + "\n"
+  );
 }
 
-// Repo-standard PR-description headings. The fix-PR body ALWAYS leads with these
-// two mechanical sections (the fix PR's own required PR-description check
-// enforces `## The Problem` then `## The Solution`); the agent's untrusted
-// write-up is fenced separately as advisory data, never rendered as the live
-// heading content.
+// Repo-standard PR-description headings. The fix-PR body is FULLY deterministic
+// (the fix PR's own required PR-description check enforces `## The Problem` then
+// `## The Solution`); no agent free-text is ever included (see the note above).
 const PROBLEM_HEADING = "## The Problem";
 const SOLUTION_HEADING = "## The Solution";
 
@@ -499,26 +446,14 @@ function provenanceSection(shortId, queueIssue) {
 }
 
 /**
- * Assemble the fix-PR body. The DETERMINISTIC template is the only mechanical
- * structure: it always leads with `## The Problem` then `## The Solution` (the
- * repo PR-description standard, enforced by the fix PR's own required check) and
- * closes with the provenance + `Fixes`/`Refs` footer.
- *
- * The agent's Problem/Solution write-up is UNTRUSTED — it is machine-generated
- * from a second-order untrusted Sentry verdict — so it is NEVER rendered as live
- * markdown. It is run through `neutralizeBlock` (backticks, @-mentions, and
- * HTML-comment openers defanged; control chars stripped; length + line bounded,
- * same bounds as the no-PR analysis comment) and embedded inside a clearly
- * labeled fenced block as inert advisory data — and, because fencing alone
- * neutralizes markdown but not DISCLOSURE, the summary is first run through
- * `redactUntrustedSummary`, which masks credential-shaped strings, long
- * high-entropy runs, email-shaped user data, and every non-allowlisted URL
- * before the text ever reaches the public PR body at `gh pr create` time. The
- * fence stays unbreakable (a `` ``` `` inside the summary is defanged, so it
- * cannot close the block and reactivate markdown), and the mechanical parts
- * stay OUTSIDE the fence so they remain trustworthy.
+ * Assemble the fix-PR body. FULLY DETERMINISTIC: the `## The Problem` /
+ * `## The Solution` template (the repo PR-description standard, enforced by the
+ * fix PR's own required check) plus the provenance + `Fixes`/`Refs` footer. No
+ * agent free-text is included — the reviewed diff is the authoritative artifact
+ * (see the note above the analysis-comment builder for why free-text passthrough
+ * is unsafe on a public surface).
  */
-export function buildPrBody({ shortId, queueIssue, summary }) {
+export function buildPrBody({ shortId, queueIssue }) {
   if (!isValidShortId(shortId)) {
     throw new Error(
       `Refusing to build a PR body for invalid SHORT-ID: ${shortId}`,
@@ -535,29 +470,12 @@ export function buildPrBody({ shortId, queueIssue, summary }) {
     PROBLEM_HEADING,
     "",
     `- A Sentry-triaged code bug (\`${shortId}\`) was verdicted \`code-fix\` for this repo.`,
-    "- A scoped, mechanically-bounded fix is proposed in the diff; the autofix agent's own write-up is included below as advisory data.",
+    "- The scoped, mechanically-bounded fix is in the diff of this PR.",
     "",
     SOLUTION_HEADING,
     "",
-    "- A small code change addresses the triaged root cause. Review the diff against the linked Sentry issue.",
+    "- A small code change addresses the triaged root cause. **Review the diff against the linked Sentry issue** — the diff is the authoritative artifact; the agent's working notes are intentionally not reproduced here (untrusted-input policy).",
   ];
-
-  const bounded = neutralizeBlock(redactUntrustedSummary(summary), {
-    maxLen: 2000,
-    maxLines: 40,
-  });
-  if (bounded) {
-    parts.push(
-      "",
-      "---",
-      "",
-      "Agent analysis (advisory — machine-generated from an untrusted triage verdict, included as inert, mechanically-redacted data):",
-      "",
-      "```text",
-      bounded,
-      "```",
-    );
-  }
 
   return `${parts.join("\n")}\n\n${provenanceSection(shortId, issue)}\n`;
 }
@@ -578,12 +496,12 @@ Commands:
       Read a newline-separated changed-file list and print {"ok":bool,"reason"?}
       JSON to stdout (always exit 0 — the caller branches on .ok). With --work
       (the tainted checkout), refuse any changed path that is a symlink there.
-  pr-body --short-id <ID> --issue <n> [--summary-file <path>]
-      Print the assembled repo-standard PR body to stdout.
+  pr-body --short-id <ID> --issue <n>
+      Print the assembled repo-standard (fully deterministic) PR body to stdout.
   autofix-comment --url <url>
       Print the exact "Autofixed by PR: <url>" queue-stub comment.
-  analysis-comment --reason <text> [--summary-file <path>]
-      Print the no-PR analysis comment (guard reason + fenced agent analysis).
+  analysis-comment --reason <text>
+      Print the no-PR analysis comment (deterministic guard reason only).
   branch --short-id <ID>
       Print the deterministic branch name (sentry-autofix/<short-id-lower>).
   label-def
@@ -642,8 +560,7 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
     case "pr-body": {
       const shortId = readFlag(args, "--short-id");
       const issue = readFlag(args, "--issue");
-      const summary = readFileMaybe(readFlag(args, "--summary-file"));
-      stdout.write(buildPrBody({ shortId, queueIssue: issue, summary }));
+      stdout.write(buildPrBody({ shortId, queueIssue: issue }));
       return;
     }
     case "autofix-comment": {
@@ -652,8 +569,7 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
     }
     case "analysis-comment": {
       const reason = readFlag(args, "--reason");
-      const summary = readFileMaybe(readFlag(args, "--summary-file"));
-      stdout.write(buildAnalysisComment(reason, summary));
+      stdout.write(buildAnalysisComment(reason));
       return;
     }
     case "branch": {

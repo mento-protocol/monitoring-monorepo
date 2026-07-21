@@ -373,11 +373,11 @@ jobs:
         run: |
           set -euo pipefail
           # Runs the analysis-comment helper FROM THE PRISTINE CLONE (never the
-          # tainted checkout) with github.token. The agent's advisory summary is
-          # fenced + neutralized by the helper before it lands on the public issue.
+          # tainted checkout) with github.token. The comment is FULLY
+          # deterministic (the machine-generated guard reason only) — no agent
+          # free-text is published, so there is nothing untrusted to neutralize.
           node "${RUNNER_TEMP}/base/scripts/sentry-autofix-finalize.mjs" analysis-comment \
             --reason "$(cat "${RUNNER_TEMP}/refuse-reason.txt")" \
-            --summary-file /tmp/autofix-pr-summary.md \
             > "${RUNNER_TEMP}/analysis.md"
           gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" --body-file "${RUNNER_TEMP}/analysis.md"
 
@@ -520,8 +520,9 @@ jobs:
             #      (ingest REOPEN_SHED_LABELS), the SHORT-ID no longer sits in an
             #      OPEN PR, and the existing-PR check above is `--state open`, so
             #      the stale merged/closed branch is reused for the fresh fix.
-            # Either way THIS run's content pairs with THIS run's summary, keeping
-            # the PR's diff and description consistent.
+            # Either way THIS run's guard-approved diff is what gets pushed; the
+            # PR body is a deterministic template (no per-run agent text), so it
+            # stays consistent with whatever diff is force-published.
             app_user_id=$(GH_TOKEN="${APP_TOKEN}" gh api "/users/${APP_SLUG}[bot]" --jq '.id')
             git -C "${push}" config user.name "${APP_SLUG}[bot]"
             git -C "${push}" config user.email "${app_user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
@@ -535,7 +536,6 @@ jobs:
             node "${fin}" pr-body \
               --short-id "${SHORT_ID}" \
               --issue "${QUEUE_ISSUE}" \
-              --summary-file /tmp/autofix-pr-summary.md \
               > "${RUNNER_TEMP}/pr-body.md"
 
             pr_url=$(GH_TOKEN="${APP_TOKEN}" gh pr create \

@@ -140,18 +140,27 @@ async function listCodeFixStubs(runGh, repo) {
     AUTOFIX_SELECT_LABEL,
     "--state",
     "all",
-    // Exclude already-handled stubs at the source so they never occupy the
-    // window: `fix-pr-opened` (a PR was opened) and `fix-refused` (an attempt
-    // declined to open one) are terminal until a human clears the marker or a
-    // regression sheds it, and `sentry:projected` marks EXTERNAL-repo code-fix
-    // stubs (their verdict was projected into the owning repo — never autofix
-    // territory here). The projected exclusion matters for the window itself:
-    // `--limit` caps what the API RETURNS, before any client-side filter, so
-    // without it an accumulating backlog of external code-fix stubs would
-    // eventually fill the whole fetch window and permanently starve newer
-    // local candidates that sort after them.
+    // Exclude everything that does not belong in the window AT THE SOURCE:
+    // `--limit` caps what the API RETURNS before any client-side filter runs,
+    // so an accumulating backlog of not-for-us stubs that sort BEFORE newer
+    // local candidates would silently starve them out of the window. Two axes:
+    //   - Handled/external markers: `fix-pr-opened` (a PR was opened) and
+    //     `fix-refused` (an attempt declined) are terminal until a human clears
+    //     them or a regression sheds them; `sentry:projected` marks external
+    //     code-fix stubs whose verdict was projected into the owning repo.
+    //   - Owning PROJECT, by title: the `sentry:projected` exclusion alone is
+    //     not enough — the projection workflow's documented `skipped-no-token`
+    //     path CLOSES external code-fix stubs while KEEPING the verdict label
+    //     and WITHOUT adding `sentry:projected`, so those would slip past the
+    //     label filter and fill the window. `<slug> in:title` restricts to
+    //     titles containing this repo's Sentry project slug; GitHub tokenizes
+    //     the hyphenated slug and ANDs the tokens (`analytics` AND `mento` AND
+    //     `org`), which — across the org's `*-mento-org` / `*-api` / `-dapp`
+    //     projects — matches only this project's stubs. The exact client-side
+    //     `parseProject === LOCAL_SENTRY_PROJECT` check below stays as the
+    //     precise gate (this server filter only needs to keep the WINDOW local).
     "--search",
-    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}" -label:"${PROJECTED_LABEL}"`,
+    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}" -label:"${PROJECTED_LABEL}" ${LOCAL_SENTRY_PROJECT} in:title`,
     "--json",
     "number,title,labels,createdAt",
     "--limit",
@@ -169,8 +178,9 @@ async function listCodeFixStubs(runGh, repo) {
           .map((label) => (typeof label === "string" ? label : label?.name))
           .filter(Boolean),
       }))
-      // Keep only this repo's Sentry project — cheap, from the title, before any
-      // per-candidate verdict read (starvation guard; see LOCAL_SENTRY_PROJECT).
+      // Exact owning-project gate — the server-side `<slug> in:title` filter
+      // keeps the WINDOW local (tokenized, so approximate); this parses the
+      // exact project out of the title and drops any tokenized false-positive.
       .filter((issue) => parseProject(issue.title) === LOCAL_SENTRY_PROJECT)
       // `--search sort:created-asc` returns oldest-first, but keep the client-side
       // sort as defense-in-depth (same pattern as the triage select job).

@@ -918,10 +918,25 @@ The credential scan closes the sibling channel: the documented process-env
 residual means an injected agent could READ runner tokens and write them into
 an allowed source file — the guard scans every changed file for known
 credential shapes (GitHub/Anthropic/Slack/AWS prefixes) and refuses the whole
-attempt, since a pushed branch is public before any human review. The prompt
-states the same limits, but the guard enforces them in code so an over-eager
-or injected agent cannot land a forbidden-path, sprawling, or
-secret-exfiltrating diff.
+attempt, since a pushed branch is public before any human review. (This is a
+known-prefix scan, not an entropy heuristic; the strong guarantee against
+token disclosure comes from the deterministic-body policy below, and this scan
+is defense-in-depth over the code diff.) The prompt states the same limits,
+but the guard enforces them in code so an over-eager or injected agent cannot
+land a forbidden-path, sprawling, or secret-exfiltrating diff.
+
+**No agent free-text is ever published.** The fix-PR body and the no-PR
+analysis comment are assembled from DETERMINISTIC templates only — the agent
+writes no summary that reaches a public surface. This is deliberate: the agent
+runs with a `Read` tool that can reach the runner's process environment (the
+documented residual), and any pattern-based redactor over free text is
+bypassable — a token fragmented across whitespace (`ghs_ABC DEF …`) matches no
+credential shape or length threshold, then reconstructs for a reader. The only
+non-bypassable policy for arbitrary untrusted text on a public surface is to
+not publish it. So the authoritative artifact is the reviewed **diff** (for a
+fix PR — a human reviews it against the linked Sentry issue) or the
+deterministic guard **reason** (for a refusal); the agent's working notes stay
+in the non-public run logs.
 
 The `sentry:fix-refused` marker is what stops a genuinely unfixable stub from
 being re-picked on every schedule and burning the per-run cap forever
@@ -966,12 +981,12 @@ checkout token ever sits in `.git/config` where PR-head code (autofix-authored
 or otherwise) could read and exfiltrate it — CI jobs only lint/test/build and
 never need an authenticated git remote (the repo is public, so plain fetches
 are anonymous).
-The PR body is assembled deterministically: the agent writes
-`/tmp/autofix-pr-summary.md` (Problem/Solution bullets), and finalize splices it
-into the repo PR format, adding `Fixes <SHORT-ID>`, `Refs <queue issue #>`, and
-a provenance note that the PR was machine-authored from a triage verdict and
-enters the normal review gauntlet. A missing/junk summary falls back to a fully
-templated body.
+The PR body is assembled deterministically from a fixed template (`## The
+Problem` / `## The Solution` referencing the SHORT-ID, plus `Fixes <SHORT-ID>`,
+`Refs <queue issue #>`, and a provenance note that the PR was machine-authored
+from a triage verdict and enters the normal review gauntlet). It contains **no
+agent-authored text** — see "No agent free-text is ever published" above; the
+diff is the artifact a human reviews.
 
 **Branch collisions + orphan recovery.** If the branch already exists AND
 already has a PR, that PR is left untouched (it may be under review) and the run

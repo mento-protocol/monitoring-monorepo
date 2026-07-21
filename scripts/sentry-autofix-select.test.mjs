@@ -174,6 +174,13 @@ await test("batch list excludes handled AND projected stubs server-side", async 
   ]) {
     assert(search.includes(excluded), `search must contain ${excluded}`);
   }
+  // Projected-label exclusion alone is not enough: the projection no-token path
+  // closes external stubs while KEEPING the verdict label and WITHOUT adding
+  // sentry:projected, so the window must also restrict to this project by title.
+  assert(
+    search.includes("analytics-mento-org in:title"),
+    `search must restrict the window to the local project by title, got: ${search}`,
+  );
 });
 
 await test("skips a stub already labeled sentry:fix-pr-opened", async () => {

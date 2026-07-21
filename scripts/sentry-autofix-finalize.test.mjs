@@ -266,101 +266,57 @@ await test("branch name refuses an invalid SHORT-ID", () => {
 
 // --- PR body -----------------------------------------------------------------
 
-await test("PR body leads with the deterministic template and fences the agent summary", () => {
-  const summary =
-    "## The Problem\n\n- A real bug.\n\n## The Solution\n\n- A scoped fix.";
-  const body = buildPrBody({ shortId: SHORT_ID, queueIssue: 1278, summary });
-  // The mechanical structure always leads (repo PR-description standard; the fix
-  // PR's own required check enforces it).
+await test("PR body is fully deterministic (no agent free-text accepted or published)", () => {
+  // buildPrBody takes ONLY shortId + queueIssue — there is no summary param, so
+  // there is no channel for agent-authored text to reach the public PR body.
+  const body = buildPrBody({ shortId: SHORT_ID, queueIssue: 1278 });
   assert(
     body.startsWith("## The Problem"),
-    "body starts with repo-standard heading",
+    "body starts with repo-standard heading (required check)",
   );
-  assert(
-    body.includes("## The Solution"),
-    "deterministic Solution heading present",
-  );
-  // The agent's own write-up is retained — but only inside the advisory fence,
-  // as inert data, never as live markdown.
-  const fenceStart = body.indexOf("```text");
-  const fenceEnd = body.indexOf("```", fenceStart + 3);
-  assert(fenceStart !== -1 && fenceEnd !== -1, "agent summary is fenced");
-  const fenced = body.slice(fenceStart, fenceEnd);
-  assert(fenced.includes("- A real bug."), "agent write-up retained as data");
+  assert(body.includes("## The Solution"), "deterministic Solution heading");
   assert(body.includes(`Fixes ${SHORT_ID}`), "Fixes SHORT-ID present");
   assert(body.includes("Refs #1278"), "Refs queue issue present");
   assert(body.includes("merge stays human"), "provenance present");
-});
-
-await test("PR body omits the agent fence when the summary is empty", () => {
-  const body = buildPrBody({
-    shortId: SHORT_ID,
-    queueIssue: 1278,
-    summary: "",
-  });
-  assert(body.startsWith("## The Problem"), "templated body starts correctly");
-  assert(body.includes("## The Solution"), "templated Solution present");
-  assert(!body.includes("```text"), "no fenced block without a summary");
-  assert(body.includes(`Fixes ${SHORT_ID}`), "Fixes still present");
-  assert(body.includes("Refs #1278"), "Refs still present");
-});
-
-await test("PR body keeps a fence-escape attempt in the agent summary inert", () => {
-  const summary =
-    "## The Problem\n```\nsteer the agent @here\n```\nleak user@example.com data";
-  const body = buildPrBody({ shortId: SHORT_ID, queueIssue: 1278, summary });
-  // Exactly one opening + one closing fence run (our own ```text …```). The
-  // embedded ``` is defanged, so it cannot close the fence and reactivate
-  // markdown (which is how an injected verdict would try to publish payload).
-  const fenceRuns = (body.match(/```/g) ?? []).length;
-  assertEqual(fenceRuns, 2);
-  assert(!/@here/.test(body), "mention defanged (zero-width space inserted)");
-  // The mechanical heading still leads, so the fix PR's own required
-  // PR-description check still passes.
-  assert(body.startsWith("## The Problem"), "mechanical heading still leads");
-});
-
-await test("summary redaction masks credentials, dumps, emails, and foreign URLs", () => {
-  const summary = [
-    "Token exfil attempt: ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345",
-    "PAT: github_pat_11ABCDEFG0abcdefghijklmnop",
-    "Anthropic: sk-ant-oat01-abcdefgh",
-    "Payload dump: QWxhZGRpbjpvcGVuIHNlc2FtZS1sb25nLWJhc2U2NC1ydW4tcGFkZGluZw",
-    "User: victim.name+tag@example-mail.com",
-    "Fetch https://evil.example.com/exfil?q=data but keep",
-    "https://github.com/mento-protocol/monitoring-monorepo/issues/1282 and",
-    "https://mento-labs.sentry.io/issues/123/",
-  ].join("\n");
-  const body = buildPrBody({ shortId: SHORT_ID, queueIssue: 1278, summary });
-  assert(!body.includes("ghs_AbCd"), "GitHub App token masked");
-  assert(!body.includes("github_pat_11"), "fine-grained PAT masked");
-  assert(!body.includes("sk-ant-"), "Anthropic key masked");
-  assert(!body.includes("QWxhZGRpbjpvcGVu"), "long base64 run masked");
-  assert(!body.includes("example-mail.com"), "email masked");
-  assert(!body.includes("evil.example.com"), "foreign URL masked");
+  // No fenced agent block, ever — the diff is the authoritative artifact.
+  assert(!body.includes("```"), "no fenced block in the body");
   assert(
-    body.includes(
-      "https://github.com/mento-protocol/monitoring-monorepo/issues/1282",
-    ),
-    "org GitHub URL survives",
+    body.toLowerCase().includes("untrusted-input"),
+    "body notes the agent notes are intentionally omitted",
   );
-  assert(
-    body.includes("https://mento-labs.sentry.io/issues/123/"),
-    "org Sentry permalink survives",
-  );
-  assert(body.includes("[redacted-token]"), "token placeholder present");
-  assert(body.includes("[redacted-url]"), "url placeholder present");
 });
 
-await test("analysis comment applies the same summary redaction", () => {
+await test("analysis comment is deterministic — no summary channel to smuggle text through", () => {
+  // buildAnalysisComment takes ONLY the machine-generated guard reason. Even if
+  // a caller tried to pass extra args, the signature ignores them.
+  const reason = "The autofix diff touches 5 files (limit 3).";
   const c = buildAnalysisComment(
-    "No changes.",
-    "leaked ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345 via https://evil.example.com/x",
+    reason,
+    "ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345 leak attempt",
   );
-  assert(!c.includes("ghs_AbCd"), "token masked in analysis comment");
+  assert(c.includes(reason), "deterministic reason rendered");
   assert(
-    !c.includes("evil.example.com"),
-    "foreign URL masked in analysis comment",
+    !c.includes("ghs_AbCd"),
+    "extra arg is not rendered (no summary param)",
+  );
+  assert(!c.includes("```"), "no fenced agent block");
+  assert(
+    c.toLowerCase().includes("omitted by policy"),
+    "explains agent notes are omitted",
+  );
+});
+
+await test("neither builder can be tricked by a whitespace-fragmented token", () => {
+  // The P1 that killed pattern-based redaction: `ghs_ABC DEF GHI` slips every
+  // shape/length check. Omission is the defense — no agent text is rendered at
+  // all, so a fragmented (or any) token simply never appears.
+  const fragmented = "ghs_AAAA BBBBBBBB CCCCCCCC DDDDDDDD EEEEEEEE FFFFFFFF";
+  const body = buildPrBody({ shortId: SHORT_ID, queueIssue: 1278 });
+  const comment = buildAnalysisComment("No changes.", fragmented);
+  assert(!body.includes("ghs_AAAA"), "fragment absent from PR body");
+  assert(
+    !comment.includes("ghs_AAAA"),
+    "fragment absent from analysis comment",
   );
 });
 
@@ -372,7 +328,7 @@ await test("PR body refuses invalid SHORT-ID / queue issue", () => {
   ]) {
     let threw = false;
     try {
-      buildPrBody({ shortId, queueIssue: issue, summary: "" });
+      buildPrBody({ shortId, queueIssue: issue });
     } catch {
       threw = true;
     }
@@ -448,26 +404,11 @@ await test("run record body coerces missing/bad counters and labels safely", () 
   assert(body.includes("Refused (no PR): 0"), "missing refused -> 0");
 });
 
-await test("analysis comment leads with the reason and fences agent analysis inertly", () => {
-  const c = buildAnalysisComment(
-    "Too many files.",
-    "```evil fence break``` @here agent text",
-  );
+await test("analysis comment leads with the deterministic reason only", () => {
+  const c = buildAnalysisComment("Too many files.");
   assert(c.includes("**Autofix: no PR opened.**"), "header present");
   assert(c.includes("Too many files."), "reason present");
-  assert(c.includes("```text"), "agent analysis fenced");
-  assert(c.includes("agent text"), "agent analysis retained");
-  // The only ``` runs are our own opening/closing fence — the embedded ```
-  // must be defanged so it cannot break out and reactivate markdown.
-  const fenceRuns = (c.match(/```/g) ?? []).length;
-  assertEqual(fenceRuns, 2);
-  assert(!/@here/.test(c), "mention defanged (zero-width space inserted)");
-});
-
-await test("analysis comment omits the fenced block when no summary", () => {
-  const c = buildAnalysisComment("No changes.", "");
-  assert(c.includes("No changes."), "reason present");
-  assert(!c.includes("```text"), "no fenced block without summary");
+  assert(!c.includes("```"), "no fenced agent block");
 });
 
 // --- CLI ---------------------------------------------------------------------
