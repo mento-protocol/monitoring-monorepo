@@ -55,6 +55,7 @@ async function mockBlockedRebalanceProbe(page: Page) {
     json.data.Pool = json.data.Pool.map((pool: Record<string, unknown>) => ({
       ...pool,
       oracleTimestamp: String(staleOracleTimestamp),
+      lastOracleReportAt: String(staleOracleTimestamp),
       priceDifference: "200",
       rebalanceThreshold: 100,
       lastRebalancedAt: "0",
@@ -346,6 +347,7 @@ test.describe("dashboard browser flows", () => {
                   updatedAtTimestamp: liveUpdatedAtTimestamp,
                   oracleOk: true,
                   oracleTimestamp: String(browserNowSeconds),
+                  lastOracleReportAt: String(browserNowSeconds),
                   oracleExpiry: "300",
                   oracleNumReporters: 5,
                   priceDifference: "0",
@@ -389,6 +391,7 @@ test.describe("dashboard browser flows", () => {
               ...pool,
               oracleOk: true,
               oracleTimestamp: String(FIXTURE_NOW_SECONDS - 1),
+              lastOracleReportAt: String(FIXTURE_NOW_SECONDS - 1),
               oracleExpiry: "300",
               priceDifference: "0",
               deviationBreachStartedAt: null,
@@ -972,7 +975,9 @@ test.describe("dashboard browser flows", () => {
       const expectHydratedWeekendBanner = async (route: string) => {
         await page.goto(route);
         await expect(
-          page.getByText(/FX markets are closed this weekend/),
+          page.getByText("FX markets are closed this weekend.", {
+            exact: true,
+          }),
         ).toBeVisible();
       };
       await expectHydratedWeekendBanner("/");

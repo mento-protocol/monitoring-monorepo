@@ -70,6 +70,7 @@ function poolFixture({
     oracleOk: true,
     oraclePrice: FIXED_1,
     oracleTimestamp: String(now - 60),
+    lastOracleReportAt: String(now - 60),
     oracleTxHash:
       "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     oracleExpiry: "3600",

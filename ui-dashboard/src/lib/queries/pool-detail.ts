@@ -70,6 +70,7 @@ export const POOL_DETAIL_WITH_HEALTH = `
       oracleOk
       oraclePrice
       oracleTimestamp
+      lastOracleReportAt
       oracleTxHash
       oracleExpiry
       oracleNumReporters
@@ -309,6 +310,8 @@ export const POOL_HEALTH_CURSOR = `
       id
       lastOracleSnapshotTimestamp
       lastDeviationRatio
+      lastOracleReportAt
+      oracleExpiry
     }
   }
 `;

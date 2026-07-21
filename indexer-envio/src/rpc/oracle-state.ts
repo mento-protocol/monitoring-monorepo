@@ -12,7 +12,8 @@ import {
 } from "./http-test-mock-bridge.js";
 
 // ---------------------------------------------------------------------------
-// Test mocks: referenceRateFeedID & reportExpiry (for self-heal testing)
+// Test mocks: referenceRateFeedID, reportExpiry, and medianTimestamp
+// (for self-heal testing)
 // ---------------------------------------------------------------------------
 
 const _testRateFeedIDs = new Map<string, string | null>();
@@ -85,6 +86,46 @@ export function _setMockReportExpiry(
 export function _clearMockReportExpiry(): void {
   _testReportExpiry.clear();
   clearTestRpcMockGroup("reportExpiry");
+}
+
+const _testMedianTimestamp = new Map<string, bigint | null>();
+
+/** @internal Test-only: pre-set a medianTimestamp response for a rateFeedID. */
+export function _setMockMedianTimestamp(
+  chainId: number,
+  rateFeedID: string,
+  timestamp: bigint | null,
+): void {
+  _testMedianTimestamp.set(`${chainId}:${rateFeedID.toLowerCase()}`, timestamp);
+  let sortedOraclesAddress: string | undefined;
+  try {
+    sortedOraclesAddress = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return;
+  }
+  if (timestamp === null) {
+    setTestRpcErrorMock({
+      group: "medianTimestamp",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "medianTimestamp",
+      callArgs: [rateFeedID],
+    });
+  } else {
+    setTestRpcMock({
+      group: "medianTimestamp",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "medianTimestamp",
+      callArgs: [rateFeedID],
+      result: timestamp,
+    });
+  }
+}
+
+export function _clearMockMedianTimestamps(): void {
+  _testMedianTimestamp.clear();
+  clearTestRpcMockGroup("medianTimestamp");
 }
 
 const _testRateFeedOracles = new Map<string, string[] | null>();
@@ -365,6 +406,58 @@ export async function fetchReportExpiry(
     return expiry;
   } catch (err) {
     logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber, log);
+    return null;
+  }
+}
+
+/** Returns SortedOracles' authoritative median report timestamp at the
+ * requested block. OracleAdapter uses this exact value with the feed expiry
+ * to decide whether FPMM reads are valid. A latest-block fallback is rejected:
+ * using a newer report while replaying an older event would renew historical
+ * freshness and corrupt uptime intervals. */
+export async function fetchMedianTimestamp(
+  chainId: number,
+  rateFeedID: string,
+  blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
+): Promise<bigint | null> {
+  const mockKey = `${chainId}:${rateFeedID.toLowerCase()}`;
+  if (_testMedianTimestamp.has(mockKey)) {
+    return _testMedianTimestamp.get(mockKey) ?? null;
+  }
+
+  let address: `0x${string}`;
+  try {
+    address = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return null;
+  }
+  try {
+    const client = getRpcClient(chainId);
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      chainId,
+      client,
+      {
+        address,
+        abi: SortedOraclesContract.abi,
+        functionName: "medianTimestamp",
+        args: [rateFeedID as `0x${string}`],
+      },
+      blockNumber,
+      getFallbackRpcClient(chainId),
+      log,
+    );
+    if (usedLatestFallback) return null;
+    return result as bigint;
+  } catch (err) {
+    logRpcFailure(
+      chainId,
+      "medianTimestamp",
+      rateFeedID,
+      err,
+      blockNumber,
+      log,
+    );
     return null;
   }
 }

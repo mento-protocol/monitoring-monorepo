@@ -250,6 +250,7 @@ describe("GlobalPoolsTable — column structure", () => {
         entries={[
           makeEntry({
             oracleTimestamp: String(TABLE_NOW_SECONDS - 60),
+            lastOracleReportAt: String(TABLE_NOW_SECONDS - 60),
             oracleExpiry: "300",
             priceDifference: "600000000000000000",
             rebalanceThreshold: 500_000,
@@ -800,11 +801,13 @@ describe("sortGlobalPools — fee, health, and volume edge cases", () => {
     const ok = makeEntry({
       id: "ok",
       oracleTimestamp: freshTs,
+      lastOracleReportAt: freshTs,
       priceDifference: "0",
     });
     const warn = makeEntry({
       id: "warn",
       oracleTimestamp: freshTs,
+      lastOracleReportAt: freshTs,
       priceDifference: "600000000000000000",
       rebalanceThreshold: 500_000,
       rebalanceThresholdsKnown: true,
@@ -812,6 +815,7 @@ describe("sortGlobalPools — fee, health, and volume edge cases", () => {
     const critical = makeEntry({
       id: "critical",
       oracleTimestamp: freshTs,
+      lastOracleReportAt: freshTs,
       oracleOk: false,
     });
 

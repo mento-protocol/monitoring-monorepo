@@ -416,11 +416,25 @@ describe("updateMetrics", () => {
     ).toBe(1);
   });
 
-  it("uses oracleTimestamp for live oracle freshness when the median value is flat", async () => {
+  it("honors a one-year expiry for sparse Polygon FX feeds", () => {
+    expect(
+      isOracleLive(
+        makePool({
+          chainId: 137,
+          oracleExpiry: "31536000",
+          lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 6 * 86_400),
+        }),
+        DEFAULT_NOW_SECONDS,
+      ),
+    ).toBe(true);
+  });
+
+  it("uses the exact median timestamp for freshness while keeping the raw timestamp diagnostic", async () => {
     updateMetrics(
       [
         makePool({
-          oracleTimestamp: "1713200000",
+          oracleTimestamp: "1713200099",
+          lastOracleReportAt: "1713200000",
         }),
       ],
       1713200001,
@@ -441,7 +455,7 @@ describe("updateMetrics", () => {
         last_oracle_update_url:
           "https://celoscan.io/tx/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       }),
-    ).toBe(1713200000);
+    ).toBe(1713200099);
   });
 
   it("uses the Celo fallback expiry when indexed expiry is unavailable", async () => {
@@ -459,7 +473,7 @@ describe("updateMetrics", () => {
       [
         makePool({
           oracleExpiry: "0",
-          oracleTimestamp: String(DEFAULT_NOW_SECONDS - 301),
+          lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 301),
         }),
       ],
       DEFAULT_NOW_SECONDS,
@@ -475,7 +489,7 @@ describe("updateMetrics", () => {
         makePool({
           chainId: 143,
           oracleExpiry: "0",
-          oracleTimestamp: String(DEFAULT_NOW_SECONDS - 360),
+          lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 360),
         }),
         DEFAULT_NOW_SECONDS,
       ),
@@ -485,7 +499,7 @@ describe("updateMetrics", () => {
         makePool({
           chainId: 143,
           oracleExpiry: "0",
-          oracleTimestamp: String(DEFAULT_NOW_SECONDS - 361),
+          lastOracleReportAt: String(DEFAULT_NOW_SECONDS - 361),
         }),
         DEFAULT_NOW_SECONDS,
       ),
@@ -561,8 +575,8 @@ describe("updateMetrics", () => {
     ).toBe(1713200000);
   });
 
-  it("parses live oracle timestamp from oracleTimestamp", async () => {
-    updateMetrics([makePool({ oracleTimestamp: "1713199900" })]);
+  it("parses the live oracle timestamp from the exact median anchor", async () => {
+    updateMetrics([makePool({ lastOracleReportAt: "1713199900" })]);
     expect(
       await getGaugeValue(
         register,

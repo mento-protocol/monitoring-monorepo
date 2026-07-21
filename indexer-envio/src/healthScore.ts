@@ -10,17 +10,14 @@
 //         d > 1.01 → unhealthy (0)
 //
 // Gap handling between oracle snapshots:
-//   - Gap ≤ freshnessLimit: carry last known state
-//   - Gap > freshnessLimit: first freshnessLimit seconds carry last state,
-//     remaining seconds are treated as unhealthy (stale)
-//   - freshnessLimit = min(pool.oracleExpiry, MAX_CARRY_SECONDS)
+//   - Carry the prior state only until the exact contract freshness boundary:
+//     prior medianTimestamp + prior oracleExpiry
+//   - The remaining seconds are treated as unhealthy (stale)
+//   - Unknown/zero anchors do not accrue healthy time
 // ---------------------------------------------------------------------------
 
 import type { Pool } from "envio";
 import FX_CALENDAR from "../config/fx-calendar.json" with { type: "json" };
-
-/** Safety cap for carry-forward duration (1 hour) */
-const MAX_CARRY_SECONDS = 3600n;
 
 /** Fixed decimal precision for ratio strings */
 const PRECISION = 6;
@@ -181,6 +178,15 @@ export interface HealthAccumulatorUpdate {
   hasHealthData: boolean;
 }
 
+/** Contract freshness inputs that governed the interval being finalized.
+ * Callers which apply a new report timestamp or expiry before recording the
+ * sample MUST pass the prior values explicitly; using the new values would
+ * retroactively heal the preceding gap. */
+export interface OracleFreshnessAnchor {
+  reportTimestamp: bigint;
+  expiry: bigint;
+}
+
 /**
  * Finalize the interval since the last oracle snapshot and update accumulators.
  *
@@ -194,11 +200,17 @@ export interface HealthAccumulatorUpdate {
  * @param pool — current Pool entity (with existing accumulators)
  * @param currentTimestamp — block timestamp of the new oracle event
  * @param currentDeviationRatio — deviationRatio string for the new snapshot
+ * @param priorOracleFreshness — exact median timestamp + expiry that governed
+ *   the interval starting at `pool.lastOracleSnapshotTimestamp`
  */
 export function updateHealthAccumulators(
   pool: Pool,
   currentTimestamp: bigint,
   currentDeviationRatio: string,
+  priorOracleFreshness: OracleFreshnessAnchor = {
+    reportTimestamp: pool.lastOracleReportAt,
+    expiry: pool.oracleExpiry,
+  },
 ): HealthAccumulatorUpdate {
   const lastTs = pool.lastOracleSnapshotTimestamp;
 
@@ -229,15 +241,16 @@ export function updateHealthAccumulators(
   // from both numerator and denominator (matches UI computeBinaryHealthWindow).
   const duration = tradingSecondsInRange(lastTs, currentTimestamp);
 
-  // Match UI computeBinaryHealthWindow: freshness is wall-clock (a snapshot
-  // expires at a wall-clock moment regardless of weekend), then the carry
-  // range is measured in trading-seconds.
-  // oracleExpiry of 0 means unknown — fall back to MAX_CARRY_SECONDS.
-  const oracleExpiry =
-    pool.oracleExpiry > 0n ? pool.oracleExpiry : MAX_CARRY_SECONDS;
-  const freshnessLimit =
-    oracleExpiry < MAX_CARRY_SECONDS ? oracleExpiry : MAX_CARRY_SECONDS;
-  const freshnessEnd = lastTs + freshnessLimit;
+  // Freshness is wall-clock (a report expires at a wall-clock moment
+  // regardless of weekend), then the carry range is measured in
+  // trading-seconds. OracleAdapter's exact authority is
+  // `SortedOracles.medianTimestamp(feed) + feedExpiry`; never renew the TTL
+  // from this pool event's timestamp. Unknown inputs fail closed (zero carry).
+  const freshnessEnd =
+    priorOracleFreshness.reportTimestamp > 0n &&
+    priorOracleFreshness.expiry > 0n
+      ? priorOracleFreshness.reportTimestamp + priorOracleFreshness.expiry
+      : lastTs;
   const carryEnd =
     currentTimestamp < freshnessEnd ? currentTimestamp : freshnessEnd;
   const carrySeconds = tradingSecondsInRange(lastTs, carryEnd);
@@ -295,6 +308,12 @@ export interface RecordHealthSampleResult {
   poolUpdate: HealthAccumulatorUpdate;
 }
 
+export interface RecordHealthSampleOptions {
+  blockTimestamp: bigint;
+  isNeverRebalance?: boolean;
+  priorOracleFreshness?: OracleFreshnessAnchor;
+}
+
 /**
  * Single entry point for recording a health sample. Called by both
  * SortedOracles and FPMM handlers when writing an OracleSnapshot.
@@ -308,9 +327,12 @@ export interface RecordHealthSampleResult {
  * @param effectiveThresholdBps — `effectiveThreshold(pool)` cast to
  *   number (NOT the raw `rebalanceThreshold` — see
  *   `computeHealthSnapshotFields` for why).
- * @param blockTimestamp — block timestamp of the event
- * @param isNeverRebalance — true iff governance configured the pool to
+ * @param options.blockTimestamp — block timestamp of the event
+ * @param options.isNeverRebalance — true iff governance configured the pool to
  *   never rebalance (see `computeHealthSnapshotFields`).
+ * @param options.priorOracleFreshness — exact contract freshness inputs for the
+ *   interval preceding this sample. Required when `pool` already contains a
+ *   newly applied median timestamp or expiry.
  * Degenerate reserves are derived from `pool`: they keep the faithful
  * priceDifference on the snapshot, but the health sample itself is recorded
  * as healthy/zero-ratio so uptime counters do not charge drained windows as
@@ -320,9 +342,13 @@ export function recordHealthSample(
   pool: Pool,
   priceDifference: bigint,
   effectiveThresholdBps: number,
-  blockTimestamp: bigint,
-  isNeverRebalance = false,
+  options: RecordHealthSampleOptions,
 ): RecordHealthSampleResult {
+  const {
+    blockTimestamp,
+    isNeverRebalance = false,
+    priorOracleFreshness,
+  } = options;
   // dataAvailable: pool has a usable threshold from EITHER a successful
   // split-side read (`rebalanceThresholdsKnown`) OR a positive active
   // threshold (RPC-derived via `getRebalancingState`, which is
@@ -363,6 +389,7 @@ export function recordHealthSample(
     pool,
     blockTimestamp,
     snapshotFields.deviationRatio,
+    priorOracleFreshness,
   );
 
   return { snapshotFields, poolUpdate };

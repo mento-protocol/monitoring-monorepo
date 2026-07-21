@@ -24,6 +24,7 @@ export const ALL_POOLS_WITH_HEALTH = `
       oracleOk
       oraclePrice
       oracleTimestamp
+      lastOracleReportAt
       oracleTxHash
       priceDifference
       rebalanceThreshold
@@ -53,9 +54,10 @@ export const ALL_POOLS_WITH_HEALTH = `
 // Lightweight live-health overlay for the homepage and /pools. The full
 // all-network payload also paginates snapshots, fees, LPs, and strategy data,
 // so it intentionally polls every 5 minutes. Health cannot share that cadence:
-// its cached oracle timestamp would cross the 5-6 minute on-chain expiry and
-// flash CRITICAL even when Hasura already has the next report. This query keeps
-// only fields that can change the live Health badge and is polled every 30s.
+// its cached exact median timestamp would cross the configured on-chain expiry
+// and flash CRITICAL even when Hasura already has the next report. This query
+// keeps only fields that can change the live Health badge and is polled every
+// 30s.
 export const ALL_POOLS_LIVE_HEALTH = `
   query AllPoolsLiveHealth($chainId: Int!) {
     Pool(where: { chainId: { _eq: $chainId } }, limit: 1000) {
@@ -64,6 +66,7 @@ export const ALL_POOLS_LIVE_HEALTH = `
       updatedAtTimestamp
       oracleOk
       oracleTimestamp
+      lastOracleReportAt
       oracleExpiry
       oracleNumReporters
       priceDifference
@@ -209,6 +212,8 @@ export const ALL_POOLS_HEALTH_CURSOR = `
       id
       lastOracleSnapshotTimestamp
       lastDeviationRatio
+      lastOracleReportAt
+      oracleExpiry
     }
   }
 `;
