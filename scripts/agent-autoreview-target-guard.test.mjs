@@ -7,6 +7,7 @@ import {
   chownSync,
   copyFileSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
@@ -61,7 +62,7 @@ function createForeignNodeFixture(directory) {
   chmodSync(directory, 0o700);
   copyFileSync(process.execPath, executable);
   chownSync(executable, 65534, 65534);
-  chmodSync(executable, 0o755);
+  chmodSync(executable, 0o777);
   assert.notEqual(lstatSync(executable, { bigint: true }).uid, 0n);
   const version = spawnSync(executable, ["--version"], {
     encoding: "utf8",
@@ -713,6 +714,12 @@ printf '%s\\n' '{"findings":[],"overall_correctness":"patch is correct","overall
   if (process.platform === "linux" && process.geteuid?.() === 0) {
     const foreignNodeDir = path.join(root, "foreign-node-bin");
     const foreignNode = createForeignNodeFixture(foreignNodeDir);
+    linkSync(foreignNode, path.join(root, "foreign-node-hardlink"));
+    assert.equal(
+      lstatSync(foreignNode, { bigint: true }).nlink,
+      2n,
+      "root regression requires a writable, hard-linked toolcache Node source",
+    );
     const gitOnlyDir = path.join(root, "git-only-bin");
     mkdirSync(gitOnlyDir);
     assert.ok(

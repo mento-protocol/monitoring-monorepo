@@ -2509,7 +2509,10 @@ snapshot_linux_root_ancestor_node() {
     my @candidate_before = stat($candidate);
     exit 1 if !@candidate_before || !S_ISREG($candidate_before[2]);
     exit 1 if $candidate_before[4] == 0 || $candidate_before[4] == $euid;
-    exit 1 if $candidate_before[3] != 1 || ($candidate_before[2] & 06022);
+    # Tool caches may publish a writable or hard-linked executable. The exact
+    # live ancestor plus before/after metadata and digest bind the copied inode;
+    # keep rejecting set-ID execution semantics that the sealed copy drops.
+    exit 1 if $candidate_before[3] < 1 || ($candidate_before[2] & 06000);
     exit 1 if ($candidate_before[2] & 0111) == 0;
     exit 1 if $candidate_before[7] <= 0 || $candidate_before[7] > $maximum_size;
     my $prefix;
