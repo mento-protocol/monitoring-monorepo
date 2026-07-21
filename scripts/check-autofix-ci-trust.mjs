@@ -156,7 +156,10 @@ export function hasTrigger(body, trigger) {
  *   - reusable-workflow explicit block: a `secrets:` mapping under a job that
  *     `uses:` another workflow. */
 export function referencesSecrets(body) {
-  if (/\$\{\{[^}]*\bsecrets\s*[.[]/.test(body)) return true;
+  // Any use of the `secrets` CONTEXT inside an expression counts — dot and
+  // bracket access, but also bare references like `toJSON(secrets)`, which
+  // expand EVERY repository secret at once.
+  if (/\$\{\{[^}]*\bsecrets\b/.test(body)) return true;
   const stripped = stripComments(body);
   if (/^\s*secrets\s*:\s*inherit\s*$/m.test(stripped)) return true;
   // Explicit `secrets:` mapping on a reusable-workflow call. Only meaningful
@@ -210,10 +213,14 @@ export function splitJobs(body) {
       continue;
     }
     if (inJobs) {
-      const jobKey = line.match(/^ {2}([A-Za-z0-9_-]+)\s*:\s*(#.*)?$/);
+      // Job IDs may be quoted (valid YAML): `"leak":` — accept optional
+      // matching quotes so a quoted job cannot hide inside a sibling's block.
+      const jobKey = line.match(
+        /^ {2}(['\"]?)([A-Za-z0-9_-]+)\1\s*:\s*(#.*)?$/,
+      );
       if (jobKey) {
         if (current !== null) flush();
-        current = jobKey[1];
+        current = jobKey[2];
         continue;
       }
       if (/^\S/.test(line) && line.trim() !== "") {
@@ -255,7 +262,11 @@ export function jobIfGuarded(block) {
       if (/^ {4}[A-Za-z0-9_-]+\s*:/.test(l) || /^ {0,3}\S/.test(l)) break;
       value += `\n${l}`;
     }
-    if (GUARD_PATTERN.test(value)) return true;
+    // Strip YAML comments BEFORE testing: `if: X # !startsWith(...)` runs as
+    // just `X` (YAML drops the trailing comment), so guard text inside a
+    // comment must not certify the job. Over-stripping (a # inside a quoted
+    // string) can only REMOVE guard evidence — fail-closed by construction.
+    if (GUARD_PATTERN.test(stripComments(value))) return true;
   }
   return false;
 }

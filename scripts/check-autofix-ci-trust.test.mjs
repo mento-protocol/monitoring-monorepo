@@ -123,11 +123,49 @@ test("referencesSecrets covers every secret-passing syntax", () => {
     ),
     "reusable-workflow explicit secrets block",
   );
+  assert(
+    referencesSecrets("          ALL: ${{ toJSON(secrets) }}"),
+    "bare secrets context (toJSON) expands every secret and must count",
+  );
   assert(!referencesSecrets("x: secrets are cool"), "prose ignored");
   assert(
     !referencesSecrets("# secrets: inherit would be bad"),
     "commented inherit ignored",
   );
+});
+
+test("guard text inside a YAML comment on the if: line does NOT count", () => {
+  // YAML drops the trailing comment before GitHub evaluates the expression,
+  // so the job RUNS for autofix PRs — the commented guard must not certify it.
+  const smuggledIfComment = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    if: github.event_name == 'pull_request' # !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')",
+    SECRET_LINE,
+  ].join("\n");
+  assert(
+    !evaluateWorkflow(smuggledIfComment).ok,
+    "comment-smuggled guard refused",
+  );
+});
+
+test("quoted job keys are segmented (cannot hide inside a sibling's block)", () => {
+  const body = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  safe:",
+    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+    SECRET_LINE,
+    '  "leak":',
+    SECRET_LINE,
+  ].join("\n");
+  const blocks = splitJobs(body);
+  assert(blocks.has("leak"), "quoted job key segmented");
+  const v = evaluateWorkflow(body);
+  assert(!v.ok && /\[leak\]/.test(v.reason), "quoted unguarded job refused");
 });
 
 test("a bare sentry-autofix/ mention does NOT count as a guard", () => {
