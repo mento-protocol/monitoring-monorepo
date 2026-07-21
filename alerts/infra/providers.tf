@@ -29,8 +29,9 @@ provider "google" {
 # QuickNode REST API Provider
 # Based on: https://www.quicknode.com/docs/webhooks/rest-api/webhooks/webhooks-rest-create-webhook
 provider "restapi" {
-  alias = "quicknode"
-  uri   = "https://api.quicknode.com"
+  alias      = "quicknode"
+  uri        = "https://api.quicknode.com"
+  rate_limit = 1
   headers = {
     "x-api-key"    = var.quicknode_api_key
     "Content-Type" = "application/json"

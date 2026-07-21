@@ -90,6 +90,7 @@ echo "Checking webhook existence in QuickNode..."
 echo ""
 
 MISSING_WEBHOOKS=()
+CHECK_FAILURES=()
 
 while IFS= read -r resource; do
 	if [[ -z ${resource} ]]; then
@@ -98,11 +99,11 @@ while IFS= read -r resource; do
 
 	echo "Checking: ${resource}"
 
-	# Extract webhook ID from state
-	WEBHOOK_ID=$(terraform state show "${resource}" 2>/dev/null | grep -E '^\s+id\s+=' | awk '{print $3}' | tr -d '"' || echo "")
-
-	if [[ -z ${WEBHOOK_ID} ]]; then
-		warn "  ⚠ Could not extract webhook ID from state"
+	# Extract only the resource-level ID. Provider v3 also renders nested IDs
+	# inside api_data/api_response; concatenating those creates an invalid URL.
+	if ! WEBHOOK_ID=$(terraform_state_resource_id "${resource}"); then
+		warn "  ⚠ Could not extract one resource-level webhook ID from state"
+		CHECK_FAILURES+=("${resource}")
 		continue
 	fi
 
@@ -112,10 +113,21 @@ while IFS= read -r resource; do
 	# so parallel script runs (or other helpers reusing /tmp) can't read
 	# each other's response body and produce the wrong existence verdict.
 	response_file=$(mktemp -t webhook_check.XXXXXX.json)
-	HTTP_CODE=$(curl -s -o "${response_file}" -w "%{http_code}" \
+	if ! HTTP_CODE=$(curl --silent --show-error \
+		--retry 3 \
+		--retry-delay 1 \
+		--retry-max-time 10 \
+		--output "${response_file}" \
+		--write-out "%{http_code}" \
 		-H "x-api-key: ${QUICKNODE_API_KEY}" \
 		-H "accept: application/json" \
-		"https://api.quicknode.com/webhooks/rest/v1/webhooks/${WEBHOOK_ID}")
+		"https://api.quicknode.com/webhooks/rest/v1/webhooks/${WEBHOOK_ID}"); then
+		warn "  ⚠ QuickNode request failed; leaving Terraform state untouched"
+		CHECK_FAILURES+=("${resource}")
+		rm -f "${response_file}"
+		echo ""
+		continue
+	fi
 
 	if [[ ${HTTP_CODE} == "200" ]]; then
 		info "  ✓ Webhook exists in QuickNode"
@@ -123,13 +135,20 @@ while IFS= read -r resource; do
 		error "  ✗ Webhook NOT FOUND in QuickNode (404)"
 		MISSING_WEBHOOKS+=("${resource}")
 	else
-		warn "  ⚠ Unexpected response code: ${HTTP_CODE}"
-		cat "${response_file}" 2>/dev/null || true
+		warn "  ⚠ Unexpected response code: ${HTTP_CODE}; leaving Terraform state untouched"
+		CHECK_FAILURES+=("${resource}")
 	fi
 
 	rm -f "${response_file}"
 	echo ""
 done <<<"${WEBHOOK_RESOURCES}"
+
+# Never offer state removal after a partial or ambiguous control-plane check.
+# A transient 429/5xx must not be mistaken for a missing webhook.
+if [[ ${#CHECK_FAILURES[@]} -gt 0 ]]; then
+	error "Could not safely verify ${#CHECK_FAILURES[@]} webhook(s); no Terraform state changes were made."
+	exit 1
+fi
 
 # If we found missing webhooks, offer to remove them from state
 if [[ ${#MISSING_WEBHOOKS[@]} -gt 0 ]]; then
