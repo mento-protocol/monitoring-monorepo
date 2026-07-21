@@ -177,7 +177,7 @@ const RPC_CONFIG_BY_CHAIN: Record<number, { default: string; envVar: string }> =
       envVar: "ENVIO_RPC_URL_137",
     }, // Polygon Mainnet
     80002: {
-      default: "https://rpc-amoy.polygon.technology",
+      default: "https://polygon-amoy.drpc.org",
       envVar: "ENVIO_RPC_URL_80002",
     }, // Polygon Amoy
     42220: { default: "https://forno.celo.org", envVar: "ENVIO_RPC_URL_42220" }, // Celo Mainnet
