@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  linkSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
@@ -36,6 +37,7 @@ const stableReadStat = {
   dev: 1,
   ino: 2,
   mode: 0o100644,
+  nlink: 1,
   size: 128,
   mtimeMs: 10,
   ctimeMs: 20,
@@ -52,6 +54,16 @@ assert.throws(
     ),
   /changed while it was being read/,
   "in-place evidence mutation is rejected even when the inode is unchanged",
+);
+assert.throws(
+  () =>
+    assertStableFileRead(
+      stableReadStat,
+      { ...stableReadStat, nlink: 2 },
+      "hard-linked fixture",
+    ),
+  /changed while it was being read/,
+  "link-count changes are part of the bounded-read stability invariant",
 );
 
 const unicodeBundle = `# Branch Diff\n${
@@ -1271,6 +1283,14 @@ assert.throws(
   /regular file/,
   "bounded file reads reject symlink final components",
 );
+const outsideHardLinkSource = path.join(root, "outside-hard-link-source.md");
+writeFileSync(outsideHardLinkSource, "outside evidence\n");
+linkSync(outsideHardLinkSource, path.join(repo, "hard-linked.md"));
+assert.throws(
+  () => serializeSafeUntrackedFile(repo, "hard-linked.md"),
+  /refusing hard-linked untracked file/,
+  "untracked-file capture rejects hard links to files outside the checkout",
+);
 assert.throws(
   () =>
     readSafeEvidenceFile({
@@ -1324,6 +1344,25 @@ assert.throws(
     }),
   /changed while it was being read/,
   "post-open validation rejects a path whose inode changed",
+);
+
+const postReadHardLinkCandidate = path.join(repo, "post-read-hard-link.md");
+const postReadHardLinkAlias = path.join(root, "post-read-hard-link-alias.md");
+writeFileSync(postReadHardLinkCandidate, "original evidence\n");
+const repoStatBeforeHardLink = lstatSync(repo);
+const postReadHardLinkStat = lstatSync(postReadHardLinkCandidate);
+linkSync(postReadHardLinkCandidate, postReadHardLinkAlias);
+assert.throws(
+  () =>
+    assertStableEvidencePathAfterRead({
+      root: repo,
+      candidate: postReadHardLinkCandidate,
+      rootStat: repoStatBeforeHardLink,
+      fileStat: postReadHardLinkStat,
+      label: "post-read hard-linked evidence",
+    }),
+  /changed while it was being read/,
+  "post-open validation rejects a file that gained another hard link",
 );
 
 const promptIndex = path.join(root, "autoreview-prompt.md");

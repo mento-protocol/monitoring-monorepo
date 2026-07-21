@@ -62,6 +62,7 @@ export function assertStableFileRead(initialStat, finalStat, label) {
   if (
     !sameFileIdentity(initialStat, finalStat) ||
     initialStat.mode !== finalStat.mode ||
+    initialStat.nlink !== finalStat.nlink ||
     initialStat.size !== finalStat.size ||
     initialStat.mtimeMs !== finalStat.mtimeMs ||
     initialStat.ctimeMs !== finalStat.ctimeMs
@@ -79,6 +80,9 @@ export function readBoundedRegularFile(
   if (!pathStat.isFile()) {
     throw new Error(`${label} must be a regular file`);
   }
+  if (pathStat.nlink !== 1) {
+    throw new Error(`refusing hard-linked ${label}`);
+  }
   const descriptor = openSync(
     filePath,
     fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0),
@@ -87,6 +91,9 @@ export function readBoundedRegularFile(
     const initialStat = fstatSync(descriptor);
     if (!initialStat.isFile()) {
       throw new Error(`${label} must be a regular file`);
+    }
+    if (initialStat.nlink !== 1) {
+      throw new Error(`refusing hard-linked ${label}`);
     }
     if (initialStat.dev !== pathStat.dev || initialStat.ino !== pathStat.ino) {
       throw new Error(`${label} changed while it was being opened`);
@@ -1759,6 +1766,8 @@ export function assertStableEvidencePathAfterRead({
   if (
     !postReadPathStat.isFile() ||
     postReadPathStat.isSymbolicLink() ||
+    postReadPathStat.nlink !== 1 ||
+    postReadPathStat.nlink !== fileStat.nlink ||
     !sameFileIdentity(postReadPathStat, fileStat)
   ) {
     throw new Error(`${label} changed while it was being read`);
