@@ -55,9 +55,15 @@ resource "null_resource" "pause_webhook_before_update" {
         exit 0
       fi
 
-      WEBHOOK_ID=$(terraform state show "$STATE_PATH" 2>/dev/null | grep -E '^\s+id\s+=' | awk '{print $3}' | tr -d '"' || echo "")
+      # Reuse the state parser used by the repair tool. Provider v3 renders
+      # nested api_data/api_response IDs in addition to the resource-level ID.
+      source "${path.module}/../scripts/common.sh"
+      if ! WEBHOOK_ID=$(terraform_state_resource_id "$STATE_PATH"); then
+        echo "Could not extract one resource-level webhook ID from state; refusing replacement" >&2
+        exit 1
+      fi
 
-      if [ -n "$WEBHOOK_ID" ] && [ "$WEBHOOK_ID" != "" ]; then
+      if [ -n "$WEBHOOK_ID" ]; then
         echo "Pausing and deleting old webhook $WEBHOOK_ID to force recreation..."
 
         # Helper script lives in the module's sibling scripts/ dir. Resolve
@@ -72,7 +78,8 @@ resource "null_resource" "pause_webhook_before_update" {
         terraform state rm -lock=false "$STATE_PATH" 2>&1 | head -5
         echo "Webhook removed from state - Terraform will create a new one"
       else
-        echo "Could not extract webhook ID from state, skipping delete"
+        echo "Webhook ID was empty; refusing replacement" >&2
+        exit 1
       fi
     EOT
   }

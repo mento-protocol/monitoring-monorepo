@@ -51,10 +51,16 @@ A new script [`scripts/fix-webhook-state.sh`](../scripts/fix-webhook-state.sh) h
 **What it does:**
 
 - Lists all webhook resources in Terraform state
+- Selects only each resource-level ID, ignoring nested IDs rendered by the provider
 - Checks if each webhook exists in QuickNode
 - Identifies webhooks in state that don't exist remotely
 - Offers to remove orphaned webhooks from state
 - Provides guidance on next steps
+
+Read-only QuickNode checks use bounded retries. Any transport error, rate limit,
+or unexpected response fails closed before the script offers state removal. The
+Terraform provider also limits QuickNode request starts to one per second so a
+refresh does not burst all chain webhooks at the control plane simultaneously.
 
 ### 4. Debug Mode (opt-in)
 
@@ -224,9 +230,8 @@ Consider these enhancements:
 
 1. **Data source validation** - Add a data source to check webhook existence before operations
 2. **External state reconciliation** - Use an external data source to sync state with QuickNode API
-3. **Retry logic** - Add retry logic for transient API failures
-4. **State refresh automation** - Automatically detect and fix drift during apply
-5. **Move away from provisioners** - Replace shell scripts with Terraform-native solutions when available
+3. **State refresh automation** - Automatically detect and fix drift during apply
+4. **Move away from provisioners** - Replace shell scripts with Terraform-native solutions when available
 
 ## References
 

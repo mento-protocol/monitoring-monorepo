@@ -43,6 +43,7 @@ Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for i
 - `pnpm alerts:rules:plan` and `pnpm alerts:infra:plan` — must show 0 changes against existing state unless the PR intentionally changes the stack.
 - `pnpm --filter @mento-protocol/alerts-onchain-event-handler typecheck` and `test:coverage` — green on handler changes. Lint/knip are wired but verify they pass too after dep bumps.
 - `pnpm --filter @mento-protocol/alerts-oncall-announcer typecheck` and `test:coverage` — green on on-call announcer changes. Lint/knip are wired too.
+- `bash alerts/infra/scripts/fix-webhook-state.test.sh` — required when changing the shared QuickNode state-ID parser, repair tool, or listener replacement provisioner.
 - `pnpm agent:quality-gate` for any combined edit — path-aware routing.
 
 For Cloud Function deploy verification, follow `docs/pr-checklists/terraform-cloudrun.md`.

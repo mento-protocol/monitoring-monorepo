@@ -1436,6 +1436,17 @@ assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud 
 run_gate "alerts/infra/channels/sentry-bridge/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
 
+run_gate "alerts/infra/onchain-event-listeners/main.tf"
+assert_contains "- bash alerts/infra/scripts/fix-webhook-state.test.sh (QuickNode replacement state parser changed)"
+
+run_gate "alerts/infra/scripts/common.sh"
+assert_contains "- bash -n alerts/infra/scripts/common.sh (shell script changed)"
+assert_contains "- bash alerts/infra/scripts/fix-webhook-state.test.sh (QuickNode state parser changed)"
+
+run_gate "alerts/infra/scripts/fix-webhook-state.test.sh"
+assert_contains "- bash -n alerts/infra/scripts/fix-webhook-state.test.sh (shell script changed)"
+assert_contains "- bash alerts/infra/scripts/fix-webhook-state.test.sh (QuickNode state parser changed)"
+
 run_gate "alerts/infra/onchain-event-handler/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud Function path changed)"

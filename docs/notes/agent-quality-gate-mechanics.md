@@ -99,6 +99,12 @@ quality prerequisites: a browser setup failure still lets independent
 lint/typecheck/unit/knip feedback run. `--fail-fast` stays sequential so it
 still stops before starting the next mapped command.
 
+QuickNode webhook state parsing has a dedicated fail-closed regression suite.
+Changes to its shared parser, repair tool, shell test, or the listener
+replacement provisioner map to
+`bash alerts/infra/scripts/fix-webhook-state.test.sh`; the handler test suite
+also executes that shell fixture in CI.
+
 Do not launch dashboard browser tests, a dashboard dev server, or another
 quality-gate run concurrently with `pnpm agent:quality-gate --run` in the same
 worktree. Next processes share `ui-dashboard/.next`; competing writers can
