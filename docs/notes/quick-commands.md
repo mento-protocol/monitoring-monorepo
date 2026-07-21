@@ -49,7 +49,7 @@ pnpm code-health                   # Run knip + deps together (everything except
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
 pnpm agent:autoreview              # Isolated closeout review; multi-pass uses --prepare-bundle-dir DIR + one fresh-context reviewer; quality gate owns tests
 pnpm agent:autoreview:test         # Full autoreview regression families; defaults to up to 3 workers with progress + timings
-pnpm agent:autoreview:test -- --jobs 1  # Sequential full closeout and CI reproduction for autoreview runtime changes
+pnpm agent:autoreview:test -- --jobs 1  # Sequential full closeout for autoreview runtime changes
 pnpm agent:autoreview --verify-bundle-dir DIR  # Pre-review rehash; retain the printed manifest digest
 pnpm agent:autoreview --verify-bundle-dir DIR --expected-bundle-manifest DIGEST  # Bound post-review rehash
 pnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown
