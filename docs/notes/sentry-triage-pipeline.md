@@ -947,6 +947,12 @@ with the App token. An App-token push
 (unlike a `github.token` push) triggers downstream workflows, so **required CI
 and Codex review actually fire**
 on the fix PR — the whole point of using an App rather than the ambient token.
+Because that CI executes the PR head's product/test code before any human
+review, every `ci.yml` checkout runs with `persist-credentials: false`: no
+checkout token ever sits in `.git/config` where PR-head code (autofix-authored
+or otherwise) could read and exfiltrate it — CI jobs only lint/test/build and
+never need an authenticated git remote (the repo is public, so plain fetches
+are anonymous).
 The PR body is assembled deterministically: the agent writes
 `/tmp/autofix-pr-summary.md` (Problem/Solution bullets), and finalize splices it
 into the repo PR format, adding `Fixes <SHORT-ID>`, `Refs <queue issue #>`, and
