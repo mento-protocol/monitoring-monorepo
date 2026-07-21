@@ -616,6 +616,13 @@ export function scoreNavigationResult({
       repoRoot,
       baseCommit: sourceCommit,
     });
+    for (const file of loaded.paths) {
+      if (bootstrap.paths.has(file)) {
+        errors.push(
+          `answer ${question.id} repeats bootstrap source ${file} in loaded_sources`,
+        );
+      }
+    }
     for (const [file, bytes] of loaded.sizes) totalSources.set(file, bytes);
     if (loaded.bytes > suite.targets.max_question_source_bytes) {
       questionsOverBudget += 1;
@@ -750,7 +757,10 @@ export function scoreNavigationResult({
     const routingIsCorrect = Boolean(route);
     if (routingIsCorrect) routingCorrect += 1;
     const evidenceIsComplete = Boolean(
-      route && route.every((file) => evidencePaths.has(file)),
+      chosen.size > 0 &&
+      [...chosen].every(
+        (file) => available.has(file) && evidencePaths.has(file),
+      ),
     );
     if (evidenceIsComplete) evidenceCorrect += 1;
     const chosenWithoutBootstrap = [...chosen].filter(

@@ -66,9 +66,23 @@ pnpm docs:navigation-eval -- --prompt > /tmp/documentation-navigation-prompt.md
 
 Prompt generation refuses a dirty checkout: the reported
 `repository_base_commit` must identify the exact documentation bytes the agent
-read. When creating or intentionally replacing a committed baseline, first
-commit the evaluation contract and any routing fixes, run the evaluation from
-that clean commit, then add the immutable result in a second commit.
+read. A result committed from a squash-merged PR must not point at an
+intermediate branch commit, because a fresh clone of `main` may not contain
+that object. For a pre-change baseline in the same PR as the evaluation
+contract, fetch `origin/main`, verify the chosen SHA is its ancestor, and pin
+the prompt explicitly:
+
+```bash
+BASE_COMMIT="$(git rev-parse origin/main)"
+git merge-base --is-ancestor "$BASE_COMMIT" origin/main
+pnpm docs:navigation-eval -- --prompt --base-commit "$BASE_COMMIT" \
+  > /tmp/documentation-navigation-prompt.md
+```
+
+Otherwise, land the contract first and generate the result from a clean
+default-branch commit in a follow-up PR. CI and the monthly workflow use a
+full-history checkout so a committed result remains reproducible from any
+reachable default-branch ancestor.
 
 Run that prompt in a fresh ephemeral agent with repository read access only,
 network disabled, and the result schema enforced. For example, with a locally
@@ -112,8 +126,9 @@ Scores stay separate so a cheap strength cannot hide an expensive failure:
 - **Canonical-source compliance** — every non-canonical or unmanaged source is
   explicitly qualified and verified against loaded canonical authority.
   Target: zero unqualified uses.
-- **Answer evidence** — every matched route document has valid targeted line
-  evidence. Target: 100%.
+- **Answer evidence** — every chosen document has valid targeted line evidence,
+  measured independently of whether the chosen order matches an accepted
+  route. Target: 100%.
 - **Shortest useful path** — the chosen set is exactly the smallest matched
   route. Extra exploratory reads lower the reported route-efficiency ratio but
   do not masquerade as a routing failure.

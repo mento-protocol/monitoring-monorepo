@@ -15,6 +15,7 @@
     "docs/evals/documentation-navigation-baseline.json",
     "scripts/docs-navigation-eval.mjs",
     "scripts/docs-navigation-eval-helpers.mjs",
+    "scripts/docs-navigation-eval-result.mjs",
     "scripts/docs-navigation-eval.test.mjs"
   ],
   "questions": [
@@ -64,7 +65,10 @@
       "id": "deployment-indexer-promote",
       "category": "deployment",
       "question": "What is the current sequence for deploying a new Envio indexer version, monitoring its sync, and promoting it without allowing an agent to auto-promote?",
-      "accepted_routes": [["docs/deployment.md"]],
+      "accepted_routes": [
+        ["docs/deployment.md"],
+        [".agents/skills/deploy-indexer/SKILL.md"]
+      ],
       "sources_requiring_verification": [
         {
           "path": "docs/PLAN-celo-mainnet-indexer.md",

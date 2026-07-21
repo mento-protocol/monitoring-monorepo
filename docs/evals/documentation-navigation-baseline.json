@@ -1,25 +1,25 @@
 {
   "schema_version": 1,
   "suite_id": "documentation-navigation-v1",
-  "fixture_digest": "b65496d5b32be462eaf7d927732b6dc3d940dda1417d68f99bd1d560913f36f9",
+  "fixture_digest": "8293b5ce8e5909ab07d1f6edadc58a7ec17ecbf578147e2b1697d32afc62e03f",
   "run": {
     "agent": "codex-subagent",
     "model": "gpt-5",
     "effort": "low",
-    "executed_at": "2026-07-21T19:56:23Z",
-    "repository_base_commit": "a5fa5141c636f959f48b942025a5140ed040e464",
+    "executed_at": "2026-07-21T21:21:54Z",
+    "repository_base_commit": "a82f8c580d145806865f031755c7b5411f89c976",
     "fresh_context": true,
     "read_only": true,
     "bootstrap_sources": [
       {
         "path": "AGENTS.md",
-        "bytes": 9137,
-        "sha256": "ff77f5e1d1aca1f5c6dd6c15d437440dae8eb219f3af1780b0b54356c9a02276"
+        "bytes": 12155,
+        "sha256": "019b39b5bc67701539fa72fb6909811a33cf17de597e0daefb0427871c750ada"
       },
       {
         "path": "docs/README.md",
-        "bytes": 30997,
-        "sha256": "edf98c7bc52622eef0f5acdcf76d66e0c3119da06b2ccb9e1b567980d31aa3f3"
+        "bytes": 30526,
+        "sha256": "5ccd6e1f1e9b232f464881766cc12a12dbad10a2ac58cecacb7f369aa069ac25"
       }
     ]
   },
@@ -27,13 +27,19 @@
     {
       "question_id": "package-shared-config-authority",
       "chosen_documents": ["shared-config/AGENTS.md"],
-      "answer": "Change these shared values in `shared-config/`, which publishes `@mento-protocol/config` and owns chain metadata, deployment namespaces, token/pool labels, thresholds, and shared ABIs. Update `src/` or the JSON inputs, never hand-edit `dist/`, and add a cross-reference test. Run the package lint, typecheck, tests, and build; when an exported shape changes, also typecheck the dashboard, indexer, metrics bridge, and integration-probes consumers.",
+      "answer": "Change these values in `shared-config/`, published as `@mento-protocol/config`: it is the source of truth for chain metadata (including chain IDs and explorer metadata), deployment namespaces, token/pool label derivation, thresholds, and shared ABIs. Change `src/` or the JSON inputs, never hand-edit `dist/`; add a cross-reference test, run the config package lint, typecheck, test, and build, and typecheck dashboard, indexer, bridge, and integration-probes consumers whenever an exported shape changes.",
       "evidence": [
         {
           "path": "shared-config/AGENTS.md",
-          "line_start": 17,
+          "line_start": 19,
+          "line_end": 27,
+          "supports": "Defines shared-config as the source of truth and states its data-change and consumer-stability rules."
+        },
+        {
+          "path": "shared-config/AGENTS.md",
+          "line_start": 31,
           "line_end": 33,
-          "supports": "Defines shared-config ownership, source-editing rules, cross-reference testing, and package plus consumer verification."
+          "supports": "Lists package verification and required consumer typechecks for exported-shape changes."
         }
       ],
       "authority_qualifications": [
@@ -55,45 +61,45 @@
     {
       "question_id": "package-indexer-add-contract",
       "chosen_documents": [
-        "indexer-envio/AGENTS.md",
-        "indexer-envio/README.md"
+        "indexer-envio/README.md",
+        "indexer-envio/AGENTS.md"
       ],
-      "answer": "The current package authority is `indexer-envio/AGENTS.md`, with the concrete contract-add procedure in `indexer-envio/README.md`. Add a published ABI to `scripts/generateAbis.mjs` and run `pnpm generate:abis`, or hand-vendor the minimal ABI and document the exception; add the contract and event to every applicable `config.multichain.*.yaml`; update `schema.graphql`; add the handler under `src/handlers/` and side-effect import it from `src/EventHandlers.ts`; then run codegen and the stateful-data/UI checklist. Because hosted Envio builds can run outside the workspace, keep `indexer-envio/config/deployment-namespaces.json` synchronized with `shared-config/deployment-namespaces.json` and do not replace the mirror with a workspace dependency without a deploy-path change.",
+      "answer": "Use `indexer-envio/README.md` for the current add-contract procedure: add or generate the ABI, update every applicable `config.multichain.*.yaml`, update schema, add the handler under `src/handlers/`, side-effect import it from `src/EventHandlers.ts`, then run package codegen and the stateful-data/UI checklist. `indexer-envio/AGENTS.md` is the package authority for the key-file map and hosted-build mirrors: keep `config/deployment-namespaces.json` synchronized with shared-config, preserve the token metadata mirror, and retain vendored ABIs because hosted Envio builds can run outside the workspace.",
       "evidence": [
-        {
-          "path": "indexer-envio/AGENTS.md",
-          "line_start": 15,
-          "line_end": 19,
-          "supports": "Routes current package topology and contract-add procedures to the package README."
-        },
         {
           "path": "indexer-envio/README.md",
           "line_start": 154,
           "line_end": 165,
-          "supports": "Defines contract-package promotion, namespace update, ABI generation, and verification."
+          "supports": "Defines the contracts-package upgrade, namespace update, ABI generation, and typecheck procedure."
         },
         {
           "path": "indexer-envio/README.md",
           "line_start": 167,
           "line_end": 178,
-          "supports": "Defines the ABI, config, schema, handler entry point, codegen, and checklist sequence for a new indexed contract."
+          "supports": "Defines the complete new-contract, config, schema, handler-entry-point, codegen, and checklist sequence."
         },
         {
           "path": "indexer-envio/AGENTS.md",
-          "line_start": 83,
+          "line_start": 42,
+          "line_end": 57,
+          "supports": "Maps hosted/testnet configs, handler entry point, deployment namespace mirror, and ABI generator."
+        },
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "line_start": 85,
           "line_end": 98,
-          "supports": "Explains why hosted builds require vendored mirrors and identifies the namespace synchronization and ABI/address rules."
+          "supports": "Explains why the hosted-build mirrors exist and which namespace and token metadata copies must stay synchronized."
         }
       ],
       "authority_qualifications": [
         {
-          "path": "indexer-envio/AGENTS.md",
+          "path": "indexer-envio/README.md",
           "authority": "canonical",
           "qualification": "",
           "verified_against": []
         },
         {
-          "path": "indexer-envio/README.md",
+          "path": "indexer-envio/AGENTS.md",
           "authority": "canonical",
           "qualification": "",
           "verified_against": []
@@ -101,51 +107,51 @@
       ],
       "loaded_sources": [
         {
-          "path": "indexer-envio/AGENTS.md",
-          "bytes": 5913,
-          "sha256": "8fd00a85c7b445e3cef3ad1220365c4ac9cbcc813df0572631afad7aa97d4949"
-        },
-        {
           "path": "indexer-envio/README.md",
           "bytes": 18491,
           "sha256": "da3649c8a917cf0d7019766ba621483c2729aeb9dc29215ab2b426b7d50d2539"
+        },
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "bytes": 5913,
+          "sha256": "8fd00a85c7b445e3cef3ad1220365c4ac9cbcc813df0572631afad7aa97d4949"
         }
       ]
     },
     {
       "question_id": "package-dashboard-browser-verification",
       "chosen_documents": ["docs/notes/dashboard-verification.md"],
-      "answer": "A dashboard UI change is incomplete until the changed behavior is exercised in a browser. Use a reproducible localhost server; manual `pnpm dev` uses the live production Envio endpoint unless `NEXT_PUBLIC_HASURA_URL` is explicitly set. If session state affects the surface, test both states: use an isolated context or clear both Auth.js cookies for logged-out behavior, and mint/set the documented local Auth.js token for logged-in behavior, confirming identity, sign-out, protected routes, and authenticated controls. Deterministic Playwright verification is different: its local Hasura fixture server must be the only GraphQL source and must never point at hosted Hasura/Envio.",
+      "answer": "A UI change is incomplete until its changed behavior is exercised in a browser. Run the dashboard on reproducible localhost `127.0.0.1:3210`; verify logged-out behavior in an isolated context or after clearing both Auth.js cookies, including public sign-in and protected-route redirects; then mint a local Auth.js token, set the session cookie, and verify the authenticated identity, protected routes, and controls. Manual `pnpm dev` defaults to the live production Envio Hasura endpoint unless explicitly overridden. Deterministic Playwright runs instead use the local Hasura fixture server as their only GraphQL source and must never target hosted Hasura/Envio.",
       "evidence": [
         {
           "path": "docs/notes/dashboard-verification.md",
           "line_start": 15,
           "line_end": 18,
-          "supports": "Makes browser exercise mandatory and requires both public and authenticated states when session state matters."
+          "supports": "Makes browser exercise and both public and authenticated states completion requirements."
         },
         {
           "path": "docs/notes/dashboard-verification.md",
-          "line_start": 20,
+          "line_start": 22,
           "line_end": 37,
-          "supports": "Defines the fixed localhost server, production Envio default, optional explicit fixture endpoint, and safe local auth inputs."
+          "supports": "Provides the fixed localhost launch and states that manual dev defaults to the live production Envio endpoint."
         },
         {
           "path": "docs/notes/dashboard-verification.md",
           "line_start": 48,
           "line_end": 54,
-          "supports": "Defines isolated logged-out verification and expected public/protected route behavior."
+          "supports": "Defines isolated logged-out verification, cookies, sign-in, and protected-route redirects."
         },
         {
           "path": "docs/notes/dashboard-verification.md",
           "line_start": 56,
           "line_end": 74,
-          "supports": "Defines simulated authenticated-session setup and the controls that must be confirmed."
+          "supports": "Defines the simulated authenticated-session token/cookie flow and expected UI assertions."
         },
         {
           "path": "docs/notes/dashboard-verification.md",
-          "line_start": 103,
-          "line_end": 112,
-          "supports": "Requires the fixture server as the sole GraphQL source for deterministic Playwright tests."
+          "line_start": 106,
+          "line_end": 121,
+          "supports": "Requires fixture browser tests to use only the local Hasura fixture server in dev and production builds."
         }
       ],
       "authority_qualifications": [
@@ -159,38 +165,86 @@
       "loaded_sources": [
         {
           "path": "docs/notes/dashboard-verification.md",
-          "bytes": 8055,
-          "sha256": "da21327f3203507db403f9e6ccab7c37bac7c4c49f3a7ed3a8b85aff04744044"
+          "bytes": 8231,
+          "sha256": "ca5827825fd91386297edd32fc111f13fe15992f2a5a4284428b4b36d7932e49"
         }
       ]
     },
     {
       "question_id": "deployment-indexer-promote",
-      "chosen_documents": ["docs/deployment.md"],
-      "answer": "Record the current commit, run `pnpm deploy:indexer` to push guarded HEAD to the `envio` branch, wait for that commit to register and catch every chain up, inspect build and recent runtime errors, capture the performance snapshot, and run `pnpm deploy:indexer:verify` for sync, metrics, endpoint, and GraphQL-row checks. Promote that same caught-up commit with `pnpm deploy:indexer:promote` only when promotion is explicitly authorized. For monitor-only, babysit, preload, or readiness work, the agent must stop after verification and surface the paste-ready promote command; it must not infer promotion approval.",
+      "chosen_documents": [".agents/skills/deploy-indexer/SKILL.md"],
+      "answer": "Deploy the checked-out, clean, pushed `HEAD` with `pnpm deploy:indexer --yes`, which updates the `envio` trigger branch. Track the explicit 7-character target SHA with `ENVIO_REGISTRATION_TIMEOUT_SECONDS=300 pnpm deploy:indexer:status <TARGET_COMMIT> --watch --compact`; registration and all-chain caught-up status are distinct gates, and an unsynced deployment must never be promoted. To prevent agent auto-promotion, pass `--no-promote` (the fail-closed default off `main`) and stop after sync. After an explicit go-live decision, and only after merge for additive changes or an approved compatibility/cutover plan for breaking changes, run `pnpm deploy:indexer:verify <TARGET_COMMIT>`, capture the previous production commit for rollback, then run `pnpm deploy:indexer:promote <TARGET_COMMIT> -y` and verify `prod_status`. Never auto-rollback.",
       "evidence": [
         {
-          "path": "docs/deployment.md",
-          "line_start": 50,
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 42,
+          "line_end": 50,
+          "supports": "Explains pre-merge no-promote behavior and compatibility requirements."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 62,
           "line_end": 69,
-          "supports": "Defines the guarded deploy, monitoring, logs, performance, verification, and promotion command sequence."
+          "supports": "Defines clean/pushed preflight, target SHA resolution, and fail-closed non-main promotion policy."
         },
         {
-          "path": "docs/deployment.md",
-          "line_start": 71,
-          "line_end": 79,
-          "supports": "Defines explicit promotion authority and the mandatory stop for monitor-only or preload requests."
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 89,
+          "line_end": 103,
+          "supports": "Defines the command that pushes HEAD to the Envio deployment trigger branch and its success signals."
         },
         {
-          "path": "docs/deployment.md",
-          "line_start": 91,
-          "line_end": 99,
-          "supports": "Defines the post-redeploy catch-up, error inspection, verification, same-commit promotion, and dashboard checks."
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 114,
+          "line_end": 129,
+          "supports": "Separates build registration from chain synchronization and defines the registration ceiling."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 132,
+          "line_end": 135,
+          "supports": "Gives the foreground status-watch command for the explicit target commit."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 157,
+          "line_end": 174,
+          "supports": "Defines the caught-up watch and requires explicit target selection rather than latest-deployment inference."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 176,
+          "line_end": 185,
+          "supports": "Provides target-specific diagnostics and forbids promotion before a successful caught-up result."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 190,
+          "line_end": 200,
+          "supports": "Requires no-promote runs to stop after sync and print separate later verify/promote commands."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 209,
+          "line_end": 229,
+          "supports": "Defines compatibility classification and the mandatory pre-promotion verifier."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 270,
+          "line_end": 285,
+          "supports": "Defines the explicit promotion command and production-status confirmation."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 375,
+          "line_end": 384,
+          "supports": "Forbids bypassing sync and verification, forbids auto-rollback, and defaults feature branches to no-promote."
         }
       ],
       "authority_qualifications": [
         {
-          "path": "docs/deployment.md",
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
           "authority": "canonical",
           "qualification": "",
           "verified_against": []
@@ -198,34 +252,34 @@
       ],
       "loaded_sources": [
         {
-          "path": "docs/deployment.md",
-          "bytes": 24548,
-          "sha256": "1c0d3d64e80fdcb73643f793c7e54dfd2051db478c425fd2949bdde2c8529418"
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "bytes": 24772,
+          "sha256": "ec0cab0e8657f20c5f99d079d7bb85c69e5119ecd603bca3feaea671e206453f"
         }
       ]
     },
     {
       "question_id": "deployment-terraform-registry-apply",
       "chosen_documents": ["docs/terraform.md"],
-      "answer": "`terraform.stacks.json` is the machine-readable ownership and policy registry; ownership must not be inferred from directories. The `platform` stack is manual-plan and human-approved local-apply. The `alerts-rules`, `alerts-delivery`, `aegis`, and `governance-watchdog` stacks use PR plans and apply from `main` through the `production-infra` environment. A registry-declared CI-applied stack is locally guarded: without the deliberate `--force-local-apply` override, apply runs only on a clean `main` checkout whose HEAD equals `origin/main`; the expected safe route is merge to main and environment-approved CI apply.",
+      "answer": "`terraform.stacks.json` is the machine-readable ownership and policy registry; do not infer ownership from paths. The `platform` stack is manual-plan and human-approved local-apply. `alerts-rules`, `alerts-delivery`, `aegis`, and `governance-watchdog` are PR-planned and normally applied only after merge to `main` through the `production-infra` GitHub Environment. A registry-marked CI-apply stack can run locally only from a clean `main` checkout whose `HEAD` equals `origin/main`, unless an operator deliberately supplies `--force-local-apply`; the documented safe path remains the environment-gated main apply.",
       "evidence": [
         {
           "path": "docs/terraform.md",
-          "line_start": 15,
+          "line_start": 13,
           "line_end": 24,
-          "supports": "Names the stack registry and maps each stack to ownership and plan/apply policy."
+          "supports": "Names the registry and maps every stack to its ownership and apply policy."
         },
         {
           "path": "docs/terraform.md",
-          "line_start": 49,
-          "line_end": 55,
-          "supports": "Defines local-apply guards, the explicit override, and the preferred production-infra path."
+          "line_start": 50,
+          "line_end": 56,
+          "supports": "Defines the clean-main local guard, deliberate override, and expected production-infra path."
         },
         {
           "path": "docs/terraform.md",
-          "line_start": 69,
-          "line_end": 73,
-          "supports": "Identifies CI-applied stacks and preserves platform as manual plan/manual apply."
+          "line_start": 65,
+          "line_end": 74,
+          "supports": "Requires registry-backed path routing and identifies the stacks with environment-gated main applies."
         }
       ],
       "authority_qualifications": [
@@ -239,33 +293,39 @@
       "loaded_sources": [
         {
           "path": "docs/terraform.md",
-          "bytes": 15837,
-          "sha256": "1d4cdffe5d79401f3811b0ca79d7b0f9d04b7289bb4d3f86e700cf8d7ec4ac31"
+          "bytes": 15984,
+          "sha256": "cc56cec808f4c41fa47e651d227c5a4a763ef7407e2e67320054cf9f6b4a5c71"
         }
       ]
     },
     {
       "question_id": "deployment-cloudrun-checklist",
       "chosen_documents": ["docs/pr-checklists/terraform-cloudrun.md"],
-      "answer": "Use `docs/pr-checklists/terraform-cloudrun.md`. It requires moved blocks and a reviewed plan with no unintended destroy/create, preserves deletion protection and accepted image drift, checks `/health`, memory, API enablement, and pinned bootstrap-image behavior, and requires unique RFC-1035 revision suffixes so retries can mint revisions. For rollout and rollback/retry readiness, the service shape must work on bootstrap, re-apply, and workflow-dispatch retry, while out-of-band image changes are not accidentally reverted. Before apply, inspect every destroy line; after apply, wait through transient rollout 503s and confirm a public 200 from `/health`.",
+      "answer": "Apply `docs/pr-checklists/terraform-cloudrun.md`. It requires a reviewed Terraform plan with explicit moved-address protection and no accidental destroys; validates Cloud Run `/health`, memory, API-drift ignores, pinned bootstrap image, and API dependency; requires unique RFC-1035 revision suffixes across both CI and script rollout paths; and finishes with a pre-apply plan review plus a post-apply public `/health` 200 check. Those controls preserve a viable prior revision/image instead of letting Terraform accidentally recreate or revert the service, making rollback and rollout health reviewable.",
       "evidence": [
         {
           "path": "docs/pr-checklists/terraform-cloudrun.md",
-          "line_start": 15,
+          "line_start": 13,
           "line_end": 29,
-          "supports": "Defines scope, bootstrap/re-apply/retry safety, moved blocks, deletion protection, IAM continuity, and plan review."
+          "supports": "Scopes the checklist and requires moved blocks plus a no-destroy plan review."
         },
         {
           "path": "docs/pr-checklists/terraform-cloudrun.md",
           "line_start": 33,
-          "line_end": 51,
-          "supports": "Defines Cloud Run health, resource, image-drift, bootstrap, dependency, and unique revision requirements."
+          "line_end": 44,
+          "supports": "Defines Cloud Run probe, resource, drift, bootstrap-image, and API-ordering safety checks."
+        },
+        {
+          "path": "docs/pr-checklists/terraform-cloudrun.md",
+          "line_start": 46,
+          "line_end": 57,
+          "supports": "Requires valid unique revisions and verification of both workflow and script rollout paths."
         },
         {
           "path": "docs/pr-checklists/terraform-cloudrun.md",
           "line_start": 111,
           "line_end": 115,
-          "supports": "Defines pre-apply plan review and post-apply public health verification."
+          "supports": "Requires plan inspection before apply and a public health check after rollout."
         }
       ],
       "authority_qualifications": [
@@ -290,31 +350,31 @@
         "docs/adr/0006-github-issues-backlog.md",
         "docs/notes/agent-issue-workflow.md"
       ],
-      "answer": "A Markdown bullet cannot be claimed atomically, does not expose queryable ready/active state, and allows duplicate work. GitHub Issues already integrate atomic queue labels, ownership, PRs, and the workboard, so they are the canonical active queue and `BACKLOG.md` is transition storage only. A migrated task must live as one labeled issue, not remain active in both places; agents claim it before substantive edits, and migrated issues carry `source:backlog` routing context.",
+      "answer": "GitHub Issues are canonical because a Markdown bullet cannot be atomically claimed, has no queryable ready/active state or ownership, and quickly diverges from reality. Issues provide mutually exclusive queue labels, an atomic claim helper, project visibility, and PR integration. Consequently `BACKLOG.md` is transition storage only: after migration, the active task lives in exactly one issue rather than both places, with `source:backlog` preserving provenance.",
       "evidence": [
         {
           "path": "docs/adr/0006-github-issues-backlog.md",
-          "line_start": 19,
+          "line_start": 21,
           "line_end": 32,
-          "supports": "Explains the atomic-claim and queryability problem and establishes Issues as the active queue."
+          "supports": "Explains Markdown queue failures and decides on atomically claimed, labeled GitHub Issues."
         },
         {
           "path": "docs/adr/0006-github-issues-backlog.md",
           "line_start": 41,
           "line_end": 46,
-          "supports": "Defines mutually exclusive lifecycle labels, claim-before-edit, and issue-backed deferrals."
+          "supports": "Makes state labels exclusive and requires claims and labeled issues for retained work."
         },
         {
           "path": "docs/notes/agent-issue-workflow.md",
           "line_start": 28,
           "line_end": 34,
-          "supports": "Makes labels authoritative and requires migrated work to live in one issue rather than both the issue and backlog."
+          "supports": "States that labels are authoritative and migrated work must live in one issue, not both trackers."
         },
         {
           "path": "docs/notes/agent-issue-workflow.md",
           "line_start": 48,
           "line_end": 52,
-          "supports": "Defines the source:backlog routing label for migrated tasks."
+          "supports": "Defines the source:backlog provenance label for migrated work."
         }
       ],
       "authority_qualifications": [
@@ -347,25 +407,25 @@
     {
       "question_id": "architecture-steth-sampler",
       "chosen_documents": ["docs/adr/0034-steth-wallet-daily-sampler.md"],
-      "answer": "stETH yield accrues through rebases without transfer logs, so an event-only ledger misses quiet-period balance growth. The accepted design takes bounded historical `balanceOf` samples every 600 produced Ethereum blocks, roughly every two hours, and writes wallet-level daily snapshots from a launch-aligned baseline. That cadence avoids block-by-block replay cost while preserving enough intra-day observation to allocate yield to the wallet where it accrued even if principal later moves; a single midnight read would lose that attribution. Daily rows match the dashboard's reporting grain, while failed historical reads skip a whole snapshot batch instead of writing partial actuals.",
+      "answer": "stETH cannot remain event-only because Lido rebases increase balances without transfer events, so a transfer ledger undercounts quiet-period earned yield. The decision establishes a launch-block baseline, samples each tracked wallet every 600 produced Ethereum blocks (about two hours), and rolls those observations into wallet-level daily rows. Thus it is deliberately not a single midnight read: repeated sub-daily observations preserve wallet attribution as principal moves and tolerate a failed later read by skipping that whole batch, while daily storage matches dashboard granularity. Every-block sampling was rejected as needless precision and hosted replay risk.",
       "evidence": [
         {
           "path": "docs/adr/0034-steth-wallet-daily-sampler.md",
-          "line_start": 19,
+          "line_start": 21,
           "line_end": 38,
-          "supports": "Explains the rebase-without-transfer problem and defines launch baseline, sub-daily cadence, daily rows, and wallet attribution."
+          "supports": "Explains rebase invisibility and defines the launch baseline, two-hour cadence, daily rows, and wallet attribution."
         },
         {
           "path": "docs/adr/0034-steth-wallet-daily-sampler.md",
           "line_start": 40,
           "line_end": 50,
-          "supports": "Rejects transfer-only accounting and block-level polling as respectively incomplete and unnecessarily costly."
+          "supports": "Rejects transfer-only inference and every-block polling as undercounting or excessive replay risk."
         },
         {
           "path": "docs/adr/0034-steth-wallet-daily-sampler.md",
           "line_start": 52,
           "line_end": 64,
-          "supports": "Defines wallet-keyed dashboard reads, retry behavior, and all-or-nothing degraded sampling."
+          "supports": "Defines dashboard daily-row consumption, baseline ordering, failed-batch behavior, and deploy verification."
         }
       ],
       "authority_qualifications": [
@@ -389,37 +449,37 @@
       "chosen_documents": [
         "docs/adr/0040-bounded-documentation-garden-queue.md"
       ],
-      "answer": "Freshness and inventory signals are not semantic proof, the full documentation corpus is too large for careful review, and an unattended partial edit could silently remove operating knowledge. The scheduler therefore performs deterministic, credential-free selection of one packet capped at 10 documents or 15,000 words and creates at most one immutable live Agent Task issue. Its mutation authority is issue-only; it cannot write repository content, open or merge a PR, deploy, or touch production. Semantic review requires evidence, a claimed issue, a normal reviewed PR, link repair, and catalog verification.",
+      "answer": "The garden creates one bounded issue because freshness and deterministic warnings are prompts, not semantic proof; the full corpus is too large for one careful pass, and an unattended model edit can silently delete operating knowledge. A deterministic planner selects at most 10 documents or 15,000 words and the scheduler creates at most one immutable live issue. Claimed or needs-grooming packets block later packets until resolved. The scheduled workflow may mutate Issues only; evidence-backed semantic changes still require the repo skill, a claimed issue, repaired links/catalog, and a normal reviewed PR, never direct scheduled edits or merges.",
       "evidence": [
         {
           "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
-          "line_start": 19,
+          "line_start": 21,
           "line_end": 30,
-          "supports": "Explains why freshness signals, full-corpus context, and unattended edits are unsafe."
+          "supports": "Explains the semantic-evidence, context-size, silent-deletion, and duplicate-backlog risks."
         },
         {
           "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
           "line_start": 34,
           "line_end": 50,
-          "supports": "Defines deterministic bounded selection and the single immutable live-issue queue."
+          "supports": "Defines deterministic bounded selection, one live immutable issue, and blocked-packet behavior."
         },
         {
           "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
           "line_start": 55,
           "line_end": 68,
-          "supports": "Restricts workflow authority to issue creation and requires evidence-backed semantic review through a normal PR."
+          "supports": "Limits workflow mutation authority and retains claimed issue, evidence, PR, links, and catalog gates."
         },
         {
           "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
           "line_start": 72,
           "line_end": 85,
-          "supports": "Rejects scheduled direct editing, weekly duplicate issues, mutable cursors, and full-repository reviews."
+          "supports": "Rejects direct LLM merging, overlapping weekly issues, and full-repository review."
         },
         {
           "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
-          "line_start": 87,
+          "line_start": 89,
           "line_end": 95,
-          "supports": "States the visible, claimable, bounded outcome and preserves content review before merge."
+          "supports": "States the bounded claimable consequence and that content pruning remains normal reviewed work."
         }
       ],
       "authority_qualifications": [
@@ -441,37 +501,43 @@
     {
       "question_id": "pr-hazard-stateful-data-ui",
       "chosen_documents": ["docs/pr-checklists/stateful-data-ui.md"],
-      "answer": "Use `docs/pr-checklists/stateful-data-ui.md`. It is mandatory for schema/entities, writers, generated and GraphQL types, dashboard readers, stateful UI, and partial-failure behavior. For each field, sequence the audit through schema and old-row rollout compatibility, every writer and codegen artifact, GraphQL/runtime/render/search consumers, then producer and UI tests plus fixtures. Define visible degraded behavior rather than silent failure, and cover happy render, state transitions and interactions, and missing-field or legacy-row failures; static markup alone is insufficient for risky interaction behavior.",
+      "answer": "Use `docs/pr-checklists/stateful-data-ui.md`; it is mandatory for an indexer field rendered by the dashboard. Define the invariant first, then audit schema type/nullability and old-row rollout behavior, every writer and generated artifact, every GraphQL/query/type/rendering reader, and producer/UI fixtures. Explicitly design missing/legacy/error/partial states so degradation is visible. Cover normal render, the relevant state transitions and actions, and failure/legacy-row behavior; static markup alone is insufficient for risky interaction behavior.",
       "evidence": [
         {
           "path": "docs/pr-checklists/stateful-data-ui.md",
           "line_start": 15,
           "line_end": 31,
-          "supports": "Makes the checklist mandatory across schema, writers, generated/read layers, UI state, and partial failures."
+          "supports": "Makes the checklist mandatory for schema, writers, generated queries/types, UI state, and rollout failures."
         },
         {
           "path": "docs/pr-checklists/stateful-data-ui.md",
           "line_start": 53,
           "line_end": 67,
-          "supports": "Defines schema compatibility, complete writer coverage, and codegen alignment."
+          "supports": "Requires schema/nullability/rollout checks and consistent writers plus refreshed generated artifacts."
         },
         {
           "path": "docs/pr-checklists/stateful-data-ui.md",
           "line_start": 69,
           "line_end": 80,
-          "supports": "Defines reader, rendering, search/sort/filter, producer, consumer, and fixture alignment."
+          "supports": "Requires all readers, types, rendering fields, producer/consumer tests, and fixtures to align."
         },
         {
           "path": "docs/pr-checklists/stateful-data-ui.md",
-          "line_start": 202,
-          "line_end": 218,
-          "supports": "Requires user-understandable degraded behavior and happy-path field rendering."
+          "line_start": 148,
+          "line_end": 165,
+          "supports": "Requires explicit behavior for failed queries, legacy rows, missing metadata, scale, and loading/partial states."
         },
         {
           "path": "docs/pr-checklists/stateful-data-ui.md",
-          "line_start": 219,
-          "line_end": 233,
-          "supports": "Requires state-transition, interaction, and failure/degraded tests and rejects static-only tests for interactive risks."
+          "line_start": 210,
+          "line_end": 224,
+          "supports": "Defines happy-path and state-transition interaction coverage."
+        },
+        {
+          "path": "docs/pr-checklists/stateful-data-ui.md",
+          "line_start": 226,
+          "line_end": 234,
+          "supports": "Defines degraded-mode tests and rejects static-only assertions for risky interactions."
         }
       ],
       "authority_qualifications": [
@@ -493,37 +559,37 @@
     {
       "question_id": "pr-hazard-ci-workflow-gates",
       "chosen_documents": ["docs/pr-checklists/ci-workflow-gates.md"],
-      "answer": "Use `docs/pr-checklists/ci-workflow-gates.md`. Preserve the ruleset-required `ci` sentinel, `Code Quality`, and Vercel contexts; required workflows must run on every PR without workflow-level path filters, while advisory workflows normally use path routing. Deploy jobs need an explicit main-branch job guard even for `workflow_dispatch`, and third-party actions must be pinned to full commit SHAs and checked with the pin validator. Treat the job-level branch guard as part of the workflow permission boundary rather than trusting maintainer dispatch access. Finally, keep `notify-slack-on-main-failure.yml` or the documented exclusion set synchronized and run the notifier-coverage check.",
+      "answer": "Use `docs/pr-checklists/ci-workflow-gates.md`. Preserve the ruleset-required `ci` sentinel (and `Code Quality`) as always-running checks: required workflows cannot have `paths` filters, while expensive path selection must happen inside a reporting job. Guard deploy jobs against non-main `workflow_dispatch`; pin every third-party action to a full commit SHA and run the pin checker. Keep `notify-slack-on-main-failure.yml` and its explicit workflow list or documented exclusion set aligned, and run the notifier-coverage checker. After changing a required workflow/check reporter, verify the live rollup with `pnpm pr:ready-state --pr <number> --json`.",
       "evidence": [
         {
           "path": "docs/pr-checklists/ci-workflow-gates.md",
-          "line_start": 13,
-          "line_end": 29,
-          "supports": "Defines checklist scope, always-run known-branch pinned-code policy, and the required-check path-filter failure mode."
+          "line_start": 15,
+          "line_end": 19,
+          "supports": "Scopes the checklist and states the always-run, known-branch, pinned-code rule."
         },
         {
           "path": "docs/pr-checklists/ci-workflow-gates.md",
-          "line_start": 31,
-          "line_end": 49,
-          "supports": "Names the required CI contexts and requires live ready-state verification after changes."
+          "line_start": 21,
+          "line_end": 35,
+          "supports": "Explains the never-ran required-check failure and identifies the required sentinel contexts."
         },
         {
           "path": "docs/pr-checklists/ci-workflow-gates.md",
-          "line_start": 54,
-          "line_end": 69,
-          "supports": "Defines required versus advisory path routing and the explicit main-branch deploy-job guard."
+          "line_start": 46,
+          "line_end": 57,
+          "supports": "Requires ready-state verification and bans required-workflow path filters while defining advisory routing."
         },
         {
           "path": "docs/pr-checklists/ci-workflow-gates.md",
-          "line_start": 71,
+          "line_start": 61,
           "line_end": 77,
-          "supports": "Requires full-SHA action pinning and the local pin validator."
+          "supports": "Requires main-branch deploy guards, full-SHA action pins, and the local pin checker."
         },
         {
           "path": "docs/pr-checklists/ci-workflow-gates.md",
           "line_start": 153,
-          "line_end": 161,
-          "supports": "Defines Slack notifier inclusion, documented exclusions, and structural coverage verification."
+          "line_end": 159,
+          "supports": "Defines notifier workflow inclusion/exclusion and structural coverage verification."
         }
       ],
       "authority_qualifications": [
@@ -545,19 +611,25 @@
     {
       "question_id": "pr-hazard-package-script-refusal",
       "chosen_documents": ["docs/notes/agent-quality-gate-mechanics.md"],
-      "answer": "The quality gate refuses execution because package manifests, the lockfile, workspace/package-manager configuration, or patches can change install-time scripts and lifecycle hooks; running mapped package commands before reviewing that surface would execute newly introduced behavior. After inspecting the package-script and lifecycle diff, rerun with `--allow-package-script-changes`, normally as `pnpm agent:quality-gate --run --allow-package-script-changes`.",
+      "answer": "The execution gate refuses because package manifests, `pnpm-lock.yaml`, workspace/npm/pnpm configuration, and patches can change package scripts or lifecycle code that the mapped checks would execute. The refusal forces a human/agent to inspect that lifecycle surface before branch-controlled package code runs. After that review, execute `pnpm agent:quality-gate --run --allow-package-script-changes`; the same acknowledgement is required for prewarm, and package-risk acknowledgement becomes part of freshness reuse for the push hook.",
       "evidence": [
         {
           "path": "docs/notes/agent-quality-gate-mechanics.md",
-          "line_start": 20,
-          "line_end": 31,
-          "supports": "Defines the inspect-then-run gate invocation contract and its local-only boundary."
+          "line_start": 55,
+          "line_end": 71,
+          "supports": "Defines mapped local execution and the package/lock/config/patch refusal plus required flag."
         },
         {
           "path": "docs/notes/agent-quality-gate-mechanics.md",
-          "line_start": 52,
-          "line_end": 65,
-          "supports": "Identifies risky package-manager surfaces, the refusal behavior, and the exact acknowledgement flag."
+          "line_start": 444,
+          "line_end": 464,
+          "supports": "Applies the same reviewed-lifecycle acknowledgement to prewarm and explains freshness reuse."
+        },
+        {
+          "path": "docs/notes/agent-quality-gate-mechanics.md",
+          "line_start": 465,
+          "line_end": 470,
+          "supports": "Makes acknowledgement part of the package-risk reuse key and documents the hook configuration path."
         }
       ],
       "authority_qualifications": [
@@ -571,21 +643,21 @@
       "loaded_sources": [
         {
           "path": "docs/notes/agent-quality-gate-mechanics.md",
-          "bytes": 11453,
-          "sha256": "e535c53c58a60e693f7a2060cfacf53ded0604928dbeedb443b03189eeb2fddf"
+          "bytes": 30584,
+          "sha256": "df35a52a81c9cea2372a3ebddb7f5e7307ce3c09ee000e0efd04e63526378351"
         }
       ]
     },
     {
       "question_id": "commands-documentation-tooling",
       "chosen_documents": ["docs/notes/quick-commands.md"],
-      "answer": "Run `pnpm docs:index --write` to regenerate the catalog and `pnpm docs:index --check` to verify catalog classification and links. Use `pnpm docs:audit --dry-run` to preview the bounded semantic-review packet. Use `pnpm docs:garden --dry-run --json` to preview the exact weekly garden issue decision without mutation.",
+      "answer": "Run `pnpm docs:index --write` to regenerate the catalog and `pnpm docs:index --check` to verify drift, classification, and internal links. Run `pnpm docs:audit --dry-run` to preview the bounded semantic-review packet without editing docs, and `pnpm docs:garden --dry-run --json` to preview the exact weekly garden-issue decision without mutation.",
       "evidence": [
         {
           "path": "docs/notes/quick-commands.md",
-          "line_start": 44,
-          "line_end": 57,
-          "supports": "Lists the catalog write/check, bounded audit preview, and non-mutating garden-decision preview commands."
+          "line_start": 53,
+          "line_end": 56,
+          "supports": "Lists all four catalog, audit-preview, and garden-decision-preview commands and their effects."
         }
       ],
       "authority_qualifications": [
@@ -599,27 +671,27 @@
       "loaded_sources": [
         {
           "path": "docs/notes/quick-commands.md",
-          "bytes": 10565,
-          "sha256": "9c2d4f70468976663531c622ab3babab21ad6bfd0305354d2d76d1c49af026da"
+          "bytes": 10464,
+          "sha256": "f09fd170caba0ca1e2361a699439512dcd67334125aa053752cc9ee267b74382"
         }
       ]
     },
     {
       "question_id": "commands-issue-lifecycle",
       "chosen_documents": ["docs/notes/agent-issue-workflow.md"],
-      "answer": "Claim ready work before edits with `pnpm issue:claim --count <n> --agent <name>` or `pnpm issue:claim --issue <issue> --agent <name>`. Move represented work into PR review with `pnpm issue:review --pr <pr> --issue <issue>`. If work cannot continue or a PR closes unmerged, use `pnpm issue:release --issue <issue>` only when the remainder is still clear and should return to `agent-ready`; otherwise use `pnpm issue:release --issue <issue> --needs-grooming`.",
+      "answer": "Claim ready work before edits with `pnpm issue:claim --count <n> --agent <name>` (or `--issue <number>` for a specific issue). Move represented work to review with `pnpm issue:review --pr <pr> --issue <issue>`. If work cannot continue or a PR closes unmerged, use `pnpm issue:release --issue <issue>` only when the remaining work is still agent-ready; otherwise use `pnpm issue:release --issue <issue> --needs-grooming`.",
       "evidence": [
         {
           "path": "docs/notes/agent-issue-workflow.md",
           "line_start": 58,
           "line_end": 78,
-          "supports": "Defines claim-before-edit, move-to-review, and ready versus needs-grooming release semantics."
+          "supports": "Defines claim, review, and ready-versus-needs-grooming release transitions."
         },
         {
           "path": "docs/notes/agent-issue-workflow.md",
           "line_start": 89,
-          "line_end": 99,
-          "supports": "Provides exact claim, review, and release command forms."
+          "line_end": 105,
+          "supports": "Lists exact commands and explains explicit issue selection and PR issue inference."
         }
       ],
       "authority_qualifications": [
@@ -641,37 +713,31 @@
     {
       "question_id": "commands-pr-readiness",
       "chosen_documents": ["docs/notes/pr-ready-state.md"],
-      "answer": "Before all-clear, run the shared final source of truth as `pnpm pr:ready-state --pr <number-or-url> --json`; all-clear requires `ready: true` for the current head. The Codex description gate requires a `chatgpt-codex-connector[bot]` `+1` reaction created at or after the current-head update lower bound. If Codex is externally blocked and every other required surface is clean, an authorized human may use `/pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>`; it applies only to that head and cannot override checks, conflicts, draft state, requested changes, unresolved threads, or unreplied comments.",
+      "answer": "The shared final probe is exactly `pnpm pr:ready-state --pr <number> --json`; declare all clear only when its final `ready` value is true for the current head. The Codex description gate requires a `chatgpt-codex-connector[bot]` `+1` created at or after the current-head update lower bound. If Codex is externally blocked and every other required surface is clean, an authorized human may use `/pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>`; it is head-scoped and overrides only that gate.",
       "evidence": [
         {
           "path": "docs/notes/pr-ready-state.md",
           "line_start": 13,
           "line_end": 22,
-          "supports": "Establishes pr:ready-state as the shared all-clear source of truth."
+          "supports": "Defines pr:ready-state as the shared source of truth before all-clear."
         },
         {
           "path": "docs/notes/pr-ready-state.md",
-          "line_start": 30,
-          "line_end": 50,
-          "supports": "Defines required checks, review state, and feedback blockers."
+          "line_start": 45,
+          "line_end": 57,
+          "supports": "Defines required review/comment gates and the current-head Codex +1 timing requirement."
         },
         {
           "path": "docs/notes/pr-ready-state.md",
-          "line_start": 54,
+          "line_start": 58,
           "line_end": 71,
-          "supports": "Defines the current-head Codex reaction gate and exact head-scoped break-glass syntax and limits."
+          "supports": "Defines the authorized, exact-head break-glass syntax and its narrow limits."
         },
         {
           "path": "docs/notes/pr-ready-state.md",
-          "line_start": 107,
-          "line_end": 112,
-          "supports": "Provides the shared probe command syntax including JSON mode."
-        },
-        {
-          "path": "docs/notes/pr-ready-state.md",
-          "line_start": 236,
-          "line_end": 242,
-          "supports": "Defines current-head Codex signal states and identifies approved as the final description +1 gate."
+          "line_start": 307,
+          "line_end": 323,
+          "supports": "Gives the exact final command and requires ready=true on the current head."
         }
       ],
       "authority_qualifications": [
@@ -685,27 +751,27 @@
       "loaded_sources": [
         {
           "path": "docs/notes/pr-ready-state.md",
-          "bytes": 15337,
-          "sha256": "a871eee63d0d0503b014794b4b3c0e97cc16a4b2e171b950ba955c737e1a49ce"
+          "bytes": 17766,
+          "sha256": "0571f7137eac68e921916a3167091ee61aaf0e42612f3a843952774c0d914271"
         }
       ]
     },
     {
       "question_id": "operator-alerts-stack-boundary",
       "chosen_documents": ["alerts/AGENTS.md"],
-      "answer": "The `alerts-delivery` Terraform stack rooted at `alerts/infra/` owns QuickNode webhook delivery, the Sentry-to-Slack bridge, Slack channel lifecycle, and the Splunk On-Call announcer. Keep it separate from `alerts-rules` because its cadence, providers, and blast radius differ. Always plan before apply and require explicit human approval; treat even cosmetic edits as potentially live external-API mutations. Validate and plan the stack, run the affected standalone Cloud Function typecheck and coverage suites, run the QuickNode state-parser test when that path changes, and run the agent quality gate; follow the Terraform/Cloud Run checklist for function deployment verification.",
+      "answer": "The `alerts-delivery` Terraform stack rooted at `alerts/infra/` owns QuickNode webhooks and their Cloud Function/Slack path, the Sentry-to-Slack bridge, and the Splunk On-Call rotation announcer. Keep it separate from `alerts-rules` because its providers, cadence, state, and blast radius differ. Before changing it: plan before apply and require explicit human approval; treat cosmetic edits as live external API mutations; preserve the chain-scoped QuickNode state-repair assumptions and standalone function lockfiles; run stack validation and `pnpm alerts:infra:plan`, relevant function typecheck/coverage, the webhook-state test when that parser/provisioner changes, the agent quality gate, and the Cloud Run checklist for deploy verification.",
       "evidence": [
         {
           "path": "alerts/AGENTS.md",
-          "line_start": 17,
-          "line_end": 33,
-          "supports": "Defines alerts-delivery ownership, stack separation, live external-API risk, approval, and active delivery paths."
+          "line_start": 19,
+          "line_end": 32,
+          "supports": "Defines the two-stack boundary, alerts/infra ownership, explicit approval, live APIs, state assumptions, and lockfiles."
         },
         {
           "path": "alerts/AGENTS.md",
           "line_start": 40,
           "line_end": 49,
-          "supports": "Defines validation, plan, function tests, QuickNode parser test, quality gate, and deployment-verification requirements."
+          "supports": "Lists validation, plan, package tests, webhook-state regression, quality gate, and Cloud Run verification."
         }
       ],
       "authority_qualifications": [
@@ -727,25 +793,31 @@
     {
       "question_id": "operator-worktree-bootstrap",
       "chosen_documents": ["docs/notes/worktree-and-web-setup.md"],
-      "answer": "For a manual fresh worktree or clone, run `./scripts/setup.sh`; Worktrunk-created worktrees run the same script automatically as a blocking pre-start hook. It installs dependencies, ensures Playwright Chromium, and produces the Envio generated type facade. Hosted Claude Code does not inherit local skills or shell state, so its SessionStart hook runs `./scripts/claude-code-web-setup.sh` only when `CLAUDE_CODE_REMOTE` is set. That hosted path performs the same install/codegen contract plus a Playwright install whose network-restricted failure is warning-only, and it relies on repo-local skill adapters rather than personal skills.",
+      "answer": "For a manually created worktree or clone, run `./scripts/setup.sh`; Worktrunk-created worktrees invoke the same script automatically as a blocking pre-start hook. It installs dependencies, ensures Playwright Chromium, and runs Envio codegen. Hosted Claude Code instead enters through the repo SessionStart hook and `./scripts/claude-code-web-setup.sh`, gated by `CLAUDE_CODE_REMOTE`; it recreates the same install/codegen contract in a container that lacks local skills/environment and performs a best-effort, non-fatal Chromium install. Repo-local skill adapters provide ship/babysit behavior without personal skills.",
       "evidence": [
         {
           "path": "docs/notes/worktree-and-web-setup.md",
           "line_start": 18,
           "line_end": 31,
-          "supports": "Defines the supported setup script, its outputs, and automatic Worktrunk invocation."
+          "supports": "Defines manual setup, its outputs, and automatic Worktrunk invocation."
+        },
+        {
+          "path": "docs/notes/worktree-and-web-setup.md",
+          "line_start": 33,
+          "line_end": 40,
+          "supports": "Explains local marker-backed setup reuse and platform-specific Playwright behavior."
         },
         {
           "path": "docs/notes/worktree-and-web-setup.md",
           "line_start": 42,
           "line_end": 58,
-          "supports": "Defines hosted Claude SessionStart bootstrap, remote gating, parity with local setup, and non-fatal Playwright behavior."
+          "supports": "Defines the hosted SessionStart bootstrap, remote gate, shared setup contract, and non-fatal Chromium step."
         },
         {
           "path": "docs/notes/worktree-and-web-setup.md",
           "line_start": 60,
           "line_end": 67,
-          "supports": "Explains repo-local hosted skill adapters and their command-backed fallback."
+          "supports": "Explains repo-local skill adapters and the hosted readiness-watch fallback."
         }
       ],
       "authority_qualifications": [
@@ -766,55 +838,37 @@
     },
     {
       "question_id": "operator-doc-garden-recovery",
-      "chosen_documents": ["docs/notes/documentation-gardening.md"],
-      "answer": "The planner deterministically chooses one of six lanes by UTC week and advances shards across rotations, with each packet capped at 10 documents and 15,000 words. The recurring workflow creates one issue only when no live marked issue exists. An `agent-ready`, `agent-active`, or `in-pr` occurrence remains immutable; `needs-grooming` remains the single blocked packet until human resolution; conflicting markers or labels fail closed; an empty lane is a no-op. Recovery preserves the markers and claimed scope, identifies the true owner, closes only a real duplicate or restores one lifecycle label, then reruns dry-run. Every document needs an evidence-backed disposition; age alone never justifies deletion or demotion, `last_verified` requires comparison with owning code or authority, navigation must be repaired, and semantic edits require a claimed issue and normal reviewed PR.",
+      "chosen_documents": [".agents/skills/doc-garden/SKILL.md"],
+      "answer": "Start from the generated issue: verify both garden markers, all eight Agent Task sections, and the complete planner packet, then claim it before semantic edits. Reproduce selection with `pnpm docs:audit --dry-run --date <selected-for> --lane <lane> --shard <shard>` and compare fingerprint and file list; reconcile catalog drift explicitly. Never overwrite a packet already `needs-grooming`, `agent-active`, or `in-pr`; it remains the one live packet until resolved or closed. If no issue exists, use the current dry-run packet only to bound the audit, then create or claim an Agent Task before editing. For each document, inspect the full document and owning sources, choose exactly one disposition, record concrete evidence, make only supported changes, repair inbound links/indexes, and never delete merely because a document is old; unresolved ownership decisions leave the document unchanged.",
       "evidence": [
         {
-          "path": "docs/notes/documentation-gardening.md",
-          "line_start": 21,
-          "line_end": 37,
-          "supports": "Defines deterministic six-lane weekly selection and no-op behavior."
+          "path": ".agents/skills/doc-garden/SKILL.md",
+          "line_start": 22,
+          "line_end": 39,
+          "supports": "Defines marker validation, claim/blocked behavior, deterministic packet reproduction, fingerprint reconciliation, and no-issue recovery."
         },
         {
-          "path": "docs/notes/documentation-gardening.md",
-          "line_start": 39,
-          "line_end": 50,
-          "supports": "Defines shard bounds and distinguishes planner signals from semantic conclusions."
+          "path": ".agents/skills/doc-garden/SKILL.md",
+          "line_start": 41,
+          "line_end": 52,
+          "supports": "Requires full owning-context review, one disposition, concrete evidence, supported changes, and link repair."
         },
         {
-          "path": "docs/notes/documentation-gardening.md",
-          "line_start": 52,
-          "line_end": 58,
-          "supports": "Defines the one-issue recurring workflow and semantic-review ownership."
+          "path": ".agents/skills/doc-garden/SKILL.md",
+          "line_start": 54,
+          "line_end": 63,
+          "supports": "Forbids age-only deletion, unverifiable metadata changes, scope expansion, and guessing through ownership conflicts."
         },
         {
-          "path": "docs/notes/documentation-gardening.md",
-          "line_start": 60,
-          "line_end": 74,
-          "supports": "Defines retention of claimed or blocked occurrences and fail-closed queue handling."
-        },
-        {
-          "path": "docs/notes/documentation-gardening.md",
-          "line_start": 102,
-          "line_end": 106,
-          "supports": "Defines duplicate/label recovery while preserving markers and claimed scope."
-        },
-        {
-          "path": "docs/notes/documentation-gardening.md",
-          "line_start": 108,
-          "line_end": 124,
-          "supports": "Requires evidence-backed dispositions and forbids age-only deletion, unverified freshness bumps, and direct semantic edits."
-        },
-        {
-          "path": "docs/notes/documentation-gardening.md",
-          "line_start": 126,
-          "line_end": 128,
-          "supports": "Requires catalog verification and reviewed regeneration after classification changes."
+          "path": ".agents/skills/doc-garden/SKILL.md",
+          "line_start": 65,
+          "line_end": 80,
+          "supports": "Defines catalog/gate verification, disposition evidence, and normal reviewed-PR completion."
         }
       ],
       "authority_qualifications": [
         {
-          "path": "docs/notes/documentation-gardening.md",
+          "path": ".agents/skills/doc-garden/SKILL.md",
           "authority": "canonical",
           "qualification": "",
           "verified_against": []
@@ -822,9 +876,9 @@
       ],
       "loaded_sources": [
         {
-          "path": "docs/notes/documentation-gardening.md",
-          "bytes": 6218,
-          "sha256": "3838a93d6c950502af6f7cd0764cd9141c053b34f1f8c07f1eeb2bec3b939218"
+          "path": ".agents/skills/doc-garden/SKILL.md",
+          "bytes": 3313,
+          "sha256": "d0b6afc662e72aed6b74503044db48a34870953f9bb8fcb2b17335f3d7e3c5d9"
         }
       ]
     }

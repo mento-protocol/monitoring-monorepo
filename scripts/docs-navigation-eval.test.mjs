@@ -248,6 +248,8 @@ test("prompt is deterministic and never leaks routes or qualification traps", ()
   assert.match(first, /250,000 UTF-8 bytes/);
   assert.match(first, /documentation-navigation-\*\.json/);
   assert.match(first, /result schema remains allowed/);
+  assert.match(first, /do not\s+repeat them in an answer's `loaded_sources`/);
+  assert.match(first, /scripts\/docs-navigation-eval-result\.mjs/);
   assert.ok(!first.includes("shared-config/AGENTS.md"));
   assert.ok(!first.includes("docs/PLAN-celo-mainnet-indexer.md"));
   const targeted = buildNavigationPrompt(context.suite, {
@@ -321,6 +323,24 @@ test("wrong source bytes or hashes are rejected", () => {
   const scored = score(result);
   assert.match(scored.errors.join("\n"), /expected/);
   assert.match(scored.errors.join("\n"), /wrong sha256/);
+});
+
+test("per-answer loaded sources cannot repeat bootstrap sources", () => {
+  const result = validResult();
+  const bootstrap = result.run.bootstrap_sources[0];
+  result.answers[0].loaded_sources.push({ ...bootstrap });
+  result.answers[0].authority_qualifications.push({
+    path: bootstrap.path,
+    authority: "canonical",
+    qualification: "",
+    verified_against: [],
+  });
+  const scored = score(result);
+  assert.match(
+    scored.errors.join("\n"),
+    /repeats bootstrap source AGENTS\.md in loaded_sources/,
+  );
+  assert.equal(scored.report.passed, false);
 });
 
 test("reported future answer artifacts are rejected", () => {
@@ -515,12 +535,14 @@ test("route order and shortest useful path are measured independently", () => {
   );
   answer.chosen_documents.reverse();
   let scored = score(result);
-  assert.equal(
-    scored.report.questions.find(
-      (question) => question.question_id === answer.question_id,
-    ).routing_correct,
-    false,
+  const reversedReport = scored.report.questions.find(
+    (question) => question.question_id === answer.question_id,
   );
+  assert.equal(reversedReport.routing_correct, false);
+  assert.equal(reversedReport.evidence_complete, true);
+  assert.equal(scored.report.routing_accuracy_percent, 94.4);
+  assert.equal(scored.report.answer_evidence_percent, 100);
+  assert.equal(scored.report.passed, true);
   answer.chosen_documents.reverse();
   answer.chosen_documents.push("docs/context-standards.md");
   answer.loaded_sources.push(source("docs/context-standards.md"));
@@ -809,6 +831,7 @@ test("generated result artifacts do not create routing-change reminders", () => 
   );
   for (const pathname of [
     "AGENTS.md",
+    "README.md",
     "docs/evals/documentation-navigation-fixtures.json",
     "docs/evals/documentation-navigation-result.schema.json",
     "docs/evals/documentation-navigation.md",
@@ -823,6 +846,10 @@ test("CLI parsing enforces one explicit mode", () => {
   assert.equal(
     parseArgs(["--prompt", "--question", "commands-pr-readiness"]).questionId,
     "commands-pr-readiness",
+  );
+  assert.equal(
+    parseArgs(["--prompt", "--base-commit", "a".repeat(40)]).baseCommit,
+    "a".repeat(40),
   );
   assert.equal(
     parseArgs([
@@ -841,6 +868,15 @@ test("CLI parsing enforces one explicit mode", () => {
   assert.throws(
     () => parseArgs(["--check-fixtures", "--question", "x"]),
     /valid only with --prompt or --validate/,
+  );
+  assert.throws(
+    () =>
+      parseArgs(["--validate", "result.json", "--base-commit", "a".repeat(40)]),
+    /valid only with --prompt/,
+  );
+  assert.throws(
+    () => parseArgs(["--prompt", "--base-commit", "abc"]),
+    /40-character lowercase commit/,
   );
 });
 

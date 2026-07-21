@@ -43,11 +43,16 @@ Use a versioned, offline evaluation contract:
 - A deterministic local scorer recomputes routing accuracy, authority
   compliance, evidence coverage, shortest useful path, and context bytes. The
   initial pass contract is at least 90% routing accuracy, zero unqualified
-  non-canonical reliance, complete evidence, and no context-budget breach.
+  non-canonical reliance, complete evidence for every chosen document, and no
+  context-budget breach. Evidence coverage is independent of whether the
+  chosen document order matches an accepted route, so the 90% routing target
+  is not silently tightened to 100% by the evidence target.
 - Prompt generation requires a clean checkout, and the scorer reads source
-  blobs from the result's claimed commit. The contract/routing changes land
-  first; the fresh result is then captured as a separate immutable baseline
-  commit.
+  blobs from the result's claimed commit. A committed result names a commit
+  reachable from the default branch in a full-history checkout. The contract
+  may land first and the result follow from merged `main`; for a pre-change
+  baseline in the same squash PR, the prompt pins the fetched `origin/main`
+  ancestor instead of an intermediate branch commit.
 - CI runs only fixture, validator, scorer, and issue-synchronizer tests. It
   never holds a model secret or invokes a model.
 - The serialized `Documentation Garden` workflow creates at most one separate

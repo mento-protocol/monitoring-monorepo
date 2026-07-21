@@ -56,6 +56,7 @@ export function parseArgs(argv, env = process.env) {
     baselinePath: DEFAULT_BASELINE,
     resultPath: null,
     questionId: null,
+    baseCommit: null,
     date: new Date().toISOString().slice(0, 10),
     dryRun: parseBoolean(
       env.DOCS_NAVIGATION_EVAL_DRY_RUN,
@@ -95,6 +96,7 @@ export function parseArgs(argv, env = process.env) {
     else if (arg === "--root") options.repoRoot = readValue();
     else if (arg === "--fixtures") options.fixturesPath = readValue();
     else if (arg === "--baseline") options.baselinePath = readValue();
+    else if (arg === "--base-commit") options.baseCommit = readValue();
     else if (arg === "--date") options.date = readValue();
     else if (arg === "--dry-run") options.dryRun = true;
     else if (arg === "--json") options.json = true;
@@ -108,6 +110,12 @@ export function parseArgs(argv, env = process.env) {
   }
   if (options.questionId && !["prompt", "validate"].includes(options.mode)) {
     throw new Error("--question is valid only with --prompt or --validate");
+  }
+  if (options.baseCommit && options.mode !== "prompt") {
+    throw new Error("--base-commit is valid only with --prompt");
+  }
+  if (options.baseCommit && !/^[0-9a-f]{40}$/.test(options.baseCommit)) {
+    throw new Error("--base-commit must be a 40-character lowercase commit");
   }
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(options.repo)) {
     throw new Error("--repo must be an owner/repository slug");
@@ -132,6 +140,7 @@ Modes:
 
 Options:
   --question ID          Generate or validate one failed/contested question
+  --base-commit SHA      Prompt against an explicit reachable historical commit
   --repo OWNER/REPO      GitHub repository for issue scheduling
   --root PATH            Repository root (default: current directory)
   --fixtures PATH        Fixture JSON path relative to the repository root
@@ -349,10 +358,16 @@ async function main() {
   }
   if (options.mode === "prompt") {
     assertCleanEvaluationCheckout(context.repoRoot);
-    const baseCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+    const baseCommit =
+      options.baseCommit ??
+      execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: context.repoRoot,
+        encoding: "utf8",
+      }).trim();
+    execFileSync("git", ["cat-file", "-e", `${baseCommit}^{commit}`], {
       cwd: context.repoRoot,
-      encoding: "utf8",
-    }).trim();
+      stdio: "ignore",
+    });
     process.stdout.write(
       buildNavigationPrompt(context.suite, {
         baseCommit,

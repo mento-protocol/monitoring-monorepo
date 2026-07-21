@@ -345,6 +345,8 @@ Rules:
   on it; the scorer automatically de-duplicates the complete-run byte total.
 - Include one authority-qualification entry for every reported source;
   canonical sources may use an empty qualification and verification list.
+- The bootstrap sources are reported once in \`run.bootstrap_sources\`; do not
+  repeat them in an answer's \`loaded_sources\` or authority qualifications.
 - ${answerScope.slice(2)}
 - Return only one JSON object matching
   \`docs/evals/documentation-navigation-result.schema.json\`.
@@ -445,6 +447,7 @@ export function isRoutingSensitivePath(file) {
     file === "AGENTS.md" ||
     file.endsWith("/AGENTS.md") ||
     file === "package.json" ||
+    file === "README.md" ||
     file.endsWith("/README.md") ||
     file.startsWith("docs/") ||
     file.startsWith(".agents/skills/") ||

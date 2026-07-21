@@ -56,6 +56,7 @@ pnpm docs:audit --dry-run          # Print this week's bounded semantic-review p
 pnpm docs:garden --dry-run --json  # Read the garden queue and preview the exact weekly issue decision without mutations
 pnpm docs:navigation-eval -- --check-fixtures  # Validate fresh-agent navigation questions, routes, and budgets
 pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only evaluation prompt; never invokes a model
+pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
