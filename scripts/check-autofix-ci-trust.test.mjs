@@ -280,6 +280,40 @@ test("the guard only counts on the JOB-LEVEL if:, not in steps or comments", () 
   assert(evaluateWorkflow(multilineIf).ok, "multiline job if: credited");
 });
 
+test("top-level content AFTER jobs: still counts as header (secrets and annotations)", () => {
+  // YAML allows workflow-level keys below jobs:. A trailing env: secret must
+  // still mark every job secret-bearing, and a trailing annotation must still
+  // cover the file.
+  const trailingEnvSecret = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    steps:",
+    "      - run: pnpm test",
+    "env:",
+    "  TOKEN: ${{ secrets.SOME_TOKEN }}",
+  ].join("\n");
+  const v = evaluateWorkflow(trailingEnvSecret);
+  assert(!v.ok && /\[x\]/.test(v.reason), "post-jobs env secret still counted");
+
+  const trailingAnnotation = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    steps:",
+    "      - run: pnpm test",
+    "env:",
+    "  TOKEN: ${{ secrets.SOME_TOKEN }}",
+    "# autofix-ci-trust: token is a public fixture value, not a secret-bearing lane.",
+  ].join("\n");
+  assert(
+    evaluateWorkflow(trailingAnnotation).ok,
+    "post-jobs file-level annotation still honored",
+  );
+});
+
 test("workflow-level env secrets make every job secret-bearing", () => {
   // Top-level `env: TOKEN: ${{ secrets.X }}` is inherited by all jobs; a job
   // with no textual secret reference still receives it.

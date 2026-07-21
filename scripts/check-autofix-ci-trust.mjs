@@ -148,48 +148,53 @@ export function hasPullRequestTrigger(body) {
 /**
  * Split the workflow body into named job blocks. Textual, indentation-based:
  * the repo's workflows are prettier/trunk-formatted with 2-space YAML indent,
- * so a job is a `  name:` key directly under the top-level `jobs:` key. Lines
- * before `jobs:` form the file HEADER (returned under the empty-string key) —
- * a file-level annotation there covers every job.
+ * so a job is a `  name:` key directly under the top-level `jobs:` key. ALL
+ * top-level content OUTSIDE the jobs block — before it AND after it (YAML
+ * allows `env:`/`permissions:` etc. below `jobs:`) — is merged into the file
+ * HEADER (returned under the empty-string key): a file-level annotation there
+ * covers every job, and a workflow-level `env:` secret there is inherited by
+ * every job, wherever it appears in the file.
  */
 export function splitJobs(body) {
   const lines = body.split("\n");
   const blocks = new Map();
-  let current = "";
+  const headerParts = [];
+  let current = ""; // "" = accumulating header content
   let inJobs = false;
   let buf = [];
+  const flush = () => {
+    if (current === "") headerParts.push(buf.join("\n"));
+    else blocks.set(current, buf.join("\n"));
+    buf = [];
+  };
   for (const line of lines) {
     if (!inJobs && /^jobs\s*:\s*(#.*)?$/.test(line)) {
-      blocks.set(current, buf.join("\n"));
+      flush();
       inJobs = true;
       current = null;
-      buf = [];
       continue;
     }
     if (inJobs) {
       const jobKey = line.match(/^ {2}([A-Za-z0-9_-]+)\s*:\s*(#.*)?$/);
       if (jobKey) {
-        if (current !== null) blocks.set(current, buf.join("\n"));
+        if (current !== null) flush();
         current = jobKey[1];
-        buf = [];
         continue;
       }
       if (/^\S/.test(line) && line.trim() !== "") {
-        // Left the jobs: block (another top-level key).
-        if (current !== null) blocks.set(current, buf.join("\n"));
-        current = null;
+        // Left the jobs: block — this and following top-level content is
+        // header material again (workflow-level env:, concurrency:, …).
+        if (current !== null) flush();
+        current = "";
         inJobs = false;
-        buf = [];
+        buf.push(line);
         continue;
       }
     }
     buf.push(line);
   }
-  if (current !== null && current !== undefined) {
-    blocks.set(current === null ? "" : current, buf.join("\n"));
-  } else if (!inJobs) {
-    blocks.set("", buf.join("\n"));
-  }
+  if (current !== null) flush();
+  blocks.set("", headerParts.join("\n"));
   return blocks;
 }
 
