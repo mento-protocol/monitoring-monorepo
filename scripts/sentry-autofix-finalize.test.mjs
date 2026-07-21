@@ -138,6 +138,10 @@ await test("guard refuses nested scripts dirs and CI-executed config surfaces", 
     "aegis/terraform/dashboard.tf",
     "anywhere/nested/module.hcl",
     "terraform/terraform.tfvars.example",
+    // Terraform's JSON syntax loads identically to HCL — same plan-time
+    // execution surface, same prohibition.
+    "alerts/infra/main.tf.json",
+    "aegis/terraform/values.tfvars.json",
   ]) {
     assert(isForbiddenPath(path), `expected forbidden: ${path}`);
   }

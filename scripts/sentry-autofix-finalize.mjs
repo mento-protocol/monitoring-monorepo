@@ -121,9 +121,11 @@ const FORBIDDEN_BASENAME_PATTERNS = [
   /\.sh$/,
   /^Dockerfile/,
   /\.ya?ml$/,
-  /\.tf$/,
-  /\.hcl$/,
-  /\.tfvars(\.example)?$/,
+  // Terraform in BOTH syntaxes: HCL (*.tf/*.hcl/*.tfvars) and the JSON forms
+  // Terraform loads identically (*.tf.json, *.tfvars.json).
+  /\.tf(\.json)?$/,
+  /\.hcl(\.json)?$/,
+  /\.tfvars(\.example|\.json)?$/,
 ];
 
 // ---------------------------------------------------------------------------

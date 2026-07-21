@@ -221,6 +221,20 @@ export function evaluateWorkflow(body) {
   const blocks = splitJobs(body);
   const header = blocks.get("") ?? "";
   const fileAnnotated = header.includes(ANNOTATION);
+  const jobNames = [...blocks.keys()].filter((k) => k !== "");
+  // FAIL CLOSED when segmentation finds no jobs but the file as a whole can
+  // receive secrets: a workflow written with non-2-space indentation (or any
+  // shape this textual splitter cannot segment) must not silently bypass the
+  // per-job analysis. Reformat the workflow (trunk/prettier enforce 2-space
+  // YAML in this repo) or annotate at file level.
+  if (jobNames.length === 0 && referencesSecrets(body)) {
+    if (fileAnnotated) return { ok: true };
+    return {
+      ok: false,
+      reason:
+        "triggers on pull_request and references secrets, but no job blocks could be segmented (non-standard indentation?). The per-job trust analysis cannot run — reformat to the repo's 2-space YAML style or add a file-level '# autofix-ci-trust:' annotation above `jobs:`.",
+    };
+  }
   const offenders = [];
   for (const [job, block] of blocks) {
     if (job === "") continue;

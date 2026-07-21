@@ -237,6 +237,23 @@ test("a per-job annotation satisfies that job; a header annotation covers all jo
   assert(evaluateWorkflow(fileLevel).ok, "header annotation covers all jobs");
 });
 
+test("un-segmentable secret-bearing workflow FAILS CLOSED", () => {
+  // 4-space job indentation defeats the textual splitter; the checker must
+  // refuse rather than silently skip the per-job analysis.
+  const weirdIndent = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "    x:",
+    "     " + SECRET_LINE.trim(),
+  ].join("\n");
+  const v = evaluateWorkflow(weirdIndent);
+  assert(
+    !v.ok && /segmented/.test(v.reason),
+    "fails closed on odd indentation",
+  );
+});
+
 test("secretless pull_request workflows and non-PR workflows pass untouched", () => {
   assert(
     evaluateWorkflow(
