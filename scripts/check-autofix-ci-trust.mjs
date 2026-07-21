@@ -17,16 +17,20 @@
  *  1. NO workflow may use `pull_request_target` (it hands secrets to
  *     PR-controlled context by design; the repo has none and must stay that
  *     way).
- *  2. Every workflow that triggers on `pull_request` AND references
- *     `${{ secrets.* }}` must either
- *       (a) contain the literal `sentry-autofix/` — evidence of an explicit
- *           guard (a job `if:` exclusion or an untrusted-lane branch), or
- *       (b) carry an `# autofix-ci-trust:` annotation comment stating WHY no
- *           guard is needed (secret step-scoped away from PR-head code
+ *  2. Every JOB that can receive secrets in a `pull_request`-triggered
+ *     workflow (its own reference, or one inherited from workflow-level
+ *     `env:`) must either
+ *       (a) carry the strict EXCLUDING guard on its job-level `if:`
+ *           (`!startsWith(github.event.pull_request.head.ref,
+ *           'sentry-autofix/')` — see GUARD_PATTERN; nothing looser counts),
+ *           or
+ *       (b) carry an `# autofix-ci-trust:` annotation COMMENT LINE stating
+ *           WHY no guard is needed (secret step-scoped away from PR-head code
  *           execution, actor-gated job, paths the autofix diff guard forbids,
- *           …). The annotation is deliberate friction: it forces the author
- *           of a new secret lane to reason about the autofix trust boundary
- *           in the diff, where review sees it.
+ *           …) — in the job block, or at file level covering all jobs. The
+ *           annotation is deliberate friction: it forces the author of a new
+ *           secret lane to reason about the autofix trust boundary in the
+ *           diff, where review sees it.
  *
  * SCOPE / STATED LIMITATION: this is a textual tripwire, not an expression
  * evaluator. It verifies the excluding guard is PRESENT on the job-level
@@ -59,6 +63,19 @@ const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
 const GUARD_PATTERN =
   /!\s*startsWith\(\s*github\.(?:event\.pull_request\.head\.ref|head_ref)\s*,\s*'sentry-autofix\/'\s*\)/;
 const ANNOTATION = "# autofix-ci-trust:";
+
+/** True when the text contains a GENUINE annotation: a YAML comment line
+ * (optionally indented `#` at line start). A raw substring check would accept
+ * lookalikes smuggled into string values (`run: "echo '# autofix-ci-trust:'"`)
+ * — the line-anchored form refuses those. (A lookalike nested inside a block
+ * scalar still line-starts with `#` and passes; distinguishing that needs a
+ * YAML parser. Accepted: workflow files are NOT autofix-editable — the diff
+ * guard forbids `.github/` — so this checker defends against honest omissions
+ * in reviewed human PRs, not adversarial workflow authors, who by definition
+ * hold write access to CI itself.) */
+function hasAnnotation(text) {
+  return /^\s*#\s*autofix-ci-trust:/m.test(text);
+}
 
 let failures = 0;
 
@@ -116,12 +133,13 @@ export function hasTrigger(body, trigger) {
         const l = lines[j];
         if (l.trim() === "") continue;
         if (!/^\s/.test(l)) break; // left the `on:` block
-        // Trigger names appear as 2-space-indented keys or list items,
-        // optionally quoted.
-        if (new RegExp(`^\\s{2}-?\\s*${q}${t}${q}(?![\\w-])`).test(l)) {
+        // Trigger names appear as indented keys or list items at ANY positive
+        // indentation (one-space indent is valid YAML), optionally quoted.
+        // Config keys (branches/paths) never equal a trigger name, so
+        // accepting any depth cannot false-positive on config.
+        if (new RegExp(`^\\s+-?\\s*${q}${t}${q}(?![\\w-])`).test(l)) {
           return true;
         }
-        // Deeper-indented lines are trigger CONFIG (branches/paths), skip.
       }
     }
   }
@@ -269,7 +287,7 @@ export function evaluateWorkflow(body) {
   }
   const blocks = splitJobs(body);
   const header = blocks.get("") ?? "";
-  const fileAnnotated = header.includes(ANNOTATION);
+  const fileAnnotated = hasAnnotation(header);
   const jobNames = [...blocks.keys()].filter((k) => k !== "");
   // FAIL CLOSED when segmentation finds no jobs but the file as a whole can
   // receive secrets: a workflow written with non-2-space indentation (or any
@@ -293,7 +311,7 @@ export function evaluateWorkflow(body) {
     if (job === "") continue;
     if (!referencesSecrets(block) && !headerHasSecrets) continue;
     if (fileAnnotated) continue;
-    if (jobIfGuarded(block) || block.includes(ANNOTATION)) continue;
+    if (jobIfGuarded(block) || hasAnnotation(block)) continue;
     offenders.push(job);
   }
   if (offenders.length === 0) {

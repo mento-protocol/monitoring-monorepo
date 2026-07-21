@@ -59,6 +59,11 @@ test("trigger detection covers block, bare-key, inline-list, inline-scalar, inli
     usesPullRequestTarget("on:\n  pull_request_target:\n"),
     "block pull_request_target detected",
   );
+  // One-space indentation under on: is valid YAML — must not fail open.
+  assert(
+    hasTrigger("on:\n pull_request:\n  branches: [main]", "pull_request"),
+    "one-space indent block form",
+  );
   // Quoted YAML scalars/keys are valid trigger spellings.
   assert(
     hasTrigger('on: ["pull_request"]\n', "pull_request"),
@@ -291,6 +296,31 @@ test("the guard only counts on the JOB-LEVEL if:, not in steps or comments", () 
     SECRET_LINE,
   ].join("\n");
   assert(evaluateWorkflow(multilineIf).ok, "multiline job if: credited");
+});
+
+test("annotation lookalikes inside string values do NOT count", () => {
+  // Only a genuine YAML comment line is a reviewed annotation; a string that
+  // merely CONTAINS the marker (e.g. echoed in a run:) must not certify a job.
+  const smuggled = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    steps:",
+    "      - run: \"echo '# autofix-ci-trust: not a real annotation'\"",
+    SECRET_LINE,
+  ].join("\n");
+  assert(!evaluateWorkflow(smuggled).ok, "string-value lookalike refused");
+
+  const genuine = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    # autofix-ci-trust: secret is step-scoped to a pinned action.",
+    SECRET_LINE,
+  ].join("\n");
+  assert(evaluateWorkflow(genuine).ok, "genuine comment line accepted");
 });
 
 test("top-level content AFTER jobs: still counts as header (secrets and annotations)", () => {
