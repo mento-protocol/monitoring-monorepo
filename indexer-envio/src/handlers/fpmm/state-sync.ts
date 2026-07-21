@@ -158,12 +158,14 @@ indexer.onEvent(
           },
         })
       : null;
+    let rebalancingStateRpcSucceeded = false;
     if (!resolved) {
       const rs = await context.effect(rebalancingStateEffect, {
         chainId: event.chainId,
         poolAddress: asAddress(event.srcAddress),
         blockNumber,
       });
+      rebalancingStateRpcSucceeded = Boolean(rs);
       resolved = rs ? scaleRpcRebalanceState(rs, existing) : null;
     }
 
@@ -196,6 +198,9 @@ indexer.onEvent(
         rebalanceThreshold: resolved.rebalanceThreshold,
         priceDifference: resolved.priceDifference,
         degenerateReserves: updateReservesDegenerate,
+        // A successful contract read proves its oracle was live at this
+        // block: getRebalancingState reverts on stale or expired data.
+        ...(rebalancingStateRpcSucceeded ? { oracleOk: true } : {}),
         ...(orientationKnown
           ? {
               oraclePrice: updateReservesOraclePrice,
@@ -424,6 +429,7 @@ indexer.onEvent(
       (rebalancingStateRpc
         ? scaleRpcRebalanceState(rebalancingStateRpc, existing)
         : null);
+    const rebalancingStateRpcSucceeded = Boolean(rebalancingStateRpc);
 
     const rebalancerAddress = asAddress(event.params.sender);
 
@@ -467,6 +473,9 @@ indexer.onEvent(
       oracleDelta = {
         ...oracleDelta,
         rebalanceThreshold: resolved.rebalanceThreshold,
+        // Match UpdateReserves: a successful authoritative read proves the
+        // contract accepted the oracle as live for this block.
+        ...(rebalancingStateRpcSucceeded ? { oracleOk: true } : {}),
         ...(rebalancedOrientationKnown
           ? {
               oraclePrice: rebalancedOraclePrice,
