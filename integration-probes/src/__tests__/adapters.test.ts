@@ -90,6 +90,23 @@ const monadChain: ChainProbeConfig = {
   ],
 };
 
+const polygonInput: QuoteProbeInput = {
+  ...input,
+  chainId: 137,
+  pairId: "137:USDC-USDm:137-0xpool",
+  sellToken: {
+    symbol: "USDC",
+    address: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+    decimals: 6,
+  },
+  buyToken: {
+    symbol: "USDm",
+    address: "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
+    decimals: 18,
+  },
+  amountRaw: "1000000",
+};
+
 describe("probeAdapterPair", () => {
   it("returns needs_key when credentials are missing", async () => {
     const adapter: AggregatorAdapter = {
@@ -1339,6 +1356,32 @@ describe("aggregator quote builders", () => {
     }
   });
 
+  it("marks every configured quote adapter supported on Polygon", () => {
+    const polygonAdapters = [
+      "lifi",
+      "squid",
+      "openocean",
+      "kyberswap",
+      "1inch",
+      "0x",
+      "relay",
+      "socket",
+      "rubic",
+    ];
+
+    for (const id of polygonAdapters) {
+      const adapter = AGGREGATOR_ADAPTERS.find((item) => item.id === id);
+      expect(adapter?.support[137], id).toBe("supported");
+      expect(adapter?.quote, id).toEqual(expect.any(Function));
+    }
+  });
+
+  it("declares Polygon support explicitly for every adapter", () => {
+    for (const adapter of AGGREGATOR_ADAPTERS) {
+      expect(adapter.support[137], adapter.id).toBeDefined();
+    }
+  });
+
   it("builds configured quote requests for v1 live adapters", () => {
     const env = {
       LIFI_API_KEY: "lifi-key",
@@ -1486,6 +1529,50 @@ describe("aggregator quote builders", () => {
     expect(request?.url).toContain(`src=${input.sellToken.address}`);
     expect(request?.url).toContain(`dst=${input.buyToken.address}`);
     expect(JSON.stringify(request?.init?.headers)).toContain("one-inch-key");
+  });
+
+  it("uses each provider's canonical Polygon chain identifier", () => {
+    const env = {
+      LIFI_API_KEY: "lifi-key",
+      OPENOCEAN_API_KEY: "test-openocean-key",
+      ZEROX_API_KEY: "0x-key",
+      ONEINCH_API_KEY: "test-one-inch-key",
+      SOCKET_API_KEY: "socket-key",
+      SQUID_INTEGRATOR_ID: "squid-id",
+    };
+    const requestFor = (id: string) =>
+      firstQuoteRequest(
+        AGGREGATOR_ADAPTERS.find((item) => item.id === id)?.quote?.(
+          polygonInput,
+          env,
+        ),
+      );
+
+    expect(requestFor("openocean")?.url).toContain("/v4/polygon/swap");
+    expect(requestFor("kyberswap")?.url).toContain("/polygon/api/v1/routes");
+    expect(requestFor("1inch")?.url).toContain("/swap/v6.1/137/quote");
+    expect(
+      new URL(requestFor("0x")?.url ?? "").searchParams.get("chainId"),
+    ).toBe("137");
+    expect(
+      new URL(requestFor("lifi")?.url ?? "").searchParams.get("fromChain"),
+    ).toBe("137");
+    expect(
+      new URL(requestFor("socket")?.url ?? "").searchParams.get("fromChainId"),
+    ).toBe("137");
+
+    expect(JSON.parse(String(requestFor("relay")?.init?.body))).toMatchObject({
+      originChainId: 137,
+      destinationChainId: 137,
+    });
+    expect(JSON.parse(String(requestFor("rubic")?.init?.body))).toMatchObject({
+      srcTokenBlockchain: "POLYGON",
+      dstTokenBlockchain: "POLYGON",
+    });
+    expect(JSON.parse(String(requestFor("squid")?.init?.body))).toMatchObject({
+      fromChain: "137",
+      toChain: "137",
+    });
   });
 
   it("requires an OpenOcean Pro API key before probing OpenOcean", async () => {

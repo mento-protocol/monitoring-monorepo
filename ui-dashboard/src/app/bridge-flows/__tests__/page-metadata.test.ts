@@ -24,7 +24,7 @@ describe("BridgeFlowsPage route metadata", () => {
     const metadata = await generateMetadata();
 
     expect(metadata.description).toBe(
-      "Wormhole bridge transfers of Mento stable tokens across Celo and Monad.",
+      "Wormhole bridge transfers of Mento stable tokens across Celo, Monad, and Polygon.",
     );
     expect(metadata.openGraph).toEqual(
       expect.objectContaining({ description: metadata.description }),
@@ -36,7 +36,7 @@ describe("BridgeFlowsPage route metadata", () => {
 
   it("includes zero metrics when snapshots return empty results", async () => {
     mockFetchBridgeFlowsOgData.mockResolvedValueOnce({
-      chains: ["Celo", "Monad"],
+      chains: ["Celo", "Monad", "Polygon"],
       volume30dUsd: 0,
       totalTransfers30d: 0,
     });
@@ -45,12 +45,12 @@ describe("BridgeFlowsPage route metadata", () => {
 
     expect(metadata.description).toContain("30d bridged volume $0.00");
     expect(metadata.description).toContain("0 transfers");
-    expect(metadata.description).toContain("on Celo + Monad");
+    expect(metadata.description).toContain("on Celo + Monad + Polygon");
   });
 
   it("builds a populated bridge-flow description", async () => {
     mockFetchBridgeFlowsOgData.mockResolvedValueOnce({
-      chains: ["Celo", "Monad"],
+      chains: ["Celo", "Monad", "Polygon"],
       volume30dUsd: 1_250_000,
       totalTransfers30d: 42,
     });
@@ -59,12 +59,12 @@ describe("BridgeFlowsPage route metadata", () => {
 
     expect(metadata.description).toContain("30d bridged volume");
     expect(metadata.description).toContain("42 transfers");
-    expect(metadata.description).toContain("on Celo + Monad");
+    expect(metadata.description).toContain("on Celo + Monad + Polygon");
   });
 
   it("falls back when all metric fields are null", async () => {
     mockFetchBridgeFlowsOgData.mockResolvedValueOnce({
-      chains: ["Celo", "Monad"],
+      chains: ["Celo", "Monad", "Polygon"],
       volume30dUsd: null,
       totalTransfers30d: null,
     });
@@ -72,7 +72,7 @@ describe("BridgeFlowsPage route metadata", () => {
     const metadata = await generateMetadata();
 
     expect(metadata.description).toBe(
-      "Wormhole bridge transfers of Mento stable tokens across Celo and Monad.",
+      "Wormhole bridge transfers of Mento stable tokens across Celo, Monad, and Polygon.",
     );
   });
 });

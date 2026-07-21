@@ -11,6 +11,7 @@ import {
 // Chain IDs used in tests (mainnet only — startup guard only covers mainnet)
 const CELO = 42220;
 const MONAD = 143;
+const POLYGON = 137;
 
 describe("assertStartBlocksValid", () => {
   it("passes when no env overrides are set", () => {
@@ -22,6 +23,7 @@ describe("assertStartBlocksValid", () => {
       assertStartBlocksValid({
         [CELO]: undefined,
         [MONAD]: "",
+        [POLYGON]: undefined,
       }),
     );
   });
@@ -31,6 +33,7 @@ describe("assertStartBlocksValid", () => {
       assertStartBlocksValid({
         [CELO]: String(FPMM_FIRST_DEPLOY_BLOCK[CELO]),
         [MONAD]: String(FPMM_FIRST_DEPLOY_BLOCK[MONAD]),
+        [POLYGON]: String(FPMM_FIRST_DEPLOY_BLOCK[POLYGON]),
       }),
     );
   });
@@ -81,6 +84,19 @@ describe("assertStartBlocksValid", () => {
       (err: unknown) => {
         assert(err instanceof Error);
         assert(err.message.includes(START_BLOCK_ENV_NAME[MONAD]));
+        return true;
+      },
+    );
+  });
+
+  it("throws for Polygon when an override skips the block-90348018 factory events", () => {
+    const tooHigh = FPMM_FIRST_DEPLOY_BLOCK[POLYGON] + 1;
+    assert.throws(
+      () => assertStartBlocksValid({ [POLYGON]: String(tooHigh) }, true),
+      (err: unknown) => {
+        assert(err instanceof Error);
+        assert(err.message.includes(START_BLOCK_ENV_NAME[POLYGON]));
+        assert(err.message.includes("90348018"));
         return true;
       },
     );

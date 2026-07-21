@@ -90,6 +90,7 @@ export function useHeroRollup({
   kpiSource,
   kpiSourceIdentity,
   kpiSourceIsCapHit,
+  chainIdIn,
   initialData,
 }: {
   venue: Venue;
@@ -108,6 +109,7 @@ export function useHeroRollup({
   kpiSourceIdentity?: VolumeQueryIdentity | undefined;
   /** Cap state paired with `kpiSource`; retained displays keep this version. */
   kpiSourceIsCapHit: boolean;
+  chainIdIn: readonly number[];
   /** Server-prefetched hero responses (perf-plan S4), forwarded to the
    *  matching `useGQL` calls as `fallbackData` so the first render paints
    *  populated tiles. Only attached when the prefetched view descriptor
@@ -140,12 +142,9 @@ export function useHeroRollup({
 } {
   // Today's UTC midnight in seconds. The hero snapshot's upper bound is
   // yesterday, so today's TraderDailySnapshot rows fill in the gap.
-  // Memoised on `utcDayKey` so it flips at midnight without retriggering
-  // every minute.
-  const todayMidnight = useMemo(
-    () => Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY,
-    [utcDayKey],
-  );
+  // Derived from the route's explicit day key so SSR and hydration use the
+  // same query identity; the URL-state hook advances the key at midnight.
+  const todayMidnight = utcDayKey * SECONDS_PER_DAY;
 
   // View-parity gate for the SSR prefetch: only attach fallbackData when the
   // prefetched descriptor matches this render's key ingredients exactly (the
@@ -166,6 +165,7 @@ export function useHeroRollup({
       range,
       isProtocolActorIn,
       todayMidnight,
+      chainIdIn,
     })
       ? initialData
       : undefined;
@@ -176,7 +176,7 @@ export function useHeroRollup({
   // added client-side.
   const heroV3Result = useGQL<HeroV3Data>(
     venue === "v3" ? VOLUME_WINDOW_LATEST : null,
-    { windowKey: range },
+    { windowKey: range, chainIdIn },
     {
       schema: VolumeWindowLatestSchema,
       fallbackData: fallback?.heroV3,
@@ -185,7 +185,7 @@ export function useHeroRollup({
   );
   const heroV2Result = useGQL<HeroV2Data>(
     venue === "v2" ? BROKER_VOLUME_WINDOW_LATEST : null,
-    { windowKey: range },
+    { windowKey: range, chainIdIn },
     {
       schema: BrokerVolumeWindowLatestSchema,
       fallbackData: fallback?.heroV2,
@@ -205,14 +205,14 @@ export function useHeroRollup({
     volumeTodayTraders: VolumeTodayTraderRow[];
   }>(
     venue === "v3" ? VOLUME_TODAY_TRADERS : null,
-    { todayMidnight, isProtocolActorIn },
+    { todayMidnight, chainIdIn, isProtocolActorIn },
     { schema: VolumeTodayTradersSchema, fallbackData: fallback?.todayV3 },
   );
   const todayV2Result = useGQL<{
     brokerVolumeTodayTraders: VolumeTodayTraderRow[];
   }>(
     venue === "v2" ? BROKER_VOLUME_TODAY_TRADERS : null,
-    { todayMidnight, isProtocolActorIn },
+    { todayMidnight, chainIdIn, isProtocolActorIn },
     { schema: BrokerVolumeTodayTradersSchema, fallbackData: fallback?.todayV2 },
   );
 
@@ -234,7 +234,7 @@ export function useHeroRollup({
     volumeWindowFirstDaySnapshots: VolumeWindowFirstDayRow[];
   }>(
     venue === "v3" ? VOLUME_WINDOW_FIRSTDAY_LATEST : null,
-    { windowKey: range },
+    { windowKey: range, chainIdIn },
     {
       schema: VolumeWindowFirstDayLatestSchema,
       fallbackData: fallback?.firstDayV3,
@@ -245,7 +245,7 @@ export function useHeroRollup({
     brokerVolumeWindowFirstDaySnapshots: VolumeWindowFirstDayRow[];
   }>(
     venue === "v2" ? BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST : null,
-    { windowKey: range },
+    { windowKey: range, chainIdIn },
     {
       schema: BrokerVolumeWindowFirstDayLatestSchema,
       fallbackData: fallback?.firstDayV2,

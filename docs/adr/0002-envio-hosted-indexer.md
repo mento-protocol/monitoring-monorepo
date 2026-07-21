@@ -3,7 +3,7 @@ title: Envio HyperIndex Hosted is the indexer; deploy via a dedicated envio bran
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
 scope: repo-wide
 date: 2026-03
 doc_type: adr
@@ -19,8 +19,9 @@ garden_lane: adrs-architecture
 ## Context
 
 We need historical + live indexing of FPMM pools, oracles, breakers, the v2
-Broker, bridges, and reserve-yield across Celo, Monad, and Ethereum, exposed as a
-queryable API — without running our own indexing infrastructure or archival RPC.
+Broker, bridges, and reserve-yield across Celo, Monad, Polygon, and Ethereum,
+exposed as a queryable API — without running our own indexing infrastructure or
+archival RPC.
 
 ## Decision
 

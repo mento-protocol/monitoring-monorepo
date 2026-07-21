@@ -88,10 +88,10 @@ export type NetworkData = {
   brokerSnapshotsAllDailyTruncated: boolean;
   olsPoolIds: Set<string>;
   /**
-   * Pool IDs classified as CDP or Reserve for global strategy badges. CDP
-   * badges are Celo-only and come from indexed CdpPool rows. Reserve badges
-   * require a positive signal too: canonical contracts-derived Reserve
-   * strategy addresses on indexed chains, or non-Celo fallback probes.
+   * Pool IDs classified as CDP or Reserve for global strategy badges. The
+   * active PoolLiquidityStrategy registry is authoritative and can classify
+   * multiple simultaneous kinds for one pool. Legacy CdpPool, known-contract,
+   * and RPC sources are used only while the registry schema is unavailable.
    */
   cdpPoolIds: Set<string>;
   reservePoolIds: Set<string>;

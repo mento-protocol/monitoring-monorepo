@@ -36,6 +36,7 @@ const USDM_CELO = "0x765de816845861e75a25fca122bb6898b8b1282a";
 const EURM_CELO = "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73";
 const USDC_CELO = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C";
 const USDM_MONAD = "0xBC69212B8E4d445b2307C9D32dD68E2A4Df00115"; // USDmSpoke
+const EUROP_POLYGON = "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51";
 
 // A plausible attacker-controlled ERC20 address — deliberately not in the
 // registry. Using a low-entropy address to make diffs readable.
@@ -72,6 +73,12 @@ describe("isKnownFeeToken — registration gate", () => {
 
   it("accepts known Monad tokens (USDmSpoke stripped to USDm)", () => {
     assert.equal(isKnownFeeToken(143, USDM_MONAD), true);
+  });
+
+  it("accepts corrected 6-decimal Polygon EUROP metadata", () => {
+    assert.equal(isKnownFeeToken(137, EUROP_POLYGON), true);
+    assert.equal(isStaticallyBoundStableToken(137, EUROP_POLYGON), false);
+    assert.equal(shouldRegisterErc20FeeToken(137, EUROP_POLYGON), true);
   });
 
   // ---------- reject attacker-controlled / unknown tokens ----------

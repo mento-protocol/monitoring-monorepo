@@ -12,8 +12,8 @@ EOT
 resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
   name = "Slack - Stale Price Alert Message"
   # Per-feed explorer links to relayer signers are set by the chain-specific
-  # `${local.celo_relayer_signer_branches}` and
-  # `${local.monad_relayer_signer_branches}` fragments (one independent
+  # `${local.celo_relayer_signer_branches}`, `${local.monad_relayer_signer_branches}`,
+  # and `${local.polygon_relayer_signer_branches}` fragments (one independent
   # `{{ if eq .Labels.rateFeed "X" }}` block per entry — see locals.tf for
   # the source maps). Each fragment is wrapped in a matching `{{ if eq
   # .Labels.chain ... }}` guard so same-named feeds only render links through
@@ -45,11 +45,22 @@ ${local.celo_relayer_signer_branches}
 {{ if or (eq .Labels.chain "monad") (eq .Labels.chain "monad-testnet") -}}
 ${local.monad_relayer_signer_branches}
 {{ end -}}
+{{/* polygon and polygon-testnet share signer addresses; split maps if testnet diverges. */ -}}
+{{ if or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-testnet") -}}
+${local.polygon_relayer_signer_branches}
+{{ end -}}
 {{ $titleURL := .GeneratorURL -}}
 {{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
-*<{{ $titleURL }}|Stale price for the {{ $slash }} rate feed on {{ $chain }}>*
+{{ if and (or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-testnet")) (eq .Labels.rateFeed "EUROPEUR") -}}
+*<{{ $titleURL }}|{{ $slash }} fixed oracle report expired on {{ $chain }}> — swaps using this feed may revert until the fixed report is refreshed*
+Next action: inspect the fixed 1.0 EUR-parity report in this chain's SortedOracles, then contact the deployment/migration owner responsible for it.
+{{ else -}}
+*<{{ $titleURL }}|{{ $slash }} oracle report expired on {{ $chain }}> — swaps using this feed may revert until a fresh report is relayed*
+Next action: confirm the relayer is executing, then inspect errors for this feed.
+- If this is an FX feed during the weekend market closure, snooze it and escalate the monitoring configuration; this alert should have been muted
 - Check the latest transactions of the {{ if $relayer -}}<https://{{ .Labels.explorer }}/address/{{ $relayer }}|{{ $slash }} relayer on {{ $chain }}>{{- else -}}{{ $slash }} relayer on {{ $chain }}{{- end }}
 - Check if the <https://console.cloud.google.com/logs/query;query=resource.labels.service_name%3D%22relay-{{ .Labels.chain }}%22%20AND%20labels.rateFeed%3D%22{{ $enc }}%22?project=${local.oracle_relayer_mainnet_project_id}|relayer cloud function> is still being triggered regularly
+{{ end -}}
 
 {{ end -}}
 {{ range .Alerts.Resolved -}}
@@ -58,7 +69,7 @@ ${local.monad_relayer_signer_branches}
 {{ $chain := .Labels.chain | title -}}
 {{ $titleURL := .GeneratorURL -}}
 {{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
-*<{{ $titleURL }}|{{ $slash }} price is fresh again on {{ $chain }}>*
+*<{{ $titleURL }}|{{ $slash }} oracle report is fresh again on {{ $chain }}> — swap availability has recovered*
 {{ end -}}
 {{ end }}
 EOT
@@ -80,7 +91,7 @@ resource "grafana_message_template" "slack_oracle_relayer_low_balance_alert_mess
 {{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner -}}
 *<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Low {{ .Labels.token }} balance for {{ $pair }} Relayer on {{ .Labels.chain | title }}> — {{ .Annotations.currentBalance }} {{ .Labels.token }} left*
 - Top up the <https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|relayer wallet> to keep the relayer running
-- Run the <https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts|relayer refill script>, or send 50 {{ .Labels.token }} from the dev wallet
+- Run the <https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts|relayer refill script>, or top up from the dev wallet until the balance is at least {{ .Annotations.threshold }} {{ .Labels.token }}
 - Get the dev wallet private key from the Eng vault in 1Password
 
 {{ end -}}
@@ -106,13 +117,13 @@ resource "grafana_message_template" "slack_reserve_balance_alert_message" {
 {{ range .Alerts.Firing -}}
 {{ $token := .Labels.token -}}
 {{ $reserveAddress := .Labels.ownerValue -}}
-*<https://celoscan.io/address/{{ $reserveAddress }}|Low {{ $token }} balance in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }} left*
+*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|Low {{ $token }} balance in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }} left*
 - Top up the {{ .Labels.owner }} above the alert threshold of {{ .Annotations.threshold }} {{ $token }}
 {{ end -}}
 {{ range .Alerts.Resolved -}}
 {{ $token := .Labels.token -}}
 {{ $reserveAddress := .Labels.ownerValue -}}
-*<https://celoscan.io/address/{{ $reserveAddress }}|Sufficient {{ $token }} balance restored in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }}*
+*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|Sufficient {{ $token }} balance restored in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }}*
 {{ end -}}
 {{ end }}
 EOT
@@ -135,9 +146,9 @@ resource "grafana_message_template" "slack_trading_mode_alert_title" {
 
 resource "grafana_message_template" "slack_trading_mode_alert_message" {
   name = "Slack - Trading Mode Alert Message"
-  # Pool URL: `$pool` is set per-chain by the `celo_pool_branches` / `monad_pool_branches`
-  # fragments (one independent `{{ if eq .Labels.rateFeed "X" -}}` block per entry, see
-  # locals.tf). When set, we build `monitoring.mento.org/pool/<chain_id>-<pool>?tab=oracle`;
+  # Pool URL: `$pool` is set per-chain by the `*_pool_branches` fragments (one
+  # independent `{{ if eq .Labels.rateFeed "X" -}}` block per entry, see locals.tf).
+  # When set, we build `monitoring.mento.org/pool/<chain_id>-<pool>?tab=oracle`;
   # otherwise we fall back to the Grafana alert-details URL so the bullet still resolves.
   # Chainlink URL: gated on both `$chainlinkFeedPath` (chain-level — empty for testnets)
   # AND `$chainlinkSlug` (per-rateFeed allowlist — only set for feeds Chainlink actually
@@ -167,6 +178,10 @@ ${local.celo_chainlink_slug_branches}
 {{ if eq .Labels.chain "monad" -}}
 ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
+{{ end -}}
+{{ if eq .Labels.chain "polygon" -}}
+${local.polygon_pool_branches}
+${local.polygon_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}

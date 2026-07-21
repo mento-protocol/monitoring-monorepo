@@ -35,6 +35,7 @@ export function V3VolumeSection({
   filteredTraderRows,
   traders,
   pools,
+  chainIdIn,
   protocolActorFilter,
   canUseVolumeFilters,
   tableState,
@@ -49,6 +50,7 @@ export function V3VolumeSection({
   filteredTraderRows: readonly TraderDailyRow[];
   traders: readonly TraderWindowRow[];
   pools: PoolMeta;
+  chainIdIn: readonly number[];
   protocolActorFilter: ReadonlyArray<boolean>;
   canUseVolumeFilters: boolean;
   tableState: V3TableState;
@@ -65,6 +67,7 @@ export function V3VolumeSection({
         traderRows={filteredTraderRows}
         traders={traders}
         pools={pools}
+        chainIdIn={chainIdIn}
         protocolActorFilter={protocolActorFilter}
         tableState={{
           isLoading: tableState.isLoading,

@@ -70,7 +70,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0033](0033-adr-process-and-gate.md)                    | ADRs record architectural decisions, enforced by a reminder gate                |
 | [0036](0036-sentry-triage-pipeline.md)                  | Sentry triage/autofix: staged GitHub Actions agent pipeline + GH-Issue queue    |
 | [0038](0038-sentry-central-plane-verdict-projection.md) | Central Sentry triage plane; actionable verdicts projected into owning repos    |
-| [0039](0039-bounded-documentation-garden-queue.md)      | Weekly bounded documentation packets enter one serialized GitHub Issue queue    |
+| [0040](0040-bounded-documentation-garden-queue.md)      | Weekly bounded documentation packets enter one serialized GitHub Issue queue    |
 
 ### shared-config
 
@@ -81,29 +81,31 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### indexer-envio
 
-| ADR                                                  | Decision                                                                            |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [0012](0012-one-multichain-indexer.md)               | One multichain indexer project; Ethereum reserve-yield shares the hosted deployment |
-| [0013](0013-vendored-shared-config-mirror.md)        | The indexer vendors a mirror of `shared-config` (it builds outside the workspace)   |
-| [0014](0014-snapshot-entities-no-aggregate.md)       | Precompute snapshot/rollup entities; never rely on Hasura `_aggregate`              |
-| [0015](0015-abi-vendoring-and-address-drift-gate.md) | Vendor ABIs from the contracts package; gate every config address on a drift check  |
-| [0016](0016-effect-rpc-split-and-heal-stages.md)     | Split effects/RPC from handlers; decompose `upsertPool` into pure heal-stages       |
-| [0017](0017-broker-denormalization-volume-dedup.md)  | Denormalize the v2 Broker swap path to de-duplicate router-routed volume            |
-| [0018](0018-indexer-observability-loki.md)           | Indexer observability is structured logs → Loki → Grafana, not Sentry               |
-| [0034](0034-steth-wallet-daily-sampler.md)           | stETH actuals use a launch-aligned sub-daily wallet balance sampler                 |
+| ADR                                                      | Decision                                                                            |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [0012](0012-one-multichain-indexer.md)                   | One multichain indexer project; Ethereum reserve-yield shares the hosted deployment |
+| [0013](0013-vendored-shared-config-mirror.md)            | The indexer vendors a mirror of `shared-config` (it builds outside the workspace)   |
+| [0014](0014-snapshot-entities-no-aggregate.md)           | Precompute snapshot/rollup entities; never rely on Hasura `_aggregate`              |
+| [0015](0015-abi-vendoring-and-address-drift-gate.md)     | Vendor ABIs from the contracts package; gate every config address on a drift check  |
+| [0016](0016-effect-rpc-split-and-heal-stages.md)         | Split effects/RPC from handlers; decompose `upsertPool` into pure heal-stages       |
+| [0017](0017-broker-denormalization-volume-dedup.md)      | Denormalize the v2 Broker swap path to de-duplicate router-routed volume            |
+| [0018](0018-indexer-observability-loki.md)               | Indexer observability is structured logs → Loki → Grafana, not Sentry               |
+| [0034](0034-steth-wallet-daily-sampler.md)               | stETH actuals use a launch-aligned sub-daily wallet balance sampler                 |
+| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses     |
 
 ### ui-dashboard
 
-| ADR                                                  | Decision                                                                          |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------- |
-| [0019](0019-vercel-path-aware-deploys.md)            | Dashboard deploys on Vercel Git integration with a path-aware skip script         |
-| [0020](0020-swr-polling-read-model.md)               | Read model is SWR polling + client-side aggregation at current pool scale         |
-| [0021](0021-dashboard-state-upstash-blob.md)         | Dashboard state lives in Upstash Redis with Vercel Blob backups, not a DB         |
-| [0022](0022-authjs-google-shared-preview-secrets.md) | Auth.js + Google; preview shares prod auth secrets behind Deployment Protection   |
-| [0023](0023-es2017-no-polyfill.md)                   | Ship ES2017 with no polyfill; ban immutable-array methods via lint + `sortedCopy` |
-| [0024](0024-plotly-basic-dist-bundle-budgets.md)     | Plotly.js `basic-dist` + enforced bundle-size budgets                             |
-| [0025](0025-fixture-browser-tests-react-doctor.md)   | Fixture-driven browser tests + visual snapshots + a react-doctor score gate       |
-| [0037](0037-dashboard-graphql-zod-mini.md)           | Native GraphQL transport + Zod Mini for browser-reachable validation              |
+| ADR                                                      | Decision                                                                          |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| [0019](0019-vercel-path-aware-deploys.md)                | Dashboard deploys on Vercel Git integration with a path-aware skip script         |
+| [0020](0020-swr-polling-read-model.md)                   | Read model is SWR polling + client-side aggregation at current pool scale         |
+| [0021](0021-dashboard-state-upstash-blob.md)             | Dashboard state lives in Upstash Redis with Vercel Blob backups, not a DB         |
+| [0022](0022-authjs-google-shared-preview-secrets.md)     | Auth.js + Google; preview shares prod auth secrets behind Deployment Protection   |
+| [0023](0023-es2017-no-polyfill.md)                       | Ship ES2017 with no polyfill; ban immutable-array methods via lint + `sortedCopy` |
+| [0024](0024-plotly-basic-dist-bundle-budgets.md)         | Plotly.js `basic-dist` + enforced bundle-size budgets                             |
+| [0025](0025-fixture-browser-tests-react-doctor.md)       | Fixture-driven browser tests + visual snapshots + a react-doctor score gate       |
+| [0037](0037-dashboard-graphql-zod-mini.md)               | Native GraphQL transport + Zod Mini for browser-reachable validation              |
+| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool detail renders every active strategy from the indexed many-to-many registry  |
 
 ### aegis
 
@@ -113,9 +115,10 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### metrics-bridge
 
-| ADR                                                 | Decision                                                                 |
-| --------------------------------------------------- | ------------------------------------------------------------------------ |
-| [0027](0027-metrics-bridge-hasura-to-prometheus.md) | A Hasura→Prometheus bridge exists so v3 DB data can drive Grafana alerts |
+| ADR                                                      | Decision                                                                     |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [0027](0027-metrics-bridge-hasura-to-prometheus.md)      | A Hasura→Prometheus bridge exists so v3 DB data can drive Grafana alerts     |
+| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool blockage requires every active indexed strategy to be confirmed blocked |
 
 ### terraform / infra
 

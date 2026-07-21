@@ -60,6 +60,14 @@ describe("bridge redeem helpers", () => {
     ).toBe(true);
   });
 
+  it("flags in-flight Wormhole transfers to Polygon as manually redeemable", () => {
+    expect(
+      canManuallyRedeemTransfer(
+        makeTransfer({ sourceChainId: 42220, destChainId: 137 }),
+      ),
+    ).toBe(true);
+  });
+
   it("rejects transfers to unsupported destination chains", () => {
     expect(canManuallyRedeemTransfer(makeTransfer({ destChainId: 999 }))).toBe(
       false,

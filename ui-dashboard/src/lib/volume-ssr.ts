@@ -83,6 +83,7 @@ async function fetchVolumeHeroUncached(
   // the cache can never serve a stale UTC day past midnight — and so the view
   // descriptor records exactly what was fetched.
   todayMidnight: number,
+  chainIdIn: readonly number[],
 ): Promise<VolumeHeroInitialData | undefined> {
   // `/volume` isn't a pool route, so NetworkProvider always resolves
   // DEFAULT_NETWORK on the client — prefetch against the same endpoint the
@@ -99,8 +100,8 @@ async function fetchVolumeHeroUncached(
   // degrades the catch-up (chains render as degraded), never the hero.
   const firstDaySignal = AbortSignal.timeout(FIRST_DAY_TIMEOUT_MS);
   const isProtocolActorIn = protocolActorInForView(includeProtocolActors);
-  const windowVariables = { windowKey: range };
-  const todayVariables = { todayMidnight, isProtocolActorIn };
+  const windowVariables = { windowKey: range, chainIdIn };
+  const todayVariables = { todayMidnight, chainIdIn, isProtocolActorIn };
 
   // Built per-branch (not hoisted) so `venue` carries its narrowed literal
   // type into the discriminated `VolumeHeroInitialData` union member.
@@ -109,6 +110,7 @@ async function fetchVolumeHeroUncached(
     range,
     includeProtocolActors,
     todayMidnight,
+    chainIdIn: [...chainIdIn],
   };
 
   if (venue === "v2") {

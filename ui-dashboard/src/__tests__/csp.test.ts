@@ -40,6 +40,8 @@ describe("buildCspWithNonce", () => {
     expect(connectSrc).toContain("https://forno.celo.org");
     expect(connectSrc).toContain("https://rpc2.monad.xyz");
     expect(connectSrc).toContain("https://testnet-rpc.monad.xyz");
+    expect(connectSrc).toContain("https://polygon.drpc.org");
+    expect(connectSrc).toContain("https://rpc-amoy.polygon.technology");
     expect(connectSrc).toContain("wss://ws-us3.pusher.com");
   });
 

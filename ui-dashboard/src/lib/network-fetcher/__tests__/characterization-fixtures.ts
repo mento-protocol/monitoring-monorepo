@@ -75,6 +75,7 @@ const DEFAULT_RESPONSES: Record<string, Record<string, unknown>> = {
   AllPoolsVpDeprecation: { BiPoolExchange: [] },
   AllPoolsVpLifecycleDeprecation: { VirtualPoolLifecycle: [] },
   AllOlsPools: { OlsPool: [] },
+  AllActivePoolLiquidityStrategies: { PoolLiquidityStrategy: [] },
   AllCdpPools: { CdpPool: [] },
   PoolDailyFeeSnapshotsPage: { PoolDailyFeeSnapshot: [] },
   PoolDailySnapshotsAll: { PoolDailySnapshot: [] },

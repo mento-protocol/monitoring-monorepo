@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { getRpcClient, _resetRpcClientsForTests } from "../src/rpc.js";
 
-const CHAINS_WITH_FULL_NODE_DEFAULT = [42220, 11142220, 143] as const;
+const CHAINS_WITH_FULL_NODE_DEFAULT = [42220, 11142220, 143, 137] as const;
 
 describe("getRpcClient", () => {
   // Snapshot env to restore between tests — `RPC_URL_*` overrides leak.
@@ -22,6 +22,7 @@ describe("getRpcClient", () => {
     delete process.env.RPC_URL_10143;
     delete process.env.RPC_URL_42220;
     delete process.env.RPC_URL_143;
+    delete process.env.RPC_URL_137;
     delete process.env.RPC_URL_11142220;
   });
 
@@ -67,8 +68,8 @@ describe("getRpcClient", () => {
   it.each(CHAINS_WITH_FULL_NODE_DEFAULT)(
     "returns a client for chain %i (full-node default present)",
     (chainId) => {
-      // Defaults: forno.celo.org / forno.celo-sepolia.celo-testnet.org / rpc2.monad.xyz.
-      // All three are full-node RPCs that serve eth_call.
+      // Defaults: Forno, Celo Sepolia Forno, Monad RPC, and Polygon dRPC.
+      // All four are full-node RPCs that serve eth_call.
       const client = getRpcClient(chainId);
       expect(client).not.toBeNull();
     },

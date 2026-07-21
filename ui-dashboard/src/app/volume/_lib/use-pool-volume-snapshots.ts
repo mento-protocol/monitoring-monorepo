@@ -43,6 +43,7 @@ function finishAfterDeadline(
 export async function fetchPoolVolumeSnapshots(
   hasuraUrl: string,
   afterTimestamp: number,
+  chainIdIn: readonly number[],
 ): Promise<PoolVolumeResult> {
   const client = new GraphQLClient(hasuraUrl);
   const rows: PoolDailyVolumeRow[] = [];
@@ -66,6 +67,7 @@ export async function fetchPoolVolumeSnapshots(
         document: POOL_DAILY_VOLUME,
         variables: {
           afterTimestamp,
+          chainIdIn,
           limit: PAGE_SIZE,
           offset: page * PAGE_SIZE,
         },
@@ -97,10 +99,12 @@ export function usePoolVolumeSnapshots({
   enabled,
   afterTimestamp,
   range,
+  chainIdIn,
 }: {
   enabled: boolean;
   afterTimestamp: number;
   range: VolumeRangeKey;
+  chainIdIn: readonly number[];
 }): {
   rows: PoolDailyVolumeRow[];
   isLoading: boolean;
@@ -129,10 +133,15 @@ export function usePoolVolumeSnapshots({
           network.hasuraUrl,
           range,
           afterTimestamp,
+          chainIdIn,
         ]
       : null,
     async () => ({
-      ...(await fetchPoolVolumeSnapshots(network.hasuraUrl, afterTimestamp)),
+      ...(await fetchPoolVolumeSnapshots(
+        network.hasuraUrl,
+        afterTimestamp,
+        chainIdIn,
+      )),
       range,
     }),
     {

@@ -32,15 +32,15 @@ If the answer fits in `notes` (≤500 chars, single fact like "Binance hot 14"),
 
 Two facts shape every tool choice in this skill:
 
-1. **Mento is multi-chain and growing.** Celo (`42220`) is primary and where most targets live. **Monad (`143`) is live** (secondary). **Polygon and Ethereum are on the roadmap.** Never hardcode `42220`; thread the target chain id through every chain-scoped call.
+1. **Mento is multi-chain and growing.** Celo (`42220`) is primary and where most targets live. Monad (`143`) is live in the Mento indexer; the Polygon (`137`) protocol deployment is live and its indexer coverage is configured pending deployment, sync verification, and promotion. Ethereum (`1`) carries reserve-yield monitoring. Never hardcode `42220`; thread the target chain id through every chain-scoped call.
 2. **One key, many chains.** If someone controls a private key on Celo, the same EOA almost always has a history on other EVM chains (Ethereum, Base, Arbitrum, …). That cross-chain footprint is usually where the _identity_ lives — ENS, OpenSea, CEX deposits, prior bots — because the richest attribution tools (Arkham, Nansen, EigenPhi, MetaSleuth) index Ethereum/L2s but **not** Celo.
 
 So split the work into two legs and pick tools per leg:
 
-- **On-chain behaviour leg** (what the address _does_ — swaps, storage, capital, venues): use Celo/Monad-native sources (the Mento Envio indexer, Blockscout, Dune `celo.*`/`monad.*`, GeckoTerminal (Celo; no Monad) / DexScreener, `cast` vs the chain's RPC). These are the only ones that actually see the target chain.
+- **On-chain behaviour leg** (what the address _does_ — swaps, storage, capital, venues): use chain-native sources for Celo, Monad, or Polygon (the Mento Envio indexer where promoted, Blockscout/Polygonscan, Dune chain tables, GeckoTerminal / DexScreener, `cast` against the chain's RPC). These are the sources that actually see the target chain.
 - **Cross-chain identity leg** (who is _behind_ the address): pivot the operator EOA onto the chains the heavyweight attributors cover and let them work there.
 
-**Corollary — never drop a source just because it lacks Celo.** A Celo-blind tool (Nansen, EigenPhi, GoPlus, Across, …) is still the right tool for the identity leg, for Monad, and for Polygon/Ethereum once we deploy there. The **Tooling matrix** near the end of this file records what each source covers and which leg it serves — consult it instead of assuming "no Celo = useless".
+**Corollary — never drop a source just because it lacks Celo.** A Celo-blind tool (Nansen, EigenPhi, GoPlus, Across, …) can still be the right tool for the identity leg or for supported Mento chains such as Polygon. The **Tooling matrix** near the end of this file records what each source covers and which leg it serves — consult it instead of assuming "no Celo = useless".
 
 ## Output
 
@@ -164,9 +164,9 @@ Cache sizes (as of 2026-05-20): `intel_deep` 529 entries, `intel_transfers` 60, 
 - `intel_deep` (`intel-deep.ts`): `enriched[chain].arkhamEntity.id` is the **entity slug** — the join key into `intel_entities` / `intel_entity_cps` (those hashes are slug-keyed, not address-keyed). `candidate.sources` tells you _why_ it was cached (`cluster-…-caller` / `top-trader` / `top-bridger` / `tier1-attested`) — a free prior classification. `counterparties[chain]` has the top USD counterparties per chain.
 - Use `intel-legacy-fallback.ts` `hgetWithLegacy` semantics — older entries may sit under `arkham_*` legacy keys.
 
-### Step 1.6 — Mento indexer fingerprint (our own Celo/Monad-native source)
+### Step 1.6 — Mento indexer fingerprint (our own Celo/Monad/Polygon source)
 
-**This is the primary on-chain-behaviour source for the target chain** — and it's the one the skill historically ignored. The repo runs its own Envio HyperIndex indexer of Mento protocol events with a **public, unauthenticated** Hasura GraphQL endpoint covering Celo (`42220`) and Monad (`143`). Because Arkham/Nansen are blind on both chains, this is where "what did this address do with Mento" actually gets answered. Query it _before_ the funder graph so you walk into Step 2 already knowing the target's Mento footprint.
+**This is the primary on-chain-behaviour source for the target chain** — and it's the one the skill historically ignored. The repo runs its own Envio HyperIndex indexer of Mento protocol events with a **public, unauthenticated** Hasura GraphQL endpoint covering Celo (`42220`) and Monad (`143`), plus Polygon (`137`) after the configured deployment is synced and promoted. Because Arkham/Nansen are blind on Celo and Monad, this is where "what did this address do with Mento" actually gets answered on those chains; always verify the requested chain is live at the endpoint before treating an empty result as evidence. Query it _before_ the funder graph so you walk into Step 2 already knowing the target's Mento footprint.
 
 ```bash
 HASURA=https://indexer.hyperindex.xyz/2f3dd15/v1/graphql   # public, no key, POST application/json
@@ -189,7 +189,7 @@ curl -s "$HASURA" -H 'content-type: application/json' \
 
 Run a small battery keyed on the target address (all fields verified against `indexer-envio/schema.graphql`). `caller` = `tx.from` (the signing EOA — the volume-attribution primary key); `sender`/`brokerCaller` = `msg.sender` to the pool/broker (often a router); `txTo` = entry-point contract (identifies the aggregator router). All three are in each row, so you disambiguate EOA-vs-router on the spot.
 
-**Scope every query to the target chain.** Add `chainId: { _eq: <CHAIN_ID> }` to the `where` of each entity that carries it (every swap/rollup/rebalance/LP entity below does; `BridgeTransfer` does not). Without it, a multi-chain address silently merges its Celo and Monad footprints and misreports volume/activity. Drop the filter only when you deliberately want the all-chain Mento footprint.
+**Scope every query to the target chain.** Add `chainId: { _eq: <CHAIN_ID> }` to the `where` of each entity that carries it (every swap/rollup/rebalance/LP entity below does; `BridgeTransfer` does not). Without it, a multi-chain address silently merges its Celo, Monad, and Polygon footprints and misreports volume/activity. Drop the filter only when you deliberately want the all-chain Mento footprint.
 
 **Pick the filter field for the target type.** `caller` is `tx.from` — correct for an **EOA target**. For a **contract target** (router / aggregator / rebalancer / the bot contract itself), `tx.from` is the _operator EOA_, not the contract, so a `caller`-only filter returns a false-EMPTY even though the contract is all over the data. Filter on `sender` / `txTo` / `recipient` / `brokerCaller` instead, or `_in` across roles when the address could appear as either. The examples below show `caller`; swap the field to match the target.
 
@@ -356,7 +356,7 @@ Hard constraints (from `docs/pr-checklists/swr-polling-hasura.md`):
 - `BrokerSwapEvent` with `routedViaV3Router:true` are v3 siblings already counted in `SwapEvent` — filter them out (`_eq:false`) to avoid double-counting.
 - `RebalanceEvent.notionalUsd`/`rewardUsd` use an empty-string sentinel when pre-reserve RPC failed — handle "" distinctly from "0".
 
-A non-empty result here, scoped to the actual target chain, is far stronger than anything the Celo-blind attributors can give — and a verified-live **empty** result is a real signal ("never interacted with Mento v2/v3 on Celo or Monad"), not a tooling gap.
+A non-empty result here, scoped to the actual target chain, is far stronger than anything the Celo-blind attributors can give — and a verified-live **empty** result is a real signal ("never interacted with Mento v2/v3 on this chain"), not a tooling gap.
 
 ### Step 2 — Cast of characters (multi-chain attribution + funder graph)
 
@@ -364,7 +364,7 @@ A non-empty result here, scoped to the actual target chain, is far stronger than
 
 - `indexer-envio/config/aggregators.json` + shared-config `getAggregatorName(chainId, addr)` → instant match to `mento-router-v2` / `squid` / `lifi` / `0x` / `openocean`, **and** to any named MEV fleet cluster already documented there (those carry a pre-written narrative you can reuse verbatim in Steps 3/6/8).
 - shared-config `chainAddressLabels(chainId)` / `tokenSymbol()` (from `@mento-protocol/contracts`) → labels broker / reserve / pools / stables / fee recipients, and gives correct explorer links via `explorerAddressUrl`.
-- `indexer-envio/config/oracle-reporters.json` + `protocolActors.json` → flags Chainlink feeds / reporters / listed rebalancers as infra. If the target is a `Pool.rebalancerAddress`, it's an authorised protocol strategy contract, not an independent bot.
+- `indexer-envio/config/oracle-reporters.json` + `protocolActors.json` + active `PoolLiquidityStrategy` rows → flags Chainlink feeds / reporters / listed rebalancers as infra. If the target is an active strategy row (or the legacy `Pool.rebalancerAddress` pointer during schema rollout), it's an authorised protocol strategy contract, not an independent bot.
 
 Then attribution. Use the `arkham` skill (project-scoped) for the **cross-chain identity leg** — Step 1.5 caches first; live calls only if the key is valid. Remember the doctrine: Arkham/Nansen don't cover Celo or Monad, so the play is:
 
@@ -768,9 +768,9 @@ These match `MAX_BODY_LENGTH` / `MAX_TITLE_LENGTH` in `ui-dashboard/src/lib/addr
 
 ## Tooling matrix (by chain + leg)
 
-Pick the tool that covers the chain you're on and the leg you're working. **A blank in the Celo column does not mean "useless"** — it means use that source on the cross-chain identity leg (operator EOA on Ethereum/L2s), on Monad, or on Polygon/Ethereum once Mento deploys there. Coverage notes below were web-verified 2026-06-15; re-check before relying on a negative.
+Pick the tool that covers the chain you're on and the leg you're working. **A blank in the Celo column does not mean "useless"** — it means use that source on the cross-chain identity leg (operator EOA on Ethereum/L2s) or on another supported target chain such as Polygon. Coverage notes below were web-verified 2026-06-15; re-check before relying on a negative.
 
-**On-chain behaviour leg — Celo/Monad-native (free, the workhorses):**
+**On-chain behaviour leg — Celo/Monad/Polygon-native (free, the workhorses):**
 
 | Source                       | Celo              | Monad | Access            | Answers                                                                        |
 | ---------------------------- | ----------------- | ----- | ----------------- | ------------------------------------------------------------------------------ |
@@ -852,4 +852,4 @@ Match its tone (specific, evidence-anchored, code-fenced for storage / tx data),
 - **Mirror the schema invariants.** Don't write a payload the API would reject — that includes the body length cap, title length cap, version monotonicity, and `createdAt` preservation on update.
 - **Cite evidence.** Every claim about an address gets a tx hash, an Arkham response, a Sim balance snapshot, an indexer row, or a storage read backing it. "Probably MEV" is not enough; "selector `0x49aa2402` calls into a contract whose public `routerUniswap()` returns Uniswap V3 SwapRouter02 (factory `0xafe208a3…` matches official UniV3 on Celo)" is.
 - **Grade, don't hedge.** Tag load-bearing attribution claims with a confidence tier (CONFIRMED / PROBABLE / POSSIBLE) instead of weasel words. A claim that can't reach POSSIBLE doesn't ship; if the whole attribution is sub-POSSIBLE, write a label + notes blurb instead of a durable report. Run the Step 8.5 adversarial gate before saving.
-- **Think multi-chain; never disable a source just because it lacks Celo.** The target chain (Celo today; Monad live; Polygon/Ethereum soon) drives the behaviour leg; the operator's cross-chain footprint drives the identity leg. A Celo-blind tool is the right tool for the identity leg / Monad / future chains — consult the Tooling matrix instead of dropping it. Thread the target chain id through every chain-scoped call; never hardcode `42220`.
+- **Think multi-chain; never disable a source just because it lacks Celo.** The target chain (Celo, Monad, or Polygon) drives the behaviour leg; the operator's cross-chain footprint drives the identity leg. A Celo-blind tool can be the right tool for the identity leg or a supported non-Celo chain — consult the Tooling matrix instead of dropping it. Thread the target chain id through every chain-scoped call; never hardcode `42220`.

@@ -2,7 +2,7 @@ export const SNAPSHOT_SCHEMA_VERSION = 1 as const;
 export const LATEST_SNAPSHOT_KEY = "integration-probes:latest";
 export const HISTORY_KEY_PREFIX = "integration-probes:history:";
 
-export const PROBE_CHAIN_IDS = [42220, 143] as const;
+export const PROBE_CHAIN_IDS = [42220, 143, 137] as const;
 
 export type ProbeChainId = (typeof PROBE_CHAIN_IDS)[number];
 

@@ -306,7 +306,7 @@ export const gauges = {
   }),
   rebalanceBlocked: new Gauge({
     name: "mento_pool_rebalance_blocked",
-    help: "1 when a critical-breach pool's `rebalance(pool)` simulation reverts (i.e. the rebalancer can't close the breach right now). Labels carry the Solidity error code (`reason_code`) and a human-readable explanation (`reason_message`). Reset before each probe cycle, so transport failures and pools currently below the probe threshold simply leave the series absent.",
+    help: "1 only when every active liquidity strategy on a critical-breach pool returns a confirmed blocked result. Any actionable strategy, transport failure, or unclassified strategy leaves the pool-level series absent. Labels carry one deterministic bounded Solidity reason (`reason_code`, `reason_message`).",
     labelNames: rebalanceBlockedLabels,
     registers: [register],
   }),

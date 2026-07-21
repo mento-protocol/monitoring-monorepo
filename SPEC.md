@@ -3,7 +3,7 @@ title: Mento v3 Monitoring Technical Specification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-03
+last_verified: 2026-07-17
 doc_type: reference
 scope: repo-wide
 review_interval_days: 90
@@ -12,13 +12,13 @@ garden_lane: package-readmes-reference
 
 # Mento v3 Monitoring — Technical Specification
 
-Last updated: 2026-07-03
+Last updated: 2026-07-17
 
 ---
 
 ## 1. System Overview
 
-The Mento v3 monitoring system provides real-time visibility into Mento's on-chain FX protocol across Celo, Monad, and Ethereum (reserve-yield). It indexes on-chain events from FPMM pools, oracle contracts, factory contracts, Liquity v2 CDP contracts, stable-token supply/custody, bridges (Wormhole NTT), and reserve-yield positions, then exposes them through a GraphQL API and a public dashboard.
+The Mento v3 monitoring system provides real-time visibility into Mento's on-chain FX protocol across Celo, Monad, Polygon, and Ethereum (reserve-yield). It indexes on-chain events from FPMM pools, oracle contracts, factory contracts, Liquity v2 CDP contracts, stable-token supply/custody, bridges (Wormhole NTT), and reserve-yield positions, then exposes them through a GraphQL API and a public dashboard.
 
 ### Goals
 
@@ -39,10 +39,10 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 ## 2. Architecture
 
 ```text
-┌────────────────────────────────────────────────────────────────────────┐
-│   Celo Mainnet (42220) + Monad Mainnet (143) + Ethereum (1, res-yield) │
-│   FPMMs · SortedOracles · BreakerBox · Broker · Reserve · Liquity v2   │
-└──────┬───────────────────────────────────────────┬────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Celo (42220) + Monad (143) + Polygon (137) + Ethereum (1, reserve-yield)   │
+│ FPMMs · SortedOracles · BreakerBox · Broker · Reserve · Liquity v2 · NTT  │
+└──────┬───────────────────────────────────────────┬────────────────────────┘
        │                                           │
  Events (HyperSync)                         View calls (RPC, 10-60s)
        │                                           │
@@ -120,9 +120,11 @@ the env-var defaults in that config.
 | ------------- | -------- | ---------------------------------------------------------- | ------------------- |
 | Celo Mainnet  | 42220    | ✅ Live in the production multichain indexer               | 60664500            |
 | Monad Mainnet | 143      | ✅ Live in the production multichain indexer               | 60710000            |
+| Polygon       | 137      | Configured — live after deploy, sync verification, promote | 90273661            |
 | Ethereum      | 1        | ✅ Live — reserve-yield events only (no onBlock heartbeat) | 19111760            |
 | Celo Sepolia  | 11142220 | Testnet — hosted dashboard support opt-in via env vars     | —                   |
 | Monad Testnet | 10143    | Testnet — hosted dashboard support opt-in via env vars     | —                   |
+| Polygon Amoy  | 80002    | Testnet — hosted dashboard support opt-in via env vars     | —                   |
 
 ---
 
@@ -136,8 +138,8 @@ config YAML must resolve to that package, `indexer-envio/config/nttAddresses.jso
 or an explicit allowlist — enforced in CI by `indexer-envio/scripts/checkYamlAddresses.mjs`.
 
 FPMM pools are created dynamically by the `FPMMFactory` proxy
-(`0xa849b475FE5a4B5C9C3280152c7a1945b907613b` — same proxy address on both
-Celo and Monad); the live pool set is visible at
+(`0xa849b475FE5a4B5C9C3280152c7a1945b907613b` — same proxy address on Celo,
+Monad, and Polygon); the live pool set is visible at
 [monitoring.mento.org/pools](https://monitoring.mento.org/pools) or via the
 `Pool` entity, so this spec intentionally carries no static pool list.
 
@@ -245,7 +247,7 @@ tracked refinement (see `docs/ROADMAP.md`, "CDP live risk refinements").
 
 Source of truth: [`indexer-envio/schema.graphql`](./indexer-envio/schema.graphql) — ~90 entity types. Major families:
 
-- **Pool core**: `Pool` (mutable per-pool state, incl. `lastEffectivenessRatio` + `deviationBreachStartedAt`), `PoolSnapshot` / `PoolDailySnapshot` (hourly/daily aggregates), `OracleSnapshot` (per-event health timeline), `TradingLimit`, `RebalanceEvent`, `DeviationThresholdBreach`, `LiquidityEvent` / `LiquidityPosition`, `SwapEvent`
+- **Pool core**: `Pool` (mutable per-pool state, incl. `lastEffectivenessRatio` + `deviationBreachStartedAt`), `PoolLiquidityStrategy` (authoritative active many-to-many strategy registry), `PoolSnapshot` / `PoolDailySnapshot` (hourly/daily aggregates), `OracleSnapshot` (per-event health timeline), `TradingLimit`, `RebalanceEvent`, `DeviationThresholdBreach`, `LiquidityEvent` / `LiquidityPosition`, `SwapEvent`
 - **Breakers**: `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeed` / `RateFeedDependency`
 - **Broker & volume rollups**: `BrokerSwapEvent`, `Broker*DailySnapshot`, `Trader*` aggregates, `VolumeWindowSnapshot`
 - **CDPs (Liquity v2)**: `LiquityInstance(+Snapshots)`, `Trove`, `StabilityPool*`, `LiquidationEvent`, `RedemptionEvent`, `CdpPool`, `ReserveTrove`
@@ -318,27 +320,29 @@ Full CSP and HSTS (with preload) headers shipped; unauthenticated GET endpoints 
 
 The dashboard is fully multichain — all chains are shown together (no network switcher). Pool IDs are prefixed with `{chainId}-` to disambiguate across chains. A `ChainIcon` component shows the chain logo next to pool identifiers.
 
-| Network       | Chain ID | Indexer Status              | Dashboard                   |
-| ------------- | -------- | --------------------------- | --------------------------- |
-| Celo Mainnet  | 42220    | Live                        | Live                        |
-| Monad Mainnet | 143      | Live                        | Live                        |
-| Ethereum      | 1        | Live (reserve-yield events) | Live (reserve-yield views)  |
-| Celo Sepolia  | 11142220 | Testnet                     | Opt-in via testnet env vars |
-| Monad Testnet | 10143    | Testnet                     | Opt-in via testnet env vars |
+| Network       | Chain ID | Indexer Status                 | Dashboard                      |
+| ------------- | -------- | ------------------------------ | ------------------------------ |
+| Celo Mainnet  | 42220    | Live                           | Live                           |
+| Monad Mainnet | 143      | Live                           | Live                           |
+| Polygon       | 137      | Configured; live after cutover | Configured; data after cutover |
+| Ethereum      | 1        | Live (reserve-yield events)    | Live (reserve-yield views)     |
+| Celo Sepolia  | 11142220 | Testnet                        | Opt-in via testnet env vars    |
+| Monad Testnet | 10143    | Testnet                        | Opt-in via testnet env vars    |
+| Polygon Amoy  | 80002    | Testnet                        | Opt-in via testnet env vars    |
 
 ---
 
 ## 9. Known Limitations
 
-| Limitation                           | Details                                                                                                                              |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Hasura 1000-row cap                  | Envio hosted Hasura silently caps all queries at 1000 rows; use the pagination helpers or indexer-side rollups                       |
-| Cannot run two indexers locally      | Shared Hasura port 8080; use separate Docker projects                                                                                |
-| SortedOracles on Sepolia             | Contracts return zero address; oracle indexing mainnet-only                                                                          |
-| Gap-fill not yet implemented         | PoolSnapshot charts may show gaps for periods with no activity                                                                       |
-| CDP TCR/ICR gauges are sentinels     | `tcrBps` / `icrP*Bps` / `icrFracBelowMcrBps` are `-1` until live TCR/ICR computation lands ("CDP live risk refinements" in ROADMAP)  |
-| Monad CDP strategy fallback          | Global pools table uses indexed `CdpPool` rows on Celo; Monad retains a Reserve-only runtime fallback until an indexed source exists |
-| Ethereum reserve-yield is event-only | The historical sUSDS onBlock heartbeat is not registered in the hosted indexer                                                       |
+| Limitation                            | Details                                                                                                                                                                                |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hasura 1000-row cap                   | Envio hosted Hasura silently caps all queries at 1000 rows; use the pagination helpers or indexer-side rollups                                                                         |
+| Cannot run two indexers locally       | Shared Hasura port 8080; use separate Docker projects                                                                                                                                  |
+| SortedOracles on Sepolia              | Contracts return zero address; oracle indexing mainnet-only                                                                                                                            |
+| Gap-fill not yet implemented          | PoolSnapshot charts may show gaps for periods with no activity                                                                                                                         |
+| CDP TCR/ICR gauges are sentinels      | `tcrBps` / `icrP*Bps` / `icrFracBelowMcrBps` are `-1` until live TCR/ICR computation lands ("CDP live risk refinements" in ROADMAP)                                                    |
+| Strategy-schema rollout compatibility | Dashboard and metrics consumers fall back to legacy strategy sources only when hosted Hasura does not yet expose `PoolLiquidityStrategy`; a successful empty registry is authoritative |
+| Ethereum reserve-yield is event-only  | The historical sUSDS onBlock heartbeat is not registered in the hosted indexer                                                                                                         |
 
 The production GraphQL endpoint is **static** (`2f3dd15` hash survives
 redeploys to the same Envio project); the old "endpoint hash changes on each
@@ -357,14 +361,14 @@ Slack is the active delivery path; page-severity alerts still escalate through S
 | Group            | Rules                                       | Notification Channels                                                               |
 | ---------------- | ------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Oracle Relayers  | Stale price feeds, low native-token balance | Slack #alerts-oracles + #alerts-critical/Splunk (page, prod chains)                 |
-| Reserve Balances | Low USDC/USDT/axlUSDC                       | Slack #alerts-reserve                                                               |
+| Reserve Balances | Low balances; exact-zero Polygon USDC/EUROP | Slack #alerts-reserve; #alerts-critical/Splunk (page for exact-zero Polygon)        |
 | Trading Modes    | Circuit breakers tripped                    | Slack #alerts-critical/Splunk (page, prod chains); #alerts-testnet (staging chains) |
 | Trading Limits   | L0/L1/LG utilization >90%                   | Slack #alerts-pools (L0); #alerts-critical/Splunk (L1/LG, page)                     |
 | Aegis Service    | RPC failures, data staleness                | Slack #alerts-infra; #alerts-critical/Splunk (page)                                 |
 
 ### v3 Metric Alerts (live)
 
-**Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls the Envio indexer every 30s (default `POLL_INTERVAL_MS`) and exports `mento_pool_*` and `mento_cdp_*` Prometheus gauges. Grafana Alloy (`aegis/grafana-agent/`, App Engine in `mento-monitoring`) scrapes and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). All live FPMM pools across Celo + Monad mainnet report with <30s staleness.
+**Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls the Envio indexer every 30s (default `POLL_INTERVAL_MS`) and exports `mento_pool_*` and `mento_cdp_*` Prometheus gauges. Grafana Alloy (`aegis/grafana-agent/`, App Engine in `mento-monitoring`) scrapes and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). The configured FPMM fleet spans Celo, Monad, and Polygon mainnet and reports with <30s staleness once each indexed chain is promoted at the static endpoint.
 
 **Terraform module** `alerts/rules/` — Grafana provider, Slack contact points, global notification policy, message templates, mute timings, and protocol rule groups. Separate state backend (`gs://mento-terraform-tfstate-6ed6/alerts-rules`).
 
@@ -394,12 +398,16 @@ themselves are the reference. One file per service domain in
 | `rules-oracles.tf`                     | `oracles`         | Oracle report outliers                                                                                                                                                 |
 | `rules-oracle-relayers.tf`             | `oracle-relayers` | Stale price feeds, low relayer native-token balance                                                                                                                    |
 | `rules-cdps.tf`                        | `cdps`            | Stability-pool headroom/thinning, shutdown, liquidation/redemption, shortfall                                                                                          |
-| `rules-reserve-balances.tf`            | `reserve`         | Low reserve stable balances (Aegis-sourced `*_balanceOf` gauges)                                                                                                       |
+| `rules-reserve-balances.tf`            | `reserve`         | Low reserve stable balances plus exact-zero Polygon USDC/EUROP pages (Aegis-sourced `*_balanceOf` gauges)                                                              |
 | `rules-trading-modes.tf`               | `exchanges`       | Circuit breakers tripped (trading-mode changes)                                                                                                                        |
 | `rules-indexer.tf`                     | `indexer`         | Envio indexer health                                                                                                                                                   |
-| `rules-metrics-bridge.tf`              | `metrics-bridge`  | Bridge not-reporting + poll errors                                                                                                                                     |
-| `rules-aegis-service.tf`               | `aegis`           | Aegis view-call failures + data staleness (page)                                                                                                                       |
+| `rules-metrics-bridge.tf`              | `metrics-bridge`  | Bridge not-reporting, poll errors, and expected Polygon pool coverage                                                                                                  |
+| `rules-aegis-service.tf`               | `aegis`           | Aegis view-call failures plus global and per-production-chain data staleness (page)                                                                                    |
 | `rules-aegis-testnet.tf`               | `aegis-testnet`   | Warning-only testnet variants                                                                                                                                          |
+
+See [`docs/notes/polygon-monitoring.md`](./docs/notes/polygon-monitoring.md)
+for Polygon's executable coverage map, rollout order, and explicitly tracked
+alert gaps.
 
 **Reading alert vs SLO state — paging gate vs uptime accrual**
 
@@ -497,7 +505,7 @@ last-verified date:
 
 ### Next
 
-- **Monad indexed Reserve source** — add an indexed positive Reserve source for Monad and remove the remaining Reserve-only runtime strategy fallback in the global pools table.
+- **Polygon monitoring cutover** — after merge, deploy and sync the multichain indexer, verify the additive schema and Polygon rows, promote the same commit, then roll out the dashboard and approved alert infrastructure/rules.
 - **CDP live risk refinements** — compute live TCR/ICR percentiles from accrued interest (today `tcrBps` / `icrP*Bps` are `-1` sentinels) and revisit the stability-pool headroom target.
 
 ### Backlog

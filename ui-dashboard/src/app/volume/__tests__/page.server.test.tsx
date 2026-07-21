@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { VolumeHeroInitialData } from "@/lib/volume-hero-initial-data";
+import type { ChainFilterOption } from "@/lib/chain-filter";
 import VolumePage from "../page";
 
 type VolumeClientProps = {
   canUseVolumeFilters: boolean;
+  chainOptions: readonly ChainFilterOption[];
   initialData?: VolumeHeroInitialData | undefined;
+  initialUtcDayKey?: number | undefined;
 };
 
 const { mockGetAuthSession, mockFetchVolumeHeroForSSR, mockVolumeClient } =
@@ -34,6 +37,7 @@ vi.mock("../page-client", () => ({
 // 12:00 UTC → midnight = 2026-07-09 00:00 UTC).
 const NOW = new Date("2026-07-09T12:00:00Z");
 const TODAY_MIDNIGHT = Math.floor(NOW.getTime() / 1000 / 86_400) * 86_400;
+const CHAIN_OPTIONS: readonly ChainFilterOption[] = [];
 
 const INITIAL_DATA: VolumeHeroInitialData = {
   view: {
@@ -41,6 +45,7 @@ const INITIAL_DATA: VolumeHeroInitialData = {
     venue: "v3",
     range: "7d",
     includeProtocolActors: true,
+    chainIdIn: [],
     todayMidnight: TODAY_MIDNIGHT,
   },
   heroV3: { volumeWindowSnapshots: [] },
@@ -82,10 +87,13 @@ describe("VolumePage server component", () => {
       "7d",
       true,
       TODAY_MIDNIGHT,
+      [],
     );
     expect(mockVolumeClient).toHaveBeenCalledWith({
       canUseVolumeFilters: false,
+      chainOptions: CHAIN_OPTIONS,
       initialData: INITIAL_DATA,
+      initialUtcDayKey: TODAY_MIDNIGHT / 86_400,
     });
   });
 
@@ -97,6 +105,7 @@ describe("VolumePage server component", () => {
       "7d",
       true,
       TODAY_MIDNIGHT,
+      [],
     );
   });
 
@@ -110,10 +119,13 @@ describe("VolumePage server component", () => {
       "7d",
       false,
       TODAY_MIDNIGHT,
+      [],
     );
     expect(mockVolumeClient).toHaveBeenCalledWith({
       canUseVolumeFilters: true,
+      chainOptions: CHAIN_OPTIONS,
       initialData: INITIAL_DATA,
+      initialUtcDayKey: TODAY_MIDNIGHT / 86_400,
     });
   });
 
@@ -127,6 +139,7 @@ describe("VolumePage server component", () => {
       "90d",
       true,
       TODAY_MIDNIGHT,
+      [],
     );
   });
 
@@ -138,6 +151,7 @@ describe("VolumePage server component", () => {
       "7d",
       true,
       TODAY_MIDNIGHT,
+      [],
     );
   });
 
@@ -149,6 +163,7 @@ describe("VolumePage server component", () => {
       "7d",
       true,
       TODAY_MIDNIGHT,
+      [],
     );
   });
 
@@ -159,7 +174,9 @@ describe("VolumePage server component", () => {
 
     expect(mockVolumeClient).toHaveBeenCalledWith({
       canUseVolumeFilters: false,
+      chainOptions: CHAIN_OPTIONS,
       initialData: undefined,
+      initialUtcDayKey: TODAY_MIDNIGHT / 86_400,
     });
   });
 });

@@ -28,6 +28,14 @@ const CHAIN_CONFIGS: Record<number, ChainRedeemConfig> = {
     explorerUrl: "https://monadscan.com",
     nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
   },
+  137: {
+    chainId: 137,
+    chainIdHex: "0x89",
+    chainName: "Polygon",
+    rpcUrl: "https://polygon.drpc.org",
+    explorerUrl: "https://polygonscan.com",
+    nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 },
+  },
 };
 
 // NttDeployHelper deploys its NttManager + WormholeTransceiver proxies

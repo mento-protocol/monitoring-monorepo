@@ -1,5 +1,6 @@
 "use client";
 
+import { chainLabel } from "@mento-protocol/config/chains";
 import { useMemo } from "react";
 import { formatUSD } from "@/lib/format";
 import { displayLabel } from "@/lib/stables";
@@ -37,13 +38,13 @@ const SPARKLINE_GRID_COLS = 4; // xl:grid-cols-4 — the audited 1440px viewport
 // registry is the indexer's STABLES set
 // (indexer-envio/src/handlers/stables/config.ts), a separate deploy artifact
 // the dashboard has no dependency edge to, and `@mento-protocol/config` only
-// exposes pool contracts, not per-source stable-supply rows. 20 matches the
-// live production card count (14 RESERVE + 6 V3_LIQUITY across Celo + Monad,
-// verified 2026-07-14 against the prod indexer); the registry's V3 hub USDm
-// carries no supply rows yet. A ±1-row drift as tokens launch is acceptable
+// exposes pool contracts, not per-source stable-supply rows. 22 matches the
+// configured post-Polygon card count (16 RESERVE + 6 V3_LIQUITY, verified
+// 2026-07-17 against the indexer registry); the registry's V3 hub USDm carries
+// no supply rows yet. A ±1-row drift as tokens launch is acceptable
 // (it beats the ~700px jump this skeleton removes) — re-count and bump when a
 // launch changes the row total.
-const SPARKLINE_SKELETON_CARDS = 20;
+const SPARKLINE_SKELETON_CARDS = 22;
 const SPARKLINE_GRID_ROWS = Math.ceil(
   SPARKLINE_SKELETON_CARDS / SPARKLINE_GRID_COLS,
 );
@@ -257,12 +258,6 @@ function SparklineCard({
       </div>
     </article>
   );
-}
-
-function chainLabel(chainId: number): string {
-  if (chainId === 143) return "Monad";
-  if (chainId === 42220) return "Celo";
-  return `Chain ${chainId}`;
 }
 
 function MiniSparkline({

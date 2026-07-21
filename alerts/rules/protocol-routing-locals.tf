@@ -61,6 +61,17 @@ locals {
       aegis_chain         = "monad"
       chainlink_feed_path = "monad/monad"
     }
+    "polygon" = {
+      title               = "Polygon"
+      env                 = "prod"
+      metric              = "Native_balanceOf"
+      symbol              = "POL"
+      threshold           = 500
+      explorer            = "polygonscan.com"
+      chain_id            = "137"
+      aegis_chain         = "polygon"
+      chainlink_feed_path = "polygon/mainnet"
+    }
     "monad-testnet" = {
       title               = "Monad-Testnet"
       env                 = "staging"
@@ -70,6 +81,19 @@ locals {
       explorer            = "testnet.monadscan.com"
       chain_id            = "10143"
       aegis_chain         = "monadTestnet"
+      chainlink_feed_path = ""
+    }
+    "polygon-testnet" = {
+      title = "Polygon-Testnet"
+      env   = "staging"
+      # Testnet threshold matching monad-testnet's 50, not mainnet's 500 —
+      # Amoy signers are manually topped up (~84 POL each as of 2026-07-16).
+      metric              = "Native_balanceOf"
+      symbol              = "POL"
+      threshold           = 50
+      explorer            = "amoy.polygonscan.com"
+      chain_id            = "80002"
+      aegis_chain         = "polygonTestnet"
       chainlink_feed_path = ""
     }
   }
@@ -183,6 +207,17 @@ locals {
     USDTUSD = "0x36a5C808e25AF0F5e406Eaa831d1749542378794"
   }
 
+  # Per-feed Polygon relayer signer wallets. Polygon publishes only these two
+  # `Native_balanceOf` RelayerSigner variants (aegis/config.yaml), resolved
+  # from the global RelayerSigner* vars — the addresses currently match the
+  # Monad signer set, but keep the map separate for the same drift reasons.
+  # polygon and polygon-testnet share this signer set; split into separate maps
+  # if testnet signers diverge.
+  polygon_relayer_signers = {
+    EURUSD  = "0x7973B53c09Ec35cdCa71D46b98801ddeD856BB20"
+    USDCUSD = "0x9b4Ee654F6bd2485e804080dDbd5E048b21271B3"
+  }
+
   # GCP project for mainnet relayer cloud functions. Used by the Slack
   # stale-price template's "relayer cloud function" link. Sourced from
   # `mento-protocol/oracle-relayer` repo (`.project_vars_cache`,
@@ -205,6 +240,11 @@ locals {
 
   monad_relayer_signer_branches = join("\n", [
     for k, v in local.monad_relayer_signers :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $relayer = %q -}}{{ end -}}", k, v)
+  ])
+
+  polygon_relayer_signer_branches = join("\n", [
+    for k, v in local.polygon_relayer_signers :
     format("{{ if eq .Labels.rateFeed %q -}}{{ $relayer = %q -}}{{ end -}}", k, v)
   ])
 
@@ -238,6 +278,16 @@ locals {
     JPYUSD  = "0x4df3f08977743ad95ab31b8dc203eae885ae9d32"
     AUSDUSD = "0xb0a0264ce6847f101b76ba36a4a3083ba489f501"
     GBPUSD  = "0xd0e9c1a718d2a693d41eacd4b2696180403ce081"
+  }
+
+  # Polygon mainnet FPMM pools, verified from the three FPMMDeployed events in
+  # transaction 0x28514ec3c8ccd5618896a50aceb0df43cfd87c7a43e3c1874d5e24a35afd995a
+  # at block 90348018. These addresses intentionally match the live factory
+  # events rather than the deterministic addresses reused on another chain.
+  polygon_pool_addresses_by_rate_feed = {
+    USDCUSD  = "0x463c0d1f04bcd99a1efcf94ac2a75bc19ea4a7e5"
+    EURUSD   = "0x93e15a22fda39fefccce82d387a09ccf030ead61"
+    EUROPEUR = "0xcd8c6811d975981f57e7fb32e59f0bee66af3201"
   }
 
   # Per-chain rateFeed → Chainlink data-feed slug maps. Source: Chainlink's
@@ -275,6 +325,14 @@ locals {
     USDTUSD = "usdt-usd"
   }
 
+  # Polygon's directory file still lives under Chainlink's legacy chain slug:
+  # `feeds-matic-mainnet.json` (the data.chain.link URL path is `polygon/mainnet`).
+  # EUROPEUR is intentionally absent — Chainlink publishes no EUROP feed.
+  polygon_chainlink_slugs_by_rate_feed = {
+    EURUSD  = "eur-usd"
+    USDCUSD = "usdc-usd"
+  }
+
   # Pre-rendered template fragments that set `$pool` per rate feed. Built from
   # the maps above using the same independent-branches idiom as the relayer
   # signer branches — Grafana's Sprig subset doesn't expose `dict` / `index`,
@@ -291,6 +349,11 @@ locals {
     format("{{ if eq .Labels.rateFeed %q -}}{{ $pool = %q -}}{{ end -}}", k, v)
   ])
 
+  polygon_pool_branches = join("\n", [
+    for k, v in local.polygon_pool_addresses_by_rate_feed :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $pool = %q -}}{{ end -}}", k, v)
+  ])
+
   # Pre-rendered template fragments that set `$chainlinkSlug` per rate feed.
   # Same independent-branches idiom as the pool / relayer-signer maps. Wrapped
   # in chain-specific `{{ if eq .Labels.chain ... }}` blocks at the call site
@@ -303,6 +366,11 @@ locals {
 
   monad_chainlink_slug_branches = join("\n", [
     for k, v in local.monad_chainlink_slugs_by_rate_feed :
+    format("{{ if eq .Labels.rateFeed %q -}}{{ $chainlinkSlug = %q -}}{{ end -}}", k, v)
+  ])
+
+  polygon_chainlink_slug_branches = join("\n", [
+    for k, v in local.polygon_chainlink_slugs_by_rate_feed :
     format("{{ if eq .Labels.rateFeed %q -}}{{ $chainlinkSlug = %q -}}{{ end -}}", k, v)
   ])
 
@@ -353,7 +421,9 @@ locals {
       names = [
         "Low USDC Reserve Balance Alert",
         "Low USDT Reserve Balance Alert",
-        "Low axlUSDC Reserve Balance Alert"
+        "Low axlUSDC Reserve Balance Alert",
+        "Empty USDC Reserve Balance Alert [Polygon]",
+        "Empty EUROP Reserve Balance Alert [Polygon]"
       ],
       slack_title_template       = "slack.reserve_balance_alert_title",
       slack_message_template     = "slack.reserve_balance_alert_message",
@@ -373,10 +443,12 @@ locals {
       victorops_message_template = "victorops.trading_mode_alert_message"
     },
     aegis_service_issues = {
-      names = [
+      names = concat([
         "Aegis view-call failures [production]",
         "Aegis does not report new data"
-      ],
+        ], [
+        for k, c in local.prod_chains : "Aegis No Successful Poll [${c.title}]"
+      ]),
       slack_title_template       = "slack.aegis_service_alert_title",
       slack_message_template     = "slack.aegis_service_alert_message",
       victorops_title_template   = "victorops.aegis_service_alert_title",

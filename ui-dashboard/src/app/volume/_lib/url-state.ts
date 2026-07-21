@@ -5,12 +5,20 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
   type Dispatch,
   type SetStateAction,
 } from "react";
 import { useSearchParams } from "next/navigation";
 import { rangeCutoffSeconds, type VolumeRangeKey } from "@/lib/volume";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
+import {
+  activeChainIds,
+  configuredProductionChainOptions,
+  type ChainFilterOption,
+  type ChainFilterValue,
+} from "@/lib/chain-filter";
+import { useUrlChainFilter } from "@/hooks/use-url-chain-filter";
 // Pure param parsing is shared with the /volume Server Component (SSR
 // prefetch must derive the identical first-render view) — see
 // lib/volume-url-params.ts. This module stays the client-side owner of
@@ -42,6 +50,8 @@ type VolumeUrlActionInputs = VolumeUrlSetters &
   };
 type VolumeUrlStateOptions = {
   canUseVolumeFilters: boolean;
+  chainOptions?: readonly ChainFilterOption[] | undefined;
+  initialUtcDayKey?: number | undefined;
 };
 type VolumeUrlStateResult = {
   canUseVolumeFilters: boolean;
@@ -49,11 +59,15 @@ type VolumeUrlStateResult = {
   actorFilter: ActorFilter;
   includeProtocolActors: boolean;
   venue: Venue;
+  chainId: ChainFilterValue;
+  chainIdIn: number[];
+  chainOptions: readonly ChainFilterOption[];
   cutoff: number;
   utcDayKey: number;
   updateRange: (next: VolumeRangeKey) => void;
   updateIncludeProtocolActors: (next: boolean) => void;
   updateVenue: (next: Venue) => void;
+  updateChainId: (next: ChainFilterValue) => void;
 };
 
 function writeVolumeUrl(
@@ -100,6 +114,8 @@ function replaceVolumeUrlSearch(params: URLSearchParams) {
  */
 export function useVolumeUrlState({
   canUseVolumeFilters,
+  chainOptions: chainOptionsOverride,
+  initialUtcDayKey,
 }: VolumeUrlStateOptions): VolumeUrlStateResult {
   // `useSearchParams()` here is load-bearing for direct page loads —
   // `useState` lazy initializers serialize their result on SSR and don't
@@ -111,6 +127,15 @@ export function useVolumeUrlState({
   // is satisfied — the rule's static check just can't see across files.
   // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
   const searchParams = useSearchParams();
+  const chainOptions = useMemo(
+    () => chainOptionsOverride ?? configuredProductionChainOptions(),
+    [chainOptionsOverride],
+  );
+  const { chainId, updateChainId } = useUrlChainFilter(chainOptions);
+  const chainIdIn = useMemo(
+    () => activeChainIds(chainId, chainOptions),
+    [chainId, chainOptions],
+  );
 
   const initialReadParams =
     typeof window !== "undefined"
@@ -144,17 +169,20 @@ export function useVolumeUrlState({
     setVenue,
   });
   useVolumeFilterCanonicalization({ canUseVolumeFilters });
-  const utcDayKey = useUtcDayKey();
+  const utcDayKey = useUtcDayKey(initialUtcDayKey);
   // Re-derive the public result as a final defense: state initialization and
   // action guards already lock anonymous users to total volume.
   const effectiveActorFilter: ActorFilter = canUseVolumeFilters
     ? actorFilter
     : "all";
 
-  // `utcDayKey` is a dep so the cutoff re-derives at midnight even though
-  // it's not referenced inside — `rangeCutoffSeconds` calls `Date.now()`
-  // internally and the memo cache must flush when the day flips.
-  const cutoff = useMemo(() => rangeCutoffSeconds(range), [range, utcDayKey]);
+  // Derive from the same explicit day key used by the hero queries. Reading
+  // `Date.now()` again here would reopen a midnight race between sibling
+  // query identities during hydration.
+  const cutoff = useMemo(
+    () => rangeCutoffSeconds(range, utcDayKey * SECONDS_PER_DAY),
+    [range, utcDayKey],
+  );
 
   return {
     canUseVolumeFilters,
@@ -162,9 +190,13 @@ export function useVolumeUrlState({
     actorFilter: effectiveActorFilter,
     includeProtocolActors: effectiveActorFilter === "all",
     venue,
+    chainId,
+    chainIdIn,
+    chainOptions,
     cutoff,
     utcDayKey,
     ...actions,
+    updateChainId,
   };
 }
 
@@ -297,23 +329,30 @@ function stripRetiredVolumeFilterParamsFromCurrentUrl() {
   replaceVolumeUrlSearch(params);
 }
 
-function useUtcDayKey(): number {
+function useUtcDayKey(initialUtcDayKey?: number): number {
   // UTC-day rollover ticker. Polled every minute — cheap, and worst-case
   // drift between wall-clock midnight and the volume page updating is
   // < 1 minute. We can't `setTimeout` precisely to midnight because
   // backgrounded tabs throttle timers.
-  const [utcDayKey, setUtcDayKey] = useState<number>(() =>
-    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY),
+  const getServerSnapshot = useCallback(
+    () => initialUtcDayKey ?? currentUtcDayKey(),
+    [initialUtcDayKey],
   );
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const id = window.setInterval(() => {
-      setUtcDayKey((prev) => {
-        const next = Math.floor(Date.now() / 1000 / SECONDS_PER_DAY);
-        return next === prev ? prev : next;
-      });
-    }, 60_000);
-    return () => window.clearInterval(id);
-  }, []);
-  return utcDayKey;
+  // React uses the server snapshot for hydration, then compares it with the
+  // browser clock before paint completes. This keeps the first render stable
+  // without mirroring external clock state through an effect.
+  return useSyncExternalStore(
+    subscribeToUtcDay,
+    currentUtcDayKey,
+    getServerSnapshot,
+  );
+}
+
+function currentUtcDayKey(): number {
+  return Math.floor(Date.now() / 1000 / SECONDS_PER_DAY);
+}
+
+function subscribeToUtcDay(onStoreChange: () => void): () => void {
+  const id = window.setInterval(onStoreChange, 60_000);
+  return () => window.clearInterval(id);
 }

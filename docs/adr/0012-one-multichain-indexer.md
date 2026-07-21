@@ -3,7 +3,7 @@ title: One multichain indexer project; Ethereum reserve-yield shares the hosted 
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
 scope: indexer-envio
 date: 2026-03
 doc_type: adr
@@ -18,15 +18,17 @@ garden_lane: adrs-architecture
 
 ## Context
 
-Mento runs on Celo and Monad, with reserve-yield positions (sUSDS, stETH) on
-Ethereum. We could run a separate indexer per chain, but the dashboard shows all
-chains together and the entity model is shared. Ethereum is needed only for
-yield accounting, not full pool indexing.
+Mento runs pools and cross-chain stables on Celo, Monad, and Polygon, with
+reserve-yield positions (sUSDS, stETH) on Ethereum. We could run a separate
+indexer per chain, but the dashboard shows all chains together and the entity
+model is shared. Ethereum is needed only for yield accounting, not full pool
+indexing.
 
 ## Decision
 
-Run **one Envio project** that indexes Celo + Monad FPMM/oracle/broker/bridge
-events and Ethereum reserve-yield in the same hosted deployment
+Run **one Envio project** that indexes Celo + Monad + Polygon
+FPMM/oracle/bridge events, Celo broker events, and Ethereum reserve-yield in
+the same hosted deployment
 (`config.multichain.mainnet.yaml`). sUSDS remains event-only, stETH uses the
 launch-aligned sub-daily wallet sampler recorded in [ADR 0034](0034-steth-wallet-daily-sampler.md),
 and the historical sUSDS `onBlock` heartbeat is intentionally excluded from the
@@ -34,7 +36,7 @@ hosted path. IDs are chain-namespaced so entities don't collide.
 
 ## Alternatives considered
 
-- **One indexer per chain** — rejected: triples deploy/ops surface and forces the
+- **One indexer per chain** — rejected: multiplies the deploy/ops surface and forces the
   dashboard to fan out queries across endpoints for a unified view.
 - **Full Ethereum indexing** — rejected: only yield accounting is needed there;
   sparse event handlers plus the bounded stETH sub-daily sampler keep sync cheap

@@ -3,7 +3,7 @@
 // — until that PR is deployed + re-synced, these queries return empty arrays.
 //
 // Pagination uses keyset on `(timestamp desc, id desc)` to break Hasura's
-// 1000-row cap for the `All` range across Celo + Monad stable rows. The query
+// 1000-row cap for the `All` range across all production-chain stable rows. The query
 // takes an optional `beforeTimestamp` cursor; pass the last
 // page's earliest `timestamp` to fetch the next page.
 

@@ -2,7 +2,7 @@
 // Breaker handler helpers — entity ID composition, upsert, RPC self-heal.
 //
 // The on-chain BreakerBox + MedianDelta + ValueDelta were deployed before our
-// indexer's `start_block` on both chains, so initial config events (BreakerAdded,
+// indexer's `start_block` on the configured pool chains, so initial config events (BreakerAdded,
 // BreakerStatusUpdated, RateChangeThresholdUpdated, etc.) are not in our event
 // stream. On the first event for any (breaker, feed) pair we don't yet know,
 // hydrate from RPC via `fetchBreakerDefaults` / `fetchBreakerFeedState`.

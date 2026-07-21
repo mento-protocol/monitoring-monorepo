@@ -88,6 +88,19 @@ chains:
           - 0x0d05cf3f8d39dc988e69cc1bf37f972eadbdc093 # CHFm
           - 0x01c9d280150f932d4a2fe11f40b0d72bffbcd339 # JPYm
 
+  # Polygon Mainnet — starts before the USDm/EURm NTT helper deployments.
+  - id: 137
+    start_block: 90273661
+    contracts:
+      - name: WormholeNttManager
+        address:
+          - 0xa4096343485a44c0f8d05ae6da311c18d63e38bc # USDm
+          - 0x5f8a1e50f83f53951b89fc73ead80b27045c67fd # EURm
+      - name: WormholeTransceiver
+        address:
+          - 0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b # USDm
+          - 0x6467cfca82184657f32f1195f9a26b5578399479 # EURm
+
 field_selection:
   transaction_fields:
     - hash

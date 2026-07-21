@@ -86,7 +86,8 @@ terraform plan -lock=false
 terraform apply -lock=false
 ```
 
-Replace `<network>` with your network key (e.g., `celo`, `ethereum`, `base`).
+Replace `<network>` with your network key (e.g., `celo`, `ethereum`,
+`polygon`).
 
 ### Automated Fix (Requires Network Access)
 

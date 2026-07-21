@@ -192,8 +192,8 @@ variable "multisigs" {
   type = map(object({
     name                   = string
     address                = string
-    chain                  = string # e.g., "celo", "ethereum", "base"
-    quicknode_network_name = string # QuickNode network identifier (e.g., "celo-mainnet", "ethereum-mainnet")
+    chain                  = string # e.g., "celo", "ethereum", "polygon"
+    quicknode_network_name = string # QuickNode network identifier (e.g., "celo-mainnet", "polygon-mainnet")
   }))
   default = {
     "mento-labs-celo" = {
@@ -207,6 +207,18 @@ variable "multisigs" {
       address                = "0x87647780180B8f55980C7D3fFeFe08a9B29e9aE1"
       chain                  = "celo"
       quicknode_network_name = "celo-mainnet"
+    }
+    "reserve-polygon" = {
+      name                   = "Reserve Multisig"
+      address                = "0x87647780180B8f55980C7D3fFeFe08a9B29e9aE1"
+      chain                  = "polygon"
+      quicknode_network_name = "polygon-mainnet"
+    }
+    "migration-multisig-polygon" = {
+      name                   = "Migration Multisig"
+      address                = "0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458"
+      chain                  = "polygon"
+      quicknode_network_name = "polygon-mainnet"
     }
     "mento-labs-eth" = {
       name                   = "Mento Labs Multisig"
@@ -271,9 +283,9 @@ variable "multisigs" {
   validation {
     condition = alltrue([
       for k, v in var.multisigs :
-      contains(["celo", "ethereum"], v.chain)
+      contains(["celo", "ethereum", "polygon"], v.chain)
     ])
-    error_message = "All multisigs must have a valid chain name: celo or ethereum."
+    error_message = "All multisigs must have a valid chain name: celo, ethereum, or polygon."
   }
 
   validation {

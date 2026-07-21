@@ -2,7 +2,7 @@
 // FPMM event handlers
 // ---------------------------------------------------------------------------
 
-import type { SwapEvent, TradingLimit } from "envio";
+import type { EvmOnEventContext, Pool, SwapEvent, TradingLimit } from "envio";
 import { indexer } from "../indexer.js";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers.js";
 import {
@@ -15,6 +15,45 @@ import { poolTradingLimitsEffect } from "../rpc/effects.js";
 import { preloadPoolCache, upsertPool, upsertSnapshot } from "../pool.js";
 import { buildSwapTraderFields } from "../swap.js";
 import { applyVolumeSnapshots } from "../volumeSnapshots.js";
+import { poolCarriesUsdRateForCurrency, swapFxCurrency } from "../usd.js";
+import { hasFreshLiveMedian } from "../priceDifference.js";
+
+type FxRateContext = Pick<EvmOnEventContext, "Pool">;
+
+async function resolveHistoricalSwapFxRate(args: {
+  context: FxRateContext;
+  chainId: number;
+  pool: Pick<Pool, "token0" | "token1">;
+  blockTimestamp: bigint;
+}): Promise<bigint | undefined> {
+  const currency = swapFxCurrency({
+    chainId: args.chainId,
+    token0: args.pool.token0,
+    token1: args.pool.token1,
+  });
+  if (currency === null) return undefined;
+
+  const pools = await args.context.Pool.getWhere({
+    chainId: { _eq: args.chainId },
+  });
+  const ratePool = pools
+    .filter(
+      (candidate) =>
+        poolCarriesUsdRateForCurrency(
+          args.chainId,
+          candidate.token0,
+          candidate.token1,
+          currency,
+        ) && hasFreshLiveMedian(candidate, args.blockTimestamp),
+    )
+    .sort((a, b) => {
+      if (a.lastOracleReportAt !== b.lastOracleReportAt) {
+        return a.lastOracleReportAt > b.lastOracleReportAt ? -1 : 1;
+      }
+      return a.id.localeCompare(b.id);
+    })[0];
+  return ratePool?.lastMedianPrice;
+}
 
 // ---------------------------------------------------------------------------
 // FPMM.Swap
@@ -45,6 +84,14 @@ indexer.onEvent(
           token0: pool.token0,
           token1: pool.token1,
           blockNumber,
+        });
+      }
+      if (pool) {
+        await resolveHistoricalSwapFxRate({
+          context,
+          chainId: event.chainId,
+          pool,
+          blockTimestamp,
         });
       }
       return;
@@ -169,7 +216,13 @@ indexer.onEvent(
       }
     }
 
-    const traderFields = buildSwapTraderFields(event, pool);
+    const fxUsdRate = await resolveHistoricalSwapFxRate({
+      context,
+      chainId: event.chainId,
+      pool,
+      blockTimestamp,
+    });
+    const traderFields = buildSwapTraderFields(event, pool, fxUsdRate);
     const swap: SwapEvent = {
       id,
       chainId: event.chainId,

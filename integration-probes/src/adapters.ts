@@ -96,10 +96,10 @@ function lifiAdapter(): AggregatorAdapter {
     kind: "cross_chain",
     tier: 1,
     credentialEnv: ["LIFI_API_KEY"],
-    support: { 42220: "supported", 143: "supported" },
+    support: { 42220: "supported", 143: "supported", 137: "supported" },
     maxQuoteRequestsPerRun: LIFI_MAX_QUOTE_REQUESTS_PER_RUN,
     researchNote:
-      "LI.FI chain metadata lists both Celo and Monad; scheduled probes use an API key and route-discovery attempts to avoid confusing cheaper non-Mento default routes with missing Mento support.",
+      "LI.FI chain metadata lists Celo, Monad, and Polygon; scheduled probes use an API key and route-discovery attempts to avoid confusing cheaper non-Mento default routes with missing Mento support.",
     quote: (input, env) =>
       lifiQuoteRequests(input, env, lifiAfterResponseHook(input, env)),
   };
@@ -112,9 +112,9 @@ function openOceanAdapter(): AggregatorAdapter {
     kind: "dex",
     tier: 1,
     credentialEnv: ["OPENOCEAN_API_KEY"],
-    support: { 42220: "supported", 143: "supported" },
+    support: { 42220: "supported", 143: "supported", 137: "supported" },
     researchNote:
-      "OpenOcean Pro endpoint is keyed; the probe enables DEX id 8 so the response proves the MentoV3 venue can route the pair.",
+      "OpenOcean lists Polygon under chain code polygon; the keyed Pro probe enables DEX id 8 so the response proves the MentoV3 venue can route the pair.",
     quote: (input, env) =>
       getRequest(openOceanUrl(input), {
         apikey: env.OPENOCEAN_API_KEY!,
@@ -130,8 +130,9 @@ function zeroXAdapter(): AggregatorAdapter {
     kind: "dex",
     tier: 2,
     credentialEnv: ["ZEROX_API_KEY"],
-    support: { 42220: "unsupported", 143: "supported" },
-    researchNote: "Current 0x docs list Monad but not Celo for Swap API.",
+    support: { 42220: "unsupported", 143: "supported", 137: "supported" },
+    researchNote:
+      "Current 0x Swap API docs list Monad and Polygon but not Celo.",
     quote: (input, env) =>
       getRequest(zeroXUrl(input), {
         "0x-api-key": env.ZEROX_API_KEY!,
@@ -147,11 +148,11 @@ function squidAdapter(): AggregatorAdapter {
     kind: "cross_chain",
     tier: 1,
     credentialEnv: ["SQUID_INTEGRATOR_ID"],
-    support: { 42220: "supported", 143: "unknown" },
+    support: { 42220: "supported", 143: "unknown", 137: "supported" },
     maxQuoteRequestsPerRun: SQUID_MAX_QUOTE_REQUESTS_PER_RUN,
     quoteRequestDelayMs: SQUID_QUOTE_REQUEST_DELAY_MS,
     researchNote:
-      "Celo Squid routing is observed in the repo registry; Monad needs quote evidence. Probes are serialized and paced to avoid 429s from bursty route checks.",
+      "Squid's supported-chain docs list Celo and Polygon; Monad still needs quote evidence. Probes are serialized and paced to avoid 429s from bursty route checks.",
     quote: (input, env, context) =>
       context
         ? squidQuoteRequests(input, env)
@@ -172,8 +173,9 @@ function socketAdapter(): AggregatorAdapter {
     kind: "cross_chain",
     tier: 2,
     credentialEnv: ["SOCKET_API_KEY"],
-    support: { 42220: "unsupported", 143: "supported" },
-    researchNote: "Public Bungee metadata lists Monad; Celo was not listed.",
+    support: { 42220: "unsupported", 143: "supported", 137: "supported" },
+    researchNote:
+      "Socket/Bungee exposes Polygon and Monad support; Celo was not listed.",
     quote: (input, env) =>
       getRequest(socketUrl(input), { "API-KEY": env.SOCKET_API_KEY! }),
   };
@@ -185,9 +187,9 @@ function rubicAdapter(): AggregatorAdapter {
     label: "Rubic",
     kind: "meta",
     tier: 2,
-    support: { 42220: "supported", 143: "supported" },
+    support: { 42220: "supported", 143: "supported", 137: "supported" },
     researchNote:
-      "Rubic metadata lists Celo via Squid/LI.FI and Monad via DEX routes.",
+      "Rubic metadata lists Celo, Monad, and Polygon; Polygon uses the POLYGON API identifier.",
     quote: (input) =>
       postRequest(
         "https://api-v2.rubic.exchange/api/routes/quoteBest",
@@ -202,9 +204,9 @@ function relayAdapter(): AggregatorAdapter {
     label: "Relay",
     kind: "cross_chain",
     tier: 2,
-    support: { 42220: "supported", 143: "supported" },
+    support: { 42220: "supported", 143: "supported", 137: "supported" },
     researchNote:
-      "Relay is a current candidate for both chains; quote evidence decides pass/fail.",
+      "Relay publishes Polygon chain 137 contracts and remains a candidate on all configured probe chains; quote evidence decides pass/fail.",
     quote: (input) =>
       postRequest("https://api.relay.link/quote/v2", relayBody(input)),
   };
@@ -217,9 +219,9 @@ function oneInchAdapter(): AggregatorAdapter {
     kind: "dex",
     tier: 2,
     credentialEnv: ["ONEINCH_API_KEY"],
-    support: { 42220: "unsupported", 143: "unsupported" },
+    support: { 42220: "unsupported", 143: "unsupported", 137: "supported" },
     researchNote:
-      "Current 1inch v6.1 docs do not list Celo or Monad; keep unsupported until separate support evidence exists.",
+      "Current 1inch v6.1 docs expose Polygon chain 137 but do not list Celo or Monad.",
     quote: (input, env) =>
       getRequest(oneInchUrl(input), {
         Authorization: `Bearer ${env.ONEINCH_API_KEY!}`,
@@ -233,8 +235,9 @@ function kyberAdapter(): AggregatorAdapter {
     label: "KyberSwap",
     kind: "dex",
     tier: 2,
-    support: { 42220: "unsupported", 143: "supported" },
-    researchNote: "KyberSwap docs list Monad but not Celo.",
+    support: { 42220: "unsupported", 143: "supported", 137: "supported" },
+    researchNote:
+      "KyberSwap docs list Monad and Polygon (path identifier polygon) but not Celo.",
     quote: (input) =>
       getRequest(kyberUrl(input), {
         "x-client-id": "mento-integration-probes",
@@ -252,8 +255,8 @@ function excludedAdapter(
     label,
     kind: "excluded",
     tier: 3,
-    support: { 42220: "unsupported", 143: "unsupported" },
-    researchNote,
+    support: { 42220: "unsupported", 143: "unsupported", 137: "unknown" },
+    researchNote: `${researchNote} Polygon support is not assessed while this adapter remains parked.`,
   };
 }
 

@@ -2,9 +2,9 @@
  * Rebalance-reason probe runner.
  *
  * For every pool whose open breach has crossed critical magnitude and remains
- * outside tolerance, simulate `rebalance(pool)` against the pool's liquidity
- * strategy and emit a `mento_pool_rebalance_blocked` gauge with the decoded
- * reason on each `(reason_code, reason_message)` pair. The Slack alert
+ * outside tolerance, simulate `rebalance(pool)` against every active liquidity
+ * strategy and emit one `mento_pool_rebalance_blocked` gauge only when all of
+ * them are confirmed blocked. The Slack alert
  * template cross-references this gauge's labels via
  * `$values.B.Labels.reason_message` (Grafana's `$labels` exposes only the
  * firing query's labels, so the annotation reads query B's labels through
@@ -32,7 +32,24 @@ import {
   type RebalanceProbeResult,
 } from "./rebalance-check.js";
 import { getRpcClient } from "./rpc.js";
-import { isFpmmPool, type PoolRow } from "./types.js";
+import {
+  isFpmmPool,
+  type PoolLiquidityStrategyRow,
+  type PoolRow,
+} from "./types.js";
+
+type ProbeTarget = {
+  pool: PoolRow;
+  strategy: PoolLiquidityStrategyRow;
+};
+
+type ProbeOutcome = ProbeTarget & {
+  result: RebalanceProbeResult;
+};
+
+type BlockedProbeOutcome = ProbeOutcome & {
+  result: Extract<RebalanceProbeResult, { kind: "blocked" }>;
+};
 
 // Module-scope re-entrancy guard. The production poller awaits each
 // `runRebalanceProbes()` call before scheduling the next loop, so cycles can't
@@ -64,7 +81,8 @@ export function _resetProbeInProgressForTests(): void {
  *   - `deviationBreachStartedAt > 0` (active breach anchor)
  *   - current `lastDeviationRatio > 1.01` (still outside tolerance)
  *   - current ratio OR open-breach peak crossed 1.05 (critical magnitude)
- *   - `rebalancerAddress` non-empty (pool has a probe-able liquidity strategy)
+ *   - at least one active registry strategy, or the legacy pointer while the
+ *     registry schema is unavailable
  */
 export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
   // Defense-in-depth VP exclusion via the canonical `isFpmmPool` predicate.
@@ -90,9 +108,39 @@ export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
       ratio > REBALANCE_PROBE_DEVIATION_THRESHOLD ||
       openBreachPeakRatio > REBALANCE_PROBE_DEVIATION_THRESHOLD;
     if (!crossedCritical) return false;
-    if (!pool.rebalancerAddress) return false;
+    if (strategiesForPool(pool).length === 0) return false;
     return true;
   });
+}
+
+/**
+ * Resolve a deterministic, de-duplicated active strategy list. A populated
+ * registry array (including an authoritative empty array) always wins. The
+ * single legacy pointer is consulted only when the companion query could not
+ * run and left `activeLiquidityStrategies` undefined.
+ */
+function strategiesForPool(pool: PoolRow): PoolLiquidityStrategyRow[] {
+  const rows =
+    pool.activeLiquidityStrategies ??
+    (pool.rebalancerAddress
+      ? [
+          {
+            poolId: pool.id,
+            strategyAddress: pool.rebalancerAddress,
+            kind: "UNKNOWN" as const,
+          },
+        ]
+      : []);
+  const byAddress = new Map<string, PoolLiquidityStrategyRow>();
+  for (const row of rows) {
+    const key = row.strategyAddress.toLowerCase();
+    if (!byAddress.has(key)) byAddress.set(key, row);
+  }
+  return [...byAddress.values()].sort((a, b) =>
+    a.strategyAddress
+      .toLowerCase()
+      .localeCompare(b.strategyAddress.toLowerCase()),
+  );
 }
 
 /**
@@ -112,13 +160,16 @@ export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
  * On the success path the timer handle is cleared so we don't leak a
  * setTimeout per probe.
  */
-async function probeOne(pool: PoolRow): Promise<RebalanceProbeResult> {
+async function probeOne({
+  pool,
+  strategy,
+}: ProbeTarget): Promise<RebalanceProbeResult> {
   const client = getRpcClient(pool.chainId);
   if (!client) {
     return { kind: "transport_error", error: "no rpc client for chain" };
   }
   const poolAddress = poolIdAddress(pool.id) as `0x${string}`;
-  const strategyAddress = pool.rebalancerAddress as `0x${string}`;
+  const strategyAddress = strategy.strategyAddress as `0x${string}`;
 
   const controller = new AbortController();
   const timeoutMessage = `probe timed out after ${REBALANCE_PROBE_TIMEOUT_MS}ms`;
@@ -200,12 +251,13 @@ export async function runWithConcurrency<T, R>(
  * Run the probe for every eligible pool and update the
  * `mento_pool_rebalance_blocked` gauge.
  *
- *   - `ok` results emit nothing (gauge stays absent for that pool).
- *   - `blocked` results emit `1` with `(reason_code, reason_message)` labels.
- *   - `transport_error` emits nothing and logs once per pool — the
+ *   - any `ok` result keeps the gauge absent for that pool.
+ *   - only an all-`blocked` result set emits `1`, using one deterministic
+ *     `(reason_code, reason_message)` pair.
+ *   - `transport_error` emits nothing and logs the affected strategy — the
  *     underlying critical breach alert keeps firing without an annotation.
- *   - `skip` (strategy type couldn't be identified) emits nothing and logs
- *     once — better than a misleading "blocked" annotation.
+ *   - `skip` (strategy type couldn't be identified) emits nothing and logs the
+ *     affected strategy — better than a misleading "blocked" annotation.
  */
 export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
   // Re-entrancy guard: if a previous cycle is still running, drop this one.
@@ -234,19 +286,28 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
       return;
     }
 
+    const targets = eligible.flatMap((pool) =>
+      strategiesForPool(pool).map((strategy) => ({ pool, strategy })),
+    );
     const results = await runWithConcurrency(
-      eligible,
+      targets,
       REBALANCE_PROBE_CONCURRENCY,
       probeOne,
     );
 
-    for (let i = 0; i < eligible.length; i++) {
-      const pool = eligible[i];
-      const result = results[i];
-      // `pool` is always defined here (the loop bound matches `eligible.length`);
-      // `noUncheckedIndexedAccess` flags it anyway, so guard explicitly.
-      if (!pool || !result) continue;
-      applyProbeResult(pool, result);
+    let resultOffset = 0;
+    for (const pool of eligible) {
+      const strategies = strategiesForPool(pool);
+      const outcomes = strategies.map((strategy, strategyIndex) => ({
+        pool,
+        strategy,
+        // `runWithConcurrency` preserves the dense target array's length and
+        // order. The non-null assertion records that invariant for TS's
+        // noUncheckedIndexedAccess mode.
+        result: results[resultOffset + strategyIndex]!,
+      }));
+      resultOffset += strategies.length;
+      applyPoolProbeResults(pool, outcomes);
     }
 
     gauges.rebalanceProbeLastRun.set(Math.floor(Date.now() / 1000));
@@ -264,32 +325,46 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
  * from the iteration in `runRebalanceProbes` so the outer function stays
  * inside the complexity budget while still covering every result.kind branch.
  */
-function applyProbeResult(pool: PoolRow, result: RebalanceProbeResult): void {
-  if (result.kind === "blocked") {
-    const labels = {
-      ...poolDisplayLabels(pool),
-      reason_code: result.reasonCode,
-      reason_message: result.reasonMessage,
-    };
-    gauges.rebalanceBlocked.set(labels, 1);
-    // Surface the unbounded diagnostic detail (raw revert string, panic
-    // code, unrecognised hex selector) to Cloud Run logs only — the
-    // metric label is intentionally bounded to the ERROR_MESSAGES enum
-    // for cardinality + Slack-injection-safety reasons (see
-    // `rebalance-check.ts:decodeBlockedRevert`).
-    if (result.diagnostic) {
-      console.warn(
-        `[REBALANCE_PROBE_DIAGNOSTIC] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason_code=${result.reasonCode} detail=${result.diagnostic}`,
-      );
-    }
-  } else if (result.kind === "transport_error") {
+function applyPoolProbeResults(pool: PoolRow, outcomes: ProbeOutcome[]): void {
+  for (const outcome of outcomes) logUnconfirmedOutcome(outcome);
+
+  // Any non-blocked result means either a strategy can act (`ok`) or the
+  // all-strategies verdict is unconfirmed (`skip` / `transport_error`). Keep
+  // the gauge absent in every such case.
+  if (outcomes.some(({ result }) => result.kind !== "blocked")) return;
+
+  // The guard above proves every outcome is blocked. `strategiesForPool`
+  // sorts by normalized address, so choosing the first row is deterministic
+  // without adding strategy addresses (unbounded cardinality) to labels.
+  const blocked = outcomes as BlockedProbeOutcome[];
+  const representative = blocked[0]!;
+
+  const labels = {
+    ...poolDisplayLabels(pool),
+    reason_code: representative.result.reasonCode,
+    reason_message: representative.result.reasonMessage,
+  };
+  gauges.rebalanceBlocked.set(labels, 1);
+
+  // Surface unbounded diagnostic details (raw revert string, panic code,
+  // unrecognised selector) in logs only. Metric labels stay inside the
+  // bounded ERROR_MESSAGES enum.
+  for (const { strategy, result } of blocked) {
+    if (!result.diagnostic) continue;
     console.warn(
-      `[REBALANCE_PROBE_FAILED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} error=${result.error}`,
+      `[REBALANCE_PROBE_DIAGNOSTIC] pool=${pool.id} chainId=${pool.chainId} strategy=${strategy.strategyAddress} reason_code=${result.reasonCode} detail=${result.diagnostic}`,
+    );
+  }
+}
+
+function logUnconfirmedOutcome({ pool, strategy, result }: ProbeOutcome): void {
+  if (result.kind === "transport_error") {
+    console.warn(
+      `[REBALANCE_PROBE_FAILED] pool=${pool.id} chainId=${pool.chainId} strategy=${strategy.strategyAddress} error=${result.error}`,
     );
   } else if (result.kind === "skip") {
     console.warn(
-      `[REBALANCE_PROBE_SKIPPED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason=${result.reason}`,
+      `[REBALANCE_PROBE_SKIPPED] pool=${pool.id} chainId=${pool.chainId} strategy=${strategy.strategyAddress} reason=${result.reason}`,
     );
   }
-  // `ok` — pool can rebalance, leave the metric absent for this label set.
 }

@@ -177,7 +177,7 @@ describe("assembleNetworkData — pure composition", () => {
       error: null,
     }),
     lpResult: fulfilled({ rows: [], truncated: false, error: null }),
-    olsResult: fulfilled({ OlsPool: [] }),
+    olsPoolIds: new Set<string>(),
     cdpPoolIds: new Set<string>(),
     reservePoolIds: new Set<string>(),
     strategyError: null,

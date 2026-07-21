@@ -46,7 +46,7 @@ function configuredContractAddresses(
 
 describe("multichain mainnet config", () => {
   it("keeps breaker contract addresses aligned with @mento-protocol/contracts", () => {
-    for (const chainId of [42220, 143]) {
+    for (const chainId of [42220, 143, 137]) {
       for (const contractName of [
         "BreakerBox",
         "MedianDeltaBreaker",
@@ -64,6 +64,24 @@ describe("multichain mainnet config", () => {
         );
       }
     }
+  });
+
+  it("wires Polygon factory discovery and canonical protocol contracts", () => {
+    assert.deepEqual(configuredContractAddresses(137, "FPMMFactory"), [
+      getContractAddress(137, "FPMMFactory")!.toLowerCase(),
+    ]);
+    assert.deepEqual(configuredContractAddresses(137, "SortedOracles"), [
+      getContractAddress(137, "SortedOracles")!.toLowerCase(),
+    ]);
+    assert.deepEqual(
+      configuredContractAddresses(137, "OpenLiquidityStrategy"),
+      [getContractAddress(137, "OpenLiquidityStrategy")!.toLowerCase()],
+    );
+    assert.deepEqual(configuredContractAddresses(137, "FPMM"), []);
+    assert.match(
+      chainConfigBlock(137),
+      /start_block: \$\{ENVIO_START_BLOCK_POLYGON:-90273661\}/,
+    );
   });
 
   it("keeps LiquityStabilityPool addresses pinned to the bare-symbol proxies", () => {

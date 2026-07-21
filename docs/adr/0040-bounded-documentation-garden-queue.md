@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0039 — Documentation gardening runs through one bounded issue queue
+# ADR 0040 — Documentation gardening runs through one bounded issue queue
 
 **Status:** Accepted (Jul 2026), in force.
 **Scope:** ci/process

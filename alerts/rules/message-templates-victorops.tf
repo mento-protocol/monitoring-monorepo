@@ -6,9 +6,16 @@ resource "grafana_message_template" "victorops_oracle_stale_price_alert_title" {
   name     = "VictorOps - Stale Price Alert Title"
   template = <<-EOT
 {{ define "victorops.oracle_stale_price_alert_title" }}
-[{{ if (len .Alerts.Firing) }}{{ len .Alerts.Firing }} FIRING{{ end }}{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end }}{{ if (len .Alerts.Resolved) }}{{ len .Alerts.Resolved }} RESOLVED{{ end }}] {{ .CommonLabels.alertname }}
-{{ if (len .Alerts.Firing) }}Firing: {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end }}{{ $alert.Labels.rateFeed }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
-{{ if (len .Alerts.Resolved) }}Resolved: {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end }}{{ $alert.Labels.rateFeed }} on {{ $alert.Labels.chain | title }}{{ end }}{{ end }}
+{{ if (len .Alerts.Firing) -}}
+P1 {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" $alert.Labels.rateFeed -}}{{ $alert.Labels.chain | title }} {{ $slash }} oracle report expired{{ end -}}
+{{ end -}}
+{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end -}}
+{{ if (len .Alerts.Resolved) -}}
+RESOLVED {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" $alert.Labels.rateFeed -}}{{ $alert.Labels.chain | title }} {{ $slash }} oracle report fresh{{ end -}}
+{{ end -}}
+{{ if and (eq (len .Alerts.Firing) 0) (eq (len .Alerts.Resolved) 0) -}}
+Oracle report status unknown
+{{ end -}}
 {{ end }}
 EOT
 }
@@ -18,15 +25,25 @@ resource "grafana_message_template" "victorops_oracle_stale_price_alert_message"
   name     = "VictorOps - Stale Price Alert Message"
   template = <<-EOT
 {{ define "victorops.oracle_stale_price_alert_message" }}
-{{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
-{{ range .Alerts.Firing }}
-FIRING: Stale price for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain | title }}
-1. Check the latest transactions of the {{ .Labels.rateFeed }} relayer on {{ .Labels.chain | title }}
-2. Check if the relayer cloud function is still being triggered regularly
-{{ end }}
-{{ range .Alerts.Resolved }}
-RESOLVED: Price is fresh again for {{ .Labels.rateFeed }} rate feed on {{ .Labels.chain }}
-{{ end }}
+{{ range .Alerts.Firing -}}
+{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+{{ $enc := reReplaceAll "/" "%2F" $slash -}}
+{{ if and (or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-testnet")) (eq .Labels.rateFeed "EUROPEUR") -}}
+PROBLEM: The fixed 1.0 EUR-parity report in SortedOracles on {{ .Labels.chain | title }} has expired. Swaps using this feed may revert until the fixed report is refreshed.
+ACTION: Inspect the fixed report, then contact the deployment/migration owner responsible for it.
+{{ else -}}
+PROBLEM: The {{ $slash }} on-chain oracle report on {{ .Labels.chain | title }} has expired. Swaps using this feed may revert until a fresh report is relayed.
+ACTION: Check whether relay-{{ .Labels.chain }} is executing and inspect the {{ $slash }} relayer errors. If this is an FX feed during the weekend market closure, the alert routing is misconfigured; snooze it and escalate the monitoring configuration.
+Logs: https://console.cloud.google.com/logs/query;query=resource.labels.service_name%3D%22relay-{{ .Labels.chain }}%22%20AND%20labels.rateFeed%3D%22{{ $enc }}%22?project=${local.oracle_relayer_mainnet_project_id}
+{{ end -}}
+Alert: {{ .GeneratorURL }}
+Started: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
+{{ end -}}
+{{ range .Alerts.Resolved -}}
+{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+RESOLVED: The {{ $slash }} oracle report on {{ .Labels.chain | title }} is fresh again.
+Resolved: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
+{{ end -}}
 {{ end }}
 EOT
 }
@@ -48,7 +65,7 @@ resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_
 Low {{ .Labels.token }} balance for {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }} left
 Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 - Top up the relayer wallet to keep the relayer running
-- Run the relayer refill script (https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts), or send 50 {{ .Labels.token }} from the dev wallet
+- Run the relayer refill script (https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts), or top up from the dev wallet until the balance is at least {{ .Annotations.threshold }} {{ .Labels.token }}
 - Get the dev wallet private key from the Eng vault in 1Password
 {{ end }}
 {{ range .Alerts.Resolved }}
@@ -79,7 +96,7 @@ resource "grafana_message_template" "victorops_reserve_balance_alert_message" {
   {{ $token := .Labels.token -}}
   {{ $reserveAddress := .Labels.ownerValue -}}
 FIRING: Low {{ $token }} balance — {{ .Annotations.currentBalance }} left
-Please top up the {{ $token }} balance of the {{ .Labels.owner }} ({{ $reserveAddress }}) above the alert threshold of {{ .Annotations.threshold }} {{ $token }}. Address: https://celoscan.io/address/{{ $reserveAddress }}
+Please top up the {{ $token }} balance of the {{ .Labels.owner }} ({{ $reserveAddress }}) above the alert threshold of {{ .Annotations.threshold }} {{ $token }}. Address: https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}
 {{ if .GeneratorURL -}}Grafana Alert Link: {{ .GeneratorURL }}{{- end }}
   {{ end -}}
   {{ range .Alerts.Resolved -}}
@@ -130,6 +147,10 @@ ${local.celo_chainlink_slug_branches}
 ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
 {{ end -}}
+{{ if eq .Labels.chain "polygon" -}}
+${local.polygon_pool_branches}
+${local.polygon_chainlink_slug_branches}
+{{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
 {{ $chainlinkURL := "" -}}
@@ -165,6 +186,10 @@ ${local.celo_chainlink_slug_branches}
 {{ if eq .Labels.chain "monad" -}}
 ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
+{{ end -}}
+{{ if eq .Labels.chain "polygon" -}}
+${local.polygon_pool_branches}
+${local.polygon_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}

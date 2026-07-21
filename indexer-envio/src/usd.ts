@@ -24,6 +24,68 @@ export function normalizeRewardBps(bps: number): number {
 
 const bAbs = (n: bigint): bigint => (n < 0n ? -n : n);
 
+const EXPLICIT_FX_CURRENCY_BY_SYMBOL: Readonly<Record<string, string>> = {
+  axlEUROC: "EUR",
+  cEUR: "EUR",
+  EUROP: "EUR",
+};
+
+function currencyForSymbol(symbol: string | undefined): string | null {
+  if (symbol === undefined) return null;
+  if (USD_PEGGED_SYMBOLS.has(symbol)) return "USD";
+  const explicit = EXPLICIT_FX_CURRENCY_BY_SYMBOL[symbol];
+  if (explicit !== undefined) return explicit;
+  if (/^[A-Z]{3}m$/.test(symbol)) return symbol.slice(0, 3);
+  return null;
+}
+
+function tokenCurrency(
+  chainId: number,
+  token: string | undefined,
+): string | null {
+  if (!token) return null;
+  return currencyForSymbol(
+    KNOWN_TOKEN_META.get(`${chainId}:${token.toLowerCase()}`)?.symbol,
+  );
+}
+
+/**
+ * Currency shared by both legs of a non-USD stable pair (for example
+ * EURm/EUROP). These pairs need a historical same-chain FX rate rather than
+ * the $1 pegged-leg shortcut used by USDm/USDC pools.
+ */
+export function swapFxCurrency(input: {
+  chainId: number;
+  token0: string | undefined;
+  token1: string | undefined;
+}): string | null {
+  const currency0 = tokenCurrency(input.chainId, input.token0);
+  const currency1 = tokenCurrency(input.chainId, input.token1);
+  if (
+    currency0 === null ||
+    currency1 === null ||
+    currency0 === "USD" ||
+    currency0 !== currency1
+  ) {
+    return null;
+  }
+  return currency0;
+}
+
+/** True when a pool is a USD/currency cross that can price `currency`. */
+export function poolCarriesUsdRateForCurrency(
+  chainId: number,
+  token0: string | undefined,
+  token1: string | undefined,
+  currency: string,
+): boolean {
+  const currencies = [
+    tokenCurrency(chainId, token0),
+    tokenCurrency(chainId, token1),
+  ];
+  return currencies.includes("USD") && currencies.includes(currency);
+}
+
 /**
  * Convert a wei-scaled amount to a 4dp fixed-point string. Truncates (not
  * rounds) on overflow past 4dp — acceptable for monitoring display.
@@ -49,22 +111,30 @@ function formatFixed4(value: bigint, decimals: number): string {
  * Returns `null` when token addresses are missing, both abs amounts are zero,
  * or neither side is in `USD_PEGGED_SYMBOLS`.
  */
+interface TokenAmount {
+  token: string | undefined;
+  amount: bigint;
+  decimals: number;
+}
+
 function pickPeggedSide(
   chainId: number,
-  token0: string | undefined,
-  token1: string | undefined,
-  abs0: bigint,
-  abs1: bigint,
-  decimals0: number,
-  decimals1: number,
+  side0: TokenAmount,
+  side1: TokenAmount,
 ): { peggedAmount: bigint; peggedDecimals: number } | null {
-  if (!token0 || !token1 || (abs0 === 0n && abs1 === 0n)) return null;
+  if (
+    !side0.token ||
+    !side1.token ||
+    (side0.amount === 0n && side1.amount === 0n)
+  ) {
+    return null;
+  }
 
   const sym0 = KNOWN_TOKEN_META.get(
-    `${chainId}:${token0.toLowerCase()}`,
+    `${chainId}:${side0.token.toLowerCase()}`,
   )?.symbol;
   const sym1 = KNOWN_TOKEN_META.get(
-    `${chainId}:${token1.toLowerCase()}`,
+    `${chainId}:${side1.token.toLowerCase()}`,
   )?.symbol;
   const peg0 = sym0 !== undefined && USD_PEGGED_SYMBOLS.has(sym0);
   const peg1 = sym1 !== undefined && USD_PEGGED_SYMBOLS.has(sym1);
@@ -73,10 +143,11 @@ function pickPeggedSide(
   const useToken0 =
     peg0 &&
     (!peg1 ||
-      abs0 * 10n ** BigInt(decimals1) >= abs1 * 10n ** BigInt(decimals0));
+      side0.amount * 10n ** BigInt(side1.decimals) >=
+        side1.amount * 10n ** BigInt(side0.decimals));
   return useToken0
-    ? { peggedAmount: abs0, peggedDecimals: decimals0 }
-    : { peggedAmount: abs1, peggedDecimals: decimals1 };
+    ? { peggedAmount: side0.amount, peggedDecimals: side0.decimals }
+    : { peggedAmount: side1.amount, peggedDecimals: side1.decimals };
 }
 
 export interface RebalanceUsdInput {
@@ -142,12 +213,16 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
 
   const picked = pickPeggedSide(
     chainId,
-    token0,
-    token1,
-    bAbs(amount0Delta),
-    bAbs(amount1Delta),
-    token0Decimals,
-    token1Decimals,
+    {
+      token: token0,
+      amount: bAbs(amount0Delta),
+      decimals: token0Decimals,
+    },
+    {
+      token: token1,
+      amount: bAbs(amount1Delta),
+      decimals: token1Decimals,
+    },
   );
   if (picked === null) return { notionalUsd: "", rewardUsd: "" };
 
@@ -208,7 +283,12 @@ export interface SwapUsdInput {
  * pegged. Callers should distinguish "uncomputable" from "zero-volume swap"
  * by also checking the raw amounts.
  */
-export function computeSwapUsdWei(input: SwapUsdInput): bigint {
+export function computeSwapUsdWei(
+  input: SwapUsdInput,
+  /** USD per token, Fixidity-scaled (1e24 = $1). Required only for a
+   * same-currency non-USD pair such as EURm/EUROP. */
+  fxUsdRate?: bigint,
+): bigint {
   const {
     chainId,
     token0,
@@ -231,15 +311,21 @@ export function computeSwapUsdWei(input: SwapUsdInput): bigint {
 
   const picked = pickPeggedSide(
     chainId,
-    token0,
-    token1,
-    a0,
-    a1,
-    token0Decimals,
-    token1Decimals,
+    { token: token0, amount: a0, decimals: token0Decimals },
+    { token: token1, amount: a1, decimals: token1Decimals },
   );
-  if (picked === null) return 0n;
-  return scaleToUsdWei(picked.peggedAmount, picked.peggedDecimals);
+  if (picked !== null) {
+    return scaleToUsdWei(picked.peggedAmount, picked.peggedDecimals);
+  }
+
+  if (fxUsdRate === undefined || fxUsdRate <= 0n) return 0n;
+  if (swapFxCurrency(input) === null) return 0n;
+  const useToken0 =
+    a0 * 10n ** BigInt(token1Decimals) >= a1 * 10n ** BigInt(token0Decimals);
+  const amountUsdWei = useToken0
+    ? scaleToUsdWei(a0, token0Decimals)
+    : scaleToUsdWei(a1, token1Decimals);
+  return (amountUsdWei * fxUsdRate) / 10n ** 24n;
 }
 
 /**

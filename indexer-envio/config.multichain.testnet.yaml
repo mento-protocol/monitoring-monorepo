@@ -1,16 +1,18 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: mento-multichain-testnet
-description: Mento v3 multichain testnet indexer — Celo Sepolia (11142220) + Monad Testnet (10143)
+description: Mento v3 multichain testnet indexer — Celo Sepolia (11142220) + Monad Testnet (10143) + Polygon Amoy (80002)
 
 # Disable v3's `src/handlers/` auto-loading — see config.multichain.mainnet.yaml
 # for the rationale. Each contract below explicitly points at
 # `src/EventHandlers.ts`.
 handlers: null
 #
-# Envio event sync uses ENVIO_RPC_URL_CELO_SEPOLIA for Celo Sepolia below.
-# Handler eth_call reads separately use ENVIO_RPC_URL_11142220 and
-# ENVIO_RPC_URL_10143. Set both Celo Sepolia variables when overriding the full
-# chain path. Do NOT use the generic ENVIO_RPC_URL in multichain mode.
+# Envio event sync uses ENVIO_RPC_URL_CELO_SEPOLIA for Celo Sepolia and
+# ENVIO_RPC_URL_80002 for Polygon Amoy below. Handler eth_call reads use
+# ENVIO_RPC_URL_11142220, ENVIO_RPC_URL_10143, and ENVIO_RPC_URL_80002.
+# Set both Celo Sepolia variables when overriding the full chain path; Polygon
+# Amoy's single override covers both paths. Do NOT use the generic
+# ENVIO_RPC_URL in multichain mode.
 #
 # NOTE — Mixed static + dynamic address model:
 # FPMM and VirtualPool addresses here are a mix of hardcoded seed addresses
@@ -418,6 +420,75 @@ chains:
         address: [] # No testnet Wormhole NTT addresses wired today
       - name: WormholeTransceiver
         address: [] # No testnet Wormhole transceiver addresses wired today
+
+  # ---------------------------------------------------------------------------
+  # Polygon Amoy (chain 80002)
+  # ---------------------------------------------------------------------------
+  - id: 80002
+    # Earliest canonical deployment receipt: SortedOracles at block 37555761.
+    # The first replayable FPMM factory events land at block 42219919.
+    rpc:
+      url: ${ENVIO_RPC_URL_80002:-https://rpc-amoy.polygon.technology}
+    start_block: ${ENVIO_START_BLOCK_POLYGON_AMOY:-37555761}
+    contracts:
+      - name: Broker
+        address: []
+      - name: FPMMFactory
+        address:
+          - 0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980
+      - name: FPMM
+        address: [] # Dynamically registered from FPMMFactory events
+      - name: VirtualPool
+        address: []
+      - name: VirtualPoolFactory
+        address: []
+      - name: SortedOracles
+        address:
+          - "0x85ed9ac57827132B8F60938F3165BC139E1F53cd"
+      - name: BiPoolManager
+        address: []
+      - name: OpenLiquidityStrategy
+        address:
+          - 0xCCd2aD0603a08EBc14D223a983171ef18192e8c9
+      - name: LiquityTroveManager
+        address: []
+      - name: LiquityStabilityPool
+        address: []
+      - name: LiquityTroveNFT
+        address: []
+      - name: LiquityBorrowerOperations
+        address: []
+      - name: LiquityCollateralRegistry
+        address: []
+      - name: CDPLiquidityStrategy
+        address: []
+      - name: ReserveTroveFactory
+        address: []
+      - name: LiquityActivePool
+        address: []
+      - name: LiquityDefaultPool
+        address: []
+      - name: ERC20FeeToken
+        address: [] # Dynamically registered from FPMMDeployed events
+      - name: StableToken
+        address: [] # No verified Amoy NTT supply deployment; do not synthesize one
+      - name: Susds
+        address: []
+      - name: Steth
+        address: []
+      - name: BreakerBox
+        address:
+          - 0x88869E30609D2C0E4032463D713328C6f541878e # BreakerBoxv265
+      - name: MedianDeltaBreaker
+        address:
+          - 0xf923C884F319b8866F67C5719A80E5cB4D0FAF2c # MedianDeltaBreakerv265
+      - name: ValueDeltaBreaker
+        address:
+          - 0xbbD0D093F5F11D16D4456FBd6229c9a3b70B8Aaf # ValueDeltaBreakerv265
+      - name: WormholeNttManager
+        address: [] # No published Amoy NTT helpers/managers
+      - name: WormholeTransceiver
+        address: [] # No published Amoy NTT transceivers
 
 field_selection:
   transaction_fields:

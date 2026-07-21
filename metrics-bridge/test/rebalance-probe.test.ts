@@ -732,6 +732,154 @@ describe("runRebalanceProbes — gauge writes", () => {
     lastDeviationRatio: "1.50",
   };
 
+  const twoStrategies = [
+    {
+      poolId: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
+      strategyAddress: "0x0000000000000000000000000000000000000bbb",
+      kind: "RESERVE" as const,
+    },
+    {
+      poolId: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
+      strategyAddress: "0x0000000000000000000000000000000000000aaa",
+      kind: "OPEN" as const,
+    },
+  ];
+
+  async function blockedGaugeValues(): Promise<unknown[]> {
+    const metrics = await register.getMetricsAsJSON();
+    const blocked = metrics.find(
+      (metric) => metric.name === "mento_pool_rebalance_blocked",
+    );
+    return blocked && "values" in blocked
+      ? (blocked as { values: unknown[] }).values
+      : [];
+  }
+
+  it("probes every active registry strategy and emits nothing when any strategy can act", async () => {
+    const pool = makePool({
+      ...breachOverrides,
+      activeLiquidityStrategies: twoStrategies,
+    });
+    mockProbe
+      .mockResolvedValueOnce({
+        kind: "blocked",
+        reasonCode: "LS_COOLDOWN_ACTIVE",
+        reasonMessage: "Rebalance cooldown is active — retry shortly",
+      })
+      .mockResolvedValueOnce({ kind: "ok" });
+
+    await runRebalanceProbes([pool]);
+
+    expect(mockProbe).toHaveBeenCalledTimes(2);
+    expect(mockProbe.mock.calls.map((call) => call[2])).toEqual([
+      twoStrategies[1]!.strategyAddress,
+      twoStrategies[0]!.strategyAddress,
+    ]);
+    expect(await blockedGaugeValues()).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: "transport failure",
+      result: { kind: "transport_error", error: "rpc unavailable" } as const,
+      log: "[REBALANCE_PROBE_FAILED]",
+    },
+    {
+      name: "unidentified strategy",
+      result: {
+        kind: "skip",
+        reason: "Unable to identify the liquidity strategy type",
+      } as const,
+      log: "[REBALANCE_PROBE_SKIPPED]",
+    },
+  ])(
+    "does not claim all strategies are blocked when one result is an unconfirmed $name",
+    async ({ result, log }) => {
+      const pool = makePool({
+        ...breachOverrides,
+        activeLiquidityStrategies: twoStrategies,
+      });
+      mockProbe
+        .mockResolvedValueOnce({
+          kind: "blocked",
+          reasonCode: "LS_COOLDOWN_ACTIVE",
+          reasonMessage: "Rebalance cooldown is active — retry shortly",
+        })
+        .mockResolvedValueOnce(result);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await runRebalanceProbes([pool]);
+
+      expect(mockProbe).toHaveBeenCalledTimes(2);
+      expect(await blockedGaugeValues()).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(log));
+      warn.mockRestore();
+    },
+  );
+
+  it("emits one deterministic pool-level reason only when every active strategy is blocked", async () => {
+    const pool = makePool({
+      ...breachOverrides,
+      activeLiquidityStrategies: twoStrategies,
+    });
+    mockProbe
+      .mockResolvedValueOnce({
+        kind: "blocked",
+        reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
+        reasonMessage: "Reserve has insufficient collateral",
+      })
+      .mockResolvedValueOnce({
+        kind: "blocked",
+        reasonCode: "LS_COOLDOWN_ACTIVE",
+        reasonMessage: "Rebalance cooldown is active — retry shortly",
+      });
+    await runRebalanceProbes([pool]);
+
+    expect(
+      await getGaugeValue(register, "mento_pool_rebalance_blocked", {
+        reason_code: "RLS_RESERVE_OUT_OF_COLLATERAL",
+        reason_message: "Reserve has insufficient collateral",
+      }),
+    ).toBe(1);
+    expect(await blockedGaugeValues()).toHaveLength(1);
+  });
+
+  it("deduplicates strategy addresses case-insensitively before probing", async () => {
+    const pool = makePool({
+      ...breachOverrides,
+      activeLiquidityStrategies: [
+        {
+          poolId: twoStrategies[0]!.poolId,
+          strategyAddress: "0x0000000000000000000000000000000000000aAa",
+          kind: "OPEN",
+        },
+        {
+          poolId: twoStrategies[0]!.poolId,
+          strategyAddress: "0x0000000000000000000000000000000000000AaA",
+          kind: "RESERVE",
+        },
+      ],
+    });
+    mockProbe.mockResolvedValue({ kind: "ok" });
+
+    await runRebalanceProbes([pool]);
+
+    expect(mockProbe).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a successful empty registry as authoritative over the legacy pointer", async () => {
+    const pool = makePool({
+      ...breachOverrides,
+      activeLiquidityStrategies: [],
+    });
+
+    await runRebalanceProbes([pool]);
+
+    expect(eligibleForProbe([pool])).toEqual([]);
+    expect(mockProbe).not.toHaveBeenCalled();
+    expect(await blockedGaugeValues()).toEqual([]);
+  });
+
   it("emits gauge=1 with reason_code + reason_message labels on a blocked probe", async () => {
     const pool = makePool(breachOverrides);
     mockProbe.mockResolvedValueOnce({

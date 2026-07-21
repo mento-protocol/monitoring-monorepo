@@ -21,6 +21,7 @@ import { makePoolId } from "../src/helpers.ts";
 
 type MockDb = MockDbWith<{
   Pool: WritableEntity;
+  PoolLiquidityStrategy: WritableEntity;
 }>;
 
 const TestHelpers = indexerTestHelpers<MockDb>();
@@ -153,6 +154,67 @@ describe("FPMM fee-config event handlers", () => {
     );
   });
 
+  it("tracks multiple active liquidity strategies and restores the legacy pointer on disable", async function () {
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedFpmmPool(mockDb);
+    const strategyA = "0x00000000000000000000000000000000000000d1";
+    const strategyB = "0x00000000000000000000000000000000000000d2";
+
+    for (const [strategy, logIndex, blockNumber] of [
+      [strategyA, 10, 600],
+      [strategyB, 11, 601],
+    ] as const) {
+      const event = FPMM.LiquidityStrategyUpdated.createMockEvent({
+        strategy,
+        status: true,
+        mockEventData: mockEventData(logIndex, blockNumber),
+      });
+      mockDb = await FPMM.LiquidityStrategyUpdated.processEvent({
+        event,
+        mockDb,
+      });
+    }
+
+    const poolId = makePoolId(42220, POOL_ADDRESS);
+    const activeA = mockDb.entities.PoolLiquidityStrategy.get(
+      `${poolId}-${strategyA}`,
+    ) as { active: boolean } | undefined;
+    const activeB = mockDb.entities.PoolLiquidityStrategy.get(
+      `${poolId}-${strategyB}`,
+    ) as { active: boolean } | undefined;
+    assert.equal(activeA?.active, true);
+    assert.equal(activeB?.active, true);
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { rebalancerAddress: string })
+        .rebalancerAddress,
+      strategyB,
+    );
+
+    const disableB = FPMM.LiquidityStrategyUpdated.createMockEvent({
+      strategy: strategyB,
+      status: false,
+      mockEventData: mockEventData(12, 602),
+    });
+    mockDb = await FPMM.LiquidityStrategyUpdated.processEvent({
+      event: disableB,
+      mockDb,
+    });
+
+    assert.equal(
+      (
+        mockDb.entities.PoolLiquidityStrategy.get(`${poolId}-${strategyB}`) as {
+          active: boolean;
+        }
+      ).active,
+      false,
+    );
+    assert.equal(
+      (mockDb.entities.Pool.get(poolId) as { rebalancerAddress: string })
+        .rebalancerAddress,
+      strategyA,
+    );
+  });
+
   it("RebalanceThresholdUpdated preserves exact-zero degeneracy when decimals are unknown", async function () {
     let mockDb = MockDb.createMockDb();
     mockDb = await seedFpmmPool(mockDb);
@@ -210,8 +272,8 @@ describe("FPMM fee-config event handlers", () => {
 
     assert.equal(
       guardedWrites?.length,
-      4,
-      "Current preload-guarded surfaces are TradingLimitConfigured, LiquidityStrategyUpdated, LPFeeUpdated/ProtocolFeeUpdated/RebalanceIncentiveUpdated, and RebalanceThresholdUpdated",
+      3,
+      "Direct Pool writes stay guarded for TradingLimitConfigured, LPFeeUpdated/ProtocolFeeUpdated/RebalanceIncentiveUpdated, and RebalanceThresholdUpdated; LiquidityStrategyUpdated delegates to its preload-safe registry helper",
     );
   });
 });

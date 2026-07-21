@@ -21,6 +21,7 @@ import { env } from "./env.js";
  * First factory deployment blocks:
  *   Celo mainnet (42220):  60668100 — initial batch of 4 FPMM pools
  *   Monad mainnet (143):   60759432 — initial batch of 3 FPMM pools
+ *   Polygon mainnet (137): 90348018 — initial batch of 3 FPMM pools
  *
  * First reserve-yield tracked movement:
  *   Ethereum mainnet (1):  19111760 — tracked stETH movement
@@ -29,6 +30,7 @@ import { env } from "./env.js";
 export const FPMM_FIRST_DEPLOY_BLOCK: Record<number, number> = {
   42220: 60668100, // Celo mainnet
   143: 60759432, // Monad mainnet
+  137: 90348018, // Polygon mainnet
 };
 
 const FIRST_REQUIRED_EVENT_BLOCK: Record<number, number> = {
@@ -43,6 +45,7 @@ export const RESERVE_YIELD_START_BLOCK_ENV_NAME =
 export const START_BLOCK_ENV_NAME: Record<number, string> = {
   42220: "ENVIO_START_BLOCK_CELO",
   143: "ENVIO_START_BLOCK_MONAD",
+  137: "ENVIO_START_BLOCK_POLYGON",
 };
 
 function assertStartBlockNotAfterRequiredEvent({
@@ -125,6 +128,7 @@ export function runStartupChecks(): void {
   assertStartBlocksValid({
     42220: env.ENVIO_START_BLOCK_CELO,
     143: env.ENVIO_START_BLOCK_MONAD,
+    137: env.ENVIO_START_BLOCK_POLYGON,
   });
   assertReserveYieldStartBlockValid();
 }

@@ -28,11 +28,13 @@ type RpcConfig = { default?: string; envVar: string };
  * as a default — that's why Monad testnet (10143) has no default and must be
  * explicitly overridden via `RPC_URL_10143`.
  *
- * Verified defaults (2026-04-28):
+ * Verified defaults:
  *   - 42220 (Celo mainnet): forno.celo.org — full-node, supports eth_call.
  *   - 11142220 (Celo Sepolia): forno.celo-sepolia.celo-testnet.org — full-node.
  *   - 143 (Monad mainnet): rpc2.monad.xyz — full-node, supports eth_call.
  *   - 10143 (Monad testnet): NO public full-node default known — env var required.
+ *   - 137 (Polygon mainnet): polygon.drpc.org — full-node, supports eth_call
+ *     (verified 2026-07-17 against the Polygon FPMM strategies).
  *
  * Add new chains here AND in `RPC_URL_<chainId>` env-var docs.
  */
@@ -43,6 +45,7 @@ const RPC_CONFIG_BY_CHAIN: Record<number, RpcConfig> = {
     envVar: "RPC_URL_11142220",
   },
   143: { default: "https://rpc2.monad.xyz", envVar: "RPC_URL_143" },
+  137: { default: "https://polygon.drpc.org", envVar: "RPC_URL_137" },
   10143: {
     // No public full-node default — `https://10143.rpc.hypersync.xyz` is
     // HyperRPC and does not serve eth_call. Operators must set RPC_URL_10143

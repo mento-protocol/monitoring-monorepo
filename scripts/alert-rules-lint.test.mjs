@@ -344,6 +344,62 @@ test("trading-mode notification templates avoid single-alert duplicate headings"
   );
 });
 
+test("oracle expiry notifications lead with human impact and action", () => {
+  const victorops = readFileSync(
+    path.resolve(
+      __dirname,
+      "..",
+      "alerts/rules/message-templates-victorops.tf",
+    ),
+    "utf8",
+  );
+  assert(
+    victorops.includes("P1 {{ range") &&
+      victorops.includes("oracle report expired"),
+    "VictorOps title should identify the page, chain, feed, and failure",
+  );
+  assert(
+    victorops.includes(
+      "{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end -}}",
+    ),
+    "VictorOps title should surface both states in mixed notification batches",
+  );
+  assert(
+    victorops.includes("Swaps using this feed may revert") &&
+      victorops.includes("ACTION: Check whether relay-"),
+    "VictorOps message should state impact and the next action",
+  );
+  assert(
+    !victorops.includes("FIRING: Stale price for"),
+    "VictorOps message should not use the old ambiguous stale-price copy",
+  );
+  const staleMessageStart = victorops.indexOf(
+    'resource "grafana_message_template" "victorops_oracle_stale_price_alert_message"',
+  );
+  const staleMessageEnd = victorops.indexOf(
+    'resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_title"',
+  );
+  assert(
+    staleMessageStart >= 0 && staleMessageEnd > staleMessageStart,
+    "stale-price VictorOps message template not found",
+  );
+  const staleMessage = victorops.slice(staleMessageStart, staleMessageEnd);
+  assert(
+    !staleMessage.includes("No alerts are currently firing."),
+    "resolve-only pages should start directly with the recovery message",
+  );
+  const slack = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/message-templates-slack.tf"),
+    "utf8",
+  );
+  assert(
+    slack.includes(
+      "If this is an FX feed during the weekend market closure, snooze it and escalate the monitoring configuration",
+    ),
+    "Slack should carry the same weekend-FX routing guidance as VictorOps",
+  );
+});
+
 test("Slack trading-mode bodies suppress duplicate single-alert headings", () => {
   const source = readFileSync(
     path.resolve(__dirname, "..", "alerts/rules/message-templates-slack.tf"),
@@ -367,6 +423,65 @@ test("Slack trading-mode bodies suppress duplicate single-alert headings", () =>
     ),
     "native Slack trading-mode firing body should keep Chainlink links",
   );
+});
+
+test("Polygon-family EUROPEUR staleness bypasses relayer remediation", () => {
+  const ruleSource = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/rules-oracle-relayers.tf"),
+    "utf8",
+  );
+  const ruleGuardStart = ruleSource.indexOf("{{ if and");
+  const ruleGuardEnd = ruleSource.indexOf(" }}", ruleGuardStart);
+  const fixedReportGuard = ruleSource.slice(ruleGuardStart, ruleGuardEnd);
+  assert(
+    ruleGuardStart >= 0 &&
+      ruleGuardEnd > ruleGuardStart &&
+      fixedReportGuard.includes("$labels.chain") &&
+      fixedReportGuard.includes("polygon") &&
+      fixedReportGuard.includes("polygon-testnet") &&
+      fixedReportGuard.includes("$labels.rateFeed") &&
+      fixedReportGuard.includes("EUROPEUR"),
+    "the fixed-report exception should cover Polygon mainnet and Amoy EUROPEUR",
+  );
+  assert(
+    ruleSource.includes(
+      "Check the deployment/migration owner responsible for the fixed 1.0 SortedOracles report.",
+    ) && ruleSource.includes("Check whether the oracle relayer is executing"),
+    "Polygon-family EUROPEUR should point to the fixed-report owner while other feeds keep relayer guidance",
+  );
+
+  for (const relativePath of [
+    "alerts/rules/message-templates-slack.tf",
+    "alerts/rules/message-templates-victorops.tf",
+  ]) {
+    const source = readFileSync(
+      path.resolve(__dirname, "..", relativePath),
+      "utf8",
+    );
+    const branchStart = source.indexOf(
+      '{{ if and (or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-testnet")) (eq .Labels.rateFeed "EUROPEUR") -}}',
+    );
+    const branchEnd = source.indexOf("{{ else -}}", branchStart);
+    assert(
+      branchStart >= 0 && branchEnd > branchStart,
+      relativePath + " should have a Polygon-family EUROPEUR branch",
+    );
+    const fixedReportBranch = source.slice(branchStart, branchEnd);
+    assert(
+      fixedReportBranch.includes("SortedOracles") &&
+        fixedReportBranch.includes("deployment/migration owner"),
+      relativePath +
+        " should route Polygon-family EUROPEUR to the fixed-report owner",
+    );
+    assert(
+      !fixedReportBranch.includes("relayer") &&
+        !fixedReportBranch.includes("relay-") &&
+        !fixedReportBranch.includes("cloud function") &&
+        !fixedReportBranch.includes("Logs:"),
+      relativePath +
+        " should not send Polygon-family EUROPEUR through relayer remediation",
+    );
+  }
 });
 
 test("trading-mode Splunk pages repeat slowly per rate feed", () => {

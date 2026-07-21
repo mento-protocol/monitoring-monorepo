@@ -12,6 +12,7 @@ import {
   marketByCollateralId,
 } from "./config.js";
 import { flushLiquitySnapshots, touchLiquityInstance } from "./instance.js";
+import { syncPoolLiquidityStrategy } from "../../liquidityStrategies.js";
 
 indexer.onEvent(
   { contract: "CDPLiquidityStrategy", event: "PoolAdded" },
@@ -25,13 +26,25 @@ indexer.onEvent(
     );
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+    const strategyAddress = asAddress(event.srcAddress);
+    await syncPoolLiquidityStrategy({
+      context,
+      chainId: event.chainId,
+      poolId,
+      strategyAddress,
+      active: true,
+      explicitKind: "CDP",
+      blockNumber,
+      blockTimestamp,
+    });
+    if (context.isPreload) return;
     context.CdpPool.set({
       id: poolId,
       chainId: event.chainId,
       collateralId: market === undefined ? undefined : makeCollateralId(market),
       debtToken: asAddress(params.debtToken),
       poolId,
-      strategyAddress: asAddress(event.srcAddress),
+      strategyAddress,
       rebalanceCooldownSec: Number(params.cooldown),
       addedAtBlock: blockNumber,
       addedAtTimestamp: blockTimestamp,
@@ -47,13 +60,25 @@ indexer.onEvent(
   async ({ event, context }) => {
     const poolId = makePoolId(event.chainId, event.params.pool);
     const existing = await context.CdpPool.get(poolId);
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
+    await syncPoolLiquidityStrategy({
+      context,
+      chainId: event.chainId,
+      poolId,
+      strategyAddress: asAddress(event.srcAddress),
+      active: false,
+      explicitKind: "CDP",
+      blockNumber,
+      blockTimestamp,
+    });
     if (context.isPreload) return;
     if (existing === undefined) return;
     context.CdpPool.set({
       ...existing,
       removed: true,
-      updatedAtBlock: asBigInt(event.block.number),
-      updatedAtTimestamp: asBigInt(event.block.timestamp),
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
     });
   },
 );

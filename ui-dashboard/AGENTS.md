@@ -17,6 +17,12 @@ Read the `ui-dashboard` records in
 README and [`SPEC.md`](../SPEC.md) own topology; `src/lib/networks.ts` is the
 runtime source for supported networks and shared-config overrides.
 
+Production targets include `celo-mainnet`, `monad-mainnet`, and
+`polygon-mainnet`; they share `NEXT_PUBLIC_HASURA_URL` and filter by `chainId`.
+Testnet targets include `celo-sepolia`, `monad-testnet`, and `polygon-amoy`;
+Polygon Amoy shares `NEXT_PUBLIC_HASURA_URL_TESTNET` with Monad Testnet and stays
+hidden unless testnet networks are enabled and that endpoint is configured.
+
 ## Before Opening PRs
 
 For pagination, sort/search, charts tied to table state, GraphQL shapes,
