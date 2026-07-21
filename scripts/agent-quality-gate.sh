@@ -956,6 +956,7 @@ while IFS= read -r path; do
       add_surface "docs"
       add_command "pnpm docs:navigation-eval:test" "documentation navigation evaluation contract changed"
       add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation contract changed"
+      add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation evaluation contract changed"
       ;;
     AGENTS.md|*/AGENTS.md|.codex/config.toml)
       add_surface "agent-context"
@@ -1543,7 +1544,7 @@ while IFS= read -r path; do
           add_command "pnpm docs:audit --dry-run" "documentation garden issue automation consumes the planner"
           add_command "pnpm docs:index --check" "documentation garden issue automation consumes the catalog"
           ;;
-        scripts/docs-navigation-eval.mjs|scripts/docs-navigation-eval-helpers.mjs|scripts/docs-navigation-eval.test.mjs)
+        scripts/docs-navigation-eval.mjs|scripts/docs-navigation-eval-helpers.mjs|scripts/docs-navigation-eval-result.mjs|scripts/docs-navigation-eval.test.mjs)
           add_command "pnpm docs:navigation-eval:test" "documentation navigation evaluation changed"
           add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation changed"
           add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation evaluation changed"

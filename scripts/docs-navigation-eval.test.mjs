@@ -19,6 +19,7 @@ import {
   buildNavigationEvalIssueSpec,
   buildNavigationPrompt,
   fixtureDigest,
+  isNavigationEvalAnswerArtifact,
   isRoutingSensitivePath,
   navigationContextFloor,
   navigationMonthMarker,
@@ -27,10 +28,12 @@ import {
   normalizeNavigationEvalIssuePages,
   parseLeadingNavigationEvalMarkers,
   planNavigationEvalIssueSync,
-  scoreNavigationResult,
-  validateNavigationResultShape,
   validateFixtureSuite,
 } from "./docs-navigation-eval-helpers.mjs";
+import {
+  scoreNavigationResult,
+  validateNavigationResultShape,
+} from "./docs-navigation-eval-result.mjs";
 import {
   assertCleanEvaluationCheckout,
   loadEvaluationContext,
@@ -206,6 +209,33 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
   );
 });
 
+test("answer artifacts include future run outputs but exclude contracts", () => {
+  assert.equal(
+    isNavigationEvalAnswerArtifact(
+      "docs/evals/documentation-navigation-baseline.json",
+    ),
+    true,
+  );
+  assert.equal(
+    isNavigationEvalAnswerArtifact(
+      "docs/evals/documentation-navigation-2026-08-post-garden.json",
+    ),
+    true,
+  );
+  assert.equal(
+    isNavigationEvalAnswerArtifact(
+      "docs/evals/documentation-navigation-fixtures.json",
+    ),
+    false,
+  );
+  assert.equal(
+    isNavigationEvalAnswerArtifact(
+      "docs/evals/documentation-navigation-result.schema.json",
+    ),
+    false,
+  );
+});
+
 test("prompt is deterministic and never leaks routes or qualification traps", () => {
   const baseCommit = "b".repeat(40);
   const first = buildNavigationPrompt(context.suite, { baseCommit });
@@ -216,6 +246,8 @@ test("prompt is deterministic and never leaks routes or qualification traps", ()
   assert.match(first, /at most 21 lines/);
   assert.match(first, /45,000 UTF-8 bytes/);
   assert.match(first, /250,000 UTF-8 bytes/);
+  assert.match(first, /documentation-navigation-\*\.json/);
+  assert.match(first, /result schema remains allowed/);
   assert.ok(!first.includes("shared-config/AGENTS.md"));
   assert.ok(!first.includes("docs/PLAN-celo-mainnet-indexer.md"));
   const targeted = buildNavigationPrompt(context.suite, {
@@ -289,6 +321,21 @@ test("wrong source bytes or hashes are rejected", () => {
   const scored = score(result);
   assert.match(scored.errors.join("\n"), /expected/);
   assert.match(scored.errors.join("\n"), /wrong sha256/);
+});
+
+test("reported future answer artifacts are rejected", () => {
+  const result = validResult();
+  result.answers[0].loaded_sources.push({
+    path: "docs/evals/documentation-navigation-2026-08-post-garden.json",
+    bytes: 1,
+    sha256: "0".repeat(64),
+  });
+  const scored = score(result);
+  assert.match(
+    scored.errors.join("\n"),
+    /loaded forbidden navigation evaluation answer artifact/,
+  );
+  assert.equal(scored.report.passed, false);
 });
 
 test("published result schema rejects unexpected and missing properties", () => {
@@ -751,6 +798,12 @@ test("generated result artifacts do not create routing-change reminders", () => 
   assert.equal(
     isRoutingSensitivePath(
       "docs/evals/documentation-navigation-post-garden-2026-09.json",
+    ),
+    false,
+  );
+  assert.equal(
+    isRoutingSensitivePath(
+      "docs/evals/documentation-navigation-2026-08-post-garden.json",
     ),
     false,
   );

@@ -21,9 +21,9 @@ import {
   normalizeNavigationEvalIssuePages,
   planNavigationEvalIssueSync,
   routingSensitiveChanges,
-  scoreNavigationResult,
   validateFixtureSuite,
 } from "./docs-navigation-eval-helpers.mjs";
+import { scoreNavigationResult } from "./docs-navigation-eval-result.mjs";
 import {
   buildDocumentationInventory,
   trackedDocumentationFiles,

@@ -2797,12 +2797,20 @@ assert_contains "- pnpm docs:index --check (documentation navigation evaluation 
 run_gate "scripts/docs-navigation-eval-helpers.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
 
+run_gate "scripts/docs-navigation-eval-result.mjs"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+
 run_gate "scripts/docs-navigation-eval.test.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
 
 run_gate "docs/evals/documentation-navigation-fixtures.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation contract changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation contract changed)"
+
+run_gate "docs/evals/documentation-navigation-2026-08-post-garden.json"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation contract changed)"
 
 run_gate "docs/evals/documentation-navigation-baseline.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation baseline changed)"
