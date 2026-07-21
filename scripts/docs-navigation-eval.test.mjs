@@ -447,7 +447,13 @@ test("a qualified historical source requires loaded canonical verification", () 
       verified_against: ["docs/notes/pr-ready-state.md"],
     }),
   );
-  const scored = score(result);
+  result.answers = [answer];
+  const scored = scoreNavigationResult({
+    suite: context.suite,
+    result,
+    repoRoot,
+    questionId: "commands-pr-readiness",
+  });
   assert.equal(
     scored.report.canonical_source_compliance.unqualified_noncanonical_sources,
     0,
