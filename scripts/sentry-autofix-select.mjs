@@ -45,6 +45,7 @@ import {
   FIX_REFUSED_LABEL,
   PROJECTED_LABEL,
 } from "./sentry-triage-ingest.mjs";
+import { autofixBranchName } from "./sentry-autofix-finalize.mjs";
 
 // Only `code-fix` verdicts are fixable in code; the select label already
 // filters to these, but the re-parse cross-checks the verdict value too.
@@ -211,29 +212,29 @@ async function readStub(runGh, repo, number) {
   };
 }
 
-/** True when an OPEN PR already references this SHORT-ID — the autofix leg must
- * never open a second fix PR for a Sentry issue that already has one under
- * review. Two deliberate scoping choices:
- *   - `--state open` only: a merged/closed PR is NOT a live dedup. A fixed
- *     issue that later regresses (ingest sheds the autofix markers on reopen)
- *     must be re-attemptable, and a `--state all` search would strand it behind
- *     the old, already-merged PR forever.
- *   - the SHORT-ID is QUOTED for exact-phrase matching. An unquoted term is
- *     tokenized by GitHub search (hyphens split it into `APP`, `MENTO`, …), so
- *     an unrelated PR merely mentioning those tokens — or a longer SHORT-ID that
- *     shares the prefix — would falsely dedup an eligible stub out of selection.
- * The SHORT-ID is shape-validated before it reaches the search and transits `gh`
- * as an argv element (never a shell string), so it can't inject. */
-async function openPrReferencesShortId(runGh, repo, shortId) {
+/** True when an OPEN autofix PR already exists for this SHORT-ID — the autofix
+ * leg must never open a second fix PR for a Sentry issue that already has one.
+ * Matched by the DETERMINISTIC head branch (`sentry-autofix/<short-id-lower>`),
+ * NOT by a text search: a free-text `--search "<SHORT-ID>"` matches any open PR
+ * whose body/title merely mentions the id (a human PR, a dependency bump, an
+ * unrelated fix that cites the Sentry issue), which would both falsely dedup an
+ * eligible stub out of selection AND — via the reconcile path — mislabel the
+ * stub `sentry:fix-pr-opened` pointing at that unrelated PR. The head branch is
+ * in our own namespace and one-to-one with the SHORT-ID, so a `--head` match is
+ * exact and cannot be spoofed by PR prose. `--state open` only: a merged/closed
+ * PR is not a live dedup (a regressed, re-triaged issue must be re-attemptable).
+ * The branch name is derived from the shape-validated SHORT-ID and transits
+ * `gh` as an argv element, so it can't inject. */
+async function openAutofixPrExists(runGh, repo, shortId) {
   const stdout = await runGh([
     "pr",
     "list",
     "--repo",
     repo,
+    "--head",
+    autofixBranchName(shortId),
     "--state",
     "open",
-    "--search",
-    `"${shortId}"`,
     "--json",
     "number",
     "--limit",
@@ -310,20 +311,20 @@ async function evaluateCandidate(runGh, repo, stub) {
     return null;
   }
 
-  // An OPEN PR already references this SHORT-ID. Because the two terminal
-  // markers were filtered above, reaching here means the stub has NEITHER
-  // marker yet an open fix PR exists — i.e. a prior run's `gh pr create`
-  // succeeded but its follow-up queue comment/label write did not land (a
-  // transient failure, or a same-tick race with a concurrent run). This is NOT
-  // a plain skip: the stub's queue side-effects are unreconciled and would
-  // never be repaired if we dropped it (the workflow's reconcile path is only
-  // reachable AFTER selection). Emit it as a RECONCILE entry — the fix job
+  // An OPEN autofix PR already exists on this SHORT-ID's deterministic branch.
+  // Because the two terminal markers were filtered above, reaching here means
+  // the stub has NEITHER marker yet its fix PR exists — i.e. a prior run's `gh
+  // pr create` succeeded but its follow-up queue comment/label write did not
+  // land (a transient failure, or a same-tick race with a concurrent run). This
+  // is NOT a plain skip: the stub's queue side-effects are unreconciled and
+  // would never be repaired if we dropped it (the workflow's reconcile path is
+  // only reachable AFTER selection). Emit it as a RECONCILE entry — the fix job
   // routes reconcile entries to a no-agent step that (re-)applies the marker +
   // comment against the existing PR, never opening a duplicate and never
   // re-running the agent (which could otherwise mislabel it `fix-refused`).
-  if (await openPrReferencesShortId(runGh, repo, shortId)) {
+  if (await openAutofixPrExists(runGh, repo, shortId)) {
     process.stderr.write(
-      `reconcile #${stub.number}: an open PR references ${shortId} but the stub lacks its marker; routing to no-agent reconciliation.\n`,
+      `reconcile #${stub.number}: an open autofix PR exists for ${shortId} but the stub lacks its marker; routing to no-agent reconciliation.\n`,
     );
     return { issue: stub.number, shortId, reconcile: true };
   }

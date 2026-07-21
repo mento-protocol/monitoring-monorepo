@@ -194,6 +194,11 @@ jobs:
     permissions:
       contents: read
       issues: write
+      # The reconcile-only step lists PRs with the ambient github.token to
+      # re-resolve an orphaned autofix PR; PR read access defaults to none, so
+      # grant it explicitly (read-only — branch push + PR create still come
+      # exclusively from the App token in the deterministic steps).
+      pull-requests: read
     # Deliberately NO GH_TOKEN at job level: it must not reach the claude-code
     # LLM step's process env, where a prompt-injected agent could read it from a
     # process-environment surface. Each deterministic step that needs GitHub auth
@@ -455,8 +460,11 @@ jobs:
             exit 0
           fi
           if grep -Fxq "sentry:fix-pr-opened" <<<"${labels_now}"; then
+            # Match the deterministic autofix head branch, not a text search: a
+            # free-text SHORT-ID query can hit an unrelated open PR that merely
+            # cites the Sentry issue and relink the stub to the wrong PR.
             reconciled_pr=$(GH_TOKEN="${APP_TOKEN}" gh pr list \
-              --repo "${REPO}" --search "\"${SHORT_ID}\"" --state open \
+              --repo "${REPO}" --head "${branch}" --state open \
               --json url --jq '.[0].url // ""')
             if [ -n "${reconciled_pr}" ]; then
               echo "::notice::#${QUEUE_ISSUE} already marked fix-pr-opened; relinking ${reconciled_pr}, no new PR."
@@ -589,14 +597,17 @@ jobs:
             echo "::notice::#${QUEUE_ISSUE} already reconciled (sentry:fix-pr-opened present)."
             exit 0
           fi
-          # Re-resolve the open PR (quoted SHORT-ID, exact-phrase, open-only —
-          # same contract as the selector's dedup). If it merged/closed in the
-          # meantime there is nothing to relink.
+          # Re-resolve the open PR by its DETERMINISTIC head branch (not a text
+          # search — a free-text SHORT-ID query could relink to an unrelated PR
+          # that merely cites the Sentry issue), open-only — same contract as
+          # the selector's dedup. No agent ran for a reconcile entry, so the
+          # checkout is untrusted-free and the repo's real helper is safe to run.
+          branch=$(node scripts/sentry-autofix-finalize.mjs branch --short-id "${SHORT_ID}")
           pr_url=$(gh pr list --repo "${REPO}" \
-            --search "\"${SHORT_ID}\"" --state open \
+            --head "${branch}" --state open \
             --json url --jq '.[0].url // ""')
           if [ -z "${pr_url}" ]; then
-            echo "::notice::#${QUEUE_ISSUE} reconcile: no open PR for ${SHORT_ID} (merged/closed?); nothing to do."
+            echo "::notice::#${QUEUE_ISSUE} reconcile: no open PR on ${branch} (merged/closed?); nothing to do."
             exit 0
           fi
           # Repair the queue side-effects: the digest link comment + the terminal

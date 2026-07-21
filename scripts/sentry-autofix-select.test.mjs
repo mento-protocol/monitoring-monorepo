@@ -87,10 +87,18 @@ function stub({
  * Mock `gh`:
  *  - issue list -> the stub summaries (number/title/labels/createdAt)
  *  - issue view -> the full stub (with comments)
- *  - pr list    -> [] unless the searched SHORT-ID is in `prShortIds` (the
- *                  fixture models an OPEN-PR reference; the selector passes
- *                  `--state open` and a quoted term, which the mock unwraps)
+ *  - pr list    -> [] unless the queried --head branch corresponds to a
+ *                  SHORT-ID in `prShortIds` (the fixture models an OPEN autofix
+ *                  PR; the selector matches by the deterministic head branch
+ *                  `sentry-autofix/<short-id-lower>`, NOT by a text search, so a
+ *                  human/unrelated PR that merely cites the id cannot match)
  */
+function branchToShortId(branch) {
+  return String(branch)
+    .replace(/^sentry-autofix\//, "")
+    .toUpperCase();
+}
+
 function makeRunGh({ stubs = [], prShortIds = [] } = {}) {
   const calls = [];
   const byNumber = new Map(stubs.map((s) => [String(s.number), s]));
@@ -118,11 +126,13 @@ function makeRunGh({ stubs = [], prShortIds = [] } = {}) {
       });
     }
     if (a0 === "pr" && a1 === "list") {
-      const searched = args[args.indexOf("--search") + 1];
-      // The selector quotes the SHORT-ID for exact-phrase matching; unwrap the
-      // surrounding quotes so the fixture keys stay the bare SHORT-ID.
-      const term = searched.replace(/^"|"$/g, "");
-      return JSON.stringify(prShortIds.includes(term) ? [{ number: 1 }] : []);
+      // The selector matches the deterministic head branch (never --search).
+      const headIdx = args.indexOf("--head");
+      const shortId =
+        headIdx === -1 ? null : branchToShortId(args[headIdx + 1]);
+      return JSON.stringify(
+        shortId && prShortIds.includes(shortId) ? [{ number: 1 }] : [],
+      );
     }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
@@ -201,12 +211,12 @@ await test("skips a stub already labeled sentry:fix-pr-opened", async () => {
   assertDeepEqual(selected, [{ issue: 21, shortId: "APP-MENTO-ORG-6W" }]);
 });
 
-await test("emits a RECONCILE entry when an OPEN PR references the SHORT-ID but the stub lacks its marker", async () => {
+await test("emits a RECONCILE entry when an OPEN autofix PR exists but the stub lacks its marker", async () => {
   // Orphan: the stub reaches the PR check without either terminal marker (they
-  // are filtered earlier), so an open PR here means a prior run opened the PR
-  // but its queue comment/label write did not land. The selector must route it
-  // to no-agent reconciliation, NOT silently drop it (which would leave the
-  // queue side-effects permanently unrepaired).
+  // are filtered earlier), so an open PR on its autofix branch means a prior
+  // run opened the PR but its queue comment/label write did not land. The
+  // selector must route it to no-agent reconciliation, NOT silently drop it
+  // (which would leave the queue side-effects permanently unrepaired).
   const stubs = [stub({ number: 30, shortId: "APP-MENTO-ORG-7X" })];
   const { runGh, calls } = makeRunGh({
     stubs,
@@ -216,17 +226,21 @@ await test("emits a RECONCILE entry when an OPEN PR references the SHORT-ID but 
   assertDeepEqual(selected, [
     { issue: 30, shortId: "APP-MENTO-ORG-7X", reconcile: true },
   ]);
-  // The dedup PR search must be scoped to OPEN PRs (a merged/closed PR must not
-  // strand a regressed stub) and must quote the SHORT-ID (exact phrase, not a
-  // tokenized substring match).
+  // The dedup must be scoped to OPEN PRs (a merged/closed PR must not strand a
+  // regressed stub) and must match the DETERMINISTIC head branch — never a text
+  // search, which an unrelated PR citing the id could satisfy.
   const prCall = calls.find((c) => c[0] === "pr" && c[1] === "list");
   assert(prCall, "pr list was queried");
   const state = prCall[prCall.indexOf("--state") + 1];
-  const searched = prCall[prCall.indexOf("--search") + 1];
-  assert(state === "open", `pr search must be open-only, got ${state}`);
+  assert(state === "open", `pr query must be open-only, got ${state}`);
   assert(
-    searched === '"APP-MENTO-ORG-7X"',
-    `pr search term must be quoted, got ${searched}`,
+    prCall.indexOf("--search") === -1,
+    "must NOT use a text search (--search)",
+  );
+  const head = prCall[prCall.indexOf("--head") + 1];
+  assert(
+    head === "sentry-autofix/app-mento-org-7x",
+    `pr query must match the deterministic head branch, got ${head}`,
   );
 });
 
