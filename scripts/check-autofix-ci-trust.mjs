@@ -161,7 +161,8 @@ export function referencesSecrets(body) {
   // expand EVERY repository secret at once.
   if (/\$\{\{[^}]*\bsecrets\b/.test(body)) return true;
   const stripped = stripComments(body);
-  if (/^\s*secrets\s*:\s*inherit\s*$/m.test(stripped)) return true;
+  // `inherit` may be a quoted YAML scalar with identical semantics.
+  if (/^\s*secrets\s*:\s*(['"]?)inherit\1\s*$/m.test(stripped)) return true;
   // Explicit `secrets:` mapping on a reusable-workflow call. Only meaningful
   // when the block also calls a workflow (`uses: .../.github/workflows/...`).
   if (

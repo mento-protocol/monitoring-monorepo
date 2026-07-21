@@ -119,6 +119,12 @@ test("referencesSecrets covers every secret-passing syntax", () => {
   );
   assert(
     referencesSecrets(
+      '    uses: ./.github/workflows/x.yml\n    secrets: "inherit"',
+    ),
+    "QUOTED inherit scalar has identical semantics and must count",
+  );
+  assert(
+    referencesSecrets(
       "    uses: org/repo/.github/workflows/x.yml@sha\n    secrets:\n      token: abc",
     ),
     "reusable-workflow explicit secrets block",
