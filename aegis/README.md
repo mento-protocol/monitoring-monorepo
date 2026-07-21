@@ -172,6 +172,7 @@ interface Chain {
   id: string;
   label: string;
   httpRpcUrl: string;
+  fallbackHttpRpcUrl?: string;
   contracts: Record<string, string>;
   vars: Record<string, string>;
 }
@@ -180,6 +181,8 @@ interface Chain {
 - If the chain `id` matches an import from [viem's supported chains](https://github.com/wevm/viem/blob/main/src/chains/index.ts), we will use that import, enabling multicall and other goodness (for example, `celoSepolia` or `celo`).
   However, arbitrary values also work, and Aegis will create a custom chain instance in that case.
 - `label` will be used for segmenting in the context of Prometheus metrics `chain={label}`.
+- `fallbackHttpRpcUrl`, when set, is tried once for transport failures from
+  `httpRpcUrl`; deterministic contract/ABI failures are not retried.
 - `contracts` should list addresses for all contracts referenced in `metrics`.
 - `vars` can contain chain-specific variables to extend or override entries in the `global.vars` object.
 

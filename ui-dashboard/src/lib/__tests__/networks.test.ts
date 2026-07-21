@@ -399,7 +399,7 @@ describe("NETWORKS — Polygon networks", () => {
       "https://polygonscan.com",
     );
     expect(NETWORKS["polygon-amoy"].rpcUrl).toBe(
-      "https://rpc-amoy.polygon.technology",
+      "https://polygon-amoy.drpc.org",
     );
     expect(NETWORKS["polygon-amoy"].explorerBaseUrl).toBe(
       "https://amoy.polygonscan.com",

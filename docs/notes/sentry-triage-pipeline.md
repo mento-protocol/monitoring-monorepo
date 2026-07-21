@@ -1013,11 +1013,12 @@ digest's "Autofixed" section reads) and applies the `sentry:fix-pr-opened`
 label, self-healed first from the ingest's `LABEL_DEFINITIONS` single source.
 The App token is never used for these local writes.
 
-**Run record (observability).** A final `record-run` job runs on EVERY autofix
-run — including when the leg is off-main, disabled, unprovisioned, finds zero
-candidates, or selection itself failed — and upserts a single rolling comment
-(its own `<!-- sentry-autofix:run-record:v1 -->` marker, distinct from the
-ingest's) on tracker issue
+**Run record (observability).** A final `record-run` job runs on every
+**on-`main`** autofix run — scheduled runs and `main` dispatches, including when
+the leg is disabled, unprovisioned, finds zero candidates, or selection itself
+failed — and upserts a single rolling comment (its own
+`<!-- sentry-autofix:run-record:v1 -->` marker, distinct from the ingest's) on
+tracker issue
 [#1282](https://github.com/mento-protocol/monitoring-monorepo/issues/1282) with
 the timestamp, trigger, disposition, and the candidates-selected /
 PRs-opened / refused / incomplete tallies (read back from the selected stubs'
@@ -1025,8 +1026,15 @@ PRs-opened / refused / incomplete tallies (read back from the selected stubs'
 plumbing is needed). It is best-effort and least-privileged (`issues: write`
 only, no Claude/App credential): a failed tracker write never reds the run,
 because a MISSING record is itself the dead-man-switch signal. This mirrors the
-ingest run record and satisfies the ADR 0036 observability invariant that every
-run leaves a durable record on the tracker.
+ingest run record and satisfies the ADR 0036 observability invariant, whose
+purpose is to detect a silently-dead **schedule**. An **off-`main`
+`workflow_dispatch`** (a developer testing the workflow from a feature branch)
+deliberately leaves **no** tracker record: the `record-run` job is gated to
+`github.ref == refs/heads/main` because a dispatch runs the *dispatched ref's*
+workflow + helper code, so recording off-main would mean executing unreviewed
+feature-branch code with the `issues:write` token. An off-main dispatch is not
+a scheduled run, so its absence from the ledger is not a false-healthy signal —
+the `select` job's own no-op notice is the record for that case.
 
 **Merge stays human.** Nothing in this leg merges. The fix PR is an ordinary PR:
 required CI, independent Codex review, and a human approving the merge —
