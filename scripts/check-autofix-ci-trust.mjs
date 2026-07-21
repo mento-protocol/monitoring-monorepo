@@ -57,13 +57,52 @@ function ok(msg) {
   console.log(`\x1b[32m✔ ${msg}\x1b[0m`);
 }
 
-/** True when the workflow body declares a `pull_request:` trigger (block or
- * inline list form). Comment lines are ignored so prose mentioning the
- * trigger cannot false-positive. */
-export function hasPullRequestTrigger(body) {
+/** Strip YAML comments line-wise (good enough for trigger detection — the
+ * `#` character inside trigger keys never appears in valid workflow syntax). */
+function stripComments(body) {
   return body
     .split("\n")
-    .some((line) => /^\s*pull_request\s*:?\s*$/.test(line.replace(/#.*$/, "")));
+    .map((line) => line.replace(/#.*$/, ""))
+    .join("\n");
+}
+
+/**
+ * True when the comment-stripped body declares the given trigger in ANY valid
+ * GitHub Actions form:
+ *   - block mapping:  `on:` newline `  pull_request:` (or bare `pull_request`)
+ *   - inline list:    `on: [push, pull_request]`
+ *   - inline scalar:  `on: pull_request`
+ *   - inline mapping: `on: { pull_request: { … } }`
+ * A pure line-anchored match misses the inline forms, which would let a
+ * workflow adopt the trigger while bypassing this check entirely.
+ */
+export function hasTrigger(body, trigger) {
+  const stripped = stripComments(body);
+  // Word-ish boundary that will not let `pull_request` match inside
+  // `pull_request_target` (nor `_target` match a longer name).
+  const t = trigger.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const asKeyOrItem = new RegExp(`(^|[\\s\\[{,])${t}(?![\\w-])`, "m");
+  // Only consider occurrences in trigger position: either inside the value of
+  // a top-level `on:` line (inline forms) or as an indented key/item in the
+  // block following `on:`. Scanning the whole body for the bare word would
+  // false-positive on step names; scoping to the `on:` region keeps precision.
+  const lines = stripped.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const onInline = line.match(/^on\s*:\s*(.+)$/);
+    if (onInline && asKeyOrItem.test(onInline[1])) return true;
+    if (/^on\s*:\s*$/.test(line)) {
+      for (let j = i + 1; j < lines.length; j += 1) {
+        const l = lines[j];
+        if (l.trim() === "") continue;
+        if (!/^\s/.test(l)) break; // left the `on:` block
+        // Trigger names appear as 2-space-indented keys or list items.
+        if (new RegExp(`^\\s{2}-?\\s*${t}(?![\\w-])`).test(l)) return true;
+        // Deeper-indented lines are trigger CONFIG (branches/paths), skip.
+      }
+    }
+  }
+  return false;
 }
 
 /** True when the workflow references any repository secret via the
@@ -72,16 +111,75 @@ export function referencesSecrets(body) {
   return /\$\{\{\s*secrets\./.test(body);
 }
 
-/** True when the workflow uses the pull_request_target trigger anywhere
- * outside a comment. */
+/** True when the workflow uses the pull_request_target trigger in any form. */
 export function usesPullRequestTarget(body) {
-  return body
-    .split("\n")
-    .some((line) => /^\s*pull_request_target\b/.test(line.replace(/#.*$/, "")));
+  return hasTrigger(body, "pull_request_target");
+}
+
+/** True when the workflow triggers on pull_request (any form). */
+export function hasPullRequestTrigger(body) {
+  return hasTrigger(body, "pull_request");
+}
+
+/**
+ * Split the workflow body into named job blocks. Textual, indentation-based:
+ * the repo's workflows are prettier/trunk-formatted with 2-space YAML indent,
+ * so a job is a `  name:` key directly under the top-level `jobs:` key. Lines
+ * before `jobs:` form the file HEADER (returned under the empty-string key) —
+ * a file-level annotation there covers every job.
+ */
+export function splitJobs(body) {
+  const lines = body.split("\n");
+  const blocks = new Map();
+  let current = "";
+  let inJobs = false;
+  let buf = [];
+  for (const line of lines) {
+    if (!inJobs && /^jobs\s*:\s*(#.*)?$/.test(line)) {
+      blocks.set(current, buf.join("\n"));
+      inJobs = true;
+      current = null;
+      buf = [];
+      continue;
+    }
+    if (inJobs) {
+      const jobKey = line.match(/^ {2}([A-Za-z0-9_-]+)\s*:\s*(#.*)?$/);
+      if (jobKey) {
+        if (current !== null) blocks.set(current, buf.join("\n"));
+        current = jobKey[1];
+        buf = [];
+        continue;
+      }
+      if (/^\S/.test(line) && line.trim() !== "") {
+        // Left the jobs: block (another top-level key).
+        if (current !== null) blocks.set(current, buf.join("\n"));
+        current = null;
+        inJobs = false;
+        buf = [];
+        continue;
+      }
+    }
+    buf.push(line);
+  }
+  if (current !== null && current !== undefined) {
+    blocks.set(current === null ? "" : current, buf.join("\n"));
+  } else if (!inJobs) {
+    blocks.set("", buf.join("\n"));
+  }
+  return blocks;
 }
 
 /**
  * Evaluate one workflow body. Returns `{ ok: true }` or `{ ok: false, reason }`.
+ *
+ * Granularity is PER JOB, not per file: in a multi-job workflow, one guarded
+ * job must not vouch for an unguarded sibling that also reaches secrets. A
+ * job passes when ITS OWN block contains the `sentry-autofix/` guard literal
+ * or an `# autofix-ci-trust:` annotation; a file-level annotation in the
+ * header (before `jobs:`) covers all jobs — annotations are deliberate
+ * reasoned prose, so file scope is acceptable for them, while the guard
+ * literal must sit in the job it protects.
+ *
  * Exported for tests.
  */
 export function evaluateWorkflow(body) {
@@ -92,17 +190,28 @@ export function evaluateWorkflow(body) {
         "uses pull_request_target, which hands secrets to PR-controlled context by design — use pull_request with an explicit trust gate instead",
     };
   }
-  if (!hasPullRequestTrigger(body) || !referencesSecrets(body)) {
+  if (!hasPullRequestTrigger(body)) {
     return { ok: true };
   }
-  if (body.includes(GUARD_LITERAL) || body.includes(ANNOTATION)) {
+  const blocks = splitJobs(body);
+  const header = blocks.get("") ?? "";
+  const fileAnnotated = header.includes(ANNOTATION);
+  const offenders = [];
+  for (const [job, block] of blocks) {
+    if (job === "") continue;
+    if (!referencesSecrets(block)) continue;
+    if (fileAnnotated) continue;
+    if (block.includes(GUARD_LITERAL) || block.includes(ANNOTATION)) continue;
+    offenders.push(job);
+  }
+  if (offenders.length === 0) {
     return { ok: true };
   }
   return {
     ok: false,
     reason:
-      `triggers on pull_request and references \${{ secrets.* }} but has neither a '${GUARD_LITERAL}' guard nor an '${ANNOTATION}' annotation. ` +
-      "Machine-authored autofix PRs pass every fork/dependabot check, so a secret-bearing PR lane must either exclude the sentry-autofix/* head branch " +
+      `triggers on pull_request, and job(s) [${offenders.join(", ")}] reference \${{ secrets.* }} without a '${GUARD_LITERAL}' guard or '${ANNOTATION}' annotation in that job (or a file-level annotation above \`jobs:\`). ` +
+      "Machine-authored autofix PRs pass every fork/dependabot check, so each secret-bearing PR job must either exclude the sentry-autofix/* head branch " +
       "(or route it to a secretless lane) or document why its secrets are unreachable from PR-head code execution.",
   };
 }

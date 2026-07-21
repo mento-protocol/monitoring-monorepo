@@ -22,6 +22,11 @@ permissions: read-all
 
 jobs:
   claude:
+    # autofix-ci-trust: this job only fires on @claude mentions from
+    # OWNER/MEMBER authors (issue_comment / review events) — never
+    # automatically on a pull_request, so a machine-authored autofix PR
+    # cannot reach its secret without a maintainer explicitly invoking it.
+    # See scripts/check-autofix-ci-trust.mjs.
     if: |
       (
         github.event_name == 'issue_comment' &&

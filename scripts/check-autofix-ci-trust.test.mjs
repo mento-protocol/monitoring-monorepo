@@ -2,7 +2,9 @@
 import {
   evaluateWorkflow,
   hasPullRequestTrigger,
+  hasTrigger,
   referencesSecrets,
+  splitJobs,
   usesPullRequestTarget,
 } from "./check-autofix-ci-trust.mjs";
 
@@ -27,36 +29,116 @@ function assert(condition, message) {
 
 const SECRET_LINE = "          token: ${{ secrets.SOME_TOKEN }}";
 
-test("pull_request_target is always refused, even with a guard", () => {
+// ── trigger detection: every valid GitHub Actions form ───────────────────────
+
+test("trigger detection covers block, bare-key, inline-list, inline-scalar, inline-mapping forms", () => {
+  assert(
+    hasTrigger("on:\n  pull_request:\n    branches: [main]", "pull_request"),
+    "block form",
+  );
+  assert(hasTrigger("on:\n  pull_request\n", "pull_request"), "bare key form");
+  assert(
+    hasTrigger("on: [push, pull_request]\n", "pull_request"),
+    "inline list",
+  );
+  assert(hasTrigger("on: pull_request\n", "pull_request"), "inline scalar");
+  assert(
+    hasTrigger("on: { pull_request: { branches: [main] } }\n", "pull_request"),
+    "inline mapping",
+  );
+  // pull_request must NOT match pull_request_target (and vice versa).
+  assert(
+    !hasTrigger("on: [pull_request_target]\n", "pull_request"),
+    "no prefix match",
+  );
+  assert(
+    usesPullRequestTarget("on: [pull_request_target]\n"),
+    "inline pull_request_target detected",
+  );
+  assert(
+    usesPullRequestTarget("on:\n  pull_request_target:\n"),
+    "block pull_request_target detected",
+  );
+  // Comments and step names never count as triggers.
+  assert(
+    !hasTrigger("on:\n  push:\n# pull_request would be nice", "pull_request"),
+    "comment ignored",
+  );
+  assert(
+    !hasTrigger(
+      "on:\n  push:\njobs:\n  x:\n    steps:\n      - name: pull_request thing",
+      "pull_request",
+    ),
+    "step name outside on: block ignored",
+  );
+});
+
+test("pull_request_target is always refused, even with a guard present", () => {
   const body = [
     "on:",
     "  pull_request_target:",
+    "jobs:",
+    "  x:",
+    "    # sentry-autofix/ guard present but irrelevant",
     SECRET_LINE,
-    "# sentry-autofix/ guard",
   ].join("\n");
   const v = evaluateWorkflow(body);
   assert(!v.ok && /pull_request_target/.test(v.reason), "refused");
 });
 
-test("commented-out pull_request_target does not trip the check", () => {
-  const body = [
-    "on:",
-    "  pull_request:",
-    "# never use pull_request_target here",
-  ].join("\n");
-  assert(!usesPullRequestTarget(body), "comment ignored");
-  assert(evaluateWorkflow(body).ok, "secretless pull_request workflow is fine");
+test("referencesSecrets matches only the expression syntax", () => {
+  assert(referencesSecrets("x: ${{ secrets.FOO }}"), "secrets expression");
+  assert(!referencesSecrets("x: secrets are cool"), "prose ignored");
 });
 
-test("secret-bearing pull_request workflow without guard or annotation fails", () => {
+// ── per-job granularity ───────────────────────────────────────────────────────
+
+test("splitJobs separates header and job blocks", () => {
+  const body = [
+    "name: X",
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  alpha:",
+    "    runs-on: ubuntu-latest",
+    "  beta:",
+    "    runs-on: ubuntu-latest",
+    SECRET_LINE,
+  ].join("\n");
+  const blocks = splitJobs(body);
+  assert(blocks.get("").includes("name: X"), "header captured");
+  assert(blocks.has("alpha") && blocks.has("beta"), "both jobs found");
+  assert(!blocks.get("alpha").includes("secrets."), "alpha has no secret");
+  assert(blocks.get("beta").includes("secrets."), "beta holds the secret");
+});
+
+test("secret-bearing job without guard or annotation fails, naming the job", () => {
   const body = ["on:", "  pull_request:", "jobs:", "  x:", SECRET_LINE].join(
     "\n",
   );
   const v = evaluateWorkflow(body);
-  assert(!v.ok && /guard nor/.test(v.reason), "unguarded lane refused");
+  assert(!v.ok && /\[x\]/.test(v.reason), "unguarded job refused by name");
 });
 
-test("a sentry-autofix/ guard literal satisfies the check", () => {
+test("one guarded job must NOT vouch for an unguarded sibling", () => {
+  // The multi-job false-negative: job `safe` carries a guard, job `leaky`
+  // reaches secrets with none. Per-job granularity must still refuse.
+  const body = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  safe:",
+    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+    SECRET_LINE,
+    "  leaky:",
+    SECRET_LINE,
+  ].join("\n");
+  const v = evaluateWorkflow(body);
+  assert(!v.ok, "sibling not vouched for");
+  assert(/\[leaky\]/.test(v.reason), "only the unguarded job is named");
+});
+
+test("a guard literal in the same job satisfies that job", () => {
   const body = [
     "on:",
     "  pull_request:",
@@ -65,39 +147,48 @@ test("a sentry-autofix/ guard literal satisfies the check", () => {
     "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
     SECRET_LINE,
   ].join("\n");
-  assert(evaluateWorkflow(body).ok, "guarded lane passes");
+  assert(evaluateWorkflow(body).ok, "guarded job passes");
 });
 
-test("an autofix-ci-trust annotation satisfies the check", () => {
-  const body = [
+test("a per-job annotation satisfies that job; a header annotation covers all jobs", () => {
+  const perJob = [
     "on:",
     "  pull_request:",
-    "# autofix-ci-trust: secret is step-scoped to a pinned action's `with:`;",
-    "# no PR-head code executes with it in env.",
+    "jobs:",
+    "  x:",
+    "    # autofix-ci-trust: secret is step-scoped to a pinned action.",
+    SECRET_LINE,
+  ].join("\n");
+  assert(evaluateWorkflow(perJob).ok, "job-level annotation passes");
+
+  const fileLevel = [
+    "on:",
+    "  pull_request:",
+    "# autofix-ci-trust: all secrets here are step-scoped; no PR-head code",
+    "# executes with them in env.",
     "jobs:",
     "  x:",
     SECRET_LINE,
+    "  y:",
+    SECRET_LINE,
   ].join("\n");
-  assert(evaluateWorkflow(body).ok, "annotated lane passes");
+  assert(evaluateWorkflow(fileLevel).ok, "header annotation covers all jobs");
 });
 
 test("secretless pull_request workflows and non-PR workflows pass untouched", () => {
   assert(
-    evaluateWorkflow(["on:", "  pull_request:", "jobs: {}"].join("\n")).ok,
+    evaluateWorkflow(
+      ["on:", "  pull_request:", "jobs:", "  x:", "    runs-on: u"].join("\n"),
+    ).ok,
     "secretless PR workflow",
   );
   assert(
-    evaluateWorkflow(["on:", "  schedule:", SECRET_LINE].join("\n")).ok,
+    evaluateWorkflow(
+      ["on:", "  schedule:", "jobs:", "  x:", SECRET_LINE].join("\n"),
+    ).ok,
     "schedule-only workflow with secrets",
   );
-});
-
-test("trigger/secret detectors behave on edge forms", () => {
-  assert(hasPullRequestTrigger("on:\n  pull_request:\n"), "block form");
-  assert(hasPullRequestTrigger("on:\n  pull_request\n"), "bare key form");
-  assert(!hasPullRequestTrigger("# pull_request:\n"), "comment ignored");
-  assert(referencesSecrets("x: ${{ secrets.FOO }}"), "secrets expression");
-  assert(!referencesSecrets("x: secrets are cool"), "prose ignored");
+  assert(hasPullRequestTrigger("on:\n  pull_request:\n"), "detector sanity");
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

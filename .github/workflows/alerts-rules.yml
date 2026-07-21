@@ -509,6 +509,10 @@ jobs:
   apply:
     name: Terraform Apply (alerts/rules)
     needs: plan
+    # autofix-ci-trust: this job's if: requires github.ref == main plus a
+    # push/workflow_dispatch event, so it can never run for ANY pull_request
+    # (autofix or otherwise) — its production secrets are unreachable from
+    # PR context. See scripts/check-autofix-ci-trust.mjs.
     # Apply when (a) on main, (b) push or dispatch event, (c) plan said
     # there are real changes, AND (d) the stack root changed or a maintainer
     # explicitly dispatched the workflow. Workflow/notifier-only edits can
