@@ -279,6 +279,7 @@ test("render groups documents in deterministic lane order", () => {
         rendered.indexOf("## operator-runbooks"),
     );
     assert.ok(rendered.includes("`AGENTS.md`"));
+    assert.doesNotMatch(rendered, /unique documents|Words \/ inbound/);
   });
 });
 
@@ -328,6 +329,32 @@ test("write converges with the generated index included and check detects drift"
     const stale = run(repo, "--check");
     assert.equal(stale.status, 1);
     assert.match(stale.stderr, /is stale/);
+  });
+});
+
+test("prose-only edits do not change the tracked catalog", () => {
+  withRepo((repo) => {
+    const metadata =
+      '<!-- agent-context: title="Root" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->';
+    write(repo, "README.md", `${metadata}\n\n# Root\n\nInitial prose.\n`);
+    write(repo, "docs/context-standards.md", "# Context\n");
+    track(repo, "README.md", "docs/context-standards.md");
+
+    const written = run(repo, "--write");
+    assert.equal(written.status, 0, written.stderr);
+    const before = readFileSync(path.join(repo, "docs/README.md"), "utf8");
+
+    write(
+      repo,
+      "README.md",
+      `${metadata}\n\n# Root\n\nSubstantially different prose with many more words.\n`,
+    );
+    const checked = run(repo, "--check");
+    assert.equal(checked.status, 0, checked.stderr);
+    assert.equal(
+      readFileSync(path.join(repo, "docs/README.md"), "utf8"),
+      before,
+    );
   });
 });
 
