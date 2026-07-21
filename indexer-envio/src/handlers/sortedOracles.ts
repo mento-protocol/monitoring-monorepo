@@ -232,9 +232,10 @@ async function processOracleReportedPool(
   // read the row's priceDifference directly (BreachEvent, oracle tab
   // detail) would see a fake non-zero value. Preserve existing instead.
   const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
-  // OracleReported carries a reporter quote, not a fresh median anchor. If the
-  // last MedianUpdated anchor has expired, the contract-side freshness gate
-  // would reject median-derived health/deviation math, so hold the cursor.
+  // OracleReported's params carry only a reporter quote, so freshness comes
+  // from the paired exact block-scoped medianTimestamp read above. If that
+  // read is missing/non-positive or the resulting anchor is expired, hold the
+  // cursor instead of treating this reporter event as a fresh median.
   if (!hasFreshLiveMedian(updatedPool, c.blockTimestamp)) {
     holdOracleReportedCursor(context, updatedPool, existing);
     return;

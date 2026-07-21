@@ -102,8 +102,8 @@ function degenerateReservesForPool(
 
 type AuthoritativeRebalanceState = {
   medianTimestamp: bigint | null;
+  oracleFreshnessProven: boolean;
   resolved: ResolvedRebalanceState | null;
-  rpcSucceeded: boolean;
 };
 
 async function fetchAuthoritativeRebalanceState(args: {
@@ -133,13 +133,14 @@ async function fetchAuthoritativeRebalanceState(args: {
         })
       : Promise.resolve(null),
   ]);
+  const exactMedianTimestamp =
+    rpc && medianTimestamp !== null && medianTimestamp > 0n
+      ? medianTimestamp
+      : null;
   return {
-    medianTimestamp:
-      rpc && medianTimestamp !== null && medianTimestamp > 0n
-        ? medianTimestamp
-        : null,
+    medianTimestamp: exactMedianTimestamp,
+    oracleFreshnessProven: exactMedianTimestamp !== null,
     resolved: rpc ? scaleRpcRebalanceState(rpc, args.existing) : null,
-    rpcSucceeded: rpc !== null,
   };
 }
 
@@ -154,8 +155,8 @@ async function resolveRebalanceState(args: {
   if (args.derived) {
     return {
       medianTimestamp: null,
+      oracleFreshnessProven: false,
       resolved: args.derived,
-      rpcSucceeded: false,
     };
   }
   return fetchAuthoritativeRebalanceState(args);
@@ -294,8 +295,8 @@ indexer.onEvent(
       : null;
     const {
       medianTimestamp: authoritativeMedianTimestamp,
+      oracleFreshnessProven,
       resolved,
-      rpcSucceeded: rebalancingStateRpcSucceeded,
     } = await resolveRebalanceState({
       blockNumber,
       chainId: event.chainId,
@@ -333,9 +334,10 @@ indexer.onEvent(
         rebalanceThreshold: resolved.rebalanceThreshold,
         priceDifference: resolved.priceDifference,
         degenerateReserves: updateReservesDegenerate,
-        // A successful contract read proves its oracle was live at this
-        // block: getRebalancingState reverts on stale or expired data.
-        ...(rebalancingStateRpcSucceeded ? { oracleOk: true } : {}),
+        // Promote freshness only when the state read is paired with the exact
+        // positive median anchor for this block. The state RPC alone cannot
+        // repair an indexer row whose freshness cursor is still unknown.
+        ...(oracleFreshnessProven ? { oracleOk: true } : {}),
         ...(authoritativeMedianTimestamp !== null
           ? { lastOracleReportAt: authoritativeMedianTimestamp }
           : {}),
@@ -509,7 +511,6 @@ indexer.onEvent(
       ]);
 
     const resolved = authoritativeState.resolved;
-    const rebalancingStateRpcSucceeded = authoritativeState.rpcSucceeded;
 
     const rebalancerAddress = asAddress(event.params.sender);
 
@@ -553,9 +554,9 @@ indexer.onEvent(
       oracleDelta = {
         ...oracleDelta,
         rebalanceThreshold: resolved.rebalanceThreshold,
-        // Match UpdateReserves: a successful authoritative read proves the
-        // contract accepted the oracle as live for this block.
-        ...(rebalancingStateRpcSucceeded ? { oracleOk: true } : {}),
+        // Match UpdateReserves: require the exact positive median anchor
+        // before repairing the persisted live-oracle flag.
+        ...(authoritativeState.oracleFreshnessProven ? { oracleOk: true } : {}),
         ...(authoritativeState.medianTimestamp !== null
           ? { lastOracleReportAt: authoritativeState.medianTimestamp }
           : {}),

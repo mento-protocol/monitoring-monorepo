@@ -55,8 +55,8 @@ type ThresholdRecomputeResult = {
   active: number | null;
   medianFresh: boolean;
   medianTimestampFromRpc: bigint | null;
+  oracleFreshnessProven: boolean;
   priceDifferenceFromMedian: bigint | null;
-  rpcSucceeded: boolean;
 };
 
 async function resolveThresholdRecompute(args: {
@@ -99,8 +99,8 @@ async function resolveThresholdRecompute(args: {
       }),
       medianFresh: true,
       medianTimestampFromRpc: null,
+      oracleFreshnessProven: false,
       priceDifferenceFromMedian: computePriceDifference(medianView),
-      rpcSucceeded: false,
     };
   }
 
@@ -124,15 +124,16 @@ async function resolveThresholdRecompute(args: {
         })
       : Promise.resolve(null),
   ]);
+  const exactMedianTimestamp =
+    rpc && medianTimestamp !== null && medianTimestamp > 0n
+      ? medianTimestamp
+      : null;
   return {
     active: rpc?.rebalanceThreshold ?? null,
     medianFresh: false,
-    medianTimestampFromRpc:
-      rpc && medianTimestamp !== null && medianTimestamp > 0n
-        ? medianTimestamp
-        : null,
+    medianTimestampFromRpc: exactMedianTimestamp,
+    oracleFreshnessProven: exactMedianTimestamp !== null,
     priceDifferenceFromMedian: rpc?.priceDifference ?? null,
-    rpcSucceeded: rpc !== null,
   };
 }
 
@@ -412,8 +413,8 @@ indexer.onEvent(
       active,
       medianFresh,
       medianTimestampFromRpc,
+      oracleFreshnessProven,
       priceDifferenceFromMedian,
-      rpcSucceeded,
     } = await resolveThresholdRecompute({
       above,
       below,
@@ -425,11 +426,10 @@ indexer.onEvent(
       poolAddress: asAddress(event.srcAddress),
     });
     const degenerateReserves = degenerateReservesForThresholdUpdate(existing);
-    // RPC fallback succeeded ⇒ contract had a live oracle at this block.
-    // If the local pool row still has `oracleOk=false` from deploy-time
-    // RPC misses or a prior stale state, lift it now so the upsertPool
-    // health/breach pipeline + the post-upsert `oracleOk` gate see the
-    // correct live-oracle status.
+    // Only the paired state read + exact positive median anchor proves
+    // freshness strongly enough to repair `oracleOk`. A state read without
+    // that anchor may still update authoritative threshold/deviation fields,
+    // but the health pipeline must preserve the prior degraded status.
     let upserted: Pool;
     if (priceDifferenceFromMedian === null || active === null) {
       // Neither local median nor RPC produced usable values.
@@ -495,7 +495,7 @@ indexer.onEvent(
           rebalanceThresholdsKnown: true,
           priceDifference: priceDifferenceFromMedian,
           degenerateReserves,
-          ...(rpcSucceeded ? { oracleOk: true } : {}),
+          ...(oracleFreshnessProven ? { oracleOk: true } : {}),
           ...(medianTimestampFromRpc !== null
             ? { lastOracleReportAt: medianTimestampFromRpc }
             : {}),
