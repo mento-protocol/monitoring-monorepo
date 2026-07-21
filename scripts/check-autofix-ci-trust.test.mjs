@@ -630,6 +630,40 @@ test("block-scalar content is inert text, not YAML (no false positives)", () => 
   );
 });
 
+test("anchored/aliased mapping KEYS are refused (not just value positions)", () => {
+  assert(
+    hasUnanalyzableTriggers(
+      "on:\n  &event pull_request:\njobs:\n  a:\n    steps:\n      - run: echo hi\n",
+    ),
+    "anchored trigger key refused",
+  );
+  assert(
+    hasUnanalyzableTriggers("on:\n  *event pull_request:\n"),
+    "aliased key refused",
+  );
+});
+
+test("letter-synthesizing escapes in double-quoted scalars are refused", () => {
+  assert(
+    hasUnanalyzableTriggers(
+      'jobs:\n  a:\n    env:\n      TOKEN: "${{ se\\u0063rets.TOKEN }}"\n',
+    ),
+    "\\u escape refused (decodes to secrets reference)",
+  );
+  assert(hasUnanalyzableTriggers('x: "\\x63"\n'), "\\x escape refused");
+  assert(hasUnanalyzableTriggers('x: "\\U00000063"\n'), "\\U escape refused");
+  assert(
+    !hasUnanalyzableTriggers(
+      'jobs:\n  a:\n    steps:\n      - run: |\n          printf "\\u0041"\n          grep -P "\\x41" file\n',
+    ),
+    "escapes inside block scalars are literal text, not flagged",
+  );
+  assert(
+    !hasUnanalyzableTriggers('x: "line1\\nline2"\n'),
+    "non-letter escapes (\\n, \\t) pass",
+  );
+});
+
 test("id-token: write is a credential (WIF token exchange), like a secret", () => {
   const base = [
     "on:",

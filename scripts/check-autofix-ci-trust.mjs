@@ -102,15 +102,25 @@ function stripComments(body) {
 /**
  * True when the file uses YAML the textual analyzer cannot affirmatively
  * resolve, ANYWHERE in the document:
- *   - any YAML anchor (`&name`) or alias (`*name`) — an alias can carry a
- *     pull_request trigger, a secret-bearing env mapping, or a whole job body
- *     defined elsewhere, so every occurrence is a potential smuggling channel
- *     for BOTH the trigger analysis and the per-job secret analysis;
+ *   - any YAML anchor (`&name`) or alias (`*name`), in value OR key position
+ *     (`  &event pull_request:` is a valid trigger key) and with any legal
+ *     anchor name (numeric `&1`, dashed) — an alias can carry a pull_request
+ *     trigger, a secret-bearing env mapping, or a whole job body defined
+ *     elsewhere, so every occurrence is a smuggling channel for BOTH the
+ *     trigger analysis and the per-job secret analysis;
+ *   - YAML explicit-key syntax (`? pull_request`), invisible to the block
+ *     trigger matcher;
+ *   - a letter-synthesizing escape (`\uXXXX` / `\xXX` / `\UXXXXXXXX`) in a
+ *     double-quoted scalar — `"${{ secrets.TOKEN }}"` decodes to a live
+ *     secrets reference the raw scans cannot see;
  *   - a flow sequence/mapping left unterminated on the `on:` line
  *     (multi-line `on: [pull_request,`).
- * The only safe answer is to REFUSE analysis (fail closed) and make the
- * author write the workflow literally — no repo workflow uses anchors, and
- * the repo's prettier/trunk YAML style never produces them.
+ * Block-scalar bodies (`run:`/`script:` `|`/`>`) are literal string content
+ * with no YAML semantics, so they are skipped — the introducer line itself is
+ * still scanned. The only safe answer for the exotic forms is to REFUSE
+ * analysis (fail closed) and make the author write the workflow literally — no
+ * repo workflow uses them, and the repo's prettier/trunk YAML style never
+ * produces them.
  */
 export function hasUnanalyzableTriggers(body) {
   const stripped = stripComments(body);
@@ -125,9 +135,20 @@ export function hasUnanalyzableTriggers(body) {
     // and therefore never matches.
     // Anchor names may be ANY non-space run (incl. numeric `&1`).
     if (/(?:^|:\s+|-\s+|[[,{]\s*)[&*][^\s,\]}]+/.test(line)) return true;
+    // Anchor/alias as the FIRST token of a line: an anchored mapping KEY
+    // (`  &event pull_request:`) parses as an ordinary key but is invisible
+    // to the trigger matcher, which expects the key at the line start.
+    if (/^\s*[&*][^\s,\]}]+/.test(line)) return true;
     // YAML explicit-key syntax (`? pull_request`) is valid for triggers and
     // invisible to the block matcher — refuse it (write keys plainly).
     if (/^\s*\?\s/.test(line)) return true;
+    // Double-quoted scalars PROCESS \uXXXX/\UXXXXXXXX/\xXX escapes, so
+    // `"${{ secrets.TOKEN }}"` (or an escaped trigger key) decodes to
+    // text the raw scans cannot see. These are the only YAML escapes that
+    // can synthesize letters; block scalars are literal and already skipped,
+    // and no workflow has a legitimate need for them — refuse outright.
+    if (/\\(?:u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{2})/.test(line))
+      return true;
     const m = line.match(/^(['"]?)on\1\s*:\s*(.*)$/);
     if (m) {
       const value = m[2].trim();
