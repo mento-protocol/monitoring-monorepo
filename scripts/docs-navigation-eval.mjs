@@ -106,8 +106,8 @@ export function parseArgs(argv, env = process.env) {
       "choose one of --check-fixtures, --prompt, --validate, or --schedule-issue",
     );
   }
-  if (options.questionId && options.mode !== "prompt") {
-    throw new Error("--question is valid only with --prompt");
+  if (options.questionId && !["prompt", "validate"].includes(options.mode)) {
+    throw new Error("--question is valid only with --prompt or --validate");
   }
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(options.repo)) {
     throw new Error("--repo must be an owner/repository slug");
@@ -131,7 +131,7 @@ Modes:
   --schedule-issue       Create or retain the monthly evaluation issue
 
 Options:
-  --question ID          Generate a prompt for one failed/contested question
+  --question ID          Generate or validate one failed/contested question
   --repo OWNER/REPO      GitHub repository for issue scheduling
   --root PATH            Repository root (default: current directory)
   --fixtures PATH        Fixture JSON path relative to the repository root
@@ -368,6 +368,7 @@ async function main() {
       result,
       inventory: context.inventory,
       repoRoot: context.repoRoot,
+      questionId: options.questionId,
     });
     printObject(scored, true);
     if (scored.errors.length > 0 || !scored.report?.passed)

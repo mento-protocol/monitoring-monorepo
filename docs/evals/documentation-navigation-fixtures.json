@@ -47,6 +47,7 @@
       "category": "packages",
       "question": "How must a dashboard UI change be verified in the browser, including logged-in and logged-out behavior and the data source used by local verification?",
       "accepted_routes": [
+        ["docs/notes/dashboard-verification.md"],
         ["ui-dashboard/AGENTS.md", "docs/notes/dashboard-verification.md"]
       ],
       "sources_requiring_verification": [
@@ -205,7 +206,10 @@
       "id": "operator-doc-garden-recovery",
       "category": "operator-workflows",
       "question": "How does the recurring documentation garden select a packet, handle an already claimed or blocked issue, and require evidence before changing or deleting a document?",
-      "accepted_routes": [["docs/notes/documentation-gardening.md"]],
+      "accepted_routes": [
+        [".agents/skills/doc-garden/SKILL.md"],
+        ["docs/notes/documentation-gardening.md"]
+      ],
       "sources_requiring_verification": []
     }
   ]

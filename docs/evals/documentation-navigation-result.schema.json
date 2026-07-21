@@ -48,7 +48,8 @@
     },
     "answers": {
       "type": "array",
-      "minItems": 15,
+      "description": "A full run contains all 15-20 suite answers; a --question escalation contains exactly one answer. The CLI enforces the selected mode.",
+      "minItems": 1,
       "maxItems": 20,
       "items": {
         "type": "object",

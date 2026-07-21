@@ -104,9 +104,9 @@ function authorityFromMetadata(metadata) {
   return "unmanaged";
 }
 
-function resultSourcePaths(suite, result) {
+function resultSourcePaths(suite, result, questions = suite.questions) {
   const paths = new Set(suite.bootstrap_sources);
-  for (const question of suite.questions) {
+  for (const question of questions) {
     for (const route of question.accepted_routes) {
       for (const file of route) paths.add(file);
     }
@@ -409,6 +409,9 @@ export function buildNavigationPrompt(
         `${index + 1}. [${question.id}] (${question.category}) ${question.question}`,
     )
     .join("\n");
+  const answerScope = questionId
+    ? `- This is a bounded escalation for \`${questionId}\`. Return exactly one answer object in the \`answers\` array. Validate it with \`pnpm docs:navigation-eval -- --validate <result.json> --question ${questionId}\`.`
+    : "- Answer every question in the suite; the `answers` array must contain all 15-20 answers.";
   return `# Fresh-agent documentation navigation evaluation
 
 You are a fresh, read-only repository agent. Measure whether the repository's
@@ -440,7 +443,8 @@ Rules:
   on it; the scorer automatically de-duplicates the complete-run byte total.
 - Include one authority-qualification entry for every reported source;
   canonical sources may use an empty qualification and verification list.
-- Answer every question. Return only one JSON object matching
+- ${answerScope.slice(2)}
+- Return only one JSON object matching
   \`docs/evals/documentation-navigation-result.schema.json\`.
 - Set \`fresh_context\` and \`read_only\` to true. Use the 40-character commit
   \`${baseCommit}\` as \`repository_base_commit\`, and use fixture digest
@@ -578,7 +582,10 @@ function validateLoadedSourceContract(source, label, errors) {
   }
 }
 
-export function validateNavigationResultShape(result) {
+export function validateNavigationResultShape(
+  result,
+  { minAnswers = 15, maxAnswers = 20 } = {},
+) {
   const errors = [];
   if (
     !validateObjectContract(
@@ -655,8 +662,15 @@ export function validateNavigationResultShape(result) {
     errors.push("result.answers must be an array");
     return errors;
   }
-  if (result.answers.length < 15 || result.answers.length > 20) {
-    errors.push("result.answers must contain 15 to 20 items");
+  if (
+    result.answers.length < minAnswers ||
+    result.answers.length > maxAnswers
+  ) {
+    errors.push(
+      minAnswers === maxAnswers
+        ? `result.answers must contain exactly ${minAnswers} item`
+        : `result.answers must contain ${minAnswers} to ${maxAnswers} items`,
+    );
   }
   result.answers.forEach((answer, answerIndex) => {
     const label = `result.answers[${answerIndex}]`;
@@ -785,8 +799,27 @@ export function validateNavigationResultShape(result) {
   return errors;
 }
 
-export function scoreNavigationResult({ suite, result, repoRoot }) {
-  const errors = validateNavigationResultShape(result);
+export function scoreNavigationResult({
+  suite,
+  result,
+  repoRoot,
+  questionId = null,
+}) {
+  const evaluatedQuestions = questionId
+    ? suite.questions.filter((question) => question.id === questionId)
+    : suite.questions;
+  const errors = [];
+  if (questionId && evaluatedQuestions.length === 0) {
+    errors.push(`unknown question: ${questionId}`);
+  }
+  errors.push(
+    ...validateNavigationResultShape(
+      result,
+      questionId
+        ? { minAnswers: 1, maxAnswers: 1 }
+        : { minAnswers: 15, maxAnswers: 20 },
+    ),
+  );
   const forbidden = new Set(suite.forbidden_sources);
   if (!isObject(result)) {
     return { errors: ["result must be a JSON object"], report: null };
@@ -830,7 +863,7 @@ export function scoreNavigationResult({ suite, result, repoRoot }) {
   const records = historicalInventoryMap(
     repoRoot,
     sourceCommit,
-    resultSourcePaths(suite, result),
+    resultSourcePaths(suite, result, evaluatedQuestions),
     errors,
   );
   if (run.fresh_context !== true)
@@ -869,7 +902,7 @@ export function scoreNavigationResult({ suite, result, repoRoot }) {
     }
   }
   for (const answerId of answersById.keys()) {
-    if (!suite.questions.some((question) => question.id === answerId)) {
+    if (!evaluatedQuestions.some((question) => question.id === answerId)) {
       errors.push(`result contains unknown question ${answerId}`);
     }
   }
@@ -881,7 +914,7 @@ export function scoreNavigationResult({ suite, result, repoRoot }) {
   let shortestRouteCount = 0;
   let unqualifiedNoncanonical = 0;
   let questionsOverBudget = 0;
-  for (const question of suite.questions) {
+  for (const question of evaluatedQuestions) {
     const answer = answersById.get(question.id);
     if (!answer) {
       errors.push(`missing answer for ${question.id}`);
@@ -1072,7 +1105,7 @@ export function scoreNavigationResult({ suite, result, repoRoot }) {
     (sum, bytes) => sum + bytes,
     0,
   );
-  const questionCount = suite.questions.length;
+  const questionCount = evaluatedQuestions.length;
   const report = {
     schema_version: NAVIGATION_EVAL_SCHEMA_VERSION,
     suite_id: suite.suite_id,

@@ -93,7 +93,12 @@ For one failed or contested case, generate a bounded escalation prompt:
 
 ```bash
 pnpm docs:navigation-eval -- --prompt --question commands-pr-readiness
+pnpm docs:navigation-eval -- --validate /tmp/question-result.json --question commands-pr-readiness
 ```
+
+A targeted result uses the same envelope and fixture digest but contains exactly
+one answer. The validator keeps full runs at 15–20 answers, so a partial result
+cannot be mistaken for a complete baseline.
 
 The validator exits nonzero for malformed or incomplete results and for a
 valid result that misses a target.

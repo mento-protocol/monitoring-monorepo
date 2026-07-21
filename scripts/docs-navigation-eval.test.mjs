@@ -223,7 +223,29 @@ test("prompt is deterministic and never leaks routes or qualification traps", ()
     questionId: context.suite.questions[0].id,
   });
   assert.match(targeted, new RegExp(context.suite.questions[0].id));
+  assert.match(targeted, /Return exactly one answer object/);
+  assert.match(targeted, /--validate <result\.json> --question/);
   assert.ok(!targeted.includes(context.suite.questions[1].id));
+});
+
+test("one-question escalation is scored independently without weakening full runs", () => {
+  const questionId = context.suite.questions[0].id;
+  const result = validResult();
+  result.answers = result.answers.filter(
+    (answer) => answer.question_id === questionId,
+  );
+  const targeted = scoreNavigationResult({
+    suite: context.suite,
+    result,
+    repoRoot,
+    questionId,
+  });
+  assert.deepEqual(targeted.errors, []);
+  assert.equal(targeted.report.question_count, 1);
+  assert.equal(targeted.report.passed, true);
+  const full = score(result);
+  assert.match(full.errors.join("\n"), /must contain 15 to 20 items/);
+  assert.equal(full.report.passed, false);
 });
 
 test("a complete result passes every deterministic target", () => {
@@ -743,6 +765,15 @@ test("CLI parsing enforces one explicit mode", () => {
     parseArgs(["--prompt", "--question", "commands-pr-readiness"]).questionId,
     "commands-pr-readiness",
   );
+  assert.equal(
+    parseArgs([
+      "--validate",
+      "result.json",
+      "--question",
+      "commands-pr-readiness",
+    ]).questionId,
+    "commands-pr-readiness",
+  );
   assert.throws(() => parseArgs([]), /choose one/);
   assert.throws(
     () => parseArgs(["--prompt", "--check-fixtures"]),
@@ -750,7 +781,7 @@ test("CLI parsing enforces one explicit mode", () => {
   );
   assert.throws(
     () => parseArgs(["--check-fixtures", "--question", "x"]),
-    /valid only with --prompt/,
+    /valid only with --prompt or --validate/,
   );
 });
 
@@ -792,6 +823,20 @@ test("CLI checks fixtures and validates a structured result", () => {
     );
     assert.equal(validate.status, 0, validate.stderr);
     assert.equal(JSON.parse(validate.stdout).report.passed, true);
+
+    const targetedResult = validResult();
+    const targetedQuestion = context.suite.questions[0].id;
+    targetedResult.answers = targetedResult.answers.filter(
+      (answer) => answer.question_id === targetedQuestion,
+    );
+    writeFileSync(resultPath, `${JSON.stringify(targetedResult)}\n`);
+    const targetedValidate = spawnSync(
+      process.execPath,
+      [scriptPath, "--validate", resultPath, "--question", targetedQuestion],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+    assert.equal(targetedValidate.status, 0, targetedValidate.stderr);
+    assert.equal(JSON.parse(targetedValidate.stdout).report.question_count, 1);
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
