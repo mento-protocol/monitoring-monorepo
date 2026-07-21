@@ -42,9 +42,10 @@ pnpm aegis:tf:plan
 pnpm gov-watchdog:tf:plan
 ```
 
-`pnpm tf validate` without a stack validates all registered stacks with
-`terraform fmt -check -recursive`, `terraform init -backend=false`, and
-`terraform validate`.
+`pnpm tf validate` without a stack validates all registered stacks. It checks
+formatting for tracked and non-ignored untracked native Terraform sources, then
+runs `terraform init -backend=false` and `terraform validate`. Gitignored
+operator-held `*.tfvars` files are deliberately outside the source-format check.
 
 For stacks where `terraform.stacks.json` declares
 `ci.apply == "push-main-production-infra-environment"`, local

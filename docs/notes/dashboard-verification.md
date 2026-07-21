@@ -91,7 +91,10 @@ For `pnpm build` plus `pnpm start`:
   `NEXT_PUBLIC_VERCEL_ENV` mirror; do not set that mirror directly.
 - The persisted SWR build salt is derived from
   `VERCEL_DEPLOYMENT_ID ?? VERCEL_GIT_COMMIT_SHA ?? "dev"` and inlined as
-  `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`. Do not configure the public mirror.
+  `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`. Do not configure the public mirror. The
+  agent quality gate supplies its own stable local deployment identity for the
+  build-backed size check, so operator-local Vercel placeholders are ignored on
+  that path.
 - `.next/cache/fetch-cache` survives `next start` restarts; remove it before a
   true cold-cache measurement.
 

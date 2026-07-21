@@ -29,7 +29,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md) | Forensic Report Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-06-15 |
 | [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md) | 0xADDRESS_CASE_PRESERVED — Display Name (persona/ENS if known) | unmanaged / unmanaged | skill / repo-wide | unowned | 90d |
 | [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md) | Monorepo Import Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-26 |
-| [`.agents/skills/ship/SKILL.md`](../.agents/skills/ship/SKILL.md) | Ship Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-28 |
+| [`.agents/skills/ship/SKILL.md`](../.agents/skills/ship/SKILL.md) | Ship Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-16 |
 | [`.claude/agents/dashboard-explorer.md`](../.claude/agents/dashboard-explorer.md) | Dashboard Explorer | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
 | [`.claude/agents/indexer-explorer.md`](../.claude/agents/indexer-explorer.md) | Indexer Explorer | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
 | [`.claude/agents/infra-reader.md`](../.claude/agents/infra-reader.md) | Infra Reader | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
@@ -63,9 +63,9 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-19 |
 | [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-08 |
-| [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md) | Codex Agent Skills — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-19 |
-| [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md) | Codex Cloud Setup and Maintenance | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-06 |
+| [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
+| [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md) | Codex Agent Skills — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
+| [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md) | Codex Cloud Setup and Maintenance | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md) | Cross-Protocol Context | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-06 |
 | [`docs/notes/dashboard-verification.md`](notes/dashboard-verification.md) | Dashboard Local and Browser Verification | canonical / active | runbook / ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md) | Documentation gardening | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-19 |
@@ -166,7 +166,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/vp-oracle-staleness-alerting-spec.md`](vp-oracle-staleness-alerting-spec.md) | Virtual Pool Oracle Staleness Alerting Spec | non-canonical / draft | reference / repo-wide | eng | 180d; verified 2026-06-16 |
 | [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-17 |
 | [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | unmanaged / unmanaged | reference / indexer-envio | unowned | 180d |
-| [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-08 |
+| [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`SPEC.md`](../SPEC.md) | Mento v3 Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-17 |
 
 ## notes-plans-archive

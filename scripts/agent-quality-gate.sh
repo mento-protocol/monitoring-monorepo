@@ -561,7 +561,11 @@ add_ui_size_limit() {
   local reason="$1"
   # `size-limit` depends on `build` in turbo.json, so one Turbo invocation
   # preserves the build guarantee without paying for a separate scheduler run.
-  add_turbo_dashboard_task "size-limit" "$reason"
+  # Trunk's hook callback strips caller-provided environment variables, while
+  # operator-local .env files may contain empty Vercel placeholders. Pin a
+  # non-empty local deployment identity on the mapped command itself so both
+  # direct gate runs and agent:prewarm remain hermetic without loose Turbo env.
+  add_command "VERCEL_DEPLOYMENT_ID=local-quality-gate $(turbo_local_cache_command "@mento-protocol/ui-dashboard" "size-limit")" "$reason"
 }
 
 add_bridge_mutation_baseline() {
@@ -638,6 +642,7 @@ add_root_tooling_package_script_checks() {
   add_command "pnpm sentry:archive:test" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
+  add_command "node scripts/terraform-fmt-check.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
   add_command "node scripts/lockfile-lint.test.mjs" "$reason"
   add_command "node scripts/version-skew-check.test.mjs" "$reason"
@@ -720,7 +725,7 @@ add_terraform_validate_commands() {
   local module="$1"
   local reason="$2"
   local tf_data_dir="${module}/.terraform-agent-gate"
-  add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} fmt -check -recursive" "$reason"
+  add_command "TF_DATA_DIR=${tf_data_dir} node scripts/terraform-fmt-check.mjs $(quote_path "$module")" "$reason"
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} init -backend=false -input=false" "$reason"
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} validate -no-color" "$reason"
 }
@@ -1501,7 +1506,7 @@ while IFS= read -r path; do
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in
-        scripts/agent-autoreview.mjs)
+        scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs|scripts/agent-autoreview-target-guard.test.mjs)
           add_command "bash scripts/agent-autoreview.test.sh" "agent autoreview helper changed"
           ;;
         scripts/check-agent-context.mjs|scripts/check-agent-context-helpers.mjs|scripts/check-agent-context.test.mjs)
@@ -1579,6 +1584,18 @@ while IFS= read -r path; do
           add_terraform_validate_commands "alerts/infra" "Terraform stack wrapper changed"
           add_terraform_validate_commands "aegis/terraform" "Terraform stack wrapper changed"
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack wrapper changed"
+          ;;
+        scripts/terraform-fmt-check.mjs)
+          add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper changed"
+          add_command "pnpm tf:test" "Terraform format helper changed"
+          add_terraform_validate_commands "terraform" "Terraform format helper changed"
+          add_terraform_validate_commands "alerts/rules" "Terraform format helper changed"
+          add_terraform_validate_commands "alerts/infra" "Terraform format helper changed"
+          add_terraform_validate_commands "aegis/terraform" "Terraform format helper changed"
+          add_terraform_validate_commands "governance-watchdog/infra" "Terraform format helper changed"
+          ;;
+        scripts/terraform-fmt-check.test.mjs)
+          add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper test changed"
           ;;
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
@@ -1798,6 +1815,8 @@ implementation_signature() {
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
     scripts/check-agent-quality-gate-package-scripts.sh \
+    scripts/terraform-fmt-check.mjs \
+    scripts/terraform-fmt-check.test.mjs \
     turbo.json \
     .trunk/trunk.yaml; do
     if [[ -f "$path" ]]; then
@@ -2081,6 +2100,9 @@ is_quality_setup_command() {
     TF_DATA_DIR=*terraform\ -chdir=*)
       return 0
       ;;
+    TF_DATA_DIR=*node\ scripts/terraform-fmt-check.mjs\ *)
+      return 0
+      ;;
   esac
 
   return 1
@@ -2092,15 +2114,21 @@ is_quality_serial_command() {
   # each other, but they are not prerequisites for lint/typecheck/unit/knip.
   # Browser tests need Chromium installed first; browser tests start a Next dev
   # server while size-limit runs a build-backed Turbo task, and both touch
-  # ui-dashboard/.next, so keep those two mutually exclusive.
+  # ui-dashboard/.next, so keep those two mutually exclusive. The quality-gate
+  # self-test temporarily mutates tracked fixture files in the current checkout,
+  # so it must also finish before source-fingerprinting tests enter the parallel
+  # pool.
   case "$command" in
+    "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
+      return 0
+      ;;
     "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium")
       return 0
       ;;
     "pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw")
       return 0
       ;;
-    "pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw")
+    "VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw")
       return 0
       ;;
   esac
