@@ -300,13 +300,22 @@ async function evaluateCandidate(runGh, repo, stub) {
     return null;
   }
 
-  // Dedup by an OPEN PR referencing the SHORT-ID (a merged/closed PR does not
-  // block — see openPrReferencesShortId).
+  // An OPEN PR already references this SHORT-ID. Because the two terminal
+  // markers were filtered above, reaching here means the stub has NEITHER
+  // marker yet an open fix PR exists — i.e. a prior run's `gh pr create`
+  // succeeded but its follow-up queue comment/label write did not land (a
+  // transient failure, or a same-tick race with a concurrent run). This is NOT
+  // a plain skip: the stub's queue side-effects are unreconciled and would
+  // never be repaired if we dropped it (the workflow's reconcile path is only
+  // reachable AFTER selection). Emit it as a RECONCILE entry — the fix job
+  // routes reconcile entries to a no-agent step that (re-)applies the marker +
+  // comment against the existing PR, never opening a duplicate and never
+  // re-running the agent (which could otherwise mislabel it `fix-refused`).
   if (await openPrReferencesShortId(runGh, repo, shortId)) {
     process.stderr.write(
-      `skip #${stub.number}: an open PR already references ${shortId}.\n`,
+      `reconcile #${stub.number}: an open PR references ${shortId} but the stub lacks its marker; routing to no-agent reconciliation.\n`,
     );
-    return null;
+    return { issue: stub.number, shortId, reconcile: true };
   }
 
   return { issue: stub.number, shortId };

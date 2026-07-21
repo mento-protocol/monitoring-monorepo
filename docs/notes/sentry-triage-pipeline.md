@@ -868,9 +868,22 @@ keeps only stubs whose `affected_repo` resolves to EXACTLY
 `mento-protocol/monitoring-monorepo` (an unrecognized value is not treated as a
 confident local classification, so it is skipped). Dedup: a stub already
 carrying `sentry:fix-pr-opened` (a PR was opened) or `sentry:fix-refused` (an
-attempt declined to open one), or whose SHORT-ID is quoted-referenced by an
-**open** PR (`gh pr list --state open --search "\"<SHORT-ID>\""`), is skipped.
-Quoting forces exact-phrase matching so an unrelated PR that merely mentions the
+attempt declined to open one) is skipped. A stub whose SHORT-ID is
+quoted-referenced by an **open** PR (`gh pr list --state open --search
+"\"<SHORT-ID>\""`) is a special case: because both terminal markers were
+already filtered out above, an open PR here means the stub has NEITHER marker
+yet a fix PR exists — a prior run's `gh pr create` succeeded but its follow-up
+queue comment/label write did not land (a transient failure or a same-tick
+race). Such a stub is **not dropped** (that would leave its queue side-effects
+permanently unrepaired, since the reconcile path is only reachable after
+selection); it is emitted as a `reconcile: true` matrix entry that the fix job
+routes to a **no-agent reconciliation step** — no agent runs (so the checkout
+stays untainted), no App token is minted, and no PR is pushed: it just
+re-resolves the open PR and re-applies the `sentry:fix-pr-opened` marker +
+`Autofixed by PR` comment (or exits cleanly if a concurrent run already did, or
+if the PR has since merged/closed). Routing it through the agent instead would
+risk mislabeling it `sentry:fix-refused` when the re-run diff differs. Quoting
+forces exact-phrase matching so an unrelated PR that merely mentions the
 tokens — or a longer SHORT-ID sharing the prefix — can't falsely dedup an
 eligible stub; scoping to open PRs means a merged/closed fix PR no longer blocks
 — once a fixed issue regresses, the ingest reopen sheds the autofix markers

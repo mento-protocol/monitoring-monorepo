@@ -251,6 +251,7 @@ jobs:
       # pre-agent from the still-clean checkout with github.token; the snapshot
       # goes to /tmp (never the checkout, so the diff guard never sees it).
       - name: Snapshot verdict for the agent
+        if: ${{ matrix.entry.reconcile != true }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -261,6 +262,7 @@ jobs:
 
       - name: Render autofix prompt
         id: render
+        if: ${{ matrix.entry.reconcile != true }}
         run: |
           set -euo pipefail
           # Wire only the validated queue-issue number + SHORT-ID into the
@@ -276,6 +278,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - uses: anthropics/claude-code-action@f87768c6d25f92ae6efa7175e223ef77d4cbf97f # v1.0.166
+        if: ${{ matrix.entry.reconcile != true }}
         with:
           github_token: ${{ github.token }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -312,6 +315,7 @@ jobs:
       # agent's changes are detected against. No agent code runs here — it is a
       # plain clone from origin — so github.token is safe.
       - name: Clone pristine base
+        if: ${{ matrix.entry.reconcile != true }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -331,6 +335,7 @@ jobs:
       # the pristine clone (code the agent never touched), with no token in env.
       - name: Detect changes (filter-free) + diff guard (deterministic)
         id: guard
+        if: ${{ matrix.entry.reconcile != true }}
         env:
           GH_TOKEN: ""
         run: |
@@ -362,7 +367,7 @@ jobs:
           echo "Diff guard passed for #${QUEUE_ISSUE}."
 
       - name: Post no-PR analysis (refused)
-        if: ${{ steps.guard.outputs.proceed == 'false' }}
+        if: ${{ matrix.entry.reconcile != true && steps.guard.outputs.proceed == 'false' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -399,7 +404,7 @@ jobs:
       # is what makes required CI + Codex review actually fire on the fix PR.
       - name: Mint App token
         id: app-token
-        if: ${{ steps.guard.outputs.proceed == 'true' }}
+        if: ${{ matrix.entry.reconcile != true && steps.guard.outputs.proceed == 'true' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.AUTOFIX_APP_ID }}
@@ -412,7 +417,7 @@ jobs:
       # and git runs only against that pristine-config copy — so no agent code and
       # no agent git config ever executes while APP_TOKEN is in scope.
       - name: Open fix PR from a pristine clone (deterministic)
-        if: ${{ steps.guard.outputs.proceed == 'true' }}
+        if: ${{ matrix.entry.reconcile != true && steps.guard.outputs.proceed == 'true' }}
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
@@ -561,6 +566,52 @@ jobs:
             --force
           gh issue edit "${QUEUE_ISSUE}" --repo "${REPO}" \
             --add-label "$(jq -r '.name' <<<"${def}")"
+
+      # Reconcile-only path (no agent, no push). The selector routes a stub here
+      # when an OPEN fix PR already references its SHORT-ID but the stub never
+      # got its marker/comment — a prior run's `gh pr create` succeeded while the
+      # follow-up queue write failed. NO agent runs (so the checkout is NOT
+      # tainted; the repo's real `scripts/` helpers are safe to run from
+      # $GITHUB_WORKSPACE) and NO App token is minted (this only reads a public
+      # PR and writes the queue side-effects with the ambient github.token). It
+      # never opens or pushes a PR, so it cannot duplicate or mislabel.
+      - name: Reconcile orphaned fix PR (no agent, no push)
+        if: ${{ matrix.entry.reconcile == true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # If a concurrent run already applied the marker between selection and
+          # now, there is nothing to reconcile.
+          labels_now=$(gh issue view "${QUEUE_ISSUE}" --repo "${REPO}" \
+            --json labels --jq '.labels[].name' || true)
+          if grep -Fxq "sentry:fix-pr-opened" <<<"${labels_now}"; then
+            echo "::notice::#${QUEUE_ISSUE} already reconciled (sentry:fix-pr-opened present)."
+            exit 0
+          fi
+          # Re-resolve the open PR (quoted SHORT-ID, exact-phrase, open-only —
+          # same contract as the selector's dedup). If it merged/closed in the
+          # meantime there is nothing to relink.
+          pr_url=$(gh pr list --repo "${REPO}" \
+            --search "\"${SHORT_ID}\"" --state open \
+            --json url --jq '.[0].url // ""')
+          if [ -z "${pr_url}" ]; then
+            echo "::notice::#${QUEUE_ISSUE} reconcile: no open PR for ${SHORT_ID} (merged/closed?); nothing to do."
+            exit 0
+          fi
+          # Repair the queue side-effects: the digest link comment + the terminal
+          # marker (self-heal the label from the ingest single source first).
+          gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
+            --body "$(node scripts/sentry-autofix-finalize.mjs autofix-comment --url "${pr_url}")"
+          def=$(node scripts/sentry-autofix-finalize.mjs label-def)
+          gh label create "$(jq -r '.name' <<<"${def}")" \
+            --repo "${REPO}" \
+            --color "$(jq -r '.color' <<<"${def}")" \
+            --description "$(jq -r '.description' <<<"${def}")" \
+            --force
+          gh issue edit "${QUEUE_ISSUE}" --repo "${REPO}" \
+            --add-label "$(jq -r '.name' <<<"${def}")"
+          echo "::notice::#${QUEUE_ISSUE} reconciled to ${pr_url}."
 
   # ---------------------------------------------------------------------------
   # record-run: leave a durable per-run record on the pipeline tracker issue —

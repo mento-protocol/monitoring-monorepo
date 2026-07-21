@@ -194,14 +194,21 @@ await test("skips a stub already labeled sentry:fix-pr-opened", async () => {
   assertDeepEqual(selected, [{ issue: 21, shortId: "APP-MENTO-ORG-6W" }]);
 });
 
-await test("skips a stub whose SHORT-ID an OPEN PR references (quoted, open-only)", async () => {
+await test("emits a RECONCILE entry when an OPEN PR references the SHORT-ID but the stub lacks its marker", async () => {
+  // Orphan: the stub reaches the PR check without either terminal marker (they
+  // are filtered earlier), so an open PR here means a prior run opened the PR
+  // but its queue comment/label write did not land. The selector must route it
+  // to no-agent reconciliation, NOT silently drop it (which would leave the
+  // queue side-effects permanently unrepaired).
   const stubs = [stub({ number: 30, shortId: "APP-MENTO-ORG-7X" })];
   const { runGh, calls } = makeRunGh({
     stubs,
     prShortIds: ["APP-MENTO-ORG-7X"],
   });
   const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
-  assertDeepEqual(selected, []);
+  assertDeepEqual(selected, [
+    { issue: 30, shortId: "APP-MENTO-ORG-7X", reconcile: true },
+  ]);
   // The dedup PR search must be scoped to OPEN PRs (a merged/closed PR must not
   // strand a regressed stub) and must quote the SHORT-ID (exact phrase, not a
   // tokenized substring match).
@@ -213,6 +220,17 @@ await test("skips a stub whose SHORT-ID an OPEN PR references (quoted, open-only
   assert(
     searched === '"APP-MENTO-ORG-7X"',
     `pr search term must be quoted, got ${searched}`,
+  );
+});
+
+await test("a normal (non-orphan) selection carries no reconcile flag", async () => {
+  const stubs = [stub({ number: 31, shortId: "APP-MENTO-ORG-8Y" })];
+  const { runGh } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
+  assertDeepEqual(selected, [{ issue: 31, shortId: "APP-MENTO-ORG-8Y" }]);
+  assert(
+    !("reconcile" in selected[0]),
+    "a real fix entry must not carry a reconcile flag",
   );
 });
 
