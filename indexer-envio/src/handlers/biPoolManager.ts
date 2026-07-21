@@ -351,11 +351,8 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
-    // Preload phase: warm entity reads only. With v3 preload optimization,
-    // the same event runs twice (preload + processing); without this guard
-    // the non-cached `poolExchangeEffect` would fire on both passes,
-    // doubling RPC pressure exactly during the transient-RPC window the
-    // backfill is trying to survive.
+    // Preload phase: warm entity reads only. The bounded ExchangeCreated RPC
+    // backfill remains processing-only under the explicit exemption below.
     if (context.isPreload) {
       await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
       return;
@@ -364,6 +361,8 @@ indexer.onEvent(
     // RPC backfill — `null` on transient failure. Caller stamps zeros for
     // the gap; the next SpreadUpdated / BucketsUpdated event still populates
     // its own fields incrementally.
+    // preload-effect-exempt: ExchangeCreated fires once per exchange, so this
+    // processing-only backfill is bounded rather than replay-traffic-scaled.
     const struct = await context.effect(poolExchangeEffect, {
       chainId: event.chainId,
       exchangeProvider,

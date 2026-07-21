@@ -460,6 +460,8 @@ export async function handleStethLaunchBaseline({
   const blockNumber = BigInt(block.number);
   if (blockNumber !== BigInt(V3_REVENUE_LAUNCH_BLOCK)) return false;
 
+  // preload-effect-exempt: this runs once at the configured launch block, so
+  // its processing-only RPC cardinality is permanently bounded.
   const sampledAtTimestamp = await context.effect(blockTimestampEffect, {
     chainId: ETHEREUM_CHAIN_ID,
     blockNumber,

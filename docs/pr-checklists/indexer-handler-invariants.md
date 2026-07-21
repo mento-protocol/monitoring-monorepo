@@ -3,7 +3,7 @@ title: Indexer Handler Invariants
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-21
 doc_type: checklist
 scope: indexer-envio
 review_interval_days: 90
@@ -32,6 +32,20 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
 
 - Block-keyed RPC caches must be bounded with an LRU or block-height eviction;
   never retain one entry per block in an unbounded `Map`.
+- Envio V3 runs each handler in a concurrent preload pass and then an ordered
+  processing pass. Any direct `context.effect(...)` whose key can be derived
+  before writes must be requested before or inside the positive
+  `context.isPreload` return, then reused with the identical effect + input key
+  during processing. An event-only input is not a processing-only dependency.
+- The blocking code-quality invariant rejects a direct effect that exists only
+  after a positive preload return. A genuinely processing-dependent or
+  permanently bounded call must carry an adjacent
+  `// preload-effect-exempt: <bounded-cardinality reason>` comment. Do not use
+  the exemption for an effect that scales with swaps, reports, transfers, or
+  another replay-traffic event stream.
+- When adding an effect to a replayed handler, audit the event's historical
+  cardinality and add preload-aware coverage. Processing-only correctness tests
+  do not prove that hosted replay will batch the external calls.
 - Local derivations from `lastMedianPrice` must use
   `hasFreshLiveMedian(pool, eventTimestamp)`, not merely `medianLive` or a
   non-zero price. The gate requires non-zero median, `medianLive`, `oracleOk`,

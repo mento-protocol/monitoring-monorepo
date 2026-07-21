@@ -5,7 +5,7 @@ title: Envio Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-09
+last_verified: 2026-07-21
 allowed-tools: Bash, Read, Grep, Glob, WebFetch
 doc_type: skill
 scope: repo-wide
@@ -29,6 +29,7 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 - Treat this repo as HyperIndex V3-first. Verify the exact installed package with `pnpm --filter @mento-protocol/indexer-envio exec envio --version`; the pinned version in `indexer-envio/package.json` is `envio@3.2.1`.
 - V3 preload optimization is always on. There is no `preload_handlers:` config flag, and loader-era patterns should be translated into normal handler code.
 - V3 handlers run twice: a concurrent preload pass for DB reads/effects, then an ordered processing pass for writes. Do not put expensive `context.effect(...)` calls behind an early `if (context.isPreload) return`; do keep writes out of preload.
+- `indexer-envio/test/code-quality-invariants.test.ts` blocks direct effects that exist only after a positive preload return. Reuse the identical effect + input key across both passes. A genuinely processing-dependent or permanently bounded exception needs an adjacent `// preload-effect-exempt: <bounded-cardinality reason>` comment; replay-traffic-scaled events are never exempt.
 - Prefer the installed CLI help over stale docs when they disagree. In this baseline, `envio metrics`, `envio metrics runtime`, `envio tools search-docs`, and `envio tools fetch-docs` exist; `envio benchmark-summary` does not.
 
 ## Mento repo quick reference
