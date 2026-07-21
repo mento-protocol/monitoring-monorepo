@@ -237,7 +237,7 @@ normalize_expected_command() {
       expected="${expected/pnpm dashboard:build/pnpm exec turbo run build --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
       ;;
     *"pnpm dashboard:size-limit"*)
-      expected="${expected/pnpm dashboard:size-limit/pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
+      expected="${expected/pnpm dashboard:size-limit/VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
       ;;
     *"bash scripts/check-react-doctor-score.sh"*)
       expected="${expected/bash scripts\/check-react-doctor-score.sh/pnpm exec turbo run react-doctor:score --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
@@ -380,6 +380,8 @@ assert_turbo_task_has_input "build" '$TURBO_ROOT$/.npmrc'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/turbo.json'
 assert_turbo_task_has_env "build" "VERCEL_ENV"
+assert_turbo_task_has_env "build" "VERCEL_DEPLOYMENT_ID"
+assert_turbo_task_has_env "build" "VERCEL_GIT_COMMIT_SHA"
 assert_turbo_task_has_output "build" ".next/**"
 assert_turbo_task_has_output "build" "!.next/cache/**"
 assert_turbo_task_has_output "build" "!.next/dev/**"
@@ -1989,6 +1991,10 @@ STUB
 args="$*"
 case "$args" in
   exec\ turbo\ run\ test:browser*|exec\ turbo\ run\ size-limit*)
+    if [[ "$args" == exec\ turbo\ run\ size-limit* && "${VERCEL_DEPLOYMENT_ID:-}" != "local-quality-gate" ]]; then
+      echo "size-limit did not receive the gate-owned deployment identity"
+      exit 1
+    fi
     if ! mkdir "${DASHBOARD_NEXT_LOCK:?}"; then
       echo "dashboard .next command overlapped"
       exit 1
@@ -2013,7 +2019,7 @@ STUB
 )
 rm -rf "$dashboard_serial_repo"
 assert_contains "+ pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw"
-assert_contains "+ pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+assert_contains "+ VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
 assert_contains "All mapped commands passed."
 assert_not_contains "dashboard .next command overlapped"
 

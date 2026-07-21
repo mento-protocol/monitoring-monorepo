@@ -561,7 +561,11 @@ add_ui_size_limit() {
   local reason="$1"
   # `size-limit` depends on `build` in turbo.json, so one Turbo invocation
   # preserves the build guarantee without paying for a separate scheduler run.
-  add_turbo_dashboard_task "size-limit" "$reason"
+  # Trunk's hook callback strips caller-provided environment variables, while
+  # operator-local .env files may contain empty Vercel placeholders. Pin a
+  # non-empty local deployment identity on the mapped command itself so both
+  # direct gate runs and agent:prewarm remain hermetic without loose Turbo env.
+  add_command "VERCEL_DEPLOYMENT_ID=local-quality-gate $(turbo_local_cache_command "@mento-protocol/ui-dashboard" "size-limit")" "$reason"
 }
 
 add_bridge_mutation_baseline() {
@@ -2119,7 +2123,7 @@ is_quality_serial_command() {
     "pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw")
       return 0
       ;;
-    "pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw")
+    "VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw")
       return 0
       ;;
   esac

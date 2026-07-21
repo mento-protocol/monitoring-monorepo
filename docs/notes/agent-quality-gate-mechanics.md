@@ -499,7 +499,12 @@ result.
 Dashboard build/browser/React Doctor cache keys explicitly include
 `shared-config`, package-manager, workflow, wrapper-script, and relevant env
 inputs; CI still runs browser tests normally and remains the Linux snapshot
-authority. The only task dependency is `size-limit -> build`, because
+authority. The build task passes and hashes both Vercel deployment identity
+inputs. The local size-limit command pins
+`VERCEL_DEPLOYMENT_ID=local-quality-gate`, so Trunk's stripped hook environment
+and empty operator-local Vercel placeholders cannot produce an empty persisted
+cache salt; `agent:prewarm` reuses that same mapped command. The only task
+dependency is `size-limit -> build`, because
 size-limit reads `.next/` output; the local gate relies on that dependency
 instead of mapping a separate dashboard build command for size-limit checks.
 High-risk or cross-layer commands stay outside Turbo, including codegen,

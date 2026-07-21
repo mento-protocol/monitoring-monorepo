@@ -54,10 +54,14 @@ export function extractTurboPrewarmCommands(gateOutput) {
 }
 
 export function isDashboardNextWorkspaceCommand(command) {
+  const commandWithoutEnvironment = command.replace(
+    /^(?:[A-Z0-9_]+=[^\s]+ )+/,
+    "",
+  );
   return (
-    command ===
+    commandWithoutEnvironment ===
       "pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw" ||
-    command ===
+    commandWithoutEnvironment ===
       "pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
   );
 }
