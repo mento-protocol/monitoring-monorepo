@@ -985,7 +985,19 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/pnpm-install
       - name: Full sequential autoreview regression suite
-        run: pnpm agent:autoreview:test -- --jobs 1
+        shell: bash
+        run: |
+          set -euo pipefail
+          # setup-node lives below a runner toolcache whose writable ancestry is
+          # intentionally rejected by the nested semantic helper. Stage the same
+          # native binary under private runner-owned ancestry instead of relaxing
+          # runtime trust; #1397 owns the separate root/container fallback.
+          trusted_node_dir="$(/usr/bin/mktemp -d "${HOME}/.autoreview-node.XXXXXX")"
+          trap '/bin/rm -rf -- "${trusted_node_dir}"' EXIT
+          /bin/chmod 0700 "$trusted_node_dir"
+          node_source="$(node -p 'process.execPath')"
+          /usr/bin/install -m 0500 "$node_source" "$trusted_node_dir/node"
+          PATH="$trusted_node_dir:$PATH" pnpm agent:autoreview:test -- --jobs 1
       - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 

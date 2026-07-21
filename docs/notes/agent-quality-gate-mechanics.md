@@ -39,7 +39,11 @@ completion timings, so a long adversarial case does not look hung. The mapped
 local quality gate invokes this package command and preserves those progress
 and timing lines. For deterministic autoreview-runtime closeout, or to
 reproduce the required path-filtered GitHub-hosted CI job, pass `-- --jobs 1`;
-this changes scheduling only and keeps the same full family coverage.
+this changes scheduling only and keeps the same full family coverage. The CI
+job stages setup-node's resolved native executable at mode `0500` under private
+runner-owned home-directory ancestry before invoking the suite. That keeps the
+production runtime-trust policy intact; root/container runtime discovery
+remains the separate follow-up tracked in #1397.
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
