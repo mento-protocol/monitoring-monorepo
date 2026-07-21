@@ -41,7 +41,13 @@ import { fileURLToPath } from "node:url";
 const ROOT = process.cwd();
 const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
 
-const GUARD_LITERAL = "sentry-autofix/";
+// The ONLY guard form the checker credits mechanically: a genuine EXCLUDING
+// `if:` condition on the autofix head-ref namespace. A bare `sentry-autofix/`
+// occurrence (a comment, a step name, a POSITIVE `startsWith` that routes
+// autofix PRs TOWARD a lane) must not certify a job — anything that isn't
+// this exact exclusion shape needs the reviewed annotation escape hatch.
+const GUARD_PATTERN =
+  /!\s*startsWith\(\s*github\.(?:event\.pull_request\.head\.ref|head_ref)\s*,\s*'sentry-autofix\/'\s*\)/;
 const ANNOTATION = "# autofix-ci-trust:";
 
 let failures = 0;
@@ -105,10 +111,28 @@ export function hasTrigger(body, trigger) {
   return false;
 }
 
-/** True when the workflow references any repository secret via the
- * `${{ secrets.* }}` expression syntax (the only way a secret enters a job). */
+/** True when the job/workflow text can receive repository secrets, in ANY of
+ * GitHub's secret-passing syntaxes:
+ *   - dot expression:      `${{ secrets.NAME }}`
+ *   - bracket expression:  `${{ secrets['NAME'] }}` / `secrets["NAME"]`
+ *   - expression via functions: any `secrets.` / `secrets[` inside `${{ }}`
+ *   - reusable-workflow inheritance: `secrets: inherit` (hands the CALLER'S
+ *     whole secret set to the called workflow, which may execute PR-head code)
+ *   - reusable-workflow explicit block: a `secrets:` mapping under a job that
+ *     `uses:` another workflow. */
 export function referencesSecrets(body) {
-  return /\$\{\{\s*secrets\./.test(body);
+  if (/\$\{\{[^}]*\bsecrets\s*[.[]/.test(body)) return true;
+  const stripped = stripComments(body);
+  if (/^\s*secrets\s*:\s*inherit\s*$/m.test(stripped)) return true;
+  // Explicit `secrets:` mapping on a reusable-workflow call. Only meaningful
+  // when the block also calls a workflow (`uses: .../.github/workflows/...`).
+  if (
+    /^\s*secrets\s*:\s*$/m.test(stripped) &&
+    /^\s*uses\s*:\s*\S*\.github\/workflows\//m.test(stripped)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** True when the workflow uses the pull_request_target trigger in any form. */
@@ -174,11 +198,12 @@ export function splitJobs(body) {
  *
  * Granularity is PER JOB, not per file: in a multi-job workflow, one guarded
  * job must not vouch for an unguarded sibling that also reaches secrets. A
- * job passes when ITS OWN block contains the `sentry-autofix/` guard literal
- * or an `# autofix-ci-trust:` annotation; a file-level annotation in the
- * header (before `jobs:`) covers all jobs — annotations are deliberate
- * reasoned prose, so file scope is acceptable for them, while the guard
- * literal must sit in the job it protects.
+ * job passes when ITS OWN block contains the strict excluding-`if:` guard
+ * (GUARD_PATTERN — a bare `sentry-autofix/` mention in a comment or a
+ * positive lane-router does NOT count) or an `# autofix-ci-trust:`
+ * annotation; a file-level annotation in the header (before `jobs:`) covers
+ * all jobs — annotations are deliberate reasoned prose, so file scope is
+ * acceptable for them, while the guard must sit in the job it protects.
  *
  * Exported for tests.
  */
@@ -201,7 +226,7 @@ export function evaluateWorkflow(body) {
     if (job === "") continue;
     if (!referencesSecrets(block)) continue;
     if (fileAnnotated) continue;
-    if (block.includes(GUARD_LITERAL) || block.includes(ANNOTATION)) continue;
+    if (GUARD_PATTERN.test(block) || block.includes(ANNOTATION)) continue;
     offenders.push(job);
   }
   if (offenders.length === 0) {
@@ -210,9 +235,9 @@ export function evaluateWorkflow(body) {
   return {
     ok: false,
     reason:
-      `triggers on pull_request, and job(s) [${offenders.join(", ")}] reference \${{ secrets.* }} without a '${GUARD_LITERAL}' guard or '${ANNOTATION}' annotation in that job (or a file-level annotation above \`jobs:\`). ` +
+      `triggers on pull_request, and job(s) [${offenders.join(", ")}] can receive secrets without an excluding autofix guard (\`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')\` on the job's if:) or an '${ANNOTATION}' annotation in that job (or a file-level annotation above \`jobs:\`). ` +
       "Machine-authored autofix PRs pass every fork/dependabot check, so each secret-bearing PR job must either exclude the sentry-autofix/* head branch " +
-      "(or route it to a secretless lane) or document why its secrets are unreachable from PR-head code execution.",
+      "or document why its secrets are unreachable from PR-head code execution.",
   };
 }
 

@@ -86,9 +86,71 @@ test("pull_request_target is always refused, even with a guard present", () => {
   assert(!v.ok && /pull_request_target/.test(v.reason), "refused");
 });
 
-test("referencesSecrets matches only the expression syntax", () => {
-  assert(referencesSecrets("x: ${{ secrets.FOO }}"), "secrets expression");
+test("referencesSecrets covers every secret-passing syntax", () => {
+  assert(referencesSecrets("x: ${{ secrets.FOO }}"), "dot expression");
+  assert(referencesSecrets("x: ${{ secrets['FOO'] }}"), "bracket expression");
+  assert(
+    referencesSecrets('x: ${{ secrets["FOO"] }}'),
+    "double-quote bracket expression",
+  );
+  assert(
+    referencesSecrets(
+      "    uses: ./.github/workflows/x.yml\n    secrets: inherit",
+    ),
+    "reusable-workflow secrets: inherit",
+  );
+  assert(
+    referencesSecrets(
+      "    uses: org/repo/.github/workflows/x.yml@sha\n    secrets:\n      token: abc",
+    ),
+    "reusable-workflow explicit secrets block",
+  );
   assert(!referencesSecrets("x: secrets are cool"), "prose ignored");
+  assert(
+    !referencesSecrets("# secrets: inherit would be bad"),
+    "commented inherit ignored",
+  );
+});
+
+test("a bare sentry-autofix/ mention does NOT count as a guard", () => {
+  // A comment, step name, or POSITIVE lane-router containing the branch
+  // namespace must not certify a secret-bearing job — only the strict
+  // excluding if: form (or an annotation) does.
+  const commentOnly = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    # we should think about sentry-autofix/ branches here someday",
+    SECRET_LINE,
+  ].join("\n");
+  assert(!evaluateWorkflow(commentOnly).ok, "comment mention refused");
+
+  const positiveRouter = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    if: ${{ startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+    SECRET_LINE,
+  ].join("\n");
+  assert(
+    !evaluateWorkflow(positiveRouter).ok,
+    "positive (non-excluding) startsWith refused",
+  );
+
+  const headRefForm = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    if: ${{ !startsWith(github.head_ref, 'sentry-autofix/') }}",
+    SECRET_LINE,
+  ].join("\n");
+  assert(
+    evaluateWorkflow(headRefForm).ok,
+    "github.head_ref exclusion accepted",
+  );
 });
 
 // ── per-job granularity ───────────────────────────────────────────────────────

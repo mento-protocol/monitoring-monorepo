@@ -74,8 +74,16 @@ jobs:
     # `decide` computes the local-fixture and trusted-preview lanes separately:
     #   - fixture=true/filter failure  → run the local fixture (fail-closed)
     #   - preview=true + trusted PR    → also run the secret-bearing preview
-    #   - workflow-only/fork/Dependabot → local fixture only
+    #   - workflow-only/fork/Dependabot/autofix → local fixture only
     #   - fixture=false                → no-op skip
+    # autofix-ci-trust: this job cannot use an if:-level exclusion (the
+    # secretless fixture lane must still run on autofix PRs so the required
+    # check stays meaningful). Instead the `decide` step's lane router sends
+    # sentry-autofix/* heads down the fixture lane with preview=false, and
+    # every bypass-secret step is gated on `decide.outputs.preview == 'true'`
+    # — so the VERCEL_AUTOMATION_BYPASS_SECRET steps never run for autofix
+    # PRs. The checkout is persist-credentials:false, so the fixture build of
+    # PR-head code finds no token in .git/config either.
     # Preview assertions warn/error per .lighthouserc.cjs; the deterministic
     # fixture owns the blocking pool-detail LCP contract.
     name: Core Web Vitals + accessibility (ui-dashboard)
