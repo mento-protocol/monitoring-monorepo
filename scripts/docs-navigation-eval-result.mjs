@@ -14,6 +14,7 @@ import {
 } from "./docs-navigation-eval-helpers.mjs";
 
 const SOURCE_AT_COMMIT_CACHE = new Map();
+const DEFAULT_BRANCH_REF = "refs/remotes/origin/main";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -61,6 +62,41 @@ function commitIsReadable(repoRoot, commit) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function defaultBranchReachability(repoRoot, commit) {
+  try {
+    execFileSync(
+      "git",
+      ["rev-parse", "--verify", "--quiet", `${DEFAULT_BRANCH_REF}^{commit}`],
+      {
+        cwd: repoRoot,
+        stdio: "ignore",
+      },
+    );
+  } catch {
+    return {
+      reachable: false,
+      error: `default branch ref is not available locally: ${DEFAULT_BRANCH_REF}`,
+    };
+  }
+
+  try {
+    execFileSync(
+      "git",
+      ["merge-base", "--is-ancestor", commit, DEFAULT_BRANCH_REF],
+      {
+        cwd: repoRoot,
+        stdio: "ignore",
+      },
+    );
+    return { reachable: true, error: null };
+  } catch {
+    return {
+      reachable: false,
+      error: `result.run.repository_base_commit is not reachable from ${DEFAULT_BRANCH_REF}: ${commit}`,
+    };
   }
 }
 
@@ -532,13 +568,19 @@ export function scoreNavigationResult({
   const baseCommit = /^[0-9a-f]{40}$/.test(run.repository_base_commit ?? "")
     ? run.repository_base_commit
     : null;
-  if (baseCommit && !commitIsReadable(repoRoot, baseCommit)) {
+  const baseCommitReadable = baseCommit
+    ? commitIsReadable(repoRoot, baseCommit)
+    : false;
+  if (baseCommit && !baseCommitReadable) {
     errors.push(
       `result.run.repository_base_commit is not available locally: ${baseCommit}`,
     );
   }
-  const sourceCommit =
-    baseCommit && commitIsReadable(repoRoot, baseCommit) ? baseCommit : "HEAD";
+  if (baseCommit && baseCommitReadable) {
+    const reachability = defaultBranchReachability(repoRoot, baseCommit);
+    if (!reachability.reachable) errors.push(reachability.error);
+  }
+  const sourceCommit = baseCommit && baseCommitReadable ? baseCommit : "HEAD";
   const records = historicalInventoryMap(
     repoRoot,
     sourceCommit,

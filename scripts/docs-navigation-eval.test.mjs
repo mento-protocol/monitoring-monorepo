@@ -42,10 +42,14 @@ import {
 } from "./docs-navigation-eval.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const repoHead = execFileSync("git", ["rev-parse", "HEAD"], {
-  cwd: repoRoot,
-  encoding: "utf8",
-}).trim();
+const repoBaseCommit = execFileSync(
+  "git",
+  ["rev-parse", "refs/remotes/origin/main^{commit}"],
+  {
+    cwd: repoRoot,
+    encoding: "utf8",
+  },
+).trim();
 const scriptPath = fileURLToPath(
   new URL("./docs-navigation-eval.mjs", import.meta.url),
 );
@@ -63,7 +67,7 @@ const sourceContentCache = new Map();
 function source(pathname) {
   let content = sourceContentCache.get(pathname);
   if (!content) {
-    content = execFileSync("git", ["show", `${repoHead}:${pathname}`], {
+    content = execFileSync("git", ["show", `${repoBaseCommit}:${pathname}`], {
       cwd: repoRoot,
       encoding: null,
     });
@@ -96,7 +100,7 @@ function validResult() {
       model: "fixture-model",
       effort: "low",
       executed_at: "2026-07-21T00:00:00.000Z",
-      repository_base_commit: repoHead,
+      repository_base_commit: repoBaseCommit,
       fresh_context: true,
       read_only: true,
       bootstrap_sources: context.suite.bootstrap_sources.map(source),
@@ -374,7 +378,7 @@ test("published result schema rejects unexpected and missing properties", () => 
   assert.equal(score(result).report.passed, false);
 });
 
-test("historical scoring survives deletion from the current worktree", () => {
+test("historical scoring requires a default-branch ancestor and survives deletion", () => {
   const temp = mkdtempSync(path.join(tmpdir(), "docs-navigation-history-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: temp });
@@ -412,6 +416,16 @@ test("historical scoring survives deletion from the current worktree", () => {
     execFileSync("git", ["add", "."], { cwd: temp });
     execFileSync("git", ["commit", "-qm", "fixture"], { cwd: temp });
     const commit = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: temp,
+      encoding: "utf8",
+    }).trim();
+    execFileSync("git", ["update-ref", "refs/remotes/origin/main", commit], {
+      cwd: temp,
+    });
+    execFileSync("git", ["commit", "--allow-empty", "-qm", "branch-only"], {
+      cwd: temp,
+    });
+    const branchOnlyCommit = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: temp,
       encoding: "utf8",
     }).trim();
@@ -470,6 +484,18 @@ test("historical scoring survives deletion from the current worktree", () => {
     });
     assert.deepEqual(scored.errors, []);
     assert.equal(scored.report.passed, true);
+
+    result.run.repository_base_commit = branchOnlyCommit;
+    const branchOnlyScored = scoreNavigationResult({
+      suite: context.suite,
+      result,
+      repoRoot: temp,
+    });
+    assert.match(
+      branchOnlyScored.errors.join("\n"),
+      /repository_base_commit is not reachable from refs\/remotes\/origin\/main/,
+    );
+    assert.equal(branchOnlyScored.report.passed, false);
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
