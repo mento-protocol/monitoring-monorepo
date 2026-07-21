@@ -38,7 +38,7 @@ import {
   getPoolsWithReferenceFeed,
   getBreakerConfigsByFeed,
 } from "../rpc.js";
-import { reportExpiryEffect } from "../rpc/effects.js";
+import { medianTimestampEffect, reportExpiryEffect } from "../rpc/effects.js";
 import {
   bootstrapAndResolveBreakerSnapshotFields,
   bootstrapFeedBreakerConfigs,
@@ -83,6 +83,7 @@ function holdOracleReportedCursor(
     oracleOk: existing.oracleOk,
     oracleTxHash: existing.oracleTxHash,
     oraclePrice: existing.oraclePrice,
+    lastOracleReportAt: existing.lastOracleReportAt,
   });
 }
 
@@ -101,6 +102,8 @@ interface OracleReportedPoolCtx {
   blockNumber: bigint;
   blockTimestamp: bigint;
   oracleTimestamp: bigint;
+  /** Exact SortedOracles medianTimestamp at this event block. */
+  medianTimestamp: bigint | null;
   breakerSnapshotFields: {
     breakerBaselineAtSnapshot: bigint;
     breakerThresholdAtSnapshot: bigint;
@@ -163,17 +166,10 @@ async function processOracleReportedPool(
 
   const oraclePrice = c.oraclePrice;
 
-  // `lastOracleReportAt` is intentionally NOT advanced here.
-  // OracleReported fires for every reporter, but the on-chain median's
-  // freshness is bounded by the median reporter's timestamp — not the
-  // max across all reporters. Tracking max-of-all here would let a
-  // fresh non-median reporter extend our derive-path freshness gate
-  // past the actual median's contract expiry. The pragmatic alternative
-  // (per claude[bot] review on PR #358): only advance `lastOracleReportAt`
-  // in the `MedianUpdated` handler using `blockTimestamp`. That's an
-  // under-bound — if reporters are fresh but the median hasn't moved
-  // recently, derive falls through to RPC. Safe by construction: never
-  // passes stale-median data through the freshness gate.
+  // `lastOracleReportAt` is the exact SortedOracles medianTimestamp, fetched
+  // once per feed event above the pool fan-out. Refresh it on EVERY report:
+  // a flat feed can advance reporter timestamps without changing the median
+  // value, so no MedianUpdated event would exist to move this cursor.
   //
   // We DO advance `lastFreshReporterAt = max(prev, event.params.timestamp)`
   // here. Diagnostic-only field — see schema.graphql for why it can't
@@ -186,6 +182,10 @@ async function processOracleReportedPool(
     oraclePrice,
     oracleExpiry,
     oracleNumReporters: existing.oracleNumReporters,
+    lastOracleReportAt:
+      c.medianTimestamp !== null && c.medianTimestamp > 0n
+        ? c.medianTimestamp
+        : existing.lastOracleReportAt,
     lastFreshReporterAt:
       c.oracleTimestamp > existing.lastFreshReporterAt
         ? c.oracleTimestamp
@@ -202,12 +202,13 @@ async function processOracleReportedPool(
   // breach durations and alert rollups. Skip the breach + health +
   // snapshot pipeline entirely; the Pool entity still advances
   // diagnostic fields (`oraclePrice`, `lastFreshReporterAt`) but the
-  // FRESHNESS cursor (`oracleTimestamp` / `oracleOk`) is HELD on the
-  // existing values — advancing them would let the dashboard's homepage
-  // table + OG card (which recompute health from `oracleTimestamp` +
-  // `priceDifference` without checking `hasHealthData`) classify a
-  // pool with untrusted deviation data as "OK / fresh" instead of
-  // degraded (codex P2 #3214513402, PR 1.6).
+  // freshness cursor (`lastOracleReportAt` / `oracleOk`) and its matching raw
+  // diagnostic tuple (`oracleTimestamp` / price / tx) are HELD on the
+  // existing values — advancing the exact freshness cursor while retaining a
+  // frozen `priceDifference` would combine oracle state from two different
+  // observations. The `hasHealthData` gate keeps consumers degraded until the
+  // trustworthy sample pipeline can move both together (codex P2 #3214513402,
+  // PR 1.6).
   // Mirrors the two-cursor model in state-sync.ts.
   //
   // Exception: never-rebalance pools (both split sides 0 + known)
@@ -231,9 +232,10 @@ async function processOracleReportedPool(
   // read the row's priceDifference directly (BreachEvent, oracle tab
   // detail) would see a fake non-zero value. Preserve existing instead.
   const decimalsTrustworthy = updatedPool.tokenDecimalsKnown === true;
-  // OracleReported carries a reporter quote, not a fresh median anchor. If the
-  // last MedianUpdated anchor has expired, the contract-side freshness gate
-  // would reject median-derived health/deviation math, so hold the cursor.
+  // OracleReported's params carry only a reporter quote, so freshness comes
+  // from the paired exact block-scoped medianTimestamp read above. If that
+  // read is missing/non-positive or the resulting anchor is expired, hold the
+  // cursor instead of treating this reporter event as a fresh median.
   if (!hasFreshLiveMedian(updatedPool, c.blockTimestamp)) {
     holdOracleReportedCursor(context, updatedPool, existing);
     return;
@@ -281,8 +283,14 @@ async function processOracleReportedPool(
     finalPool,
     priceDifference,
     effectiveBps,
-    c.blockTimestamp,
-    isNeverRebalance(finalPool),
+    {
+      blockTimestamp: c.blockTimestamp,
+      isNeverRebalance: isNeverRebalance(finalPool),
+      priorOracleFreshness: {
+        reportTimestamp: existing.lastOracleReportAt,
+        expiry: existing.oracleExpiry,
+      },
+    },
   );
   const merged: Pool = {
     ...finalPool,
@@ -382,6 +390,11 @@ indexer.onEvent(
     }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+    const medianTimestamp = await context.effect(medianTimestampEffect, {
+      chainId: event.chainId,
+      rateFeedID,
+      blockNumber,
+    });
 
     await ensureRateFeed({
       context,
@@ -419,6 +432,7 @@ indexer.onEvent(
       blockNumber,
       blockTimestamp,
       oracleTimestamp: event.params.timestamp,
+      medianTimestamp,
       breakerSnapshotFields,
     };
     // Each poolId is distinct (getPoolsByFeed returns unique rows) so pool
@@ -496,6 +510,11 @@ indexer.onEvent(
 
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+    const medianTimestamp = await context.effect(medianTimestampEffect, {
+      chainId: event.chainId,
+      rateFeedID,
+      blockNumber,
+    });
 
     await ensureRateFeed({
       context,
@@ -599,15 +618,13 @@ indexer.onEvent(
           oracleExpiry,
           oracleNumReporters: existing.oracleNumReporters,
           ...lineage,
-          // Advance only on MedianUpdated (block timestamp). Under-bound on
-          // contract median-reporter expiry — see OracleReported handler for
-          // why this is safer than tracking max(reporter timestamps).
-          // Freeze on zero-median outages: `medianLive=false` keeps the
-          // prior fresh anchor so the next post-outage state-sync event
-          // doesn't see a freshness gate that the contract would also fail.
-          lastOracleReportAt: lineage.medianLive
-            ? blockTimestamp
-            : existing.lastOracleReportAt,
+          // Exact contract freshness anchor. Keep the prior known value on an
+          // RPC miss; the raw `oracleTimestamp` above remains diagnostic and
+          // must never renew contract freshness by itself.
+          lastOracleReportAt:
+            medianTimestamp !== null && medianTimestamp > 0n
+              ? medianTimestamp
+              : existing.lastOracleReportAt,
           updatedAtBlock: blockNumber,
           updatedAtTimestamp: blockTimestamp,
         };
@@ -676,8 +693,9 @@ indexer.onEvent(
         // handler, including the never-rebalance exception (those pools
         // record OK uptime samples with no priceDifference math).
         // Pool entity still advances diagnostic fields (`oraclePrice`, median
-        // lineage), but the FRESHNESS cursor (`oracleTimestamp` / `oracleOk` /
-        // `lastOracleReportAt`) is HELD on the existing values — see
+        // lineage), but the freshness cursor (`lastOracleReportAt` /
+        // `oracleOk`) and matching raw diagnostic tuple are HELD on the
+        // existing values — see
         // OracleReported handler for the dashboard-side rationale
         // (codex P2 #3214513402, PR 1.6).
         if (
@@ -765,8 +783,14 @@ indexer.onEvent(
           finalPool,
           priceDifference,
           effectiveBps,
-          blockTimestamp,
-          isNeverRebalance(finalPool),
+          {
+            blockTimestamp,
+            isNeverRebalance: isNeverRebalance(finalPool),
+            priorOracleFreshness: {
+              reportTimestamp: existing.lastOracleReportAt,
+              expiry: existing.oracleExpiry,
+            },
+          },
         );
         const merged: Pool = {
           ...finalPool,

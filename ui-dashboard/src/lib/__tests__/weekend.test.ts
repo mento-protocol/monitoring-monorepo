@@ -83,7 +83,7 @@ describe("isWeekendOracleStale", () => {
   it("returns true when oracle is stale AND it is the weekend", () => {
     expect(
       isWeekendOracleStale(
-        { oracleTimestamp: STALE_TS, oracleExpiry: "300" },
+        { lastOracleReportAt: STALE_TS, oracleExpiry: "300" },
         isOracleFresh,
         undefined,
         SAT_NOON,
@@ -94,7 +94,7 @@ describe("isWeekendOracleStale", () => {
   it("returns false when oracle is fresh (even on the weekend)", () => {
     expect(
       isWeekendOracleStale(
-        { oracleTimestamp: FRESH_TS, oracleExpiry: "300" },
+        { lastOracleReportAt: FRESH_TS, oracleExpiry: "300" },
         isOracleFresh,
         undefined,
         SAT_NOON,
@@ -105,7 +105,7 @@ describe("isWeekendOracleStale", () => {
   it("returns false when oracle is stale but it is a weekday", () => {
     expect(
       isWeekendOracleStale(
-        { oracleTimestamp: STALE_TS, oracleExpiry: "300" },
+        { lastOracleReportAt: STALE_TS, oracleExpiry: "300" },
         isOracleFresh,
         undefined,
         MON_NOON,
@@ -119,7 +119,7 @@ describe("isWeekendOracleStale", () => {
     const ts340 = String(Math.floor(sat.getTime() / 1000) - 340);
     expect(
       isWeekendOracleStale(
-        { oracleTimestamp: ts340, oracleExpiry: "0" },
+        { lastOracleReportAt: ts340, oracleExpiry: "0" },
         isOracleFresh,
         143, // Monad mainnet
         sat,
@@ -134,13 +134,13 @@ describe("isWeekendOracleStale", () => {
     try {
       expect(
         isWeekendOracleStale(
-          { oracleTimestamp: STALE_TS, oracleExpiry: "300" },
+          { lastOracleReportAt: STALE_TS, oracleExpiry: "300" },
           isOracleFresh,
         ),
       ).toBe(true);
       expect(
         isWeekendOracleStale(
-          { oracleTimestamp: FRESH_TS, oracleExpiry: "300" },
+          { lastOracleReportAt: FRESH_TS, oracleExpiry: "300" },
           isOracleFresh,
         ),
       ).toBe(false);

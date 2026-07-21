@@ -70,6 +70,7 @@ const BASE_POOL = {
   updatedAtTimestamp: "2000",
   oracleOk: true,
   oracleTimestamp: "1900",
+  lastOracleReportAt: "1900",
   oracleFreshnessCheckedAt: 2_000,
   priceDifference: "0",
 } satisfies Pool;
@@ -86,6 +87,7 @@ const LIVE_ROW = {
   updatedAtTimestamp: "2100",
   oracleOk: false,
   oracleTimestamp: "2050",
+  lastOracleReportAt: "2050",
   oracleExpiry: "300",
   oracleNumReporters: 3,
   priceDifference: "0",

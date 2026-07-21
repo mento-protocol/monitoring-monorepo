@@ -74,6 +74,8 @@ export {
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
+  _setMockMedianTimestamp,
+  _clearMockMedianTimestamps,
   _setMockRateFeedOracles,
   _clearMockRateFeedOracles,
   _setMockNumReporters,

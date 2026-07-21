@@ -51,6 +51,9 @@ function mergeHealthCursor(
           ...p,
           lastOracleSnapshotTimestamp: r.lastOracleSnapshotTimestamp,
           lastDeviationRatio: r.lastDeviationRatio,
+          // Same-query freshness pair for projecting the open interval.
+          lastOracleReportAt: r.lastOracleReportAt,
+          oracleExpiry: r.oracleExpiry,
         };
   });
 }

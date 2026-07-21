@@ -31,6 +31,7 @@ import {
   fetchTradingLimits,
 } from "./pool-state.js";
 import {
+  fetchMedianTimestamp,
   fetchNumReporters,
   fetchRateFeedOracles,
   fetchReferenceRateFeedID,
@@ -657,6 +658,27 @@ export const reportExpiryEffect = createEffect(
   },
   async ({ input, context }) =>
     (await fetchReportExpiry(
+      input.chainId,
+      input.rateFeedID,
+      input.blockNumber,
+      context.log,
+    )) ?? null,
+);
+
+export const medianTimestampEffect = createEffect(
+  {
+    name: "medianTimestamp",
+    input: {
+      chainId: S.int32,
+      rateFeedID: S.string,
+      blockNumber: S.bigint,
+    },
+    output: S.nullable(S.bigint),
+    rateLimit: { calls: 200, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) =>
+    (await fetchMedianTimestamp(
       input.chainId,
       input.rateFeedID,
       input.blockNumber,

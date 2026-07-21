@@ -6706,6 +6706,7 @@ export type PoolDetailWithHealthQuery = {
     readonly oracleOk: boolean;
     readonly oraclePrice: string;
     readonly oracleTimestamp: string;
+    readonly lastOracleReportAt: string;
     readonly oracleTxHash: string;
     readonly oracleExpiry: string;
     readonly oracleNumReporters: number;
@@ -6889,6 +6890,8 @@ export type PoolHealthCursorQuery = {
     readonly id: string;
     readonly lastOracleSnapshotTimestamp: string;
     readonly lastDeviationRatio: string;
+    readonly lastOracleReportAt: string;
+    readonly oracleExpiry: string;
   }>;
 };
 
@@ -7061,6 +7064,7 @@ export type AllPoolsWithHealthQuery = {
     readonly oracleOk: boolean;
     readonly oraclePrice: string;
     readonly oracleTimestamp: string;
+    readonly lastOracleReportAt: string;
     readonly oracleTxHash: string;
     readonly priceDifference: string;
     readonly rebalanceThreshold: number;
@@ -7097,6 +7101,7 @@ export type AllPoolsLiveHealthQuery = {
     readonly updatedAtTimestamp: string;
     readonly oracleOk: boolean;
     readonly oracleTimestamp: string;
+    readonly lastOracleReportAt: string;
     readonly oracleExpiry: string;
     readonly oracleNumReporters: number;
     readonly priceDifference: string;
@@ -7196,6 +7201,8 @@ export type AllPoolsHealthCursorQuery = {
     readonly id: string;
     readonly lastOracleSnapshotTimestamp: string;
     readonly lastDeviationRatio: string;
+    readonly lastOracleReportAt: string;
+    readonly oracleExpiry: string;
   }>;
 };
 

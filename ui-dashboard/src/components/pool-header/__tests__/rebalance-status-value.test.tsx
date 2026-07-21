@@ -86,6 +86,7 @@ const BASE_POOL: Pool = {
   updatedAtTimestamp: "2000",
   rebalancerAddress: STRATEGY_ADDR,
   oracleTimestamp: String(nowSeconds - 60),
+  lastOracleReportAt: String(nowSeconds - 60),
   oracleExpiry: "300",
   priceDifference: "0",
   rebalanceThreshold: 5000,
@@ -208,6 +209,7 @@ describe("RebalanceStatusValue", () => {
         pool={{
           ...BASE_POOL,
           oracleTimestamp: String(nowSeconds - 600),
+          lastOracleReportAt: String(nowSeconds - 600),
           priceDifference: "1000",
         }}
         network={NETWORK}

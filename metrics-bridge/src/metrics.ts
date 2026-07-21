@@ -432,18 +432,16 @@ function recordStatusAndOracleMetrics(
   const oracleLabels = oracleUpdateMetricLabels(pool, labels);
   gauges.healthStatus.set(labels, healthStatusToNumber(pool.healthStatus));
   gauges.oracleContractOk.set(labels, pool.oracleOk ? 1 : 0);
-  // Alert liveness uses the observed report timestamp, not `lastOracleReportAt`.
-  // The indexer keeps `lastOracleReportAt` as a safe under-bound for its
-  // derive path because it falls back to RPC when unsure. Alerting on that
-  // under-bound would false-page flat single-reporter feeds whose on-chain
-  // timestamp refreshed without emitting `MedianUpdated`.
+  // Alert liveness uses the exact SortedOracles median timestamp. The raw
+  // `oracleTimestamp` gauge remains diagnostic (report/state-sync touch time)
+  // and must not renew the contract freshness boundary.
   gauges.oracleOk.set(labels, isOracleLive(pool, nowSeconds) ? 1 : 0);
   const marketPause = classifyFxMarketPause(labels.pair, nowSeconds);
   if (marketPause !== null) {
     gauges.oracleMarketPause.set({ ...labels, reason: marketPause }, 1);
   }
   gauges.oracleTimestamp.set(oracleLabels, Number(pool.oracleTimestamp));
-  gauges.oracleLiveTimestamp.set(labels, Number(pool.oracleTimestamp));
+  gauges.oracleLiveTimestamp.set(labels, Number(pool.lastOracleReportAt));
   gauges.oracleExpiry.set(oracleLabels, oracleExpirySeconds(pool));
 }
 
@@ -535,11 +533,11 @@ export function vpOracleFreshness(
 export function isOracleLive(
   pool: Pick<
     PoolRow,
-    "chainId" | "oracleOk" | "oracleTimestamp" | "oracleExpiry"
+    "chainId" | "oracleOk" | "lastOracleReportAt" | "oracleExpiry"
   >,
   nowSeconds: number,
 ): boolean {
-  const timestamp = Number(pool.oracleTimestamp);
+  const timestamp = Number(pool.lastOracleReportAt);
   const expiry = oracleExpirySeconds(pool);
   return (
     pool.oracleOk &&

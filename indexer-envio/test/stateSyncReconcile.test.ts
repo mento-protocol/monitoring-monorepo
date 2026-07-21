@@ -9,7 +9,15 @@ import {
 import { createMockEventData } from "./helpers/eventFixtures.js";
 import {
   _clearMockRebalancingStates,
+  _clearMockMedianTimestamps,
+  _clearMockRateFeedIDs,
+  _clearMockReportExpiry,
+  _clearMockReserves,
+  _setMockMedianTimestamp,
+  _setMockRateFeedID,
   _setMockRebalancingState,
+  _setMockReportExpiry,
+  _setMockReserves,
 } from "../src/EventHandlers.ts";
 import { makePool } from "./helpers/makePool.ts";
 import { makePoolId } from "../src/helpers.ts";
@@ -20,11 +28,10 @@ import { makePoolId } from "../src/helpers.ts";
 // contract's live state) disagrees with the Pool row's currently-persisted
 // (accumulated) `priceDifference` / `rebalanceThreshold` / `oraclePrice`.
 //
-// `rebalanceThresholdsKnown: false` forces `tryDeriveRebalanceState` to
-// return null every time (it gates on this flag), so the handler always
-// falls through to the RPC — letting the test pin that the RPC's fresh
-// values win over whatever was persisted, rather than the stale figures
-// surviving the event.
+// `oracleOk: false` forces `tryDeriveRebalanceState` to return null, so the
+// handlers fall through to the authoritative RPC. Contract state remains
+// useful for reconciliation, but repairing `oracleOk` additionally requires
+// the exact positive SortedOracles median timestamp for the same block.
 // ---------------------------------------------------------------------------
 
 type MockDb = MockDbWith<{ Pool: WritableEntity }>;
@@ -34,6 +41,9 @@ const { MockDb, FPMM } = TestHelpers;
 
 const CHAIN_ID = 42220;
 const POOL_ADDRESS = "0x00000000000000000000000000000000000000fe";
+const RATE_FEED_ID = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
+const ONE_YEAR_SECONDS = 31_536_000n;
+const MEDIAN_TIMESTAMP = 1_700_888_137n;
 
 function updateReservesEvent(): unknown {
   const data: MockEventData = createMockEventData({
@@ -51,30 +61,131 @@ function updateReservesEvent(): unknown {
   });
 }
 
+function rebalancedEvent(): unknown {
+  const data: MockEventData = createMockEventData({
+    chainId: CHAIN_ID,
+    logIndex: 2,
+    srcAddress: POOL_ADDRESS,
+    blockNumber: 901,
+    blockTimestamp: 1_700_900_100,
+  });
+  return FPMM.Rebalanced.createMockEvent({
+    sender: "0x00000000000000000000000000000000000000aa",
+    priceDifferenceBefore: 600n,
+    priceDifferenceAfter: 50n,
+    mockEventData: data,
+  });
+}
+
+function rebalanceThresholdUpdatedEvent(): unknown {
+  const data: MockEventData = createMockEventData({
+    chainId: CHAIN_ID,
+    logIndex: 3,
+    srcAddress: POOL_ADDRESS,
+    blockNumber: 902,
+    blockTimestamp: 1_700_900_200,
+  });
+  return FPMM.RebalanceThresholdUpdated.createMockEvent({
+    oldThresholdAbove: 250n,
+    oldThresholdBelow: 250n,
+    newThresholdAbove: 300n,
+    newThresholdBelow: 300n,
+    mockEventData: data,
+  });
+}
+
+function unreconciledOraclePool(overrides: Partial<Pool> = {}): Pool {
+  return makePool({
+    id: makePoolId(CHAIN_ID, POOL_ADDRESS),
+    chainId: CHAIN_ID,
+    token0: "0x00000000000000000000000000000000000000b0",
+    token1: "0x00000000000000000000000000000000000000b1",
+    tokenDecimalsKnown: true,
+    invertRateFeedKnown: true,
+    invertRateFeed: false,
+    rebalanceThresholdsKnown: true,
+    rebalanceThresholdAbove: 250,
+    rebalanceThresholdBelow: 250,
+    rebalanceThreshold: 250,
+    oracleOk: false,
+    // Mirrors the Polygon EURm/EUROP bootstrap: the feed's configured
+    // one-year expiry was indexed correctly, but its latest report predated
+    // the pool, so no OracleReported event initialized the local cursors.
+    oracleExpiry: ONE_YEAR_SECONDS,
+    oracleTimestamp: 1_700_000_000n,
+    lastOracleReportAt: 0n,
+    lastMedianPrice: 0n,
+    priceDifference: 9_999n,
+    oraclePrice: 42n,
+    reserves0: 1_000_000n * 10n ** 18n,
+    reserves1: 1_000_000n * 10n ** 18n,
+    referenceRateFeedID: RATE_FEED_ID,
+    oracleFreshnessWindow: 3_600n,
+    lpFee: 0,
+    protocolFee: 0,
+    rebalanceReward: -2,
+    ...overrides,
+  });
+}
+
+function blankFeedOraclePool(): Pool {
+  return unreconciledOraclePool({
+    referenceRateFeedID: "",
+    oracleExpiry: 0n,
+    lastOracleReportAt: 0n,
+  });
+}
+
+function mockBlankFeedRecovery(
+  medianTimestamp: bigint | null = MEDIAN_TIMESTAMP,
+): void {
+  _setMockRateFeedID(CHAIN_ID, POOL_ADDRESS, RATE_FEED_ID);
+  _setMockReportExpiry(CHAIN_ID, RATE_FEED_ID, ONE_YEAR_SECONDS);
+  _setMockMedianTimestamp(CHAIN_ID, RATE_FEED_ID, medianTimestamp);
+}
+
+function assertRecoveredOracleConfig(pool: Pool): void {
+  assert.equal(pool.referenceRateFeedID, RATE_FEED_ID);
+  assert.equal(pool.oracleExpiry, ONE_YEAR_SECONDS);
+  assert.equal(pool.lastOracleReportAt, MEDIAN_TIMESTAMP);
+  assert.equal(pool.oracleOk, true);
+}
+
+function assertOracleRemainsDegraded(pool: Pool): void {
+  assert.equal(pool.referenceRateFeedID, RATE_FEED_ID);
+  assert.equal(pool.oracleExpiry, ONE_YEAR_SECONDS);
+  assert.equal(pool.lastOracleReportAt, 0n);
+  assert.equal(pool.oracleOk, false);
+  assert.equal(pool.healthStatus, "CRITICAL");
+  assert.equal(pool.healthBinarySeconds, 0n);
+}
+
+const UNPROVEN_MEDIAN_CASES = [
+  { label: "fails", value: null },
+  { label: "returns zero", value: 0n },
+] as const;
+
 describe("state-sync reconcile (issue #1053 scenario 5)", () => {
-  afterEach(() => {
-    _clearMockRebalancingStates();
+  beforeEach(() => {
+    _setMockMedianTimestamp(CHAIN_ID, RATE_FEED_ID, MEDIAN_TIMESTAMP);
   });
 
-  it("adopts the on-chain getRebalancingState read over stale accumulated priceDifference/threshold/oraclePrice", async () => {
+  afterEach(() => {
+    _clearMockMedianTimestamps();
+    _clearMockRateFeedIDs();
+    _clearMockReportExpiry();
+    _clearMockRebalancingStates();
+    _clearMockReserves();
+  });
+
+  it("restores a one-year-expiry oracle after UpdateReserves RPC succeeds", async () => {
     // Stale, previously-persisted values a naive "keep accumulating"
     // implementation might otherwise hold onto.
-    const staleFixture = makePool({
-      id: makePoolId(CHAIN_ID, POOL_ADDRESS),
-      chainId: CHAIN_ID,
-      token0: "0x00000000000000000000000000000000000000b0",
-      token1: "0x00000000000000000000000000000000000000b1",
-      tokenDecimalsKnown: true,
-      invertRateFeedKnown: true,
-      invertRateFeed: false,
-      rebalanceThresholdsKnown: false, // forces RPC fallback every time
+    const staleFixture = unreconciledOraclePool({
+      oracleOk: false, // forces RPC fallback despite otherwise-derivable state
       rebalanceThreshold: 100, // stale
       priceDifference: 9_999n, // stale
       oraclePrice: 42n, // stale
-      reserves0: 1_000_000n * 10n ** 18n,
-      reserves1: 1_000_000n * 10n ** 18n,
-      referenceRateFeedID: "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a",
-      oracleFreshnessWindow: 3_600n,
     });
 
     // Fresh on-chain state disagrees with every one of those stale fields.
@@ -114,5 +225,231 @@ describe("state-sync reconcile (issue #1053 scenario 5)", () => {
     // (the contract's ground truth), regardless of the RPC path above.
     assert.equal(pool.reserves0, 900_000n * 10n ** 18n);
     assert.equal(pool.reserves1, 1_100_000n * 10n ** 18n);
+    assert.equal(
+      pool.oracleOk,
+      true,
+      "successful state and exact median reads must restore the live-oracle flag",
+    );
+    assert.equal(
+      pool.oracleExpiry,
+      ONE_YEAR_SECONDS,
+      "RPC recovery must preserve the per-feed one-year expiry",
+    );
+    assert.equal(
+      pool.lastOracleReportAt,
+      MEDIAN_TIMESTAMP,
+      "RPC recovery must persist SortedOracles' exact median timestamp",
+    );
+  });
+
+  it("restores oracleOk after a successful Rebalanced RPC fallback", async () => {
+    const staleFixture = unreconciledOraclePool();
+
+    _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, {
+      oraclePriceNumerator: 2n * 10n ** 24n,
+      oraclePriceDenominator: 1n,
+      rebalanceThreshold: 250,
+      priceDifference: 50n,
+    });
+    _setMockReserves(CHAIN_ID, POOL_ADDRESS, {
+      reserve0: staleFixture.reserves0,
+      reserve1: staleFixture.reserves1,
+    });
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(staleFixture);
+    mockDb = await FPMM.Rebalanced.processEvent({
+      event: rebalancedEvent(),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(staleFixture.id) as Pool;
+    assert.ok(pool);
+    assert.equal(
+      pool.oracleOk,
+      true,
+      "successful state and exact median reads must restore the live-oracle flag",
+    );
+    assert.equal(pool.lastOracleReportAt, MEDIAN_TIMESTAMP);
+  });
+
+  it("recovers a blank feed and exact freshness config on UpdateReserves", async () => {
+    const staleFixture = blankFeedOraclePool();
+    mockBlankFeedRecovery();
+    _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, {
+      oraclePriceNumerator: 2n * 10n ** 24n,
+      oraclePriceDenominator: 1n,
+      rebalanceThreshold: 250,
+      priceDifference: 555n,
+    });
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(staleFixture);
+    mockDb = await FPMM.UpdateReserves.processEvent({
+      event: updateReservesEvent(),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(staleFixture.id) as Pool;
+    assert.ok(pool);
+    assertRecoveredOracleConfig(pool);
+  });
+
+  it("recovers a blank feed and exact freshness config on Rebalanced", async () => {
+    const staleFixture = blankFeedOraclePool();
+    mockBlankFeedRecovery();
+    _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, {
+      oraclePriceNumerator: 2n * 10n ** 24n,
+      oraclePriceDenominator: 1n,
+      rebalanceThreshold: 250,
+      priceDifference: 50n,
+    });
+    _setMockReserves(CHAIN_ID, POOL_ADDRESS, {
+      reserve0: staleFixture.reserves0,
+      reserve1: staleFixture.reserves1,
+    });
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(staleFixture);
+    mockDb = await FPMM.Rebalanced.processEvent({
+      event: rebalancedEvent(),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(staleFixture.id) as Pool;
+    assert.ok(pool);
+    assertRecoveredOracleConfig(pool);
+  });
+
+  it("recovers a blank feed and exact freshness config on RebalanceThresholdUpdated", async () => {
+    const staleFixture = blankFeedOraclePool();
+    mockBlankFeedRecovery();
+    _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, {
+      oraclePriceNumerator: 2n * 10n ** 24n,
+      oraclePriceDenominator: 1n,
+      rebalanceThreshold: 300,
+      priceDifference: 450n,
+    });
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(staleFixture);
+    mockDb = await FPMM.RebalanceThresholdUpdated.processEvent({
+      event: rebalanceThresholdUpdatedEvent(),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(staleFixture.id) as Pool;
+    assert.ok(pool);
+    assertRecoveredOracleConfig(pool);
+    assert.equal(pool.rebalanceThreshold, 300);
+    assert.equal(pool.priceDifference, 450n);
+  });
+
+  for (const medianCase of UNPROVEN_MEDIAN_CASES) {
+    it(`keeps UpdateReserves degraded when the state RPC succeeds but the exact median ${medianCase.label}`, async () => {
+      const staleFixture = blankFeedOraclePool();
+      mockBlankFeedRecovery(medianCase.value);
+      _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, {
+        oraclePriceNumerator: 2n * 10n ** 24n,
+        oraclePriceDenominator: 1n,
+        rebalanceThreshold: 250,
+        priceDifference: 555n,
+      });
+
+      let mockDb = MockDb.createMockDb();
+      mockDb = mockDb.entities.Pool.set(staleFixture);
+      mockDb = await FPMM.UpdateReserves.processEvent({
+        event: updateReservesEvent(),
+        mockDb,
+      });
+
+      const pool = mockDb.entities.Pool.get(staleFixture.id) as Pool;
+      assert.ok(pool);
+      assertOracleRemainsDegraded(pool);
+    });
+
+    it(`keeps Rebalanced degraded when the state RPC succeeds but the exact median ${medianCase.label}`, async () => {
+      const staleFixture = blankFeedOraclePool();
+      mockBlankFeedRecovery(medianCase.value);
+      _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, {
+        oraclePriceNumerator: 2n * 10n ** 24n,
+        oraclePriceDenominator: 1n,
+        rebalanceThreshold: 250,
+        priceDifference: 50n,
+      });
+      _setMockReserves(CHAIN_ID, POOL_ADDRESS, {
+        reserve0: staleFixture.reserves0,
+        reserve1: staleFixture.reserves1,
+      });
+
+      let mockDb = MockDb.createMockDb();
+      mockDb = mockDb.entities.Pool.set(staleFixture);
+      mockDb = await FPMM.Rebalanced.processEvent({
+        event: rebalancedEvent(),
+        mockDb,
+      });
+
+      const pool = mockDb.entities.Pool.get(staleFixture.id) as Pool;
+      assert.ok(pool);
+      assertOracleRemainsDegraded(pool);
+    });
+
+    it(`keeps RebalanceThresholdUpdated degraded when the state RPC succeeds but the exact median ${medianCase.label}`, async () => {
+      const staleFixture = blankFeedOraclePool();
+      mockBlankFeedRecovery(medianCase.value);
+      _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, {
+        oraclePriceNumerator: 2n * 10n ** 24n,
+        oraclePriceDenominator: 1n,
+        rebalanceThreshold: 300,
+        priceDifference: 450n,
+      });
+
+      let mockDb = MockDb.createMockDb();
+      mockDb = mockDb.entities.Pool.set(staleFixture);
+      mockDb = await FPMM.RebalanceThresholdUpdated.processEvent({
+        event: rebalanceThresholdUpdatedEvent(),
+        mockDb,
+      });
+
+      const pool = mockDb.entities.Pool.get(staleFixture.id) as Pool;
+      assert.ok(pool);
+      assertOracleRemainsDegraded(pool);
+    });
+  }
+
+  it("keeps oracleOk false when the UpdateReserves RPC fails", async () => {
+    const staleFixture = unreconciledOraclePool();
+    _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, null);
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(staleFixture);
+    mockDb = await FPMM.UpdateReserves.processEvent({
+      event: updateReservesEvent(),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(staleFixture.id) as Pool;
+    assert.ok(pool);
+    assert.equal(pool.oracleOk, false);
+  });
+
+  it("keeps oracleOk false when the Rebalanced RPC fails", async () => {
+    const staleFixture = unreconciledOraclePool();
+    _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, null);
+    _setMockReserves(CHAIN_ID, POOL_ADDRESS, {
+      reserve0: staleFixture.reserves0,
+      reserve1: staleFixture.reserves1,
+    });
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.Pool.set(staleFixture);
+    mockDb = await FPMM.Rebalanced.processEvent({
+      event: rebalancedEvent(),
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(staleFixture.id) as Pool;
+    assert.ok(pool);
+    assert.equal(pool.oracleOk, false);
   });
 });

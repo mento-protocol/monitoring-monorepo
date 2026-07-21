@@ -29,6 +29,10 @@ type Pool {
   # fire freshness alerts.
   oracleOk: Boolean!
   oraclePrice: BigInt!
+  # Diagnostic timestamp of the last raw oracle/pool-state observation. This
+  # can be an OracleReported reporter timestamp or a state-sync block time; it
+  # is NOT the FPMM contract-freshness anchor. Use `lastOracleReportAt` for
+  # every SortedOracles expiry decision.
   oracleTimestamp: BigInt!
   oracleTxHash: String!
   oracleExpiry: BigInt!
@@ -65,18 +69,17 @@ type Pool {
   # `oraclePrice` alone isn't enough since `OracleReported` writes reporter
   # quotes to it.
   medianLive: Boolean!
-  # Most recent `OracleReported` report time (from `event.params.timestamp`).
-  # Distinct from `oracleTimestamp` (also bumped by state-sync writes) and
-  # `lastMedianAt` (block timestamp of MedianUpdated). The on-chain
-  # `getRebalancingState` checks expiry via reporter `report.timestamp +
-  # oracleExpiry`; gating the entity-derive path on this field gives parity
-  # with that revert.
+  # Exact SortedOracles `medianTimestamp(referenceRateFeedID)` at the latest
+  # indexed oracle/state-sync boundary. Distinct from `oracleTimestamp` (raw
+  # diagnostic observation) and `lastMedianAt` (MedianUpdated lineage). The
+  # OracleAdapter checks `medianTimestamp + oracleExpiry`; every FPMM
+  # freshness decision and uptime carry must use this field.
   lastOracleReportAt: BigInt!
   # `max(event.params.timestamp)` across all `OracleReported` events on this
   # pool's rate feed. Diagnostic only — NOT used in `tryDeriveRebalanceState`'s
   # freshness gate, because it would over-bound the contract's median-reporter
   # expiry (a fresh non-median reporter could keep this advancing while the
-  # median reporter is stale). The under-bound `lastOracleReportAt` stays
+  # median reporter is stale). The exact `lastOracleReportAt` stays
   # authoritative for the gate. Surfaces per-reporter freshness data for
   # future parity work without changing the safe-by-construction current
   # behaviour. 0n until the first `OracleReported` for the feed.

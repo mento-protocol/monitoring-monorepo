@@ -46,6 +46,8 @@ type RollupRow = {
 type HealthCursorRow = {
   lastOracleSnapshotTimestamp?: string | undefined;
   lastDeviationRatio?: string | undefined;
+  lastOracleReportAt?: string | undefined;
+  oracleExpiry?: string | undefined;
 };
 type DailyAnchorRow = {
   // Read by computeWindowUptimePct's freshness gate (rejects anchors >8d

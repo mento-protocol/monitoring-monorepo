@@ -65,6 +65,7 @@ const BASE_POOL: Pool = {
   healthStatus: "OK",
   limitStatus: "OK",
   oracleTimestamp: FRESH_TS,
+  lastOracleReportAt: FRESH_TS,
   oracleExpiry: "300",
   priceDifference: "0",
   rebalanceThreshold: 5000,
@@ -88,7 +89,11 @@ describe("HealthPanel weekend mode", () => {
     // mockReturnValue (not Once) — called by both computeHealthStatus and health-panel directly
     vi.mocked(weekend.isWeekend).mockReturnValue(true);
 
-    const stalePool: Pool = { ...BASE_POOL, oracleTimestamp: STALE_TS };
+    const stalePool: Pool = {
+      ...BASE_POOL,
+      oracleTimestamp: STALE_TS,
+      lastOracleReportAt: STALE_TS,
+    };
 
     // SSR-safe: useIsWeekend() is false until mount, so the server HTML omits
     // the weekend banner and matches the client's first render — no hydration
@@ -116,7 +121,11 @@ describe("HealthPanel weekend mode", () => {
     const weekend = await import("@/lib/weekend");
     vi.mocked(weekend.isWeekend).mockReturnValue(true);
 
-    const freshPool: Pool = { ...BASE_POOL, oracleTimestamp: FRESH_TS };
+    const freshPool: Pool = {
+      ...BASE_POOL,
+      oracleTimestamp: FRESH_TS,
+      lastOracleReportAt: FRESH_TS,
+    };
     const html = renderToStaticMarkup(<HealthPanel pool={freshPool} />);
 
     expect(html).not.toContain("Trading is paused for the weekend");
@@ -127,7 +136,11 @@ describe("HealthPanel weekend mode", () => {
     // the pool header (DeviationRow), and with no weekend pause, no missing-
     // data case, and no rebalance diagnostics, the panel has nothing left
     // to render and collapses.
-    const stalePool: Pool = { ...BASE_POOL, oracleTimestamp: STALE_TS };
+    const stalePool: Pool = {
+      ...BASE_POOL,
+      oracleTimestamp: STALE_TS,
+      lastOracleReportAt: STALE_TS,
+    };
     const html = renderToStaticMarkup(<HealthPanel pool={stalePool} />);
 
     expect(html).not.toContain("Trading is paused for the weekend");
@@ -259,6 +272,7 @@ describe("HealthPanel weekend mode", () => {
       ...BASE_POOL,
       hasHealthData: false,
       oracleTimestamp: STALE_TS,
+      lastOracleReportAt: STALE_TS,
     };
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -316,6 +330,7 @@ describe("HealthPanel breaker halt", () => {
     const staleHalted: Pool = {
       ...BASE_POOL,
       oracleTimestamp: STALE_TS,
+      lastOracleReportAt: STALE_TS,
       breakerTripped: true,
     };
     const html = renderToStaticMarkup(<HealthPanel pool={staleHalted} />);
