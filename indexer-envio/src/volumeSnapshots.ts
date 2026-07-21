@@ -157,8 +157,8 @@ export async function applyVolumeSnapshots(
   // Skip uncomputable USD swaps. `computeSwapUsdWei` returns 0n in two
   // cases: (1) a degenerate zero-amount swap (impossible from a real
   // SwapEvent) and (2) a pool whose USD value can't be derived from the
-  // pegged-side trick (neither leg is in USD_PEGGED_SYMBOLS — e.g. a
-  // hypothetical axlEUROC/EURm pool). Writing 0n into the rollups would
+  // pegged-side trick and has no fresh same-chain FX cross available.
+  // Writing 0n into the rollups would
   // collapse "uncomputable" with "real zero volume" and silently
   // undercount those pools' traders.
   if (args.volumeUsdWei === 0n) {

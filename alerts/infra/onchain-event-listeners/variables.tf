@@ -5,7 +5,7 @@ variable "webhook_name" {
 }
 
 variable "chain_key" {
-  description = "Key of this listener's for_each entry (e.g. 'celo', 'ethereum'). Scopes the state-rm provisioner to this chain only."
+  description = "Key of this listener's for_each entry (e.g. 'celo', 'ethereum', 'polygon'). Scopes the state-rm provisioner to this chain only."
   type        = string
 
   validation {
@@ -21,7 +21,7 @@ variable "debug_mode" {
 }
 
 variable "quicknode_network_name" {
-  description = "QuickNode network identifier (e.g., 'celo-mainnet', 'ethereum-mainnet'). Must be a valid QuickNode network name."
+  description = "QuickNode network identifier (e.g., 'celo-mainnet', 'polygon-mainnet'). Must be a valid QuickNode network name."
   type        = string
   default     = "celo-mainnet"
 }
@@ -79,4 +79,3 @@ variable "quicknode_signing_secret" {
     error_message = "QuickNode signing secret must be at least 32 characters for security."
   }
 }
-

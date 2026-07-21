@@ -425,6 +425,65 @@ test("Slack trading-mode bodies suppress duplicate single-alert headings", () =>
   );
 });
 
+test("Polygon-family EUROPEUR staleness bypasses relayer remediation", () => {
+  const ruleSource = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/rules-oracle-relayers.tf"),
+    "utf8",
+  );
+  const ruleGuardStart = ruleSource.indexOf("{{ if and");
+  const ruleGuardEnd = ruleSource.indexOf(" }}", ruleGuardStart);
+  const fixedReportGuard = ruleSource.slice(ruleGuardStart, ruleGuardEnd);
+  assert(
+    ruleGuardStart >= 0 &&
+      ruleGuardEnd > ruleGuardStart &&
+      fixedReportGuard.includes("$labels.chain") &&
+      fixedReportGuard.includes("polygon") &&
+      fixedReportGuard.includes("polygon-testnet") &&
+      fixedReportGuard.includes("$labels.rateFeed") &&
+      fixedReportGuard.includes("EUROPEUR"),
+    "the fixed-report exception should cover Polygon mainnet and Amoy EUROPEUR",
+  );
+  assert(
+    ruleSource.includes(
+      "Check the deployment/migration owner responsible for the fixed 1.0 SortedOracles report.",
+    ) && ruleSource.includes("Check whether the oracle relayer is executing"),
+    "Polygon-family EUROPEUR should point to the fixed-report owner while other feeds keep relayer guidance",
+  );
+
+  for (const relativePath of [
+    "alerts/rules/message-templates-slack.tf",
+    "alerts/rules/message-templates-victorops.tf",
+  ]) {
+    const source = readFileSync(
+      path.resolve(__dirname, "..", relativePath),
+      "utf8",
+    );
+    const branchStart = source.indexOf(
+      '{{ if and (or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-testnet")) (eq .Labels.rateFeed "EUROPEUR") -}}',
+    );
+    const branchEnd = source.indexOf("{{ else -}}", branchStart);
+    assert(
+      branchStart >= 0 && branchEnd > branchStart,
+      relativePath + " should have a Polygon-family EUROPEUR branch",
+    );
+    const fixedReportBranch = source.slice(branchStart, branchEnd);
+    assert(
+      fixedReportBranch.includes("SortedOracles") &&
+        fixedReportBranch.includes("deployment/migration owner"),
+      relativePath +
+        " should route Polygon-family EUROPEUR to the fixed-report owner",
+    );
+    assert(
+      !fixedReportBranch.includes("relayer") &&
+        !fixedReportBranch.includes("relay-") &&
+        !fixedReportBranch.includes("cloud function") &&
+        !fixedReportBranch.includes("Logs:"),
+      relativePath +
+        " should not send Polygon-family EUROPEUR through relayer remediation",
+    );
+  }
+});
+
 test("trading-mode Splunk pages repeat slowly per rate feed", () => {
   const source = readFileSync(
     path.resolve(__dirname, "..", "alerts/rules/notification-policies.tf"),

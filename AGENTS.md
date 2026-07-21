@@ -165,6 +165,10 @@ Open the scoped instructions before editing a package:
 | Governance watchdog              | [`governance-watchdog/README.md`](governance-watchdog/README.md) |
 | Root tooling and deploy wrappers | [`scripts/AGENTS.md`](scripts/AGENTS.md)                         |
 
+Indexer coverage includes Celo, Monad, and Polygon FPMM pools, Polygon
+Wormhole NTT flows, the Celo v2 Broker path, and Ethereum reserve-yield
+accounting.
+
 Dashboard review assumptions such as current pool scale are canonical in
 [`docs/pr-checklists/review-prompt-exclusions.md`](docs/pr-checklists/review-prompt-exclusions.md),
 not in this router.

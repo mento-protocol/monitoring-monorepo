@@ -15,11 +15,15 @@ const ENV_KEYS = [
   "ENVIO_RPC_URL_42220",
   "ENVIO_RPC_URL_11142220",
   "ENVIO_RPC_URL_143",
+  "ENVIO_RPC_URL_137",
+  "ENVIO_RPC_URL_80002",
   "ENVIO_RPC_URL_1",
   "ENVIO_RPC_URL_10143",
   "ENVIO_RPC_FALLBACK_URL_42220",
   "ENVIO_RPC_FALLBACK_URL_11142220",
   "ENVIO_RPC_FALLBACK_URL_143",
+  "ENVIO_RPC_FALLBACK_URL_137",
+  "ENVIO_RPC_FALLBACK_URL_80002",
   "ENVIO_RPC_FALLBACK_URL_1",
   "ENVIO_RPC_FALLBACK_URL_10143",
 ] as const;
@@ -112,6 +116,11 @@ describe("getRpcClient", () => {
     delete process.env.ENVIO_RPC_URL_1;
     const client = getRpcClient(1);
     assert.ok(client);
+  });
+
+  it("returns Polygon mainnet and Amoy clients from full-node defaults", () => {
+    assert.ok(getRpcClient(137));
+    assert.ok(getRpcClient(80002));
   });
 
   it("caches the client across calls (same chainId)", () => {

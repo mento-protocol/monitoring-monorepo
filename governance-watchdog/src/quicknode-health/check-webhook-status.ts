@@ -61,6 +61,10 @@ const EXPECTED_WEBHOOK_PREFIXES = [
     namePrefix: "safe-multisig-monitor-ethereum-",
     network: "ethereum-mainnet",
   },
+  {
+    namePrefix: "safe-multisig-monitor-polygon-",
+    network: "polygon-mainnet",
+  },
 ];
 
 /**

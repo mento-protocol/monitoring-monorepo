@@ -29,6 +29,9 @@ import {
   type GlobalPoolEntry,
 } from "@/components/global-pools-table";
 import { ChainIcon } from "@/components/chain-icon";
+import { ChainFilterControl } from "@/components/chain-filter-control";
+import * as chainFilter from "@/lib/chain-filter";
+import { useUrlChainFilter } from "@/hooks/use-url-chain-filter";
 import {
   NETWORKS,
   networkIdForChainId,
@@ -113,8 +116,19 @@ function PoolsContent({
     setFilterError("");
   }
 
+  const chainOptions = useMemo(() => {
+    return chainFilter.availableProductionChainOptions(
+      networkData.map((data) => data.network),
+    );
+  }, [networkData]);
+  const { chainId, updateChainId } = useUrlChainFilter(chainOptions);
+  const chainIdIn = useMemo(
+    () => chainFilter.activeChainIds(chainId, chainOptions),
+    [chainId, chainOptions],
+  );
+
   const {
-    entries,
+    entries: allEntries,
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
@@ -122,12 +136,20 @@ function PoolsContent({
     cdpPoolKeys,
     reservePoolKeys,
   } = useMemo(() => buildGlobalPoolEntries(networkData), [networkData]);
+  const entries = useMemo(
+    () => filterPoolsByChain(allEntries, chainId),
+    [allEntries, chainId],
+  );
+  const selectedNetworkData = useMemo(
+    () => filterNetworkDataByChain(networkData, chainId),
+    [networkData, chainId],
+  );
 
   const poolsByNamespacedId = useMemo(() => {
     const m = new Map<string, GlobalPoolEntry>();
-    for (const e of entries) m.set(e.pool.id, e);
+    for (const e of allEntries) m.set(e.pool.id, e);
     return m;
-  }, [entries]);
+  }, [allEntries]);
 
   const poolNames = useMemo(() => {
     const m: Record<string, string> = {};
@@ -152,7 +174,7 @@ function PoolsContent({
   const swapQuery = activePoolFilter ? POOL_SWAPS : RECENT_SWAPS;
   const swapVars = activePoolFilter
     ? { poolId: activePoolFilter, limit }
-    : { limit };
+    : { chainIdIn, limit };
   const {
     data: swapsData,
     error: swapsErr,
@@ -160,8 +182,8 @@ function PoolsContent({
   } = useGQL<{ SwapEvent: SwapEvent[] }>(swapQuery, swapVars);
 
   const swaps = swapsData?.SwapEvent ?? [];
-  const failedNetworks = networkData.filter((n) => n.error !== null);
-  const liveHealthFailures = networkData.filter(
+  const failedNetworks = selectedNetworkData.filter((n) => n.error !== null);
+  const liveHealthFailures = selectedNetworkData.filter(
     (n) => n.error === null && n.liveHealthError != null,
   );
 
@@ -202,20 +224,11 @@ function PoolsContent({
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Tile
-          label="Pools"
-          value={poolsLoading ? "…" : String(entries.length)}
-        />
-        <Tile
-          label="Showing"
-          value={swapsLoading ? "…" : `${swaps.length} swaps`}
-        />
-        <Tile
-          label="Latest Swap Block"
-          value={latestBlock ? formatBlock(latestBlock) : "—"}
-        />
-      </div>
+      <PoolsSummary
+        pools={poolsLoading ? "…" : String(entries.length)}
+        swaps={swapsLoading ? "…" : `${swaps.length} swaps`}
+        latestBlock={latestBlock ? formatBlock(latestBlock) : "—"}
+      />
 
       {failedNetworks.map((net) => (
         <ErrorBox
@@ -231,12 +244,16 @@ function PoolsContent({
       ))}
 
       <section aria-labelledby="pools-heading">
-        <h2
-          id="pools-heading"
-          className="text-lg font-semibold text-white mb-3"
-        >
-          Pools
-        </h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 id="pools-heading" className="text-lg font-semibold text-white">
+            Pools
+          </h2>
+          <ChainFilterControl
+            value={chainId}
+            options={chainOptions}
+            onChange={updateChainId}
+          />
+        </div>
         {showInitialSkeleton(poolsLoading, networkData.length) ? (
           // Matches the real GlobalPoolsTable's 45px header / 58px row
           // rhythm (`PoolsTableSkeleton`, `@/components/pools-table-skeleton`)
@@ -244,7 +261,7 @@ function PoolsContent({
           // stand-ins reserve, not the shared TableSkeleton's generic 36/44.
           <PoolsTableSkeleton />
         ) : failedNetworks.length === 0 && entries.length === 0 ? (
-          <EmptyBox message="No pools found across any chain." />
+          <EmptyBox message={emptyPoolsMessage(chainId)} />
         ) : (
           <GlobalPoolsTable
             entries={entries}
@@ -349,6 +366,55 @@ function PoolsContent({
       </section>
     </div>
   );
+}
+
+function PoolsSummary({
+  pools,
+  swaps,
+  latestBlock,
+}: {
+  pools: string;
+  swaps: string;
+  latestBlock: string;
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <Tile label="Pools" value={pools} />
+      <Tile label="Showing" value={swaps} />
+      <Tile label="Latest Swap Block" value={latestBlock} />
+    </div>
+  );
+}
+
+function matchesChain(
+  candidateChainId: number,
+  selectedChainId: number | null,
+): boolean {
+  return selectedChainId === null || candidateChainId === selectedChainId;
+}
+
+function filterPoolsByChain(
+  entries: GlobalPoolEntry[],
+  chainId: number | null,
+): GlobalPoolEntry[] {
+  return entries.filter((entry) =>
+    matchesChain(entry.network.chainId, chainId),
+  );
+}
+
+function filterNetworkDataByChain<T extends { network: Network }>(
+  networkData: T[],
+  chainId: number | null,
+): T[] {
+  return networkData.filter((data) =>
+    matchesChain(data.network.chainId, chainId),
+  );
+}
+
+function emptyPoolsMessage(chainId: number | null): string {
+  return chainId === null
+    ? "No pools found across any chain."
+    : "No pools found on the selected chain.";
 }
 
 function resolvePoolFilter(

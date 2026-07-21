@@ -59,6 +59,27 @@ export const PoolConfigExtSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// POOL_LIQUIDITY_STRATEGIES
+// ---------------------------------------------------------------------------
+
+const PoolLiquidityStrategyRowSchema = z.object({
+  id: z.string(),
+  chainId: z.number(),
+  poolId: z.string(),
+  strategyAddress: z.string(),
+  kind: z.enum(["OPEN", "CDP", "RESERVE", "UNKNOWN"]),
+  active: z.boolean(),
+  addedAtBlock: z.string(),
+  addedAtTimestamp: z.string(),
+  updatedAtBlock: z.string(),
+  updatedAtTimestamp: z.string(),
+});
+
+export const PoolLiquidityStrategiesSchema = z.object({
+  PoolLiquidityStrategy: z.array(PoolLiquidityStrategyRowSchema),
+});
+
+// ---------------------------------------------------------------------------
 // POOL_RATE_FEED_EXT
 // ---------------------------------------------------------------------------
 

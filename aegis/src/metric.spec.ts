@@ -266,10 +266,25 @@ describe('Metric.parse', () => {
       expect(result).toBe(100);
     });
 
-    it('should floor sub-unit balances to zero', () => {
+    it('should preserve sub-unit balances at bounded decimal precision', () => {
       const dust = BigInt('123456789012345678'); // ~0.12 token
       const result = metric.parse(dust, 'Native', 'balanceOf');
-      expect(result).toBe(0);
+      expect(result).toBe(0.123456789012);
+    });
+
+    it('should not round a sub-threshold balance up to the next whole token', () => {
+      const divisor = 1_000_000_000_000_000_000n;
+      const justBelowFiveHundred = 500n * divisor - 1n;
+
+      const result = metric.parse(justBelowFiveHundred, 'Native', 'balanceOf');
+
+      expect(result).toBeLessThan(500);
+      expect(result).toBeGreaterThan(499);
+      expect(metric.parse(500n * divisor, 'Native', 'balanceOf')).toBe(500);
+    });
+
+    it('should not collapse a positive wei balance to zero', () => {
+      expect(metric.parse(1n, 'Native', 'balanceOf')).toBeGreaterThan(0);
     });
 
     it('should throw when balance overflows safe integer range', () => {
@@ -281,14 +296,31 @@ describe('Metric.parse', () => {
     });
   });
 
+  describe('6-decimal reserve balance parsers', () => {
+    it('should parse the raw EUROP balance into whole units', () => {
+      const oneHundredTokens = BigInt('100000000'); // 100 * 1e6
+      const result = metric.parse(oneHundredTokens, 'EUROP', 'balanceOf');
+      expect(result).toBe(100);
+    });
+
+    it.each(['USDC', 'EUROP'])(
+      'should not collapse a non-zero %s balance to zero',
+      (symbol) => {
+        const result = metric.parse(1n, symbol, 'balanceOf');
+
+        expect(result).toBe(0.000001);
+      },
+    );
+  });
+
   describe('configured token totalSupply()', () => {
-    it('should match the legacy 18-decimal conversion for every configured stable token', () => {
-      const rawSupply = 123_456n * 1_000_000_000_000_000_000n + 999_999n;
-      const legacyResult = Number(rawSupply / 1_000_000_000_000_000_000n);
+    it('should preserve fractional units for every configured stable token', () => {
+      const rawSupply =
+        123_456n * 1_000_000_000_000_000_000n + 500_000_000_000_000_000n;
 
       STABLE_TOTAL_SUPPLY_TOKENS.forEach((symbol) => {
         const result = metric.parse(rawSupply, symbol, 'totalSupply');
-        expect(result).toBe(legacyResult);
+        expect(result).toBe(123_456.5);
       });
     });
 
@@ -296,7 +328,7 @@ describe('Metric.parse', () => {
       const rawSupply = 123_456_789n;
       const result = metric.parse(rawSupply, 'TEST6', 'totalSupply');
 
-      expect(result).toBe(123);
+      expect(result).toBe(123.456789);
     });
 
     it('should require token metadata before parsing totalSupply', () => {

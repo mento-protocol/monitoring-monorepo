@@ -3,7 +3,7 @@
  */
 
 import { createPublicClient, hashMessage, http, recoverAddress } from "viem";
-import { celo, mainnet } from "viem/chains";
+import { celo, mainnet, polygon } from "viem/chains";
 import config from "./config";
 import {
   DEFAULT_TOKEN_DECIMALS,
@@ -18,9 +18,13 @@ import type { NotificationField, QuickNodeDecodedLog } from "./types";
 /**
  * Map chain names to viem chain objects
  */
-const VIEM_CHAINS: Record<string, typeof celo | typeof mainnet> = {
+const VIEM_CHAINS: Record<
+  string,
+  typeof celo | typeof mainnet | typeof polygon
+> = {
   celo,
   ethereum: mainnet,
+  polygon,
 };
 const MAX_SAFE_DYNAMIC_OFFSET_WORD = BigInt(
   Math.floor(Number.MAX_SAFE_INTEGER / 2),
@@ -29,7 +33,7 @@ const MAX_SAFE_DYNAMIC_OFFSET_WORD = BigInt(
 /**
  * Get multisig key from contract address and chain
  * @param address - The multisig contract address
- * @param chain - Chain name (e.g., "celo", "ethereum")
+ * @param chain - Chain name (e.g., "celo", "ethereum", "polygon")
  * @returns The multisig key, or null if not found
  */
 export function getMultisigKey(address: string, chain: string): string | null {
@@ -42,7 +46,7 @@ export function getMultisigKey(address: string, chain: string): string | null {
 /**
  * Verify if a block hash exists on a given chain
  * @param blockHash - The block hash to verify
- * @param chainName - The chain name to check (e.g., "celo", "ethereum")
+ * @param chainName - The chain name to check (e.g., "celo", "ethereum", "polygon")
  * @returns true if block exists on the chain, false otherwise
  */
 async function verifyBlockHashOnChain(
@@ -358,7 +362,7 @@ function addressFromPaddedWord(wordHex: string): string | null {
  * @param eventName - The Safe event name (e.g., "AddedOwner", "ExecutionSuccess")
  * @param log - QuickNode decoded log entry containing decoded event parameters
  * @param txHash - Optional Safe transaction hash for extracting signers
- * @param chainName - Chain name (e.g., "celo", "ethereum") for chain-specific formatting
+ * @param chainName - Chain name (e.g., "celo", "ethereum", "polygon") for chain-specific formatting
  * @returns Array of notification fields with event parameters
  */
 export async function decodeEventData(
@@ -403,7 +407,7 @@ export async function decodeEventData(
 /**
  * Get the executor address (from) of a transaction
  * @param transactionHash - The transaction hash to look up
- * @param chainName - The chain name (e.g., "celo", "ethereum")
+ * @param chainName - The chain name (e.g., "celo", "ethereum", "polygon")
  * @returns The executor address, or null if not found/error
  */
 export async function getTransactionExecutor(
@@ -522,7 +526,7 @@ export function getBlockExplorer(chainName: string) {
 
 /**
  * Build Safe UI URL for a transaction
- * Format: https://app.safe.global/transactions/tx?safe={chain}:{address}&id=multisig_{address}_{txHash}
+ * Format: https://app.safe.global/transactions/tx?safe={eip3770-prefix}:{address}&id=multisig_{address}_{txHash}
  */
 export function getSafeUiUrl(
   safeAddress: string,
@@ -532,10 +536,13 @@ export function getSafeUiUrl(
   const chainInfo = getMultisigChainInfo(multisigKey);
 
   if (chainInfo) {
-    // Use chain:address format for safe parameter
-    // Use multisig_{address}_{txHash} format for id parameter
-    const normalizedAddress = safeAddress.toLowerCase();
-    return `https://app.safe.global/transactions/tx?safe=${chainInfo.chain}:${normalizedAddress}&id=multisig_${normalizedAddress}_${txHash}`;
+    const chainConfig = getChainConfig(chainInfo.chain);
+    if (chainConfig) {
+      // Safe Wallet requires the chain's EIP-3770 short name here (for
+      // example, `matic`, not our internal chain key `polygon`).
+      const normalizedAddress = safeAddress.toLowerCase();
+      return `https://app.safe.global/transactions/tx?safe=${chainConfig.safeAddressPrefix}:${normalizedAddress}&id=multisig_${normalizedAddress}_${txHash}`;
+    }
   }
 
   // Fallback to simple format if chain info not available

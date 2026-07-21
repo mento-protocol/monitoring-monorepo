@@ -32,7 +32,8 @@ QUICKNODE_API_BASE="https://api.quicknode.com/webhooks/rest/v1/webhooks"
 pause_webhook() {
 	local webhook_id="$1"
 	local api_key="$2"
-	# Per-invocation tmpfile so concurrent per-chain runs (celo + ethereum)
+	# Per-invocation tmpfile so concurrent per-chain runs (for example,
+	# Celo + Ethereum + Polygon)
 	# can't clobber each other's API response bodies.
 	local response_file
 	response_file=$(mktemp -t webhook_pause.XXXXXX.json)

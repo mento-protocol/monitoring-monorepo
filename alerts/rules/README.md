@@ -1,4 +1,4 @@
-<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-07-19 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
 
 # alerts/rules
 
@@ -49,6 +49,21 @@ the gauges registered in `metrics-bridge/src/metrics.ts` and
 
 CI runs this in the `CI / Lint + test root scripts` job, along with
 `pnpm alerts:rules:lint:test` for extractor and failure-case coverage.
+
+## Producer-first rollout and rollback
+
+For any new rule with `no_data_state = "Alerting"`, confirm its production
+metric series exists before approving the `alerts-rules` apply. A merge can
+start the producer deployment and the protected Terraform workflow in
+parallel; keep the `production-infra` approval pending until the producer is
+deployed and the exact rule query returns the expected series. Scheduled mute
+timings, including the FX-weekend mute, are not deployment silences.
+
+Reverse the dependency for rollback. If a service or indexer rollback would
+remove a series required by a no-data-alerting rule, merge and apply the rule
+revert first, confirm the rule is absent, and only then withdraw the producer.
+The Polygon-specific producer checks and ordered steps are in
+[`docs/notes/polygon-monitoring.md`](../../docs/notes/polygon-monitoring.md).
 
 ## Smoke test
 

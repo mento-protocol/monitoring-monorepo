@@ -65,6 +65,60 @@ describe("runIntegrationProbes", () => {
     expect(chain?.pairCoverage).toEqual({ passed: 2, total: 2 });
   });
 
+  it("runs Polygon probes against the two active USDm hub pools", async () => {
+    const rows: PoolRow[] = [
+      polygonPoolRow(
+        "137-0x463c0d1f04bcd99a1efcf94ac2a75bc19ea4a7e5",
+        "USDC",
+        "USDm",
+        6,
+        18,
+      ),
+      polygonPoolRow(
+        "137-0x93e15a22fda39fefccce82d387a09ccf030ead61",
+        "EURm",
+        "USDm",
+        18,
+        18,
+      ),
+      polygonPoolRow(
+        "137-0xcd8c6811d975981f57e7fb32e59f0bee66af3201",
+        "EURm",
+        "EUROP",
+        18,
+        6,
+      ),
+    ];
+    const snapshot = await runIntegrationProbes({
+      chainIds: [137],
+      adapters: [passingAdapter()],
+      hasuraUrl: "https://hasura.test",
+      env: {},
+      fetcher: async (request) => {
+        if (String(request) === "https://hasura.test") {
+          return new Response(JSON.stringify({ data: { Pool: rows } }));
+        }
+        return new Response(
+          JSON.stringify({ transactionRequest: { to: ROUTER_V300 } }),
+        );
+      },
+    });
+
+    expect(snapshot.chains[0]).toMatchObject({
+      chainId: 137,
+      chainSlug: "polygon",
+      chainLabel: "Polygon",
+    });
+    expect(snapshot.chains[0]?.pairs.map((pair) => pair.base.symbol)).toEqual([
+      "EURm",
+      "USDC",
+    ]);
+    expect(snapshot.aggregators[0]?.chains[0]).toMatchObject({
+      status: "pass",
+      pairCoverage: { passed: 4, total: 4 },
+    });
+  });
+
   it("can filter adapters and limit pairs for live debugging", async () => {
     const rows: PoolRow[] = [
       {
@@ -490,7 +544,7 @@ function passingAdapter(): AggregatorAdapter {
     label: "Fixture",
     kind: "dex",
     tier: 1,
-    support: { 42220: "supported", 143: "supported" },
+    support: { 42220: "supported", 143: "supported", 137: "supported" },
     researchNote: "fixture",
     quote: () => ({ url: "https://quote.test" }),
   };
@@ -555,17 +609,41 @@ function skippedAdapter(): AggregatorAdapter {
     label: "Skipped",
     kind: "dex",
     tier: 1,
-    support: { 42220: "supported", 143: "supported" },
+    support: { 42220: "supported", 143: "supported", 137: "supported" },
     researchNote: "skipped",
     quote: () => ({ url: "https://skipped.test" }),
   };
 }
 
 function tokenAddress(symbol: string): string {
-  const entry = contractEntries(42220).find(
+  return tokenAddressFor(42220, symbol);
+}
+
+function tokenAddressFor(chainId: number, symbol: string): string {
+  const entry = contractEntries(chainId).find(
     (candidate) =>
       candidate.type === "token" && candidate.canonicalName === symbol,
   );
-  if (!entry) throw new Error(`Missing ${symbol} test token`);
+  if (!entry) throw new Error(`Missing ${symbol} test token on ${chainId}`);
   return entry.address;
+}
+
+function polygonPoolRow(
+  id: string,
+  token0Symbol: string,
+  token1Symbol: string,
+  token0Decimals: number,
+  token1Decimals: number,
+): PoolRow {
+  return {
+    id,
+    chainId: 137,
+    token0: tokenAddressFor(137, token0Symbol),
+    token1: tokenAddressFor(137, token1Symbol),
+    token0Decimals,
+    token1Decimals,
+    source: "fpmm_factory",
+    reserves0: "1",
+    reserves1: "1",
+  };
 }

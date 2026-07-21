@@ -28,6 +28,14 @@ const clientSchema = z.object({
     z.url(),
     "https://testnet-rpc.monad.xyz",
   ),
+  NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET: z.catch(
+    z.url(),
+    "https://polygon.drpc.org",
+  ),
+  NEXT_PUBLIC_RPC_URL_POLYGON_AMOY: z.catch(
+    z.url(),
+    "https://rpc-amoy.polygon.technology",
+  ),
   NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA: z.catch(
     z.url(),
     "https://forno.celo-sepolia.celo-testnet.org",
@@ -45,6 +53,14 @@ const clientSchema = z.object({
     undefined,
   ),
   NEXT_PUBLIC_EXPLORER_URL_MONAD_TESTNET: z.catch(
+    z.optional(z.url()),
+    undefined,
+  ),
+  NEXT_PUBLIC_EXPLORER_URL_POLYGON_MAINNET: z.catch(
+    z.optional(z.url()),
+    undefined,
+  ),
+  NEXT_PUBLIC_EXPLORER_URL_POLYGON_AMOY: z.catch(
     z.optional(z.url()),
     undefined,
   ),
@@ -86,6 +102,10 @@ export const clientEnv = clientSchema.parse({
     process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET,
   NEXT_PUBLIC_RPC_URL_MONAD_TESTNET:
     process.env.NEXT_PUBLIC_RPC_URL_MONAD_TESTNET,
+  NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET:
+    process.env.NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET,
+  NEXT_PUBLIC_RPC_URL_POLYGON_AMOY:
+    process.env.NEXT_PUBLIC_RPC_URL_POLYGON_AMOY,
   NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA:
     process.env.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA,
   NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET:
@@ -96,6 +116,10 @@ export const clientEnv = clientSchema.parse({
     process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA,
   NEXT_PUBLIC_EXPLORER_URL_MONAD_TESTNET:
     process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_TESTNET,
+  NEXT_PUBLIC_EXPLORER_URL_POLYGON_MAINNET:
+    process.env.NEXT_PUBLIC_EXPLORER_URL_POLYGON_MAINNET,
+  NEXT_PUBLIC_EXPLORER_URL_POLYGON_AMOY:
+    process.env.NEXT_PUBLIC_EXPLORER_URL_POLYGON_AMOY,
   NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL:
     process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL,
   NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_LOCAL:

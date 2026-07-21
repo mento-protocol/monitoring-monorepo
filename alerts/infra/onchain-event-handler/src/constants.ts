@@ -5,7 +5,7 @@
  */
 
 import { keccak256, stringToBytes } from "viem";
-import { celo, mainnet } from "viem/chains";
+import { celo, mainnet, polygon } from "viem/chains";
 import safeAbi from "./safe-abi.json";
 import config from "./config";
 import type { EventName, EventSignature, MultisigKey } from "./types";
@@ -166,12 +166,16 @@ interface ChainConfig {
     decimals: number;
   };
   rpcEndpoint: string;
+  /** EIP-3770 short name used by Safe Wallet's `safe=` URL parameter. */
+  safeAddressPrefix: string;
 }
 
 /**
  * Build block explorer helpers from viem chain blockExplorers
  */
-function buildBlockExplorer(chain: typeof celo | typeof mainnet) {
+function buildBlockExplorer(
+  chain: typeof celo | typeof mainnet | typeof polygon,
+) {
   const explorer = chain.blockExplorers?.default;
   if (!explorer) {
     throw new Error(
@@ -195,6 +199,7 @@ const CHAIN_CONFIGS: Record<string, ChainConfig> = {
       decimals: celo.nativeCurrency.decimals,
     },
     rpcEndpoint: celo.rpcUrls.default.http[0] || "https://forno.celo.org",
+    safeAddressPrefix: "celo",
   },
   ethereum: {
     blockExplorer: buildBlockExplorer(mainnet),
@@ -203,6 +208,16 @@ const CHAIN_CONFIGS: Record<string, ChainConfig> = {
       decimals: mainnet.nativeCurrency.decimals,
     },
     rpcEndpoint: mainnet.rpcUrls.default.http[0] || "https://eth.llamarpc.com",
+    safeAddressPrefix: "eth",
+  },
+  polygon: {
+    blockExplorer: buildBlockExplorer(polygon),
+    nativeToken: {
+      symbol: polygon.nativeCurrency.symbol,
+      decimals: polygon.nativeCurrency.decimals,
+    },
+    rpcEndpoint: polygon.rpcUrls.default.http[0] || "https://polygon-rpc.com",
+    safeAddressPrefix: "matic",
   },
 } as const;
 
@@ -216,7 +231,7 @@ export function getChainConfig(chainName: string): ChainConfig | null {
 /**
  * Chains the handler can route events from. Derived from CHAIN_CONFIGS so
  * adding a new chain is a single source-of-truth edit (above) rather than
- * grepping for hardcoded `["celo", "ethereum"]` lists across modules.
+ * grepping for hardcoded chain lists across modules.
  *
  * Note: chains in `MULTISIG_CONFIG` env that aren't in this list will be
  * unreachable at runtime — see findChainForAddress / findChainFromBlockHash.

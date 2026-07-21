@@ -2,7 +2,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runIntegrationProbes } from "./runner.js";
-import type { ProbeChainId } from "./types.js";
+import { PROBE_CHAIN_IDS, type ProbeChainId } from "./types.js";
 import { writeSnapshotToUpstash } from "./upstash.js";
 
 type CliOptions = {
@@ -158,7 +158,8 @@ function parseCsv(value: string): string[] {
 
 function parseChain(value: string): ProbeChainId {
   const chainId = Number(value);
-  if (chainId === 42220 || chainId === 143) return chainId;
+  const supported = PROBE_CHAIN_IDS.find((candidate) => candidate === chainId);
+  if (supported !== undefined) return supported;
   throw new Error(`Unsupported probe chain: ${value}`);
 }
 
@@ -181,7 +182,7 @@ function usage(): void {
 Options:
   --amount-usd <n>    Stable-unit amount per route direction (default: 1)
   --adapter <id[,id]> Probe only selected adapter ids
-  --chain <id>        Probe only selected chain ids (42220 or 143)
+  --chain <id>        Probe only selected chain ids (${PROBE_CHAIN_IDS.join(", ")})
   --pair-limit <n>    Limit USDm hub pairs per chain for debugging
   --timeout-ms <n>    Per-request timeout in milliseconds (default: 15000)
   --write-upstash     Write latest + dated snapshots to Upstash Redis

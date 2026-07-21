@@ -586,9 +586,17 @@ function TradersTile({
   // definition below for the polling rationale).
   const utcDayKey = useUtcDayKey();
   const todayMidnight = utcDayKey * SECONDS_PER_DAY;
+  const expectedChainIds = useMemo(
+    () => new Set(networkData.map((n) => n.network.chainId)),
+    [networkData],
+  );
   const todayGql = useGQL<VolumeTodayTraders>(
     VOLUME_TODAY_TRADERS,
-    { todayMidnight, isProtocolActorIn: [false] },
+    {
+      todayMidnight,
+      chainIdIn: Array.from(expectedChainIds),
+      isProtocolActorIn: [false],
+    },
     {
       schema: VolumeTodayTradersSchema,
       refreshInterval: 15 * 60_000,
@@ -617,10 +625,6 @@ function TradersTile({
   // returning the shape with zero rows). `0` would otherwise read as a
   // real metric (LP tile uses the same null-fallback pattern).
   const yesterdayMidnight = (utcDayKey - 1) * SECONDS_PER_DAY;
-  const expectedChainIds = useMemo(
-    () => new Set(networkData.map((n) => n.network.chainId)),
-    [networkData],
-  );
   // Both queries are scoped to chains the dashboard knows about — Hasura
   // may return rows for additional chains the indexer covers (e.g. an
   // experimental chain not yet wired into `useAllNetworksData`), and

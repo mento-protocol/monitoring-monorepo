@@ -502,14 +502,16 @@ locals {
   # different bound than critical), so it stays inline in each rule.
   #
   # Aegis-sourced reserve balances (ResUSDC / ResUSDT / ResAxlUSDC on Celo;
-  # ResUSDC / ResUSDT0 / ResAUSD on Monad — issue #707):
+  # ResUSDC / ResUSDT0 / ResAUSD on Monad; ResUSDC on Polygon —
+  # issue #707):
   #   - Read Aegis's `${TOKEN}_balanceOf{owner="Reserve"}` series, one per
   #     chain via the `chain` label (production-stable for years on Celo;
   #     refreshed every 10s via Treb-driven RPC reads in the Aegis NestJS
   #     service).
-  #   - ResUSDC is chain-agnostic (USDC/USDm exists on both chains); ResUSDT /
-  #     ResAxlUSDC are Celo-only and ResUSDT0 / ResAUSD are Monad-only, so each
-  #     binds to its own chain's pool instances via the `on(chain_name)` join.
+  #   - ResUSDC is chain-agnostic (USDC/USDm exists on all production pool
+  #     chains); ResUSDT / ResAxlUSDC are Celo-only and ResUSDT0 / ResAUSD are
+  #     Monad-only, so each binds to its own chain's pool instances via the
+  #     `on(chain_name)` join.
   #   - The `*_balanceOf` gauges are ALREADY in whole-token units — Aegis
   #     divides by the token's decimals before exporting (metric.ts
   #     `tokenAmountToWholeUnits`, e.g. USDC_balanceOf{chain="celo"} ≈ 127909).
@@ -561,9 +563,9 @@ locals {
       ref_id = "B"
       expr   = "mento_pool_rebalance_blocked > 0"
     },
-    # ResUSDC is chain-AGNOSTIC: USDC/USDm pools exist on both Celo and Monad.
+    # ResUSDC is chain-AGNOSTIC: USDC/USDm pools exist on Celo, Monad, and Polygon.
     # Both operands omit a chain pin so `label_replace(...) * on(chain_name)
-    # group_left(...)` produces one balance row per chain (celo, monad), each
+    # group_left(...)` produces one balance row per chain, each
     # joining to its own pool instance. ResUSDT / ResAxlUSDC stay Celo-pinned
     # (those tokens are Celo-only; Monad uses USDT0 / AUSD below).
     {

@@ -266,10 +266,12 @@ export function findUnrepliedRootReviewComments(
   reviewComments = [],
   ignoredAuthors = [],
   allowedReplyAuthors = null,
+  allowedReplyAuthorAssociations = null,
 ) {
   const repliedRootIds = repliedRootReviewCommentIds(
     reviewComments,
     allowedReplyAuthors,
+    allowedReplyAuthorAssociations,
   );
   const ignoredAuthorSet = new Set(ignoredAuthors.filter(Boolean));
 
@@ -289,20 +291,49 @@ function commentIsRootReviewComment(comment) {
 function repliedRootReviewCommentIds(
   reviewComments = [],
   allowedReplyAuthors = null,
+  allowedReplyAuthorAssociations = null,
 ) {
   const allowedReplyAuthorSet =
     allowedReplyAuthors === null
       ? null
       : new Set(allowedReplyAuthors.filter(Boolean));
+  const allowedReplyAuthorAssociationSet =
+    allowedReplyAuthorAssociations === null
+      ? null
+      : new Set(
+          [...allowedReplyAuthorAssociations]
+            .filter(Boolean)
+            .map((association) => normalizeStatusValue(association)),
+        );
+  const rootAuthorsById = new Map(
+    reviewComments
+      .filter(commentIsRootReviewComment)
+      .map((comment) => [comment.id, comment.user?.login ?? null]),
+  );
 
   return new Set(
     reviewComments
       .filter((comment) => {
         const rootId = comment.in_reply_to_id;
         if (rootId === undefined || rootId === null) return false;
+        const replyAuthor = comment.user?.login ?? null;
+        if (
+          replyAuthor !== null &&
+          replyAuthor === rootAuthorsById.get(rootId)
+        ) {
+          return false;
+        }
+
+        if (
+          allowedReplyAuthorSet === null &&
+          allowedReplyAuthorAssociationSet === null
+        ) {
+          return true;
+        }
+
         return (
-          allowedReplyAuthorSet === null ||
-          allowedReplyAuthorSet.has(comment.user?.login)
+          allowedReplyAuthorSet?.has(replyAuthor) === true ||
+          isTrustedHumanAuthor(comment, allowedReplyAuthorAssociationSet)
         );
       })
       .map((comment) => comment.in_reply_to_id),
@@ -326,10 +357,12 @@ function summarizeRootReviewComments(
   reviewComments = [],
   ignoredAuthors = [],
   allowedReplyAuthors = null,
+  allowedReplyAuthorAssociations = null,
 ) {
   const repliedRootIds = repliedRootReviewCommentIds(
     reviewComments,
     allowedReplyAuthors,
+    allowedReplyAuthorAssociations,
   );
   const ignoredAuthorSet = new Set(ignoredAuthors.filter(Boolean));
 
@@ -441,12 +474,17 @@ function issueCommentAuthorAssociation(comment) {
 }
 
 function isHumanOverrideAuthor(comment) {
+  return isTrustedHumanAuthor(comment, HUMAN_OVERRIDE_ASSOCIATIONS);
+}
+
+function isTrustedHumanAuthor(comment, allowedAssociations) {
+  if (allowedAssociations === null) return false;
   const login = comment.user?.login ?? comment.author?.login ?? "";
   const type = comment.user?.type ?? comment.author?.type ?? "";
   return (
     !String(login).endsWith("[bot]") &&
     type !== "Bot" &&
-    HUMAN_OVERRIDE_ASSOCIATIONS.has(issueCommentAuthorAssociation(comment))
+    allowedAssociations.has(issueCommentAuthorAssociation(comment))
   );
 }
 
@@ -747,6 +785,7 @@ export function summarizeReadyState({
     reviewComments,
     [pr.author?.login],
     [pr.author?.login, BOT_APPROVER],
+    HUMAN_OVERRIDE_ASSOCIATIONS,
   );
   const unrepliedRootReviewComments = rootReviewComments.filter(
     (comment) => comment.replied === false,

@@ -4,6 +4,8 @@ import {
   computeRebalanceUsd,
   computeSwapUsdWei,
   normalizeRewardBps,
+  poolCarriesUsdRateForCurrency,
+  swapFxCurrency,
   USD_PEGGED_SYMBOLS,
   USD_WEI_DECIMALS,
 } from "../src/usd.js";
@@ -15,6 +17,10 @@ const USDM = "0x765de816845861e75a25fca122bb6898b8b1282a"; // 18dp, USD-pegged
 const USDC = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C"; // 6dp,  USD-pegged
 const CELO = "0x471ece3750da237f93b8e339c536989b8978a438"; // 18dp, NOT pegged
 const UNKNOWN_TOKEN = "0x000000000000000000000000000000000000beef";
+const CHAIN_POLYGON = 137;
+const EURM_POLYGON = "0x4d502d735b4c574b487ed641ae87ceae884731c7";
+const EUROP_POLYGON = "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51";
+const USDM_POLYGON = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115";
 
 describe("computeRebalanceUsd", () => {
   it("USDm-side delta on USDm/CELO pool: notional = |delta0|/1e18, reward = notional × bps/10000", () => {
@@ -305,6 +311,61 @@ describe("computeSwapUsdWei", () => {
       amount1Out: 0n,
     });
     assert.equal(result, 0n);
+  });
+
+  it("prices Polygon EURm/EUROP from the historical EUR/USD Fixidity rate", () => {
+    const result = computeSwapUsdWei(
+      {
+        chainId: CHAIN_POLYGON,
+        token0: EURM_POLYGON,
+        token1: EUROP_POLYGON,
+        token0Decimals: 18,
+        token1Decimals: 6,
+        amount0In: 100n * 10n ** 18n,
+        amount0Out: 0n,
+        amount1In: 0n,
+        amount1Out: 99_900_000n,
+      },
+      1_100_000_000_000_000_000_000_000n,
+    );
+    assert.equal(result, 110n * 10n ** 18n);
+  });
+
+  it("does not invent USD value for a non-USD pair when the FX cross is unavailable", () => {
+    const input = {
+      chainId: CHAIN_POLYGON,
+      token0: EURM_POLYGON,
+      token1: EUROP_POLYGON,
+      token0Decimals: 18,
+      token1Decimals: 6,
+      amount0In: 100n * 10n ** 18n,
+      amount0Out: 0n,
+      amount1In: 0n,
+      amount1Out: 99_900_000n,
+    };
+    assert.equal(computeSwapUsdWei(input), 0n);
+  });
+});
+
+describe("historical FX-cross classification", () => {
+  it("recognizes EURm/EUROP as EUR and EURm/USDm as its USD rate pool", () => {
+    assert.equal(
+      swapFxCurrency({
+        chainId: CHAIN_POLYGON,
+        token0: EURM_POLYGON,
+        token1: EUROP_POLYGON,
+      }),
+      "EUR",
+    );
+    assert.equal(
+      poolCarriesUsdRateForCurrency(
+        CHAIN_POLYGON,
+        EURM_POLYGON,
+        USDM_POLYGON,
+        "EUR",
+      ),
+      true,
+    );
   });
 });
 

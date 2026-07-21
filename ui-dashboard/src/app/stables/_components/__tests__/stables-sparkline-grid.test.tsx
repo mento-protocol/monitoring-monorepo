@@ -91,7 +91,7 @@ describe("StablesSparklineGrid — loading-branch skeleton parity", () => {
     expect(grid!.className).toBe(GRID_CLASS);
 
     const cards = grid!.querySelectorAll("article");
-    expect(cards).toHaveLength(20);
+    expect(cards).toHaveLength(22);
     for (const card of Array.from(cards)) {
       expect((card as HTMLElement).className).toBe(CARD_CLASS);
     }
@@ -172,5 +172,24 @@ describe("StablesSparklineGrid — loading-branch skeleton parity", () => {
       hasError: false,
     });
     expect(div.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+  });
+});
+
+describe("StablesSparklineGrid — chain labels", () => {
+  it("uses the canonical Polygon label for chain 137 cards", () => {
+    const div = renderGrid({
+      latestPerToken: [
+        snapshot({
+          chainId: 137,
+          timestamp: String(NOW_TS),
+          totalSupply: "1000000000000000000",
+        }),
+      ],
+      isLoading: false,
+      hasError: false,
+    });
+
+    expect(div.textContent).toContain("USDm on Polygon");
+    expect(div.textContent).not.toContain("Chain 137");
   });
 });

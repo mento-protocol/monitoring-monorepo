@@ -20,10 +20,16 @@ invariants, and contract-add/promotion procedures live in
 
 ## What This Is
 
-One Envio HyperIndex project indexes Ethereum reserve yield, Celo and Monad v3
-pools, the Celo v2 Broker path, and Mento Liquity/CDP state. Production behavior
-is defined by `config.multichain.mainnet.yaml`, `schema.graphql`, and the loaded
-handler graph—not by historical plans.
+One Envio HyperIndex project indexes Ethereum reserve yield, Celo, Monad, and
+Polygon v3 pools, Polygon Wormhole NTT flows, the Celo v2 Broker path, and Mento
+Liquity/CDP state. Production behavior is defined by
+`config.multichain.mainnet.yaml`, `schema.graphql`, and the loaded handler
+graph—not by historical plans.
+
+Polygon Mainnet (`137`) is the production target and Polygon Amoy (`80002`) is
+the testnet target. Exact contracts, start blocks, dashboard coverage, alert
+conditions, deferrals, and cutover state live in
+[`../docs/notes/polygon-monitoring.md`](../docs/notes/polygon-monitoring.md).
 
 ## Before Opening PRs
 
@@ -42,8 +48,10 @@ types, rollout behavior, and representative browser/query tests agree.
   must be reachable through a side-effect import here.
 - `src/contractAddresses.ts` and `config/deployment-namespaces.json` — contract
   resolution plus the hosted-build namespace mirror.
-- `config/protocolActors.json` — only protocol actors not derivable from pool or
-  contract metadata.
+- `config/protocolActors.json` — only protocol actors not derivable from pool
+  state, `PoolLiquidityStrategy`, contract, or NTT metadata. The populated
+  `Pool.rebalancerAddress` remains a compatibility/swap fast path, not the
+  authoritative active-strategy cardinality source.
 - `abis/` and `scripts/generateAbis.mjs` — vendored ABI allowlist and documented
   hand-vendored exceptions.
 
@@ -55,11 +63,13 @@ reachability, run `pnpm indexer:codegen`; after dashboard queries change, also
 run `pnpm dashboard:codegen`.
 
 The wrapper reads `.env`, not named legacy env files. `.env.example` is the
-variable reference. Never set generic `ENVIO_RPC_URL` in multichain mode; use
-per-chain overrides, and ensure fallback RPCs cover the full archive/replay
-window. Local Hasura must stay on port 8080, only one `generated` Docker stack
-may run at a time, and codegen must go through the wrapper so the Postgres
-healthcheck is re-applied.
+variable reference, including Polygon's per-chain RPC and start-block
+overrides. Never set generic `ENVIO_RPC_URL` in multichain mode; use per-chain
+overrides, and ensure fallback RPCs cover the full archive/replay window. Keep
+`ENVIO_START_BLOCK_POLYGON` at or before the first FPMM factory deployment at
+block `90348018`. Local Hasura must stay on port 8080, only one `generated`
+Docker stack may run at a time, and codegen must go through the wrapper so the
+Postgres healthcheck is re-applied.
 
 ## Contract Types
 

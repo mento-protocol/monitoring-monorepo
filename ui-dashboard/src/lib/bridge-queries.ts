@@ -16,18 +16,17 @@
 // the race window (and permanently hide any transfer whose source chain is
 // not in the indexer's networks: list).
 //
-// `statusIn` accepts the full status allowlist the caller wants. Callers that
-// want "show all" pass every status — a null/empty-list variant is avoided to
-// keep the query server-filterable (and the total count honest under the
-// same filter) without branching on optional operators.
+// `$where` carries the status and optional source/destination predicates as a
+// single boolean expression. The window and count queries receive the exact
+// same object so the visible rows and pagination denominator cannot drift.
 export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
   query BridgeTransfersWindow(
     $limit: Int!
     $offset: Int!
-    $statusIn: [String!]!
+    $where: BridgeTransfer_bool_exp!
   ) {
     BridgeTransfer(
-      where: { status: { _in: $statusIn } }
+      where: $where
       order_by: [{ firstSeenAt: desc }, { id: asc }]
       limit: $limit
       offset: $offset
@@ -61,14 +60,14 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
 // Count paired with BRIDGE_TRANSFERS_WINDOW. Fetches IDs only (up to
 // `$limit` rows — callers pass `ENVIO_MAX_ROWS`) so the page indicator can
 // render "Page X of Y" without an `_aggregate` query (aggregates are
-// disabled on hosted Hasura). Applies the same `statusIn` filter the
-// visible window uses — otherwise the denominator would count hidden rows.
+// disabled on hosted Hasura). Applies the same `$where` filter the visible
+// window uses — otherwise the denominator would count hidden rows.
 // The $limit variable keeps the cap in a single TS constant rather than
 // hardcoding it in GraphQL.
 export const BRIDGE_TRANSFERS_COUNT = /* GraphQL */ `
-  query BridgeTransfersCount($statusIn: [String!]!, $limit: Int!) {
+  query BridgeTransfersCount($where: BridgeTransfer_bool_exp!, $limit: Int!) {
     BridgeTransfer(
-      where: { status: { _in: $statusIn } }
+      where: $where
       order_by: [{ firstSeenAt: desc }, { id: asc }]
       limit: $limit
     ) {

@@ -1,5 +1,6 @@
-// Fires the 13-way parallel fan-out behind `fetchNetworkData`: fee/daily/
-// broker snapshots, LP addresses, OLS pools, breach rollup, health cursor,
+// Fires the 14-way parallel fan-out behind `fetchNetworkData`: fee/daily/
+// broker snapshots, LP addresses, legacy OLS pools, the active strategy
+// registry, breach rollup, health cursor,
 // rebalance-threshold-known, VP oracle freshness, VP deprecation x2, indexed
 // CDP pools, and fallback strategy probes. Each branch is isolated behind
 // `Promise.allSettled` so one query's schema-lag or timeout degrades only
@@ -8,6 +9,7 @@
 import type { GraphQLClient } from "@/lib/graphql-fetch";
 import type { Network } from "@/lib/networks";
 import {
+  ALL_ACTIVE_POOL_LIQUIDITY_STRATEGIES,
   ALL_CDP_POOLS,
   ALL_OLS_POOLS,
   ALL_POOLS_BREACH_ROLLUP,
@@ -28,7 +30,10 @@ import {
 } from "./pagination";
 import {
   emptyStrategyIds,
+  isMissingLiquidityStrategySchemaError,
   usesIndexedCdpPools,
+  type ActiveLiquidityStrategiesResult,
+  type ActiveLiquidityStrategyRow,
   type CdpPoolsResponse,
   type ProbedStrategies,
 } from "./strategy-resolution";
@@ -59,6 +64,7 @@ export type NetworkSources = {
   >;
   lp: PromiseSettledResult<PaginatedPageResult<{ address: string }>>;
   ols: PromiseSettledResult<OlsPoolsResult>;
+  activeStrategies: PromiseSettledResult<ActiveLiquidityStrategiesResult>;
   breachRollup: PromiseSettledResult<PoolBreachRollupResult>;
   healthCursor: PromiseSettledResult<PoolHealthCursorResult>;
   rebalanceThresholdsKnown: PromiseSettledResult<PoolRebalanceThresholdsKnownResult>;
@@ -70,6 +76,32 @@ export type NetworkSources = {
   indexedCdpPools: PromiseSettledResult<CdpPoolsResponse>;
   fallbackStrategies: PromiseSettledResult<Readonly<ProbedStrategies>>;
 };
+
+let warnedMissingLiquidityStrategySchema = false;
+
+async function requestActiveLiquidityStrategies(
+  network: Network,
+  timed: TimedRequest,
+): Promise<ActiveLiquidityStrategiesResult> {
+  try {
+    const response = await timed<{
+      PoolLiquidityStrategy?: ActiveLiquidityStrategyRow[];
+    }>(ALL_ACTIVE_POOL_LIQUIDITY_STRATEGIES, { chainId: network.chainId });
+    return {
+      rows: response.PoolLiquidityStrategy ?? [],
+      available: true,
+    };
+  } catch (err) {
+    if (!isMissingLiquidityStrategySchemaError(err)) throw err;
+    if (!warnedMissingLiquidityStrategySchema) {
+      warnedMissingLiquidityStrategySchema = true;
+      console.warn(
+        "[dashboard] Hasura schema missing PoolLiquidityStrategy; fleet strategy badges are using legacy classification until the indexer catches up.",
+      );
+    }
+    return { rows: [], available: false };
+  }
+}
 
 function requestIndexedCdpPools(
   network: Network,
@@ -100,7 +132,7 @@ type SourcesArgs = {
 };
 
 // Positional tuple matching `fetchNetworkSources`'s destructure order below —
-// kept as its own function so the 13-item fan-out (with its per-branch
+// kept as its own function so the 14-item fan-out (with its per-branch
 // isolation rationale) stays readable as one literal instead of folded into
 // a larger function body.
 function buildSourcePromises(
@@ -111,6 +143,7 @@ function buildSourcePromises(
   Promise<PaginatedPageResult<BrokerDailySnapshotRow>>,
   Promise<PaginatedPageResult<{ address: string }>>,
   Promise<OlsPoolsResult>,
+  Promise<ActiveLiquidityStrategiesResult>,
   Promise<PoolBreachRollupResult>,
   Promise<PoolHealthCursorResult>,
   Promise<PoolRebalanceThresholdsKnownResult>,
@@ -158,6 +191,7 @@ function buildSourcePromises(
           error: null,
         }),
     timed<OlsPoolsResult>(ALL_OLS_POOLS, chainVariables),
+    requestActiveLiquidityStrategies(network, timed),
     // Uptime rollup — isolated from ALL_POOLS_WITH_HEALTH so a schema-
     // lag fail degrades just the uptime column to "—", not the entire
     // pools page.
@@ -195,7 +229,7 @@ function buildSourcePromises(
 }
 
 /**
- * Fires the 13 isolated data-source queries and returns their settled
+ * Fires the 14 isolated data-source queries and returns their settled
  * results keyed by name. `pools` is the already-fetched `ALL_POOLS_WITH_HEALTH`
  * result — needed by the fallback strategy probe — and `poolIds`/`fpmmPoolIds`
  * are derived from it by the caller.
@@ -209,6 +243,7 @@ export async function fetchNetworkSources(
     brokerSnapshotsAllDaily,
     lp,
     ols,
+    activeStrategies,
     breachRollup,
     healthCursor,
     rebalanceThresholdsKnown,
@@ -225,6 +260,7 @@ export async function fetchNetworkSources(
     brokerSnapshotsAllDaily,
     lp,
     ols,
+    activeStrategies,
     breachRollup,
     healthCursor,
     rebalanceThresholdsKnown,

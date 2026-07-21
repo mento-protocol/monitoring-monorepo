@@ -34,9 +34,9 @@ indexer/dashboard runbook.
 
 The prod multichain indexer is driven by a single deploy branch that Envio watches:
 
-| Network      | Deploy Branch | Config File                      | Envio Project                  |
-| ------------ | ------------- | -------------------------------- | ------------------------------ |
-| Celo + Monad | `envio`       | `config.multichain.mainnet.yaml` | `mento-protocol/mento` (Envio) |
+| Networks               | Deploy Branch | Config File                      | Envio Project                  |
+| ---------------------- | ------------- | -------------------------------- | ------------------------------ |
+| Celo + Monad + Polygon | `envio`       | `config.multichain.mainnet.yaml` | `mento-protocol/mento` (Envio) |
 
 ### Endpoint URL
 
@@ -192,17 +192,17 @@ manual CLI commands (`gh secret set`, `vercel env add`, `gcloud secrets versions
 add`, etc.). Add or update the owning Terraform resource/integration instead,
 document the source of truth here, and wait for a human-approved plan/apply.
 
-| Variable                              | Source                   | Description                                                 |
-| ------------------------------------- | ------------------------ | ----------------------------------------------------------- |
-| `ENABLE_EXPERIMENTAL_COREPACK`        | Terraform resource       | Vercel Corepack opt-in so hosted builds honor pnpm 11       |
-| `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Ethereum reserve-yield + Celo + Monad) |
-| `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                       |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                        |
-| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks   |
-| `UPSTASH_REDIS_REST_URL`              | Terraform output         | Address labels Redis — auto-set from DB                     |
-| `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Address labels Redis token — auto-set                       |
-| `BLOB_STORE_ID`                       | Vercel store integration | Blob OIDC store id for backup and restore routes            |
-| `BLOB_WEBHOOK_PUBLIC_KEY`             | Vercel store integration | Blob OIDC public key for the connected store                |
+| Variable                              | Source                   | Description                                                           |
+| ------------------------------------- | ------------------------ | --------------------------------------------------------------------- |
+| `ENABLE_EXPERIMENTAL_COREPACK`        | Terraform resource       | Vercel Corepack opt-in so hosted builds honor pnpm 11                 |
+| `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Ethereum reserve-yield + Celo + Monad + Polygon) |
+| `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                                 |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                                  |
+| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks             |
+| `UPSTASH_REDIS_REST_URL`              | Terraform output         | Address labels Redis — auto-set from DB                               |
+| `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Address labels Redis token — auto-set                                 |
+| `BLOB_STORE_ID`                       | Vercel store integration | Blob OIDC store id for backup and restore routes                      |
+| `BLOB_WEBHOOK_PUBLIC_KEY`             | Vercel store integration | Blob OIDC public key for the connected store                          |
 
 ### Aggregator Integration Probes
 
@@ -372,7 +372,7 @@ main
 └── feature branches → PR → main
 
 envio
-├── 🚀 auto-deploys to Envio (multichain indexer, Celo + Monad)
+├── 🚀 auto-deploys to Envio (multichain indexer, Celo + Monad + Polygon)
 └── updated via: pnpm deploy:indexer
 ```
 

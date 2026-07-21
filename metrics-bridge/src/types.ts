@@ -1,3 +1,11 @@
+export type PoolLiquidityStrategyKind = "OPEN" | "CDP" | "RESERVE" | "UNKNOWN";
+
+export interface PoolLiquidityStrategyRow {
+  poolId: string;
+  strategyAddress: string;
+  kind: PoolLiquidityStrategyKind;
+}
+
 export interface PoolRow {
   id: string;
   chainId: number;
@@ -42,6 +50,15 @@ export interface PoolRow {
   // (`indexer-envio/schema.graphql:95`), so this field is always populated
   // in the GraphQL response.
   rebalancerAddress: string;
+  /**
+   * Authoritative active strategy rows from `PoolLiquidityStrategy`.
+   *
+   * `undefined` is reserved for the schema-lag fallback where the registry
+   * entity is not available yet; only in that state may the rebalance probe
+   * use the legacy `rebalancerAddress` pointer. An empty array is therefore a
+   * meaningful, authoritative "no active strategies" result.
+   */
+  activeLiquidityStrategies?: readonly PoolLiquidityStrategyRow[] | undefined;
   // "" = FPMM (native pool), non-empty hex = VP (VirtualPool healed from an
   // FPMM). Filtered out by `isFpmmPool` before any gauge/probe work.
   // Schema: `Pool.wrappedExchangeId: String! @index` (schema.graphql:181).

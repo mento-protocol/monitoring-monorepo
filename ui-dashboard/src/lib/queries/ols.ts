@@ -72,3 +72,21 @@ export const ALL_CDP_POOLS = `
     }
   }
 `;
+
+// Authoritative source for every active strategy badge on the fleet view.
+// Keep this isolated from the main Pool query: during the indexer schema
+// rollout, hosted Hasura rejects the new root field and the fetcher falls back
+// to the legacy OlsPool/CdpPool/rebalancer sources without hiding the pool
+// table. A successful empty response is authoritative and must not resurrect
+// the compatibility pointer.
+export const ALL_ACTIVE_POOL_LIQUIDITY_STRATEGIES = `
+  query AllActivePoolLiquidityStrategies($chainId: Int!) {
+    PoolLiquidityStrategy(
+      where: { active: { _eq: true }, chainId: { _eq: $chainId } }
+      order_by: [{ poolId: asc }, { strategyAddress: asc }]
+      limit: 1000
+    ) {
+      poolId strategyAddress kind
+    }
+  }
+`;

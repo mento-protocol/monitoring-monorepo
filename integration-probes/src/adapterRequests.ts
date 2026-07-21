@@ -171,7 +171,11 @@ export function flyDistributionsUrl(
 }
 
 export function openOceanUrl(input: QuoteProbeInput): string {
-  const aliases: Record<number, string> = { 42220: "celo", 143: "monad" };
+  const aliases: Record<number, string> = {
+    42220: "celo",
+    143: "monad",
+    137: "polygon",
+  };
   const chain = aliases[input.chainId] ?? String(input.chainId);
   const url = new URL(
     `https://open-api-pro.openocean.finance/v4/${chain}/swap`,
@@ -227,7 +231,7 @@ export function socketUrl(input: QuoteProbeInput): string {
 }
 
 export function kyberUrl(input: QuoteProbeInput): string {
-  const aliases: Record<number, string> = { 143: "monad" };
+  const aliases: Record<number, string> = { 143: "monad", 137: "polygon" };
   const chain = aliases[input.chainId] ?? String(input.chainId);
   const url = new URL(
     `https://aggregator-api.kyberswap.com/${chain}/api/v1/routes`,
@@ -431,7 +435,11 @@ function lifiUrl(
 }
 
 function rubicChain(chainId: number): string {
-  const aliases: Record<number, string> = { 42220: "CELO", 143: "MONAD" };
+  const aliases: Record<number, string> = {
+    42220: "CELO",
+    143: "MONAD",
+    137: "POLYGON",
+  };
   return aliases[chainId] ?? String(chainId);
 }
 

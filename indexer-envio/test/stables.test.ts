@@ -53,12 +53,12 @@ const EXPECTED_RESERVE_STABLE_SYMBOLS = [
 const CELO_CUSD_USDM_ADDRESS = "0x765de816845861e75a25fca122bb6898b8b1282a";
 
 describe("stables/config — registry derivation", () => {
-  it("exposes Celo supply rows plus Monad NTT supply rows", () => {
-    assert.equal(STABLES.length, 18);
+  it("exposes Celo supply rows plus Monad and Polygon NTT supply rows", () => {
+    assert.equal(STABLES.length, 20);
     const reserve = STABLES.filter((s) => s.source === "RESERVE");
     const hub = STABLES.filter((s) => s.source === "V3_HUB_COLLATERAL");
     const v3Liquity = STABLES.filter((s) => s.source === "V3_LIQUITY");
-    assert.equal(reserve.length, 14);
+    assert.equal(reserve.length, 16);
     assert.equal(hub.length, 1);
     assert.equal(v3Liquity.length, 3);
     assert.equal(hub[0].address, V3_HUB_USDM_ADDRESS);
@@ -73,6 +73,10 @@ describe("stables/config — registry derivation", () => {
       "JPYm",
       "USDm",
     ]);
+    const polygonSymbols = new Set(
+      STABLES.filter((s) => s.chainId === 137).map((s) => s.symbol),
+    );
+    assert.deepEqual([...polygonSymbols].sort(), ["EURm", "USDm"]);
   });
 
   it("includes every expected reserve symbol from @mento-protocol/contracts", () => {
@@ -148,6 +152,13 @@ describe("stables/config — registry derivation", () => {
         byKey.get(`143:${symbol}`)?.bridgeMode,
         "BURNING",
         `${symbol} on Monad should be burn/mint supply, not lock custody.`,
+      );
+    }
+    for (const symbol of ["EURm", "USDm"]) {
+      assert.equal(
+        byKey.get(`137:${symbol}`)?.bridgeMode,
+        "BURNING",
+        `${symbol} on Polygon should be burn/mint supply, not lock custody.`,
       );
     }
 
@@ -231,7 +242,7 @@ describe("stables — YAML drift gate", () => {
   });
 
   it("keeps supply and custody address exports scoped to their responsibilities", () => {
-    assert.equal(STABLE_ADDRESSES.length, 18);
+    assert.equal(STABLE_ADDRESSES.length, 20);
     assert.equal(LOCK_AND_MINT_NTT_STABLE_ADDRESSES.length, 3);
     for (const addr of LOCK_AND_MINT_NTT_STABLE_ADDRESSES) {
       assert.equal(

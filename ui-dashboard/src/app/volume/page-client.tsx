@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { formatUSD } from "@/lib/format";
@@ -30,7 +30,8 @@ import {
   type AggregatorDailyRowBase,
 } from "@/lib/volume-aggregators";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
-import { SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
+import type { ChainFilterOption } from "@/lib/chain-filter";
+import { SECONDS_PER_DAY } from "@/lib/time-series";
 import {
   protocolActorInForView,
   type VolumeHeroInitialData,
@@ -43,8 +44,10 @@ import {
   VolumeVenueSection,
 } from "./_components/volume-page-sections";
 import { usePoolChartViewModel } from "./_lib/pool-chart-vm";
+import type { VolumePoolRow } from "./_lib/types";
 import { useHeroRollup } from "./_lib/use-hero-rollup";
 import { useVolumeAggregates } from "./_lib/use-volume-aggregates";
+import { useVolumeChartControls } from "./_lib/use-volume-chart-controls";
 import { useVolumeUrlState } from "./_lib/url-state";
 import { usePoolVolumeSnapshots } from "./_lib/use-pool-volume-snapshots";
 import {
@@ -57,13 +60,6 @@ import {
 
 type V3AggregatorsData = { AggregatorDailySnapshot: AggregatorDailyRow[] };
 
-type PoolRow = {
-  id: string;
-  chainId: number;
-  token0: string | null;
-  token1: string | null;
-};
-
 // Per-pool stacked chart needs ≥30 days of data to read meaningfully —
 // hide it for shorter ranges (24h collapses to a point, 7d gives 7
 // stacked bars of varying widths that look noisy).
@@ -71,16 +67,42 @@ const RANGES_WITH_CHART = new Set<VolumeRangeKey>(["30d", "90d", "all"]);
 
 export function VolumeClient({
   canUseVolumeFilters,
+  chainOptions,
   initialData,
+  initialUtcDayKey,
 }: {
   canUseVolumeFilters: boolean;
+  chainOptions?: readonly ChainFilterOption[] | undefined;
   /** Server-prefetched hero responses (perf-plan S4), forwarded to
    *  `useHeroRollup` as per-query `fallbackData` so the headline and KPI
    *  tiles paint populated on first render. `undefined` degrades to the
    *  client-only loading path. */
   initialData?: VolumeHeroInitialData | undefined;
+  /** UTC day selected by the Server Component. The client hydrates from the
+   *  same value, then reconciles to its own clock after mount. */
+  initialUtcDayKey?: number | undefined;
 }) {
-  const urlState = useVolumeUrlState({ canUseVolumeFilters });
+  const urlState = useVolumeUrlState({
+    canUseVolumeFilters,
+    chainOptions,
+    initialUtcDayKey,
+  });
+  return (
+    <VolumeDataClient
+      key={urlState.chainId ?? "all"}
+      urlState={urlState}
+      initialData={initialData}
+    />
+  );
+}
+
+function VolumeDataClient({
+  urlState,
+  initialData,
+}: {
+  urlState: VolumeUrlState;
+  initialData?: VolumeHeroInitialData | undefined;
+}) {
   const model = useVolumePageModel(urlState, initialData);
   return <VolumePageView urlState={urlState} model={model} />;
 }
@@ -91,6 +113,7 @@ export type VolumePageModel = ReturnType<typeof useVolumePageModel>;
 function useVolumePageModel(
   {
     range,
+    chainIdIn,
     includeProtocolActors,
     venue,
     cutoff,
@@ -110,6 +133,7 @@ function useVolumePageModel(
   const queries = useVolumeQueries({
     venue,
     range,
+    chainIdIn,
     cutoff,
     includeProtocolActors,
     isProtocolActorIn,
@@ -154,6 +178,7 @@ function useVolumePageModel(
     kpiSource,
     kpiSourceIdentity: traderDataIdentity,
     kpiSourceIsCapHit,
+    chainIdIn,
     initialData,
   });
   const chartControls = useVolumeChartControls(range, updateRange);
@@ -190,6 +215,7 @@ function useVolumePageModel(
 function useVolumeQueries({
   venue,
   range,
+  chainIdIn,
   cutoff,
   includeProtocolActors,
   isProtocolActorIn,
@@ -197,6 +223,7 @@ function useVolumeQueries({
 }: {
   venue: VolumeUrlState["venue"];
   range: VolumeRangeKey;
+  chainIdIn: readonly number[];
   cutoff: number;
   includeProtocolActors: boolean;
   isProtocolActorIn: ReadonlyArray<boolean>;
@@ -214,6 +241,7 @@ function useVolumeQueries({
     venue === "v3" ? TRADER_DAILY_TOP : null,
     {
       afterTimestamp: cutoff,
+      chainIdIn,
       isProtocolActorIn,
       limit: ENVIO_MAX_ROWS,
     },
@@ -223,9 +251,9 @@ function useVolumeQueries({
       keepPreviousData: true,
     },
   );
-  const poolsResult = useGQL<{ Pool: PoolRow[] }>(
+  const poolsResult = useGQL<{ Pool: VolumePoolRow[] }>(
     venue === "v3" ? POOLS_FOR_VOLUME : null,
-    undefined,
+    { chainIdIn },
     300_000, // pool metadata barely changes; refresh every 5 min
     { timeoutMs: 8_000, schema: PoolsForVolumeSchema },
   );
@@ -233,10 +261,11 @@ function useVolumeQueries({
     enabled: showChart,
     afterTimestamp: cutoff,
     range,
+    chainIdIn,
   });
   const v3AggregatorsResult = useGQL<V3AggregatorsData>(
     venue === "v3" ? aggregatorDailyTopQuery(includeProtocolActors) : null,
-    { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
+    { afterTimestamp: cutoff, chainIdIn, limit: ENVIO_MAX_ROWS },
     {
       timeoutMs: 8_000,
       schema: AggregatorDailyTopSchema,
@@ -248,7 +277,12 @@ function useVolumeQueries({
     BrokerTraderDailySnapshot: BrokerTraderDailyRow[];
   }>(
     venue === "v2" ? BROKER_TRADER_DAILY_TOP : null,
-    { afterTimestamp: cutoff, isProtocolActorIn, limit: ENVIO_MAX_ROWS },
+    {
+      afterTimestamp: cutoff,
+      chainIdIn,
+      isProtocolActorIn,
+      limit: ENVIO_MAX_ROWS,
+    },
     {
       timeoutMs: 8_000,
       schema: BrokerTraderDailyTopSchema,
@@ -261,7 +295,7 @@ function useVolumeQueries({
     venue === "v2"
       ? brokerAggregatorDailyTopQuery(includeProtocolActors)
       : null,
-    { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
+    { afterTimestamp: cutoff, chainIdIn, limit: ENVIO_MAX_ROWS },
     {
       timeoutMs: 8_000,
       schema: BrokerAggregatorDailyTopSchema,
@@ -569,32 +603,4 @@ function VolumePageView({
       <VolumeVenueSection urlState={urlState} model={model} />
     </div>
   );
-}
-
-function useVolumeChartControls(
-  range: VolumeRangeKey,
-  updateRange: (next: VolumeRangeKey) => void,
-): {
-  chartRange: RangeKey;
-  onChartRangeChange: (next: RangeKey) => void;
-} {
-  // Volume ranges include `24h` (used by v3 single-line + v2
-  // single-line charts via `range !== "24h"` gate elsewhere) and `7d`,
-  // neither of which exists in the global `RangeKey`. When the active
-  // range falls outside the chart's accepted set, coerce to "7d" — the
-  // chart isn't actually rendered for those ranges (24h gets the
-  // `range !== "24h"` short-circuit in JSX), so the value is only used
-  // to populate the chart's range-pill highlight if it ever does
-  // render.
-  const chartRange: RangeKey =
-    range === "30d" || range === "90d" || range === "all" ? range : "7d";
-  const onChartRangeChange = useCallback(
-    (next: RangeKey) => {
-      if (next === "7d" || next === "30d" || next === "90d" || next === "all") {
-        updateRange(next);
-      }
-    },
-    [updateRange],
-  );
-  return { chartRange, onChartRangeChange };
 }

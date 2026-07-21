@@ -7,11 +7,15 @@ locals {
   trading_limits_id_start            = 300
   aegis_system_verification_id_start = 400
 
+  # Per-chain sections render two panels per row; heights are derived from the
+  # chains registry so adding a chain can't overlap the section below it.
+  chain_rows = ceil(length(local.chains) / 2)
+
   # Y-position management
   trading_mode_y_start              = 0
-  trading_mode_height               = 25 # 1 (row) + 24 (4 chains, 2 rows of 12)
+  trading_mode_height               = 1 + local.chain_rows * 12 # 1 (row) + 12 per 2-chain row
   oracle_relayer_y_start            = local.trading_mode_y_start + local.trading_mode_height
-  oracle_relayer_height             = 57 # 1 (row) + 40 (freshness: 4 chains, 2 rows of 20) + 16 (balances: 4 chains, 2 rows of 8)
+  oracle_relayer_height             = 1 + local.chain_rows * (20 + 8) # 1 (row) + freshness rows of 20 + balance rows of 8
   reserve_y_start                   = local.oracle_relayer_y_start + local.oracle_relayer_height
   reserve_height                    = 17 # 1 (row) + 16 (panel)
   stable_token_supply_y_start       = local.reserve_y_start + local.reserve_height

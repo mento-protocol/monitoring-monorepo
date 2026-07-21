@@ -3,7 +3,7 @@
 # Mento v3 Envio HyperIndex Indexer
 
 Multichain Envio HyperIndex indexer for Mento v3 — Ethereum reserve-yield (1),
-Celo Mainnet (42220), and Monad Mainnet (143). Tracks FPMM pool activity,
+Celo Mainnet (42220), Monad Mainnet (143), and Polygon Mainnet (137). Tracks FPMM pool activity,
 oracle health, trading limits, rebalancer liveness, event-driven sUSDS reserve
 yield, and stETH reserve yield with a sub-daily wallet balance sampler that
 writes daily snapshots. The historical sUSDS `onBlock` heartbeat is
@@ -20,7 +20,7 @@ event list; the table highlights the main monitoring surfaces.
 
 | Contract              | Events                                                                                                                                                                                                                   |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Broker                | `Swap` (legacy v2 settlement layer; Celo only - no Broker on Monad)                                                                                                                                                      |
+| Broker                | `Swap` (legacy v2 settlement layer; Celo only - no Broker on Monad or Polygon)                                                                                                                                           |
 | FPMMFactory           | `FPMMDeployed`                                                                                                                                                                                                           |
 | FPMM (pool)           | `Swap`, `Mint`, `Burn`, `Transfer`, `UpdateReserves`, `Rebalanced`, `TradingLimitConfigured`, `LiquidityStrategyUpdated`, `LPFeeUpdated`, `ProtocolFeeUpdated`, `RebalanceIncentiveUpdated`, `RebalanceThresholdUpdated` |
 | VirtualPool           | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`                                                                                                                                                                   |
@@ -40,6 +40,7 @@ event list; the table highlights the main monitoring surfaces.
 | Entity group            | Description                                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `TradingLimit`                                                                                                            |
+| Pool strategies         | `PoolLiquidityStrategy` (authoritative active many-to-many registry; `Pool.rebalancerAddress` is compatibility-only)                                                            |
 | Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                      |
 | Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                          |
 | Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                           |
@@ -60,17 +61,19 @@ This prevents collisions when the same contract address is deployed on multiple 
 
 ## Configuration
 
-| File                                 | Networks                                                                   |
-| ------------------------------------ | -------------------------------------------------------------------------- |
-| `config.multichain.mainnet.yaml`     | Ethereum reserve-yield + Celo Mainnet + Monad Mainnet (default/production) |
-| `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet                                               |
-| `config.multichain.bridge-only.yaml` | Local bridge-flow validation harness                                       |
+| File                                 | Networks                                                                      |
+| ------------------------------------ | ----------------------------------------------------------------------------- |
+| `config.multichain.mainnet.yaml`     | Ethereum reserve-yield + Celo + Monad + Polygon mainnets (default/production) |
+| `config.multichain.testnet.yaml`     | Celo Sepolia + Monad Testnet + Polygon Amoy                                   |
+| `config.multichain.bridge-only.yaml` | Local Celo + Monad + Polygon bridge-flow validation harness                   |
 
 `config/protocolActors.json` contains manual protocol-controlled caller and
 entry-point overrides for the dashboard volume filter. Pool liquidity-strategy
-contracts are classified automatically from `Pool.rebalancerAddress`; add
-manual entries only for protocol actors that cannot be derived from pool state
-or the normal contract/NTT address metadata.
+cardinality comes from `PoolLiquidityStrategy`. The populated
+`Pool.rebalancerAddress` compatibility pointer remains the swap-time fast path
+for dynamic strategies, while named strategies are also discovered from the
+contracts manifest. Add manual entries only for protocol actors that cannot be
+derived from those sources or normal NTT address metadata.
 
 Deploy branch: `envio` → triggers hosted reindex on push.
 
@@ -86,7 +89,7 @@ Deploy branch: `envio` → triggers hosted reindex on push.
 
 ```bash
 cp indexer-envio/.env.example indexer-envio/.env
-# Mainnet defaults (forno, rpc2.monad.xyz) work out of the box.
+# Mainnet defaults (forno, rpc2.monad.xyz, polygon.drpc.org) work out of the box.
 # For testnet, set ENVIO_API_TOKEN or override ENVIO_RPC_URL_10143.
 # For a custom Celo Sepolia provider, set ENVIO_RPC_URL_CELO_SEPOLIA for event
 # sync and ENVIO_RPC_URL_11142220 for handler eth_call reads.
@@ -121,9 +124,9 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
 ### Available Commands (from repo root)
 
 ```bash
-pnpm indexer:codegen                # Generate types (multichain mainnet — Ethereum reserve-yield + Celo + Monad)
+pnpm indexer:codegen                # Generate types (multichain mainnet — Ethereum reserve-yield + Celo + Monad + Polygon)
 pnpm indexer:dev                    # Start local multichain mainnet indexer
-pnpm indexer:testnet:codegen        # Generate types (multichain testnet — Celo Sepolia + Monad testnet)
+pnpm indexer:testnet:codegen        # Generate types (multichain testnet — Celo Sepolia + Monad testnet + Polygon Amoy)
 pnpm indexer:testnet:dev            # Start local multichain testnet indexer
 pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test     # Codegen mainnet config, run sUSDS/stETH tests, restore mainnet codegen
 pnpm deploy:indexer                 # Push to envio branch → triggers hosted reindex
@@ -293,6 +296,6 @@ See [`STATUS.md`](./STATUS.md) for the static endpoint and deployment reference.
 | `src/EventHandlers.ts`              | Event → entity mapping                                  |
 | `src/helpers.ts`                    | `makePoolId`, `poolIdToAddress` utilities               |
 | `src/rpc.ts` + `src/rpc/`           | RPC read helpers (per-chain clients, effects, fallback) |
-| `config.multichain.mainnet.yaml`    | Production config (Ethereum + Celo + Monad)             |
+| `config.multichain.mainnet.yaml`    | Production config (Ethereum + Celo + Monad + Polygon)   |
 | `config/deployment-namespaces.json` | Vendored namespace map for hosted builds                |
 | `abis/`                             | Vendored contract ABI subsets                           |

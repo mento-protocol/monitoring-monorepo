@@ -28,9 +28,14 @@ resource "grafana_message_template" "victorops_oracle_stale_price_alert_message"
 {{ range .Alerts.Firing -}}
 {{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $enc := reReplaceAll "/" "%2F" $slash -}}
+{{ if and (or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-testnet")) (eq .Labels.rateFeed "EUROPEUR") -}}
+PROBLEM: The fixed 1.0 EUR-parity report in SortedOracles on {{ .Labels.chain | title }} has expired. Swaps using this feed may revert until the fixed report is refreshed.
+ACTION: Inspect the fixed report, then contact the deployment/migration owner responsible for it.
+{{ else -}}
 PROBLEM: The {{ $slash }} on-chain oracle report on {{ .Labels.chain | title }} has expired. Swaps using this feed may revert until a fresh report is relayed.
 ACTION: Check whether relay-{{ .Labels.chain }} is executing and inspect the {{ $slash }} relayer errors. If this is an FX feed during the weekend market closure, the alert routing is misconfigured; snooze it and escalate the monitoring configuration.
 Logs: https://console.cloud.google.com/logs/query;query=resource.labels.service_name%3D%22relay-{{ .Labels.chain }}%22%20AND%20labels.rateFeed%3D%22{{ $enc }}%22?project=${local.oracle_relayer_mainnet_project_id}
+{{ end -}}
 Alert: {{ .GeneratorURL }}
 Started: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
 {{ end -}}
@@ -60,7 +65,7 @@ resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_
 Low {{ .Labels.token }} balance for {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }} left
 Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 - Top up the relayer wallet to keep the relayer running
-- Run the relayer refill script (https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts), or send 50 {{ .Labels.token }} from the dev wallet
+- Run the relayer refill script (https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts), or top up from the dev wallet until the balance is at least {{ .Annotations.threshold }} {{ .Labels.token }}
 - Get the dev wallet private key from the Eng vault in 1Password
 {{ end }}
 {{ range .Alerts.Resolved }}
@@ -91,7 +96,7 @@ resource "grafana_message_template" "victorops_reserve_balance_alert_message" {
   {{ $token := .Labels.token -}}
   {{ $reserveAddress := .Labels.ownerValue -}}
 FIRING: Low {{ $token }} balance — {{ .Annotations.currentBalance }} left
-Please top up the {{ $token }} balance of the {{ .Labels.owner }} ({{ $reserveAddress }}) above the alert threshold of {{ .Annotations.threshold }} {{ $token }}. Address: https://celoscan.io/address/{{ $reserveAddress }}
+Please top up the {{ $token }} balance of the {{ .Labels.owner }} ({{ $reserveAddress }}) above the alert threshold of {{ .Annotations.threshold }} {{ $token }}. Address: https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}
 {{ if .GeneratorURL -}}Grafana Alert Link: {{ .GeneratorURL }}{{- end }}
   {{ end -}}
   {{ range .Alerts.Resolved -}}
@@ -142,6 +147,10 @@ ${local.celo_chainlink_slug_branches}
 ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
 {{ end -}}
+{{ if eq .Labels.chain "polygon" -}}
+${local.polygon_pool_branches}
+${local.polygon_chainlink_slug_branches}
+{{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
 {{ $chainlinkURL := "" -}}
@@ -177,6 +186,10 @@ ${local.celo_chainlink_slug_branches}
 {{ if eq .Labels.chain "monad" -}}
 ${local.monad_pool_branches}
 ${local.monad_chainlink_slug_branches}
+{{ end -}}
+{{ if eq .Labels.chain "polygon" -}}
+${local.polygon_pool_branches}
+${local.polygon_chainlink_slug_branches}
 {{ end -}}
 {{ $poolURL := printf "%s&tab=instances" .GeneratorURL -}}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}

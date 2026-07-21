@@ -14,6 +14,11 @@ const USDC_CELO = "0xceba9300f2b948710d2653dd7b07f33a8b32118c";
 const USDMSPOKE_MONAD = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115";
 const EURMSPOKE_MONAD = "0x4d502d735b4c574b487ed641ae87ceae884731c7";
 const AUSD_MONAD = "0x00000000efe302beaa2b3e6e1b18d08d69a9012a";
+const USDM_POLYGON = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115";
+const EURM_POLYGON = "0x4d502d735b4c574b487ed641ae87ceae884731c7";
+const EUROP_POLYGON = "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51";
+const USDC_POLYGON = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359";
+const MOCK_EUROP_AMOY = "0x62a5e599c4f4bfa1024efffa15799a7a2bb29dec";
 
 describe("tokenSymbol", () => {
   it("resolves Celo mainnet token addresses", () => {
@@ -26,6 +31,14 @@ describe("tokenSymbol", () => {
     expect(tokenSymbol(143, USDMSPOKE_MONAD)).toBe("USDm");
     expect(tokenSymbol(143, EURMSPOKE_MONAD)).toBe("EURm");
     expect(tokenSymbol(143, AUSD_MONAD)).toBe("AUSD");
+  });
+
+  it("resolves Polygon token addresses from the released deployment registry", () => {
+    expect(tokenSymbol(137, USDM_POLYGON)).toBe("USDm");
+    expect(tokenSymbol(137, EURM_POLYGON)).toBe("EURm");
+    expect(tokenSymbol(137, EUROP_POLYGON)).toBe("EUROP");
+    expect(tokenSymbol(137, USDC_POLYGON)).toBe("USDC");
+    expect(tokenSymbol(80002, MOCK_EUROP_AMOY)).toBe("MockERC20EUROP");
   });
 
   it("is case-insensitive on the address", () => {
@@ -92,6 +105,29 @@ describe("contractEntries", () => {
     expect(usdm?.canonicalName).toBe("USDm");
   });
 
+  it("preserves Polygon token types and decimals from contracts 0.9.0", () => {
+    const polygonEntries = contractEntries(137);
+    const europ = polygonEntries.find(
+      (entry) => entry.address === EUROP_POLYGON,
+    );
+    expect(europ).toMatchObject({
+      rawName: "EUROP",
+      canonicalName: "EUROP",
+      type: "token",
+      decimals: 6,
+    });
+
+    const amoyEntries = contractEntries(80002);
+    const mockEurop = amoyEntries.find(
+      (entry) => entry.address === MOCK_EUROP_AMOY,
+    );
+    expect(mockEurop).toMatchObject({
+      rawName: "MockERC20EUROP",
+      type: "token",
+      decimals: 6,
+    });
+  });
+
   it("returns all entries across chains when chainId is omitted", () => {
     const all = contractEntries();
     expect(all.some((e) => e.chainId === 42220)).toBe(true);
@@ -151,5 +187,14 @@ describe("chainAddressLabels", () => {
   it("canonicalizes token names (trailing Spoke stripped) in Monad", () => {
     const labels = chainAddressLabels(143);
     expect(labels[USDMSPOKE_MONAD]).toBe("USDm");
+  });
+
+  it("labels Polygon contracts and tokens from the deployment registry", () => {
+    const labels = chainAddressLabels(137);
+    expect(labels[USDM_POLYGON]).toBe("USDm");
+    expect(labels[EUROP_POLYGON]).toBe("EUROP");
+    expect(labels["0xa849b475fe5a4b5c9c3280152c7a1945b907613b"]).toBe(
+      "FPMMFactory",
+    );
   });
 });

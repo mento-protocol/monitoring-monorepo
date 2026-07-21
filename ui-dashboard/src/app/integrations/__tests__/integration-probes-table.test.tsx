@@ -24,6 +24,25 @@ describe("IntegrationProbesTable", () => {
     expect(html).toContain("3 attempts");
   });
 
+  it("derives chain columns from the snapshot instead of a fixed two-chain list", () => {
+    const snapshot = fixtureSnapshot();
+    snapshot.chains = [
+      chainConfigFixture(42220, "Celo"),
+      chainConfigFixture(143, "Monad"),
+      chainConfigFixture(137, "Polygon"),
+    ];
+    snapshot.aggregators[0]!.chains.push(chainFixture(137, "Polygon", "pass"));
+
+    const html = renderToStaticMarkup(
+      <IntegrationProbesTable snapshot={snapshot} />,
+    );
+
+    expect(html).toContain("<th");
+    expect(html).toContain("Polygon");
+    expect(html.match(/Polygon/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(html).toContain('colSpan="8"');
+  });
+
   it("shows non-pass pair evidence before capped passing rows", () => {
     const snapshot = fixtureSnapshot();
     const chain = snapshot.aggregators[0]?.chains[0];
@@ -200,6 +219,20 @@ function fixtureSnapshot(): IntegrationProbeSnapshot {
       needsKeyChainChecks: 1,
       unsupportedChainChecks: 2,
     },
+  };
+}
+
+function chainConfigFixture(
+  chainId: number,
+  chainLabel: string,
+): IntegrationProbeSnapshot["chains"][number] {
+  return {
+    chainId,
+    chainSlug: chainLabel.toLowerCase(),
+    chainLabel,
+    routerAddresses: [],
+    poolAddresses: [],
+    pairs: [],
   };
 }
 

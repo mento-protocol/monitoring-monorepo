@@ -366,6 +366,12 @@ function renderJsdom(): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.pushState(null, "", "/bridge-flows");
+  vi.spyOn(window.history, "replaceState").mockImplementation(
+    (_state, _unused, url) => {
+      mockReplace(String(url));
+    },
+  );
   mockSearchParams = new URLSearchParams();
   // Default: every query returns empty. Tests override per-slot.
   mockUseBridgeGQL.mockImplementation(bridgeImpl());
@@ -379,6 +385,7 @@ afterEach(() => {
     root.unmount();
   });
   container.remove();
+  vi.restoreAllMocks();
 });
 
 // ---------------------------------------------------------------------------
@@ -932,6 +939,24 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
 // ---------------------------------------------------------------------------
 
 describe("BridgeFlowsPage — pagination and count state", () => {
+  it("canonicalizes a malformed page before issuing a paginated query", () => {
+    mockSearchParams = new URLSearchParams("page=not-a-number");
+    let observedOffset: number | null = null;
+    mockUseBridgeGQL.mockImplementation(
+      (query: string | null, vars?: { offset?: number }) => {
+        if (query === BRIDGE_TRANSFERS_WINDOW) {
+          observedOffset = vars?.offset ?? 0;
+        }
+        return bridgeImpl()(query);
+      },
+    );
+
+    renderJsdom();
+
+    expect(observedOffset).toBe(0);
+    expect(mockReplace.mock.calls.at(-1)?.[0]).toBe("/bridge-flows");
+  });
+
   it("when URL says page=99 but total fits one page, the page sends offset=0 (clamped)", () => {
     const transfers = ALL_THREE_TRANSFERS;
     mockSearchParams = new URLSearchParams("page=99");
@@ -969,6 +994,7 @@ describe("BridgeFlowsPage — pagination and count state", () => {
     // Pager shows "3 total" (single page → no "page X of Y" suffix).
     expect(container.textContent).toContain("3 total");
     expect(container.textContent).not.toContain("page 99");
+    expect(mockReplace.mock.calls.at(-1)?.[0]).toBe("/bridge-flows");
   });
 
   it("page=2 with 30 rows shows the second page (rows 26..30)", () => {
@@ -1224,7 +1250,7 @@ describe("BridgeFlowsPage — pagination and count state", () => {
 // ---------------------------------------------------------------------------
 
 describe("BridgeFlowsPage — status filter", () => {
-  it("URL ?status=PENDING marks the Pending pill as active and filters via statusIn", () => {
+  it("URL ?status=PENDING marks the Pending pill as active and filters the shared predicate", () => {
     mockSearchParams = new URLSearchParams("status=PENDING");
     let countVars: unknown = null;
     let transfersVars: unknown = null;
@@ -1266,13 +1292,15 @@ describe("BridgeFlowsPage — status filter", () => {
 
     // Total count tile reflects only Pending (1 of the 3 fixtures).
     expect(container.textContent).toContain("1 total");
-    // Both queries got `statusIn = ["PENDING"]`.
-    expect((countVars as { statusIn?: string[] }).statusIn).toEqual([
-      "PENDING",
-    ]);
-    expect((transfersVars as { statusIn?: string[] }).statusIn).toEqual([
-      "PENDING",
-    ]);
+    // Both queries got the same status predicate.
+    expect(
+      (countVars as { where?: { status?: { _in?: string[] } } }).where?.status
+        ?._in,
+    ).toEqual(["PENDING"]);
+    expect(
+      (transfersVars as { where?: { status?: { _in?: string[] } } }).where
+        ?.status?._in,
+    ).toEqual(["PENDING"]);
     // Only the pending row renders in the table body.
     expect(container.querySelectorAll("tbody tr")).toHaveLength(1);
   });
@@ -1283,7 +1311,9 @@ describe("BridgeFlowsPage — status filter", () => {
     mockUseBridgeGQL.mockImplementation(
       (query: string | null, vars?: unknown) => {
         if (query === BRIDGE_TRANSFERS_WINDOW) {
-          observedStatusIn = (vars as { statusIn?: string[] }).statusIn ?? null;
+          observedStatusIn =
+            (vars as { where?: { status?: { _in?: string[] } } }).where?.status
+              ?._in ?? null;
           return ok({ BridgeTransfer: [] });
         }
         if (query === BRIDGE_TRANSFERS_COUNT) return ok({ BridgeTransfer: [] });
@@ -1297,7 +1327,7 @@ describe("BridgeFlowsPage — status filter", () => {
       },
     );
     renderJsdom();
-    // statusIn should expand to the full ALL_BRIDGE_STATUSES set.
+    // The status predicate should expand to the full allowlist.
     expect(observedStatusIn).toEqual([
       "PENDING",
       "SENT",
@@ -1310,6 +1340,7 @@ describe("BridgeFlowsPage — status filter", () => {
       container.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
     ).find((b) => b.textContent?.trim() === "All");
     expect(allPill?.getAttribute("aria-checked")).toBe("true");
+    expect(mockReplace.mock.calls.at(-1)?.[0]).toBe("/bridge-flows");
   });
 
   it("clicking a status pill calls router.replace with the new status param + drops page", () => {
@@ -1340,8 +1371,82 @@ describe("BridgeFlowsPage — status filter", () => {
     );
     renderJsdom();
     expect(container.textContent).toContain(
-      "No bridge transfers match the selected status.",
+      "No bridge transfers match the selected filters.",
     );
+  });
+});
+
+describe("BridgeFlowsPage — directional chain filters", () => {
+  it("removes malformed route filters while preserving history state and hash", () => {
+    const preservedState = { from: "dashboard" };
+    window.history.pushState(preservedState, "", "/bridge-flows#recent");
+    mockSearchParams = new URLSearchParams(
+      "source=not-a-chain&destination=999&page=1",
+    );
+
+    renderJsdom();
+
+    const call = vi.mocked(window.history.replaceState).mock.calls.at(-1);
+    expect(call?.[0]).toEqual(preservedState);
+    expect(call?.[2]).toBe("/bridge-flows#recent");
+    expect(
+      container.querySelector<HTMLSelectElement>(
+        'select[aria-label="Source chain"]',
+      )?.value,
+    ).toBe("");
+    expect(
+      container.querySelector<HTMLSelectElement>(
+        'select[aria-label="Destination chain"]',
+      )?.value,
+    ).toBe("");
+  });
+
+  it("applies Polygon source and Celo destination to both rows and count", () => {
+    mockSearchParams = new URLSearchParams(
+      "source=137&destination=42220&status=SENT",
+    );
+    renderJsdom();
+
+    const source = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Source chain"]',
+    );
+    const destination = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Destination chain"]',
+    );
+    expect(source?.value).toBe("137");
+    expect(destination?.value).toBe("42220");
+    expect(source?.textContent).toContain("Polygon");
+
+    for (const query of [BRIDGE_TRANSFERS_COUNT, BRIDGE_TRANSFERS_WINDOW]) {
+      const call = mockUseBridgeGQL.mock.calls.findLast(
+        ([document]) => document === query,
+      );
+      expect(call?.[1]?.where).toEqual({
+        status: { _in: ["SENT"] },
+        sourceChainId: { _eq: 137 },
+        destChainId: { _eq: 42220 },
+      });
+    }
+  });
+
+  it("writes source filters without an RSC navigation and resets page", () => {
+    mockSearchParams = new URLSearchParams("page=3&status=PENDING");
+    renderJsdom();
+    const source = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Source chain"]',
+    );
+    expect(source).toBeTruthy();
+
+    act(() => {
+      source!.value = "137";
+      source!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(mockReplace).toHaveBeenCalled();
+    const url = mockReplace.mock.calls.at(-1)?.[0] as string;
+    expect(url).toContain("source=137");
+    expect(url).toContain("status=PENDING");
+    expect(url).not.toContain("page=");
   });
 });
 

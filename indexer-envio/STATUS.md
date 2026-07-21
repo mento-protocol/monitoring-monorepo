@@ -3,7 +3,7 @@
 ## Deployment Model
 
 Single multichain mainnet indexer (Ethereum reserve-yield `1`, Celo Mainnet
-`42220`, and Monad `143`) on the Envio Cloud `mento` project (org
+`42220`, Monad `143`, and Polygon `137`) on the Envio Cloud `mento` project (org
 `mento-protocol`), Production Medium tier. Ethereum reserve-yield handlers are
 event-only; the historical sUSDS onBlock heartbeat is not registered in the
 hosted indexer.
@@ -37,7 +37,9 @@ All child entities (`poolId` FKs) follow the same format.
 ## Config File
 
 `indexer-envio/config.multichain.mainnet.yaml` — covers Ethereum (1)
-sUSDS/stETH reserve-yield accounting, Celo (42220), and Monad (143).
+sUSDS/stETH reserve-yield accounting, Celo (42220), Monad (143), and Polygon
+(137). Polygon is configured here and becomes production-visible only after the
+normal deploy, sync verification, and promotion workflow completes.
 
 Git release branch: `envio` — push to this branch to trigger a redeployment.
 

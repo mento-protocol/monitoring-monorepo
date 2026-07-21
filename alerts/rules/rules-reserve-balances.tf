@@ -32,6 +32,7 @@ resource "grafana_rule_group" "reserve_balances" {
         service  = "reserve"
         severity = "warning"
         token    = rule.value.token
+        explorer = "celoscan.io"
       }
 
       data {
@@ -84,6 +85,116 @@ resource "grafana_rule_group" "reserve_balances" {
               type   = "last"
             }
             type = "query"
+          }]
+        })
+      }
+    }
+  }
+
+  # Polygon's Reserve-backed pools cannot expand when their corresponding
+  # ReserveV2 collateral balance is exactly zero. Keep this predicate strictly
+  # zero-only; nonzero operational floors still require treasury SLOs and stay
+  # tracked in #1332 rather than being guessed here.
+  dynamic "rule" {
+    for_each = {
+      USDC  = { metric = "USDC_balanceOf", token = "USDC" }
+      EUROP = { metric = "EUROP_balanceOf", token = "EUROP" }
+    }
+
+    content {
+      name           = "Empty ${rule.key} Reserve Balance Alert [Polygon]"
+      condition      = "threshold"
+      for            = "5m"
+      exec_err_state = "Error"
+      no_data_state  = "NoData"
+
+      annotations = {
+        summary        = "Polygon ReserveV2 has no ${rule.key} collateral available for Reserve-backed pool expansion."
+        threshold      = "0"
+        currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.key}"
+      }
+      labels = {
+        service  = "reserve"
+        severity = "page"
+        token    = rule.value.token
+        chain    = "polygon"
+        explorer = "polygonscan.com"
+      }
+
+      data {
+        ref_id         = "a"
+        datasource_uid = "grafanacloud-prom"
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+        model = jsonencode({
+          expr  = "${rule.value.metric}{chain=\"polygon\", owner=\"Reserve\"}"
+          refId = "a"
+        })
+      }
+      data {
+        ref_id         = "balance"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          expression = "a"
+          type       = "reduce"
+          reducer    = "last"
+          refId      = "balance"
+        })
+      }
+      data {
+        ref_id         = "isZeroRaw"
+        datasource_uid = "grafanacloud-prom"
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+        model = jsonencode({
+          # The bool modifier converts exactly-zero to 1 and every positive
+          # value to 0 while preserving the source labels. This is stricter
+          # than approximating zero with a sub-token floating threshold.
+          expr  = "${rule.value.metric}{chain=\"polygon\", owner=\"Reserve\"} == bool 0"
+          refId = "isZeroRaw"
+        })
+      }
+      data {
+        ref_id         = "isZero"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          expression = "isZeroRaw"
+          type       = "reduce"
+          reducer    = "last"
+          refId      = "isZero"
+        })
+      }
+      data {
+        ref_id         = "threshold"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          type       = "threshold"
+          expression = "isZero"
+          refId      = "threshold"
+          conditions = [{
+            evaluator = {
+              params = [0.5]
+              type   = "gt"
+            }
+            operator = { type = "and" }
+            reducer  = { params = [], type = "last" }
+            type     = "query"
           }]
         })
       }

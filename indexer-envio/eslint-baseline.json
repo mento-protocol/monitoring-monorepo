@@ -152,12 +152,5 @@
     "message": "Async function 'fetchTradingLimits' has too many parameters (5). Maximum allowed is 4.",
     "line": 483,
     "linePreview": " | export async function fetchTradingLimits( | chainId: number,"
-  },
-  {
-    "file": "src/usd.ts",
-    "ruleId": "max-params",
-    "message": "Function 'pickPeggedSide' has too many parameters (7). Maximum allowed is 4.",
-    "line": 52,
-    "linePreview": "*/ | function pickPeggedSide( | chainId: number,"
   }
 ]

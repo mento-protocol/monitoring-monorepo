@@ -239,14 +239,17 @@ export async function fetchNetworkData(
     oracleFreshnessCheckedAt,
   }));
 
-  const { cdpPoolIds, reservePoolIds } = resolveStrategyIds({
+  const { olsPoolIds, cdpPoolIds, reservePoolIds } = resolveStrategyIds({
     network,
     pools,
+    activeStrategiesResult: sources.activeStrategies,
+    olsResult: sources.ols,
     indexedCdpPoolsResult: sources.indexedCdpPools,
     fallbackStrategiesResult: sources.fallbackStrategies,
   });
   const strategyError = resolveStrategyError({
     network,
+    activeStrategiesResult: sources.activeStrategies,
     olsResult: sources.ols,
     indexedCdpPoolsResult: sources.indexedCdpPools,
     fallbackStrategiesResult: sources.fallbackStrategies,
@@ -261,7 +264,7 @@ export async function fetchNetworkData(
     snapshotsAllDailyResult: sources.snapshotsAllDaily,
     brokerSnapshotsAllDailyResult: sources.brokerSnapshotsAllDaily,
     lpResult: sources.lp,
-    olsResult: sources.ols,
+    olsPoolIds,
     cdpPoolIds,
     reservePoolIds,
     strategyError,

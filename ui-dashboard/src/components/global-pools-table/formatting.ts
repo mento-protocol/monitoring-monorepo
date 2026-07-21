@@ -7,13 +7,15 @@ export function poolStrategies(
   isCdp: boolean,
   isReserve: boolean,
 ): PoolStrategyLabel[] {
-  // Precedence: OLS (indexer-tracked) > CDP > Reserve. All three require a
-  // positive signal; missing classification leaves the pool out of every set
-  // rather than misclassifying it as Reserve.
-  if (isOls) return ["Open"];
-  if (isCdp) return ["CDP"];
-  if (isReserve) return ["Reserve"];
-  return [];
+  // All three require a positive signal; missing classification leaves the
+  // pool out of every set rather than misclassifying it as Reserve. Do not
+  // collapse simultaneous strategies: Polygon's EURm/EUROP pool deliberately
+  // authorizes both Open and Reserve.
+  const labels: PoolStrategyLabel[] = [];
+  if (isOls) labels.push("Open");
+  if (isCdp) labels.push("CDP");
+  if (isReserve) labels.push("Reserve");
+  return labels;
 }
 
 // Fee display
