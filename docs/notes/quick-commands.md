@@ -54,6 +54,9 @@ pnpm docs:index --write            # Regenerate docs/README.md from tracked + no
 pnpm docs:index --check            # Fail on catalog drift, invalid classification, or broken internal Markdown links
 pnpm docs:audit --dry-run          # Print this week's bounded semantic-review packet without mutating documentation
 pnpm docs:garden --dry-run --json  # Read the garden queue and preview the exact weekly issue decision without mutations
+pnpm docs:navigation-eval -- --check-fixtures  # Validate fresh-agent navigation questions, routes, and budgets
+pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only evaluation prompt; never invokes a model
+pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
 node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics

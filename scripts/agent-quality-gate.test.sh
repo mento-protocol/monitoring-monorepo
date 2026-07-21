@@ -617,6 +617,8 @@ validator_repo="$(mktemp -d)"
     "agent:review-materiality:test": "node scripts/review-materiality.test.mjs",
     "docs:garden": "node scripts/docs-garden-issue.mjs",
     "docs:garden:test": "node scripts/docs-garden-issue.test.mjs",
+    "docs:navigation-eval": "node scripts/docs-navigation-eval.mjs",
+    "docs:navigation-eval:test": "node scripts/docs-navigation-eval.test.mjs",
     "issue:board": "node scripts/agent-issue-board.mjs",
     "issue:board:test": "node scripts/agent-issue-board.test.mjs",
     "issue:claim": "node scripts/agent-issue-board.mjs claim",
@@ -802,6 +804,7 @@ assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling scr
 assert_contains "- node scripts/review-materiality.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/agent-issue-board.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/docs-garden-issue.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/docs-navigation-eval.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
@@ -1475,6 +1478,8 @@ assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard cha
 run_gate ".github/workflows/documentation-garden.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
+assert_contains "- pnpm docs:garden:test (documentation garden workflow changed)"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation scheduler workflow changed)"
 assert_contains "node scripts/check-adr-reminder.mjs"
 
 run_gate ".lighthouserc.cjs"
@@ -2782,6 +2787,26 @@ assert_contains "- pnpm docs:garden:test (documentation garden issue automation 
 
 run_gate "scripts/docs-garden-issue.test.mjs"
 assert_contains "- pnpm docs:garden:test (documentation garden issue automation changed)"
+
+run_gate "scripts/docs-navigation-eval.mjs"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:index --check (documentation navigation evaluation consumes the catalog)"
+
+run_gate "scripts/docs-navigation-eval-helpers.mjs"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+
+run_gate "scripts/docs-navigation-eval.test.mjs"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+
+run_gate "docs/evals/documentation-navigation-fixtures.json"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation contract changed)"
+
+run_gate "docs/evals/documentation-navigation-baseline.json"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation baseline changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation baseline changed)"
 
 run_gate "scripts/agent-context-budget.mjs"
 assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"

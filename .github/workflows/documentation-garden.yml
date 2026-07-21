@@ -75,3 +75,10 @@ jobs:
           DOCS_GARDEN_SHARD: ${{ inputs.shard || '' }}
           DOCS_GARDEN_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
         run: node scripts/docs-garden-issue.mjs --json
+      - name: Synchronize the monthly navigation evaluation issue
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOCS_NAVIGATION_EVAL_REPO: ${{ github.repository }}
+          DOCS_NAVIGATION_EVAL_DRY_RUN: "false"
+        run: node scripts/docs-navigation-eval.mjs --schedule-issue --json

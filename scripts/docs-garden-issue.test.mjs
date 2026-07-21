@@ -203,7 +203,7 @@ await test("REST normalization deduplicates pages, filters PRs, and parses marke
         number: 1,
         state: "open",
         body: `${DOCS_GARDEN_MARKER}\n${packetMarker(auditPacket)}\n`,
-        labels: [{ name: "agent-ready" }],
+        labels: [{ name: "agent-ready" }, { name: "source:audit" }],
       },
       { number: 2, state: "open", pull_request: {}, body: "" },
     ],
@@ -212,14 +212,42 @@ await test("REST normalization deduplicates pages, filters PRs, and parses marke
         number: 1,
         state: "open",
         body: `${DOCS_GARDEN_MARKER}\n${packetMarker(auditPacket)}\n`,
-        labels: [{ name: "agent-ready" }],
+        labels: [{ name: "agent-ready" }, { name: "source:audit" }],
       },
     ],
   ];
   const normalized = normalizeGithubIssuePages(pages);
   assert.equal(normalized.length, 1);
   assert.equal(normalized[0].marker.week_serial, auditPacket.cycle.week_serial);
-  assert.deepEqual(normalized[0].labels, ["agent-ready"]);
+  assert.deepEqual(normalized[0].labels, ["agent-ready", "source:audit"]);
+});
+
+await test("untrusted public issue markers cannot own or break the garden queue", () => {
+  const auditPacket = packet();
+  const normalized = normalizeGithubIssuePages([
+    [
+      {
+        number: 90,
+        state: "closed",
+        body: `${DOCS_GARDEN_MARKER}\n${packetMarker(auditPacket)}\n`,
+        labels: [],
+      },
+      {
+        number: 91,
+        state: "open",
+        body: `${DOCS_GARDEN_MARKER}\nmalformed`,
+        labels: [{ name: "agent-ready" }],
+      },
+    ],
+  ]);
+  assert.deepEqual(
+    normalized.map((issue) => issue.marker),
+    [null, null],
+  );
+  assert.equal(
+    resolveTargetWeekSerial(auditPacket.cycle.week_serial, normalized),
+    auditPacket.cycle.week_serial,
+  );
 });
 
 await test("full GitHub pagination stops only after a short page", async () => {
@@ -249,7 +277,7 @@ await test("queue discovery scans all issues instead of trusting routing labels"
             number: 11,
             state: "open",
             body: `${DOCS_GARDEN_MARKER}\n${packetMarker(auditPacket)}\n`,
-            labels: [{ name: "agent-ready" }],
+            labels: [{ name: "agent-ready" }, { name: "source:audit" }],
           },
           { number: 12, state: "open", pull_request: {}, body: "" },
         ]);

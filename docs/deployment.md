@@ -68,6 +68,16 @@ pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
 ```
 
+Promotion authority depends on the request. For a monitor-only or babysit
+request, wait until every chain is caught up, run
+`pnpm deploy:indexer:verify "$COMMIT"`, surface the paste-ready promote
+command, and stop until the user explicitly approves promotion. For a
+pre-merge feature-branch preload, `/deploy-indexer --no-promote` stops after
+sync and prints the later verify/promote commands without running them. Do not
+infer promotion approval from a request to monitor, preload, or report
+readiness; an explicitly authorized end-to-end production deploy is a separate
+case.
+
 ### Force Retrigger Without Code Changes
 
 If Envio gets stuck or you need to retrigger without a code change:

@@ -468,7 +468,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/docs:navigation-eval|/scripts/docs:navigation-eval:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -651,6 +651,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/docs-index.test.mjs" "$reason"
   add_command "node scripts/docs-audit.test.mjs" "$reason"
   add_command "node scripts/docs-garden-issue.test.mjs" "$reason"
+  add_command "node scripts/docs-navigation-eval.test.mjs" "$reason"
   add_command "node scripts/agent-context-budget.test.mjs" "$reason"
 }
 
@@ -944,6 +945,17 @@ while IFS= read -r path; do
   case "$path" in
     README.md|*/README.md)
       add_command "pnpm agent:context-check" "README metadata may enroll canonical context"
+      ;;
+    docs/evals/documentation-navigation-baseline.json)
+      add_surface "docs"
+      add_command "pnpm docs:navigation-eval:test" "documentation navigation baseline changed"
+      add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation baseline changed"
+      add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation baseline changed"
+      ;;
+    docs/evals/documentation-navigation-*.json)
+      add_surface "docs"
+      add_command "pnpm docs:navigation-eval:test" "documentation navigation evaluation contract changed"
+      add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation contract changed"
       ;;
     AGENTS.md|*/AGENTS.md|.codex/config.toml)
       add_surface "agent-context"
@@ -1279,6 +1291,10 @@ while IFS= read -r path; do
           add_terraform_validate_commands "alerts/infra" "Terraform registry-backed CI workflow changed"
           add_terraform_validate_commands "aegis/terraform" "Terraform registry-backed CI workflow changed"
           ;;
+        .github/workflows/documentation-garden.yml)
+          add_command "pnpm docs:garden:test" "documentation garden workflow changed"
+          add_command "pnpm docs:navigation-eval:test" "documentation navigation scheduler workflow changed"
+          ;;
         .github/workflows/infra.yml)
           add_command "pnpm tf:test" "Terraform registry workflow changed"
           add_terraform_validate_commands "terraform" "Terraform registry workflow changed"
@@ -1526,6 +1542,12 @@ while IFS= read -r path; do
           add_command "pnpm docs:garden:test" "documentation garden issue automation changed"
           add_command "pnpm docs:audit --dry-run" "documentation garden issue automation consumes the planner"
           add_command "pnpm docs:index --check" "documentation garden issue automation consumes the catalog"
+          ;;
+        scripts/docs-navigation-eval.mjs|scripts/docs-navigation-eval-helpers.mjs|scripts/docs-navigation-eval.test.mjs)
+          add_command "pnpm docs:navigation-eval:test" "documentation navigation evaluation changed"
+          add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation changed"
+          add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation evaluation changed"
+          add_command "pnpm docs:index --check" "documentation navigation evaluation consumes the catalog"
           ;;
         scripts/agent-context-budget.mjs|scripts/agent-context-budget.test.mjs)
           add_command "pnpm agent:context-budget:test" "agent context budget helper changed"

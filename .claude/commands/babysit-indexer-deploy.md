@@ -168,7 +168,10 @@ Each emit is either **terminal** (the script exits after emitting) or **transien
 
 **Terminal emits** — the calling skill treats these as the final result:
 
-- `READY_TO_PROMOTE` / `ALREADY_PROMOTED` → success; proceed to the next phase (deployment verification, then promote).
+- `READY_TO_PROMOTE` → success; run deployment verification, surface the
+  paste-ready promote command, and wait for explicit user approval. Never
+  promote from this monitor-only command.
+- `ALREADY_PROMOTED` → success; report that no promotion action remains.
 - `BUILD_FAILED` / `SYNC_DEADLINE` → failure; stop without promoting.
 
 **Transient emits** — the script keeps polling after these; the calling skill should NOT stop on them:
