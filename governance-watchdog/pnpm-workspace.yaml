@@ -12,11 +12,15 @@ minimumReleaseAgeExclude:
   # package and share the same release timestamp.
   - esbuild
   - "@esbuild/*"
-  # Security override floors for the 2026-06-15 advisory batch may be younger
-  # than the 3-day release-age gate.
+  # Security override floors may be younger than the 3-day release-age gate.
+  - brace-expansion
+  - js-yaml
   - protobufjs
 
 overrides:
+  "brace-expansion@^1.0.0": 1.1.16
+  "brace-expansion@>=2.0.0 <3": 2.1.2
+  "brace-expansion@>=5.0.0 <6": 5.0.7
   # Exact pin because ranges resolve forward on fresh installs. 3.4.2 is what
   # both the standalone npm lockfile and this lockfile resolve today.
   flatted: 3.4.2
@@ -27,7 +31,8 @@ overrides:
   # vulnerable ranges narrowly instead of overriding whole packages.
   "qs@<6.15.2": 6.15.2
   "uuid@<11.1.1": 11.1.1
-  "protobufjs@>=7.0.0 <7.6.3": 7.6.3
+  "protobufjs@>=7.0.0 <7.6.5": 7.6.5
+  "js-yaml@>=4.0.0 <4.3.0": 4.3.0
   # isows resolves ws@8.20.1 through viem; 8.21.0 contains the GHSA-96hv-2xvq-fx4p
   # fix and stays compatible with isows' ws peer range.
   "ws@<8.21.0": 8.21.0

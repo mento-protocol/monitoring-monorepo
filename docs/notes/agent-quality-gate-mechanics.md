@@ -67,17 +67,21 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:quality-gate:test`, `scripts.agent:prewarm`,
 `scripts.agent:prewarm:test`, `scripts.agent:review-materiality`,
 `scripts.agent:review-materiality:test`, `scripts.agent:context-check`,
+`scripts.agent:context-budget`, `scripts.agent:context-budget:test`,
 `scripts.agent:autoreview`, `scripts.issue:board`,
 `scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
 `scripts.issue:release`, `scripts.sentry:ingest`,
-`scripts.sentry:ingest:test`, `scripts.pr:feedback-state`,
+`scripts.sentry:ingest:test`, `scripts.docs:index`, `scripts.docs:index:test`,
+`scripts.docs:audit`, `scripts.docs:audit:test`, `scripts.docs:garden`,
+`scripts.docs:garden:test`, `scripts.pr:feedback-state`,
 `scripts.pr:feedback-state:test`, `scripts.pr:ready-state`,
 `scripts.pr:ready-state:test`,
 `scripts.tf`, `scripts.tf:test`, `scripts.alerts:rules:lint`,
 `scripts.alerts:rules:lint:test`, `scripts.lockfile:lint`,
 `scripts.lockfile:lint:test`, `scripts.skew:check`,
 `scripts.skew:check:test`, `scripts.sanitize:test`,
-`scripts.override:prune-report`, or `scripts.override:prune-report:test`; the gate treats that
+`scripts.override:prune-report`, `scripts.override:prune-report:test`,
+`scripts.adr:check`, or `scripts.adr:check:test`; the gate treats that
 as tooling-only and runs an
 entrypoint validator plus the gate/prewarm/PR-feedback/PR-ready/Terraform-stack
 regression tests instead of the package-script refusal path. Existing changed paths run
