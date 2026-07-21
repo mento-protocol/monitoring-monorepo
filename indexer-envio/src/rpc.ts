@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import type { EvmOnEventContext, Pool, BreakerConfig } from "envio";
+import { updateHealthAccumulators } from "./healthScore.js";
 
 // Re-export the client/log/rate-limit primitives so existing callers
 // (feeToken.ts, EventHandlers.ts, breakers.ts, hyperRpcToken.test.ts, etc.)
@@ -53,6 +54,8 @@ export {
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
+  _setMockMedianTimestamp,
+  _clearMockMedianTimestamps,
   _setMockRateFeedOracles,
   _clearMockRateFeedOracles,
   _setMockNumReporters,
@@ -61,6 +64,7 @@ export {
   fetchNumReporters,
   fetchRateFeedOracles,
   fetchReportExpiry,
+  fetchMedianTimestamp,
 } from "./rpc/oracle-state.js";
 export {
   _setMockFees,
@@ -151,8 +155,30 @@ export async function updatePoolsOracleExpiry(
     const existing = await context.Pool.get(poolId);
     if (!existing || existing.oracleExpiry === oracleExpiry) continue;
 
+    // The new expiry takes effect at this event boundary. Finalize the open
+    // interval with the PRIOR expiry first; otherwise extending a feed from
+    // minutes to one year would retroactively turn an already-stale gap into
+    // healthy time. Do not create a health cursor when the pool has never had
+    // a health sample.
+    const healthBoundary =
+      existing.lastOracleSnapshotTimestamp > 0n
+        ? updateHealthAccumulators(
+            existing,
+            blockTimestamp,
+            existing.lastDeviationRatio,
+            {
+              reportTimestamp: existing.lastOracleReportAt,
+              expiry: existing.oracleExpiry,
+            },
+          )
+        : {};
+
     const updatedPool: Pool = {
       ...existing,
+      ...healthBoundary,
+      // An expiry configuration event is not itself a trusted deviation
+      // sample, so it must not promote an N/A pool into hasHealthData=true.
+      hasHealthData: existing.hasHealthData,
       oracleExpiry,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,

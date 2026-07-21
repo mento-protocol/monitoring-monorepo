@@ -112,6 +112,7 @@ describe("OraclePriceValue", () => {
       ...BASE_POOL,
       oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
       oracleTimestamp: freshTs,
+      lastOracleReportAt: freshTs,
       oracleExpiry: "300",
       oracleTxHash:
         "0xcb81fe1d4ff72d75ce29bf7905ea852d7e8da98e1831f575c5b71687e9acc936",
@@ -141,6 +142,7 @@ describe("OraclePriceValue", () => {
       ...BASE_POOL,
       oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
       oracleTimestamp: staleTs,
+      lastOracleReportAt: staleTs,
       oracleExpiry: "300",
     };
     const html = renderToStaticMarkup(
@@ -273,7 +275,7 @@ describe("OraclePriceValue", () => {
     expect(html).not.toContain("text-red-400");
   });
 
-  it("uses oracleTimestamp for freshness when lastOracleReportAt is older", () => {
+  it("uses the exact median anchor when the raw reporter timestamp is newer", () => {
     const staleLiveTs = String(Math.floor(Date.now() / 1000) - 3600);
     const freshRawTs = String(Math.floor(Date.now() / 1000) - 60);
     const pool: Pool = {
@@ -288,18 +290,16 @@ describe("OraclePriceValue", () => {
     const html = renderToStaticMarkup(
       <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
     );
-    expect(html).not.toContain("· stale");
-    expect(html).not.toContain("text-red-400");
-    expect(html).toContain(
-      'href="https://celoscan.io/tx/0xcb81fe1d4ff72d75ce29bf7905ea852d7e8da98e1831f575c5b71687e9acc936"',
-    );
+    expect(html).toContain("· stale");
+    expect(html).toContain("text-red-400");
+    expect(html).not.toContain('href="https://celoscan.io/tx/');
   });
 
-  it("omits the 'last …' subline when oracleTimestamp is absent", () => {
+  it("omits the 'last …' subline when the median anchor is absent", () => {
     const pool: Pool = {
       ...BASE_POOL,
       oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
-      // no oracleTimestamp
+      // no lastOracleReportAt
     };
     const html = renderToStaticMarkup(
       <OraclePriceValue pool={pool} network={NETWORK_WITHOUT_CHAINLINK} />,
@@ -307,14 +307,14 @@ describe("OraclePriceValue", () => {
     expect(html).not.toMatch(/expiry/);
   });
 
-  it("treats the '0' oracleTimestamp sentinel like a missing timestamp", () => {
+  it("treats the '0' median anchor sentinel like a missing timestamp", () => {
     // Hasura returns "0" as the default for unset numeric fields; the
     // component must skip the 'last …' subline (don't render "last 56y ago"
     // pointing at the Unix epoch).
     const pool: Pool = {
       ...BASE_POOL,
       oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
-      oracleTimestamp: "0",
+      lastOracleReportAt: "0",
     };
     const html = renderToStaticMarkup(
       <OraclePriceValue pool={pool} network={NETWORK_WITHOUT_CHAINLINK} />,

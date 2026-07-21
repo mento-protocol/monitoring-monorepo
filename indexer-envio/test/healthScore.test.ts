@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
+import type { EvmOnEventContext, Pool } from "envio";
 import {
   computeHealthSnapshotFields,
   updateHealthAccumulators,
   recordHealthSample,
 } from "../src/healthScore.js";
-import { makePool } from "./helpers/makePool.js";
+import { updatePoolsOracleExpiry } from "../src/rpc.js";
+import { makePool as makeBasePool } from "./helpers/makePool.js";
+
+/** Health tests use compact synthetic timestamps. Anchor freshness to the
+ * previous sample by default rather than makePool's production-like epoch. */
+function makePool(overrides: Partial<Pool> = {}): Pool {
+  return makeBasePool({
+    lastOracleReportAt: overrides.lastOracleSnapshotTimestamp ?? 0n,
+    ...overrides,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // computeHealthSnapshotFields
@@ -194,7 +205,7 @@ describe("updateHealthAccumulators", () => {
     assert.equal(result.lastOracleSnapshotTimestamp, 1000n); // keeps earlier ts
   });
 
-  it("oracleExpiry = 0 falls back to MAX_CARRY (3600s)", () => {
+  it("oracleExpiry = 0 fails closed with zero healthy carry", () => {
     const pool = makePool({
       lastOracleSnapshotTimestamp: 1000n,
       lastDeviationRatio: "0.500000",
@@ -202,29 +213,107 @@ describe("updateHealthAccumulators", () => {
       healthBinarySeconds: 0n,
       oracleExpiry: 0n, // unknown
     });
-    // Gap = 7200s, MAX_CARRY = 3600s
-    // Carry = 3600s (healthy), Stale = 3600s
+    // Without the contract expiry, no healthy carry can be proven.
     const result = updateHealthAccumulators(pool, 8200n, "0.500000");
     assert.equal(result.healthTotalSeconds, 7200n);
-    assert.equal(result.healthBinarySeconds, 3600n);
+    assert.equal(result.healthBinarySeconds, 0n);
   });
 
-  it("oracleExpiry > MAX_CARRY: capped at 3600s", () => {
+  it("honors a configured one-year expiry without a one-hour cap", () => {
     const pool = makePool({
       lastOracleSnapshotTimestamp: 1000n,
       lastDeviationRatio: "0.500000",
       healthTotalSeconds: 0n,
       healthBinarySeconds: 0n,
-      oracleExpiry: 86400n, // 24h — unreasonably large
+      oracleExpiry: 31_536_000n,
     });
-    // Gap = 7200s, freshnessLimit = min(86400, 3600) = 3600
+    // The two-hour gap is fully inside the feed's configured one-year window.
     const result = updateHealthAccumulators(pool, 8200n, "0.500000");
     assert.equal(result.healthTotalSeconds, 7200n);
-    assert.equal(result.healthBinarySeconds, 3600n);
+    assert.equal(result.healthBinarySeconds, 7200n);
+  });
+
+  it("uses only the remaining TTL for a late-life one-year report", () => {
+    const expiry = 31_536_000n;
+    const reportTimestamp = 1_000n;
+    const pool = makePool({
+      lastOracleSnapshotTimestamp: reportTimestamp + expiry - 100n,
+      lastOracleReportAt: reportTimestamp,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      oracleExpiry: expiry,
+    });
+
+    const result = updateHealthAccumulators(
+      pool,
+      reportTimestamp + expiry + 100n,
+      "0.500000",
+    );
+
+    assert.equal(result.healthTotalSeconds, 200n);
+    assert.equal(result.healthBinarySeconds, 100n);
+  });
+
+  it("does not let a new report retroactively heal the preceding gap", () => {
+    const poolWithNewAnchor = makePool({
+      lastOracleSnapshotTimestamp: 1_000n,
+      lastOracleReportAt: 2_000n,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      oracleExpiry: 300n,
+    });
+
+    const result = updateHealthAccumulators(
+      poolWithNewAnchor,
+      2_000n,
+      "0.500000",
+      { reportTimestamp: 1_000n, expiry: 300n },
+    );
+
+    assert.equal(result.healthTotalSeconds, 1_000n);
+    assert.equal(result.healthBinarySeconds, 300n);
+  });
+
+  it("closes an expiry-change boundary with the prior expiry", async () => {
+    let persisted = makePool({
+      id: "42220-expiry-boundary",
+      lastOracleSnapshotTimestamp: 1_000n,
+      lastOracleReportAt: 1_000n,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      oracleExpiry: 300n,
+    });
+    const context = {
+      Pool: {
+        get: async () => persisted,
+        set: (pool: Pool) => {
+          persisted = pool;
+        },
+      },
+    } as unknown as EvmOnEventContext;
+
+    await updatePoolsOracleExpiry(
+      context,
+      [persisted.id],
+      31_536_000n,
+      123n,
+      2_000n,
+    );
+
+    assert.equal(persisted.healthTotalSeconds, 1_000n);
+    assert.equal(persisted.healthBinarySeconds, 300n);
+    assert.equal(persisted.lastOracleSnapshotTimestamp, 2_000n);
+    assert.equal(persisted.oracleExpiry, 31_536_000n);
   });
 
   it("accumulates across multiple events correctly", () => {
-    let pool = makePool({ oracleExpiry: 300n });
+    let pool = makePool({
+      oracleExpiry: 300n,
+      lastOracleReportAt: 1_000n,
+    });
 
     // Event 1: first snapshot at t=1000, healthy
     let update = updateHealthAccumulators(pool, 1000n, "0.500000");

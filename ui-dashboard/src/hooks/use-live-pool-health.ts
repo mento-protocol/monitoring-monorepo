@@ -383,6 +383,7 @@ function mergeLiveHealthRow(
       updatedAtTimestamp: row.updatedAtTimestamp,
       oracleOk: row.oracleOk,
       oracleTimestamp: row.oracleTimestamp,
+      lastOracleReportAt: row.lastOracleReportAt,
       oracleExpiry: row.oracleExpiry,
       oracleNumReporters: row.oracleNumReporters,
       priceDifference: row.priceDifference,

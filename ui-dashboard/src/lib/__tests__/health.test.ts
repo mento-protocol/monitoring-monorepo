@@ -43,6 +43,7 @@ describe("computeHealthStatus", () => {
         source: "virtual_pool_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -55,6 +56,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_virtual_test",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -384,6 +386,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: false,
         oracleTimestamp: STALE_TS,
+        lastOracleReportAt: STALE_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -396,6 +399,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: false,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -409,6 +413,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "1000",
         rebalanceThreshold: 5000,
       }),
@@ -423,6 +428,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "4000",
         rebalanceThreshold: 5000,
       }),
@@ -437,6 +443,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "5000",
         rebalanceThreshold: 5000,
       }),
@@ -449,6 +456,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "5025",
         rebalanceThreshold: 5000,
       }),
@@ -461,6 +469,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "5050",
         rebalanceThreshold: 5000,
       }),
@@ -476,6 +485,7 @@ describe("computeHealthStatus", () => {
         {
           source: "fpmm_factory",
           oracleTimestamp: FRESH_TS,
+          lastOracleReportAt: FRESH_TS,
           priceDifference: "5060",
           rebalanceThreshold: 5000,
           deviationBreachStartedAt: String(now - 2 * 3600),
@@ -493,6 +503,7 @@ describe("computeHealthStatus", () => {
         {
           source: "fpmm_factory",
           oracleTimestamp: FRESH_TS,
+          lastOracleReportAt: FRESH_TS,
           priceDifference: "5250",
           rebalanceThreshold: 5000,
           deviationBreachStartedAt: String(now - 2 * 3600),
@@ -513,6 +524,7 @@ describe("computeHealthStatus", () => {
         {
           source: "fpmm_factory",
           oracleTimestamp: FRESH_TS,
+          lastOracleReportAt: FRESH_TS,
           priceDifference: "5250",
           rebalanceThreshold: 5000,
           deviationBreachStartedAt: String(now - 1800),
@@ -531,6 +543,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_rebalanced",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "8000",
         rebalanceThreshold: 5000,
       }),
@@ -543,6 +556,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "73000000000",
         rebalanceThreshold: 5000,
         degenerateReserves: true,
@@ -557,6 +571,7 @@ describe("computeHealthStatus", () => {
         {
           source: "fpmm_factory",
           oracleTimestamp: FRESH_TS,
+          lastOracleReportAt: FRESH_TS,
           priceDifference: "8000",
           rebalanceThreshold: 5000,
           deviationBreachStartedAt: String(now - 30 * 60), // 30 min ago
@@ -574,6 +589,7 @@ describe("computeHealthStatus", () => {
         {
           source: "fpmm_factory",
           oracleTimestamp: FRESH_TS,
+          lastOracleReportAt: FRESH_TS,
           priceDifference: "8000",
           rebalanceThreshold: 5000,
           deviationBreachStartedAt: String(now - 2 * 3600), // 2h ago — past 1h
@@ -594,6 +610,7 @@ describe("computeHealthStatus", () => {
         {
           source: "fpmm_factory",
           oracleTimestamp: FRESH_TS,
+          lastOracleReportAt: FRESH_TS,
           priceDifference: "8000",
           rebalanceThreshold: 5000,
           deviationBreachStartedAt: String(now - 3599),
@@ -612,6 +629,7 @@ describe("computeHealthStatus", () => {
         {
           source: "fpmm_factory",
           oracleTimestamp: FRESH_TS,
+          lastOracleReportAt: FRESH_TS,
           priceDifference: "8000",
           rebalanceThreshold: 5000,
           deviationBreachStartedAt: String(now - 3600),
@@ -630,6 +648,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_factory",
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "8000",
         rebalanceThreshold: 5000,
         deviationBreachStartedAt: null,
@@ -646,6 +665,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "9000",
         rebalanceThreshold: 0,
       }),
@@ -661,6 +681,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "20000", // 200%
         rebalanceThreshold: 0,
         rebalanceThresholdAbove: 0,
@@ -678,6 +699,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: String(2e12),
         rebalanceThreshold: 0,
         rebalanceThresholdAbove: 0,
@@ -700,6 +722,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "12000",
         rebalanceThreshold: 0,
         rebalanceThresholdAbove: 0,
@@ -721,6 +744,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "20000",
         rebalanceThreshold: 0,
         rebalanceThresholdsKnown: false,
@@ -747,6 +771,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_factory",
         oracleTimestamp: STALE_TS,
+        lastOracleReportAt: STALE_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -762,6 +787,7 @@ describe("computeHealthStatus", () => {
           source: "fpmm_factory",
           oracleOk: false,
           oracleTimestamp: FRESH_TS,
+          lastOracleReportAt: FRESH_TS,
           priceDifference: "0",
           rebalanceThreshold: 5000,
         }),
@@ -777,6 +803,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -798,6 +825,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
         hasHealthData: false,
@@ -814,6 +842,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: false,
         oracleTimestamp: STALE_TS,
+        lastOracleReportAt: STALE_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
         hasHealthData: false,
@@ -830,6 +859,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "1000",
         rebalanceThreshold: 5000,
         // hasHealthData omitted — pre-PR 1.6 query shape
@@ -843,6 +873,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "1000",
         rebalanceThreshold: 5000,
         hasHealthData: true,
@@ -857,6 +888,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "1000",
         rebalanceThreshold: 5000,
         breakerTripped: true,
@@ -870,6 +902,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "1000",
         rebalanceThreshold: 5000,
         hasHealthData: false,
@@ -884,6 +917,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "1000",
         rebalanceThresholdAbove: 0,
         rebalanceThresholdBelow: 0,
@@ -899,6 +933,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "999999",
         rebalanceThreshold: 5000,
         degenerateReserves: true,
@@ -913,6 +948,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "100000", // ratio = 20 → would be CRITICAL
         rebalanceThreshold: 5000,
         deviationBreachStartedAt: "1",
@@ -927,6 +963,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: STALE_TS,
+        lastOracleReportAt: STALE_TS,
         priceDifference: "1000",
         rebalanceThreshold: 5000,
         breakerTripped: true,
@@ -942,6 +979,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: STALE_TS,
+        lastOracleReportAt: STALE_TS,
         priceDifference: "1000",
         rebalanceThreshold: 5000,
         breakerTripped: true,
@@ -955,6 +993,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: false,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "1000",
         rebalanceThreshold: 5000,
         breakerTripped: true,
@@ -968,6 +1007,7 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
         oracleOk: true,
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "1000",
         rebalanceThreshold: 5000,
         breakerTripped: false,
@@ -1000,6 +1040,7 @@ describe("computePoolUptimePct", () => {
         healthTotalSeconds: String(total),
         lastOracleSnapshotTimestamp: String(sixHourGapStart),
         lastDeviationRatio: "0.010000",
+        lastOracleReportAt: String(sixHourGapStart),
         oracleExpiry: "360",
       })?.toFixed(2),
     ).toBe("99.19");
@@ -1015,9 +1056,45 @@ describe("computePoolUptimePct", () => {
         healthTotalSeconds: String(total),
         lastOracleSnapshotTimestamp: String(frozenNowSec - 120),
         lastDeviationRatio: "0.010000",
+        lastOracleReportAt: String(frozenNowSec - 120),
         oracleExpiry: "360",
       }),
     ).toBe(100);
+  });
+
+  it("keeps a sparse Polygon FX feed healthy inside its one-year expiry", () => {
+    expect(
+      computePoolUptimePct({
+        source: "fpmm_factory",
+        healthBinarySeconds: "0",
+        healthTotalSeconds: "0",
+        lastOracleSnapshotTimestamp: String(frozenNowSec - 6 * 86_400),
+        lastDeviationRatio: "0.010000",
+        lastOracleReportAt: String(frozenNowSec - 6 * 86_400),
+        oracleExpiry: "31536000",
+      }),
+    ).toBe(100);
+  });
+
+  it("clips the open healthy tail at the exact median expiry boundary", () => {
+    expect(
+      liveHealthCounters(
+        {
+          source: "fpmm_factory",
+          healthBinarySeconds: "0",
+          healthTotalSeconds: "0",
+          lastOracleSnapshotTimestamp: String(frozenNowSec - 200),
+          lastDeviationRatio: "0.010000",
+          // The median expired 100 seconds into the 200-second open interval.
+          lastOracleReportAt: String(frozenNowSec - 400),
+          oracleExpiry: "300",
+        },
+        frozenNowSec,
+      ),
+    ).toEqual({
+      healthBinarySeconds: "100",
+      healthTotalSeconds: "200",
+    });
   });
 
   it("does not retroactively count no-data intervals", () => {
@@ -1029,6 +1106,7 @@ describe("computePoolUptimePct", () => {
           healthTotalSeconds: "1000",
           lastOracleSnapshotTimestamp: String(frozenNowSec - 6 * 3600),
           lastDeviationRatio,
+          lastOracleReportAt: String(frozenNowSec - 6 * 3600),
           oracleExpiry: "360",
         }),
       ).toBe(100);
@@ -1044,6 +1122,7 @@ describe("computePoolUptimePct", () => {
         healthTotalSeconds: "1000",
         lastOracleSnapshotTimestamp: String(anchorTs - 120),
         lastDeviationRatio: "0.010000",
+        lastOracleReportAt: String(anchorTs - 120),
         oracleExpiry: "360",
       },
       frozenNowSec,
@@ -1291,7 +1370,7 @@ describe("computeEffectiveStatus", () => {
     expect(
       computeEffectiveStatus({
         source: "fpmm_factory",
-        oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "6000",
         rebalanceThreshold: 5000,
         deviationBreachStartedAt: String(now - 2 * 3600),
@@ -1305,7 +1384,7 @@ describe("computeEffectiveStatus", () => {
     expect(
       computeEffectiveStatus({
         source: "fpmm_factory",
-        oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
         limitPressure0: "1.05",
@@ -1319,6 +1398,7 @@ describe("computeEffectiveStatus", () => {
       computeEffectiveStatus({
         source: "fpmm_factory",
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
         limitStatus: "WARN",
@@ -1344,6 +1424,7 @@ describe("computeEffectiveStatus", () => {
       computeEffectiveStatus({
         source: "fpmm_factory",
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
         limitStatus: "BROKEN",
@@ -1388,6 +1469,7 @@ describe("computeEffectiveStatus", () => {
       computeEffectiveStatus({
         source: "fpmm_factory",
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "73000000000",
         rebalanceThreshold: 5000,
         degenerateReserves: true,
@@ -1418,6 +1500,7 @@ describe("computeEffectiveStatus", () => {
       computeEffectiveStatus({
         source: "fpmm_factory",
         oracleTimestamp: FRESH_TS,
+        lastOracleReportAt: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
         hasHealthData: false,
@@ -1448,14 +1531,14 @@ describe("computeHealthStatus oracle staleness boundary", () => {
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
-        oracleTimestamp: ts120,
+        lastOracleReportAt: ts120,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
     ).toBe("OK");
   });
 
-  it("uses oracleTimestamp for live freshness when lastOracleReportAt is older", () => {
+  it("uses the exact median anchor even when the raw reporter timestamp is newer", () => {
     const staleMedianTs = String(frozenNowSec - 301);
     const freshReporterTs = String(frozenNowSec - 120);
     expect(
@@ -1466,7 +1549,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
-    ).toBe("OK");
+    ).toBe("CRITICAL");
   });
 
   it("oracle at 301s is stale → CRITICAL", () => {
@@ -1474,7 +1557,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
-        oracleTimestamp: ts301,
+        lastOracleReportAt: ts301,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -1486,7 +1569,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
-        oracleTimestamp: ts300,
+        lastOracleReportAt: ts300,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -1501,7 +1584,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
       isOracleFresh(
         {
           source: "fpmm_factory",
-          oracleTimestamp,
+          lastOracleReportAt: oracleTimestamp,
           oracleExpiry: "300",
           oracleFreshnessCheckedAt: checkedAt,
         },
@@ -1518,7 +1601,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
         {
           source: "fpmm_factory",
           oracleOk: true,
-          oracleTimestamp,
+          lastOracleReportAt: oracleTimestamp,
           oracleExpiry: "300",
           oracleFreshnessCheckedAt: frozenNowSec - 60,
           priceDifference: "0",
@@ -1581,7 +1664,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
         {
           source: "fpmm_factory",
           oracleOk: true,
-          oracleTimestamp,
+          lastOracleReportAt: oracleTimestamp,
           oracleExpiry: "300",
           oracleFreshnessCheckedAt: frozenNowSec + 61,
           priceDifference: "0",
@@ -1597,7 +1680,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
     const oracleTimestamp = String(frozenNowSec - 600);
     const pendingPool = {
       source: "fpmm_factory",
-      oracleTimestamp,
+      lastOracleReportAt: oracleTimestamp,
       oracleExpiry: "300",
       oracleFreshnessCheckPending: true,
       priceDifference: "0",
@@ -1626,7 +1709,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
         {
           source: "fpmm_factory",
           oracleOk: true,
-          oracleTimestamp: String(frozenNowSec - 600),
+          lastOracleReportAt: String(frozenNowSec - 600),
           oracleExpiry: "300",
           oracleFreshnessCheckedAt: frozenNowSec,
           oracleFreshnessCheckPending: true,
@@ -1660,7 +1743,7 @@ describe("computeHealthStatus per-feed oracleExpiry", () => {
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
-        oracleTimestamp: ts400,
+        lastOracleReportAt: ts400,
         oracleExpiry: "600",
         priceDifference: "0",
         rebalanceThreshold: 5000,
@@ -1673,7 +1756,7 @@ describe("computeHealthStatus per-feed oracleExpiry", () => {
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
-        oracleTimestamp: ts601,
+        lastOracleReportAt: ts601,
         oracleExpiry: "600",
         priceDifference: "0",
         rebalanceThreshold: 5000,
@@ -1687,7 +1770,7 @@ describe("computeHealthStatus per-feed oracleExpiry", () => {
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
-        oracleTimestamp: ts301,
+        lastOracleReportAt: ts301,
         oracleExpiry: "0",
         priceDifference: "0",
         rebalanceThreshold: 5000,
@@ -1700,7 +1783,7 @@ describe("computeHealthStatus per-feed oracleExpiry", () => {
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
-        oracleTimestamp: ts301,
+        lastOracleReportAt: ts301,
         priceDifference: "0",
         rebalanceThreshold: 5000,
         // oracleExpiry intentionally omitted
@@ -1714,11 +1797,27 @@ describe("computeHealthStatus per-feed oracleExpiry", () => {
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
-        oracleTimestamp: ts300,
+        lastOracleReportAt: ts300,
         oracleExpiry: "600",
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
+    ).toBe("OK");
+  });
+
+  it("keeps a days-old Polygon FX report fresh inside its one-year expiry", () => {
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleOk: true,
+          lastOracleReportAt: String(frozenNowSec - 6 * 86_400),
+          oracleExpiry: "31536000",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        137,
+      ),
     ).toBe("OK");
   });
 });
@@ -1744,7 +1843,7 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
       computeHealthStatus(
         {
           source: "fpmm_factory",
-          oracleTimestamp: ts340,
+          lastOracleReportAt: ts340,
           oracleExpiry: "0",
           priceDifference: "0",
           rebalanceThreshold: 5000,
@@ -1760,7 +1859,7 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
       computeHealthStatus(
         {
           source: "fpmm_factory",
-          oracleTimestamp: ts361,
+          lastOracleReportAt: ts361,
           oracleExpiry: "0",
           priceDifference: "0",
           rebalanceThreshold: 5000,
@@ -1856,7 +1955,7 @@ describe("computeHealthStatus chain-aware staleness fallback", () => {
       computeHealthStatus(
         {
           source: "fpmm_factory",
-          oracleTimestamp: ts301,
+          lastOracleReportAt: ts301,
           oracleExpiry: "0",
           priceDifference: "0",
           rebalanceThreshold: 5000,

@@ -15,7 +15,8 @@
 //  2. `oraclePrice` + `oracleTimestamp` HOLD on the prior values when
 //     orientation is unknown. Advancing them with a guess from the schema
 //     default would mark stale data as freshly updated under the
-//     `oracleTimestamp + oracleExpiry` freshness check.
+//     diagnostics. Contract freshness is tracked separately by the exact
+//     `lastOracleReportAt + oracleExpiry` anchor.
 //
 //  3. OracleSnapshot row SKIPPED when orientation is unknown. A row whose
 //     displayed `oraclePrice` doesn't match its `priceDifference` would be
@@ -44,6 +45,7 @@ import {
   type ResolvedRebalanceState,
 } from "../../priceDifference.js";
 import {
+  medianTimestampEffect,
   rebalanceIncentiveAtBlockEffect,
   rebalancingStateEffect,
   reservesEffect,
@@ -159,13 +161,27 @@ indexer.onEvent(
         })
       : null;
     let rebalancingStateRpcSucceeded = false;
+    let authoritativeMedianTimestamp: bigint | null = null;
     if (!resolved) {
-      const rs = await context.effect(rebalancingStateEffect, {
-        chainId: event.chainId,
-        poolAddress: asAddress(event.srcAddress),
-        blockNumber,
-      });
+      const [rs, medianTimestamp] = await Promise.all([
+        context.effect(rebalancingStateEffect, {
+          chainId: event.chainId,
+          poolAddress: asAddress(event.srcAddress),
+          blockNumber,
+        }),
+        existing?.referenceRateFeedID
+          ? context.effect(medianTimestampEffect, {
+              chainId: event.chainId,
+              rateFeedID: existing.referenceRateFeedID,
+              blockNumber,
+            })
+          : Promise.resolve(null),
+      ]);
       rebalancingStateRpcSucceeded = Boolean(rs);
+      authoritativeMedianTimestamp =
+        rs && medianTimestamp !== null && medianTimestamp > 0n
+          ? medianTimestamp
+          : null;
       resolved = rs ? scaleRpcRebalanceState(rs, existing) : null;
     }
 
@@ -185,9 +201,8 @@ indexer.onEvent(
     // pools. The contract's threshold + priceDifference are authoritative
     // regardless of our local flag, so we still persist those. Preserve
     // the existing `oraclePrice` AND `oracleTimestamp` when orientation
-    // is unknown — advancing the timestamp without a usable price would
-    // mark stale data as freshly updated under the
-    // `oracleTimestamp + oracleExpiry` freshness check.
+    // is unknown — advancing a raw observation timestamp without a usable
+    // price would make the diagnostic cursor internally inconsistent.
     const orientationKnown = existing?.invertRateFeedKnown === true;
     let updateReservesOraclePrice = 0n;
     if (resolved) {
@@ -201,6 +216,9 @@ indexer.onEvent(
         // A successful contract read proves its oracle was live at this
         // block: getRebalancingState reverts on stale or expired data.
         ...(rebalancingStateRpcSucceeded ? { oracleOk: true } : {}),
+        ...(authoritativeMedianTimestamp !== null
+          ? { lastOracleReportAt: authoritativeMedianTimestamp }
+          : {}),
         ...(orientationKnown
           ? {
               oraclePrice: updateReservesOraclePrice,
@@ -252,6 +270,10 @@ indexer.onEvent(
         effectiveBps,
         blockTimestamp,
         isNeverRebalance(pool),
+        {
+          reportTimestamp: existing?.lastOracleReportAt ?? 0n,
+          expiry: existing?.oracleExpiry ?? 0n,
+        },
       );
       // Reassign so the daily-snapshot upsert below freezes the just-updated
       // health counters, not the pre-recordHealthSample values.
@@ -399,30 +421,41 @@ indexer.onEvent(
         blockNumber: blockNumber - 1n,
       }),
     );
-    const [rebalancingStateRpc, preReserves, blockScopedIncentive] =
-      await Promise.all([
-        derivedRebalanceState
-          ? Promise.resolve(null)
-          : context.effect(rebalancingStateEffect, {
-              chainId: event.chainId,
-              poolAddress: asAddress(event.srcAddress),
-              blockNumber,
-            }),
-        preReservesPromise,
-        // Read at the event block — `Pool.rebalanceReward` may carry today's
-        // value during full resync (fetchFees self-heals from `latest`), and
-        // we want the bps that was actually in force when this rebalance
-        // executed. Falls back to `pool.rebalanceReward` below on RPC failure
-        // or block-fallback. Skipped for `-2` sentinel pools per the comment
-        // above — propagate the sentinel so `normalizeRewardBps` sees it.
-        incentiveGetterMissing
-          ? Promise.resolve(-2)
-          : context.effect(rebalanceIncentiveAtBlockEffect, {
-              chainId: event.chainId,
-              poolAddress: asAddress(event.srcAddress),
-              blockNumber,
-            }),
-      ]);
+    const [
+      rebalancingStateRpc,
+      preReserves,
+      blockScopedIncentive,
+      medianTimestampRpc,
+    ] = await Promise.all([
+      derivedRebalanceState
+        ? Promise.resolve(null)
+        : context.effect(rebalancingStateEffect, {
+            chainId: event.chainId,
+            poolAddress: asAddress(event.srcAddress),
+            blockNumber,
+          }),
+      preReservesPromise,
+      // Read at the event block — `Pool.rebalanceReward` may carry today's
+      // value during full resync (fetchFees self-heals from `latest`), and
+      // we want the bps that was actually in force when this rebalance
+      // executed. Falls back to `pool.rebalanceReward` below on RPC failure
+      // or block-fallback. Skipped for `-2` sentinel pools per the comment
+      // above — propagate the sentinel so `normalizeRewardBps` sees it.
+      incentiveGetterMissing
+        ? Promise.resolve(-2)
+        : context.effect(rebalanceIncentiveAtBlockEffect, {
+            chainId: event.chainId,
+            poolAddress: asAddress(event.srcAddress),
+            blockNumber,
+          }),
+      derivedRebalanceState || !existing?.referenceRateFeedID
+        ? Promise.resolve(null)
+        : context.effect(medianTimestampEffect, {
+            chainId: event.chainId,
+            rateFeedID: existing.referenceRateFeedID,
+            blockNumber,
+          }),
+    ]);
 
     const resolved: ResolvedRebalanceState | null =
       derivedRebalanceState ??
@@ -476,6 +509,11 @@ indexer.onEvent(
         // Match UpdateReserves: a successful authoritative read proves the
         // contract accepted the oracle as live for this block.
         ...(rebalancingStateRpcSucceeded ? { oracleOk: true } : {}),
+        ...(rebalancingStateRpcSucceeded &&
+        medianTimestampRpc !== null &&
+        medianTimestampRpc > 0n
+          ? { lastOracleReportAt: medianTimestampRpc }
+          : {}),
         ...(rebalancedOrientationKnown
           ? {
               oraclePrice: rebalancedOraclePrice,
@@ -516,6 +554,10 @@ indexer.onEvent(
         effectiveBps,
         blockTimestamp,
         isNeverRebalance(pool),
+        {
+          reportTimestamp: existing?.lastOracleReportAt ?? 0n,
+          expiry: existing?.oracleExpiry ?? 0n,
+        },
       );
       // Reassign so the daily-snapshot upsert below freezes the just-updated
       // health counters, not the pre-recordHealthSample values.

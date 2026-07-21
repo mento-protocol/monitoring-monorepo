@@ -8,6 +8,7 @@ import {
   fetchBreakerDefaults,
   fetchBreakerFeedState,
   fetchBreakerList,
+  fetchMedianTimestamp,
   fetchRateFeedOracles,
   fetchReportExpiry,
   fetchRebalanceThresholds,
@@ -174,6 +175,25 @@ describe("RPC fetchers reject non-historical latest fallbacks", () => {
     });
 
     const result = await fetchReportExpiry(CHAIN_ID, FEED, BLOCK, noopLogger);
+
+    assert.equal(result, null);
+  });
+
+  it("fetchMedianTimestamp rejects a latest-block fallback", async () => {
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const call = args as ReadContractArgs;
+        if (call.blockNumber !== undefined) throw new Error("header not found");
+        return 1_700_000_000n;
+      },
+    });
+
+    const result = await fetchMedianTimestamp(
+      CHAIN_ID,
+      FEED,
+      BLOCK,
+      noopLogger,
+    );
 
     assert.equal(result, null);
   });

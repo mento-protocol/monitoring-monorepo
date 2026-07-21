@@ -9,7 +9,9 @@ import {
 import { createMockEventData } from "./helpers/eventFixtures.js";
 import {
   _clearMockRebalancingStates,
+  _clearMockMedianTimestamps,
   _clearMockReserves,
+  _setMockMedianTimestamp,
   _setMockRebalancingState,
   _setMockReserves,
 } from "../src/EventHandlers.ts";
@@ -35,6 +37,9 @@ const { MockDb, FPMM } = TestHelpers;
 
 const CHAIN_ID = 42220;
 const POOL_ADDRESS = "0x00000000000000000000000000000000000000fe";
+const RATE_FEED_ID = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
+const ONE_YEAR_SECONDS = 31_536_000n;
+const MEDIAN_TIMESTAMP = 1_700_888_137n;
 
 function updateReservesEvent(): unknown {
   const data: MockEventData = createMockEventData({
@@ -68,7 +73,7 @@ function rebalancedEvent(): unknown {
   });
 }
 
-function staleOraclePool(overrides: Partial<Pool> = {}): Pool {
+function unreconciledOraclePool(overrides: Partial<Pool> = {}): Pool {
   return makePool({
     id: makePoolId(CHAIN_ID, POOL_ADDRESS),
     chainId: CHAIN_ID,
@@ -82,11 +87,18 @@ function staleOraclePool(overrides: Partial<Pool> = {}): Pool {
     rebalanceThresholdBelow: 250,
     rebalanceThreshold: 250,
     oracleOk: false,
+    // Mirrors the Polygon EURm/EUROP bootstrap: the feed's configured
+    // one-year expiry was indexed correctly, but its latest report predated
+    // the pool, so no OracleReported event initialized the local cursors.
+    oracleExpiry: ONE_YEAR_SECONDS,
+    oracleTimestamp: 1_700_000_000n,
+    lastOracleReportAt: 0n,
+    lastMedianPrice: 0n,
     priceDifference: 9_999n,
     oraclePrice: 42n,
     reserves0: 1_000_000n * 10n ** 18n,
     reserves1: 1_000_000n * 10n ** 18n,
-    referenceRateFeedID: "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a",
+    referenceRateFeedID: RATE_FEED_ID,
     oracleFreshnessWindow: 3_600n,
     lpFee: 0,
     protocolFee: 0,
@@ -96,15 +108,20 @@ function staleOraclePool(overrides: Partial<Pool> = {}): Pool {
 }
 
 describe("state-sync reconcile (issue #1053 scenario 5)", () => {
+  beforeEach(() => {
+    _setMockMedianTimestamp(CHAIN_ID, RATE_FEED_ID, MEDIAN_TIMESTAMP);
+  });
+
   afterEach(() => {
+    _clearMockMedianTimestamps();
     _clearMockRebalancingStates();
     _clearMockReserves();
   });
 
-  it("adopts UpdateReserves RPC state and restores oracleOk", async () => {
+  it("restores a one-year-expiry oracle after UpdateReserves RPC succeeds", async () => {
     // Stale, previously-persisted values a naive "keep accumulating"
     // implementation might otherwise hold onto.
-    const staleFixture = staleOraclePool({
+    const staleFixture = unreconciledOraclePool({
       oracleOk: false, // forces RPC fallback despite otherwise-derivable state
       rebalanceThreshold: 100, // stale
       priceDifference: 9_999n, // stale
@@ -153,10 +170,20 @@ describe("state-sync reconcile (issue #1053 scenario 5)", () => {
       true,
       "successful getRebalancingState must restore the live-oracle flag",
     );
+    assert.equal(
+      pool.oracleExpiry,
+      ONE_YEAR_SECONDS,
+      "RPC recovery must preserve the per-feed one-year expiry",
+    );
+    assert.equal(
+      pool.lastOracleReportAt,
+      MEDIAN_TIMESTAMP,
+      "RPC recovery must persist SortedOracles' exact median timestamp",
+    );
   });
 
   it("restores oracleOk after a successful Rebalanced RPC fallback", async () => {
-    const staleFixture = staleOraclePool();
+    const staleFixture = unreconciledOraclePool();
 
     _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, {
       oraclePriceNumerator: 2n * 10n ** 24n,
@@ -183,10 +210,11 @@ describe("state-sync reconcile (issue #1053 scenario 5)", () => {
       true,
       "successful getRebalancingState must restore the live-oracle flag",
     );
+    assert.equal(pool.lastOracleReportAt, MEDIAN_TIMESTAMP);
   });
 
   it("keeps oracleOk false when the UpdateReserves RPC fails", async () => {
-    const staleFixture = staleOraclePool();
+    const staleFixture = unreconciledOraclePool();
     _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, null);
 
     let mockDb = MockDb.createMockDb();
@@ -202,7 +230,7 @@ describe("state-sync reconcile (issue #1053 scenario 5)", () => {
   });
 
   it("keeps oracleOk false when the Rebalanced RPC fails", async () => {
-    const staleFixture = staleOraclePool();
+    const staleFixture = unreconciledOraclePool();
     _setMockRebalancingState(CHAIN_ID, POOL_ADDRESS, null);
     _setMockReserves(CHAIN_ID, POOL_ADDRESS, {
       reserve0: staleFixture.reserves0,

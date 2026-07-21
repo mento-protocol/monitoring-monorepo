@@ -13,7 +13,10 @@ import {
   tradingLimitId,
   tradingLimitStateFromEntity,
 } from "../../tradingLimits.js";
-import { rebalancingStateEffect } from "../../rpc/effects.js";
+import {
+  medianTimestampEffect,
+  rebalancingStateEffect,
+} from "../../rpc/effects.js";
 import {
   computeHealthStatus,
   effectiveThreshold,
@@ -339,6 +342,7 @@ indexer.onEvent(
     // fields and preserves existing breach/health state.
     let priceDifferenceFromMedian: bigint | null = null;
     let active: number | null = null;
+    let medianTimestampFromRpc: bigint | null = null;
     const degenerateReserves = degenerateReservesForThresholdUpdate(existing);
     if (medianFresh) {
       // Synthetic pool view using `lastMedianPrice` (clean median) for both
@@ -360,14 +364,27 @@ indexer.onEvent(
       // Threshold updates are rare governance events so the extra RPC is
       // acceptable. The contract's `getRebalancingState` returns the
       // direction-correct active threshold + priceDifference at this block.
-      const rpc = await context.effect(rebalancingStateEffect, {
-        chainId: event.chainId,
-        poolAddress: asAddress(event.srcAddress),
-        blockNumber,
-      });
+      const [rpc, medianTimestamp] = await Promise.all([
+        context.effect(rebalancingStateEffect, {
+          chainId: event.chainId,
+          poolAddress: asAddress(event.srcAddress),
+          blockNumber,
+        }),
+        existing.referenceRateFeedID
+          ? context.effect(medianTimestampEffect, {
+              chainId: event.chainId,
+              rateFeedID: existing.referenceRateFeedID,
+              blockNumber,
+            })
+          : Promise.resolve(null),
+      ]);
       if (rpc) {
         priceDifferenceFromMedian = rpc.priceDifference;
         active = rpc.rebalanceThreshold;
+        medianTimestampFromRpc =
+          medianTimestamp !== null && medianTimestamp > 0n
+            ? medianTimestamp
+            : null;
       }
     }
     // RPC fallback succeeded ⇒ contract had a live oracle at this block.
@@ -443,6 +460,9 @@ indexer.onEvent(
           priceDifference: priceDifferenceFromMedian,
           degenerateReserves,
           ...(rpcSucceeded ? { oracleOk: true } : {}),
+          ...(medianTimestampFromRpc !== null
+            ? { lastOracleReportAt: medianTimestampFromRpc }
+            : {}),
         },
         existing: { pool: existing },
       });
@@ -466,6 +486,10 @@ indexer.onEvent(
         Number(effectiveThreshold(upserted)),
         blockTimestamp,
         isNeverRebalance(upserted),
+        {
+          reportTimestamp: existing.lastOracleReportAt,
+          expiry: existing.oracleExpiry,
+        },
       );
       // Recompute `healthStatus` after the merge: `recordHealthSample` may
       // have flipped `hasHealthData: false → true`, and `upsertted`'s earlier

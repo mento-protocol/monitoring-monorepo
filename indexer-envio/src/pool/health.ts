@@ -191,8 +191,8 @@ export const isAboveCriticalMagnitude = (
  *
  * Intentional divergences NOT covered by the parity suite:
  *  - Oracle staleness: indexer reads the event-time `oracleOk` flag; the UI
- *    reads `oracleTimestamp + oracleExpiry` against wall clock at render time
- *    with per-chain fallbacks.
+ *    reads the exact `lastOracleReportAt + oracleExpiry` contract boundary
+ *    against wall clock at render time with per-chain fallbacks.
  *  - Weekend reclassification: only the UI has `isWeekend()` at render time.
  *    Indexed weekend-stale pools surface as CRITICAL here; the UI
  *    reclassifies them to WEEKEND.

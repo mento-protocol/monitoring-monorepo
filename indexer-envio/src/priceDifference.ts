@@ -264,15 +264,12 @@ export function scaleRpcRebalanceState(
  *     returns the real priceDifference at this block.
  *   - `oracleOk` AND `oracleExpiry > 0` AND
  *     `lastOracleReportAt + oracleExpiry > eventTimestamp`: the
- *     on-chain `getRebalancingState` reverts on stale oracle, so
- *     derive must mirror that. Use `lastOracleReportAt` (advanced
- *     only inside `MedianUpdated` using `blockTimestamp`, frozen on
- *     zero-median outages) — NOT `oracleTimestamp` (bumped by
- *     `OracleReported` and state-sync writes, so it tracks "last
- *     entity touch") and NOT `lastMedianAt` (jump-detection lineage
- *     field, not gated for outages). This is an under-bound on the
- *     contract's median-reporter expiry: when reporters refresh but
- *     the median hasn't moved, derive falls through to RPC.
+ *     on-chain `getRebalancingState` reverts on stale oracle, so derive must
+ *     mirror that. Use `lastOracleReportAt` (the block-scoped
+ *     SortedOracles.medianTimestamp refreshed on OracleReported,
+ *     MedianUpdated, and authoritative state-sync) — NOT `oracleTimestamp`
+ *     (a raw diagnostic observation also bumped by state-sync writes) and
+ *     NOT `lastMedianAt` (jump-detection lineage).
  *
  * `reservesOverride` lets UpdateReserves pass the event's new reserves
  * (the contract's `getRebalancingState` reads post-event state); Rebalanced

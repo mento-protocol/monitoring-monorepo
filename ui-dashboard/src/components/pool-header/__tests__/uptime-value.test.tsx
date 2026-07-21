@@ -10,6 +10,8 @@ type RollupRow = {
 type HealthCursorRow = {
   lastOracleSnapshotTimestamp?: string;
   lastDeviationRatio?: string;
+  lastOracleReportAt?: string;
+  oracleExpiry?: string;
 };
 type DailyAnchorRow = {
   timestamp?: string;
@@ -164,6 +166,8 @@ describe("UptimeValue", () => {
           {
             lastOracleSnapshotTimestamp: String(nowSec - 6 * 3600),
             lastDeviationRatio: "0.010000",
+            lastOracleReportAt: String(nowSec - 6 * 3600),
+            oracleExpiry: "360",
           },
         ],
       },
