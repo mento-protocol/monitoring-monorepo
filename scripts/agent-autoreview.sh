@@ -2264,7 +2264,6 @@ snapshot_linux_root_ancestor_node() {
   local alias_dir
   local node_version
   local smoke_output
-  local diagnostics="${AUTOREVIEW_TEST_NODE_SNAPSHOT_DIAGNOSTICS:-0}"
   [[ "$(/usr/bin/uname -s)" == "Linux" && "$EUID" -eq 0 ]] || return 1
   [[ "$source" == /* && -f "$source" && -x "$source" && ! -L "$source" ]] ||
     return 1
@@ -2286,14 +2285,8 @@ snapshot_linux_root_ancestor_node() {
   if ! digest="$(system_perl -MDigest::SHA -MFcntl=:DEFAULT,:mode -e '
     use strict;
     use warnings;
-    my ($source, $destination, $euid, $diagnostics) = @ARGV;
+    my ($source, $destination, $euid) = @ARGV;
     my $maximum_size = 256 * 1024 * 1024;
-    my $reject = sub {
-      my ($stage) = @_;
-      print STDERR "agent:autoreview: live-ancestor Node snapshot rejected at $stage\n"
-        if $diagnostics eq "1";
-      exit 1;
-    };
 
     sub read_proc_identity {
       my ($pid) = @_;
@@ -2369,27 +2362,22 @@ snapshot_linux_root_ancestor_node() {
       return 1;
     }
 
-    $reject->("root-policy") if $euid != 0;
-    sysopen(my $candidate, $source, O_RDONLY | O_NOFOLLOW) or
-      $reject->("source-open");
+    exit 1 if $euid != 0;
+    sysopen(my $candidate, $source, O_RDONLY | O_NOFOLLOW) or exit 1;
     binmode($candidate);
     my @candidate_before = stat($candidate);
-    $reject->("source-type")
-      if !@candidate_before || !S_ISREG($candidate_before[2]);
-    $reject->("source-owner")
-      if $candidate_before[4] == 0 || $candidate_before[4] == $euid;
+    exit 1 if !@candidate_before || !S_ISREG($candidate_before[2]);
+    exit 1 if $candidate_before[4] == 0 || $candidate_before[4] == $euid;
     # Image/tool caches may hard-link the active runtime. The live descriptor,
     # complete before/after metadata (including nlink and ctime), and digest
     # bind the copied bytes; only the published snapshot must be single-link.
-    $reject->("source-mode")
-      if $candidate_before[3] < 1 || ($candidate_before[2] & 06022);
-    $reject->("source-executable") if ($candidate_before[2] & 0111) == 0;
-    $reject->("source-size")
-      if $candidate_before[7] <= 0 || $candidate_before[7] > $maximum_size;
+    exit 1 if $candidate_before[3] < 1 || ($candidate_before[2] & 06022);
+    exit 1 if ($candidate_before[2] & 0111) == 0;
+    exit 1 if $candidate_before[7] <= 0 || $candidate_before[7] > $maximum_size;
     my $prefix;
-    $reject->("source-prefix") if sysread($candidate, $prefix, 4) != 4;
-    $reject->("source-format") if unpack("H*", $prefix) ne "7f454c46";
-    sysseek($candidate, 0, 0) == 0 or $reject->("source-rewind");
+    exit 1 if sysread($candidate, $prefix, 4) != 4;
+    exit 1 if unpack("H*", $prefix) ne "7f454c46";
+    sysseek($candidate, 0, 0) == 0 or exit 1;
 
     my ($ancestor_pid, $ancestor_starttime) = find_live_ancestor(
       $candidate_before[0],
@@ -2397,91 +2385,81 @@ snapshot_linux_root_ancestor_node() {
       undef,
       undef,
     );
-    $reject->("live-ancestor")
-      if !defined($ancestor_pid) || !defined($ancestor_starttime);
+    exit 1 if !defined($ancestor_pid) || !defined($ancestor_starttime);
     my $proc_source = "/proc/$ancestor_pid/exe";
     # /proc/<pid>/exe is an intentional kernel-owned symlink to the already
     # running executable, so this one open must follow the final component.
-    sysopen(my $input, $proc_source, O_RDONLY) or
-      $reject->("ancestor-open");
+    sysopen(my $input, $proc_source, O_RDONLY) or exit 1;
     binmode($input);
     my @input_before = stat($input);
-    $reject->("ancestor-identity")
-      if !@input_before || !same_metadata(\@candidate_before, \@input_before);
+    exit 1 if !@input_before ||
+      !same_metadata(\@candidate_before, \@input_before);
 
     sysopen(
       my $output,
       $destination,
       O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
       0600,
-    ) or $reject->("snapshot-create");
+    ) or exit 1;
     binmode($output);
     my $source_digest = Digest::SHA->new(256);
     my $total = 0;
     my $buffer;
     while (1) {
       my $read = sysread($input, $buffer, 65536);
-      $reject->("snapshot-read") if !defined($read);
+      exit 1 if !defined($read);
       last if $read == 0;
       $total += $read;
-      $reject->("snapshot-size")
-        if $total > $maximum_size || $total > $input_before[7];
+      exit 1 if $total > $maximum_size || $total > $input_before[7];
       $source_digest->add(substr($buffer, 0, $read));
       my $offset = 0;
       while ($offset < $read) {
         my $written = syswrite($output, $buffer, $read - $offset, $offset);
-        $reject->("snapshot-write") if !defined($written) || $written == 0;
+        exit 1 if !defined($written) || $written == 0;
         $offset += $written;
       }
     }
-    $reject->("snapshot-length") if $total != $input_before[7];
-    close($output) or $reject->("snapshot-close");
-    chmod(0500, $destination) == 1 or $reject->("snapshot-mode");
+    exit 1 if $total != $input_before[7];
+    close($output) or exit 1;
+    chmod(0500, $destination) == 1 or exit 1;
 
     my @input_after = stat($input);
     my @candidate_after = stat($candidate);
     my @path_after = lstat($source);
-    $reject->("ancestor-drift")
-      if !@input_after || !same_metadata(\@input_before, \@input_after);
-    $reject->("source-descriptor-drift")
-      if !@candidate_after ||
-        !same_metadata(\@candidate_before, \@candidate_after);
-    $reject->("source-path-drift")
-      if !@path_after || !same_metadata(\@candidate_before, \@path_after);
+    exit 1 if !@input_after ||
+      !same_metadata(\@input_before, \@input_after);
+    exit 1 if !@candidate_after ||
+      !same_metadata(\@candidate_before, \@candidate_after);
+    exit 1 if !@path_after ||
+      !same_metadata(\@candidate_before, \@path_after);
     my ($verified_pid, $verified_starttime) = find_live_ancestor(
       $candidate_before[0],
       $candidate_before[1],
       $ancestor_pid,
       $ancestor_starttime,
     );
-    $reject->("live-ancestor-drift")
-      if !defined($verified_pid) || !defined($verified_starttime);
-    close($input) or $reject->("ancestor-close");
-    close($candidate) or $reject->("source-close");
+    exit 1 if !defined($verified_pid) || !defined($verified_starttime);
+    close($input) or exit 1;
+    close($candidate) or exit 1;
 
     my @published = lstat($destination);
-    $reject->("published-type")
-      if !@published || !S_ISREG($published[2]) || S_ISLNK($published[2]);
-    $reject->("published-owner")
-      if $published[4] != $euid || $published[3] != 1;
-    $reject->("published-metadata")
-      if ($published[2] & 07777) != 0500 || $published[7] != $total;
-    sysopen(my $published_input, $destination, O_RDONLY | O_NOFOLLOW) or
-      $reject->("published-open");
+    exit 1 if !@published || !S_ISREG($published[2]) || S_ISLNK($published[2]);
+    exit 1 if $published[4] != $euid || $published[3] != 1;
+    exit 1 if ($published[2] & 07777) != 0500 || $published[7] != $total;
+    sysopen(my $published_input, $destination, O_RDONLY | O_NOFOLLOW) or exit 1;
     binmode($published_input);
     my $published_digest = Digest::SHA->new(256);
     while (1) {
       my $read = sysread($published_input, $buffer, 65536);
-      $reject->("published-read") if !defined($read);
+      exit 1 if !defined($read);
       last if $read == 0;
       $published_digest->add(substr($buffer, 0, $read));
     }
-    close($published_input) or $reject->("published-close");
+    close($published_input) or exit 1;
     my $source_hex = $source_digest->hexdigest;
-    $reject->("published-digest")
-      if $published_digest->hexdigest ne $source_hex;
+    exit 1 if $published_digest->hexdigest ne $source_hex;
     print "$source_hex\n";
-  ' "$source" "$destination" "$EUID" "$diagnostics")"; then
+  ' "$source" "$destination" "$EUID")"; then
     /bin/rm -rf -- "$snapshot_dir"
     return 1
   fi
@@ -2491,33 +2469,17 @@ snapshot_linux_root_ancestor_node() {
   }
   /bin/mv "$destination" "$destination.$digest"
   destination="$destination.$digest"
-  if ! snapshot_path_is_trusted "$destination"; then
-    [[ "$diagnostics" != "1" ]] ||
-      echo "agent:autoreview: live-ancestor Node snapshot rejected at snapshot-trust" >&2
-    /bin/rm -rf -- "$snapshot_dir"
-    return 1
-  fi
-  if ! native_node_candidate_is_trusted "$destination"; then
-    [[ "$diagnostics" != "1" ]] ||
-      echo "agent:autoreview: live-ancestor Node snapshot rejected at native-format" >&2
-    /bin/rm -rf -- "$snapshot_dir"
-    return 1
-  fi
-  if ! linux_node_snapshot_has_safe_closure "$destination"; then
-    [[ "$diagnostics" != "1" ]] ||
-      echo "agent:autoreview: live-ancestor Node snapshot rejected at loader-closure" >&2
+  if ! snapshot_path_is_trusted "$destination" ||
+    ! native_node_candidate_is_trusted "$destination" ||
+    ! linux_node_snapshot_has_safe_closure "$destination"; then
     /bin/rm -rf -- "$snapshot_dir"
     return 1
   fi
   linux_node_snapshot_closure_is_trusted "$destination" || {
-    [[ "$diagnostics" != "1" ]] ||
-      echo "agent:autoreview: live-ancestor Node snapshot rejected at closure-attestation" >&2
     /bin/rm -rf -- "$snapshot_dir"
     return 1
   }
   alias_dir="$(linux_node_alias_dir_for_candidate "$destination")" || {
-    [[ "$diagnostics" != "1" ]] ||
-      echo "agent:autoreview: live-ancestor Node snapshot rejected at alias-directory" >&2
     /bin/rm -rf -- "$snapshot_dir"
     return 1
   }
@@ -2527,22 +2489,16 @@ snapshot_linux_root_ancestor_node() {
       "AUTOREVIEW_ATTESTED_NODE_LIBRARY_PATH=$alias_dir" \
       "$destination" --version 2>/dev/null
   )" || {
-    [[ "$diagnostics" != "1" ]] ||
-      echo "agent:autoreview: live-ancestor Node snapshot rejected at version-exec" >&2
     /bin/rm -rf -- "$snapshot_dir"
     return 1
   }
   [[
     "$node_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.+-]+)?$
   ]] || {
-    [[ "$diagnostics" != "1" ]] ||
-      echo "agent:autoreview: live-ancestor Node snapshot rejected at version-output" >&2
     /bin/rm -rf -- "$snapshot_dir"
     return 1
   }
   linux_node_snapshot_closure_is_trusted "$destination" || {
-    [[ "$diagnostics" != "1" ]] ||
-      echo "agent:autoreview: live-ancestor Node snapshot rejected at version-reattest" >&2
     /bin/rm -rf -- "$snapshot_dir"
     return 1
   }
@@ -2554,15 +2510,11 @@ snapshot_linux_root_ancestor_node() {
       -e 'process.stdout.write("agent-autoreview-node-smoke")' \
       2>/dev/null
   )" || {
-    [[ "$diagnostics" != "1" ]] ||
-      echo "agent:autoreview: live-ancestor Node snapshot rejected at smoke-exec" >&2
     /bin/rm -rf -- "$snapshot_dir"
     return 1
   }
   if [[ "$smoke_output" != "agent-autoreview-node-smoke" ]] ||
     ! linux_node_snapshot_closure_is_trusted "$destination"; then
-    [[ "$diagnostics" != "1" ]] ||
-      echo "agent:autoreview: live-ancestor Node snapshot rejected at smoke-reattest" >&2
     /bin/rm -rf -- "$snapshot_dir"
     return 1
   fi
@@ -2701,7 +2653,6 @@ resolve_node_command() {
 
 git_bin="$(resolve_external_command git || true)"
 node_bin="$(resolve_node_command || true)"
-unset AUTOREVIEW_TEST_NODE_SNAPSHOT_DIAGNOSTICS
 
 if [[ ! -x "$helper" ]]; then
   cat >&2 <<EOF

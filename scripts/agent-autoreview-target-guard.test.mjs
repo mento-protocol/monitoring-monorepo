@@ -559,10 +559,7 @@ printf '%s\\n' '{"findings":[],"overall_correctness":"patch is correct","overall
       ...process.env,
       AUTOREVIEW_FAKE_MUTATE_REPO: repo,
       ...(rootForeignCurrentNode
-        ? {
-            AUTOREVIEW_FAKE_NODE_MARKER: inheritedNodeMarker,
-            AUTOREVIEW_TEST_NODE_SNAPSHOT_DIAGNOSTICS: "1",
-          }
+        ? { AUTOREVIEW_FAKE_NODE_MARKER: inheritedNodeMarker }
         : {}),
       PATH: `${bin}${path.delimiter}${process.env.PATH || ""}`,
     },
