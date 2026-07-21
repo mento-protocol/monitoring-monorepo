@@ -93,7 +93,9 @@ If a webhook was deleted outside Terraform and planning reports a 404, stop
 before applying. After explicit state-repair approval, run
 `alerts/infra/scripts/fix-webhook-state.sh`, inspect its proposed state changes,
 then run `pnpm alerts:infra:plan` again. Deployment and recreation happen only
-through the reviewed `production-infra`-gated CI workflow.
+through the reviewed `production-infra`-gated CI workflow. The repair tool
+ignores provider-rendered nested IDs and refuses all state changes when a
+QuickNode read is rate-limited, unavailable, or otherwise inconclusive.
 
 ## Debugging and security
 

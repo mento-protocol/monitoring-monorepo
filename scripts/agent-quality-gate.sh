@@ -1355,6 +1355,11 @@ while IFS= read -r path; do
           add_command "bash -n $(quote_path "$path")" "alerts infra shell script changed"
           ;;
       esac
+      case "$path" in
+        alerts/infra/scripts/common.sh|alerts/infra/scripts/fix-webhook-state.sh|alerts/infra/scripts/fix-webhook-state.test.sh)
+          add_command "bash alerts/infra/scripts/fix-webhook-state.test.sh" "QuickNode state parser changed"
+          ;;
+      esac
       ;;
     alerts/infra/onchain-event-listeners/*|alerts/infra/channels/*)
       # Listener filter (filter-function.js.tpl) feeds into the handler —
@@ -1366,6 +1371,11 @@ while IFS= read -r path; do
       add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "alerts/infra listener or channels changed (handler tests cover cross-chain behavior)"
       add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
       add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
+      case "$path" in
+        alerts/infra/onchain-event-listeners/main.tf)
+          add_command "bash alerts/infra/scripts/fix-webhook-state.test.sh" "QuickNode replacement state parser changed"
+          ;;
+      esac
       ;;
     alerts/infra/*)
       add_surface "alerts-infra"

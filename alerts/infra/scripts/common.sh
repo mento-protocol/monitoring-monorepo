@@ -246,6 +246,34 @@ read_tf_main_value() {
 	fi
 }
 
+# Extract the single resource-level ID from `terraform state show` output.
+# Provider-rendered JSON may contain nested `id =` fields at deeper indentation;
+# only Terraform's four-space-indented top-level resource attribute is valid.
+# Consume the complete output and fail closed if it contains zero or multiple
+# top-level IDs.
+terraform_state_resource_id() {
+	local resource="$1"
+	local state_output
+
+	if ! state_output=$(terraform state show -no-color "${resource}" 2>/dev/null); then
+		return 1
+	fi
+
+	awk '
+		/^    id[[:space:]]*=[[:space:]]*"/ {
+			count++
+			value = $3
+			gsub(/^"|"$/, "", value)
+		}
+		END {
+			if (count != 1 || value == "") {
+				exit 1
+			}
+			print value
+		}
+	' <<<"${state_output}"
+}
+
 # Validate that a value is a non-negative integer
 # Usage: validate_non_negative_int "value" "default" "name"
 # Example: memory=$(validate_non_negative_int "${memory_raw}" "256" "memory_mb")
