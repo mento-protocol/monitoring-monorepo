@@ -237,7 +237,7 @@ normalize_expected_command() {
       expected="${expected/pnpm dashboard:build/pnpm exec turbo run build --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
       ;;
     *"pnpm dashboard:size-limit"*)
-      expected="${expected/pnpm dashboard:size-limit/pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
+      expected="${expected/pnpm dashboard:size-limit/VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
       ;;
     *"bash scripts/check-react-doctor-score.sh"*)
       expected="${expected/bash scripts\/check-react-doctor-score.sh/pnpm exec turbo run react-doctor:score --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
@@ -380,6 +380,8 @@ assert_turbo_task_has_input "build" '$TURBO_ROOT$/.npmrc'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/turbo.json'
 assert_turbo_task_has_env "build" "VERCEL_ENV"
+assert_turbo_task_has_env "build" "VERCEL_DEPLOYMENT_ID"
+assert_turbo_task_has_env "build" "VERCEL_GIT_COMMIT_SHA"
 assert_turbo_task_has_output "build" ".next/**"
 assert_turbo_task_has_output "build" "!.next/cache/**"
 assert_turbo_task_has_output "build" "!.next/dev/**"
@@ -1409,32 +1411,32 @@ assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser"
 
 run_gate "terraform/metrics-bridge.tf"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform init -backend=false -input=false (Terraform changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform validate -no-color (Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Terraform/Cloud Run path changed)"
 
 run_gate "alerts/rules/rules-fpmms.tf"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
 
 run_gate "alerts/rules/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
 
 run_gate "alerts/infra/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra init -backend=false -input=false (alerts/infra Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra validate -no-color (alerts/infra Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud Function path changed)"
 
 run_gate "alerts/infra/channels/sentry-bridge/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
 
 run_gate "alerts/infra/onchain-event-listeners/main.tf"
 assert_contains "- bash alerts/infra/scripts/fix-webhook-state.test.sh (QuickNode replacement state parser changed)"
@@ -1448,7 +1450,7 @@ assert_contains "- bash -n alerts/infra/scripts/fix-webhook-state.test.sh (shell
 assert_contains "- bash alerts/infra/scripts/fix-webhook-state.test.sh (QuickNode state parser changed)"
 
 run_gate "alerts/infra/onchain-event-handler/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud Function path changed)"
 
 run_gate "alerts/infra/onchain-event-handler/src/slack.ts"
@@ -1460,7 +1462,7 @@ run_gate "alerts/infra/onchain-event-handler/src/safe-abi.json"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
 assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
 assert_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage (Safe ABI changed (handler imports it) (coverage floor))"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Safe ABI changed (listener filter uses it at plan time))"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra init -backend=false -input=false (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra validate -no-color (Safe ABI changed (listener filter uses it at plan time))"
 
@@ -1487,9 +1489,9 @@ assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions wor
 assert_contains "- pnpm install --frozen-lockfile (central CI workflow changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
 assert_contains "- pnpm tf:test (Terraform registry-backed CI workflow changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform registry-backed CI workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform registry-backed CI workflow changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform registry-backed CI workflow changed)"
 # Workspace-wide triggers (ci.yml here) deliberately skip the playwright
 # suite — CI runs it in its own ui-dashboard job and the local --single-process
 # chromium mode is flaky on keyboard/route-heavy tests.
@@ -1507,10 +1509,10 @@ run_gate ".github/workflows/infra.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm tf:test (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform registry workflow changed)"
 
 run_gate ".github/actions/pnpm-install/action.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
@@ -1710,17 +1712,29 @@ assert_contains "- pnpm agent:quality-gate:test (turbo task config changed)"
 run_gate "terraform.stacks.json"
 assert_contains "- terraform"
 assert_contains "- pnpm tf:test (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform stack registry changed)"
 
 run_gate "scripts/tf-stacks.mjs"
 assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform stack wrapper changed)"
+
+run_gate "scripts/terraform-fmt-check.mjs"
+assert_contains "- node scripts/terraform-fmt-check.test.mjs (Terraform format helper changed)"
+assert_contains "- pnpm tf:test (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=governance-watchdog/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs governance-watchdog/infra (Terraform format helper changed)"
+
+run_gate "scripts/terraform-fmt-check.test.mjs"
+assert_contains "- node scripts/terraform-fmt-check.test.mjs (Terraform format helper test changed)"
 
 fail_fast_repo="$(mktemp -d)"
 (
@@ -1817,6 +1831,61 @@ assert_contains "+ pnpm lint:scripts"
 assert_contains "+ pnpm agent:prewarm:test"
 assert_contains "All mapped commands passed."
 assert_not_contains "parallel marker was not created"
+
+serialized_repo_mutation_repo="$(mktemp -d)"
+(
+  cd "$serialized_repo_mutation_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  cat > scripts/agent-quality-gate.sh <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > scripts/agent-autoreview.sh <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > scripts/agent-autoreview.test.sh <<'STUB'
+#!/usr/bin/env bash
+if [[ ! -f "${SERIAL_MUTATION_MARKER:?}" ]]; then
+  echo "autoreview test overlapped the repo-mutating quality-gate self-test"
+  exit 1
+fi
+STUB
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "agent:quality-gate:test" ]]; then
+  sleep 0.2
+  : > "${SERIAL_MUTATION_MARKER:?}"
+fi
+STUB
+  chmod +x bin/pnpm scripts/agent-autoreview.sh scripts/agent-autoreview.test.sh scripts/agent-quality-gate.sh tools/trunk
+  git add .
+  git commit -qm init
+  printf '%s\n' \
+    "scripts/agent-autoreview.sh" \
+    "scripts/agent-quality-gate.sh" \
+    > changed-paths.txt
+  SERIAL_MUTATION_MARKER="$serialized_repo_mutation_repo/serial-marker" \
+    PATH="$serialized_repo_mutation_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 4 \
+      > "$output_file" 2>&1
+)
+rm -rf "$serialized_repo_mutation_repo"
+assert_contains "+ pnpm agent:quality-gate:test"
+assert_contains "+ bash scripts/agent-autoreview.test.sh"
+assert_contains "All mapped commands passed."
+assert_not_contains "autoreview test overlapped the repo-mutating quality-gate self-test"
 
 auto_parallel_quality_repo="$(mktemp -d)"
 (
@@ -1922,6 +1991,10 @@ STUB
 args="$*"
 case "$args" in
   exec\ turbo\ run\ test:browser*|exec\ turbo\ run\ size-limit*)
+    if [[ "$args" == exec\ turbo\ run\ size-limit* && "${VERCEL_DEPLOYMENT_ID:-}" != "local-quality-gate" ]]; then
+      echo "size-limit did not receive the gate-owned deployment identity"
+      exit 1
+    fi
     if ! mkdir "${DASHBOARD_NEXT_LOCK:?}"; then
       echo "dashboard .next command overlapped"
       exit 1
@@ -1946,7 +2019,7 @@ STUB
 )
 rm -rf "$dashboard_serial_repo"
 assert_contains "+ pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw"
-assert_contains "+ pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+assert_contains "+ VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
 assert_contains "All mapped commands passed."
 assert_not_contains "dashboard .next command overlapped"
 
@@ -2650,6 +2723,18 @@ run_gate "scripts/check-pr-description.test.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
 
 run_gate "scripts/agent-autoreview.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+
+run_gate "scripts/agent-autoreview-core.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+
+run_gate "scripts/agent-autoreview-core.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+
+run_gate "scripts/agent-autoreview-target-guard.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
 
