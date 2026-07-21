@@ -39,10 +39,22 @@ locals {
       symbol    = "MON"
       threshold = 50
     }
+    "polygon" = {
+      title     = "Polygon"
+      metric    = "Native_balanceOf"
+      symbol    = "POL"
+      threshold = 500
+    }
     "monad-testnet" = {
       title     = "Monad-Testnet"
       metric    = "Native_balanceOf"
       symbol    = "MON"
+      threshold = 50
+    }
+    "polygon-testnet" = {
+      title     = "Polygon-Testnet"
+      metric    = "Native_balanceOf"
+      symbol    = "POL"
       threshold = 50
     }
   }

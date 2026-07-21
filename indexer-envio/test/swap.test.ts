@@ -77,4 +77,27 @@ describe("buildSwapTraderFields", () => {
     );
     assert.equal(fields.volumeUsdWei, 0n);
   });
+
+  it("passes a historical FX rate through for same-currency non-USD pools", () => {
+    const fields = buildSwapTraderFields(
+      {
+        chainId: 137,
+        transaction: { from: TRADER, to: ROUTER },
+        params: {
+          amount0In: 100n * 10n ** 18n,
+          amount0Out: 0n,
+          amount1In: 0n,
+          amount1Out: 99_900_000n,
+        },
+      },
+      {
+        token0: "0x4d502d735b4c574b487ed641ae87ceae884731c7",
+        token1: "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51",
+        token0Decimals: 18,
+        token1Decimals: 6,
+      },
+      1_100_000_000_000_000_000_000_000n,
+    );
+    assert.equal(fields.volumeUsdWei, 110n * 10n ** 18n);
+  });
 });

@@ -47,6 +47,7 @@ export type VolumeHeroView = {
   venue: Venue;
   range: VolumeRangeKey;
   includeProtocolActors: boolean;
+  chainIdIn: number[];
   /** UTC midnight (seconds) the today-partial query was scoped to. */
   todayMidnight: number;
 };
@@ -105,17 +106,22 @@ export function volumeHeroViewMatches(
     range: VolumeRangeKey;
     isProtocolActorIn: ReadonlyArray<boolean>;
     todayMidnight: number;
+    chainIdIn: ReadonlyArray<number>;
   },
 ): boolean {
   const expectedActors = protocolActorInForView(view.includeProtocolActors);
   const actorsMatch =
     expectedActors.length === actual.isProtocolActorIn.length &&
     expectedActors.every((v, i) => actual.isProtocolActorIn[i] === v);
+  const chainsMatch =
+    view.chainIdIn.length === actual.chainIdIn.length &&
+    view.chainIdIn.every((value, index) => actual.chainIdIn[index] === value);
   return (
     view.networkId === actual.networkId &&
     view.venue === actual.venue &&
     view.range === actual.range &&
     view.todayMidnight === actual.todayMidnight &&
-    actorsMatch
+    actorsMatch &&
+    chainsMatch
   );
 }

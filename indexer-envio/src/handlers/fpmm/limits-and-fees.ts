@@ -35,6 +35,7 @@ import { recordHealthSample } from "../../healthScore.js";
 import { bootstrapAndResolveBreakerSnapshotFields } from "../../breakers.js";
 import { getBreakerConfigsByFeed } from "../../rpc.js";
 import { shouldPersistRawOracleSnapshot } from "../../oracleSnapshotRetention.js";
+import { syncPoolLiquidityStrategy } from "../../liquidityStrategies.js";
 
 function degenerateReservesForThresholdUpdate(pool: Pool): boolean {
   const exactZeroDegenerateState = classifyExactZeroReserves(pool);
@@ -102,19 +103,16 @@ indexer.onEvent(
   { contract: "FPMM", event: "LiquidityStrategyUpdated" },
   async ({ event, context }) => {
     const poolId = makePoolId(event.chainId, event.srcAddress);
-    if (await maybePreloadPool(context, poolId)) return;
-
     const strategy = asAddress(event.params.strategy);
-    const status = event.params.status;
-
-    const pool = await context.Pool.get(poolId);
-    if (!pool) return;
-
-    if (status) {
-      context.Pool.set({ ...pool, rebalancerAddress: strategy });
-    } else if (pool.rebalancerAddress === strategy) {
-      context.Pool.set({ ...pool, rebalancerAddress: "" });
-    }
+    await syncPoolLiquidityStrategy({
+      context,
+      chainId: event.chainId,
+      poolId,
+      strategyAddress: strategy,
+      active: event.params.status,
+      blockNumber: asBigInt(event.block.number),
+      blockTimestamp: asBigInt(event.block.timestamp),
+    });
   },
 );
 

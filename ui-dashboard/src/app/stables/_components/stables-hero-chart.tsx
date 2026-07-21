@@ -1,5 +1,6 @@
 "use client";
 
+import { chainLabel } from "@mento-protocol/config/chains";
 import { useMemo } from "react";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import type { BreakdownSeries } from "@/components/time-series-chart-card-overlays";
@@ -66,7 +67,7 @@ export function StablesHeroChart({
   isLoading,
   hasError,
 }: Props): React.JSX.Element {
-  // Group snapshots by `{chainId}|{tokenAddress}|{source}` so Celo and Monad
+  // Group snapshots by `{chainId}|{tokenAddress}|{source}` so chain-local
   // supplies stay distinct before the stacked total sums them.
   const { breakdown, totalSeries } = useMemo(() => {
     if (snapshots.length === 0 && latestPerToken.length === 0) {
@@ -161,10 +162,4 @@ export function StablesHeroChart({
       plotlyDeferMode="visible"
     />
   );
-}
-
-function chainLabel(chainId: number): string {
-  if (chainId === 143) return "Monad";
-  if (chainId === 42220) return "Celo";
-  return `Chain ${chainId}`;
 }

@@ -13,9 +13,12 @@ When the user asks for a broad verify (no specific page), hit these in order and
 1. **Homepage** `/` — KPI tiles + protocol-wide TVL/volume chart + attention pools
 2. **Pools** `/pools` — full pools table with health indicators
 3. **Pool detail** `/pool/{id}` — pick any active pool from `/pools`. Verify TVL/volume charts, oracle freshness, rebalance history, swap table
-4. **Revenue** `/revenue` — KPI tiles + historical chart
-5. **Bridge Flows** `/bridge-flows` — Wormhole NTT transfers (see below)
-6. **Address book** `/address-book` — auth-gated; verify logged-in when possible, otherwise verify the logged-out redirect/sign-in state
+4. **Volume** `/volume` — global volume, flow insights, and chain filter
+5. **Stables** `/stables` — supply/custody across configured chains
+6. **Revenue** `/revenue` — KPI tiles + historical chart
+7. **Bridge Flows** `/bridge-flows` — Wormhole NTT transfers (see below)
+8. **Integrations** `/integrations` — auth-gated adapter coverage by chain
+9. **Address book** `/address-book` — auth-gated; verify logged-in when possible, otherwise verify the logged-out redirect/sign-in state
 
 For a narrow verify (specific page or feature), skip the list and go directly to the requested URL.
 
@@ -61,18 +64,27 @@ For a narrow verify (specific page or feature), skip the list and go directly to
 
 ## Page-specific checks
 
+### Polygon coverage
+
+- `/pools` and `/volume`: select Polygon, verify the URL contains `chain=137`, only Polygon rows/series remain, refresh preserves the selection, and selecting All removes the default query parameter without an RSC refetch.
+- Polygon pool detail: EURm/EUROP renders every active strategy (Open and Reserve once the promoted schema/data are available); during schema rollout, the page degrades to the legacy pointer without blanking the rest of the pool.
+- `/stables`: Polygon USDm and EURm appear as distinct chain-qualified burning-mode supplies rather than being merged with another chain's token row.
+- `/integrations`: Polygon appears for every configured adapter and empty/error states remain distinct from unsupported coverage.
+
 ### `/bridge-flows`
 
 - **KPI row (3 tiles):** `Total Bridge Transfers` (BreakdownTile w/ 24h/7d/30d breakdown), `Pending` (number or "1,000+"), `Avg deliver time` (h/m/s). None should be "—" or "…" on a healthy load.
 - **Charts row (3 columns):** `Bridged Volume (USD)` time-series chart with 7d/30d/all range buttons, `Token Breakdown` donut, `Top Bridgers` ranked list with address links.
 - **Recent transfers table (25 rows):** columns Provider, Route, Status, Token, Amount (USD), Amount, Sender, Receiver, Txs, Time. Per-cell click targets:
   - **Wormholescan** (`wormholescan.io/#/tx/{sentTxHash}`): Provider badge, Amount (USD), Amount, and the `wh` pill in the Txs column
-  - **Chain explorer** (Celoscan / Monadscan): Token cell (`token contract`), Sender, Receiver, and the `src` pill in the Txs column
+  - **Chain explorer** (Celoscan / Monadscan / Polygonscan): Token cell (`token contract`), Sender, Receiver, and the `src` pill in the Txs column
 - **Key interactions to spot-check:**
+  - Set source or destination to Polygon → URL contains `source=137` or `destination=137`, the opposite filter/status survives, and pagination resets to page 1
+  - Refresh/back/forward preserves source, destination, status, and page; malformed/default parameters canonicalize out of the URL
   - Click a sortable header (e.g. "Amount (USD)") → rows re-sort, arrow flips on second click
-  - Click an `AddressLink` → opens explorer for the correct chain (Celoscan for 42220 senders, MonadExplorer for 143)
+  - Click an `AddressLink` → opens the correct explorer (Celoscan for 42220, MonadExplorer for 143, Polygonscan for 137)
   - Click the Wormholescan `wh` pill → opens `wormholescan.io/#/tx/{sentTxHash}?network=Mainnet` (NOT the digest)
-- **STUCK overlay:** if any row is `SENT`/`ATTESTED`/`QUEUED_INBOUND` and older than 24h, the status badge should read "Stuck" in red.
+- **STUCK overlay:** the status badge should read "Stuck" in red once a row remains `SENT` for more than 1h, `ATTESTED` for more than 15m, or `QUEUED_INBOUND` for more than 24h.
 - **Empty / error states:** an error from one query should NOT blank the whole page — each KPI/chart/table gates on its own backing query.
 
 ## Token budget guidelines

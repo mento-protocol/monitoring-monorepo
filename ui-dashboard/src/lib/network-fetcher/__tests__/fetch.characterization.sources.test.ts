@@ -7,8 +7,8 @@
 // cases live in `fetch.characterization.windows.test.ts`.
 //
 // Coverage matrix (this file):
-//   - all 13 Promise.allSettled sources succeeding together
-//   - each of those 13 sources failing alone (the other 12 stay healthy)
+//   - all 14 Promise.allSettled sources succeeding together
+//   - each of those 14 sources failing alone (the other 13 stay healthy)
 //   - the top-level pools query failing
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -124,6 +124,25 @@ describe("fetchNetworkData characterization — all sources succeed", () => {
         ],
       },
       AllOlsPools: { OlsPool: [{ poolId: "42220-0xols" }] },
+      AllActivePoolLiquidityStrategies: {
+        PoolLiquidityStrategy: [
+          {
+            poolId: pool.id,
+            strategyAddress: "0x0000000000000000000000000000000000000001",
+            kind: "OPEN",
+          },
+          {
+            poolId: pool.id,
+            strategyAddress: "0x0000000000000000000000000000000000000002",
+            kind: "CDP",
+          },
+          {
+            poolId: pool.id,
+            strategyAddress: "0x0000000000000000000000000000000000000003",
+            kind: "RESERVE",
+          },
+        ],
+      },
       AllCdpPools: {
         CdpPool: [{ poolId: pool.id, strategyAddress: "0xabc" }],
       },
@@ -144,7 +163,9 @@ describe("fetchNetworkData characterization — all sources succeed", () => {
     expect(result.pools[0]?.lastOracleReportAt).toBeUndefined();
     expect(result.pools[0]?.vpHealthUpdatedAtBlock).toBeUndefined();
     expect(result.pools[0]?.vpOracleFreshnessCheckedAt).toBeUndefined();
-    expect(result.olsPoolIds).toEqual(new Set(["42220-0xols"]));
+    expect(result.olsPoolIds).toEqual(new Set([pool.id]));
+    expect(result.cdpPoolIds).toEqual(new Set([pool.id]));
+    expect(result.reservePoolIds).toEqual(new Set([pool.id]));
     expect(result.fees).not.toBeNull();
     expect(result.uniqueLpAddresses).toEqual(["0xa"]);
     expect(result.strategyError).toBeNull();
@@ -287,7 +308,7 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     expect(result.fees).not.toBeNull();
   });
 
-  it("OLS pools: strategyError set, olsPoolIds empty", async () => {
+  it("legacy OLS failure is ignored while the strategy registry is authoritative", async () => {
     const pool = makePool("42220-0xols-fail");
     const err = new Error("OLS query down");
     installGraphQLMock({
@@ -298,8 +319,55 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     const result = await fetchNetworkData(CELO_NETWORK, WINDOWS);
 
     expect(result.error).toBeNull();
+    expect(result.strategyError).toBeNull();
+    expect(result.olsPoolIds).toEqual(new Set());
+  });
+
+  it("active strategy registry: transport failure degrades all badges without trusting legacy sources", async () => {
+    const pool = makePool("42220-0xstrategy-fail", {
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    });
+    const err = new Error("strategy registry transport down");
+    installGraphQLMock({
+      AllPoolsWithHealth: { Pool: [pool] },
+      AllActivePoolLiquidityStrategies: reject(err),
+      AllOlsPools: { OlsPool: [{ poolId: pool.id }] },
+      AllCdpPools: {
+        CdpPool: [{ poolId: pool.id, strategyAddress: pool.rebalancerAddress }],
+      },
+    });
+
+    const result = await fetchNetworkData(CELO_NETWORK, WINDOWS);
+
     expect(result.strategyError).toBe(err);
     expect(result.olsPoolIds).toEqual(new Set());
+    expect(result.cdpPoolIds).toEqual(new Set());
+    expect(result.reservePoolIds).toEqual(new Set());
+  });
+
+  it("missing strategy registry schema falls back to legacy OLS and CDP rows", async () => {
+    const rebalancer = "0x000000000000000000000000000000000000d0d0";
+    const pool = makePool("42220-0xstrategy-schema-lag", {
+      rebalancerAddress: rebalancer,
+    });
+    installGraphQLMock({
+      AllPoolsWithHealth: { Pool: [pool] },
+      AllActivePoolLiquidityStrategies: reject(
+        new Error(
+          "field 'PoolLiquidityStrategy' not found in type: 'query_root'",
+        ),
+      ),
+      AllOlsPools: { OlsPool: [{ poolId: pool.id }] },
+      AllCdpPools: {
+        CdpPool: [{ poolId: pool.id, strategyAddress: rebalancer }],
+      },
+    });
+
+    const result = await fetchNetworkData(CELO_NETWORK, WINDOWS);
+
+    expect(result.strategyError).toBeNull();
+    expect(result.olsPoolIds).toEqual(new Set([pool.id]));
+    expect(result.cdpPoolIds).toEqual(new Set([pool.id]));
   });
 
   it("breach rollup: fails open — no error channel, rollup fields stay undefined", async () => {
@@ -428,6 +496,11 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     const err = new Error("CdpPool query down");
     installGraphQLMock({
       AllPoolsWithHealth: { Pool: [pool] },
+      AllActivePoolLiquidityStrategies: reject(
+        new Error(
+          "field 'PoolLiquidityStrategy' not found in type: 'query_root'",
+        ),
+      ),
       AllCdpPools: reject(err),
     });
 
@@ -445,7 +518,14 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     });
     const err = new Error("strategy probe down");
     mockDetectProbedStrategies.mockRejectedValueOnce(err);
-    installGraphQLMock({ AllPoolsWithHealth: { Pool: [pool] } });
+    installGraphQLMock({
+      AllPoolsWithHealth: { Pool: [pool] },
+      AllActivePoolLiquidityStrategies: reject(
+        new Error(
+          "field 'PoolLiquidityStrategy' not found in type: 'query_root'",
+        ),
+      ),
+    });
 
     const result = await fetchNetworkData(MONAD_NETWORK, WINDOWS);
 

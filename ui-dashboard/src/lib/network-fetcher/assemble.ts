@@ -19,7 +19,6 @@ import { mutableDayCutoff } from "./pagination";
 import type {
   BrokerDailySnapshotRow,
   NetworkData,
-  OlsPoolsResult,
   PaginatedPageResult,
   SnapshotPageResult,
 } from "./types";
@@ -173,14 +172,6 @@ function deriveLpSlice(
   };
 }
 
-function deriveOlsPoolIds(
-  result: PromiseSettledResult<OlsPoolsResult>,
-): Set<string> {
-  return result.status === "fulfilled"
-    ? new Set((result.value.OlsPool ?? []).map((p) => p.poolId))
-    : new Set<string>();
-}
-
 /**
  * Derives the snapshotsAllDaily/snapshots7d/snapshots30d/snapshots slices
  * plus their per-window errors. Window-specific arrays are derived in-memory
@@ -289,7 +280,7 @@ export type AssembleNetworkDataArgs = {
     PaginatedPageResult<BrokerDailySnapshotRow>
   >;
   lpResult: PromiseSettledResult<PaginatedPageResult<{ address: string }>>;
-  olsResult: PromiseSettledResult<OlsPoolsResult>;
+  olsPoolIds: Set<string>;
   cdpPoolIds: Set<string>;
   reservePoolIds: Set<string>;
   strategyError: Error | null;
@@ -315,7 +306,7 @@ export function assembleNetworkData(
     snapshotsAllDailyResult,
     brokerSnapshotsAllDailyResult,
     lpResult,
-    olsResult,
+    olsPoolIds,
     cdpPoolIds,
     reservePoolIds,
     strategyError,
@@ -335,8 +326,6 @@ export function assembleNetworkData(
   });
   const brokerSlice = deriveBrokerSlice(brokerSnapshotsAllDailyResult);
   const lpSlice = deriveLpSlice(lpResult);
-  const olsPoolIds = deriveOlsPoolIds(olsResult);
-
   return {
     network,
     snapshotWindows: windows,

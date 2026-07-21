@@ -7,6 +7,7 @@ export type Maybe<T> = T | null;
 export type BreakerKind = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
 export type BreakerStatus = "OK" | "TRIPPED";
 export type BridgeProvider = "WORMHOLE";
+export type LiquidityStrategyKind = "OPEN" | "CDP" | "RESERVE" | "UNKNOWN";
 export type OracleReporterType =
   | "CHAINLINK"
   | "REDSTONE"
@@ -3101,6 +3102,51 @@ export type PoolDailyVolumeSnapshotBoolExp = {
   readonly volumeUsdWeiIncludingProtocolActors?: ComparisonExp<string>;
 };
 
+export type PoolLiquidityStrategySelectColumn =
+  | "active"
+  | "addedAtBlock"
+  | "addedAtTimestamp"
+  | "chainId"
+  | "id"
+  | "kind"
+  | "poolId"
+  | "strategyAddress"
+  | "updatedAtBlock"
+  | "updatedAtTimestamp";
+
+export type PoolLiquidityStrategyOrderBy = {
+  readonly active?: OrderBy;
+  readonly addedAtBlock?: OrderBy;
+  readonly addedAtTimestamp?: OrderBy;
+  readonly chainId?: OrderBy;
+  readonly id?: OrderBy;
+  readonly kind?: OrderBy;
+  readonly poolId?: OrderBy;
+  readonly strategyAddress?: OrderBy;
+  readonly updatedAtBlock?: OrderBy;
+  readonly updatedAtTimestamp?: OrderBy;
+};
+
+export type PoolLiquidityStrategyBoolExp = {
+  readonly _and?:
+    | PoolLiquidityStrategyBoolExp
+    | ReadonlyArray<PoolLiquidityStrategyBoolExp>;
+  readonly _or?:
+    | PoolLiquidityStrategyBoolExp
+    | ReadonlyArray<PoolLiquidityStrategyBoolExp>;
+  readonly _not?: PoolLiquidityStrategyBoolExp;
+  readonly active?: ComparisonExp<boolean>;
+  readonly addedAtBlock?: ComparisonExp<string>;
+  readonly addedAtTimestamp?: ComparisonExp<string>;
+  readonly chainId?: ComparisonExp<number>;
+  readonly id?: ComparisonExp<string>;
+  readonly kind?: ComparisonExp<LiquidityStrategyKind>;
+  readonly poolId?: ComparisonExp<string>;
+  readonly strategyAddress?: ComparisonExp<string>;
+  readonly updatedAtBlock?: ComparisonExp<string>;
+  readonly updatedAtTimestamp?: ComparisonExp<string>;
+};
+
 export type PoolSnapshotSelectColumn =
   | "blockNumber"
   | "burnCount"
@@ -5369,7 +5415,7 @@ export type WormholeTransferPendingBoolExp = {
 export type BridgeTransfersWindowQueryVariables = {
   readonly limit: number;
   readonly offset: number;
-  readonly statusIn: ReadonlyArray<string>;
+  readonly where: BridgeTransferBoolExp;
 };
 export type BridgeTransfersWindowQuery = {
   readonly BridgeTransfer: ReadonlyArray<{
@@ -5400,7 +5446,7 @@ export type BridgeTransfersWindowQuery = {
 
 // bridge-queries.BRIDGE_TRANSFERS_COUNT
 export type BridgeTransfersCountQueryVariables = {
-  readonly statusIn: ReadonlyArray<string>;
+  readonly where: BridgeTransferBoolExp;
   readonly limit: number;
 };
 export type BridgeTransfersCountQuery = {
@@ -6625,6 +6671,18 @@ export type AllCdpPoolsQuery = {
   }>;
 };
 
+// queries/ols.ALL_ACTIVE_POOL_LIQUIDITY_STRATEGIES
+export type AllActivePoolLiquidityStrategiesQueryVariables = {
+  readonly chainId: number;
+};
+export type AllActivePoolLiquidityStrategiesQuery = {
+  readonly PoolLiquidityStrategy: ReadonlyArray<{
+    readonly poolId: string;
+    readonly strategyAddress: string;
+    readonly kind: LiquidityStrategyKind;
+  }>;
+};
+
 // queries/pool-detail.POOL_DETAIL_WITH_HEALTH
 export type PoolDetailWithHealthQueryVariables = {
   readonly id: string;
@@ -6741,6 +6799,26 @@ export type PoolConfigExtQuery = {
   readonly Pool: ReadonlyArray<{
     readonly id: string;
     readonly rebalanceReward: number;
+  }>;
+};
+
+// queries/pool-detail.POOL_LIQUIDITY_STRATEGIES
+export type PoolLiquidityStrategiesQueryVariables = {
+  readonly poolId: string;
+  readonly chainId: number;
+};
+export type PoolLiquidityStrategiesQuery = {
+  readonly PoolLiquidityStrategy: ReadonlyArray<{
+    readonly id: string;
+    readonly chainId: number;
+    readonly poolId: string;
+    readonly strategyAddress: string;
+    readonly kind: LiquidityStrategyKind;
+    readonly active: boolean;
+    readonly addedAtBlock: string;
+    readonly addedAtTimestamp: string;
+    readonly updatedAtBlock: string;
+    readonly updatedAtTimestamp: string;
   }>;
 };
 
@@ -7149,6 +7227,7 @@ export type PoolLabelsAllQuery = {
 
 // queries/pools.RECENT_SWAPS
 export type RecentSwapsQueryVariables = {
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly limit: number;
 };
 export type RecentSwapsQuery = {
@@ -7688,6 +7767,7 @@ export type StablesChangesQuery = {
 // queries/volume.TRADER_DAILY_TOP
 export type TraderDailyTopQueryVariables = {
   readonly afterTimestamp: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly isProtocolActorIn: ReadonlyArray<boolean>;
   readonly limit: number;
 };
@@ -7734,6 +7814,7 @@ export type TraderPoolDailyForTraderQuery = {
 export type TraderDailyWindowTopQueryVariables = {
   readonly afterTimestamp: number | string;
   readonly beforeTimestamp: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly isProtocolActorIn: ReadonlyArray<boolean>;
   readonly limit: number;
 };
@@ -7756,6 +7837,7 @@ export type TraderDailyWindowTopQuery = {
 // queries/volume.TRADER_POOL_DAILY_TOP
 export type TraderPoolDailyTopQueryVariables = {
   readonly afterTimestamp: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly limit: number;
 };
 export type TraderPoolDailyTopQuery = {
@@ -7778,6 +7860,7 @@ export type TraderPoolDailyTopQuery = {
 // queries/volume.SWAP_EVENT_OUTLIERS
 export type SwapEventOutliersQueryVariables = {
   readonly afterTimestamp: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly limit: number;
 };
 export type SwapEventOutliersQuery = {
@@ -7795,7 +7878,9 @@ export type SwapEventOutliersQuery = {
 };
 
 // queries/volume.POOLS_FOR_VOLUME
-export type PoolsForVolumeQueryVariables = Record<string, never>;
+export type PoolsForVolumeQueryVariables = {
+  readonly chainIdIn: ReadonlyArray<number>;
+};
 export type PoolsForVolumeQuery = {
   readonly Pool: ReadonlyArray<{
     readonly id: string;
@@ -7808,6 +7893,7 @@ export type PoolsForVolumeQuery = {
 // queries/volume.POOL_DAILY_VOLUME
 export type PoolDailyVolumeQueryVariables = {
   readonly afterTimestamp: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly limit: number;
   readonly offset: number;
 };
@@ -7827,6 +7913,7 @@ export type PoolDailyVolumeQuery = {
 // queries/volume.AGGREGATOR_DAILY_TOP
 export type AggregatorDailyTopQueryVariables = {
   readonly afterTimestamp: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly limit: number;
 };
 export type AggregatorDailyTopQuery = {
@@ -7848,6 +7935,7 @@ export type AggregatorDailyTopQuery = {
 // queries/volume.AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS
 export type AggregatorDailyTopIncludingProtocolActorsQueryVariables = {
   readonly afterTimestamp: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly limit: number;
 };
 export type AggregatorDailyTopIncludingProtocolActorsQuery = {
@@ -7869,6 +7957,7 @@ export type AggregatorDailyTopIncludingProtocolActorsQuery = {
 // queries/volume.BROKER_TRADER_DAILY_TOP
 export type BrokerTraderDailyTopQueryVariables = {
   readonly afterTimestamp: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly isProtocolActorIn: ReadonlyArray<boolean>;
   readonly limit: number;
 };
@@ -7888,6 +7977,7 @@ export type BrokerTraderDailyTopQuery = {
 // queries/volume.BROKER_AGGREGATOR_DAILY_TOP
 export type BrokerAggregatorDailyTopQueryVariables = {
   readonly afterTimestamp: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly limit: number;
 };
 export type BrokerAggregatorDailyTopQuery = {
@@ -7909,6 +7999,7 @@ export type BrokerAggregatorDailyTopQuery = {
 // queries/volume.BROKER_AGGREGATOR_DAILY_TOP_INCLUDING_PROTOCOL_ACTORS
 export type BrokerAggregatorDailyTopIncludingProtocolActorsQueryVariables = {
   readonly afterTimestamp: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly limit: number;
 };
 export type BrokerAggregatorDailyTopIncludingProtocolActorsQuery = {
@@ -7930,6 +8021,7 @@ export type BrokerAggregatorDailyTopIncludingProtocolActorsQuery = {
 // queries/volume.VOLUME_WINDOW_LATEST
 export type VolumeWindowLatestQueryVariables = {
   readonly windowKey: string;
+  readonly chainIdIn: ReadonlyArray<number>;
 };
 export type VolumeWindowLatestQuery = {
   readonly volumeWindowSnapshots: ReadonlyArray<{
@@ -7950,6 +8042,7 @@ export type VolumeWindowLatestQuery = {
 // queries/volume.BROKER_VOLUME_WINDOW_LATEST
 export type BrokerVolumeWindowLatestQueryVariables = {
   readonly windowKey: string;
+  readonly chainIdIn: ReadonlyArray<number>;
 };
 export type BrokerVolumeWindowLatestQuery = {
   readonly brokerVolumeWindowSnapshots: ReadonlyArray<{
@@ -7970,6 +8063,7 @@ export type BrokerVolumeWindowLatestQuery = {
 // queries/volume.VOLUME_WINDOW_FIRSTDAY_LATEST
 export type VolumeWindowFirstDayLatestQueryVariables = {
   readonly windowKey: string;
+  readonly chainIdIn: ReadonlyArray<number>;
 };
 export type VolumeWindowFirstDayLatestQuery = {
   readonly volumeWindowFirstDaySnapshots: ReadonlyArray<{
@@ -7987,6 +8081,7 @@ export type VolumeWindowFirstDayLatestQuery = {
 // queries/volume.BROKER_VOLUME_WINDOW_FIRSTDAY_LATEST
 export type BrokerVolumeWindowFirstDayLatestQueryVariables = {
   readonly windowKey: string;
+  readonly chainIdIn: ReadonlyArray<number>;
 };
 export type BrokerVolumeWindowFirstDayLatestQuery = {
   readonly brokerVolumeWindowFirstDaySnapshots: ReadonlyArray<{
@@ -8044,6 +8139,7 @@ export type BrokerVolumePartialOverlapTradersQuery = {
 // queries/volume.VOLUME_TODAY_TRADERS
 export type VolumeTodayTradersQueryVariables = {
   readonly todayMidnight: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly isProtocolActorIn: ReadonlyArray<boolean>;
 };
 export type VolumeTodayTradersQuery = {
@@ -8059,6 +8155,7 @@ export type VolumeTodayTradersQuery = {
 // queries/volume.BROKER_VOLUME_TODAY_TRADERS
 export type BrokerVolumeTodayTradersQueryVariables = {
   readonly todayMidnight: number | string;
+  readonly chainIdIn: ReadonlyArray<number>;
   readonly isProtocolActorIn: ReadonlyArray<boolean>;
 };
 export type BrokerVolumeTodayTradersQuery = {

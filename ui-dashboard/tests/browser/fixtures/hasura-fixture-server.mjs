@@ -1045,6 +1045,9 @@ export function handleGraphQL(
               ]
             : [],
       };
+    case "AllActivePoolLiquidityStrategies":
+    case "PoolLiquidityStrategies":
+      return { PoolLiquidityStrategy: [] };
     case "PoolDetailWithHealth": {
       const pool = poolsById.get(String(variables.id));
       return {

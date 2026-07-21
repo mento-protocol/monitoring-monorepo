@@ -14,7 +14,7 @@ import { BridgeFlowsPageClient } from "./_components/bridge-flows-page-client";
 export const revalidate = 60;
 
 const STATIC_FALLBACK =
-  "Wormhole bridge transfers of Mento stable tokens across Celo and Monad.";
+  "Wormhole bridge transfers of Mento stable tokens across Celo, Monad, and Polygon.";
 
 function buildDescription(data: BridgeFlowsOgData | null): string {
   if (!data) return STATIC_FALLBACK;

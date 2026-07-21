@@ -21,6 +21,8 @@ describe("deployment namespaces", () => {
     expect(deploymentNamespace(11142220)).toBe("testnet-v2-rc5");
     expect(deploymentNamespace(143)).toBe("mainnet");
     expect(deploymentNamespace(10143)).toBe("testnet-v2-rc5");
+    expect(deploymentNamespace(137)).toBe("mainnet");
+    expect(deploymentNamespace(80002)).toBe("testnet-v2-rc5");
   });
 
   it("returns null for unknown chains", () => {

@@ -44,10 +44,10 @@ locals {
         title       = "${local.chains[chain].symbol} Balances of Relayer Signers [${local.chains[chain].title}]"
         description = "${local.chains[chain].symbol} balance of relayer signers on ${chain}. Red line indicates danger threshold."
         # Two panels per row; new row every 2 chains. Sits below the freshness
-        # panels (header + 2 rows of 20).
+        # panels (header + chain_rows rows of 20).
         gridPos = {
           x = (i % 2) * 12,
-          y = local.oracle_relayer_y_start + 41 + floor(i / 2) * 8,
+          y = local.oracle_relayer_y_start + 1 + local.chain_rows * 20 + floor(i / 2) * 8,
           h = 8,
           w = 12
         }

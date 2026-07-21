@@ -1,6 +1,12 @@
 "use client";
 
-import { isVirtualPool, type Pool, type RateFeed } from "@/lib/types";
+import {
+  isVirtualPool,
+  type Pool,
+  type PoolLiquidityStrategy,
+  type PoolLiquidityStrategyKind,
+  type RateFeed,
+} from "@/lib/types";
 import {
   getChainlinkDataFeedUrl,
   getRateFeedChainlinkDataFeedUrl,
@@ -12,9 +18,14 @@ import { AddressLink } from "@/components/address-link";
 import { Tooltip } from "@/components/tooltip";
 import { Stat } from "@/components/stat";
 import { HASURA_TIMEOUT_MS, useGQL } from "@/lib/graphql";
-import { POOL_CONFIG_EXT, POOL_RATE_FEED_EXT } from "@/lib/queries";
+import {
+  POOL_CONFIG_EXT,
+  POOL_LIQUIDITY_STRATEGIES,
+  POOL_RATE_FEED_EXT,
+} from "@/lib/queries";
 import {
   PoolConfigExtSchema,
+  PoolLiquidityStrategiesSchema,
   PoolRateFeedExtSchema,
 } from "@/lib/queries/pool-detail-schemas";
 
@@ -53,6 +64,7 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
   const neverRebalances = isNeverRebalance(pool);
   const { data: configExt } = usePoolConfigExt(pool, isVirtual);
   const { data: rateFeedExt } = usePoolRateFeedExt(pool, isVirtual);
+  const { data: strategiesExt } = usePoolLiquidityStrategies(pool, isVirtual);
 
   if (isVirtual) return null;
 
@@ -70,7 +82,11 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
       ? lpFee + protocolFee
       : null;
 
-  const strategyAddress = pool.rebalancerAddress ?? null;
+  // Schema-lag and test fixtures can return a truthy GraphQL envelope without
+  // the additive relation. Treat a missing field like an unavailable query and
+  // keep the legacy pointer fallback until the promoted indexer exposes it.
+  const strategies =
+    strategiesExt?.PoolLiquidityStrategy ?? legacyPoolStrategies(pool);
 
   return (
     <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
@@ -136,15 +152,65 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
       />
       <Stat
         label="Rebalance Strategy"
-        value={
-          strategyAddress ? (
-            <AddressLink address={strategyAddress} readOnly />
-          ) : (
-            <span className="text-slate-500">—</span>
-          )
-        }
+        value={<LiquidityStrategyList strategies={strategies} />}
       />
     </dl>
+  );
+}
+
+function legacyPoolStrategies(pool: Pool): PoolLiquidityStrategy[] {
+  if (!pool.rebalancerAddress) return [];
+  return [
+    {
+      id: `${pool.id}-${pool.rebalancerAddress.toLowerCase()}`,
+      chainId: pool.chainId,
+      poolId: pool.id,
+      strategyAddress: pool.rebalancerAddress,
+      kind: "UNKNOWN",
+      active: true,
+      addedAtBlock: pool.createdAtBlock,
+      addedAtTimestamp: pool.createdAtTimestamp,
+      updatedAtBlock: pool.updatedAtBlock,
+      updatedAtTimestamp: pool.updatedAtTimestamp,
+    },
+  ];
+}
+
+function strategyKindLabel(kind: PoolLiquidityStrategyKind): string {
+  switch (kind) {
+    case "OPEN":
+      return "Open";
+    case "CDP":
+      return "CDP";
+    case "RESERVE":
+      return "Reserve";
+    case "UNKNOWN":
+      return "Strategy";
+  }
+}
+
+function LiquidityStrategyList({
+  strategies,
+}: {
+  strategies: readonly PoolLiquidityStrategy[];
+}) {
+  if (strategies.length === 0) {
+    return <span className="text-slate-500">—</span>;
+  }
+  return (
+    <span className="flex flex-col gap-1">
+      {strategies.map((strategy) => (
+        <span
+          key={strategy.id}
+          className="inline-flex items-center justify-end gap-1.5"
+        >
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            {strategyKindLabel(strategy.kind)}
+          </span>
+          <AddressLink address={strategy.strategyAddress} readOnly />
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -254,6 +320,17 @@ function usePoolRateFeedExt(pool: Pool, isVirtual: boolean) {
     {
       timeoutMs: HASURA_TIMEOUT_MS,
       schema: PoolRateFeedExtSchema,
+    },
+  );
+}
+
+function usePoolLiquidityStrategies(pool: Pool, isVirtual: boolean) {
+  return useGQL<{ PoolLiquidityStrategy: PoolLiquidityStrategy[] }>(
+    isVirtual ? null : POOL_LIQUIDITY_STRATEGIES,
+    { poolId: pool.id, chainId: pool.chainId },
+    {
+      timeoutMs: HASURA_TIMEOUT_MS,
+      schema: PoolLiquidityStrategiesSchema,
     },
   );
 }

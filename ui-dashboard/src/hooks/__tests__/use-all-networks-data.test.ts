@@ -293,6 +293,20 @@ function mockRequest(impl: (query: string) => unknown) {
     GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
   ).mockImplementation((...args: unknown[]) => {
     const query = extractQuery(args[0]);
+    if (query.includes("PoolLiquidityStrategy")) {
+      const r = impl(query);
+      if (r != null && typeof r === "object" && "PoolLiquidityStrategy" in r)
+        return Promise.resolve(r);
+      // Most tests in this legacy-fallback suite predate the registry. Model
+      // the phased schema window explicitly so they keep exercising that
+      // compatibility path instead of treating `{ Pool: ... }` as an
+      // authoritative empty registry response.
+      return Promise.reject(
+        new Error(
+          "field 'PoolLiquidityStrategy' not found in type: 'query_root'",
+        ),
+      );
+    }
     if (query.includes("PoolDailySnapshot")) {
       const r = impl(query);
       if (r != null && typeof r === "object" && "PoolDailySnapshot" in r)
@@ -620,6 +634,13 @@ describe("fetchNetworkData — happy path", () => {
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockImplementation((...args: unknown[]) => {
       const query = extractQuery(args[0]);
+      if (query.includes("PoolLiquidityStrategy")) {
+        return Promise.reject(
+          new Error(
+            "field 'PoolLiquidityStrategy' not found in type: 'query_root'",
+          ),
+        );
+      }
       if (query.includes("CdpPool")) return Promise.reject(cdpErr);
       if (query.includes("OlsPool")) return Promise.resolve({ OlsPool: [] });
       if (query.includes("PoolDailySnapshot"))

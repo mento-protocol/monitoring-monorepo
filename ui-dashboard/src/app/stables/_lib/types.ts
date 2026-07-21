@@ -34,7 +34,7 @@ export type StableSupplyChangeEvent =
 // KPI tiles, and hero chart.
 export type TokenAgg = {
   // Discriminator key: `{chainId}|{tokenAddress}|{source}`. The same Mento
-  // token can exist on Celo and Monad, so chainId is part of the identity.
+  // token can exist on multiple chains, so chainId is part of the identity.
   key: string;
   chainId: number;
   tokenAddress: string;

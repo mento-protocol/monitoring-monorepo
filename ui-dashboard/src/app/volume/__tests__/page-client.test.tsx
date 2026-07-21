@@ -15,6 +15,8 @@ const volumeState = vi.hoisted(() => ({
   venue: "v3" as "v3" | "v2",
   includeProtocolActors: false,
   range: "7d" as "24h" | "7d" | "30d" | "90d" | "all",
+  chainId: null as number | null,
+  chainIdIn: [42220, 143, 137] as number[],
 }));
 const poolVolumeState = vi.hoisted(() => ({
   rows: [] as Array<Record<string, unknown>>,
@@ -93,11 +95,19 @@ vi.mock("../_lib/url-state", () => ({
       actorFilter: includeProtocolActors ? "all" : "organic",
       includeProtocolActors,
       venue: volumeState.venue,
+      chainId: volumeState.chainId,
+      chainIdIn: volumeState.chainIdIn,
+      chainOptions: [
+        { chainId: 42220, label: "Celo" },
+        { chainId: 143, label: "Monad" },
+        { chainId: 137, label: "Polygon" },
+      ],
       cutoff: 1_700_000_000,
       utcDayKey: 20_000,
       updateRange: vi.fn(),
       updateIncludeProtocolActors: vi.fn(),
       updateVenue: vi.fn(),
+      updateChainId: vi.fn(),
     };
   },
 }));
@@ -224,6 +234,8 @@ describe("VolumeClient useGQL wiring", () => {
     heroState.displayIdentity = undefined;
     heroState.isKpiSourceCapHit = false;
     volumeState.range = "7d";
+    volumeState.chainId = null;
+    volumeState.chainIdIn = [42220, 143, 137];
     poolVolumeState.rows = [];
     poolVolumeState.isLoading = false;
     poolVolumeState.error = null;
@@ -266,6 +278,21 @@ describe("VolumeClient useGQL wiring", () => {
       timeoutMs: 8_000,
       keepPreviousData: true,
     });
+  });
+
+  it("scopes every capped v3 query and the hero to the selected chain", () => {
+    volumeState.chainId = 137;
+    volumeState.chainIdIn = [137];
+    renderVolume("v3");
+
+    expect(variablesFor(TRADER_DAILY_TOP)).toMatchObject({ chainIdIn: [137] });
+    expect(variablesFor(AGGREGATOR_DAILY_TOP)).toMatchObject({
+      chainIdIn: [137],
+    });
+    expect(variablesFor(POOLS_FOR_VOLUME)).toEqual({ chainIdIn: [137] });
+    expect(mockUseHeroRollup).toHaveBeenCalledWith(
+      expect.objectContaining({ chainIdIn: [137] }),
+    );
   });
 
   it("keeps v3 chart, trader, and aggregator skeletons off while retained data revalidates", () => {
@@ -603,6 +630,7 @@ describe("VolumeClient useGQL wiring", () => {
         venue: "v3",
         range: "7d",
         includeProtocolActors: false,
+        chainIdIn: [],
         todayMidnight: 1_780_012_800,
       },
       heroV3: { volumeWindowSnapshots: [] },

@@ -7,7 +7,7 @@ configured chain. Each webhook filters Safe logs by contract address and the 17
 topic hashes committed in `event-hashes.json`, then sends signed payloads to the
 shared on-chain event handler.
 
-The parent `alerts/infra` stack currently configures Celo and Ethereum. The
+The parent `alerts/infra` stack currently configures Celo, Ethereum, and Polygon. The
 handler routes eight security events to `#multisig-alerts` and the remaining
 nine operational events to `#multisig-events`.
 

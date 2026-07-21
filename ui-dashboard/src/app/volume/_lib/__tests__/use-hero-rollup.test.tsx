@@ -117,6 +117,7 @@ const SECONDS_PER_DAY = 86400;
 const NOW_SECONDS = Math.floor(Date.now() / 1000);
 const TODAY_MIDNIGHT =
   Math.floor(NOW_SECONDS / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+const TODAY_UTC_DAY_KEY = TODAY_MIDNIGHT / SECONDS_PER_DAY;
 const TWO_DAYS_AGO_MIDNIGHT = TODAY_MIDNIGHT - 2 * SECONDS_PER_DAY;
 const CELO = 42220;
 
@@ -192,7 +193,7 @@ function Probe({
   initialData,
   venue = "v3",
   range = "7d",
-  utcDayKey = 0,
+  utcDayKey = TODAY_UTC_DAY_KEY,
   kpiSource = EMPTY_KPI_SOURCE,
   kpiSourceIdentity,
   kpiSourceIsCapHit = false,
@@ -215,6 +216,7 @@ function Probe({
     kpiSource,
     kpiSourceIdentity,
     kpiSourceIsCapHit,
+    chainIdIn: [CELO],
     initialData,
   });
   return null;
@@ -732,7 +734,7 @@ describe("useHeroRollup orchestration", () => {
 
     const ref = render(undefined, {
       range: "7d",
-      utcDayKey: dayN,
+      utcDayKey: dayN / SECONDS_PER_DAY,
       kpiSource: priorKpi,
       kpiSourceIdentity: kpiIdentity("7d", oldCutoff),
     });
@@ -758,7 +760,7 @@ describe("useHeroRollup orchestration", () => {
     });
     rerender(ref, {
       range: "7d",
-      utcDayKey: dayNPlusOne,
+      utcDayKey: dayNPlusOne / SECONDS_PER_DAY,
       kpiSource: priorKpi,
       kpiSourceIdentity: kpiIdentity("7d", oldCutoff),
     });
@@ -773,7 +775,7 @@ describe("useHeroRollup orchestration", () => {
     ];
     rerender(ref, {
       range: "7d",
-      utcDayKey: dayNPlusOne,
+      utcDayKey: dayNPlusOne / SECONDS_PER_DAY,
       kpiSource: freshKpi,
       kpiSourceIdentity: kpiIdentity(
         "7d",
@@ -933,6 +935,7 @@ describe("useHeroRollup orchestration", () => {
         venue: "v3",
         range: "7d",
         includeProtocolActors: false,
+        chainIdIn: [CELO],
         todayMidnight: TODAY_MIDNIGHT,
       },
       heroV3: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },
@@ -967,6 +970,7 @@ describe("useHeroRollup orchestration", () => {
         venue: "v3",
         range: "30d", // Probe renders range "7d" — must not seed 30d data
         includeProtocolActors: false,
+        chainIdIn: [CELO],
         todayMidnight: TODAY_MIDNIGHT,
       },
       heroV3: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },
@@ -990,6 +994,7 @@ describe("useHeroRollup orchestration", () => {
         venue: "v3",
         range: "7d",
         includeProtocolActors: false,
+        chainIdIn: [CELO],
         todayMidnight: TODAY_MIDNIGHT - SECONDS_PER_DAY,
       },
       heroV3: { volumeWindowSnapshots: [snapshot({ chainId: CELO })] },

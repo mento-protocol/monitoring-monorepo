@@ -51,6 +51,7 @@ export function V3FlowInsights({
   traderRows,
   traders,
   pools,
+  chainIdIn,
   protocolActorFilter,
   tableState,
 }: {
@@ -60,6 +61,7 @@ export function V3FlowInsights({
   traderRows: readonly TraderDailyRow[];
   traders: readonly TraderWindowRow[];
   pools: PoolMeta;
+  chainIdIn: readonly number[];
   protocolActorFilter: ReadonlyArray<boolean>;
   tableState: FlowTableState;
 }) {
@@ -68,6 +70,7 @@ export function V3FlowInsights({
     cutoff,
     traderRows,
     traders,
+    chainIdIn,
     protocolActorFilter,
     isTraderCapHit: tableState.isCapHit,
   });
@@ -116,6 +119,7 @@ function useV3FlowInsightModel({
   cutoff,
   traderRows,
   traders,
+  chainIdIn,
   protocolActorFilter,
   isTraderCapHit,
 }: {
@@ -123,6 +127,7 @@ function useV3FlowInsightModel({
   cutoff: number;
   traderRows: readonly TraderDailyRow[];
   traders: readonly TraderWindowRow[];
+  chainIdIn: readonly number[];
   protocolActorFilter: ReadonlyArray<boolean>;
   isTraderCapHit: boolean;
 }) {
@@ -134,6 +139,7 @@ function useV3FlowInsightModel({
     useV3FlowInsightQueries({
       previousBounds,
       cutoff,
+      chainIdIn,
       protocolActorFilter,
     });
   const allowedTraderDayKeys = useMemo(
@@ -207,6 +213,7 @@ function useV3FlowInsightModel({
 function useV3FlowInsightQueries({
   previousBounds,
   cutoff,
+  chainIdIn,
   protocolActorFilter,
 }: {
   previousBounds:
@@ -214,6 +221,7 @@ function useV3FlowInsightQueries({
     | null
     | undefined;
   cutoff: number;
+  chainIdIn: readonly number[];
   protocolActorFilter: ReadonlyArray<boolean>;
 }) {
   const previousTradersResult = useGQL<{
@@ -224,6 +232,7 @@ function useV3FlowInsightQueries({
       ? {
           afterTimestamp: previousBounds.afterTimestamp,
           beforeTimestamp: previousBounds.beforeTimestamp,
+          chainIdIn,
           isProtocolActorIn: protocolActorFilter,
           limit: ENVIO_MAX_ROWS,
         }
@@ -235,7 +244,7 @@ function useV3FlowInsightQueries({
     TraderPoolDailySnapshot: TraderPoolDailyRow[];
   }>(
     TRADER_POOL_DAILY_TOP,
-    { afterTimestamp: cutoff, limit: ENVIO_MAX_ROWS },
+    { afterTimestamp: cutoff, chainIdIn, limit: ENVIO_MAX_ROWS },
     60_000,
     { timeoutMs: 8_000, schema: TraderPoolDailyTopSchema },
   );
@@ -243,7 +252,7 @@ function useV3FlowInsightQueries({
     SwapEvent: SwapOutlierRow[];
   }>(
     SWAP_EVENT_OUTLIERS,
-    { afterTimestamp: cutoff, limit: SWAP_OUTLIER_FETCH_LIMIT },
+    { afterTimestamp: cutoff, chainIdIn, limit: SWAP_OUTLIER_FETCH_LIMIT },
     60_000,
     { timeoutMs: 8_000, schema: SwapEventOutliersSchema },
   );

@@ -197,4 +197,27 @@ describe("GET /api/bridge-redeem", () => {
       vaaHex: "0x010203",
     });
   });
+
+  it("returns the Polygon redeem payload", async () => {
+    mockWormholeResponse({ operations: [{ vaa: { raw: "AQID" } }] });
+
+    const res = await GET(
+      makeRequest({
+        txHash: TX_HASH,
+        destChainId: "137",
+        tokenSymbol: "EURm",
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      chainId: 137,
+      chainIdHex: "0x89",
+      chainName: "Polygon",
+      rpcUrl: "https://polygon.drpc.org",
+      explorerUrl: "https://polygonscan.com",
+      nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 },
+      vaaHex: "0x010203",
+    });
+  });
 });

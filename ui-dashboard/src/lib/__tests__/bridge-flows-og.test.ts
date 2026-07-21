@@ -4,8 +4,8 @@ const { capturedCacheKeyParts } = vi.hoisted(() => ({
   capturedCacheKeyParts: [] as string[][],
 }));
 
-// NETWORKS mock — two mainnet chains sharing a Hasura URL (matches the
-// real config where both Celo + Monad point at the same NEXT_PUBLIC_HASURA_URL).
+// NETWORKS mock — all mainnet chains sharing one Hasura URL (matches the real
+// multichain production config).
 vi.mock("@/lib/networks", () => {
   const celo = {
     id: "celo-mainnet" as const,
@@ -28,12 +28,24 @@ vi.mock("@/lib/networks", () => {
     chainId: 143,
     hasVirtualPools: false,
   };
+  const polygon = {
+    ...celo,
+    id: "polygon-mainnet" as const,
+    label: "Polygon",
+    chainId: 137,
+    hasVirtualPools: false,
+  };
   return {
-    NETWORKS: { "celo-mainnet": celo, "monad-mainnet": monad },
-    NETWORK_IDS: ["celo-mainnet", "monad-mainnet"],
+    NETWORKS: {
+      "celo-mainnet": celo,
+      "monad-mainnet": monad,
+      "polygon-mainnet": polygon,
+    },
+    NETWORK_IDS: ["celo-mainnet", "monad-mainnet", "polygon-mainnet"],
     networkIdForChainId: (chainId: number) => {
       if (chainId === 42220) return "celo-mainnet";
       if (chainId === 143) return "monad-mainnet";
+      if (chainId === 137) return "polygon-mainnet";
       return null;
     },
     isCanonicalNetwork: () => true,
@@ -135,7 +147,7 @@ describe("bridge flows OG cache key", () => {
         process.env.VERCEL_DEPLOYMENT_ID ??
           process.env.VERCEL_GIT_COMMIT_SHA ??
           "dev",
-        "celo-mainnet=https://multichain.example.com/v1/graphql|monad-mainnet=https://multichain.example.com/v1/graphql",
+        "celo-mainnet=https://multichain.example.com/v1/graphql|monad-mainnet=https://multichain.example.com/v1/graphql|polygon-mainnet=https://multichain.example.com/v1/graphql",
       ],
     ]);
   });
@@ -156,7 +168,7 @@ describe("fetchBridgeFlowsOgDataUncached", () => {
     expect(data!.volume30dUsd).toBe(1500);
     expect(data!.totalTransfers30d).toBe(8);
     expect(data!.volumeSeries).toEqual([500, 1000]);
-    expect(data!.chains).toEqual(["Celo", "Monad"]);
+    expect(data!.chains).toEqual(["Celo", "Monad", "Polygon"]);
   });
 
   it("degrades gracefully when snapshots fail — chains label still populated", async () => {
@@ -169,7 +181,7 @@ describe("fetchBridgeFlowsOgDataUncached", () => {
     expect(data!.volume30dUsd).toBeNull();
     expect(data!.totalTransfers30d).toBeNull();
     expect(data!.volumeSeries).toEqual([]);
-    expect(data!.chains).toEqual(["Celo", "Monad"]);
+    expect(data!.chains).toEqual(["Celo", "Monad", "Polygon"]);
   });
 
   it("still returns volume when a pools query fails (rate map degraded)", async () => {

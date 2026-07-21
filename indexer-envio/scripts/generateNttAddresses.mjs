@@ -37,7 +37,7 @@ const REPO = resolve(__dirname, "..");
 const WORMHOLE_CHAIN_ID = {
   42220: 14, // Celo
   143: 48, // Monad
-  // 137: 5,   // Polygon (future)
+  137: 5, // Polygon
 };
 
 const HELPER_PREFIX = "NttDeployHelper"; // "NttDeployHelperUSDm" etc.
@@ -49,6 +49,10 @@ const ALLOWED_MISSING_MANIFEST_GAPS = new Set([
   // chain IDs are not part of the committed mainnet NTT address config.
   "wormhole-chain-id:10143",
   "wormhole-chain-id:11142220",
+  // Amoy publishes protocol contracts but does not publish NTT helpers.
+  // Keep it out of the mainnet bridge manifest until a real testnet NTT
+  // deployment exists.
+  "wormhole-chain-id:80002",
 ]);
 
 /** Extract `{USDm|GBPm|EURm|...}` from a helper entry name. */

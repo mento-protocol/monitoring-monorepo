@@ -9,6 +9,7 @@ import { NETWORKS } from "../networks";
 
 const sepolia = NETWORKS["celo-sepolia-local"];
 const mainnet = NETWORKS["celo-mainnet"];
+const polygon = NETWORKS["polygon-mainnet"];
 
 // Mainnet token addresses (from @mento-protocol/contracts)
 const USDM_MAINNET = "0x765de816845861e75a25fca122bb6898b8b1282a";
@@ -25,6 +26,15 @@ describe("tokenSymbol", () => {
     expect(
       tokenSymbol(sepolia, "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b"),
     ).toBe("USDm");
+  });
+
+  it("resolves Polygon EUROP and USDC from shared config", () => {
+    expect(
+      tokenSymbol(polygon, "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51"),
+    ).toBe("EUROP");
+    expect(
+      tokenSymbol(polygon, "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359"),
+    ).toBe("USDC");
   });
 
   it("truncates unknown address", () => {

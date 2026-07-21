@@ -6,8 +6,9 @@ import type { OracleReporterType } from "@mento-protocol/config/oracle-reporters
  * Keep in sync with mainnet network entries in src/lib/networks.ts:
  *   - celo-mainnet → 42220
  *   - monad-mainnet → 143
+ *   - polygon-mainnet → 137
  */
-export const MAINNET_CHAIN_IDS = [42220, 143] as const;
+export const MAINNET_CHAIN_IDS = [42220, 143, 137] as const;
 
 /** True when the pool is a VirtualPool (no oracle, no fees, no rebalance
  * mechanics).
@@ -132,6 +133,21 @@ export type Pool = {
   // wrapped v2 exchange; used to mirror the bridge's median-validity signal in
   // dashboard health.
   wrappedExchangeMinimumReports?: string | undefined;
+};
+
+export type PoolLiquidityStrategyKind = "OPEN" | "CDP" | "RESERVE" | "UNKNOWN";
+
+export type PoolLiquidityStrategy = {
+  id: string;
+  chainId: number;
+  poolId: string;
+  strategyAddress: string;
+  kind: PoolLiquidityStrategyKind;
+  active: boolean;
+  addedAtBlock: string;
+  addedAtTimestamp: string;
+  updatedAtBlock: string;
+  updatedAtTimestamp: string;
 };
 
 export type RateFeed = {

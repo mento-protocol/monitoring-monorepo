@@ -12,6 +12,7 @@ import type {
 } from "@/lib/__generated__/graphql";
 import { useGQL } from "@/lib/graphql";
 import type { OracleRateMap } from "@/lib/tokens";
+import { MAINNET_CHAIN_IDS } from "@/lib/types";
 import {
   STABLES_CURRENT_CUSTODY_PER_TOKEN,
   STABLES_CURRENT_SUPPLY_PER_TOKEN,
@@ -34,7 +35,7 @@ import type {
   StableSupplyChangeEvent,
 } from "./types";
 
-const STABLES_CHAIN_IDS = [42220, 143] as const;
+const STABLES_CHAIN_IDS = MAINNET_CHAIN_IDS;
 // Hasura silently caps at 1000; we set explicit limits to be honest.
 const SNAPSHOT_PAGE_LIMIT = 1000;
 const CHANGES_QUERY_PAGE_LIMIT = 400;

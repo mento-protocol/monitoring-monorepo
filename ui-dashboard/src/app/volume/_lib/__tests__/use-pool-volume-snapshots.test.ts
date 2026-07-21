@@ -15,6 +15,8 @@ vi.mock("@/lib/graphql-fetch", () => ({
 
 import { fetchPoolVolumeSnapshots } from "../use-pool-volume-snapshots";
 
+const CHAIN_ID_IN = [42220, 143, 137] as const;
+
 function row(id: string): PoolDailyVolumeRow {
   return {
     id,
@@ -47,7 +49,11 @@ describe("fetchPoolVolumeSnapshots", () => {
       })
       .mockResolvedValueOnce({ PoolDailyVolumeSnapshot: [row("1000")] });
 
-    const result = await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+    const result = await fetchPoolVolumeSnapshots(
+      "https://hasura.test",
+      123,
+      CHAIN_ID_IN,
+    );
 
     expect(result.partial).toBe(false);
     expect(result.afterTimestamp).toBe(123);
@@ -55,6 +61,7 @@ describe("fetchPoolVolumeSnapshots", () => {
     expect(requestMock).toHaveBeenCalledTimes(2);
     expect(requestMock.mock.calls[0]![0].variables).toMatchObject({
       afterTimestamp: 123,
+      chainIdIn: CHAIN_ID_IN,
       limit: 1000,
       offset: 0,
     });
@@ -74,7 +81,11 @@ describe("fetchPoolVolumeSnapshots", () => {
         PoolDailyVolumeSnapshot: [row("999"), row("1000")],
       });
 
-    const result = await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+    const result = await fetchPoolVolumeSnapshots(
+      "https://hasura.test",
+      123,
+      CHAIN_ID_IN,
+    );
 
     expect(result.partial).toBe(false);
     expect(result.rows).toHaveLength(1001);
@@ -89,7 +100,7 @@ describe("fetchPoolVolumeSnapshots", () => {
       })
       .mockResolvedValueOnce({ PoolDailyVolumeSnapshot: [row("1000")] });
 
-    await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+    await fetchPoolVolumeSnapshots("https://hasura.test", 123, CHAIN_ID_IN);
 
     expect(requestMock.mock.calls[0]![0].signal).not.toBe(
       requestMock.mock.calls[1]![0].signal,
@@ -111,7 +122,11 @@ describe("fetchPoolVolumeSnapshots", () => {
       })
       .mockResolvedValueOnce({ PoolDailyVolumeSnapshot: [row("1000")] });
 
-    const result = await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+    const result = await fetchPoolVolumeSnapshots(
+      "https://hasura.test",
+      123,
+      CHAIN_ID_IN,
+    );
 
     expect(result.partial).toBe(false);
     expect(timeoutSpy.mock.calls[0]?.[0]).toBe(8000);
@@ -127,7 +142,11 @@ describe("fetchPoolVolumeSnapshots", () => {
       })
       .mockRejectedValueOnce(new Error("timeout"));
 
-    const result = await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+    const result = await fetchPoolVolumeSnapshots(
+      "https://hasura.test",
+      123,
+      CHAIN_ID_IN,
+    );
 
     expect(result.partial).toBe(true);
     expect(result.rows).toHaveLength(1000);
@@ -154,7 +173,11 @@ describe("fetchPoolVolumeSnapshots", () => {
         });
       });
 
-    const result = await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+    const result = await fetchPoolVolumeSnapshots(
+      "https://hasura.test",
+      123,
+      CHAIN_ID_IN,
+    );
 
     expect(result.partial).toBe(true);
     expect(result.rows).toHaveLength(2000);
@@ -174,7 +197,11 @@ describe("fetchPoolVolumeSnapshots", () => {
       });
     });
 
-    const result = await fetchPoolVolumeSnapshots("https://hasura.test", 123);
+    const result = await fetchPoolVolumeSnapshots(
+      "https://hasura.test",
+      123,
+      CHAIN_ID_IN,
+    );
 
     expect(result.partial).toBe(false);
     expect(result.rows).toHaveLength(100_000);

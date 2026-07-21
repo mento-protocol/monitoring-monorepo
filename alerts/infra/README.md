@@ -27,7 +27,7 @@ Terraform-managed alert infrastructure for monitoring Mento's infrastructure acr
 
 ```mermaid
 graph LR
-    A[Blockchain<br/>Celo/Ethereum] -->|Events emitted| B[QuickNode<br/>Webhooks]
+    A[Blockchain<br/>Celo/Ethereum/Polygon] -->|Events emitted| B[QuickNode<br/>Webhooks]
     B -->|HTTP POST<br/>signed| C[Cloud Function<br/>onchain-event-handler]
     C -->|1. Verify signature| C
     C -->|2. Validate payload| C
@@ -131,6 +131,18 @@ multisigs = {
     chain                  = "celo"
     quicknode_network_name = "celo-mainnet"
   }
+  "reserve-polygon" = {
+    name                   = "Reserve Multisig"
+    address                = "0x87647780180B8f55980C7D3fFeFe08a9B29e9aE1"
+    chain                  = "polygon"
+    quicknode_network_name = "polygon-mainnet"
+  }
+  "migration-multisig-polygon" = {
+    name                   = "Migration Multisig"
+    address                = "0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458"
+    chain                  = "polygon"
+    quicknode_network_name = "polygon-mainnet"
+  }
 }
 
 # Optional: Additional Labels
@@ -193,6 +205,12 @@ multisigs = {
     chain                  = "ethereum"
     quicknode_network_name = "ethereum-mainnet"
   }
+  "reserve-polygon" = {
+    name                   = "Reserve Multisig"
+    address                = "0x87647780180B8f55980C7D3fFeFe08a9B29e9aE1"
+    chain                  = "polygon"
+    quicknode_network_name = "polygon-mainnet"
+  }
 }
 ```
 
@@ -200,6 +218,13 @@ multisigs = {
 
 - **Celo**: `chain = "celo"`, `quicknode_network_name = "celo-mainnet"`
 - **Ethereum**: `chain = "ethereum"`, `quicknode_network_name = "ethereum-mainnet"`
+- **Polygon**: `chain = "polygon"`, `quicknode_network_name = "polygon-mainnet"`
+
+The default production configuration monitors Polygon's `ReserveSafe`
+(`0x8764…9aE1`) and `MigrationMultisig` (`0x5809…a458`) from
+`@mento-protocol/contracts@0.9.0`. Safe Wallet links use the chain's canonical
+EIP-3770 prefix (`celo`, `eth`, or `matic`) rather than the internal Terraform
+chain key.
 
 **Note:** `quicknode_network_name` must be a valid QuickNode network identifier. See QuickNode API documentation for the full list of supported networks.
 

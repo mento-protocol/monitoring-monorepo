@@ -68,6 +68,72 @@ resource "grafana_rule_group" "metrics_bridge" {
     }
   }
 
+  # Polygon launched with exactly three FPMM pools. health_status is emitted
+  # once per indexed FPMM on every successful bridge poll, so it is a stable
+  # coverage gauge rather than a health-dependent subset. NoData is alerting:
+  # zero Polygon series is precisely the blind spot this rule guards against.
+  rule {
+    name           = "Polygon Pool Coverage Incomplete"
+    condition      = "threshold"
+    for            = "10m"
+    exec_err_state = "Error"
+    no_data_state  = "Alerting"
+
+    annotations = {
+      summary     = "Metrics Bridge exports {{ if $values.A }}{{ printf \"%.0f\" $values.A.Value }}{{ else }}zero{{ end }} of 3 expected Polygon FPMM pools."
+      description = "Expected live pools: USDC/USDm, EURm/USDm, and EURm/EUROP. Check Envio chain-137 sync and the metrics-bridge Hasura query before trusting Polygon pool alerts."
+    }
+
+    labels = {
+      service  = "metrics-bridge"
+      severity = "critical"
+      chain    = "polygon"
+      chain_id = "137"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        expr    = "count(mento_pool_health_status{chain_id=\"137\"})"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [3], type = "lt" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_critical.contact_point
+      group_by        = local.notify_critical.group_by
+      group_wait      = local.notify_critical.group_wait
+      group_interval  = local.notify_critical.group_interval
+      repeat_interval = local.notify_critical.repeat_interval
+    }
+  }
+
   rule {
     name      = "Metrics Bridge Poll Errors"
     condition = "threshold"

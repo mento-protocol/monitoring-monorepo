@@ -506,13 +506,20 @@ function variableDefinitionsToTs(variableDefinitions) {
 
 function typeAlias(name, value) {
   const line = `export type ${name} = ${value};`;
-  return line.length <= 80 ? line : `export type ${name} =\n${value};`;
+  if (line.length <= 80) return line;
+  const wrappedValue = value.includes("\n")
+    ? value
+    : value
+        .split(" | ")
+        .map((member) => `  | ${member}`)
+        .join("\n");
+  return `export type ${name} =\n${wrappedValue};`;
 }
 
 function unionType(values) {
   if (values.length === 0) return "never";
   const oneLine = values.join(" | ");
-  if (values.length <= 3 && oneLine.length <= 56) return oneLine;
+  if (oneLine.length <= 56) return oneLine;
   return values.map((value) => `  | ${value}`).join("\n");
 }
 

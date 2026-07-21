@@ -6,7 +6,6 @@ import type {
 } from "@/lib/integration-probes";
 import { IntegrationStatusBadge } from "./integration-status-badge";
 
-const CHAIN_ORDER = [42220, 143];
 const PREVIEW_VENUE_KEYS = [
   "dex",
   "tool",
@@ -22,6 +21,7 @@ export function IntegrationProbesTable({
 }: {
   snapshot: IntegrationProbeSnapshot;
 }) {
+  const chainColumns = snapshotChainColumns(snapshot);
   return (
     <Table aria-label="Mento v3 aggregator integration health">
       <thead>
@@ -30,14 +30,19 @@ export function IntegrationProbesTable({
           <Th>Tier</Th>
           <Th>Type</Th>
           <Th>Volume Signal</Th>
-          <Th>Celo</Th>
-          <Th>Monad</Th>
+          {chainColumns.map((chain) => (
+            <Th key={chain.chainId}>{chain.chainLabel}</Th>
+          ))}
           <Th>Next Step</Th>
         </tr>
       </thead>
       <tbody>
         {snapshot.aggregators.map((aggregator) => (
-          <AggregatorRows key={aggregator.id} aggregator={aggregator} />
+          <AggregatorRows
+            key={aggregator.id}
+            aggregator={aggregator}
+            chainColumns={chainColumns}
+          />
         ))}
       </tbody>
     </Table>
@@ -46,8 +51,10 @@ export function IntegrationProbesTable({
 
 function AggregatorRows({
   aggregator,
+  chainColumns,
 }: {
   aggregator: IntegrationProbeAggregator;
+  chainColumns: ReadonlyArray<{ chainId: number; chainLabel: string }>;
 }) {
   const chainsById = new Map(
     aggregator.chains.map((chain) => [chain.chainId, chain]),
@@ -73,9 +80,9 @@ function AggregatorRows({
         <Td>
           <VolumeSignalCell signal={aggregator.volumeSignal} />
         </Td>
-        {CHAIN_ORDER.map((chainId) => (
-          <Td key={chainId}>
-            <ChainCell chain={chainsById.get(chainId)} />
+        {chainColumns.map((chain) => (
+          <Td key={chain.chainId}>
+            <ChainCell chain={chainsById.get(chain.chainId)} />
           </Td>
         ))}
         <Td muted small>
@@ -85,7 +92,7 @@ function AggregatorRows({
         </Td>
       </tr>
       <tr className="border-b border-slate-800/50 bg-slate-950/30">
-        <td colSpan={7} className="px-2 sm:px-4 py-2">
+        <td colSpan={5 + chainColumns.length} className="px-2 sm:px-4 py-2">
           <details className="group">
             <summary className="cursor-pointer text-xs font-medium text-slate-400 hover:text-indigo-300">
               Pair evidence
@@ -100,6 +107,29 @@ function AggregatorRows({
       </tr>
     </>
   );
+}
+
+function snapshotChainColumns(
+  snapshot: IntegrationProbeSnapshot,
+): Array<{ chainId: number; chainLabel: string }> {
+  const byId = new Map<number, { chainId: number; chainLabel: string }>();
+  for (const chain of snapshot.chains) {
+    byId.set(chain.chainId, {
+      chainId: chain.chainId,
+      chainLabel: chain.chainLabel,
+    });
+  }
+  for (const aggregator of snapshot.aggregators) {
+    for (const chain of aggregator.chains) {
+      if (!byId.has(chain.chainId)) {
+        byId.set(chain.chainId, {
+          chainId: chain.chainId,
+          chainLabel: chain.chainLabel,
+        });
+      }
+    }
+  }
+  return Array.from(byId.values());
 }
 
 function VolumeSignalCell({

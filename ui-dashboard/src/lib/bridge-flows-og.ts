@@ -38,7 +38,7 @@ export type BridgeFlowsOgData = {
 
 /**
  * Configured bridge-eligible chains. Bridge data lives on the single
- * multichain Hasura endpoint (shared between Celo + Monad mainnet entries
+ * multichain Hasura endpoint (shared by the production mainnet entries
  * in NETWORKS), so we pick any one of them to source the snapshot query.
  * All configured mainnet chains contribute their oracle rates for pricing
  * rows that don't carry a pinned `sentUsdValue`.

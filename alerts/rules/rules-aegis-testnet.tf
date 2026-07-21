@@ -2,8 +2,8 @@
 #
 # These intentionally use Aegis self-metrics only. Testnet does not have a
 # metrics-bridge/exported Envio pool gauge path, but Aegis already polls
-# Celo Sepolia + Monad Testnet oracle freshness, breaker modes, and relayer
-# balances. Alerting on successful/error polling keeps testnet health visible
+# Celo Sepolia + Monad Testnet + Polygon Amoy oracle freshness, breaker modes,
+# and relayer balances. Alerting on successful/error polling keeps testnet health visible
 # without standing up per-chain testnet indexers or bridge exporters.
 
 resource "grafana_rule_group" "aegis_testnet_health" {

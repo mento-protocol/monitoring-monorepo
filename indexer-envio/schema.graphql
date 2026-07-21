@@ -189,6 +189,30 @@ type Pool {
   updatedAtTimestamp: BigInt!
 }
 
+# A pool may authorize more than one liquidity strategy at the same time.
+# `Pool.rebalancerAddress` remains the legacy "most recently observed active"
+# pointer for backwards-compatible consumers; this entity is the authoritative
+# many-to-many registry used by new indexer and dashboard paths.
+enum LiquidityStrategyKind {
+  OPEN
+  CDP
+  RESERVE
+  UNKNOWN
+}
+
+type PoolLiquidityStrategy @index(fields: ["poolId", "active"]) {
+  id: ID! # "{chainId}-{poolAddress}-{strategyAddress}"
+  chainId: Int! @index
+  poolId: String! @index
+  strategyAddress: String! @index
+  kind: LiquidityStrategyKind!
+  active: Boolean!
+  addedAtBlock: BigInt!
+  addedAtTimestamp: BigInt!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
 enum OracleReporterType {
   CHAINLINK
   REDSTONE
@@ -1837,7 +1861,7 @@ type Breaker {
   address: String! # lowercased
   kind: BreakerKind!
   # Trading mode this breaker OR's into rateFeedTradingMode when tripped.
-  # Production: 3 (halt) for all three breakers on Celo + Monad.
+  # Production: 3 (halt) for all three breakers on every configured pool chain.
   activatesTradingMode: Int!
   # Defaults — used when per-feed override is sentinel 0.
   defaultCooldownTime: BigInt! # seconds

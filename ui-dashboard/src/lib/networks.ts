@@ -17,6 +17,8 @@ const NS = {
   "celo-sepolia": DEPLOYMENT_NAMESPACES["11142220"],
   "monad-mainnet": DEPLOYMENT_NAMESPACES["143"],
   "monad-testnet": DEPLOYMENT_NAMESPACES["10143"],
+  "polygon-mainnet": DEPLOYMENT_NAMESPACES["137"],
+  "polygon-amoy": DEPLOYMENT_NAMESPACES["80002"],
 } as const;
 
 export type IndexerNetworkId =
@@ -25,7 +27,9 @@ export type IndexerNetworkId =
   | "celo-sepolia"
   | "celo-mainnet"
   | "monad-mainnet"
-  | "monad-testnet";
+  | "monad-testnet"
+  | "polygon-mainnet"
+  | "polygon-amoy";
 
 export type Network = {
   id: IndexerNetworkId;
@@ -190,6 +194,33 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
       sharedExplorerBaseUrl(10143) ??
       "https://testnet.monadscan.com",
   }),
+  "polygon-mainnet": makeNetwork({
+    id: "polygon-mainnet",
+    label: "Polygon",
+    chainId: 137,
+    contractsNamespace: NS["polygon-mainnet"],
+    rpcUrl: clientEnv.NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET,
+    hasuraUrl: clientEnv.NEXT_PUBLIC_HASURA_URL?.trim() ?? "",
+    hasuraSecret: "",
+    explorerBaseUrl:
+      clientEnv.NEXT_PUBLIC_EXPLORER_URL_POLYGON_MAINNET ??
+      sharedExplorerBaseUrl(137) ??
+      "https://polygonscan.com",
+  }),
+  "polygon-amoy": makeNetwork({
+    id: "polygon-amoy",
+    label: "Polygon Amoy",
+    testnet: true,
+    chainId: 80002,
+    contractsNamespace: NS["polygon-amoy"],
+    rpcUrl: clientEnv.NEXT_PUBLIC_RPC_URL_POLYGON_AMOY,
+    hasuraUrl: clientEnv.NEXT_PUBLIC_HASURA_URL_TESTNET?.trim() ?? "",
+    hasuraSecret: "",
+    explorerBaseUrl:
+      clientEnv.NEXT_PUBLIC_EXPLORER_URL_POLYGON_AMOY ??
+      sharedExplorerBaseUrl(80002) ??
+      "https://amoy.polygonscan.com",
+  }),
 };
 
 export const NETWORK_IDS = Object.keys(NETWORKS) as IndexerNetworkId[];
@@ -205,6 +236,8 @@ const NETWORKS_BY_CHAIN_ID: Record<number, readonly IndexerNetworkId[]> = {
   11142220: ["celo-sepolia", "celo-sepolia-local"],
   143: ["monad-mainnet"],
   10143: ["monad-testnet"],
+  137: ["polygon-mainnet"],
+  80002: ["polygon-amoy"],
 };
 
 const CANONICAL_NETWORK_BY_CHAIN_ID: Record<number, IndexerNetworkId> = {
@@ -212,6 +245,8 @@ const CANONICAL_NETWORK_BY_CHAIN_ID: Record<number, IndexerNetworkId> = {
   11142220: "celo-sepolia",
   143: "monad-mainnet",
   10143: "monad-testnet",
+  137: "polygon-mainnet",
+  80002: "polygon-amoy",
 };
 
 // Canonical network id for a chainId (used to derive the active network

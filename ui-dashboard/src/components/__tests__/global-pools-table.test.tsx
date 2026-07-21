@@ -924,7 +924,7 @@ describe("GlobalPoolsTable — Strategy badge", () => {
     expect(html).not.toContain(">Reserve<");
   });
 
-  it("prefers Open over CDP and Reserve when a pool is in multiple sets", () => {
+  it("renders every active strategy when a pool is in multiple sets", () => {
     const entry = makeEntry(WITH_REBALANCER);
     const key = globalPoolKey(entry);
     const html = renderToStaticMarkup(
@@ -936,11 +936,11 @@ describe("GlobalPoolsTable — Strategy badge", () => {
       />,
     );
     expect(html).toContain(">Open<");
-    expect(html).not.toContain(">CDP<");
-    expect(html).not.toContain(">Reserve<");
+    expect(html).toContain(">CDP<");
+    expect(html).toContain(">Reserve<");
   });
 
-  it("prefers CDP over Reserve when a pool is in both sets", () => {
+  it("renders both CDP and Reserve when both are active", () => {
     const entry = makeEntry(WITH_REBALANCER);
     const key = globalPoolKey(entry);
     const html = renderToStaticMarkup(
@@ -951,7 +951,7 @@ describe("GlobalPoolsTable — Strategy badge", () => {
       />,
     );
     expect(html).toContain(">CDP<");
-    expect(html).not.toContain(">Reserve<");
+    expect(html).toContain(">Reserve<");
   });
 
   it("renders no strategy badge when a pool has no rebalancer and is in no strategy set", () => {

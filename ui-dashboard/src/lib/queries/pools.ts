@@ -263,8 +263,9 @@ export const POOL_LABELS_ALL = `
 `;
 
 export const RECENT_SWAPS = `
-  query RecentSwaps($limit: Int!) {
+  query RecentSwaps($chainIdIn: [Int!]!, $limit: Int!) {
     SwapEvent(
+      where: { chainId: { _in: $chainIdIn } }
       order_by: { blockNumber: desc }
       limit: $limit
     ) {

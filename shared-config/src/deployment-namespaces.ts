@@ -5,6 +5,8 @@ export const DEPLOYMENT_NAMESPACE_CHAIN_IDS = [
   "11142220",
   "143",
   "10143",
+  "137",
+  "80002",
 ] as const;
 
 export type DeploymentNamespaceChainId =

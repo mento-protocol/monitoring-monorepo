@@ -13,7 +13,10 @@ const SOLIDITY_TYPE_BOUNDS = {
   int48: { min: -140737488355328n, max: 140737488355327n },
 } as const;
 
-const ORACLE_RATE_DECIMAL_SCALE = 1_000_000_000_000n;
+// Keep bigint-to-number fractional conversion below Number's safe-integer
+// boundary. Twelve decimal places are precise enough for alert thresholds and
+// leave a representable gap below the next whole unit at operational balances.
+const NUMBER_DECIMAL_SCALE = 1_000_000_000_000n;
 
 const inputName = (input: { name?: string }, index: number): string =>
   input.name ?? `in${index}`;
@@ -58,16 +61,18 @@ export class Metric {
   private readonly metricParsers: Record<string, MetricParser> = {
     'BreakerBox.getRateFeedTradingMode': (output) =>
       this.bigintToSafeNumber(output as bigint),
-    'CELOToken.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 18),
+    'CELOToken.balanceOf': (output) => this.tokenAmountToUnits(output, 18),
     // Native handles non-ERC20 native gas tokens (e.g. MON, ETH) fetched via
     // eth_getBalance. Like CELO (which is ERC20-compatible), they use 18 decimals.
-    'Native.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 18),
-    'USDC.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
-    'USDT.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
-    'axlUSDC.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    'Native.balanceOf': (output) => this.tokenAmountToUnits(output, 18),
+    'USDC.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
+    'USDT.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
+    'axlUSDC.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
     // Monad reserve tokens (issue #707); both verified 6dp on-chain.
-    'USDT0.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
-    'AUSD.balanceOf': (output) => this.tokenAmountToWholeUnits(output, 6),
+    'USDT0.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
+    'AUSD.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
+    // Polygon reserve token; verified 6dp on-chain.
+    'EUROP.balanceOf': (output) => this.tokenAmountToUnits(output, 6),
     'SortedOracles.medianRate': (output) => this.parseMedianRate(output),
     'SortedOracles.isOldestReportExpired': (output) =>
       this.parseOldestReportExpired(output),
@@ -279,7 +284,7 @@ export class Metric {
     if (functionName !== 'totalSupply' || tokenDecimals === undefined) {
       return undefined;
     }
-    return this.tokenAmountToWholeUnits(output, tokenDecimals);
+    return this.tokenAmountToUnits(output, tokenDecimals);
   }
 
   private bigintToSafeNumber(value: bigint): number {
@@ -338,20 +343,30 @@ export class Metric {
       throw new Error(`Value ${integerPart} is too large to be a safe integer`);
     }
 
-    const scaledFraction =
-      (remainder * ORACLE_RATE_DECIMAL_SCALE) / denominator;
+    const scaledFraction = (remainder * NUMBER_DECIMAL_SCALE) / denominator;
     return (
       Number(integerPart) +
-      Number(scaledFraction) / Number(ORACLE_RATE_DECIMAL_SCALE)
+      Number(scaledFraction) / Number(NUMBER_DECIMAL_SCALE)
     );
   }
 
-  private tokenAmountToWholeUnits(output: unknown, decimals: number): number {
+  private tokenAmountToUnits(output: unknown, decimals: number): number {
     const divisor = 10n ** BigInt(decimals);
     const wholeUnits = (output as bigint) / divisor;
+    const fractionalUnits = (output as bigint) % divisor;
     if (wholeUnits > Number.MAX_SAFE_INTEGER) {
       throw new Error(`Value ${wholeUnits} is too large to be a safe integer`);
     }
-    return Number(wholeUnits);
+
+    const fractionalScale =
+      divisor < NUMBER_DECIMAL_SCALE ? divisor : NUMBER_DECIMAL_SCALE;
+    let scaledFraction = (fractionalUnits * fractionalScale) / divisor;
+    if (fractionalUnits > 0n && scaledFraction === 0n) {
+      scaledFraction = 1n;
+    }
+
+    return (
+      Number(wholeUnits) + Number(scaledFraction) / Number(fractionalScale)
+    );
   }
 }

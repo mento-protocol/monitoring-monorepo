@@ -32,6 +32,7 @@ const REPORTER_TYPE_SET = new Set<string>(ORACLE_REPORTER_TYPES);
 const CHAINLINK_FEED_PATH_BY_CHAIN: Readonly<Record<number, string>> = {
   42220: "celo/mainnet",
   143: "monad/monad",
+  137: "polygon/mainnet",
 };
 
 function chainEntry(chainId: number): RawChainEntry | undefined {

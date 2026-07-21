@@ -19,8 +19,9 @@ import { asAddress } from "../../helpers.js";
 //   RESERVE          — reserve-backed stables that mint/burn via Broker or
 //                         Wormhole NTT. 12 Celo tokens are brand-named in
 //                         @mento-protocol/contracts (USDm aliases the Celo cUSD
-//                         address 0x765de8…). Monad EURm/USDm are generated
-//                         from the NTT manifest and tracked the same way.
+//                         address 0x765de8…). Monad and Polygon burning-mode
+//                         stables are generated from the NTT manifest and
+//                         tracked the same way.
 //   V3_HUB_COLLATERAL   — the V3 hub USDm at 0x106cc… (a distinct contract
 //                         from Celo cUSD-USDm). Hand-typed below because the
 //                         contracts package's bare `USDm` key still resolves
@@ -52,6 +53,7 @@ export type StableInfo = {
 
 const CELO_CHAIN_ID = 42220;
 const MONAD_CHAIN_ID = 143;
+const POLYGON_CHAIN_ID = 137;
 
 // V3 Liquity Bold debt tokens — supply tracked via LiquityInstance.systemDebt,
 // not via the Celo StableToken Transfer-zero subscription.
@@ -87,6 +89,8 @@ const EXPECTED_MONAD_NTT_SYMBOLS = new Set([
   "USDm",
 ]);
 
+const EXPECTED_POLYGON_NTT_SYMBOLS = new Set(["EURm", "USDm"]);
+
 export type NttBridgeMode = "LOCKING" | "BURNING";
 
 type NttAddressEntry = {
@@ -115,6 +119,9 @@ const NTT_BRIDGE_MODE_BY_TOKEN = new Map<string, NttBridgeMode>([
   ["143:0x39bb4e0a204412bb98e821d25e7d955e69d40fd1", "BURNING"], // GBPm
   ["143:0x22f6a6752800eab67b84748fefc3cc658384af72", "BURNING"], // JPYm
   ["143:0xbc69212b8e4d445b2307c9d32dd68e2a4df00115", "BURNING"], // USDm
+  // Live Polygon NttManager.mode() on 2026-07-17: both managers are BURNING.
+  ["137:0x4d502d735b4c574b487ed641ae87ceae884731c7", "BURNING"], // EURm
+  ["137:0xbc69212b8e4d445b2307c9d32dd68e2a4df00115", "BURNING"], // USDm
 ]);
 
 const nttEntries = (nttAddresses as { entries: NttAddressEntry[] }).entries;
@@ -188,12 +195,11 @@ const buildStables = (): ReadonlyArray<StableInfo> => {
   // Append V3 hub USDm (not derivable from the package today).
   out.push(V3_HUB_USDM_INFO);
 
-  // Append Monad NTT supplies. These are all burn/mint on Monad, so the
-  // chain-local totalSupply is real supply and can be added directly to the
-  // Celo circulating supply after the dashboard subtracts any Celo lock
-  // custody.
+  // Append burning-mode NTT supplies outside Celo. Their chain-local
+  // totalSupply is real supply and can be added directly to the Celo
+  // circulating supply after the dashboard subtracts any Celo lock custody.
   for (const ntt of NTT_STABLES) {
-    if (ntt.chainId !== MONAD_CHAIN_ID) continue;
+    if (ntt.chainId === CELO_CHAIN_ID || ntt.bridgeMode !== "BURNING") continue;
     out.push({
       chainId: ntt.chainId,
       address: ntt.address,
@@ -210,7 +216,7 @@ const buildStables = (): ReadonlyArray<StableInfo> => {
 // the namespace map *before* the builders run, so a chain rename/removal in
 // deployment-namespaces.json fails loud at module load instead of buildStables()
 // silently returning [].
-for (const cid of [CELO_CHAIN_ID, MONAD_CHAIN_ID]) {
+for (const cid of [CELO_CHAIN_ID, MONAD_CHAIN_ID, POLYGON_CHAIN_ID]) {
   if (!(String(cid) in CONTRACT_NAMESPACE_BY_CHAIN)) {
     throw new Error(
       `[stables/config] Chain ${cid} is not a key in CONTRACT_NAMESPACE_BY_CHAIN. ` +
@@ -252,9 +258,9 @@ export const STABLES: ReadonlyArray<StableInfo> = buildStables();
   // (last-write-wins). Asserting distinctness here fails loud at module
   // load so an operator removes V3_HUB_USDM_INFO before deploy.
   const usdmEntries = STABLES.filter((s) => s.symbol === "USDm");
-  if (usdmEntries.length !== 3) {
+  if (usdmEntries.length !== 4) {
     throw new Error(
-      `[stables/config] Expected exactly 3 USDm entries (Celo cUSD-USDm + Celo V3 hub USDm + Monad USDm), found ${usdmEntries.length}. ` +
+      `[stables/config] Expected exactly 4 USDm entries (Celo cUSD-USDm + Celo V3 hub USDm + Monad USDm + Polygon USDm), found ${usdmEntries.length}. ` +
         `If @mento-protocol/contracts now ships USDm at ${V3_HUB_USDM_ADDRESS}, remove V3_HUB_USDM_INFO from this file.`,
     );
   }
@@ -280,6 +286,16 @@ export const STABLES: ReadonlyArray<StableInfo> = buildStables();
     if (!monadSymbols.has(expected)) {
       throw new Error(
         `[stables/config] Expected Monad NTT stable ${expected} missing from config/nttAddresses.json.`,
+      );
+    }
+  }
+  const polygonSymbols = new Set(
+    STABLES.filter((s) => s.chainId === POLYGON_CHAIN_ID).map((s) => s.symbol),
+  );
+  for (const expected of EXPECTED_POLYGON_NTT_SYMBOLS) {
+    if (!polygonSymbols.has(expected)) {
+      throw new Error(
+        `[stables/config] Expected Polygon NTT stable ${expected} missing from config/nttAddresses.json.`,
       );
     }
   }

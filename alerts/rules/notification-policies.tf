@@ -341,7 +341,47 @@ resource "grafana_notification_policy" "all" {
       }
     }
 
-    # Reserve alerts → #alerts-reserve
+    # Reserve page alerts → Splunk On-Call and #alerts-critical, then continue
+    # into the reserve-domain route below. Keep these before the terminal
+    # service=reserve policy or Grafana will stop at #alerts-reserve and never
+    # deliver the page-grade copies.
+    policy {
+      contact_point = grafana_contact_point.splunk_on_call.name
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "reserve"
+      }
+
+      matcher {
+        label = "severity"
+        match = "="
+        value = "page"
+      }
+
+      continue = true
+    }
+
+    policy {
+      contact_point = grafana_contact_point.slack_alerts_critical.name
+
+      matcher {
+        label = "service"
+        match = "="
+        value = "reserve"
+      }
+
+      matcher {
+        label = "severity"
+        match = "="
+        value = "page"
+      }
+
+      continue = true
+    }
+
+    # Reserve alerts → #alerts-reserve (terminal domain route)
     policy {
       contact_point = grafana_contact_point.slack_alerts_reserve.name
 

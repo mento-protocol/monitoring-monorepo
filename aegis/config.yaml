@@ -202,6 +202,24 @@ chains:
       JPYUSD: '0xb9aDdcD1d1CE7d49DBB540E2677F1C572Bc8D195'
       CHFUSD: '0x2EE56bE22D6af8c1b0ac97149b6F42D3B0BFb8C2'
 
+  - id: polygon
+    label: polygon
+    httpRpcUrl: https://polygon.drpc.org
+    contracts:
+      SortedOracles: '0x6f92C745346057a61b259579256159458a0a6A92'
+      BreakerBox: '0x9fc1E0d10fb38954Da385B8B25aB2BbaF3241722'
+      # Reserve collateral token contracts for the ReserveV2 balance gauges.
+      # Both expose 6 decimals; used only for balanceOf(Reserve) gauges.
+      USDC: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359'
+      EUROP: '0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51'
+    vars:
+      # Polygon ReserveV2 — overrides the global (Celo) Reserve for this chain.
+      Reserve: '0x4255Cf38e51516766180b33122029A88Cb853806'
+      # Polygon rate feeds
+      USDCUSD: '0x81a313Ff894BFC6093d33b5514E34D7FAA41B7eF'
+      EURUSD: '0xEc57482AA55e3ad026C315A0e4A692B776C318cA'
+      EUROPEUR: '0xc22418a83DfC262B10a1f57E25309DB83E7eA79e'
+
   - id: monadTestnet
     label: monad-testnet
     httpRpcUrl: https://testnet-rpc.monad.xyz
@@ -217,6 +235,21 @@ chains:
       EURUSD: '0xEc57482AA55e3ad026C315A0e4A692B776C318cA'
       JPYUSD: '0xb9aDdcD1d1CE7d49DBB540E2677F1C572Bc8D195'
       CHFUSD: '0x2EE56bE22D6af8c1b0ac97149b6F42D3B0BFb8C2'
+
+  - id: polygonTestnet
+    label: polygon-testnet
+    httpRpcUrl: https://rpc-amoy.polygon.technology
+    contracts:
+      # Same deterministic testnet deploy addresses as monadTestnet above.
+      # Verified on-chain (chainId 80002): only the three Polygon rate feeds
+      # below are registered; all other feed IDs revert "not been added".
+      SortedOracles: '0x85ed9ac57827132B8F60938F3165BC139E1F53cd'
+      BreakerBox: '0x88869E30609D2C0E4032463D713328C6f541878e'
+    vars:
+      # Polygon rate feeds (same IDs on polygon mainnet and Amoy)
+      USDCUSD: '0x81a313Ff894BFC6093d33b5514E34D7FAA41B7eF'
+      EURUSD: '0xEc57482AA55e3ad026C315A0e4A692B776C318cA'
+      EUROPEUR: '0xc22418a83DfC262B10a1f57E25309DB83E7eA79e'
 
   - id: celoSepolia
     label: celo-sepolia
@@ -528,6 +561,28 @@ metrics:
       - [JPYUSD]
       - [CHFUSD]
 
+  # Polygon rate feed freshness. Polygon SortedOracles reports its own feed set,
+  # so this is a separate entry from the Celo and Monad ones above.
+  # Amoy registers the same three feed IDs as polygon mainnet.
+  - source: SortedOracles.isOldestReportExpired(address rateFeed)(bool isExpired,address oracle)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [polygon, polygonTestnet]
+    variants:
+      - [USDCUSD]
+      - [EURUSD]
+      - [EUROPEUR]
+
+  # Polygon rate feed trading modes (BreakerBox), for the Polygon feed set.
+  - source: BreakerBox.getRateFeedTradingMode(address rateFeed)(uint8)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [polygon, polygonTestnet]
+    variants:
+      - [USDCUSD]
+      - [EURUSD]
+      - [EUROPEUR]
+
   # Checks if wallets or contracts of interest have enough CELO to pay for transactions
   - source: CELOToken.balanceOf(address owner)(uint256)
     schedule: 0 * * * * *
@@ -627,6 +682,17 @@ metrics:
       - [RelayerSignerCHFUSD]
       - [RelayerSignerJPYUSD]
 
+  # Native gas-token balance (POL) for Polygon relayer signers.
+  # Uses eth_getBalance under the hood instead of an ERC20 balanceOf call.
+  # polygon and polygon-testnet share the same signer addresses.
+  - source: Native.balanceOf(address owner)(uint256)
+    schedule: 0 * * * * *
+    type: gauge
+    chains: [polygon, polygonTestnet]
+    variants:
+      - [RelayerSignerUSDCUSD]
+      - [RelayerSignerEURUSD]
+
   # Does the reserve have enough USDC for swap operations?
   - source: USDC.balanceOf(address owner)(uint256)
     schedule: 0/10 * * * * *
@@ -672,6 +738,22 @@ metrics:
     schedule: 0/10 * * * * *
     type: gauge
     chains: [monad]
+    variants:
+      - [Reserve]
+
+  # Polygon ReserveV2 balances. Same gauge names as Celo/Monad
+  # (USDC_balanceOf, ...) but distinct series via the `chain` label.
+  - source: USDC.balanceOf(address owner)(uint256)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [polygon]
+    variants:
+      - [Reserve]
+
+  - source: EUROP.balanceOf(address owner)(uint256)
+    schedule: 0/10 * * * * *
+    type: gauge
+    chains: [polygon]
     variants:
       - [Reserve]
 
