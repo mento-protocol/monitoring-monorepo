@@ -237,6 +237,79 @@ test("a per-job annotation satisfies that job; a header annotation covers all jo
   assert(evaluateWorkflow(fileLevel).ok, "header annotation covers all jobs");
 });
 
+test("the guard only counts on the JOB-LEVEL if:, not in steps or comments", () => {
+  // The exact guard text inside a step's run: (or a step-level if:) does not
+  // gate whether the JOB runs for autofix PRs — it must not certify the job.
+  const guardInRunStep = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    steps:",
+    "      - run: echo \"!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')\"",
+    SECRET_LINE,
+  ].join("\n");
+  assert(!evaluateWorkflow(guardInRunStep).ok, "guard inside run: refused");
+
+  const guardInStepIf = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    steps:",
+    "      - if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+    "        run: echo hi",
+    SECRET_LINE,
+  ].join("\n");
+  assert(
+    !evaluateWorkflow(guardInStepIf).ok,
+    "step-level if: does not certify the whole job",
+  );
+
+  // Multiline job-level if: (the repo's >- form) is credited.
+  const multilineIf = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  x:",
+    "    if: >-",
+    "      (github.event_name == 'pull_request'",
+    "        && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/'))",
+    SECRET_LINE,
+  ].join("\n");
+  assert(evaluateWorkflow(multilineIf).ok, "multiline job if: credited");
+});
+
+test("workflow-level env secrets make every job secret-bearing", () => {
+  // Top-level `env: TOKEN: ${{ secrets.X }}` is inherited by all jobs; a job
+  // with no textual secret reference still receives it.
+  const headerEnv = [
+    "on:",
+    "  pull_request:",
+    "env:",
+    "  TOKEN: ${{ secrets.SOME_TOKEN }}",
+    "jobs:",
+    "  x:",
+    "    steps:",
+    "      - run: pnpm test",
+  ].join("\n");
+  const v = evaluateWorkflow(headerEnv);
+  assert(!v.ok && /\[x\]/.test(v.reason), "inherited header secret refused");
+
+  const guarded = [
+    "on:",
+    "  pull_request:",
+    "env:",
+    "  TOKEN: ${{ secrets.SOME_TOKEN }}",
+    "jobs:",
+    "  x:",
+    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+    "    steps:",
+    "      - run: pnpm test",
+  ].join("\n");
+  assert(evaluateWorkflow(guarded).ok, "guarded job passes with header secret");
+});
+
 test("un-segmentable secret-bearing workflow FAILS CLOSED", () => {
   // 4-space job indentation defeats the textual splitter; the checker must
   // refuse rather than silently skip the per-job analysis.

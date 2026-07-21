@@ -194,6 +194,33 @@ export function splitJobs(body) {
 }
 
 /**
+ * True when the job block's JOB-LEVEL `if:` condition contains the excluding
+ * autofix guard. Only the `if:` value counts — the same text inside a step's
+ * `run:`, a comment, or a step-level `if:` does not gate whether the JOB (and
+ * its secret-bearing env/steps) runs for an autofix PR. A job block's own
+ * keys sit at 4-space indent; the job-level `if:` value is the rest of that
+ * line plus any deeper-indented continuation lines (block scalars `|`/`>`,
+ * folded expressions) up to the next 4-space key.
+ *
+ * Exported for tests.
+ */
+export function jobIfGuarded(block) {
+  const lines = block.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = lines[i].match(/^ {4}if\s*:\s*(.*)$/);
+    if (!m) continue;
+    let value = m[1];
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const l = lines[j];
+      if (/^ {4}[A-Za-z0-9_-]+\s*:/.test(l) || /^ {0,3}\S/.test(l)) break;
+      value += `\n${l}`;
+    }
+    if (GUARD_PATTERN.test(value)) return true;
+  }
+  return false;
+}
+
+/**
  * Evaluate one workflow body. Returns `{ ok: true }` or `{ ok: false, reason }`.
  *
  * Granularity is PER JOB, not per file: in a multi-job workflow, one guarded
@@ -235,12 +262,16 @@ export function evaluateWorkflow(body) {
         "triggers on pull_request and references secrets, but no job blocks could be segmented (non-standard indentation?). The per-job trust analysis cannot run — reformat to the repo's 2-space YAML style or add a file-level '# autofix-ci-trust:' annotation above `jobs:`.",
     };
   }
+  // Workflow-level `env:` (or any header secret expression) is inherited by
+  // EVERY job, so a header secret makes every job secret-bearing even when no
+  // job block contains the textual reference itself.
+  const headerHasSecrets = referencesSecrets(header);
   const offenders = [];
   for (const [job, block] of blocks) {
     if (job === "") continue;
-    if (!referencesSecrets(block)) continue;
+    if (!referencesSecrets(block) && !headerHasSecrets) continue;
     if (fileAnnotated) continue;
-    if (GUARD_PATTERN.test(block) || block.includes(ANNOTATION)) continue;
+    if (jobIfGuarded(block) || block.includes(ANNOTATION)) continue;
     offenders.push(job);
   }
   if (offenders.length === 0) {
