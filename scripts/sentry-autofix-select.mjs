@@ -43,6 +43,7 @@ import {
 import {
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
+  PROJECTED_LABEL,
 } from "./sentry-triage-ingest.mjs";
 
 // Only `code-fix` verdicts are fixable in code; the select label already
@@ -140,11 +141,17 @@ async function listCodeFixStubs(runGh, repo) {
     "--state",
     "all",
     // Exclude already-handled stubs at the source so they never occupy the
-    // window: both `fix-pr-opened` (a PR was opened) and `fix-refused` (an
-    // attempt declined to open one) are terminal until a human clears the marker
-    // or a regression sheds it.
+    // window: `fix-pr-opened` (a PR was opened) and `fix-refused` (an attempt
+    // declined to open one) are terminal until a human clears the marker or a
+    // regression sheds it, and `sentry:projected` marks EXTERNAL-repo code-fix
+    // stubs (their verdict was projected into the owning repo — never autofix
+    // territory here). The projected exclusion matters for the window itself:
+    // `--limit` caps what the API RETURNS, before any client-side filter, so
+    // without it an accumulating backlog of external code-fix stubs would
+    // eventually fill the whole fetch window and permanently starve newer
+    // local candidates that sort after them.
     "--search",
-    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}"`,
+    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}" -label:"${PROJECTED_LABEL}"`,
     "--json",
     "number,title,labels,createdAt",
     "--limit",

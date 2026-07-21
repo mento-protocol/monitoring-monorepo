@@ -886,17 +886,28 @@ dispatch from a feature ref would make that ref the base and its divergence from
 **Diff guard (mechanical, not just prompt-enforced).** After the agent edits,
 the finalize step detects the changes and refuses — posting a no-PR analysis
 comment on the queue stub, marking it `sentry:fix-refused`, exiting cleanly —
-when the diff has zero changes, more than 3 changed files, ANY changed path
-under a forbidden prefix (`.github/`, `terraform/`, all of `scripts/`,
-`patches/`, any `package.json`, `pnpm-lock.yaml`, `.npmrc`, any `pnpmfile`,
-`.trunk/`, `tools/`), or a changed path the agent turned into a **symlink**. The
-symlink rejection is credential-free (it runs in the guard step, before the App
-token is minted) and lstat-only: the filter-free detector does not dereference
+when the diff has zero changes, more than 3 changed files, ANY changed path on
+a forbidden surface, a changed path the agent turned into a **symlink**, or a
+changed file whose CONTENT is **credential-shaped**. Forbidden surfaces:
+prefixes `.github/`, `terraform/`, `patches/`, `.trunk/`, `tools/`; a
+`scripts/` directory at ANY depth (root tooling AND package-local helpers like
+`ui-dashboard/scripts/` — several workflows execute package scripts from the
+PR head with secrets in env, e.g. the Lighthouse deploy-protection bypass);
+and CI-executed config files anywhere (`package.json`, `pnpm-lock.yaml`,
+`.npmrc`, any `pnpmfile`, `vercel.json`, `turbo.json`, `*.config.{js,ts,…}`,
+`lighthouserc*`, `*.sh`, `Dockerfile*`, `*.yml`/`*.yaml`). The symlink
+rejection is credential-free (it runs in the guard step, before the App token
+is minted) and lstat-only: the filter-free detector does not dereference
 symlinks, so without it an agent could replace an allowed source file with a
 symlink to a secret-bearing path (e.g. `/proc/self/environ`) that the later
 credentialed byte-copy would dereference and publish into the public fix branch.
-The prompt states the same limits, but the guard enforces them in code so an
-over-eager or injected agent cannot land a forbidden-path, sprawling, or
+The credential scan closes the sibling channel: the documented process-env
+residual means an injected agent could READ runner tokens and write them into
+an allowed source file — the guard scans every changed file for known
+credential shapes (GitHub/Anthropic/Slack/AWS prefixes) and refuses the whole
+attempt, since a pushed branch is public before any human review. The prompt
+states the same limits, but the guard enforces them in code so an over-eager
+or injected agent cannot land a forbidden-path, sprawling, or
 secret-exfiltrating diff.
 
 The `sentry:fix-refused` marker is what stops a genuinely unfixable stub from

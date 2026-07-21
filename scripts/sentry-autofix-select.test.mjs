@@ -158,6 +158,24 @@ await test("selects oldest local code-fix stubs, capped", async () => {
   ]);
 });
 
+await test("batch list excludes handled AND projected stubs server-side", async () => {
+  const stubs = [stub({ number: 30, shortId: "APP-MENTO-ORG-6W" })];
+  const { runGh, calls } = makeRunGh({ stubs });
+  await selectAutofixCandidates({ repo: "o/r", cap: 2 }, { runGh });
+  const listCall = calls.find((c) => c[0] === "issue" && c[1] === "list");
+  const search = listCall[listCall.indexOf("--search") + 1];
+  // The window cap (--limit) applies BEFORE any client-side filter, so every
+  // terminal/external state must be excluded in the server-side query or an
+  // accumulating backlog would starve newer local candidates out of the window.
+  for (const excluded of [
+    '-label:"sentry:fix-pr-opened"',
+    '-label:"sentry:fix-refused"',
+    '-label:"sentry:projected"',
+  ]) {
+    assert(search.includes(excluded), `search must contain ${excluded}`);
+  }
+});
+
 await test("skips a stub already labeled sentry:fix-pr-opened", async () => {
   const stubs = [
     stub({

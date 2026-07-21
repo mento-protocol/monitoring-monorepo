@@ -436,6 +436,19 @@ jobs:
           # — the marker is already set, so no re-label is needed.
           labels_now=$(gh issue view "${QUEUE_ISSUE}" --repo "${REPO}" \
             --json labels --jq '.labels[].name' || true)
+          # Stale-verdict guard: the ingest workflow runs on its own concurrency
+          # group and can reopen-for-regression MID-RUN, shedding the code-fix
+          # verdict label while the agent is editing. A regressed occurrence has
+          # not been re-triaged — pushing a fix PR from the pre-regression
+          # verdict would publish a diff justified by evidence that no longer
+          # stands. Refuse (no PR, no labels) and let the fresh triage round
+          # produce a new verdict; the stub is selectable again afterwards.
+          if ! grep -Fxq "sentry:verdict-code-fix" <<<"${labels_now}"; then
+            echo "::notice::#${QUEUE_ISSUE} no longer carries sentry:verdict-code-fix (regression re-queue mid-run?); refusing to open a PR from a stale verdict."
+            gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
+              --body "Autofix: no PR opened. The code-fix verdict label was removed while the fix attempt was in flight (most likely a regression re-queue) — the attempt was discarded rather than opening a PR from a stale verdict. The stub will be reconsidered after re-triage."
+            exit 0
+          fi
           if grep -Fxq "sentry:fix-pr-opened" <<<"${labels_now}"; then
             reconciled_pr=$(GH_TOKEN="${APP_TOKEN}" gh pr list \
               --repo "${REPO}" --search "\"${SHORT_ID}\"" --state open \
@@ -563,7 +576,13 @@ jobs:
   # ---------------------------------------------------------------------------
   record-run:
     needs: [select, autofix]
-    if: ${{ always() }}
+    # always() so a failed/skipped autofix still leaves a record — but ONLY on
+    # main: this job checks out ${{ github.sha }} and EXECUTES the finalize
+    # helper from it with an issues:write token, so an off-main
+    # workflow_dispatch (which the select job refuses as a no-op) must not get
+    # its unreviewed ref's code run here either. Off-main dispatches therefore
+    # leave no tracker record — the select job's refusal notice is the record.
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

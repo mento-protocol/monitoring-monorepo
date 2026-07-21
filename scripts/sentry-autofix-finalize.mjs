@@ -81,23 +81,42 @@ export function autofixBranchName(shortId) {
 const FORBIDDEN_PREFIXES = [
   ".github/",
   "terraform/",
-  // ALL of scripts/ (repo CI/tooling, incl. this autofix helper and its
-  // imports) is off-limits: a Sentry runtime bug is fixed in product code
-  // (ui-dashboard/, indexer-envio/, …), never in the pipeline that opens the
-  // PR. This also stops the agent from editing the deterministic helper the
-  // workflow later runs (defense in depth behind running those helpers only
-  // from a pristine clone).
-  "scripts/",
   "patches/",
   ".trunk/",
   "tools/",
 ];
 
+// ANY `scripts/` directory at ANY depth (root repo tooling AND nested package
+// helpers like ui-dashboard/scripts/): a Sentry runtime bug is fixed in
+// product source, never in tooling — and several CI workflows execute
+// package-local scripts from the PR head with secrets in env (e.g. the
+// Lighthouse job runs ui-dashboard/scripts/* with a deploy-protection bypass
+// secret), so an autofix diff must never be able to place code there. Also
+// stops the agent from editing the deterministic helpers this workflow later
+// runs (defense in depth behind running those only from a pristine clone).
+const FORBIDDEN_SEGMENTS = new Set(["scripts"]);
+
 const FORBIDDEN_BASENAMES = new Set([
   "package.json",
   "pnpm-lock.yaml",
   ".npmrc",
+  "vercel.json",
+  "turbo.json",
 ]);
+
+// CI-executed config surfaces anywhere in the tree: build/test/CI configs are
+// loaded and EXECUTED by workflows and platform builds running on the PR head
+// (vitest/next/playwright/tailwind configs, lighthouserc, shell scripts,
+// container files, workflow/config YAML). Autofix territory is product source
+// only; a config-shaped path is refused even when the fix "needs" it — that is
+// a human's change to make.
+const FORBIDDEN_BASENAME_PATTERNS = [
+  /\.config\.[cm]?[jt]s$/,
+  /^\.?lighthouserc/,
+  /\.sh$/,
+  /^Dockerfile/,
+  /\.ya?ml$/,
+];
 
 // ---------------------------------------------------------------------------
 // Filter-free change detection. The agent-tainted checkout must NEVER be read
@@ -158,11 +177,58 @@ export function isForbiddenPath(path) {
   const p = String(path ?? "").trim();
   if (p === "") return false;
   if (FORBIDDEN_PREFIXES.some((prefix) => p.startsWith(prefix))) return true;
-  const base = p.slice(p.lastIndexOf("/") + 1);
+  const segments = p.split("/");
+  if (segments.slice(0, -1).some((s) => FORBIDDEN_SEGMENTS.has(s))) return true;
+  const base = segments[segments.length - 1];
   if (FORBIDDEN_BASENAMES.has(base)) return true;
+  if (FORBIDDEN_BASENAME_PATTERNS.some((re) => re.test(base))) return true;
   // pnpmfile variants (.pnpmfile.cjs, pnpmfile.cjs, …) anywhere in the tree.
   if (base.includes("pnpmfile")) return true;
   return false;
+}
+
+// Credential-shaped strings that must never appear in a pushed diff. The
+// documented residual lets a prompt-injected agent READ the runner's tokens
+// from a process-env surface; the summary redactor closes the PR-BODY channel,
+// and this scan closes the CODE channel — an agent that writes a token into an
+// allowed source file gets the whole attempt refused instead of published.
+// Known prefixes only (GitHub, Anthropic, Slack, AWS): entropy heuristics
+// false-positive on legitimate hashes/fixtures in source code, and the
+// high-value exfil target is exactly these runner credentials.
+const DIFF_CREDENTIAL_PATTERNS = [
+  /\b(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{16,}\b/,
+  /\bgithub_pat_[A-Za-z0-9_]{16,}\b/,
+  /\bsk-ant-[A-Za-z0-9-]{8,}\b/,
+  /\bxox[a-z]-[A-Za-z0-9-]{8,}\b/,
+  /\bAKIA[A-Z0-9]{16}\b/,
+];
+
+/** Changed paths (present in the work tree as regular files) whose CONTENT
+ * contains a credential-shaped string. Pure fs reads from the tainted tree —
+ * no git, no execution; the guard runs credential-free from the pristine
+ * clone. The refusal reason never echoes the matched value. */
+export function filesWithCredentialShapedContent(workRoot, files) {
+  const hits = [];
+  for (const file of files) {
+    const full = join(workRoot, file);
+    let stat;
+    try {
+      stat = lstatSync(full);
+    } catch {
+      continue; // deleted path — nothing to scan
+    }
+    if (!stat.isFile()) continue;
+    let content;
+    try {
+      content = readFileSync(full, "latin1");
+    } catch {
+      continue;
+    }
+    if (DIFF_CREDENTIAL_PATTERNS.some((re) => re.test(content))) {
+      hits.push(file);
+    }
+  }
+  return hits;
 }
 
 /** True when `path` under `workRoot` is a symlink (lstat, so it never
@@ -222,6 +288,15 @@ export function evaluateDiffGuard(files, { workRoot = null } = {}) {
       return {
         ok: false,
         reason: `The autofix diff replaces path(s) with a symlink: ${symlinks.join(", ")}. Symlinked paths are refused — a symlink would be dereferenced by the credentialed byte-copy and could exfiltrate runner secrets. No PR opened.`,
+      };
+    }
+    const credentialHits = filesWithCredentialShapedContent(workRoot, changed);
+    if (credentialHits.length > 0) {
+      return {
+        ok: false,
+        // Names the FILES, never the matched content — the reason lands on a
+        // public queue issue.
+        reason: `The autofix diff contains credential-shaped content in: ${credentialHits.join(", ")}. Changed files are scanned before any push because a pushed branch is public immediately — a diff carrying anything token-shaped is refused wholesale. No PR opened.`,
       };
     }
   }

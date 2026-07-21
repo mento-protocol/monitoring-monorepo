@@ -113,6 +113,64 @@ await test("guard refuses forbidden prefixes and dependency/toolchain files", ()
   }
 });
 
+await test("guard refuses nested scripts dirs and CI-executed config surfaces", () => {
+  // CI workflows execute package-local scripts and configs from the PR head
+  // (some with secrets in env, e.g. the Lighthouse deploy-protection bypass) —
+  // an autofix diff must never be able to place code on those surfaces.
+  for (const path of [
+    "ui-dashboard/scripts/measure-inp.mjs",
+    "indexer-envio/scripts/helper.mjs",
+    "ui-dashboard/vitest.config.ts",
+    "ui-dashboard/next.config.mjs",
+    "ui-dashboard/playwright.config.ts",
+    "ui-dashboard/.lighthouserc.js",
+    "aegis/config.yaml",
+    "aegis/bin/deploy.sh",
+    "ui-dashboard/vercel.json",
+    "turbo.json",
+    "indexer-envio/Dockerfile",
+  ]) {
+    assert(isForbiddenPath(path), `expected forbidden: ${path}`);
+  }
+  // Ordinary product source stays allowed, including files that merely have
+  // "scripts" in their NAME (only a path SEGMENT is a scripts dir).
+  for (const path of [
+    "ui-dashboard/lib/scripts-helper.ts",
+    "indexer-envio/src/EventHandlers.ts",
+    "ui-dashboard/app/pool/page.tsx",
+  ]) {
+    assert(!isForbiddenPath(path), `expected allowed: ${path}`);
+  }
+});
+
+await test("guard refuses a diff whose file content is credential-shaped", () => {
+  const dir = mkdtempSync(join(tmpdir(), "autofix-credscan-"));
+  mkdirSync(join(dir, "ui-dashboard"), { recursive: true });
+  writeFileSync(
+    join(dir, "ui-dashboard", "leak.ts"),
+    'const t = "ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345";\n',
+  );
+  writeFileSync(
+    join(dir, "ui-dashboard", "clean.ts"),
+    "export const ok = 1;\n",
+  );
+  const r = evaluateDiffGuard(
+    ["ui-dashboard/leak.ts", "ui-dashboard/clean.ts"],
+    { workRoot: dir },
+  );
+  assert(
+    !r.ok && /credential-shaped/i.test(r.reason),
+    "credential-shaped content refused",
+  );
+  // The refusal reason names the file but never the matched value.
+  assert(!r.reason.includes("ghs_AbCd"), "reason must not echo the token");
+  assert(
+    evaluateDiffGuard(["ui-dashboard/clean.ts"], { workRoot: dir }).ok,
+    "clean file passes the scan",
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
 await test("guard refuses a changed path the agent turned into a symlink", () => {
   const dir = mkdtempSync(join(tmpdir(), "autofix-symlink-"));
   mkdirSync(join(dir, "ui-dashboard"), { recursive: true });
