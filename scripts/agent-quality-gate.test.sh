@@ -1832,6 +1832,192 @@ assert_contains "+ pnpm agent:prewarm:test"
 assert_contains "All mapped commands passed."
 assert_not_contains "parallel marker was not created"
 
+autoreview_progress_repo="$(mktemp -d)"
+(
+  cd "$autoreview_progress_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  cat > scripts/agent-autoreview.test.sh <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+/bin/sleep 0.1
+printf '%s\n' \
+  'AUTOREVIEW_TEST_PROGRESS family=target-selection elapsed=1s' \
+  'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s'
+echo 'successful autoreview noise that should stay quiet'
+/bin/sleep 2
+printf '%s\n' \
+  'AUTOREVIEW_TEST_TIMING family=target-selection status=ok elapsed=3s' \
+  'AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s'
+STUB
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == agent:autoreview:test* ]]; then
+  /bin/bash scripts/agent-autoreview.test.sh
+fi
+STUB
+  # Advance the gate's clock by 30 seconds per read so the 20-second heartbeat
+  # can be exercised without adding 20 real seconds to this regression suite.
+  cat > bin/date <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" != "+%s" ]]; then
+  exec /bin/date "$@"
+fi
+lock_dir="${DATE_COUNTER_FILE:?}.lock"
+while ! mkdir "$lock_dir" 2>/dev/null; do
+  /bin/sleep 0.01
+done
+trap 'rmdir "$lock_dir"' EXIT
+value=0
+if [[ -f "$DATE_COUNTER_FILE" ]]; then
+  value="$(cat "$DATE_COUNTER_FILE")"
+else
+  value="$(/bin/date +%s)"
+fi
+value=$((value + 30))
+printf '%s\n' "$value" > "$DATE_COUNTER_FILE"
+printf '%s\n' "$value"
+STUB
+  chmod +x bin/date bin/pnpm scripts/agent-autoreview.test.sh tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-autoreview.test.sh\n' > changed-paths.txt
+  DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+    PATH="$autoreview_progress_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 4 \
+      > "$output_file" 2>&1
+)
+assert_contains "AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s"
+assert_not_contains "AUTOREVIEW_TEST_PROGRESS family=target-selection elapsed=1s"
+assert_contains "AUTOREVIEW_TEST_TIMING family=target-selection status=ok elapsed=3s"
+assert_contains "AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s"
+assert_not_contains "successful autoreview noise that should stay quiet"
+
+for sequential_mode in parallel-one fail-fast; do
+  sequential_args=(--fail-fast)
+  if [[ "$sequential_mode" == parallel-one ]]; then
+    sequential_args=(--parallel 1)
+  fi
+  (
+    cd "$autoreview_progress_repo"
+    DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+      PATH="$autoreview_progress_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        "${sequential_args[@]}" \
+        > "$output_file" 2>&1
+  )
+  assert_contains "AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s"
+  assert_contains "AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s"
+  assert_not_contains "successful autoreview noise that should stay quiet"
+done
+
+(
+  cd "$autoreview_progress_repo"
+  cat > scripts/agent-autoreview.test.sh <<'STUB'
+#!/usr/bin/env bash
+echo 'AUTOREVIEW_TEST_PROGRESS family=runtime-trust elapsed=5s'
+echo 'AUTOREVIEW_TEST_TIMING family=runtime-trust status=failed elapsed=6s'
+echo 'complete autoreview failure diagnostic'
+exit 7
+STUB
+  chmod +x scripts/agent-autoreview.test.sh
+  set +e
+  DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+    PATH="$autoreview_progress_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 4 \
+      > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]] ||
+    fail "gate did not fail when the autoreview test command failed"
+)
+assert_contains "AUTOREVIEW_TEST_PROGRESS family=runtime-trust elapsed=5s"
+assert_contains "AUTOREVIEW_TEST_TIMING family=runtime-trust status=failed elapsed=6s"
+assert_contains "complete autoreview failure diagnostic"
+
+(
+  cd "$autoreview_progress_repo"
+  cat > scripts/agent-autoreview.test.sh <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$$" > "${AUTOREVIEW_TEST_PID_FILE:?}"
+echo 'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=7s'
+sleep 30
+STUB
+  chmod +x scripts/agent-autoreview.test.sh
+  autoreview_pid_file="$autoreview_progress_repo/autoreview-child-pid"
+  gate_output_fifo="$autoreview_progress_repo/gate-output.fifo"
+  rm -f "$autoreview_pid_file" "$gate_output_fifo"
+  mkfifo "$gate_output_fifo"
+  cat "$gate_output_fifo" > "$output_file" &
+  output_reader_pid=$!
+  AUTOREVIEW_TEST_PID_FILE="$autoreview_pid_file" \
+    DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+    PATH="$autoreview_progress_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$gate_output_fifo" 2>&1 &
+  gate_pid=$!
+  launched=0
+  for _ in {1..200}; do
+    if [[ -s "$autoreview_pid_file" ]]; then
+      launched=1
+      break
+    fi
+    if ! kill -0 "$gate_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$launched" -ne 1 ]]; then
+    kill -KILL "$gate_pid" 2>/dev/null || true
+    wait "$gate_pid" 2>/dev/null || true
+    kill -KILL "$output_reader_pid" 2>/dev/null || true
+    wait "$output_reader_pid" 2>/dev/null || true
+    fail "sequential autoreview cancellation fixture did not launch"
+  fi
+
+  kill -KILL "$gate_pid"
+  wait "$gate_pid" 2>/dev/null || true
+  kill -KILL "$(cat "$autoreview_pid_file")" 2>/dev/null || true
+  reader_exited=0
+  for _ in {1..100}; do
+    if ! kill -0 "$output_reader_pid" 2>/dev/null; then
+      reader_exited=1
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$reader_exited" -ne 1 ]]; then
+    kill -KILL "$output_reader_pid" 2>/dev/null || true
+    wait "$output_reader_pid" 2>/dev/null || true
+    fail "sequential autoreview progress monitor survived its killed gate parent"
+  fi
+  wait "$output_reader_pid" 2>/dev/null || true
+  rm -f "$gate_output_fifo"
+)
+rm -rf "$autoreview_progress_repo"
+
 serialized_repo_mutation_repo="$(mktemp -d)"
 (
   cd "$serialized_repo_mutation_repo"
@@ -1858,12 +2044,17 @@ STUB
 #!/usr/bin/env bash
 exit 0
 STUB
-  cat > bin/pnpm <<'STUB'
+cat > bin/pnpm <<'STUB'
 #!/usr/bin/env bash
-if [[ "$*" == "agent:quality-gate:test" ]]; then
-  sleep 0.2
-  : > "${SERIAL_MUTATION_MARKER:?}"
-fi
+case "$*" in
+  "agent:quality-gate:test")
+    sleep 0.2
+    : > "${SERIAL_MUTATION_MARKER:?}"
+    ;;
+  agent:autoreview:test*)
+    /bin/bash scripts/agent-autoreview.test.sh
+    ;;
+esac
 STUB
   chmod +x bin/pnpm scripts/agent-autoreview.sh scripts/agent-autoreview.test.sh scripts/agent-quality-gate.sh tools/trunk
   git add .
@@ -1883,7 +2074,7 @@ STUB
 )
 rm -rf "$serialized_repo_mutation_repo"
 assert_contains "+ pnpm agent:quality-gate:test"
-assert_contains "+ bash scripts/agent-autoreview.test.sh"
+assert_contains "+ pnpm agent:autoreview:test"
 assert_contains "All mapped commands passed."
 assert_not_contains "autoreview test overlapped the repo-mutating quality-gate self-test"
 
@@ -2100,13 +2291,31 @@ STUB
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --allow-package-script-changes > "$output_file" 2>&1
   git add fixture.txt
   git commit -qm "commit validated content"
+  stamp_file="$fresh_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+  stamp_value="$(sed -n '2s/^stamp=//p' "$stamp_file")"
+  printf 'created_at=%s\nstamp=%s\n' \
+    "$(( $(date +%s) - 60 * 60 ))" \
+    "$stamp_value" \
+    > "$stamp_file"
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
   [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
-    fail "fresh gate stamp did not skip flag-less run after allow-flag warm"
+    fail "one-hour-old exact gate stamp did not skip flag-less run after allow-flag warm"
+  grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." "$output_file" ||
+    fail "one-hour-old exact gate stamp did not report a freshness skip"
+
+  printf 'created_at=%s\nstamp=%s\n' \
+    "$(( $(date +%s) - 2 * 60 * 60 - 1 ))" \
+    "$stamp_value" \
+    > "$stamp_file"
+  : > "$output_file"
+  COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
+  [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "2" ]] ||
+    fail "gate reused an exact success stamp older than the hard two-hour cap"
 )
 rm -rf "$fresh_stamp_repo"
-assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
 # Workflow changes add the ADR reminder command, whose execution argument uses
 # a randomized changed-paths scratch file. That volatile path must be
@@ -2199,9 +2408,26 @@ STUB
       >> "$output_file" 2>&1
   [[ "$(cat "$package_risk_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
     fail "fresh gate stamp did not skip duplicate package-risk run"
+  grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." "$output_file" ||
+    fail "acknowledged duplicate package-risk run did not reuse its exact stamp"
+
+  : > "$output_file"
+  if COUNTER_FILE="$package_risk_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    PATH="$package_risk_fresh_stamp_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1; then
+    fail "unacknowledged package-risk run reused an acknowledged success stamp"
+  fi
+  [[ "$(cat "$package_risk_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
+    fail "unacknowledged package-risk run executed mapped commands"
 )
 rm -rf "$package_risk_fresh_stamp_repo"
-assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
+assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
 # A failed ORDERED prerequisite phase (here the preflight `pnpm install`) must
 # stop the run before the parallel quality pool executes. Prerequisite phases
@@ -2282,6 +2508,79 @@ STUB
     fail "fresh gate stamp was reused after worktree content changed"
 )
 rm -rf "$stale_stamp_repo"
+assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+
+# Extending the reuse window must not weaken any exact-signature binding. Use
+# equal-tree base commits to isolate the base OID, then change the validation
+# path/command plan and the fixture's gate implementation independently. Every
+# change must execute the mapped command again instead of reusing the stamp.
+signature_stamp_repo="$(mktemp -d)"
+(
+  cd "$signature_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p scripts tools
+  printf 'fixture\n' > fixture.txt
+  printf 'second fixture\n' > second.txt
+  printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  base_one="$(git rev-parse --verify HEAD)"
+  git commit --allow-empty -qm "equal-tree alternate base"
+  base_two="$(git rev-parse --verify HEAD)"
+  printf 'changed\n' >> fixture.txt
+  printf 'fixture.txt\n' > changed-paths-one.txt
+  printf 'fixture.txt\nsecond.txt\n' > changed-paths-two.txt
+
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-one.txt \
+      --base "$base_one" \
+      --run \
+      > "$output_file" 2>&1
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-one.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "2" ]] ||
+    fail "fresh gate stamp was reused after the base OID changed"
+
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "3" ]] ||
+    fail "fresh gate stamp was reused after the validation path/command plan changed"
+
+  printf '# changed fixture gate implementation\n' >> scripts/agent-quality-gate.sh
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "4" ]] ||
+    fail "fresh gate stamp was reused after the gate implementation changed"
+)
+rm -rf "$signature_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
 sha256sum_repo="$(mktemp -d)"
@@ -2724,19 +3023,19 @@ assert_contains "- node scripts/check-pr-description.test.mjs (PR description va
 
 run_gate "scripts/agent-autoreview.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
 
 run_gate "scripts/agent-autoreview-core.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
 
 run_gate "scripts/agent-autoreview-core.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
 
 run_gate "scripts/agent-autoreview-target-guard.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
 
 run_gate "scripts/check-agent-context.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
@@ -2804,10 +3103,10 @@ run_gate "scripts/verify-github-environment-protection.test.mjs"
 assert_contains "- node scripts/verify-github-environment-protection.test.mjs (GitHub environment protection checker changed)"
 
 run_gate "scripts/agent-autoreview.sh"
-assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview adapter changed)"
 
 run_gate "scripts/agent-autoreview.test.sh"
-assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview adapter changed)"
 
 # Other root-script changes only need the standalone scripts ESLint.
 run_gate "scripts/code-health-history.mjs"

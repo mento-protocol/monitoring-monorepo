@@ -49,6 +49,7 @@ jobs:
       terraform: ${{ steps.filter.outputs.terraform }}
       codeHealth: ${{ steps.filter.outputs.codeHealth }}
       rootScripts: ${{ steps.filter.outputs.rootScripts }}
+      autoreviewSuite: ${{ steps.filter.outputs.autoreviewSuite }}
       versionSkew: ${{ steps.filter.outputs.versionSkew }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -263,6 +264,22 @@ jobs:
               - .claude/settings.json
               - .codex/config.toml
               - .codex/hooks.json
+            # The adversarial autoreview suite is intentionally isolated from
+            # the broader root-scripts job: it is expensive, path-specific,
+            # and runs sequentially in CI for deterministic fixture/process
+            # cleanup. The local quality gate may orchestrate the same complete
+            # family set in parallel.
+            autoreviewSuite:
+              - scripts/agent-autoreview.sh
+              - scripts/agent-autoreview.mjs
+              - scripts/agent-autoreview-core.mjs
+              - scripts/agent-autoreview-core.test.mjs
+              - scripts/agent-autoreview-target-guard.test.mjs
+              - scripts/agent-autoreview.test.sh
+              - package.json
+              - .node-version
+              - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the
@@ -952,6 +969,26 @@ jobs:
       - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
+  autoreview-suite:
+    name: Autoreview adversarial suite
+    needs: changes
+    if: needs.changes.outputs.autoreviewSuite == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/pnpm-install
+      - name: Full sequential autoreview regression suite
+        run: pnpm agent:autoreview:test -- --jobs 1
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+        if: always()
+
   version-skew:
     name: Version skew
     needs: changes
@@ -1018,6 +1055,7 @@ jobs:
         terraform,
         deps,
         scripts,
+        autoreview-suite,
         version-skew,
       ]
     if: always()
@@ -1030,6 +1068,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,version-skew
+          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,autoreview-suite,version-skew
       - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()

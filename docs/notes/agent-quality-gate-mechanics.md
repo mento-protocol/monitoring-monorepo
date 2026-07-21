@@ -25,10 +25,21 @@ Before opening or updating an agent-authored PR:
 pnpm agent:quality-gate          # inspect mapped commands and checklists
 pnpm agent:quality-gate --run    # execute the safe local mapped commands
 pnpm agent:autoreview            # required for a non-trivial completed batch
+pnpm agent:autoreview:test -- --jobs 1  # sequential full regression closeout for autoreview runtime changes
 ```
 
 The gate is local-only and never deploys or runs Terraform apply. Do not assume
 the pre-push hook is installed; run the gate explicitly.
+
+`pnpm agent:autoreview` performs source review and never runs tests.
+`pnpm agent:autoreview:test` is the canonical command boundary for the complete
+autoreview regression harness. It defaults to at most three independent family
+workers and emits bounded family-start/heartbeat progress plus per-family
+completion timings, so a long adversarial case does not look hung. The mapped
+local quality gate invokes this package command and preserves those progress
+and timing lines. For deterministic autoreview-runtime closeout, or to
+reproduce the required path-filtered GitHub-hosted CI job, pass `-- --jobs 1`;
+this changes scheduling only and keeps the same full family coverage.
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
@@ -74,7 +85,7 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:prewarm:test`, `scripts.agent:review-materiality`,
 `scripts.agent:review-materiality:test`, `scripts.agent:context-check`,
 `scripts.agent:context-budget`, `scripts.agent:context-budget:test`,
-`scripts.agent:autoreview`, `scripts.issue:board`,
+`scripts.agent:autoreview`, `scripts.agent:autoreview:test`, `scripts.issue:board`,
 `scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
 `scripts.issue:release`, `scripts.sentry:ingest`,
 `scripts.sentry:ingest:test`, `scripts.docs:index`, `scripts.docs:index:test`,
@@ -468,6 +479,12 @@ review the script/lifecycle diff first, then set
 `agent.qualityGate.allowPackageScriptChanges=true` in local git config (seen by
 both the manual warm run and the hook) so a just-passed acknowledged manual gate
 can satisfy the `--skip-if-fresh` check.
+
+An exact-signature success stamp is reusable for at most two hours. The
+signature binds the fetched base object, mapped plan, gate implementation,
+changed paths and validated content, plus package-risk state; any bound-input
+change reruns the mapped commands immediately, and an unchanged stamp older
+than two hours expires instead of masking drift.
 
 Package-local gate tasks for `lint`, `typecheck`, `knip`, dashboard size-limit,
 local dashboard browser tests, and dashboard React Doctor checks run through
