@@ -128,16 +128,39 @@ if (args.some((arg) => arg.endsWith("/unformatted.tf"))) process.exit(9);
   );
 
   let calls = readCalls(terraformLog);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0][0], `-chdir=${realpathSync(moduleRoot)}`);
-  assert.deepEqual(calls[0].slice(1, 3), ["fmt", "-check"]);
-  assert(calls[0].includes(`./${newlinePath}`));
-  assert(!calls[0].some((arg) => arg.includes("terraform.tfvars")));
+  assert.equal(calls.length, targets.length);
+  assert.deepEqual(
+    calls.map((args) => args.at(-1)),
+    targets,
+    "Terraform targets were not checked one at a time in deterministic order",
+  );
+  for (const args of calls) {
+    assert.deepEqual(args.slice(0, 3), [
+      `-chdir=${realpathSync(moduleRoot)}`,
+      "fmt",
+      "-check",
+    ]);
+    assert.equal(args.length, 4, "Terraform received more than one target");
+    assert(
+      !args.some((arg) => arg.includes("terraform.tfvars")),
+      "ignored operator tfvars reached Terraform",
+    );
+    assert(
+      !args.some((arg) => arg.includes("local.auto.tfvars")),
+      "ignored auto tfvars reached Terraform",
+    );
+  }
+  assert(calls.some((args) => args.at(-1) === `./${newlinePath}`));
 
   writeFileSync(
     path.join(moduleRoot, "unformatted.tf"),
     'variable "unformatted" {}\n',
   );
+  writeFileSync(
+    path.join(moduleRoot, "zz-after-failure.tf"),
+    'variable "after_failure" {}\n',
+  );
+  const callsBeforeFailure = calls.length;
   const terraformFailure = expectFailure(
     () =>
       checkTerraformFormat("stack", {
@@ -149,9 +172,20 @@ if (args.some((arg) => arg.endsWith("/unformatted.tf"))) process.exit(9);
   );
   assert.equal(terraformFailure.exitCode, 9);
   unlinkSync(path.join(moduleRoot, "unformatted.tf"));
+  unlinkSync(path.join(moduleRoot, "zz-after-failure.tf"));
 
   calls = readCalls(terraformLog);
-  assert.equal(calls.length, 2);
+  const failureCalls = calls.slice(callsBeforeFailure);
+  assert.deepEqual(
+    failureCalls.map((args) => args.at(-1)),
+    [...targets, "./unformatted.tf"],
+    "Terraform did not stop deterministically at the first failing target",
+  );
+  assert(
+    !failureCalls.some((args) => args.at(-1) === "./zz-after-failure.tf"),
+    "Terraform continued after a target failed",
+  );
+  const callsAfterTerraformFailure = calls.length;
   expectFailure(
     () =>
       checkTerraformFormat("stack", {
@@ -164,7 +198,7 @@ if (args.some((arg) => arg.endsWith("/unformatted.tf"))) process.exit(9);
   );
   assert.equal(
     readCalls(terraformLog).length,
-    2,
+    callsAfterTerraformFailure,
     "Terraform ran after Git enumeration failed",
   );
 
@@ -182,7 +216,7 @@ if (args.some((arg) => arg.endsWith("/unformatted.tf"))) process.exit(9);
   );
   assert.equal(
     readCalls(terraformLog).length,
-    2,
+    callsAfterTerraformFailure,
     "Terraform ran after a symlink target was discovered",
   );
 } finally {

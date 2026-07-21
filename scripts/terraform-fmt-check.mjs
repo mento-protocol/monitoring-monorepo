@@ -134,17 +134,20 @@ export function checkTerraformFormat(modulePath, options = {}) {
     );
   }
 
-  const terraformResult = spawnSync(
-    terraformBinary,
-    [`-chdir=${moduleRoot}`, "fmt", "-check", ...targets],
-    {
-      cwd: repoRoot,
-      env,
-      stdio: "inherit",
-    },
-  );
-  if (terraformResult.status !== 0 || terraformResult.error) {
-    throw commandError("terraform fmt -check", terraformResult);
+  targets.sort();
+  for (const target of targets) {
+    const terraformResult = spawnSync(
+      terraformBinary,
+      [`-chdir=${moduleRoot}`, "fmt", "-check", target],
+      {
+        cwd: repoRoot,
+        env,
+        stdio: "inherit",
+      },
+    );
+    if (terraformResult.status !== 0 || terraformResult.error) {
+      throw commandError("terraform fmt -check", terraformResult);
+    }
   }
 
   return targets;

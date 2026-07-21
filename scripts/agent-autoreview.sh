@@ -2368,7 +2368,10 @@ snapshot_linux_root_ancestor_node() {
     my @candidate_before = stat($candidate);
     exit 1 if !@candidate_before || !S_ISREG($candidate_before[2]);
     exit 1 if $candidate_before[4] == 0 || $candidate_before[4] == $euid;
-    exit 1 if $candidate_before[3] != 1 || ($candidate_before[2] & 06022);
+    # Image/tool caches may hard-link the active runtime. The live descriptor,
+    # complete before/after metadata (including nlink and ctime), and digest
+    # bind the copied bytes; only the published snapshot must be single-link.
+    exit 1 if $candidate_before[3] < 1 || ($candidate_before[2] & 06022);
     exit 1 if ($candidate_before[2] & 0111) == 0;
     exit 1 if $candidate_before[7] <= 0 || $candidate_before[7] > $maximum_size;
     my $prefix;

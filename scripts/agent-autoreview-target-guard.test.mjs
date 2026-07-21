@@ -7,6 +7,7 @@ import {
   chownSync,
   copyFileSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
@@ -581,6 +582,13 @@ printf '%s\\n' '{"findings":[],"overall_correctness":"patch is correct","overall
   if (process.platform === "linux" && process.geteuid?.() === 0) {
     const foreignNodeDir = path.join(root, "foreign-node-bin");
     const foreignNode = createForeignNodeFixture(foreignNodeDir);
+    const foreignNodeAlias = path.join(root, "foreign-node-hardlink");
+    linkSync(foreignNode, foreignNodeAlias);
+    assert.equal(
+      lstatSync(foreignNode, { bigint: true }).nlink,
+      2n,
+      "root regression requires a hard-linked image-owned Node source",
+    );
     const gitOnlyDir = path.join(root, "git-only-bin");
     mkdirSync(gitOnlyDir);
     assert.ok(
