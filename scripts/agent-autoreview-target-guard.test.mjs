@@ -11,6 +11,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -539,12 +540,26 @@ printf '%s\\n' '{"findings":[],"overall_correctness":"patch is correct","overall
   );
   chmodSync(claude, 0o755);
 
-  const result = spawnSync(process.execPath, reviewArgs, {
+  const currentNode = realpathSync(process.execPath);
+  const currentNodeStat = lstatSync(currentNode, { bigint: true });
+  const rootForeignCurrentNode =
+    process.platform === "linux" &&
+    process.geteuid?.() === 0 &&
+    currentNodeStat.uid !== 0n;
+  const inheritedNodeMarker = path.join(root, "inherited-node-snapshot.json");
+  const reviewCommand = rootForeignCurrentNode ? wrapper : process.execPath;
+  const reviewCommandArgs = rootForeignCurrentNode
+    ? reviewArgs.slice(1)
+    : reviewArgs;
+  const result = spawnSync(reviewCommand, reviewCommandArgs, {
     cwd: repo,
     encoding: "utf8",
     env: {
       ...process.env,
       AUTOREVIEW_FAKE_MUTATE_REPO: repo,
+      ...(rootForeignCurrentNode
+        ? { AUTOREVIEW_FAKE_NODE_MARKER: inheritedNodeMarker }
+        : {}),
       PATH: `${bin}${path.delimiter}${process.env.PATH || ""}`,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -559,6 +574,9 @@ printf '%s\\n' '{"findings":[],"overall_correctness":"patch is correct","overall
     result.stdout,
     /autoreview clean: no accepted\/actionable findings reported/,
   );
+  if (rootForeignCurrentNode) {
+    assertSealedNodeSnapshot(inheritedNodeMarker, currentNode);
+  }
 
   if (process.platform === "linux" && process.geteuid?.() === 0) {
     const foreignNodeDir = path.join(root, "foreign-node-bin");
