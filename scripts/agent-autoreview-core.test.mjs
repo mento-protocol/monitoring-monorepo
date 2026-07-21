@@ -21,6 +21,7 @@ import {
   assertStableEvidencePathAfterRead,
   buildBoundedReviewPrompts,
   createReviewInputCollector,
+  isWithin,
   MAX_REVIEW_PROMPT_BYTES,
   readBoundedRegularFile,
   readSafeEvidenceFile,
@@ -32,6 +33,41 @@ import {
   utf8Size,
   writeReviewPromptOutputs,
 } from "./agent-autoreview-core.mjs";
+
+const containmentRoot = path.join(tmpdir(), "autoreview-reviewed-repo");
+assert.equal(isWithin(containmentRoot, containmentRoot), true);
+assert.equal(
+  isWithin(
+    path.join(containmentRoot, "tools", "bin", "codex"),
+    containmentRoot,
+  ),
+  true,
+);
+assert.equal(
+  isWithin(
+    path.join(containmentRoot, "..tools", "bin", "codex"),
+    containmentRoot,
+  ),
+  true,
+  "descendant names beginning with two dots are not parent traversal",
+);
+assert.equal(
+  isWithin(path.join(containmentRoot, "...", "evidence.md"), containmentRoot),
+  true,
+  "descendant names beginning with more than two dots remain inside the root",
+);
+assert.equal(isWithin(path.dirname(containmentRoot), containmentRoot), false);
+assert.equal(
+  isWithin(
+    path.join(
+      path.dirname(containmentRoot),
+      "autoreview-reviewed-repo-sibling",
+    ),
+    containmentRoot,
+  ),
+  false,
+  "a real parent segment still escapes the root",
+);
 
 const stableReadStat = {
   dev: 1,

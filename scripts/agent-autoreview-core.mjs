@@ -135,10 +135,9 @@ export function readBoundedRegularFile(
 
 export function isWithin(candidate, root) {
   const relative = path.relative(root, candidate);
-  return (
-    relative === "" ||
-    (!relative.startsWith("..") && !path.isAbsolute(relative))
-  );
+  const traversesParent =
+    relative === ".." || relative.startsWith(`..${path.sep}`);
+  return relative === "" || (!traversesParent && !path.isAbsolute(relative));
 }
 
 function literalLfLines(text) {
