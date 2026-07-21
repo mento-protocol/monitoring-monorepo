@@ -282,11 +282,13 @@ async function processOracleReportedPool(
     finalPool,
     priceDifference,
     effectiveBps,
-    c.blockTimestamp,
-    isNeverRebalance(finalPool),
     {
-      reportTimestamp: existing.lastOracleReportAt,
-      expiry: existing.oracleExpiry,
+      blockTimestamp: c.blockTimestamp,
+      isNeverRebalance: isNeverRebalance(finalPool),
+      priorOracleFreshness: {
+        reportTimestamp: existing.lastOracleReportAt,
+        expiry: existing.oracleExpiry,
+      },
     },
   );
   const merged: Pool = {
@@ -780,11 +782,13 @@ indexer.onEvent(
           finalPool,
           priceDifference,
           effectiveBps,
-          blockTimestamp,
-          isNeverRebalance(finalPool),
           {
-            reportTimestamp: existing.lastOracleReportAt,
-            expiry: existing.oracleExpiry,
+            blockTimestamp,
+            isNeverRebalance: isNeverRebalance(finalPool),
+            priorOracleFreshness: {
+              reportTimestamp: existing.lastOracleReportAt,
+              expiry: existing.oracleExpiry,
+            },
           },
         );
         const merged: Pool = {

@@ -29,6 +29,7 @@
 // ---------------------------------------------------------------------------
 
 import type {
+  EvmOnEventContext,
   OracleSnapshot,
   Pool,
   RebalanceEvent,
@@ -98,6 +99,130 @@ function degenerateReservesForPool(
   });
 }
 
+type AuthoritativeRebalanceState = {
+  medianTimestamp: bigint | null;
+  resolved: ResolvedRebalanceState | null;
+  rpcSucceeded: boolean;
+};
+
+async function fetchAuthoritativeRebalanceState(args: {
+  blockNumber: bigint;
+  chainId: number;
+  context: EvmOnEventContext;
+  existing: Pool | undefined;
+  poolAddress: string;
+}): Promise<AuthoritativeRebalanceState> {
+  const [rpc, medianTimestamp] = await Promise.all([
+    args.context.effect(rebalancingStateEffect, {
+      chainId: args.chainId,
+      poolAddress: args.poolAddress,
+      blockNumber: args.blockNumber,
+    }),
+    args.existing?.referenceRateFeedID
+      ? args.context.effect(medianTimestampEffect, {
+          chainId: args.chainId,
+          rateFeedID: args.existing.referenceRateFeedID,
+          blockNumber: args.blockNumber,
+        })
+      : Promise.resolve(null),
+  ]);
+  return {
+    medianTimestamp:
+      rpc && medianTimestamp !== null && medianTimestamp > 0n
+        ? medianTimestamp
+        : null,
+    resolved: rpc ? scaleRpcRebalanceState(rpc, args.existing) : null,
+    rpcSucceeded: rpc !== null,
+  };
+}
+
+async function resolveRebalanceState(args: {
+  blockNumber: bigint;
+  chainId: number;
+  context: EvmOnEventContext;
+  derived: ResolvedRebalanceState | null;
+  existing: Pool | undefined;
+  poolAddress: string;
+}): Promise<AuthoritativeRebalanceState> {
+  if (args.derived) {
+    return {
+      medianTimestamp: null,
+      resolved: args.derived,
+      rpcSucceeded: false,
+    };
+  }
+  return fetchAuthoritativeRebalanceState(args);
+}
+
+/** Persist the health cursor and optional diagnostic row shared by both
+ * state-sync handlers. The Pool write must follow `upsertPool` because it
+ * accumulates against the final event state. */
+function recordStateSyncHealth(args: {
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+  chainId: number;
+  context: EvmOnEventContext;
+  pool: Pool;
+  priorPool: Pool | undefined;
+  poolId: string;
+  snapshotId: string;
+  snapshotOraclePrice: bigint;
+  snapshotSource: "rebalanced" | "update_reserves";
+  shouldRecord: boolean;
+  shouldSnapshot: boolean;
+  txHash: string;
+}): Pool {
+  if (!args.shouldRecord) return args.pool;
+
+  const { snapshotFields, poolUpdate } = recordHealthSample(
+    args.pool,
+    args.pool.priceDifference,
+    Number(effectiveThreshold(args.pool)),
+    {
+      blockTimestamp: args.blockTimestamp,
+      isNeverRebalance: isNeverRebalance(args.pool),
+      priorOracleFreshness: {
+        reportTimestamp: args.priorPool?.lastOracleReportAt ?? 0n,
+        expiry: args.priorPool?.oracleExpiry ?? 0n,
+      },
+    },
+  );
+  const merged = { ...args.pool, ...poolUpdate };
+  const pool = {
+    ...merged,
+    healthStatus: computeHealthStatus(merged, args.blockTimestamp),
+  };
+  args.context.Pool.set(pool);
+
+  if (args.shouldSnapshot) {
+    const snapshot: OracleSnapshot = {
+      id: args.snapshotId,
+      chainId: args.chainId,
+      poolId: args.poolId,
+      timestamp: args.blockTimestamp,
+      oraclePrice: args.snapshotOraclePrice,
+      oracleOk: pool.oracleOk,
+      numReporters: pool.oracleNumReporters,
+      priceDifference: pool.priceDifference,
+      degenerateReserves: pool.degenerateReserves,
+      rebalanceThreshold: persistableThreshold(pool),
+      source: args.snapshotSource,
+      blockNumber: args.blockNumber,
+      txHash: args.txHash,
+      // State-sync rows measure pool-internal deviation, not oracle
+      // deviation, so BreakerBox does not evaluate this path.
+      breakerBaselineAtSnapshot: undefined,
+      breakerThresholdAtSnapshot: undefined,
+      ...snapshotFields,
+    };
+    if (shouldPersistRawOracleSnapshot(args.blockTimestamp)) {
+      args.context.OracleSnapshot.set(snapshot);
+    }
+  }
+
+  return pool;
+}
+
 // ---------------------------------------------------------------------------
 // FPMM.UpdateReserves
 // ---------------------------------------------------------------------------
@@ -151,7 +276,7 @@ indexer.onEvent(
     // Override reserves: `getRebalancingState` reads post-event state on
     // chain, but `existing.reserves0/1` still hold the prior block's value
     // until `upsertPool` runs below.
-    let resolved: ResolvedRebalanceState | null = existing
+    const derivedRebalanceState = existing
       ? tryDeriveRebalanceState(existing, {
           eventTimestamp: blockTimestamp,
           reservesOverride: {
@@ -160,30 +285,18 @@ indexer.onEvent(
           },
         })
       : null;
-    let rebalancingStateRpcSucceeded = false;
-    let authoritativeMedianTimestamp: bigint | null = null;
-    if (!resolved) {
-      const [rs, medianTimestamp] = await Promise.all([
-        context.effect(rebalancingStateEffect, {
-          chainId: event.chainId,
-          poolAddress: asAddress(event.srcAddress),
-          blockNumber,
-        }),
-        existing?.referenceRateFeedID
-          ? context.effect(medianTimestampEffect, {
-              chainId: event.chainId,
-              rateFeedID: existing.referenceRateFeedID,
-              blockNumber,
-            })
-          : Promise.resolve(null),
-      ]);
-      rebalancingStateRpcSucceeded = Boolean(rs);
-      authoritativeMedianTimestamp =
-        rs && medianTimestamp !== null && medianTimestamp > 0n
-          ? medianTimestamp
-          : null;
-      resolved = rs ? scaleRpcRebalanceState(rs, existing) : null;
-    }
+    const {
+      medianTimestamp: authoritativeMedianTimestamp,
+      resolved,
+      rpcSucceeded: rebalancingStateRpcSucceeded,
+    } = await resolveRebalanceState({
+      blockNumber,
+      chainId: event.chainId,
+      context,
+      derived: derivedRebalanceState,
+      existing,
+      poolAddress: asAddress(event.srcAddress),
+    });
 
     let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
     const updateReservesDegenerate = degenerateReservesForPool(existing, {
@@ -249,82 +362,22 @@ indexer.onEvent(
 
     const recordDegenerateHealthBoundary =
       !resolved && updateReservesDegenerate && pool.degenerateReserves;
-    if (resolved || recordDegenerateHealthBoundary) {
-      // Health score: compute snapshot fields + update pool accumulators.
-      // Note: upsertPool above calls context.Pool.set(pool) internally with
-      // default health fields. We immediately overwrite with the correct
-      // health accumulators here. Safe because Envio is single-threaded, but
-      // the double-write is intentional — health update must come after upsertPool
-      // so we have the final pool state to accumulate against.
-      //
-      // Exact one-sided reserve updates can be trusted even when
-      // getRebalancingState reverts. In that case upsertPool has already
-      // closed the breach and persisted degenerateReserves=true; recording a
-      // health sample here advances the cursor with a zero health ratio so the
-      // drained interval does not keep accruing against the previous unhealthy
-      // lastDeviationRatio.
-      const effectiveBps = Number(effectiveThreshold(pool));
-      const { snapshotFields, poolUpdate } = recordHealthSample(
-        pool,
-        pool.priceDifference,
-        effectiveBps,
-        blockTimestamp,
-        isNeverRebalance(pool),
-        {
-          reportTimestamp: existing?.lastOracleReportAt ?? 0n,
-          expiry: existing?.oracleExpiry ?? 0n,
-        },
-      );
-      // Reassign so the daily-snapshot upsert below freezes the just-updated
-      // health counters, not the pre-recordHealthSample values.
-      // Recompute `healthStatus`: `recordHealthSample` may have flipped
-      // `hasHealthData: false → true` on the first valid sample, and
-      // `upsertPool`'s earlier computeHealthStatus ran against the OLD value.
-      // Without this, the persisted pool has the new hasHealthData but a
-      // stale `N/A` healthStatus (codex P2 PR #370 #3214748736).
-      const merged = { ...pool, ...poolUpdate };
-      pool = {
-        ...merged,
-        healthStatus: computeHealthStatus(merged, blockTimestamp),
-      };
-      context.Pool.set(pool);
-      // Skip the OracleSnapshot row when orientation is unknown: we'd be
-      // writing a fresh deviation alongside a stale (often zero) oraclePrice
-      // because of the orientation gate above. A row whose displayed price
-      // doesn't match the deviation is worse than no row — the chart
-      // history would show a fake sample. Pool entity still gets updated;
-      // the next event with known orientation will write the snapshot.
-      if (resolved && orientationKnown) {
-        const snapshot: OracleSnapshot = {
-          id,
-          chainId: event.chainId,
-          poolId,
-          timestamp: blockTimestamp,
-          oraclePrice: updateReservesOraclePrice,
-          oracleOk: pool.oracleOk,
-          numReporters: pool.oracleNumReporters,
-          priceDifference: pool.priceDifference,
-          degenerateReserves: pool.degenerateReserves,
-          // See sortedOracles.OracleReported — `persistableThreshold` gates the
-          // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
-          rebalanceThreshold: persistableThreshold(pool),
-          source: "update_reserves",
-          blockNumber,
-          txHash: event.transaction.hash,
-          // `update_reserves` measures pool-internal post-swap deviation,
-          // not oracle deviation — the BreakerBox never evaluates this
-          // path. Leave undefined so the chart's per-point breaker verdict
-          // falls through to "no band check" for these rows even if a
-          // future filter relaxation lets them through.
-          breakerBaselineAtSnapshot: undefined,
-          breakerThresholdAtSnapshot: undefined,
-          ...snapshotFields,
-        };
-        if (shouldPersistRawOracleSnapshot(blockTimestamp)) {
-          context.OracleSnapshot.set(snapshot);
-        }
-      }
-    }
+    pool = recordStateSyncHealth({
+      blockNumber,
+      blockTimestamp,
+      chainId: event.chainId,
+      context,
+      pool,
+      priorPool: existing,
+      poolId,
+      snapshotId: id,
+      snapshotOraclePrice: updateReservesOraclePrice,
+      snapshotSource: "update_reserves",
+      shouldRecord: Boolean(resolved) || recordDegenerateHealthBoundary,
+      // Unknown orientation would pair a fresh deviation with a stale price.
+      shouldSnapshot: Boolean(resolved) && orientationKnown,
+      txHash: event.transaction.hash,
+    });
 
     await upsertSnapshot({
       context,
@@ -421,48 +474,35 @@ indexer.onEvent(
         blockNumber: blockNumber - 1n,
       }),
     );
-    const [
-      rebalancingStateRpc,
-      preReserves,
-      blockScopedIncentive,
-      medianTimestampRpc,
-    ] = await Promise.all([
-      derivedRebalanceState
-        ? Promise.resolve(null)
-        : context.effect(rebalancingStateEffect, {
-            chainId: event.chainId,
-            poolAddress: asAddress(event.srcAddress),
-            blockNumber,
-          }),
-      preReservesPromise,
-      // Read at the event block — `Pool.rebalanceReward` may carry today's
-      // value during full resync (fetchFees self-heals from `latest`), and
-      // we want the bps that was actually in force when this rebalance
-      // executed. Falls back to `pool.rebalanceReward` below on RPC failure
-      // or block-fallback. Skipped for `-2` sentinel pools per the comment
-      // above — propagate the sentinel so `normalizeRewardBps` sees it.
-      incentiveGetterMissing
-        ? Promise.resolve(-2)
-        : context.effect(rebalanceIncentiveAtBlockEffect, {
-            chainId: event.chainId,
-            poolAddress: asAddress(event.srcAddress),
-            blockNumber,
-          }),
-      derivedRebalanceState || !existing?.referenceRateFeedID
-        ? Promise.resolve(null)
-        : context.effect(medianTimestampEffect, {
-            chainId: event.chainId,
-            rateFeedID: existing.referenceRateFeedID,
-            blockNumber,
-          }),
-    ]);
+    const authoritativeStatePromise = resolveRebalanceState({
+      blockNumber,
+      chainId: event.chainId,
+      context,
+      derived: derivedRebalanceState,
+      existing,
+      poolAddress: asAddress(event.srcAddress),
+    });
+    const [authoritativeState, preReserves, blockScopedIncentive] =
+      await Promise.all([
+        authoritativeStatePromise,
+        preReservesPromise,
+        // Read at the event block — `Pool.rebalanceReward` may carry today's
+        // value during full resync (fetchFees self-heals from `latest`), and
+        // we want the bps that was actually in force when this rebalance
+        // executed. Falls back to `pool.rebalanceReward` below on RPC failure
+        // or block-fallback. Skipped for `-2` sentinel pools per the comment
+        // above — propagate the sentinel so `normalizeRewardBps` sees it.
+        incentiveGetterMissing
+          ? Promise.resolve(-2)
+          : context.effect(rebalanceIncentiveAtBlockEffect, {
+              chainId: event.chainId,
+              poolAddress: asAddress(event.srcAddress),
+              blockNumber,
+            }),
+      ]);
 
-    const resolved: ResolvedRebalanceState | null =
-      derivedRebalanceState ??
-      (rebalancingStateRpc
-        ? scaleRpcRebalanceState(rebalancingStateRpc, existing)
-        : null);
-    const rebalancingStateRpcSucceeded = Boolean(rebalancingStateRpc);
+    const resolved = authoritativeState.resolved;
+    const rebalancingStateRpcSucceeded = authoritativeState.rpcSucceeded;
 
     const rebalancerAddress = asAddress(event.params.sender);
 
@@ -509,10 +549,8 @@ indexer.onEvent(
         // Match UpdateReserves: a successful authoritative read proves the
         // contract accepted the oracle as live for this block.
         ...(rebalancingStateRpcSucceeded ? { oracleOk: true } : {}),
-        ...(rebalancingStateRpcSucceeded &&
-        medianTimestampRpc !== null &&
-        medianTimestampRpc > 0n
-          ? { lastOracleReportAt: medianTimestampRpc }
+        ...(authoritativeState.medianTimestamp !== null
+          ? { lastOracleReportAt: authoritativeState.medianTimestamp }
           : {}),
         ...(rebalancedOrientationKnown
           ? {
@@ -540,72 +578,21 @@ indexer.onEvent(
       existing: { pool: existing },
     });
 
-    if (resolved) {
-      // Health score: compute snapshot fields + update pool accumulators.
-      // Note: upsertPool above calls context.Pool.set(pool) internally with
-      // default health fields. We immediately overwrite with the correct
-      // health accumulators here. Safe because Envio is single-threaded, but
-      // the double-write is intentional — health update must come after upsertPool
-      // so we have the final pool state to accumulate against.
-      const effectiveBps = Number(effectiveThreshold(pool));
-      const { snapshotFields, poolUpdate } = recordHealthSample(
-        pool,
-        pool.priceDifference,
-        effectiveBps,
-        blockTimestamp,
-        isNeverRebalance(pool),
-        {
-          reportTimestamp: existing?.lastOracleReportAt ?? 0n,
-          expiry: existing?.oracleExpiry ?? 0n,
-        },
-      );
-      // Reassign so the daily-snapshot upsert below freezes the just-updated
-      // health counters, not the pre-recordHealthSample values.
-      // Recompute `healthStatus`: `recordHealthSample` may have flipped
-      // `hasHealthData: false → true` on the first valid sample, and
-      // `upsertPool`'s earlier computeHealthStatus ran against the OLD value.
-      // Without this, the persisted pool has the new hasHealthData but a
-      // stale `N/A` healthStatus (codex P2 PR #370 #3214748736).
-      const merged = { ...pool, ...poolUpdate };
-      pool = {
-        ...merged,
-        healthStatus: computeHealthStatus(merged, blockTimestamp),
-      };
-      context.Pool.set(pool);
-
-      // Skip OracleSnapshot when orientation is unknown — see UpdateReserves
-      // handler for the rationale (avoid mixing fresh deviation with a
-      // stale/preserved oraclePrice in the chart history).
-      if (rebalancedOrientationKnown) {
-        const snapshot: OracleSnapshot = {
-          id,
-          chainId: event.chainId,
-          poolId,
-          timestamp: blockTimestamp,
-          oraclePrice: rebalancedOraclePrice,
-          oracleOk: pool.oracleOk,
-          numReporters: pool.oracleNumReporters,
-          priceDifference: pool.priceDifference,
-          degenerateReserves: pool.degenerateReserves,
-          // See sortedOracles.OracleReported — `persistableThreshold` gates the
-          // 1e12 never-rebalance sentinel out of this `Int!`-typed write.
-          rebalanceThreshold: persistableThreshold(pool),
-          source: "rebalanced",
-          blockNumber,
-          txHash: event.transaction.hash,
-          // `rebalanced` rows measure post-rebalance pool-internal
-          // deviation, not oracle deviation — same rationale as
-          // `update_reserves`. Leave undefined so the chart's per-point
-          // breaker verdict falls through to "no band check".
-          breakerBaselineAtSnapshot: undefined,
-          breakerThresholdAtSnapshot: undefined,
-          ...snapshotFields,
-        };
-        if (shouldPersistRawOracleSnapshot(blockTimestamp)) {
-          context.OracleSnapshot.set(snapshot);
-        }
-      }
-    }
+    pool = recordStateSyncHealth({
+      blockNumber,
+      blockTimestamp,
+      chainId: event.chainId,
+      context,
+      pool,
+      priorPool: existing,
+      poolId,
+      snapshotId: id,
+      snapshotOraclePrice: rebalancedOraclePrice,
+      snapshotSource: "rebalanced",
+      shouldRecord: Boolean(resolved),
+      shouldSnapshot: Boolean(resolved) && rebalancedOrientationKnown,
+      txHash: event.transaction.hash,
+    });
 
     await upsertSnapshot({
       context,

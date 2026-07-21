@@ -4,7 +4,7 @@
 // + RebalanceThresholdUpdated
 // ---------------------------------------------------------------------------
 
-import type { OracleSnapshot, Pool } from "envio";
+import type { EvmOnEventContext, OracleSnapshot, Pool } from "envio";
 import { indexer } from "../../indexer.js";
 import { asAddress, asBigInt, eventId, makePoolId } from "../../helpers.js";
 import {
@@ -48,6 +48,85 @@ function degenerateReservesForThresholdUpdate(pool: Pool): boolean {
       ? hasDegenerateReserves(pool)
       : pool.degenerateReserves)
   );
+}
+
+type ThresholdRecomputeResult = {
+  active: number | null;
+  medianFresh: boolean;
+  medianTimestampFromRpc: bigint | null;
+  priceDifferenceFromMedian: bigint | null;
+  rpcSucceeded: boolean;
+};
+
+async function resolveThresholdRecompute(args: {
+  above: number;
+  below: number;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+  chainId: number;
+  context: EvmOnEventContext;
+  existing: Pool;
+  poolAddress: string;
+}): Promise<ThresholdRecomputeResult> {
+  const { existing } = args;
+  const medianFresh =
+    existing.lastMedianPrice > 0n &&
+    existing.medianLive &&
+    existing.invertRateFeedKnown &&
+    existing.tokenDecimalsKnown &&
+    existing.oracleOk &&
+    existing.oracleExpiry > 0n &&
+    existing.lastOracleReportAt > 0n &&
+    existing.lastOracleReportAt + existing.oracleExpiry >=
+      args.blockTimestamp &&
+    existing.reserves0 > 0n &&
+    existing.reserves1 > 0n;
+
+  if (medianFresh) {
+    const medianView = {
+      reserves0: existing.reserves0,
+      reserves1: existing.reserves1,
+      oraclePrice: existing.lastMedianPrice,
+      invertRateFeed: existing.invertRateFeed,
+      token0Decimals: existing.token0Decimals,
+      token1Decimals: existing.token1Decimals,
+    };
+    return {
+      active: pickActiveThreshold(medianView, {
+        above: args.above,
+        below: args.below,
+      }),
+      medianFresh: true,
+      medianTimestampFromRpc: null,
+      priceDifferenceFromMedian: computePriceDifference(medianView),
+      rpcSucceeded: false,
+    };
+  }
+
+  const [rpc, medianTimestamp] = await Promise.all([
+    args.context.effect(rebalancingStateEffect, {
+      chainId: args.chainId,
+      poolAddress: args.poolAddress,
+      blockNumber: args.blockNumber,
+    }),
+    existing.referenceRateFeedID
+      ? args.context.effect(medianTimestampEffect, {
+          chainId: args.chainId,
+          rateFeedID: existing.referenceRateFeedID,
+          blockNumber: args.blockNumber,
+        })
+      : Promise.resolve(null),
+  ]);
+  return {
+    active: rpc?.rebalanceThreshold ?? null,
+    medianFresh: false,
+    medianTimestampFromRpc:
+      rpc && medianTimestamp !== null && medianTimestamp > 0n
+        ? medianTimestamp
+        : null,
+    priceDifferenceFromMedian: rpc?.priceDifference ?? null,
+    rpcSucceeded: rpc !== null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -315,24 +394,6 @@ indexer.onEvent(
     // return `0n`. Same gates the entity-derive path uses, applied here so
     // a governance threshold update doesn't open/close breaches from
     // oracle/reserve data the contract would reject.
-    const medianFresh =
-      existing.lastMedianPrice > 0n &&
-      existing.medianLive &&
-      existing.invertRateFeedKnown &&
-      // `tokenDecimalsKnown` gate — without real decimals, the local-median
-      // path would compute `priceDifferenceFromMedian` via `normalizeTo18`
-      // against the schema-default 18/18 and produce a result off by
-      // `10^(18 - real_dec)`. Falls through to RPC, which is the right
-      // safe-by-construction fallback (contract `getRebalancingState`
-      // returns the real value).
-      existing.tokenDecimalsKnown &&
-      existing.oracleOk &&
-      existing.oracleExpiry > 0n &&
-      existing.lastOracleReportAt > 0n &&
-      existing.lastOracleReportAt + existing.oracleExpiry > blockTimestamp &&
-      existing.reserves0 > 0n &&
-      existing.reserves1 > 0n;
-
     // Resolve the threshold-event's recompute inputs, preferring local
     // median when fresh (cheap, no RPC) and falling back to the contract's
     // `getRebalancingState` otherwise (covers quiet pools where local
@@ -340,60 +401,28 @@ indexer.onEvent(
     // codex M1). `null` means neither path could produce a usable
     // priceDifference; the handler then writes only the threshold split
     // fields and preserves existing breach/health state.
-    let priceDifferenceFromMedian: bigint | null = null;
-    let active: number | null = null;
-    let medianTimestampFromRpc: bigint | null = null;
+    const {
+      active,
+      medianFresh,
+      medianTimestampFromRpc,
+      priceDifferenceFromMedian,
+      rpcSucceeded,
+    } = await resolveThresholdRecompute({
+      above,
+      below,
+      blockNumber,
+      blockTimestamp,
+      chainId: event.chainId,
+      context,
+      existing,
+      poolAddress: asAddress(event.srcAddress),
+    });
     const degenerateReserves = degenerateReservesForThresholdUpdate(existing);
-    if (medianFresh) {
-      // Synthetic pool view using `lastMedianPrice` (clean median) for both
-      // direction-pick AND priceDifference. Without this, upsertPool's
-      // breach/health recompute would derive priceDifference from the
-      // reporter-tainted `oraclePrice` (set by OracleReported).
-      const medianView = {
-        reserves0: existing.reserves0,
-        reserves1: existing.reserves1,
-        oraclePrice: existing.lastMedianPrice,
-        invertRateFeed: existing.invertRateFeed,
-        token0Decimals: existing.token0Decimals,
-        token1Decimals: existing.token1Decimals,
-      };
-      active = pickActiveThreshold(medianView, { above, below });
-      priceDifferenceFromMedian = computePriceDifference(medianView);
-    } else {
-      // Local median not usable — try the contract's authoritative state.
-      // Threshold updates are rare governance events so the extra RPC is
-      // acceptable. The contract's `getRebalancingState` returns the
-      // direction-correct active threshold + priceDifference at this block.
-      const [rpc, medianTimestamp] = await Promise.all([
-        context.effect(rebalancingStateEffect, {
-          chainId: event.chainId,
-          poolAddress: asAddress(event.srcAddress),
-          blockNumber,
-        }),
-        existing.referenceRateFeedID
-          ? context.effect(medianTimestampEffect, {
-              chainId: event.chainId,
-              rateFeedID: existing.referenceRateFeedID,
-              blockNumber,
-            })
-          : Promise.resolve(null),
-      ]);
-      if (rpc) {
-        priceDifferenceFromMedian = rpc.priceDifference;
-        active = rpc.rebalanceThreshold;
-        medianTimestampFromRpc =
-          medianTimestamp !== null && medianTimestamp > 0n
-            ? medianTimestamp
-            : null;
-      }
-    }
     // RPC fallback succeeded ⇒ contract had a live oracle at this block.
     // If the local pool row still has `oracleOk=false` from deploy-time
     // RPC misses or a prior stale state, lift it now so the upsertPool
     // health/breach pipeline + the post-upsert `oracleOk` gate see the
     // correct live-oracle status.
-    const rpcSucceeded = !medianFresh && priceDifferenceFromMedian !== null;
-
     let upserted: Pool;
     if (priceDifferenceFromMedian === null || active === null) {
       // Neither local median nor RPC produced usable values.
@@ -484,11 +513,13 @@ indexer.onEvent(
         upserted,
         upserted.priceDifference,
         Number(effectiveThreshold(upserted)),
-        blockTimestamp,
-        isNeverRebalance(upserted),
         {
-          reportTimestamp: existing.lastOracleReportAt,
-          expiry: existing.oracleExpiry,
+          blockTimestamp,
+          isNeverRebalance: isNeverRebalance(upserted),
+          priorOracleFreshness: {
+            reportTimestamp: existing.lastOracleReportAt,
+            expiry: existing.oracleExpiry,
+          },
         },
       );
       // Recompute `healthStatus` after the merge: `recordHealthSample` may

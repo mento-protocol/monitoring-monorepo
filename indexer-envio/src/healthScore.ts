@@ -308,6 +308,12 @@ export interface RecordHealthSampleResult {
   poolUpdate: HealthAccumulatorUpdate;
 }
 
+export interface RecordHealthSampleOptions {
+  blockTimestamp: bigint;
+  isNeverRebalance?: boolean;
+  priorOracleFreshness?: OracleFreshnessAnchor;
+}
+
 /**
  * Single entry point for recording a health sample. Called by both
  * SortedOracles and FPMM handlers when writing an OracleSnapshot.
@@ -321,10 +327,10 @@ export interface RecordHealthSampleResult {
  * @param effectiveThresholdBps — `effectiveThreshold(pool)` cast to
  *   number (NOT the raw `rebalanceThreshold` — see
  *   `computeHealthSnapshotFields` for why).
- * @param blockTimestamp — block timestamp of the event
- * @param isNeverRebalance — true iff governance configured the pool to
+ * @param options.blockTimestamp — block timestamp of the event
+ * @param options.isNeverRebalance — true iff governance configured the pool to
  *   never rebalance (see `computeHealthSnapshotFields`).
- * @param priorOracleFreshness — exact contract freshness inputs for the
+ * @param options.priorOracleFreshness — exact contract freshness inputs for the
  *   interval preceding this sample. Required when `pool` already contains a
  *   newly applied median timestamp or expiry.
  * Degenerate reserves are derived from `pool`: they keep the faithful
@@ -336,10 +342,13 @@ export function recordHealthSample(
   pool: Pool,
   priceDifference: bigint,
   effectiveThresholdBps: number,
-  blockTimestamp: bigint,
-  isNeverRebalance = false,
-  priorOracleFreshness?: OracleFreshnessAnchor,
+  options: RecordHealthSampleOptions,
 ): RecordHealthSampleResult {
+  const {
+    blockTimestamp,
+    isNeverRebalance = false,
+    priorOracleFreshness,
+  } = options;
   // dataAvailable: pool has a usable threshold from EITHER a successful
   // split-side read (`rebalanceThresholdsKnown`) OR a positive active
   // threshold (RPC-derived via `getRebalancingState`, which is

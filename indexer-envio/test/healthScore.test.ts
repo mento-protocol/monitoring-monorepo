@@ -148,7 +148,7 @@ describe("updateHealthAccumulators", () => {
       makePool({ oracleExpiry: 300n }),
       10_100_001n,
       10_000_000,
-      1000n,
+      { blockTimestamp: 1000n },
     );
     assert.equal(first.snapshotFields.healthBinaryValue, "0.000000");
     assert.equal(first.poolUpdate.lastDeviationRatio, "1.010001");
@@ -157,7 +157,9 @@ describe("updateHealthAccumulators", () => {
       ...first.poolUpdate,
       oracleExpiry: 300n,
     });
-    const second = recordHealthSample(pool, 5_000_000n, 10_000_000, 1100n);
+    const second = recordHealthSample(pool, 5_000_000n, 10_000_000, {
+      blockTimestamp: 1100n,
+    });
     assert.equal(second.poolUpdate.healthTotalSeconds, 100n);
     assert.equal(second.poolUpdate.healthBinarySeconds, 0n);
   });
@@ -358,7 +360,7 @@ describe("recordHealthSample", () => {
       pool,
       5000n, // priceDifference
       0, // rebalanceThreshold = 0 → no valid data
-      1200n, // blockTimestamp
+      { blockTimestamp: 1200n },
     );
 
     // Snapshot should be flagged as no-data
@@ -389,7 +391,7 @@ describe("recordHealthSample", () => {
       pool1,
       5000n,
       0, // no valid data
-      1200n,
+      { blockTimestamp: 1200n },
     );
 
     // Accumulators unchanged, but timestamp advanced and ratio is sentinel
@@ -407,7 +409,7 @@ describe("recordHealthSample", () => {
       pool2,
       2500n, // healthy (d=0.5)
       5000, // rebalanceThreshold=5000
-      1500n,
+      { blockTimestamp: 1500n },
     );
 
     // The 300s gap (1200→1500) should NOT be added to totalSeconds
@@ -430,7 +432,7 @@ describe("recordHealthSample", () => {
       pool,
       2500n, // priceDifference
       5000, // rebalanceThreshold
-      1100n, // blockTimestamp
+      { blockTimestamp: 1100n },
     );
 
     // Snapshot fields
@@ -455,7 +457,9 @@ describe("recordHealthSample", () => {
       degenerateReserves: true,
     });
 
-    const first = recordHealthSample(pool, 100000n, 5000, 1100n);
+    const first = recordHealthSample(pool, 100000n, 5000, {
+      blockTimestamp: 1100n,
+    });
 
     assert.equal(first.snapshotFields.deviationRatio, "0.000000");
     assert.equal(first.snapshotFields.healthBinaryValue, "1.000000");
@@ -468,7 +472,9 @@ describe("recordHealthSample", () => {
       oracleExpiry: 300n,
       degenerateReserves: false,
     });
-    const second = recordHealthSample(nextPool, 2500n, 5000, 1200n);
+    const second = recordHealthSample(nextPool, 2500n, 5000, {
+      blockTimestamp: 1200n,
+    });
 
     assert.equal(second.poolUpdate.healthTotalSeconds, 200n);
     assert.equal(second.poolUpdate.healthBinarySeconds, 200n);

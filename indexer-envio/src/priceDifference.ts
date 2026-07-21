@@ -84,7 +84,7 @@ export function hasFreshLiveMedian(
   if (!pool.oracleOk) return false;
   if (pool.oracleExpiry <= 0n) return false;
   if (pool.lastOracleReportAt <= 0n) return false;
-  return pool.lastOracleReportAt + pool.oracleExpiry > eventTimestamp;
+  return pool.lastOracleReportAt + pool.oracleExpiry >= eventTimestamp;
 }
 
 /** Shared inputs for `reservePriceVsOracleRef`, `computePriceDifference`,
@@ -263,7 +263,7 @@ export function scaleRpcRebalanceState(
  *     here is safe-by-construction: contract `getRebalancingState`
  *     returns the real priceDifference at this block.
  *   - `oracleOk` AND `oracleExpiry > 0` AND
- *     `lastOracleReportAt + oracleExpiry > eventTimestamp`: the
+ *     `lastOracleReportAt + oracleExpiry >= eventTimestamp`: the
  *     on-chain `getRebalancingState` reverts on stale oracle, so derive must
  *     mirror that. Use `lastOracleReportAt` (the block-scoped
  *     SortedOracles.medianTimestamp refreshed on OracleReported,

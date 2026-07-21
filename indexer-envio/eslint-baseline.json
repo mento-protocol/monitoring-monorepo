@@ -24,15 +24,8 @@
     "file": "src/contractAddresses.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
-    "line": 129,
+    "line": 143,
     "linePreview": "const label = PRICING_MODULE_LABELS[rawName]; | if (label && entry.address) { | index.set(entry.address.toLowerCase(), label);"
-  },
-  {
-    "file": "src/healthScore.ts",
-    "ruleId": "max-params",
-    "message": "Function 'recordHealthSample' has too many parameters (5). Maximum allowed is 4.",
-    "line": 319,
-    "linePreview": "*/ | export function recordHealthSample( | pool: Pool,"
   },
   {
     "file": "src/pool/snapshots.ts",
@@ -52,7 +45,7 @@
     "file": "src/rpc.ts",
     "ruleId": "max-params",
     "message": "Async function 'updatePoolsOracleExpiry' has too many parameters (5). Maximum allowed is 4.",
-    "line": 151,
+    "line": 142,
     "linePreview": " | export async function updatePoolsOracleExpiry( | context: EvmOnEventContext,"
   },
   {
