@@ -67,6 +67,7 @@ import {
 } from "../../pool.js";
 import { recordHealthSample } from "../../healthScore.js";
 import { shouldPersistRawOracleSnapshot } from "../../oracleSnapshotRetention.js";
+import { resolveReferenceRateFeedForOracleRead } from "./oracle-recovery.js";
 
 type DegenerateReservePool = Pick<
   Pool,
@@ -112,16 +113,22 @@ async function fetchAuthoritativeRebalanceState(args: {
   existing: Pool | undefined;
   poolAddress: string;
 }): Promise<AuthoritativeRebalanceState> {
+  const rateFeedID = await resolveReferenceRateFeedForOracleRead({
+    chainId: args.chainId,
+    context: args.context,
+    existingFeedId: args.existing?.referenceRateFeedID ?? "",
+    poolAddress: args.poolAddress,
+  });
   const [rpc, medianTimestamp] = await Promise.all([
     args.context.effect(rebalancingStateEffect, {
       chainId: args.chainId,
       poolAddress: args.poolAddress,
       blockNumber: args.blockNumber,
     }),
-    args.existing?.referenceRateFeedID
+    rateFeedID
       ? args.context.effect(medianTimestampEffect, {
           chainId: args.chainId,
-          rateFeedID: args.existing.referenceRateFeedID,
+          rateFeedID,
           blockNumber: args.blockNumber,
         })
       : Promise.resolve(null),

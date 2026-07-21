@@ -39,6 +39,7 @@ import { bootstrapAndResolveBreakerSnapshotFields } from "../../breakers.js";
 import { getBreakerConfigsByFeed } from "../../rpc.js";
 import { shouldPersistRawOracleSnapshot } from "../../oracleSnapshotRetention.js";
 import { syncPoolLiquidityStrategy } from "../../liquidityStrategies.js";
+import { resolveReferenceRateFeedForOracleRead } from "./oracle-recovery.js";
 
 function degenerateReservesForThresholdUpdate(pool: Pool): boolean {
   const exactZeroDegenerateState = classifyExactZeroReserves(pool);
@@ -103,16 +104,22 @@ async function resolveThresholdRecompute(args: {
     };
   }
 
+  const rateFeedID = await resolveReferenceRateFeedForOracleRead({
+    chainId: args.chainId,
+    context: args.context,
+    existingFeedId: existing.referenceRateFeedID,
+    poolAddress: args.poolAddress,
+  });
   const [rpc, medianTimestamp] = await Promise.all([
     args.context.effect(rebalancingStateEffect, {
       chainId: args.chainId,
       poolAddress: args.poolAddress,
       blockNumber: args.blockNumber,
     }),
-    existing.referenceRateFeedID
+    rateFeedID
       ? args.context.effect(medianTimestampEffect, {
           chainId: args.chainId,
-          rateFeedID: existing.referenceRateFeedID,
+          rateFeedID,
           blockNumber: args.blockNumber,
         })
       : Promise.resolve(null),
