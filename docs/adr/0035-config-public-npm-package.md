@@ -3,7 +3,7 @@ title: shared-config publishes as the public @mento-protocol/config package
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-21
 scope: shared-config
 date: 2026-07
 doc_type: adr
@@ -59,9 +59,10 @@ and pack the artifact; untagged workflow runs do not publish.
   and allowed action `npm publish`.
 - The publish job intentionally uses a GitHub-hosted runner because npm trusted
   publishing does not support self-hosted or third-party GitHub Actions runners.
-- The public package intentionally keeps the workspace Node 24 engine floor for
-  v0.1.x, matching `.node-version` and CI. Broadening support to older Node
-  versions needs a package consumer and publish verification matrix.
+- The public package intentionally keeps the workspace Node 24 engine floor
+  throughout the pre-1.0 release line, matching `.node-version` and CI.
+  Broadening support to older Node versions needs a package consumer and
+  publish verification matrix.
 - The indexer vendored mirror remains governed by ADR 0013 until a separate PR
   intentionally changes the hosted Envio dependency model.
 
