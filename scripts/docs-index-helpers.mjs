@@ -513,16 +513,6 @@ export function renderDocumentationIndex(
   inventory,
   { lastVerified = "2026-07-17" } = {},
 ) {
-  const totalWords = inventory.records.reduce(
-    (total, record) => total + record.words,
-    0,
-  );
-  const authorityCounts = Object.fromEntries(
-    ["canonical", "non-canonical", "unmanaged"].map((value) => [
-      value,
-      inventory.records.filter((record) => record.authority === value).length,
-    ]),
-  );
   const lines = [
     "---",
     "title: Documentation Catalog",
@@ -542,28 +532,21 @@ export function renderDocumentationIndex(
     "This is the navigation index. A document's authority still comes from its metadata and",
     "the rules in [`context-standards.md`](context-standards.md).",
     "",
-    `**${inventory.records.length} unique documents · ${totalWords.toLocaleString("en-US")} words · ${authorityCounts.canonical} canonical · ${authorityCounts["non-canonical"]} non-canonical · ${authorityCounts.unmanaged} unmanaged**`,
-    "",
   ];
 
   for (const lane of GARDEN_LANES) {
     const records = inventory.records.filter(
       (record) => record.garden_lane === lane,
     );
-    const words = records.reduce((total, record) => total + record.words, 0);
     lines.push(`## ${lane}`, "");
     lines.push(
-      `${records.length} documents · ${words.toLocaleString("en-US")} words`,
-      "",
-    );
-    lines.push(
-      "| Document | Title | Authority | Type / scope | Owner | Review | Words / inbound |",
-      "| --- | --- | --- | --- | --- | --- | ---: |",
+      "| Document | Title | Authority | Type / scope | Owner | Review |",
+      "| --- | --- | --- | --- | --- | --- |",
     );
     for (const record of records) {
       const link = relativeCatalogLink(record.path);
       lines.push(
-        `| [\`${escapeCell(record.path)}\`](${link}) | ${escapeCell(record.title)} | ${record.authority} / ${record.status} | ${record.doc_type} / ${record.scope} | ${escapeCell(record.owner)} | ${reviewCell(record)} | ${record.words.toLocaleString("en-US")} / ${record.inbound_links} |`,
+        `| [\`${escapeCell(record.path)}\`](${link}) | ${escapeCell(record.title)} | ${record.authority} / ${record.status} | ${record.doc_type} / ${record.scope} | ${escapeCell(record.owner)} | ${reviewCell(record)} |`,
       );
     }
     lines.push("");
