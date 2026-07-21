@@ -841,24 +841,27 @@ await test("verdict label set is derived from the label definitions", () => {
   ]);
 });
 
-await test("reopen shed set is every verdict label plus projected + archive markers", () => {
-  // A reopened regression must not keep reading as verdicted, projected,
-  // approved-for-archive, or archived — every one of those described the old
-  // occurrence (PR #1356 review). Shedding the approval marker also stops a
-  // stale human archive approval from carrying into a fresh occurrence.
+await test("reopen shed set is every verdict label plus projected + autofix + archive markers", () => {
+  // A reopened regression is a NEW occurrence: it must not keep reading as
+  // verdicted, projected, autofixed/refused, or approved-for-archive/archived —
+  // every one of those described the old occurrence (PR #1356 review). A stale
+  // autofix marker also blocks re-autofix, and a stale archive approval must not
+  // carry a human sign-off into a fresh occurrence.
   assertDeepEqual(REOPEN_SHED_LABELS, [
     "sentry:verdict-code-fix",
     "sentry:verdict-config-fix",
     "sentry:verdict-upstream",
     "sentry:verdict-needs-human",
     "sentry:projected",
+    "sentry:fix-pr-opened",
+    "sentry:fix-refused",
     "sentry:approved-archive",
     "sentry:archived",
   ]);
   assertEqual(PROJECTED_LABEL, "sentry:projected");
 });
 
-await test("reopen label edit re-queues triage and sheds stale verdict + projected + archive labels", () => {
+await test("reopen label edit re-queues triage and sheds stale verdict + projected + autofix + archive labels", () => {
   const args = buildReopenLabelEditArgs(200, "owner/repo");
   assertDeepEqual(args, [
     "issue",
@@ -869,7 +872,7 @@ await test("reopen label edit re-queues triage and sheds stale verdict + project
     "--add-label",
     "sentry:needs-triage",
     "--remove-label",
-    "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human,sentry:projected,sentry:approved-archive,sentry:archived",
+    "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human,sentry:projected,sentry:fix-pr-opened,sentry:fix-refused,sentry:approved-archive,sentry:archived",
   ]);
 });
 

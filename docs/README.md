@@ -37,6 +37,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.claude/commands/autoreview.md`](../.claude/commands/autoreview.md) | Auto Review | unmanaged / unmanaged | command / repo-wide | unowned | 180d |
 | [`.claude/commands/babysit-indexer-deploy.md`](../.claude/commands/babysit-indexer-deploy.md) | Babysit Indexer Deploy | unmanaged / unmanaged | command / repo-wide | unowned | 180d |
 | [`.claude/commands/verify-ui.md`](../.claude/commands/verify-ui.md) | Verify UI | unmanaged / unmanaged | command / repo-wide | unowned | 180d |
+| [`.github/prompts/sentry-autofix.md`](../.github/prompts/sentry-autofix.md) | sentry-autofix.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
 | [`.github/prompts/sentry-triage.md`](../.github/prompts/sentry-triage.md) | sentry-triage.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
 | [`aegis/AGENTS.md`](../aegis/AGENTS.md) | Aegis Instructions | canonical / active | agent-instructions / aegis | eng | 90d; verified 2026-05-20 |
 | [`AGENTS.md`](../AGENTS.md) | Monitoring Monorepo Instructions | canonical / active | agent-instructions / repo-wide | eng | 90d; verified 2026-07-17 |

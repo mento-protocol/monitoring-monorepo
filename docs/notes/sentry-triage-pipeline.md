@@ -52,7 +52,12 @@ flowchart LR
         LBL["<b>deterministic verdict step</b><br/>parse comment → validate →<br/>apply label (no LLM authority)"]
         CLOSE["<b>deterministic close step</b><br/>upstream + actionable-local →<br/>close (completed); needs-human<br/>stays open; external actionable<br/>deferred to the project job"]
         PROJ["<b>project job — SERIALIZED</b><br/>after the whole matrix, one at a<br/>time: external code-fix/config-fix →<br/>owning-repo issue, then close<br/>(Issues-write, no LLM authority)"]
+        AFX["<b>autofix leg — Phase 2b</b><br/>sentry-autofix.yml (separate cron)<br/>LOCAL code-fix stubs → scoped fix<br/>agent (no Sentry access) → diff guard<br/>→ PR via App token (merge stays human)"]
         ARCH["<b>Phase 2a — archive</b><br/>sentry-triage-archive.yml<br/>human-approved, deterministic<br/>archived_until_escalating<br/>(never hard-resolve)"]
+    end
+
+    subgraph FIXES["Fix PRs — this repo (Phase 2b)"]
+        FIXPR["scoped fix PR<br/>required CI + Codex review;<br/><b>merge stays human</b>"]
     end
 
     subgraph QUEUE["GitHub Issues — machine ledger"]
@@ -66,7 +71,8 @@ flowchart LR
     subgraph TF["Terraform platform stack"]
         SEC["SENTRY_TRIAGE_TOKEN (read-only)<br/>SENTRY_TRIAGE_ENABLED (kill switch)"]
         SECP["SENTRY_PROJECTION_TOKEN<br/>(Issues R/W, 3 owning repos)"]
-        SECA["SENTRY_ARCHIVE_TOKEN (Issue R/W)<br/>SENTRY_ARCHIVE_ENABLED (kill switch)"]
+        SECA["AUTOFIX_APP_* (App id + PEM)<br/>SENTRY_AUTOFIX_ENABLED (kill switch)"]
+        SECAR["SENTRY_ARCHIVE_TOKEN (Issue R/W)<br/>SENTRY_ARCHIVE_ENABLED (kill switch)"]
     end
 
     subgraph OBS["Observability"]
@@ -89,17 +95,22 @@ flowchart LR
     PROJ -- "one issue per family,<br/>allowlisted owning repos only" --> REPOS
     PROJ -- "sentry:projected + link,<br/>then close (completed)" --> QI
     CLOSE -- "close (completed),<br/>settled buckets" --> QI
+    QI -- "sentry:verdict-code-fix,<br/>local + no fix PR yet<br/>(cap 2/run)" --> AFX
+    AFX -- "branch + PR via App token<br/>(required CI + review fire)" --> FIXPR
+    AFX -- "Autofixed by PR: + label<br/>(ambient github.token)" --> QI
     SEC -. "gates + authenticates" .-> ING & SEL
     SECP -. "authenticates (Issues-write,<br/>project job ONLY)" .-> PROJ
+    SECA -. "gates + authenticates<br/>(App token, autofix ONLY)" .-> AFX
     HUM -- "apply sentry:approved-archive<br/>on a verdicted stub" --> ARCH
     ARCH -- "archived_until_escalating<br/>(never hard-resolve)" --> SE
     ARCH -- "audit + sentry:archived,<br/>close (completed)" --> QI
-    SECA -. "gates + authenticates<br/>(archive job ONLY)" .-> ARCH
+    SECAR -. "gates + authenticates<br/>(archive job ONLY)" .-> ARCH
     ING --> TRK
     GHA -.-> CIF
     LBL --> ENG
     QI --> HUM
     REPOS --> HUM
+    FIXPR --> HUM
 ```
 
 ### Process flow — life of one Sentry issue
@@ -800,6 +811,238 @@ any partially-applied `sentry:projected`, and fail the job loudly so the
 main-failure notifier fires and the next scheduled run retries. Nothing
 strands.
 
+## Autofix PRs (Phase 2b)
+
+Autofix is the first leg that WRITES code (ADR 0036 Stage C, Phase 2b). For a
+queue stub verdicted `code-fix` whose parsed `affected_repo` is EXACTLY this
+repo, a claude-code-action agent implements a scoped fix in a fresh checkout,
+and a deterministic finalize step commits, pushes a branch, and opens a PR via a
+GitHub App token. It is **PR-only** — nothing ever merges automatically; merge
+stays human. It runs as its own scheduled workflow
+(`.github/workflows/sentry-autofix.yml`), separate from the triage workflow, on
+a weekday cron (`30 8 * * 1-5`, after the ~07:55 triage run) plus a
+single-issue `workflow_dispatch` live run (opens a real fix PR if the issue is
+eligible — there is no non-mutating dry-run mode). Helpers:
+`scripts/sentry-autofix-select.mjs` (selection) and
+`scripts/sentry-autofix-finalize.mjs` (diff guard + PR-body assembly), both with
+offline tests.
+
+**Containment (two layers).** First, the fix agent gets NO Sentry access at all
+— no MCP server, no `--mcp-config`. Its only inputs are the already-posted,
+redacted verdict comment (read via `gh issue view`) and this repo's own code, so
+the prompt-injection surface stays confined to the read-only triage leg.
+Second — and this is the load-bearing one, because the verdict is still
+second-order untrusted data — the agent has **NO code-execution tool and no
+GitHub token**: its allowlist is `Read`/`Grep`/`Glob`/`Edit`/`Write`/`MultiEdit`
+ONLY, with no `pnpm`, `node`, `Bash`, `git`, `gh`, or network (mirroring the
+repo's other claude-code-action agents in `claude.yml`). A code-execution tool
+would let a verdict-injected agent run arbitrary JS with the runner's env
+secrets and exfiltrate them before the diff guard ever runs; denying execution
+removes that path entirely. The verdict is **pre-fetched** (trusted, fence-
+selected) to `/tmp/autofix-verdict.md`, which the agent reads — so it needs no
+`gh` tool and no GitHub token in its process env. The worst a prompt-injected
+fix agent can now do is produce a bad DIFF, which the mechanical diff guard, the
+fix PR's required CI, and human review all catch. And the LLM step holds NO
+branch/PR write credential — the App token (branch push + PR create authority)
+is minted and used EXCLUSIVELY inside the deterministic finalize steps, never in
+the LLM step's env, so an injected instruction cannot push or open a PR because
+the step that could be injected has nothing to push with. **Verification is not
+the agent's job**: it cannot run tests, so the fix PR's own full required CI
+(typecheck, tests, lint) plus independent review is the verification — which is
+exactly why merge stays human.
+
+_Residual (accepted, tracked):_ `anthropics/claude-code-action` still holds its
+own `github_token` input and the Claude OAuth token in the CLI process env,
+which the agent's unrestricted `Read` tool could in principle reach via a
+process-environment surface and then write into an edited file or the summary.
+This exposure is inherent to the action and identical to the repo's existing
+`claude.yml` agents; the OAuth token is inference-only and rotatable, and any
+leak would have to survive human PR/comment review. Full OS-level
+process/filesystem sandboxing of the agent is a follow-up.
+
+**Selection (deterministic).** The select job lists `sentry:verdict-code-fix`
+queue stubs across `--state all` (verdicted stubs auto-close — closed is the
+normal state), re-parses each verdict through the SAME authoritative parser the
+triage label step uses (`sentry-triage-project-core.mjs` `resolveVerdict`), and
+keeps only stubs whose `affected_repo` resolves to EXACTLY
+`mento-protocol/monitoring-monorepo` (an unrecognized value is not treated as a
+confident local classification, so it is skipped). Dedup: a stub already
+carrying `sentry:fix-pr-opened` (a PR was opened) or `sentry:fix-refused` (an
+attempt declined to open one) is skipped. A stub whose SHORT-ID is
+quoted-referenced by an **open** PR (`gh pr list --state open --search
+"\"<SHORT-ID>\""`) is a special case: because both terminal markers were
+already filtered out above, an open PR here means the stub has NEITHER marker
+yet a fix PR exists — a prior run's `gh pr create` succeeded but its follow-up
+queue comment/label write did not land (a transient failure or a same-tick
+race). Such a stub is **not dropped** (that would leave its queue side-effects
+permanently unrepaired, since the reconcile path is only reachable after
+selection); it is emitted as a `reconcile: true` matrix entry that the fix job
+routes to a **no-agent reconciliation step** — no agent runs (so the checkout
+stays untainted), no App token is minted, and no PR is pushed: it just
+re-resolves the open PR and re-applies the `sentry:fix-pr-opened` marker +
+`Autofixed by PR` comment (or exits cleanly if a concurrent run already did, or
+if the PR has since merged/closed). Routing it through the agent instead would
+risk mislabeling it `sentry:fix-refused` when the re-run diff differs. Quoting
+forces exact-phrase matching so an unrelated PR that merely mentions the
+tokens — or a longer SHORT-ID sharing the prefix — can't falsely dedup an
+eligible stub; scoping to open PRs means a merged/closed fix PR no longer blocks
+— once a fixed issue regresses, the ingest reopen sheds the autofix markers
+(`REOPEN_SHED_LABELS`) and the stub is re-attemptable by design. Oldest-first,
+**hard-capped at 2 per run** (quota cap). The single-issue `workflow_dispatch`
+live run evaluates one requested issue through the same filters (an eligible
+issue opens a real PR). The whole workflow runs **only from `main`** (the select job
+no-ops on any other ref): the pristine base is pinned to `github.sha`, so a
+dispatch from a feature ref would make that ref the base and its divergence from
+`main` would bypass the 3-file diff guard and land in the PR (which opens against
+`main`). Scheduled runs are always on `main`.
+
+**Diff guard (mechanical, not just prompt-enforced).** After the agent edits,
+the finalize step detects the changes and refuses — posting a no-PR analysis
+comment on the queue stub, marking it `sentry:fix-refused`, exiting cleanly —
+when the diff has zero changes, more than 3 changed files, ANY changed path on
+a forbidden surface, a changed path the agent turned into a **symlink**, or a
+changed file whose CONTENT is **credential-shaped**. Forbidden surfaces:
+prefixes `.github/`, `terraform/`, `patches/`, `.trunk/`, `tools/`; a
+`scripts/` directory at ANY depth (root tooling AND package-local helpers like
+`ui-dashboard/scripts/` — several workflows execute package scripts from the
+PR head with secrets in env, e.g. the Lighthouse deploy-protection bypass);
+and CI-executed config files anywhere (`package.json`, `pnpm-lock.yaml`,
+`.npmrc`, any `pnpmfile`, `vercel.json`, `turbo.json`, `*.config.{js,ts,…}`,
+`lighthouserc*`, `*.sh`, `Dockerfile*`, `*.yml`/`*.yaml`). The symlink
+rejection is credential-free (it runs in the guard step, before the App token
+is minted) and lstat-only: the filter-free detector does not dereference
+symlinks, so without it an agent could replace an allowed source file with a
+symlink to a secret-bearing path (e.g. `/proc/self/environ`) that the later
+credentialed byte-copy would dereference and publish into the public fix branch.
+The credential scan closes the sibling channel: the documented process-env
+residual means an injected agent could READ runner tokens and write them into
+an allowed source file — the guard scans every changed file for known
+credential shapes (GitHub/Anthropic/Slack/AWS prefixes) and refuses the whole
+attempt, since a pushed branch is public before any human review. (This is a
+known-prefix scan, not an entropy heuristic; the strong guarantee against
+token disclosure comes from the deterministic-body policy below, and this scan
+is defense-in-depth over the code diff.) The prompt states the same limits,
+but the guard enforces them in code so an over-eager or injected agent cannot
+land a forbidden-path, sprawling, or secret-exfiltrating diff.
+
+**No agent free-text is ever published.** The fix-PR body and the no-PR
+analysis comment are assembled from DETERMINISTIC templates only — the agent
+writes no summary that reaches a public surface. This is deliberate: the agent
+runs with a `Read` tool that can reach the runner's process environment (the
+documented residual), and any pattern-based redactor over free text is
+bypassable — a token fragmented across whitespace (`ghs_ABC DEF …`) matches no
+credential shape or length threshold, then reconstructs for a reader. The only
+non-bypassable policy for arbitrary untrusted text on a public surface is to
+not publish it. So the authoritative artifact is the reviewed **diff** (for a
+fix PR — a human reviews it against the linked Sentry issue) or the
+deterministic guard **reason** (for a refusal); the agent's working notes stay
+in the non-public run logs.
+
+The `sentry:fix-refused` marker is what stops a genuinely unfixable stub from
+being re-picked on every schedule and burning the per-run cap forever
+(starvation): the selector excludes it server-side exactly like
+`sentry:fix-pr-opened`. A human retries a refused stub by **removing the label**;
+a regression reopen sheds it automatically (`REOPEN_SHED_LABELS`), since it
+described the old occurrence.
+
+**Tainted-checkout containment (no git on the checkout, ever).** The agent has
+`Write` access to the checkout, which includes the untracked `.git/` — so a
+prompt-injected agent could plant a `pre-commit`/`fsmonitor` hook, a
+`url.insteadOf` rewrite, or a clean/smudge filter, and ANY git command run
+against that checkout (even `git add`/`git diff`/`git status`) would execute or
+redirect it — hardened flags do not disable in-tree `.gitattributes` filters.
+The finalize flow therefore never runs git against the tainted checkout at all:
+(1) `persist-credentials: false` keeps the checkout token out of `.git/config`;
+(2) the agent's changes are detected against a PRISTINE clone at the run's base
+commit using **pure filesystem reads** (`sentry-autofix-finalize.mjs diff-trees`
+content-hashes both trees — no git, so no filter/hook/textconv runs), and the
+result is fed to the same diff guard; (3) EVERY deterministic node helper runs
+from that pristine clone (the helper scripts are themselves agent-editable in
+the checkout, so `scripts/` is a forbidden diff path AND the helpers are never
+executed from the checkout); and (4) the guard-approved files are re-created in a
+copy of the pristine clone by BYTE-COPYING them with `cp` (never git-reading the
+checkout), and git only ever touches that pristine-config copy — so
+agent-planted hooks/rewrites/filters have nothing to hijack and the App token
+never reaches a git command that consults agent-controlled config.
+
+**PR authorship + why an App token.** When the guard passes, the finalize step
+mints a short-lived installation token from the `sentry-autofix` GitHub App
+(app-id `AUTOFIX_APP_ID` variable, private-key `AUTOFIX_APP_PRIVATE_KEY`
+secret), re-creates THIS run's guard-approved files in the pristine clone (byte
+copy), commits them as the App bot identity on branch
+`sentry-autofix/<short-id-lower>`, pushes with the App token, and opens the PR
+with the App token. An App-token push
+(unlike a `github.token` push) triggers downstream workflows, so **required CI
+and Codex review actually fire**
+on the fix PR — the whole point of using an App rather than the ambient token.
+Because that CI executes the PR head's product/test code before any human
+review, every `ci.yml` checkout runs with `persist-credentials: false`: no
+checkout token ever sits in `.git/config` where PR-head code (autofix-authored
+or otherwise) could read and exfiltrate it — CI jobs only lint/test/build and
+never need an authenticated git remote (the repo is public, so plain fetches
+are anonymous).
+The PR body is assembled deterministically from a fixed template (`## The
+Problem` / `## The Solution` referencing the SHORT-ID, plus `Fixes <SHORT-ID>`,
+`Refs <queue issue #>`, and a provenance note that the PR was machine-authored
+from a triage verdict and enters the normal review gauntlet). It contains **no
+agent-authored text** — see "No agent free-text is ever published" above; the
+diff is the artifact a human reviews.
+
+**Branch collisions + orphan recovery.** If the branch already exists AND
+already has a PR, that PR is left untouched (it may be under review) and the run
+just marks the stub — though the selector's SHORT-ID PR-search dedup normally
+stops such a stub from being picked at all. If the branch exists but has NO PR,
+it is an _orphan_: a prior run pushed the fix but its `gh pr create` failed,
+leaving a branch with no PR, so the selector kept re-picking the stub forever.
+The finalize step recovers by force-overwriting that branch with THIS run's
+guard-checked content and opening the missing PR — never a permanent silent
+no-op, and never a PR whose diff was not validated by the run that opened it
+(the force-push is safe: the branch holds no PR, lives in the pipeline's own
+`sentry-autofix/` namespace, and runs are concurrency-serialized).
+
+`Fixes <SHORT-ID>` in the PR description is Sentry's release-linked auto-resolve
+keyword: Sentry references the fix and marks the issue resolved in the release
+that ships the merge commit (verified against
+<https://docs.sentry.io/product/releases/associate-commits/>, 2026-07).
+
+**Queue-stub side effects.** After opening the PR, the finalize step — using the
+AMBIENT `github.token` so the comment is authored by `github-actions` (the
+outcome digest's authorship fence) — posts the machine-parseable
+`Autofixed by PR: <url>` comment (the `AUTOFIX_COMMENT_PREFIX` contract the
+digest's "Autofixed" section reads) and applies the `sentry:fix-pr-opened`
+label, self-healed first from the ingest's `LABEL_DEFINITIONS` single source.
+The App token is never used for these local writes.
+
+**Run record (observability).** A final `record-run` job runs on every
+**on-`main`** autofix run — scheduled runs and `main` dispatches, including when
+the leg is disabled, unprovisioned, finds zero candidates, or selection itself
+failed — and upserts a single rolling comment (its own
+`<!-- sentry-autofix:run-record:v1 -->` marker, distinct from the ingest's) on
+tracker issue
+[#1282](https://github.com/mento-protocol/monitoring-monorepo/issues/1282) with
+the timestamp, trigger, disposition, and the candidates-selected /
+PRs-opened / refused / incomplete tallies (read back from the selected stubs'
+`sentry:fix-pr-opened` / `sentry:fix-refused` labels, so no matrix-output
+plumbing is needed). It is best-effort and least-privileged (`issues: write`
+only, no Claude/App credential): a failed tracker write never reds the run,
+because a MISSING record is itself the dead-man-switch signal. This mirrors the
+ingest run record and satisfies the ADR 0036 observability invariant, whose
+purpose is to detect a silently-dead **schedule**. An **off-`main`
+`workflow_dispatch`** (a developer testing the workflow from a feature branch)
+deliberately leaves **no** tracker record: the `record-run` job is gated to
+`github.ref == refs/heads/main` because a dispatch runs the _dispatched ref's_
+workflow + helper code, so recording off-main would mean executing unreviewed
+feature-branch code with the `issues:write` token. An off-main dispatch is not
+a scheduled run, so its absence from the ledger is not a false-healthy signal —
+the `select` job's own no-op notice is the record for that case.
+
+**Merge stays human.** Nothing in this leg merges. The fix PR is an ordinary PR:
+required CI, independent Codex review, and a human approving the merge —
+identical to any hand-written change. This is the accepted residual in ADR 0036:
+a `code-fix` verdict triggers automated branch/PR creation bounded by the
+per-run cap, the diff guard, and the review gauntlet — but never an automated
+merge.
+
 ## Archive loop (Phase 2a)
 
 Phase 2a is the first leg that mutates **Sentry**. It is deterministic
@@ -1066,6 +1309,51 @@ issues automatically:
    orphans existing projections' idempotency matching (re-projections would file
    duplicates instead of reusing).
 
+### Activating autofix PRs (Phase 2b)
+
+Autofix is a separate, later activation from the read-only pipeline and from
+verdict projection: its select job is a graceful no-op until the App credential
+AND the `SENTRY_AUTOFIX_ENABLED` switch exist, so the rest of the pipeline runs
+fine without it. When the team is ready to open scoped fix PRs automatically:
+
+1. **Create the `sentry-autofix` GitHub App.** GitHub → Settings → Developer
+   settings → GitHub Apps → New GitHub App:
+   - **Repository permissions → Contents: Read and write** and **Pull requests:
+     Read and write.** Set NOTHING else — no Issues, no Actions, no webhooks.
+     This is the whole trust boundary; the ambient `github.token` (not the App)
+     does the local queue-stub comment/label, so the App needs no Issues scope.
+   - **Where can this GitHub App be installed?** Only this account; then install
+     it on `mento-protocol/monitoring-monorepo` ONLY.
+   - Record the **App ID**; generate a **private key** (downloads a PEM).
+2. **Set both values in the platform tfvars.** In your local, gitignored
+   `terraform/terraform.tfvars`, set `autofix_app_id` and
+   `autofix_app_private_key` (see `terraform/terraform.tfvars.example` for the
+   keys and the PEM heredoc shape). Same value source as the other `count`-gated
+   platform secrets — never `gh secret set`, never the GitHub UI.
+3. **Plan and apply the platform stack (human-approved local apply).** Run
+   `pnpm infra:plan` and confirm the new `github_actions_variable.autofix_app_id`
+   and `github_actions_secret.autofix_app_private_key` resources appear (absent
+   while the tfvars are empty). After human sign-off, run `pnpm tf apply platform`
+   from a clean `main` checkout. The apply mirrors the values into the repo
+   Actions variable `AUTOFIX_APP_ID` and secret `AUTOFIX_APP_PRIVATE_KEY`;
+   `SENTRY_AUTOFIX_ENABLED` is provisioned by the same apply in its default
+   `"false"` (off) position. Both autofix secrets are brand-new with no external
+   consumer, so no `prevent_destroy` — emptying a tfvar later cleanly removes it
+   (autofix reverts to the no-op).
+4. **Flip the autofix kill switch to activate.** Once this workflow PR is merged
+   and the App is applied, set `sentry_autofix_enabled = "true"` in
+   `terraform.tfvars` and re-apply the platform stack (still IaC, not the GitHub
+   UI). The scheduled autofix workflow activates on its next weekday run; verify
+   with a single-issue `workflow_dispatch` LIVE run against a known local
+   `code-fix` stub first — there is no dry-run mode: an eligible stub gets a
+   real agent run and a real fix PR (which is the verification).
+5. **Verify + the merge-stays-human rule.** On the next local `code-fix` verdict,
+   confirm a `sentry-autofix/<short-id-lower>` branch and PR are opened by the
+   App bot, required CI and Codex review run on the PR, the queue stub carries
+   `sentry:fix-pr-opened` + an `Autofixed by PR: <url>` comment, and — critically
+   — **nothing merges automatically.** A human reviews and merges the fix PR like
+   any other change; that gate is never automated (ADR 0036).
+
 **Backfill after an outage or at first activation:** the ingest's default
 firstSeen window is 8 days, so Sentry issues first seen during a longer inert
 or broken period fall outside the next scheduled scan. Run one manual
@@ -1108,9 +1396,13 @@ pnpm sentry:ingest --dry-run   # needs a local SENTRY_TRIAGE_TOKEN; prints mutat
 pnpm sentry:ingest:test        # node --test scripts/sentry-triage-ingest.test.mjs
 pnpm sentry:digest:test        # node --test scripts/sentry-triage-digest.test.mjs (offline)
 pnpm sentry:project:test       # node --test scripts/sentry-triage-project.test.mjs (offline)
+pnpm sentry:autofix:select:test   # offline: autofix selection filters + dedup + cap
+pnpm sentry:autofix:finalize:test # offline: autofix diff guard + PR-body assembly
 # Print the Slack digest payload for a batch without posting (needs gh auth):
 SENTRY_TRIAGE_ISSUES='[123,456]' pnpm sentry:digest --channel '#engineering'
 # Project a single verdicted stub (needs gh auth + SENTRY_PROJECTION_TOKEN for a
 # real cross-repo write; prints the JSON result). Absent token -> graceful no-op:
 SENTRY_PROJECTION_TOKEN=… pnpm sentry:project --issue 123
+# Print the autofix candidate batch (needs gh auth); read-only, opens nothing:
+pnpm sentry:autofix:select --cap 2
 ```
