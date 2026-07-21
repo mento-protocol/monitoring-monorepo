@@ -1588,26 +1588,13 @@ describe("indexer code quality invariants", () => {
             import { throughBarrel as renamedEffectful } from "./barrel";
             import { duplicateName as sameTextPure } from "./pure-source";
 
-            export async function handler(context, id) {
+            export async function handlerMissingDeclaration(context, id) {
               if (context.isPreload) return;
               await renamedEffectful({ context, id });
               await sameTextPure(id);
             }
-          `,
-        },
-        "handler.ts",
-      ),
-      ["helper:renamedEffectful"],
-    );
-    assert.deepEqual(
-      hiddenEffectNamesInProgram(
-        {
-          ...sharedFiles,
-          "handler.ts": `
-            import { throughBarrel as renamedEffectful } from "./barrel";
-            import { duplicateName as sameTextPure } from "./pure-source";
 
-            export async function handler(context, id) {
+            export async function handlerDeclared(context, id) {
               // preload-handler-note: ordered state requires processing-only RPC
               // preload-effect-helpers: renamedEffectful
               if (context.isPreload) return;
@@ -1618,7 +1605,7 @@ describe("indexer code quality invariants", () => {
         },
         "handler.ts",
       ),
-      [],
+      ["helper:renamedEffectful"],
     );
   }, 30_000);
 
@@ -1653,46 +1640,22 @@ describe("indexer code quality invariants", () => {
           ...wrapperFiles,
           "handler.ts": `
             import {
+              maybePreloadBreaker,
               maybePreloadBreaker as preloadBreaker,
             } from "./wrapper-barrel";
+            import * as preload from "./wrapper-barrel";
 
-            export async function handler(context, breakerId) {
+            export async function renamedWrapperHandler(context, breakerId) {
               if (await preloadBreaker(context, breakerId)) return;
               await context.effect(renamedWrapperEffect, { breakerId });
             }
-          `,
-        },
-        "handler.ts",
-        wrapperExports,
-      ),
-      ["renamedWrapperEffect"],
-    );
-    assert.deepEqual(
-      hiddenEffectNamesInProgram(
-        {
-          ...wrapperFiles,
-          "handler.ts": `
-            import * as preload from "./wrapper-barrel";
 
-            export async function handler(context, poolId) {
+            export async function propertyWrapperHandler(context, poolId) {
               if (await preload.maybePreloadPool(context, poolId)) return;
               await context.effect(propertyWrapperEffect, { poolId });
             }
-          `,
-        },
-        "handler.ts",
-        wrapperExports,
-      ),
-      ["propertyWrapperEffect"],
-    );
-    assert.deepEqual(
-      hiddenEffectNamesInProgram(
-        {
-          ...wrapperFiles,
-          "handler.ts": `
-            import { maybePreloadBreaker } from "./wrapper-barrel";
 
-            export async function handler(context, breakerId) {
+            export async function compoundWrapperHandler(context, breakerId) {
               if ((await maybePreloadBreaker(context, breakerId)) && enabled) {
                 return;
               }
@@ -1703,7 +1666,7 @@ describe("indexer code quality invariants", () => {
         "handler.ts",
         wrapperExports,
       ),
-      [],
+      ["renamedWrapperEffect", "propertyWrapperEffect"],
     );
   }, 30_000);
 
