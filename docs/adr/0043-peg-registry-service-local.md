@@ -52,15 +52,21 @@ unpublished.
   integrity check script — sibling to the existing threshold-drift check,
   wired into the quality gate and CI — fails the build when a referenced
   feed or token does not exist upstream. Pool references cannot be proven
-  statically (pools are discovered on-chain), so at startup the bridge
-  resolves every `(chain, pool)` against Hasura and fails that asset's
-  `indexed-pool` coverage path with a distinct ops alert when a pool does
-  not resolve.
+  statically (pools are discovered on-chain), so the bridge resolves every
+  `(chain, pool)` against Hasura at startup AND re-validates continuously
+  with each structural poll, failing that asset's `indexed-pool` coverage
+  path closed — with a distinct ops alert — whenever resolution stops
+  (retired pool, resync, partial backend failure), not only when it never
+  resolved.
 - Schema decisions that the first adversarial review forced:
   - Asset keys are internal slugs (`europ-schuman`), never tickers; the
     onboarding census binds by contract address / issuer identity (ticker
     collisions are real — "EURP" vs "EUROP").
-  - `tokenRefs` supports non-EVM identity forms (XRPL issuer+currency).
+  - `tokenRefs` is restricted to identity forms the repository can
+    validate upstream today: EVM chainId + address against shared-config.
+    Non-EVM forms (XRPL issuer+currency) require a canonical registry in
+    shared-config first; until one exists they are rejected rather than
+    accepted unvalidated.
   - `monitors[]` holds one entry per (chain, pool, rate feed) —
     asset-level vs pool-level identity is explicit. Breaker thresholds are
     not stored: they are governance-mutable on-chain state already
@@ -77,8 +83,11 @@ unpublished.
   - Source ids are stable internal names (`bitvavo_eur`) decoupled from
     venue pair spellings, so a venue renaming a pair is a config edit, not
     Grafana label churn that orphans alert history.
-  - `peg` carries currency, target, and an optional schedule (crawling
-    pegs).
+  - `peg` carries the currency only. The peg TARGET and any crawling-peg
+    schedule are page-affecting policy — they change the deviation
+    calculation directly — and live in the gated policy artifact
+    ([ADR 0044](0044-peg-thresholds-gated-rules-plane.md)) with the other
+    alert-affecting parameters, so a bridge deploy cannot move the peg.
   - Each asset declares a `coverageClass` recording which alert paths its
     source mix can actually reach (see
     [ADR 0045](0045-peg-paging-semantics.md)).

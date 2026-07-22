@@ -34,9 +34,12 @@ or structurally missing (thin second venue).
 ## Decision
 
 - **Measurand.** Deviation is computed from the executable _sell_ price at
-  a per-asset reference size tied to real exposure (bounded by the FPMM
-  per-window trading limit, floored near the issuer redemption minimum) —
-  never from the mid, and it is downside-only shortfall:
+  a per-asset reference size tied to real exposure: the binding bound is
+  `min(FPMM per-window trading limit, configured cap)`; the issuer
+  redemption minimum is a default target only, and when the trading limit
+  undercuts it the limit wins — refSize shrinks and the asset's coverage
+  record notes the degraded comparability, never an ambiguous measurand.
+  Deviation is never taken from the mid, and it is downside-only shortfall:
   `max(0, (target − executableSellPx) / target)` in bps, so a premium can
   never page the drain path and implementations cannot invert the sign. A
   sustained premium beyond the warn threshold surfaces as a warn-tier

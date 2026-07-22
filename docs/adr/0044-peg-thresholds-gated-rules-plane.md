@@ -53,7 +53,14 @@ auto-resolves a live page whenever the threshold series blips.
   bridge polls — the bridge never bakes this JSON into its image, exports
   `mento_peg_policy_version`, and the rules assert version freshness, so
   an ordinary ungated bridge deploy cannot activate page-affecting policy
-  ahead of approval. There is no HCL mirror, so the existing
+  ahead of approval. Activation is two-phase because artifact publish and
+  bridge pickup cannot be atomic: the generated rules accept both the
+  previous and the new policy version for a bounded rollover window
+  anchored at apply time, deviation evaluation stays live on the previous
+  policy throughout, and a distinct rollover-stuck alert fires if the
+  bridge has not confirmed the new version before the window closes — a
+  policy apply never opens a critical-monitoring gap. There is no HCL
+  mirror, so the existing
   mirror-drift check is unnecessary for this class; a sibling integrity
   check validates at source level: every threshold source key and the
   deep-venue designation must name an existing registry source id, every
@@ -83,11 +90,13 @@ auto-resolves a live page whenever the threshold series blips.
     breach; this is a new idiom in the stack, adopted deliberately for
     thin-market series and documented in the rule file banner. Range
     functions ignore gaps, so the quantile counts as a duration fraction
-    only when a sample-coverage predicate also passes — counting
-    successful observation updates (`changes` over
-    `mento_peg_observation_at` in the same window against the expected
-    poll cadence), never scrapes of a retained gauge, with failed polls
-    dropping or staling the per-source series instead of holding last-good
+    only when a sample-coverage predicate also passes — `increase` over a
+    monotonic per-source poll-success counter
+    (`mento_peg_poll_success_total`) compared against the expected poll
+    cadence. A timestamp-gauge `changes` undercounts polls that land
+    between scrapes, and raw `count_over_time` counts scrapes of a
+    retained gauge; only producer-side successes qualify, and failed polls
+    drop or stale the per-source series instead of holding last-good
     values — after an API outage a sparse window with one fresh deviated
     sample must not read as a sustained breach.
   - Severity and routing stay per-rule: warn → Slack, critical → page, each

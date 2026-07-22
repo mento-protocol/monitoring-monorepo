@@ -50,7 +50,9 @@ attestation PDFs — no machine-readable API; runbook inputs only.
 ### Registry (ADR 0043)
 
 Service-local `metrics-bridge/peg-registry.json` + schema + fixtures.
-Slug-keyed assets; `tokenRefs` per chain (EVM + XRPL forms); `monitors[]`
+Slug-keyed assets; `tokenRefs` per chain (EVM chainId+address only until a
+canonical non-EVM registry exists in shared-config; peg currency in the
+registry, peg target/schedule in the gated policy artifact); `monitors[]`
 per (chain, pool, feed) — breaker thresholds are never stored, read live
 via the indexer's effective-threshold resolution (per-feed
 `BreakerConfig.rateChangeThreshold`, falling back to
@@ -73,14 +75,16 @@ keys and the deep-venue designation must name registry source ids, and
 alert-authoritative sources need complete policy) vs
 `shared-config/oracle-reporters.json` and
 token registry runs in the quality gate and CI; pool references are
-resolved against Hasura at bridge startup, failing that asset's
-`indexed-pool` coverage path with a distinct ops alert when unresolved.
+resolved against Hasura at startup and re-validated continuously,
+failing that asset's `indexed-pool` coverage path closed with a distinct
+ops alert whenever resolution stops.
 
 ### Measurement (ADR 0045)
 
-- Executable **sell** price at per-asset reference size
-  (min(FPMM per-window inflow limit, configured cap), floored near the
-  issuer redemption minimum). Observation:
+- Executable **sell** price at per-asset reference size — binding bound
+  `min(FPMM per-window inflow limit, configured cap)`; the issuer
+  redemption minimum is a default target only, the limit wins when lower
+  (coverage recorded as degraded). Observation:
   `{vwap, filledFraction, capped, bid, ask, lastTradeAt, fetchedAt, venueState}`.
   Deviation is downside-only shortfall
   (`max(0, (target − executableSellPx)/target)` in bps); a sustained
@@ -110,9 +114,10 @@ saturation flag; no Hasura `_aggregate` per ADR 0014), already-polled
 denominator. Token-native amounts (USD rollups are zero for EURm/EUROP).
 Anomaly = net directional inflow vs trading-limit-implied max rate
 (saturation fraction, per configured window on the monitored token's
-inflow direction, max across active L0/L1 windows; swap amounts
-normalized from raw token units into the 15-decimal TradingLimitsV2
-scale before division). Counterparty diversity (`caller` = tx.from) is
+inflow direction, max across active L0/L1 windows; window durations
+read live from on-chain trading-limit config with lazy-reset expiry;
+swap amounts normalized from raw token units into the 15-decimal
+TradingLimitsV2 scale before division). Counterparty diversity (`caller` = tx.from) is
 dashboard-advisory only. Never pages alone; escalates price-based pages.
 
 ### Metrics (ADR 0042)
@@ -132,16 +137,19 @@ Thresholds in `alerts/rules/peg-thresholds.json`, read via
 change passes the `production-infra` gate, and the gated apply also
 publishes the same policy as an IaC-owned versioned runtime artifact
 that the bridge polls (never baked into the image;
-`mento_peg_policy_version` asserted fresh by the rules). Per-rule conventions: freshness
+`mento_peg_policy_version` asserted by the rules with two-phase
+rollover: previous + new version accepted for a bounded window, rollover
+stuck alert if the bridge doesn't confirm). Per-rule conventions: freshness
 gate (`time() - mento_peg_observation_at`) on **every** peg rule;
 `no_data_state = "Alerting"` (+~5 min grace, documented) on blindness and
 heartbeat rules; duration-fraction sustain
 (`quantile_over_time(0.2, deviation[W]) >= threshold`, W ≈ 20–30 min) so
 one favorable sample cannot reset a real breach on a flapping thin book —
-ANDed with a sample-coverage predicate counting successful observation
-updates (`changes` over `observation_at` vs expected cadence; failed
-polls drop/stale the series), because range functions ignore gaps and a
-sparse post-outage window must not read as sustained.
+ANDed with a sample-coverage predicate — `increase` over a monotonic
+`mento_peg_poll_success_total` vs expected cadence (timestamp-gauge
+`changes` undercounts between scrapes; failed polls drop/stale the
+series) — because range functions ignore gaps and a sparse post-outage
+window must not read as sustained.
 
 Ladder (EUROP initial values; per-asset data):
 
