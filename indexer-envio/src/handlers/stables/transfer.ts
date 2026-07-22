@@ -129,6 +129,8 @@ indexer.onEvent(
     // running supply would recover; the event log would not. Throwing
     // forces a clean retry of the original event when RPC recovers.
     if (!supply.supplyBaselineSeeded) {
+      // preload-effect-exempt: one successful baseline per token; eligibility
+      // depends on the ordered supply state above.
       const baseline = await context.effect(stableTotalSupplyEffect, {
         chainId,
         tokenAddress,

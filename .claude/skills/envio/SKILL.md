@@ -5,7 +5,7 @@ title: Envio Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-09
+last_verified: 2026-07-21
 allowed-tools: Bash, Read, Grep, Glob, WebFetch
 doc_type: skill
 scope: repo-wide
@@ -29,6 +29,9 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 - Treat this repo as HyperIndex V3-first. Verify the exact installed package with `pnpm --filter @mento-protocol/indexer-envio exec envio --version`; the pinned version in `indexer-envio/package.json` is `envio@3.2.1`.
 - V3 preload optimization is always on. There is no `preload_handlers:` config flag, and loader-era patterns should be translated into normal handler code.
 - V3 handlers run twice: a concurrent preload pass for DB reads/effects, then an ordered processing pass for writes. Do not put expensive `context.effect(...)` calls behind an early `if (context.isPreload) return`; do keep writes out of preload.
+- `indexer-envio/test/code-quality-invariants.test.ts` blocks direct effects that exist only after a positive preload return (including exact `await maybePreloadPool(...)` and `await maybePreloadBreaker(...)` wrappers) or after an earlier entity-dependent return. Start event-derived effects before lookups whose empty result can differ between concurrent preload and ordered processing, then reuse the identical effect + input key across both passes. An effect that must remain processing-only for ordered-state correctness, or is permanently bounded, needs an adjacent call-site `// preload-effect-exempt: <ordered-state or bounded-cardinality reason>` comment. A comment on the preload guard never suppresses direct-effect checks.
+- When code that preload cannot eagerly reach—after an entity-dependent return or a positive preload return—calls a helper that directly or transitively reaches `context.effect`, the invariant derives that boundary from TypeScript symbols. Declare the exact used set with one or more adjacent `// preload-effect-helpers: <helper names>` lines plus a non-empty `// preload-handler-note: <reason>` line. Missing and unused helper declarations both fail. A phase-stable event-derived filter may be declared only when the effect is still awaited during preload; say that explicitly. Never exempt replay-traffic-scaled effects merely for convenience; when preloading would violate sequential semantics, state the exact ordering invariant and track a preload-safe redesign.
+- For an effect that is needed only when preloaded entity state meets a condition, carry an event-scoped in-memory preload marker into processing. If a row appears only during ordered processing, stay fail-closed and defer the RPC until the next event instead of issuing a serialized call.
 - Prefer the installed CLI help over stale docs when they disagree. In this baseline, `envio metrics`, `envio metrics runtime`, `envio tools search-docs`, and `envio tools fetch-docs` exist; `envio benchmark-summary` does not.
 
 ## Mento repo quick reference
@@ -84,7 +87,11 @@ Per-chain fields that matter:
 | `has_processed_to_end_block`              | Only `true` when config has a concrete `end_block`; ignore for live indexers where `end_block: 0` |
 | `num_events_processed`                    | Cumulative; useful for progress feel but not completion                                           |
 
-**"Ready to promote"** = `timestamp_caught_up_to_head_or_endblock` is non-empty on **every** chain in the response. `latest_processed_block === block_height` is a close proxy but can flicker because `block_height` keeps advancing.
+**"Caught up"** = `timestamp_caught_up_to_head_or_endblock` is non-empty on
+**every** chain in the response. This is `SYNCED_PENDING_DATA_VERIFY`, not
+`READY_TO_PROMOTE`: the commit-scoped deployment verifier must still pass.
+`latest_processed_block === block_height` is a close proxy but can flicker
+because `block_height` keeps advancing.
 
 Add `--watch-till-synced` to block until all chains hit 100%. Useful in CI or a foreground terminal; for agentic monitoring, poll with `-o json` and parse.
 
@@ -183,6 +190,12 @@ Notes:
 - **Don't set generic `ENVIO_RPC_URL` in multichain mode** — it routes every chain to the same RPC. Use `ENVIO_RPC_URL_<chainId>` (e.g. `ENVIO_RPC_URL_42220`).
 - **Celo Sepolia / Monad Testnet may fall back to RPC** instead of HyperSync. Slower but works; set `ENVIO_API_TOKEN` for HyperRPC access on testnets.
 - **HyperRPC does NOT support `eth_call`** — only event sync (HyperSync) + a subset of chain-info methods (`eth_blockNumber` etc.). Contract reads in handlers (`client.readContract`, `getBreakers()`, `getReserves()`, etc.) MUST use a full-node RPC (`forno.celo.org` for Celo, `rpc2.monad.xyz` / quiknode for Monad). The constraint is hard-documented in `indexer-envio/src/rpc/client.ts` near `RPC_CONFIG_BY_CHAIN`. Don't suggest "switch to HyperRPC for archive depth" as a perf lever — it won't run the call shape we need at all.
+- **dRPC public JSON-RPC batches are capped at three calls.** The repo applies
+  `{ batchSize: 3 }` to exact `drpc.org` hosts; do not replace it with viem's
+  default 1,000-call batch. Tracked SortedOracles events also fail closed when
+  their exact-block median timestamp remains unavailable after transient retry
+  and fallback. A caught-up deployment with those historical reads missing is
+  tainted and requires a clean replay.
 - **Version drift is common around V3 RCs.** Check the installed CLI and package before relying on older docs, memory, or notes; do not reintroduce V2-only fields such as `preload_handlers:`.
 
 ## Monitoring playbook (agentic)
@@ -191,9 +204,9 @@ When asked to "monitor the latest deployment until ready to promote":
 
 1. `pnpm exec envio-cloud indexer get mento mento-protocol -o json` — required to surface `deployments[]` + `prod_status`. Filter for the newest entry where `prod_status !== "prod"`. (`pnpm deploy:indexer:info <commit>` is the wrapper for inspecting a specific known commit, not for the "find newest pending" step.) If no pending deployment exists, count `deployments[]` first: three live entries means Envio has no room for a new deployment and you must delete, or ask the user to delete, an obsolete non-prod deployment before retrying. If fewer than three deployments exist, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
 2. Poll `deployment status <commit> -o json` every 5–15 min (Envio builds finish fast, syncs take minutes–hours).
-3. Ready-to-promote condition: every chain in `data[]` has a non-empty `timestamp_caught_up_to_head_or_endblock`.
-4. Run `pnpm deploy:indexer:verify <commit>` to batch status, metrics, endpoint resolution, and the GraphQL row probe before promotion.
-5. Surface the result with a progress table and `pnpm deploy:indexer:promote <commit>` as the suggested next step — **do not promote without the user's OK.**
+3. Caught-up condition: every chain in `data[]` has a non-empty `timestamp_caught_up_to_head_or_endblock`; classify this as `SYNCED_PENDING_DATA_VERIFY`.
+4. Run `pnpm deploy:indexer:verify <commit>` to batch status, metrics, endpoint resolution, core rows, and Polygon replay semantics before promotion. Polygon semantic failures are never waived by `--allow-syncing`.
+5. Only a passing verifier transitions the candidate to `READY_TO_PROMOTE`. Surface the result with a progress table and `pnpm deploy:indexer:promote <commit>` as the suggested next step — **do not promote without the user's OK.**
 
 ## Useful links
 

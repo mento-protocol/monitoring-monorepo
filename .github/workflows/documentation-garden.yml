@@ -38,12 +38,7 @@ on:
         default: true
         type: boolean
 
-permissions:
-  contents: read
-  # Issues are the only mutable resource. OIDC supplies runner-bound identity
-  # proof and does not grant write access to a GitHub or cloud resource.
-  id-token: write
-  issues: write
+permissions: read-all
 
 concurrency:
   group: documentation-garden
@@ -58,6 +53,12 @@ jobs:
         github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
+    permissions:
+      contents: read
+      # Issues are the only mutable resource. OIDC supplies runner-bound
+      # identity proof and does not grant write access to GitHub or cloud.
+      id-token: write
+      issues: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -75,3 +76,10 @@ jobs:
           DOCS_GARDEN_SHARD: ${{ inputs.shard || '' }}
           DOCS_GARDEN_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
         run: node scripts/docs-garden-issue.mjs --json
+      - name: Synchronize the monthly navigation evaluation issue
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCS_NAVIGATION_EVAL_REPO: ${{ github.repository }}
+          DOCS_NAVIGATION_EVAL_DRY_RUN: "false"
+        run: node scripts/docs-navigation-eval.mjs --schedule-issue --json

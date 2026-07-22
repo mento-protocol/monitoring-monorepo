@@ -674,7 +674,10 @@ export const medianTimestampEffect = createEffect(
       blockNumber: S.bigint,
     },
     output: S.nullable(S.bigint),
-    rateLimit: { calls: 200, per: "second" },
+    // dRPC's stressed public-tier floor is 40 eth_call/s. This exact-block
+    // read fans out during Polygon replays, so stay within that floor instead
+    // of creating a retry/fallback storm after transport-level batching.
+    rateLimit: { calls: 40, per: "second" },
     cache: false,
   },
   async ({ input, context }) =>

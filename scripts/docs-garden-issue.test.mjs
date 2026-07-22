@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import jsYaml from "js-yaml";
+
 import {
   buildDocsGardenIssueSpec,
   DOCS_GARDEN_MARKER,
@@ -203,7 +205,7 @@ await test("REST normalization deduplicates pages, filters PRs, and parses marke
         number: 1,
         state: "open",
         body: `${DOCS_GARDEN_MARKER}\n${packetMarker(auditPacket)}\n`,
-        labels: [{ name: "agent-ready" }],
+        labels: [{ name: "agent-ready" }, { name: "source:audit" }],
       },
       { number: 2, state: "open", pull_request: {}, body: "" },
     ],
@@ -212,14 +214,42 @@ await test("REST normalization deduplicates pages, filters PRs, and parses marke
         number: 1,
         state: "open",
         body: `${DOCS_GARDEN_MARKER}\n${packetMarker(auditPacket)}\n`,
-        labels: [{ name: "agent-ready" }],
+        labels: [{ name: "agent-ready" }, { name: "source:audit" }],
       },
     ],
   ];
   const normalized = normalizeGithubIssuePages(pages);
   assert.equal(normalized.length, 1);
   assert.equal(normalized[0].marker.week_serial, auditPacket.cycle.week_serial);
-  assert.deepEqual(normalized[0].labels, ["agent-ready"]);
+  assert.deepEqual(normalized[0].labels, ["agent-ready", "source:audit"]);
+});
+
+await test("untrusted public issue markers cannot own or break the garden queue", () => {
+  const auditPacket = packet();
+  const normalized = normalizeGithubIssuePages([
+    [
+      {
+        number: 90,
+        state: "closed",
+        body: `${DOCS_GARDEN_MARKER}\n${packetMarker(auditPacket)}\n`,
+        labels: [],
+      },
+      {
+        number: 91,
+        state: "open",
+        body: `${DOCS_GARDEN_MARKER}\nmalformed`,
+        labels: [{ name: "agent-ready" }],
+      },
+    ],
+  ]);
+  assert.deepEqual(
+    normalized.map((issue) => issue.marker),
+    [null, null],
+  );
+  assert.equal(
+    resolveTargetWeekSerial(auditPacket.cycle.week_serial, normalized),
+    auditPacket.cycle.week_serial,
+  );
 });
 
 await test("full GitHub pagination stops only after a short page", async () => {
@@ -249,7 +279,7 @@ await test("queue discovery scans all issues instead of trusting routing labels"
             number: 11,
             state: "open",
             body: `${DOCS_GARDEN_MARKER}\n${packetMarker(auditPacket)}\n`,
-            labels: [{ name: "agent-ready" }],
+            labels: [{ name: "agent-ready" }, { name: "source:audit" }],
           },
           { number: 12, state: "open", pull_request: {}, body: "" },
         ]);
@@ -612,6 +642,94 @@ await test("OIDC authorization binds creation to the exact workflow run", async 
   assert.equal(request.init.headers.authorization, "bearer runner-bound-token");
 });
 
+await test("OIDC authorization accepts a regional GitHub pipeline host", async () => {
+  const { claims, env, nowSeconds } = workflowOidcFixture();
+  const regionalEnv = {
+    ...env,
+    ACTIONS_ID_TOKEN_REQUEST_URL:
+      "https://pipelinesghubeus13.actions.githubusercontent.com/example/idtoken?api-version=2.0",
+  };
+  let requestedUrl;
+  await assertAuthorizedGardenWorkflow(
+    { repo: "owner/repo" },
+    {
+      env: regionalEnv,
+      now: () => nowSeconds * 1000,
+      fetchImpl: async (url) => {
+        requestedUrl = String(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ value: oidcToken(claims) }),
+        };
+      },
+    },
+  );
+  assert.match(
+    requestedUrl,
+    /^https:\/\/pipelinesghubeus13\.actions\.githubusercontent\.com\//,
+  );
+});
+
+await test("OIDC authorization accepts a GitHub Actions managed-runner host", async () => {
+  const { claims, env, nowSeconds } = workflowOidcFixture();
+  const managedRunnerEnv = {
+    ...env,
+    ACTIONS_ID_TOKEN_REQUEST_URL:
+      "https://run-actions-3-azure-eastus.actions.githubusercontent.com/example/idtoken?api-version=2.0",
+  };
+  let requestedUrl;
+  await assertAuthorizedGardenWorkflow(
+    { repo: "owner/repo" },
+    {
+      env: managedRunnerEnv,
+      now: () => nowSeconds * 1000,
+      fetchImpl: async (url) => {
+        requestedUrl = String(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ value: oidcToken(claims) }),
+        };
+      },
+    },
+  );
+  assert.match(
+    requestedUrl,
+    /^https:\/\/run-actions-3-azure-eastus\.actions\.githubusercontent\.com\//,
+  );
+});
+
+await test("OIDC authorization rejects untrusted request URL variants", async () => {
+  const { env } = workflowOidcFixture();
+  const rejectedUrls = [
+    "https://pipelinesghubeus13.actions.githubusercontent.com.evil.example/idtoken",
+    "http://pipelines.actions.githubusercontent.com/idtoken",
+    "https://actions.githubusercontent.com/idtoken",
+    "https://run-actions-3-azure-eastus.actions.githubusercontent.example/idtoken",
+  ];
+
+  for (const requestUrl of rejectedUrls) {
+    let fetched = false;
+    await assert.rejects(
+      assertAuthorizedGardenWorkflow(
+        { repo: "owner/repo" },
+        {
+          env: {
+            ...env,
+            ACTIONS_ID_TOKEN_REQUEST_URL: requestUrl,
+          },
+          fetchImpl: async () => {
+            fetched = true;
+          },
+        },
+      ),
+      /runner credentials are unavailable/,
+    );
+    assert.equal(fetched, false);
+  }
+});
+
 await test("OIDC authorization rejects env spoofing and claim drift", async () => {
   const { claims, env, nowSeconds } = workflowOidcFixture();
   let fetched = false;
@@ -659,7 +777,13 @@ await test("scheduled workflow fetches the history required by packet evidence",
     workflow,
     /actions\/checkout@[a-f0-9]+[^\n]*\n\s+with:\n(?:\s+#[^\n]*\n)*\s+#[^\n]*\n\s+fetch-depth: 0/,
   );
-  assert.match(workflow, /id-token: write/);
+  const parsedWorkflow = jsYaml.load(workflow);
+  assert.equal(parsedWorkflow.permissions, "read-all");
+  assert.deepEqual(parsedWorkflow.jobs?.["schedule-issue"]?.permissions, {
+    contents: "read",
+    "id-token": "write",
+    issues: "write",
+  });
   assert.match(
     workflow,
     /github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)/,

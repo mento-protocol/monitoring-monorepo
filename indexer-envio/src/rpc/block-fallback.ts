@@ -1,16 +1,17 @@
 // `readContractWithBlockFallback` — the shared retry/fallback primitive every
 // fetcher in rpc.ts wraps `client.readContract` in. Two transient-failure
-// modes are handled here so individual fetchers don't have to: rate-limit
+// modes are handled here so individual fetchers don't have to: transient RPC
 // retries (with secondary-RPC fallback) and "block not yet on this node"
 // retries (with a same-block secondary attempt before `latest` fallback).
 
 import type { createPublicClient, ReadContractParameters } from "viem";
 import {
-  RATE_LIMIT_RETRY_DELAYS_MS,
+  RPC_TRANSIENT_RETRY_DELAYS_MS,
   _resetRpcFailureCounts,
   describeKnownRevert,
   fallbackLikelyHasBlock,
   isRateLimitError,
+  isRetryableRpcError,
   logRpcFailure,
   recordFallbackArchiveMiss,
   sanitizeErrorMessage,
@@ -140,6 +141,7 @@ export const _testHooks = {
     new Promise((resolve) => setTimeout(resolve, ms)),
   nowFn: (): number => Date.now(),
   isRateLimitError: (err: unknown): boolean => isRateLimitError(err),
+  isRetryableRpcError: (err: unknown): boolean => isRetryableRpcError(err),
   logRpcFailure: (
     chainId: number,
     fn: string,
@@ -173,8 +175,8 @@ type RecoveryDeps = {
 /**
  * Wrapper around `client.readContract` that handles two transient failure modes:
  *
- * 1. **Rate limits** — retries with backoff, then falls back to a secondary
- *    (public) RPC client if available.
+ * 1. **Transient RPC failures** — retries rate limits and HTTP 5xx responses
+ *    with backoff, then falls back to a secondary RPC client if available.
  * 2. **Block not available** — retries the original block with backoff, then
  *    tries the secondary RPC at the same block before falling back to "latest".
  *
@@ -216,8 +218,8 @@ export async function readContractWithBlockFallback(
       log,
     };
     let currentError: unknown = initialErr;
-    if (isRateLimitError(currentError)) {
-      const outcome = await attemptRateLimitRecovery(deps, currentError);
+    if (isRetryableRpcError(currentError)) {
+      const outcome = await attemptTransientRecovery(deps, currentError);
       if (outcome.kind === "result") return outcome.value;
       // fallthrough: archive-depth surfaced from a retry — try archive branch
       currentError = outcome.error;
@@ -265,30 +267,30 @@ function isBlockNotAvailableErr(
   );
 }
 
-/** Rate-limit retry can finish in three states: a recovered result, a non-rate-limit
- *  archive-depth error that should re-enter the archive-depth branch, or a thrown
- *  error (handled by caller). */
-type RateLimitOutcome =
+/** Transient retry can finish in three states: a recovered result, an
+ * archive-depth error that should re-enter the archive-depth branch, or a
+ * thrown error (handled by the caller). */
+type TransientOutcome =
   | { kind: "result"; value: BlockFallbackResult }
   | { kind: "fallthrough"; error: unknown };
 
-/** Retry the original call against the primary until rate-limit clears. If a
- *  retry surfaces an archive-depth error (primary recovered from 429 but lacks
+/** Retry the original call against the primary until the transient failure
+ *  clears. If a retry surfaces an archive-depth error (primary recovered but lacks
  *  archive depth for the requested block), return `fallthrough` so the
  *  dispatcher consults the archive-depth secondary path. BLOCK_NOT_AVAILABLE
  *  errors surfaced from a retry are thrown instead — silently swapping in
- *  `latest` after a 429-then-block-miss would corrupt historical entity state
+ *  `latest` after a transient-then-block-miss would corrupt historical state
  *  for callers that destructure `result` without checking `usedLatestFallback`. */
-async function retryThroughRateLimit(
+async function retryThroughTransientError(
   deps: RecoveryDeps,
   initialError: unknown,
-): Promise<RateLimitOutcome | { kind: "exhausted"; error: unknown }> {
+): Promise<TransientOutcome | { kind: "exhausted"; error: unknown }> {
   const { callWithBlock, fn, target, log } = deps;
   let surfacedError: unknown = initialError;
-  for (let i = 0; i < RATE_LIMIT_RETRY_DELAYS_MS.length; i++) {
-    const delay = RATE_LIMIT_RETRY_DELAYS_MS[i] ?? 0;
+  for (let i = 0; i < RPC_TRANSIENT_RETRY_DELAYS_MS.length; i++) {
+    const delay = RPC_TRANSIENT_RETRY_DELAYS_MS[i] ?? 0;
     log.debug(
-      `[RPC_RATE_LIMIT_RETRY] fn=${fn} target=${target} retry=${i + 1}/${RATE_LIMIT_RETRY_DELAYS_MS.length} delay=${delay}ms`,
+      `[RPC_TRANSIENT_RETRY] fn=${fn} target=${target} retry=${i + 1}/${RPC_TRANSIENT_RETRY_DELAYS_MS.length} delay=${delay}ms`,
     );
     await _testHooks.delayFn(delay);
     try {
@@ -298,7 +300,7 @@ async function retryThroughRateLimit(
         value: { result, usedFallback: false, usedLatestFallback: false },
       };
     } catch (retryErr) {
-      if (isRateLimitError(retryErr)) {
+      if (isRetryableRpcError(retryErr)) {
         surfacedError = retryErr;
         continue;
       }
@@ -314,31 +316,31 @@ async function retryThroughRateLimit(
   return { kind: "exhausted", error: surfacedError };
 }
 
-/** Rate-limit dispatcher: drive retries, then attempt the secondary RPC at the
+/** Transient-failure dispatcher: drive retries, then attempt the secondary at the
  *  same block when the fallback's known horizon covers it. Returns a result if
  *  one of those succeeded, or `fallthrough` so the dispatcher reconsiders the
  *  current error against the archive-depth branch. */
-async function attemptRateLimitRecovery(
+async function attemptTransientRecovery(
   deps: RecoveryDeps,
   initialError: unknown,
-): Promise<RateLimitOutcome> {
+): Promise<TransientOutcome> {
   const { chainId, makeCall, fallbackClient, blockNumber, fn, target, log } =
     deps;
-  const retried = await retryThroughRateLimit(deps, initialError);
+  const retried = await retryThroughTransientError(deps, initialError);
   if (retried.kind === "result" || retried.kind === "fallthrough") {
     return retried;
   }
-  // Retries exhausted with rate-limit still in place — try the secondary IF
+  // Retries exhausted with a transient failure still in place — try the secondary IF
   // its archive horizon covers the requested block. A call to a fallback we
   // know lacks the block would just surface a confusing archive-miss error
-  // masking the rate-limit cause, and waste a round trip.
+  // masking the original transient failure, and waste a round trip.
   if (
     fallbackClient &&
     fallbackLikelyHasBlock(chainId, blockNumber) &&
     fallbackCooldownAllows(deps)
   ) {
     log.warn(
-      `[RPC_RATE_LIMIT_FALLBACK] fn=${fn} target=${target} — primary rate-limited, using fallback RPC`,
+      `[RPC_TRANSIENT_FALLBACK] fn=${fn} target=${target} — primary unavailable after retries, using fallback RPC`,
     );
     try {
       const result = await makeCall(fallbackClient, blockNumber);

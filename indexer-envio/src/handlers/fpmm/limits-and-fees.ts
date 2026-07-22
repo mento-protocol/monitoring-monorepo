@@ -375,6 +375,11 @@ indexer.onEvent(
     // Same preload-bail rationale as state-sync handlers: with v3 preload
     // optimization we'd otherwise run `recordBreachTransition`
     // (inside `upsertPool`) twice per event.
+    // preload-handler-note: ordered Pool and breach writes must stay sequential.
+    // Preload-safe redesign is tracked in #1394.
+    // preload-effect-helpers: selfHealInvertRateFeed, selfHealTokenDecimals
+    // preload-effect-helpers: resolveThresholdRecompute, upsertPool
+    // preload-effect-helpers: resolveBreakerFieldsForFeedAtBlock
     if (await maybePreloadPool(context, poolId)) return;
     const initial = await context.Pool.get(poolId);
     if (!initial) return;

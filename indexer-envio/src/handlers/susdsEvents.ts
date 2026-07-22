@@ -69,7 +69,13 @@ export function registerSusdsYieldEventHandlers(): void {
       const owner = asAddress(event.params.owner);
       if (!isTrackedWallet(owner)) return;
       const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
-      if (context.isPreload) return;
+      // preload-handler-note: the tracked-owner predicate is event-derived and
+      // identical in both phases; share price is awaited during preload.
+      // preload-effect-helpers: readSharePrice
+      if (context.isPreload) {
+        await readSharePrice(context, meta);
+        return;
+      }
       if (!(await shouldProcess(context, id))) return;
       const sharePriceUsdWei = await readSharePrice(context, meta);
       await recordDeposit(
@@ -101,7 +107,13 @@ export function registerSusdsYieldEventHandlers(): void {
       const owner = asAddress(event.params.owner);
       if (!isTrackedWallet(owner)) return;
       const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
-      if (context.isPreload) return;
+      // preload-handler-note: the tracked-owner predicate is event-derived and
+      // identical in both phases; share price is awaited during preload.
+      // preload-effect-helpers: readSharePrice
+      if (context.isPreload) {
+        await readSharePrice(context, meta);
+        return;
+      }
       if (!(await shouldProcess(context, id))) return;
       const sharePriceUsdWei = await readSharePrice(context, meta);
       await recordWithdraw(context, meta, {
@@ -134,7 +146,13 @@ export function registerSusdsYieldEventHandlers(): void {
       if (from === to) return;
       const meta = eventMeta(event);
       const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
-      if (context.isPreload) return;
+      // preload-handler-note: the address predicates are event-derived and
+      // identical in both phases; share price is awaited during preload.
+      // preload-effect-helpers: readSharePrice
+      if (context.isPreload) {
+        await readSharePrice(context, meta);
+        return;
+      }
       if (!(await shouldProcess(context, id))) return;
       const sharePriceUsdWei = await readSharePrice(context, meta);
       await recordTransfer(

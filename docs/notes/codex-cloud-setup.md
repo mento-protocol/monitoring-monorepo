@@ -3,7 +3,7 @@ title: Codex Cloud Setup and Maintenance
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-17
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -15,9 +15,18 @@ garden_lane: operator-runbooks
 Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
 `~/.claude` directories. Cloud setup and maintenance therefore rely on the
 repo-local helper at `scripts/agent-autoreview.mjs`; they fail fast only if that
-repo-owned executable is missing or an explicit `AUTOREVIEW_HELPER` override is
-not executable. PR shipping requires `pnpm agent:autoreview` as the structured
-batch-boundary review.
+repo-owned executable is missing or an explicit compatible `AUTOREVIEW_HELPER`
+override is not executable. Prepared-bundle overrides must implement the pinned
+helper's final handoff contract, including `--bundle-output`,
+`--bundle-output-display`, and `--trusted-input-root`. The wrapper-attested
+helper owns source fingerprinting and untracked-file serialization from a
+private manifest-bound runtime created before the final handoff. The owning
+checkout must match the pinned protected-main wrapper and materialize compatible
+helper/core blobs from that object; runtime-changing reviews use a separate
+trusted wrapper checkout physically outside the reviewed checkout. An explicit
+override that names that external wrapper's default sibling is still privately
+attested before use. PR shipping requires
+`pnpm agent:autoreview` as the structured batch-boundary review.
 Configure the Codex Cloud environment setup script as:
 
 ```bash
@@ -52,8 +61,8 @@ execution. Setup checks OSV API egress by POSTing to
 `https://api.osv.dev/v1/querybatch` unless `CODEX_CLOUD_CHECK_OSV_EGRESS=false`,
 and verifies the repo-local autoreview helper at
 `scripts/agent-autoreview.mjs` before tool prewarm. Set `AUTOREVIEW_HELPER` only
-for an intentional executable override; setup fails fast when the effective
-helper is missing.
+for an intentional compatible executable override; setup fails fast when the
+effective helper is missing.
 
 Codex Cloud maintenance runs when Codex resumes a cached container after
 checking out the task branch. It skips apt/tool installation, re-establishes

@@ -32,18 +32,23 @@ indexer.onEvent(
     // counting every pool type the revenue page lists.
     const sender = asAddress(event.params.from);
     const poolId = makePoolId(event.chainId, sender);
-    const pool = await context.Pool.get(poolId);
+    const { chainId } = event;
+    const tokenAddress = event.srcAddress;
+    // Warm event-derived token metadata before the entity-dependent return.
+    // Preload and processing can observe different Pool rows when an earlier
+    // event in the same batch creates the sender pool.
+    const [pool, tokenMeta] = await Promise.all([
+      context.Pool.get(poolId),
+      context.effect(feeTokenMetaEffect, {
+        chainId,
+        tokenAddress,
+      }),
+    ]);
     if (!pool || (!pool.source.includes("fpmm") && !isVirtualPool(pool))) {
       return; // Not from a known revenue-tracked pool — skip
     }
 
-    const { chainId } = event;
-    const tokenAddress = event.srcAddress;
-    const { symbol, decimals } =
-      (await context.effect(feeTokenMetaEffect, {
-        chainId,
-        tokenAddress,
-      })) ?? UNKNOWN_FEE_TOKEN_META;
+    const { symbol, decimals } = tokenMeta ?? UNKNOWN_FEE_TOKEN_META;
 
     const id = eventId(chainId, event.block.number, event.logIndex);
     const normalizedToken = asAddress(tokenAddress);

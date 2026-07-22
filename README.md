@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-08 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-21 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -93,8 +93,51 @@ inside the cloud container, while relying only on repo-visible files by default.
 Codex Cloud does not inherit a developer's local `~/.agents` directory, so the
 repo vendors the required autoreview helper at `scripts/agent-autoreview.mjs`.
 Set `AUTOREVIEW_HELPER` only when intentionally replacing that helper with a
-different executable. The setup and maintenance scripts fail fast when the
-effective helper is missing because PR shipping requires `pnpm agent:autoreview`.
+compatible implementation of its CLI contract. Prepared-bundle replacements
+receive only the final prompt handoff and must support `--bundle-output`,
+`--bundle-output-display`, and `--trusted-input-root`; the wrapper-attested
+helper owns source fingerprinting and untracked-file serialization from a
+private manifest-bound runtime created before that handoff. In the owning
+checkout that runtime must come from compatible pinned protected-main blobs;
+runtime-changing reviews must use a separate trusted wrapper checkout
+physically outside the reviewed checkout. Its default sibling helper is still
+privately attested when named explicitly through `AUTOREVIEW_HELPER`. The setup
+and maintenance scripts fail fast when the effective helper is missing because
+PR shipping requires `pnpm agent:autoreview`.
+Semantic review uses the complete branch-local target and an isolated empty
+reviewer workspace. Oversized direct semantic runs fail closed; prepared
+bundles preserve bounded lossless passes for one fresh-context reviewer to
+inspect together. Run
+`pnpm agent:autoreview --verify-bundle-dir <dir>` immediately before that
+reviewer reads every pass, retain its printed manifest digest outside the
+bundle, then rerun with `--expected-bundle-manifest <retained-digest>` after
+review; the completion marker binds the verified evidence manifest. Capture
+enforces a cumulative byte budget before diffs, untracked files, and
+supplemental evidence accumulate. Sensitive review input fails closed,
+including wallet recovery phrases; reviewer web search is off by default unless
+`--web-search` is explicit. Prepared bundles pin one protected `origin/main`
+snapshot for checklist policy, the owning-checkout default semantic helper, and
+automatic-feedback modules, never a PR-selected base, mutable worktree, or
+branch-controlled package scripts. Wrapper-owned Node launches discard
+`NODE_OPTIONS`, `NODE_PATH`, and loader/startup injection variables. Direct
+executables require trusted ownership and
+non-shared-writable ancestry. On Darwin, Homebrew-style paths are accepted only
+through sealed private native Mach-O snapshots with system-only library
+closure. On Linux, a root-run wrapper may recover an otherwise path-untrusted
+Node (including root- or foreign-owned writable/hard-linked toolcache layouts)
+only when it is the exact live ancestor of the canonical wrapper across an
+uninterrupted all-root UID chain; direct helper invocation remains fail-closed.
+The wrapper seals the exact ELF inode and its validated glibc startup closure;
+the helper revalidates the snapshot, sealed manifest, loader, and alias handoff
+around semantic-engine launches.
+Scripts and unsafe library closure fail closed. Prepared-bundle
+creation and verification also reject macOS write-granting ACLs on parent
+ancestors or bundle entries.
+Runtime-changing PRs use a clean, compatible wrapper/helper from the last
+independently reviewed pre-change commit; the exact external-runtime review
+sequence is documented in `docs/notes/agent-quality-gate-mechanics.md`.
+Autoreview remains source review, so the quality gate and applicable browser or
+runtime verification are still required.
 
 The maintenance path runs after Codex checks out the task branch in a cached
 container; it refreshes `origin/main`, verifies the autoreview helper, syncs
@@ -287,6 +330,10 @@ pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
 ```
+
+The status watcher only proves a deployment caught up. Promotion additionally
+requires `deploy:indexer:verify` to pass core-row and Polygon replay semantics;
+`--allow-syncing` never waives those data-integrity checks.
 
 If a promotion turns out bad, roll back with
 `pnpm deploy:indexer:rollback <last-good-sha>` - see

@@ -237,7 +237,7 @@ normalize_expected_command() {
       expected="${expected/pnpm dashboard:build/pnpm exec turbo run build --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
       ;;
     *"pnpm dashboard:size-limit"*)
-      expected="${expected/pnpm dashboard:size-limit/pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
+      expected="${expected/pnpm dashboard:size-limit/VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
       ;;
     *"bash scripts/check-react-doctor-score.sh"*)
       expected="${expected/bash scripts\/check-react-doctor-score.sh/pnpm exec turbo run react-doctor:score --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
@@ -380,6 +380,8 @@ assert_turbo_task_has_input "build" '$TURBO_ROOT$/.npmrc'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/turbo.json'
 assert_turbo_task_has_env "build" "VERCEL_ENV"
+assert_turbo_task_has_env "build" "VERCEL_DEPLOYMENT_ID"
+assert_turbo_task_has_env "build" "VERCEL_GIT_COMMIT_SHA"
 assert_turbo_task_has_output "build" ".next/**"
 assert_turbo_task_has_output "build" "!.next/cache/**"
 assert_turbo_task_has_output "build" "!.next/dev/**"
@@ -615,6 +617,8 @@ validator_repo="$(mktemp -d)"
     "agent:review-materiality:test": "node scripts/review-materiality.test.mjs",
     "docs:garden": "node scripts/docs-garden-issue.mjs",
     "docs:garden:test": "node scripts/docs-garden-issue.test.mjs",
+    "docs:navigation-eval": "node scripts/docs-navigation-eval.mjs",
+    "docs:navigation-eval:test": "node scripts/docs-navigation-eval.test.mjs",
     "issue:board": "node scripts/agent-issue-board.mjs",
     "issue:board:test": "node scripts/agent-issue-board.test.mjs",
     "issue:claim": "node scripts/agent-issue-board.mjs claim",
@@ -800,6 +804,7 @@ assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling scr
 assert_contains "- node scripts/review-materiality.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/agent-issue-board.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/docs-garden-issue.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/docs-navigation-eval.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
@@ -1409,32 +1414,32 @@ assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser"
 
 run_gate "terraform/metrics-bridge.tf"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform init -backend=false -input=false (Terraform changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform validate -no-color (Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Terraform/Cloud Run path changed)"
 
 run_gate "alerts/rules/rules-fpmms.tf"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
 
 run_gate "alerts/rules/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
 
 run_gate "alerts/infra/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra init -backend=false -input=false (alerts/infra Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra validate -no-color (alerts/infra Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud Function path changed)"
 
 run_gate "alerts/infra/channels/sentry-bridge/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
 
 run_gate "alerts/infra/onchain-event-listeners/main.tf"
 assert_contains "- bash alerts/infra/scripts/fix-webhook-state.test.sh (QuickNode replacement state parser changed)"
@@ -1448,7 +1453,7 @@ assert_contains "- bash -n alerts/infra/scripts/fix-webhook-state.test.sh (shell
 assert_contains "- bash alerts/infra/scripts/fix-webhook-state.test.sh (QuickNode state parser changed)"
 
 run_gate "alerts/infra/onchain-event-handler/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (alerts/infra Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud Function path changed)"
 
 run_gate "alerts/infra/onchain-event-handler/src/slack.ts"
@@ -1460,7 +1465,7 @@ run_gate "alerts/infra/onchain-event-handler/src/safe-abi.json"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
 assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
 assert_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage (Safe ABI changed (handler imports it) (coverage floor))"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Safe ABI changed (listener filter uses it at plan time))"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra init -backend=false -input=false (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra validate -no-color (Safe ABI changed (listener filter uses it at plan time))"
 
@@ -1473,6 +1478,8 @@ assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard cha
 run_gate ".github/workflows/documentation-garden.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
+assert_contains "- pnpm docs:garden:test (documentation garden workflow changed)"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation scheduler workflow changed)"
 assert_contains "node scripts/check-adr-reminder.mjs"
 
 run_gate ".lighthouserc.cjs"
@@ -1487,9 +1494,9 @@ assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions wor
 assert_contains "- pnpm install --frozen-lockfile (central CI workflow changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
 assert_contains "- pnpm tf:test (Terraform registry-backed CI workflow changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform registry-backed CI workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform registry-backed CI workflow changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform registry-backed CI workflow changed)"
 # Workspace-wide triggers (ci.yml here) deliberately skip the playwright
 # suite — CI runs it in its own ui-dashboard job and the local --single-process
 # chromium mode is flaky on keyboard/route-heavy tests.
@@ -1507,10 +1514,10 @@ run_gate ".github/workflows/infra.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm tf:test (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform registry workflow changed)"
 
 run_gate ".github/actions/pnpm-install/action.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
@@ -1710,17 +1717,29 @@ assert_contains "- pnpm agent:quality-gate:test (turbo task config changed)"
 run_gate "terraform.stacks.json"
 assert_contains "- terraform"
 assert_contains "- pnpm tf:test (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform stack registry changed)"
 
 run_gate "scripts/tf-stacks.mjs"
 assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform fmt -check -recursive (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules fmt -check -recursive (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra fmt -check -recursive (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate terraform -chdir=aegis/terraform fmt -check -recursive (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform stack wrapper changed)"
+
+run_gate "scripts/terraform-fmt-check.mjs"
+assert_contains "- node scripts/terraform-fmt-check.test.mjs (Terraform format helper changed)"
+assert_contains "- pnpm tf:test (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=governance-watchdog/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs governance-watchdog/infra (Terraform format helper changed)"
+
+run_gate "scripts/terraform-fmt-check.test.mjs"
+assert_contains "- node scripts/terraform-fmt-check.test.mjs (Terraform format helper test changed)"
 
 fail_fast_repo="$(mktemp -d)"
 (
@@ -1817,6 +1836,252 @@ assert_contains "+ pnpm lint:scripts"
 assert_contains "+ pnpm agent:prewarm:test"
 assert_contains "All mapped commands passed."
 assert_not_contains "parallel marker was not created"
+
+autoreview_progress_repo="$(mktemp -d)"
+(
+  cd "$autoreview_progress_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  cat > scripts/agent-autoreview.test.sh <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+/bin/sleep 0.1
+printf '%s\n' \
+  'AUTOREVIEW_TEST_PROGRESS family=target-selection elapsed=1s' \
+  'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s'
+echo 'successful autoreview noise that should stay quiet'
+/bin/sleep 2
+printf '%s\n' \
+  'AUTOREVIEW_TEST_TIMING family=target-selection status=ok elapsed=3s' \
+  'AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s'
+STUB
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == agent:autoreview:test* ]]; then
+  /bin/bash scripts/agent-autoreview.test.sh
+fi
+STUB
+  # Advance the gate's clock by 30 seconds per read so the 20-second heartbeat
+  # can be exercised without adding 20 real seconds to this regression suite.
+  cat > bin/date <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" != "+%s" ]]; then
+  exec /bin/date "$@"
+fi
+lock_dir="${DATE_COUNTER_FILE:?}.lock"
+while ! mkdir "$lock_dir" 2>/dev/null; do
+  /bin/sleep 0.01
+done
+trap 'rmdir "$lock_dir"' EXIT
+value=0
+if [[ -f "$DATE_COUNTER_FILE" ]]; then
+  value="$(cat "$DATE_COUNTER_FILE")"
+else
+  value="$(/bin/date +%s)"
+fi
+value=$((value + 30))
+printf '%s\n' "$value" > "$DATE_COUNTER_FILE"
+printf '%s\n' "$value"
+STUB
+  chmod +x bin/date bin/pnpm scripts/agent-autoreview.test.sh tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-autoreview.test.sh\n' > changed-paths.txt
+  DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+    PATH="$autoreview_progress_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 4 \
+      > "$output_file" 2>&1
+)
+assert_contains "AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s"
+assert_not_contains "AUTOREVIEW_TEST_PROGRESS family=target-selection elapsed=1s"
+assert_contains "AUTOREVIEW_TEST_TIMING family=target-selection status=ok elapsed=3s"
+assert_contains "AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s"
+assert_not_contains "successful autoreview noise that should stay quiet"
+
+for sequential_mode in parallel-one fail-fast; do
+  sequential_args=(--fail-fast)
+  if [[ "$sequential_mode" == parallel-one ]]; then
+    sequential_args=(--parallel 1)
+  fi
+  (
+    cd "$autoreview_progress_repo"
+    DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+      PATH="$autoreview_progress_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        "${sequential_args[@]}" \
+        > "$output_file" 2>&1
+  )
+  assert_contains "AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s"
+  assert_contains "AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s"
+  assert_not_contains "successful autoreview noise that should stay quiet"
+done
+
+(
+  cd "$autoreview_progress_repo"
+  cat > scripts/agent-autoreview.test.sh <<'STUB'
+#!/usr/bin/env bash
+echo 'AUTOREVIEW_TEST_PROGRESS family=runtime-trust elapsed=5s'
+echo 'AUTOREVIEW_TEST_TIMING family=runtime-trust status=failed elapsed=6s'
+echo 'complete autoreview failure diagnostic'
+exit 7
+STUB
+  chmod +x scripts/agent-autoreview.test.sh
+  set +e
+  DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+    PATH="$autoreview_progress_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 4 \
+      > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]] ||
+    fail "gate did not fail when the autoreview test command failed"
+)
+assert_contains "AUTOREVIEW_TEST_PROGRESS family=runtime-trust elapsed=5s"
+assert_contains "AUTOREVIEW_TEST_TIMING family=runtime-trust status=failed elapsed=6s"
+assert_contains "complete autoreview failure diagnostic"
+
+(
+  cd "$autoreview_progress_repo"
+  cat > scripts/agent-autoreview.test.sh <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$$" > "${AUTOREVIEW_TEST_PID_FILE:?}"
+echo 'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=7s'
+sleep 30
+STUB
+  chmod +x scripts/agent-autoreview.test.sh
+  autoreview_pid_file="$autoreview_progress_repo/autoreview-child-pid"
+  gate_output_fifo="$autoreview_progress_repo/gate-output.fifo"
+  rm -f "$autoreview_pid_file" "$gate_output_fifo"
+  mkfifo "$gate_output_fifo"
+  cat "$gate_output_fifo" > "$output_file" &
+  output_reader_pid=$!
+  AUTOREVIEW_TEST_PID_FILE="$autoreview_pid_file" \
+    DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
+    PATH="$autoreview_progress_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$gate_output_fifo" 2>&1 &
+  gate_pid=$!
+  launched=0
+  for _ in {1..200}; do
+    if [[ -s "$autoreview_pid_file" ]]; then
+      launched=1
+      break
+    fi
+    if ! kill -0 "$gate_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$launched" -ne 1 ]]; then
+    kill -KILL "$gate_pid" 2>/dev/null || true
+    wait "$gate_pid" 2>/dev/null || true
+    kill -KILL "$output_reader_pid" 2>/dev/null || true
+    wait "$output_reader_pid" 2>/dev/null || true
+    fail "sequential autoreview cancellation fixture did not launch"
+  fi
+
+  kill -KILL "$gate_pid"
+  wait "$gate_pid" 2>/dev/null || true
+  kill -KILL "$(cat "$autoreview_pid_file")" 2>/dev/null || true
+  reader_exited=0
+  for _ in {1..100}; do
+    if ! kill -0 "$output_reader_pid" 2>/dev/null; then
+      reader_exited=1
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$reader_exited" -ne 1 ]]; then
+    kill -KILL "$output_reader_pid" 2>/dev/null || true
+    wait "$output_reader_pid" 2>/dev/null || true
+    fail "sequential autoreview progress monitor survived its killed gate parent"
+  fi
+  wait "$output_reader_pid" 2>/dev/null || true
+  rm -f "$gate_output_fifo"
+)
+rm -rf "$autoreview_progress_repo"
+
+serialized_repo_mutation_repo="$(mktemp -d)"
+(
+  cd "$serialized_repo_mutation_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  cat > scripts/agent-quality-gate.sh <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > scripts/agent-autoreview.sh <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > scripts/agent-autoreview.test.sh <<'STUB'
+#!/usr/bin/env bash
+if [[ ! -f "${SERIAL_MUTATION_MARKER:?}" ]]; then
+  echo "autoreview test overlapped the repo-mutating quality-gate self-test"
+  exit 1
+fi
+STUB
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "agent:quality-gate:test")
+    sleep 0.2
+    : > "${SERIAL_MUTATION_MARKER:?}"
+    ;;
+  agent:autoreview:test*)
+    /bin/bash scripts/agent-autoreview.test.sh
+    ;;
+esac
+STUB
+  chmod +x bin/pnpm scripts/agent-autoreview.sh scripts/agent-autoreview.test.sh scripts/agent-quality-gate.sh tools/trunk
+  git add .
+  git commit -qm init
+  printf '%s\n' \
+    "scripts/agent-autoreview.sh" \
+    "scripts/agent-quality-gate.sh" \
+    > changed-paths.txt
+  SERIAL_MUTATION_MARKER="$serialized_repo_mutation_repo/serial-marker" \
+    PATH="$serialized_repo_mutation_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 4 \
+      > "$output_file" 2>&1
+)
+rm -rf "$serialized_repo_mutation_repo"
+assert_contains "+ pnpm agent:quality-gate:test"
+assert_contains "+ pnpm agent:autoreview:test"
+assert_contains "All mapped commands passed."
+assert_not_contains "autoreview test overlapped the repo-mutating quality-gate self-test"
 
 auto_parallel_quality_repo="$(mktemp -d)"
 (
@@ -1922,6 +2187,10 @@ STUB
 args="$*"
 case "$args" in
   exec\ turbo\ run\ test:browser*|exec\ turbo\ run\ size-limit*)
+    if [[ "$args" == exec\ turbo\ run\ size-limit* && "${VERCEL_DEPLOYMENT_ID:-}" != "local-quality-gate" ]]; then
+      echo "size-limit did not receive the gate-owned deployment identity"
+      exit 1
+    fi
     if ! mkdir "${DASHBOARD_NEXT_LOCK:?}"; then
       echo "dashboard .next command overlapped"
       exit 1
@@ -1946,7 +2215,7 @@ STUB
 )
 rm -rf "$dashboard_serial_repo"
 assert_contains "+ pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw"
-assert_contains "+ pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+assert_contains "+ VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw"
 assert_contains "All mapped commands passed."
 assert_not_contains "dashboard .next command overlapped"
 
@@ -2027,13 +2296,31 @@ STUB
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --allow-package-script-changes > "$output_file" 2>&1
   git add fixture.txt
   git commit -qm "commit validated content"
+  stamp_file="$fresh_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+  stamp_value="$(sed -n '2s/^stamp=//p' "$stamp_file")"
+  printf 'created_at=%s\nstamp=%s\n' \
+    "$(( $(date +%s) - 60 * 60 ))" \
+    "$stamp_value" \
+    > "$stamp_file"
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
   [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
-    fail "fresh gate stamp did not skip flag-less run after allow-flag warm"
+    fail "one-hour-old exact gate stamp did not skip flag-less run after allow-flag warm"
+  grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." "$output_file" ||
+    fail "one-hour-old exact gate stamp did not report a freshness skip"
+
+  printf 'created_at=%s\nstamp=%s\n' \
+    "$(( $(date +%s) - 2 * 60 * 60 - 1 ))" \
+    "$stamp_value" \
+    > "$stamp_file"
+  : > "$output_file"
+  COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
+  [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "2" ]] ||
+    fail "gate reused an exact success stamp older than the hard two-hour cap"
 )
 rm -rf "$fresh_stamp_repo"
-assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
 # Workflow changes add the ADR reminder command, whose execution argument uses
 # a randomized changed-paths scratch file. That volatile path must be
@@ -2126,9 +2413,26 @@ STUB
       >> "$output_file" 2>&1
   [[ "$(cat "$package_risk_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
     fail "fresh gate stamp did not skip duplicate package-risk run"
+  grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." "$output_file" ||
+    fail "acknowledged duplicate package-risk run did not reuse its exact stamp"
+
+  : > "$output_file"
+  if COUNTER_FILE="$package_risk_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    PATH="$package_risk_fresh_stamp_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1; then
+    fail "unacknowledged package-risk run reused an acknowledged success stamp"
+  fi
+  [[ "$(cat "$package_risk_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
+    fail "unacknowledged package-risk run executed mapped commands"
 )
 rm -rf "$package_risk_fresh_stamp_repo"
-assert_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
+assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
 # A failed ORDERED prerequisite phase (here the preflight `pnpm install`) must
 # stop the run before the parallel quality pool executes. Prerequisite phases
@@ -2209,6 +2513,79 @@ STUB
     fail "fresh gate stamp was reused after worktree content changed"
 )
 rm -rf "$stale_stamp_repo"
+assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
+
+# Extending the reuse window must not weaken any exact-signature binding. Use
+# equal-tree base commits to isolate the base OID, then change the validation
+# path/command plan and the fixture's gate implementation independently. Every
+# change must execute the mapped command again instead of reusing the stamp.
+signature_stamp_repo="$(mktemp -d)"
+(
+  cd "$signature_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p scripts tools
+  printf 'fixture\n' > fixture.txt
+  printf 'second fixture\n' > second.txt
+  printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  base_one="$(git rev-parse --verify HEAD)"
+  git commit --allow-empty -qm "equal-tree alternate base"
+  base_two="$(git rev-parse --verify HEAD)"
+  printf 'changed\n' >> fixture.txt
+  printf 'fixture.txt\n' > changed-paths-one.txt
+  printf 'fixture.txt\nsecond.txt\n' > changed-paths-two.txt
+
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-one.txt \
+      --base "$base_one" \
+      --run \
+      > "$output_file" 2>&1
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-one.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "2" ]] ||
+    fail "fresh gate stamp was reused after the base OID changed"
+
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "3" ]] ||
+    fail "fresh gate stamp was reused after the validation path/command plan changed"
+
+  printf '# changed fixture gate implementation\n' >> scripts/agent-quality-gate.sh
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "4" ]] ||
+    fail "fresh gate stamp was reused after the gate implementation changed"
+)
+rm -rf "$signature_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
 sha256sum_repo="$(mktemp -d)"
@@ -2651,7 +3028,19 @@ assert_contains "- node scripts/check-pr-description.test.mjs (PR description va
 
 run_gate "scripts/agent-autoreview.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview helper changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
+
+run_gate "scripts/agent-autoreview-core.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
+
+run_gate "scripts/agent-autoreview-core.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
+
+run_gate "scripts/agent-autoreview-target-guard.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
 
 run_gate "scripts/check-agent-context.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
@@ -2698,6 +3087,34 @@ assert_contains "- pnpm docs:garden:test (documentation garden issue automation 
 run_gate "scripts/docs-garden-issue.test.mjs"
 assert_contains "- pnpm docs:garden:test (documentation garden issue automation changed)"
 
+run_gate "scripts/docs-navigation-eval.mjs"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:index --check (documentation navigation evaluation consumes the catalog)"
+
+run_gate "scripts/docs-navigation-eval-helpers.mjs"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+
+run_gate "scripts/docs-navigation-eval-result.mjs"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+
+run_gate "scripts/docs-navigation-eval.test.mjs"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+
+run_gate "docs/evals/documentation-navigation-fixtures.json"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation contract changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation contract changed)"
+
+run_gate "docs/evals/documentation-navigation-2026-08-post-garden.json"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation contract changed)"
+
+run_gate "docs/evals/documentation-navigation-baseline.json"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation baseline changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation baseline changed)"
+
 run_gate "scripts/agent-context-budget.mjs"
 assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"
 assert_contains "- pnpm agent:context-budget --strict (agent context budget helper changed)"
@@ -2719,10 +3136,16 @@ run_gate "scripts/verify-github-environment-protection.test.mjs"
 assert_contains "- node scripts/verify-github-environment-protection.test.mjs (GitHub environment protection checker changed)"
 
 run_gate "scripts/agent-autoreview.sh"
-assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview adapter changed)"
 
 run_gate "scripts/agent-autoreview.test.sh"
-assert_contains "- bash scripts/agent-autoreview.test.sh (agent autoreview adapter changed)"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview adapter changed)"
+
+run_gate "scripts/dev-janitor.sh"
+assert_contains "- bash scripts/dev-janitor.test.sh (dev janitor script changed)"
+
+run_gate "scripts/dev-janitor.test.sh"
+assert_contains "- bash scripts/dev-janitor.test.sh (dev janitor script changed)"
 
 # Other root-script changes only need the standalone scripts ESLint.
 run_gate "scripts/code-health-history.mjs"

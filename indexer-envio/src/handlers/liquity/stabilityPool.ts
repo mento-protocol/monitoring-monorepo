@@ -439,6 +439,8 @@ indexer.onEvent(
         { requireSource: true },
       ),
     ]);
+    // preload-handler-note: cold-start system params are preload-warmed; ordered collateral reclassification stays in processing.
+    // preload-effect-helpers: getOrLoadSystemParams
     if (context.isPreload) {
       await Promise.all([
         preloadLiquityMarket(context, market),

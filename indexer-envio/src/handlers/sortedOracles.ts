@@ -48,6 +48,7 @@ import {
   syncHaltOnColdStart,
 } from "../breakers.js";
 import { ensureRateFeed, preloadRateFeed } from "./rateFeed.js";
+import { requireExactMedianTimestamp } from "./exact-median-timestamp.js";
 
 function priceDifferenceForOracleSample(
   pool: Pool,
@@ -104,6 +105,8 @@ interface OracleReportedPoolCtx {
   oracleTimestamp: bigint;
   /** Exact SortedOracles medianTimestamp at this event block. */
   medianTimestamp: bigint | null;
+  /** Exact SortedOracles reportExpiry at this event block. */
+  reportExpiry: bigint | null;
   breakerSnapshotFields: {
     breakerBaselineAtSnapshot: bigint;
     breakerThresholdAtSnapshot: bigint;
@@ -118,6 +121,48 @@ class OracleReportedPreWriteFailure extends Error {
     super(String(reason));
     this.name = "OracleReportedPreWriteFailure";
   }
+}
+
+// Envio's preload and processing passes can observe different entity state
+// within one batch. Record only event keys whose preload pass actually warmed
+// each conditional effect, so processing never turns a newly-visible pool into
+// a serialized archive call. A newly-visible pool stays fail-closed and is
+// retried by preload on its next oracle event.
+const preloadedMedianTimestampEvents = new Set<string>();
+const preloadedReportExpiryEvents = new Set<string>();
+
+function shouldRequestMedianTimestamp(
+  context: EvmOnEventContext,
+  preloadEventKey: string,
+  hasPools: boolean,
+): boolean {
+  if (!context.isPreload) {
+    return preloadedMedianTimestampEvents.delete(preloadEventKey);
+  }
+
+  if (hasPools) preloadedMedianTimestampEvents.add(preloadEventKey);
+  else preloadedMedianTimestampEvents.delete(preloadEventKey);
+  return hasPools;
+}
+
+async function shouldRequestReportExpiry(
+  context: EvmOnEventContext,
+  preloadEventKey: string,
+  poolIds: readonly string[],
+): Promise<boolean> {
+  if (!context.isPreload) {
+    return preloadedReportExpiryEvents.delete(preloadEventKey);
+  }
+
+  const pools = await Promise.all(
+    poolIds.map((poolId) => context.Pool.get(poolId)),
+  );
+  const needsExpiry = pools.some(
+    (pool) => pool !== undefined && pool.oracleExpiry <= 0n,
+  );
+  if (needsExpiry) preloadedReportExpiryEvents.add(preloadEventKey);
+  else preloadedReportExpiryEvents.delete(preloadEventKey);
+  return needsExpiry;
 }
 
 /** Process one pool's OracleReported update: self-heal, advance the oracle
@@ -146,16 +191,12 @@ async function processOracleReportedPool(
       await selfHealInvertRateFeed(context, initial),
     );
 
-    // Resolve oracleExpiry from DB if already populated, otherwise fetch
-    // via RPC (one-time seed — subsequent events use the DB value).
+    // Resolve oracleExpiry from DB if already populated, otherwise consume
+    // the event-level value fetched during preload.
     oracleExpiry =
       existing.oracleExpiry > 0n
         ? existing.oracleExpiry
-        : ((await context.effect(reportExpiryEffect, {
-            chainId: c.chainId,
-            rateFeedID: c.rateFeedID,
-            blockNumber: c.blockNumber,
-          })) ?? existing.oracleExpiry);
+        : (c.reportExpiry ?? existing.oracleExpiry);
   } catch (error) {
     // These reads/effects happen before this pool queues any writes, so one
     // pool's malformed id or transient RPC self-heal failure can be skipped
@@ -364,6 +405,13 @@ indexer.onEvent(
   { contract: "SortedOracles", event: "OracleReported" },
   async ({ event, context }) => {
     const rateFeedID = asAddress(event.params.token);
+    const blockNumber = asBigInt(event.block.number);
+    const preloadEventKey = eventId(
+      event.chainId,
+      event.block.number,
+      event.logIndex,
+    );
+
     // Chain-scoped — getPoolsByFeed filters by chainId to prevent cross-chain
     // oracle bleed (same rateFeedID exists on both Celo and Monad). See rpc.ts.
     // Co-fetched with the BreakerConfig lookup so the preload phase warms
@@ -372,14 +420,45 @@ indexer.onEvent(
       getPoolsByFeed(context, event.chainId, rateFeedID),
       getBreakerConfigsByFeed(context, event.chainId, rateFeedID),
     ]);
-    if (poolIds.length === 0) return;
+    const requestMedianTimestamp = shouldRequestMedianTimestamp(
+      context,
+      preloadEventKey,
+      poolIds.length > 0,
+    );
+    const medianTimestampPromise = requestMedianTimestamp
+      ? context.effect(medianTimestampEffect, {
+          chainId: event.chainId,
+          rateFeedID,
+          blockNumber,
+        })
+      : undefined;
+    const requestReportExpiry = await shouldRequestReportExpiry(
+      context,
+      preloadEventKey,
+      poolIds,
+    );
+    const reportExpiryPromise = requestReportExpiry
+      ? context.effect(reportExpiryEffect, {
+          chainId: event.chainId,
+          rateFeedID,
+          blockNumber,
+        })
+      : undefined;
 
     // Preload phase: seed Pool + open-breach-row lookups so Envio can
-    // batch them, then bail. Also warm the per-feed Breaker entities the
-    // baseline/threshold resolver will read in the processing phase — same
-    // pattern as MedianUpdated below. See `maybePreloadPool` in pool.ts.
+    // batch them with any needed timestamp RPC and expiry retry, then
+    // bail. Also warm the
+    // per-feed Breaker entities the baseline/threshold resolver will read in
+    // the processing phase — same pattern as MedianUpdated below. See
+    // `maybePreloadPool` in pool.ts.
+    // preload-handler-note: event-scoped timestamp and expiry effects are warmed;
+    // ordered Pool self-heals remain tracked in #1394.
+    // preload-effect-helpers: ensureRateFeed, bootstrapAndResolveBreakerSnapshotFields
+    // preload-effect-helpers: processOracleReportedPool, syncDependencyHaltOnColdStart
     if (context.isPreload) {
       await Promise.all([
+        ...(medianTimestampPromise ? [medianTimestampPromise] : []),
+        ...(reportExpiryPromise ? [reportExpiryPromise] : []),
         preloadRateFeed(context, event.chainId, rateFeedID),
         maybePreloadPool(context, poolIds),
         ...breakerConfigs.map(async (cfg) => {
@@ -388,13 +467,21 @@ indexer.onEvent(
       ]);
       return;
     }
-    const blockNumber = asBigInt(event.block.number);
+    if (poolIds.length === 0) return;
+
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const medianTimestamp = await context.effect(medianTimestampEffect, {
+    let medianTimestamp = medianTimestampPromise
+      ? await medianTimestampPromise
+      : null;
+    medianTimestamp = requireExactMedianTimestamp({
+      timestamp: medianTimestamp,
+      eventName: "OracleReported",
       chainId: event.chainId,
       rateFeedID,
       blockNumber,
+      log: context.log,
     });
+    const reportExpiry = reportExpiryPromise ? await reportExpiryPromise : null;
 
     await ensureRateFeed({
       context,
@@ -424,15 +511,12 @@ indexer.onEvent(
       oraclePrice: event.params.value,
       txHash: event.transaction.hash,
       logIndex: event.logIndex,
-      snapshotIdBase: eventId(
-        event.chainId,
-        event.block.number,
-        event.logIndex,
-      ),
+      snapshotIdBase: preloadEventKey,
       blockNumber,
       blockTimestamp,
       oracleTimestamp: event.params.timestamp,
       medianTimestamp,
+      reportExpiry,
       breakerSnapshotFields,
     };
     // Each poolId is distinct (getPoolsByFeed returns unique rows) so pool
@@ -483,6 +567,12 @@ indexer.onEvent(
   async ({ event, context }) => {
     const rateFeedID = asAddress(event.params.token);
     const oraclePrice = event.params.value;
+    const blockNumber = asBigInt(event.block.number);
+    const preloadEventKey = eventId(
+      event.chainId,
+      event.block.number,
+      event.logIndex,
+    );
 
     // Two parallel concerns share this event: pool-side oracle/breach state
     // (existing) and breaker-side EMA / lastMedianRate mirror (new). Look up
@@ -492,13 +582,44 @@ indexer.onEvent(
       getPoolsByFeed(context, event.chainId, rateFeedID),
       getBreakerConfigsByFeed(context, event.chainId, rateFeedID),
     ]);
+    const requestMedianTimestamp = shouldRequestMedianTimestamp(
+      context,
+      preloadEventKey,
+      poolIds.length > 0,
+    );
+    const medianTimestampPromise = requestMedianTimestamp
+      ? context.effect(medianTimestampEffect, {
+          chainId: event.chainId,
+          rateFeedID,
+          blockNumber,
+        })
+      : undefined;
+    const requestReportExpiry = await shouldRequestReportExpiry(
+      context,
+      preloadEventKey,
+      poolIds,
+    );
+    const reportExpiryPromise = requestReportExpiry
+      ? context.effect(reportExpiryEffect, {
+          chainId: event.chainId,
+          rateFeedID,
+          blockNumber,
+        })
+      : undefined;
 
-    if (poolIds.length === 0 && breakerConfigs.length === 0) return;
-
-    // Preload phase: warm pool + breaker entities, no writes. Mirrors
-    // `maybePreloadPool` semantics — return without proceeding to writes.
+    // Preload phase: warm the timestamp RPC, any expiry retry, and the pool +
+    // breaker entities, with no writes.
+    // Mirrors `maybePreloadPool` semantics — return without proceeding to
+    // writes.
+    // preload-handler-note: event-scoped timestamp and expiry effects are warmed;
+    // ordered Pool self-heals remain tracked in #1394.
+    // preload-effect-helpers: ensureRateFeed, bootstrapFeedBreakerConfigs
+    // preload-effect-helpers: selfHealInvertRateFeed, selfHealTokenDecimals
+    // preload-effect-helpers: syncDependencyHaltOnColdStart
     if (context.isPreload) {
       await Promise.all([
+        ...(medianTimestampPromise ? [medianTimestampPromise] : []),
+        ...(reportExpiryPromise ? [reportExpiryPromise] : []),
         preloadRateFeed(context, event.chainId, rateFeedID),
         maybePreloadPool(context, poolIds),
         ...breakerConfigs.map(async (cfg) => {
@@ -507,14 +628,23 @@ indexer.onEvent(
       ]);
       return;
     }
+    if (poolIds.length === 0 && breakerConfigs.length === 0) return;
 
-    const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const medianTimestamp = await context.effect(medianTimestampEffect, {
-      chainId: event.chainId,
-      rateFeedID,
-      blockNumber,
-    });
+    let medianTimestamp = medianTimestampPromise
+      ? await medianTimestampPromise
+      : null;
+    if (poolIds.length > 0) {
+      medianTimestamp = requireExactMedianTimestamp({
+        timestamp: medianTimestamp,
+        eventName: "MedianUpdated",
+        chainId: event.chainId,
+        rateFeedID,
+        blockNumber,
+        log: context.log,
+      });
+    }
+    const reportExpiry = reportExpiryPromise ? await reportExpiryPromise : null;
 
     await ensureRateFeed({
       context,
@@ -577,14 +707,10 @@ indexer.onEvent(
             await selfHealInvertRateFeed(context, initial),
           );
 
-          oracleExpiry =
-            existing.oracleExpiry > 0n
-              ? existing.oracleExpiry
-              : ((await context.effect(reportExpiryEffect, {
-                  chainId: event.chainId,
-                  rateFeedID,
-                  blockNumber,
-                })) ?? existing.oracleExpiry);
+          oracleExpiry = existing.oracleExpiry;
+          if (oracleExpiry <= 0n) {
+            oracleExpiry = reportExpiry ?? oracleExpiry;
+          }
         } catch (error) {
           // Mirrors the OracleReported isolation fix (#871, see
           // processOracleReportedPool above): these reads/self-heals happen
@@ -985,9 +1111,11 @@ indexer.onEvent(
     const rateFeedID = asAddress(event.params.token);
     const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
     // See OracleReported handler.
+    // preload-handler-note: governance expiry changes are bounded config events.
     if (await maybePreloadPool(context, poolIds)) return;
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+    // preload-effect-exempt: one expiry lookup per bounded governance event.
     const oracleExpiry = await context.effect(reportExpiryEffect, {
       chainId: event.chainId,
       rateFeedID,
@@ -1013,6 +1141,7 @@ indexer.onEvent(
   async ({ event, context }) => {
     const pools = await getPoolsWithReferenceFeed(context, event.chainId);
     // See OracleReported handler.
+    // preload-handler-note: global expiry changes are bounded config events.
     if (
       await maybePreloadPool(
         context,
@@ -1025,6 +1154,7 @@ indexer.onEvent(
 
     await Promise.all(
       pools.map(async (pool) => {
+        // preload-effect-exempt: one lookup per pool per bounded config event.
         const oracleExpiry = await context.effect(reportExpiryEffect, {
           chainId: event.chainId,
           rateFeedID: pool.referenceRateFeedID,

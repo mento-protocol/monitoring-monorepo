@@ -82,14 +82,29 @@ local-only checks:
 pnpm agent:quality-gate
 pnpm agent:quality-gate --run
 pnpm agent:autoreview # non-trivial completed batches
+pnpm agent:autoreview:test -- --jobs 1  # autoreview runtime changes only
+pnpm agent:autoreview --verify-bundle-dir <dir>  # pre-review check; retain the printed manifest
 ```
 
 The gate never deploys or applies Terraform. It refuses package-script or
-package-manager changes until their lifecycle risk is reviewed and explicitly
-acknowledged. Do not run a competing dashboard server/browser suite or second
-gate in the same worktree. Invocation details, parallelism, cache behavior, the
-server-side full-repository fallback, and common traps live in
+package-manager changes until their lifecycle risk is explicitly acknowledged.
+Do not run a competing dashboard server/browser suite or second gate in the
+same worktree. Background `--run` gates and `git push`; a 600s foreground kill
+discards the freshness stamp. Invocation details, parallelism, caching, the
+server-side fallback, and common traps live in
 [`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md).
+
+Autoreview covers the complete branch-local target without truncation. One
+fresh-context reviewer must inspect every prepared-bundle pass, with manifest
+verification before and after review. Capture, bundle-integrity,
+sensitive-input, and runtime-trust failures are fail-closed; so is an explicitly
+selected unavailable semantic engine. Runtime-changing PRs use the compatible
+last-reviewed owning-checkout wrapper. Autoreview reviews source only: it runs
+no tests and proves no behavior, so mapped gate, browser, generated-artifact,
+and runtime checks still apply. Exact target, bundle, isolation, trust,
+engine-selection, and command contracts live in
+[`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md)
+and [`docs/notes/codex-agent-skills.md`](docs/notes/codex-agent-skills.md).
 
 ## PR description standard
 
@@ -116,6 +131,12 @@ comments/threads, annotations, and failing logs. Reply before resolving:
 Audit sibling surfaces after one instance of a hazard is found; review is a
 batch-boundary verifier, not the inner edit loop. Never force-push or amend
 while babysitting.
+
+Freeze the intended review baseline before the first pass: the user request,
+target/owner, changed files, and non-test changed lines. Classify additions as
+in-scope, follow-up, or stop; create an issue before deferring valid follow-up
+work, warn near twice the baseline, and pause for reclassification after two
+review-triggered patch cycles rather than starting a third automatically.
 
 Before all-clear, run:
 

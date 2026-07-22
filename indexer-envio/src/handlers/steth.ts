@@ -116,6 +116,9 @@ if (!stethRegistrationState.__mentoStethYieldEventHandlersRegistered) {
       if (!isTrackedWallet(from) && !isTrackedWallet(to)) return;
       const meta = eventMeta(event);
       const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
+      // preload-handler-note: snapshot writes follow ordered movements; preload-safe
+      // balance collection is tracked in #1396.
+      // preload-effect-helpers: recordStethYieldEventDailySnapshots
       if (context.isPreload) return;
       if (!(await shouldProcess(context, id))) return;
       if (await recordTransfer(context, meta, from, to, event.params.value)) {

@@ -5,7 +5,7 @@ title: Ship Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-28
+last_verified: 2026-07-16
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -58,17 +58,80 @@ staging anything.
 pnpm agent:quality-gate --run
 ```
 
-2. For non-trivial behavioral, workflow, security, data-flow, infrastructure,
-   or UI changes, run the closeout review when the helper is available:
+2. Freeze the original request, target/owner, changed files, and non-test
+   changed-line count as the scope baseline. For non-trivial behavioral,
+   workflow, security, data-flow, infrastructure, or UI changes, run the
+   closeout review:
 
 ```bash
 pnpm agent:autoreview
 ```
 
-If `pnpm agent:autoreview` reports that the global helper is missing, do a
-current-session closeout review instead: inspect the diff against the PR base,
-read every touched file that carries behavior, check docs/workflow drift, and
-state in the PR body/final summary that the structured helper was unavailable.
+The repo-local helper reviews the complete branch-local target without
+truncation. Direct semantic engines fail closed if the target needs more than
+one prompt; prepared bundles retain bounded lossless passes that one
+fresh-context reviewer must inspect completely.
+Semantic engines run from an isolated empty workspace with restricted project
+configuration and environment; sensitive inputs fail closed. Direct
+supplemental evidence must be repo-relative, except for adapter-generated PR
+feedback and protected-main checklist copies inside its trusted bundle
+directory. The owning-checkout default semantic helper and automatic feedback
+run Node modules pinned from that same `origin/main` object, not a PR-selected
+base, mutable worktree, or reviewed package scripts; wrapper-owned Node launches
+discard `NODE_OPTIONS` and `NODE_PATH`.
+Reviewer web search is off by default and requires explicit `--web-search`.
+A quiet reviewer emits a
+60-second heartbeat. Do not pass the removed `--parallel-tests` option; the
+quality gate owns test execution.
+
+If direct semantic execution refuses a multi-pass target, run
+`pnpm agent:autoreview --prepare-bundle-dir <dir>` with a directory outside the
+worktree whose parent already exists. Every canonical parent ancestor must be
+owned by the current user or root; group/other-writable ancestors require
+sticky-bit protection. On macOS, write-granting ACLs on parent ancestors or
+bundle entries fail preparation or verification. Have one fresh-context reviewer
+inspect every pass listed by the bundle index. Run
+`pnpm agent:autoreview --verify-bundle-dir <dir>` immediately before review and
+retain its printed digest outside the bundle. After review, rerun with
+`--expected-bundle-manifest <retained-digest>`; both checks must pass with the
+same digest.
+
+If the change edits the executable autoreview runtime and the owning checkout
+refuses with `executable autoreview runtime differs from its trusted pre-change
+snapshot`, keep that refusal intact. From the reviewed checkout, invoke a clean,
+detached, protocol-compatible wrapper/helper from the last independently
+reviewed pre-change commit (or protected main when it is compatible):
+
+```bash
+reviewed_checkout=/absolute/path/to/reviewed-checkout
+trusted_checkout=/absolute/path/to/trusted-pre-change-checkout
+bundle_parent=/tmp/autoreview-runtime-review
+mkdir -p "$bundle_parent"
+(
+  cd "$reviewed_checkout"
+  AUTOREVIEW_HELPER="$trusted_checkout/scripts/agent-autoreview.mjs" \
+    "$trusted_checkout/scripts/agent-autoreview.sh" \
+    --prepare-bundle-dir "$bundle_parent/context-bundle" \
+    --mode auto --base origin/main --feedback-pr <number>
+)
+"$trusted_checkout/scripts/agent-autoreview.sh" \
+  --verify-bundle-dir "$bundle_parent/context-bundle"
+```
+
+Use that same trusted wrapper for the bound post-review manifest check. Never
+point either path at the runtime-changing checkout, and never invoke that
+checkout's package scripts to bootstrap the review.
+
+Inside an active Codex sandbox, the adapter may choose the local deterministic
+engine only when no engine was explicitly selected. An explicitly selected
+unavailable semantic engine, or a missing repo helper, is a hard stop: report
+the blocker rather than silently substituting local or current-session review.
+
+Verify accepted findings before editing. Classify scope growth as in-scope,
+follow-up, or stop, create an issue before deferring valid follow-up work, warn
+near twice the frozen baseline, and pause for reclassification after two
+review-triggered patch cycles. A clean source review is not UI, CLI/API,
+generated-artifact, or runtime proof; retain all applicable verification.
 
 3. For UI changes, follow the browser verification protocol in `AGENTS.md`.
    If browser tools are unavailable in the session, say so explicitly and do not

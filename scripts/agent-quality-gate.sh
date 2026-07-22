@@ -163,7 +163,10 @@ cd "$repo_root"
 scratch_dir="$repo_root/.tmp/agent-quality-gate"
 mkdir -p "$scratch_dir"
 success_stamp_file="$scratch_dir/last-success.stamp"
-success_stamp_ttl_seconds=900
+# An exact-signature success may cover the manual-run-to-pre-push interval even
+# for the slowest mapped suites. Keep this fixed rather than environment-
+# configurable so callers cannot extend validation reuse beyond two hours.
+success_stamp_ttl_seconds=$((2 * 60 * 60))
 # Avoid overriding a usable TMPDIR: Terraform providers use go-plugin grpc on
 # a socket in TMPDIR, and repo-local paths can be blocked by agent seatbelts.
 # Trunk hooks can strip TMPDIR entirely, so prefer the system temp directory
@@ -257,6 +260,9 @@ command_dedupe_key() {
   case "$command" in
     "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
       echo "agent-quality-gate.test"
+      ;;
+    "pnpm agent:autoreview:test"|"bash scripts/agent-autoreview.test.sh")
+      echo "agent-autoreview.test"
       ;;
     *)
       echo "$command"
@@ -468,7 +474,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/docs:navigation-eval|/scripts/docs:navigation-eval:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -561,7 +567,11 @@ add_ui_size_limit() {
   local reason="$1"
   # `size-limit` depends on `build` in turbo.json, so one Turbo invocation
   # preserves the build guarantee without paying for a separate scheduler run.
-  add_turbo_dashboard_task "size-limit" "$reason"
+  # Trunk's hook callback strips caller-provided environment variables, while
+  # operator-local .env files may contain empty Vercel placeholders. Pin a
+  # non-empty local deployment identity on the mapped command itself so both
+  # direct gate runs and agent:prewarm remain hermetic without loose Turbo env.
+  add_command "VERCEL_DEPLOYMENT_ID=local-quality-gate $(turbo_local_cache_command "@mento-protocol/ui-dashboard" "size-limit")" "$reason"
 }
 
 add_bridge_mutation_baseline() {
@@ -638,6 +648,7 @@ add_root_tooling_package_script_checks() {
   add_command "pnpm sentry:archive:test" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
+  add_command "node scripts/terraform-fmt-check.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
   add_command "node scripts/lockfile-lint.test.mjs" "$reason"
   add_command "node scripts/version-skew-check.test.mjs" "$reason"
@@ -646,6 +657,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/docs-index.test.mjs" "$reason"
   add_command "node scripts/docs-audit.test.mjs" "$reason"
   add_command "node scripts/docs-garden-issue.test.mjs" "$reason"
+  add_command "node scripts/docs-navigation-eval.test.mjs" "$reason"
   add_command "node scripts/agent-context-budget.test.mjs" "$reason"
 }
 
@@ -720,7 +732,7 @@ add_terraform_validate_commands() {
   local module="$1"
   local reason="$2"
   local tf_data_dir="${module}/.terraform-agent-gate"
-  add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} fmt -check -recursive" "$reason"
+  add_command "TF_DATA_DIR=${tf_data_dir} node scripts/terraform-fmt-check.mjs $(quote_path "$module")" "$reason"
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} init -backend=false -input=false" "$reason"
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} validate -no-color" "$reason"
 }
@@ -939,6 +951,18 @@ while IFS= read -r path; do
   case "$path" in
     README.md|*/README.md)
       add_command "pnpm agent:context-check" "README metadata may enroll canonical context"
+      ;;
+    docs/evals/documentation-navigation-baseline.json)
+      add_surface "docs"
+      add_command "pnpm docs:navigation-eval:test" "documentation navigation baseline changed"
+      add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation baseline changed"
+      add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation baseline changed"
+      ;;
+    docs/evals/documentation-navigation-*.json)
+      add_surface "docs"
+      add_command "pnpm docs:navigation-eval:test" "documentation navigation evaluation contract changed"
+      add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation contract changed"
+      add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation evaluation contract changed"
       ;;
     AGENTS.md|*/AGENTS.md|.codex/config.toml)
       add_surface "agent-context"
@@ -1274,6 +1298,10 @@ while IFS= read -r path; do
           add_terraform_validate_commands "alerts/infra" "Terraform registry-backed CI workflow changed"
           add_terraform_validate_commands "aegis/terraform" "Terraform registry-backed CI workflow changed"
           ;;
+        .github/workflows/documentation-garden.yml)
+          add_command "pnpm docs:garden:test" "documentation garden workflow changed"
+          add_command "pnpm docs:navigation-eval:test" "documentation navigation scheduler workflow changed"
+          ;;
         .github/workflows/infra.yml)
           add_command "pnpm tf:test" "Terraform registry workflow changed"
           add_terraform_validate_commands "terraform" "Terraform registry workflow changed"
@@ -1482,7 +1510,10 @@ while IFS= read -r path; do
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
         scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
-          add_command "bash scripts/agent-autoreview.test.sh" "agent autoreview adapter changed"
+          add_command "pnpm agent:autoreview:test" "agent autoreview adapter changed"
+          ;;
+        scripts/dev-janitor.sh|scripts/dev-janitor.test.sh)
+          add_command "bash scripts/dev-janitor.test.sh" "dev janitor script changed"
           ;;
         scripts/deploy-bridge.sh)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
@@ -1500,8 +1531,8 @@ while IFS= read -r path; do
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in
-        scripts/agent-autoreview.mjs)
-          add_command "bash scripts/agent-autoreview.test.sh" "agent autoreview helper changed"
+        scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs|scripts/agent-autoreview-target-guard.test.mjs)
+          add_command "pnpm agent:autoreview:test" "agent autoreview helper changed"
           ;;
         scripts/check-agent-context.mjs|scripts/check-agent-context-helpers.mjs|scripts/check-agent-context.test.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
@@ -1521,6 +1552,12 @@ while IFS= read -r path; do
           add_command "pnpm docs:garden:test" "documentation garden issue automation changed"
           add_command "pnpm docs:audit --dry-run" "documentation garden issue automation consumes the planner"
           add_command "pnpm docs:index --check" "documentation garden issue automation consumes the catalog"
+          ;;
+        scripts/docs-navigation-eval.mjs|scripts/docs-navigation-eval-helpers.mjs|scripts/docs-navigation-eval-result.mjs|scripts/docs-navigation-eval.test.mjs)
+          add_command "pnpm docs:navigation-eval:test" "documentation navigation evaluation changed"
+          add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation changed"
+          add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation evaluation changed"
+          add_command "pnpm docs:index --check" "documentation navigation evaluation consumes the catalog"
           ;;
         scripts/agent-context-budget.mjs|scripts/agent-context-budget.test.mjs)
           add_command "pnpm agent:context-budget:test" "agent context budget helper changed"
@@ -1578,6 +1615,18 @@ while IFS= read -r path; do
           add_terraform_validate_commands "alerts/infra" "Terraform stack wrapper changed"
           add_terraform_validate_commands "aegis/terraform" "Terraform stack wrapper changed"
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack wrapper changed"
+          ;;
+        scripts/terraform-fmt-check.mjs)
+          add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper changed"
+          add_command "pnpm tf:test" "Terraform format helper changed"
+          add_terraform_validate_commands "terraform" "Terraform format helper changed"
+          add_terraform_validate_commands "alerts/rules" "Terraform format helper changed"
+          add_terraform_validate_commands "alerts/infra" "Terraform format helper changed"
+          add_terraform_validate_commands "aegis/terraform" "Terraform format helper changed"
+          add_terraform_validate_commands "governance-watchdog/infra" "Terraform format helper changed"
+          ;;
+        scripts/terraform-fmt-check.test.mjs)
+          add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper test changed"
           ;;
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
@@ -1793,6 +1842,8 @@ implementation_signature() {
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
     scripts/check-agent-quality-gate-package-scripts.sh \
+    scripts/terraform-fmt-check.mjs \
+    scripts/terraform-fmt-check.test.mjs \
     turbo.json \
     .trunk/trunk.yaml; do
     if [[ -f "$path" ]]; then
@@ -1980,6 +2031,46 @@ filter_expected_output() {
   done
 }
 
+is_autoreview_test_command() {
+  local command="$1"
+  case "$command" in
+    *"pnpm agent:autoreview:test"*|*"bash scripts/agent-autoreview.test.sh"*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+latest_autoreview_test_progress() {
+  local output_file="$1"
+  awk '
+    length($0) <= 512 &&
+      $0 ~ /^AUTOREVIEW_TEST_PROGRESS family=[[:alnum:]_,-]+ elapsed=[0-9]+s$/ {
+      latest = $0
+    }
+    END {
+      if (latest != "") {
+        print latest
+      }
+    }
+  ' "$output_file"
+}
+
+print_autoreview_test_timings() {
+  local output_file="$1"
+  # A canonical run currently has only a handful of families. Cap accepted
+  # protocol lines defensively so a noisy child cannot flood otherwise-quiet
+  # successful gate output while preserving each accepted marker verbatim.
+  awk '
+    count < 32 && length($0) <= 512 &&
+      $0 ~ /^AUTOREVIEW_TEST_TIMING family=[[:alnum:]_-]+ status=(ok|failed) elapsed=[0-9]+s$/ {
+      print
+      count++
+    }
+  ' "$output_file"
+}
+
 record_command_summary() {
   local status="$1"
   local elapsed="$2"
@@ -2009,9 +2100,37 @@ print_command_summary() {
   done
 }
 
+monitor_sequential_autoreview_progress() {
+  local command="$1"
+  local output_file="$2"
+  local start_ts="$3"
+  local done_file="$4"
+  local parent_pid="$5"
+  local last_heartbeat_ts="$start_ts"
+  local heartbeat_interval=20
+  local now_ts
+
+  while [[ ! -e "$done_file" ]] && kill -0 "$parent_pid" 2>/dev/null; do
+    sleep 1
+    if [[ -e "$done_file" ]] || ! kill -0 "$parent_pid" 2>/dev/null; then
+      break
+    fi
+    now_ts="$(date +%s)"
+    if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
+      printf '⏳ still running after %s:\n' "$(format_duration $((now_ts - start_ts)))"
+      printf '    · %s\n' "$command"
+      latest_autoreview_test_progress "$output_file"
+      last_heartbeat_ts="$now_ts"
+    fi
+  done
+}
+
 run_mapped_command() {
   local command="$1"
   local output_file
+  local gate_pid="$$"
+  local monitor_done_file=""
+  local monitor_pid=""
   local start_ts
   local end_ts
   local elapsed
@@ -2021,15 +2140,31 @@ run_mapped_command() {
   start_ts="$(date +%s)"
   echo
   echo "+ ${command}"
+  if is_autoreview_test_command "$command"; then
+    monitor_done_file="${output_file}.done"
+    tmpfiles+=("$monitor_done_file")
+    rm -f "$monitor_done_file"
+    monitor_sequential_autoreview_progress \
+      "$command" "$output_file" "$start_ts" "$monitor_done_file" "$gate_pid" &
+    monitor_pid="$!"
+  fi
   set +e
   bash -c "$command" > "$output_file" 2>&1
   exit_code=$?
   set -e
+  if [[ -n "$monitor_pid" ]]; then
+    : > "$monitor_done_file"
+    wait "$monitor_pid" 2>/dev/null || true
+    rm -f "$monitor_done_file"
+  fi
   end_ts="$(date +%s)"
   elapsed=$((end_ts - start_ts))
 
   if [[ "$exit_code" -eq 0 ]]; then
     record_command_summary "ok" "$elapsed" "$command"
+    if is_autoreview_test_command "$command"; then
+      print_autoreview_test_timings "$output_file"
+    fi
     echo "✓ ${command} ($(format_duration "$elapsed"))"
     rm -f "$output_file"
     return 0
@@ -2076,6 +2211,9 @@ is_quality_setup_command() {
     TF_DATA_DIR=*terraform\ -chdir=*)
       return 0
       ;;
+    TF_DATA_DIR=*node\ scripts/terraform-fmt-check.mjs\ *)
+      return 0
+      ;;
   esac
 
   return 1
@@ -2087,15 +2225,21 @@ is_quality_serial_command() {
   # each other, but they are not prerequisites for lint/typecheck/unit/knip.
   # Browser tests need Chromium installed first; browser tests start a Next dev
   # server while size-limit runs a build-backed Turbo task, and both touch
-  # ui-dashboard/.next, so keep those two mutually exclusive.
+  # ui-dashboard/.next, so keep those two mutually exclusive. The quality-gate
+  # self-test temporarily mutates tracked fixture files in the current checkout,
+  # so it must also finish before source-fingerprinting tests enter the parallel
+  # pool.
   case "$command" in
+    "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
+      return 0
+      ;;
     "pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium")
       return 0
       ;;
     "pnpm exec turbo run test:browser --filter=@mento-protocol/ui-dashboard --cache=local:rw")
       return 0
       ;;
-    "pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw")
+    "VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw")
       return 0
       ;;
   esac
@@ -2225,6 +2369,9 @@ run_mapped_entries_parallel() {
 
       if [[ "$status" -eq 0 ]]; then
         record_command_summary "ok" "$elapsed" "$command"
+        if is_autoreview_test_command "$command"; then
+          print_autoreview_test_timings "$output_file"
+        fi
         echo "✓ ${command} ($(format_duration "$elapsed"))"
       else
         failures=$((failures + 1))
@@ -2250,8 +2397,12 @@ run_mapped_entries_parallel() {
       if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
         printf '⏳ still running after %s (%d/%d done):\n' \
           "$(format_duration $((now_ts - phase_start_ts)))" "$completed" "$total"
-        for hb_cmd in "${active_commands[@]}"; do
+        for i in "${!active_commands[@]}"; do
+          hb_cmd="${active_commands[$i]}"
           printf '    · %s\n' "$hb_cmd"
+          if is_autoreview_test_command "$hb_cmd"; then
+            latest_autoreview_test_progress "${active_output_files[$i]}"
+          fi
         done
         last_heartbeat_ts="$now_ts"
       fi
