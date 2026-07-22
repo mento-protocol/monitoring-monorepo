@@ -31,18 +31,9 @@ import { buildSwapAddressFields } from "../swap.js";
 import { selfHealWrappedExchangeId } from "../pool.js";
 import { feeTokenMetaEffect } from "../rpc/effects.js";
 
-// Per-chain cache of the v3 Router address. JSON lookup once per chain is
-// cheap, but a Map is cheaper still and Broker.Swap fires per swap event.
-// `null` is cached too — chains without a registered Router (testnets that
-// haven't been wired) skip the lookup permanently.
-const routerByChain = new Map<number, string | null>();
 function v3RouterAddress(chainId: number): string | null {
-  const cached = routerByChain.get(chainId);
-  if (cached !== undefined) return cached;
   const addr = getContractAddress(chainId, "Routerv300");
-  const value = addr ? addr.toLowerCase() : null;
-  routerByChain.set(chainId, value);
-  return value;
+  return addr ? addr.toLowerCase() : null;
 }
 
 function contractAddress(chainId: number, name: string): string | null {
