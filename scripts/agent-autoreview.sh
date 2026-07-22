@@ -4167,6 +4167,7 @@ materialize_feedback_runtime() {
   local runtime_paths=(
     scripts/pr-feedback-state.mjs \
     scripts/pr-feedback-state-core.mjs \
+    scripts/pr-feedback-state-claude.mjs \
     scripts/pr-ready-state.mjs \
     scripts/pr-ready-state-core.mjs \
     scripts/pr-ready-state-format.mjs

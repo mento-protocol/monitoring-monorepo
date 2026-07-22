@@ -4914,6 +4914,7 @@ run_feedback_runtime_aggregate_regression() {
   dd if=/dev/zero bs=1100000 count=1 2>/dev/null |
     tr '\000' 'b' >"$review_repo/scripts/pr-feedback-state-core.mjs"
   for runtime_file in \
+    pr-feedback-state-claude.mjs \
     pr-ready-state.mjs \
     pr-ready-state-core.mjs \
     pr-ready-state-format.mjs; do
@@ -6493,6 +6494,7 @@ process.stdout.write(`${JSON.stringify(state)}\n`);
 FEEDBACK_RUNTIME
 for feedback_runtime_file in \
   pr-feedback-state-core.mjs \
+  pr-feedback-state-claude.mjs \
   pr-ready-state.mjs \
   pr-ready-state-core.mjs \
   pr-ready-state-format.mjs; do

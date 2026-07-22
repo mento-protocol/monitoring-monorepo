@@ -108,12 +108,15 @@ const ACTIONABLE_CLAUDE_REVIEW_LOOKALIKE = {
     "4. [P2] Action required: remove the remaining vulnerable `sharp@0.34.5` lockfile entry.",
   ),
 };
-function normalizedReadyStateForClaudeReview(comment) {
+function normalizedReadyStateForClaudeReview(
+  comment,
+  { title = "fix(deps): upgrade sharp past vulnerable libvips" } = {},
+) {
   return summarizeReadyState({
     pr: {
       number: 1431,
       url: "https://github.com/mento-protocol/monitoring-monorepo/pull/1431",
-      title: "fix(deps): upgrade sharp past vulnerable libvips",
+      title,
       state: "OPEN",
       author: { login: "chapati23" },
       isDraft: false,
@@ -830,6 +833,343 @@ test("agrees with ready-state on the normalized PR #1431 clean Claude review", (
   assertEqual(feedbackState.counts.topLevelBotComments, 1);
   assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
   assertEqual(feedbackState.counts.blockingFindings, 0);
+});
+
+function structuredClaudeReview({
+  title,
+  checklist = ["Parser structure and unit-test coverage", "Runtime behavior"],
+  findings = [
+    "1. [P3] No action: tests cover the changed paths.",
+    "2. [P3] No action: fix is correct and covered.",
+  ],
+  rollup = ["1. [P3] No-action: fix is correct."],
+}) {
+  return `### Review: ${title}
+
+**Verdict: LGTM**
+
+#### What I checked
+${checklist.map((subject) => `- [x] ${subject}`).join("\n")}
+
+#### Findings
+${findings.join("\n")}
+
+#### Roll-up
+${rollup.join("\n")}`;
+}
+
+test("accepts bounded clean Claude reviews for unrelated ordinary PR titles", () => {
+  const cleanReviews = [
+    {
+      title: "feat(auth): add secure session refresh",
+      checklist: [
+        "Authentication boundary and session lifecycle",
+        "Unit tests and operator documentation",
+      ],
+    },
+    {
+      title: "fix(api): handle failed request errors",
+      checklist: ["Request-path coverage", "Schema compatibility"],
+    },
+    {
+      title: "docs(agent): explain Roll-up handling #1476",
+      checklist: [
+        "Review title and checklist routing",
+        "Documentation examples and unit tests",
+      ],
+    },
+  ];
+
+  let fixtureId = 5043638300;
+  for (const fixture of cleanReviews) {
+    const normalizedReadyState = normalizedReadyStateForClaudeReview(
+      {
+        ...PR_1431_CLEAN_CLAUDE_REVIEW,
+        id: fixtureId++,
+        body: structuredClaudeReview(fixture),
+      },
+      { title: fixture.title },
+    );
+    const feedbackState = summarizeFeedbackState(normalizedReadyState);
+    assertEqual(normalizedReadyState.ready, true);
+    assertEqual(feedbackState.ready, normalizedReadyState.required.ready);
+    assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+    assertEqual(feedbackState.counts.blockingFindings, 0);
+  }
+});
+
+test("accepts CommonMark punctuation escapes in exact Claude review titles", () => {
+  const escapedTitles = [
+    [
+      "docs(parser): explain pipe | handling",
+      "docs(parser): explain pipe \\| handling",
+    ],
+    [
+      "docs(parser): explain colon : handling",
+      "docs(parser)\\: explain colon \\: handling",
+    ],
+    [
+      "docs(parser): explain tilde ~ handling",
+      "docs(parser): explain tilde \\~ handling",
+    ],
+  ];
+
+  let fixtureId = 5043638350;
+  for (const [title, reviewTitle] of escapedTitles) {
+    const normalizedReadyState = normalizedReadyStateForClaudeReview(
+      {
+        ...PR_1431_CLEAN_CLAUDE_REVIEW,
+        id: fixtureId++,
+        body: structuredClaudeReview({ title: reviewTitle }),
+      },
+      { title },
+    );
+    const feedbackState = summarizeFeedbackState(normalizedReadyState);
+    assertEqual(normalizedReadyState.ready, true);
+    assertEqual(feedbackState.ready, normalizedReadyState.required.ready);
+    assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  }
+});
+
+test("fails closed on adversarial Claude review protocol variants", () => {
+  const title = "feat(auth): add secure session refresh";
+  const clean = structuredClaudeReview({ title });
+  const replaceChecklist = (entry) =>
+    clean.replace("- [x] Parser structure and unit-test coverage", entry);
+  const replaceFinding = (entry) =>
+    clean.replace("1. [P3] No action: tests cover the changed paths.", entry);
+  const replaceRollup = (entry) =>
+    clean.replace("1. [P3] No-action: fix is correct.", entry);
+  const blockingReviews = [
+    ["mismatched title", clean, "fix(auth): different change"],
+    [
+      "oversized title",
+      structuredClaudeReview({ title: "x".repeat(201) }),
+      "x".repeat(201),
+    ],
+    [
+      "escaped punctuation still requires exact title equality",
+      structuredClaudeReview({
+        title: "feat(auth)\\: add secure session refresh \\| changed",
+      }),
+      title,
+    ],
+    ["unchecked checklist", replaceChecklist("- [ ] Unit tests"), title],
+    ["malformed checklist", replaceChecklist("- [yes] Unit tests"), title],
+    [
+      "empty checklist",
+      clean.replace(
+        "- [x] Parser structure and unit-test coverage\n- [x] Runtime behavior",
+        "",
+      ),
+      title,
+    ],
+    [
+      "actionable checklist suffix",
+      replaceChecklist("- [x] Unit tests — but please restore validation"),
+      title,
+    ],
+    [
+      "negated checklist",
+      replaceChecklist("- [x] Authorization coverage does not include writes"),
+      title,
+    ],
+    [
+      "hedged checklist",
+      replaceChecklist("- [x] Session-boundary coverage might be complete"),
+      title,
+    ],
+    [
+      "semantically actionable checklist",
+      replaceChecklist(
+        "- [x] Tests confirm the fallback allows unauthenticated writes",
+      ),
+      title,
+    ],
+    [
+      "unknown plaintext-secret claim",
+      replaceChecklist("- [x] API logs private keys in plaintext"),
+      title,
+    ],
+    [
+      "unknown credential-storage claim",
+      replaceChecklist(
+        "- [x] Telemetry stores authentication tokens without encryption",
+      ),
+      title,
+    ],
+    [
+      "unknown credential-tracing claim",
+      replaceChecklist("- [x] Request traces contain signing credentials"),
+      title,
+    ],
+    [
+      "unknown declarative checklist",
+      replaceChecklist("- [x] The implementation matches the specification"),
+      title,
+    ],
+    [
+      "unknown code-label injection",
+      replaceChecklist("- [x] `API logs private keys in plaintext` behavior"),
+      title,
+    ],
+    [
+      "hyphenated code-label injection",
+      replaceChecklist("- [x] `API-logs-private-keys-in-plaintext` behavior"),
+      title,
+    ],
+    [
+      "underscored code-label injection",
+      replaceChecklist("- [x] `P1_action_required` behavior"),
+      title,
+    ],
+    [
+      "malformed Findings heading",
+      clean.replace("#### Findings", "#### Findings:"),
+      title,
+    ],
+    [
+      "malformed Roll-up heading",
+      clean.replace("#### Roll-up", "#### Roll_up"),
+      title,
+    ],
+    [
+      "four-space-indented review heading",
+      clean.replace(`### Review: ${title}`, `    ### Review: ${title}`),
+      title,
+    ],
+    [
+      "tab-indented checklist entry",
+      clean.replace("- [x] Runtime behavior", "\t- [x] Runtime behavior"),
+      title,
+    ],
+    [
+      "one-space-tab-indented verdict",
+      clean.replace("**Verdict: LGTM**", " \t**Verdict: LGTM**"),
+      title,
+    ],
+    [
+      "four-space-indented Findings heading",
+      clean.replace("#### Findings", "    #### Findings"),
+      title,
+    ],
+    [
+      "tab-indented finding",
+      replaceFinding("\t1. [P3] No action: tests cover the changed paths."),
+      title,
+    ],
+    [
+      "two-space-tab-indented finding",
+      replaceFinding("  \t1. [P3] No action: tests cover the changed paths."),
+      title,
+    ],
+    [
+      "four-space-indented Roll-up heading",
+      clean.replace("#### Roll-up", "    #### Roll-up"),
+      title,
+    ],
+    [
+      "tab-indented roll-up",
+      replaceRollup("\t1. [P3] No-action: fix is correct."),
+      title,
+    ],
+    [
+      "three-space-tab-indented roll-up",
+      replaceRollup("   \t1. [P3] No-action: fix is correct."),
+      title,
+    ],
+    [
+      "actionable finding suffix",
+      replaceFinding(
+        "1. [P3] No action: tests cover the changed paths. Remove the fallback.",
+      ),
+      title,
+    ],
+    ["marker-only finding", replaceFinding("1. [P3] No action:"), title],
+    [
+      "delimiter-only finding",
+      replaceFinding("1. [P3] No action: .; !"),
+      title,
+    ],
+    [
+      "backtick finding label",
+      replaceFinding("1. [P3] No action: `clean`."),
+      title,
+    ],
+    [
+      "Markdown-link finding target",
+      replaceFinding(
+        "1. [P3] No action: [clean](https://example.invalid/audit).",
+      ),
+      title,
+    ],
+    [
+      "HTML-comment finding",
+      replaceFinding("1. [P3] No action: clean. <!-- metadata -->"),
+      title,
+    ],
+    [
+      "Markdown-link roll-up target",
+      replaceRollup(
+        "1. [P3] No-action: [clean](https://example.invalid/audit).",
+      ),
+      title,
+    ],
+    [
+      "negated finding",
+      replaceFinding("1. [P3] No action: fix is not correct."),
+      title,
+    ],
+    [
+      "hedged finding",
+      replaceFinding("1. [P3] No action: fix is probably correct."),
+      title,
+    ],
+    [
+      "unknown finding prose",
+      replaceFinding("1. [P3] No action: authentication looks fine."),
+      title,
+    ],
+    [
+      "unknown roll-up prose",
+      replaceRollup("1. [P3] No-action: authentication looks fine."),
+      title,
+    ],
+    [
+      "mixed clean and actionable findings",
+      replaceFinding(
+        "1. [P3] No action: tests cover the changed paths.\n2. [P2] Restore validation.",
+      ),
+      title,
+    ],
+    [
+      "mixed clean and actionable roll-up",
+      replaceRollup(
+        "1. [P3] No-action: fix is correct.\n2. [P3] No-action: clean but please remove the fallback.",
+      ),
+      title,
+    ],
+  ];
+
+  let fixtureId = 5043638400;
+  for (const [label, body, prTitle] of blockingReviews) {
+    const normalizedReadyState = normalizedReadyStateForClaudeReview(
+      {
+        ...PR_1431_CLEAN_CLAUDE_REVIEW,
+        id: fixtureId++,
+        body,
+      },
+      { title: prTitle },
+    );
+    const feedbackState = summarizeFeedbackState(normalizedReadyState);
+    assertEqual(normalizedReadyState.required.ready, true);
+    assert(
+      feedbackState.ready === false,
+      `${label}: expected feedback-state to fail closed`,
+    );
+    assertEqual(feedbackState.counts.blockingTopLevelBotComments, 1);
+    assertEqual(feedbackState.counts.blockingFindings > 0, true);
+  }
 });
 
 test("classifies clean and actionable Claude review variants", () => {
