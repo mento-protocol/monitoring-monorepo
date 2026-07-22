@@ -3080,6 +3080,37 @@ attested_helper_runtime_dir=""
 attested_helper_runtime_identity=""
 attested_helper_runtime_manifest=""
 
+# Bound each automatic-lookup gh call (and the multi-call feedback capture) so a
+# hung GitHub CLI cannot stall autoreview forever. Overridable for tests.
+#
+# Validate the overrides here rather than trusting them into run_with_deadline:
+# its `[[ "$waited" -lt "$deadline" ]]` loop evaluates $deadline as arithmetic,
+# and under this script's `set -u` a non-numeric value (e.g. a typo'd
+# AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS=foo) aborts the subshell there -- after
+# the job has already been backgrounded -- leaving it orphaned instead of
+# bounded.
+gh_lookup_deadline_seconds="${AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS:-60}"
+if ! [[ "$gh_lookup_deadline_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  echo "agent:autoreview: AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS='$gh_lookup_deadline_seconds' is not a positive integer; using default 60s" >&2
+  gh_lookup_deadline_seconds=60
+fi
+feedback_capture_deadline_seconds="${AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS:-120}"
+if ! [[ "$feedback_capture_deadline_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  echo "agent:autoreview: AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS='$feedback_capture_deadline_seconds' is not a positive integer; using default 120s" >&2
+  feedback_capture_deadline_seconds=120
+fi
+
+# Unify per-stage timing between the wrapper and the helper. When a runtime-
+# changing PR is reviewed from a separate trusted checkout, repo_root names that
+# trusted wrapper checkout while the helper resolves the reviewed checkout from
+# its working directory, so their default durations targets diverge and neither
+# log holds the whole run. Pin one shared directory -- the reviewed checkout the
+# helper already defaults to -- and export it so both processes agree. A caller-
+# provided value still wins; an unresolved checkout keeps the per-process default.
+if [[ -z "${AGENT_AUTOREVIEW_DURATIONS_DIR:-}" && "$checkout_root_found" -eq 1 ]]; then
+  export AGENT_AUTOREVIEW_DURATIONS_DIR="$checkout_root/.tmp/agent-autoreview"
+fi
+
 resolved_command_is_trusted() {
   local candidate="$1"
   if [[ "$candidate" == "$node_bin" ]]; then
@@ -3144,6 +3175,92 @@ run_trusted_external() {
     return 127
   }
   return "$status"
+}
+
+# Bound a foreground command with a wall-clock deadline without depending on a
+# timeout(1) binary (absent on stock macOS). Stdout is captured and replayed so
+# $(...) callers still receive it; stderr passes through. The job runs in its
+# own process group so a hung child tree is fully signalled on timeout, and 124
+# is returned so callers fail closed exactly as they do for other lookup errors.
+run_with_deadline() {
+  local label="$1"
+  local deadline="$2"
+  shift 2
+  local out_file
+  local child
+  local waited=0
+  local status
+  local had_monitor=0
+  if ! out_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/autoreview-deadline.XXXXXX")"; then
+    echo "agent:autoreview: failed to allocate a deadline capture file for $label" >&2
+    return 1
+  fi
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
+  "$@" >"$out_file" &
+  child=$!
+  if [[ "$had_monitor" -eq 0 ]]; then
+    set +m
+  fi
+  # If the wrapper itself is interrupted while this job is running, kill the
+  # whole backgrounded process group instead of leaving it to run orphaned and
+  # undetected -- exactly the hung-command class this function exists to
+  # bound. Re-raise the signal against ourselves afterward so the interrupted
+  # script still terminates with the expected signal-death semantics.
+  trap 'kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$out_file"; trap - INT TERM; kill -s TERM "$$"' TERM
+  trap 'kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$out_file"; trap - INT TERM; kill -s INT "$$"' INT
+  while [[ "$waited" -lt "$deadline" ]] && kill -0 "$child" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if kill -0 "$child" 2>/dev/null; then
+    kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
+    sleep 1
+    kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+    echo "agent:autoreview: $label timed out after ${deadline}s" >&2
+    rm -f "$out_file"
+    trap - INT TERM
+    return 124
+  fi
+  if wait "$child"; then
+    status=0
+  else
+    status=$?
+  fi
+  trap - INT TERM
+  cat "$out_file"
+  rm -f "$out_file"
+  return "$status"
+}
+
+stage_epoch_seconds() {
+  /bin/date +%s 2>/dev/null || printf '0'
+}
+
+# Best-effort per-stage timing that mirrors the gate's durations-file
+# convention (gitignored .tmp/agent-<tool>/durations.jsonl). It appends one JSON
+# line and echoes a filterable summary line; logging failure never aborts a run.
+record_stage_duration() {
+  local stage="$1"
+  local seconds="$2"
+  local mode="$3"
+  local dir="${AGENT_AUTOREVIEW_DURATIONS_DIR:-$repo_root/.tmp/agent-autoreview}"
+  local ts
+  ts="$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'unknown')"
+  {
+    mkdir -p "$dir" 2>/dev/null &&
+      printf '{"ts":"%s","stage":"%s","seconds":%s,"mode":"%s"}\n' \
+        "$ts" "$stage" "$seconds" "$mode" >>"$dir/durations.jsonl"
+  } 2>/dev/null || true
+  # The JSONL above is always written; the stderr summary is opt-in so it never
+  # violates the wrapper's strict reviewer-cleanliness stderr contract.
+  if [[ -n "${AGENT_AUTOREVIEW_STAGE_SUMMARY:-}" ]]; then
+    printf 'agent:autoreview: stage-timing   %s %ss (mode=%s)\n' \
+      "$stage" "$seconds" "$mode" >&2
+  fi
 }
 
 run_trusted_node() {
@@ -3583,7 +3700,9 @@ detect_unique_pr_record() {
   if ! lookup="$(
     cd "$repo" &&
       unset GH_HOST GH_REPO &&
-      GH_PAGER=cat GH_PROMPT_DISABLED=1 run_trusted_external "$gh_bin" pr list \
+      GH_PAGER=cat GH_PROMPT_DISABLED=1 run_with_deadline "gh pr list" \
+        "$gh_lookup_deadline_seconds" \
+        run_trusted_external "$gh_bin" pr list \
         --repo "$repository_slug" \
         --head "$branch" \
         --state open \
@@ -3635,7 +3754,9 @@ detect_unique_pr_record() {
       if ! repository_owner="$(
         cd "$repo" &&
           unset GH_HOST GH_REPO &&
-          GH_PAGER=cat GH_PROMPT_DISABLED=1 run_trusted_external "$gh_bin" repo view \
+          GH_PAGER=cat GH_PROMPT_DISABLED=1 run_with_deadline "gh repo view" \
+            "$gh_lookup_deadline_seconds" \
+            run_trusted_external "$gh_bin" repo view \
             "$repository_slug" \
             --json owner \
             --jq '.owner.login'
@@ -4158,6 +4279,8 @@ materialize_feedback_runtime() {
   local snapshot_ref="$2"
   local runtime_dir="$3"
   local relative_path
+  local optional_entry
+  local optional_runtime_path="scripts/pr-feedback-state-claude.mjs"
   local output_path
   local mode
   local size
@@ -4171,6 +4294,22 @@ materialize_feedback_runtime() {
     scripts/pr-ready-state-core.mjs \
     scripts/pr-ready-state-format.mjs
   )
+
+  if ! optional_entry="$(
+    git_output "$repo" ls-tree "$snapshot_ref" -- "$optional_runtime_path"
+  )"; then
+    echo "agent:autoreview: cannot inspect optional trusted feedback runtime: $optional_runtime_path" >&2
+    return 1
+  fi
+  if [[ -n "$optional_entry" ]]; then
+    if ! mode="$(
+      git_blob_mode "$repo" "$snapshot_ref" "$optional_runtime_path"
+    )" || [[ "$mode" != "100644" && "$mode" != "100755" ]]; then
+      echo "agent:autoreview: trusted feedback runtime is not a regular Git blob: $optional_runtime_path" >&2
+      return 1
+    fi
+    runtime_paths+=("$optional_runtime_path")
+  fi
 
   for relative_path in "${runtime_paths[@]}"; do
     if ! mode="$(git_blob_mode "$repo" "$snapshot_ref" "$relative_path")" ||
@@ -4262,7 +4401,9 @@ capture_feedback_state() {
   fi
   (
     cd "$repo"
-    run_trusted_node_in_clean_env \
+    run_with_deadline "PR feedback capture" \
+      "$feedback_capture_deadline_seconds" \
+      run_trusted_node_in_clean_env \
       "${#env_args[@]}" \
       "${env_args[@]}" \
       "$runtime_dir/scripts/pr-feedback-state.mjs" \
@@ -4765,6 +4906,13 @@ bundle_content_manifest() {
   shift 2
   local ignored_root_entries=("$@")
   local digest
+  # Test-only observability hook: when a counter file is provided, record one
+  # line per manifest call so regressions can assert each distinct (tree,moment)
+  # is hashed exactly once. Unset in production, so this is a no-op there.
+  if [[ -n "${AGENT_AUTOREVIEW_MANIFEST_COUNTER_FILE:-}" ]]; then
+    printf '%s\t%s\n' "$root" "$expected_root_identity" \
+      >>"$AGENT_AUTOREVIEW_MANIFEST_COUNTER_FILE" 2>/dev/null || true
+  fi
   assert_bundle_tree_acl_trusted "$root" "$expected_root_identity" || return 1
   # The single-quoted string is JavaScript source, not shell interpolation.
   # shellcheck disable=SC2016
@@ -6598,12 +6746,19 @@ EOF
     trusted_helper_runtime_dir=""
     trusted_helper_runtime_identity=""
     prepared_helper_override=""
-  fi
-  if ! expected_bundle_manifest="$(
-    bundle_content_manifest "$staging_dir" "$staging_identity"
-  )"; then
-    echo "agent:autoreview: prepared-bundle staging changed before publication" >&2
-    return 1
+    # Removing the trusted-runtime subtree changes the staging tree, so the
+    # publishable manifest is a new moment that must be hashed independently.
+    if ! expected_bundle_manifest="$(
+      bundle_content_manifest "$staging_dir" "$staging_identity"
+    )"; then
+      echo "agent:autoreview: prepared-bundle staging changed before publication" >&2
+      return 1
+    fi
+  else
+    # No subtree was removed and prompt validation is read-only, so the staging
+    # tree is byte-identical to the post-source-validation snapshot. Reuse that
+    # digest rather than re-hashing the same (tree,moment) for publication.
+    expected_bundle_manifest="$post_snapshot_bundle_manifest"
   fi
   publish_bundle_with_reservation \
     "$staging_dir" \
@@ -6620,12 +6775,19 @@ EOF
 }
 
 if [[ -n "$verify_bundle_dir" ]]; then
+  stage_timer_start="$(stage_epoch_seconds)"
   verify_context_bundle "$verify_bundle_dir" "$verify_expected_manifest"
+  record_stage_duration "verification" \
+    "$(($(stage_epoch_seconds) - stage_timer_start))" "verify"
   exit 0
 fi
 
 if [[ -n "$prepare_bundle_dir" ]]; then
+  stage_timer_start="$(stage_epoch_seconds)"
   prepare_context_bundle "$prepare_bundle_dir" "$feedback_pr" "$@"
+  record_stage_duration "prepare-bundle" \
+    "$(($(stage_epoch_seconds) - stage_timer_start))" \
+    "$(arg_value --mode auto "$@")"
   exit 0
 fi
 

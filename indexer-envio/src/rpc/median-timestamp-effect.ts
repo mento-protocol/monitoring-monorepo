@@ -2,7 +2,7 @@ import { S } from "envio";
 import { fetchMedianTimestamp } from "./oracle-state.js";
 import { createEffect } from "./tracked-effect.js";
 
-type MedianTimestampProviderFamily = "polygon" | "celo" | "monad" | "default";
+export type OracleRpcProviderFamily = "polygon" | "celo" | "monad" | "default";
 
 export const MEDIAN_TIMESTAMP_RATE_LIMITS = {
   // dRPC's stressed public-tier floor is 40 eth_call/s.
@@ -17,9 +17,9 @@ export const MEDIAN_TIMESTAMP_RATE_LIMITS = {
   default: { calls: 40, per: "second" },
 } as const;
 
-function medianTimestampProviderFamily(
+export function oracleRpcProviderFamily(
   chainId: number,
-): MedianTimestampProviderFamily {
+): OracleRpcProviderFamily {
   if (chainId === 137 || chainId === 80002) return "polygon";
   if (chainId === 42220 || chainId === 11142220) return "celo";
   if (chainId === 143 || chainId === 10143) return "monad";
@@ -28,7 +28,7 @@ function medianTimestampProviderFamily(
 
 function createMedianTimestampEffect(
   name: string,
-  family: MedianTimestampProviderFamily,
+  family: OracleRpcProviderFamily,
 ) {
   return createEffect(
     {
@@ -75,7 +75,7 @@ const defaultMedianTimestampEffect = createMedianTimestampEffect(
 /** Select one stable effect object per provider family. Using the same object
  * in preload and processing preserves Envio's identical-input deduplication. */
 export function medianTimestampEffectForChain(chainId: number) {
-  switch (medianTimestampProviderFamily(chainId)) {
+  switch (oracleRpcProviderFamily(chainId)) {
     case "polygon":
       return polygonMedianTimestampEffect;
     case "celo":

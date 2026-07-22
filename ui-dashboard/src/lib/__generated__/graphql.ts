@@ -2321,6 +2321,97 @@ export type OlsPoolBoolExp = {
   readonly updatedAtTimestamp?: ComparisonExp<string>;
 };
 
+export type OracleExpiryStateSelectColumn =
+  | "bootstrapThroughBlock"
+  | "chainId"
+  | "globalReportExpiry"
+  | "id"
+  | "rateFeedID"
+  | "reportExpiry"
+  | "tokenReportExpiry"
+  | "updatedAtBlock"
+  | "updatedAtLogIndex"
+  | "updatedAtTimestamp";
+
+export type OracleExpiryStateOrderBy = {
+  readonly bootstrapThroughBlock?: OrderBy;
+  readonly chainId?: OrderBy;
+  readonly globalReportExpiry?: OrderBy;
+  readonly id?: OrderBy;
+  readonly rateFeedID?: OrderBy;
+  readonly reportExpiry?: OrderBy;
+  readonly tokenReportExpiry?: OrderBy;
+  readonly updatedAtBlock?: OrderBy;
+  readonly updatedAtLogIndex?: OrderBy;
+  readonly updatedAtTimestamp?: OrderBy;
+};
+
+export type OracleExpiryStateBoolExp = {
+  readonly _and?:
+    | OracleExpiryStateBoolExp
+    | ReadonlyArray<OracleExpiryStateBoolExp>;
+  readonly _or?:
+    | OracleExpiryStateBoolExp
+    | ReadonlyArray<OracleExpiryStateBoolExp>;
+  readonly _not?: OracleExpiryStateBoolExp;
+  readonly bootstrapThroughBlock?: ComparisonExp<string>;
+  readonly chainId?: ComparisonExp<number>;
+  readonly globalReportExpiry?: ComparisonExp<string>;
+  readonly id?: ComparisonExp<string>;
+  readonly rateFeedID?: ComparisonExp<string>;
+  readonly reportExpiry?: ComparisonExp<string>;
+  readonly tokenReportExpiry?: ComparisonExp<string>;
+  readonly updatedAtBlock?: ComparisonExp<string>;
+  readonly updatedAtLogIndex?: ComparisonExp<number>;
+  readonly updatedAtTimestamp?: ComparisonExp<string>;
+};
+
+export type OracleFeedStateSelectColumn =
+  | "activeReporters"
+  | "activeReportTimestamps"
+  | "bootstrapThroughBlock"
+  | "chainId"
+  | "id"
+  | "medianReportTimestamp"
+  | "rateFeedID"
+  | "reportExpiry"
+  | "updatedAtBlock"
+  | "updatedAtLogIndex"
+  | "updatedAtTimestamp";
+
+export type OracleFeedStateOrderBy = {
+  readonly activeReporters?: OrderBy;
+  readonly activeReportTimestamps?: OrderBy;
+  readonly bootstrapThroughBlock?: OrderBy;
+  readonly chainId?: OrderBy;
+  readonly id?: OrderBy;
+  readonly medianReportTimestamp?: OrderBy;
+  readonly rateFeedID?: OrderBy;
+  readonly reportExpiry?: OrderBy;
+  readonly updatedAtBlock?: OrderBy;
+  readonly updatedAtLogIndex?: OrderBy;
+  readonly updatedAtTimestamp?: OrderBy;
+};
+
+export type OracleFeedStateBoolExp = {
+  readonly _and?:
+    | OracleFeedStateBoolExp
+    | ReadonlyArray<OracleFeedStateBoolExp>;
+  readonly _or?: OracleFeedStateBoolExp | ReadonlyArray<OracleFeedStateBoolExp>;
+  readonly _not?: OracleFeedStateBoolExp;
+  readonly activeReporters?: ComparisonExp<string>;
+  readonly activeReportTimestamps?: ComparisonExp<string>;
+  readonly bootstrapThroughBlock?: ComparisonExp<string>;
+  readonly chainId?: ComparisonExp<number>;
+  readonly id?: ComparisonExp<string>;
+  readonly medianReportTimestamp?: ComparisonExp<string>;
+  readonly rateFeedID?: ComparisonExp<string>;
+  readonly reportExpiry?: ComparisonExp<string>;
+  readonly updatedAtBlock?: ComparisonExp<string>;
+  readonly updatedAtLogIndex?: ComparisonExp<number>;
+  readonly updatedAtTimestamp?: ComparisonExp<string>;
+};
+
 export type OraclePriceDailySnapshotSelectColumn =
   | "anyOutOfBand"
   | "blockNumber"

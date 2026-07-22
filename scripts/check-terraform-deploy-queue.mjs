@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 
 const DEFAULT_API_URL = "https://api.github.com";
 const DEFAULT_SERVER_URL = "https://github.com";
-const DEFAULT_SLACK_CHANNEL = "#ci-operations";
+const DEFAULT_SLACK_CHANNEL = "#deploys";
 const DEFAULT_STALE_MINUTES = 60;
 const USER_AGENT = "mento-monitoring-terraform-deploy-queue-watch";
 const MAX_SLACK_RUNS = 8;
@@ -63,7 +63,7 @@ function isDeployQueueCandidate(run) {
     return false;
   }
 
-  return run.event !== "push" || run.head_branch === "main";
+  return run.head_branch === "main";
 }
 
 function summarizeJobs(jobs) {
@@ -363,7 +363,7 @@ async function main(
 
   if (stalledRuns.length === 0) {
     console.log(
-      `No Terraform deploy workflow runs older than ${staleMinutes}m are queued/pending with zero started jobs.`,
+      `No Terraform deploy workflow runs older than ${staleMinutes}m are queued/pending/requested/waiting with zero started jobs.`,
     );
     return { stalledRuns };
   }
@@ -383,7 +383,7 @@ async function main(
   });
 
   console.error(
-    `Detected ${stalledRuns.length} Terraform deploy run(s) queued/pending for at least ${staleMinutes}m with zero started jobs.`,
+    `Detected ${stalledRuns.length} Terraform deploy run(s) queued/pending/requested/waiting for at least ${staleMinutes}m with zero started jobs.`,
   );
   for (const run of stalledRuns) {
     console.error(
@@ -418,6 +418,7 @@ if (
 }
 
 export {
+  DEFAULT_SLACK_CHANNEL,
   DEPLOY_WORKFLOWS,
   buildSlackPayload,
   classifyStalledRuns,
