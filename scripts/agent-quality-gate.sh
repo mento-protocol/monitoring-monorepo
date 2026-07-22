@@ -2661,10 +2661,11 @@ run_with_timeout() {
 
   last_command_timed_out=false
   timeout_seq=$((timeout_seq + 1))
-  # BASHPID (not $$) so concurrent parallel-pool subshells never collide on the
-  # marker path; the watchdog CREATES this file, so it must not pre-exist.
-  timeout_marker="$scratch_dir/command-timeout.${BASHPID}.${timeout_seq}.${RANDOM}"
-  rm -f "$timeout_marker"
+  # mktemp guarantees a unique path even across concurrent parallel-pool
+  # subshells (BASHPID would too, but stock macOS Bash 3.2 does not define it
+  # and this script runs under set -u). The file exists from the start; the
+  # timeout signal is CONTENT (non-empty), written by the watchdog.
+  timeout_marker="$(mktemp "$scratch_dir/command-timeout.XXXXXX")"
 
   bash -c "$command" &
   cmd_pid=$!
@@ -2680,20 +2681,32 @@ run_with_timeout() {
     cmd_pid="$1"
     timeout_secs="$2"
     marker="$3"
-    kill_tree() {
+    collect_tree() {
       local pid="$1"
-      local sig="$2"
       local child
       while IFS= read -r child; do
-        [ -n "$child" ] && kill_tree "$child" "$sig"
+        [ -n "$child" ] && collect_tree "$child"
       done < <(pgrep -P "$pid" 2>/dev/null || true)
-      kill "-${sig}" "$pid" 2>/dev/null || true
+      echo "$pid"
     }
     sleep "$timeout_secs"
-    : > "$marker"
-    kill_tree "$cmd_pid" TERM
+    echo timeout > "$marker"
+    # Snapshot the whole tree BEFORE TERM: a root that exits on TERM reparents
+    # a TERM-ignoring descendant away from the tree, so a post-TERM re-walk
+    # would miss it. The KILL pass targets the saved list.
+    tree="$(collect_tree "$cmd_pid")"
+    while IFS= read -r pid; do
+      [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null
+    done <<EOF_TREE
+$tree
+EOF_TREE
     sleep 3
-    kill_tree "$cmd_pid" KILL
+    while IFS= read -r pid; do
+      [ -n "$pid" ] && kill -KILL "$pid" 2>/dev/null
+    done <<EOF_TREE
+$tree
+EOF_TREE
+    exit 0
   ' _ "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" >/dev/null 2>&1 &
   watchdog_pid=$!
   active_timeout_pids=("$cmd_pid" "$watchdog_pid")
@@ -2701,13 +2714,20 @@ run_with_timeout() {
   wait "$cmd_pid"
   rc=$?
 
-  # Command settled first (or was killed): tear the watchdog and its pending
-  # sleep down so nothing leaks on normal completion.
-  kill_process_tree "$watchdog_pid" TERM
-  wait "$watchdog_pid" 2>/dev/null
+  if [[ -s "$timeout_marker" ]]; then
+    # A timeout fired: the watchdog is mid-escalation. Let it finish its KILL
+    # pass (bounded by the 3s grace) — killing it here would strand a
+    # TERM-ignoring descendant whose root already exited on TERM.
+    wait "$watchdog_pid" 2>/dev/null
+  else
+    # Command settled first: tear the watchdog and its pending sleep down so
+    # nothing leaks on normal completion.
+    kill_process_tree "$watchdog_pid" TERM
+    wait "$watchdog_pid" 2>/dev/null
+  fi
   active_timeout_pids=()
 
-  if [[ -e "$timeout_marker" ]]; then
+  if [[ -s "$timeout_marker" ]]; then
     last_command_timed_out=true
     rc=1
   elif [[ "$rc" -gt 128 ]]; then
@@ -2826,6 +2846,7 @@ try_reuse_command() {
   echo
   echo "↻ ${command} (fresh from previous run)"
   command_summaries+=("reused|0|${command}")
+  stamp_reuse_count=$((${stamp_reuse_count:-0} + 1))
   return 0
 }
 
@@ -3242,7 +3263,14 @@ log_duration_line "ok" "$gate_total_elapsed" "__run_total__" "run" || true
 
 echo
 echo "All mapped commands passed."
-{
-  printf 'created_at=%s\n' "$(date +%s)"
-  printf 'stamp=%s\n' "$current_stamp"
-} > "$success_stamp_file"
+if [[ "${stamp_reuse_count:-0}" -eq 0 ]]; then
+  # Only a fully-executed green run earns the whole-run fast-path stamp. A
+  # resumed run reused work whose real age lives in the per-command stamps;
+  # re-dating it here would let --skip-if-fresh extend validation reuse past
+  # the two-hour ceiling (command passes at t=0, retry succeeds at t=119m,
+  # fresh whole-run stamp then covers t=238m).
+  {
+    printf 'created_at=%s\n' "$(date +%s)"
+    printf 'stamp=%s\n' "$current_stamp"
+  } > "$success_stamp_file"
+fi

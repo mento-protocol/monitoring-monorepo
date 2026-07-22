@@ -33,10 +33,14 @@ restore_hook_configs() {
 trap 'restore_hook_configs; rm -rf "$gate_cache_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$codex_hooks_backup" "$claude_settings_backup" "$codex_hooks_fixture" "$claude_settings_fixture"' EXIT
 
 fail() {
-  echo "agent-quality-gate test failed: $*" >&2
-  echo >&2
-  echo "Last gate output:" >&2
-  sed 's/^/  /' "$output_file" >&2
+  # Stdout AND stderr: some CI log captures drop the suite's stderr, which
+  # left failures reported only as a bare nonzero exit.
+  {
+    echo "agent-quality-gate test failed: $*"
+    echo
+    echo "Last gate output:"
+    sed 's/^/  /' "$output_file"
+  } | tee /dev/stderr
   exit 1
 }
 
@@ -3686,6 +3690,25 @@ STUB
       > "$output_file" 2>&1
   [[ "$(wc -l < "$command_stamp_resume_repo/lint-side-effect" | tr -d ' ')" == "1" ]] ||
     fail "expected lint:scripts to be reused (not re-run) on the resume rerun"
+
+  # PR 1492 review: the resumed (partially reused) success must NOT write the
+  # whole-run fast-path stamp — re-dating reused work would let --skip-if-fresh
+  # extend validation reuse past the two-hour ceiling. A third run with
+  # --skip-if-fresh therefore still executes/reuses commands instead of
+  # whole-run skipping.
+  LINT_SIDE_EFFECT="$command_stamp_resume_repo/lint-side-effect" \
+    PREWARM_FAIL_FLAG="$command_stamp_resume_repo/prewarm-fail" \
+    PATH="$command_stamp_resume_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      --skip-if-fresh \
+      > "$command_stamp_resume_repo/third-run-output" 2>&1
+  if grep -q "skipping mapped commands" "$command_stamp_resume_repo/third-run-output"; then
+    fail "a resumed run's success must not enable the whole-run fast-path skip"
+  fi
 )
 rm -rf "$command_stamp_resume_repo"
 assert_raw_contains "↻ pnpm lint:scripts (fresh from previous run)"
@@ -3812,10 +3835,21 @@ command_timeout_repo="$(mktemp -d)"
 #!/usr/bin/env bash
 exit 0
 STUB
-  # A distinctively-named victim so pgrep can prove the tree was reaped.
+  # A distinctively-named victim so pgrep can prove the tree was reaped. The
+  # parent exits on TERM while its child ignores TERM (PR 1492 review): the
+  # watchdog must snapshot the tree before TERM and KILL the saved list, or
+  # the reparented child survives the escalation.
+  cat > bin/qg-timeout-orphan <<'STUB'
+#!/usr/bin/env bash
+trap '' TERM
+while :; do sleep 1; done
+STUB
   cat > bin/qg-timeout-victim <<'STUB'
 #!/usr/bin/env bash
-sleep 45
+trap 'exit 0' TERM
+qg-timeout-orphan &
+sleep 45 &
+wait
 STUB
   cat > bin/pnpm <<'STUB'
 #!/usr/bin/env bash
@@ -3824,7 +3858,7 @@ if [[ "$*" == "agent:prewarm:test" ]]; then
 fi
 exit 0
 STUB
-  chmod +x bin/pnpm bin/qg-timeout-victim tools/trunk
+  chmod +x bin/pnpm bin/qg-timeout-victim bin/qg-timeout-orphan tools/trunk
   git add .
   git commit -qm init
   printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
@@ -3846,6 +3880,10 @@ STUB
   if pgrep -f "qg-timeout-victim" >/dev/null 2>&1; then
     pkill -KILL -f "qg-timeout-victim" 2>/dev/null || true
     fail "timed-out command left a leaked background process"
+  fi
+  if pgrep -f "qg-timeout-orphan" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-timeout-orphan" 2>/dev/null || true
+    fail "timed-out command's TERM-ignoring child escaped the watchdog KILL pass"
   fi
 )
 rm -rf "$command_timeout_repo"
