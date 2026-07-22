@@ -1855,6 +1855,12 @@ while IFS= read -r path; do
     .agents/*|.claude/skills/*|.claude/settings.json|.codex/hooks.json)
       add_surface "agent-context"
       add_command "pnpm agent:context-check" "agent context files changed"
+      case "$path" in
+        .agents/skills/*|.claude/skills/*)
+          add_command "bash scripts/check-skills-mirror.test.sh" "skills mirror content changed"
+          add_command "bash scripts/check-skills-mirror.sh" "skills mirror content changed"
+          ;;
+      esac
       ;;
     scripts/*.sh)
       add_surface "scripts"
@@ -1886,6 +1892,10 @@ while IFS= read -r path; do
           ;;
         scripts/agent-session-end-hook.sh)
           add_command "pnpm agent:context-check" "agent SessionEnd hook changed"
+          ;;
+        scripts/check-skills-mirror.sh|scripts/check-skills-mirror.test.sh)
+          add_command "bash scripts/check-skills-mirror.test.sh" "skills mirror checker changed"
+          add_command "bash scripts/check-skills-mirror.sh" "skills mirror checker changed"
           ;;
       esac
       ;;
@@ -1964,7 +1974,7 @@ while IFS= read -r path; do
         scripts/sentry-triage-archive.mjs|scripts/sentry-triage-archive.test.mjs)
           add_command "pnpm sentry:archive:test" "Sentry triage archive helper changed"
           ;;
-        scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state.test.mjs)
+        scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
           ;;
         scripts/pr-ready-state.mjs|scripts/pr-ready-state-core.mjs|scripts/pr-ready-state-format.mjs|scripts/pr-ready-state.test.mjs)

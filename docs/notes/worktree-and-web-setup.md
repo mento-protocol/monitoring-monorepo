@@ -3,7 +3,7 @@ title: New Worktree / Clone Setup and Claude Code on the Web Setup
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -23,9 +23,13 @@ After creating a new worktree manually or cloning the repo, run:
 ./scripts/setup.sh
 ```
 
-This ensures deps are installed, Playwright Chromium is available for dashboard
-browser tests, and Envio codegen has produced the generated type facade
-required for `indexer-envio` TypeScript to compile. A `pnpm patch` on
+This configures the tracked git hooks, installs dependencies, builds
+`shared-config`, and ensures Envio codegen has produced the generated type
+facade required for `indexer-envio` TypeScript to compile. It also attempts to
+install Playwright Chromium for dashboard browser tests. A blocked browser
+download warns and continues; run
+`pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium`
+before browser tests when the binary is still absent. A `pnpm patch` on
 `blamer@1.0.7` (jscpd's transitive git-blame dependency) strips its shipped
 `.idea/` directory so sandboxed installs no longer hit a deterministic EPERM
 at `importPackage`.
@@ -53,12 +57,13 @@ itself through a SessionStart hook (`.claude/settings.json` →
 ./scripts/claude-code-web-setup.sh
 ```
 
-The script is gated on `$CLAUDE_CODE_REMOTE` so it is a no-op for local Claude
-Code sessions. It performs the same install + codegen contract as
-`./scripts/setup.sh` plus a Playwright Chromium install for the dashboard
-browser fixture suite. The Playwright step is non-fatal: hosted environments
-that restrict outbound access to `cdn.playwright.dev` will skip the download
-and warn instead of failing the bootstrap.
+The heavy bootstrap runs only for a remote startup event, not local sessions,
+resume, or compact. It installs dependencies, prewarms Trunk, runs the context
+check, builds/code-generates the required packages, configures available
+GitHub/MCP integration, and attempts a Playwright Chromium install for the
+dashboard browser fixture suite. The Playwright step is non-fatal: hosted
+environments that restrict outbound access to `cdn.playwright.dev` warn
+instead of failing the bootstrap.
 
 Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
 (mirrored under `.agents/skills/` for Codex), so the familiar `/ship` and
@@ -66,5 +71,5 @@ Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
 agent:quality-gate`, `pnpm agent:autoreview`, `pnpm pr:ready-state`) without
 needing a developer's personal skills present. When the Claude `Monitor` tool
 is unavailable in the hosted session, the `babysit-pr` skill falls back to
-`pnpm pr:ready-state --pr <number> --watch --compact` as the foreground watch
-loop.
+`pnpm pr:ready-state --pr <number> --watch --compact --until-ready` as the
+foreground watch loop.

@@ -88,7 +88,7 @@
     "code-health:history": "node scripts/code-health-history.mjs",
     "code-health:duplication": "jscpd --config .jscpd.json",
     "code-health": "pnpm code-health:knip && pnpm code-health:deps",
-    "lint:scripts": "eslint scripts/ eslint.config.mjs .dependency-cruiser.cjs",
+    "lint:scripts": "eslint scripts/ eslint.config.mjs .dependency-cruiser.cjs --cache --cache-strategy content --cache-location .eslintcache",
     "indexer:mutation": "pnpm --filter @mento-protocol/indexer-envio test:mutation",
     "indexer:testnet:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml",
     "indexer:testnet:dev": "pnpm --filter @mento-protocol/indexer-envio dev --config config.multichain.testnet.yaml",

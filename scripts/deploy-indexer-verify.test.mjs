@@ -20,7 +20,7 @@ import {
 
 const NOW_SECONDS = 2_000_000_000;
 const VALID_REPLAY_INTEGRITY = {
-  value: { polygonExactMedianTimestamp: 2 },
+  value: { polygonExactMedianTimestamp: 3 },
   readError: "",
 };
 
@@ -126,20 +126,22 @@ assert.equal(
 );
 assert.equal(resolveProdDeployment(indexerJson)?.commit_hash, "abc1234");
 
-assert.equal(summarizeReplayIntegrity(VALID_REPLAY_INTEGRITY).ok, true);
+const validReplayIntegrity = summarizeReplayIntegrity(VALID_REPLAY_INTEGRITY);
+assert.equal(validReplayIntegrity.ok, true);
+assert.equal(validReplayIntegrity.requiredVersion, 3);
 assert.match(
   summarizeReplayIntegrity({
-    value: { polygonExactMedianTimestamp: 1 },
+    value: { polygonExactMedianTimestamp: 2 },
     readError: "",
   }).failures.join("\n"),
-  /predates Polygon exact-median replay integrity v2/,
+  /predates Polygon event-sourced oracle-freshness replay integrity v3/,
 );
 assert.match(
   summarizeReplayIntegrity({
     value: null,
     readError: "marker missing from old commit",
   }).failures.join("\n"),
-  /marker missing[\s\S]*predates Polygon exact-median replay integrity/,
+  /marker missing[\s\S]*predates Polygon event-sourced oracle-freshness replay integrity/,
 );
 assert.equal(
   summarizeReplayIntegrity({
@@ -329,6 +331,7 @@ const summary = buildSummary({
 
 assert.equal(summary.ok, true);
 assert.match(renderText(summary), /Result: verified/);
+assert.match(renderText(summary), /Polygon oracle freshness: v3\/v3/);
 
 const semanticFailureWhileSyncing = buildSummary({
   args: { allowSyncing: true },

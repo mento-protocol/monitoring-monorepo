@@ -196,7 +196,7 @@ export const LABEL_DEFINITIONS = [
     name: "sentry:fix-refused",
     color: "bfdadc",
     description:
-      "Autofix attempt declined to open a PR (no change or guard-refused); remove the label to allow a retry (ADR 0036 Phase 2b)",
+      "Autofix declined to open a PR (no change/guard-refused); remove to retry (ADR 0036 Phase 2b)",
   },
   {
     name: "sentry:approved-archive",
@@ -208,7 +208,7 @@ export const LABEL_DEFINITIONS = [
     name: "sentry:archived",
     color: "6e7681",
     description:
-      "Underlying Sentry issue archived (archived_until_escalating) via the human-approved archive loop (Phase 2a, ADR 0036)",
+      "Sentry issue archived (archived_until_escalating) via the Phase 2a archive loop (ADR 0036)",
   },
 ];
 

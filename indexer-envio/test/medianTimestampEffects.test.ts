@@ -3,6 +3,7 @@ import { describe, it } from "vitest";
 import {
   MEDIAN_TIMESTAMP_RATE_LIMITS,
   medianTimestampEffectForChain,
+  oracleReportTimestampsEffectForChain,
 } from "../src/rpc/effects.js";
 
 describe("medianTimestamp effect rate limits", () => {
@@ -30,5 +31,20 @@ describe("medianTimestamp effect rate limits", () => {
       monad: { calls: 40, per: "second" },
       default: { calls: 40, per: "second" },
     });
+  });
+
+  it("scopes the bounded timestamp-list bootstrap by provider family", () => {
+    const polygon = oracleReportTimestampsEffectForChain(137);
+    const celo = oracleReportTimestampsEffectForChain(42220);
+    const monad = oracleReportTimestampsEffectForChain(143);
+    const fallback = oracleReportTimestampsEffectForChain(1);
+
+    assert.equal(oracleReportTimestampsEffectForChain(80002), polygon);
+    assert.equal(oracleReportTimestampsEffectForChain(11142220), celo);
+    assert.equal(oracleReportTimestampsEffectForChain(10143), monad);
+    assert.notEqual(polygon, celo);
+    assert.notEqual(polygon, monad);
+    assert.notEqual(celo, monad);
+    assert.notEqual(fallback, polygon);
   });
 });

@@ -3,7 +3,7 @@ title: Spoken Attention Nudge
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-05
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -24,23 +24,24 @@ repo-standard key file path so behavior does not depend on shell startup files
 or stripped environment variables:
 
 ```bash
-sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval to deploy the Alloy collector"
+sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat"
 ```
 
 `sag` needs network access to ElevenLabs, a readable ElevenLabs API key, and the
-local audio device. Store the key for agent nudges in
-`$HOME/.config/elevenlabs_api_key` with mode `0600`, then invoke `sag` with
-`--api-key-file`. This is required for Codex because it does not reliably
+local audio device. A human operator provisions
+`$HOME/.config/elevenlabs_api_key` with mode `0600`; agents may pass that
+path to `sag` but must not open, copy, create, rotate, or retrieve the
+credential. The key file is required for Codex because it does not reliably
 inherit shell startup files, and its environment policy strips secret-like
-variables such as `ELEVENLABS_API_KEY`, even when they exist in `.zshrc`. Claude
-may inherit `.zshrc` in local shells, but should still use the same key-file
-command so the two agents behave consistently.
+variables such as `ELEVENLABS_API_KEY`, even when they exist in `.zshrc`.
+Claude may inherit `.zshrc` in local shells, but should still use the same
+key-file command so the two agents behave consistently.
 
-Because `sag` is a third-party Homebrew package, it may not exist on every
+Because `sag` is a third-party CLI, it may not exist on every
 developer machine. Use this fallback order:
 
 ```bash
-msg="hey, i need your feedback on the deploy"
+msg="hey, i need your feedback in the agent chat"
 sent=0
 if command -v sag >/dev/null 2>&1 && [ -r "$HOME/.config/elevenlabs_api_key" ]; then
   sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "$msg" && sent=1
@@ -61,10 +62,15 @@ built-in TTS command; `spd-say` is best-effort only when installed. In Codex,
 request escalated execution for the nudge instead of trying to run it inside the
 workspace sandbox. If every spoken path fails, report the failure in chat and
 continue with the visible written request; do not silently assume the user heard
-the nudge. Claude command pre-approvals should stay limited to literal,
-low-information nudge messages. Do not pre-approve arbitrary `say`, `spd-say`,
-or `sag` message arguments, because shell substitutions in those arguments could
-disclose local file contents through speech or the ElevenLabs request.
+the nudge. The compound fallback recipe may require normal command approval.
+
+`sag` sends the spoken text to ElevenLabs. Keep both remote and local fallback
+messages fixed and low-information: never include secrets, logs, identifiers,
+addresses, filenames, or copied local content. Claude command pre-approvals
+should stay limited to the literal phrases tracked in `.claude/settings.json`.
+Do not pre-approve arbitrary `say`, `spd-say`, or `sag` message arguments,
+because shell substitutions in those arguments could disclose local file
+contents through speech or the ElevenLabs request.
 
 Do not wire this into the existing SessionEnd hook. The current shared hook
 events do not know whether the agent is genuinely waiting on the user versus
