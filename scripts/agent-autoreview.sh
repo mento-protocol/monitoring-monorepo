@@ -3085,6 +3085,17 @@ attested_helper_runtime_manifest=""
 gh_lookup_deadline_seconds="${AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS:-60}"
 feedback_capture_deadline_seconds="${AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS:-120}"
 
+# Unify per-stage timing between the wrapper and the helper. When a runtime-
+# changing PR is reviewed from a separate trusted checkout, repo_root names that
+# trusted wrapper checkout while the helper resolves the reviewed checkout from
+# its working directory, so their default durations targets diverge and neither
+# log holds the whole run. Pin one shared directory -- the reviewed checkout the
+# helper already defaults to -- and export it so both processes agree. A caller-
+# provided value still wins; an unresolved checkout keeps the per-process default.
+if [[ -z "${AGENT_AUTOREVIEW_DURATIONS_DIR:-}" && "$checkout_root_found" -eq 1 ]]; then
+  export AGENT_AUTOREVIEW_DURATIONS_DIR="$checkout_root/.tmp/agent-autoreview"
+fi
+
 resolved_command_is_trusted() {
   local candidate="$1"
   if [[ "$candidate" == "$node_bin" ]]; then

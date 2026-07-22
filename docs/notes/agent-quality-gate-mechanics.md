@@ -168,10 +168,13 @@ that directory; `AGENT_AUTOREVIEW_STAGE_SUMMARY` (any non-empty value) also
 echoes a filterable `agent:autoreview: stage-timing ...` line per stage to
 stderr — off by default so it never violates the reviewer-cleanliness stderr
 contract. Logging failure never aborts or fails a run. Automatic `gh`-based PR
-lookups (base-branch detection, `--feedback-pr auto` resolution, feedback
-capture) are bounded by `AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS` (default 60s)
-so a hung `gh` process cannot stall autoreview indefinitely; a lookup that
-exceeds the deadline fails closed like any other lookup error. The wrapper's
+lookups for base-branch detection and `--feedback-pr auto` resolution are
+bounded by `AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS` (default 60s); the separate
+multi-call PR feedback capture is bounded by its own
+`AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS` (default 120s, higher because it
+runs several GitHub calls in one pass). Either way a hung `gh` process cannot
+stall autoreview indefinitely; a lookup that exceeds its deadline fails closed
+like any other lookup error. The wrapper's
 own `gh`/subprocess deadlines (`run_with_deadline`) run the command in its own
 process group and escalate `SIGTERM` then `SIGKILL` on timeout or on the
 wrapper itself being interrupted; the helper's `gh` calls (`spawnSync`) use

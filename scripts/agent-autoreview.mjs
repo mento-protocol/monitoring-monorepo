@@ -4448,48 +4448,55 @@ async function main() {
 
   let report;
   const engineStartedAt = Date.now();
-  if (args.engine === "local") {
-    assertReviewSourceState(
-      repo,
-      reviewSourceSnapshot,
-      target,
-      targetSelectionSourceSnapshot,
-      guardTargetSelectionDuringReview,
-      "source changed before local review; rerun autoreview against the updated tree",
-    );
-    report = runLocalReview(repo, target, paths);
-    assertReviewSourceState(
-      repo,
-      reviewSourceSnapshot,
-      target,
-      targetSelectionSourceSnapshot,
-      guardTargetSelectionDuringReview,
-      "source changed during local review; rerun autoreview against the updated tree",
-    );
-  } else {
-    assertReviewSourceState(
-      repo,
-      reviewSourceSnapshot,
-      target,
-      targetSelectionSourceSnapshot,
-      guardTargetSelectionDuringReview,
-      "source changed before semantic review; rerun autoreview against the updated tree",
-    );
-    const raw =
-      args.engine === "codex"
-        ? await runCodex(repo, args, prompts[0])
-        : await runClaude(repo, args, prompts[0]);
-    report = validateReport(extractReviewJson(raw), paths);
-    assertReviewSourceState(
-      repo,
-      reviewSourceSnapshot,
-      target,
-      targetSelectionSourceSnapshot,
-      guardTargetSelectionDuringReview,
-      "source changed during semantic review; rerun autoreview against the updated tree",
-    );
+  try {
+    if (args.engine === "local") {
+      assertReviewSourceState(
+        repo,
+        reviewSourceSnapshot,
+        target,
+        targetSelectionSourceSnapshot,
+        guardTargetSelectionDuringReview,
+        "source changed before local review; rerun autoreview against the updated tree",
+      );
+      report = runLocalReview(repo, target, paths);
+      assertReviewSourceState(
+        repo,
+        reviewSourceSnapshot,
+        target,
+        targetSelectionSourceSnapshot,
+        guardTargetSelectionDuringReview,
+        "source changed during local review; rerun autoreview against the updated tree",
+      );
+    } else {
+      assertReviewSourceState(
+        repo,
+        reviewSourceSnapshot,
+        target,
+        targetSelectionSourceSnapshot,
+        guardTargetSelectionDuringReview,
+        "source changed before semantic review; rerun autoreview against the updated tree",
+      );
+      const raw =
+        args.engine === "codex"
+          ? await runCodex(repo, args, prompts[0])
+          : await runClaude(repo, args, prompts[0]);
+      report = validateReport(extractReviewJson(raw), paths);
+      assertReviewSourceState(
+        repo,
+        reviewSourceSnapshot,
+        target,
+        targetSelectionSourceSnapshot,
+        guardTargetSelectionDuringReview,
+        "source changed during semantic review; rerun autoreview against the updated tree",
+      );
+    }
+  } finally {
+    // Record the engine span even when the invocation throws -- a nonzero
+    // engine exit, or a post-invocation source-state check failing -- so the
+    // runs operators most need to profile still get an engine-invocation
+    // duration. The top-level `.finally` flushes whatever spans were recorded.
+    recordStageDuration("engine-invocation", engineStartedAt);
   }
-  recordStageDuration("engine-invocation", engineStartedAt);
 
   if (args.bundleOutput) {
     const displayedBundleOutput = args.bundleOutputDisplay || args.bundleOutput;
