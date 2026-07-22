@@ -152,7 +152,13 @@ pnpm pr:ready-state --pr <number> --json
 
 All-clear requires a clean feedback ledger plus ready-state's current-head
 required state, including the current-head
-`chatgpt-codex-connector[bot]` PR-description approval. Do not post routine or
+`chatgpt-codex-connector[bot]` PR-description approval. Exception: in Claude
+cloud sessions the probes cannot run (gh's repo API is platform-blocked);
+run the MCP emulation checklist from the `babysit-pr` skill instead, label
+any all-clear MCP-emulated rather than probe-verified, and leave the
+probe-verified all-clear to a gh-capable surface — see
+[`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
+Do not post routine or
 duplicate `@codex review` requests. The projection contract, break-glass
 behavior, optional-bot treatment, and watch loop live in
 [`docs/notes/pr-ready-state.md`](docs/notes/pr-ready-state.md) and the
