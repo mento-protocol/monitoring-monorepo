@@ -9,6 +9,8 @@ unset \
   ENV \
   NODE_OPTIONS \
   NODE_PATH \
+  OPENSSL_CONF \
+  OPENSSL_MODULES \
   PERL5LIB \
   PERL5OPT \
   PYTHONHOME \
@@ -23,6 +25,8 @@ unset \
   LD_PRELOAD \
   LD_PROFILE \
   LD_SHOW_AUXV \
+  GLIBC_TUNABLES \
+  AUTOREVIEW_ATTESTED_NODE_LIBRARY_PATH \
   DYLD_FALLBACK_FRAMEWORK_PATH \
   DYLD_FALLBACK_LIBRARY_PATH \
   DYLD_FRAMEWORK_PATH \
@@ -35,7 +39,108 @@ unset \
   DYLD_VERSIONED_FRAMEWORK_PATH \
   DYLD_VERSIONED_LIBRARY_PATH
 
+# Loader variables are an open-ended namespace.  Do not rely on a finite list
+# when the wrapper is about to attest and relaunch a path-untrusted Node binary.
+# Bash only imports valid shell names, which covers the dynamic loaders' LD_*
+# controls and GLIBC_TUNABLES.
+while IFS= read -r ambient_loader_name; do
+  case "$ambient_loader_name" in
+    LD_* | GLIBC_TUNABLES)
+      unset "$ambient_loader_name"
+      ;;
+  esac
+done < <(compgen -e)
+unset ambient_loader_name
+
 untrusted_helper_exposed=0
+
+# The focused Linux/root regression may opt into one fixed trust-stage code.
+# Normal invocations keep the existing generic error and never print paths,
+# owners, metadata, digests, or inherited environment values.
+root_node_snapshot_diagnostics=0
+if [[ "${AUTOREVIEW_TEST_NODE_SNAPSHOT_DIAGNOSTICS:-}" == "1" ]]; then
+  root_node_snapshot_diagnostics=1
+fi
+root_node_snapshot_stage="source-proof"
+root_node_snapshot_diagnostic_file=""
+
+set_root_node_snapshot_stage() {
+  case "$1" in
+    source-proof | snapshot-trust | native-format | preload-policy | \
+      elf-metadata | interpreter-path | loader-policy | ambient-loader-exec | \
+      ambient-loader-stderr | ambient-loader-parse | ambient-loader-policy | \
+      dependency-closure | alias-policy | controlled-loader-list | \
+      manifest-seal | closure-attestation | version-exec | version-output | \
+      version-reattest | smoke-exec | smoke-reattest)
+      root_node_snapshot_stage="$1"
+      ;;
+    *)
+      root_node_snapshot_stage="source-proof"
+      ;;
+  esac
+}
+
+report_root_node_snapshot_rejection() {
+  [[ "$root_node_snapshot_diagnostics" -eq 1 ]] || return 0
+  local rank=1
+  local existing_rank=0
+  local existing_stage=""
+  local rejected_stage="$root_node_snapshot_stage"
+  local record=""
+  local temporary=""
+  case "$root_node_snapshot_stage" in
+    source-proof) rank=1 ;;
+    snapshot-trust) rank=2 ;;
+    native-format) rank=3 ;;
+    preload-policy) rank=4 ;;
+    elf-metadata) rank=5 ;;
+    interpreter-path) rank=6 ;;
+    loader-policy) rank=7 ;;
+    ambient-loader-exec) rank=8 ;;
+    ambient-loader-stderr) rank=9 ;;
+    ambient-loader-parse) rank=10 ;;
+    ambient-loader-policy) rank=11 ;;
+    dependency-closure) rank=12 ;;
+    alias-policy) rank=13 ;;
+    controlled-loader-list) rank=14 ;;
+    manifest-seal) rank=15 ;;
+    closure-attestation) rank=16 ;;
+    version-exec) rank=17 ;;
+    version-output) rank=18 ;;
+    version-reattest) rank=19 ;;
+    smoke-exec) rank=20 ;;
+    smoke-reattest) rank=21 ;;
+  esac
+  [[ -n "$root_node_snapshot_diagnostic_file" ]] || return 0
+  if [[
+    -f "$root_node_snapshot_diagnostic_file" &&
+      ! -L "$root_node_snapshot_diagnostic_file"
+  ]]; then
+    IFS= read -r record <"$root_node_snapshot_diagnostic_file" || record=""
+    if [[ "$record" =~ ^([0-9]+):([a-z-]+)$ ]]; then
+      existing_rank="${BASH_REMATCH[1]}"
+      existing_stage="${BASH_REMATCH[2]}"
+      case "$existing_stage" in
+        source-proof | snapshot-trust | native-format | preload-policy | \
+          elf-metadata | interpreter-path | loader-policy | \
+          ambient-loader-exec | ambient-loader-stderr | ambient-loader-parse | \
+          ambient-loader-policy | dependency-closure | alias-policy | \
+          controlled-loader-list | manifest-seal | closure-attestation | \
+          version-exec | version-output | version-reattest | smoke-exec | \
+          smoke-reattest) ;;
+        *) existing_rank=0 ;;
+      esac
+    fi
+  fi
+  if [[ "$rank" -gt "$existing_rank" ]]; then
+    temporary="$root_node_snapshot_diagnostic_file.$BASHPID"
+    (umask 077 && printf '%s:%s\n' "$rank" "$rejected_stage" >"$temporary") ||
+      return 0
+    /bin/chmod 0600 "$temporary" 2>/dev/null || return 0
+    /bin/mv "$temporary" "$root_node_snapshot_diagnostic_file" 2>/dev/null ||
+      return 0
+  fi
+}
 
 script_path="${BASH_SOURCE[0]}"
 script_parent="${script_path%/*}"
@@ -121,11 +226,13 @@ if [[
     ! -x /usr/bin/mktemp ||
     ! -x /usr/bin/uname ||
     ! -x /bin/chmod ||
+    ! -x /bin/ln ||
     ! -x /bin/ls ||
+    ! -x /bin/mkdir ||
     ! -x /bin/mv ||
     ! -x /bin/rm
 ]]; then
-  echo "agent:autoreview requires trusted system env, perl, mktemp, uname, chmod, ls, mv, and rm executables" >&2
+  echo "agent:autoreview requires trusted system env, perl, mktemp, uname, chmod, ln, ls, mkdir, mv, and rm executables" >&2
   exit 127
 fi
 
@@ -284,6 +391,7 @@ if [[ -z "$command_runtime_identity" ]]; then
   echo "agent:autoreview failed to pin the private external-command runtime" >&2
   exit 127
 fi
+root_node_snapshot_diagnostic_file="$command_runtime_dir/root-node-trust-stage"
 
 cleanup_command_runtime() {
   local current_identity=""
@@ -581,6 +689,2193 @@ native_node_candidate_is_trusted() {
   esac
 }
 
+strict_linux_elf_metadata() {
+  local candidate="$1"
+  local interpreter_policy="$2"
+  # Parse the bounded ELF structures directly. readelf renders unescaped
+  # string-table bytes and therefore is not a security authority here.
+  # shellcheck disable=SC2016
+  system_perl -MConfig -MFcntl=:DEFAULT,:mode -e '
+    use strict;
+    use warnings;
+    my ($candidate, $interpreter_policy) = @ARGV;
+    exit 1 if $Config{ivsize} < 8 ||
+      $interpreter_policy !~ /\A(?:required|forbidden|optional)\z/;
+
+    my $same_metadata = sub {
+      my ($left, $right) = @_;
+      for my $index (0, 1, 2, 3, 4, 5, 6, 7, 9, 10) {
+        return 0 if $left->[$index] != $right->[$index];
+      }
+      return 1;
+    };
+    my $read_exact = sub {
+      my ($input, $offset, $length) = @_;
+      exit 1 if $offset < 0 || $length < 0;
+      sysseek($input, $offset, 0) == $offset or exit 1;
+      my $value = "";
+      while (length($value) < $length) {
+        my $remaining = $length - length($value);
+        my $read = sysread($input, my $buffer, $remaining);
+        exit 1 if !defined($read) || $read == 0;
+        $value .= substr($buffer, 0, $read);
+      }
+      return $value;
+    };
+
+    sysopen(my $input, $candidate, O_RDONLY | O_NOFOLLOW) or exit 1;
+    binmode($input);
+    my @before = stat($input);
+    exit 1 if !@before || !S_ISREG($before[2]) || $before[7] < 64;
+    my $header = $read_exact->($input, 0, 64);
+    exit 1 if substr($header, 0, 4) ne "\x7fELF";
+    my $class = ord(substr($header, 4, 1));
+    my $data = ord(substr($header, 5, 1));
+    my $ident_version = ord(substr($header, 6, 1));
+    exit 1 if ($class != 1 && $class != 2) ||
+      ($data != 1 && $data != 2) || $ident_version != 1;
+    my $elf64 = $class == 2;
+    my $little = $data == 1;
+    my $u16 = $little
+      ? sub { unpack("v", substr($_[0], $_[1], 2)) }
+      : sub { unpack("n", substr($_[0], $_[1], 2)) };
+    my $u32 = $little
+      ? sub { unpack("V", substr($_[0], $_[1], 4)) }
+      : sub { unpack("N", substr($_[0], $_[1], 4)) };
+    my $u64 = $little
+      ? sub { unpack("Q<", substr($_[0], $_[1], 8)) }
+      : sub { unpack("Q>", substr($_[0], $_[1], 8)) };
+    my $word = $elf64 ? $u64 : $u32;
+    my $header_size = $elf64 ? 64 : 52;
+    my $program_header_size = $elf64 ? 56 : 32;
+    my $elf_type = $u16->($header, 16);
+    my $elf_version = $u32->($header, 20);
+    my $program_header_offset = $word->($header, $elf64 ? 32 : 28);
+    my $declared_header_size = $u16->($header, $elf64 ? 52 : 40);
+    my $declared_program_header_size = $u16->(
+      $header,
+      $elf64 ? 54 : 42,
+    );
+    my $program_header_count = $u16->($header, $elf64 ? 56 : 44);
+    exit 1 if ($elf_type != 2 && $elf_type != 3) || $elf_version != 1 ||
+      $declared_header_size != $header_size ||
+      $declared_program_header_size != $program_header_size ||
+      $program_header_count == 0 || $program_header_count == 0xffff ||
+      $program_header_count > 1024 ||
+      $program_header_offset < $header_size ||
+      $program_header_offset > $before[7];
+    my $program_table_bytes = $program_header_count * $program_header_size;
+    exit 1 if $program_table_bytes > $before[7] - $program_header_offset;
+    my $program_headers = $read_exact->(
+      $input,
+      $program_header_offset,
+      $program_table_bytes,
+    );
+
+    my @loads;
+    my @interpreters;
+    my @dynamics;
+    for my $index (0 .. $program_header_count - 1) {
+      my $base = $index * $program_header_size;
+      my $type = $u32->($program_headers, $base);
+      my $segment_offset = $word->(
+        $program_headers,
+        $base + ($elf64 ? 8 : 4),
+      );
+      my $virtual_address = $word->(
+        $program_headers,
+        $base + ($elf64 ? 16 : 8),
+      );
+      my $file_size = $word->(
+        $program_headers,
+        $base + ($elf64 ? 32 : 16),
+      );
+      my $memory_size = $word->(
+        $program_headers,
+        $base + ($elf64 ? 40 : 20),
+      );
+      exit 1 if $file_size > 0 &&
+        ($segment_offset > $before[7] ||
+          $file_size > $before[7] - $segment_offset);
+      if ($type == 1) {
+        exit 1 if $memory_size < $file_size;
+        push @loads, [$segment_offset, $virtual_address, $file_size];
+      } elsif ($type == 3) {
+        push @interpreters, [$segment_offset, $file_size];
+      } elsif ($type == 2) {
+        push @dynamics, [
+          $segment_offset,
+          $virtual_address,
+          $file_size,
+          $memory_size,
+        ];
+      }
+    }
+    exit 1 if @dynamics != 1;
+    exit 1 if
+      ($interpreter_policy eq "required" && @interpreters != 1) ||
+      ($interpreter_policy eq "forbidden" && @interpreters != 0) ||
+      ($interpreter_policy eq "optional" && @interpreters > 1);
+
+    my $interpreter = "";
+    if (@interpreters == 1) {
+      my ($offset, $size) = @{$interpreters[0]};
+      exit 1 if $size < 2 || $size > 4096;
+      my $bytes = $read_exact->($input, $offset, $size);
+      exit 1 if substr($bytes, -1) ne "\0" ||
+        index($bytes, "\0") != length($bytes) - 1;
+      $interpreter = substr($bytes, 0, -1);
+      exit 1 if $interpreter !~
+        m{\A/(?:[A-Za-z0-9_+.,:@%=-]+/)*[A-Za-z0-9_+.,:@%=-]+\z};
+    }
+
+    my (
+      $dynamic_offset,
+      $dynamic_address,
+      $dynamic_size,
+      $dynamic_memory_size,
+    ) = @{$dynamics[0]};
+    my $dynamic_entry_size = $elf64 ? 16 : 8;
+    exit 1 if $dynamic_size < $dynamic_entry_size ||
+      $dynamic_size > 1024 * 1024 ||
+      $dynamic_size % $dynamic_entry_size != 0 ||
+      $dynamic_memory_size != $dynamic_size;
+    # Runtime loaders consume PT_DYNAMIC through p_vaddr, not p_offset. Bind
+    # the two views so an unsafe in-memory table cannot hide behind benign
+    # bytes at an unrelated file offset.
+    my @dynamic_mappings;
+    for my $load (@loads) {
+      my ($file_offset, $virtual_address, $file_size) = @{$load};
+      next if $dynamic_address < $virtual_address;
+      my $delta = $dynamic_address - $virtual_address;
+      next if $delta > $file_size ||
+        $dynamic_size > $file_size - $delta;
+      push @dynamic_mappings, $file_offset + $delta;
+    }
+    exit 1 if @dynamic_mappings != 1 ||
+      $dynamic_mappings[0] != $dynamic_offset;
+    my $dynamic = $read_exact->($input, $dynamic_offset, $dynamic_size);
+    my %forbidden = map { $_ => 1 } (
+      0x0f,
+      0x1d,
+      0x6ffffefa,
+      0x6ffffefb,
+      0x6ffffefc,
+      0x7ffffffd,
+      0x7fffffff,
+    );
+    my @string_offsets;
+    my $string_table_address;
+    my $string_table_size;
+    my $saw_null = 0;
+    for (
+      my $offset = 0;
+      $offset < length($dynamic);
+      $offset += $dynamic_entry_size
+    ) {
+      my $tag = $word->($dynamic, $offset);
+      my $value = $word->($dynamic, $offset + ($elf64 ? 8 : 4));
+      if ($saw_null) {
+        exit 1 if $tag != 0 || $value != 0;
+        next;
+      }
+      if ($tag == 0) {
+        $saw_null = 1;
+        next;
+      }
+      exit 1 if $forbidden{$tag};
+      if ($tag == 1 || $tag == 14) {
+        push @string_offsets, [$tag, $value];
+      } elsif ($tag == 5) {
+        exit 1 if defined($string_table_address);
+        $string_table_address = $value;
+      } elsif ($tag == 10) {
+        exit 1 if defined($string_table_size);
+        $string_table_size = $value;
+      }
+    }
+    exit 1 if !$saw_null || !defined($string_table_address) ||
+      !defined($string_table_size) || $string_table_size < 1 ||
+      $string_table_size > 64 * 1024 * 1024;
+    my @mappings;
+    for my $load (@loads) {
+      my ($file_offset, $virtual_address, $file_size) = @{$load};
+      next if $string_table_address < $virtual_address;
+      my $delta = $string_table_address - $virtual_address;
+      next if $delta > $file_size ||
+        $string_table_size > $file_size - $delta;
+      push @mappings, $file_offset + $delta;
+    }
+    exit 1 if @mappings != 1 ||
+      $mappings[0] > $before[7] ||
+      $string_table_size > $before[7] - $mappings[0];
+    my $strings = $read_exact->(
+      $input,
+      $mappings[0],
+      $string_table_size,
+    );
+    my %seen_needed;
+    my @needed;
+    my $soname = "";
+    for my $record (@string_offsets) {
+      my ($tag, $offset) = @{$record};
+      exit 1 if $offset < 0 || $offset >= length($strings);
+      my $end = index($strings, "\0", $offset);
+      exit 1 if $end < $offset;
+      my $value = substr($strings, $offset, $end - $offset);
+      exit 1 if $value !~ /\A[A-Za-z0-9_+.-]+\z/ ||
+        $value eq "." || $value eq "..";
+      if ($tag == 1) {
+        exit 1 if $seen_needed{$value}++;
+        push @needed, $value;
+      } else {
+        exit 1 if $soname ne "";
+        $soname = $value;
+      }
+    }
+    my @after = stat($input);
+    my @path_after = lstat($candidate);
+    exit 1 if !@after || !@path_after ||
+      !$same_metadata->(\@before, \@after) ||
+      !$same_metadata->(\@before, \@path_after);
+    close($input) or exit 1;
+    print "interpreter\t$interpreter\n" if $interpreter ne "";
+    print "soname\t$soname\n" if $soname ne "";
+    print "needed\t$_\n" for @needed;
+  ' "$candidate" "$interpreter_policy"
+}
+
+strict_linux_loader_list_metadata() {
+  local output="$1"
+  local resolved_interpreter="$2"
+  shift 2
+  # shellcheck disable=SC2016
+  system_perl -MDigest::SHA -MFcntl=:DEFAULT,:mode -e '
+    use strict;
+    use warnings;
+    my ($output, $resolved_interpreter, $euid, @needed) = @ARGV;
+    my $same_metadata = sub {
+      my ($left, $right) = @_;
+      for my $index (0, 1, 2, 3, 4, 5, 6, 7, 9, 10) {
+        return 0 if $left->[$index] != $right->[$index];
+      }
+      return 1;
+    };
+    sysopen(my $input, $output, O_RDONLY | O_NOFOLLOW) or exit 1;
+    my @before = stat($input);
+    exit 1 if !@before || !S_ISREG($before[2]) || $before[4] != $euid ||
+      $before[3] != 1 || $before[7] > 8 * 1024 * 1024;
+    my $content = "";
+    while (1) {
+      my $read = sysread($input, my $buffer, 65536);
+      exit 1 if !defined($read);
+      last if $read == 0;
+      $content .= substr($buffer, 0, $read);
+      exit 1 if length($content) > 8 * 1024 * 1024;
+    }
+    my @after = stat($input);
+    exit 1 if !@after || !$same_metadata->(\@before, \@after) ||
+      length($content) != $before[7];
+    close($input) or exit 1;
+    exit 1 if $content eq "" || $content =~ /[^\x09\x0a\x20-\x7e]/;
+    my %aliases;
+    my %paths;
+    my %standalone;
+    my %virtuals;
+    my @lines = split(/\n/, $content, -1);
+    exit 1 if @lines > 2049;
+    for my $index (0 .. $#lines) {
+      my $line = $lines[$index];
+      next if $line eq "" && $index == $#lines;
+      exit 1 if $line eq "" || $line =~ /=>\s+not found\b/;
+      if ($line =~
+        m{^\s*([A-Za-z0-9_+.-]+)\s+=>\s+(/(?:[A-Za-z0-9_+.,:@%=-]+/)*[A-Za-z0-9_+.,:@%=-]+)\s+\(0x[0-9A-Fa-f]+\)\s*$}) {
+        exit 1 if $1 eq "." || $1 eq ".." || exists($aliases{$1});
+        $aliases{$1} = $2;
+        $paths{$2} = 1;
+      } elsif ($line =~
+        m{^\s*(/(?:[A-Za-z0-9_+.,:@%=-]+/)*[A-Za-z0-9_+.,:@%=-]+)\s+\(0x[0-9A-Fa-f]+\)\s*$}) {
+        exit 1 if $standalone{$1}++;
+        $paths{$1} = 1;
+      } elsif ($line =~
+        /^\s*(linux-(?:vdso(?:32|64)?|gate)\.so\.1)\s+\(0x[0-9A-Fa-f]+\)\s*$/) {
+        exit 1 if $virtuals{$1}++;
+      } else {
+        exit 1;
+      }
+      exit 1 if keys(%aliases) + keys(%standalone) + keys(%virtuals) > 1024;
+    }
+    exit 1 if !keys(%paths);
+    my @interpreter_stat = stat($resolved_interpreter);
+    exit 1 if !@interpreter_stat || !S_ISREG($interpreter_stat[2]);
+    my $self_matches = 0;
+    my $matched_interpreter_path = "";
+    for my $path (keys(%standalone)) {
+      my @path_stat = stat($path);
+      exit 1 if !@path_stat || !S_ISREG($path_stat[2]);
+      if ($path_stat[0] == $interpreter_stat[0] &&
+          $path_stat[1] == $interpreter_stat[1]) {
+        $self_matches++;
+        $matched_interpreter_path = $path;
+      }
+    }
+    exit 1 if $self_matches != 1;
+    my ($interpreter_name) =
+      $matched_interpreter_path =~ m{/([A-Za-z0-9_+.-]+)\z};
+    exit 1 if !defined($interpreter_name) || $interpreter_name eq "." ||
+      $interpreter_name eq "..";
+    my %seen_needed;
+    my $self_needed = 0;
+    for my $name (@needed) {
+      exit 1 if $name !~ /\A[A-Za-z0-9_+.-]+\z/ || $name eq "." ||
+        $name eq ".." || $seen_needed{$name}++;
+      # glibc renders its own interpreter as the one standalone path even when
+      # the executable also declares the loader SONAME in DT_NEEDED. Bind that
+      # exceptional name to the inode-matched interpreter; every other needed
+      # object must still appear in the explicit alias map.
+      next if exists($aliases{$name});
+      exit 1 if $name ne $interpreter_name || $self_needed++;
+    }
+    my $digest = Digest::SHA->new(256);
+    for my $name (sort keys(%aliases)) {
+      $digest->add("alias\0$name\0$aliases{$name}\0");
+    }
+    $digest->add("path\0$_\0") for sort keys(%paths);
+    $digest->add("standalone\0$_\0") for sort keys(%standalone);
+    $digest->add("virtual\0$_\0") for sort keys(%virtuals);
+    print "digest\t", $digest->hexdigest, "\n";
+    print "interpreter\t$interpreter_name\t$matched_interpreter_path\n";
+    print "alias\t$_\t$aliases{$_}\n" for sort keys(%aliases);
+    print "standalone\t$_\n" for sort keys(%standalone);
+    print "path\t$_\n" for sort keys(%paths);
+  ' "$output" "$resolved_interpreter" "$EUID" "$@"
+}
+
+strict_linux_loader_path_fingerprint() {
+  local candidate="$1"
+  local require_executable="$2"
+  shift 2
+  # Resolve and fingerprint every lexical and symlink-expanded component. This
+  # keeps common root-owned /lib and /lib64 symlinks working while rejecting a
+  # chain that crosses writable or reviewed-repository ancestry.
+  # shellcheck disable=SC2016
+  system_perl -MCwd=abs_path -MDigest::SHA -MFcntl=:DEFAULT,:mode -e '
+    use strict;
+    use warnings;
+    my ($candidate, $euid, $require_executable, @rejected_roots) = @ARGV;
+    exit 1 if $euid != 0 || $require_executable !~ /\A[01]\z/;
+    exit 1 if $candidate !~
+      m{\A/(?:[A-Za-z0-9_+.,:@%=-]+/)*[A-Za-z0-9_+.,:@%=-]+\z};
+
+    my $rejected = sub {
+      my ($path) = @_;
+      for my $root (@rejected_roots) {
+        $root =~ s{/+\z}{} if $root ne "/";
+        return 1 if $path eq $root || index($path, "$root/") == 0;
+      }
+      return 0;
+    };
+
+    sub normalize_absolute {
+      my ($value) = @_;
+      return if !defined($value) || substr($value, 0, 1) ne "/" ||
+        $value =~ /[\r\n\0]/;
+      my @parts;
+      for my $part (split(m{/+}, $value)) {
+        next if $part eq "" || $part eq ".";
+        if ($part eq "..") {
+          pop @parts if @parts;
+        } else {
+          push @parts, $part;
+        }
+      }
+      return "/" . join("/", @parts);
+    }
+
+    my $trusted_owner = sub {
+      my ($uid) = @_;
+      return $uid == 0 || $uid == $euid;
+    };
+
+    my $digest = Digest::SHA->new(256);
+    my $same_metadata = sub {
+      my ($left, $right) = @_;
+      for my $index (0, 1, 2, 3, 4, 5, 6, 7, 9, 10) {
+        return 0 if $left->[$index] != $right->[$index];
+      }
+      return 1;
+    };
+    my $executable_digest = sub {
+      my ($path, @path_stat) = @_;
+      sysopen(my $input, $path, O_RDONLY | O_NOFOLLOW) or exit 1;
+      binmode($input);
+      my @before = stat($input);
+      exit 1 if !@before || !$same_metadata->(\@path_stat, \@before) ||
+        $before[7] < 1 || $before[7] > 64 * 1024 * 1024;
+      my $content_digest = Digest::SHA->new(256);
+      my $total = 0;
+      while (1) {
+        my $read = sysread($input, my $buffer, 65536);
+        exit 1 if !defined($read);
+        last if $read == 0;
+        $total += $read;
+        exit 1 if $total > $before[7];
+        $content_digest->add(substr($buffer, 0, $read));
+      }
+      my @after = stat($input);
+      my @path_after = lstat($path);
+      exit 1 if $total != $before[7] || !@after || !@path_after ||
+        !$same_metadata->(\@before, \@after) ||
+        !$same_metadata->(\@before, \@path_after);
+      close($input) or exit 1;
+      return $content_digest->hexdigest;
+    };
+    my $record_entry = sub {
+      my ($type, $path, $target, @stat) = @_;
+      exit 1 if $rejected->($path) || !$trusted_owner->($stat[4]);
+      if ($type eq "directory") {
+        exit 1 if !S_ISDIR($stat[2]) || ($stat[2] & 0022);
+      } elsif ($type eq "symlink") {
+        exit 1 if !S_ISLNK($stat[2]);
+      } elsif ($type eq "file") {
+        exit 1 if !S_ISREG($stat[2]) || ($stat[2] & 06022) || $stat[3] < 1;
+        exit 1 if $require_executable && ($stat[2] & 0111) == 0;
+      } else {
+        exit 1;
+      }
+      $digest->add(join("\0", $type, $path, $target,
+        @stat[0, 1, 2, 3, 4, 5, 6, 7, 9, 10]), "\0");
+    };
+
+    my @root_stat = lstat("/");
+    exit 1 if !@root_stat;
+    $record_entry->("directory", "/", "", @root_stat);
+    my @pending = grep { length($_) } split(m{/}, $candidate);
+    my $current = "/";
+    my $symlinks = 0;
+    while (@pending) {
+      my $component = shift @pending;
+      exit 1 if $component eq "." || $component eq "..";
+      my $next = $current eq "/" ? "/$component" : "$current/$component";
+      my @stat = lstat($next);
+      exit 1 if !@stat;
+      if (S_ISLNK($stat[2])) {
+        exit 1 if ++$symlinks > 40;
+        my $target = readlink($next);
+        exit 1 if !defined($target) || $target eq "" || $target =~ /[\r\n\0]/;
+        $record_entry->("symlink", $next, $target, @stat);
+        my $target_path = substr($target, 0, 1) eq "/"
+          ? $target
+          : ($current eq "/" ? "/$target" : "$current/$target");
+        my $combined = $target_path;
+        $combined .= "/" . join("/", @pending) if @pending;
+        $combined = normalize_absolute($combined);
+        exit 1 if !defined($combined);
+        @pending = grep { length($_) } split(m{/}, $combined);
+        $current = "/";
+        next;
+      }
+      if (@pending) {
+        $record_entry->("directory", $next, "", @stat);
+      } else {
+        my $content_digest = $require_executable
+          ? $executable_digest->($next, @stat)
+          : "";
+        $record_entry->("file", $next, $content_digest, @stat);
+      }
+      $current = $next;
+    }
+    my $resolved = abs_path($candidate);
+    exit 1 if !defined($resolved) || $resolved ne $current ||
+      $rejected->($resolved);
+    print "$resolved\t", $digest->hexdigest, "\n";
+  ' "$candidate" "$EUID" "$require_executable" "$@"
+}
+
+strict_linux_snapshot_alias_path_fingerprint() {
+  local snapshot_candidate="$1"
+  local alias_path="$2"
+  local expected_target="$3"
+  local target_record
+  local target_record_after
+  local resolved_target
+  local target_fingerprint
+  local alias_fingerprint
+  target_record="$({
+    strict_linux_loader_path_fingerprint \
+      "$expected_target" \
+      0 \
+      "${rejected_command_roots[@]}"
+  } 2>/dev/null)" || return 1
+  [[ "$target_record" == *$'\t'* ]] || return 1
+  resolved_target="${target_record%%$'\t'*}"
+  target_fingerprint="${target_record#*$'\t'}"
+  [[
+    "$resolved_target" == "$expected_target" &&
+      "$target_fingerprint" =~ ^[0-9a-f]{64}$
+  ]] || return 1
+  # The alias is the only loader-controlled path allowed below the sticky
+  # system temporary root. Bind it to this exact snapshot, the pinned private
+  # runtime, a root-owned 0700 alias directory, and an already validated
+  # dependency target. Ordinary dependency paths continue to use the stricter
+  # system-ancestry validator above.
+  # shellcheck disable=SC2016
+  alias_fingerprint="$(system_perl \
+    -MDigest::SHA \
+    -MFcntl=:mode \
+    -MFile::Basename=dirname \
+    -e '
+      use strict;
+      use warnings;
+      my (
+        $runtime,
+        $expected_runtime,
+        $temporary_root,
+        $snapshot,
+        $alias_path,
+        $expected_target,
+        $target_fingerprint,
+        $euid,
+      ) = @ARGV;
+      exit 1 if $euid != 0 || $target_fingerprint !~ /\A[0-9a-f]{64}\z/;
+      for my $path ($runtime, $temporary_root, $snapshot, $alias_path,
+          $expected_target) {
+        exit 1 if $path !~
+          m{\A/(?:[A-Za-z0-9_+.,:@%=-]+/)*[A-Za-z0-9_+.,:@%=-]+\z};
+      }
+      my $snapshot_directory = dirname($snapshot);
+      my $alias_directory = dirname($alias_path);
+      my $alias_name = substr($alias_path, length($alias_directory) + 1);
+      exit 1 if dirname($runtime) ne $temporary_root ||
+        index($snapshot_directory, "$runtime/") != 0 ||
+        dirname($snapshot_directory) ne $runtime ||
+        $alias_directory ne "$snapshot_directory/loader-aliases" ||
+        $alias_name !~ /\A[A-Za-z0-9_+.-]+\z/ ||
+        $alias_name eq "." || $alias_name eq "..";
+
+      my $digest = Digest::SHA->new(256);
+      my $record = sub {
+        my ($kind, $path, $target, @stat) = @_;
+        $digest->add(join("\0", $kind, $path, $target,
+          @stat[0, 1, 2, 3, 4, 5, 6, 7, 9, 10]), "\0");
+      };
+      my $record_directory = sub {
+        my ($kind, $path, @stat) = @_;
+        # Directory timestamps legitimately change when the wrapper creates
+        # its manifest/recheck files and when unrelated users write to /tmp.
+        # Bind the stable identity/authority fields instead.
+        $digest->add(join("\0", $kind, $path,
+          @stat[0, 1, 2, 4]), "\0");
+      };
+      my @runtime_stat = lstat($runtime);
+      exit 1 if !@runtime_stat || !S_ISDIR($runtime_stat[2]) ||
+        S_ISLNK($runtime_stat[2]) || $runtime_stat[4] != $euid ||
+        ($runtime_stat[2] & 07777) != 0700 ||
+        join(":", @runtime_stat[0, 1, 2, 4]) ne $expected_runtime;
+      $record_directory->("private-directory", $runtime, @runtime_stat);
+
+      my $current = $temporary_root;
+      while (1) {
+        my @stat = lstat($current);
+        exit 1 if !@stat || !S_ISDIR($stat[2]) || S_ISLNK($stat[2]) ||
+          ($stat[4] != 0 && $stat[4] != $euid);
+        my $shared_writable = ($stat[2] & 0022) != 0;
+        exit 1 if $shared_writable && ($stat[2] & 01000) == 0;
+        $record_directory->("temporary-ancestor", $current, @stat);
+        my $parent = dirname($current);
+        last if $parent eq $current;
+        $current = $parent;
+      }
+
+      for my $directory ($snapshot_directory, $alias_directory) {
+        my @stat = lstat($directory);
+        exit 1 if !@stat || !S_ISDIR($stat[2]) || S_ISLNK($stat[2]) ||
+          $stat[4] != $euid || ($stat[2] & 07777) != 0700;
+        $record_directory->("private-directory", $directory, @stat);
+      }
+      my @snapshot_stat = lstat($snapshot);
+      exit 1 if !@snapshot_stat || !S_ISREG($snapshot_stat[2]) ||
+        S_ISLNK($snapshot_stat[2]) || $snapshot_stat[4] != $euid ||
+        $snapshot_stat[3] != 1 || ($snapshot_stat[2] & 07777) != 0500;
+      $record->("snapshot", $snapshot, "", @snapshot_stat);
+
+      my @alias_stat = lstat($alias_path);
+      exit 1 if !@alias_stat || !S_ISLNK($alias_stat[2]) ||
+        $alias_stat[4] != $euid;
+      my $target = readlink($alias_path);
+      exit 1 if !defined($target) || $target ne $expected_target;
+      my @followed = stat($alias_path);
+      my @target_stat = stat($expected_target);
+      exit 1 if !@followed || !@target_stat || !S_ISREG($target_stat[2]) ||
+        $followed[0] != $target_stat[0] ||
+        $followed[1] != $target_stat[1];
+      $record->("alias", $alias_path, $target, @alias_stat);
+      $record->("target", $expected_target, $target_fingerprint, @target_stat);
+      print $digest->hexdigest, "\n";
+    ' \
+    "$command_runtime_dir" \
+    "$command_runtime_identity" \
+    "$trusted_temp_root" \
+    "$snapshot_candidate" \
+    "$alias_path" \
+    "$expected_target" \
+    "$target_fingerprint" \
+    "$EUID")" || return 1
+  [[ "$alias_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 1
+  target_record_after="$({
+    strict_linux_loader_path_fingerprint \
+      "$expected_target" \
+      0 \
+      "${rejected_command_roots[@]}"
+  } 2>/dev/null)" || return 1
+  [[ "$target_record_after" == "$target_record" ]] || return 1
+  printf '%s\t%s\n' "$resolved_target" "$alias_fingerprint"
+}
+
+linux_glibc_preload_is_absent() {
+  # A missing preload file is useful only when an untrusted user cannot create
+  # it between checks. Pin /etc and every ancestor to root-owned, non-writable
+  # real directories before and after the raw lstat absence check.
+  # shellcheck disable=SC2016
+  system_perl -MErrno=ENOENT -MFcntl=:mode -MFile::Basename=dirname -e '
+    use strict;
+    use warnings;
+    my $euid = $ARGV[0];
+    exit 1 if $euid != 0;
+    my @directories;
+    my $current = "/etc";
+    while (1) {
+      my @stat = lstat($current);
+      exit 1 if !@stat || !S_ISDIR($stat[2]) || S_ISLNK($stat[2]) ||
+        $stat[4] != 0 || ($stat[2] & 0022);
+      push @directories, [$current, @stat];
+      my $parent = dirname($current);
+      last if $parent eq $current;
+      $current = $parent;
+    }
+    $! = 0;
+    my @preload = lstat("/etc/ld.so.preload");
+    exit 1 if @preload || $! != ENOENT;
+    for my $record (@directories) {
+      my ($path, @before) = @{$record};
+      my @after = lstat($path);
+      exit 1 if !@after || !S_ISDIR($after[2]) || S_ISLNK($after[2]) ||
+        $after[4] != 0 || ($after[2] & 0022);
+      for my $index (0, 1, 2, 4) {
+        exit 1 if $before[$index] != $after[$index];
+      }
+    }
+  ' "$EUID"
+}
+
+strict_linux_glibc_loader_is_supported() {
+  local loader="$1"
+  local loader_name="${loader##*/}"
+  local version_output
+  local version_output_file
+  linux_glibc_preload_is_absent || return 1
+  case "$loader_name" in
+    ld-linux*.so.[0-9]* | ld64.so.[0-9]* | ld.so.[0-9]*) ;;
+    *) return 1 ;;
+  esac
+  version_output_file="$({
+    /usr/bin/mktemp "$command_runtime_dir/glibc-loader-version.XXXXXX"
+  } 2>/dev/null)" || return 1
+  /bin/chmod 0600 "$version_output_file"
+  if ! {
+    /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C \
+      "$loader" --version >"$version_output_file" 2>&1
+  }; then
+    /bin/rm -f -- "$version_output_file"
+    return 1
+  fi
+  # Validate the raw bytes before putting them in a Bash variable. Bash cannot
+  # represent NUL, so a `$'\0'` pattern would silently become an empty string
+  # and could never provide the intended check.
+  # shellcheck disable=SC2016
+  if ! version_output="$(system_perl -MFcntl=:DEFAULT,:mode -e '
+    use strict;
+    use warnings;
+    my ($output, $euid) = @ARGV;
+    my $same_metadata = sub {
+      my ($left, $right) = @_;
+      for my $index (0, 1, 2, 3, 4, 5, 6, 7, 9, 10) {
+        return 0 if $left->[$index] != $right->[$index];
+      }
+      return 1;
+    };
+    sysopen(my $input, $output, O_RDONLY | O_NOFOLLOW) or exit 1;
+    binmode($input);
+    my @before = stat($input);
+    exit 1 if !@before || !S_ISREG($before[2]) || $before[4] != $euid ||
+      $before[3] != 1 || ($before[2] & 07777) != 0600 ||
+      $before[7] < 1 || $before[7] > 16 * 1024;
+    my $content = "";
+    while (1) {
+      my $read = sysread($input, my $buffer, 4096);
+      exit 1 if !defined($read);
+      last if $read == 0;
+      $content .= substr($buffer, 0, $read);
+      exit 1 if length($content) > 16 * 1024;
+    }
+    my @after = stat($input);
+    my @path_after = lstat($output);
+    exit 1 if !@after || !@path_after ||
+      !$same_metadata->(\@before, \@after) ||
+      !$same_metadata->(\@before, \@path_after) ||
+      length($content) != $before[7] ||
+      $content =~ /[^\x09\x0a\x20-\x7e]/;
+    close($input) or exit 1;
+    print $content;
+  ' "$version_output_file" "$EUID")"; then
+    /bin/rm -f -- "$version_output_file"
+    return 1
+  fi
+  /bin/rm -f -- "$version_output_file"
+  [[
+    -n "$version_output" &&
+      (
+        "$version_output" == *GLIBC* ||
+          "$version_output" == *"GNU libc"* ||
+          "$version_output" == *"GNU C Library"*
+      )
+  ]] && linux_glibc_preload_is_absent
+}
+
+linux_node_alias_dir_for_candidate() {
+  local candidate="$1"
+  printf '%s/loader-aliases\n' "${candidate%/*}"
+}
+
+strict_linux_alias_directory_metadata() {
+  local directory="$1"
+  # shellcheck disable=SC2016
+  system_perl -MDigest::SHA -MFcntl=:mode -e '
+    use strict;
+    use warnings;
+    my ($directory, $euid) = @ARGV;
+    exit 1 if $euid != 0 || $directory !~
+      m{\A/(?:[A-Za-z0-9_+.,:@%=-]+/)*[A-Za-z0-9_+.,:@%=-]+\z};
+    my @before = lstat($directory);
+    exit 1 if !@before || !S_ISDIR($before[2]) || S_ISLNK($before[2]) ||
+      $before[4] != $euid || ($before[2] & 07777) != 0700;
+    opendir(my $handle, $directory) or exit 1;
+    my %targets;
+    while (defined(my $name = readdir($handle))) {
+      next if $name eq "." || $name eq "..";
+      exit 1 if $name !~ /\A[A-Za-z0-9_+.-]+\z/ || exists($targets{$name});
+      exit 1 if keys(%targets) >= 1024;
+      my $path = "$directory/$name";
+      my @stat = lstat($path);
+      exit 1 if !@stat || !S_ISLNK($stat[2]) || $stat[4] != $euid;
+      my $target = readlink($path);
+      exit 1 if !defined($target) || $target !~
+        m{\A/(?:[A-Za-z0-9_+.,:@%=-]+/)*[A-Za-z0-9_+.,:@%=-]+\z};
+      $targets{$name} = $target;
+    }
+    closedir($handle) or exit 1;
+    exit 1 if !keys(%targets);
+    my @after = lstat($directory);
+    exit 1 if !@after;
+    for my $index (0, 1, 2, 3, 4, 5, 7, 9, 10) {
+      exit 1 if $before[$index] != $after[$index];
+    }
+    my $digest = Digest::SHA->new(256);
+    for my $name (sort keys(%targets)) {
+      $digest->add("alias\0$name\0$targets{$name}\0");
+    }
+    print "digest\t", $digest->hexdigest, "\n";
+    print "alias\t$_\t$targets{$_}\n" for sort keys(%targets);
+  ' "$directory" "$EUID"
+}
+
+run_strict_linux_loader_list() {
+  # Use the attested PT_INTERP spelling, not its resolved target. glibc emits
+  # its own loader as a standalone row only when the invocation name matches;
+  # the metadata parser still binds that row to the resolved loader inode.
+  local loader="$1"
+  local candidate="$2"
+  local library_path="$3"
+  local output="$4"
+  local error="$5"
+  linux_glibc_preload_is_absent || return 1
+  if [[ "$library_path" == "-" ]]; then
+    /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C \
+      "$loader" --list "$candidate" >"$output" 2>"$error"
+  else
+    [[ "$library_path" == /* && -d "$library_path" && ! -L "$library_path" ]] ||
+      return 1
+    /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C \
+      "LD_LIBRARY_PATH=$library_path" \
+      "$loader" --list "$candidate" >"$output" 2>"$error"
+  fi
+}
+
+linux_node_add_name_mapping() {
+  local name="$1"
+  local target="$2"
+  local mapping_index
+  [[
+    "$name" =~ ^[A-Za-z0-9_+.-]+$ &&
+      "$name" != "." &&
+      "$name" != ".." &&
+      "$target" == /*
+  ]] || return 1
+  for mapping_index in "${!name_map_names[@]}"; do
+    if [[ "${name_map_names[$mapping_index]}" == "$name" ]]; then
+      [[ "${name_map_targets[$mapping_index]}" == "$target" ]]
+      return
+    fi
+  done
+  [[ "${#name_map_names[@]}" -lt 1024 ]] || return 1
+  name_map_names+=("$name")
+  name_map_targets+=("$target")
+}
+
+linux_node_add_needed_name() {
+  local name="$1"
+  local existing
+  [[
+    "$name" =~ ^[A-Za-z0-9_+.-]+$ &&
+      "$name" != "." &&
+      "$name" != ".."
+  ]] || return 1
+  for existing in "${needed_names[@]+"${needed_names[@]}"}"; do
+    [[ "$existing" != "$name" ]] || return 0
+  done
+  [[ "${#needed_names[@]}" -lt 1024 ]] || return 1
+  needed_names+=("$name")
+}
+
+strict_linux_dependency_elf_metadata() {
+  local candidate="$1"
+  local expected_interpreter_record="$2"
+  local metadata
+  local metadata_kind
+  local metadata_value
+  local metadata_extra
+  local interpreter_count=0
+  metadata="$({
+    strict_linux_elf_metadata "$candidate" optional
+  } 2>/dev/null)" || return 1
+  while IFS=$'\t' read -r metadata_kind metadata_value metadata_extra; do
+    [[ -z "$metadata_extra" ]] || return 1
+    case "$metadata_kind" in
+      interpreter)
+        [[ "$interpreter_count" -eq 0 && "$metadata_value" == /* ]] || return 1
+        interpreter_count=1
+        [[
+          "$({
+            strict_linux_loader_path_fingerprint \
+              "$metadata_value" \
+              1 \
+              "${rejected_command_roots[@]}"
+          } 2>/dev/null)" == "$expected_interpreter_record"
+        ]] || return 1
+        ;;
+      needed | soname)
+        printf '%s\t%s\n' "$metadata_kind" "$metadata_value"
+        ;;
+      *) return 1 ;;
+    esac
+  done <<<"$metadata"
+}
+
+linux_node_closure_manifest_path() {
+  local candidate="$1"
+  local manifests=("$candidate".loader-closure.*)
+  [[
+    "${#manifests[@]}" -eq 1 &&
+      -f "${manifests[0]}" &&
+      ! -L "${manifests[0]}"
+  ]] || return 1
+  # shellcheck disable=SC2016
+  system_perl -MDigest::SHA -MFcntl=:DEFAULT,:mode -e '
+    use strict;
+    use warnings;
+    my ($manifest, $euid) = @ARGV;
+    my @stat = lstat($manifest);
+    exit 1 if !@stat || !S_ISREG($stat[2]) || S_ISLNK($stat[2]);
+    exit 1 if $stat[4] != $euid || $stat[3] != 1 ||
+      ($stat[2] & 07777) != 0400 || $stat[7] > 1024 * 1024;
+    my ($expected) = $manifest =~ /\.loader-closure\.([0-9a-f]{64})\z/;
+    exit 1 if !defined($expected);
+    sysopen(my $input, $manifest, O_RDONLY | O_NOFOLLOW) or exit 1;
+    binmode($input);
+    my $digest = Digest::SHA->new(256);
+    my $buffer;
+    while (1) {
+      my $read = sysread($input, $buffer, 65536);
+      exit 1 if !defined($read);
+      last if $read == 0;
+      $digest->add(substr($buffer, 0, $read));
+    }
+    close($input) or exit 1;
+    exit 1 if $digest->hexdigest ne $expected;
+    print "$manifest\n";
+  ' "${manifests[0]}" "$EUID"
+}
+
+linux_node_snapshot_closure_is_trusted() {
+  local candidate="$1"
+  local manifest
+  local alias_dir=""
+  local expected_alias_digest=""
+  local expected_loader_digest=""
+  local loader_requested=""
+  local loader_resolved=""
+  local loader_count=0
+  local policy_count=0
+  local line_number=0
+  local record_count=0
+  local kind
+  local executable
+  local requested
+  local resolved
+  local expected_fingerprint
+  local extra
+  local index
+  local current
+  local found
+  local alias_metadata
+  local alias_metadata_after
+  local alias_metadata_kind
+  local alias_metadata_name
+  local alias_metadata_target
+  local current_alias_digest=""
+  local loader_output
+  local loader_error
+  local loader_metadata
+  local metadata_kind
+  local metadata_value
+  local metadata_third
+  local metadata_extra
+  local current_loader_digest=""
+  local loader_interpreter_count=0
+  local needed_names=()
+  local needed_targets=()
+  local manifest_alias_names=()
+  local manifest_alias_targets=()
+  local actual_alias_names=()
+  local actual_alias_targets=()
+  local record_executables=()
+  local record_kinds=()
+  local record_requested=()
+  local record_resolved=()
+  local record_fingerprints=()
+
+  [[ "$(/usr/bin/uname -s)" == "Linux" && "$EUID" -eq 0 ]] || return 1
+  linux_glibc_preload_is_absent || return 1
+  snapshot_path_is_trusted "$candidate" || return 1
+  manifest="$(linux_node_closure_manifest_path "$candidate")" || return 1
+  while IFS=$'\t' read -r kind executable requested resolved expected_fingerprint extra; do
+    line_number=$((line_number + 1))
+    if [[ "$line_number" -eq 1 ]]; then
+      [[
+        "$kind" == "loader-closure-v3" &&
+          -z "$executable" &&
+          -z "$requested" &&
+          -z "$resolved" &&
+          -z "$expected_fingerprint" &&
+          -z "$extra"
+      ]] || return 1
+      continue
+    fi
+    case "$kind" in
+      policy)
+        [[
+          "$policy_count" -eq 0 &&
+            "$executable" == "0" &&
+            "$requested" == /* &&
+            "$resolved" == "-" &&
+            "$expected_fingerprint" =~ ^[0-9a-f]{64}$ &&
+            "$extra" =~ ^[0-9a-f]{64}$
+        ]] || return 1
+        policy_count=1
+        alias_dir="$requested"
+        expected_alias_digest="$expected_fingerprint"
+        expected_loader_digest="$extra"
+        continue
+        ;;
+      loader)
+        [[
+          "$loader_count" -eq 0 &&
+            "$executable" == "1" &&
+            "$requested" == /* &&
+            "$resolved" == /* &&
+            "$expected_fingerprint" =~ ^[0-9a-f]{64}$ &&
+            "$extra" == "-"
+        ]] || return 1
+        loader_count=1
+        loader_requested="$requested"
+        loader_resolved="$resolved"
+        ;;
+      needed)
+        [[
+          "$executable" == "0" &&
+            "$requested" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$requested" != "." &&
+            "$requested" != ".." &&
+            "$resolved" == /* &&
+            "$expected_fingerprint" == "-" &&
+            "$extra" == "-"
+        ]] || return 1
+        for index in "${!needed_names[@]}"; do
+          [[ "${needed_names[$index]}" != "$requested" ]] || return 1
+        done
+        needed_names+=("$requested")
+        needed_targets+=("$resolved")
+        continue
+        ;;
+      alias)
+        [[
+          "$executable" == "0" &&
+            "$requested" == /* &&
+            "$resolved" == /* &&
+            "$expected_fingerprint" =~ ^[0-9a-f]{64}$ &&
+            "$extra" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$extra" != "." &&
+            "$extra" != ".."
+        ]] || return 1
+        manifest_alias_names+=("$extra")
+        manifest_alias_targets+=("$resolved")
+        ;;
+      file)
+        [[
+          "$executable" == "0" &&
+            "$requested" == /* &&
+            "$resolved" == /* &&
+            "$expected_fingerprint" =~ ^[0-9a-f]{64}$ &&
+            "$extra" == "-"
+        ]] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+    record_count=$((record_count + 1))
+    [[ "$record_count" -le 3072 ]] || return 1
+    path_is_rejected "$requested" && return 1
+    path_is_rejected "$resolved" && return 1
+    record_kinds+=("$kind")
+    record_executables+=("$executable")
+    record_requested+=("$requested")
+    record_resolved+=("$resolved")
+    record_fingerprints+=("$expected_fingerprint")
+  done <"$manifest"
+  [[
+    "$line_number" -ge 4 &&
+      "$policy_count" -eq 1 &&
+      "$loader_count" -eq 1 &&
+      "${#needed_names[@]}" -gt 0 &&
+      "${#needed_names[@]}" -eq "${#manifest_alias_names[@]}" &&
+      "$alias_dir" == "$(linux_node_alias_dir_for_candidate "$candidate")"
+  ]] || return 1
+  path_is_rejected "$alias_dir" && return 1
+
+  alias_metadata="$({
+    strict_linux_alias_directory_metadata "$alias_dir"
+  } 2>/dev/null)" || return 1
+  while IFS=$'\t' read -r alias_metadata_kind alias_metadata_name alias_metadata_target metadata_extra; do
+    [[ -z "$metadata_extra" ]] || return 1
+    case "$alias_metadata_kind" in
+      digest)
+        [[
+          -z "$current_alias_digest" &&
+            "$alias_metadata_name" =~ ^[0-9a-f]{64}$ &&
+            -z "$alias_metadata_target"
+        ]] || return 1
+        current_alias_digest="$alias_metadata_name"
+        ;;
+      alias)
+        [[
+          "$alias_metadata_name" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$alias_metadata_name" != "." &&
+            "$alias_metadata_name" != ".." &&
+            "$alias_metadata_target" == /*
+        ]] || return 1
+        actual_alias_names+=("$alias_metadata_name")
+        actual_alias_targets+=("$alias_metadata_target")
+        ;;
+      *) return 1 ;;
+    esac
+  done <<<"$alias_metadata"
+  [[
+    "$current_alias_digest" == "$expected_alias_digest" &&
+      "${#actual_alias_names[@]}" -eq "${#needed_names[@]}"
+  ]] || return 1
+  for index in "${!needed_names[@]}"; do
+    found=0
+    for current in "${!actual_alias_names[@]}"; do
+      if [[ "${actual_alias_names[$current]}" == "${needed_names[$index]}" ]]; then
+        [[ "${actual_alias_targets[$current]}" == "${needed_targets[$index]}" ]] ||
+          return 1
+        found=$((found + 1))
+      fi
+    done
+    [[ "$found" -eq 1 ]] || return 1
+    found=0
+    for current in "${!manifest_alias_names[@]}"; do
+      if [[ "${manifest_alias_names[$current]}" == "${needed_names[$index]}" ]]; then
+        [[ "${manifest_alias_targets[$current]}" == "${needed_targets[$index]}" ]] ||
+          return 1
+        found=$((found + 1))
+      fi
+    done
+    [[ "$found" -eq 1 ]] || return 1
+  done
+
+  for index in "${!record_requested[@]}"; do
+    if [[ "${record_kinds[$index]}" == "alias" ]]; then
+      current="$({
+        strict_linux_snapshot_alias_path_fingerprint \
+          "$candidate" \
+          "${record_requested[$index]}" \
+          "${record_resolved[$index]}"
+      } 2>/dev/null)" || return 1
+    else
+      current="$({
+        strict_linux_loader_path_fingerprint \
+          "${record_requested[$index]}" \
+          "${record_executables[$index]}" \
+          "${rejected_command_roots[@]}"
+      } 2>/dev/null)" || return 1
+    fi
+    [[
+      "$current" == "${record_resolved[$index]}"$'\t'"${record_fingerprints[$index]}"
+    ]] || return 1
+  done
+  # Validate the sealed manifest fingerprint before executing the loader for
+  # either --version or --list during re-attestation.
+  strict_linux_glibc_loader_is_supported "$loader_resolved" || return 1
+
+  loader_output="$({
+    /usr/bin/mktemp "$candidate.loader-recheck.XXXXXX"
+  } 2>/dev/null)" || return 1
+  loader_error="$loader_output.err"
+  [[ ! -e "$loader_error" && ! -L "$loader_error" ]] || {
+    /bin/rm -f -- "$loader_output"
+    return 1
+  }
+  : >"$loader_error"
+  /bin/chmod 0600 "$loader_output" "$loader_error"
+  if ! run_strict_linux_loader_list \
+    "$loader_requested" \
+    "$candidate" \
+    "$alias_dir" \
+    "$loader_output" \
+    "$loader_error"; then
+    /bin/rm -f -- "$loader_output" "$loader_error"
+    return 1
+  fi
+  if [[ -s "$loader_error" ]]; then
+    /bin/rm -f -- "$loader_output" "$loader_error"
+    return 1
+  fi
+  loader_metadata="$({
+    strict_linux_loader_list_metadata \
+      "$loader_output" \
+      "$loader_resolved" \
+      "${needed_names[@]+"${needed_names[@]}"}"
+  } 2>/dev/null)" || {
+    /bin/rm -f -- "$loader_output" "$loader_error"
+    return 1
+  }
+  /bin/rm -f -- "$loader_output" "$loader_error"
+  while IFS=$'\t' read -r metadata_kind metadata_value metadata_third metadata_extra; do
+    [[ -z "$metadata_extra" ]] || return 1
+    case "$metadata_kind" in
+      interpreter)
+        [[
+          "$loader_interpreter_count" -eq 0 &&
+            "$metadata_value" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$metadata_value" != "." &&
+            "$metadata_value" != ".." &&
+            "$metadata_third" == /*
+        ]] || return 1
+        loader_interpreter_count=1
+        ;;
+      digest)
+        [[
+          -z "$current_loader_digest" &&
+            "$metadata_value" =~ ^[0-9a-f]{64}$ &&
+            -z "$metadata_third"
+        ]] || return 1
+        current_loader_digest="$metadata_value"
+        ;;
+      alias)
+        [[
+          "$metadata_value" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$metadata_third" == /*
+        ]] || return 1
+        ;;
+      path | standalone)
+        [[ "$metadata_value" == /* && -z "$metadata_third" ]] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+  done <<<"$loader_metadata"
+  [[
+    "$loader_interpreter_count" -eq 1 &&
+      "$current_loader_digest" == "$expected_loader_digest"
+  ]] || return 1
+
+  for index in "${!record_requested[@]}"; do
+    if [[ "${record_kinds[$index]}" == "alias" ]]; then
+      current="$({
+        strict_linux_snapshot_alias_path_fingerprint \
+          "$candidate" \
+          "${record_requested[$index]}" \
+          "${record_resolved[$index]}"
+      } 2>/dev/null)" || return 1
+    else
+      current="$({
+        strict_linux_loader_path_fingerprint \
+          "${record_requested[$index]}" \
+          "${record_executables[$index]}" \
+          "${rejected_command_roots[@]}"
+      } 2>/dev/null)" || return 1
+    fi
+    [[
+      "$current" == "${record_resolved[$index]}"$'\t'"${record_fingerprints[$index]}"
+    ]] || return 1
+  done
+  alias_metadata_after="$({
+    strict_linux_alias_directory_metadata "$alias_dir"
+  } 2>/dev/null)" || return 1
+  [[ "$alias_metadata_after" == "$alias_metadata" ]] || return 1
+  linux_glibc_preload_is_absent || return 1
+  [[ "$loader_requested" == "${record_requested[0]}" ]] || return 1
+  snapshot_path_is_trusted "$candidate" || return 1
+  [[ "$(linux_node_closure_manifest_path "$candidate")" == "$manifest" ]]
+}
+
+linux_node_snapshot_has_safe_closure() {
+  local candidate="$1"
+  local elf_metadata
+  local file_metadata
+  local needed_names=()
+  local name_map_names=()
+  local name_map_targets=()
+  local interpreter=""
+  local interpreter_count=0
+  local metadata_kind
+  local metadata_value
+  local metadata_third
+  local metadata_extra
+  local interpreter_record=""
+  local resolved_interpreter
+  local interpreter_fingerprint
+  local loader_output="$candidate.loader-list.out"
+  local loader_error="$candidate.loader-list.err"
+  local loader_metadata
+  local ambient_loader_digest=""
+  local controlled_loader_digest=""
+  local ambient_interpreter_count=0
+  local ambient_interpreter_name=""
+  local ambient_interpreter_path=""
+  local controlled_interpreter_count=0
+  local controlled_interpreter_name=""
+  local controlled_interpreter_path=""
+  local ambient_alias_names=()
+  local ambient_alias_paths=()
+  local closure_paths=()
+  local closure_path
+  local fingerprint_record
+  local resolved_path
+  local fingerprint
+  local after_fingerprint_record
+  local file_soname
+  local inspected_path
+  local already_inspected
+  local inspected_resolved_paths=()
+  local closure_requested_paths=()
+  local closure_resolved_paths=()
+  local closure_fingerprints=()
+  local controlled_paths=()
+  local controlled_alias_names=()
+  local controlled_alias_paths=()
+  local controlled_requested_paths=()
+  local controlled_resolved_paths=()
+  local controlled_fingerprints=()
+  local alias_dir
+  local alias_path
+  local alias_metadata
+  local alias_metadata_after
+  local alias_digest=""
+  local alias_metadata_kind
+  local alias_metadata_name
+  local alias_metadata_target
+  local alias_count=0
+  local target
+  local found
+  local index
+  local mapping_index
+  local manifest="$candidate.loader-closure"
+  local manifest_digest
+  [[ "$(/usr/bin/uname -s)" == "Linux" && "$EUID" -eq 0 ]] || return 1
+  set_root_node_snapshot_stage preload-policy
+  linux_glibc_preload_is_absent || return 1
+  set_root_node_snapshot_stage snapshot-trust
+  snapshot_path_is_trusted "$candidate" || return 1
+  set_root_node_snapshot_stage native-format
+  native_node_candidate_is_trusted "$candidate" || return 1
+  set_root_node_snapshot_stage elf-metadata
+  elf_metadata="$({
+    strict_linux_elf_metadata "$candidate" required
+  } 2>/dev/null)" ||
+    return 1
+  while IFS=$'\t' read -r metadata_kind metadata_value metadata_extra; do
+    [[ -z "$metadata_extra" ]] || return 1
+    case "$metadata_kind" in
+      interpreter)
+        [[ "$interpreter_count" -eq 0 && "$metadata_value" == /* ]] ||
+          return 1
+        interpreter_count=1
+        interpreter="$metadata_value"
+        ;;
+      needed)
+        linux_node_add_needed_name "$metadata_value" || return 1
+        ;;
+      soname)
+        [[
+          "$metadata_value" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$metadata_value" != "." &&
+            "$metadata_value" != ".."
+        ]] || return 1
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  done <<<"$elf_metadata"
+  [[ "$interpreter_count" -eq 1 ]] || return 1
+
+  set_root_node_snapshot_stage interpreter-path
+  path_is_rejected "$interpreter" && return 1
+  interpreter_record="$({
+    strict_linux_loader_path_fingerprint \
+      "$interpreter" \
+      1 \
+      "${rejected_command_roots[@]}"
+  } 2>/dev/null)" || return 1
+  [[ "$interpreter_record" == *$'\t'* ]] || return 1
+  resolved_interpreter="${interpreter_record%%$'\t'*}"
+  interpreter_fingerprint="${interpreter_record#*$'\t'}"
+  [[
+    "$resolved_interpreter" == /* &&
+      "$interpreter_fingerprint" =~ ^[0-9a-f]{64}$
+  ]] || return 1
+  path_is_rejected "$resolved_interpreter" && return 1
+  set_root_node_snapshot_stage loader-policy
+  strict_linux_elf_metadata "$resolved_interpreter" forbidden >/dev/null 2>&1 ||
+    return 1
+  strict_linux_glibc_loader_is_supported "$resolved_interpreter" || return 1
+  [[
+    "$({
+      strict_linux_loader_path_fingerprint \
+        "$interpreter" \
+        1 \
+        "${rejected_command_roots[@]}"
+    } 2>/dev/null)" == "$interpreter_record"
+  ]] || return 1
+  [[ ! -e "$loader_output" && ! -L "$loader_output" ]] || return 1
+  [[ ! -e "$loader_error" && ! -L "$loader_error" ]] || return 1
+  : >"$loader_output"
+  : >"$loader_error"
+  /bin/chmod 0600 "$loader_output" "$loader_error"
+  set_root_node_snapshot_stage ambient-loader-exec
+  if ! run_strict_linux_loader_list \
+    "$interpreter" \
+    "$candidate" \
+    - \
+    "$loader_output" \
+    "$loader_error"; then
+    /bin/rm -f -- "$loader_output" "$loader_error"
+    return 1
+  fi
+  set_root_node_snapshot_stage ambient-loader-stderr
+  if [[ -s "$loader_error" ]]; then
+    /bin/rm -f -- "$loader_output" "$loader_error"
+    return 1
+  fi
+  set_root_node_snapshot_stage ambient-loader-parse
+  loader_metadata="$({
+    strict_linux_loader_list_metadata \
+      "$loader_output" \
+      "$resolved_interpreter" \
+      "${needed_names[@]+"${needed_names[@]}"}"
+  } 2>/dev/null)" || {
+    /bin/rm -f -- "$loader_output" "$loader_error"
+    return 1
+  }
+  /bin/rm -f -- "$loader_output" "$loader_error"
+  set_root_node_snapshot_stage ambient-loader-policy
+  while IFS=$'\t' read -r metadata_kind metadata_value metadata_third metadata_extra; do
+    [[ -z "$metadata_extra" ]] || return 1
+    case "$metadata_kind" in
+      interpreter)
+        [[
+          "$ambient_interpreter_count" -eq 0 &&
+            "$metadata_value" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$metadata_value" != "." &&
+            "$metadata_value" != ".." &&
+            "$metadata_third" == /*
+        ]] || return 1
+        ambient_interpreter_count=1
+        ambient_interpreter_name="$metadata_value"
+        ambient_interpreter_path="$metadata_third"
+        ;;
+      digest)
+        [[
+          -z "$ambient_loader_digest" &&
+            "$metadata_value" =~ ^[0-9a-f]{64}$ &&
+            -z "$metadata_third"
+        ]] ||
+          return 1
+        ambient_loader_digest="$metadata_value"
+        ;;
+      alias)
+        [[
+          "$metadata_value" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$metadata_value" != "." &&
+            "$metadata_value" != ".." &&
+            "$metadata_third" == /*
+        ]] || return 1
+        ambient_alias_names+=("$metadata_value")
+        ambient_alias_paths+=("$metadata_third")
+        ;;
+      path)
+        [[ "$metadata_value" == /* && -z "$metadata_third" ]] || return 1
+        closure_paths+=("$metadata_value")
+        ;;
+      standalone)
+        [[ "$metadata_value" == /* && -z "$metadata_third" ]] || return 1
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  done <<<"$loader_metadata"
+  [[
+    "$ambient_interpreter_count" -eq 1 &&
+      -n "$ambient_loader_digest" &&
+      "${#closure_paths[@]}" -gt 0 &&
+      "$({
+        strict_linux_loader_path_fingerprint \
+          "$ambient_interpreter_path" \
+          1 \
+          "${rejected_command_roots[@]}"
+      } 2>/dev/null)" == "$interpreter_record"
+  ]] || return 1
+
+  for metadata_value in "${needed_names[@]+"${needed_names[@]}"}"; do
+    if [[ "$metadata_value" == "$ambient_interpreter_name" ]]; then
+      linux_node_add_name_mapping "$metadata_value" "$resolved_interpreter" ||
+        return 1
+    fi
+  done
+
+  # Parse every object selected by the clean glibc resolver.  Collect the full
+  # recursive DT_NEEDED name set and bind each SONAME/requested alias to one
+  # validated physical file.
+  set_root_node_snapshot_stage dependency-closure
+  for closure_path in "${closure_paths[@]}"; do
+    [[ -n "$closure_path" ]] || return 1
+    [[ "$closure_path" != "$candidate" ]] || continue
+    path_is_rejected "$closure_path" && return 1
+    fingerprint_record="$({
+      strict_linux_loader_path_fingerprint \
+        "$closure_path" \
+        0 \
+        "${rejected_command_roots[@]}"
+    } 2>/dev/null)" || return 1
+    [[ "$fingerprint_record" == *$'\t'* ]] || return 1
+    resolved_path="${fingerprint_record%%$'\t'*}"
+    fingerprint="${fingerprint_record#*$'\t'}"
+    [[
+      "$resolved_path" == /* &&
+        "$fingerprint" =~ ^[0-9a-f]{64}$
+    ]] || return 1
+    path_is_rejected "$resolved_path" && return 1
+    closure_requested_paths+=("$closure_path")
+    closure_resolved_paths+=("$resolved_path")
+    closure_fingerprints+=("$fingerprint")
+    already_inspected=0
+    for inspected_path in "${inspected_resolved_paths[@]}"; do
+      [[ "$inspected_path" != "$resolved_path" ]] || already_inspected=1
+    done
+    if [[ "$already_inspected" -eq 0 ]]; then
+      file_metadata="$({
+        strict_linux_dependency_elf_metadata \
+          "$resolved_path" \
+          "$interpreter_record"
+      } 2>/dev/null)" || return 1
+      file_soname=""
+      while IFS=$'\t' read -r metadata_kind metadata_value metadata_extra; do
+        [[ -z "$metadata_extra" ]] || return 1
+        case "$metadata_kind" in
+          soname)
+            [[ -z "$file_soname" ]] || return 1
+            file_soname="$metadata_value"
+            ;;
+          needed)
+            linux_node_add_needed_name "$metadata_value" || return 1
+            ;;
+          *) return 1 ;;
+        esac
+      done <<<"$file_metadata"
+      if [[ -n "$file_soname" ]]; then
+        linux_node_add_name_mapping "$file_soname" "$resolved_path" || return 1
+      fi
+      inspected_resolved_paths+=("$resolved_path")
+    fi
+    after_fingerprint_record="$({
+      strict_linux_loader_path_fingerprint \
+        "$closure_path" \
+        0 \
+        "${rejected_command_roots[@]}"
+    } 2>/dev/null)" || return 1
+    [[ "$after_fingerprint_record" == "$fingerprint_record" ]] || return 1
+  done
+
+  for index in "${!ambient_alias_names[@]}"; do
+    found=0
+    target=""
+    for mapping_index in "${!closure_requested_paths[@]}"; do
+      if [[
+        "${closure_requested_paths[$mapping_index]}" == "${ambient_alias_paths[$index]}"
+      ]]; then
+        target="${closure_resolved_paths[$mapping_index]}"
+        found=$((found + 1))
+      fi
+    done
+    [[ "$found" -eq 1 && -n "$target" ]] || return 1
+    linux_node_add_name_mapping "${ambient_alias_names[$index]}" "$target" ||
+      return 1
+  done
+
+  for metadata_value in "${needed_names[@]+"${needed_names[@]}"}"; do
+    found=0
+    target=""
+    for mapping_index in "${!name_map_names[@]}"; do
+      if [[ "${name_map_names[$mapping_index]}" == "$metadata_value" ]]; then
+        target="${name_map_targets[$mapping_index]}"
+        found=$((found + 1))
+      fi
+    done
+    [[ "$found" -eq 1 && -n "$target" ]] || return 1
+  done
+
+  set_root_node_snapshot_stage alias-policy
+  alias_dir="$(linux_node_alias_dir_for_candidate "$candidate")" || return 1
+  [[ ! -e "$alias_dir" && ! -L "$alias_dir" ]] || return 1
+  /bin/mkdir -m 0700 -- "$alias_dir" || return 1
+  for metadata_value in "${needed_names[@]+"${needed_names[@]}"}"; do
+    target=""
+    for mapping_index in "${!name_map_names[@]}"; do
+      if [[ "${name_map_names[$mapping_index]}" == "$metadata_value" ]]; then
+        target="${name_map_targets[$mapping_index]}"
+      fi
+    done
+    [[ -n "$target" ]] || return 1
+    /bin/ln -s -- "$target" "$alias_dir/$metadata_value" || return 1
+  done
+  alias_metadata="$({
+    strict_linux_alias_directory_metadata "$alias_dir"
+  } 2>/dev/null)" || return 1
+  while IFS=$'\t' read -r alias_metadata_kind alias_metadata_name alias_metadata_target metadata_extra; do
+    [[ -z "$metadata_extra" ]] || return 1
+    case "$alias_metadata_kind" in
+      digest)
+        [[
+          -z "$alias_digest" &&
+            "$alias_metadata_name" =~ ^[0-9a-f]{64}$ &&
+            -z "$alias_metadata_target"
+        ]] || return 1
+        alias_digest="$alias_metadata_name"
+        ;;
+      alias)
+        alias_count=$((alias_count + 1))
+        ;;
+      *) return 1 ;;
+    esac
+  done <<<"$alias_metadata"
+  [[
+    "$alias_digest" =~ ^[0-9a-f]{64}$ &&
+      "$alias_count" -eq "${#needed_names[@]}"
+  ]] || return 1
+
+  # Resolve again with the sealed alias directory first in the search policy.
+  # This digest, rather than the ambient discovery pass, is what every later
+  # launch and before/after check must reproduce.
+  : >"$loader_output"
+  : >"$loader_error"
+  /bin/chmod 0600 "$loader_output" "$loader_error"
+  set_root_node_snapshot_stage controlled-loader-list
+  if ! run_strict_linux_loader_list \
+    "$interpreter" \
+    "$candidate" \
+    "$alias_dir" \
+    "$loader_output" \
+    "$loader_error"; then
+    /bin/rm -f -- "$loader_output" "$loader_error"
+    return 1
+  fi
+  if [[ -s "$loader_error" ]]; then
+    /bin/rm -f -- "$loader_output" "$loader_error"
+    return 1
+  fi
+  loader_metadata="$({
+    strict_linux_loader_list_metadata \
+      "$loader_output" \
+      "$resolved_interpreter" \
+      "${needed_names[@]+"${needed_names[@]}"}"
+  } 2>/dev/null)" || {
+    /bin/rm -f -- "$loader_output" "$loader_error"
+    return 1
+  }
+  /bin/rm -f -- "$loader_output" "$loader_error"
+  while IFS=$'\t' read -r metadata_kind metadata_value metadata_third metadata_extra; do
+    [[ -z "$metadata_extra" ]] || return 1
+    case "$metadata_kind" in
+      interpreter)
+        [[
+          "$controlled_interpreter_count" -eq 0 &&
+            "$metadata_value" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$metadata_value" != "." &&
+            "$metadata_value" != ".." &&
+            "$metadata_third" == /*
+        ]] || return 1
+        controlled_interpreter_count=1
+        controlled_interpreter_name="$metadata_value"
+        controlled_interpreter_path="$metadata_third"
+        ;;
+      digest)
+        [[
+          -z "$controlled_loader_digest" &&
+            "$metadata_value" =~ ^[0-9a-f]{64}$ &&
+            -z "$metadata_third"
+        ]] || return 1
+        controlled_loader_digest="$metadata_value"
+        ;;
+      alias)
+        [[
+          "$metadata_value" =~ ^[A-Za-z0-9_+.-]+$ &&
+            "$metadata_third" == /*
+        ]] || return 1
+        controlled_alias_names+=("$metadata_value")
+        controlled_alias_paths+=("$metadata_third")
+        ;;
+      path)
+        [[ "$metadata_value" == /* && -z "$metadata_third" ]] || return 1
+        controlled_paths+=("$metadata_value")
+        ;;
+      standalone)
+        [[ "$metadata_value" == /* && -z "$metadata_third" ]] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+  done <<<"$loader_metadata"
+  [[
+    "$controlled_interpreter_count" -eq 1 &&
+      "$controlled_interpreter_name" == "$ambient_interpreter_name" &&
+      "$({
+        strict_linux_loader_path_fingerprint \
+          "$controlled_interpreter_path" \
+          1 \
+          "${rejected_command_roots[@]}"
+      } 2>/dev/null)" == "$interpreter_record" &&
+      "$controlled_loader_digest" =~ ^[0-9a-f]{64}$ &&
+      "${#controlled_paths[@]}" -gt 0
+  ]] || return 1
+
+  for index in "${!controlled_alias_names[@]}"; do
+    found=0
+    target=""
+    for mapping_index in "${!needed_names[@]}"; do
+      if [[ "${needed_names[$mapping_index]}" == "${controlled_alias_names[$index]}" ]]; then
+        found=$((found + 1))
+      fi
+    done
+    [[ "$found" -eq 1 ]] || return 1
+    for mapping_index in "${!name_map_names[@]}"; do
+      if [[ "${name_map_names[$mapping_index]}" == "${controlled_alias_names[$index]}" ]]; then
+        target="${name_map_targets[$mapping_index]}"
+      fi
+    done
+    [[ -n "$target" ]] || return 1
+    fingerprint_record="$({
+      strict_linux_snapshot_alias_path_fingerprint \
+        "$candidate" \
+        "${controlled_alias_paths[$index]}" \
+        "$target"
+    } 2>/dev/null)" || return 1
+    resolved_path="${fingerprint_record%%$'\t'*}"
+    [[ "$resolved_path" == "$target" ]] || return 1
+  done
+
+  for closure_path in "${controlled_paths[@]}"; do
+    [[ "$closure_path" != "$candidate" ]] || continue
+    if [[ "$closure_path" == "$alias_dir"/* ]]; then
+      metadata_value="${closure_path##*/}"
+      target=""
+      for mapping_index in "${!name_map_names[@]}"; do
+        if [[ "${name_map_names[$mapping_index]}" == "$metadata_value" ]]; then
+          target="${name_map_targets[$mapping_index]}"
+        fi
+      done
+      [[ -n "$target" ]] || return 1
+      fingerprint_record="$({
+        strict_linux_snapshot_alias_path_fingerprint \
+          "$candidate" \
+          "$closure_path" \
+          "$target"
+      } 2>/dev/null)" || return 1
+      [[ "$fingerprint_record" == "$target"$'\t'* ]] || return 1
+      continue
+    fi
+    fingerprint_record="$({
+      strict_linux_loader_path_fingerprint \
+        "$closure_path" \
+        0 \
+        "${rejected_command_roots[@]}"
+    } 2>/dev/null)" || return 1
+    resolved_path="${fingerprint_record%%$'\t'*}"
+    fingerprint="${fingerprint_record#*$'\t'}"
+    [[ "$resolved_path" == /* && "$fingerprint" =~ ^[0-9a-f]{64}$ ]] ||
+      return 1
+    found=0
+    [[ "$resolved_path" != "$resolved_interpreter" ]] || found=1
+    for mapping_index in "${!name_map_targets[@]}"; do
+      [[ "${name_map_targets[$mapping_index]}" != "$resolved_path" ]] || found=1
+    done
+    [[ "$found" -eq 1 ]] || return 1
+    strict_linux_dependency_elf_metadata \
+      "$resolved_path" \
+      "$interpreter_record" >/dev/null 2>&1 || return 1
+    after_fingerprint_record="$({
+      strict_linux_loader_path_fingerprint \
+        "$closure_path" \
+        0 \
+        "${rejected_command_roots[@]}"
+    } 2>/dev/null)" || return 1
+    [[ "$after_fingerprint_record" == "$fingerprint_record" ]] || return 1
+    controlled_requested_paths+=("$closure_path")
+    controlled_resolved_paths+=("$resolved_path")
+    controlled_fingerprints+=("$fingerprint")
+  done
+  alias_metadata_after="$({
+    strict_linux_alias_directory_metadata "$alias_dir"
+  } 2>/dev/null)" || return 1
+  [[ "$alias_metadata_after" == "$alias_metadata" ]] || return 1
+
+  set_root_node_snapshot_stage manifest-seal
+  [[ ! -e "$manifest" && ! -L "$manifest" ]] || return 1
+  : >"$manifest"
+  /bin/chmod 0600 "$manifest"
+  printf '%s\n' 'loader-closure-v3' >"$manifest"
+  printf 'policy\t0\t%s\t-\t%s\t%s\n' \
+    "$alias_dir" \
+    "$alias_digest" \
+    "$controlled_loader_digest" >>"$manifest"
+  printf 'loader\t1\t%s\t%s\t%s\t-\n' \
+    "$interpreter" \
+    "$resolved_interpreter" \
+    "$interpreter_fingerprint" >>"$manifest"
+  for metadata_value in "${needed_names[@]+"${needed_names[@]}"}"; do
+    target=""
+    for mapping_index in "${!name_map_names[@]}"; do
+      if [[ "${name_map_names[$mapping_index]}" == "$metadata_value" ]]; then
+        target="${name_map_targets[$mapping_index]}"
+      fi
+    done
+    [[ -n "$target" ]] || return 1
+    printf 'needed\t0\t%s\t%s\t-\t-\n' \
+      "$metadata_value" \
+      "$target" >>"$manifest"
+    alias_path="$alias_dir/$metadata_value"
+    fingerprint_record="$({
+      strict_linux_snapshot_alias_path_fingerprint \
+        "$candidate" \
+        "$alias_path" \
+        "$target"
+    } 2>/dev/null)" || return 1
+    resolved_path="${fingerprint_record%%$'\t'*}"
+    fingerprint="${fingerprint_record#*$'\t'}"
+    [[ "$resolved_path" == "$target" && "$fingerprint" =~ ^[0-9a-f]{64}$ ]] ||
+      return 1
+    printf 'alias\t0\t%s\t%s\t%s\t%s\n' \
+      "$alias_path" \
+      "$target" \
+      "$fingerprint" \
+      "$metadata_value" >>"$manifest"
+  done
+  for index in "${!controlled_requested_paths[@]}"; do
+    printf 'file\t0\t%s\t%s\t%s\t-\n' \
+      "${controlled_requested_paths[$index]}" \
+      "${controlled_resolved_paths[$index]}" \
+      "${controlled_fingerprints[$index]}" >>"$manifest"
+  done
+  # shellcheck disable=SC2016
+  manifest_digest="$(system_perl -MDigest::SHA -MFcntl=:DEFAULT,:mode -e '
+    use strict;
+    use warnings;
+    my $manifest = $ARGV[0];
+    sysopen(my $input, $manifest, O_RDONLY | O_NOFOLLOW) or exit 1;
+    my @stat = stat($input);
+    exit 1 if !@stat || !S_ISREG($stat[2]) || $stat[7] > 1024 * 1024;
+    my $digest = Digest::SHA->new(256);
+    my $buffer;
+    while (1) {
+      my $read = sysread($input, $buffer, 65536);
+      exit 1 if !defined($read);
+      last if $read == 0;
+      $digest->add(substr($buffer, 0, $read));
+    }
+    close($input) or exit 1;
+    print $digest->hexdigest, "\n";
+  ' "$manifest")" || return 1
+  [[ "$manifest_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  /bin/chmod 0400 "$manifest"
+  /bin/mv "$manifest" "$manifest.$manifest_digest"
+  set_root_node_snapshot_stage closure-attestation
+  linux_node_snapshot_closure_is_trusted "$candidate"
+}
+
+snapshot_linux_root_ancestor_node() {
+  local source="$1"
+  local snapshot_dir
+  local destination
+  local digest
+  local alias_dir
+  local node_version
+  local smoke_output
+  set_root_node_snapshot_stage source-proof
+  [[ "$(/usr/bin/uname -s)" == "Linux" && "$EUID" -eq 0 ]] || return 1
+  [[ "$source" == /* && -f "$source" && -x "$source" && ! -L "$source" ]] ||
+    return 1
+  path_is_rejected "$source" && return 1
+  snapshot_dir="$(
+    /usr/bin/mktemp -d \
+      "$command_runtime_dir/node.XXXXXX" \
+      2>/dev/null || true
+  )"
+  [[ -n "$snapshot_dir" && -d "$snapshot_dir" && ! -L "$snapshot_dir" ]] ||
+    return 1
+  /bin/chmod 0700 "$snapshot_dir"
+  destination="$snapshot_dir/node"
+  # A root-run package-manager process may inherit an image-installed Node
+  # whose on-disk owner is the image build user. Trust only the exact native
+  # executable already running in this wrapper's live ancestor chain, then
+  # copy it through /proc into the private command runtime.
+  # shellcheck disable=SC2016
+  if ! digest="$(system_perl -MDigest::SHA -MFcntl=:DEFAULT,:mode -e '
+    use strict;
+    use warnings;
+    my ($source, $destination, $euid) = @ARGV;
+    my $maximum_size = 256 * 1024 * 1024;
+
+    sub read_proc_identity {
+      my ($pid) = @_;
+      return if !defined($pid) || $pid !~ /\A[1-9][0-9]*\z/;
+      my $stat_path = "/proc/$pid/stat";
+      sysopen(my $input, $stat_path, O_RDONLY | O_NOFOLLOW) or return;
+      my $content = "";
+      my $buffer;
+      while (1) {
+        my $read = sysread($input, $buffer, 4096);
+        return if !defined($read);
+        last if $read == 0;
+        $content .= substr($buffer, 0, $read);
+        return if length($content) > 8192;
+      }
+      close($input) or return;
+      my $closing = rindex($content, ") ");
+      return if $closing < 0;
+      my $fields_text = substr($content, $closing + 2);
+      $fields_text =~ s/\s+\z//;
+      my @fields = split(/\s+/, $fields_text);
+      return if @fields < 20;
+      my ($ppid, $starttime) = @fields[1, 19];
+      return if $ppid !~ /\A[0-9]+\z/ || $starttime !~ /\A[0-9]+\z/;
+
+      my $status_path = "/proc/$pid/status";
+      sysopen(my $status, $status_path, O_RDONLY | O_NOFOLLOW) or return;
+      my $status_content = "";
+      while (1) {
+        my $read = sysread($status, $buffer, 4096);
+        return if !defined($read);
+        last if $read == 0;
+        $status_content .= substr($buffer, 0, $read);
+        return if length($status_content) > 1024 * 1024;
+      }
+      close($status) or return;
+      my ($real_uid, $effective_uid, $saved_uid, $filesystem_uid) =
+        $status_content =~ /^Uid:\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s*$/m;
+      return if !defined($filesystem_uid);
+      return ($ppid, $starttime, $real_uid, $effective_uid, $saved_uid,
+        $filesystem_uid);
+    }
+
+    sub find_live_ancestor {
+      my ($device, $inode, $wanted_pid, $wanted_starttime) = @_;
+      my $pid = getppid();
+      my %seen;
+      for (1 .. 64) {
+        return if !$pid || $seen{$pid}++;
+        my ($ppid, $starttime, @uids) = read_proc_identity($pid);
+        return if !defined($ppid) || !defined($starttime) || @uids != 4;
+        my $all_root_uids = !grep { $_ ne "0" } @uids;
+        return if !$all_root_uids;
+        my @executable = stat("/proc/$pid/exe");
+        if (@executable && $executable[0] == $device &&
+            $executable[1] == $inode) {
+          if (!defined($wanted_pid) ||
+              ($pid == $wanted_pid && $starttime eq $wanted_starttime)) {
+            return ($pid, $starttime);
+          }
+        }
+        last if $ppid == 0 || $ppid == $pid;
+        $pid = $ppid;
+      }
+      return;
+    }
+
+    sub same_metadata {
+      my ($left, $right) = @_;
+      for my $index (0, 1, 2, 3, 4, 5, 7, 9, 10) {
+        return 0 if $left->[$index] != $right->[$index];
+      }
+      return 1;
+    }
+
+    sub digest_open_file {
+      my ($input, $expected_size, $maximum_size) = @_;
+      return if $expected_size <= 0 || $expected_size > $maximum_size;
+      sysseek($input, 0, 0) == 0 or return;
+      my $digest = Digest::SHA->new(256);
+      my $total = 0;
+      my $buffer;
+      while (1) {
+        my $read = sysread($input, $buffer, 65536);
+        return if !defined($read);
+        last if $read == 0;
+        $total += $read;
+        return if $total > $expected_size || $total > $maximum_size;
+        $digest->add(substr($buffer, 0, $read));
+      }
+      return if $total != $expected_size;
+      return $digest->hexdigest;
+    }
+
+    exit 1 if $euid != 0;
+    sysopen(my $candidate, $source, O_RDONLY | O_NOFOLLOW) or exit 1;
+    binmode($candidate);
+    my @candidate_before = stat($candidate);
+    exit 1 if !@candidate_before || !S_ISREG($candidate_before[2]);
+    # Tool caches may publish a root-owned, foreign-owned, writable, or
+    # hard-linked executable. The exact all-root-UID live ancestor plus
+    # before/after metadata and digest bind the copied inode; keep rejecting
+    # set-ID execution semantics that the sealed copy drops.
+    exit 1 if $candidate_before[3] < 1 || ($candidate_before[2] & 06000);
+    exit 1 if ($candidate_before[2] & 0111) == 0;
+    exit 1 if $candidate_before[7] <= 0 || $candidate_before[7] > $maximum_size;
+    my $prefix;
+    exit 1 if sysread($candidate, $prefix, 4) != 4;
+    exit 1 if unpack("H*", $prefix) ne "7f454c46";
+    sysseek($candidate, 0, 0) == 0 or exit 1;
+
+    my ($ancestor_pid, $ancestor_starttime) = find_live_ancestor(
+      $candidate_before[0],
+      $candidate_before[1],
+      undef,
+      undef,
+    );
+    exit 1 if !defined($ancestor_pid) || !defined($ancestor_starttime);
+    my $proc_source = "/proc/$ancestor_pid/exe";
+    # /proc/<pid>/exe is an intentional kernel-owned symlink to the already
+    # running executable, so this one open must follow the final component.
+    sysopen(my $input, $proc_source, O_RDONLY) or exit 1;
+    binmode($input);
+    my @input_before = stat($input);
+    exit 1 if !@input_before ||
+      !same_metadata(\@candidate_before, \@input_before);
+
+    sysopen(
+      my $output,
+      $destination,
+      O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
+      0600,
+    ) or exit 1;
+    binmode($output);
+    my $source_digest = Digest::SHA->new(256);
+    my $total = 0;
+    my $buffer;
+    while (1) {
+      my $read = sysread($input, $buffer, 65536);
+      exit 1 if !defined($read);
+      last if $read == 0;
+      $total += $read;
+      exit 1 if $total > $maximum_size || $total > $input_before[7];
+      $source_digest->add(substr($buffer, 0, $read));
+      my $offset = 0;
+      while ($offset < $read) {
+        my $written = syswrite($output, $buffer, $read - $offset, $offset);
+        exit 1 if !defined($written) || $written == 0;
+        $offset += $written;
+      }
+    }
+    exit 1 if $total != $input_before[7];
+    my $source_hex = $source_digest->hexdigest;
+    close($output) or exit 1;
+    chmod(0500, $destination) == 1 or exit 1;
+
+    my @input_after = stat($input);
+    my @candidate_after = stat($candidate);
+    my @path_after = lstat($source);
+    exit 1 if !@input_after ||
+      !same_metadata(\@input_before, \@input_after);
+    exit 1 if !@candidate_after ||
+      !same_metadata(\@candidate_before, \@candidate_after);
+    exit 1 if !@path_after ||
+      !same_metadata(\@candidate_before, \@path_after);
+    my ($verified_pid, $verified_starttime) = find_live_ancestor(
+      $candidate_before[0],
+      $candidate_before[1],
+      $ancestor_pid,
+      $ancestor_starttime,
+    );
+    exit 1 if !defined($verified_pid) || !defined($verified_starttime);
+    my $ancestor_hex_after = digest_open_file(
+      $input,
+      $total,
+      $maximum_size,
+    );
+    my $candidate_hex_after = digest_open_file(
+      $candidate,
+      $total,
+      $maximum_size,
+    );
+    exit 1 if !defined($ancestor_hex_after) ||
+      !defined($candidate_hex_after) ||
+      $ancestor_hex_after ne $source_hex ||
+      $candidate_hex_after ne $source_hex;
+    close($input) or exit 1;
+    close($candidate) or exit 1;
+
+    my @published = lstat($destination);
+    exit 1 if !@published || !S_ISREG($published[2]) || S_ISLNK($published[2]);
+    exit 1 if $published[4] != $euid || $published[3] != 1;
+    exit 1 if ($published[2] & 07777) != 0500 || $published[7] != $total;
+    sysopen(my $published_input, $destination, O_RDONLY | O_NOFOLLOW) or exit 1;
+    binmode($published_input);
+    my $published_digest = Digest::SHA->new(256);
+    while (1) {
+      my $read = sysread($published_input, $buffer, 65536);
+      exit 1 if !defined($read);
+      last if $read == 0;
+      $published_digest->add(substr($buffer, 0, $read));
+    }
+    close($published_input) or exit 1;
+    exit 1 if $published_digest->hexdigest ne $source_hex;
+    print "$source_hex\n";
+  ' "$source" "$destination" "$EUID")"; then
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  fi
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  }
+  /bin/mv "$destination" "$destination.$digest"
+  destination="$destination.$digest"
+  set_root_node_snapshot_stage snapshot-trust
+  if ! snapshot_path_is_trusted "$destination"; then
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  fi
+  set_root_node_snapshot_stage native-format
+  if ! native_node_candidate_is_trusted "$destination"; then
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  fi
+  if ! linux_node_snapshot_has_safe_closure "$destination"; then
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  fi
+  set_root_node_snapshot_stage closure-attestation
+  linux_node_snapshot_closure_is_trusted "$destination" || {
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  }
+  alias_dir="$(linux_node_alias_dir_for_candidate "$destination")" || {
+    set_root_node_snapshot_stage alias-policy
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  }
+  set_root_node_snapshot_stage version-exec
+  node_version="$(
+    /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C \
+      "LD_LIBRARY_PATH=$alias_dir" \
+      "AUTOREVIEW_ATTESTED_NODE_LIBRARY_PATH=$alias_dir" \
+      "$destination" --version 2>/dev/null
+  )" || {
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  }
+  [[
+    "$node_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.+-]+)?$
+  ]] || {
+    set_root_node_snapshot_stage version-output
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  }
+  set_root_node_snapshot_stage version-reattest
+  linux_node_snapshot_closure_is_trusted "$destination" || {
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  }
+  set_root_node_snapshot_stage smoke-exec
+  smoke_output="$(
+    /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C \
+      "LD_LIBRARY_PATH=$alias_dir" \
+      "AUTOREVIEW_ATTESTED_NODE_LIBRARY_PATH=$alias_dir" \
+      "$destination" \
+      -e 'process.stdout.write("agent-autoreview-node-smoke")' \
+      2>/dev/null
+  )" || {
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  }
+  if [[ "$smoke_output" != "agent-autoreview-node-smoke" ]] ||
+    ! linux_node_snapshot_closure_is_trusted "$destination"; then
+    set_root_node_snapshot_stage smoke-reattest
+    report_root_node_snapshot_rejection
+    /bin/rm -rf -- "$snapshot_dir"
+    return 1
+  fi
+  printf '%s\n' "$destination"
+}
+
+snapshot_node_candidate() {
+  local source="$1"
+  local snapshotted
+  if snapshotted="$(snapshot_linux_root_ancestor_node "$source")"; then
+    printf '%s\n' "$snapshotted"
+    return 0
+  fi
+  snapshot_external_executable "$source" node
+}
+
 trusted_login_home() {
   # shellcheck disable=SC2016
   system_perl -MCwd=abs_path -e '
@@ -646,7 +2941,7 @@ resolve_volta_node() {
     printf '%s\n' "$resolved"
     return 0
   fi
-  if snapshotted_node="$(snapshot_external_executable "$resolved" node)"; then
+  if snapshotted_node="$(snapshot_node_candidate "$resolved")"; then
     printf '%s\n' "$snapshotted_node"
     return 0
   fi
@@ -658,6 +2953,7 @@ resolve_node_command() {
   local path_entry
   local candidate
   local resolved
+  local snapshotted_node
   local fallback_candidates=()
   local volta_shims=()
   IFS=: read -r -a path_entries <<<"$external_command_path"
@@ -675,6 +2971,12 @@ resolve_node_command() {
     if command_path_is_strictly_trusted "$resolved" &&
       native_node_candidate_is_trusted "$resolved"; then
       printf '%s\n' "$resolved"
+      return 0
+    fi
+    if snapshotted_node="$(
+      snapshot_linux_root_ancestor_node "$resolved"
+    )"; then
+      printf '%s\n' "$snapshotted_node"
       return 0
     fi
     fallback_candidates+=("$resolved")
@@ -696,6 +2998,29 @@ resolve_node_command() {
 
 git_bin="$(resolve_external_command git || true)"
 node_bin="$(resolve_node_command || true)"
+if [[
+  "$root_node_snapshot_diagnostics" -eq 1 &&
+    -z "$node_bin"
+]]; then
+  root_node_snapshot_stage="source-proof"
+  diagnostic_record=""
+  if [[
+    -f "$root_node_snapshot_diagnostic_file" &&
+      ! -L "$root_node_snapshot_diagnostic_file"
+  ]]; then
+    IFS= read -r diagnostic_record <"$root_node_snapshot_diagnostic_file" ||
+      diagnostic_record=""
+  fi
+  if [[ "$diagnostic_record" =~ ^[0-9]+:([a-z-]+)$ ]]; then
+    set_root_node_snapshot_stage "${BASH_REMATCH[1]}"
+  fi
+  printf 'agent:autoreview: root Node trust rejected at %s\n' \
+    "$root_node_snapshot_stage" >&2
+fi
+/bin/rm -f -- "$root_node_snapshot_diagnostic_file"
+unset AUTOREVIEW_TEST_NODE_SNAPSHOT_DIAGNOSTICS
+unset AUTOREVIEW_TEST_REQUIRE_ROOT_SNAPSHOT
+root_node_snapshot_diagnostics=0
 
 if [[ ! -x "$helper" ]]; then
   cat >&2 <<EOF
@@ -716,6 +3041,23 @@ fi
 if [[ -z "$node_bin" || ! -x "$node_bin" ]]; then
   echo "agent:autoreview requires a trusted node executable" >&2
   exit 127
+fi
+
+attested_node_library_path=""
+if [[
+  "$(/usr/bin/uname -s)" == "Linux" &&
+    "$EUID" -eq 0 &&
+    "$node_bin" == "$command_runtime_dir"/*
+]]; then
+  attested_node_library_path="$(linux_node_alias_dir_for_candidate "$node_bin")"
+  if [[
+    "$attested_node_library_path" != /* ||
+      ! -d "$attested_node_library_path" ||
+      -L "$attested_node_library_path"
+  ]] || ! linux_node_snapshot_closure_is_trusted "$node_bin"; then
+    echo "agent:autoreview: attested Node loader policy changed before use" >&2
+    exit 127
+  fi
 fi
 
 command_file_identity() {
@@ -740,12 +3082,20 @@ attested_helper_runtime_manifest=""
 
 resolved_command_is_trusted() {
   local candidate="$1"
-  if [[ "$candidate" == "$command_runtime_dir"/* ]]; then
+  if [[ "$candidate" == "$node_bin" ]]; then
+    if [[ "$candidate" == "$command_runtime_dir"/* ]]; then
+      if [[ "$(/usr/bin/uname -s)" == "Linux" && "$EUID" -eq 0 ]]; then
+        linux_node_snapshot_closure_is_trusted "$candidate"
+      else
+        snapshot_path_is_trusted "$candidate"
+      fi
+    else
+      [[ "$(command_file_identity "$candidate" 2>/dev/null || true)" == "$node_bin_identity" ]]
+    fi
+  elif [[ "$candidate" == "$command_runtime_dir"/* ]]; then
     snapshot_path_is_trusted "$candidate"
   elif [[ "$candidate" == "$git_bin" ]]; then
     [[ "$(command_file_identity "$candidate" 2>/dev/null || true)" == "$git_bin_identity" ]]
-  elif [[ "$candidate" == "$node_bin" ]]; then
-    [[ "$(command_file_identity "$candidate" 2>/dev/null || true)" == "$node_bin_identity" ]]
   else
     command_path_is_strictly_trusted "$candidate"
   fi
@@ -753,14 +3103,18 @@ resolved_command_is_trusted() {
 
 run_trusted_external() {
   local executable="$1"
+  local status
   shift
   resolved_command_is_trusted "$executable" || {
     echo "agent:autoreview: resolved executable changed before launch: $executable" >&2
     return 127
   }
-  /usr/bin/env \
+  if /usr/bin/env \
     -u NODE_OPTIONS \
     -u NODE_PATH \
+    -u OPENSSL_CONF \
+    -u OPENSSL_MODULES \
+    -u GLIBC_TUNABLES \
     -u LD_AUDIT \
     -u LD_DEBUG \
     -u LD_DEBUG_OUTPUT \
@@ -780,11 +3134,111 @@ run_trusted_external() {
     -u DYLD_SHARED_REGION \
     -u DYLD_VERSIONED_FRAMEWORK_PATH \
     -u DYLD_VERSIONED_LIBRARY_PATH \
-    "$executable" "$@"
+    "$executable" "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  resolved_command_is_trusted "$executable" || {
+    echo "agent:autoreview: resolved executable changed after launch: $executable" >&2
+    return 127
+  }
+  return "$status"
 }
 
 run_trusted_node() {
-  run_trusted_external "$node_bin" "$@"
+  local status
+  if [[ -z "$attested_node_library_path" ]]; then
+    run_trusted_external "$node_bin" "$@"
+    return
+  fi
+  linux_node_snapshot_closure_is_trusted "$node_bin" || {
+    echo "agent:autoreview: attested Node closure changed before launch" >&2
+    return 127
+  }
+  if /usr/bin/env \
+    -u NODE_OPTIONS \
+    -u NODE_PATH \
+    -u OPENSSL_CONF \
+    -u OPENSSL_MODULES \
+    -u GLIBC_TUNABLES \
+    -u LD_AUDIT \
+    -u LD_DEBUG \
+    -u LD_DEBUG_OUTPUT \
+    -u LD_PRELOAD \
+    -u LD_LIBRARY_PATH \
+    -u LD_ORIGIN_PATH \
+    -u LD_PROFILE \
+    -u LD_SHOW_AUXV \
+    "LD_LIBRARY_PATH=$attested_node_library_path" \
+    "AUTOREVIEW_ATTESTED_NODE_LIBRARY_PATH=$attested_node_library_path" \
+    "$node_bin" "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  linux_node_snapshot_closure_is_trusted "$node_bin" || {
+    echo "agent:autoreview: attested Node closure changed after launch" >&2
+    return 127
+  }
+  return "$status"
+}
+
+run_trusted_node_in_clean_env() {
+  local environment_count="$1"
+  local environment_index
+  local environment_name
+  local environment_args=()
+  local status
+  shift
+  [[ "$environment_count" =~ ^[0-9]+$ && "$environment_count" -le 64 ]] ||
+    return 127
+  for ((environment_index = 0; environment_index < environment_count; environment_index++)); do
+    [[ "$#" -gt 0 && "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]] || return 127
+    environment_name="${1%%=*}"
+    case "$environment_name" in
+      LD_* | GLIBC_TUNABLES | AUTOREVIEW_ATTESTED_NODE_LIBRARY_PATH | \
+        NODE_OPTIONS | NODE_PATH | OPENSSL_CONF | OPENSSL_MODULES)
+        return 127
+        ;;
+    esac
+    environment_args+=("$1")
+    shift
+  done
+  if [[ -n "$attested_node_library_path" ]]; then
+    linux_node_snapshot_closure_is_trusted "$node_bin" || {
+      echo "agent:autoreview: attested Node closure changed before clean-environment launch" >&2
+      return 127
+    }
+    if /usr/bin/env -i \
+      "${environment_args[@]}" \
+      "LD_LIBRARY_PATH=$attested_node_library_path" \
+      "AUTOREVIEW_ATTESTED_NODE_LIBRARY_PATH=$attested_node_library_path" \
+      "$node_bin" "$@"; then
+      status=0
+    else
+      status=$?
+    fi
+    linux_node_snapshot_closure_is_trusted "$node_bin" || {
+      echo "agent:autoreview: attested Node closure changed after clean-environment launch" >&2
+      return 127
+    }
+    return "$status"
+  fi
+  resolved_command_is_trusted "$node_bin" || {
+    echo "agent:autoreview: resolved node executable changed before clean-environment launch" >&2
+    return 127
+  }
+  if /usr/bin/env -i "${environment_args[@]}" "$node_bin" "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  resolved_command_is_trusted "$node_bin" || {
+    echo "agent:autoreview: resolved node executable changed after clean-environment launch" >&2
+    return 127
+  }
+  return "$status"
 }
 
 run_helper() {
@@ -1808,8 +4262,10 @@ capture_feedback_state() {
   fi
   (
     cd "$repo"
-    env -i "${env_args[@]}" \
-      "$node_bin" "$runtime_dir/scripts/pr-feedback-state.mjs" \
+    run_trusted_node_in_clean_env \
+      "${#env_args[@]}" \
+      "${env_args[@]}" \
+      "$runtime_dir/scripts/pr-feedback-state.mjs" \
       --pr "$pr_number" \
       --repo "$repository_slug" \
       --json

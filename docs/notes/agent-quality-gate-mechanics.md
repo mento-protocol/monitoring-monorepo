@@ -209,11 +209,44 @@ executables and every canonical ancestor must be owned by the current user or
 root and must not be group/other-writable. On Darwin, Homebrew-style paths that
 fail only that ancestry rule are accepted solely through sealed private
 snapshots of native Mach-O executables whose linked-library closure is entirely
-system-only. Node discovery never executes a version-manager
+system-only. On Linux, and only for a root-run wrapper, an otherwise
+path-untrusted Node may be recovered only when its inode matches a live wrapper
+ancestor across an uninterrupted all-root UID chain; this includes root- or
+foreign-owned writable/hard-linked toolcache layouts, while set-ID semantics
+remain forbidden. Direct helper invocation receives no runtime exception. The
+wrapper copies bytes from the bound `/proc/<pid>/exe` descriptor into a
+root-owned `0500`, single-link snapshot, then re-hashes both the ancestor and
+candidate descriptors before launch. Bounded ELF parsing
+rejects unsafe interpreters, RPATH/RUNPATH and loader-injection tags, and
+path-qualified dependencies. The glibc-only fallback recursively resolves every
+static `DT_NEEDED` name to a root-owned, non-writable target, publishes those
+names through a private `0700` alias directory, and launches with that exact
+controlled `LD_LIBRARY_PATH`; `/etc/ld.so.preload` must remain absent. The
+helper reproduces the wrapper-sealed loader path/symlink/stat/content
+fingerprint and validates the handed-off current snapshot, sealed manifest,
+loader, alias names, targets, and ancestry before and after semantic-engine
+launches. This exception trusts the
+UID-0 wrapper/runtime and covers the static startup closure, not later
+application-level `dlopen`, provider, or plugin loads. Scripts and native
+executables with relative or non-system library closure fail closed. Node
+discovery never executes a version-manager
 shim: Volta is queried through a sealed native `volta which node`, and the
 returned Node path is revalidated before launch. Git invocations ignore
 inherited repository-routing variables such as `GIT_DIR` and
-`GIT_WORK_TREE`. Prepared repo-context bundles apply the same target-scoped
+`GIT_WORK_TREE`.
+
+The required `autoreview-root-runtime` CI job is the focused Linux/root proof.
+It selects the repository's Node version through Blacksmith's x64
+`/opt/hostedtoolcache` layout, launches that exact runtime through `sudo` and a
+minimal `env -i`, and requires the target-guard suite to observe the sealed
+snapshot rather than silently taking the ordinary trusted-path branch. The job
+does not install workspace dependencies or run the full autoreview suite. Its
+test-only diagnostic switch retains only the deepest allowlisted trust stage,
+prints that one stage if Node resolution fails, and is unset before the helper
+or semantic engine starts; normal invocations keep the generic trusted-Node
+error.
+
+Prepared repo-context bundles apply the same target-scoped
 before/after fingerprint while every artifact remains in an adjacent ephemeral
 directory. The destination parent's canonical inode and the freshly created
 staging directory's `dev:ino` are pinned before content generation. After
