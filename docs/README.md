@@ -185,11 +185,4 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) | UI Dashboard Performance Plan — monitoring.mento.org | unmanaged / unmanaged | note / repo-wide | unowned | 365d |
 | [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) | AI Review Process Integration Plan | non-canonical / archived | plan / ci/process | eng | 365d; verified 2026-07-17 |
 | [`docs/PLAN-cdps-monitoring.md`](PLAN-cdps-monitoring.md) | ROADMAP refresh + CDPs monitoring (Liquity v2 indexing & dashboard) | unmanaged / unmanaged | plan / repo-wide | unowned | 365d |
-| [`docs/PLAN-celo-mainnet-indexer.md`](PLAN-celo-mainnet-indexer.md) | Plan: Celo Mainnet Envio Indexer | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-oracle-health-state-DOD.md`](PLAN-oracle-health-state-DOD.md) | Oracle & Health State — Definition of Done | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Plan: Oracle & Health State in the Indexer + Dashboard | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-oracle-snapshot-chart.md`](PLAN-oracle-snapshot-chart.md) | Plan: OracleSnapshot Chart — Oracle Price History Timeline | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-rebalancer-liveness.md`](PLAN-rebalancer-liveness.md) | Plan: Rebalancer Liveness & Effectiveness | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-stream-c-dashboard.md`](PLAN-stream-c-dashboard.md) | Stream C: Dashboard Components for Trading Limits & Rebalancer Liveness | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-trading-limit-tracking.md`](PLAN-trading-limit-tracking.md) | Plan: Trading Limit Tracking | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/ROADMAP.md`](ROADMAP.md) | Monitoring Monorepo — Roadmap | unmanaged / unmanaged | plan / repo-wide | unowned | 365d |
+| [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Oracle health-state decision retrospective | non-canonical / archived | plan / repo-wide | eng | 365d |

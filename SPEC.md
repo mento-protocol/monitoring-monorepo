@@ -191,7 +191,7 @@ ordering remain in
 | Which networks, symbols, thresholds, namespaces, and ABIs are shared? | [`shared-config/AGENTS.md`](./shared-config/AGENTS.md) and package source                                                                     |
 | Which dashboard routes and behaviors exist?                           | [`ui-dashboard/AGENTS.md`](./ui-dashboard/AGENTS.md) and `ui-dashboard/src/`                                                                  |
 | Which alerts fire and where do they route?                            | [`alerts/AGENTS.md`](./alerts/AGENTS.md), `alerts/rules/`, and `aegis/config.yaml`                                                            |
-| What is planned rather than shipped?                                  | GitHub Issues are the active-work authority; [`docs/ROADMAP.md`](./docs/ROADMAP.md) is non-canonical planning context that must be verified   |
+| What is planned rather than shipped?                                  | GitHub Issues are the active-work authority; historical plans and notes are non-canonical input that must be verified                         |
 | Which commands and CI checks are current?                             | [`docs/notes/quick-commands.md`](./docs/notes/quick-commands.md) and the package manifests/workflows                                          |
 
 When an implementation change alters one of these boundaries, update the

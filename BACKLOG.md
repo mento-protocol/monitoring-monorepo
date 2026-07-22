@@ -16,7 +16,6 @@ an Issue promptly.
 - Active work → GitHub Issues (`source:backlog` label; priorities `priority:p1/p2/p3`).
 - Decisions recorded so they aren't re-litigated → `docs/notes/terraform-cicd-hardening-decisions-2026-05.md`.
 - Passive watch lists / parked ideas → `docs/notes/file-size-watch.md`, `docs/notes/indexer-spec-followups.md`.
-- Speculative future sinks (Streamlit, ClickHouse) → `docs/ROADMAP.md`.
 
 Durable lessons belong in `AGENTS.md`, `docs/pr-checklists/`, `docs/notes/`, or
 tests. Workflow details live in `docs/notes/agent-issue-workflow.md`.

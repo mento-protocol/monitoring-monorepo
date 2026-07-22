@@ -237,14 +237,30 @@ export function validateFixtureSuite(suite, inventory) {
       );
     } else {
       for (const source of question.sources_requiring_verification) {
-        const sourceRecord = records.get(source?.path);
-        if (!sourceRecord) {
+        const sourcePath = source?.path;
+        const hasValidSourcePath =
+          typeof sourcePath === "string" &&
+          sourcePath.length > 0 &&
+          !sourcePath.startsWith("/") &&
+          !sourcePath.includes("\\") &&
+          sourcePath
+            .split("/")
+            .every(
+              (segment) =>
+                segment.length > 0 && segment !== "." && segment !== "..",
+            ) &&
+          sourcePath.endsWith(".md");
+        if (!hasValidSourcePath) {
           errors.push(
-            `question ${question.id} verification source is missing: ${source?.path}`,
+            `question ${question.id} verification source has an invalid path`,
           );
-        } else if (sourceRecord.authority === "canonical") {
+        }
+        const sourceRecord = hasValidSourcePath
+          ? records.get(sourcePath)
+          : null;
+        if (sourceRecord?.authority === "canonical") {
           errors.push(
-            `question ${question.id} verification source is already canonical: ${source.path}`,
+            `question ${question.id} verification source is already canonical: ${sourcePath}`,
           );
         }
         if (
