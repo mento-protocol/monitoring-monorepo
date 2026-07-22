@@ -2374,6 +2374,10 @@ for sequential_mode in parallel-one fail-fast; do
   fi
   (
     cd "$autoreview_progress_repo"
+    # This block re-runs the same unchanged fixture to exercise the progress
+    # monitor; per-command reuse (issue #1410) would otherwise skip the
+    # autoreview test on later runs, so drop the stamps to force re-execution.
+    rm -f "$autoreview_progress_repo/.tmp/agent-quality-gate/command-stamps.tsv"
     DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
       PATH="$autoreview_progress_repo/bin:$PATH" \
       "$repo_root/scripts/agent-quality-gate.sh" \
@@ -3617,5 +3621,234 @@ assert_not_contains "(ESLint baseline wrapper changed)"
 # Root ESLint config changes trigger scripts lint.
 run_gate "eslint.config.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
+
+# GitHub issue #1410: a run that fails on one flaky command must, on rerun,
+# reuse the commands that already passed against unchanged content instead of
+# re-executing them. `pnpm lint:scripts` appends a side-effect line every time
+# it runs; it must run exactly once across a failing run plus a passing rerun.
+command_stamp_resume_repo="$(mktemp -d)"
+(
+  cd "$command_stamp_resume_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "lint:scripts")
+    printf 'ran\n' >> "${LINT_SIDE_EFFECT:?}"
+    ;;
+  "agent:prewarm:test")
+    if [[ -f "${PREWARM_FAIL_FLAG:?}" ]]; then
+      echo "prewarm intentional failure"
+      exit 1
+    fi
+    ;;
+esac
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  : > "$command_stamp_resume_repo/prewarm-fail"
+  set +e
+  LINT_SIDE_EFFECT="$command_stamp_resume_repo/lint-side-effect" \
+    PREWARM_FAIL_FLAG="$command_stamp_resume_repo/prewarm-fail" \
+    PATH="$command_stamp_resume_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$output_file" 2>&1
+  first_exit=$?
+  set -e
+  [[ "$first_exit" -ne 0 ]] ||
+    fail "expected the first resume run to fail on the flaky command"
+  [[ "$(wc -l < "$command_stamp_resume_repo/lint-side-effect" | tr -d ' ')" == "1" ]] ||
+    fail "expected lint:scripts to run once on the first resume run"
+
+  rm -f "$command_stamp_resume_repo/prewarm-fail"
+  LINT_SIDE_EFFECT="$command_stamp_resume_repo/lint-side-effect" \
+    PREWARM_FAIL_FLAG="$command_stamp_resume_repo/prewarm-fail" \
+    PATH="$command_stamp_resume_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$output_file" 2>&1
+  [[ "$(wc -l < "$command_stamp_resume_repo/lint-side-effect" | tr -d ' ')" == "1" ]] ||
+    fail "expected lint:scripts to be reused (not re-run) on the resume rerun"
+)
+rm -rf "$command_stamp_resume_repo"
+assert_raw_contains "↻ pnpm lint:scripts (fresh from previous run)"
+assert_raw_contains "- reused 0s pnpm lint:scripts"
+assert_contains "+ pnpm agent:prewarm:test"
+assert_contains "All mapped commands passed."
+
+# GitHub issue #1410: any content change to a validated file changes the whole-
+# run fingerprint, which must invalidate every per-command stamp so the command
+# re-executes. `pnpm lint:scripts` runs once on the first success, then again
+# after the changed file is edited.
+command_stamp_invalidation_repo="$(mktemp -d)"
+(
+  cd "$command_stamp_invalidation_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+[[ "$*" == "lint:scripts" ]] && printf 'ran\n' >> "${LINT_SIDE_EFFECT:?}"
+exit 0
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  LINT_SIDE_EFFECT="$command_stamp_invalidation_repo/lint-side-effect" \
+    PATH="$command_stamp_invalidation_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$output_file" 2>&1
+  [[ "$(wc -l < "$command_stamp_invalidation_repo/lint-side-effect" | tr -d ' ')" == "1" ]] ||
+    fail "expected lint:scripts to run once on the first invalidation run"
+
+  printf 'console.log("changed");\n' >> scripts/agent-prewarm.mjs
+  LINT_SIDE_EFFECT="$command_stamp_invalidation_repo/lint-side-effect" \
+    PATH="$command_stamp_invalidation_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$output_file" 2>&1
+  [[ "$(wc -l < "$command_stamp_invalidation_repo/lint-side-effect" | tr -d ' ')" == "2" ]] ||
+    fail "expected lint:scripts to re-execute after the changed file was edited"
+)
+rm -rf "$command_stamp_invalidation_repo"
+assert_not_contains "↻ pnpm lint:scripts (fresh from previous run)"
+
+# GitHub issue #1410: the Trunk check and the gate self-test validate repo/gate
+# state cheaply and self-referentially, so they must ALWAYS re-execute — never be
+# reused from a prior run's stamp — while ordinary commands still reuse.
+command_stamp_exempt_repo="$(mktemp -d)"
+(
+  cd "$command_stamp_exempt_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  printf '#!/usr/bin/env bash\nexit 0\n' > scripts/agent-quality-gate.sh
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+printf 'ran\n' >> "${TRUNK_COUNT:?}"
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "lint:scripts") printf 'ran\n' >> "${LINT_SIDE_EFFECT:?}" ;;
+  "agent:quality-gate:test") printf 'ran\n' >> "${SELFTEST_COUNT:?}" ;;
+esac
+exit 0
+STUB
+  chmod +x bin/pnpm scripts/agent-quality-gate.sh tools/trunk
+  git add .
+  git commit -qm init
+  printf '%s\n' scripts/agent-prewarm.mjs scripts/agent-quality-gate.sh > changed-paths.txt
+  for _ in 1 2; do
+    TRUNK_COUNT="$command_stamp_exempt_repo/trunk-count" \
+      SELFTEST_COUNT="$command_stamp_exempt_repo/selftest-count" \
+      LINT_SIDE_EFFECT="$command_stamp_exempt_repo/lint-side-effect" \
+      PATH="$command_stamp_exempt_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        --parallel 1 \
+        > "$output_file" 2>&1
+  done
+  [[ "$(wc -l < "$command_stamp_exempt_repo/trunk-count" | tr -d ' ')" == "2" ]] ||
+    fail "expected the Trunk check to re-run on every gate run (never reused)"
+  [[ "$(wc -l < "$command_stamp_exempt_repo/selftest-count" | tr -d ' ')" == "2" ]] ||
+    fail "expected the gate self-test to re-run on every gate run (never reused)"
+  [[ "$(wc -l < "$command_stamp_exempt_repo/lint-side-effect" | tr -d ' ')" == "1" ]] ||
+    fail "expected an ordinary command to be reused on the second run"
+)
+rm -rf "$command_stamp_exempt_repo"
+assert_raw_contains "↻ pnpm lint:scripts (fresh from previous run)"
+assert_not_contains "↻ pnpm agent:quality-gate:test"
+assert_not_contains "↻ ./tools/trunk check"
+
+# GitHub issue #1410: no mapped command may hang forever. A command that sleeps
+# past --command-timeout is killed (whole process tree) and reported as a normal
+# failure that names the command and the timeout, leaving no background process.
+command_timeout_repo="$(mktemp -d)"
+(
+  cd "$command_timeout_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  # A distinctively-named victim so pgrep can prove the tree was reaped.
+  cat > bin/qg-timeout-victim <<'STUB'
+#!/usr/bin/env bash
+sleep 45
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "agent:prewarm:test" ]]; then
+  exec qg-timeout-victim
+fi
+exit 0
+STUB
+  chmod +x bin/pnpm bin/qg-timeout-victim tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  set +e
+  PATH="$command_timeout_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      --command-timeout 2 \
+      > "$output_file" 2>&1
+  timeout_exit=$?
+  set -e
+  [[ "$timeout_exit" -ne 0 ]] ||
+    fail "expected the gate to fail when a mapped command exceeded --command-timeout"
+  # TERM lands at ~2s; give the KILL backstop a moment, then assert no leak.
+  sleep 4
+  if pgrep -f "qg-timeout-victim" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-timeout-victim" 2>/dev/null || true
+    fail "timed-out command left a leaked background process"
+  fi
+)
+rm -rf "$command_timeout_repo"
+assert_raw_contains "Command timed out after 2s: pnpm agent:prewarm:test"
 
 echo "agent quality gate tests passed"

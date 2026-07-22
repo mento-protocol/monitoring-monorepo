@@ -35,6 +35,10 @@ Options:
                  Force full per-package `test:coverage` locally instead of the
                  scoped `vitest related` optimization. CI always runs the full
                  coverage floors regardless of this flag.
+  --command-timeout <n>
+                 With --run, kill any single mapped command that runs longer
+                 than n seconds and report it as a failure. Default: 900. The
+                 timeout is per command, never for the whole run.
   -h, --help     Show this help.
 
 Environment:
@@ -49,6 +53,8 @@ Environment:
                       Same behavior as --parallel. Use auto for the default.
   AGENT_GATE_FULL_TESTS
                       Same behavior as --full-local-tests when set to 1 or true.
+  AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS
+                      Same behavior as --command-timeout. Default: 900.
 USAGE
 }
 
@@ -61,6 +67,7 @@ fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
 skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
 quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
 full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
+command_timeout_seconds="${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-900}"
 if [[ -z "$allow_package_script_changes" ]]; then
   allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
 fi
@@ -119,6 +126,14 @@ while [[ $# -gt 0 ]]; do
       full_local_tests="true"
       shift
       ;;
+    --command-timeout)
+      command_timeout_seconds="${2:-}"
+      if [[ -z "$command_timeout_seconds" ]]; then
+        echo "error: --command-timeout requires a positive integer" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
     --parallel|--jobs)
       quality_parallelism="${2:-}"
       if [[ -z "$quality_parallelism" ]]; then
@@ -164,6 +179,11 @@ if [[ ! "$quality_parallelism" =~ ^[0-9]+$ || "$quality_parallelism" -lt 1 ]]; t
   exit 2
 fi
 
+if [[ ! "$command_timeout_seconds" =~ ^[0-9]+$ || "$command_timeout_seconds" -lt 1 ]]; then
+  echo "error: --command-timeout requires a positive integer" >&2
+  exit 2
+fi
+
 # Resolve this script's own directory before the cd below so node helpers it
 # invokes (e.g. lockfile-scope.mjs) resolve from the real checkout even when the
 # gate runs against a temp fixture repo whose working directory is elsewhere.
@@ -182,6 +202,10 @@ scratch_dir="$repo_root/.tmp/agent-quality-gate"
 mkdir -p "$scratch_dir"
 durations_file="$scratch_dir/durations.jsonl"
 success_stamp_file="$scratch_dir/last-success.stamp"
+# Per-command success stamps (GitHub issue #1410): lets a killed run or a run
+# that lost one flaky check resume the commands that already passed instead of
+# re-executing everything. Bounded by prune_command_stamps below.
+command_stamps_file="$scratch_dir/command-stamps.tsv"
 # An exact-signature success may cover the manual-run-to-pre-push interval even
 # for the slowest mapped suites. Keep this fixed rather than environment-
 # configurable so callers cannot extend validation reuse beyond two hours.
@@ -204,12 +228,52 @@ fi
 export CI="${CI:-true}"
 
 tmpfiles=()
+# Set by run_with_timeout for the most recent mapped command so callers can tell
+# a timeout apart from an ordinary non-zero exit. Read only right after the call.
+last_command_timed_out=false
+# Monotonic counter for unique per-command timeout marker paths.
+timeout_seq=0
+# PIDs (command + watchdog) of any in-flight timed command in THIS process, so a
+# wrapper SIGINT/SIGTERM tears them down instead of leaking the watchdog's
+# background sleeps. Sequential commands run in the gate process; parallel
+# members run in their own `&` subshells, each maintaining its own copy.
+active_timeout_pids=()
+
+kill_process_tree() {
+  local pid="$1"
+  local sig="$2"
+  local child
+  [[ -n "$pid" ]] || return 0
+  while IFS= read -r child; do
+    [[ -n "$child" ]] && kill_process_tree "$child" "$sig"
+  done < <(pgrep -P "$pid" 2>/dev/null || true)
+  kill "-${sig}" "$pid" 2>/dev/null || true
+}
+
+teardown_active_timeouts() {
+  local pid
+  for pid in "${active_timeout_pids[@]+"${active_timeout_pids[@]}"}"; do
+    kill_process_tree "$pid" TERM
+  done
+  active_timeout_pids=()
+}
+
 cleanup_tmpfiles() {
+  teardown_active_timeouts
   if [[ ${#tmpfiles[@]} -gt 0 ]]; then
     rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
   fi
 }
 trap cleanup_tmpfiles EXIT
+
+on_terminating_signal() {
+  local signal="$1"
+  teardown_active_timeouts
+  trap - "$signal"
+  kill "-${signal}" "$$" 2>/dev/null || exit 143
+}
+trap 'on_terminating_signal INT' INT
+trap 'on_terminating_signal TERM' TERM
 
 make_tmpfile() {
   local tmpfile
@@ -2528,6 +2592,195 @@ monitor_sequential_autoreview_progress() {
   done
 }
 
+# Portable per-command watchdog. macOS ships no timeout(1), so run the command
+# in the background, arm a background killer, and reap. On timeout the command's
+# whole process tree is signalled (TERM, then KILL after a short grace) so child
+# processes (pnpm -> node, etc.) do not survive. Sets last_command_timed_out and
+# returns the command's exit status; a signal-death is remapped to a normal
+# failure code (see below). Applies per command only, never to the whole run.
+run_with_timeout() {
+  local command="$1"
+  local cmd_pid
+  local watchdog_pid
+  local rc
+  local timeout_marker
+  local had_errexit=0
+
+  # A `wait` that reaps a SIGTERM/SIGKILL-killed child makes bash re-raise that
+  # signal at the next `return`, which would kill the gate. Run the reaping with
+  # errexit off and remap any >128 status to an ordinary failure so the caller
+  # (and its `if ! run_mapped_command` / status-file plumbing) just sees a fail.
+  case "$-" in
+    *e*) had_errexit=1 ;;
+  esac
+  set +e
+
+  last_command_timed_out=false
+  timeout_seq=$((timeout_seq + 1))
+  # BASHPID (not $$) so concurrent parallel-pool subshells never collide on the
+  # marker path; the watchdog CREATES this file, so it must not pre-exist.
+  timeout_marker="$scratch_dir/command-timeout.${BASHPID}.${timeout_seq}.${RANDOM}"
+  rm -f "$timeout_marker"
+
+  bash -c "$command" &
+  cmd_pid=$!
+  # Run the watchdog via `bash -c` (which execs) rather than a `( … ) &`
+  # subshell. A forked subshell inherits bash's saved copy of the caller's
+  # redirected stdout — the descriptor bash stashes (close-on-exec) while
+  # `run_with_timeout … > file` is in effect — and would hold it open, so a
+  # downstream fifo/pipe reader (e.g. the sequential progress monitor) never
+  # sees EOF after the gate exits. exec drops that close-on-exec fd; the command
+  # above already execs, which is why only the watchdog needed this. The tree
+  # kill is inlined because bash -c cannot see this script's functions.
+  bash -c '
+    cmd_pid="$1"
+    timeout_secs="$2"
+    marker="$3"
+    kill_tree() {
+      local pid="$1"
+      local sig="$2"
+      local child
+      while IFS= read -r child; do
+        [ -n "$child" ] && kill_tree "$child" "$sig"
+      done < <(pgrep -P "$pid" 2>/dev/null || true)
+      kill "-${sig}" "$pid" 2>/dev/null || true
+    }
+    sleep "$timeout_secs"
+    : > "$marker"
+    kill_tree "$cmd_pid" TERM
+    sleep 3
+    kill_tree "$cmd_pid" KILL
+  ' _ "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" >/dev/null 2>&1 &
+  watchdog_pid=$!
+  active_timeout_pids=("$cmd_pid" "$watchdog_pid")
+
+  wait "$cmd_pid"
+  rc=$?
+
+  # Command settled first (or was killed): tear the watchdog and its pending
+  # sleep down so nothing leaks on normal completion.
+  kill_process_tree "$watchdog_pid" TERM
+  wait "$watchdog_pid" 2>/dev/null
+  active_timeout_pids=()
+
+  if [[ -e "$timeout_marker" ]]; then
+    last_command_timed_out=true
+    rc=1
+  elif [[ "$rc" -gt 128 ]]; then
+    rc=1
+  fi
+  rm -f "$timeout_marker"
+
+  [[ "$had_errexit" == 1 ]] && set -e
+  return "$rc"
+}
+
+# The whole-run fingerprint (current_stamp) is hashed per-command; identical
+# fingerprint + command hash + within-TTL means a previous run already passed
+# this exact command against unchanged content, so it can be reused.
+command_stamp_key() {
+  printf '%s' "$1" | hash_stream
+}
+
+# Trunk validates working-tree/repo state cheaply on every invocation, and the
+# gate self-test is self-referential (it exercises this very stamp machinery),
+# so both must ALWAYS re-execute — never reused, never recorded (issue #1410).
+is_stamp_exempt_command() {
+  case "$1" in
+    "./tools/trunk check"*)
+      return 0
+      ;;
+    "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# Each record is `<created_at>\t<command-hash>\t<whole-run-fingerprint>`. The
+# fingerprint keeps its literal tabs and is the trailing field so it round-trips
+# exactly. Fail toward rerun: any parse/IO/format ambiguity returns not-fresh.
+command_stamp_is_fresh() {
+  local command="$1"
+  local target_key
+  local now
+  local line
+  local created_at
+  local rest
+  local cmd_key
+  local fingerprint
+
+  [[ -f "$command_stamps_file" ]] || return 1
+  target_key="$(command_stamp_key "$command")"
+  now="$(date +%s)"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    created_at="${line%%$'\t'*}"
+    [[ "$created_at" =~ ^[0-9]+$ ]] || continue
+    rest="${line#*$'\t'}"
+    cmd_key="${rest%%$'\t'*}"
+    fingerprint="${rest#*$'\t'}"
+    [[ "$cmd_key" == "$target_key" ]] || continue
+    [[ "$fingerprint" == "$current_stamp" ]] || continue
+    [[ $((now - created_at)) -le "$success_stamp_ttl_seconds" ]] || continue
+    return 0
+  done < "$command_stamps_file"
+
+  return 1
+}
+
+record_command_stamp() {
+  local command="$1"
+  is_stamp_exempt_command "$command" && return 0
+  # Best-effort: a stamp-write failure must never fail the gate.
+  printf '%s\t%s\t%s\n' \
+    "$(date +%s)" "$(command_stamp_key "$command")" "$current_stamp" \
+    >> "$command_stamps_file" 2>/dev/null || true
+}
+
+# Keep the file bounded: retain only entries matching this run's fingerprint and
+# within the TTL, dropping the rest. Runs once before execution so even a series
+# of killed runs cannot grow it without bound. A changed fingerprint (any edited
+# validated file) drops every prior entry, which is exactly the required
+# content-change invalidation.
+prune_command_stamps() {
+  [[ -f "$command_stamps_file" ]] || return 0
+  local now
+  local tmp
+  local line
+  local created_at
+  local rest
+  local fingerprint
+
+  now="$(date +%s)"
+  tmp="$(make_tmpfile)"
+  : > "$tmp"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    created_at="${line%%$'\t'*}"
+    [[ "$created_at" =~ ^[0-9]+$ ]] || continue
+    rest="${line#*$'\t'}"
+    fingerprint="${rest#*$'\t'}"
+    [[ "$fingerprint" == "$current_stamp" ]] || continue
+    [[ $((now - created_at)) -le "$success_stamp_ttl_seconds" ]] || continue
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$command_stamps_file"
+  mv -f "$tmp" "$command_stamps_file" 2>/dev/null || true
+}
+
+# Prints the reuse marker and records a `reused` summary entry (NOT counted as
+# executed, never logged to durations) when the command was already completed by
+# a previous run with the identical fingerprint. Returns 0 when reused (caller
+# skips execution), 1 when the command must run.
+try_reuse_command() {
+  local command="$1"
+  is_stamp_exempt_command "$command" && return 1
+  command_stamp_is_fresh "$command" || return 1
+  echo
+  echo "↻ ${command} (fresh from previous run)"
+  command_summaries+=("reused|0|${command}")
+  return 0
+}
+
 run_mapped_command() {
   local command="$1"
   local output_file
@@ -2538,6 +2791,10 @@ run_mapped_command() {
   local end_ts
   local elapsed
   local exit_code
+
+  if try_reuse_command "$command"; then
+    return 0
+  fi
 
   output_file="$(make_tmpfile)"
   start_ts="$(date +%s)"
@@ -2552,9 +2809,10 @@ run_mapped_command() {
     monitor_pid="$!"
   fi
   set +e
-  bash -c "$command" > "$output_file" 2>&1
+  run_with_timeout "$command" > "$output_file" 2>&1
   exit_code=$?
   set -e
+  local timed_out="$last_command_timed_out"
   if [[ -n "$monitor_pid" ]]; then
     : > "$monitor_done_file"
     wait "$monitor_pid" 2>/dev/null || true
@@ -2565,6 +2823,7 @@ run_mapped_command() {
 
   if [[ "$exit_code" -eq 0 ]]; then
     record_command_summary "ok" "$elapsed" "$command"
+    record_command_stamp "$command"
     if is_autoreview_test_command "$command"; then
       print_autoreview_test_timings "$output_file"
     fi
@@ -2574,7 +2833,11 @@ run_mapped_command() {
   fi
 
   record_command_summary "fail" "$elapsed" "$command"
-  echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
+  if [[ "$timed_out" == true ]]; then
+    echo "Command timed out after ${command_timeout_seconds}s: ${command}" >&2
+  else
+    echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
+  fi
   filter_expected_output < "$output_file" >&2
   rm -f "$output_file"
   return "$exit_code"
@@ -2585,6 +2848,7 @@ run_mapped_command_to_files() {
   local output_file="$2"
   local status_file="$3"
   local elapsed_file="$4"
+  local timeout_file="$5"
   local start_ts
   local end_ts
   local elapsed
@@ -2592,7 +2856,7 @@ run_mapped_command_to_files() {
 
   start_ts="$(date +%s)"
   set +e
-  bash -c "$command" > "$output_file" 2>&1
+  run_with_timeout "$command" > "$output_file" 2>&1
   exit_code=$?
   set -e
   end_ts="$(date +%s)"
@@ -2600,6 +2864,7 @@ run_mapped_command_to_files() {
 
   printf '%s\n' "$exit_code" > "$status_file"
   printf '%s\n' "$elapsed" > "$elapsed_file"
+  printf '%s\n' "$last_command_timed_out" > "$timeout_file"
 }
 
 is_quality_setup_command() {
@@ -2686,21 +2951,25 @@ run_mapped_entries_parallel() {
   local active_output_files=()
   local active_status_files=()
   local active_elapsed_files=()
+  local active_timeout_files=()
   local next_active_pids=()
   local next_active_commands=()
   local next_active_output_files=()
   local next_active_status_files=()
   local next_active_elapsed_files=()
+  local next_active_timeout_files=()
   local running_pids=()
   local entry
   local command
   local output_file
   local status_file
   local elapsed_file
+  local timeout_file
   local pid
   local i
   local status
   local elapsed
+  local timed_out
   local phase_start_ts last_heartbeat_ts now_ts hb_cmd
   local heartbeat_interval=20
 
@@ -2722,13 +2991,23 @@ run_mapped_entries_parallel() {
     while [[ "$next_index" -lt "$total" && "${#active_pids[@]}" -lt "$max_parallel" ]]; do
       entry="${entries[$next_index]}"
       command="${entry%%|*}"
+      next_index=$((next_index + 1))
+
+      # A command a previous run already completed against this exact fingerprint
+      # is reused without dispatching a job, so pool accounting stays intact.
+      if try_reuse_command "$command"; then
+        completed=$((completed + 1))
+        continue
+      fi
+
       output_file="$(make_tmpfile)"
       status_file="$(make_tmpfile)"
       elapsed_file="$(make_tmpfile)"
+      timeout_file="$(make_tmpfile)"
 
       echo
       echo "+ ${command}"
-      run_mapped_command_to_files "$command" "$output_file" "$status_file" "$elapsed_file" &
+      run_mapped_command_to_files "$command" "$output_file" "$status_file" "$elapsed_file" "$timeout_file" &
       pid="$!"
 
       active_pids+=("$pid")
@@ -2736,8 +3015,7 @@ run_mapped_entries_parallel() {
       active_output_files+=("$output_file")
       active_status_files+=("$status_file")
       active_elapsed_files+=("$elapsed_file")
-
-      next_index=$((next_index + 1))
+      active_timeout_files+=("$timeout_file")
     done
 
     running_pids=()
@@ -2749,6 +3027,7 @@ run_mapped_entries_parallel() {
     next_active_output_files=()
     next_active_status_files=()
     next_active_elapsed_files=()
+    next_active_timeout_files=()
 
     for i in "${!active_pids[@]}"; do
       pid="${active_pids[$i]}"
@@ -2758,6 +3037,7 @@ run_mapped_entries_parallel() {
         next_active_output_files+=("${active_output_files[$i]}")
         next_active_status_files+=("${active_status_files[$i]}")
         next_active_elapsed_files+=("${active_elapsed_files[$i]}")
+        next_active_timeout_files+=("${active_timeout_files[$i]}")
         continue
       fi
 
@@ -2769,11 +3049,14 @@ run_mapped_entries_parallel() {
       output_file="${active_output_files[$i]}"
       status_file="${active_status_files[$i]}"
       elapsed_file="${active_elapsed_files[$i]}"
+      timeout_file="${active_timeout_files[$i]}"
       status="$(cat "$status_file" 2>/dev/null || echo 127)"
       elapsed="$(cat "$elapsed_file" 2>/dev/null || echo 0)"
+      timed_out="$(cat "$timeout_file" 2>/dev/null || echo false)"
 
       if [[ "$status" -eq 0 ]]; then
         record_command_summary "ok" "$elapsed" "$command"
+        record_command_stamp "$command"
         if is_autoreview_test_command "$command"; then
           print_autoreview_test_timings "$output_file"
         fi
@@ -2781,11 +3064,15 @@ run_mapped_entries_parallel() {
       else
         failures=$((failures + 1))
         record_command_summary "fail" "$elapsed" "$command"
-        echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
+        if [[ "$timed_out" == true ]]; then
+          echo "Command timed out after ${command_timeout_seconds}s: ${command}" >&2
+        else
+          echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
+        fi
         filter_expected_output < "$output_file" >&2
       fi
 
-      rm -f "$output_file" "$status_file" "$elapsed_file"
+      rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
       completed=$((completed + 1))
     done
 
@@ -2794,6 +3081,7 @@ run_mapped_entries_parallel() {
     active_output_files=("${next_active_output_files[@]+"${next_active_output_files[@]}"}")
     active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
     active_elapsed_files=("${next_active_elapsed_files[@]+"${next_active_elapsed_files[@]}"}")
+    active_timeout_files=("${next_active_timeout_files[@]+"${next_active_timeout_files[@]}"}")
 
     # Heartbeat: while commands are still in flight, emit a periodic liveness
     # line naming what is running so a slow member is visibly working, not hung.
@@ -2868,6 +3156,11 @@ run_quality_phase() {
   run_mapped_entries_sequential "quality serialized" "${serial_entries[@]+"${serial_entries[@]}"}"
   run_mapped_entries_parallel "quality" "$quality_parallelism" "${parallel_entries[@]+"${parallel_entries[@]}"}"
 }
+
+# Drop per-command stamps that don't match this run's fingerprint (any changed
+# validated file invalidates all of them) or that aged past the TTL, so the file
+# stays bounded and only genuine resume candidates remain.
+prune_command_stamps
 
 run_prerequisite_phase "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
 run_prerequisite_phase "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"
