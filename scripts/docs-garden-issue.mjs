@@ -24,11 +24,10 @@ import {
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 const GARDEN_OIDC_AUDIENCE = "mento-docs-garden";
 const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
-const GITHUB_OIDC_REQUEST_HOST_PATTERN =
-  /^pipelines(?:ghub[a-z0-9]+)?\.actions\.githubusercontent\.com$/u;
+const GITHUB_OIDC_REQUEST_HOST_SUFFIX = ".actions.githubusercontent.com";
 
 function isGithubOidcRequestHost(hostname) {
-  return GITHUB_OIDC_REQUEST_HOST_PATTERN.test(hostname);
+  return hostname.endsWith(GITHUB_OIDC_REQUEST_HOST_SUFFIX);
 }
 
 function parseBoolean(value, name) {
