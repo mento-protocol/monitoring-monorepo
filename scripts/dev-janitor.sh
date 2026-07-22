@@ -6,8 +6,9 @@ usage() {
 Usage: scripts/dev-janitor.sh [--apply]
 
 Reports (and, with --apply, cleans up) stale local dev-machine disk usage:
-trunk repo caches, the pnpm store, pruned git worktree metadata, and stale
-/private/tmp scratch trees. Defaults to dry-run.
+trunk repo caches, the pnpm store, and pruned git worktree metadata. Stale
+/private/tmp scratch trees are reported only, never deleted. Defaults to
+dry-run.
 
 Options:
   --apply   Execute the cleanup actions instead of only reporting them.
@@ -113,7 +114,7 @@ echo
 echo "-- Stale /private/tmp trees (report only, never deleted) --"
 tmp_count=0
 if [[ -d /private/tmp ]]; then
-  tmp_count="$(find /private/tmp -maxdepth 1 -mindepth 1 -type d \( -iname '*monitoring*' -o -iname '*autoreview*' \) 2>/dev/null | wc -l | tr -d ' ')"
+  tmp_count="$( (find /private/tmp -maxdepth 1 -mindepth 1 -type d \( -iname '*monitoring*' -o -iname '*autoreview*' \) 2>/dev/null || true) | wc -l | tr -d ' ')"
 fi
 echo "Found ${tmp_count} monitoring/autoreview /private/tmp dir(s)"
 echo
