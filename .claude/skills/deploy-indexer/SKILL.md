@@ -74,7 +74,8 @@ In parallel:
   verify by content: the remote URL's repository path must end in
   `mento-protocol/monitoring-monorepo` (the git credential proxy embeds the
   attached repo slug) and the `git fetch` above must succeed — otherwise stop
-  and hand the deploy to a gh-capable surface. In normal mode, require
+  and hand the deploy to a gh-capable surface. This check does not waive the
+  `CANONICAL_REMOTE=origin` requirement. In normal mode, require
   `CANONICAL_REMOTE=origin` because the deploy
   wrapper pushes `origin/envio`; a fork `origin` cannot trigger the canonical
   Envio deployment.

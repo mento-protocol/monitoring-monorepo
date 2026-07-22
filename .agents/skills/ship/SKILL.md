@@ -232,9 +232,10 @@ Run the shared readiness probe before calling the PR clean:
 pnpm pr:ready-state --pr <number> --json
 ```
 
-In a Claude cloud session the probe cannot run; use the `babysit-pr` skill's
-cloud watch loop (MCP emulation checklist) and label its result MCP-emulated
-rather than probe-verified.
+In a Claude cloud session without the Surface Detection capability exception,
+the probe cannot run; use the `babysit-pr` skill's cloud watch loop (MCP
+emulation checklist) and label its result MCP-emulated rather than
+probe-verified.
 
 If the user asked for the complete ship loop, invoke the repo `babysit-pr`
 skill or follow its workflow until the PR reaches all-clear, merged, closed, or
