@@ -3,7 +3,7 @@ title: Indexer Handler Invariants
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-21
+last_verified: 2026-07-22
 doc_type: checklist
 scope: indexer-envio
 review_interval_days: 90
@@ -40,10 +40,15 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
 - Start event-derived effects before any entity-dependent early return. A
   concurrent preload pass can see an empty lookup while ordered processing for
   the same event sees a row created by an earlier event in the batch.
-- For state-dependent retry effects, carry an event-scoped in-memory marker
-  only when preload actually scheduled the key. Processing must stay
-  fail-closed and defer newly visible rows until the next event rather than
-  issuing an un-preloaded call.
+- For effects whose eligibility depends on entity state, derive the condition
+  independently in preload and processing; never carry eligibility across the
+  phase boundary in a module-scoped `Set`, `Map`, or other mutable marker.
+  Hosted Envio may run the passes in different workers or after a restart. Use
+  the identical event-only effect key in both passes. If ordered processing
+  newly exposes a row, take a bounded safe serialized exact-block path when the
+  handler requires that event's state; otherwise fail closed with a documented
+  ordered-state exemption. Do not substitute a later event's value for exact
+  event/block state.
 - The blocking code-quality invariant rejects a direct effect that exists only
   after a positive preload return (including exact `maybePreloadPool(...)` and
   `maybePreloadBreaker(...)` wrappers)

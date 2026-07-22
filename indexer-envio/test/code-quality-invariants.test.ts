@@ -28,6 +28,110 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+function topLevelSetOrMapDeclarations(
+  sourceFile: ts.SourceFile,
+): Map<string, "Set" | "Map"> {
+  const declarations = new Map<string, "Set" | "Map">();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const initializer = declaration.initializer;
+      if (!initializer || !ts.isNewExpression(initializer)) continue;
+      const constructor = initializer.expression;
+      const collectionKind = ts.isIdentifier(constructor)
+        ? constructor.text
+        : ts.isPropertyAccessExpression(constructor)
+          ? constructor.name.text
+          : null;
+      if (collectionKind !== "Set" && collectionKind !== "Map") continue;
+      if (!ts.isIdentifier(declaration.name)) continue;
+
+      declarations.set(declaration.name.text, collectionKind);
+    }
+  }
+
+  return declarations;
+}
+
+function moduleLocalPhaseCollectionMutations(
+  sourceText: string,
+  fileName: string,
+): string[] {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const moduleCollections = topLevelSetOrMapDeclarations(sourceFile);
+  if (moduleCollections.size === 0) return [];
+
+  const offenders = new Set<string>();
+  const collectionMutators = new Set(["add", "set", "delete", "clear"]);
+  const visitFunction = (fn: ts.Node): void => {
+    let preloadAware = false;
+    const findPreload = (node: ts.Node): void => {
+      if (node !== fn && isFunctionLikeNode(node)) return;
+      if (
+        ts.isPropertyAccessExpression(node) &&
+        node.name.text === "isPreload"
+      ) {
+        preloadAware = true;
+        return;
+      }
+      ts.forEachChild(node, findPreload);
+    };
+    findPreload(fn);
+    if (!preloadAware) return;
+
+    const findMutation = (node: ts.Node): void => {
+      if (node !== fn && isFunctionLikeNode(node)) return;
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        moduleCollections.has(node.expression.expression.text) &&
+        collectionMutators.has(node.expression.name.text)
+      ) {
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+          node.expression.getStart(sourceFile),
+        );
+        offenders.add(
+          `${fileName}:${line + 1}:${character + 1} ${node.expression.getText(sourceFile)}`,
+        );
+      }
+      ts.forEachChild(node, findMutation);
+    };
+    findMutation(fn);
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (isFunctionLikeNode(node)) visitFunction(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+
+  return [...offenders];
+}
+
+function moduleLocalSetOrMapDeclarations(
+  sourceText: string,
+  fileName: string,
+): string[] {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+
+  return [...topLevelSetOrMapDeclarations(sourceFile)].map(
+    ([name, collectionKind]) => `${fileName} ${name} (${collectionKind})`,
+  );
+}
+
 function findUnsafeMultiFieldGetWhereCalls(): string[] {
   const offenders: string[] = [];
   for (const file of sourceFiles(srcRoot)) {
@@ -1210,19 +1314,46 @@ describe("indexer code quality invariants", () => {
     assert.deepEqual(offenders, []);
   });
 
-  it("does not bridge preload and processing with module-local collections", () => {
-    const moduleLocalPreloadCollection =
-      /(?:preload|preloaded)[A-Za-z0-9_]*\s*=\s*new\s+(?:Set|Map)\b/i;
-    const offenders = sourceFiles(path.join(srcRoot, "handlers"))
-      .filter((file) =>
-        moduleLocalPreloadCollection.test(readFileSync(file, "utf8")),
-      )
-      .map((file) => path.relative(packageRoot, file));
+  it("does not mutate module-local collections in preload-aware handlers", () => {
+    const offenders = sourceFiles(path.join(srcRoot, "handlers")).flatMap(
+      (file) =>
+        moduleLocalPhaseCollectionMutations(
+          readFileSync(file, "utf8"),
+          path.relative(packageRoot, file),
+        ),
+    );
 
     assert.deepEqual(
       offenders,
       [],
       "Hosted Envio may run preload and processing in different workers; derive effect conditions in each pass instead of bridging them with module-local Set/Map state",
+    );
+  });
+
+  it("detects renamed module-local phase mutations without flagging locals", () => {
+    assert.deepEqual(
+      moduleLocalPhaseCollectionMutations(
+        `
+          const renamed: Set<string> = new Set();
+          const cache = new globalThis.Map<string, boolean>();
+          function handler(context: { isPreload: boolean }) {
+            if (context.isPreload) renamed.add("event");
+            cache.set("event", true);
+            const preloadedIds = new Set<string>();
+            preloadedIds.add("local");
+            return preloadedIds;
+          }
+        `,
+        "fixture.ts",
+      ).map((offender) => offender.replace(/:\d+:\d+/, "")),
+      ["fixture.ts renamed.add", "fixture.ts cache.set"],
+    );
+    assert.deepEqual(
+      moduleLocalSetOrMapDeclarations(
+        `const renamed: Set<string> = new Set();`,
+        "fixture.ts",
+      ),
+      ["fixture.ts renamed (Set)"],
     );
   });
 
