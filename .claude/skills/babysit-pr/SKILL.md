@@ -33,10 +33,11 @@ reasoning live in
   [Cloud Watch Loop](#cloud-watch-loop-claude-cloud-sessions) instead. Do not
   trust `gh auth status` as a capability signal; only a successful
   `gh api repos/<owner>/<repo>` call proves the gh path works. Exception: in
-  a cloud variant where that repo-scoped call succeeds **and** gh supports
-  `gh api --slurp`, the gh-first path above is available and preferred — the
-  same capability gate `.claude/babysit-pr.sh` applies before choosing gh
-  mode.
+  a cloud variant where that repo-scoped REST call succeeds, a minimal
+  GraphQL query (`gh api graphql -f query='query{viewer{login}}'`) succeeds,
+  **and** gh supports `gh api --slurp`, the gh-first path above is available
+  and preferred — the same capability gate `.claude/babysit-pr.sh` probes
+  before choosing gh mode.
 
 ## Resolve Target
 
