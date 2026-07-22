@@ -62,10 +62,12 @@ babysit_repo_gate() {
   # fallbacks below then silently report PENDING forever even when the PR is
   # green + approved. `--silent` suppresses the banner so `--json` is clean,
   # parseable output; capturing stderr to /dev/null keeps any script warning
-  # from corrupting the JSON too.
+  # from corrupting the JSON too. `--repo` is required: a cloud checkout's
+  # origin is the credential-proxy URL, which gh cannot map to a repository,
+  # so an implicit-repo invocation fails even after the capability gate passes.
   local output
-  output=$(cd "$repo_root" && pnpm --silent pr:ready-state --pr "$pr" --json 2>/dev/null) || {
-    printf 'FAIL pr:ready-state errored (repro: pnpm pr:ready-state --pr %s --json)' "$pr"
+  output=$(cd "$repo_root" && pnpm --silent pr:ready-state --pr "$pr" --repo "${owner}/${repo}" --json 2>/dev/null) || {
+    printf 'FAIL pr:ready-state errored (repro: pnpm pr:ready-state --pr %s --repo %s/%s --json)' "$pr" "$owner" "$repo"
     return 0
   }
 
