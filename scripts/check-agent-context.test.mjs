@@ -641,6 +641,9 @@ test("rejects direct and wrapped Claude sag permissions without the canonical ke
     'Bash(echo ready && sag --api-key-file ~/.config/other-key -v Charlie "hey, i need your approval in the agent chat")',
     'Bash(/usr/bin/env LANG=C /usr/local/bin/sag --api-key-file ~/.config/other-key -v Charlie "hey, i need your approval in the agent chat")',
     "Bash(command sag:*)",
+    'Bash(env LANG=C command sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
+    'Bash(command sag --api-key-file=~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
+    'Bash(sag --api-key-file ~/.config/other-key -v Charlie "hey"; printf %s --api-key-file ~/.config/elevenlabs_api_key)',
   ];
 
   for (const permission of permissions) {
@@ -693,7 +696,7 @@ test("rejects direct and wrapped Claude sag permissions without the canonical ke
   }
 });
 
-test("accepts a wrapped Claude sag permission with the canonical key path", () => {
+test("accepts the reviewed single-command Claude sag permissions", () => {
   const today = isoDateWithOffset(0);
   const root = createContextCheckFixture(
     `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${today} -->\n`,
@@ -702,8 +705,9 @@ test("accepts a wrapped Claude sag permission with the canonical key path", () =
     writeFixtureJson(root, ".claude/settings.json", {
       permissions: {
         allow: [
-          'Bash(env LANG=C command sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
-          'Bash(command sag --api-key-file=~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
+          'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your feedback in the agent chat")',
+          'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
+          'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, the task finished and needs your attention in the agent chat")',
           "Bash(echo sagacious)",
         ],
       },

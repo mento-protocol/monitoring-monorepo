@@ -408,6 +408,15 @@ const allowedClaudeBashScriptPermissions = new Set([
   "Bash(bash ./scripts/check-react-doctor-score.sh:*)",
 ]);
 
+// Keep this in sync with `.claude/settings.json`. Exact entries make the key
+// path part of the `sag` invocation itself; wrappers, compound commands, and
+// comments cannot satisfy the check by mentioning the canonical path elsewhere.
+const allowedClaudeSagPermissions = new Set([
+  'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your feedback in the agent chat")',
+  'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
+  'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, the task finished and needs your attention in the agent chat")',
+]);
+
 function isClaudeBashScriptPermission(permission) {
   return /^Bash\(bash\s+(?:\.\/)?scripts\/[^)]*\)$/.test(permission);
 }
@@ -436,12 +445,10 @@ function validateClaudePermissions(settings) {
 
     if (
       isClaudeSagPermission(permission) &&
-      !/(?:^|\s)--api-key-file(?:=|\s+)~\/\.config\/elevenlabs_api_key(?=\s|\))/.test(
-        permission,
-      )
+      !allowedClaudeSagPermissions.has(permission)
     ) {
       fail(
-        `.claude/settings.json: sag permissions must include --api-key-file with the canonical ~/.config/elevenlabs_api_key path: ${permission}`,
+        `.claude/settings.json: sag permissions must include --api-key-file with the canonical ~/.config/elevenlabs_api_key path and match a reviewed single-command allowlist entry: ${permission}`,
       );
     }
 
