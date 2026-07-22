@@ -104,7 +104,8 @@ tests, apply
 [`../docs/pr-checklists/indexer-handler-invariants.md`](../docs/pr-checklists/indexer-handler-invariants.md).
 It owns the collision-resistant ID rule, entity rollups, trading-time units,
 bounded caches, median freshness, partial-heal retry coordination, downstream
-predicate/query audit, Vitest RPC mocks, and env parsing.
+predicate/query audit, phase-local preload state (including imported
+handler-helper call graphs), Vitest RPC mocks, and env parsing.
 
 Also apply the shared recurring-review rules for file-size limits, multichain
 enumeration, Hasura row caps, and effect-layer boundaries:

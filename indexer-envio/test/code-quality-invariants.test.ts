@@ -28,29 +28,127 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-function topLevelSetOrMapDeclarations(
+type TopLevelCollectionDeclaration = {
+  kind: "Set" | "Map";
+  name: string;
+  propertyPath: string[];
+  rootSymbolNode: ts.Identifier;
+};
+
+function newCollectionKind(
+  initializer: ts.Expression,
+): "Set" | "Map" | undefined {
+  if (!ts.isNewExpression(initializer)) return undefined;
+  const constructor = initializer.expression;
+  const collectionKind = ts.isIdentifier(constructor)
+    ? constructor.text
+    : ts.isPropertyAccessExpression(constructor)
+      ? constructor.name.text
+      : undefined;
+  return collectionKind === "Set" || collectionKind === "Map"
+    ? collectionKind
+    : undefined;
+}
+
+function nestedCollectionDeclarations(
+  initializer: ts.Expression,
+  name: string,
+  rootSymbolNode: ts.Identifier,
+  propertyPath: string[],
+): TopLevelCollectionDeclaration[] {
+  const collectionKind = newCollectionKind(initializer);
+  if (collectionKind) {
+    return [{ kind: collectionKind, name, propertyPath, rootSymbolNode }];
+  }
+  if (
+    ts.isAsExpression(initializer) ||
+    ts.isParenthesizedExpression(initializer) ||
+    ts.isSatisfiesExpression(initializer) ||
+    ts.isTypeAssertionExpression(initializer)
+  ) {
+    return nestedCollectionDeclarations(
+      initializer.expression,
+      name,
+      rootSymbolNode,
+      propertyPath,
+    );
+  }
+  if (!ts.isObjectLiteralExpression(initializer)) return [];
+
+  return initializer.properties.flatMap((property) => {
+    if (
+      !ts.isPropertyAssignment(property) ||
+      !(
+        ts.isIdentifier(property.name) ||
+        ts.isStringLiteral(property.name) ||
+        ts.isNumericLiteral(property.name)
+      )
+    ) {
+      return [];
+    }
+    return nestedCollectionDeclarations(
+      property.initializer,
+      `${name}.${property.name.text}`,
+      rootSymbolNode,
+      [...propertyPath, property.name.text],
+    );
+  });
+}
+
+function topLevelSetOrMapDeclarationNodes(
   sourceFile: ts.SourceFile,
-): Map<string, "Set" | "Map"> {
-  const declarations = new Map<string, "Set" | "Map">();
+): TopLevelCollectionDeclaration[] {
+  const declarations: TopLevelCollectionDeclaration[] = [];
   for (const statement of sourceFile.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
-      const initializer = declaration.initializer;
-      if (!initializer || !ts.isNewExpression(initializer)) continue;
-      const constructor = initializer.expression;
-      const collectionKind = ts.isIdentifier(constructor)
-        ? constructor.text
-        : ts.isPropertyAccessExpression(constructor)
-          ? constructor.name.text
-          : null;
-      if (collectionKind !== "Set" && collectionKind !== "Map") continue;
-      if (!ts.isIdentifier(declaration.name)) continue;
-
-      declarations.set(declaration.name.text, collectionKind);
+      if (!declaration.initializer || !ts.isIdentifier(declaration.name)) {
+        continue;
+      }
+      declarations.push(
+        ...nestedCollectionDeclarations(
+          declaration.initializer,
+          declaration.name.text,
+          declaration.name,
+          [],
+        ),
+      );
     }
   }
 
   return declarations;
+}
+
+function topLevelSetOrMapDeclarations(
+  sourceFile: ts.SourceFile,
+): Map<string, "Set" | "Map"> {
+  return new Map(
+    topLevelSetOrMapDeclarationNodes(sourceFile).map(({ kind, name }) => [
+      name,
+      kind,
+    ]),
+  );
+}
+
+function isPreloadAccess(node: ts.Node): boolean {
+  if (ts.isPropertyAccessExpression(node) && node.name.text === "isPreload") {
+    return true;
+  }
+  if (
+    ts.isElementAccessExpression(node) &&
+    node.argumentExpression &&
+    (ts.isStringLiteral(node.argumentExpression) ||
+      ts.isNoSubstitutionTemplateLiteral(node.argumentExpression)) &&
+    node.argumentExpression.text === "isPreload"
+  ) {
+    return true;
+  }
+  if (!ts.isBindingElement(node)) return false;
+  const bindingName = node.propertyName ?? node.name;
+  return (
+    (ts.isIdentifier(bindingName) || ts.isStringLiteral(bindingName)) &&
+    bindingName.text === "isPreload"
+  );
 }
 
 function moduleLocalCollectionsInPreloadAwareModule(
@@ -69,7 +167,7 @@ function moduleLocalCollectionsInPreloadAwareModule(
 
   let preloadAwareModule = false;
   const findPreload = (node: ts.Node): void => {
-    if (ts.isPropertyAccessExpression(node) && node.name.text === "isPreload") {
+    if (isPreloadAccess(node)) {
       preloadAwareModule = true;
       return;
     }
@@ -516,6 +614,417 @@ function buildEffectfulProgramAnalysis(): EffectfulProgramAnalysis {
 }
 
 const effectfulProgramAnalysis = buildEffectfulProgramAnalysis();
+
+type ModuleCollectionInfo = {
+  kind: "Set" | "Map";
+  name: string;
+  sourceFile: ts.SourceFile;
+};
+
+// Follow real TypeScript symbols so imported helpers, callbacks, aliases, and
+// collection parameters cannot hide worker-local mutations. Read-only lookup
+// collections are intentionally allowed.
+function findModuleCollectionMutationsReachableFromPreload(
+  program: ts.Program,
+  includesSourceFile: (sourceFile: ts.SourceFile) => boolean,
+  displayRoot: string,
+): string[] {
+  const checker = program.getTypeChecker();
+  const sourceFileList = program
+    .getSourceFiles()
+    .filter(
+      (sourceFile) =>
+        !sourceFile.isDeclarationFile && includesSourceFile(sourceFile),
+    );
+  type SymbolAccess = { path: string[]; root: ts.Symbol };
+  type PathBinding = {
+    collections: Set<ModuleCollectionInfo>;
+    path: string[];
+  };
+  type CollectionPathBindings = Map<ts.Symbol, Map<string, PathBinding>>;
+  const collectionPathBindings: CollectionPathBindings = new Map();
+  const pathKey = (propertyPath: readonly string[]): string =>
+    JSON.stringify(propertyPath);
+  const mergePathBinding = (
+    symbol: ts.Symbol,
+    propertyPath: readonly string[],
+    collections: ReadonlySet<ModuleCollectionInfo>,
+  ): boolean => {
+    const byPath = collectionPathBindings.get(symbol) ?? new Map();
+    const key = pathKey(propertyPath);
+    const existing = byPath.get(key) ?? {
+      collections: new Set<ModuleCollectionInfo>(),
+      path: [...propertyPath],
+    };
+    const initialSize = existing.collections.size;
+    for (const collection of collections) {
+      existing.collections.add(collection);
+    }
+    if (existing.collections.size === initialSize) return false;
+    byPath.set(key, existing);
+    collectionPathBindings.set(symbol, byPath);
+    return true;
+  };
+  const expressionAccess = (
+    expression: ts.Expression,
+  ): SymbolAccess | undefined => {
+    if (
+      ts.isAsExpression(expression) ||
+      ts.isNonNullExpression(expression) ||
+      ts.isParenthesizedExpression(expression) ||
+      ts.isSatisfiesExpression(expression) ||
+      ts.isTypeAssertionExpression(expression)
+    ) {
+      return expressionAccess(expression.expression);
+    }
+    if (ts.isIdentifier(expression)) {
+      const root = canonicalSymbol(
+        checker,
+        checker.getSymbolAtLocation(expression),
+      );
+      return root ? { path: [], root } : undefined;
+    }
+    if (ts.isPropertyAccessExpression(expression)) {
+      const parent = expressionAccess(expression.expression);
+      return parent
+        ? { path: [...parent.path, expression.name.text], root: parent.root }
+        : undefined;
+    }
+    if (
+      ts.isElementAccessExpression(expression) &&
+      expression.argumentExpression &&
+      (ts.isStringLiteral(expression.argumentExpression) ||
+        ts.isNoSubstitutionTemplateLiteral(expression.argumentExpression) ||
+        ts.isNumericLiteral(expression.argumentExpression))
+    ) {
+      const parent = expressionAccess(expression.expression);
+      return parent
+        ? {
+            path: [...parent.path, expression.argumentExpression.text],
+            root: parent.root,
+          }
+        : undefined;
+    }
+    return undefined;
+  };
+  const copyAccessBindings = (
+    alias: ts.Symbol,
+    target: SymbolAccess,
+  ): boolean => {
+    let changed = false;
+    for (const binding of collectionPathBindings.get(target.root)?.values() ??
+      []) {
+      if (
+        target.path.length > binding.path.length ||
+        target.path.some((segment, index) => binding.path[index] !== segment)
+      ) {
+        continue;
+      }
+      if (
+        mergePathBinding(
+          alias,
+          binding.path.slice(target.path.length),
+          binding.collections,
+        )
+      ) {
+        changed = true;
+      }
+    }
+    return changed;
+  };
+  const aliasEdges: Array<{
+    alias: ts.Symbol;
+    target: SymbolAccess;
+  }> = [];
+  for (const sourceFile of sourceFileList) {
+    for (const {
+      kind,
+      name,
+      propertyPath,
+      rootSymbolNode,
+    } of topLevelSetOrMapDeclarationNodes(sourceFile)) {
+      const collection = { kind, name, sourceFile };
+      const root = canonicalSymbol(
+        checker,
+        checker.getSymbolAtLocation(rootSymbolNode),
+      );
+      if (root) mergePathBinding(root, propertyPath, new Set([collection]));
+    }
+    const collectAliases = (node: ts.Node): void => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.initializer
+      ) {
+        const alias = canonicalSymbol(
+          checker,
+          checker.getSymbolAtLocation(node.name),
+        );
+        const target = expressionAccess(node.initializer);
+        if (alias && target) aliasEdges.push({ alias, target });
+      }
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isObjectBindingPattern(node.name) &&
+        node.initializer
+      ) {
+        const initializerAccess = expressionAccess(node.initializer);
+        for (const element of node.name.elements) {
+          const propertyName = element.propertyName ?? element.name;
+          if (
+            !ts.isIdentifier(element.name) ||
+            !(
+              ts.isIdentifier(propertyName) ||
+              ts.isStringLiteral(propertyName) ||
+              ts.isNumericLiteral(propertyName)
+            )
+          ) {
+            continue;
+          }
+          const alias = canonicalSymbol(
+            checker,
+            checker.getSymbolAtLocation(element.name),
+          );
+          if (alias && initializerAccess) {
+            aliasEdges.push({
+              alias,
+              target: {
+                path: [...initializerAccess.path, propertyName.text],
+                root: initializerAccess.root,
+              },
+            });
+          }
+        }
+      }
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(node.left)
+      ) {
+        const alias = canonicalSymbol(
+          checker,
+          checker.getSymbolAtLocation(node.left),
+        );
+        const target = expressionAccess(node.right);
+        if (alias && target) aliasEdges.push({ alias, target });
+      }
+      ts.forEachChild(node, collectAliases);
+    };
+    collectAliases(sourceFile);
+  }
+
+  const functions = new Set<ts.FunctionLikeDeclaration>();
+  const functionsBySymbol = new Map<
+    ts.Symbol,
+    Set<ts.FunctionLikeDeclaration>
+  >();
+  for (const sourceFile of sourceFileList) {
+    const visit = (node: ts.Node): void => {
+      if (isFunctionLikeNode(node)) {
+        const fn = node as ts.FunctionLikeDeclaration;
+        functions.add(fn);
+        const symbol = functionSymbol(fn, checker);
+        if (symbol) {
+          const declarations = functionsBySymbol.get(symbol) ?? new Set();
+          declarations.add(fn);
+          functionsBySymbol.set(symbol, declarations);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+
+  const edges = new Map<
+    ts.FunctionLikeDeclaration,
+    Set<ts.FunctionLikeDeclaration>
+  >();
+  const callSitesByFunction = new Map<
+    ts.FunctionLikeDeclaration,
+    Array<{
+      call: ts.CallExpression;
+      invokedTargets: Set<ts.FunctionLikeDeclaration>;
+    }>
+  >();
+  const preloadFunctions = new Set<ts.FunctionLikeDeclaration>();
+  for (const fn of functions) {
+    const targets = new Set<ts.FunctionLikeDeclaration>();
+    const callSites: Array<{
+      call: ts.CallExpression;
+      invokedTargets: Set<ts.FunctionLikeDeclaration>;
+    }> = [];
+    let preloadAware = false;
+    const visit = (node: ts.Node): void => {
+      if (node !== fn && isFunctionLikeNode(node)) return;
+      if (isPreloadAccess(node)) {
+        preloadAware = true;
+      }
+      if (ts.isCallExpression(node)) {
+        const invokedTargets = new Set<ts.FunctionLikeDeclaration>();
+        for (const calledSymbol of callExpressionSymbols(node, checker)) {
+          for (const target of functionsBySymbol.get(calledSymbol) ?? []) {
+            targets.add(target);
+            invokedTargets.add(target);
+          }
+        }
+        for (const argument of node.arguments) {
+          if (isFunctionLikeNode(argument)) {
+            const target = argument as ts.FunctionLikeDeclaration;
+            targets.add(target);
+          }
+          const argumentSymbol = expressionSymbol(argument, checker);
+          if (!argumentSymbol) continue;
+          for (const target of functionsBySymbol.get(argumentSymbol) ?? []) {
+            targets.add(target);
+          }
+        }
+        callSites.push({ call: node, invokedTargets });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(fn);
+    edges.set(fn, targets);
+    callSitesByFunction.set(fn, callSites);
+    if (preloadAware) preloadFunctions.add(fn);
+  }
+
+  const reachableFunctions = new Set(preloadFunctions);
+  const pendingFunctions = [...preloadFunctions];
+  while (pendingFunctions.length > 0) {
+    const fn = pendingFunctions.pop();
+    if (!fn) continue;
+    for (const target of edges.get(fn) ?? []) {
+      if (reachableFunctions.has(target)) continue;
+      reachableFunctions.add(target);
+      pendingFunctions.push(target);
+    }
+  }
+
+  let bindingsChanged = true;
+  while (bindingsChanged) {
+    bindingsChanged = false;
+    for (const { alias, target } of aliasEdges) {
+      if (copyAccessBindings(alias, target)) bindingsChanged = true;
+    }
+    for (const fn of reachableFunctions) {
+      for (const { call, invokedTargets } of callSitesByFunction.get(fn) ??
+        []) {
+        for (const target of invokedTargets) {
+          for (
+            let argumentIndex = 0;
+            argumentIndex < call.arguments.length;
+            argumentIndex += 1
+          ) {
+            const argument = call.arguments[argumentIndex];
+            const parameter = target.parameters[argumentIndex];
+            if (!argument || !parameter) continue;
+            const argumentAccess = expressionAccess(argument);
+            if (!argumentAccess) continue;
+            if (ts.isIdentifier(parameter.name)) {
+              const parameterSymbol = canonicalSymbol(
+                checker,
+                checker.getSymbolAtLocation(parameter.name),
+              );
+              if (
+                parameterSymbol &&
+                copyAccessBindings(parameterSymbol, argumentAccess)
+              ) {
+                bindingsChanged = true;
+              }
+              continue;
+            }
+            if (ts.isObjectBindingPattern(parameter.name)) {
+              for (const element of parameter.name.elements) {
+                const propertyName = element.propertyName ?? element.name;
+                if (
+                  !ts.isIdentifier(element.name) ||
+                  !(
+                    ts.isIdentifier(propertyName) ||
+                    ts.isStringLiteral(propertyName) ||
+                    ts.isNumericLiteral(propertyName)
+                  )
+                ) {
+                  continue;
+                }
+                const bindingSymbol = canonicalSymbol(
+                  checker,
+                  checker.getSymbolAtLocation(element.name),
+                );
+                if (
+                  bindingSymbol &&
+                  copyAccessBindings(bindingSymbol, {
+                    path: [...argumentAccess.path, propertyName.text],
+                    root: argumentAccess.root,
+                  })
+                ) {
+                  bindingsChanged = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const mutatedCollectionsByFunction = new Map<
+    ts.FunctionLikeDeclaration,
+    Set<ModuleCollectionInfo>
+  >();
+  for (const fn of functions) {
+    const mutatedCollections = new Set<ModuleCollectionInfo>();
+    const visit = (node: ts.Node): void => {
+      if (node !== fn && isFunctionLikeNode(node)) return;
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ["add", "clear", "delete", "set"].includes(node.expression.name.text)
+      ) {
+        const receiverAccess = expressionAccess(node.expression.expression);
+        const binding =
+          receiverAccess &&
+          collectionPathBindings
+            .get(receiverAccess.root)
+            ?.get(pathKey(receiverAccess.path));
+        if (binding) {
+          for (const collection of binding.collections) {
+            mutatedCollections.add(collection);
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(fn);
+    mutatedCollectionsByFunction.set(fn, mutatedCollections);
+  }
+
+  const reachableCollections = new Set<ModuleCollectionInfo>();
+  for (const fn of reachableFunctions) {
+    for (const collection of mutatedCollectionsByFunction.get(fn) ?? []) {
+      reachableCollections.add(collection);
+    }
+  }
+  return [...reachableCollections]
+    .map(
+      ({ kind, name, sourceFile }) =>
+        `${path.relative(displayRoot, sourceFile.fileName)} ${name} (${kind})`,
+    )
+    .sort();
+}
+
+function findHandlerCollectionMutationsReachableFromPreload(): string[] {
+  const handlersRoot = path.join(srcRoot, "handlers");
+  // RPC/effect modules own intentional process-local client and test caches;
+  // this guard targets phase-bridging state hidden in the handler module graph.
+  return findModuleCollectionMutationsReachableFromPreload(
+    effectfulProgramAnalysis.program,
+    (sourceFile) =>
+      path
+        .resolve(sourceFile.fileName)
+        .startsWith(`${handlersRoot}${path.sep}`),
+    packageRoot,
+  );
+}
 
 function isDirectContextEffectCall(node: ts.Node): node is ts.CallExpression {
   return (
@@ -1140,14 +1649,17 @@ function hiddenEffectNames(sourceText: string): string[] {
   ).map((offender) => offender.slice(offender.lastIndexOf(" ") + 1));
 }
 
-function hiddenEffectNamesInProgram(
+type ProgramFixture = {
+  fixtureFiles: Map<string, string>;
+  fixtureRoot: string;
+  program: ts.Program;
+};
+
+function createProgramFixture(
   files: Readonly<Record<string, string>>,
-  entryFile: string,
-  preloadWrapperExports: ReadonlyArray<
-    readonly [file: string, exportName: string]
-  > = [],
-): string[] {
-  const fixtureRoot = path.join(packageRoot, "__preload-effect-fixtures__");
+  fixtureDirectory: string,
+): ProgramFixture {
+  const fixtureRoot = path.join(packageRoot, fixtureDirectory);
   const fixtureFiles = new Map(
     Object.entries(files).map(([file, sourceText]) => [
       path.resolve(fixtureRoot, file),
@@ -1218,6 +1730,20 @@ function hiddenEffectNamesInProgram(
         .join("\n"),
     );
   }
+  return { fixtureFiles, fixtureRoot, program };
+}
+
+function hiddenEffectNamesInProgram(
+  files: Readonly<Record<string, string>>,
+  entryFile: string,
+  preloadWrapperExports: ReadonlyArray<
+    readonly [file: string, exportName: string]
+  > = [],
+): string[] {
+  const { fixtureFiles, fixtureRoot, program } = createProgramFixture(
+    files,
+    "__preload-effect-fixtures__",
+  );
   const checker = program.getTypeChecker();
   const preloadWrapperSymbols = new Set<ts.Symbol>();
   for (const [file, exportName] of preloadWrapperExports) {
@@ -1255,6 +1781,20 @@ function hiddenEffectNamesInProgram(
   ).map((offender) => offender.slice(offender.lastIndexOf(" ") + 1));
 }
 
+function phaseCollectionNamesInProgram(
+  files: Readonly<Record<string, string>>,
+): string[] {
+  const { fixtureFiles, fixtureRoot, program } = createProgramFixture(
+    files,
+    "__preload-phase-collection-fixtures__",
+  );
+  return findModuleCollectionMutationsReachableFromPreload(
+    program,
+    (sourceFile) => fixtureFiles.has(path.resolve(sourceFile.fileName)),
+    fixtureRoot,
+  );
+}
+
 describe("indexer code quality invariants", () => {
   it("does not hardcode mainnet-only chain iteration in source", () => {
     const mainnetPairPattern = /\[\s*(?:42220\s*,\s*143|143\s*,\s*42220)\s*\]/;
@@ -1281,21 +1821,32 @@ describe("indexer code quality invariants", () => {
     );
   });
 
+  it("keeps preload-aware handlers from mutating imported handler collections", () => {
+    assert.deepEqual(
+      findHandlerCollectionMutationsReachableFromPreload(),
+      [],
+      "Hosted Envio workers do not share module state; preload-aware handlers must not mutate module-local Set/Map state through imported handler helpers",
+    );
+  });
+
   it("detects helper-hidden phase collections without flagging locals", () => {
     assert.deepEqual(
       moduleLocalCollectionsInPreloadAwareModule(
         `
           const renamed: Set<string> = new Set();
           const cache = new globalThis.Map<string, boolean>();
+          const phase = { queued: new Set<string>() };
           function remember() {
             const alias = renamed;
             alias.add("event");
+            phase.queued.add("event");
           }
           function consume() {
             renamed.delete("event");
           }
           function handler(context: { isPreload: boolean }) {
-            if (context.isPreload) remember();
+            const { isPreload } = context;
+            if (isPreload) remember();
             consume();
             cache.set("event", true);
             const preloadedIds = new Set<string>();
@@ -1305,7 +1856,11 @@ describe("indexer code quality invariants", () => {
         `,
         "fixture.ts",
       ),
-      ["fixture.ts renamed (Set)", "fixture.ts cache (Map)"],
+      [
+        "fixture.ts renamed (Set)",
+        "fixture.ts cache (Map)",
+        "fixture.ts phase.queued (Set)",
+      ],
     );
     assert.deepEqual(
       moduleLocalCollectionsInPreloadAwareModule(
@@ -1319,6 +1874,130 @@ describe("indexer code quality invariants", () => {
         "fixture.ts",
       ),
       [],
+    );
+  });
+
+  it("follows imported helper calls to phase collections across files", () => {
+    assert.deepEqual(
+      phaseCollectionNamesInProgram({
+        "entry.ts": `
+          import { consume, remember } from "./helpers.js";
+          export function handler(context: { isPreload: boolean }) {
+            const { isPreload } = context;
+            if (isPreload) {
+              remember("event");
+              return;
+            }
+            consume("event");
+            const local = new Set<string>();
+            local.add("safe");
+          }
+        `,
+        "helpers.ts": `
+          import {
+            deleteState,
+            writeAssignedState,
+            writeCallbackState,
+            writeDirectState,
+            writeNestedState,
+            writeParameterizedState,
+            mutateLocalNestedState,
+            prepareSharedAlias,
+            mutateSharedAlias,
+          } from "./phase-state.js";
+          const unrelatedStaticLookup = new Set(["safe"]);
+          export function remember(id: string) {
+            writeDirectState(id);
+            writeNestedState(id);
+            writeParameterizedState(id);
+            writeCallbackState(id);
+            writeAssignedState(id);
+            mutateLocalNestedState(id);
+            prepareSharedAlias();
+            unrelated();
+          }
+          export function consume(id: string) {
+            deleteState(id);
+            mutateSharedAlias();
+          }
+          export function unrelated() {
+            return unrelatedStaticLookup.has("safe");
+          }
+        `,
+        "phase-state.ts": `
+          interface NestedState {
+            remembered: Set<string>;
+          }
+          const directState = new Set<string>();
+          const nestedState: NestedState = { remembered: new Set<string>() };
+          const moduleLookup: NestedState = { remembered: new Set<string>() };
+          const parameterState = new Set<string>();
+          const callbackState = new Map<string, boolean>();
+          const assignmentState = new Set<string>();
+          const sharedAliasState = new Set<string>();
+          const unrelatedPathState = new Set<string>();
+          let sharedAlias: Set<string> | undefined;
+          function mutate(target: Set<string>, id: string) {
+            target.add(id);
+          }
+          export function writeDirectState(id: string) {
+            directState.add(id);
+          }
+          export function writeNestedState(id: string) {
+            const { remembered } = nestedState;
+            remembered.add(id);
+          }
+          export function mutateLocalNestedState(id: string) {
+            const local: NestedState = { remembered: new Set<string>() };
+            local.remembered.add(id);
+            moduleLookup.remembered.has(id);
+          }
+          export function writeParameterizedState(id: string) {
+            mutate(parameterState, id);
+          }
+          export function writeCallbackState(id: string) {
+            [id].forEach((item) => callbackState.set(item, true));
+          }
+          export function writeAssignedState(id: string) {
+            let alias: Set<string>;
+            alias = assignmentState;
+            alias.add(id);
+          }
+          export function deleteState(id: string) {
+            directState.delete(id);
+          }
+          export function prepareSharedAlias() {
+            sharedAlias = sharedAliasState;
+          }
+          export function mutateSharedAlias() {
+            sharedAlias?.delete("event");
+          }
+          export function mutateOnlyOutsideThePreloadGraph() {
+            mutate(unrelatedPathState, "unrelated");
+          }
+        `,
+        "bracket-entry.ts": `
+          import { writeBracketState } from "./bracket-state.js";
+          export function bracketHandler(context: { isPreload: boolean }) {
+            if (context["isPreload"]) writeBracketState("event");
+          }
+        `,
+        "bracket-state.ts": `
+          const bracketState = new Set<string>();
+          export function writeBracketState(id: string) {
+            bracketState.add(id);
+          }
+        `,
+      }),
+      [
+        "bracket-state.ts bracketState (Set)",
+        "phase-state.ts assignmentState (Set)",
+        "phase-state.ts callbackState (Map)",
+        "phase-state.ts directState (Set)",
+        "phase-state.ts nestedState.remembered (Set)",
+        "phase-state.ts parameterState (Set)",
+        "phase-state.ts sharedAliasState (Set)",
+      ],
     );
   });
 

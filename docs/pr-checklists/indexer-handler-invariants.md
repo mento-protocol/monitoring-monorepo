@@ -49,6 +49,13 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
   handler requires that event's state; otherwise fail closed with a documented
   ordered-state exemption. Do not substitute a later event's value for exact
   event/block state.
+- Do not hide phase-bridging state in an imported handler helper. The blocking
+  code-quality invariant follows TypeScript-resolved calls from preload-aware
+  handlers through imported and transitive handler helpers, including callbacks,
+  aliases, and collection arguments. A reachable mutation of a module-level
+  native `Set` or `Map` (`add`, `set`, `delete`, or `clear`) fails; deterministic
+  read-only lookup collections remain valid outside the preload-aware handler
+  module.
 - The blocking code-quality invariant rejects a direct effect that exists only
   after a positive preload return (including exact `maybePreloadPool(...)` and
   `maybePreloadBreaker(...)` wrappers)

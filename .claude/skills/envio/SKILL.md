@@ -210,7 +210,12 @@ Notes:
   inputs in each pass (or use a phase-stable event-only condition), invoke the
   identical effect key before the preload return, and let a rare newly-visible
   entity take the safe serialized exact-block path. A missing warmed result must
-  fail closed; it must not be reconstructed from a later event.
+  fail closed; it must not be reconstructed from a later event. Moving the
+  collection into an imported handler helper does not make it safe: the
+  blocking invariant follows TypeScript-resolved imported/transitive handler
+  calls, callbacks, aliases, and collection arguments and rejects reachable
+  module-level `Set`/`Map` mutations. Deterministic read-only lookup collections
+  are allowed outside the preload-aware handler module.
 - **Version drift is common around V3 RCs.** Check the installed CLI and package before relying on older docs, memory, or notes; do not reintroduce V2-only fields such as `preload_handlers:`.
 - Development-plan retention and quota rules change independently of this
   repo. Check Envio's current hosted deployment/billing pages instead of
