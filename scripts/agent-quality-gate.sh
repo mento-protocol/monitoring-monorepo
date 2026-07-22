@@ -2414,6 +2414,10 @@ is_fresh_success_stamp() {
   [[ "$stamped_value" == "$current_stamp" ]] || return 1
   [[ "$stamped_at" =~ ^[0-9]+$ ]] || return 1
   now="$(date +%s)"
+  # Reject future-dated stamps (clock stepped backward after stamping): a
+  # negative age would satisfy an upper-bound-only check and extend reuse
+  # until the clock catches up. Fail toward rerun.
+  [[ "$stamped_at" -le "$now" ]] || return 1
   [[ $((now - stamped_at)) -le "$success_stamp_ttl_seconds" ]]
 }
 
@@ -2793,6 +2797,7 @@ command_stamp_is_fresh() {
     fingerprint="${rest#*$'\t'}"
     [[ "$cmd_key" == "$target_key" ]] || continue
     [[ "$fingerprint" == "$current_stamp" ]] || continue
+    [[ "$created_at" -le "$now" ]] || continue
     [[ $((now - created_at)) -le "$success_stamp_ttl_seconds" ]] || continue
     return 0
   done < "$command_stamps_file"
@@ -2840,6 +2845,7 @@ prune_command_stamps() {
     rest="${line#*$'\t'}"
     fingerprint="${rest#*$'\t'}"
     [[ "$fingerprint" == "$current_stamp" ]] || continue
+    [[ "$created_at" -le "$now" ]] || continue
     [[ $((now - created_at)) -le "$success_stamp_ttl_seconds" ]] || continue
     printf '%s\n' "$line" >> "$tmp"
   done < "$command_stamps_file"
