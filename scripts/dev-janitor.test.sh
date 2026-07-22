@@ -38,4 +38,24 @@ if scripts/dev-janitor.sh --bogus-flag > "$output_file" 2>&1; then
   fail "unknown flag exited 0, expected nonzero"
 fi
 
+# Re-create the fixture immediately before the apply run so this test stays
+# order-independent (a prior test may have already deleted old_dir).
+rm -rf "$old_dir" "$fresh_dir"
+mkdir -p "$old_dir" "$fresh_dir"
+touch -t 202501010000 "$old_dir"
+
+if ! JANITOR_TRUNK_REPOS_DIR="$trunk_repos_dir" JANITOR_STALE_DAYS=30 JANITOR_SKIP_SYSTEM=1 \
+  scripts/dev-janitor.sh --apply > "$output_file"; then
+  fail "apply exited nonzero, expected 0"
+fi
+
+[[ ! -d "$old_dir" ]] || fail "apply did not delete the stale trunk repo cache"
+[[ -d "$fresh_dir" ]] || fail "apply deleted the fresh trunk repo cache"
+
+if JANITOR_TRUNK_REPOS_DIR="/" JANITOR_SKIP_SYSTEM=1 scripts/dev-janitor.sh --apply > "$output_file" 2>&1; then
+  fail "apply against unsafe trunk cache root exited 0, expected nonzero"
+fi
+
+grep -q "refus" "$output_file" || fail "apply against unsafe trunk cache root did not explain the refusal"
+
 echo "dev-janitor.test.sh: all checks passed"
