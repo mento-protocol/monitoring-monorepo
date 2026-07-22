@@ -17,16 +17,23 @@
  *  1. NO workflow may use `pull_request_target` (it hands secrets to
  *     PR-controlled context by design; the repo has none and must stay that
  *     way).
- *  2. Every JOB that can receive a CREDENTIAL in a `pull_request`-triggered
- *     workflow — a `${{ secrets.* }}` reference (its own or inherited from
- *     workflow-level `env:`), a reusable-workflow `secrets:` forward, an
+ *  2. Every JOB that can receive a CREDENTIAL in a workflow REACHABLE on an
+ *     autofix branch — the eventual `pull_request`, the `push` the finalizer
+ *     makes to `sentry-autofix/*` before the PR exists (when its branch filter
+ *     admits that branch), or the `create` event of that branch — must guard or
+ *     annotate. "Credential" is: a `${{ secrets.* }}` reference (its own or
+ *     inherited from workflow-level `env:`), a reusable-workflow `secrets:`
+ *     forward or local reusable-workflow (`uses: ./…`) call, an
  *     `id-token: write` / `permissions: write-all` OIDC grant (this repo's WIF
  *     pool trusts any repository-attributed OIDC token — `terraform/ci-wif.tf`),
- *     or a GitHub `environment:` binding — must either
- *       (a) carry the strict EXCLUDING guard on its job-level `if:`
- *           (`!startsWith(github.event.pull_request.head.ref,
- *           'sentry-autofix/')` — see GUARD_PATTERN; nothing looser counts),
- *           or
+ *     a write-scoped automatic `${{ github.token }}`, or a GitHub
+ *     `environment:` binding. Such a job must either
+ *       (a) carry the strict EXCLUDING guard on its job-level `if:` for EACH
+ *           reachable context — `!startsWith(github.event.pull_request.head.ref,
+ *           'sentry-autofix/')` for pull_request (GUARD_PATTERN),
+ *           `!startsWith(github.ref, 'refs/heads/sentry-autofix/')` (or
+ *           `github.ref_name`, `'sentry-autofix/'`) for push/create
+ *           (PUSH_GUARD_PATTERN); nothing looser counts — or
  *       (b) carry an `# autofix-ci-trust:` annotation COMMENT LINE stating
  *           WHY no guard is needed (secret step-scoped away from PR-head code
  *           execution, actor-gated job, paths the autofix diff guard forbids,
@@ -83,10 +90,13 @@ const GUARD_PATTERN =
   /!\s*startsWith\s*\(\s*github\.(?:event\.pull_request\.head\.ref|head_ref)\s*,\s*'sentry-autofix\/'\s*\)/i;
 // The push-context analogue: on a `push` event the pull_request context is
 // empty, so a job that runs on the pushed `sentry-autofix/*` branch is excluded
-// by a `github.ref` test instead. Both `refs/heads/sentry-autofix/` and the
-// short `sentry-autofix/` (as used with a stripped ref) count.
+// by a `github.ref` / `github.ref_name` test instead. The two are paired to
+// their CORRECT value: `github.ref` is the FULL `refs/heads/sentry-autofix/…`
+// on a branch push (the short prefix would never match — the guard would
+// evaluate true and the job would run), while `github.ref_name` is the short
+// `sentry-autofix/…`.
 const PUSH_GUARD_PATTERN =
-  /!\s*startsWith\s*\(\s*github\.ref\s*,\s*'(?:refs\/heads\/)?sentry-autofix\/'\s*\)/i;
+  /!\s*startsWith\s*\(\s*github\.(?:ref\s*,\s*'refs\/heads\/sentry-autofix\/'|ref_name\s*,\s*'sentry-autofix\/')\s*\)/i;
 const ANNOTATION = "# autofix-ci-trust:";
 const ANNOTATION_LINE = /^\s*#\s*autofix-ci-trust:/;
 
@@ -157,21 +167,25 @@ export function usesPullRequestTarget(body) {
   return collectTriggers(parseWorkflow(body)).has("pull_request_target");
 }
 
-/** True when a GitHub Actions ref-glob (`main`, `sentry-autofix/**`, `**`, …)
- * could match a pushed autofix branch. `*` matches within a path segment, `**`
- * across segments, `?` one char — the forms GitHub documents. Anything with
- * other glob metacharacters (`[`, `+`, `!`, `{`) is treated as a POSSIBLE match
- * (fail closed) rather than parsed precisely. */
-function refGlobAdmitsAutofix(pattern) {
-  if (typeof pattern !== "string") return true;
-  if (/[[\]{}!+]/.test(pattern)) return true; // un-modeled metachar → fail closed
+/** Three-valued match of a GitHub Actions ref-glob (`main`, `sentry-autofix/**`,
+ * `**`, …) against a pushed autofix branch: `"match"`, `"no-match"`, or
+ * `"unknown"`. `*` matches within a path segment, `**` across segments, `?` one
+ * char — the forms GitHub documents. A pattern with other glob metacharacters
+ * (`[`, `+`, `!`, `{`) is `"unknown"` — never asserted as a definite match OR a
+ * definite non-match, so BOTH the `branches` (admit-if-could-match) and the
+ * `branches-ignore` (exclude-only-if-definitely-matches) directions fail
+ * closed. (An earlier two-valued version fed `true` into the negated
+ * branches-ignore path and became fail-OPEN there.) */
+function refGlobMatch(pattern) {
+  if (typeof pattern !== "string") return "unknown";
+  if (/[[\]{}!+]/.test(pattern)) return "unknown";
   const rx = pattern
     .replace(/[.^$()|\\]/g, "\\$&")
     .replace(/\*\*/g, "\0") // placeholder for cross-segment
     .replace(/\*/g, "[^/]*")
     .replace(/\0/g, ".*")
     .replace(/\?/g, "[^/]");
-  return new RegExp(`^${rx}$`).test("sentry-autofix/x");
+  return new RegExp(`^${rx}$`).test("sentry-autofix/x") ? "match" : "no-match";
 }
 
 /**
@@ -195,13 +209,16 @@ export function pushAdmitsAutofix(pushCfg) {
     const pats = Array.isArray(pushCfg.branches)
       ? pushCfg.branches
       : [pushCfg.branches];
-    return pats.some(refGlobAdmitsAutofix);
+    // Admit if any pattern could match (match or unknown) — fail closed.
+    return pats.some((p) => refGlobMatch(p) !== "no-match");
   }
   if ("branches-ignore" in pushCfg) {
     const pats = Array.isArray(pushCfg["branches-ignore"])
       ? pushCfg["branches-ignore"]
       : [pushCfg["branches-ignore"]];
-    return !pats.some(refGlobAdmitsAutofix);
+    // Excluded ONLY if a pattern DEFINITELY matches; an unknown pattern is not
+    // a definite exclusion, so it leaves the branch admitted — fail closed.
+    return !pats.some((p) => refGlobMatch(p) === "match");
   }
   // No branch filter: a tags-only config never fires on branch pushes; anything
   // else (paths-only, or an empty config) fires on every branch.
@@ -253,6 +270,31 @@ export function grantsOidc(permissions) {
   return false;
 }
 
+/** True when a parsed `permissions:` value grants ANY write scope — `write-all`
+ * or a mapping with a `write` value. A write-scoped automatic `GITHUB_TOKEN`
+ * (`${{ github.token }}`) exposed to autofix-branch code can mutate the repo
+ * (push, open/label issues and PRs, …), so it is a credential too.
+ *
+ * Exported for tests. */
+export function hasWritePermission(permissions) {
+  if (permissions === "write-all") return true;
+  if (permissions && typeof permissions === "object") {
+    return Object.values(permissions).some((v) => v === "write");
+  }
+  return false;
+}
+
+/** True when a nested string references the automatic workflow token via the
+ * `github` context (`${{ github.token }}`). The `secrets.GITHUB_TOKEN` spelling
+ * is caught by referencesSecrets; this is the OTHER spelling of the same
+ * token. */
+function referencesWorkflowToken(value) {
+  for (const s of walkStrings(value)) {
+    if (/\$\{\{[\s\S]*?\bgithub\s*\.\s*token\b/i.test(s)) return true;
+  }
+  return false;
+}
+
 /**
  * True when a parsed job can receive a repository credential, considering
  * workflow-level inheritance. "Credential" is the full set: a `${{ secrets.* }}`
@@ -279,6 +321,16 @@ export function jobReceivesCredential(job, inherited) {
   if (!job || typeof job !== "object") return inherited.envSecrets;
   if (inherited.envSecrets) return true;
   if (referencesSecrets(job)) return true;
+  // The automatic GITHUB_TOKEN via the github context, when the job's effective
+  // permissions grant a write scope, is a mutating credential in autofix-branch
+  // code's hands. The `github.token` reference may sit in the JOB body or be
+  // inherited from a workflow-level `env:` (available to every job/step).
+  if (
+    hasWritePermission(effectivePermissions) &&
+    (referencesWorkflowToken(job) || inherited.envWorkflowToken)
+  ) {
+    return true;
+  }
   // A `secrets:` key exists only on a reusable-workflow (`uses:`) call and
   // always forwards the caller's secrets — `inherit` (string) or a map.
   if (job.secrets != null) return true;
@@ -504,14 +556,19 @@ export function evaluateWorkflow(body) {
   // before the PR exists (`push`, when its branch filter admits
   // `sentry-autofix/*`). Each is its own guard context — a job reachable via
   // both must exclude in both.
-  const contexts = [];
-  if (triggers.has("pull_request")) contexts.push("pull_request");
+  const contextSet = new Set();
+  if (triggers.has("pull_request")) contextSet.add("pull_request");
   const onValue = "on" in doc ? doc.on : doc[true];
   const pushCfg =
     onValue && typeof onValue === "object" && !Array.isArray(onValue)
       ? onValue.push
       : undefined;
-  if (triggers.has("push") && pushAdmitsAutofix(pushCfg)) contexts.push("push");
+  if (triggers.has("push") && pushAdmitsAutofix(pushCfg))
+    contextSet.add("push");
+  // `create` fires when the finalizer creates the sentry-autofix/* branch; the
+  // job then sees that ref, so it needs the same ref-based exclusion as push.
+  if (triggers.has("create")) contextSet.add("push");
+  const contexts = [...contextSet];
   if (contexts.length === 0) {
     return { ok: true };
   }
@@ -523,6 +580,7 @@ export function evaluateWorkflow(body) {
   const jobNames = Object.keys(jobs);
   const inherited = {
     envSecrets: referencesSecrets(doc.env),
+    envWorkflowToken: referencesWorkflowToken(doc.env),
     workflowPermissions: doc.permissions,
   };
   // A reachable workflow with a workflow-level credential but no analyzable

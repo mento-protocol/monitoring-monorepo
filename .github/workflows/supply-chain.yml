@@ -205,6 +205,10 @@ jobs:
 
   moderate-advisory-report:
     name: moderate advisory report (non-blocking)
+    # autofix-ci-trust: the if: below restricts this job to the weekly cron and
+    # default-branch manual dispatch — it never runs on a pull_request or an
+    # autofix-branch push, so its write-scoped GITHUB_TOKEN is unreachable from
+    # autofix-branch code.
     # Weekly cron + default-branch manual dispatch only — never on pull_request,
     # so this job can never block a merge. The manual branch guard matters
     # because this job mutates the canonical security-advisories issue.
@@ -382,6 +386,10 @@ jobs:
 
   override-prune-report:
     name: override prune report (non-blocking)
+    # autofix-ci-trust: the if: below restricts this job to the weekly cron and
+    # default-branch manual dispatch — it never runs on a pull_request or an
+    # autofix-branch push, so its write-scoped GITHUB_TOKEN is unreachable from
+    # autofix-branch code.
     # Weekly cron + default-branch manual dispatch only — never on pull_request,
     # so this job can never block a merge. The manual branch guard matters
     # because this job mutates the canonical override-prune-report issue.

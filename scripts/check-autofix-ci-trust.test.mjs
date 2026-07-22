@@ -789,5 +789,126 @@ test("a '# autofix-ci-trust:' line inside a multiline quoted scalar is not an an
   );
 });
 
+test("the SHORT sentry-autofix/ prefix does NOT satisfy a github.ref push guard", () => {
+  // github.ref is the full refs/heads/… on a branch push, so startsWith(github.ref,
+  // 'sentry-autofix/') is always false and the guard evaluates true → job runs.
+  const shortRef = [
+    "on:",
+    "  push:",
+    "jobs:",
+    "  leak:",
+    "    if: ${{ !startsWith(github.ref, 'sentry-autofix/') }}",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  assert(
+    !evaluateWorkflow(shortRef).ok,
+    "short-prefix github.ref guard rejected",
+  );
+
+  // The correct full-prefix github.ref form, and the short github.ref_name form.
+  const fullRef = shortRef.replace(
+    "'sentry-autofix/'",
+    "'refs/heads/sentry-autofix/'",
+  );
+  assert(evaluateWorkflow(fullRef).ok, "full-prefix github.ref guard credited");
+  const refName = shortRef.replace("github.ref,", "github.ref_name,");
+  assert(
+    evaluateWorkflow(refName).ok,
+    "github.ref_name short-prefix guard credited",
+  );
+});
+
+test("a write-scoped github.token exposed on a reachable job is a credential", () => {
+  const body = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    "    permissions:",
+    "      contents: read",
+    "      issues: write",
+    "    steps:",
+    "      - run: gh issue comment 1 --body hi",
+    "        env:",
+    "          GH_TOKEN: ${{ github.token }}",
+  ].join("\n");
+  assert(!evaluateWorkflow(body).ok, "github.token + issues:write flagged");
+
+  // Read-only token is not a mutating credential.
+  const readOnly = body.replace("      issues: write\n", "");
+  assert(evaluateWorkflow(readOnly).ok, "read-only github.token not flagged");
+});
+
+test("the create event (branch creation) is a reachable context", () => {
+  const body = [
+    "on:",
+    "  create:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  const v = evaluateWorkflow(body);
+  assert(
+    !v.ok && /\[leak\]/.test(v.reason),
+    "create-triggered secret job flagged",
+  );
+
+  const guarded = body.replace(
+    "    runs-on: ubuntu-latest",
+    "    if: ${{ !startsWith(github.ref, 'refs/heads/sentry-autofix/') }}\n    runs-on: ubuntu-latest",
+  );
+  assert(evaluateWorkflow(guarded).ok, "ref-guarded create job passes");
+});
+
+test("branches-ignore fails closed on un-modeled glob metacharacters", () => {
+  // 'v[0-9]' does not definitely exclude sentry-autofix/*, so the branch is
+  // still admitted (must be guarded) — unknown patterns never assert exclusion.
+  assert(
+    pushAdmitsAutofix({ "branches-ignore": ["main", "v[0-9]"] }),
+    "metachar branches-ignore still admits",
+  );
+  assert(
+    !evaluateWorkflow(
+      'on:\n  push:\n    branches-ignore: [main, "v[0-9]"]\njobs:\n  leak:\n    runs-on: x\n    steps:\n      - run: d\n        env:\n          T: ${{ secrets.X }}\n',
+    ).ok,
+    "metachar branches-ignore workflow refused",
+  );
+  // A pattern that DEFINITELY matches the autofix branch does exclude it.
+  assert(
+    !pushAdmitsAutofix({ "branches-ignore": ["sentry-autofix/**"] }),
+    "explicit branches-ignore excludes",
+  );
+});
+
+test("a workflow-level env github.token with write perms is inherited by jobs", () => {
+  const body = [
+    "on:",
+    "  pull_request:",
+    "permissions:",
+    "  contents: write",
+    "env:",
+    "  GH_TOKEN: ${{ github.token }}",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: gh pr merge --admin 1",
+  ].join("\n");
+  const v = evaluateWorkflow(body);
+  assert(
+    !v.ok && /\[leak\]/.test(v.reason),
+    "inherited env token+write flagged",
+  );
+
+  const readOnly = body.replace("  contents: write", "  contents: read");
+  assert(
+    evaluateWorkflow(readOnly).ok,
+    "inherited env token with read-only perms passes",
+  );
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exitCode = 1;
