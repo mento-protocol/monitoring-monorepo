@@ -146,6 +146,7 @@ export function lookupPricingModuleName(
         }
       }
     }
+    // phase-state-cache: rebuildable deployment lookup; loss only repeats deterministic manifest indexing.
     _pricingModuleIndex.set(chainId, index);
   }
   return index.get(address.toLowerCase()) ?? null;
@@ -207,6 +208,7 @@ export function lookupLiquidityStrategyKind(
         index.set(key, kind);
       }
     }
+    // phase-state-cache: rebuildable deployment lookup; loss only repeats deterministic manifest indexing.
     _liquidityStrategyKindIndex.set(chainId, index);
   }
   return index.get(address.toLowerCase()) ?? null;

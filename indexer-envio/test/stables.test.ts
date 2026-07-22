@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { beforeEach, describe, it } from "vitest";
+import { describe, it } from "vitest";
 import {
   LOCK_AND_MINT_NTT_STABLES,
   LOCK_AND_MINT_NTT_STABLE_ADDRESSES,
@@ -12,10 +12,7 @@ import {
   makeStableSupplyDailySnapshotId,
   makeStableTokenCustodyDailySnapshotId,
 } from "../src/handlers/stables/config.ts";
-import {
-  _resetBrokerAddressCacheForTest,
-  classifyStableSupplyChangeKind,
-} from "../src/handlers/stables/classifyKind.ts";
+import { classifyStableSupplyChangeKind } from "../src/handlers/stables/classifyKind.ts";
 import { flushStableDailySnapshot } from "../src/handlers/stables/dailyFlush.ts";
 import { makeStableTokenSupply } from "../src/handlers/stables/bootstrap.ts";
 import {
@@ -255,10 +252,6 @@ describe("stables — YAML drift gate", () => {
 });
 
 describe("classifyStableSupplyChangeKind", () => {
-  beforeEach(() => {
-    _resetBrokerAddressCacheForTest();
-  });
-
   it("Broker tx.to maps to RESERVE_MINT / RESERVE_BURN on Celo", () => {
     // Broker address from @mento-protocol/contracts mainnet Celo.
     const broker = "0x777a8255ca72412f0d706dc03c9d1987306b4cad";

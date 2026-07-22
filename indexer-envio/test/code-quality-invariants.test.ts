@@ -28,6 +28,159 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+type TopLevelCollectionDeclaration = {
+  kind: "Set" | "Map";
+  name: string;
+  propertyPath: string[];
+  rootSymbolNode: ts.Identifier;
+};
+
+function newCollectionKind(
+  initializer: ts.Expression,
+): "Set" | "Map" | undefined {
+  if (!ts.isNewExpression(initializer)) return undefined;
+  const constructor = initializer.expression;
+  const collectionKind = ts.isIdentifier(constructor)
+    ? constructor.text
+    : ts.isPropertyAccessExpression(constructor)
+      ? constructor.name.text
+      : undefined;
+  return collectionKind === "Set" || collectionKind === "Map"
+    ? collectionKind
+    : undefined;
+}
+
+function nestedCollectionDeclarations(
+  initializer: ts.Expression,
+  name: string,
+  rootSymbolNode: ts.Identifier,
+  propertyPath: string[],
+): TopLevelCollectionDeclaration[] {
+  const collectionKind = newCollectionKind(initializer);
+  if (collectionKind) {
+    return [{ kind: collectionKind, name, propertyPath, rootSymbolNode }];
+  }
+  if (
+    ts.isAsExpression(initializer) ||
+    ts.isParenthesizedExpression(initializer) ||
+    ts.isSatisfiesExpression(initializer) ||
+    ts.isTypeAssertionExpression(initializer)
+  ) {
+    return nestedCollectionDeclarations(
+      initializer.expression,
+      name,
+      rootSymbolNode,
+      propertyPath,
+    );
+  }
+  if (!ts.isObjectLiteralExpression(initializer)) return [];
+
+  return initializer.properties.flatMap((property) => {
+    if (
+      !ts.isPropertyAssignment(property) ||
+      !(
+        ts.isIdentifier(property.name) ||
+        ts.isStringLiteral(property.name) ||
+        ts.isNumericLiteral(property.name)
+      )
+    ) {
+      return [];
+    }
+    return nestedCollectionDeclarations(
+      property.initializer,
+      `${name}.${property.name.text}`,
+      rootSymbolNode,
+      [...propertyPath, property.name.text],
+    );
+  });
+}
+
+function topLevelSetOrMapDeclarationNodes(
+  sourceFile: ts.SourceFile,
+): TopLevelCollectionDeclaration[] {
+  const declarations: TopLevelCollectionDeclaration[] = [];
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (!declaration.initializer || !ts.isIdentifier(declaration.name)) {
+        continue;
+      }
+      declarations.push(
+        ...nestedCollectionDeclarations(
+          declaration.initializer,
+          declaration.name.text,
+          declaration.name,
+          [],
+        ),
+      );
+    }
+  }
+
+  return declarations;
+}
+
+function topLevelSetOrMapDeclarations(
+  sourceFile: ts.SourceFile,
+): Map<string, "Set" | "Map"> {
+  return new Map(
+    topLevelSetOrMapDeclarationNodes(sourceFile).map(({ kind, name }) => [
+      name,
+      kind,
+    ]),
+  );
+}
+
+function isPreloadAccess(node: ts.Node): boolean {
+  if (ts.isPropertyAccessExpression(node) && node.name.text === "isPreload") {
+    return true;
+  }
+  if (
+    ts.isElementAccessExpression(node) &&
+    node.argumentExpression &&
+    (ts.isStringLiteral(node.argumentExpression) ||
+      ts.isNoSubstitutionTemplateLiteral(node.argumentExpression)) &&
+    node.argumentExpression.text === "isPreload"
+  ) {
+    return true;
+  }
+  if (!ts.isBindingElement(node)) return false;
+  const bindingName = node.propertyName ?? node.name;
+  return (
+    (ts.isIdentifier(bindingName) || ts.isStringLiteral(bindingName)) &&
+    bindingName.text === "isPreload"
+  );
+}
+
+function moduleLocalCollectionsInPreloadAwareModule(
+  sourceText: string,
+  fileName: string,
+): string[] {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const moduleCollections = topLevelSetOrMapDeclarations(sourceFile);
+  if (moduleCollections.size === 0) return [];
+
+  let preloadAwareModule = false;
+  const findPreload = (node: ts.Node): void => {
+    if (isPreloadAccess(node)) {
+      preloadAwareModule = true;
+      return;
+    }
+    ts.forEachChild(node, findPreload);
+  };
+  findPreload(sourceFile);
+  if (!preloadAwareModule) return [];
+
+  return [...moduleCollections].map(
+    ([name, collectionKind]) => `${fileName} ${name} (${collectionKind})`,
+  );
+}
+
 function findUnsafeMultiFieldGetWhereCalls(): string[] {
   const offenders: string[] = [];
   for (const file of sourceFiles(srcRoot)) {
@@ -461,6 +614,631 @@ function buildEffectfulProgramAnalysis(): EffectfulProgramAnalysis {
 }
 
 const effectfulProgramAnalysis = buildEffectfulProgramAnalysis();
+
+type ModuleStateInfo = {
+  kind: "Set" | "Map" | "state";
+  name: string;
+  owner: ts.Symbol;
+  sourceFile: ts.SourceFile;
+};
+
+// Follow real TypeScript symbols so imported helpers, callbacks, aliases, and
+// parameters cannot hide worker-local mutations. Read-only module bindings are
+// intentionally allowed.
+function findModuleStateMutationsReachableFromRegisteredHandlers(
+  program: ts.Program,
+  includesSourceFile: (sourceFile: ts.SourceFile) => boolean,
+  displayRoot: string,
+  includesStateSourceFile: (
+    sourceFile: ts.SourceFile,
+  ) => boolean = includesSourceFile,
+): string[] {
+  const checker = program.getTypeChecker();
+  const sourceFileList = program
+    .getSourceFiles()
+    .filter(
+      (sourceFile) =>
+        !sourceFile.isDeclarationFile && includesSourceFile(sourceFile),
+    );
+  type SymbolAccess = { path: string[]; root: ts.Symbol };
+  type PathBinding = {
+    states: Set<ModuleStateInfo>;
+    path: string[];
+  };
+  type StatePathBindings = Map<ts.Symbol, Map<string, PathBinding>>;
+  const statePathBindings: StatePathBindings = new Map();
+  const moduleScopedBindingSymbols = new Set<ts.Symbol>();
+  const pathKey = (propertyPath: readonly string[]): string =>
+    JSON.stringify(propertyPath);
+  const mergePathBinding = (
+    symbol: ts.Symbol,
+    propertyPath: readonly string[],
+    states: ReadonlySet<ModuleStateInfo>,
+  ): boolean => {
+    const byPath = statePathBindings.get(symbol) ?? new Map();
+    const key = pathKey(propertyPath);
+    const existing = byPath.get(key) ?? {
+      states: new Set<ModuleStateInfo>(),
+      path: [...propertyPath],
+    };
+    const initialSize = existing.states.size;
+    for (const state of states) {
+      existing.states.add(state);
+    }
+    if (existing.states.size === initialSize) return false;
+    byPath.set(key, existing);
+    statePathBindings.set(symbol, byPath);
+    return true;
+  };
+  const isPathPrefix = (
+    prefix: readonly string[],
+    candidate: readonly string[],
+  ): boolean =>
+    prefix.length <= candidate.length &&
+    prefix.every((segment, index) => candidate[index] === segment);
+  const expressionAccess = (
+    expression: ts.Expression,
+  ): SymbolAccess | undefined => {
+    if (
+      ts.isAsExpression(expression) ||
+      ts.isNonNullExpression(expression) ||
+      ts.isParenthesizedExpression(expression) ||
+      ts.isSatisfiesExpression(expression) ||
+      ts.isTypeAssertionExpression(expression)
+    ) {
+      return expressionAccess(expression.expression);
+    }
+    if (ts.isIdentifier(expression)) {
+      const root = canonicalSymbol(
+        checker,
+        checker.getSymbolAtLocation(expression),
+      );
+      return root ? { path: [], root } : undefined;
+    }
+    if (ts.isPropertyAccessExpression(expression)) {
+      const parent = expressionAccess(expression.expression);
+      return parent
+        ? { path: [...parent.path, expression.name.text], root: parent.root }
+        : undefined;
+    }
+    if (ts.isElementAccessExpression(expression)) {
+      const parent = expressionAccess(expression.expression);
+      const argument = expression.argumentExpression;
+      const property =
+        argument &&
+        (ts.isStringLiteral(argument) ||
+          ts.isNoSubstitutionTemplateLiteral(argument) ||
+          ts.isNumericLiteral(argument))
+          ? argument.text
+          : "<computed>";
+      return parent
+        ? {
+            path: [...parent.path, property],
+            root: parent.root,
+          }
+        : undefined;
+    }
+    return undefined;
+  };
+  const copyAccessBindings = (
+    alias: ts.Symbol,
+    target: SymbolAccess,
+  ): boolean => {
+    let changed = false;
+    for (const binding of statePathBindings.get(target.root)?.values() ?? []) {
+      const targetContainsBinding = isPathPrefix(target.path, binding.path);
+      const bindingContainsTarget = isPathPrefix(binding.path, target.path);
+      if (!targetContainsBinding && !bindingContainsTarget) continue;
+      if (
+        mergePathBinding(
+          alias,
+          targetContainsBinding ? binding.path.slice(target.path.length) : [],
+          binding.states,
+        )
+      ) {
+        changed = true;
+      }
+    }
+    return changed;
+  };
+  const aliasEdges: Array<{
+    alias: ts.Symbol;
+    target: SymbolAccess;
+  }> = [];
+  for (const sourceFile of sourceFileList) {
+    const collectModuleBindingState = (
+      name: ts.BindingName,
+      kind: ModuleStateInfo["kind"],
+    ): void => {
+      if (ts.isIdentifier(name)) {
+        const symbol = canonicalSymbol(
+          checker,
+          checker.getSymbolAtLocation(name),
+        );
+        if (symbol) {
+          moduleScopedBindingSymbols.add(symbol);
+          mergePathBinding(
+            symbol,
+            [],
+            new Set([
+              {
+                kind,
+                name: name.text,
+                owner: symbol,
+                sourceFile,
+              },
+            ]),
+          );
+        }
+        return;
+      }
+      for (const element of name.elements) {
+        if (!ts.isOmittedExpression(element)) {
+          collectModuleBindingState(element.name, "state");
+        }
+      }
+    };
+    if (includesStateSourceFile(sourceFile)) {
+      for (const statement of sourceFile.statements) {
+        if (!ts.isVariableStatement(statement)) continue;
+        for (const declaration of statement.declarationList.declarations) {
+          const kind = declaration.initializer
+            ? (newCollectionKind(declaration.initializer) ?? "state")
+            : "state";
+          collectModuleBindingState(declaration.name, kind);
+        }
+      }
+    }
+    const collectAliases = (node: ts.Node): void => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.initializer
+      ) {
+        const alias = canonicalSymbol(
+          checker,
+          checker.getSymbolAtLocation(node.name),
+        );
+        const target = expressionAccess(node.initializer);
+        if (alias && target) aliasEdges.push({ alias, target });
+      }
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isObjectBindingPattern(node.name) &&
+        node.initializer
+      ) {
+        const initializerAccess = expressionAccess(node.initializer);
+        for (const element of node.name.elements) {
+          const propertyName = element.propertyName ?? element.name;
+          if (
+            !ts.isIdentifier(element.name) ||
+            !(
+              ts.isIdentifier(propertyName) ||
+              ts.isStringLiteral(propertyName) ||
+              ts.isNumericLiteral(propertyName)
+            )
+          ) {
+            continue;
+          }
+          const alias = canonicalSymbol(
+            checker,
+            checker.getSymbolAtLocation(element.name),
+          );
+          if (alias && initializerAccess) {
+            aliasEdges.push({
+              alias,
+              target: {
+                path: [...initializerAccess.path, propertyName.text],
+                root: initializerAccess.root,
+              },
+            });
+          }
+        }
+      }
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(node.left)
+      ) {
+        const alias = canonicalSymbol(
+          checker,
+          checker.getSymbolAtLocation(node.left),
+        );
+        const target = expressionAccess(node.right);
+        if (alias && target) aliasEdges.push({ alias, target });
+      }
+      ts.forEachChild(node, collectAliases);
+    };
+    collectAliases(sourceFile);
+  }
+
+  const functions = new Set<ts.FunctionLikeDeclaration>();
+  const functionsBySymbol = new Map<
+    ts.Symbol,
+    Set<ts.FunctionLikeDeclaration>
+  >();
+  for (const sourceFile of sourceFileList) {
+    const visit = (node: ts.Node): void => {
+      if (isFunctionLikeNode(node)) {
+        const fn = node as ts.FunctionLikeDeclaration;
+        functions.add(fn);
+        const symbol = functionSymbol(fn, checker);
+        if (symbol) {
+          const declarations = functionsBySymbol.get(symbol) ?? new Set();
+          declarations.add(fn);
+          functionsBySymbol.set(symbol, declarations);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+
+  const edges = new Map<
+    ts.FunctionLikeDeclaration,
+    Set<ts.FunctionLikeDeclaration>
+  >();
+  const callSitesByFunction = new Map<
+    ts.FunctionLikeDeclaration,
+    Array<{
+      call: ts.CallExpression;
+      invokedTargets: Set<ts.FunctionLikeDeclaration>;
+    }>
+  >();
+  for (const fn of functions) {
+    const targets = new Set<ts.FunctionLikeDeclaration>();
+    const callSites: Array<{
+      call: ts.CallExpression;
+      invokedTargets: Set<ts.FunctionLikeDeclaration>;
+    }> = [];
+    const visit = (node: ts.Node): void => {
+      if (node !== fn && isFunctionLikeNode(node)) return;
+      if (ts.isCallExpression(node)) {
+        const invokedTargets = new Set<ts.FunctionLikeDeclaration>();
+        for (const calledSymbol of callExpressionSymbols(node, checker)) {
+          for (const target of functionsBySymbol.get(calledSymbol) ?? []) {
+            targets.add(target);
+            invokedTargets.add(target);
+          }
+        }
+        for (const argument of node.arguments) {
+          if (isFunctionLikeNode(argument)) {
+            const target = argument as ts.FunctionLikeDeclaration;
+            targets.add(target);
+          }
+          const argumentSymbol = expressionSymbol(argument, checker);
+          if (!argumentSymbol) continue;
+          for (const target of functionsBySymbol.get(argumentSymbol) ?? []) {
+            targets.add(target);
+          }
+        }
+        callSites.push({ call: node, invokedTargets });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(fn);
+    edges.set(fn, targets);
+    callSitesByFunction.set(fn, callSites);
+  }
+
+  const registeredHandlerFunctions = new Set<ts.FunctionLikeDeclaration>();
+  for (const sourceFile of sourceFileList) {
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ["contractRegister", "onBlock", "onEvent"].includes(
+          node.expression.name.text,
+        )
+      ) {
+        const indexerSymbol = checker.getSymbolAtLocation(
+          node.expression.expression,
+        );
+        const callback = node.arguments[1];
+        if (indexerSymbol?.name === "indexer" && callback) {
+          if (isFunctionLikeNode(callback)) {
+            registeredHandlerFunctions.add(
+              callback as ts.FunctionLikeDeclaration,
+            );
+          } else {
+            const callbackSymbol = expressionSymbol(callback, checker);
+            if (callbackSymbol) {
+              for (const fn of functionsBySymbol.get(callbackSymbol) ?? []) {
+                registeredHandlerFunctions.add(fn);
+              }
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+  if (registeredHandlerFunctions.size === 0) {
+    throw new Error(
+      "Module-state analysis found no registered indexer callbacks",
+    );
+  }
+
+  const reachableFunctions = new Set(registeredHandlerFunctions);
+  const pendingFunctions = [...registeredHandlerFunctions];
+  while (pendingFunctions.length > 0) {
+    const fn = pendingFunctions.pop();
+    if (!fn) continue;
+    for (const target of edges.get(fn) ?? []) {
+      if (reachableFunctions.has(target)) continue;
+      reachableFunctions.add(target);
+      pendingFunctions.push(target);
+    }
+  }
+
+  let bindingsChanged = true;
+  while (bindingsChanged) {
+    bindingsChanged = false;
+    for (const { alias, target } of aliasEdges) {
+      if (copyAccessBindings(alias, target)) bindingsChanged = true;
+    }
+    for (const fn of reachableFunctions) {
+      for (const { call, invokedTargets } of callSitesByFunction.get(fn) ??
+        []) {
+        for (const target of invokedTargets) {
+          for (
+            let argumentIndex = 0;
+            argumentIndex < call.arguments.length;
+            argumentIndex += 1
+          ) {
+            const argument = call.arguments[argumentIndex];
+            const parameter = target.parameters[argumentIndex];
+            if (!argument || !parameter) continue;
+            const argumentAccess = expressionAccess(argument);
+            if (!argumentAccess) continue;
+            if (ts.isIdentifier(parameter.name)) {
+              const parameterSymbol = canonicalSymbol(
+                checker,
+                checker.getSymbolAtLocation(parameter.name),
+              );
+              if (
+                parameterSymbol &&
+                copyAccessBindings(parameterSymbol, argumentAccess)
+              ) {
+                bindingsChanged = true;
+              }
+              continue;
+            }
+            if (ts.isObjectBindingPattern(parameter.name)) {
+              for (const element of parameter.name.elements) {
+                const propertyName = element.propertyName ?? element.name;
+                if (
+                  !ts.isIdentifier(element.name) ||
+                  !(
+                    ts.isIdentifier(propertyName) ||
+                    ts.isStringLiteral(propertyName) ||
+                    ts.isNumericLiteral(propertyName)
+                  )
+                ) {
+                  continue;
+                }
+                const bindingSymbol = canonicalSymbol(
+                  checker,
+                  checker.getSymbolAtLocation(element.name),
+                );
+                if (
+                  bindingSymbol &&
+                  copyAccessBindings(bindingSymbol, {
+                    path: [...argumentAccess.path, propertyName.text],
+                    root: argumentAccess.root,
+                  })
+                ) {
+                  bindingsChanged = true;
+                }
+              }
+            }
+          }
+        }
+        const receiverAccess = ts.isPropertyAccessExpression(call.expression)
+          ? expressionAccess(call.expression.expression)
+          : undefined;
+        if (receiverAccess) {
+          for (const argument of call.arguments) {
+            const callbackTargets = new Set<ts.FunctionLikeDeclaration>();
+            if (isFunctionLikeNode(argument)) {
+              callbackTargets.add(argument as ts.FunctionLikeDeclaration);
+            }
+            const callbackSymbol = expressionSymbol(argument, checker);
+            if (callbackSymbol) {
+              for (const target of functionsBySymbol.get(callbackSymbol) ??
+                []) {
+                callbackTargets.add(target);
+              }
+            }
+            for (const callbackTarget of callbackTargets) {
+              const valueParameter = callbackTarget.parameters[0];
+              if (!valueParameter || !ts.isIdentifier(valueParameter.name)) {
+                continue;
+              }
+              const valueSymbol = canonicalSymbol(
+                checker,
+                checker.getSymbolAtLocation(valueParameter.name),
+              );
+              if (
+                valueSymbol &&
+                copyAccessBindings(valueSymbol, receiverAccess)
+              ) {
+                bindingsChanged = true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const statesForAccess = (
+    access: SymbolAccess,
+    includeDescendants: boolean,
+  ): Set<ModuleStateInfo> => {
+    const states = new Set<ModuleStateInfo>();
+    for (const binding of statePathBindings.get(access.root)?.values() ?? []) {
+      if (
+        !isPathPrefix(binding.path, access.path) &&
+        !(includeDescendants && isPathPrefix(access.path, binding.path))
+      ) {
+        continue;
+      }
+      for (const state of binding.states) states.add(state);
+    }
+    const directlyOwned = new Set(
+      [...states].filter((state) => state.owner === access.root),
+    );
+    return directlyOwned.size > 0 ? directlyOwned : states;
+  };
+  const mutatedStatesByFunction = new Map<
+    ts.FunctionLikeDeclaration,
+    Set<ModuleStateInfo>
+  >();
+  const isAssignmentOperator = (kind: ts.SyntaxKind): boolean =>
+    kind >= ts.SyntaxKind.FirstAssignment &&
+    kind <= ts.SyntaxKind.LastAssignment;
+  const mutatingMethodNames = new Set([
+    "add",
+    "clear",
+    "copyWithin",
+    "delete",
+    "fill",
+    "pop",
+    "push",
+    "reverse",
+    "set",
+    "shift",
+    "sort",
+    "splice",
+    "unshift",
+  ]);
+  const objectMutationMethods = new Set([
+    "assign",
+    "defineProperties",
+    "defineProperty",
+    "setPrototypeOf",
+  ]);
+  const reflectMutationMethods = new Set([
+    "defineProperty",
+    "deleteProperty",
+    "set",
+    "setPrototypeOf",
+  ]);
+  const hasPhaseStateAllowance = (node: ts.Node): boolean => {
+    const sourceFile = node.getSourceFile();
+    const leadingTrivia = sourceFile.text.slice(
+      node.getFullStart(),
+      node.getStart(sourceFile),
+    );
+    return (
+      /phase-state-exempt:[ \t]*[^#\r\n]*[A-Za-z][^#\r\n]*#\d+/.test(
+        leadingTrivia,
+      ) ||
+      /phase-state-cache:[ \t]*[^\r\n]*[A-Za-z][^\r\n]*/.test(leadingTrivia)
+    );
+  };
+  for (const fn of functions) {
+    const mutatedStates = new Set<ModuleStateInfo>();
+    const recordMutation = (
+      access: SymbolAccess | undefined,
+      includeDescendants: boolean,
+      mutationNode: ts.Node,
+    ): void => {
+      if (!access || hasPhaseStateAllowance(mutationNode)) return;
+      for (const state of statesForAccess(access, includeDescendants)) {
+        mutatedStates.add(state);
+      }
+    };
+    const visit = (node: ts.Node): void => {
+      if (node !== fn && isFunctionLikeNode(node)) return;
+      if (
+        ts.isBinaryExpression(node) &&
+        isAssignmentOperator(node.operatorToken.kind) &&
+        (ts.isIdentifier(node.left) ||
+          ts.isPropertyAccessExpression(node.left) ||
+          ts.isElementAccessExpression(node.left))
+      ) {
+        const assignedAccess = expressionAccess(node.left);
+        const mayReplaceModuleState =
+          assignedAccess &&
+          (!ts.isIdentifier(node.left) ||
+            moduleScopedBindingSymbols.has(assignedAccess.root));
+        if (assignedAccess && mayReplaceModuleState) {
+          recordMutation(assignedAccess, true, node);
+        }
+      }
+      if (
+        (ts.isPrefixUnaryExpression(node) ||
+          ts.isPostfixUnaryExpression(node)) &&
+        (node.operator === ts.SyntaxKind.PlusPlusToken ||
+          node.operator === ts.SyntaxKind.MinusMinusToken)
+      ) {
+        const operand = node.operand;
+        const access = expressionAccess(operand);
+        if (
+          access &&
+          (!ts.isIdentifier(operand) ||
+            moduleScopedBindingSymbols.has(access.root))
+        ) {
+          recordMutation(access, true, node);
+        }
+      }
+      if (ts.isDeleteExpression(node)) {
+        recordMutation(expressionAccess(node.expression), false, node);
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        mutatingMethodNames.has(node.expression.name.text)
+      ) {
+        const receiverAccess = expressionAccess(node.expression.expression);
+        recordMutation(receiverAccess, false, node);
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        ((node.expression.expression.text === "Object" &&
+          objectMutationMethods.has(node.expression.name.text)) ||
+          (node.expression.expression.text === "Reflect" &&
+            reflectMutationMethods.has(node.expression.name.text)))
+      ) {
+        const target = node.arguments[0];
+        if (target) recordMutation(expressionAccess(target), false, node);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(fn);
+    mutatedStatesByFunction.set(fn, mutatedStates);
+  }
+
+  const reachableStates = new Set<ModuleStateInfo>();
+  for (const fn of reachableFunctions) {
+    for (const state of mutatedStatesByFunction.get(fn) ?? []) {
+      reachableStates.add(state);
+    }
+  }
+  return [...reachableStates]
+    .map(
+      ({ kind, name, sourceFile }) =>
+        `${path.relative(displayRoot, sourceFile.fileName)} ${name} (${kind})`,
+    )
+    .sort();
+}
+
+function includesIndexerSourceFile(sourceFile: ts.SourceFile): boolean {
+  return path.resolve(sourceFile.fileName).startsWith(`${srcRoot}${path.sep}`);
+}
+
+function findHandlerModuleStateMutationsReachableFromHandlers(): string[] {
+  return findModuleStateMutationsReachableFromRegisteredHandlers(
+    effectfulProgramAnalysis.program,
+    includesIndexerSourceFile,
+    packageRoot,
+  );
+}
 
 function isDirectContextEffectCall(node: ts.Node): node is ts.CallExpression {
   return (
@@ -1085,14 +1863,17 @@ function hiddenEffectNames(sourceText: string): string[] {
   ).map((offender) => offender.slice(offender.lastIndexOf(" ") + 1));
 }
 
-function hiddenEffectNamesInProgram(
+type ProgramFixture = {
+  fixtureFiles: Map<string, string>;
+  fixtureRoot: string;
+  program: ts.Program;
+};
+
+function createProgramFixture(
   files: Readonly<Record<string, string>>,
-  entryFile: string,
-  preloadWrapperExports: ReadonlyArray<
-    readonly [file: string, exportName: string]
-  > = [],
-): string[] {
-  const fixtureRoot = path.join(packageRoot, "__preload-effect-fixtures__");
+  fixtureDirectory: string,
+): ProgramFixture {
+  const fixtureRoot = path.join(packageRoot, fixtureDirectory);
   const fixtureFiles = new Map(
     Object.entries(files).map(([file, sourceText]) => [
       path.resolve(fixtureRoot, file),
@@ -1163,6 +1944,20 @@ function hiddenEffectNamesInProgram(
         .join("\n"),
     );
   }
+  return { fixtureFiles, fixtureRoot, program };
+}
+
+function hiddenEffectNamesInProgram(
+  files: Readonly<Record<string, string>>,
+  entryFile: string,
+  preloadWrapperExports: ReadonlyArray<
+    readonly [file: string, exportName: string]
+  > = [],
+): string[] {
+  const { fixtureFiles, fixtureRoot, program } = createProgramFixture(
+    files,
+    "__preload-effect-fixtures__",
+  );
   const checker = program.getTypeChecker();
   const preloadWrapperSymbols = new Set<ts.Symbol>();
   for (const [file, exportName] of preloadWrapperExports) {
@@ -1200,6 +1995,20 @@ function hiddenEffectNamesInProgram(
   ).map((offender) => offender.slice(offender.lastIndexOf(" ") + 1));
 }
 
+function phaseStateNamesInProgram(
+  files: Readonly<Record<string, string>>,
+): string[] {
+  const { fixtureFiles, fixtureRoot, program } = createProgramFixture(
+    files,
+    "__preload-phase-state-fixtures__",
+  );
+  return findModuleStateMutationsReachableFromRegisteredHandlers(
+    program,
+    (sourceFile) => fixtureFiles.has(path.resolve(sourceFile.fileName)),
+    fixtureRoot,
+  );
+}
+
 describe("indexer code quality invariants", () => {
   it("does not hardcode mainnet-only chain iteration in source", () => {
     const mainnetPairPattern = /\[\s*(?:42220\s*,\s*143|143\s*,\s*42220)\s*\]/;
@@ -1208,6 +2017,374 @@ describe("indexer code quality invariants", () => {
       .map((file) => path.relative(packageRoot, file));
 
     assert.deepEqual(offenders, []);
+  });
+
+  it("keeps preload-aware handler modules free of module-local collections", () => {
+    const offenders = sourceFiles(path.join(srcRoot, "handlers")).flatMap(
+      (file) =>
+        moduleLocalCollectionsInPreloadAwareModule(
+          readFileSync(file, "utf8"),
+          path.relative(packageRoot, file),
+        ),
+    );
+
+    assert.deepEqual(
+      offenders,
+      [],
+      "Hosted Envio may run preload and processing in different workers; preload-aware handler modules must not declare module-local Set/Map state",
+    );
+  });
+
+  it("keeps registered handlers from mutating module-scoped handler state", () => {
+    assert.deepEqual(
+      findHandlerModuleStateMutationsReachableFromHandlers(),
+      [],
+      "Hosted Envio workers and restarts do not share module state; registered handlers must not mutate module-scoped state through imported handler helpers",
+    );
+  });
+
+  it("includes non-handler source modules in phase-state analysis", () => {
+    const sourceFile = effectfulProgramAnalysis.program.getSourceFile(
+      path.join(srcRoot, "contractAddresses.ts"),
+    );
+    assert.ok(
+      sourceFile,
+      "expected contractAddresses.ts in the indexer program",
+    );
+    assert.equal(includesIndexerSourceFile(sourceFile), true);
+  });
+
+  it("detects helper-hidden phase collections without flagging locals", () => {
+    assert.deepEqual(
+      moduleLocalCollectionsInPreloadAwareModule(
+        `
+          const renamed: Set<string> = new Set();
+          const cache = new globalThis.Map<string, boolean>();
+          const phase = { queued: new Set<string>() };
+          function remember() {
+            const alias = renamed;
+            alias.add("event");
+            phase.queued.add("event");
+          }
+          function consume() {
+            renamed.delete("event");
+          }
+          function handler(context: { isPreload: boolean }) {
+            const { isPreload } = context;
+            if (isPreload) remember();
+            consume();
+            cache.set("event", true);
+            const preloadedIds = new Set<string>();
+            preloadedIds.add("local");
+            return preloadedIds;
+          }
+        `,
+        "fixture.ts",
+      ),
+      [
+        "fixture.ts renamed (Set)",
+        "fixture.ts cache (Map)",
+        "fixture.ts phase.queued (Set)",
+      ],
+    );
+    assert.deepEqual(
+      moduleLocalCollectionsInPreloadAwareModule(
+        `
+          function handler(context: { isPreload: boolean }) {
+            if (context.isPreload) return;
+            const warmed = new Set<string>();
+            warmed.add("local");
+          }
+        `,
+        "fixture.ts",
+      ),
+      [],
+    );
+  });
+
+  it("follows imported helper calls to module phase state across files", () => {
+    assert.deepEqual(
+      phaseStateNamesInProgram({
+        "entry.ts": `
+          import { consume, remember } from "./helpers.js";
+          const indexer = { onEvent: (..._args: unknown[]) => undefined };
+          function isPreloadPhase(context: { isPreload: boolean }) {
+            return context.isPreload;
+          }
+          export function handler(context: { isPreload: boolean }) {
+            if (isPreloadPhase(context)) {
+              remember("event");
+              return;
+            }
+            consume("event");
+            const local = new Set<string>();
+            local.add("safe");
+          }
+          indexer.onEvent({}, handler);
+        `,
+        "helpers.ts": `
+          import {
+            deleteState,
+            writeAssignedState,
+            writeCallbackState,
+            writeDirectState,
+            writeNestedState,
+            writeParameterizedState,
+            mutateLocalNestedState,
+            prepareSharedAlias,
+            replaceAliasState,
+            replaceContainerState,
+            mutateSharedAlias,
+            replaceNestedState,
+            replaceState,
+            writeArrayState,
+            writeAssignedRecordState,
+            writeCacheState,
+            writeCallbackObjectState,
+            writeComputedRecordState,
+            writeDeletedRecordState,
+            writeExemptState,
+            writeFactoryArrayState,
+            writeFactorySetState,
+            writeInvalidCacheState,
+            writeInvalidExemptState,
+            writePrimitiveState,
+          } from "./phase-state.js";
+          const unrelatedStaticLookup = new Set(["safe"]);
+          const unrelatedStaticArray = ["safe"];
+          const unrelatedStaticRecord: Record<string, boolean> = { safe: true };
+          export function remember(id: string) {
+            writeDirectState(id);
+            writeNestedState(id);
+            writeParameterizedState(id);
+            writeCallbackState(id);
+            writeAssignedState(id);
+            mutateLocalNestedState(id);
+            prepareSharedAlias();
+            replaceAliasState(id);
+            replaceContainerState(id);
+            replaceNestedState(id);
+            replaceState(id);
+            writeArrayState(id);
+            writeAssignedRecordState(id);
+            writeCacheState(id);
+            writeCallbackObjectState();
+            writeComputedRecordState(id);
+            writeDeletedRecordState(id);
+            writeExemptState(id);
+            writeFactoryArrayState(id);
+            writeFactorySetState(id);
+            writeInvalidCacheState(id);
+            writeInvalidExemptState(id);
+            writePrimitiveState(id);
+            unrelated();
+          }
+          export function consume(id: string) {
+            deleteState(id);
+            mutateSharedAlias();
+          }
+          export function unrelated() {
+            return (
+              unrelatedStaticLookup.has("safe") &&
+              unrelatedStaticArray.includes("safe") &&
+              unrelatedStaticRecord.safe
+            );
+          }
+        `,
+        "phase-state.ts": `
+          interface NestedState {
+            remembered: Set<string>;
+          }
+          const directState = new Set<string>();
+          const nestedState: NestedState = { remembered: new Set<string>() };
+          const moduleLookup: NestedState = { remembered: new Set<string>() };
+          const parameterState = new Set<string>();
+          const callbackState = new Map<string, boolean>();
+          const assignmentState = new Set<string>();
+          const aliasStateSeed = new Set<string>();
+          const arrayState: string[] = [];
+          const assignedRecordState: Record<string, boolean> = {};
+          const cacheState = new Set<string>();
+          const callbackObjectState = [{ done: false }];
+          const computedRecordState: Record<string, boolean> = {};
+          const deletedRecordState: Record<string, boolean> = {};
+          const exemptState = new Set<string>();
+          const factoryArrayState = makeArrayState();
+          const factorySetState = makeSetState();
+          const invalidCacheState = new Set<string>();
+          const invalidExemptState = new Set<string>();
+          const reassignedNestedState = { remembered: new Set<string>() };
+          const sharedAliasState = new Set<string>();
+          const unrelatedPathState = new Set<string>();
+          let aliasState = aliasStateSeed;
+          let primitiveState: string | undefined;
+          let replacedContainerState = { remembered: new Set<string>() };
+          let reassignedState = new Set<string>();
+          let sharedAlias: Set<string> | undefined;
+          function makeArrayState() {
+            return [] as string[];
+          }
+          function makeSetState() {
+            return new Set<string>();
+          }
+          function mutate(target: Set<string>, id: string) {
+            target.add(id);
+          }
+          export function writeDirectState(id: string) {
+            directState.add(id);
+          }
+          export function writeNestedState(id: string) {
+            const { remembered } = nestedState;
+            remembered.add(id);
+          }
+          export function mutateLocalNestedState(id: string) {
+            const local: NestedState = { remembered: new Set<string>() };
+            let localAlias = moduleLookup.remembered;
+            localAlias.has(id);
+            localAlias = new Set([id]);
+            local.remembered.add(id);
+            moduleLookup.remembered.has(id);
+            localAlias.has(id);
+          }
+          export function writeParameterizedState(id: string) {
+            mutate(parameterState, id);
+          }
+          export function writeCallbackState(id: string) {
+            [id].forEach((item) => callbackState.set(item, true));
+          }
+          export function writeAssignedState(id: string) {
+            let alias: Set<string>;
+            alias = assignmentState;
+            alias.add(id);
+          }
+          export function deleteState(id: string) {
+            directState.delete(id);
+          }
+          export function prepareSharedAlias() {
+            sharedAlias = sharedAliasState;
+          }
+          export function mutateSharedAlias() {
+            sharedAlias?.delete("event");
+          }
+          export function replaceAliasState(id: string) {
+            aliasState = new Set([id]);
+          }
+          export function replaceContainerState(id: string) {
+            replacedContainerState = { remembered: new Set([id]) };
+          }
+          export function replaceNestedState(id: string) {
+            reassignedNestedState.remembered = new Set([id]);
+          }
+          export function replaceState(id: string) {
+            reassignedState = new Set([id]);
+          }
+          export function writeArrayState(id: string) {
+            arrayState.push(id);
+          }
+          export function writeAssignedRecordState(id: string) {
+            Object.assign(assignedRecordState, { [id]: true });
+          }
+          export function writeCacheState(id: string) {
+            // phase-state-cache: bounded rebuildable fixture cache; loss only repeats work.
+            cacheState.add(id);
+          }
+          export function writeCallbackObjectState() {
+            callbackObjectState.forEach((item) => {
+              item.done = true;
+            });
+          }
+          export function writeComputedRecordState(id: string) {
+            computedRecordState[id] = true;
+          }
+          export function writeDeletedRecordState(id: string) {
+            delete deletedRecordState[id];
+          }
+          export function writeExemptState(id: string) {
+            // phase-state-exempt: ordered fixture state; remove with #123.
+            exemptState.add(id);
+          }
+          export function writeFactoryArrayState(id: string) {
+            factoryArrayState.splice(0, 0, id);
+          }
+          export function writeFactorySetState(id: string) {
+            factorySetState.add(id);
+          }
+          export function writeInvalidCacheState(id: string) {
+            // phase-state-cache:
+            invalidCacheState.add(id);
+          }
+          export function writeInvalidExemptState(id: string) {
+            // phase-state-exempt: missing tracking issue.
+            invalidExemptState.add(id);
+          }
+          export function writePrimitiveState(id: string) {
+            primitiveState = id;
+          }
+          export function mutateOnlyOutsideThePreloadGraph() {
+            mutate(unrelatedPathState, "unrelated");
+          }
+        `,
+        "bracket-entry.ts": `
+          import { writeBracketState } from "./bracket-state.js";
+          const indexer = { onEvent: (..._args: unknown[]) => undefined };
+          export function bracketHandler(context: { isPreload: boolean }) {
+            if (context["isPreload"]) writeBracketState("event");
+          }
+          indexer.onEvent({}, bracketHandler);
+        `,
+        "bracket-state.ts": `
+          const bracketState = new Set<string>();
+          export function writeBracketState(id: string) {
+            bracketState.add(id);
+          }
+        `,
+      }),
+      [
+        "bracket-state.ts bracketState (Set)",
+        "phase-state.ts aliasState (state)",
+        "phase-state.ts arrayState (state)",
+        "phase-state.ts assignedRecordState (state)",
+        "phase-state.ts assignmentState (Set)",
+        "phase-state.ts callbackObjectState (state)",
+        "phase-state.ts callbackState (Map)",
+        "phase-state.ts computedRecordState (state)",
+        "phase-state.ts deletedRecordState (state)",
+        "phase-state.ts directState (Set)",
+        "phase-state.ts factoryArrayState (state)",
+        "phase-state.ts factorySetState (state)",
+        "phase-state.ts invalidCacheState (Set)",
+        "phase-state.ts invalidExemptState (Set)",
+        "phase-state.ts nestedState (state)",
+        "phase-state.ts parameterState (Set)",
+        "phase-state.ts primitiveState (state)",
+        "phase-state.ts reassignedNestedState (state)",
+        "phase-state.ts reassignedState (Set)",
+        "phase-state.ts replacedContainerState (state)",
+        "phase-state.ts sharedAlias (state)",
+      ],
+    );
+  });
+
+  it("follows module state outside the registered handler directory", () => {
+    assert.deepEqual(
+      phaseStateNamesInProgram({
+        "handlers/entry.ts": `
+          import { writeImportedState } from "../outside-helper.js";
+          const indexer = { onEvent: (..._args: unknown[]) => undefined };
+          function handler() {
+            writeImportedState("event");
+          }
+          indexer.onEvent({}, handler);
+        `,
+        "outside-helper.ts": `
+          let warmedId: string | undefined;
+          export function writeImportedState(id: string) {
+            warmedId = id;
+          }
+        `,
+      }),
+      ["outside-helper.ts warmedId (state)"],
+    );
   });
 
   it("keeps multi-field Envio getWhere calls chain-scoped or pool-scoped", () => {

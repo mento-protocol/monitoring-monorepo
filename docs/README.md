@@ -93,7 +93,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/pr-checklists/ci-workflow-gates.md`](pr-checklists/ci-workflow-gates.md) | CI Workflow Gates Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/code-health.md`](pr-checklists/code-health.md) | Code Health Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/dynamic-route-metadata.md`](pr-checklists/dynamic-route-metadata.md) | Dynamic Route Metadata and Private Data Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |
-| [`docs/pr-checklists/indexer-handler-invariants.md`](pr-checklists/indexer-handler-invariants.md) | Indexer Handler Invariants | canonical / active | checklist / indexer-envio | eng | 90d; verified 2026-07-21 |
+| [`docs/pr-checklists/indexer-handler-invariants.md`](pr-checklists/indexer-handler-invariants.md) | Indexer Handler Invariants | canonical / active | checklist / indexer-envio | eng | 90d; verified 2026-07-22 |
 | [`docs/pr-checklists/keyboard-a11y-controlled-widgets.md`](pr-checklists/keyboard-a11y-controlled-widgets.md) | Keyboard Accessibility on Controlled Widgets Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/mutation-testing.md`](pr-checklists/mutation-testing.md) | Mutation Testing Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/recurring-review-patterns.md`](pr-checklists/recurring-review-patterns.md) | Recurring PR Review Patterns | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-21 |

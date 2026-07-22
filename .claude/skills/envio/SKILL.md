@@ -32,7 +32,8 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
   ordered processing pass for writes. Before changing a handler or RPC effect,
   read `indexer-envio/AGENTS.md` and
   `docs/pr-checklists/indexer-handler-invariants.md`; that checklist owns effect
-  ordering, preload markers, exemption syntax, helper declarations, and tests.
+  ordering, phase-state and preload markers, exemption syntax, helper
+  declarations, and tests.
 - Prefer the installed CLI help over stale docs when they disagree. In this baseline, `envio metrics`, `envio metrics runtime`, `envio tools search-docs`, and `envio tools fetch-docs` exist; `envio benchmark-summary` does not.
 
 ## Mento repo quick reference

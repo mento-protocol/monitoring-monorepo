@@ -25,19 +25,12 @@ export type StableSupplyChangeKind =
   | "OTHER_MINT"
   | "OTHER_BURN";
 
-// Per-chain Broker address. Resolved lazily via getContractAddress so the
-// classifier degrades to OTHER_* on chains where Broker isn't deployed
-// (e.g. Monad), rather than throwing at module load. Map is bounded by the
-// number of indexed chains (currently 5 across mainnet + testnet), so the
-// unbounded-Map rule in CLAUDE.md doesn't apply meaningfully.
-const _brokerCache = new Map<number, string | null>();
+// Resolve on demand so the classifier degrades to OTHER_* on chains where
+// Broker isn't deployed (e.g. Monad), rather than throwing at module load.
+// getContractAddress is a static registry lookup, so caching it here only
+// creates worker-local mutable state without avoiding meaningful work.
 const getBrokerAddress = (chainId: number): string | null => {
-  if (_brokerCache.has(chainId)) {
-    return _brokerCache.get(chainId) ?? null;
-  }
-  const lowered = getContractAddress(chainId, "Broker")?.toLowerCase() ?? null;
-  _brokerCache.set(chainId, lowered);
-  return lowered;
+  return getContractAddress(chainId, "Broker")?.toLowerCase() ?? null;
 };
 
 /**
@@ -61,9 +54,4 @@ export function classifyStableSupplyChangeKind(
     return isMint ? "BRIDGE_MINT" : "BRIDGE_BURN";
   }
   return isMint ? "OTHER_MINT" : "OTHER_BURN";
-}
-
-/** @internal Test-only: reset the broker-address cache between tests. */
-export function _resetBrokerAddressCacheForTest(): void {
-  _brokerCache.clear();
 }

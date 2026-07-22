@@ -123,46 +123,14 @@ class OracleReportedPreWriteFailure extends Error {
   }
 }
 
-// Envio's preload and processing passes can observe different entity state
-// within one batch. Record only event keys whose preload pass actually warmed
-// each conditional effect, so processing never turns a newly-visible pool into
-// a serialized archive call. A newly-visible pool stays fail-closed and is
-// retried by preload on its next oracle event.
-const preloadedMedianTimestampEvents = new Set<string>();
-const preloadedReportExpiryEvents = new Set<string>();
-
-function shouldRequestMedianTimestamp(
-  context: EvmOnEventContext,
-  preloadEventKey: string,
-  hasPools: boolean,
-): boolean {
-  if (!context.isPreload) {
-    return preloadedMedianTimestampEvents.delete(preloadEventKey);
-  }
-
-  if (hasPools) preloadedMedianTimestampEvents.add(preloadEventKey);
-  else preloadedMedianTimestampEvents.delete(preloadEventKey);
-  return hasPools;
-}
-
 async function shouldRequestReportExpiry(
   context: EvmOnEventContext,
-  preloadEventKey: string,
   poolIds: readonly string[],
 ): Promise<boolean> {
-  if (!context.isPreload) {
-    return preloadedReportExpiryEvents.delete(preloadEventKey);
-  }
-
   const pools = await Promise.all(
     poolIds.map((poolId) => context.Pool.get(poolId)),
   );
-  const needsExpiry = pools.some(
-    (pool) => pool !== undefined && pool.oracleExpiry <= 0n,
-  );
-  if (needsExpiry) preloadedReportExpiryEvents.add(preloadEventKey);
-  else preloadedReportExpiryEvents.delete(preloadEventKey);
-  return needsExpiry;
+  return pools.some((pool) => pool !== undefined && pool.oracleExpiry <= 0n);
 }
 
 /** Process one pool's OracleReported update: self-heal, advance the oracle
@@ -420,11 +388,11 @@ indexer.onEvent(
       getPoolsByFeed(context, event.chainId, rateFeedID),
       getBreakerConfigsByFeed(context, event.chainId, rateFeedID),
     ]);
-    const requestMedianTimestamp = shouldRequestMedianTimestamp(
-      context,
-      preloadEventKey,
-      poolIds.length > 0,
-    );
+    // Derive effect conditions from entity state in each pass. Do not bridge
+    // preload and processing with module-local memory: hosted Envio can run
+    // those passes in different workers (and restarts always clear it), which
+    // makes a warmed exact-block result look absent during processing.
+    const requestMedianTimestamp = poolIds.length > 0;
     const medianTimestampPromise = requestMedianTimestamp
       ? context.effect(medianTimestampEffect, {
           chainId: event.chainId,
@@ -434,7 +402,6 @@ indexer.onEvent(
       : undefined;
     const requestReportExpiry = await shouldRequestReportExpiry(
       context,
-      preloadEventKey,
       poolIds,
     );
     const reportExpiryPromise = requestReportExpiry
@@ -568,12 +535,6 @@ indexer.onEvent(
     const rateFeedID = asAddress(event.params.token);
     const oraclePrice = event.params.value;
     const blockNumber = asBigInt(event.block.number);
-    const preloadEventKey = eventId(
-      event.chainId,
-      event.block.number,
-      event.logIndex,
-    );
-
     // Two parallel concerns share this event: pool-side oracle/breach state
     // (existing) and breaker-side EMA / lastMedianRate mirror (new). Look up
     // both up front so neither's emptiness suppresses the other, and so a
@@ -582,11 +543,9 @@ indexer.onEvent(
       getPoolsByFeed(context, event.chainId, rateFeedID),
       getBreakerConfigsByFeed(context, event.chainId, rateFeedID),
     ]);
-    const requestMedianTimestamp = shouldRequestMedianTimestamp(
-      context,
-      preloadEventKey,
-      poolIds.length > 0,
-    );
+    // See OracleReported: the preload/processing decision must not depend on
+    // module-local state that disappears across hosted workers or restarts.
+    const requestMedianTimestamp = poolIds.length > 0;
     const medianTimestampPromise = requestMedianTimestamp
       ? context.effect(medianTimestampEffect, {
           chainId: event.chainId,
@@ -596,7 +555,6 @@ indexer.onEvent(
       : undefined;
     const requestReportExpiry = await shouldRequestReportExpiry(
       context,
-      preloadEventKey,
       poolIds,
     );
     const reportExpiryPromise = requestReportExpiry

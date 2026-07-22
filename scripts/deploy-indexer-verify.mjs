@@ -8,7 +8,7 @@ const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";
 const GRAPHQL_TIMEOUT_MS = 20_000;
 const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
-const REQUIRED_POLYGON_EXACT_MEDIAN_VERSION = 1;
+const REQUIRED_POLYGON_EXACT_MEDIAN_VERSION = 2;
 
 const PROBE_TABLES = [
   "Pool",

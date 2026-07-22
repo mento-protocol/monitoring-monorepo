@@ -196,6 +196,7 @@ indexer.onEvent(
             });
           }
         }
+        // phase-state-cache: rebuildable backfill cache; loss only repeats idempotent entity reconciliation.
         backfilledTokens.add(backfillKey);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
