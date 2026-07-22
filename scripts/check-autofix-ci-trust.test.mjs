@@ -941,6 +941,15 @@ test("a fully-qualified in-repo reusable-workflow self-call is credential-bearin
     "FQN self-reference treated as local",
   );
   assert(
+    jobReceivesCredential(
+      {
+        uses: "Mento-Protocol/Monitoring-Monorepo/.github/workflows/deploy.yml@main",
+      },
+      inherited,
+    ),
+    "case-variant owner/repo self-reference treated as local",
+  );
+  assert(
     !jobReceivesCredential(
       { uses: "other-org/other-repo/.github/workflows/deploy.yml@main" },
       inherited,

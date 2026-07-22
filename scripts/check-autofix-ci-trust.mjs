@@ -323,7 +323,9 @@ const THIS_REPO = "mento-protocol/monitoring-monorepo";
  * which GitHub resolves to the same repository. */
 function callsInRepoReusableWorkflow(uses) {
   if (/^\.\.?\//.test(uses)) return true;
-  return uses.startsWith(`${THIS_REPO}/.github/workflows/`);
+  // GitHub owner/repo matching is case-insensitive, so compare lowercased
+  // (THIS_REPO is already lowercase). Over-matching here only ADDS scrutiny.
+  return uses.toLowerCase().startsWith(`${THIS_REPO}/.github/workflows/`);
 }
 
 /** True when a nested string references the automatic workflow token via the
