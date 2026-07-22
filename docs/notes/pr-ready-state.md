@@ -100,6 +100,33 @@ required blockers. If a review-producing workflow is visibly in progress,
 report it as optional lag and rerun `pr:feedback-state` after it reaches a
 terminal state so late feedback is not missed.
 
+### Bounded clean-Claude protocol
+
+`pr:feedback-state` treats a current-head Claude `Verdict: LGTM` review as clean
+only when the complete comment matches this bounded protocol:
+
+- The optional Claude completion line may include only its fixed GitHub Actions
+  `View job` suffix; other suffixes fail closed.
+- An optional `Review: <title>` must equal the PR title after whitespace and
+  CommonMark ASCII-punctuation escape normalization. Title words are labels,
+  not finding evidence.
+- An optional `What I checked` block needs one or more checked (`[x]`) bounded
+  single-line subjects from the neutral-topic grammar (optionally joined by
+  `and`) or the narrow legacy matcher. Unknown prose, inline-code labels,
+  declarative claims, unchecked entries, and mixed safe/actionable checklists
+  fail closed.
+- Non-empty `Findings` then `Roll-up` sections are mandatory. Generalized
+  entries require an explicit `[P3]` clean marker, approved positive evidence,
+  and plain-text syntax; only exact observed legacy Markdown lines use the
+  compatibility matcher. Unknown prose, Markdown/HTML syntax, actionable
+  suffixes, negation, hedging, malformed or duplicate headings, higher
+  priorities, and mixed clean/actionable items remain blocking. Markdown
+  code-block indentation on any non-empty protocol line also fails closed.
+
+The parser validates title, checklist, Findings, and Roll-up as separate
+structural regions. Do not broaden the Findings/Roll-up positive-evidence
+allowlist merely to accept a new title or checklist subject.
+
 ## Expected CLI contract
 
 `pnpm pr:ready-state` must expose a stable JSON shape for agent loops via

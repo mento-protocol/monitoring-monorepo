@@ -53,9 +53,12 @@ export {
   _setMockRateFeedID,
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
+  _setMockReportExpiryConfig,
   _clearMockReportExpiry,
   _setMockMedianTimestamp,
   _clearMockMedianTimestamps,
+  _setMockOracleReportTimestamps,
+  _clearMockOracleReportTimestamps,
   _setMockRateFeedOracles,
   _clearMockRateFeedOracles,
   _setMockNumReporters,
@@ -63,9 +66,12 @@ export {
   fetchReferenceRateFeedID,
   fetchNumReporters,
   fetchRateFeedOracles,
+  fetchOracleReportTimestamps,
   fetchReportExpiry,
+  fetchReportExpiryConfig,
   fetchMedianTimestamp,
 } from "./rpc/oracle-state.js";
+export type { ReportExpiryConfig } from "./rpc/oracle-state.js";
 export {
   _setMockFees,
   _clearMockFees,

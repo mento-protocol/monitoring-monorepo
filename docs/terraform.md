@@ -116,15 +116,17 @@ use the workflow run for the full sanitized plan. The default destination is
 `#deploys`; the platform stack manages the repository variable
 `TERRAFORM_APPLY_SLACK_CHANNEL` (`terraform_apply_slack_channel` tfvar,
 `terraform/github-variables.tf`) — set the tfvar and apply to route these
-summaries to another channel. See `docs/notes/slack-github-subscriptions.md`
+summaries to another channel. See
+[`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md)
 for the GitHub Slack App subscription, apply-pending summary, queue watcher,
 and failure-notifier relationship.
 
 `Terraform Deploy Queue Watch` runs daily and warns in the same Terraform apply
 Slack channel when one of the production Terraform deploy workflows has been
-queued or pending for at least 60 minutes with zero started jobs. The watcher is
-observer-only: it does not share the deploy workflows' `*-deploy` concurrency
-groups, cancel runs, approve environments, or change apply ordering.
+queued, pending, requested, or waiting on `main` for at least 60 minutes with
+zero started jobs. The watcher is observer-only: it does not share the deploy
+workflows' `*-deploy` concurrency groups, cancel runs, approve environments, or
+change apply ordering.
 
 If a post-merge Terraform deploy workflow stays `pending` with no jobs, start
 from the watcher alert or inspect that workflow's run queue directly before

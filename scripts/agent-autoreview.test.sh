@@ -1292,7 +1292,8 @@ expect_empty_stderr() {
   local unexpected
   unexpected="$(
     grep -v \
-      '^agent:autoreview: leaving external-command runtime because an explicit helper may have surviving same-UID writers: ' \
+      -e '^agent:autoreview: leaving external-command runtime because an explicit helper may have surviving same-UID writers: ' \
+      -e '^agent:autoreview: stage-timing' \
       "$stderr" || true
   )"
   if [[ -n "$unexpected" ]]; then
@@ -1418,6 +1419,9 @@ init_review_repo() {
   git -C "$review_repo" init -b main >/dev/null
   git -C "$review_repo" config user.name "Agent Test"
   git -C "$review_repo" config user.email "agent-test@example.invalid"
+  # Match the real repo: the gitignored scratch dir that receives best-effort
+  # stage-duration logs must never enter the reviewed source enumeration.
+  printf '%s\n' '.tmp/' >>"$review_repo/.git/info/exclude"
 }
 
 commit_review_repo() {
@@ -3681,6 +3685,149 @@ GH
   expect_stderr_contains "open PR for head branch feature is not owned by mento-protocol"
 }
 
+run_gh_lookup_timeout_regression() {
+  local review_repo="$tmp_dir/gh-lookup-timeout"
+  local fake_bin="$tmp_dir/gh-lookup-timeout-bin"
+  init_review_repo "$review_repo"
+  git -C "$review_repo" remote add origin \
+    https://github.com/mento-protocol/monitoring-monorepo.git
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'feature\n' >"$review_repo/feature.txt"
+  commit_review_repo "$review_repo" feature
+  mkdir "$fake_bin"
+  cat >"$fake_bin/gh" <<GH
+#!/usr/bin/env bash
+git rev-parse --show-toplevel >/dev/null || exit 81
+if [[ "\$1" == "repo" && "\$2" == "view" ]]; then
+  printf '%s\n' '{"owner":{"login":"mento-protocol"}}'
+  exit 0
+fi
+if [[ "\$1" == "pr" && "\$2" == "list" ]]; then
+  exec sleep 3600
+fi
+exit 82
+GH
+  chmod +x "$fake_bin/gh"
+
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$fake_bin:$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS=1" \
+      "$repo_root/scripts/agent-autoreview.sh" \
+      --engine local --dry-run >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'hung gh pr list lookup unexpectedly succeeded\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains "gh pr list timed out after 1s"
+}
+
+run_deadline_gh_lookup_kill_regression() {
+  # Exercise the wrapper's own run_with_deadline (not the helper's spawnSync
+  # timeout) through its real caller. Branch-mode bundle prep with no explicit
+  # --base resolves the PR base via detect_unique_pr_record, which bounds
+  # `gh pr list` with run_with_deadline. A gh that ignores SIGTERM proves the
+  # deadline escalates to a process-group SIGKILL, fails closed with exit 124,
+  # and leaves no orphaned child -- unlike run_gh_lookup_timeout_regression,
+  # whose --dry-run path resolves entirely through the helper's own timeout.
+  local review_repo="$tmp_dir/deadline-gh-lookup-kill"
+  local fake_bin="$tmp_dir/deadline-gh-lookup-kill-bin"
+  local bundle_dir="$tmp_dir/deadline-gh-lookup-kill-bundle"
+  local pid_file="$tmp_dir/deadline-gh-lookup-kill.pid"
+  init_review_repo "$review_repo"
+  git -C "$review_repo" remote add origin \
+    https://github.com/mento-protocol/monitoring-monorepo.git
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'feature\n' >"$review_repo/feature.txt"
+  commit_review_repo "$review_repo" feature
+  mkdir "$fake_bin"
+  cat >"$fake_bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [[ "$1" == "pr" && "$2" == "list" ]]; then
+  # Ignore SIGTERM so only run_with_deadline's SIGKILL escalation can stop us,
+  # proving the deadline signals the whole backgrounded process group rather
+  # than blocking on the child until the fake one-hour sleep elapses.
+  trap '' TERM
+  printf '%s\n' "$$" >"$AUTOREVIEW_FAKE_GH_PID_FILE"
+  while true; do
+    sleep 1
+  done
+fi
+if [[ "$1" == "repo" && "$2" == "view" ]]; then
+  printf '%s\n' '{"owner":{"login":"mento-protocol"}}'
+  exit 0
+fi
+exit 82
+GH
+  chmod +x "$fake_bin/gh"
+
+  : >"$stdout"
+  : >"$stderr"
+  : >"$pid_file"
+  local started_at
+  started_at="$(date +%s)"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$fake_bin:$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AUTOREVIEW_FAKE_GH_PID_FILE=$pid_file" \
+      "AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS=2" \
+      "$adapter_wrapper" \
+      --prepare-bundle-dir "$bundle_dir" \
+      --mode branch \
+      --engine local >"$stdout" 2>"$stderr"
+  ) || status=$?
+  cleanup_retained_test_command_runtimes
+  local elapsed=$(($(date +%s) - started_at))
+
+  if [[ "$status" -eq 0 ]]; then
+    printf 'hung gh pr list during PR detection unexpectedly succeeded\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains "gh pr list timed out after 2s"
+  expect_stderr_contains "failed to inspect PR metadata for head branch feature"
+  if [[ "$elapsed" -ge 60 ]]; then
+    printf 'run_with_deadline did not bound the hung gh lookup: took %ss\n' \
+      "$elapsed" >&2
+    exit 1
+  fi
+
+  # The escalation must reach the whole process group: the SIGTERM-ignoring gh
+  # child is gone, not orphaned. Poll briefly because the group SIGKILL and the
+  # reparented child's reaping race with the wrapper's own exit.
+  local gh_pid
+  gh_pid="$(cat "$pid_file")"
+  if [[ -z "$gh_pid" ]]; then
+    printf 'fake gh never recorded its pid; the lookup call site was not reached\n' >&2
+    exit 1
+  fi
+  local waited=0
+  while [[ "$waited" -lt 10 ]] && kill -0 "$gh_pid" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if kill -0 "$gh_pid" 2>/dev/null; then
+    kill -KILL "$gh_pid" 2>/dev/null || true
+    printf 'SIGTERM-ignoring gh child survived the deadline: pid %s still alive\n' \
+      "$gh_pid" >&2
+    exit 1
+  fi
+}
+
 run_target_selection_drift_regression() {
   local review_repo="$tmp_dir/target-selection-drift"
   local fake_bin="$tmp_dir/target-selection-drift-bin"
@@ -4187,6 +4334,143 @@ run_frozen_checklist_provenance_regression() {
     "$local_bundle/patches/unstaged.diff" \
     "malicious local checklist injection"
   expect_empty_stderr
+}
+
+run_stage_timing_manifest_regression() {
+  local review_repo="$tmp_dir/stage-timing-manifest"
+  local bundle_dir="$tmp_dir/stage-timing-manifest-bundle"
+  local durations_dir="$tmp_dir/stage-timing-manifest-durations"
+  local counter_file="$tmp_dir/stage-timing-manifest-counter"
+  local durations_file="$durations_dir/durations.jsonl"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c release >/dev/null 2>&1
+  printf 'release\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" release
+  git -C "$review_repo" update-ref refs/remotes/origin/release HEAD
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'feature change\n' >"$review_repo/feature.txt"
+  commit_review_repo "$review_repo" feature
+
+  : >"$counter_file"
+  : >"$stdout"
+  : >"$stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AGENT_AUTOREVIEW_DURATIONS_DIR=$durations_dir" \
+      "AGENT_AUTOREVIEW_MANIFEST_COUNTER_FILE=$counter_file" \
+      "$adapter_wrapper" \
+      --prepare-bundle-dir "$bundle_dir" \
+      --mode branch \
+      --base origin/release \
+      --engine local >"$stdout" 2>"$stderr"
+  )
+  cleanup_retained_test_command_runtimes
+
+  # Item 1: every stage-duration line is parseable JSON with the agreed keys,
+  # and both the wrapper stage and the helper stages were recorded.
+  expect_file_exists "$durations_file"
+  if ! "$node_bin" -e '
+    const fs = require("node:fs");
+    const lines = fs
+      .readFileSync(process.argv[1], "utf8")
+      .split("\n")
+      .filter((line) => line.length > 0);
+    if (lines.length === 0) throw new Error("no duration lines written");
+    const stages = new Set();
+    for (const line of lines) {
+      const record = JSON.parse(line);
+      for (const key of ["ts", "stage", "seconds", "mode"]) {
+        if (!(key in record)) throw new Error("missing key " + key);
+      }
+      if (typeof record.seconds !== "number") {
+        throw new Error("seconds must be numeric");
+      }
+      stages.add(record.stage);
+    }
+    if (!stages.has("prepare-bundle")) throw new Error("missing prepare-bundle stage");
+    if (!stages.has("target-selection")) throw new Error("missing target-selection stage");
+    if (!stages.has("bundle-prep")) throw new Error("missing bundle-prep stage");
+  ' "$durations_file"; then
+    printf 'stage-duration log was not valid\nlog:\n%s\n' \
+      "$(cat "$durations_file")" >&2
+    exit 1
+  fi
+
+  # Item 2: the staging tree is hashed exactly once per distinct (tree,moment):
+  # pre/post helper evidence + pre/post source-validation snapshot = 4, with the
+  # publication manifest reused from the post-snapshot moment (no re-hash).
+  local staging_hashes
+  staging_hashes="$(grep -c '\.agent-autoreview-context\.' "$counter_file" || true)"
+  if [[ "$staging_hashes" -ne 4 ]]; then
+    printf 'expected staging tree hashed 4 times, saw %s\ncounter:\n%s\n' \
+      "$staging_hashes" "$(cat "$counter_file")" >&2
+    exit 1
+  fi
+}
+
+run_stage_timing_split_checkout_regression() {
+  # With no explicit AGENT_AUTOREVIEW_DURATIONS_DIR, a separate trusted wrapper
+  # checkout (adapter_runtime) reviewing a different checkout must still write
+  # the wrapper and helper stages to one log -- the reviewed checkout the helper
+  # already defaults to -- instead of splitting the run across the trusted
+  # wrapper checkout (repo_root) and the reviewed checkout.
+  local review_repo="$tmp_dir/stage-timing-split-checkout"
+  local bundle_dir="$tmp_dir/stage-timing-split-checkout-bundle"
+  local durations_file="$review_repo/.tmp/agent-autoreview/durations.jsonl"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c release >/dev/null 2>&1
+  printf 'release\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" release
+  git -C "$review_repo" update-ref refs/remotes/origin/release HEAD
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'feature change\n' >"$review_repo/feature.txt"
+  commit_review_repo "$review_repo" feature
+
+  : >"$stdout"
+  : >"$stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "$adapter_wrapper" \
+      --prepare-bundle-dir "$bundle_dir" \
+      --mode branch \
+      --base origin/release \
+      --engine local >"$stdout" 2>"$stderr"
+  )
+  cleanup_retained_test_command_runtimes
+
+  # The wrapper stage (prepare-bundle) landing in the reviewed checkout's log
+  # alongside the helper stages proves the unification: before the shared
+  # default, prepare-bundle would have gone to the trusted wrapper checkout.
+  expect_file_exists "$durations_file"
+  if ! "$node_bin" -e '
+    const fs = require("node:fs");
+    const stages = new Set(
+      fs
+        .readFileSync(process.argv[1], "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line).stage),
+    );
+    for (const stage of ["prepare-bundle", "target-selection", "bundle-prep"]) {
+      if (!stages.has(stage)) throw new Error("missing stage " + stage);
+    }
+  ' "$durations_file"; then
+    printf 'reviewed-checkout durations log did not hold the whole run\nlog:\n%s\n' \
+      "$(cat "$durations_file")" >&2
+    exit 1
+  fi
 }
 
 run_prepared_unsupported_path_regressions() {
@@ -4914,6 +5198,7 @@ run_feedback_runtime_aggregate_regression() {
   dd if=/dev/zero bs=1100000 count=1 2>/dev/null |
     tr '\000' 'b' >"$review_repo/scripts/pr-feedback-state-core.mjs"
   for runtime_file in \
+    pr-feedback-state-claude.mjs \
     pr-ready-state.mjs \
     pr-ready-state-core.mjs \
     pr-ready-state-format.mjs; do
@@ -5704,6 +5989,8 @@ run_target_selection_family() {
   run_branch_local_deleted_reference_regression
   run_branch_local_deleted_reference_fixed_regression
   run_pr_base_detection_regression
+  run_gh_lookup_timeout_regression
+  run_deadline_gh_lookup_kill_regression
   run_target_selection_drift_regression
   run_dry_run_unresolved_ref_regression
   run_dirty_source_drift_regression
@@ -5731,6 +6018,8 @@ run_runtime_trust_family() {
 
 run_bundle_integrity_family() {
   run_frozen_checklist_provenance_regression
+  run_stage_timing_manifest_regression
+  run_stage_timing_split_checkout_regression
   run_prepared_unsupported_path_regressions
   run_frozen_checklist_symlink_regression
   run_prepared_untracked_symlink_regression
@@ -6491,6 +6780,7 @@ state.testEvidence = {
 };
 process.stdout.write(`${JSON.stringify(state)}\n`);
 FEEDBACK_RUNTIME
+# Model the bootstrap snapshot that predates the split Claude grammar module.
 for feedback_runtime_file in \
   pr-feedback-state-core.mjs \
   pr-ready-state.mjs \

@@ -23,9 +23,13 @@ After creating a new worktree manually or cloning the repo, run:
 ./scripts/setup.sh
 ```
 
-This ensures deps are installed, Playwright Chromium is available for dashboard
-browser tests, and Envio codegen has produced the generated type facade
-required for `indexer-envio` TypeScript to compile. A `pnpm patch` on
+This configures the tracked git hooks, installs dependencies, builds
+`shared-config`, and ensures Envio codegen has produced the generated type
+facade required for `indexer-envio` TypeScript to compile. It also attempts to
+install Playwright Chromium for dashboard browser tests. A blocked browser
+download warns and continues; run
+`pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium`
+before browser tests when the binary is still absent. A `pnpm patch` on
 `blamer@1.0.7` (jscpd's transitive git-blame dependency) strips its shipped
 `.idea/` directory so sandboxed installs no longer hit a deterministic EPERM
 at `importPackage`.
@@ -53,12 +57,13 @@ itself through a SessionStart hook (`.claude/settings.json` →
 ./scripts/claude-code-web-setup.sh
 ```
 
-The script is gated on `$CLAUDE_CODE_REMOTE` so it is a no-op for local Claude
-Code sessions. It performs the same install + codegen contract as
-`./scripts/setup.sh` plus a Playwright Chromium install for the dashboard
-browser fixture suite. The Playwright step is non-fatal: hosted environments
-that restrict outbound access to `cdn.playwright.dev` will skip the download
-and warn instead of failing the bootstrap.
+The heavy bootstrap runs only for a remote startup event, not local sessions,
+resume, or compact. It installs dependencies, prewarms Trunk, runs the context
+check, builds/code-generates the required packages, configures available
+GitHub/MCP integration, and attempts a Playwright Chromium install for the
+dashboard browser fixture suite. The Playwright step is non-fatal: hosted
+environments that restrict outbound access to `cdn.playwright.dev` warn
+instead of failing the bootstrap.
 
 Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
 (mirrored under `.agents/skills/` for Codex), so the familiar `/ship` and
@@ -73,7 +78,7 @@ repo API and GraphQL regardless of tokens or allowlist entries (`gh auth
 status` still passes, so it is not a capability signal), and
 `pnpm pr:ready-state` cannot run. Hosted sessions use the GitHub MCP tools
 plus the `babysit-pr` cloud watch loop; the foreground
-`pnpm pr:ready-state --pr <number> --watch --compact` loop remains the local
-fallback when the Claude `Monitor` tool is unavailable. Mechanics, the
-gh→MCP mapping, and the empirical findings live in
+`pnpm pr:ready-state --pr <number> --watch --compact --until-ready` loop
+remains the local fallback when the Claude `Monitor` tool is unavailable.
+Mechanics, the gh→MCP mapping, and the empirical findings live in
 [`github-tooling-surfaces.md`](github-tooling-surfaces.md).

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  DEFAULT_SLACK_CHANNEL,
   DEPLOY_WORKFLOWS,
   buildSlackPayload,
   classifyStalledRuns,
@@ -19,6 +20,8 @@ const workflowYaml = readFileSync(
   ),
   "utf8",
 );
+
+assert.equal(DEFAULT_SLACK_CHANNEL, "#deploys");
 
 assert.match(
   workflowYaml,
@@ -53,6 +56,21 @@ assert.equal(
   isDeployQueueCandidate({
     ...staleQueuedRun,
     event: "push",
+    head_branch: "agent/example",
+  }),
+  false,
+);
+assert.equal(
+  isDeployQueueCandidate({
+    ...staleQueuedRun,
+    event: "workflow_dispatch",
+  }),
+  true,
+);
+assert.equal(
+  isDeployQueueCandidate({
+    ...staleQueuedRun,
+    event: "workflow_dispatch",
     head_branch: "agent/example",
   }),
   false,
@@ -126,7 +144,7 @@ assert.deepEqual(stalledRuns[0], {
 });
 
 const payload = buildSlackPayload({
-  channel: "#ci-operations",
+  channel: "#deploys",
   repo: "mento-protocol/monitoring-monorepo",
   serverUrl: "https://github.com",
   watcherRunUrl:
@@ -135,7 +153,7 @@ const payload = buildSlackPayload({
   stalledRuns,
 });
 
-assert.equal(payload.channel, "#ci-operations");
+assert.equal(payload.channel, "#deploys");
 assert.equal(
   payload.text,
   "Terraform deploy queue may be wedged: 1 stale run(s)",
