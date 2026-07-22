@@ -391,8 +391,9 @@ function isClaudeSessionEndCommand(command) {
   return directInvocation.test(command) || guardedInvocation.test(command);
 }
 
-// Keep this in sync with `.claude/settings.json`: the context check enforces
-// that every pre-approved `Bash(bash scripts/...)` permission appears here.
+// Keep these in sync with `.claude/settings.json`. Bash permissions are an
+// exact reviewed allowlist so shell escaping or dynamic command construction
+// cannot bypass a command-specific policy check.
 const allowedClaudeBashScriptPermissions = new Set([
   "Bash(bash scripts/agent-quality-gate.sh:*)",
   "Bash(bash ./scripts/agent-quality-gate.sh:*)",
@@ -417,6 +418,25 @@ const allowedClaudeSagPermissions = new Set([
   'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, the task finished and needs your attention in the agent chat")',
 ]);
 
+const allowedClaudeOtherBashPermissions = new Set([
+  "Bash(terraform -chdir=terraform output:*)",
+  "Bash(terraform -chdir=terraform plan:*)",
+  "Bash(terraform -chdir=terraform validate:*)",
+  'Bash(say "hey, i need your feedback in the agent chat")',
+  'Bash(say "hey, i need your approval in the agent chat")',
+  'Bash(say "hey, the task finished and needs your attention in the agent chat")',
+  'Bash(spd-say "hey, i need your feedback in the agent chat")',
+  'Bash(spd-say "hey, i need your approval in the agent chat")',
+  'Bash(spd-say "hey, the task finished and needs your attention in the agent chat")',
+  "Bash(ESLINT_BASELINE_MAIN=* node *)",
+]);
+
+const allowedClaudeBashPermissions = new Set([
+  ...allowedClaudeBashScriptPermissions,
+  ...allowedClaudeSagPermissions,
+  ...allowedClaudeOtherBashPermissions,
+]);
+
 function isClaudeBashScriptPermission(permission) {
   return /^Bash\(bash\s+(?:\.\/)?scripts\/[^)]*\)$/.test(permission);
 }
@@ -428,8 +448,11 @@ function isClaudeSagPermission(permission) {
     "Bash(".length,
     permission.endsWith(")") ? -1 : undefined,
   );
-  return /(?:^|[\s;&|()'"`])(?:[^\s;&|()'"`]+\/)?sag(?=$|[\s:;&|()'"`])/.test(
-    command,
+  const normalizedCommand = command
+    .replace(/\\\r?\n/g, "")
+    .replace(/[\\'"]/g, "");
+  return /(?:^|[\s;&|()'"`$])(?:[^\s;&|()'"`$]+\/)?sag(?=$|[\s:;&|()'"`$])/.test(
+    normalizedCommand,
   );
 }
 
@@ -442,6 +465,7 @@ function validateClaudePermissions(settings) {
 
   for (const permission of allow) {
     if (typeof permission !== "string") continue;
+    if (!permission.startsWith("Bash(")) continue;
 
     if (
       isClaudeSagPermission(permission) &&
@@ -450,25 +474,29 @@ function validateClaudePermissions(settings) {
       fail(
         `.claude/settings.json: sag permissions must include --api-key-file with the canonical ~/.config/elevenlabs_api_key path and match a reviewed single-command allowlist entry: ${permission}`,
       );
+      continue;
     }
 
     if (/^Bash\(until\b/.test(permission)) {
       fail(
         `.claude/settings.json: permissions.allow must not allow shell-loop commands: ${permission}`,
       );
+      continue;
     }
 
-    if (!isClaudeBashScriptPermission(permission)) continue;
-
-    if (!allowedClaudeBashScriptPermissions.has(permission)) {
-      fail(
-        `.claude/settings.json: unexpected bash scripts allow: ${permission}`,
-      );
-    }
+    if (allowedClaudeBashPermissions.has(permission)) continue;
 
     if (/^Bash\(bash\s+(?:\.\/)?scripts\/deploy-[^)]*\)$/.test(permission)) {
       fail(
         `.claude/settings.json: must not allow deploy/promote scripts: ${permission}`,
+      );
+    } else if (isClaudeBashScriptPermission(permission)) {
+      fail(
+        `.claude/settings.json: unexpected bash scripts allow: ${permission}`,
+      );
+    } else {
+      fail(
+        `.claude/settings.json: unexpected Bash permission; add the exact reviewed entry to the context-check allowlist: ${permission}`,
       );
     }
   }

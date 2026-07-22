@@ -248,7 +248,11 @@ To change a stage:
 4. run `pnpm tf apply platform` from a clean `main` checkout;
 5. verify a bounded live case and the expected observability record.
 
-Set the stage's `*_enabled` tfvar to `"false"` and reapply to pause it.
+To pause ingest/triage, autofix, or archive, set that stage's named
+`*_enabled` tfvar to `"false"` and reapply. Projection has no enable flag: set
+`sentry_projection_token = ""` and reapply. Confirm the plan removes
+`SENTRY_PROJECTION_TOKEN`; subsequent external verdicts then record the
+visible projection-skipped outcome instead of creating owning-repo issues.
 Never widen the read-only token or reuse it for archive. Treat
 `CLAUDE_CODE_OAUTH_TOKEN` replacement as a shared-secret rotation and verify
 the existing Claude PR workflow after applying it.

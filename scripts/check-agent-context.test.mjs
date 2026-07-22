@@ -644,6 +644,8 @@ test("rejects direct and wrapped Claude sag permissions without the canonical ke
     'Bash(env LANG=C command sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
     'Bash(command sag --api-key-file=~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
     'Bash(sag --api-key-file ~/.config/other-key -v Charlie "hey"; printf %s --api-key-file ~/.config/elevenlabs_api_key)',
+    String.raw`Bash(s\ag --api-key-file /tmp/other-key -v Charlie "hey")`,
+    "Bash(s''ag --api-key-file /tmp/other-key -v Charlie \"hey\")",
   ];
 
   for (const permission of permissions) {
@@ -708,7 +710,6 @@ test("accepts the reviewed single-command Claude sag permissions", () => {
           'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your feedback in the agent chat")',
           'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
           'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, the task finished and needs your attention in the agent chat")',
-          "Bash(echo sagacious)",
         ],
       },
       hooks: {
@@ -733,6 +734,61 @@ test("accepts the reviewed single-command Claude sag permissions", () => {
     });
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects every unreviewed Claude Bash permission", () => {
+  const today = isoDateWithOffset(0);
+  const permissions = [
+    'Bash(cmd=sag; "$cmd" --api-key-file /tmp/other-key -v Charlie "hey")',
+    "Bash(echo sagacious)",
+  ];
+
+  for (const permission of permissions) {
+    const root = createContextCheckFixture(
+      `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${today} -->\n`,
+    );
+    try {
+      writeFixtureJson(root, ".claude/settings.json", {
+        permissions: { allow: [permission] },
+        hooks: {
+          SessionEnd: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command:
+                    'bash "${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh"',
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      try {
+        execFileSync(process.execPath, [checkerScriptPath], {
+          cwd: root,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        throw new Error(`expected context check to reject ${permission}`);
+      } catch (/** @type {unknown} */ err) {
+        const maybeError =
+          err && typeof err === "object"
+            ? /** @type {{stderr?: string, stdout?: string, message?: string}} */ (
+                err
+              )
+            : {};
+        const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
+        assert(
+          output.includes("unexpected Bash permission"),
+          `expected unreviewed Bash permission failure, got ${JSON.stringify(output || maybeError.message)}`,
+        );
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
