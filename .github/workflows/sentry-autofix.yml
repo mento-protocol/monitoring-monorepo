@@ -19,11 +19,18 @@ name: Sentry Autofix
 #     reads, so it needs no gh tool or token in env. It cannot execute code, so
 #     an injected verdict cannot exfiltrate secrets by running JS. A
 #     prompt-injected agent can, at most, produce a bad DIFF, which the mechanical
-#     diff guard + required CI + human review catch. (Residual: claude-code-action
-#     itself holds its `github_token` input + the Claude OAuth token in the CLI
-#     process env, which the agent's Read tool could in principle reach via a
-#     process-env surface — inherent to the action, same as claude.yml, tracked
-#     as a sandboxing follow-up.)
+#     diff guard + required CI + human review catch. (Residual, issue #1373: the
+#     CLI must hold the Claude OAuth *inference* token in its process env to
+#     authenticate, and a process can always read its own /proc/self/environ, so
+#     an injected agent's Read tool CAN reach that token — this cannot be blocked
+#     on a hosted runner while claude-code-action runs inference and the tool
+#     loop in one process; a true sandbox needs an upstream action feature. We
+#     shrink the blast radius instead: `github_token` is NOT passed (above), so
+#     the only credential in the env is the inference token, which is
+#     inference-only (no repo/cloud scope) and rotatable. It can only leave via a
+#     DIFF the agent writes — no network/gh tool — which the finalize
+#     credential-scan inspects; the accepted residual is a leaked, rotatable
+#     inference token under a successful prompt injection.)
 #   - NO git AT ALL against the agent-tainted checkout, and NO write credential
 #     in the LLM step. The agent has Write access to the checkout INCLUDING
 #     .git/, so any git command there would run agent-planted hooks / clean-smudge
@@ -202,10 +209,12 @@ jobs:
     # Deliberately NO GH_TOKEN at job level: it must not reach the claude-code
     # LLM step's process env, where a prompt-injected agent could read it from a
     # process-environment surface. Each deterministic step that needs GitHub auth
-    # sets GH_TOKEN itself. (Residual: claude-code-action still holds its own
-    # `github_token` input + the Claude OAuth token in the CLI process; see the
-    # containment note — that exposure is inherent to the action and tracked as a
-    # sandboxing follow-up.) These non-secret vars are safe at job level.
+    # sets GH_TOKEN itself. And the agent step drops the action's optional
+    # `github_token` input (see there), so the ONLY credential in the CLI env is
+    # the Claude OAuth inference token — inference-only and rotatable. That token
+    # can't be removed (the CLI needs it to authenticate) and self-environ reads
+    # can't be sandboxed on a hosted runner; the residual is documented at the
+    # containment note (issue #1373). These non-secret vars are safe at job level.
     env:
       QUEUE_ISSUE: ${{ matrix.entry.issue }}
       SHORT_ID: ${{ matrix.entry.shortId }}
@@ -285,7 +294,11 @@ jobs:
       - uses: anthropics/claude-code-action@12531344451323133b0493233c759991ac61da12 # v1.0.174
         if: ${{ matrix.entry.reconcile != true }}
         with:
-          github_token: ${{ github.token }}
+          # NO github_token: the fix agent has no GitHub/gh tools and posts
+          # nothing — every GitHub write is deterministic downstream via the App
+          # token. Omitting it (the action's `github_token` is optional) keeps
+          # this credential OUT of the CLI process env, shrinking what a
+          # prompt-injected agent's Read tool can reach (issue #1373).
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: ${{ steps.render.outputs.prompt }}
           # NO --mcp-config: the fix agent gets no Sentry access at all — its

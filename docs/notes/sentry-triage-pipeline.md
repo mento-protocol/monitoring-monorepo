@@ -851,14 +851,22 @@ the agent's job**: it cannot run tests, so the fix PR's own full required CI
 (typecheck, tests, lint) plus independent review is the verification — which is
 exactly why merge stays human.
 
-_Residual (accepted, tracked):_ `anthropics/claude-code-action` still holds its
-own `github_token` input and the Claude OAuth token in the CLI process env,
-which the agent's unrestricted `Read` tool could in principle reach via a
-process-environment surface and then write into an edited file or the summary.
-This exposure is inherent to the action and identical to the repo's existing
-`claude.yml` agents; the OAuth token is inference-only and rotatable, and any
-leak would have to survive human PR/comment review. Full OS-level
-process/filesystem sandboxing of the agent is a follow-up.
+_Residual (accepted, issue #1373):_ `anthropics/claude-code-action` must hold
+the Claude OAuth **inference** token in the CLI process env to authenticate, and
+a process can always read its own `/proc/self/environ`, so the agent's
+unrestricted `Read` tool can reach that token and write it into an edited file
+(the summary channel is closed — agent free-text is never published). This
+**cannot be sandboxed on a hosted runner** while the action runs inference and
+the tool loop in one process; a true sandbox needs an upstream action feature.
+We shrink the blast radius instead: the agent step no longer passes the action's
+optional `github_token` (the agent has no GitHub tools; every GitHub write is
+the App token downstream), so the ONLY credential in the env is the inference
+token — inference-only (no repo/cloud scope), rotatable, exfiltrable solely via
+a DIFF the finalize credential-scan inspects, and only under a successful prompt
+injection. The credential-scan catches verbatim/known-shape tokens but cannot
+prove a fragmented/encoded token is absent, so the accepted residual is: a
+leaked, rotatable inference token under injection. True OS-level isolation
+remains an upstream ask tracked in #1373.
 
 **Selection (deterministic).** The select job lists `sentry:verdict-code-fix`
 queue stubs across `--state all` (verdicted stubs auto-close — closed is the
