@@ -1,299 +1,117 @@
-<!-- agent-context: title="On-chain Event Handler Module" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=alerts/infra/onchain-event-handler review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="On-chain Event Handler Module" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=runbook scope=alerts/infra/onchain-event-handler review_interval_days=90 garden_lane=operator-runbooks -->
 
-# Onchain Event Handler Module
+# On-chain Event Handler Module
 
-Terraform module for deploying the Cloud Function that processes QuickNode webhooks and routes Safe multisig events to Slack.
+Terraform module and Node.js 24 Cloud Function that verify QuickNode webhook
+payloads and route Safe multisig events to Slack.
 
-## Overview
+## Ownership and configuration
 
-This module:
+The parent [`alerts/infra`](../README.md) stack owns the GCP project, APIs,
+service accounts, function, secrets, and deployment. Do not instantiate or
+deploy this nested module independently. Its current wiring lives in
+[`../main.tf`](../main.tf), with the maintained input and output contracts in
+[`variables.tf`](variables.tf) and [`outputs.tf`](outputs.tf).
 
-1. Builds and packages the TypeScript source code
-2. Creates a Cloud Storage bucket for the function source
-3. Deploys a Cloud Function
-4. Configures environment variables and Secret Manager access for Slack delivery
-5. Sets up IAM permissions for public invocation (by QuickNode Webhooks)
+Production routes Celo, Ethereum, and Polygon. Safe Wallet links use each
+network's EIP-3770 short name (`celo`, `eth`, and `matic`), which intentionally
+differs from the internal `ethereum` and `polygon` chain keys.
 
-The production handler routes Celo, Ethereum, and Polygon. Safe Wallet links
-use each network's EIP-3770 short name (`celo`, `eth`, and `matic`
-respectively); those prefixes intentionally differ from the internal
-`ethereum` and `polygon` chain keys.
+## Runtime behavior
 
-## Prerequisites
+- The public HTTP endpoint accepts QuickNode delivery; HMAC verification,
+  timestamp replay protection, and configured chain/address checks authenticate
+  each payload.
+- All 17 Safe events in [`src/safe-abi.json`](src/safe-abi.json) are supported.
+  Eight security events route to the alerts channel and nine operational events
+  route to the events channel; [`src/constants.ts`](src/constants.ts) owns that
+  classification.
+- One malformed or failed event does not abort the rest of a webhook batch.
+- The function uses the same private GCS bucket for replay nonces and
+  dead-lettered Slack payloads.
 
-- Google Cloud project with billing enabled
-- Cloud Functions API enabled
-- Cloud Storage API enabled
-- Service account with appropriate permissions
+## Validate and deploy
 
-## Usage
-
-```hcl
-module "onchain_event_handler" {
-  source = "./onchain-event-handler"
-
-  project_id    = local.project_id
-  region        = var.region
-  common_labels = local.common_labels
-
-  project_service_account_email = google_service_account.project_sa.email
-  cloudbuild_builder_dependency = google_project_iam_member.cloudbuild_builder.id
-
-  quicknode_signing_secret = var.quicknode_signing_secret
-
-  # All multisigs share the same two Slack destinations (alerts and events channels)
-  multisig_notifications = {
-    for key, multisig in var.multisigs : key => {
-      address           = multisig.address
-      name              = multisig.name
-      chain             = multisig.chain
-      alerts_channel_id = module.slack_channels.channel_ids.alerts
-      events_channel_id = module.slack_channels.channel_ids.events
-    }
-  }
-  slack_bot_token = var.slack_bot_token
-
-  depends_on = [
-    module.slack_channels,
-    module.project_factory,
-    google_service_account.project_sa,
-  ]
-}
-```
-
-## Inputs
-
-| Name                            | Description                                           | Type     | Default                      | Required |
-| ------------------------------- | ----------------------------------------------------- | -------- | ---------------------------- | -------- |
-| `project_id`                    | GCP project ID                                        | `string` | -                            | yes      |
-| `region`                        | GCP region                                            | `string` | `"europe-west1"`             | no       |
-| `common_labels`                 | Labels applied to module resources                    | `map`    | `{}`                         | no       |
-| `function_name`                 | Function name                                         | `string` | `"onchain-event-handler"`    | no       |
-| `memory_mb`                     | Memory in MB                                          | `number` | `256`                        | no       |
-| `timeout_seconds`               | Timeout in seconds                                    | `number` | `300`                        | no       |
-| `max_instances`                 | Max instances                                         | `number` | `10`                         | no       |
-| `min_instances`                 | Min instances                                         | `number` | `0`                          | no       |
-| `quicknode_signing_secret`      | QuickNode signing secret                              | `string` | -                            | yes      |
-| `multisig_notifications`        | Map of multisig configs with shared Slack channel IDs | `map`    | -                            | yes      |
-| `slack_bot_token`               | Slack bot OAuth token for `chat.postMessage`          | `string` | -                            | yes      |
-| `project_service_account_email` | Existing project service account for Cloud Build      | `string` | `null`                       | no       |
-| `cloudbuild_builder_dependency` | Opaque dependency on the Cloud Build IAM grant        | `string` | -                            | yes      |
-| `runtime`                       | Cloud Function runtime                                | `string` | `"nodejs24"`                 | no       |
-| `secret_name`                   | QuickNode signing-secret container name               | `string` | `"quicknode-signing-secret"` | no       |
-
-## Outputs
-
-| Name                | Description                             |
-| ------------------- | --------------------------------------- |
-| `function_url`      | Cloud Function URL for webhook endpoint |
-| `function_name`     | Function name                           |
-| `function_location` | Function location                       |
-
-## Deployment
-
-The parent `alerts/infra` stack owns the GCP project, APIs, service accounts,
-function, and CI deployment. Do not enable APIs, use service-account key files,
-or deploy this nested module independently.
-
-### Step 1: Build and check the function
-
-**IMPORTANT**: Build TypeScript before deploying:
+From the repository root, run the handler checks and the parent-stack plan:
 
 ```bash
-pnpm alerts:handler:build
-pnpm alerts:handler:typecheck
-pnpm alerts:handler:test
-```
-
-The build compiles `src/` to `dist/`, including `src/safe-abi.json` as
-`dist/safe-abi.json`. Terraform packages the module for Cloud Build while
-excluding dev-only files, Terraform configs, local env files, and node_modules.
-
-### Step 2: Configure Terraform variables
-
-Ensure `alerts/infra/terraform.tfvars` includes all required local-plan values
-(see `alerts/infra/terraform.tfvars.example` for the full list).
-
-### Step 3: Plan and deploy through the stack
-
-```bash
-pnpm alerts:infra:init
+pnpm --filter @mento-protocol/alerts-onchain-event-handler lint
+pnpm --filter @mento-protocol/alerts-onchain-event-handler typecheck
+pnpm --filter @mento-protocol/alerts-onchain-event-handler knip
+pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage
+pnpm --filter @mento-protocol/alerts-onchain-event-handler build:event-hashes
 pnpm alerts:infra:plan
 ```
 
-Open a PR and review the CI plan. After merge, the apply runs through
+`build:event-hashes` regenerates
+`alerts/infra/onchain-event-listeners/event-hashes.json`; it is not a read-only
+check. When the ABI is not meant to change, follow it with
+`git diff --exit-code -- alerts/infra/onchain-event-listeners/event-hashes.json`.
+For an intentional ABI change, review and commit the regenerated file.
+
+Terraform archives the TypeScript source and package-local lockfile while
+excluding `dist/`, tests, Terraform files, local environment files, and
+`node_modules`. Cloud Build installs from that lockfile, compiles the source,
+and emits `dist/safe-abi.json`. A local `dist/` build is useful for development
+but is not a deployment input.
+
+Open a PR and review its plan. After merge, the apply runs through
 `.github/workflows/alerts-infra.yml` behind the `production-infra` approval
-gate. Do not run a local apply.
+gate. Never run a local production-stack apply. The targeted `generate:env`
+provisioner below is the sole documented local-development exception and still
+requires explicit approval.
 
-**Deployment process:**
-
-1. Archives function source (`dist/` folder)
-2. Creates Cloud Storage bucket and uploads archive
-3. Deploys Cloud Function (2nd gen, Node.js 24)
-4. Configures environment variables
-5. Sets up public IAM permissions for QuickNode webhook access
-
-### Step 4: Verify deployment
+After the gated deploy, obtain the function URL from the stack output and
+confirm that an unsigned request is rejected:
 
 ```bash
 FUNCTION_URL=$(terraform -chdir=alerts/infra output -json google_cloud | jq -r .cloud_function_url)
-curl -X POST "$FUNCTION_URL"  # Should return 401 without a signed webhook payload.
+curl -X POST "$FUNCTION_URL" # expected: 401
 ```
 
-The function URL is used as the webhook endpoint in `onchain-event-listeners`.
+## Local development
 
-### Updating the function
-
-```bash
-pnpm alerts:handler:build
-pnpm alerts:infra:plan
-```
-
-Commit the source change and use the same reviewed PR and gated CI apply. The
-workflow builds `dist/`; Terraform archives it and creates a new function
-revision when the source hash changes.
-
-## Development
-
-### Development Prerequisites
-
-- Node.js 24
-- pnpm 11
-
-### Setup
+The package is a standalone Cloud Build source root with its own lockfile:
 
 ```bash
 cd alerts/infra/onchain-event-handler
 pnpm install --frozen-lockfile --lockfile-dir .
+pnpm run dev
 ```
 
-### Build
+After explicit approval for the targeted Terraform state mutation,
+`pnpm run generate:env` regenerates `.env` through the provisioner. The file
+contains `GCP_PROJECT_ID`, `MULTISIG_CONFIG`, `SLACK_BOT_TOKEN`,
+`SLACK_CHANNEL_ALERTS`, `SLACK_CHANNEL_EVENTS`, `QUICKNODE_SIGNING_SECRET`,
+`QUICKNODE_REPLAY_BUCKET`, and `SUPPORTED_CHAINS`. The runtime configuration
+parser requires the multisig, signing-secret, and Slack values. Production also
+needs the replay bucket for nonce reservation and dead-letter storage; local
+development bypasses replay protection. `GCP_PROJECT_ID` and `SUPPORTED_CHAINS`
+are generated but are not read by the current handler code.
 
-```bash
-pnpm run build
-```
+The local function listens on `http://localhost:8080/` by default. Set `PORT`
+to use another port.
 
-**IMPORTANT**: Build before deploying with Terraform. The build compiles `src/`
-to `dist/`, including the Safe ABI JSON required by the compiled constants
-module.
+## Dead-lettering and redrive
 
-### Local Development
+An event is written under the bucket's `dead-letter/` prefix when Slack retries
+are exhausted or the processing budget expires before delivery completes. The
+corresponding ERROR logs are covered by the on-chain handler monitoring
+policies in [`../monitoring.tf`](../monitoring.tf).
 
-For local development, you'll need to set up environment variables. The function expects several environment variables that are normally provided by Terraform when deployed to GCP.
-
-1. **Generate `.env` file:**
-
-   After an explicit human approval for the targeted state mutation, generate
-   `.env` from this directory:
-
-   ```bash
-   pnpm run generate:env
-   ```
-
-   Creates `.env` with: `MULTISIG_CONFIG`, `SLACK_BOT_TOKEN`,
-   `SLACK_CHANNEL_ALERTS`, `SLACK_CHANNEL_EVENTS`,
-   `QUICKNODE_SIGNING_SECRET`, `QUICKNODE_REPLAY_BUCKET`,
-   `FUNCTION_TIMEOUT_SECONDS`, `SUPPORTED_CHAINS`.
-
-   The script uses `terraform apply -replace` to force the provisioner
-   to re-run, so `.env` is always regenerated from current state even
-   if upstream variables haven't changed.
-
-2. **Run locally:**
-
-   ```bash
-   pnpm run dev        # TypeScript development mode
-   # or
-   pnpm run build && pnpm start  # Compiled version
-   ```
-
-   Function available at `http://localhost:8080/` by default. Set `PORT` env var for different port.
-
-   **Note:** Without `.env`, the function runs with warnings. Environment variables are optional in non-production for basic testing.
-
-## Architecture
-
-- **Runtime**: Node.js 24
-- **Language**: TypeScript (compiled to JavaScript)
-- **Trigger**: HTTP/HTTPS
-- **Generation**: 2nd gen Cloud Functions
-- **Authentication**: Public (allUsers) for QuickNode webhook access
-- **Event Processing**: Processes all 17 Safe contract events
-- **Routing**: Routes security events to alerts channels, operational events to events channels
-- **Error Handling**: Continues processing other events if one fails
-
-### Dead-lettering & redrive
-
-If Slack delivery for an event exhausts its retries, the rendered payload is
-persisted to the same GCS bucket used for QuickNode nonce replay protection,
-under a `dead-letter/` prefix (see `src/dead-letter.ts`), instead of being
-lost. The write logs `"Dead-lettered Safe alert after Slack delivery
-failure"` at ERROR — this is covered by the existing
-`onchain_handler_errors_policy` Cloud Monitoring alert (see
-`alerts/infra/monitoring.tf`), since it fires alongside the same event's
-`"Error processing log"` entry.
-
-To re-deliver dead-lettered alerts, run `pnpm deadletter:redrive` (requires
-`QUICKNODE_REPLAY_BUCKET` and `SLACK_BOT_TOKEN` in the environment, plus an
-authenticated `gcloud` CLI session for GCS access). It reposts each
-dead-lettered payload to its original Slack channel, then archives it to
-`dead-letter/done/` so re-runs don't repost it.
+With explicit approval, run `pnpm deadletter:redrive` from the repository root.
+It requires `QUICKNODE_REPLAY_BUCKET`, `SLACK_BOT_TOKEN`, and an authenticated
+`gcloud` session; it reposts payloads to Slack and then moves the GCS objects to
+`dead-letter/done/`. Because the command sends messages and archives objects,
+never use it as a read-only diagnostic.
 
 ## Troubleshooting
 
-### Build Issues
-
-#### Error: `pnpm: command not found`
-
-- Install Node.js 24: `brew install node@24` (macOS) or use [nvm](https://github.com/nvm-sh/nvm)
-- Enable pnpm via corepack (ships with Node.js 16+): `corepack enable pnpm`
-
-#### Error: TypeScript compilation fails
-
-- Check `tsconfig.json` is present
-- Verify all dependencies are installed: `pnpm install --frozen-lockfile --lockfile-dir .`
-- Check for TypeScript errors: `pnpm exec tsc --noEmit`
-
-### Deployment Issues
-
-#### Error: API not enabled
-
-The parent Terraform stack owns API enablement. Inspect `pnpm alerts:infra:plan`
-and the gated workflow rather than enabling APIs manually.
-
-#### Error: Permission denied
-
-- Ensure your GCP account has `roles/cloudfunctions.admin` and `roles/storage.admin`
-- Or use a service account with appropriate permissions
-
-#### Error: Function deployment timeout
-
-- Check Cloud Build logs in GCP Console
-- Verify the `dist/` folder exists and contains compiled JavaScript
-- Ensure the archive size is reasonable (< 50MB recommended)
-
-### Runtime Issues
-
-#### Function returns 401 Unauthorized
-
-- Verify `QUICKNODE_SIGNING_SECRET` environment variable is set correctly
-- Check that the webhook signature verification is working
-
-#### Function doesn't receive webhooks
-
-- Verify the function URL is correct in QuickNode webhook configuration
-- Check IAM permissions allow `allUsers` to invoke the function
-- Review Cloud Function logs with
+- **401 response:** verify the configured QuickNode signing secret and webhook
+  signature, without printing either value.
+- **No webhook deliveries:** compare the function URL with the parent listener
+  configuration and inspect logs with
   `pnpm --filter @mento-protocol/alerts-onchain-event-handler logs`.
-
-## Notes
-
-- Function source is archived to Cloud Storage with dev-only files, local env
-  files, tests, Terraform files, and `node_modules` excluded. Cloud Build runs
-  pnpm from the checked-in package-local `pnpm-lock.yaml`, then runs the package
-  build and emits `dist/safe-abi.json` from `src/safe-abi.json`.
-- CI installs from the same package-local `pnpm-lock.yaml` before running
-  handler typecheck, lint, knip, tests, and event-hash validation. The supply
-  chain workflow also audits and lockfile-lints this deploy lockfile.
-- Build required before Terraform deployment
-- Environment variables set at deployment time (require redeployment to change)
+- **Deployment failure:** inspect the parent stack plan and Cloud Build logs.
+  API enablement and IAM belong to the parent Terraform stack; do not repair
+  them manually.

@@ -6,15 +6,11 @@
 
 # Delete old webhook before recreation (QuickNode doesn't support PUT updates)
 # 
-# IMPORTANT: Due to Terraform's execution model, the first apply may fail with 404.
-# This happens because Terraform plans the update before the provisioner runs.
-# 
-# WORKAROUND: If you get a 404 error, run:
-#   `terraform state rm 'module.onchain_event_listeners["celo"].restapi_object.multisig_webhook'`
-#   `terraform apply`
-#
-# The provisioner will delete the old webhook and remove it from state,
-# so the second apply will succeed by creating a new webhook instead of updating.
+# IMPORTANT: A remotely deleted webhook can make planning fail with 404. Stop
+# before applying and use `(cd alerts/infra && ./scripts/fix-webhook-state.sh)`
+# after explicit state-repair approval. Re-plan from the repository root with
+# `pnpm alerts:infra:plan`; recreation belongs only to the protected main-branch
+# workflow. Never use an ad hoc state removal followed by a local apply.
 resource "null_resource" "pause_webhook_before_update" {
   # Include hash in a way that forces replacement
   # When hash changes, Terraform will replace this resource (destroy old, create new)
@@ -72,8 +68,9 @@ resource "null_resource" "pause_webhook_before_update" {
         "${path.module}/../scripts/manage-quicknode-webhook.sh" pause-and-delete "$WEBHOOK_ID" "${var.quicknode_api_key}"
 
         # Remove from Terraform state so Terraform will create instead of
-        # update. `set -o pipefail` above ensures a failing `state rm` is
-        # not masked by `head` exiting successfully.
+        # update. This provisioner runs inside the active Terraform apply, so
+        # the nested state command must not try to reacquire the apply's lock.
+        # `set -o pipefail` ensures failure is not masked by `head`.
         echo "Removing webhook from Terraform state..."
         terraform state rm -lock=false "$STATE_PATH" 2>&1 | head -5
         echo "Webhook removed from state - Terraform will create a new one"

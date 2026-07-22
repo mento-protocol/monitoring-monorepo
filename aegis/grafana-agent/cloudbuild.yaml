@@ -6,12 +6,11 @@
 # and (b) the container image layer. Runtime fetch keeps the secrets in
 # Secret Manager only.
 #
-# The App Engine default service account
-# (`<project>@appspot.gserviceaccount.com`) needs
-# `roles/secretmanager.secretAccessor` on each grafana-agent-* secret;
-# bound by `terraform/aegis-bootstrap.tf` → `grafana_agent_appspot_accessor`.
-# (App Engine Flex apps run as the AppSpot SA, not the Compute default
-# SA, even though the underlying VM uses Compute.)
+# The effective App Engine version identity needs Secret Manager access.
+# Terraform currently grants the expected AppSpot principal, but
+# `grafana-agent.yaml` does not pin `service_account` and therefore inherits
+# the mutable app-level default. Verify it before deploy; issue #1473 tracks
+# a pinned or fail-closed identity design.
 steps:
   - name: gcr.io/cloud-builders/gcloud
     args: [app, deploy, --quiet, grafana-agent.yaml]

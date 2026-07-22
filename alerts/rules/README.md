@@ -1,4 +1,4 @@
-<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-07-19 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
 
 # alerts/rules
 
@@ -17,7 +17,7 @@ Separate from `terraform/` (platform) and `aegis/terraform`: `gs://mento-terrafo
 
 ## Prerequisites
 
-1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to every channel it posts to. Current set: `#alerts-critical`, `#alerts-oracles`, `#alerts-pools`, `#alerts-cdps`, `#alerts-reserve`, `#alerts-infra`, `#alerts-testnet`, and the deprecated compatibility channel `#alerts-warning`. **`#alerts-cdps` is new (CDP warnings) — create the channel and invite the app before CDP warning alerts can deliver; CDP criticals route to `#alerts-critical` and are unaffected.**
+1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to every channel it posts to. Current set: `#alerts-critical`, `#alerts-oracles`, `#alerts-pools`, `#alerts-cdps`, `#alerts-reserve`, `#alerts-infra`, `#alerts-testnet`, and the deprecated compatibility channel `#alerts-warning`. CDP warnings route to `#alerts-cdps`; CDP criticals route to `#alerts-critical`.
 2. **Grafana Cloud service account token** with `Admin` role in the `clabsmento` stack (Grafana Cloud → Administration → Service accounts).
 3. **Splunk On-Call webhook URL** for page-severity protocol/Aegis routes.
 
@@ -83,9 +83,10 @@ second resolve message.
 
 ## Service label routing
 
-v3 FPMM/indexer/metrics-bridge/Aegis testnet-health rules use rule-level
-`notification_settings`. Protocol relayer/reserve/trading/Aegis service-health
-rules use the global notification policy and route by `service`, `severity`,
-`chain`, and `rateFeed` labels. Aegis testnet-health rules route to
-`#alerts-testnet` via `service=aegis-testnet` and do not depend on a testnet
-metrics bridge or hosted testnet pool indexer.
+FPMM pool/deviation-transition, oracle, CDP, indexer, metrics-bridge, and Aegis
+testnet-health rule groups use rule-level `notification_settings`. Relayer,
+reserve, trading-mode, trading-limit, and Aegis service-health rules use the
+global notification policy and route by `service`, `severity`, `chain`, and
+`rateFeed` labels. Aegis testnet-health rules route to `#alerts-testnet` via
+`service=aegis-testnet` and do not depend on a testnet metrics bridge or hosted
+testnet pool indexer.

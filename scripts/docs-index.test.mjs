@@ -105,7 +105,6 @@ test("classification is single-valued and explicit metadata overrides defaults",
     "agent-instructions",
   );
   for (const file of [
-    "alerts/infra/onchain-event-listeners/WEBHOOK_STATE_MANAGEMENT.md",
     "governance-watchdog/ADDING_EVENTS.md",
     "governance-watchdog/DEPLOY_FROM_SCRATCH.md",
   ]) {

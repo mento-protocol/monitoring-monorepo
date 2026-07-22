@@ -72,12 +72,12 @@ resource "google_secret_manager_secret_iam_member" "grafana_agent_cloudbuild_com
   ]
 }
 
-# App Engine Flex apps run as the App Engine default SA
-# (`<project>@appspot.gserviceaccount.com`), not the Compute Engine default
-# SA. The metadata server in the application's request context returns the
-# AppSpot SA's token, so `grafana-agent/entrypoint.sh` needs THIS binding —
-# the Compute SA grant above is preserved for the legacy Cloud Build path
-# and other consumers but isn't what authenticates the runtime fetch.
+# Grant the expected AppSpot principal access for the runtime fetch.
+# `grafana-agent.yaml` does not pin `service_account`, so a deployed version
+# inherits the mutable app-level default and this binding alone does not prove
+# the live runtime identity. Verify it before deploy; issue #1473 tracks a
+# pinned or fail-closed identity design. The Compute SA grant above remains for
+# legacy or other consumers.
 resource "google_secret_manager_secret_iam_member" "grafana_agent_appspot_accessor" {
   for_each  = google_secret_manager_secret.grafana_agent
   project   = google_project.monitoring.project_id

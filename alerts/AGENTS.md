@@ -23,6 +23,10 @@ garden_lane: agent-entry-points
 
 Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for infra). Keep them separate roots — cadence + blast-radius asymmetry. Stack ownership is registered in `terraform.stacks.json` and summarized in `docs/terraform.md`.
 
+Operator runbooks: [`alerts/infra/README.md`](infra/README.md) for event-driven
+delivery and [`alerts/rules/README.md`](rules/README.md) for Grafana rules and
+routing.
+
 ## Operating Rules
 
 - **Plan before apply, always.** Never `apply` without explicit human approval.

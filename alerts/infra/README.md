@@ -74,84 +74,14 @@ graph LR
 cp alerts/infra/terraform.tfvars.example alerts/infra/terraform.tfvars
 ```
 
-Edit `alerts/infra/terraform.tfvars`:
+Use [`terraform.tfvars.example`](terraform.tfvars.example) as the maintained
+local variable guide. It documents the required GCP, Slack, Sentry, QuickNode,
+and optional on-call values and their scope requirements.
 
-```hcl
-# Sentry Configuration
-sentry_auth_token             = "your-sentry-auth-token"
-sentry_organization_slug      = "my-org"            # Optional, defaults to "mento-labs"
-sentry_slack_workspace_name      = "Mento Labs"        # Optional, defaults to "Mento Labs"
-sentry_slack_critical_channel    = "#alerts-critical"  # Optional, defaults to "#alerts-critical"
-sentry_slack_critical_channel_id = "C0AURREPNDU"       # Optional, defaults to current "#alerts-critical" ID
-# If rerouting critical fan-out, update both sentry_slack_critical_channel
-# and sentry_slack_critical_channel_id together. Terraform rejects partial
-# overrides, but cannot prove arbitrary custom name/ID pairs match.
-
-# Slack Configuration (used by Terraform to create + archive Sentry and
-# on-chain event channels, by Cloud Functions to post Slack messages, and by
-# the on-call announcer to manage @support-engineer).
-# Scopes required: channels:read, channels:manage, channels:join,
-# channels:write.invites, chat:write, chat:write.public, usergroups:read,
-# usergroups:write, users:read, users:read.email.
-slack_bot_token = "xoxb-..."
-
-# Splunk On-Call API credentials for the on-call announcer. A read-only key is
-# sufficient. Leave both empty to keep the announcer disabled until the first
-# credential bootstrap; setting both values enables the Cloud Function,
-# scheduler, @support-engineer membership management, and GitHub secret sync.
-splunk_on_call_api_id  = "your-splunk-on-call-api-id"
-splunk_on_call_api_key = "your-splunk-on-call-api-key"
-
-# Required when the announcer is enabled: Slack channel ID for #eng.
-oncall_slack_channel_id = "C0123ABC456"
-
-# Required when the announcer is enabled: Slack usergroup ID for
-# @support-engineer. Create the usergroup in Slack once, then paste its ID here.
-oncall_support_usergroup_id = "S0123ABC456"
-
-# Optional existing GCP Monitoring notification-channel ID override. Omit this
-# to let Terraform create the default Slack #alerts-infra channel integration.
-# slack_notification_channel_id = "1234567890123456789"
-
-# GCP Configuration
-project_name     = "alerts"              # Optional, defaults to "alerts"
-org_id           = "599540483579"
-billing_account  = "XXXXXX-XXXXXX-XXXXXX"  # Required
-region           = "europe-west1"        # Optional, defaults to "europe-west1"
-
-# QuickNode Configuration
-quicknode_api_key        = "your-quicknode-api-key"
-quicknode_signing_secret = "your-signing-secret-at-least-32-chars"  # Generate: openssl rand -hex 32
-
-# Multisig Configuration
-multisigs = {
-  "mento-labs-celo" = {
-    name                   = "Mento Labs Multisig"
-    address                = "0x655133d8E90F8190ed5c1F0f3710F602800C0150"
-    chain                  = "celo"
-    quicknode_network_name = "celo-mainnet"
-  }
-  "reserve-polygon" = {
-    name                   = "Reserve Multisig"
-    address                = "0x87647780180B8f55980C7D3fFeFe08a9B29e9aE1"
-    chain                  = "polygon"
-    quicknode_network_name = "polygon-mainnet"
-  }
-  "migration-multisig-polygon" = {
-    name                   = "Migration Multisig"
-    address                = "0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458"
-    chain                  = "polygon"
-    quicknode_network_name = "polygon-mainnet"
-  }
-}
-
-# Optional: Additional Labels
-additional_labels = {
-  environment = "production"
-  team        = "platform"
-  cost-center = "infrastructure"
-}
-```
+Do not override `multisigs` in `terraform.tfvars` with a partial map: Terraform
+would replace the entire committed default and silently stop monitoring omitted
+Safes. Production multisig additions and removals belong in
+[`variables.tf`](variables.tf), reviewed in a PR.
 
 ### 2. Initialize and plan
 
@@ -172,49 +102,10 @@ FUNCTION_URL=$(terraform -chdir=alerts/infra output -json google_cloud | jq -r .
 curl -X POST "$FUNCTION_URL"  # Should return 401 without a signed webhook payload.
 ```
 
-## 📖 Usage Examples
+## Supported chains
 
-### Single-Chain Setup
-
-```hcl
-multisigs = {
-  "my-multisig" = {
-    name                   = "My Multisig"
-    address                = "0x1234567890123456789012345678901234567890"
-    chain                  = "celo"
-    quicknode_network_name = "celo-mainnet"
-  }
-}
-```
-
-### Multi-Chain Setup
-
-The module automatically groups multisigs by chain and creates one QuickNode webhook per chain. A single Cloud Function handles webhooks from all chains.
-
-```hcl
-multisigs = {
-  "mento-labs-celo" = {
-    name                   = "Mento Labs Multisig"
-    address                = "0x655133d8E90F8190ed5c1F0f3710F602800C0150"
-    chain                  = "celo"
-    quicknode_network_name = "celo-mainnet"
-  }
-  "mento-labs-ethereum" = {
-    name                   = "Mento Labs Multisig"
-    address                = "0x1234567890123456789012345678901234567890"
-    chain                  = "ethereum"
-    quicknode_network_name = "ethereum-mainnet"
-  }
-  "reserve-polygon" = {
-    name                   = "Reserve Multisig"
-    address                = "0x87647780180B8f55980C7D3fFeFe08a9B29e9aE1"
-    chain                  = "polygon"
-    quicknode_network_name = "polygon-mainnet"
-  }
-}
-```
-
-### Supported Chains
+The stack groups multisigs by chain and creates one QuickNode webhook per
+chain. One Cloud Function handles deliveries from all configured chains.
 
 - **Celo**: `chain = "celo"`, `quicknode_network_name = "celo-mainnet"`
 - **Ethereum**: `chain = "ethereum"`, `quicknode_network_name = "ethereum-mainnet"`
@@ -258,10 +149,9 @@ chain key.
 - Polls Splunk On-Call `/api-public/v1/oncall/current`
 - Resolves the current Splunk On-Call user email to a Slack user ID with `users.lookupByEmail`
 - Posts one Slack message to `#eng` only when the on-call username changes
-- Replaces `@support-engineer` membership with exactly that Slack user on every run
+- Replaces the configured `@support-engineer` usergroup membership with exactly
+  that Slack user on every run
 - Stores last-seen state in a private GCS bucket to suppress duplicate announcements
-- Uses the configured `@support-engineer` Slack usergroup ID and replaces its
-  membership with exactly the current on-call Slack user
 - Alerts `#alerts-infra` when Cloud Scheduler reports a failed reconciliation
   attempt, including function 5xx responses, IAM failures, timeouts, and
   unreachable targets
@@ -349,22 +239,6 @@ diagnostic session.
 - [`oncall-announcer/README.md`](oncall-announcer/README.md) - Splunk On-Call rotation announcer
 - [`onchain-event-listeners/README.md`](onchain-event-listeners/README.md) - QuickNode webhook module for on-chain events
 - [`onchain-event-handler/README.md`](onchain-event-handler/README.md) - Cloud Function module
-
-### Code Quality
-
-Follows [AWS Terraform best practices](https://docs.aws.amazon.com/prescriptive-guidance/latest/terraform-aws-provider-best-practices/structure.html) (adapted for GCP):
-
-- Standard structure with data sources in dedicated `data.tf` files
-- Consistent formatting (output descriptions, variable descriptions, naming conventions)
-- Comprehensive labeling pattern using `merge()` for extensibility (GCP equivalent of AWS tags)
-- Comprehensive README files for all modules with inline usage examples
-
-### External Documentation
-
-- [Terraform Documentation](https://developer.hashicorp.com/terraform/docs)
-- [Sentry API Docs](https://docs.sentry.io/api/)
-- [Slack API Docs](https://api.slack.com/web)
-- [QuickNode Documentation](https://www.quicknode.com/docs)
 
 ## 🔒 Security
 
