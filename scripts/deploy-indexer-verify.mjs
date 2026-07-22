@@ -8,7 +8,7 @@ const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";
 const GRAPHQL_TIMEOUT_MS = 20_000;
 const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
-const REQUIRED_POLYGON_EXACT_MEDIAN_VERSION = 2;
+const REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION = 3;
 
 const PROBE_TABLES = [
   "Pool",
@@ -223,16 +223,16 @@ export function summarizeReplayIntegrity(input) {
   if (input?.readError) failures.push(input.readError);
   if (
     !Number.isSafeInteger(observedVersion) ||
-    observedVersion < REQUIRED_POLYGON_EXACT_MEDIAN_VERSION
+    observedVersion < REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION
   ) {
     failures.push(
-      `deployment predates Polygon exact-median replay integrity v${REQUIRED_POLYGON_EXACT_MEDIAN_VERSION}`,
+      `deployment predates Polygon event-sourced oracle-freshness replay integrity v${REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION}`,
     );
   }
   return {
     ok: failures.length === 0,
     markerPath: REPLAY_INTEGRITY_PATH,
-    requiredVersion: REQUIRED_POLYGON_EXACT_MEDIAN_VERSION,
+    requiredVersion: REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION,
     observedVersion,
     failures,
   };
@@ -464,7 +464,7 @@ export function renderText(summary) {
   lines.push("");
   lines.push("Replay integrity contract:");
   lines.push(
-    `  Polygon exact median: v${summary.replayIntegrity.observedVersion}/v${summary.replayIntegrity.requiredVersion}`,
+    `  Polygon oracle freshness: v${summary.replayIntegrity.observedVersion}/v${summary.replayIntegrity.requiredVersion}`,
   );
   lines.push("");
   lines.push("Polygon replay semantics:");

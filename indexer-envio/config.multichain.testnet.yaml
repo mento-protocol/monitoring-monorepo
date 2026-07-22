@@ -82,6 +82,7 @@ contracts:
       - event: OracleAdded
       - event: OracleRemoved
       - event: OracleReported
+      - event: OracleReportRemoved
       - event: MedianUpdated
       - event: ReportExpirySet
       - event: TokenReportExpirySet
