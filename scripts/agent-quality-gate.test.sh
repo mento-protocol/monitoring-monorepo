@@ -2141,6 +2141,28 @@ assert_contains "- bash -n scripts/check-agent-quality-gate-package-scripts.sh (
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (agent quality gate package script validator changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
 
+run_gate ".agents/skills/ship/SKILL.md"
+assert_contains "- agent-context"
+assert_contains "- pnpm agent:context-check (agent context files changed)"
+assert_contains "- bash scripts/check-skills-mirror.test.sh (skills mirror content changed)"
+assert_contains "- bash scripts/check-skills-mirror.sh (skills mirror content changed)"
+
+run_gate ".claude/skills/ship/SKILL.md"
+assert_contains "- agent-context"
+assert_contains "- pnpm agent:context-check (agent context files changed)"
+assert_contains "- bash scripts/check-skills-mirror.test.sh (skills mirror content changed)"
+assert_contains "- bash scripts/check-skills-mirror.sh (skills mirror content changed)"
+
+run_gate "scripts/check-skills-mirror.sh"
+assert_contains "- bash -n scripts/check-skills-mirror.sh (shell script changed)"
+assert_contains "- bash scripts/check-skills-mirror.test.sh (skills mirror checker changed)"
+assert_contains "- bash scripts/check-skills-mirror.sh (skills mirror checker changed)"
+
+run_gate "scripts/check-skills-mirror.test.sh"
+assert_contains "- bash -n scripts/check-skills-mirror.test.sh (shell script changed)"
+assert_contains "- bash scripts/check-skills-mirror.test.sh (skills mirror checker changed)"
+assert_contains "- bash scripts/check-skills-mirror.sh (skills mirror checker changed)"
+
 run_gate ".trunk/trunk.yaml"
 assert_contains "- tooling"
 assert_contains "- node scripts/check-github-action-pins.mjs (Trunk workflow/action setup changed)"
