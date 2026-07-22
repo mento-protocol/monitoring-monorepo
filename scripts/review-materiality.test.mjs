@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -56,6 +56,47 @@ function git(cwd, args) {
   return result.stdout;
 }
 
+function contextNote(canonical) {
+  return `---
+title: Fixture runbook
+status: active
+owner: eng
+canonical: ${canonical}
+last_verified: 2026-07-22
+doc_type: runbook
+scope: repo-wide
+review_interval_days: 90
+garden_lane: operator-runbooks
+---
+
+# Fixture runbook
+`;
+}
+
+function materialityCliFixture(noteContent) {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-context-test-"));
+  const pathsFile = join(dir, "paths.txt");
+  mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+  mkdirSync(join(dir, "docs", "notes"), { recursive: true });
+  writeFileSync(join(dir, ".github", "workflows", "ci.yml"), "name: CI\n");
+  writeFileSync(join(dir, "docs", "notes", "runbook.md"), noteContent);
+  writeFileSync(pathsFile, ".github/workflows/ci.yml\ndocs/notes/runbook.md\n");
+  return { dir, pathsFile };
+}
+
+function runMaterialityCli(cwd, pathsFile, json = false) {
+  return spawnSync(
+    process.execPath,
+    [
+      new URL("./review-materiality.mjs", import.meta.url).pathname,
+      "--changed-paths-file",
+      pathsFile,
+      ...(json ? ["--json"] : []),
+    ],
+    { cwd, encoding: "utf8" },
+  );
+}
+
 console.log("\nreview-materiality.mjs tests\n");
 
 test("classifies non-canonical plan-only edits as trivial", () => {
@@ -110,6 +151,88 @@ test("recognizes context updates when canonical docs are present", () => {
   assertEqual(report.contextUpdateRequired, true);
   assertEqual(report.contextUpdatesPresent, true);
   assertEqual(report.contextUpdateMissing, false);
+});
+
+test("CLI recognizes a workflow plus canonical note in human and JSON output", () => {
+  const { dir, pathsFile } = materialityCliFixture(contextNote("true"));
+
+  try {
+    const human = runMaterialityCli(dir, pathsFile);
+    const json = runMaterialityCli(dir, pathsFile, true);
+    assertEqual(human.status, 0);
+    assertEqual(json.status, 0);
+    assertIncludes(human.stdout, "Context update: required and present");
+
+    const report = JSON.parse(json.stdout);
+    assertEqual(report.contextUpdateRequired, true);
+    assertEqual(report.contextUpdatesPresent, true);
+    assertEqual(report.contextUpdateMissing, false);
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.reason,
+      "canonical agent or operator context",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI rejects a workflow plus non-canonical note in human and JSON output", () => {
+  const { dir, pathsFile } = materialityCliFixture(contextNote("false"));
+
+  try {
+    const human = runMaterialityCli(dir, pathsFile);
+    const json = runMaterialityCli(dir, pathsFile, true);
+    assertEqual(human.status, 0);
+    assertEqual(json.status, 0);
+    assertIncludes(human.stdout, "Context update: required but not present");
+
+    const report = JSON.parse(json.stdout);
+    assertEqual(report.contextUpdateRequired, true);
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.reason,
+      "non-canonical planning or note document",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("malformed canonical note metadata fails closed", () => {
+  for (const content of [
+    "---\ncanonical: true\n# Missing delimiter\n",
+    "---\ncanonical: true\nnot valid metadata\n---\n",
+    '---\ncanonical: "true\n---\n',
+    "---\ncanonical: false\ncanonical: true\n---\n",
+  ]) {
+    const report = analyzeMateriality({
+      paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
+      readContextFile: () => content,
+    });
+
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.reason,
+      "non-canonical planning or note document",
+    );
+  }
+});
+
+test("unreadable canonical note metadata fails closed", () => {
+  const report = analyzeMateriality({
+    paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
+    readContextFile: () => {
+      throw new Error("permission denied");
+    },
+  });
+
+  assertEqual(report.contextUpdatesPresent, false);
+  assertEqual(report.contextUpdateMissing, true);
 });
 
 test("recognizes scoped Claude context files as canonical context", () => {

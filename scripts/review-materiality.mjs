@@ -3,6 +3,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { load as parseYaml } from "js-yaml";
+
+import { parseDocumentationMetadata } from "./docs-index-helpers.mjs";
 
 const TIER_ORDER = ["trivial", "standard", "full"];
 const DEFAULT_BASE = "origin/main";
@@ -191,6 +194,11 @@ function numstatFromGit(base, head) {
   return stats;
 }
 
+function readTextAtRef(ref, filePath) {
+  if (ref === "HEAD") return readFileSync(filePath, "utf8");
+  return runGit(["show", `${ref}:${filePath}`]);
+}
+
 function readJsonAtRef(ref, filePath) {
   if (ref === "HEAD") {
     try {
@@ -272,7 +280,42 @@ function isAgentRuntimeContextPath(filePath) {
   );
 }
 
-function isCanonicalContextPath(filePath) {
+function parseFrontmatterDocument(content) {
+  if (typeof content !== "string" || !content.startsWith("---\n")) {
+    return null;
+  }
+  const end = content.indexOf("\n---\n", 4);
+  if (end === -1) return null;
+  const document = parseYaml(content.slice(4, end));
+  return document && typeof document === "object" && !Array.isArray(document)
+    ? document
+    : null;
+}
+
+function hasCanonicalNoteMetadata(filePath, readContextFile) {
+  if (!filePath.startsWith("docs/notes/") || !filePath.endsWith(".md")) {
+    return false;
+  }
+
+  try {
+    // The documentation catalog derives authority from this same metadata. Do
+    // not fall back to its generated label: the catalog does not promote a
+    // document, and it may be stale while the working tree is being edited.
+    const content = readContextFile(filePath);
+    const frontmatter = parseFrontmatterDocument(content);
+    if (frontmatter?.canonical !== true && frontmatter?.canonical !== "true") {
+      return false;
+    }
+    const metadata = parseDocumentationMetadata(filePath, content);
+    return metadata?.canonical === "true";
+  } catch {
+    // Deleted, unreadable, and malformed notes must not satisfy a required
+    // context update merely because their path sits under docs/notes/.
+    return false;
+  }
+}
+
+function isCanonicalContextPath(filePath, readContextFile) {
   return (
     filePath === "AGENTS.md" ||
     filePath.endsWith("/AGENTS.md") ||
@@ -285,6 +328,7 @@ function isCanonicalContextPath(filePath) {
     filePath.startsWith(".agents/skills/") ||
     filePath.startsWith(".agents/roles/") ||
     filePath.startsWith(".claude/skills/") ||
+    hasCanonicalNoteMetadata(filePath, readContextFile) ||
     isAgentRuntimeContextPath(filePath)
   );
 }
@@ -296,8 +340,8 @@ function isRepoToolingTestPath(filePath) {
   );
 }
 
-function classifyPath(filePath) {
-  if (filePath.startsWith("docs/PLAN-") || filePath.startsWith("docs/notes/")) {
+function classifyPath(filePath, canonicalContextPaths) {
+  if (filePath.startsWith("docs/PLAN-")) {
     return signal(
       filePath,
       "trivial",
@@ -325,8 +369,16 @@ function classifyPath(filePath) {
     return signal(filePath, "full", "agent, build, or repository tooling");
   }
 
-  if (isCanonicalContextPath(filePath)) {
+  if (canonicalContextPaths.has(filePath)) {
     return signal(filePath, "full", "canonical agent or operator context");
+  }
+
+  if (filePath.startsWith("docs/notes/")) {
+    return signal(
+      filePath,
+      "trivial",
+      "non-canonical planning or note document",
+    );
   }
 
   if (
@@ -516,9 +568,17 @@ export function analyzeMateriality({
   paths,
   numstat = new Map(),
   scriptChanges = [],
+  readContextFile = (filePath) => readFileSync(filePath, "utf8"),
 } = {}) {
   const changedPaths = uniqueSorted(paths ?? []);
-  const pathSignals = changedPaths.map(classifyPath);
+  const canonicalContextPaths = new Set(
+    changedPaths.filter((filePath) =>
+      isCanonicalContextPath(filePath, readContextFile),
+    ),
+  );
+  const pathSignals = changedPaths.map((filePath) =>
+    classifyPath(filePath, canonicalContextPaths),
+  );
   const lineChanges = summarizeLineChanges(changedPaths, numstat);
   const sizeSignal = classifyBySize(changedPaths.length, lineChanges.total);
   const allSignals = sizeSignal ? [...pathSignals, sizeSignal] : pathSignals;
@@ -527,7 +587,7 @@ export function analyzeMateriality({
     "trivial",
   );
   const contextReasons = contextRequirementSignals(changedPaths, scriptChanges);
-  const contextUpdatesPresent = changedPaths.some(isCanonicalContextPath);
+  const contextUpdatesPresent = canonicalContextPaths.size > 0;
   const contextUpdateRequired = contextReasons.length > 0;
 
   return {
@@ -594,7 +654,12 @@ async function main() {
   const scriptChanges = paths.includes("package.json")
     ? rootScriptChanges(args.base, args.head)
     : [];
-  const report = analyzeMateriality({ paths, numstat, scriptChanges });
+  const report = analyzeMateriality({
+    paths,
+    numstat,
+    scriptChanges,
+    readContextFile: (filePath) => readTextAtRef(args.head, filePath),
+  });
 
   process.stdout.write(
     args.json ? `${JSON.stringify(report, null, 2)}\n` : renderHuman(report),
