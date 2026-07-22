@@ -82,6 +82,7 @@ local-only checks:
 pnpm agent:quality-gate
 pnpm agent:quality-gate --run
 pnpm agent:autoreview # non-trivial completed batches
+pnpm agent:autoreview:test -- --jobs 1  # autoreview runtime changes only
 pnpm agent:autoreview --verify-bundle-dir <dir>  # pre-review check; retain the printed manifest for the bound post-check
 ```
 

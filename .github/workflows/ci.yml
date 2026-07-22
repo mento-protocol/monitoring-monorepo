@@ -49,6 +49,7 @@ jobs:
       terraform: ${{ steps.filter.outputs.terraform }}
       codeHealth: ${{ steps.filter.outputs.codeHealth }}
       rootScripts: ${{ steps.filter.outputs.rootScripts }}
+      autoreviewRootRuntime: ${{ steps.filter.outputs.autoreviewRootRuntime }}
       versionSkew: ${{ steps.filter.outputs.versionSkew }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -264,6 +265,14 @@ jobs:
               - .claude/settings.json
               - .codex/config.toml
               - .codex/hooks.json
+            # Focused x64 Blacksmith proof for the Linux/root Node trust path.
+            # Keep this separate from the broader scripts job so a regression
+            # cannot skip unrelated root suites and does not need pnpm install.
+            autoreviewRootRuntime:
+              - scripts/agent-autoreview.sh
+              - scripts/agent-autoreview*.mjs
+              - .node-version
+              - .github/workflows/ci.yml
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the
@@ -962,6 +971,51 @@ jobs:
       - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
+  autoreview-root-runtime:
+    name: Autoreview root-runtime trust
+    needs: changes
+    if: needs.changes.outputs.autoreviewRootRuntime == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+      - name: Exercise Blacksmith toolcache Node as root
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_path="$(/usr/bin/readlink -f -- "$(command -v node)")"
+          case "$node_path" in
+            /opt/hostedtoolcache/node/*/x64/bin/node) ;;
+            *)
+              echo "expected the Blacksmith x64 toolcache Node runtime" >&2
+              exit 1
+              ;;
+          esac
+          root_path="${node_path%/node}:/usr/local/bin:/usr/bin:/bin"
+          root_prefix=()
+          if [[ "$EUID" -ne 0 ]]; then
+            root_prefix=(/usr/bin/sudo)
+          fi
+          "${root_prefix[@]}" /usr/bin/env -i \
+            "PATH=$root_path" \
+            HOME=/root \
+            CI=true \
+            LC_ALL=C \
+            AUTOREVIEW_TEST_REQUIRE_ROOT_SNAPSHOT=1 \
+            AUTOREVIEW_TEST_NODE_SNAPSHOT_DIAGNOSTICS=1 \
+            AUTOREVIEW_TEST_TRUSTED_FIXTURE_PARENT=/root \
+            "$node_path" scripts/agent-autoreview-target-guard.test.mjs
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+        if: always()
+
   version-skew:
     name: Version skew
     needs: changes
@@ -1028,6 +1082,7 @@ jobs:
         terraform,
         deps,
         scripts,
+        autoreview-root-runtime,
         version-skew,
       ]
     if: always()
@@ -1040,6 +1095,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,version-skew
+          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,autoreview-root-runtime,version-skew
       - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()

@@ -36,6 +36,7 @@
     "adr:check": "node scripts/check-adr-reminder.mjs",
     "adr:check:test": "node scripts/check-adr-reminder.test.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
+    "agent:autoreview:test": "AUTOREVIEW_TEST_FOCUS=suite bash scripts/agent-autoreview.test.sh",
     "issue:board": "node scripts/agent-issue-board.mjs",
     "issue:board:test": "node scripts/agent-issue-board.test.mjs",
     "issue:claim": "node scripts/agent-issue-board.mjs claim",
