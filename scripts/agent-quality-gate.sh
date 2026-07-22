@@ -2227,10 +2227,9 @@ is_quality_serial_command() {
   # app (`.next-fixture`) served by `next start` while size-limit runs a
   # build-backed Turbo task (`.next`), and both `next build` steps transiently
   # rewrite the tracked `next-env.d.ts`, so keep those two mutually exclusive.
-  # The quality-gate
-  # self-test temporarily mutates tracked fixture files in the current checkout,
-  # so it must also finish before source-fingerprinting tests enter the parallel
-  # pool.
+  # The quality-gate self-test temporarily mutates tracked fixture files in
+  # the current checkout, so it must also finish before source-fingerprinting
+  # tests enter the parallel pool.
   case "$command" in
     "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
       return 0

@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { buildFixtureApp, fixtureBuildExists } from "./fixture-build.mjs";
 import {
-  buildFixtureApp,
   FIXTURE_DIST_DIR,
   FIXTURE_HASURA_PORT,
   FIXTURE_HASURA_URL,
-  fixtureBuildExists,
-} from "./fixture-build.mjs";
+} from "./fixture-constants.mjs";
 
 // Browser tests run against a production `next build` (fixture mode) served by
 // `next start`, never a `next dev` server. The build lives in `.next-fixture`
@@ -41,12 +40,16 @@ async function findFreePort(exclude = []) {
   throw new Error(`could not find a free port avoiding ${exclude.join(", ")}`);
 }
 
-if (!process.env.PLAYWRIGHT_FIXTURE_PORT) {
-  process.env.PLAYWRIGHT_FIXTURE_PORT = String(FIXTURE_HASURA_PORT);
-}
+// The fixture Hasura port is fixed, not env-overridable: it's inlined into
+// the client bundle at build time (see fixture-build.mjs), so the server
+// must answer on the exact port the build baked in. A caller-supplied value
+// here would desync the two and either point the client at nothing or, worse,
+// an unrelated reused server. The var stays settable for turbo's cache-key
+// tracking; it just can't diverge from the build's constant.
+process.env.PLAYWRIGHT_FIXTURE_PORT = String(FIXTURE_HASURA_PORT);
 if (!process.env.PLAYWRIGHT_NEXT_PORT) {
   process.env.PLAYWRIGHT_NEXT_PORT = String(
-    await findFreePort([Number(process.env.PLAYWRIGHT_FIXTURE_PORT)]),
+    await findFreePort([FIXTURE_HASURA_PORT]),
   );
 }
 
@@ -54,6 +57,10 @@ const args = process.argv.slice(2);
 const productionIndex = args.indexOf("--production");
 const forceRebuild = productionIndex !== -1;
 if (forceRebuild) args.splice(productionIndex, 1);
+// Captured before browserTestEnv defaults PLAYWRIGHT_NEXT_COMMAND below, so
+// this reflects only an explicit caller override (e.g. the documented
+// Turbopack-production-build-panic fallback to `pnpm dev --webpack`).
+const usingCustomNextCommand = Boolean(process.env.PLAYWRIGHT_NEXT_COMMAND);
 
 const browserTestEnv = {
   ...process.env,
@@ -89,7 +96,14 @@ function runPlaywright() {
 
 let exitCode = 1;
 try {
-  if (forceRebuild || !fixtureBuildExists()) {
+  if (usingCustomNextCommand) {
+    // A custom Next command doesn't serve the fixture build (it's the
+    // documented fallback for a Turbopack production-build panic in
+    // buildFixtureApp() — see docs/notes/dashboard-verification.md). Building
+    // here would hard-fail on that same panic before Playwright ever starts
+    // the substitute command, defeating the fallback entirely.
+    exitCode = 0;
+  } else if (forceRebuild || !fixtureBuildExists()) {
     exitCode = await buildFixtureApp();
   } else {
     exitCode = 0;
