@@ -63,8 +63,11 @@ monitoring, extending — not replacing — ADR 0027's scope:
   token-native: USD-denominated rollups are defined as zero for pools with
   no USD-pegged leg, so they cannot serve pairs like EURm/EUROP.
 - Conversion legs (needed for USD-quoted venues on non-USD pegs) read
-  on-chain Chainlink aggregators through the existing per-chain viem
-  clients, following the rebalance-probe `readContract` pattern.
+  `SortedOracles.medianRate(feedId)` through the existing per-chain viem
+  clients, following the rebalance-probe `readContract` pattern. The
+  identifiers canonicalized in `oracle-reporters.json` are Mento rate-feed
+  IDs, not Chainlink aggregator contracts; a direct aggregator read would
+  need a separately canonicalized aggregator address and ABI.
 
 ## Alternatives considered
 
@@ -88,8 +91,12 @@ monitoring, extending — not replacing — ADR 0027's scope:
   metric surface" rule now covers the `mento_peg_*` family too.
 - The bridge's egress allowlist must include the market-data hosts; a venue
   API change is a bridge deploy, not an alerts-plane change.
-- Peg-loop failures are isolated: they can never wipe or stall the pool
-  gauges, and vice versa; each loop pages through its own liveness rules.
+- Peg-loop failures are contained at the gauge-lifecycle and error-channel
+  level, and each loop pages through its own liveness rules — but both
+  loops share one Node process, so this is containment, not process
+  isolation. The peg loop must catch at top level and bound response
+  sizes, timeouts, and per-poll work; a separate service is the escalation
+  if shared event-loop interference is ever observed.
 - Adding a monitored asset whose venues are already supported is a registry
   change ([ADR 0043](0043-peg-registry-service-local.md)); adding a venue is
   one adapter plus fixtures.

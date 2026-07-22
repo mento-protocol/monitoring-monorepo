@@ -39,7 +39,11 @@ or structurally missing (thin second venue).
   never from the mid. Observations carry `{vwap, filledFraction, capped}`;
   an observation that cannot fill the reference size is `capped` and is
   excluded from deviation alerting entirely — it feeds depth/stress
-  signals instead of printing phantom deviation.
+  signals instead of printing phantom deviation. A capped observation on
+  the designated deep venue additionally counts as no usable primary
+  price — it feeds `mento_peg_blind` — so a capped, draining book
+  escalates through the blind-while-stressed critical path instead of
+  idling at warn.
 - **The deep venue pages alone.** Sustained executable deviation beyond the
   critical threshold on the registry-designated deep venue pages by
   itself. Corroboration — structural drain saturation, or uncapped
@@ -68,10 +72,12 @@ or structurally missing (thin second venue).
   explicit per-class policy is written and reviewed. Assets on chains or
   venues outside indexer coverage (XRPL books) have no structural plane
   and must say so.
-- **Fatigue budget.** Warn is Slack-only, deduped, with a per-asset daily
-  budget; source _health_ problems are ops-noise tier and never page.
-  Pager trust is a design invariant: the critical channel stays quiet
-  enough to be believed.
+- **Fatigue budget.** Warn is Slack-only with repeat suppression
+  (alert-plane grouping and repeat-interval dedup); a hard per-asset daily
+  notification cap is not expressible in the rules plane and, if ever
+  needed, is stateful bridge-side work. Source _health_ problems are
+  ops-noise tier and never page. Pager trust is a design invariant: the
+  critical channel stays quiet enough to be believed.
 
 ## Alternatives considered
 

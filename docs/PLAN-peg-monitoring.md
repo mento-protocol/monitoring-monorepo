@@ -51,14 +51,19 @@ attestation PDFs — no machine-readable API; runbook inputs only.
 
 Service-local `metrics-bridge/peg-registry.json` + schema + fixtures.
 Slug-keyed assets; `tokenRefs` per chain (EVM + XRPL forms); `monitors[]`
-per (chain, pool, feed, breakerBps); stable source ids decoupled from venue
+per (chain, pool, feed) — breaker thresholds are read live from indexed
+`BreakerConfig`, never stored; stable source ids decoupled from venue
 pair spellings; roles `primary | secondary | display` (display has zero
 alert authority); per-source `refSize`, gates, optional `convertVia`
-naming an on-chain feed readable over existing bridge RPC (declared error
+naming a rate-feed ID read via `SortedOracles.medianRate` over existing
+bridge RPC (the `oracle-reporters.json` identifiers are Mento rate-feed
+IDs, not Chainlink aggregator contracts; declared error
 band widens that source's thresholds; leg staleness incl. FX weekend +
 reopen grace demotes the source to display); `coverageClass` per asset.
 Referential-integrity script vs `shared-config/oracle-reporters.json` and
-token registry runs in the quality gate and CI.
+token registry runs in the quality gate and CI; pool references are
+resolved against Hasura at bridge startup, failing that asset's
+`indexed-pool` coverage path with a distinct ops alert when unresolved.
 
 ### Measurement (ADR 0045)
 
@@ -69,6 +74,9 @@ token registry runs in the quality gate and CI.
 - `capped` observations never produce deviation — they feed depth-collapse
   stress. This is what keeps Kraken (16.5k near-par depth < ref size) from
   printing permanent phantom deviation while still contributing evidence.
+  A capped deep venue also counts as blind (no usable primary price),
+  keeping the blind-while-stressed critical path reachable during partial
+  evacuation.
 - Venue states: `ok | wide | one_sided_bid | one_sided_ask | evacuated |
 halted`. `wide` counts as stress only beyond the venue's observed diurnal
   spread envelope; thin-secondary book-shape states never escalate;
@@ -111,7 +119,7 @@ Ladder (EUROP initial values; per-asset data):
 - **Critical (page, Splunk):** deep-venue uncapped deviation ≥ 50 bps
   sustained (duration-fraction). Pages alone; structural saturation or a
   second uncapped venue escalates priority. Also: blind-while-stressed.
-- **Warn (Slack, deduped, per-asset daily budget):** uncapped deviation
+- **Warn (Slack, repeat-suppressed):** uncapped deviation
   ≥ 25 bps sustained ≥ 10 min; deep-venue envelope-excess spread; structural
   saturation; blind ≥ M consecutive polls.
 - **Ops-noise (Slack low-urgency):** source unhealthy (API errors, 429s);

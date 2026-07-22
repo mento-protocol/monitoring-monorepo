@@ -51,14 +51,21 @@ unpublished.
   chain + address (canonical in shared-config tokens). A referential-
   integrity check script — sibling to the existing threshold-drift check,
   wired into the quality gate and CI — fails the build when a referenced
-  feed or token does not exist upstream.
+  feed or token does not exist upstream. Pool references cannot be proven
+  statically (pools are discovered on-chain), so at startup the bridge
+  resolves every `(chain, pool)` against Hasura and fails that asset's
+  `indexed-pool` coverage path with a distinct ops alert when a pool does
+  not resolve.
 - Schema decisions that the first adversarial review forced:
   - Asset keys are internal slugs (`europ-schuman`), never tickers; the
     onboarding census binds by contract address / issuer identity (ticker
     collisions are real — "EURP" vs "EUROP").
   - `tokenRefs` supports non-EVM identity forms (XRPL issuer+currency).
-  - `monitors[]` holds one entry per (chain, pool, rate feed, breaker
-    threshold) — asset-level vs pool-level identity is explicit.
+  - `monitors[]` holds one entry per (chain, pool, rate feed) —
+    asset-level vs pool-level identity is explicit. Breaker thresholds are
+    not stored: they are governance-mutable on-chain state already indexed
+    (`BreakerConfig.rateChangeThreshold`) and are read live, so the
+    registry cannot carry stale breaker policy.
   - Source ids are stable internal names (`bitvavo_eur`) decoupled from
     venue pair spellings, so a venue renaming a pair is a config edit, not
     Grafana label churn that orphans alert history.
