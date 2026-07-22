@@ -8,6 +8,11 @@
 # shellcheck disable=SC2016
 set -euo pipefail
 
+# A set -e abort outside fail() would otherwise die with no message at all —
+# which is exactly how a CI-only failure stays undiagnosable. Name the dying
+# command on stdout (some CI captures drop stderr).
+trap 'echo "agent-quality-gate test suite aborted: line $LINENO: $BASH_COMMAND (exit $?)"' ERR
+
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
