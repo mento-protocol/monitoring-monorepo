@@ -42,14 +42,16 @@ import {
 } from "./docs-navigation-eval.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const repoBaseCommit = execFileSync(
-  "git",
-  ["rev-parse", "refs/remotes/origin/main^{commit}"],
-  {
-    cwd: repoRoot,
-    encoding: "utf8",
-  },
-).trim();
+const committedBaseline = JSON.parse(
+  readFileSync(
+    new URL(
+      "../docs/evals/documentation-navigation-baseline.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+const repoBaseCommit = committedBaseline.run.repository_base_commit;
 const scriptPath = fileURLToPath(
   new URL("./docs-navigation-eval.mjs", import.meta.url),
 );
