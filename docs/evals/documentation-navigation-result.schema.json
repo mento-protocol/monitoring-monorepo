@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mento.org/schemas/documentation-navigation-result-v1.json",
+  "title": "Documentation Navigation Evaluation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "suite_id",
+    "fixture_digest",
+    "run",
+    "answers"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "suite_id": { "type": "string", "const": "documentation-navigation-v1" },
+    "fixture_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent",
+        "model",
+        "effort",
+        "executed_at",
+        "repository_base_commit",
+        "fresh_context",
+        "read_only",
+        "bootstrap_sources"
+      ],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string", "minLength": 1 },
+        "executed_at": { "type": "string", "format": "date-time" },
+        "repository_base_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "fresh_context": { "type": "boolean", "const": true },
+        "read_only": { "type": "boolean", "const": true },
+        "bootstrap_sources": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/loadedSource" }
+        }
+      }
+    },
+    "answers": {
+      "type": "array",
+      "description": "A full run contains all 15-20 suite answers; a --question escalation contains exactly one answer. The CLI enforces the selected mode.",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "question_id",
+          "chosen_documents",
+          "answer",
+          "evidence",
+          "authority_qualifications",
+          "loaded_sources"
+        ],
+        "properties": {
+          "question_id": { "type": "string", "minLength": 1 },
+          "chosen_documents": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "answer": { "type": "string", "minLength": 1 },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "description": "One targeted evidence span. line_end - line_start + 1 must be at most 21; split wider support across entries.",
+              "additionalProperties": false,
+              "required": ["path", "line_start", "line_end", "supports"],
+              "properties": {
+                "path": { "type": "string", "minLength": 1 },
+                "line_start": { "type": "integer", "minimum": 1 },
+                "line_end": { "type": "integer", "minimum": 1 },
+                "supports": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "authority_qualifications": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "authority",
+                "qualification",
+                "verified_against"
+              ],
+              "properties": {
+                "path": { "type": "string", "minLength": 1 },
+                "authority": {
+                  "enum": ["canonical", "non-canonical", "unmanaged"]
+                },
+                "qualification": { "type": "string" },
+                "verified_against": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          },
+          "loaded_sources": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/loadedSource" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "loadedSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

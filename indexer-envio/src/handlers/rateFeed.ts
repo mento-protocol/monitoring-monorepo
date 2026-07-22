@@ -218,6 +218,8 @@ indexer.onEvent(
     const feedAddress = asAddress(event.params.token);
     const reporterAddress = asAddress(event.params.oracleAddress);
     const poolIds = await getPoolsByFeed(context, event.chainId, feedAddress);
+    // preload-handler-note: reporter addition is a bounded configuration event reconciled from authoritative RPC state.
+    // preload-effect-helpers: syncOrApplyReporterDelta, syncPoolsReporterCountFromRpc
     if (context.isPreload) {
       await Promise.all([
         preloadRateFeed(context, event.chainId, feedAddress),
@@ -257,6 +259,8 @@ indexer.onEvent(
     const feedAddress = asAddress(event.params.token);
     const reporterAddress = asAddress(event.params.oracleAddress);
     const poolIds = await getPoolsByFeed(context, event.chainId, feedAddress);
+    // preload-handler-note: reporter removal is a bounded configuration event reconciled from authoritative RPC state.
+    // preload-effect-helpers: syncOrApplyReporterDelta, syncPoolsReporterCountFromRpc
     if (context.isPreload) {
       await Promise.all([
         preloadRateFeed(context, event.chainId, feedAddress),

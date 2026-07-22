@@ -48,12 +48,18 @@ pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs orig
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
 pnpm agent:autoreview              # Isolated closeout review; multi-pass uses --prepare-bundle-dir DIR + one fresh-context reviewer; quality gate owns tests
+pnpm agent:autoreview:test         # Full autoreview regression families; defaults to up to 3 workers with progress + timings
+pnpm agent:autoreview:test -- --jobs 1  # Sequential full closeout for autoreview runtime changes
 pnpm agent:autoreview --verify-bundle-dir DIR  # Pre-review rehash; retain the printed manifest digest
 pnpm agent:autoreview --verify-bundle-dir DIR --expected-bundle-manifest DIGEST  # Bound post-review rehash
 pnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown
 pnpm docs:index --check            # Fail on catalog drift, invalid classification, or broken internal Markdown links
 pnpm docs:audit --dry-run          # Print this week's bounded semantic-review packet without mutating documentation
 pnpm docs:garden --dry-run --json  # Read the garden queue and preview the exact weekly issue decision without mutations
+pnpm docs:navigation-eval -- --check-fixtures  # Validate fresh-agent navigation questions, routes, and budgets
+pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only evaluation prompt; never invokes a model
+pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
+pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
 node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics

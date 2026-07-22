@@ -24,8 +24,8 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.agents/roles/verifier.md`](../.agents/roles/verifier.md) | Verifier Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-05-20 |
 | [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md) | Babysit PR Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-28 |
 | [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md) | Deploy Indexer Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-29 |
-| [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-19 |
-| [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-09 |
+| [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
+| [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md) | Forensic Report Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-06-15 |
 | [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md) | 0xADDRESS_CASE_PRESERVED — Display Name (persona/ENS if known) | unmanaged / unmanaged | skill / repo-wide | unowned | 90d |
 | [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md) | Monorepo Import Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-26 |
@@ -62,6 +62,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-17 |
 | [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-19 |
 | [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
+| [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-21 |
 | [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-08 |
 | [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md) | Codex Agent Skills — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
@@ -92,10 +93,10 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/pr-checklists/ci-workflow-gates.md`](pr-checklists/ci-workflow-gates.md) | CI Workflow Gates Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/code-health.md`](pr-checklists/code-health.md) | Code Health Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/dynamic-route-metadata.md`](pr-checklists/dynamic-route-metadata.md) | Dynamic Route Metadata and Private Data Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |
-| [`docs/pr-checklists/indexer-handler-invariants.md`](pr-checklists/indexer-handler-invariants.md) | Indexer Handler Invariants | canonical / active | checklist / indexer-envio | eng | 90d; verified 2026-07-17 |
+| [`docs/pr-checklists/indexer-handler-invariants.md`](pr-checklists/indexer-handler-invariants.md) | Indexer Handler Invariants | canonical / active | checklist / indexer-envio | eng | 90d; verified 2026-07-21 |
 | [`docs/pr-checklists/keyboard-a11y-controlled-widgets.md`](pr-checklists/keyboard-a11y-controlled-widgets.md) | Keyboard Accessibility on Controlled Widgets Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/mutation-testing.md`](pr-checklists/mutation-testing.md) | Mutation Testing Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
-| [`docs/pr-checklists/recurring-review-patterns.md`](pr-checklists/recurring-review-patterns.md) | Recurring PR Review Patterns | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-16 |
+| [`docs/pr-checklists/recurring-review-patterns.md`](pr-checklists/recurring-review-patterns.md) | Recurring PR Review Patterns | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`docs/pr-checklists/review-prompt-exclusions.md`](pr-checklists/review-prompt-exclusions.md) | Review Prompt Exclusions | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-03 |
 | [`docs/pr-checklists/stateful-data-ui.md`](pr-checklists/stateful-data-ui.md) | Stateful Data and UI Checklist | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/swr-polling-hasura.md`](pr-checklists/swr-polling-hasura.md) | SWR and Hasura Polling Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |
@@ -145,6 +146,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0038-sentry-central-plane-verdict-projection.md`](adr/0038-sentry-central-plane-verdict-projection.md) | Central Sentry triage plane with owning-repo verdict projection | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0039-multistrategy-pools-historical-fx-volume.md`](adr/0039-multistrategy-pools-historical-fx-volume.md) | Model pool strategies many-to-many and price same-currency swaps from historical FX crosses | canonical / active | adr / indexer-envio, ui-dashboard, metrics-bridge | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0040-bounded-documentation-garden-queue.md`](adr/0040-bounded-documentation-garden-queue.md) | Documentation gardening runs through one bounded issue queue | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-19 |
+| [`docs/adr/0041-offline-documentation-navigation-evaluation.md`](adr/0041-offline-documentation-navigation-evaluation.md) | Documentation navigation is evaluated offline with deterministic scoring | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-21 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
 ## package-readmes-reference

@@ -154,6 +154,8 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
+    // preload-handler-note: ordered Pool writes gate self-healing; see #1394.
+    // preload-effect-helpers: upsertPool
     if (context.isPreload) {
       await preloadPoolCache(context, poolId);
       return;

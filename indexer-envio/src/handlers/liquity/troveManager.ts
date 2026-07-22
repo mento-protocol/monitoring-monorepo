@@ -241,6 +241,8 @@ indexer.onEvent(
     );
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
+    // preload-handler-note: price and cold-start params are preload-warmed; trove transitions require ordered state.
+    // preload-effect-helpers: loadLiquityPrice, getOrLoadSystemParams
     if (context.isPreload) {
       const [trove, pendingBatchOperation] = await Promise.all([
         context.Trove.get(makeTroveId(collateralId, troveId)),
@@ -413,6 +415,8 @@ indexer.onEvent(
     const blockTimestamp = asBigInt(event.block.timestamp);
     const existing = await context.InterestBatch.get(batchId);
     const blockNumber = asBigInt(event.block.number);
+    // preload-handler-note: batch replay warms price and params before ordered trove reconciliation.
+    // preload-effect-helpers: loadLiquityPrice, getOrLoadSystemParams
     if (context.isPreload) {
       await preloadBatchReplay({
         context,

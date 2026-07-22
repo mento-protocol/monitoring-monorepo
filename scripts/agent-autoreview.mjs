@@ -14,6 +14,7 @@ import {
   mkdtempSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
   readlinkSync,
@@ -125,6 +126,7 @@ const activeReviewerAborters = new Map();
 const terminationSignalHandlers = new Map();
 const rejectedTrustedExecutableCandidates = new Set();
 const writeGrantingAclCache = new Map();
+const attestedNodeLibraryPathRecords = new Map();
 let trustedExecutableCleanupRegistered = false;
 let pendingTerminationSignal = null;
 let reviewerForceKillTimer = null;
@@ -508,6 +510,7 @@ function cleanupTrustedExecutableSnapshots() {
   trustedExecutableSnapshotsByPath.clear();
   rejectedTrustedExecutableCandidates.clear();
   writeGrantingAclCache.clear();
+  attestedNodeLibraryPathRecords.clear();
 }
 
 function registerEngineRuntimeDirectory(directory) {
@@ -1172,6 +1175,581 @@ function trustedToolPath(directory, commands) {
   return [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(
     path.delimiter,
   );
+}
+
+function assertLinuxDynamicPreloadAbsent() {
+  try {
+    lstatSync("/etc/ld.so.preload", { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(
+    "attested Node runtime requires /etc/ld.so.preload to be absent",
+  );
+}
+
+function attestedRuntimeAncestryIsTrusted(ancestry) {
+  return ancestry.every(
+    ({ fileStat, writeGrantingAcl }) =>
+      !writeGrantingAcl &&
+      (!sharedWritable(fileStat) ||
+        (fileStat.uid === 0n && (fileStat.mode & 0o1000n) !== 0n)),
+  );
+}
+
+function readStableAttestedFile(
+  candidate,
+  label,
+  maximumBytes,
+  { includeContent = false } = {},
+) {
+  const pathBefore = lstatSync(candidate, { bigint: true });
+  if (
+    !pathBefore.isFile() ||
+    pathBefore.isSymbolicLink() ||
+    pathBefore.size <= 0n ||
+    pathBefore.size > BigInt(maximumBytes)
+  ) {
+    throw new Error(`${label} is not a bounded regular file`);
+  }
+  let descriptor;
+  try {
+    descriptor = openSync(candidate, secureReadFlags());
+    const before = fstatSync(descriptor, { bigint: true });
+    if (!sameFileMetadata(pathBefore, before)) {
+      throw new Error(`${label} changed before validation`);
+    }
+    const digest = createHash("sha256");
+    const chunks = [];
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let total = 0;
+    while (true) {
+      const read = readSync(descriptor, buffer, 0, buffer.length, null);
+      if (read === 0) break;
+      total += read;
+      if (total > maximumBytes || BigInt(total) > before.size) {
+        throw new Error(`${label} grew during validation`);
+      }
+      const chunk = buffer.subarray(0, read);
+      digest.update(chunk);
+      if (includeContent) chunks.push(Buffer.from(chunk));
+    }
+    const after = fstatSync(descriptor, { bigint: true });
+    const pathAfter = lstatSync(candidate, { bigint: true });
+    if (
+      BigInt(total) !== before.size ||
+      !sameFileMetadata(before, after) ||
+      !sameFileMetadata(before, pathAfter)
+    ) {
+      throw new Error(`${label} changed during validation`);
+    }
+    return {
+      content: includeContent ? Buffer.concat(chunks, total) : null,
+      digest: digest.digest("hex"),
+      fileStat: before,
+    };
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function linuxLoaderPathFingerprint(candidate, repo) {
+  if (
+    effectiveUid() !== 0n ||
+    !/^\/(?:[A-Za-z0-9_+.,:@%=-]+\/)*[A-Za-z0-9_+.,:@%=-]+$/.test(candidate)
+  ) {
+    throw new Error("attested Node loader path is invalid");
+  }
+  const digest = createHash("sha256");
+  const statFields = (fileStat) => [
+    fileStat.dev,
+    fileStat.ino,
+    fileStat.mode,
+    fileStat.nlink,
+    fileStat.uid,
+    fileStat.gid,
+    fileStat.rdev,
+    fileStat.size,
+    fileStat.mtimeNs / 1_000_000_000n,
+    fileStat.ctimeNs / 1_000_000_000n,
+  ];
+  const record = (kind, candidatePath, target, fileStat) => {
+    if (isWithin(candidatePath, repo) || fileStat.uid !== 0n) {
+      throw new Error("attested Node loader path is unsafe");
+    }
+    if (kind === "directory") {
+      if (!fileStat.isDirectory() || sharedWritable(fileStat)) {
+        throw new Error("attested Node loader directory is unsafe");
+      }
+    } else if (kind === "symlink") {
+      if (!fileStat.isSymbolicLink()) {
+        throw new Error("attested Node loader symlink is unsafe");
+      }
+    } else if (kind === "file") {
+      if (
+        !fileStat.isFile() ||
+        (fileStat.mode & 0o6022n) !== 0n ||
+        (fileStat.mode & 0o111n) === 0n ||
+        fileStat.nlink < 1n
+      ) {
+        throw new Error("attested Node loader file is unsafe");
+      }
+    } else {
+      throw new Error("attested Node loader path record is invalid");
+    }
+    digest.update(
+      [kind, candidatePath, target, ...statFields(fileStat)].join("\0") + "\0",
+    );
+  };
+  const normalizeAbsolute = (value) => {
+    if (!value.startsWith("/") || /[\r\n\0]/.test(value)) return null;
+    const parts = [];
+    for (const part of value.split(/\/+/)) {
+      if (!part || part === ".") continue;
+      if (part === "..") parts.pop();
+      else parts.push(part);
+    }
+    return `/${parts.join("/")}`;
+  };
+
+  record("directory", "/", "", lstatSync("/", { bigint: true }));
+  let pending = candidate.split("/").filter(Boolean);
+  let current = "/";
+  let symlinks = 0;
+  let loaderDigest = "";
+  let loaderStat;
+  while (pending.length > 0) {
+    const component = pending.shift();
+    if (component === "." || component === "..") {
+      throw new Error("attested Node loader path component is unsafe");
+    }
+    const next = current === "/" ? `/${component}` : `${current}/${component}`;
+    const fileStat = lstatSync(next, { bigint: true });
+    if (fileStat.isSymbolicLink()) {
+      if (++symlinks > 40) {
+        throw new Error("attested Node loader has excessive symlinks");
+      }
+      const target = readlinkSync(next, "utf8");
+      if (!target || /[\r\n\0]/.test(target)) {
+        throw new Error("attested Node loader symlink target is unsafe");
+      }
+      record("symlink", next, target, fileStat);
+      const targetPath = target.startsWith("/")
+        ? target
+        : current === "/"
+          ? `/${target}`
+          : `${current}/${target}`;
+      const combined = normalizeAbsolute(
+        pending.length > 0 ? `${targetPath}/${pending.join("/")}` : targetPath,
+      );
+      if (!combined) {
+        throw new Error("attested Node loader symlink path is invalid");
+      }
+      pending = combined.split("/").filter(Boolean);
+      current = "/";
+      continue;
+    }
+    if (pending.length > 0) {
+      record("directory", next, "", fileStat);
+    } else {
+      const loader = readStableAttestedFile(
+        next,
+        "attested Node loader",
+        64 * 1024 * 1024,
+      );
+      if (!sameFileMetadata(fileStat, loader.fileStat)) {
+        throw new Error("attested Node loader changed during validation");
+      }
+      loaderDigest = loader.digest;
+      loaderStat = loader.fileStat;
+      record("file", next, loaderDigest, fileStat);
+    }
+    current = next;
+  }
+  const resolved = realpathSync(candidate);
+  if (resolved !== current || isWithin(resolved, repo) || !loaderStat) {
+    throw new Error("attested Node loader resolution is unsafe");
+  }
+  return {
+    fingerprint: digest.digest("hex"),
+    loaderDigest,
+    loaderStat,
+    resolved,
+  };
+}
+
+function inspectAttestedNodeManifest(executable, directory, repo) {
+  const parent = path.dirname(executable);
+  const prefix = `${path.basename(executable)}.loader-closure.`;
+  const names = readdirSync(parent, { encoding: "utf8" }).filter((name) =>
+    name.startsWith(prefix),
+  );
+  if (names.length !== 1) {
+    throw new Error("attested Node closure manifest is missing or excessive");
+  }
+  const expectedDigest = names[0].slice(prefix.length);
+  if (!/^[0-9a-f]{64}$/.test(expectedDigest)) {
+    throw new Error("attested Node closure manifest name is invalid");
+  }
+  const manifestPath = path.join(parent, names[0]);
+  if (isWithin(manifestPath, repo)) {
+    throw new Error(
+      "attested Node closure manifest is inside the review target",
+    );
+  }
+  const manifest = readStableAttestedFile(
+    manifestPath,
+    "attested Node closure manifest",
+    1024 * 1024,
+    { includeContent: true },
+  );
+  if (
+    manifest.fileStat.uid !== 0n ||
+    manifest.fileStat.nlink !== 1n ||
+    (manifest.fileStat.mode & 0o7777n) !== 0o400n ||
+    manifest.digest !== expectedDigest
+  ) {
+    throw new Error("attested Node closure manifest is unsafe");
+  }
+  let content;
+  try {
+    content = new TextDecoder("utf-8", { fatal: true }).decode(
+      manifest.content,
+    );
+  } catch {
+    throw new Error("attested Node closure manifest is not UTF-8");
+  }
+  if (
+    !content.endsWith("\n") ||
+    content.includes("\r") ||
+    content.includes("\0")
+  ) {
+    throw new Error("attested Node closure manifest format is invalid");
+  }
+  const lines = content.slice(0, -1).split("\n");
+  if (
+    lines.length < 4 ||
+    lines.length > 3074 ||
+    lines[0] !== "loader-closure-v3"
+  ) {
+    throw new Error("attested Node closure manifest header is invalid");
+  }
+  let policyCount = 0;
+  let loaderCount = 0;
+  let loaderFingerprint = "";
+  let loaderRequested = "";
+  let loaderResolved = "";
+  const passiveKinds = new Set(["needed", "alias", "file"]);
+  for (const line of lines.slice(1)) {
+    const fields = line.split("\t");
+    if (fields.length !== 6) {
+      throw new Error("attested Node closure manifest record is malformed");
+    }
+    const [kind, executableFlag, requested, resolved, fingerprint, extra] =
+      fields;
+    if (kind === "policy") {
+      if (
+        policyCount++ !== 0 ||
+        executableFlag !== "0" ||
+        requested !== directory ||
+        resolved !== "-" ||
+        !/^[0-9a-f]{64}$/.test(fingerprint) ||
+        !/^[0-9a-f]{64}$/.test(extra)
+      ) {
+        throw new Error("attested Node closure policy is invalid");
+      }
+    } else if (kind === "loader") {
+      if (
+        loaderCount++ !== 0 ||
+        executableFlag !== "1" ||
+        !path.isAbsolute(requested) ||
+        !path.isAbsolute(resolved) ||
+        /[\r\n\0]/.test(requested) ||
+        /[\r\n\0]/.test(resolved) ||
+        path.normalize(requested) !== requested ||
+        path.normalize(resolved) !== resolved ||
+        !/^[0-9a-f]{64}$/.test(fingerprint) ||
+        extra !== "-"
+      ) {
+        throw new Error("attested Node closure loader record is invalid");
+      }
+      loaderRequested = requested;
+      loaderResolved = resolved;
+      loaderFingerprint = fingerprint;
+    } else if (!passiveKinds.has(kind)) {
+      throw new Error("attested Node closure manifest kind is invalid");
+    }
+  }
+  if (policyCount !== 1 || loaderCount !== 1) {
+    throw new Error("attested Node closure manifest is incomplete");
+  }
+  if (
+    realpathSync(loaderRequested) !== loaderResolved ||
+    realpathSync(loaderResolved) !== loaderResolved ||
+    isWithin(loaderResolved, repo)
+  ) {
+    throw new Error("attested Node loader path is unsafe");
+  }
+  const loader = linuxLoaderPathFingerprint(loaderRequested, repo);
+  if (
+    loader.resolved !== loaderResolved ||
+    loader.fingerprint !== loaderFingerprint ||
+    hasWriteGrantingAcl(
+      loaderResolved,
+      loader.loaderStat,
+      "attested Node loader",
+    )
+  ) {
+    throw new Error("attested Node loader is unsafe");
+  }
+  const loaderAncestry = inspectTrustedDirectoryAncestry(
+    path.dirname(loaderResolved),
+    "attested Node loader",
+  );
+  if (
+    loaderAncestry.some(
+      ({ fileStat, writeGrantingAcl }) =>
+        sharedWritable(fileStat) || writeGrantingAcl,
+    )
+  ) {
+    throw new Error("attested Node loader ancestry is writable");
+  }
+  return {
+    loaderAncestry,
+    loaderDigest: loader.loaderDigest,
+    loaderRequested,
+    loaderResolved,
+    loaderStat: loader.loaderStat,
+    manifestDigest: manifest.digest,
+    manifestPath,
+    manifestStat: manifest.fileStat,
+  };
+}
+
+function sameAttestedNodeManifest(left, right) {
+  try {
+    assertStableDirectoryAncestry(
+      left.loaderAncestry,
+      right.loaderAncestry,
+      "attested Node loader",
+    );
+  } catch {
+    return false;
+  }
+  return (
+    left.loaderDigest === right.loaderDigest &&
+    left.loaderRequested === right.loaderRequested &&
+    left.loaderResolved === right.loaderResolved &&
+    sameFileMetadata(left.loaderStat, right.loaderStat) &&
+    left.manifestDigest === right.manifestDigest &&
+    left.manifestPath === right.manifestPath &&
+    sameFileMetadata(left.manifestStat, right.manifestStat)
+  );
+}
+
+function inspectAttestedNodeAliases(directory, repo) {
+  const names = readdirSync(directory, { encoding: "utf8" }).sort();
+  if (names.length === 0 || names.length > 1024) {
+    throw new Error("attested Node library aliases are missing or excessive");
+  }
+  return names.map((name) => {
+    if (!/^[A-Za-z0-9_+.-]+$/.test(name) || name === "." || name === "..") {
+      throw new Error("attested Node library alias name is unsafe");
+    }
+    const aliasPath = path.join(directory, name);
+    const aliasStat = lstatSync(aliasPath, { bigint: true });
+    const target = readlinkSync(aliasPath, "utf8");
+    if (
+      !aliasStat.isSymbolicLink() ||
+      aliasStat.uid !== 0n ||
+      !path.isAbsolute(target) ||
+      /[\r\n\0]/.test(target) ||
+      realpathSync(aliasPath) !== target ||
+      isWithin(target, repo)
+    ) {
+      throw new Error("attested Node library alias is unsafe");
+    }
+    const targetStat = lstatSync(target, { bigint: true });
+    if (
+      !targetStat.isFile() ||
+      targetStat.uid !== 0n ||
+      sharedWritable(targetStat) ||
+      (targetStat.mode & 0o6000n) !== 0n ||
+      targetStat.nlink < 1n ||
+      hasWriteGrantingAcl(target, targetStat, "attested Node library")
+    ) {
+      throw new Error("attested Node library target is unsafe");
+    }
+    const targetAncestry = inspectTrustedDirectoryAncestry(
+      path.dirname(target),
+      "attested Node library target",
+    );
+    if (
+      targetAncestry.some(
+        ({ fileStat, writeGrantingAcl }) =>
+          sharedWritable(fileStat) || writeGrantingAcl,
+      )
+    ) {
+      throw new Error("attested Node library target ancestry is writable");
+    }
+    return { aliasPath, aliasStat, name, target, targetAncestry, targetStat };
+  });
+}
+
+function assertAttestedNodeRuntimeRecord(record) {
+  assertLinuxDynamicPreloadAbsent();
+  assertPrivateSnapshotDirectory(record.directory);
+  const directoryStat = lstatSync(record.directory, { bigint: true });
+  if (!sameDirectorySecurityMetadata(record.directoryStat, directoryStat)) {
+    throw new Error("attested Node library directory changed");
+  }
+  const ancestry = inspectTrustedDirectoryAncestry(
+    path.dirname(record.directory),
+    "attested Node runtime",
+  );
+  if (!attestedRuntimeAncestryIsTrusted(ancestry)) {
+    throw new Error("attested Node runtime ancestry is unsafe");
+  }
+  assertStableDirectoryAncestry(
+    record.ancestry,
+    ancestry,
+    "attested Node runtime",
+  );
+  const executableStat = lstatSync(record.executable, { bigint: true });
+  if (
+    !sameFileMetadata(record.executableStat, executableStat) ||
+    realpathSync(process.execPath) !== record.executable ||
+    realpathSync(`/proc/${process.pid}/exe`) !== record.executable
+  ) {
+    throw new Error("attested Node executable changed");
+  }
+  let manifest;
+  try {
+    manifest = inspectAttestedNodeManifest(
+      record.executable,
+      record.directory,
+      record.repo,
+    );
+  } catch {
+    throw new Error("attested Node loader or manifest changed");
+  }
+  if (!sameAttestedNodeManifest(record.manifest, manifest)) {
+    throw new Error("attested Node loader or manifest changed");
+  }
+  const aliases = inspectAttestedNodeAliases(record.directory, record.repo);
+  if (
+    aliases.length !== record.aliases.length ||
+    aliases.some((alias, index) => {
+      const expected = record.aliases[index];
+      try {
+        assertStableDirectoryAncestry(
+          expected.targetAncestry,
+          alias.targetAncestry,
+          "attested Node library target",
+        );
+      } catch {
+        return true;
+      }
+      return (
+        alias.name !== expected.name ||
+        alias.target !== expected.target ||
+        !sameFileMetadata(alias.aliasStat, expected.aliasStat) ||
+        !sameFileMetadata(alias.targetStat, expected.targetStat)
+      );
+    })
+  ) {
+    throw new Error("attested Node library aliases changed");
+  }
+}
+
+function attestedNodeRuntime(repo) {
+  const requested = process.env.AUTOREVIEW_ATTESTED_NODE_LIBRARY_PATH;
+  if (!requested) return null;
+  if (
+    process.platform !== "linux" ||
+    effectiveUid() !== 0n ||
+    !path.isAbsolute(requested) ||
+    /[\r\n\0]/.test(requested)
+  ) {
+    throw new Error("attested Node library path is invalid");
+  }
+  const directory = realpathSync(requested);
+  const executable = realpathSync(process.execPath);
+  const canonicalRepo = realpathSync(repo);
+  if (
+    directory !== requested ||
+    path.dirname(directory) !== path.dirname(executable) ||
+    isWithin(directory, canonicalRepo)
+  ) {
+    throw new Error("attested Node library path is outside its runtime");
+  }
+  if (
+    process.env.LD_LIBRARY_PATH !== directory ||
+    process.env.GLIBC_TUNABLES ||
+    process.env.OPENSSL_CONF ||
+    process.env.OPENSSL_MODULES ||
+    Object.keys(process.env).some(
+      (key) => key.startsWith("LD_") && key !== "LD_LIBRARY_PATH",
+    )
+  ) {
+    throw new Error("attested Node runtime inherited unsafe loader state");
+  }
+  let record = attestedNodeLibraryPathRecords.get(directory);
+  if (!record) {
+    assertPrivateSnapshotDirectory(directory);
+    const executableStat = lstatSync(executable, { bigint: true });
+    if (
+      !executableStat.isFile() ||
+      executableStat.uid !== 0n ||
+      (executableStat.mode & 0o7777n) !== 0o500n ||
+      executableStat.nlink !== 1n ||
+      hasWriteGrantingAcl(
+        executable,
+        executableStat,
+        "attested Node runtime",
+      ) ||
+      realpathSync(`/proc/${process.pid}/exe`) !== executable
+    ) {
+      throw new Error("attested Node executable is unsafe");
+    }
+    const ancestry = inspectTrustedDirectoryAncestry(
+      path.dirname(directory),
+      "attested Node runtime",
+    );
+    if (!attestedRuntimeAncestryIsTrusted(ancestry)) {
+      throw new Error("attested Node runtime ancestry is unsafe");
+    }
+    let manifest;
+    try {
+      manifest = inspectAttestedNodeManifest(
+        executable,
+        directory,
+        canonicalRepo,
+      );
+    } catch {
+      throw new Error("attested Node loader or manifest is unsafe");
+    }
+    record = {
+      aliases: inspectAttestedNodeAliases(directory, canonicalRepo),
+      ancestry,
+      directory,
+      directoryStat: lstatSync(directory, { bigint: true }),
+      executable,
+      executableStat,
+      manifest,
+      repo: canonicalRepo,
+    };
+    attestedNodeLibraryPathRecords.set(directory, record);
+  }
+  assertAttestedNodeRuntimeRecord(record);
+  return record;
+}
+
+function assertAllAttestedNodeLibraryPaths() {
+  for (const record of attestedNodeLibraryPathRecords.values()) {
+    assertAttestedNodeRuntimeRecord(record);
+  }
 }
 
 function gitEnvironment() {
@@ -2326,8 +2904,10 @@ function safeEngineEnv(repo, engine, runtimeDir) {
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
   }
   const git = resolveTrustedCommand("git", repo);
-  const node = trustedCurrentNode(repo);
+  const nodeRuntime = attestedNodeRuntime(repo);
+  const node = nodeRuntime?.executable || trustedCurrentNode(repo);
   env.PATH = trustedToolPath(runtimeDir, { git, node });
+  if (nodeRuntime) env.LD_LIBRARY_PATH = nodeRuntime.directory;
   env.TMPDIR = runtimeDir;
   env.GIT_CONFIG_GLOBAL = "/dev/null";
   env.GIT_CONFIG_NOSYSTEM = "1";
@@ -2349,6 +2929,7 @@ function runCommandWithInput(
 ) {
   return new Promise((resolve, reject) => {
     revalidateAllTrustedExecutableSnapshots();
+    assertAllAttestedNodeLibraryPaths();
     const child = spawn(command, commandArgs, {
       cwd,
       detached: process.platform !== "win32",
@@ -2362,6 +2943,7 @@ function runCommandWithInput(
     let timedOut = false;
     let killTimer = null;
     let settled = false;
+    let stdinWriteError = null;
     const configuredHeartbeat = Number.parseInt(
       process.env.AUTOREVIEW_HEARTBEAT_SECONDS || "60",
       10,
@@ -2438,8 +3020,23 @@ function runCommandWithInput(
     child.on("error", (error) => {
       rejectOnce(error);
     });
+    const handleStdinError = (error) => {
+      if (settled) return;
+      if (error?.code === "EPIPE") {
+        stdinWriteError = error;
+        return;
+      }
+      forceAbort(error);
+    };
+    child.stdin.on("error", handleStdinError);
     child.on("close", (code, signal) => {
       signalReviewerProcessGroup(child, "SIGKILL");
+      try {
+        assertAllAttestedNodeLibraryPaths();
+      } catch (error) {
+        rejectOnce(error);
+        return;
+      }
       if (timedOut) {
         rejectOnce(new Error(`${command} timed out after ${timeoutSeconds}s`));
         return;
@@ -2452,9 +3049,21 @@ function runCommandWithInput(
         );
         return;
       }
+      if (stdinWriteError) {
+        rejectOnce(
+          new Error(
+            `${command} exited successfully after closing stdin before the complete review prompt was written: ${stderr || stdout}`,
+          ),
+        );
+        return;
+      }
       resolveOnce({ stdout, stderr });
     });
-    child.stdin.end(prompt);
+    try {
+      child.stdin.end(prompt);
+    } catch (error) {
+      handleStdinError(error);
+    }
   });
 }
 

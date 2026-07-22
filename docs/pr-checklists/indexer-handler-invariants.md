@@ -3,7 +3,7 @@ title: Indexer Handler Invariants
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-21
 doc_type: checklist
 scope: indexer-envio
 review_interval_days: 90
@@ -32,6 +32,43 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
 
 - Block-keyed RPC caches must be bounded with an LRU or block-height eviction;
   never retain one entry per block in an unbounded `Map`.
+- Envio V3 runs each handler in a concurrent preload pass and then an ordered
+  processing pass. Any direct `context.effect(...)` whose key can be derived
+  before writes must be requested before or inside the positive
+  `context.isPreload` return, then reused with the identical effect + input key
+  during processing. An event-only input is not a processing-only dependency.
+- Start event-derived effects before any entity-dependent early return. A
+  concurrent preload pass can see an empty lookup while ordered processing for
+  the same event sees a row created by an earlier event in the batch.
+- For state-dependent retry effects, carry an event-scoped in-memory marker
+  only when preload actually scheduled the key. Processing must stay
+  fail-closed and defer newly visible rows until the next event rather than
+  issuing an un-preloaded call.
+- The blocking code-quality invariant rejects a direct effect that exists only
+  after a positive preload return (including exact `maybePreloadPool(...)` and
+  `maybePreloadBreaker(...)` wrappers)
+  or after an earlier return-bearing branch. A call that must remain
+  processing-only for ordered-state correctness, or is permanently bounded,
+  must carry an adjacent call-site
+  `// preload-effect-exempt: <ordered-state or bounded-cardinality reason>`
+  comment. A comment on the preload guard does not suppress direct-effect
+  checks.
+- When code that preload cannot eagerly reach—after an entity-dependent return
+  or a positive preload return—calls a helper that directly or transitively
+  reaches `context.effect`, the invariant derives that boundary from TypeScript
+  symbols. Declare the exact used set with one or more adjacent
+  `// preload-effect-helpers: <helper names>` lines. Pair the declaration with
+  a non-empty `// preload-handler-note: <reason>` line. Missing and unused
+  declarations both fail so a broad handler marker cannot hide a future
+  effect. A phase-stable event-derived filter is valid only when the effect is
+  still awaited during preload; state that fact in the note. Do not exempt an
+  effect that scales with swaps, reports, transfers,
+  or another replay-traffic event stream merely for convenience. When preload
+  would violate sequential state semantics, name the exact ordering invariant
+  and track a preload-safe redesign.
+- When adding an effect to a replayed handler, audit the event's historical
+  cardinality and add preload-aware coverage. Processing-only correctness tests
+  do not prove that hosted replay will batch the external calls.
 - Local derivations from `lastMedianPrice` must use
   `hasFreshLiveMedian(pool, eventTimestamp)`, not merely `medianLive` or a
   non-zero price. The gate requires non-zero median, `medianLive`, `oracleOk`,

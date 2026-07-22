@@ -221,6 +221,9 @@ export async function handleSusdsYieldDailySnapshotHeartbeat({
   block: { number: number | bigint };
   context: SusdsContext;
 }): Promise<boolean> {
+  // preload-handler-note: this dormant heartbeat needs ordered snapshot writes;
+  // preload-safe block/share-price reads are tracked in #1396 before activation.
+  // preload-effect-helpers: recordSusdsYieldHeartbeatSnapshot
   if (context.isPreload) return false;
   return recordSusdsYieldHeartbeatSnapshot(context, BigInt(block.number));
 }

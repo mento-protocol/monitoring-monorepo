@@ -7,6 +7,364 @@ set -euo pipefail
 umask 077
 unset SSL_CERT_DIR
 
+suite_tmp_dir=""
+suite_child_pids=()
+suite_registry_in_progress=0
+suite_pending_exit=0
+
+handle_suite_signal() {
+  local exit_code="$1"
+  if [[ "$suite_registry_in_progress" -eq 1 ]]; then
+    suite_pending_exit="$exit_code"
+    return 0
+  fi
+  trap - HUP INT TERM
+  exit "$exit_code"
+}
+
+finish_suite_registry_update() {
+  suite_registry_in_progress=0
+  if [[ "$suite_pending_exit" -ne 0 ]]; then
+    local exit_code="$suite_pending_exit"
+    suite_pending_exit=0
+    handle_suite_signal "$exit_code"
+  fi
+}
+
+unregister_suite_child_pid() {
+  local completed_pid="$1"
+  local registered_pid
+  local remaining_pids=()
+  for registered_pid in "${suite_child_pids[@]:-}"; do
+    [[ -n "$registered_pid" ]] || continue
+    if [[ "$registered_pid" != "$completed_pid" ]]; then
+      remaining_pids+=("$registered_pid")
+    fi
+  done
+  suite_child_pids=()
+  if [[ "${#remaining_pids[@]}" -gt 0 ]]; then
+    suite_child_pids=("${remaining_pids[@]}")
+  fi
+}
+
+reap_and_unregister_suite_wrapper() {
+  local pid="$1"
+  suite_registry_in_progress=1
+  while kill -0 "$pid" 2>/dev/null; do
+    wait "$pid" 2>/dev/null || true
+  done
+  wait "$pid" 2>/dev/null || true
+  unregister_suite_child_pid "$pid"
+  finish_suite_registry_update
+}
+
+cleanup_suite_runner() {
+  local pid
+  local group_file
+  local group_pid
+  for pid in "${suite_child_pids[@]:-}"; do
+    [[ -n "$pid" ]] || continue
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+  for pid in "${suite_child_pids[@]:-}"; do
+    [[ -n "$pid" ]] || continue
+    wait "$pid" 2>/dev/null || true
+  done
+  if [[ -n "$suite_tmp_dir" && -d "$suite_tmp_dir" ]]; then
+    for group_file in "$suite_tmp_dir"/*.group; do
+      [[ -f "$group_file" ]] || continue
+      group_pid="$(cat "$group_file" 2>/dev/null || true)"
+      [[ "$group_pid" =~ ^[0-9]+$ ]] || continue
+      terminate_suite_process_group "$group_pid"
+    done
+  fi
+  if [[ -n "$suite_tmp_dir" && -d "$suite_tmp_dir" ]]; then
+    rm -rf -- "$suite_tmp_dir"
+  fi
+}
+
+terminate_suite_process_group() {
+  local group_pid="$1"
+  local grace_tenths="${2:-70}"
+  local attempt
+
+  [[ -n "$group_pid" ]] || return 0
+  if ! kill -0 -- "-$group_pid" 2>/dev/null; then
+    wait "$group_pid" 2>/dev/null || true
+    return 0
+  fi
+  kill -TERM -- "-$group_pid" 2>/dev/null || true
+  for ((attempt = 0; attempt < grace_tenths; attempt++)); do
+    if ! kill -0 -- "-$group_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  if kill -0 -- "-$group_pid" 2>/dev/null; then
+    kill -KILL -- "-$group_pid" 2>/dev/null || true
+  fi
+  wait "$group_pid" 2>/dev/null || true
+}
+
+run_autoreview_test_suite() {
+  local jobs=3
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --)
+        shift
+        ;;
+      --jobs)
+        if [[ $# -lt 2 ]]; then
+          printf '%s\n' '--jobs requires a value from 1 through 3' >&2
+          return 2
+        fi
+        jobs="$2"
+        shift 2
+        ;;
+      --jobs=*)
+        jobs="${1#*=}"
+        shift
+        ;;
+      *)
+        printf 'unknown autoreview test-suite argument: %s\n' "$1" >&2
+        return 2
+        ;;
+    esac
+  done
+  if [[ ! "$jobs" =~ ^[1-3]$ ]]; then
+    printf 'autoreview test-suite --jobs must be from 1 through 3: %s\n' \
+      "$jobs" >&2
+    return 2
+  fi
+
+  local suite_script
+  suite_script="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
+  local suite_tmp_parent="$trusted_fixture_parent"
+  suite_tmp_dir="$(/usr/bin/mktemp -d "$suite_tmp_parent/agent-autoreview-suite.XXXXXX")"
+  suite_tmp_dir="$(cd "$suite_tmp_dir" && pwd -P)"
+  trap cleanup_suite_runner EXIT
+  trap 'handle_suite_signal 129' HUP
+  trap 'handle_suite_signal 130' INT
+  trap 'handle_suite_signal 143' TERM
+
+  local suite_started_at
+  suite_started_at="$(date +%s)"
+  local next_progress_at=$((suite_started_at + 20))
+
+  launch_suite_family() {
+    local family="$1"
+    local log_file="$suite_tmp_dir/$family.log"
+    local status_file="$suite_tmp_dir/$family.status"
+    local started_file="$suite_tmp_dir/$family.started"
+    local group_file="$suite_tmp_dir/$family.group"
+    date +%s >"$started_file"
+    suite_registry_in_progress=1
+    (
+      local family_pid=""
+      local family_status=125
+      local family_launch_in_progress=0
+      local family_pending_exit=0
+      # Invoked indirectly by the EXIT trap below.
+      # shellcheck disable=SC2329
+      publish_family_status() {
+        printf '%s\n' "$family_status" >"$status_file.tmp"
+        mv -- "$status_file.tmp" "$status_file"
+      }
+      forward_family_signal() {
+        local exit_code="$1"
+        if [[ "$family_launch_in_progress" -eq 1 ]]; then
+          family_pending_exit="$exit_code"
+          return 0
+        fi
+        trap - HUP INT TERM
+        if [[ -n "$family_pid" ]]; then
+          terminate_suite_process_group "$family_pid"
+          rm -f -- "$group_file"
+        fi
+        family_status="$exit_code"
+        exit "$family_status"
+      }
+      trap publish_family_status EXIT
+      trap 'forward_family_signal 129' HUP
+      trap 'forward_family_signal 130' INT
+      trap 'forward_family_signal 143' TERM
+      set +e
+      family_launch_in_progress=1
+      set -m
+      AUTOREVIEW_TEST_FOCUS="$family" /bin/bash "$suite_script" \
+        >"$log_file" 2>&1 &
+      family_pid=$!
+      set +m
+      printf '%s\n' "$family_pid" >"$group_file.tmp"
+      mv -- "$group_file.tmp" "$group_file"
+      family_launch_in_progress=0
+      if [[ "$family_pending_exit" -ne 0 ]]; then
+        local pending_exit="$family_pending_exit"
+        family_pending_exit=0
+        forward_family_signal "$pending_exit"
+      fi
+      wait "$family_pid"
+      family_status=$?
+      terminate_suite_process_group "$family_pid"
+      rm -f -- "$group_file"
+      set -e
+      exit "$family_status"
+    ) &
+    local wrapper_pid
+    wrapper_pid=$!
+    if [[ -n "${AUTOREVIEW_TEST_SUITE_REGISTRATION_MARKER:-}" ]]; then
+      printf 'registration\n' >"$AUTOREVIEW_TEST_SUITE_REGISTRATION_MARKER"
+      sleep 2 || true
+    fi
+    suite_child_pids+=("$wrapper_pid")
+    finish_suite_registry_update
+    printf 'AUTOREVIEW_TEST_PROGRESS family=%s elapsed=%ss\n' \
+      "$family" "$(( $(date +%s) - suite_started_at ))"
+  }
+
+  run_suite_family_group() {
+    local group_jobs="$1"
+    shift
+    local families=("$@")
+    local next_family=0
+    local active_families=()
+    local active_pids=()
+    local family
+    local pid
+    local index
+    local status_file
+    local now
+
+    while [[ "$next_family" -lt "${#families[@]}" || "${#active_families[@]}" -gt 0 ]]; do
+      while [[ "$next_family" -lt "${#families[@]}" && "${#active_families[@]}" -lt "$group_jobs" ]]; do
+        family="${families[$next_family]}"
+        launch_suite_family "$family"
+        active_families+=("$family")
+        active_pids+=("${suite_child_pids[${#suite_child_pids[@]}-1]}")
+        next_family=$((next_family + 1))
+      done
+
+      local remaining_families=()
+      local remaining_pids=()
+      for ((index = 0; index < ${#active_families[@]}; index++)); do
+        family="${active_families[$index]}"
+        pid="${active_pids[$index]}"
+        status_file="$suite_tmp_dir/$family.status"
+        if [[ -f "$status_file" ]]; then
+          reap_and_unregister_suite_wrapper "$pid"
+          if [[ -f "$suite_tmp_dir/$family.group" ]]; then
+            local completed_group_pid
+            completed_group_pid="$(cat "$suite_tmp_dir/$family.group")"
+            if [[ "$completed_group_pid" =~ ^[0-9]+$ ]]; then
+              terminate_suite_process_group "$completed_group_pid"
+            fi
+            rm -f -- "$suite_tmp_dir/$family.group"
+          fi
+          local family_started
+          family_started="$(cat "$suite_tmp_dir/$family.started")"
+          printf '%s\n' "$(( $(date +%s) - family_started ))" \
+            >"$suite_tmp_dir/$family.elapsed"
+        elif ! kill -0 "$pid" 2>/dev/null; then
+          local wrapper_status=0
+          suite_registry_in_progress=1
+          set +e
+          wait "$pid" 2>/dev/null
+          wrapper_status=$?
+          set -e
+          unregister_suite_child_pid "$pid"
+          finish_suite_registry_update
+          if [[ "$wrapper_status" -eq 0 ]]; then
+            wrapper_status=125
+          fi
+          if [[ -f "$suite_tmp_dir/$family.group" ]]; then
+            local orphaned_group_pid
+            orphaned_group_pid="$(cat "$suite_tmp_dir/$family.group")"
+            if [[ "$orphaned_group_pid" =~ ^[0-9]+$ ]]; then
+              terminate_suite_process_group "$orphaned_group_pid"
+            fi
+            rm -f -- "$suite_tmp_dir/$family.group"
+          fi
+          printf '%s\n' "$wrapper_status" >"$status_file.tmp"
+          mv -- "$status_file.tmp" "$status_file"
+          local failed_family_started
+          failed_family_started="$(cat "$suite_tmp_dir/$family.started")"
+          printf '%s\n' "$(( $(date +%s) - failed_family_started ))" \
+            >"$suite_tmp_dir/$family.elapsed"
+        else
+          remaining_families+=("$family")
+          remaining_pids+=("$pid")
+        fi
+      done
+      active_families=()
+      active_pids=()
+      if [[ "${#remaining_families[@]}" -gt 0 ]]; then
+        active_families=("${remaining_families[@]}")
+        active_pids=("${remaining_pids[@]}")
+      fi
+
+      now="$(date +%s)"
+      if [[ "${#active_families[@]}" -gt 0 && "$now" -ge "$next_progress_at" ]]; then
+        local active_csv
+        active_csv="$(IFS=,; printf '%s' "${active_families[*]}")"
+        printf 'AUTOREVIEW_TEST_PROGRESS family=%s elapsed=%ss\n' \
+          "$active_csv" "$((now - suite_started_at))"
+        next_progress_at=$((now + 20))
+      fi
+      if [[ "${#active_families[@]}" -gt 0 ]]; then
+        sleep 1
+      fi
+    done
+  }
+
+  if [[ "${AUTOREVIEW_TEST_SUITE_SIGNAL_FIXTURE:-}" == "1" ]]; then
+    run_suite_family_group 1 suite-wrapper-fixture
+    if [[ "$(cat "$suite_tmp_dir/suite-wrapper-fixture.status")" != "0" ]]; then
+      cat "$suite_tmp_dir/suite-wrapper-fixture.log" >&2
+    fi
+    printf 'suite wrapper signal fixture exited without cancellation\n' >&2
+    return 1
+  fi
+
+  # Engine lifecycle and signal assertions are timing-sensitive, so this family
+  # remains exclusive even when the rest of the suite uses bounded parallelism.
+  run_suite_family_group 1 engine-isolation
+  run_suite_family_group "$jobs" \
+    target-selection runtime-trust bundle-integrity adapter
+
+  local failed=0
+  local family
+  local status
+  local elapsed
+  for family in \
+    engine-isolation target-selection runtime-trust bundle-integrity adapter; do
+    status="$(cat "$suite_tmp_dir/$family.status")"
+    elapsed="$(cat "$suite_tmp_dir/$family.elapsed")"
+    if [[ "$status" == "0" ]]; then
+      printf 'AUTOREVIEW_TEST_TIMING family=%s status=ok elapsed=%ss\n' \
+        "$family" "$elapsed"
+    else
+      failed=1
+      printf 'AUTOREVIEW_TEST_TIMING family=%s status=failed elapsed=%ss\n' \
+        "$family" "$elapsed"
+    fi
+  done
+
+  if [[ "$failed" -ne 0 ]]; then
+    for family in \
+      engine-isolation target-selection runtime-trust bundle-integrity adapter; do
+      status="$(cat "$suite_tmp_dir/$family.status")"
+      if [[ "$status" != "0" ]]; then
+        printf '\n===== autoreview family failed: %s =====\n' "$family" >&2
+        cat "$suite_tmp_dir/$family.log" >&2
+      fi
+    done
+    return 1
+  fi
+
+  printf 'autoreview test suite passed in %ss with jobs=%s\n' \
+    "$(( $(date +%s) - suite_started_at ))" "$jobs"
+}
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 original_path="$PATH"
@@ -48,11 +406,57 @@ if [[ -z "$trusted_fixture_parent" ]]; then
   printf 'autoreview adversarial tests require a writable fixture parent with non-shared-writable ancestry\n' >&2
   exit 1
 fi
+if [[ "${AUTOREVIEW_TEST_FOCUS:-all}" == "suite-wrapper-fixture" ]]; then
+  fixture_state="${AUTOREVIEW_TEST_SUITE_FIXTURE_STATE:-}"
+  if [[ -z "$fixture_state" || ! -d "$fixture_state" ]]; then
+    printf 'suite wrapper fixture requires an existing state directory\n' >&2
+    exit 2
+  fi
+  printf 'entered\n' >"$fixture_state/entered"
+  fixture_script="$fixture_state/family-worker.mjs"
+  cat >"$fixture_script" <<'NODE'
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
+const stateDir = process.argv[2];
+const reviewer = spawn(
+  process.execPath,
+  [
+    "-e",
+    'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);',
+  ],
+  { detached: true, stdio: "ignore" },
+);
+writeFileSync(`${stateDir}/worker.pid`, `${process.pid}\n`);
+writeFileSync(`${stateDir}/reviewer.pid`, `${reviewer.pid}\n`);
+writeFileSync(`${stateDir}/ready`, "ready\n");
+let terminating = false;
+process.on("SIGTERM", () => {
+  if (terminating) return;
+  terminating = true;
+  setTimeout(() => {
+    try {
+      process.kill(-reviewer.pid, "SIGKILL");
+    } catch (error) {
+      if (error?.code !== "ESRCH") throw error;
+    }
+    writeFileSync(`${stateDir}/cleaned`, "cleaned\n");
+    process.exit(143);
+  }, 500);
+});
+setInterval(() => {}, 1000);
+NODE
+  "$node_bin" "$fixture_script" "$fixture_state" \
+    >"$fixture_state/worker.stdout" 2>"$fixture_state/worker.stderr"
+  exit $?
+fi
+if [[ "${AUTOREVIEW_TEST_FOCUS:-all}" == "suite" ]]; then
+  run_autoreview_test_suite "$@"
+  exit $?
+fi
 tmp_dir="$(/usr/bin/mktemp -d "$trusted_fixture_parent/agent-autoreview-test.XXXXXX")"
 tmp_dir="$(cd "$tmp_dir" && pwd -P)"
-repo_untracked="$repo_root/.agent-autoreview-test-untracked.$$.$RANDOM.txt"
-repo_node_test_dir="$repo_root/.agent-autoreview-node-test.$$.$RANDOM"
-trap 'rm -rf "$tmp_dir" "$repo_untracked" "$repo_node_test_dir"' EXIT
+trap 'rm -rf "$tmp_dir"' EXIT
 node_exec_path="$("$node_bin" -p 'process.execPath')"
 trusted_test_node_dir="$tmp_dir/trusted-test-node"
 mkdir "$trusted_test_node_dir"
@@ -290,20 +694,27 @@ if [[ ! -x /usr/bin/cc ]]; then
 fi
 /usr/bin/cc -O2 -Wall -Wextra -o "$terminal_manifest_node" "$terminal_manifest_node_source"
 
-TMPDIR="$tmp_dir" "$node_bin" "$repo_root/scripts/agent-autoreview-core.test.mjs"
-AUTOREVIEW_TEST_TRUSTED_FIXTURE_PARENT="$tmp_dir" \
+run_core_target_node_tests() {
   TMPDIR="$tmp_dir" \
-  "$node_bin" "$repo_root/scripts/agent-autoreview-target-guard.test.mjs"
-adapter_help="$("$node_bin" "$repo_root/scripts/agent-autoreview.mjs" --help)"
-if [[
-  "$adapter_help" != *"--verify-bundle-dir <dir>"* ||
-    "$adapter_help" != *"--expected-bundle-manifest <sha>"* ||
-    "$adapter_help" != *"--serialize-untracked-file <path>"* ||
-    "$adapter_help" != *"a repo adapter should use --prepare-bundle-dir"*
-]]; then
-  printf 'autoreview help omitted prepared-bundle replacement options\n' >&2
-  exit 1
-fi
+    "$node_bin" "$repo_root/scripts/agent-autoreview-core.test.mjs"
+  AUTOREVIEW_TEST_TRUSTED_FIXTURE_PARENT="$tmp_dir" \
+    TMPDIR="$tmp_dir" \
+    "$node_bin" "$repo_root/scripts/agent-autoreview-target-guard.test.mjs"
+}
+
+run_adapter_help_contract() {
+  local adapter_help
+  adapter_help="$("$node_bin" "$repo_root/scripts/agent-autoreview.mjs" --help)"
+  if [[
+    "$adapter_help" != *"--verify-bundle-dir <dir>"* ||
+      "$adapter_help" != *"--expected-bundle-manifest <sha>"* ||
+      "$adapter_help" != *"--serialize-untracked-file <path>"* ||
+      "$adapter_help" != *"a repo adapter should use --prepare-bundle-dir"*
+  ]]; then
+    printf 'autoreview help omitted prepared-bundle replacement options\n' >&2
+    exit 1
+  fi
+}
 
 helper="$tmp_dir/autoreview-helper"
 trusted_direct_helper_dir="$tmp_dir/trusted-direct-helper"
@@ -1169,6 +1580,7 @@ run_helper_with_path_in_repo() {
     GOOGLE_APPLICATION_CREDENTIALS \
     SSL_CERT_DIR \
     SSL_CERT_FILE \
+    AUTOREVIEW_FAKE_STDIN_EXIT_CODE \
     AUTOREVIEW_FAKE_CREDENTIAL_PROCESS_MARKER \
     AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE; do
     value="${!key-}"
@@ -2557,6 +2969,204 @@ CODEX
   done
 }
 
+run_stdin_epipe_regression() {
+  local review_repo="$tmp_dir/stdin-epipe"
+  local fake_bin="$tmp_dir/stdin-epipe-bin"
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  "$node_bin" -e \
+    'require("node:fs").writeFileSync(process.argv[1], "x".repeat(180 * 1024))' \
+    "$review_repo/large-review.txt"
+  mkdir "$fake_bin"
+  cat >"$fake_bin/codex" <<'CODEX'
+#!/usr/bin/env node
+const fs = require("node:fs");
+const exitCode = Number.parseInt(
+  process.env.AUTOREVIEW_FAKE_STDIN_EXIT_CODE || "7",
+  10,
+);
+
+fs.closeSync(0);
+process.stderr.write(
+  exitCode === 0
+    ? "reviewer closed stdin early\n"
+    : "reviewer rejected startup\n",
+);
+setTimeout(() => process.exit(exitCode), 25);
+CODEX
+  chmod +x "$fake_bin/codex"
+
+  AUTOREVIEW_FAKE_STDIN_EXIT_CODE=7 run_helper_with_path_in_repo_expect_failure \
+    "$review_repo" "$fake_bin" --mode local --engine codex
+  expect_stderr_contains "failed (7): reviewer rejected startup"
+  if grep -Fq -- "write EPIPE" "$stderr"; then
+    printf 'reviewer stdin EPIPE escaped the controlled failure path\nstderr:\n%s\n' \
+      "$(cat "$stderr")" >&2
+    exit 1
+  fi
+
+  AUTOREVIEW_FAKE_STDIN_EXIT_CODE=0 run_helper_with_path_in_repo_expect_failure \
+    "$review_repo" "$fake_bin" --mode local --engine codex
+  expect_stderr_contains \
+    "exited successfully after closing stdin before the complete review prompt was written"
+  expect_stderr_contains "reviewer closed stdin early"
+}
+
+run_suite_process_group_cleanup_regression() {
+  local fixture="$tmp_dir/suite-process-group-fixture.mjs"
+  local fixture_state="$tmp_dir/suite-process-group-state"
+  local leader_pid
+  local descendant_pid
+  local launched=0
+  local exited
+  mkdir "$fixture_state"
+  cat >"$fixture" <<'NODE'
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
+const [role, stateDir] = process.argv.slice(2);
+process.on("SIGTERM", () => {});
+writeFileSync(`${stateDir}/${role}.pid`, `${process.pid}\n`);
+if (role === "leader") {
+  spawn(process.execPath, [import.meta.filename, "child", stateDir], {
+    stdio: "ignore",
+  });
+} else if (role === "child") {
+  spawn(process.execPath, [import.meta.filename, "grandchild", stateDir], {
+    stdio: "ignore",
+  });
+}
+setInterval(() => {}, 1000);
+NODE
+
+  set -m
+  "$node_bin" "$fixture" leader "$fixture_state" &
+  leader_pid=$!
+  set +m
+  for _ in {1..200}; do
+    if [[
+      -s "$fixture_state/leader.pid" &&
+        -s "$fixture_state/child.pid" &&
+        -s "$fixture_state/grandchild.pid"
+    ]]; then
+      launched=1
+      break
+    fi
+    if ! kill -0 "$leader_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$launched" -ne 1 ]]; then
+    kill -KILL -- "-$leader_pid" 2>/dev/null || true
+    wait "$leader_pid" 2>/dev/null || true
+    printf 'suite process-group cleanup fixture did not launch\n' >&2
+    exit 1
+  fi
+
+  terminate_suite_process_group "$leader_pid" 2
+  for role in leader child grandchild; do
+    descendant_pid="$(cat "$fixture_state/$role.pid")"
+    exited=0
+    for _ in {1..100}; do
+      if ! kill -0 "$descendant_pid" 2>/dev/null; then
+        exited=1
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$exited" -ne 1 ]]; then
+      kill -KILL "$descendant_pid" 2>/dev/null || true
+      printf 'suite process-group descendant survived cleanup: %s (%s)\n' \
+        "$role" "$descendant_pid" >&2
+      exit 1
+    fi
+  done
+}
+
+run_suite_wrapper_signal_regression() {
+  local fixture_state="$tmp_dir/suite-wrapper-signal-state"
+  local registration_marker="$fixture_state/registration-window"
+  local nested_stdout="$fixture_state/suite.stdout"
+  local nested_stderr="$fixture_state/suite.stderr"
+  local suite_pid
+  local suite_status
+  local descendant_pid
+  local exited
+  local launched=0
+  mkdir "$fixture_state"
+
+  AUTOREVIEW_TEST_FOCUS=suite \
+    AUTOREVIEW_TEST_SUITE_SIGNAL_FIXTURE=1 \
+    AUTOREVIEW_TEST_SUITE_FIXTURE_STATE="$fixture_state" \
+    AUTOREVIEW_TEST_SUITE_REGISTRATION_MARKER="$registration_marker" \
+    /bin/bash "${BASH_SOURCE[0]}" --jobs 1 \
+      >"$nested_stdout" 2>"$nested_stderr" &
+  suite_pid=$!
+  for _ in {1..200}; do
+    if [[ -s "$registration_marker" && -s "$fixture_state/ready" ]]; then
+      launched=1
+      break
+    fi
+    if ! kill -0 "$suite_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$launched" -ne 1 ]]; then
+    kill -TERM "$suite_pid" 2>/dev/null || true
+    wait "$suite_pid" 2>/dev/null || true
+    printf 'nested suite did not reach its wrapper registration window\n' >&2
+    cat "$nested_stdout" >&2
+    cat "$nested_stderr" >&2
+    if [[ -f "$fixture_state/worker.stderr" ]]; then
+      cat "$fixture_state/worker.stderr" >&2
+    fi
+    for role in entered worker reviewer ready; do
+      if [[ -f "$fixture_state/$role.pid" ]]; then
+        printf '%s pid: %s\n' "$role" "$(cat "$fixture_state/$role.pid")" >&2
+      elif [[ -f "$fixture_state/$role" ]]; then
+        printf '%s marker present\n' "$role" >&2
+      fi
+    done
+    exit 1
+  fi
+
+  kill -TERM "$suite_pid"
+  set +e
+  wait "$suite_pid"
+  suite_status=$?
+  set -e
+  if [[ "$suite_status" -eq 0 ]]; then
+    printf 'nested suite exited successfully after cancellation\n' >&2
+    exit 1
+  fi
+  if [[ ! -f "$fixture_state/cleaned" ]]; then
+    printf 'nested suite killed its worker before detached-reviewer cleanup\n' >&2
+    cat "$nested_stderr" >&2
+    exit 1
+  fi
+  for role in worker reviewer; do
+    descendant_pid="$(cat "$fixture_state/$role.pid")"
+    exited=0
+    for _ in {1..100}; do
+      if ! kill -0 "$descendant_pid" 2>/dev/null; then
+        exited=1
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$exited" -ne 1 ]]; then
+      kill -KILL "$descendant_pid" 2>/dev/null || true
+      printf 'nested suite cancellation orphaned %s process: %s\n' \
+        "$role" "$descendant_pid" >&2
+      exit 1
+    fi
+  done
+}
+
 run_symlinked_node_codex_regression() {
   local review_repo="$tmp_dir/symlinked-node-codex"
   local fake_bin="$tmp_dir/symlinked-node-codex-bin"
@@ -2597,6 +3207,7 @@ run_repo_controlled_node_regression() {
   local review_repo="$tmp_dir/repo-controlled-node"
   local fake_bin="$tmp_dir/repo-controlled-node-bin"
   local marker="$tmp_dir/repo-controlled-node-ran"
+  local repo_node_test_dir="$adapter_runtime/.agent-autoreview-node-test"
   init_review_repo "$review_repo"
   printf 'base\n' >"$review_repo/README.md"
   commit_review_repo "$review_repo" init
@@ -4213,7 +4824,10 @@ CLAUDE
   chmod +x "$fake_bin/claude"
 
   AUTOREVIEW_HEARTBEAT_SECONDS=1 run_helper_with_path_in_repo "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
-  expect_stderr_contains "review still running: claude elapsed=1s pid="
+  if ! grep -Eq '^review still running: claude elapsed=[0-9]+s pid=[1-9][0-9]*$' "$stderr"; then
+    printf 'expected a well-formed Claude heartbeat\nstderr:\n%s\n' "$(cat "$stderr")" >&2
+    exit 1
+  fi
   expect_stdout_contains "autoreview clean"
 }
 
@@ -4691,72 +5305,20 @@ run_untrusted_cleanup_retention_regression() {
   rm -rf -- "$cleanup_race_staging"
 }
 
-run_default_adapter
-expect_stdout_contains "engine: local"
-expect_empty_stderr
+run_engine_isolation_family() {
+  run_requested_codex_missing_regression
+  run_claude_no_tools_regression
+  run_codex_isolation_regression
+  run_engine_signal_cleanup_regression
+  run_stdin_epipe_regression
+  run_suite_process_group_cleanup_regression
+  run_suite_wrapper_signal_regression
+  run_claude_multi_pass_regression
+  run_heartbeat_regression
+}
 
-run_default_adapter_in_clean_main
-expect_stdout_contains "autoreview target: none"
-expect_stdout_contains "branch: main"
-expect_stdout_contains "engine: local"
-expect_empty_stderr
-
-run_default_adapter_with_inline_engine
-expect_stdout_contains "engine: local"
-expect_empty_stderr
-
-test_focus="${AUTOREVIEW_TEST_FOCUS:-all}"
-case "$test_focus" in
-  engine-isolation)
-    run_claude_no_tools_regression
-    run_codex_isolation_regression
-    run_engine_signal_cleanup_regression
-    printf 'focused autoreview engine-isolation tests passed\n'
-    exit 0
-    ;;
-  signal-cleanup)
-    run_engine_signal_cleanup_regression
-    printf 'focused autoreview signal-cleanup tests passed\n'
-    exit 0
-    ;;
-  review-target-trust)
-    run_review_target_metadata_regression
-    run_trusted_helper_runtime_regression
-    run_same_checkout_explicit_helper_fail_closed_regression
-    run_same_checkout_protected_runtime_regression
-    run_nested_wrapper_fail_closed_regression
-    run_external_wrapper_source_trust_regression
-    printf 'focused autoreview target/trust tests passed\n'
-    exit 0
-    ;;
-  prepared-bundle-safety)
-    run_frozen_checklist_provenance_regression
-    run_prepared_unsupported_path_regressions
-    run_sensitive_input_regressions
-    printf 'focused autoreview prepared-bundle safety tests passed\n'
-    exit 0
-    ;;
-  cleanup-race)
-    run_untrusted_cleanup_retention_regression
-    printf 'focused autoreview cleanup-race tests passed\n'
-    exit 0
-    ;;
-  adapter | all) ;;
-  *)
-    printf 'unknown AUTOREVIEW_TEST_FOCUS: %s\n' "$AUTOREVIEW_TEST_FOCUS" >&2
-    exit 2
-    ;;
-esac
-
-if [[ "$test_focus" == "adapter" || "$test_focus" == "all" ]]; then
-  run_same_checkout_explicit_helper_fail_closed_regression
-  run_same_checkout_protected_runtime_regression
-  run_nested_wrapper_fail_closed_regression
-  run_external_wrapper_source_trust_regression
-fi
-
-if [[ "$test_focus" == "all" ]]; then
-  run_parallel_tests_removed_regression
+run_target_selection_family() {
+  run_core_target_node_tests
   run_review_target_metadata_regression
   run_branch_diff_check_regression
   run_local_deleted_reference_regression
@@ -4767,12 +5329,6 @@ if [[ "$test_focus" == "all" ]]; then
   run_branch_local_diff_check_fixed_regression
   run_branch_local_deleted_reference_regression
   run_branch_local_deleted_reference_fixed_regression
-  run_requested_codex_missing_regression
-  run_claude_no_tools_regression
-  run_codex_isolation_regression
-  run_engine_signal_cleanup_regression
-  run_symlinked_node_codex_regression
-  run_repo_controlled_node_regression
   run_pr_base_detection_regression
   run_target_selection_drift_regression
   run_dry_run_unresolved_ref_regression
@@ -4782,25 +5338,85 @@ if [[ "$test_focus" == "all" ]]; then
   run_mode_source_drift_regression
   run_branch_identity_source_drift_regression
   run_explicit_snapshot_scope_regression
+  run_git_replace_ref_regression
+}
+
+run_runtime_trust_family() {
+  run_same_checkout_explicit_helper_fail_closed_regression
+  run_same_checkout_protected_runtime_regression
+  run_nested_wrapper_fail_closed_regression
+  run_external_wrapper_source_trust_regression
+  run_symlinked_node_codex_regression
+  run_repo_controlled_node_regression
+  run_trusted_helper_runtime_regression
+  run_hostile_git_path_regression
+  run_unsafe_script_fallback_regressions
+  run_privileged_shebang_startup_regression
+  run_hostile_volta_environment_regression
+}
+
+run_bundle_integrity_family() {
   run_frozen_checklist_provenance_regression
   run_prepared_unsupported_path_regressions
   run_frozen_checklist_symlink_regression
-  run_git_replace_ref_regression
-  run_trusted_helper_runtime_regression
   run_prepared_untracked_symlink_regression
   run_feedback_runtime_aggregate_regression
   run_large_untracked_bound_regression
   run_aggregate_untracked_bound_regression
   run_bundle_output_deferred_regression
-  run_claude_multi_pass_regression
-  run_heartbeat_regression
-  run_hostile_git_path_regression
-  run_unsafe_script_fallback_regressions
-  run_privileged_shebang_startup_regression
-  run_hostile_volta_environment_regression
   run_sensitive_input_regressions
   run_attested_untracked_serializer_regression
-fi
+  run_untrusted_cleanup_retention_regression
+}
+
+verify_canonical_family_partition() {
+  local definitions="$tmp_dir/canonical-regression-definitions"
+  local assignments="$tmp_dir/canonical-regression-assignments"
+  local duplicate_assignments="$tmp_dir/canonical-regression-duplicates"
+  local source_file="${BASH_SOURCE[0]}"
+
+  sed -nE \
+    's/^(run_[a-zA-Z0-9_]+_regressions?)\(\) \{$/\1/p' \
+    "$source_file" | LC_ALL=C sort >"$definitions"
+  awk '
+    /^run_(engine_isolation|target_selection|runtime_trust|bundle_integrity|adapter)_family\(\) \{/ {
+      in_family = 1
+      next
+    }
+    /^test_focus=/ { in_family = 0 }
+    in_family && $1 ~ /^run_[a-zA-Z0-9_]+_regressions?$/ { print $1 }
+  ' "$source_file" >"$assignments"
+  LC_ALL=C sort "$assignments" | uniq -d >"$duplicate_assignments"
+  if [[ -s "$duplicate_assignments" ]]; then
+    printf 'autoreview regressions assigned to multiple canonical families:\n' >&2
+    cat "$duplicate_assignments" >&2
+    exit 1
+  fi
+  LC_ALL=C sort "$assignments" -o "$assignments"
+  if ! cmp -s "$definitions" "$assignments"; then
+    printf 'canonical autoreview family partition differs from regression definitions:\n' >&2
+    diff -u "$definitions" "$assignments" >&2 || true
+    exit 1
+  fi
+}
+
+run_adapter_family() {
+  run_adapter_help_contract
+  run_parallel_tests_removed_regression
+
+  run_default_adapter
+  expect_stdout_contains "engine: local"
+  expect_empty_stderr
+
+  run_default_adapter_in_clean_main
+  expect_stdout_contains "autoreview target: none"
+  expect_stdout_contains "branch: main"
+  expect_stdout_contains "engine: local"
+  expect_empty_stderr
+
+  run_default_adapter_with_inline_engine
+  expect_stdout_contains "engine: local"
+  expect_empty_stderr
 
 run_adapter CODEX_SANDBOX=seatbelt --dry-run
 expect_args $'--engine\nlocal\n--dry-run'
@@ -5355,8 +5971,6 @@ if [[ "$(/usr/bin/uname -s)" == "Darwin" ]]; then
     exit 1
   fi
 fi
-
-run_untrusted_cleanup_retention_regression
 
 staging_swap_bundle="$tmp_dir/context-bundle-staging-swap"
 run_adapter_expect_failure \
@@ -5941,12 +6555,27 @@ if [[ -e "$failed_pr_lookup_bundle" ]]; then
   exit 1
 fi
 
-run_adapter_expect_failure --prepare-bundle-dir "$repo_root/.autoreview-bundle" --mode branch --base HEAD
+in_repo_bundle_review_repo="$tmp_dir/in-repo-bundle-review-repo"
+init_review_repo "$in_repo_bundle_review_repo"
+printf 'base\n' >"$in_repo_bundle_review_repo/README.md"
+commit_review_repo "$in_repo_bundle_review_repo" init
+(
+  cd "$in_repo_bundle_review_repo"
+  run_adapter_expect_failure \
+    --prepare-bundle-dir "$in_repo_bundle_review_repo/.autoreview-bundle" \
+    --mode branch \
+    --base HEAD
+)
 expect_stderr_contains "must be outside the repo worktree"
 
-nested_in_repo_parent="$repo_root/.autoreview-test-parent"
-rm -rf "$nested_in_repo_parent"
-run_adapter_expect_failure --prepare-bundle-dir "$nested_in_repo_parent/review" --mode branch --base HEAD
+nested_in_repo_parent="$in_repo_bundle_review_repo/.autoreview-test-parent"
+(
+  cd "$in_repo_bundle_review_repo"
+  run_adapter_expect_failure \
+    --prepare-bundle-dir "$nested_in_repo_parent/review" \
+    --mode branch \
+    --base HEAD
+)
 expect_stderr_contains "must be outside the repo worktree"
 if [[ -e "$nested_in_repo_parent" ]]; then
   printf 'expected rejected in-repo bundle parent not to be created: %s\n' "$nested_in_repo_parent" >&2
@@ -6036,10 +6665,77 @@ subdir_bundle="$tmp_dir/context-bundle-subdir"
 (cd "$repo_root/scripts" && run_adapter --prepare-bundle-dir "$subdir_bundle" --mode branch --base HEAD)
 expect_file_contains "$capture.cwd" "$repo_root"
 
+untracked_review_repo="$tmp_dir/untracked-review-repo"
+init_review_repo "$untracked_review_repo"
+printf 'base\n' >"$untracked_review_repo/README.md"
+commit_review_repo "$untracked_review_repo" init
+repo_untracked="$untracked_review_repo/untracked-review-body.txt"
 printf 'untracked review body\n' >"$repo_untracked"
 untracked_bundle="$tmp_dir/context-bundle-untracked"
 canonical_untracked_bundle="$(cd "$(dirname "$untracked_bundle")" && pwd -P)/$(basename "$untracked_bundle")"
-run_adapter --prepare-bundle-dir "$untracked_bundle" --mode local
+(
+  cd "$untracked_review_repo"
+  run_adapter --prepare-bundle-dir "$untracked_bundle" --mode local
+)
 expect_file_contains "$canonical_untracked_bundle/patches/untracked.diff" "untracked review body"
 
 printf 'agent-autoreview adapter tests passed\n'
+}
+
+test_focus="${AUTOREVIEW_TEST_FOCUS:-all}"
+verify_canonical_family_partition
+case "$test_focus" in
+  engine-isolation)
+    run_engine_isolation_family
+    ;;
+  target-selection)
+    run_target_selection_family
+    ;;
+  runtime-trust)
+    run_runtime_trust_family
+    ;;
+  bundle-integrity)
+    run_bundle_integrity_family
+    ;;
+  adapter)
+    run_adapter_family
+    ;;
+  all)
+    run_engine_isolation_family
+    run_target_selection_family
+    run_runtime_trust_family
+    run_bundle_integrity_family
+    run_adapter_family
+    ;;
+  signal-cleanup)
+    run_engine_signal_cleanup_regression
+    ;;
+  suite-process-cleanup)
+    run_suite_process_group_cleanup_regression
+    ;;
+  suite-wrapper-signal)
+    run_suite_wrapper_signal_regression
+    ;;
+  review-target-trust)
+    run_review_target_metadata_regression
+    run_trusted_helper_runtime_regression
+    run_same_checkout_explicit_helper_fail_closed_regression
+    run_same_checkout_protected_runtime_regression
+    run_nested_wrapper_fail_closed_regression
+    run_external_wrapper_source_trust_regression
+    ;;
+  prepared-bundle-safety)
+    run_frozen_checklist_provenance_regression
+    run_prepared_unsupported_path_regressions
+    run_sensitive_input_regressions
+    ;;
+  cleanup-race)
+    run_untrusted_cleanup_retention_regression
+    ;;
+  *)
+    printf 'unknown AUTOREVIEW_TEST_FOCUS: %s\n' "$test_focus" >&2
+    exit 2
+    ;;
+esac
+
+printf 'focused autoreview %s tests passed\n' "$test_focus"

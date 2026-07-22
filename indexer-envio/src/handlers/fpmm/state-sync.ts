@@ -248,6 +248,11 @@ indexer.onEvent(
     // between sequential handlers, manifesting as breach rows closing
     // with `endedByEvent = "unknown"` even when a Rebalanced event fired
     // right after the UR handlers in the same tx. See `maybePreloadPool`.
+    // preload-handler-note: ordered same-tx Pool writes must reach later events.
+    // Preload-safe redesign is tracked in #1394.
+    // preload-effect-helpers: selfHealInvertRateFeed, selfHealTokenDecimals
+    // preload-effect-helpers: selfHealRebalanceThresholds, resolveRebalanceState
+    // preload-effect-helpers: upsertPool
     if (await maybePreloadPool(context, poolId)) return;
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
@@ -425,6 +430,11 @@ indexer.onEvent(
     // because FPMM emits 2× UR + 1× Rebalanced in the same rebalance tx
     // and we need sequential in-batch state visibility so Rebalanced sees
     // the anchor UR held.
+    // preload-handler-note: ordered same-tx Pool writes must reach this event.
+    // Preload-safe redesign is tracked in #1394.
+    // preload-effect-helpers: selfHealInvertRateFeed, selfHealTokenDecimals
+    // preload-effect-helpers: selfHealRebalanceThresholds, resolveRebalanceState
+    // preload-effect-helpers: upsertPool
     if (await maybePreloadPool(context, poolId)) return;
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
@@ -477,6 +487,7 @@ indexer.onEvent(
       blockNumber,
     });
     const preReservesPromise = preReservesOrFallback(txScopedPreReserves, () =>
+      // preload-effect-exempt: ordered same-tx reserves are required; see #1394.
       context.effect(reservesEffect, {
         chainId: event.chainId,
         poolAddress: asAddress(event.srcAddress),
@@ -503,7 +514,8 @@ indexer.onEvent(
         // above — propagate the sentinel so `normalizeRewardBps` sees it.
         incentiveGetterMissing
           ? Promise.resolve(-2)
-          : context.effect(rebalanceIncentiveAtBlockEffect, {
+          : // preload-effect-exempt: block-scoped reward follows ordered Pool state; see #1394.
+            context.effect(rebalanceIncentiveAtBlockEffect, {
               chainId: event.chainId,
               poolAddress: asAddress(event.srcAddress),
               blockNumber,

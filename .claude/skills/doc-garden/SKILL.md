@@ -5,7 +5,7 @@ title: Documentation Garden Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-19
+last_verified: 2026-07-21
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -18,6 +18,12 @@ Garden one bounded packet without treating age or deterministic warnings as
 semantic conclusions. The canonical policy, lanes, shard limits, and
 dispositions live in `docs/notes/documentation-gardening.md`; read it before
 editing.
+
+The recurring planner derives the weekly packet from the UTC Monday week and
+current catalog: it rotates across six lanes, advances that lane's shard on its
+next rotation, and caps normal shards at 10 documents and 15,000 source words.
+The generated issue freezes the selected lane, shard, fingerprint, and file
+list for review.
 
 ## Establish The Packet
 

@@ -3,7 +3,7 @@ title: Recurring PR Review Patterns
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-16
+last_verified: 2026-07-21
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -67,8 +67,11 @@ tldr: roving `tabIndex` follows FOCUS not `selected` (track `focusedIndex` local
 tldr: RPC caches are bounded; multi-getter effects preserve partial wins and
 distinct retry/unsupported sentinels; median-derived values require the full
 freshness gate; heal stages widen every downstream predicate/query and retry
-partial side effects; handler tests mock every reachable RPC path. Entity IDs,
-rollups, environment parsing, and Vitest bridge rules live in the linked
+partial side effects; direct effects must preload the identical key before a
+positive preload return and before entity-dependent early returns, or carry a
+bounded-cardinality exemption enforced by the blocking AST invariant; handler
+tests mock every reachable RPC path. Entity
+IDs, rollups, environment parsing, and Vitest bridge rules live in the linked
 checklist.
 
 ### Terraform + Cloud Run — `docs/pr-checklists/terraform-cloudrun.md`

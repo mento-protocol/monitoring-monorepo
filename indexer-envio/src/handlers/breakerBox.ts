@@ -43,6 +43,8 @@ indexer.onEvent(
   async ({ event, context }) => {
     const breakerAddress = asAddress(event.params.breaker);
     const breakerId = makeBreakerId(event.chainId, breakerAddress);
+    // preload-handler-note: breaker registration is a bounded lifecycle event whose bootstrap follows ordered Breaker state.
+    // preload-effect-helpers: ensureBreaker
     if (await maybePreloadBreaker(context, breakerId)) return;
     await ensureBreaker(
       context,
@@ -105,6 +107,8 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
+    // preload-handler-note: breaker enablement is bounded configuration whose bootstrap follows ordered Breaker state.
+    // preload-effect-helpers: ensureBreaker, ensureBreakerConfig
     if (await maybePreloadBreaker(context, breakerId)) return;
 
     const breaker = await ensureBreaker(
@@ -175,6 +179,8 @@ indexer.onEvent(
   { contract: "BreakerBox", event: "RateFeedDependenciesSet" },
   async ({ event, context }) => {
     // Feed-scoped event — no single breaker entity to preload; bail in preload.
+    // preload-handler-note: dependency replacement is a bounded configuration event.
+    // preload-effect-helpers: loadFeedDependencies
     if (context.isPreload) return;
     const rateFeedID = asAddress(event.params.rateFeedID);
     await loadFeedDependencies({
@@ -203,6 +209,8 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
+    // preload-handler-note: trip transitions need ordered Breaker state; RPC bootstrap is cold-start-bounded.
+    // preload-effect-helpers: ensureBreaker, ensureBreakerConfig
     if (await maybePreloadBreaker(context, breakerId)) return;
 
     const breaker = await ensureBreaker(
@@ -278,6 +286,8 @@ indexer.onEvent(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
+    // preload-handler-note: reset transitions need ordered trip state; RPC bootstrap is cold-start-bounded.
+    // preload-effect-helpers: ensureBreaker, ensureBreakerConfig
     if (await maybePreloadBreaker(context, breakerId)) return;
 
     const breaker = await ensureBreaker(
@@ -326,6 +336,8 @@ indexer.onEvent(
     // Feed-scoped event — there is no single breaker-id to preload, so just
     // bail during the preload phase. Mirrors the explicit `if (isPreload) return;`
     // guard the other BreakerBox handlers get for free via maybePreloadBreaker.
+    // preload-handler-note: owner trading-mode overrides are bounded configuration events.
+    // preload-effect-helpers: bootstrapFeedBreakerConfigs
     if (context.isPreload) return;
 
     const rateFeedID = asAddress(event.params.rateFeedID);
