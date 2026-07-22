@@ -54,6 +54,13 @@ reproducible after later documentation edits. Self-reported scores are never
 trusted. CI and the monthly scheduler both reject a missing, malformed, or
 failing committed baseline before treating it as completion evidence.
 
+`sources_requiring_verification` entries are historical qualification traps,
+not live routes. A trap may remain in the immutable fixture after its document
+is retired only when the evaluator explicitly lists that path as a tombstone;
+every other missing path fails fixture validation. The trap applies only when
+an evaluated agent actually loads that path at the result's pinned commit. Its
+`verify_against` targets must remain current canonical authority.
+
 ## Run locally
 
 Validate the deterministic contract first:

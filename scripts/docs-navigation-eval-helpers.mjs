@@ -33,6 +33,10 @@ const ISSUE_LABELS = [
   "risk:low",
 ];
 const NAVIGATION_EVAL_OWNERSHIP_LABEL = "source:audit";
+const RETIRED_VERIFICATION_SOURCE_TOMBSTONES = new Set([
+  // Retained by the immutable pre-garden fixture after issue #1442 deleted it.
+  "docs/PLAN-celo-mainnet-indexer.md",
+]);
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -237,14 +241,39 @@ export function validateFixtureSuite(suite, inventory) {
       );
     } else {
       for (const source of question.sources_requiring_verification) {
-        const sourceRecord = records.get(source?.path);
-        if (!sourceRecord) {
+        const sourcePath = source?.path;
+        const hasValidSourcePath =
+          typeof sourcePath === "string" &&
+          sourcePath.length > 0 &&
+          !sourcePath.startsWith("/") &&
+          !sourcePath.includes("\\") &&
+          sourcePath
+            .split("/")
+            .every(
+              (segment) =>
+                segment.length > 0 && segment !== "." && segment !== "..",
+            ) &&
+          sourcePath.endsWith(".md");
+        if (!hasValidSourcePath) {
           errors.push(
-            `question ${question.id} verification source is missing: ${source?.path}`,
+            `question ${question.id} verification source has an invalid path`,
           );
-        } else if (sourceRecord.authority === "canonical") {
+        }
+        const sourceRecord = hasValidSourcePath
+          ? records.get(sourcePath)
+          : null;
+        if (
+          hasValidSourcePath &&
+          !sourceRecord &&
+          !RETIRED_VERIFICATION_SOURCE_TOMBSTONES.has(sourcePath)
+        ) {
           errors.push(
-            `question ${question.id} verification source is already canonical: ${source.path}`,
+            `question ${question.id} verification source is missing: ${sourcePath}`,
+          );
+        }
+        if (sourceRecord?.authority === "canonical") {
+          errors.push(
+            `question ${question.id} verification source is already canonical: ${sourcePath}`,
           );
         }
         if (
