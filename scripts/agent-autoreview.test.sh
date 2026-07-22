@@ -3,9 +3,53 @@ if [[ "${AUTOREVIEW_TEST_SYSTEM_BASH:-}" != "1" && -x /bin/bash ]]; then
   export AUTOREVIEW_TEST_SYSTEM_BASH=1
   exec /bin/bash "$0" "$@"
 fi
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
 unset SSL_CERT_DIR
+
+report_unexpected_test_failure() {
+  local status="$1"
+  local line="$2"
+  local case_name="bootstrap"
+  local frame
+  local source="${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}"
+
+  # ERR also fires while errexit is deliberately disabled around expected
+  # failures. Keep those paths quiet and report only commands that would abort
+  # a family under the suite's fail-fast contract.
+  case "$-" in
+    *e*) ;;
+    *) return 0 ;;
+  esac
+
+  for frame in "${FUNCNAME[@]:1}"; do
+    case "$frame" in
+      run_*_regression | run_*_regressions)
+        case_name="$frame"
+        break
+        ;;
+    esac
+  done
+  if [[ "$case_name" == "bootstrap" ]]; then
+    for frame in "${FUNCNAME[@]:1}"; do
+      case "$frame" in
+        run_*)
+          case_name="$frame"
+          break
+          ;;
+      esac
+    done
+  fi
+
+  printf 'AUTOREVIEW_TEST_FAILURE focus=%s case=%s status=%s source=%s line=%s\n' \
+    "${AUTOREVIEW_TEST_FOCUS:-all}" \
+    "$case_name" \
+    "$status" \
+    "${source##*/}" \
+    "$line" >&2
+  return 0
+}
+trap 'report_unexpected_test_failure "$?" "$LINENO"' ERR
 
 suite_tmp_dir=""
 suite_child_pids=()
@@ -316,6 +360,19 @@ run_autoreview_test_suite() {
     done
   }
 
+  report_failed_family() {
+    local family="$1"
+    local status
+    status="$(cat "$suite_tmp_dir/$family.status")"
+    printf '\n===== autoreview family failed: %s =====\n' "$family" >&2
+    printf 'AUTOREVIEW_TEST_FAILURE family=%s status=%s elapsed=%ss rerun="AUTOREVIEW_TEST_FOCUS=%s bash scripts/agent-autoreview.test.sh"\n' \
+      "$family" \
+      "$status" \
+      "$(cat "$suite_tmp_dir/$family.elapsed")" \
+      "$family" >&2
+    cat "$suite_tmp_dir/$family.log" >&2
+  }
+
   if [[ "${AUTOREVIEW_TEST_SUITE_SIGNAL_FIXTURE:-}" == "1" ]]; then
     run_suite_family_group 1 suite-wrapper-fixture
     if [[ "$(cat "$suite_tmp_dir/suite-wrapper-fixture.status")" != "0" ]]; then
@@ -323,6 +380,28 @@ run_autoreview_test_suite() {
     fi
     printf 'suite wrapper signal fixture exited without cancellation\n' >&2
     return 1
+  fi
+
+  if [[ "${AUTOREVIEW_TEST_SUITE_DIAGNOSTIC_FIXTURE:-}" == "1" ]]; then
+    run_suite_family_group 1 family-diagnostic-fixture
+    local diagnostic_status
+    diagnostic_status="$(cat "$suite_tmp_dir/family-diagnostic-fixture.status")"
+    if [[ "$diagnostic_status" != "1" ]]; then
+      cat "$suite_tmp_dir/family-diagnostic-fixture.log" >&2
+      printf 'expected diagnostic fixture status 1, got %s\n' \
+        "$diagnostic_status" >&2
+      return 1
+    fi
+    if ! grep -Fq \
+      'AUTOREVIEW_TEST_FAILURE focus=family-diagnostic-fixture case=run_family_diagnostic_fixture status=1' \
+      "$suite_tmp_dir/family-diagnostic-fixture.log"; then
+      cat "$suite_tmp_dir/family-diagnostic-fixture.log" >&2
+      printf 'family failure log omitted the actionable case diagnostic\n' >&2
+      return 1
+    fi
+    report_failed_family family-diagnostic-fixture
+    printf 'autoreview suite family diagnostics passed\n'
+    return 0
   fi
 
   # Engine lifecycle and signal assertions are timing-sensitive, so this family
@@ -354,8 +433,7 @@ run_autoreview_test_suite() {
       engine-isolation target-selection runtime-trust bundle-integrity adapter; do
       status="$(cat "$suite_tmp_dir/$family.status")"
       if [[ "$status" != "0" ]]; then
-        printf '\n===== autoreview family failed: %s =====\n' "$family" >&2
-        cat "$suite_tmp_dir/$family.log" >&2
+        report_failed_family "$family"
       fi
     done
     return 1
@@ -363,6 +441,34 @@ run_autoreview_test_suite() {
 
   printf 'autoreview test suite passed in %ss with jobs=%s\n' \
     "$(( $(date +%s) - suite_started_at ))" "$jobs"
+}
+
+run_family_diagnostic_fixture() {
+  false
+}
+
+run_suite_family_diagnostic_regression() {
+  local nested_stdout="$tmp_dir/suite-family-diagnostic.stdout"
+  local nested_stderr="$tmp_dir/suite-family-diagnostic.stderr"
+
+  if ! AUTOREVIEW_TEST_FOCUS=suite \
+    AUTOREVIEW_TEST_SUITE_DIAGNOSTIC_FIXTURE=1 \
+    /bin/bash "${BASH_SOURCE[0]}" --jobs 1 \
+      >"$nested_stdout" 2>"$nested_stderr"; then
+    printf 'nested suite family diagnostic regression failed\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$nested_stdout")" \
+      "$(cat "$nested_stderr")" >&2
+    exit 1
+  fi
+  expect_file_contains \
+    "$nested_stdout" \
+    "autoreview suite family diagnostics passed"
+  expect_file_contains \
+    "$nested_stderr" \
+    "AUTOREVIEW_TEST_FAILURE family=family-diagnostic-fixture status=1"
+  expect_file_contains \
+    "$nested_stderr" \
+    "AUTOREVIEW_TEST_FAILURE focus=family-diagnostic-fixture case=run_family_diagnostic_fixture status=1"
 }
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -463,6 +569,36 @@ mkdir "$trusted_test_node_dir"
 ln -s "$node_exec_path" "$trusted_test_node_dir/node"
 PATH="$trusted_test_node_dir:$PATH"
 export PATH
+
+# Make ambient GitHub and semantic CLIs actively hostile. Every fixture that
+# needs gh, Claude, or Codex must put its own executable ahead of these
+# sentinels; missing-tool fixtures use a deliberately bounded PATH instead.
+ambient_external_tool_bin="$tmp_dir/ambient-external-tool-bin"
+ambient_external_tool_log="$tmp_dir/ambient-external-tool.log"
+mkdir "$ambient_external_tool_bin"
+for ambient_external_tool in gh claude codex; do
+  cat >"$ambient_external_tool_bin/$ambient_external_tool" <<TOOL
+#!/bin/bash
+printf '%s\n' '$ambient_external_tool' >>'$ambient_external_tool_log'
+printf 'unexpected ambient $ambient_external_tool fixture executed\n' >&2
+exit 97
+TOOL
+  chmod +x "$ambient_external_tool_bin/$ambient_external_tool"
+done
+PATH="$trusted_test_node_dir:$ambient_external_tool_bin:$PATH"
+export PATH
+
+hermetic_git_bin="$tmp_dir/hermetic-git-bin"
+mkdir "$hermetic_git_bin"
+ln -s /usr/bin/git "$hermetic_git_bin/git"
+
+assert_no_ambient_external_tool_use() {
+  if [[ -s "$ambient_external_tool_log" ]]; then
+    printf 'autoreview fixture reached ambient external-tool sentinels:\n%s\n' \
+      "$(cat "$ambient_external_tool_log")" >&2
+    exit 1
+  fi
+}
 
 terminal_manifest_node_dir="$tmp_dir/terminal-manifest-node"
 terminal_manifest_node="$terminal_manifest_node_dir/node"
@@ -1001,7 +1137,10 @@ expect_capture_not_contains_line() {
 expect_stderr_contains() {
   local expected="$1"
   if ! grep -Fq -- "$expected" "$stderr"; then
-    printf 'expected stderr to contain %s\nstderr:\n%s\n' "$expected" "$(cat "$stderr")" >&2
+    printf 'expected stderr to contain %s\nstdout:\n%s\nstderr:\n%s\n' \
+      "$expected" \
+      "$(cat "$stdout")" \
+      "$(cat "$stderr")" >&2
     exit 1
   fi
 }
@@ -1009,7 +1148,10 @@ expect_stderr_contains() {
 expect_stdout_contains() {
   local expected="$1"
   if ! grep -Fq -- "$expected" "$stdout"; then
-    printf 'expected stdout to contain %s\nstdout:\n%s\n' "$expected" "$(cat "$stdout")" >&2
+    printf 'expected stdout to contain %s\nstdout:\n%s\nstderr:\n%s\n' \
+      "$expected" \
+      "$(cat "$stdout")" \
+      "$(cat "$stderr")" >&2
     exit 1
   fi
 }
@@ -1532,7 +1674,7 @@ run_node_helper_in_repo_expect_failure() {
   (
     cd "$review_repo"
     env -i \
-      "PATH=/bin:/usr/bin" \
+      "PATH=$hermetic_git_bin" \
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
       "GIT_CONFIG_GLOBAL=/dev/null" \
@@ -1901,10 +2043,12 @@ if [[ -n "${AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE:-}" ]]; then
     >"$AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE"
 fi
 if [[ "${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -2499,20 +2643,24 @@ function captureAndHang() {
   );
   setInterval(() => {}, 1000);
 }
+function completeCapabilityProbe(output) {
+  process.stdin.once("end", () => {
+    process.stdout.write(output);
+  });
+  process.stdin.resume();
+}
 if (
   process.argv[2] === "--version" &&
   !process.env.AUTOREVIEW_FAKE_HANG_CLAUDE_PROBE
 ) {
-  process.stdout.write("2.1.210\n");
-  process.exit(0);
-}
-if (process.argv[2] === "--help") {
-  process.stdout.write(
+  completeCapabilityProbe("2.1.210\n");
+} else if (process.argv[2] === "--help") {
+  completeCapabilityProbe(
     "--safe-mode\n--setting-sources\n--strict-mcp-config\n--disallowedTools\n--tools\n",
   );
-  process.exit(0);
+} else {
+  captureAndHang();
 }
-captureAndHang();
 CLAUDE
   cat >"$fake_bin/codex" <<'CODEX'
 #!/usr/bin/env node
@@ -3389,10 +3537,12 @@ run_dirty_source_drift_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -3422,10 +3572,12 @@ run_untracked_churn_scope_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -3462,10 +3614,12 @@ run_index_source_drift_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -3504,10 +3658,12 @@ run_mode_source_drift_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -3554,10 +3710,12 @@ run_branch_identity_source_drift_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -4688,10 +4846,12 @@ run_bundle_output_deferred_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -4726,10 +4886,12 @@ run_claude_multi_pass_regression() {
 #!/usr/bin/env bash
 printf 'invoked\n' >"$AUTOREVIEW_FAKE_CAPTURE.invoked"
 if [[ "${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -4808,10 +4970,12 @@ run_heartbeat_regression() {
   cat >"$fake_bin/claude" <<'CLAUDE'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -5307,6 +5471,7 @@ run_untrusted_cleanup_retention_regression() {
 
 run_engine_isolation_family() {
   run_requested_codex_missing_regression
+  run_suite_family_diagnostic_regression
   run_claude_no_tools_regression
   run_codex_isolation_regression
   run_engine_signal_cleanup_regression
@@ -6302,21 +6467,30 @@ if [[ -e "$prepared_target_drift_bundle" ]]; then
 fi
 git -C "$pr_base_repo" switch feature >/dev/null 2>&1
 
-no_gh_bin="$tmp_dir/no-gh-bin"
-no_gh_bundle="$tmp_dir/context-bundle-no-gh-feedback"
-mkdir "$no_gh_bin"
-ln -s "$node_bin" "$no_gh_bin/node"
+empty_pr_gh_bin="$tmp_dir/empty-pr-gh-bin"
+empty_pr_bundle="$tmp_dir/context-bundle-empty-pr-feedback"
+mkdir "$empty_pr_gh_bin"
+cat >"$empty_pr_gh_bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [[ "$1" == "pr" && "$2" == "list" ]]; then
+  printf '0\n'
+  exit 0
+fi
+printf 'unexpected empty-PR gh arguments: %s\n' "$*" >&2
+exit 91
+GH
+chmod +x "$empty_pr_gh_bin/gh"
 (
   cd "$pr_base_repo"
   run_adapter_expect_failure \
-    "PATH=$no_gh_bin:/usr/bin:/bin" \
-    --prepare-bundle-dir "$no_gh_bundle" \
+    "PATH=$empty_pr_gh_bin:$PATH" \
+    --prepare-bundle-dir "$empty_pr_bundle" \
     --feedback-pr auto \
     --mode branch
 )
 expect_stderr_contains "--feedback-pr auto requires exactly one open PR"
-if [[ -e "$no_gh_bundle" ]]; then
-  printf 'automatic feedback bundle was published without GitHub metadata\n' >&2
+if [[ -e "$empty_pr_bundle" ]]; then
+  printf 'automatic feedback bundle was published without an open PR\n' >&2
   exit 1
 fi
 
@@ -6685,6 +6859,9 @@ printf 'agent-autoreview adapter tests passed\n'
 test_focus="${AUTOREVIEW_TEST_FOCUS:-all}"
 verify_canonical_family_partition
 case "$test_focus" in
+  family-diagnostic-fixture)
+    run_family_diagnostic_fixture
+    ;;
   engine-isolation)
     run_engine_isolation_family
     ;;
@@ -6738,4 +6915,5 @@ case "$test_focus" in
     ;;
 esac
 
+assert_no_ambient_external_tool_use
 printf 'focused autoreview %s tests passed\n' "$test_focus"

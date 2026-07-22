@@ -64,7 +64,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-21 |
 | [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-08 |
-| [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
+| [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md) | Codex Agent Skills — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md) | Codex Cloud Setup and Maintenance | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md) | Cross-Protocol Context | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-06 |

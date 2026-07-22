@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-21
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -39,8 +39,10 @@ completion timings, so a long adversarial case does not look hung. The mapped
 local quality gate invokes this package command and preserves those progress
 and timing lines. For deterministic autoreview-runtime closeout, pass
 `-- --jobs 1`; this changes scheduling only and keeps the same full family
-coverage. Hosted-CI hermeticity remains the separate follow-up tracked in
-#1422.
+coverage. The path-filtered `Autoreview adversarial suite` job runs that same
+complete family set sequentially on `ubuntu-latest` whenever autoreview runtime
+or fixture inputs change. The required `ci` sentinel allows the job to skip for
+unrelated paths and requires it to pass whenever the path filter selects it.
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
