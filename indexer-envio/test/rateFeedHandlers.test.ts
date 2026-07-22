@@ -11,8 +11,10 @@ import { makeRateFeedId } from "../src/oracleReporters.js";
 import {
   _clearMockRateFeedOracles,
   _clearMockNumReporters,
+  _clearMockMedianTimestamps,
   _setMockRateFeedOracles,
   _setMockNumReporters,
+  _setMockMedianTimestamp,
 } from "../src/EventHandlers.ts";
 import { UNKNOWN_ORACLE_REPORTERS } from "../src/constants.js";
 import { syncRateFeedFromRpc } from "../src/handlers/rateFeed.js";
@@ -35,9 +37,15 @@ const UNKNOWN_REPORTER = "0x0000000000000000000000000000000000000001";
 const SORTED_ORACLES = "0xefb84935239dacdecf7c5ba76d8de40b077b7b33";
 
 describe("RateFeed handlers", () => {
+  beforeEach(() => {
+    _setMockMedianTimestamp(CELO, CELO_GBP_FEED, 1_700_000_000n);
+    _setMockMedianTimestamp(MONAD, MONAD_GBP_FEED, 1_700_000_000n);
+  });
+
   afterEach(() => {
     _clearMockRateFeedOracles();
     _clearMockNumReporters();
+    _clearMockMedianTimestamps();
   });
 
   it("writes chain-scoped RateFeed rows from OracleAdded", async () => {

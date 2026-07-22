@@ -76,8 +76,9 @@ exporter and degraded-mode contract.
 FPMM freshness follows `OracleAdapter` exactly: a rate remains valid until the
 SortedOracles median report timestamp plus that feed's configured expiry. Pool
 events and RPC reconciliation timestamps are diagnostic observations; they do
-not renew the feed TTL. This distinction matters for sparse Polygon FX feeds,
-including the one-year expiries used by the EURm pools.
+not renew the feed TTL. This distinction matters for the sparse Polygon
+EUROP/EUR feed, whose configured expiry is one year. The USDC/USD and EUR/USD
+feeds remain at 150 seconds.
 
 The indexer reads the median timestamp at the event block, stores it in
 `Pool.lastOracleReportAt`, and uses the prior report timestamp and prior expiry
@@ -90,8 +91,16 @@ Deploying a change to these semantics requires a full Envio resync before
 promotion. Existing rows and cumulative health counters were derived with the
 older bounded-carry approximation and cannot be repaired safely in place.
 Verify a candidate only after replay has populated positive
-`lastOracleReportAt` values for all FPMMs and the EURm Polygon pools stay healthy
-inside their configured one-year window.
+`lastOracleReportAt` values for all FPMMs and EURm/EUROP stays healthy inside
+its configured one-year window. Tracked `OracleReported` and `MedianUpdated`
+events now reject a missing exact-block median timestamp, and dRPC batches are
+capped at three calls. A historical `[RPC_FAILURE] chainId=137
+fn=medianTimestamp` on an older candidate makes that replay tainted even if its
+hosted status later reaches head; deploy a fresh commit and replay cleanly.
+The promotion verifier additionally reads the versioned
+`indexer-envio/config/replay-integrity.json` marker from the deployed commit,
+which prevents a pre-fix replay from passing solely because a later event made
+the final pool row look current.
 
 ## Alert conditions
 
@@ -127,11 +136,13 @@ Roll out in this order:
 
 1. From the reviewed PR head, deploy the multichain Envio candidate to the
    `envio` branch without promoting it.
-2. Wait for every chain to reach the hosted head. At the candidate endpoint,
+2. Wait for every chain to reach the hosted head; classify that state as
+   `SYNCED_PENDING_DATA_VERIFY`. At the candidate endpoint,
    verify the three Polygon pools, two NTT tokens, bridge handlers, and exactly
    four active Polygon strategy rows: USDC/USDm Reserve, EURm/USDm Open, plus
    EURm/EUROP Reserve and Open. Then run the repository's commit-scoped
-   deployment verifier.
+   deployment verifier. Only a passing semantic verifier makes the candidate
+   ready to promote; `--allow-syncing` never waives Polygon integrity failures.
 3. Merge the PR. This starts the metrics-bridge and Aegis production-service
    deploys and the protected Terraform workflows in parallel. Keep the
    `alerts-rules` `production-infra` approval pending.

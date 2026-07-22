@@ -2,10 +2,13 @@
 
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { summarizePolygonPools } from "./lib/polygon-deployment-semantics.mjs";
 
 const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";
 const GRAPHQL_TIMEOUT_MS = 20_000;
+const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
+const REQUIRED_POLYGON_EXACT_MEDIAN_VERSION = 1;
 
 const PROBE_TABLES = [
   "Pool",
@@ -17,6 +20,23 @@ const PROBE_TABLES = [
 
 export const PROBE_QUERY = `query VerifyIndexerRows {
   Pool(limit: 1) { id chainId source }
+  PolygonPool: Pool(
+    where: { chainId: { _eq: 137 }, source: { _eq: "fpmm_factory" } }
+    order_by: { id: asc }
+  ) {
+    id
+    source
+    referenceRateFeedID
+    lastOracleReportAt
+    oracleExpiry
+    oracleOk
+    medianLive
+    healthStatus
+    hasHealthData
+    lastOracleSnapshotTimestamp
+    healthTotalSeconds
+    healthBinarySeconds
+  }
   SusdsYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
   SusdsYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
   StethYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
@@ -173,6 +193,51 @@ function verifyGitTarget(target) {
   return result.status === 0 ? result.stdout.trim() : "";
 }
 
+function replayIntegrityFromCommit(commit) {
+  const result = spawnSync(
+    "git",
+    ["show", `${commit}:${REPLAY_INTEGRITY_PATH}`],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+  );
+  if (result.status !== 0) {
+    return {
+      value: null,
+      readError: `could not read ${REPLAY_INTEGRITY_PATH} from deployment commit ${commit}`,
+    };
+  }
+  try {
+    return { value: JSON.parse(result.stdout), readError: "" };
+  } catch (error) {
+    return {
+      value: null,
+      readError: `${REPLAY_INTEGRITY_PATH} is invalid JSON at deployment commit ${commit}: ${error.message}`,
+    };
+  }
+}
+
+export function summarizeReplayIntegrity(input) {
+  const observedVersion = Number(
+    input?.value?.polygonExactMedianTimestamp ?? 0,
+  );
+  const failures = [];
+  if (input?.readError) failures.push(input.readError);
+  if (
+    !Number.isSafeInteger(observedVersion) ||
+    observedVersion < REQUIRED_POLYGON_EXACT_MEDIAN_VERSION
+  ) {
+    failures.push(
+      `deployment predates Polygon exact-median replay integrity v${REQUIRED_POLYGON_EXACT_MEDIAN_VERSION}`,
+    );
+  }
+  return {
+    ok: failures.length === 0,
+    markerPath: REPLAY_INTEGRITY_PATH,
+    requiredVersion: REQUIRED_POLYGON_EXACT_MEDIAN_VERSION,
+    observedVersion,
+    failures,
+  };
+}
+
 function deploymentsFromIndexer(indexerJson) {
   return [...(indexerJson.data?.deployments ?? [])].sort((a, b) =>
     String(b.created_time ?? "").localeCompare(String(a.created_time ?? "")),
@@ -310,9 +375,16 @@ export function buildSummary({
   statusJson,
   metricsJson,
   graphqlJson,
+  nowSeconds,
+  replayIntegrityInput,
 }) {
   const sync = summarizeStatus(statusJson);
   const probe = summarizeProbe(graphqlJson);
+  const replayIntegrity = summarizeReplayIntegrity(replayIntegrityInput);
+  const polygon = summarizePolygonPools(
+    graphqlJson.data?.PolygonPool,
+    nowSeconds,
+  );
   const failures = [];
 
   if (!args.allowSyncing && !sync.allSynced) {
@@ -330,6 +402,8 @@ export function buildSummary({
       );
     }
   }
+  failures.push(...replayIntegrity.failures);
+  failures.push(...polygon.failures);
 
   return {
     ok: failures.length === 0,
@@ -343,6 +417,8 @@ export function buildSummary({
     sync,
     metrics: metricSummary(metricsJson),
     probe,
+    replayIntegrity,
+    polygon,
     failures,
   };
 }
@@ -385,6 +461,17 @@ export function renderText(summary) {
   for (const [table, count] of Object.entries(summary.probe.rowCounts)) {
     lines.push(`  ${table}: ${count}`);
   }
+  lines.push("");
+  lines.push("Replay integrity contract:");
+  lines.push(
+    `  Polygon exact median: v${summary.replayIntegrity.observedVersion}/v${summary.replayIntegrity.requiredVersion}`,
+  );
+  lines.push("");
+  lines.push("Polygon replay semantics:");
+  lines.push(
+    `  FPMMs: ${summary.polygon.actualCount}/${summary.polygon.expectedCount}`,
+  );
+  lines.push(`  semantic integrity: ${summary.polygon.ok ? "yes" : "no"}`);
 
   if (summary.failures.length > 0) {
     lines.push("");
@@ -405,12 +492,12 @@ function printUsage() {
   pnpm deploy:indexer:verify <commit> --prod [--json]
 
 Checks a registered Envio deployment by fetching status, metrics, a GraphQL
-endpoint, and a small row probe for core Pool and reserve-yield tables.
+endpoint, core rows, and fail-closed Polygon replay semantics.
 
 Options:
   --prod           Probe the static production endpoint and require <commit> to be prod.
   --allow-syncing  Do not fail solely because one or more chains are still syncing.
-                   Empty GraphQL probe tables remain a failure.
+                   Empty rows and Polygon semantic failures remain failures.
   --json, -j       Print machine-readable summary JSON.
 `);
 }
@@ -470,6 +557,9 @@ async function main() {
     deployment.commit_hash,
     ENVIO_ORG,
   ]);
+  const replayIntegrityInput = replayIntegrityFromCommit(
+    deployment.commit_hash,
+  );
   const graphqlJson = await queryGraphql(endpoint);
   const summary = buildSummary({
     args,
@@ -479,6 +569,7 @@ async function main() {
     statusJson,
     metricsJson,
     graphqlJson,
+    replayIntegrityInput,
   });
 
   if (args.json) {
