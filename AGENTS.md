@@ -137,6 +137,11 @@ Every PR description starts with `## The Problem` followed by
 solution explains the approach before implementation detail. The checked-in
 template, validator, and `ship` skill own the complete format.
 
+Open PRs ready for review, never as drafts. This binds every agent surface —
+including hosted sessions whose platform default is draft. Use draft only when
+the user explicitly asks for one or required validation is intentionally still
+pending, and state that reason in the PR body.
+
 ## Deferral rule
 
 Knowingly deferred work requires a GitHub issue before posting the deferral
