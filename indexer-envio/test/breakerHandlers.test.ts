@@ -21,6 +21,7 @@ import {
   makeRateFeedDependencyId,
 } from "../src/breakers.ts";
 import { makePoolId } from "../src/helpers.ts";
+import { bootstrapOracleFeedState } from "../src/oracleFeedState.ts";
 import { makePool } from "./helpers/makePool.js";
 import { registerMockRateFeedDependenciesHttp } from "../src/rpc/http-test-mock-bridge.js";
 
@@ -28,6 +29,7 @@ type MockDb = MockDbWith<{
   Breaker: WritableEntity;
   BreakerConfig: WritableEntity;
   BreakerTripEvent: EntityReader;
+  OracleFeedState: WritableEntity;
   Pool: WritableEntity;
   RateFeedDependency: WritableEntity;
 }>;
@@ -45,6 +47,19 @@ const DEP_FEED = "0xa1a8003936862e7a15092a91898d69fa8bce290c";
 
 const COOLDOWN = 900n; // 15 min — production value
 const THRESHOLD = 4n * 10n ** 22n; // 4% Fixidity
+
+function seedOracleFeedState(mockDb: MockDb, throughBlock: bigint): MockDb {
+  return mockDb.entities.OracleFeedState.set(
+    bootstrapOracleFeedState({
+      chainId: CHAIN_ID,
+      rateFeedID: FEED,
+      reporters: ["0x00000000000000000000000000000000000000aa"],
+      timestamps: [1_700_001_950n],
+      reportExpiry: 1_700_010_000n,
+      bootstrapThroughBlock: throughBlock,
+    }),
+  );
+}
 
 describe("BreakerBox handlers — bootstrap + state transitions", () => {
   beforeEach(() => {
@@ -910,6 +925,7 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
         breakerTripped: false,
       }),
     );
+    mockDb = seedOracleFeedState(mockDb, 299n);
 
     mockDb = await SortedOracles.MedianUpdated.processEvent({
       event: SortedOracles.MedianUpdated.createMockEvent({
@@ -971,7 +987,7 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     mockDb = await SortedOracles.OracleReported.processEvent({
       event: SortedOracles.OracleReported.createMockEvent({
         token: FEED,
-        reporter: "0x00000000000000000000000000000000000000aa",
+        oracle: "0x00000000000000000000000000000000000000aa",
         value: 1_180_000_000_000_000_000_000_000n,
         timestamp: 1_700_001_900n,
         mockEventData: {
@@ -1027,7 +1043,7 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     mockDb = await SortedOracles.OracleReported.processEvent({
       event: SortedOracles.OracleReported.createMockEvent({
         token: FEED,
-        reporter: "0x00000000000000000000000000000000000000aa",
+        oracle: "0x00000000000000000000000000000000000000aa",
         value: 1_180_000_000_000_000_000_000_000n,
         timestamp: 1_700_001_900n,
         mockEventData: {
@@ -1088,6 +1104,7 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
         oracleExpiry: 1_700_010_000n,
       }),
     );
+    mockDb = seedOracleFeedState(mockDb, 302n);
 
     const newMedian = 1_190_000_000_000_000_000_000_000n;
     mockDb = await SortedOracles.MedianUpdated.processEvent({

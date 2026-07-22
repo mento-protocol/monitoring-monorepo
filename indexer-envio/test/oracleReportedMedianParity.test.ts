@@ -14,7 +14,7 @@ import {
   _setMockBreakerFeedState,
   _setMockBreakerKind,
   _setMockBreakerList,
-  _setMockMedianTimestamp,
+  _setMockOracleReportTimestamps,
   _setMockReportExpiry,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
@@ -90,7 +90,30 @@ describe("SortedOracles.OracleReported median parity", () => {
     medianTimestamp?: bigint | null;
   }) {
     registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, []);
-    _setMockMedianTimestamp(CHAIN_ID, FEED, medianTimestamp);
+    if (medianTimestamp !== null) {
+      _setMockOracleReportTimestamps(CHAIN_ID, FEED, {
+        reporters: [
+          "0x00000000000000000000000000000000000000aa",
+          "0x00000000000000000000000000000000000000b1",
+          "0x00000000000000000000000000000000000000b2",
+          "0x00000000000000000000000000000000000000b3",
+          "0x00000000000000000000000000000000000000b4",
+        ],
+        // Four non-reporting oracles pin the upper median to the requested
+        // value regardless of whether this reporter's new timestamp is older
+        // or newer. This mirrors the contract's full timestamp list instead
+        // of treating one reporter timestamp as the median.
+        timestamps: [
+          medianTimestamp,
+          medianTimestamp - 1n,
+          medianTimestamp,
+          medianTimestamp,
+          medianTimestamp + 1n,
+        ],
+      });
+    } else {
+      _setMockOracleReportTimestamps(CHAIN_ID, FEED, null);
+    }
 
     let mockDb = MockDb.createMockDb();
     const poolId = makePoolId(
@@ -118,7 +141,7 @@ describe("SortedOracles.OracleReported median parity", () => {
     mockDb = await SortedOracles.OracleReported.processEvent({
       event: SortedOracles.OracleReported.createMockEvent({
         token: FEED,
-        reporter: "0x00000000000000000000000000000000000000aa",
+        oracle: "0x00000000000000000000000000000000000000aa",
         value,
         timestamp: BigInt(blockTimestamp - 100),
         mockEventData: {
@@ -169,29 +192,7 @@ describe("SortedOracles.OracleReported median parity", () => {
     assert.equal(pool.lastOracleReportAt, medianTimestamp);
   });
 
-  it("skips the median timestamp RPC when preload sees no tracked pools", async () => {
-    registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, []);
-    const blockTimestamp = 1_700_002_000;
-    const mockDb = await SortedOracles.OracleReported.processEvent({
-      event: SortedOracles.OracleReported.createMockEvent({
-        token: FEED,
-        reporter: "0x00000000000000000000000000000000000000aa",
-        value: ONE,
-        timestamp: BigInt(blockTimestamp - 100),
-        mockEventData: {
-          chainId: CHAIN_ID,
-          logIndex: 7,
-          srcAddress: SORTED_ORACLES,
-          block: { number: 60_664_501, timestamp: blockTimestamp },
-        },
-      }),
-      mockDb: MockDb.createMockDb(),
-    });
-
-    assert.deepEqual(mockDb.entities.Pool.getAll(), []);
-  });
-
-  it("preloads a report-expiry retry before healing an unseeded pool", async () => {
+  it("bootstraps report expiry before healing an unseeded pool", async () => {
     _setMockReportExpiry(CHAIN_ID, FEED, 31_536_000n);
     const { mockDb, poolId } = await processReport({
       lastMedianPrice: ONE,
@@ -209,7 +210,6 @@ describe("SortedOracles.OracleReported median parity", () => {
     });
 
     const pool = mockDb.entities.Pool.get(poolId)!;
-
     assert.equal(pool.deviationBreachStartedAt, blockTimestamp);
     assert.equal(pool.healthStatus, "WARN");
   });
@@ -223,7 +223,6 @@ describe("SortedOracles.OracleReported median parity", () => {
     });
 
     const pool = mockDb.entities.Pool.get(poolId)!;
-
     assert.equal(pool.priceDifference, 123n);
     assert.equal(pool.deviationBreachStartedAt, 0n);
   });
@@ -239,7 +238,6 @@ describe("SortedOracles.OracleReported median parity", () => {
     });
 
     const pool = mockDb.entities.Pool.get(poolId)!;
-
     assert.equal(pool.priceDifference, 123n);
     assert.equal(pool.deviationBreachStartedAt, 0n);
     assert.equal(pool.oracleTimestamp, 1_700_000_000n);

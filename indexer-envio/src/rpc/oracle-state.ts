@@ -12,7 +12,8 @@ import {
 } from "./http-test-mock-bridge.js";
 
 // ---------------------------------------------------------------------------
-// Test mocks: referenceRateFeedID, reportExpiry, and medianTimestamp
+// Test mocks: referenceRateFeedID, reportExpiry, timestamp-list state, and
+// medianTimestamp
 // (for self-heal testing)
 // ---------------------------------------------------------------------------
 
@@ -89,6 +90,57 @@ export function _clearMockReportExpiry(): void {
 }
 
 const _testMedianTimestamp = new Map<string, bigint | null>();
+const LEGACY_MEDIAN_TEST_REPORTER =
+  "0x0000000000000000000000000000000000000001";
+
+export type OracleReportTimestamps = {
+  reporters: string[];
+  timestamps: bigint[];
+};
+
+const _testOracleReportTimestamps = new Map<
+  string,
+  OracleReportTimestamps | null
+>();
+
+/** @internal Test-only: pre-set getTimestamps response for a rateFeedID. */
+export function _setMockOracleReportTimestamps(
+  chainId: number,
+  rateFeedID: string,
+  value: OracleReportTimestamps | null,
+): void {
+  const key = `${chainId}:${rateFeedID.toLowerCase()}`;
+  _testOracleReportTimestamps.set(key, value);
+  let sortedOraclesAddress: string | undefined;
+  try {
+    sortedOraclesAddress = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return;
+  }
+  if (value === null) {
+    setTestRpcErrorMock({
+      group: "oracleReportTimestamps",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "getTimestamps",
+      callArgs: [rateFeedID],
+    });
+  } else {
+    setTestRpcMock({
+      group: "oracleReportTimestamps",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "getTimestamps",
+      callArgs: [rateFeedID],
+      result: [value.reporters, value.timestamps, value.reporters.map(() => 0)],
+    });
+  }
+}
+
+export function _clearMockOracleReportTimestamps(): void {
+  _testOracleReportTimestamps.clear();
+  clearTestRpcMockGroup("oracleReportTimestamps");
+}
 
 /** @internal Test-only: pre-set a medianTimestamp response for a rateFeedID. */
 export function _setMockMedianTimestamp(
@@ -97,6 +149,18 @@ export function _setMockMedianTimestamp(
   timestamp: bigint | null,
 ): void {
   _testMedianTimestamp.set(`${chainId}:${rateFeedID.toLowerCase()}`, timestamp);
+  // Preserve existing handler-test fixtures while OracleReported migrates from
+  // one medianTimestamp call per event to one getTimestamps bootstrap per feed.
+  _setMockOracleReportTimestamps(
+    chainId,
+    rateFeedID,
+    timestamp === null
+      ? null
+      : {
+          reporters: [LEGACY_MEDIAN_TEST_REPORTER],
+          timestamps: [timestamp],
+        },
+  );
   let sortedOraclesAddress: string | undefined;
   try {
     sortedOraclesAddress = SORTED_ORACLES_ADDRESS(chainId);
@@ -126,6 +190,7 @@ export function _setMockMedianTimestamp(
 export function _clearMockMedianTimestamps(): void {
   _testMedianTimestamp.clear();
   clearTestRpcMockGroup("medianTimestamp");
+  _clearMockOracleReportTimestamps();
 }
 
 const _testRateFeedOracles = new Map<string, string[] | null>();
@@ -337,6 +402,66 @@ export async function fetchRateFeedOracles(
     return (result as readonly string[]).map((oracle) => oracle.toLowerCase());
   } catch (err) {
     logRpcFailure(chainId, "getOracles", rateFeedID, err, blockNumber, log);
+    return null;
+  }
+}
+
+/** Returns the active SortedOracles reporter timestamps at the requested
+ * block. This is a permanently bounded bootstrap read: handlers persist the
+ * result once per tracked feed and then advance it from report/removal events.
+ * A latest-block fallback is rejected because it would import future reports
+ * into an older replay boundary. */
+export async function fetchOracleReportTimestamps(
+  chainId: number,
+  rateFeedID: string,
+  blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
+): Promise<OracleReportTimestamps | null> {
+  const mockKey = `${chainId}:${rateFeedID.toLowerCase()}`;
+  if (_testOracleReportTimestamps.has(mockKey)) {
+    const mocked = _testOracleReportTimestamps.get(mockKey);
+    return mocked
+      ? {
+          reporters: mocked.reporters.map((reporter) => reporter.toLowerCase()),
+          timestamps: [...mocked.timestamps],
+        }
+      : null;
+  }
+
+  let address: `0x${string}`;
+  try {
+    address = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return null;
+  }
+  try {
+    const client = getRpcClient(chainId);
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      chainId,
+      client,
+      {
+        address,
+        abi: SortedOraclesContract.abi,
+        functionName: "getTimestamps",
+        args: [rateFeedID as `0x${string}`],
+      },
+      blockNumber,
+      getFallbackRpcClient(chainId),
+      log,
+    );
+    if (usedLatestFallback) return null;
+    const [reporters, timestamps] = result as readonly [
+      readonly string[],
+      readonly bigint[],
+      readonly number[],
+    ];
+    if (reporters.length !== timestamps.length) return null;
+    return {
+      reporters: reporters.map((reporter) => reporter.toLowerCase()),
+      timestamps: [...timestamps],
+    };
+  } catch (err) {
+    logRpcFailure(chainId, "getTimestamps", rateFeedID, err, blockNumber, log);
     return null;
   }
 }

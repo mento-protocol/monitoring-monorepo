@@ -18,6 +18,7 @@ import {
 } from "../src/EventHandlers.ts";
 import { makeBreakerConfigId, makeBreakerId } from "../src/breakers.ts";
 import { makePoolId } from "../src/helpers.ts";
+import { bootstrapOracleFeedState } from "../src/oracleFeedState.ts";
 import { registerMockRateFeedDependenciesHttp } from "../src/rpc/http-test-mock-bridge.js";
 import { makePool } from "./helpers/makePool.js";
 
@@ -32,6 +33,7 @@ type MockDb = MockDbWith<{
   Pool: WritableEntity & EntityCollection;
   RateFeed: EntityCollection;
   OracleSnapshot: EntityCollection;
+  OracleFeedState: WritableEntity;
 }>;
 
 const TestHelpers = indexerTestHelpers<MockDb>();
@@ -273,6 +275,16 @@ describe("Issue #1052 scenario gap-closing", () => {
         invertRateFeedKnown: true,
         tokenDecimalsKnown: true,
         oracleExpiry: 1_700_010_000n,
+      }),
+    );
+    mockDb = mockDb.entities.OracleFeedState.set(
+      bootstrapOracleFeedState({
+        chainId: CHAIN_ID,
+        rateFeedID: FEED,
+        reporters: ["0x00000000000000000000000000000000000000aa"],
+        timestamps: [1_700_001_950n],
+        reportExpiry: 1_700_010_000n,
+        bootstrapThroughBlock: 299n,
       }),
     );
 

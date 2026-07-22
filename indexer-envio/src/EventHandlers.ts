@@ -25,6 +25,7 @@ import "./handlers/fpmm/liquidity.js";
 import "./handlers/fpmm/state-sync.js";
 import "./handlers/fpmm/limits-and-fees.js";
 import "./handlers/rateFeed.js";
+import "./handlers/oracleFeedState.js";
 import "./handlers/sortedOracles.js";
 import "./handlers/virtualPool.js";
 import "./handlers/biPoolManager.js";
@@ -76,6 +77,8 @@ export {
   _clearMockReportExpiry,
   _setMockMedianTimestamp,
   _clearMockMedianTimestamps,
+  _setMockOracleReportTimestamps,
+  _clearMockOracleReportTimestamps,
   _setMockRateFeedOracles,
   _clearMockRateFeedOracles,
   _setMockNumReporters,

@@ -94,6 +94,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0018](0018-indexer-observability-loki.md)               | Indexer observability is structured logs → Loki → Grafana, not Sentry               |
 | [0034](0034-steth-wallet-daily-sampler.md)               | stETH actuals use a launch-aligned sub-daily wallet balance sampler                 |
 | [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses     |
+| [0046](0046-event-sourced-oracle-freshness.md)           | Oracle freshness is reconstructed from persisted report events                      |
 
 ### ui-dashboard
 

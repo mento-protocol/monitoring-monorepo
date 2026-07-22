@@ -80,33 +80,51 @@ not renew the feed TTL. This distinction matters for the sparse Polygon
 EUROP/EUR feed, whose configured expiry is one year. The USDC/USD and EUR/USD
 feeds remain at 150 seconds.
 
-The indexer reads the median timestamp at the event block, stores it in
-`Pool.lastOracleReportAt`, and uses the prior report timestamp and prior expiry
-when closing each health-counter interval. The dashboard and metrics bridge use
-that exact anchor for status, uptime tails, and `mento_pool_oracle_ok`.
-`Pool.oracleTimestamp` and `mento_pool_oracle_timestamp` remain raw diagnostic
-timestamps only.
+The indexer persists an `OracleFeedState` for every feed referenced by an
+indexed pool. The first tracked `OracleReported` or `OracleReportRemoved`
+performs one exact-boundary `getTimestamps` read. When a currently referencing
+pool row was last persisted before the event block, the boundary is the parent
+block and the current log is applied normally. Otherwise the boundary is exact
+block-close timestamps and expiry, and all oracle logs in that initialization
+block are absorbed; this prevents an earlier same-block report before pool
+deployment or feed self-heal from falling outside the parent snapshot.
+The bootstrap rejects mismatched arrays,
+duplicate reporters, non-positive timestamps, and a missing or non-positive
+effective expiry. It then computes SortedOracles' upper median timestamp (the
+sorted element at `floor(count / 2)`).
+
+After bootstrap, `OracleReported` upserts that reporter's event timestamp and
+`OracleReportRemoved` deletes the reporter in block/log order. Expiry events
+update the persisted expiry. `MedianUpdated` consumes the already-updated feed
+state; it does not renew the TTL, and `OracleRemoved` alone does not remove a
+report. This preserves flat-report correctness because reporter timestamps can
+advance while the median value stays unchanged and no `MedianUpdated` is
+emitted. `Pool.lastOracleReportAt` stores the event-sourced upper median and is
+the freshness anchor used by the dashboard, uptime counters, and
+`mento_pool_oracle_ok`. `Pool.oracleTimestamp` and
+`mento_pool_oracle_timestamp` remain raw diagnostic timestamps only.
 
 Deploying a change to these semantics requires a full Envio resync before
 promotion. Existing rows and cumulative health counters were derived with the
 older bounded-carry approximation and cannot be repaired safely in place.
 Verify a candidate only after replay has populated positive
 `lastOracleReportAt` values for all FPMMs and EURm/EUROP stays healthy inside
-its configured one-year window. Tracked `OracleReported` and `MedianUpdated`
-events now reject a missing exact-block median timestamp, and dRPC batches are
-capped at three calls. A historical `[RPC_FAILURE] chainId=137
-fn=medianTimestamp` on an older candidate makes that replay tainted even if its
-hosted status later reaches head; deploy a fresh commit and replay cleanly.
-The promotion verifier additionally reads the versioned
-`indexer-envio/config/replay-integrity.json` marker from the deployed commit,
-which prevents a pre-fix replay from passing solely because a later event made
-the final pool row look current.
+its configured one-year window. Missing or malformed bootstrap timestamps or
+expiry fail the current event before writes, rather than letting a later event
+hide corruption. dRPC batches remain capped at three calls, but ordinary report
+traffic no longer performs one archive `medianTimestamp` or `reportExpiry` read
+per event: the exact-boundary bootstrap is paid once per tracked feed and
+subsequent state is event-sourced. A bootstrap RPC failure still taints that
+candidate and requires a clean replay.
 
-Version 2 also records the hosted-worker boundary discovered during the first
-fail-closed replay: preload and processing must independently derive whether an
-effect is needed. Module-local collections cannot bridge those passes because
-Envio may place them in different workers or restart the process. The v1
-candidate therefore remains incompatible even if it later appears caught up.
+The promotion verifier reads replay-integrity v3 from the deployed commit's
+`indexer-envio/config/replay-integrity.json`. V3 proves the candidate replayed
+with the exact-boundary timestamp-list bootstrap and `OracleReportRemoved`
+transition; v1 and v2 candidates are incompatible even if their final pool rows
+look current. V2's worker-boundary rule remains inherited: preload and
+processing independently derive effect eligibility, and no module-local
+collection may bridge those passes because Envio can use different workers or
+restart a process.
 
 ## Alert conditions
 

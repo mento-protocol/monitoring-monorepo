@@ -201,15 +201,26 @@ Notes:
 - **HyperRPC does NOT support `eth_call`** — only event sync (HyperSync) + a subset of chain-info methods (`eth_blockNumber` etc.). Contract reads in handlers (`client.readContract`, `getBreakers()`, `getReserves()`, etc.) MUST use a full-node RPC (`forno.celo.org` for Celo, `rpc2.monad.xyz` / quiknode for Monad). The constraint is hard-documented in `indexer-envio/src/rpc/client.ts` near `RPC_CONFIG_BY_CHAIN`. Don't suggest "switch to HyperRPC for archive depth" as a perf lever — it won't run the call shape we need at all.
 - **dRPC public JSON-RPC batches are capped at three calls.** The repo applies
   `{ batchSize: 3 }` to exact `drpc.org` hosts; do not replace it with viem's
-  default 1,000-call batch. Tracked SortedOracles events also fail closed when
-  their exact-block median timestamp remains unavailable after transient retry
-  and fallback. A caught-up deployment with those historical reads missing is
-  tainted and requires a clean replay.
+  default 1,000-call batch. The first tracked `OracleReported` or
+  `OracleReportRemoved` for a feed performs one exact-boundary `getTimestamps`
+  bootstrap. A feed with referencing pool state persisted before the block uses
+  the parent boundary and may reuse one unique seeded expiry. Otherwise use
+  exact block-close timestamps and expiry, absorbing that block's logs so a
+  report before deployment or feed self-heal cannot be lost.
+  Later blocks update persisted `OracleFeedState` in log order, while
+  `MedianUpdated` consumes that state. Never restore traffic-scaled
+  `medianTimestamp` or `reportExpiry` calls. A missing or malformed bootstrap
+  fails before writes and taints the candidate for a clean replay.
 - **Effect rate limits are global to each created effect object.** A provider-
   specific cap in this multichain indexer must be routed through distinct
   chain/provider-scoped effect objects. Keep preload and processing on the same
   selected object so Envio still deduplicates identical inputs; never let one
   chain's public-tier floor throttle every chain.
+- **Polygon oracle-freshness replay integrity is versioned.** V3 requires the
+  exact-boundary timestamp-list bootstrap plus event-sourced
+  `OracleReported` and `OracleReportRemoved` transitions. V1/v2 deployments are
+  not promotion-compatible; `pnpm deploy:indexer:verify <commit>` enforces the
+  marker before promotion.
 - **Version drift is common around V3 RCs.** Check the installed CLI and package before relying on older docs, memory, or notes; do not reintroduce V2-only fields such as `preload_handlers:`.
 - Development-plan retention and quota rules change independently of this
   repo. Check Envio's current hosted deployment/billing pages instead of

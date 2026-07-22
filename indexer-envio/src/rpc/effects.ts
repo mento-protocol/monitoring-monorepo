@@ -645,6 +645,7 @@ export {
   MEDIAN_TIMESTAMP_RATE_LIMITS,
   medianTimestampEffectForChain,
 } from "./median-timestamp-effect.js";
+export { oracleReportTimestampsEffectForChain } from "./oracle-report-timestamps-effect.js";
 
 // ---------------------------------------------------------------------------
 // Group E — trading limits.

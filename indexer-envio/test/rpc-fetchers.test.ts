@@ -9,6 +9,7 @@ import {
   fetchBreakerFeedState,
   fetchBreakerList,
   fetchMedianTimestamp,
+  fetchOracleReportTimestamps,
   fetchRateFeedOracles,
   fetchReportExpiry,
   fetchRebalanceThresholds,
@@ -196,6 +197,61 @@ describe("RPC fetchers reject non-historical latest fallbacks", () => {
     );
 
     assert.equal(result, null);
+  });
+
+  it("fetchOracleReportTimestamps rejects a latest-block fallback", async () => {
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const call = args as ReadContractArgs;
+        if (call.blockNumber !== undefined) throw new Error("header not found");
+        return [
+          ["0x00000000000000000000000000000000000000AA"],
+          [1_700_000_000n],
+          [0],
+        ];
+      },
+    });
+
+    const result = await fetchOracleReportTimestamps(
+      CHAIN_ID,
+      FEED,
+      BLOCK,
+      noopLogger,
+    );
+
+    assert.equal(result, null);
+  });
+
+  it("fetchOracleReportTimestamps returns aligned historical arrays", async () => {
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const call = args as ReadContractArgs;
+        assert.equal(call.blockNumber, BLOCK);
+        return [
+          [
+            "0x00000000000000000000000000000000000000AA",
+            "0x00000000000000000000000000000000000000BB",
+          ],
+          [1_700_000_000n, 1_700_000_100n],
+          [0, 1],
+        ];
+      },
+    });
+
+    const result = await fetchOracleReportTimestamps(
+      CHAIN_ID,
+      FEED,
+      BLOCK,
+      noopLogger,
+    );
+
+    assert.deepEqual(result, {
+      reporters: [
+        "0x00000000000000000000000000000000000000aa",
+        "0x00000000000000000000000000000000000000bb",
+      ],
+      timestamps: [1_700_000_000n, 1_700_000_100n],
+    });
   });
 
   it("fetchBreakerList returns null instead of seeding current breakers historically", async () => {

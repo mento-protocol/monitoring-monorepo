@@ -238,6 +238,27 @@ type RateFeed @index(fields: ["chainId", "feedAddress"]) {
   updatedAtTimestamp: BigInt!
 }
 
+# Authoritative SortedOracles timestamp-list state for one tracked feed.
+# Bootstrapped once from an exact historical boundary, then advanced from
+# OracleReported / OracleReportRemoved in log order. This keeps high-cardinality
+# replay off archive RPC while preserving the contract's upper-median rule.
+type OracleFeedState @index(fields: ["chainId", "rateFeedID"]) {
+  id: ID! # "{chainId}-{rateFeedID}"
+  chainId: Int! @index
+  rateFeedID: String! @index
+  activeReporters: [String!]!
+  activeReportTimestamps: [BigInt!]!
+  medianReportTimestamp: BigInt!
+  reportExpiry: BigInt!
+  # Usually the parent block; initialization is absorbed at block close when
+  # no referencing pool row predates it. The marker proves no earlier report
+  # or removal can be silently skipped.
+  bootstrapThroughBlock: BigInt!
+  updatedAtBlock: BigInt!
+  updatedAtLogIndex: Int!
+  updatedAtTimestamp: BigInt!
+}
+
 type DeviationThresholdBreach @index(fields: ["poolId", "startedAt"]) {
   id: ID! # "{poolId}-{startedAt}"
   chainId: Int! @index
