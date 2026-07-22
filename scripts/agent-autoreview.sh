@@ -4279,6 +4279,8 @@ materialize_feedback_runtime() {
   local snapshot_ref="$2"
   local runtime_dir="$3"
   local relative_path
+  local optional_entry
+  local optional_runtime_path="scripts/pr-feedback-state-claude.mjs"
   local output_path
   local mode
   local size
@@ -4292,6 +4294,22 @@ materialize_feedback_runtime() {
     scripts/pr-ready-state-core.mjs \
     scripts/pr-ready-state-format.mjs
   )
+
+  if ! optional_entry="$(
+    git_output "$repo" ls-tree "$snapshot_ref" -- "$optional_runtime_path"
+  )"; then
+    echo "agent:autoreview: cannot inspect optional trusted feedback runtime: $optional_runtime_path" >&2
+    return 1
+  fi
+  if [[ -n "$optional_entry" ]]; then
+    if ! mode="$(
+      git_blob_mode "$repo" "$snapshot_ref" "$optional_runtime_path"
+    )" || [[ "$mode" != "100644" && "$mode" != "100755" ]]; then
+      echo "agent:autoreview: trusted feedback runtime is not a regular Git blob: $optional_runtime_path" >&2
+      return 1
+    fi
+    runtime_paths+=("$optional_runtime_path")
+  fi
 
   for relative_path in "${runtime_paths[@]}"; do
     if ! mode="$(git_blob_mode "$repo" "$snapshot_ref" "$relative_path")" ||

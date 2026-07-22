@@ -3448,6 +3448,9 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 run_gate "scripts/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
 
+run_gate "scripts/pr-feedback-state-claude.mjs"
+assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
+
 run_gate "scripts/sanitize-terraform-output.sh"
 assert_contains "- pnpm sanitize:test (Terraform output sanitizer changed)"
 
