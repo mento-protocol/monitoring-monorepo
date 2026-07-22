@@ -1,0 +1,36 @@
+diff --git a/.idea/blamer.iml b/.idea/blamer.iml
+deleted file mode 100644
+index 24643cc37449b4bde54411a80b8ed61258225e34..0000000000000000000000000000000000000000
+diff --git a/.idea/codeStyles/Project.xml b/.idea/codeStyles/Project.xml
+deleted file mode 100644
+index 4f6ece286da2a48d355cfeca74a1f43e22d1d353..0000000000000000000000000000000000000000
+diff --git a/.idea/codeStyles/codeStyleConfig.xml b/.idea/codeStyles/codeStyleConfig.xml
+deleted file mode 100644
+index 79ee123c2b23e069e35ed634d687e17f731cc702..0000000000000000000000000000000000000000
+diff --git a/.idea/copilot.data.migration.agent.xml b/.idea/copilot.data.migration.agent.xml
+deleted file mode 100644
+index 4ea72a911af2d782f20b992e808276bb838718d8..0000000000000000000000000000000000000000
+diff --git a/.idea/copilot.data.migration.ask.xml b/.idea/copilot.data.migration.ask.xml
+deleted file mode 100644
+index 7ef04e2ea0752989be4a246d998b53adf46bab42..0000000000000000000000000000000000000000
+diff --git a/.idea/copilot.data.migration.ask2agent.xml b/.idea/copilot.data.migration.ask2agent.xml
+deleted file mode 100644
+index 1f2ea11e7f0069b02b6f715f9735b8a31b234538..0000000000000000000000000000000000000000
+diff --git a/.idea/copilot.data.migration.edit.xml b/.idea/copilot.data.migration.edit.xml
+deleted file mode 100644
+index 8648f9401aa827dc53e658ac3b1c1f1556df236b..0000000000000000000000000000000000000000
+diff --git a/.idea/dbnavigator.xml b/.idea/dbnavigator.xml
+deleted file mode 100644
+index 3b39be9561c4998c6e85d396a2d40b3dfa3bcd77..0000000000000000000000000000000000000000
+diff --git a/.idea/modules.xml b/.idea/modules.xml
+deleted file mode 100644
+index 19e49aed27f8bb8021756932b1adafdb0b40d52c..0000000000000000000000000000000000000000
+diff --git a/.idea/prettier.xml b/.idea/prettier.xml
+deleted file mode 100644
+index b0c1c68fbbad6b190434cd2bb0e807796bd56fca..0000000000000000000000000000000000000000
+diff --git a/.idea/vcs.xml b/.idea/vcs.xml
+deleted file mode 100644
+index 35eb1ddfbbc029bcab630581847471d7f238ec53..0000000000000000000000000000000000000000
+diff --git a/.idea/workspace.xml b/.idea/workspace.xml
+deleted file mode 100644
+index 64e6964dcc0d76143565f25609b6523840188b29..0000000000000000000000000000000000000000
