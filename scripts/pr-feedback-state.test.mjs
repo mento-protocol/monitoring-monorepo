@@ -931,6 +931,45 @@ test("accepts CommonMark punctuation escapes in exact Claude review titles", () 
   }
 });
 
+test("accepts only the bounded Claude completion View-job wrapper", () => {
+  const title = "feat(auth): add secure session refresh";
+  const review = structuredClaudeReview({ title });
+  const completion =
+    "**Claude finished @chapati23's task in 5m 0s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/29940793241)";
+  const wrappedReview = `${completion}\n\n---\n${review}`;
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    {
+      ...PR_1431_CLEAN_CLAUDE_REVIEW,
+      id: 5043638390,
+      body: wrappedReview,
+    },
+    { title },
+  );
+  const feedbackState = summarizeFeedbackState(normalizedReadyState);
+  assertEqual(normalizedReadyState.ready, true);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+
+  const malformedWrappers = [
+    completion.replace("https://github.com/", "https://example.invalid/"),
+    completion.replace("29940793241", "not-a-run"),
+    `${completion} trailing text`,
+  ];
+  for (const [index, malformed] of malformedWrappers.entries()) {
+    const blockedReadyState = normalizedReadyStateForClaudeReview(
+      {
+        ...PR_1431_CLEAN_CLAUDE_REVIEW,
+        id: 5043638391 + index,
+        body: `${malformed}\n\n---\n${review}`,
+      },
+      { title },
+    );
+    const blockedFeedbackState = summarizeFeedbackState(blockedReadyState);
+    assertEqual(blockedReadyState.required.ready, true);
+    assertEqual(blockedFeedbackState.ready, false);
+    assertEqual(blockedFeedbackState.counts.blockingTopLevelBotComments, 1);
+  }
+});
+
 test("fails closed on adversarial Claude review protocol variants", () => {
   const title = "feat(auth): add secure session refresh";
   const clean = structuredClaudeReview({ title });

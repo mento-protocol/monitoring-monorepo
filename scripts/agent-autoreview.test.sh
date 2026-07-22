@@ -6492,9 +6492,9 @@ state.testEvidence = {
 };
 process.stdout.write(`${JSON.stringify(state)}\n`);
 FEEDBACK_RUNTIME
+# Model the bootstrap snapshot that predates the split Claude grammar module.
 for feedback_runtime_file in \
   pr-feedback-state-core.mjs \
-  pr-feedback-state-claude.mjs \
   pr-ready-state.mjs \
   pr-ready-state-core.mjs \
   pr-ready-state-format.mjs; do

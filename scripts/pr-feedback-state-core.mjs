@@ -16,7 +16,7 @@ const UNSAFE_EVIDENCE_QUALIFIER =
 const POSITIVE_EVIDENCE =
   /^(?:clean(?:,\s+well\s+scoped)?(?:\s+fix)?|well\s+scoped(?:\s+fix)?|correct|covered|bounded|mechanical|verified|complete|exact\s+removal\s+condition|(?:no|zero|0)\s+(?:errors?|fails?|failed|failures?)(?:\s+(?:and|or)\s+(?:errors?|fails?|failed|failures?))?(?:\s+(?:are|was|were)\s+(?:found|observed|reported))?|no\s+unrelated\s+version\s+bumps?|no\s+vulnerable\s+sharp@0\.34\.5\s+remains?\s+anywhere\s+in\s+(?:the\s+)?repo(?:'s)?\s+lockfiles|parser\s+should\s+continue\s+rejecting\s+malformed\s+input|fallback\s+should\s+stay|fix\s+is\s+correct|override\s+selector\s+is\s+correctly\s+bounded|lockfile\s+churn\s+beyond\s+sharp\s+itself\s+is\s+confirmed\s+mechanical,\s+not\s+scope\s+creep|(?:the\s+)?bounded\s+selector\s+matches\s+the\s+repo(?:'s)?\s+established\s+override\s+pattern|matches\s+repo\s+convention|(?:the\s+)?inline\s+comment\s+documents\s+the\s+advisory|removal\s+condition\s+comment\s+satisfies\s+the\s+temporary\s+override\s+documentation\s+expectation|tests\s+cover\s+the\s+changed\s+paths)$/i;
 const CLAUDE_TASK_COMPLETION_LINE =
-  /^\*\*Claude\s+finished\s+@[A-Za-z0-9_-]+'s\s+task\s+in\s+\d+m\s+\d+s\*\*$/i;
+  /^\*\*Claude\s+finished\s+@[A-Za-z0-9_-]+'s\s+task\s+in\s+\d+m\s+\d+s\*\*(?:\s+——\s+\[View\s+job\]\(https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+\))?$/i;
 const CLAUDE_REVIEW_TITLE_LINE = /^#{1,6}\s+Review:\s+(.{1,200})$/i;
 const CLAUDE_VERDICT_LINE = /^(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?$/i;
 const CLAUDE_CHECKLIST_HEADING = /^#{1,6}\s+What\s+I\s+checked$/i;

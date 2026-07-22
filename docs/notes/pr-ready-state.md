@@ -97,33 +97,25 @@ terminal state so late feedback is not missed.
 ### Bounded clean-Claude protocol
 
 `pr:feedback-state` treats a current-head Claude `Verdict: LGTM` review as clean
-only when the complete comment matches the bounded protocol below. The protocol
-generalizes review labels without treating arbitrary clean-sounding prose as
-evidence:
+only when the complete comment matches this bounded protocol:
 
-- An optional `Review: <title>` heading is accepted only when the bounded title
-  matches the pull request's actual title after whitespace and Markdown-escape
-  normalization across the complete CommonMark ASCII punctuation set. Title
-  words are labels, not finding evidence, so ordinary PR titles may mention
-  fixes or errors without becoming false findings.
-- An optional `What I checked` block must contain one or more checked (`[x]`)
-  entries. Each subject is a bounded single line that matches a positive
-  grammar of recognized neutral topic labels, optionally joined by `and`. A
-  narrow compatibility matcher retains the already-observed legacy subjects;
-  arbitrary inline-code labels, noun phrases, declarative claims, and unknown
-  prose do not become safe merely because their vocabulary avoids known hazard
-  terms. Unchecked, malformed, empty, or mixed safe/actionable checklists fail
-  closed.
-- `Findings` followed by `Roll-up` is mandatory, in that order, with both
-  sections non-empty. Every generalized entry keeps an explicit `[P3]` clean
-  marker, at least one non-empty approved positive-evidence clause, and raw
-  plain-text syntax. A narrow compatibility matcher retains the exact
-  already-observed legacy Markdown lines; do not expand it. Unknown prose,
-  discarded Markdown/HTML syntax, actionable suffixes, negation, hedging,
-  malformed/duplicate headings, higher priorities, and mixed clean/actionable
-  items remain blocking. Any non-empty protocol line beginning with Markdown
-  code-block indentation (four spaces, or a tab after up to three leading
-  spaces) also remains blocking before regional parsing or normalization.
+- The optional Claude completion line may include only its fixed GitHub Actions
+  `View job` suffix; other suffixes fail closed.
+- An optional `Review: <title>` must equal the PR title after whitespace and
+  CommonMark ASCII-punctuation escape normalization. Title words are labels,
+  not finding evidence.
+- An optional `What I checked` block needs one or more checked (`[x]`) bounded
+  single-line subjects from the neutral-topic grammar (optionally joined by
+  `and`) or the narrow legacy matcher. Unknown prose, inline-code labels,
+  declarative claims, unchecked entries, and mixed safe/actionable checklists
+  fail closed.
+- Non-empty `Findings` then `Roll-up` sections are mandatory. Generalized
+  entries require an explicit `[P3]` clean marker, approved positive evidence,
+  and plain-text syntax; only exact observed legacy Markdown lines use the
+  compatibility matcher. Unknown prose, Markdown/HTML syntax, actionable
+  suffixes, negation, hedging, malformed or duplicate headings, higher
+  priorities, and mixed clean/actionable items remain blocking. Markdown
+  code-block indentation on any non-empty protocol line also fails closed.
 
 The parser validates title, checklist, Findings, and Roll-up as separate
 structural regions. Do not broaden the Findings/Roll-up positive-evidence
