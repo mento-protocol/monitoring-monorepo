@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-21 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -12,7 +12,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | [`indexer-envio`](./indexer-envio/)             | Envio HyperIndex indexer — Celo + Monad + Polygon multichain                                                |
 | [`ui-dashboard`](./ui-dashboard/)               | Next.js 16 + Plotly.js multi-chain dashboard — all chains shown together, network derived from the pool URL |
-| [`metrics-bridge`](./metrics-bridge/)           | Hasura → Prometheus exporter for v3 alert rules                                                             |
+| [`metrics-bridge`](./metrics-bridge/)           | Hasura state + isolated CEX/RPC peg observations → Prometheus exporter                                      |
 | [`shared-config`](./shared-config/)             | Public `@mento-protocol/config` package for protocol metadata, thresholds, and shared ABIs                  |
 | [`aegis`](./aegis/)                             | App Engine v2 alerting service + Aegis Grafana dashboards                                                   |
 | [`governance-watchdog`](./governance-watchdog/) | Cloud Function watching Mento Governance events → Discord/Telegram (own GCP project)                        |
@@ -20,20 +20,28 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 ## Architecture
 
 ```text
-┌──────────────────────┐     ┌──────────────────┐     ┌────────────────┐
-│ Celo + Monad +       │────▶│  Envio HyperIndex │────▶│  Hasura        │
-│ Polygon              │     │  (Hosted, mento)  │     │  (GraphQL API) │
-│  (HyperSync / RPC)   │     │                  │     │                │
-└──────────────────────┘     └──────────────────┘     └───────┬────────┘
-                                                               │
-                                                        ┌──────▼──────┐
-                                                        │  Next.js    │
-                                                        │  Dashboard  │
-                                                        │  (Vercel)   │
-                                                        └─────────────┘
+ Celo / Monad / Polygon / Ethereum events (HyperSync / RPC)
+                     │
+                     ▼
+          Envio HyperIndex (hosted, mento)
+                     │
+                     ▼
+                Hasura GraphQL API ─────────► Next.js dashboard (Vercel)
+                     │
+                     └──────────────────────┐
+ CEX order books ──────────────────────────┤
+ RPC oracle conversion views ──────────────┴──► metrics-bridge (Cloud Run)
+                                                   │
+                                                   ▼
+                                          Grafana Alloy / Cloud
 ```
 
 `config.multichain.mainnet.yaml` configures a single Envio project (`mento`) for Celo Mainnet (42220), Monad Mainnet (143), Polygon Mainnet (137), and Ethereum reserve-yield events (1). Polygon becomes live at the static endpoint after the normal indexer deploy, sync verification, and promotion workflow. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing is event-only; the historical sUSDS onBlock heartbeat is not registered in the hosted indexer.
+
+`metrics-bridge` retains its indexed Hasura poller and owns an isolated peg
+lifecycle. When the protected policy artifact is configured, that loop combines
+indexed pool and trading-limit state with direct CEX order books and RPC oracle
+conversion views before exporting bounded Prometheus gauges.
 
 **Static production endpoint:** `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`
 

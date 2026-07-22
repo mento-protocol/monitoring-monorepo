@@ -44,7 +44,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`alerts/AGENTS.md`](../alerts/AGENTS.md) | Alerts Instructions | canonical / active | agent-instructions / alerts | eng | 90d; verified 2026-05-21 |
 | [`indexer-envio/AGENTS.md`](../indexer-envio/AGENTS.md) | Envio Indexer Instructions | canonical / active | agent-instructions / indexer-envio | eng | 90d; verified 2026-07-17 |
 | [`integration-probes/AGENTS.md`](../integration-probes/AGENTS.md) | Integration Probes Instructions | canonical / active | agent-instructions / integration-probes | eng | 90d; verified 2026-07-17 |
-| [`metrics-bridge/AGENTS.md`](../metrics-bridge/AGENTS.md) | Metrics Bridge Instructions | canonical / active | agent-instructions / metrics-bridge | eng | 90d; verified 2026-07-17 |
+| [`metrics-bridge/AGENTS.md`](../metrics-bridge/AGENTS.md) | Metrics Bridge Instructions | canonical / active | agent-instructions / metrics-bridge | eng | 90d; verified 2026-07-22 |
 | [`scripts/AGENTS.md`](../scripts/AGENTS.md) | Scripts Instructions | canonical / active | agent-instructions / scripts | eng | 90d; verified 2026-05-20 |
 | [`shared-config/AGENTS.md`](../shared-config/AGENTS.md) | Shared Config Instructions | canonical / active | agent-instructions / shared-config | eng | 90d; verified 2026-07-21 |
 | [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-05-20 |
@@ -171,7 +171,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/vp-oracle-staleness-alerting-spec.md`](vp-oracle-staleness-alerting-spec.md) | Virtual Pool Oracle Staleness Alerting Spec | non-canonical / draft | reference / repo-wide | eng | 180d; verified 2026-06-16 |
 | [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-17 |
 | [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | unmanaged / unmanaged | reference / indexer-envio | unowned | 180d |
-| [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-21 |
+| [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`SPEC.md`](../SPEC.md) | Mento Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-22 |
 
 ## notes-plans-archive

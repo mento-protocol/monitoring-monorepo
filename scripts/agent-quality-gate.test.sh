@@ -680,6 +680,7 @@ assert_contains "- ./tools/trunk check metrics-bridge/src/main.ts (changed exist
 assert_not_contains "- ./tools/trunk check --all"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/metrics-bridge --cache=local:rw (metrics-bridge changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge build (metrics-bridge changed)"
 # `assert_contains` normalizes legacy package-task expectations to the Turbo
 # command shape; keep a direct negative assertion so the old command cannot be
 # emitted alongside the cached one unnoticed.
@@ -1314,6 +1315,7 @@ packages:
 assert_contains "- pnpm skew:check (lockfile change scoped to importers)"
 assert_contains "- pnpm lockfile:lint (lockfile change scoped to importers)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (lockfile importer metrics-bridge changed (coverage floor))"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (root lockfile changed (peg registry authority dependency))"
 assert_not_contains "cd aegis && forge test"
 assert_not_contains "@mento-protocol/integration-probes test:coverage"
 assert_not_contains "workspace dependency/config changed (coverage floor)"
@@ -1585,8 +1587,15 @@ assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data f
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
 assert_contains "- pnpm alerts:rules:lint (metrics-bridge gauge registry changed (alerts cross-check))"
 
+run_gate "metrics-bridge/src/peg/metrics.ts"
+assert_contains "- pnpm alerts:rules:lint (metrics-bridge gauge registry changed (alerts cross-check))"
+
+run_gate "metrics-bridge/peg-registry.json"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry changed)"
+
 run_gate "metrics-bridge/src/rpc.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+assert_not_contains "node scripts/check-peg-registry-integrity.mjs"
 
 run_gate "metrics-bridge/src/rebalance-probe.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
@@ -1795,6 +1804,14 @@ assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chd
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
+assert_not_contains "node scripts/check-peg-registry-integrity.mjs"
+
+run_gate "alerts/rules/peg-thresholds.json"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
+assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg threshold policy changed)"
 
 run_gate "alerts/rules/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
@@ -1919,6 +1936,7 @@ assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metri
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics bridge build context changed (coverage floor))"
 
 run_gate "shared-config/deployment-namespaces.json"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (shared-config vendored indexer fixture changed)" \
   "- pnpm indexer:testnet:codegen (shared-config vendored indexer fixture changed)"
@@ -1944,9 +1962,22 @@ assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the das
 run_gate "shared-config/src/chains.ts"
 assert_contains "- pnpm --filter @mento-protocol/config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (shared-config exports feed the dashboard bundle)"
+
+run_gate "shared-config/oracle-reporters.json"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+
+run_gate "shared-config/chain-metadata.json"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+
+run_gate "shared-config/src/oracle-reporters.ts"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+
+run_gate "shared-config/src/tokens.ts"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 
 run_gate "shared-config/src/thresholds.ts"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
@@ -3481,6 +3512,14 @@ assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)
 
 run_gate "scripts/alert-rules-lint.test.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
+
+run_gate "scripts/check-peg-registry-integrity.mjs"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
+
+run_gate "scripts/check-peg-registry-integrity.test.mjs"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
 run_gate "scripts/check-pr-description.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
