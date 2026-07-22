@@ -123,8 +123,15 @@ branch-controlled package scripts. Wrapper-owned Node launches discard
 executables require trusted ownership and
 non-shared-writable ancestry. On Darwin, Homebrew-style paths are accepted only
 through sealed private native Mach-O snapshots with system-only library
-closure. Prepared-bundle creation and verification also reject macOS
-write-granting ACLs on parent
+closure. On Linux, a root-run wrapper may recover an otherwise path-untrusted
+Node (including root- or foreign-owned writable/hard-linked toolcache layouts)
+only when it is the exact live ancestor of the canonical wrapper across an
+uninterrupted all-root UID chain; direct helper invocation remains fail-closed.
+The wrapper seals the exact ELF inode and its validated glibc startup closure;
+the helper revalidates the snapshot, sealed manifest, loader, and alias handoff
+around semantic-engine launches.
+Scripts and unsafe library closure fail closed. Prepared-bundle
+creation and verification also reject macOS write-granting ACLs on parent
 ancestors or bundle entries.
 Runtime-changing PRs use a clean, compatible wrapper/helper from the last
 independently reviewed pre-change commit; the exact external-runtime review
