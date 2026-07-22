@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -15,13 +15,13 @@ garden_lane: operator-runbooks
 `terraform.stacks.json` is the machine-readable registry for Terraform roots.
 Use it instead of inferring ownership from directory names.
 
-| Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                                                     | Plan/apply policy                                                                                                   |
-| --------------------- | ---------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `platform`            | `terraform/`                 | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, CI WIF/IAM                                                                                | Manual plan; human-approved local apply                                                                             |
-| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + the Aegis service-health rule group, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                                                 | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources                                                                          | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                                 | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `governance-watchdog` | `governance-watchdog/infra/` | `governance-watchdog` | Dedicated governance-watchdog GCP project (project factory), the watchdog Cloud Function + source archive, Secret Manager secrets, QuickNode webhooks/filters, Cloud Scheduler health check, log-based monitoring/alerts | PR plan; `main` apply through the `production-infra` GitHub Environment; daily drift plan via `terraform-drift.yml` |
+| Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                         | Plan/apply policy                                                                                                   |
+| --------------------- | ---------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `platform`            | `terraform/`                 | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, CI WIF/IAM, and platform-owned repo Actions secrets/variables | Manual plan; human-approved local apply                                                                             |
+| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + Aegis service-health and testnet-health rule groups, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings     | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources                                              | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                     | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `governance-watchdog` | `governance-watchdog/infra/` | `governance-watchdog` | Dedicated governance-watchdog GCP project, Cloud Function/source archive, Secret Manager, QuickNode webhook creation, scheduler, monitoring, and alerts                                      | PR plan; `main` apply through the `production-infra` GitHub Environment; daily drift plan via `terraform-drift.yml` |
 
 ## Commands
 
@@ -57,32 +57,31 @@ Environment approval.
 
 ## CI Model
 
-`.github/workflows/infra.yml` asks `scripts/tf-stacks.mjs` which stacks changed
-and validates only those stack roots. The workflow summary prints the stack's
-state prefix plus its plan/apply policy so reviewers can see whether a PR is
-validation-only, manual-plan, or auto-apply eligible.
-
-`.github/workflows/ci.yml` uses the same registry-backed changed-stack
-validation inside the required `CI / ci` sentinel. Keep Terraform path routing
-in `terraform.stacks.json` rather than duplicating stack ownership in workflow
-YAML.
+`.github/workflows/infra.yml` and the required `.github/workflows/ci.yml`
+sentinel use coarse YAML path filters to admit a run. After admission,
+`scripts/tf-stacks.mjs` uses `terraform.stacks.json` to classify changed stacks
+and validate only their registered roots. The registry remains the ownership
+source of truth, but a new `changedPathPatterns` entry must also reach both
+workflow admission filters until
+[#1501](https://github.com/mento-protocol/monitoring-monorepo/issues/1501)
+replaces that duplication with enforced parity.
 
 `alerts-rules`, `alerts-delivery`, `aegis`, and `governance-watchdog` have CI
 apply behavior on `main`, gated by the `production-infra` GitHub Environment.
 Their plan jobs can run for workflow/notifier edits too, but the apply jobs only
-become eligible when the stack root changed or a maintainer used
+become eligible when stack-owned deployment inputs changed or a maintainer used
 `workflow_dispatch`. The platform stack remains manual-plan/manual-apply only.
-`governance-watchdog` lives in its own GCP project and also opts into scheduled
-drift detection, where CI runs a read-only plan under `org-terraform`
-impersonation without applying changes.
+`terraform-drift.yml` also runs a daily read-only plan for all four CI-applied
+stacks under `org-terraform` impersonation. It never applies changes.
 
 For secret-bearing plan workflows (`alerts-rules.yml`, `alerts-infra.yml`,
-`aegis-terraform.yml`, and `governance-watchdog.yml`), same-repo PR plans
-intentionally receive validation-safe placeholder `TF_VAR_*` values instead of
-production secrets. Push/workflow_dispatch plans and environment-gated apply
-jobs keep the real secrets and are the authoritative plan before production
-mutation. The Aegis and governance-watchdog PR plans verify Terraform shape and
-config diffs with placeholders. The alerts-rules PR plan targets
+`aegis-terraform.yml`, and `governance-watchdog.yml`), eligible same-repo human
+PR plans intentionally receive validation-safe placeholder `TF_VAR_*` values
+instead of production secrets. Fork, Dependabot, and `sentry-autofix/*` plans
+are skipped. Push/workflow_dispatch plans and environment-gated apply jobs keep
+the real secrets and are the authoritative plan before production mutation.
+The Aegis and governance-watchdog PR plans verify Terraform shape and config
+diffs with placeholders. The alerts-rules PR plan targets
 `terraform_data.pr_plan_secretless_guard` plus the non-secret rule groups that
 route through the global notification policy and do not directly depend on
 Slack/Splunk contact points. It still skips contact points, notification
@@ -108,7 +107,8 @@ required CI before merge is the approval path for normal service rollouts.
 
 When one of those CI-applied stacks plans real changes on `main`, the plan job
 posts a Slack apply-pending summary before the environment-gated apply job waits
-for approval, but only for stack-root changes or explicit manual dispatches.
+for approval, but only for stack-owned deployment-input changes or explicit
+manual dispatches.
 The summary links back to the merged PR when GitHub can associate the main
 commit with a PR, and lists Terraform resource actions by resource type plus
 exact resource address. Attribute values are intentionally omitted from Slack;
@@ -142,106 +142,73 @@ needed state reconciliation, keep watching the same deploy workflow until every
 queued `main` run reaches a terminal state. Later queued jobs can pass the
 `production-infra` gate without an obvious second prompt, so do not call a drift
 issue fixed from the first successful apply alone. Verify the live resource and
-run `terraform-drift.yml` before closing the drift issue.
+dispatch `terraform-drift.yml` from `main` before closing the drift issue.
 
 ## Platform GitHub Actions secrets and variables
 
-The platform stack mirrors repo-level GitHub Actions secrets and variables on
-`monitoring-monorepo` (`terraform/github-secrets.tf`,
-`terraform/github-variables.tf`). Their values come from the platform stack's
-gitignored, operator-held `terraform/terraform.tfvars` (never committed) or from
-other platform resources; each secret-mirroring resource is `count`-gated on its
-value being set, so plan/apply succeed while a value is unset. The platform
-stack is manual-plan / manual-apply (`pnpm infra:plan`, then a human-approved
-`pnpm tf apply platform`), not a CI `production-infra` apply.
+The manual-apply platform stack owns the repo-level Actions mirrors declared in
+`terraform/github-secrets.tf` and `terraform/github-variables.tf`. Values come
+from platform resources or the gitignored, operator-held tfvars described by
+[`terraform/terraform.tfvars.example`](../terraform/terraform.tfvars.example). Some
+resource-derived mirrors are unconditional; optional provider keys and Sentry
+credentials are `count`-gated on non-empty inputs. Clearing a count-gated input
+can therefore plan deletion of the live Actions secret or variable.
 
-Sentry triage/autofix pipeline (ADR 0036), provisioned by issue #1276:
+Review every planned secret deletion. `CLAUDE_CODE_OAUTH_TOKEN` is the only
+current mirror with `prevent_destroy` because it adopts a shared credential
+used outside the Sentry pipeline. Do not assume the other optional mirrors have
+that protection.
 
-- `SENTRY_TRIAGE_TOKEN` — READ-ONLY Sentry internal-integration token
-  (`sentry_triage_token` tfvar). Read scopes only; no write scopes (Phase-1
-  trust boundary). `count`-gated.
-- `CLAUDE_CODE_OAUTH_TOKEN` — Claude Max OAuth token from `claude setup-token`
-  (`claude_code_oauth_token` tfvar), for `anthropics/claude-code-action@v1`.
-  `count`-gated. Adopts the pre-existing live secret shared with
-  `.github/workflows/claude.yml`: the first apply overwrites (rotates) the live
-  value, and the resource carries `prevent_destroy` so emptying the tfvar fails
-  the plan loudly instead of silently breaking the Claude PR automation.
-- `SENTRY_TRIAGE_ENABLED` — kill-switch **variable** (`sentry_triage_enabled`
-  tfvar), default `"false"`. The scheduled workflows stay inert until it is
-  `"true"`.
+The Sentry triage, projection, autofix, and archive credentials and their three
+kill switches are routed by
+[`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md). Keep
+that runbook and the Terraform resources aligned rather than duplicating the
+full inventory here.
 
-The human token-provisioning and activation steps are in the operator runbook in
-[`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md).
+## GitHub Environments
 
-## GitHub Environment Setup
-
-Pre-merge requirement for the production-environment split in issue #762:
-repo admins must create both environments in Settings -> Environments before
-merging the workflow change that first references them. GitHub auto-creates a
-missing environment on first workflow use with no protection rules, so
-`production-infra` must already have required reviewers, self-review allowed
-for the required reviewer, administrator bypass disabled, and the protected-`main` branch restriction
-before any Terraform-changing commit can land on `main`. The Terraform apply
-workflows also verify this configuration before cloud authentication so an
-accidentally auto-created or bypassable environment fails closed before
-`terraform apply`.
-
-Repo admins should keep exactly two production GitHub Environments for this
-repo's Actions workflows:
+Keep exactly two production GitHub Environments for this repository:
 
 - `production-infra`: used by Terraform apply jobs in `alerts-infra.yml`,
   `alerts-rules.yml`, `aegis-terraform.yml`, and `governance-watchdog.yml`.
-  Copy the required reviewers from the old `production` environment, allow
-  self-review for the required reviewer, disable administrator bypass, and
-  limit deployment branches to protected `main`.
+  It must have required reviewers, self-review allowed for the required
+  reviewer, administrator bypass disabled, and deployment branches limited to
+  protected `main`. Terraform apply workflows verify this before cloud
+  authentication and fail closed if protection drifts.
 - `production-services`: used by routine service deploy jobs such as
   `metrics-bridge.yml` and `aegis-app-engine.yml`. Limit deployment branches to
   protected `main`, but leave required reviewers unset by default so green
   `main` deploys do not require an extra human approval.
 
-The old `Production` migration-shim environment was removed on 2026-06-17 after
-workflow references drained. Do not recreate it. Do not move or recreate secrets
-with CLI commands; any environment-scoped secret changes must go through the
-owning IaC or a documented repo-admin settings change.
+Do not recreate the retired `Production`/`production` environments. GitHub can
+auto-create an unprotected environment when a workflow first references a
+missing name, so create any future environment with its reviewed protection
+before merging that reference.
 
-## Grafana Alert Ownership Migration
+Never move or recreate environment secrets with CLI commands. Use the owning
+IaC or documented owning integration; if neither exists, stop and establish an
+IaC path before changing the secret.
 
-The one-time Aegis-to-alerts Grafana state migration was completed on
-2026-05-27 and applied successfully. Do not rerun the migration script.
+## Grafana Alert Ownership
 
-On 2026-06-02 the Aegis **service-health** rule group
-(`grafana_rule_group.aegis_service_alerts`) was relocated from the `aegis`
-stack into `alerts-rules` (issue #706). Because Terraform `moved {}` blocks do
-not cross state backends, this was an import-then-state-rm move: PR1 added the
-resource to `alerts/rules/rules-aegis-service.tf` and the operator
-`terraform import`ed the existing Grafana object into `alerts-rules` state
-(0-diff) before approving that apply; PR2 removed it from `aegis/terraform` and
-the operator `terraform state rm`'d it from `aegis` state (no Grafana delete)
-before approving that apply. The Grafana object and its firing state were
-preserved throughout; the Aegis folder stays in the `aegis` stack.
+The Aegis-to-alerts state migration is complete; do not rerun its import/state
+removal procedure. Current ownership is:
 
-Current ownership:
-
-- `alerts-rules` owns protocol rule groups, the Aegis service-health rule
-  group (`grafana_rule_group.aegis_service_alerts`), protocol folders, the
-  global Grafana notification policy, contact points, message templates, and
-  mute timings.
+- `alerts-rules` owns protocol rule groups, Aegis service-health and
+  testnet-health rule groups, protocol folders, the global Grafana notification
+  policy, contact points, message templates, and mute timings.
 - `aegis` owns only the Aegis Grafana folder and Aegis dashboard.
 
-Local gitignored tfvars files must follow the same ownership:
+Use each stack's maintained input template instead of copying a partial list
+from this overview:
 
-- `alerts/rules/terraform.tfvars`: Grafana token, Slack bot token, and Splunk
-  On-Call webhook URL.
-- `alerts/infra/terraform.tfvars`: Sentry token, Slack bot token, QuickNode
-  credentials, GitHub PAT, and Splunk On-Call API ID/key plus Slack channel
-  and usergroup IDs for the on-call announcer.
-- `aegis/terraform/terraform.tfvars`: only `grafana_service_account_token`.
-- `governance-watchdog/infra/terraform.tfvars`: org/billing ids, GitHub PAT
-  (`github_token`) for mirroring drift-workflow repo secrets, plus the
-  notification and webhook secrets (Discord/Telegram credentials, QuickNode
-  API key + security token, x-auth token, VictorOps webhook URL); template in
-  `governance-watchdog/infra/terraform.tfvars.example`, real file stays
-  operator-held and gitignored.
+- [`terraform/terraform.tfvars.example`](../terraform/terraform.tfvars.example)
+- [`alerts/rules/terraform.tfvars.example`](../alerts/rules/terraform.tfvars.example)
+- [`alerts/infra/terraform.tfvars.example`](../alerts/infra/terraform.tfvars.example)
+- [`governance-watchdog/infra/terraform.tfvars.example`](../governance-watchdog/infra/terraform.tfvars.example)
+- `aegis/terraform` currently requires only
+  `grafana_service_account_token`; see
+  [`aegis/terraform/variables.tf`](../aegis/terraform/variables.tf).
 
 Verify ownership and drift with:
 
@@ -252,7 +219,8 @@ pnpm alerts:rules:plan
 pnpm aegis:tf:plan
 ```
 
-Expected result: protocol rule groups, global routing resources, and
-`grafana_rule_group.aegis_service_alerts` appear only in `alerts-rules`; the
+Expected result: protocol rule groups, global routing resources,
+`grafana_rule_group.aegis_service_alerts`, and
+`grafana_rule_group.aegis_testnet_health` appear only in `alerts-rules`; the
 `aegis` state contains only the Aegis folder + dashboard resources (the
 `grep grafana_rule_group` against `aegis` returns nothing).
