@@ -388,6 +388,77 @@ test("head-canonical notes do not require a redundant base read", () => {
   assertEqual(report.contextUpdateMissing, false);
 });
 
+test("deleted convention-based context stays full without counting present", () => {
+  for (const filePath of [
+    "AGENTS.md",
+    "scripts/AGENTS.md",
+    "CLAUDE.md",
+    "scripts/CLAUDE.md",
+    "README.md",
+    "docs/context-standards.md",
+    "docs/deployment.md",
+    "docs/pr-checklists/example.md",
+    ".agents/skills/example/SKILL.md",
+    ".agents/roles/example.md",
+    ".claude/skills/example/SKILL.md",
+    ".codex/hooks.json",
+    ".claude/settings.json",
+  ]) {
+    const report = analyzeMateriality({
+      paths: [".github/workflows/ci.yml", filePath],
+      readBaseContextFile: () => "base context",
+      readHeadContextFile: () => {
+        throw new Error("deleted at head");
+      },
+    });
+
+    assertEqual(report.tier, "full");
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
+  }
+});
+
+test("renaming convention-based context out of canonical paths is not present", () => {
+  const oldPath = "docs/pr-checklists/old-checklist.md";
+  const newPath = "docs/notes/old-checklist.md";
+  const report = analyzeMateriality({
+    paths: [".github/workflows/ci.yml", oldPath, newPath],
+    readBaseContextFile: (filePath) => {
+      if (filePath === oldPath) return "base context";
+      throw new Error("absent at base");
+    },
+    readHeadContextFile: (filePath) => {
+      if (filePath === newPath) return contextNote("false");
+      throw new Error("absent at head");
+    },
+  });
+
+  assertEqual(report.tier, "full");
+  assertEqual(report.contextUpdatesPresent, false);
+  assertEqual(report.contextUpdateMissing, true);
+});
+
+test("file-list mode keeps deleted convention-based context full", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-file-list-test-"));
+  const pathsFile = join(dir, "paths.txt");
+  writeFileSync(pathsFile, ".github/workflows/ci.yml\nAGENTS.md\n");
+
+  try {
+    const result = runMaterialityCli(dir, pathsFile, true);
+    assertEqual(result.status, 0);
+    const report = JSON.parse(result.stdout);
+    assertEqual(report.tier, "full");
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "AGENTS.md")?.reason,
+      "canonical agent or operator context",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("unreadable canonical note metadata fails closed", () => {
   const report = analyzeMateriality({
     paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],

@@ -306,6 +306,23 @@ function isAgentRuntimeContextPath(filePath) {
   );
 }
 
+function isConventionBasedCanonicalContextPath(filePath) {
+  return (
+    filePath === "AGENTS.md" ||
+    filePath.endsWith("/AGENTS.md") ||
+    filePath === "CLAUDE.md" ||
+    filePath.endsWith("/CLAUDE.md") ||
+    filePath === "README.md" ||
+    filePath === "docs/context-standards.md" ||
+    filePath === "docs/deployment.md" ||
+    filePath.startsWith("docs/pr-checklists/") ||
+    filePath.startsWith(".agents/skills/") ||
+    filePath.startsWith(".agents/roles/") ||
+    filePath.startsWith(".claude/skills/") ||
+    isAgentRuntimeContextPath(filePath)
+  );
+}
+
 function parseFrontmatterDocument(content) {
   if (typeof content !== "string" || !content.startsWith("---\n")) {
     return null;
@@ -346,21 +363,15 @@ function hasCanonicalNoteMetadata(filePath, readContextFile) {
 }
 
 function isCanonicalContextPath(filePath, readContextFile) {
-  return (
-    filePath === "AGENTS.md" ||
-    filePath.endsWith("/AGENTS.md") ||
-    filePath === "CLAUDE.md" ||
-    filePath.endsWith("/CLAUDE.md") ||
-    filePath === "README.md" ||
-    filePath === "docs/context-standards.md" ||
-    filePath === "docs/deployment.md" ||
-    filePath.startsWith("docs/pr-checklists/") ||
-    filePath.startsWith(".agents/skills/") ||
-    filePath.startsWith(".agents/roles/") ||
-    filePath.startsWith(".claude/skills/") ||
-    hasCanonicalNoteMetadata(filePath, readContextFile) ||
-    isAgentRuntimeContextPath(filePath)
-  );
+  if (hasCanonicalNoteMetadata(filePath, readContextFile)) return true;
+  if (!isConventionBasedCanonicalContextPath(filePath)) return false;
+
+  try {
+    readContextFile(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isRepoToolingTestPath(filePath) {
@@ -607,7 +618,10 @@ export function analyzeMateriality({
       isCanonicalContextPath(filePath, readHeadContextFile),
     ),
   );
-  const materialityCanonicalContextPaths = new Set(headCanonicalContextPaths);
+  const materialityCanonicalContextPaths = new Set([
+    ...headCanonicalContextPaths,
+    ...changedPaths.filter(isConventionBasedCanonicalContextPath),
+  ]);
   for (const filePath of changedPaths) {
     if (
       !materialityCanonicalContextPaths.has(filePath) &&
