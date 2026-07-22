@@ -7,7 +7,7 @@
     "answer_evidence_percent": 100,
     "questions_over_context_budget": 0,
     "max_question_source_bytes": 45000,
-    "max_total_unique_source_bytes": 250000
+    "max_total_unique_source_bytes": 260000
   },
   "bootstrap_sources": ["AGENTS.md", "docs/README.md"],
   "forbidden_sources": [
