@@ -53,8 +53,11 @@ MCP-resolved PR to be same-repository (`headRepository.nameWithOwner` equals
 the session-attached repo), require local `git rev-parse HEAD` to equal the
 MCP-resolved `headRefOid` before editing, and use the verified proxy `origin`
 as `HEAD_REMOTE`. Cross-repository (fork) PRs stop on this surface: the proxy
-remote cannot be bound to a fork. The clean-tree and post-push head
-re-verification guards below run unchanged.
+remote cannot be bound to a fork. The clean-tree guard below runs unchanged;
+for the post-push guard, re-resolve with `pull_request_read` method `get` in
+place of `gh pr view` and require the returned `headRefOid` to equal local
+`HEAD`. Base-branch fetches for conflict handling use the same verified proxy
+`origin` as `BASE_REMOTE` (same-repository PRs only).
 
 For an explicit target, accept a bare number or PR URL. Derive and preserve
 `BASE_REPO` (`owner/name`) from the resolved PR URL before changing checkouts.
