@@ -14,9 +14,9 @@
 
 Two coupled deliverables:
 
-1. **ROADMAP refresh.** `docs/ROADMAP.md` was last updated 2026-04-24. Roughly 60 PRs have merged since then — Envio v3 migration, Lever 4 series (rebalance state derivation + BiPoolExchange + Pool Config + decimal-trust gates), volume rollups + v2/v3 attribution, Slack/deviation-alert refinements, ratchet linting series (6 PRs), Clawpatch baseline, react-doctor 80→100, browser interaction tests, and infra hygiene (mutation testing, supply-chain gate, agent quality gate). The file's "Done" lists and "Next" hint are stale. Refreshing it before the Liquity work lands keeps the roadmap honest and means the next reader (or future agent) doesn't have to reverse-engineer recent state from git log.
+1. **Historical status-inventory refresh.** The then-existing roadmap was last updated 2026-04-24. Roughly 60 PRs had merged since then — Envio v3 migration, Lever 4 series (rebalance state derivation + BiPoolExchange + Pool Config + decimal-trust gates), volume rollups + v2/v3 attribution, Slack/deviation-alert refinements, ratchet linting series (6 PRs), Clawpatch baseline, react-doctor 80→100, browser interaction tests, and infra hygiene (mutation testing, supply-chain gate, agent quality gate). Its "Done" lists and "Next" hint were stale. That inventory was refreshed as part of this historical plan; GitHub Issues now own active work.
 
-2. **Liquity v2 CDP indexing + dashboard.** Backlog item flagged in `docs/ROADMAP.md:151-155`, `SPEC.md` §5.5, and `docs/BACKLOG.md:18-25`. Verification against `@mento-protocol/contracts@0.8.0` (see "Mento contracts verification" section below) revealed **three live Liquity instances on Celo mainnet** (GBPm + CHFm + JPYm), not the single GBPm instance BACKLOG implied. Each mints its own debt token against USDm collateral. We have zero indexer or dashboard visibility today. This plan adds the indexer entities + handlers for all three instances, then `/cdps` + `/cdps/[symbol]` routes with system KPIs + ICR distribution + trove/depositor tables + interest-rate brackets + CDP-pool linkage, all in **one deploy-sequenced PR**. `service=cdps` alert rules ship as a follow-up PR after sync.
+2. **Liquity v2 CDP indexing + dashboard.** The backlog item was flagged in the then-current roadmap, the then-current `SPEC.md` §5.5, and `docs/BACKLOG.md:18-25`. Verification against `@mento-protocol/contracts@0.8.0` (see "Mento contracts verification" section below) revealed **three live Liquity instances on Celo mainnet** (GBPm + CHFm + JPYm), not the single GBPm instance BACKLOG implied. Each mints its own debt token against USDm collateral. We have zero indexer or dashboard visibility today. This plan adds the indexer entities + handlers for all three instances, then `/cdps` + `/cdps/[symbol]` routes with system KPIs + ICR distribution + trove/depositor tables + interest-rate brackets + CDP-pool linkage, all in **one deploy-sequenced PR**. `service=cdps` alert rules ship as a follow-up PR after sync.
 
 **Constraints carried in.**
 
@@ -279,9 +279,10 @@ Upstream marks `Trove.mightBeLeveraged = true` if a `FlashLoan` topic appears in
 
 ---
 
-## Part 1 — ROADMAP refresh
+## Part 1 — Historical status-inventory refresh
 
-File to edit: `docs/ROADMAP.md`
+This section records the retired roadmap refresh that shipped with the plan.
+GitHub Issues now own active work, and the duplicated roadmap was removed.
 
 ### Update "Last updated" header
 
@@ -334,7 +335,9 @@ interest-rate brackets, and CDP-pool linkage. Alerts (`service=cdps`
 Stability Pool Headroom rule) ship as a follow-up PR once sync is
 verified.
 
-See SPEC.md §5.5 and BACKLOG.md "Liquity v2 CDP indexing" for full requirements.
+At plan time, see SPEC.md §5.5 and BACKLOG.md "Liquity v2 CDP indexing" for
+the original requirements. Current behavior is owned by
+`docs/notes/liquity-monitoring-invariants.md`.
 ```
 
 ### Update `### Backlog → Indexer Enhancements` (lines 149–161)
@@ -352,9 +355,12 @@ After Liquity v2 indexing lands, add a follow-up bullet:
 
 - **`service=cdps` alerts** — metrics-bridge gauges (`mento_liquity_*`) + Terraform rules. Stability Pool Headroom is critical when per-market `spHeadroom ≤ 0`; TCR warning/critical thresholds join against per-market SystemParams gauges, never hardcoded 115%/110%; shutdown pages immediately when `isShutDown=true`. Blocked on Phase A indexing landing.
 
-### Update SPEC.md §11 "Future Plans → Next" (lines 458–459)
+### Historical SPEC update requested by this plan (then §11)
 
-Mirror the ROADMAP "Next" change: Liquity v2 replaces CDP strategy entity as the top Next item. Keep §5.5 status as "Phase 2 — in progress" once the PR is opened.
+At execution time, mirror the ROADMAP "Next" change: Liquity v2 replaces CDP
+strategy entity as the top Next item. Current active work now belongs in GitHub
+Issues and current behavior in the owning implementation sources; the ROADMAP
+is non-canonical planning context, not part of the high-level specification.
 
 ---
 
@@ -1227,8 +1233,8 @@ For completeness; do not implement now. Follow-up PR:
 
 | Path                                                                                                                                                                                                                     | Change                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/ROADMAP.md`                                                                                                                                                                                                        | Refresh Done lists per Part 1; move Liquity to Next                                                                                                                                                                                                                                                                                                             |
-| `SPEC.md` (§5.5, §11)                                                                                                                                                                                                    | Liquity status → "Phase 2 in progress"; Next swap                                                                                                                                                                                                                                                                                                               |
+| Retired roadmap status inventory                                                                                                                                                                                         | Refreshed Done lists per Part 1 and moved Liquity to Next; GitHub Issues later became the sole active-work authority                                                                                                                                                                                                                                            |
+| `SPEC.md` (historical §5.5, §11)                                                                                                                                                                                         | Liquity status → "Phase 2 in progress"; Next swap                                                                                                                                                                                                                                                                                                               |
 | `docs/BACKLOG.md`                                                                                                                                                                                                        | Drop the Liquity entry + CDP-strategy entry (both ship in this PR); add `service=cdps` alerts follow-up                                                                                                                                                                                                                                                         |
 | `indexer-envio/scripts/generateAbis.mjs`                                                                                                                                                                                 | EDIT — extend to copy 11 Liquity/CDP ABIs from `@mento-protocol/contracts`                                                                                                                                                                                                                                                                                      |
 | `indexer-envio/abis/liquity/{TroveManager,StabilityPool,TroveNFT,BorrowerOperations,CollateralRegistry,CDPLiquidityStrategy,ReserveTroveFactory,SystemParams,AddressesRegistry,ActivePool,DefaultPool,FXPriceFeed}.json` | NEW — vendored ABIs (committed)                                                                                                                                                                                                                                                                                                                                 |

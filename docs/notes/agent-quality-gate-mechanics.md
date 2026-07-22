@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-21
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -39,8 +39,15 @@ completion timings, so a long adversarial case does not look hung. The mapped
 local quality gate invokes this package command and preserves those progress
 and timing lines. For deterministic autoreview-runtime closeout, pass
 `-- --jobs 1`; this changes scheduling only and keeps the same full family
-coverage. Hosted-CI hermeticity remains the separate follow-up tracked in
-#1422.
+coverage. The path-filtered `Autoreview adversarial suite` job runs that same
+complete family set sequentially on `ubuntu-latest` whenever autoreview runtime
+or fixture inputs change. The required `ci` sentinel allows the job to skip for
+unrelated paths and requires it to pass whenever the path filter selects it.
+
+Agent sessions must run `--run` gate invocations and `git push` as background
+tasks: foreground commands are killed at 600s, and a killed run writes no
+freshness stamp, so the next invocation re-runs the full mapped command set
+instead of hitting `--skip-if-fresh`.
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
@@ -502,7 +509,8 @@ concurrently (the heavy `test:coverage` suites and the gate self-test overlap
 instead of summing to the serial total), and it reuses a recent successful
 manual gate run when the fetched base commit, mapped command plan, gate
 implementation, changed paths, validated file content, and package-risk state
-are unchanged. Because it runs in parallel rather than `--fail-fast`, a red
+are unchanged and the recorded success is no older than the freshness TTL
+(two hours). Because it runs in parallel rather than `--fail-fast`, a red
 push runs the remaining in-flight members before failing (green pushes, the
 common case, get the full speedup). Package-script acknowledgement is folded out
 of the reuse key when there is no package-script risk, so a warm

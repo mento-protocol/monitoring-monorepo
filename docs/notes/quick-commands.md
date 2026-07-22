@@ -33,7 +33,7 @@ pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Runtime issue
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:perf <commit>     # Combined status/metrics/log snapshot for perf comparisons
-pnpm deploy:indexer:verify <commit>   # Batch status, metrics, endpoint, and GraphQL row probe
+pnpm deploy:indexer:verify <commit>   # Gate promotion on sync, core rows, and Polygon replay semantics
 pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod
 pnpm deploy:indexer:rollback <last-good-sha>  # Roll prod back: re-promote if still registered, else rebuild + resync
 
@@ -146,4 +146,8 @@ pnpm alerts:rules:init / alerts:rules:plan
 # Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
 # The production-infra gate enforces required-reviewer approval and allows
 # self-review for the sole-maintainer workflow.
+
+# Dev janitor
+bash scripts/dev-janitor.sh            # Dry-run: report stale trunk repo caches, pnpm store, git worktrees, /private/tmp trees
+bash scripts/dev-janitor.sh --apply    # Delete stale trunk repo caches, prune pnpm store, and run git worktree prune
 ```

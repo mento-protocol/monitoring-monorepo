@@ -64,7 +64,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-21 |
 | [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-08 |
-| [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
+| [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md) | Codex Agent Skills — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md) | Codex Cloud Setup and Maintenance | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md) | Cross-Protocol Context | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-06 |
@@ -173,7 +173,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-17 |
 | [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | unmanaged / unmanaged | reference / indexer-envio | unowned | 180d |
 | [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-21 |
-| [`SPEC.md`](../SPEC.md) | Mento v3 Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-17 |
+| [`SPEC.md`](../SPEC.md) | Mento Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-22 |
 
 ## notes-plans-archive
 
@@ -189,12 +189,5 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) | UI Dashboard Performance Plan — monitoring.mento.org | unmanaged / unmanaged | note / repo-wide | unowned | 365d |
 | [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) | AI Review Process Integration Plan | non-canonical / archived | plan / ci/process | eng | 365d; verified 2026-07-17 |
 | [`docs/PLAN-cdps-monitoring.md`](PLAN-cdps-monitoring.md) | ROADMAP refresh + CDPs monitoring (Liquity v2 indexing & dashboard) | unmanaged / unmanaged | plan / repo-wide | unowned | 365d |
-| [`docs/PLAN-celo-mainnet-indexer.md`](PLAN-celo-mainnet-indexer.md) | Plan: Celo Mainnet Envio Indexer | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-oracle-health-state-DOD.md`](PLAN-oracle-health-state-DOD.md) | Oracle & Health State — Definition of Done | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Plan: Oracle & Health State in the Indexer + Dashboard | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-oracle-snapshot-chart.md`](PLAN-oracle-snapshot-chart.md) | Plan: OracleSnapshot Chart — Oracle Price History Timeline | non-canonical / archived | plan / repo-wide | eng | 365d |
+| [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Oracle health-state decision retrospective | non-canonical / archived | plan / repo-wide | eng | 365d |
 | [`docs/PLAN-peg-monitoring.md`](PLAN-peg-monitoring.md) | Peg monitoring for oracle-less stablecoins (EUROP first) | non-canonical / active | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-rebalancer-liveness.md`](PLAN-rebalancer-liveness.md) | Plan: Rebalancer Liveness & Effectiveness | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-stream-c-dashboard.md`](PLAN-stream-c-dashboard.md) | Stream C: Dashboard Components for Trading Limits & Rebalancer Liveness | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-trading-limit-tracking.md`](PLAN-trading-limit-tracking.md) | Plan: Trading Limit Tracking | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/ROADMAP.md`](ROADMAP.md) | Monitoring Monorepo — Roadmap | unmanaged / unmanaged | plan / repo-wide | unowned | 365d |

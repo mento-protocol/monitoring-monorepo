@@ -5,6 +5,8 @@
     "src/EventHandlersBridgeOnly.ts",
     "src/indexer.ts",
     "vitest.mutation.config.ts",
+    "vitest.fail-closed.config.ts",
+    "test/fixtures/failClosedSortedOracles.case.ts",
     "scripts/*.mjs"
   ],
   "project": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.mjs", "*.config.*"],

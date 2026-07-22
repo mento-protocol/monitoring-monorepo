@@ -54,6 +54,13 @@ reproducible after later documentation edits. Self-reported scores are never
 trusted. CI and the monthly scheduler both reject a missing, malformed, or
 failing committed baseline before treating it as completion evidence.
 
+`sources_requiring_verification` entries are historical qualification traps,
+not live routes. A trap may remain in the immutable fixture after its document
+is retired only when the evaluator explicitly lists that path as a tombstone;
+every other missing path fails fixture validation. The trap applies only when
+an evaluated agent actually loads that path at the result's pinned commit. Its
+`verify_against` targets must remain current canonical authority.
+
 ## Run locally
 
 Validate the deterministic contract first:
@@ -134,7 +141,7 @@ Scores stay separate so a cheap strength cannot hide an expensive failure:
   do not masquerade as a routing failure.
 - **Context bytes** — source bytes are recomputed per question and as a unique
   suite total. No question may exceed 45,000 additional source bytes and the
-  complete run may not exceed 250,000 unique source bytes, including bootstrap
+  complete run may not exceed 260,000 unique source bytes, including bootstrap
   sources. Fixture validation also proves that the cheapest accepted route for
   every question, and their unique union, fit those caps before a run begins.
 

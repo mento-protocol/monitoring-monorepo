@@ -83,52 +83,28 @@ pnpm agent:quality-gate
 pnpm agent:quality-gate --run
 pnpm agent:autoreview # non-trivial completed batches
 pnpm agent:autoreview:test -- --jobs 1  # autoreview runtime changes only
-pnpm agent:autoreview --verify-bundle-dir <dir>  # pre-review check; retain the printed manifest for the bound post-check
+pnpm agent:autoreview --verify-bundle-dir <dir>  # pre-review check; retain the printed manifest
 ```
 
 The gate never deploys or applies Terraform. It refuses package-script or
-package-manager changes until their lifecycle risk is reviewed and explicitly
-acknowledged. Do not run a competing dashboard server/browser suite or second
-gate in the same worktree. Invocation details, parallelism, cache behavior, the
-server-side full-repository fallback, and common traps live in
+package-manager changes until their lifecycle risk is explicitly acknowledged.
+Do not run a competing dashboard server/browser suite or second gate in the
+same worktree. Background `--run` gates and `git push`; a 600s foreground kill
+discards the freshness stamp. Invocation details, parallelism, caching, the
+server-side fallback, and common traps live in
 [`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md).
 
-Autoreview keeps this repo's branch-local target (base-to-`HEAD` plus dirty
-tracked and untracked work), deterministic Mento checks, and repo-selected
-checklist/feedback context. It reviews that complete target without truncation,
-but direct semantic engines fail closed when the target needs more than one
-prompt. Prepared bundles retain a bounded, lossless pass index that one
-fresh-context reviewer must inspect completely. Their completion marker binds
-the evidence manifest; run `--verify-bundle-dir` immediately before review,
-retain its printed digest outside the bundle, then pass that digest to the
-post-review check with `--expected-bundle-manifest`. On macOS, write-granting
-ACLs on bundle-parent ancestors or entries fail preparation or verification.
-Automatic feedback capture
-pins the canonical GitHub repository. The owning-checkout default semantic
-helper, feedback-state modules, and checklist policy come from one pinned
-`origin/main` object rather than a PR-selected base, mutable worktree, or
-branch-controlled package scripts; wrapper-owned Node launches discard
-`NODE_OPTIONS`, `NODE_PATH`, and loader/startup injection variables. Direct
-executables require trusted ownership and non-shared-writable ancestry; on
-Darwin, Homebrew-style paths are accepted only through sealed private native
-Mach-O snapshots with system-only library closure, while scripts and unsafe
-library closure fail closed. Runtime-changing PRs must keep the owning-checkout
-refusal intact and use the compatible last-reviewed pre-change wrapper from the
-reviewed checkout; the exact command sequence is in
-`docs/notes/agent-quality-gate-mechanics.md`.
-Checklist edits remain diff evidence. Direct and prepared capture enforce a
-cumulative byte budget before review input accumulates in memory or staging
-sidecars.
-Semantic engines run in an isolated empty workspace with restricted project
-configuration and environment; reviewer web search is disabled by default and
-requires explicit `--web-search`. Review inputs fail closed on sensitive
-content, including wallet recovery phrases.
-Inside an active Codex sandbox, the adapter may choose its local deterministic
-engine only when no engine was explicitly selected; an explicitly selected
-unavailable semantic engine fails closed. Autoreview does not run tests;
-`pnpm agent:quality-gate --run` owns test execution.
-Autoreview is source review, not runtime or behavior proof, so all mapped gate,
-browser, generated-artifact, and runtime verification still applies.
+Autoreview covers the complete branch-local target without truncation. One
+fresh-context reviewer must inspect every prepared-bundle pass, with manifest
+verification before and after review. Capture, bundle-integrity,
+sensitive-input, and runtime-trust failures are fail-closed; so is an explicitly
+selected unavailable semantic engine. Runtime-changing PRs use the compatible
+last-reviewed owning-checkout wrapper. Autoreview reviews source only: it runs
+no tests and proves no behavior, so mapped gate, browser, generated-artifact,
+and runtime checks still apply. Exact target, bundle, isolation, trust,
+engine-selection, and command contracts live in
+[`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md)
+and [`docs/notes/codex-agent-skills.md`](docs/notes/codex-agent-skills.md).
 
 ## PR description standard
 

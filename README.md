@@ -331,6 +331,10 @@ pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
 ```
 
+The status watcher only proves a deployment caught up. Promotion additionally
+requires `deploy:indexer:verify` to pass core-row and Polygon replay semantics;
+`--allow-syncing` never waives those data-integrity checks.
+
 If a promotion turns out bad, roll back with
 `pnpm deploy:indexer:rollback <last-good-sha>` - see
 [docs/deployment.md](./docs/deployment.md#rollback-a-bad-promotion).
