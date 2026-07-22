@@ -629,6 +629,63 @@ test("applies staleness checks to a hidden root README marker", () => {
   }
 });
 
+test("rejects Claude sag permissions that use a non-canonical key path", () => {
+  const today = isoDateWithOffset(0);
+  const root = createContextCheckFixture(
+    `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${today} -->\n`,
+  );
+  try {
+    writeFixtureJson(root, ".claude/settings.json", {
+      permissions: {
+        allow: [
+          'Bash(sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "hey, i need your approval in the agent chat")',
+          'Bash(sag -v Charlie --api-key-file ~/.config/sag/elevenlabs-api-key "hey, i need your approval in the agent chat")',
+          'Bash(sag speak --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "hey, i need your approval in the agent chat")',
+          "Bash(sag:*)",
+        ],
+      },
+      hooks: {
+        SessionEnd: [
+          {
+            hooks: [
+              {
+                type: "command",
+                command:
+                  'bash "${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh"',
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    try {
+      execFileSync(process.execPath, [checkerScriptPath], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      throw new Error("expected context check to reject the legacy key path");
+    } catch (/** @type {unknown} */ err) {
+      const maybeError =
+        err && typeof err === "object"
+          ? /** @type {{stderr?: string, stdout?: string, message?: string}} */ (
+              err
+            )
+          : {};
+      const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
+      assert(
+        output.includes(
+          "sag permissions must include --api-key-file with the canonical ~/.config/elevenlabs_api_key path",
+        ),
+        `expected canonical sag path failure, got ${JSON.stringify(output || maybeError.message)}`,
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ── summary ───────────────────────────────────────────────────────────────────
 
 console.log(

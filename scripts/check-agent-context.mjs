@@ -422,6 +422,17 @@ function validateClaudePermissions(settings) {
   for (const permission of allow) {
     if (typeof permission !== "string") continue;
 
+    if (
+      /^Bash\(sag(?:\s|:|\))/.test(permission) &&
+      !/(?:^|\s)--api-key-file(?:=|\s+)~\/\.config\/elevenlabs_api_key(?=\s|\))/.test(
+        permission,
+      )
+    ) {
+      fail(
+        `.claude/settings.json: sag permissions must include --api-key-file with the canonical ~/.config/elevenlabs_api_key path: ${permission}`,
+      );
+    }
+
     if (/^Bash\(until\b/.test(permission)) {
       fail(
         `.claude/settings.json: permissions.allow must not allow shell-loop commands: ${permission}`,
