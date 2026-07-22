@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import {
+  collectTriggers,
   evaluateWorkflow,
-  hasUnanalyzableTriggers,
+  grantsOidc,
   hasPullRequestTrigger,
-  hasTrigger,
-  referencesSecrets,
-  splitJobs,
+  jobGuarded,
+  jobReceivesCredential,
+  parseWorkflow,
   usesPullRequestTarget,
 } from "./check-autofix-ci-trust.mjs";
 
@@ -28,675 +29,335 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const SECRET_LINE = "          token: ${{ secrets.SOME_TOKEN }}";
+const SECRET_STEP = [
+  "    steps:",
+  "      - run: ./deploy.sh",
+  "        env:",
+  "          TOKEN: ${{ secrets.DEPLOY_TOKEN }}",
+].join("\n");
 
-// ── trigger detection: every valid GitHub Actions form ───────────────────────
+const GUARD =
+  "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}";
 
-test("trigger detection covers block, bare-key, inline-list, inline-scalar, inline-mapping forms", () => {
-  assert(
-    hasTrigger("on:\n  pull_request:\n    branches: [main]", "pull_request"),
-    "block form",
-  );
-  assert(hasTrigger("on:\n  pull_request\n", "pull_request"), "bare key form");
-  assert(
-    hasTrigger("on: [push, pull_request]\n", "pull_request"),
-    "inline list",
-  );
-  assert(hasTrigger("on: pull_request\n", "pull_request"), "inline scalar");
-  assert(
-    hasTrigger("on: { pull_request: { branches: [main] } }\n", "pull_request"),
-    "inline mapping",
-  );
-  // pull_request must NOT match pull_request_target (and vice versa).
-  assert(
-    !hasTrigger("on: [pull_request_target]\n", "pull_request"),
-    "no prefix match",
-  );
-  assert(
-    usesPullRequestTarget("on: [pull_request_target]\n"),
-    "inline pull_request_target detected",
-  );
-  assert(
-    usesPullRequestTarget("on:\n  pull_request_target:\n"),
-    "block pull_request_target detected",
-  );
-  // One-space indentation under on: is valid YAML — must not fail open.
-  assert(
-    hasTrigger("on:\n pull_request:\n  branches: [main]", "pull_request"),
-    "one-space indent block form",
-  );
-  // Quoted YAML scalars/keys are valid trigger spellings.
-  assert(
-    hasTrigger('on: ["pull_request"]\n', "pull_request"),
-    "quoted inline list",
-  );
-  assert(
-    hasTrigger("on:\n  'pull_request':\n    branches: [main]", "pull_request"),
-    "quoted block key",
-  );
-  assert(
-    usesPullRequestTarget('on: ["pull_request_target"]\n'),
-    "quoted pull_request_target detected",
-  );
-  // Comments and step names never count as triggers.
-  assert(
-    !hasTrigger("on:\n  push:\n# pull_request would be nice", "pull_request"),
-    "comment ignored",
-  );
-  assert(
-    !hasTrigger(
-      "on:\n  push:\njobs:\n  x:\n    steps:\n      - name: pull_request thing",
-      "pull_request",
-    ),
-    "step name outside on: block ignored",
-  );
-});
-
-test("pull_request_target is always refused, even with a guard present", () => {
-  const body = [
-    "on:",
-    "  pull_request_target:",
+// Build an unguarded secret-bearing pull_request workflow with a given `on:`.
+function unguarded(onBlock) {
+  return [
+    onBlock,
     "jobs:",
-    "  x:",
-    "    # sentry-autofix/ guard present but irrelevant",
-    SECRET_LINE,
-  ].join("\n");
-  const v = evaluateWorkflow(body);
-  assert(!v.ok && /pull_request_target/.test(v.reason), "refused");
-});
-
-test("referencesSecrets covers every secret-passing syntax", () => {
-  assert(referencesSecrets("x: ${{ secrets.FOO }}"), "dot expression");
-  assert(referencesSecrets("x: ${{ secrets['FOO'] }}"), "bracket expression");
-  assert(
-    referencesSecrets('x: ${{ secrets["FOO"] }}'),
-    "double-quote bracket expression",
-  );
-  assert(
-    referencesSecrets(
-      "    uses: ./.github/workflows/x.yml\n    secrets: inherit",
-    ),
-    "reusable-workflow secrets: inherit",
-  );
-  assert(
-    referencesSecrets(
-      '    uses: ./.github/workflows/x.yml\n    secrets: "inherit"',
-    ),
-    "QUOTED inherit scalar has identical semantics and must count",
-  );
-  assert(
-    referencesSecrets(
-      "    uses: org/repo/.github/workflows/x.yml@sha\n    secrets:\n      token: abc",
-    ),
-    "reusable-workflow explicit secrets block",
-  );
-  assert(
-    referencesSecrets("          ALL: ${{ toJSON(secrets) }}"),
-    "bare secrets context (toJSON) expands every secret and must count",
-  );
-  assert(!referencesSecrets("x: secrets are cool"), "prose ignored");
-  assert(
-    !referencesSecrets("# secrets: inherit would be bad"),
-    "commented inherit ignored",
-  );
-});
-
-test("guard text inside a YAML comment on the if: line does NOT count", () => {
-  // YAML drops the trailing comment before GitHub evaluates the expression,
-  // so the job RUNS for autofix PRs — the commented guard must not certify it.
-  const smuggledIfComment = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    if: github.event_name == 'pull_request' # !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')",
-    SECRET_LINE,
-  ].join("\n");
-  assert(
-    !evaluateWorkflow(smuggledIfComment).ok,
-    "comment-smuggled guard refused",
-  );
-});
-
-test("quoted job keys are segmented (cannot hide inside a sibling's block)", () => {
-  const body = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  safe:",
-    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
-    SECRET_LINE,
-    '  "leak":',
-    SECRET_LINE,
-  ].join("\n");
-  const blocks = splitJobs(body);
-  assert(blocks.has("leak"), "quoted job key segmented");
-  const v = evaluateWorkflow(body);
-  assert(!v.ok && /\[leak\]/.test(v.reason), "quoted unguarded job refused");
-});
-
-test("a bare sentry-autofix/ mention does NOT count as a guard", () => {
-  // A comment, step name, or POSITIVE lane-router containing the branch
-  // namespace must not certify a secret-bearing job — only the strict
-  // excluding if: form (or an annotation) does.
-  const commentOnly = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    # we should think about sentry-autofix/ branches here someday",
-    SECRET_LINE,
-  ].join("\n");
-  assert(!evaluateWorkflow(commentOnly).ok, "comment mention refused");
-
-  const positiveRouter = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    if: ${{ startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
-    SECRET_LINE,
-  ].join("\n");
-  assert(
-    !evaluateWorkflow(positiveRouter).ok,
-    "positive (non-excluding) startsWith refused",
-  );
-
-  const headRefForm = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    if: ${{ !startsWith(github.head_ref, 'sentry-autofix/') }}",
-    SECRET_LINE,
-  ].join("\n");
-  assert(
-    evaluateWorkflow(headRefForm).ok,
-    "github.head_ref exclusion accepted",
-  );
-});
-
-// ── per-job granularity ───────────────────────────────────────────────────────
-
-test("splitJobs separates header and job blocks", () => {
-  const body = [
-    "name: X",
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  alpha:",
+    "  leak:",
     "    runs-on: ubuntu-latest",
-    "  beta:",
+    SECRET_STEP,
+  ].join("\n");
+}
+
+// ── core security property ───────────────────────────────────────────────────
+
+test("unguarded secret-bearing pull_request job is refused", () => {
+  const v = evaluateWorkflow(unguarded("on:\n  pull_request:"));
+  assert(!v.ok && /\[leak\]/.test(v.reason), "refused and names the job");
+});
+
+test("job-level if guard clears it", () => {
+  const body = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
     "    runs-on: ubuntu-latest",
-    SECRET_LINE,
-  ].join("\n");
-  const blocks = splitJobs(body);
-  assert(blocks.get("").includes("name: X"), "header captured");
-  assert(blocks.has("alpha") && blocks.has("beta"), "both jobs found");
-  assert(!blocks.get("alpha").includes("secrets."), "alpha has no secret");
-  assert(blocks.get("beta").includes("secrets."), "beta holds the secret");
-});
-
-test("secret-bearing job without guard or annotation fails, naming the job", () => {
-  const body = ["on:", "  pull_request:", "jobs:", "  x:", SECRET_LINE].join(
-    "\n",
-  );
-  const v = evaluateWorkflow(body);
-  assert(!v.ok && /\[x\]/.test(v.reason), "unguarded job refused by name");
-});
-
-test("one guarded job must NOT vouch for an unguarded sibling", () => {
-  // The multi-job false-negative: job `safe` carries a guard, job `leaky`
-  // reaches secrets with none. Per-job granularity must still refuse.
-  const body = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  safe:",
-    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
-    SECRET_LINE,
-    "  leaky:",
-    SECRET_LINE,
-  ].join("\n");
-  const v = evaluateWorkflow(body);
-  assert(!v.ok, "sibling not vouched for");
-  assert(/\[leaky\]/.test(v.reason), "only the unguarded job is named");
-});
-
-test("a guard literal in the same job satisfies that job", () => {
-  const body = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
-    SECRET_LINE,
+    GUARD,
+    SECRET_STEP,
   ].join("\n");
   assert(evaluateWorkflow(body).ok, "guarded job passes");
 });
 
-test("a per-job annotation satisfies that job; a header annotation covers all jobs", () => {
-  const perJob = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    # autofix-ci-trust: secret is step-scoped to a pinned action.",
-    SECRET_LINE,
-  ].join("\n");
-  assert(evaluateWorkflow(perJob).ok, "job-level annotation passes");
-
-  const fileLevel = [
-    "on:",
-    "  pull_request:",
-    "# autofix-ci-trust: all secrets here are step-scoped; no PR-head code",
-    "# executes with them in env.",
-    "jobs:",
-    "  x:",
-    SECRET_LINE,
-    "  y:",
-    SECRET_LINE,
-  ].join("\n");
-  assert(evaluateWorkflow(fileLevel).ok, "header annotation covers all jobs");
-});
-
-test("the guard only counts on the JOB-LEVEL if:, not in steps or comments", () => {
-  // The exact guard text inside a step's run: (or a step-level if:) does not
-  // gate whether the JOB runs for autofix PRs — it must not certify the job.
-  const guardInRunStep = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    steps:",
-    "      - run: echo \"!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')\"",
-    SECRET_LINE,
-  ].join("\n");
-  assert(!evaluateWorkflow(guardInRunStep).ok, "guard inside run: refused");
-
-  const guardInStepIf = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    steps:",
-    "      - if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
-    "        run: echo hi",
-    SECRET_LINE,
-  ].join("\n");
-  assert(
-    !evaluateWorkflow(guardInStepIf).ok,
-    "step-level if: does not certify the whole job",
-  );
-
-  // Multiline job-level if: (the repo's >- form) is credited.
-  const multilineIf = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    if: >-",
-    "      (github.event_name == 'pull_request'",
-    "        && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/'))",
-    SECRET_LINE,
-  ].join("\n");
-  assert(evaluateWorkflow(multilineIf).ok, "multiline job if: credited");
-});
-
-test("annotation lookalikes inside string values do NOT count", () => {
-  // Only a genuine YAML comment line is a reviewed annotation; a string that
-  // merely CONTAINS the marker (e.g. echoed in a run:) must not certify a job.
-  const smuggled = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    steps:",
-    "      - run: \"echo '# autofix-ci-trust: not a real annotation'\"",
-    SECRET_LINE,
-  ].join("\n");
-  assert(!evaluateWorkflow(smuggled).ok, "string-value lookalike refused");
-
-  const genuine = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    # autofix-ci-trust: secret is step-scoped to a pinned action.",
-    SECRET_LINE,
-  ].join("\n");
-  assert(evaluateWorkflow(genuine).ok, "genuine comment line accepted");
-});
-
-test("top-level content AFTER jobs: still counts as header (secrets and annotations)", () => {
-  // YAML allows workflow-level keys below jobs:. A trailing env: secret must
-  // still mark every job secret-bearing, and a trailing annotation must still
-  // cover the file.
-  const trailingEnvSecret = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    steps:",
-    "      - run: pnpm test",
-    "env:",
-    "  TOKEN: ${{ secrets.SOME_TOKEN }}",
-  ].join("\n");
-  const v = evaluateWorkflow(trailingEnvSecret);
-  assert(!v.ok && /\[x\]/.test(v.reason), "post-jobs env secret still counted");
-
-  const trailingAnnotation = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    steps:",
-    "      - run: pnpm test",
-    "env:",
-    "  TOKEN: ${{ secrets.SOME_TOKEN }}",
-    "# autofix-ci-trust: token is a public fixture value, not a secret-bearing lane.",
-  ].join("\n");
-  assert(
-    evaluateWorkflow(trailingAnnotation).ok,
-    "post-jobs file-level annotation still honored",
-  );
-});
-
-test("workflow-level env secrets make every job secret-bearing", () => {
-  // Top-level `env: TOKEN: ${{ secrets.X }}` is inherited by all jobs; a job
-  // with no textual secret reference still receives it.
-  const headerEnv = [
-    "on:",
-    "  pull_request:",
-    "env:",
-    "  TOKEN: ${{ secrets.SOME_TOKEN }}",
-    "jobs:",
-    "  x:",
-    "    steps:",
-    "      - run: pnpm test",
-  ].join("\n");
-  const v = evaluateWorkflow(headerEnv);
-  assert(!v.ok && /\[x\]/.test(v.reason), "inherited header secret refused");
-
-  const guarded = [
-    "on:",
-    "  pull_request:",
-    "env:",
-    "  TOKEN: ${{ secrets.SOME_TOKEN }}",
-    "jobs:",
-    "  x:",
-    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
-    "    steps:",
-    "      - run: pnpm test",
-  ].join("\n");
-  assert(evaluateWorkflow(guarded).ok, "guarded job passes with header secret");
-});
-
-test("un-segmentable secret-bearing workflow FAILS CLOSED", () => {
-  // 4-space job indentation defeats the textual splitter; the checker must
-  // refuse rather than silently skip the per-job analysis.
-  const weirdIndent = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "    x:",
-    "     " + SECRET_LINE.trim(),
-  ].join("\n");
-  const v = evaluateWorkflow(weirdIndent);
-  assert(
-    !v.ok && /segmented/.test(v.reason),
-    "fails closed on odd indentation",
-  );
-});
-
-test("secretless pull_request workflows and non-PR workflows pass untouched", () => {
-  assert(
-    evaluateWorkflow(
-      ["on:", "  pull_request:", "jobs:", "  x:", "    runs-on: u"].join("\n"),
-    ).ok,
-    "secretless PR workflow",
-  );
-  assert(
-    evaluateWorkflow(
-      ["on:", "  schedule:", "jobs:", "  x:", SECRET_LINE].join("\n"),
-    ).ok,
-    "schedule-only workflow with secrets",
-  );
-  assert(hasPullRequestTrigger("on:\n  pull_request:\n"), "detector sanity");
-});
-
-test("aliased/anchored or multi-line flow on: declarations FAIL CLOSED", () => {
-  const aliased = [
-    "events: &pr_events",
-    "  pull_request:",
-    "on: *pr_events",
-    "jobs:",
-    "  x:",
-    SECRET_LINE,
-  ].join("\n");
-  assert(hasUnanalyzableTriggers(aliased), "alias detected");
-  const v = evaluateWorkflow(aliased);
-  assert(!v.ok && /anchors|alias/i.test(v.reason), "aliased on: refused");
-
-  const multilineFlow = [
-    "on: [pull_request,",
-    "  push]",
-    "jobs:",
-    "  x:",
-    SECRET_LINE,
-  ].join("\n");
-  assert(
-    !evaluateWorkflow(multilineFlow).ok,
-    "unterminated flow on: refused (fail closed)",
-  );
-
-  // Ordinary literal forms remain analyzable.
-  assert(
-    !hasUnanalyzableTriggers("on:\n  pull_request:\n    branches: [main]"),
-    "literal block form analyzable",
-  );
-});
-
-test("quoted secrets key forwarding inherit still counts", () => {
-  assert(
-    referencesSecrets(
-      '    uses: ./.github/workflows/x.yml\n    "secrets": inherit',
-    ),
-    "quoted secrets key with inherit counts",
-  );
-});
-
-test("aliases ANYWHERE (inline lists, secret-carrying anchors) fail closed; mrkdwn strings do not", () => {
-  // Alias inside a valid inline trigger list.
-  const inlineAlias = [
-    "name: &pr pull_request",
-    "on: [*pr]",
-    "jobs:",
-    "  x:",
-    SECRET_LINE,
-  ].join("\n");
-  assert(!evaluateWorkflow(inlineAlias).ok, "inline-list alias refused");
-
-  // Anchor carrying a secret env mapping consumed by a later job.
-  const anchorSecrets = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  safe:",
-    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
-    "    env: &shared_secrets",
-    "      TOKEN: ${{ secrets.TOKEN }}",
-    "  leak:",
-    "    env: *shared_secrets",
-    "    steps:",
-    "      - run: pnpm test",
-  ].join("\n");
-  assert(!evaluateWorkflow(anchorSecrets).ok, "anchor-carried secrets refused");
-
-  // Slack mrkdwn bold inside a quoted string is NOT a YAML alias.
-  const mrkdwn = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    steps:",
-    '      - run: echo "🧪 *wiring test*"',
-  ].join("\n");
-  assert(!hasUnanalyzableTriggers(mrkdwn), "mrkdwn bold not an alias");
-  assert(evaluateWorkflow(mrkdwn).ok, "secretless mrkdwn workflow passes");
-});
-
-test("environment-bound jobs are secret-bearing even with no textual secrets", () => {
-  const envJob = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    environment: production-infra",
-    "    steps:",
-    "      - run: pnpm deploy",
-  ].join("\n");
-  const v = evaluateWorkflow(envJob);
-  assert(!v.ok && /\[x\]/.test(v.reason), "environment secrets counted");
-
-  const guarded = [
-    "on:",
-    "  pull_request:",
-    "jobs:",
-    "  x:",
-    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
-    "    environment: production-infra",
-    "    steps:",
-    "      - run: pnpm deploy",
-  ].join("\n");
-  assert(evaluateWorkflow(guarded).ok, "guarded environment job passes");
-});
-
-test("anchors/aliases with non-identifier names (numeric, dashed) are refused", () => {
-  assert(
-    hasUnanalyzableTriggers("events: &1\n  pull_request:\non: *1\n"),
-    "numeric anchor + alias refused",
-  );
-  assert(
-    hasUnanalyzableTriggers("on: *-x\n"),
-    "dash-leading alias name refused",
-  );
-});
-
-test("YAML explicit-key syntax in mappings is refused", () => {
-  assert(
-    hasUnanalyzableTriggers("on:\n  ? pull_request\n  : null\n"),
-    "explicit trigger key refused",
-  );
-  assert(
-    hasUnanalyzableTriggers('on:\n  ? "pull_request"\n'),
-    "quoted explicit key refused",
-  );
-});
-
-test("block-scalar content is inert text, not YAML (no false positives)", () => {
-  const ternary = [
-    "on:",
-    "  push:",
-    "jobs:",
-    "  a:",
-    "    steps:",
-    "      - run: |",
-    "          const x = cond",
-    "            ? a",
-    "            : b;",
-  ].join("\n");
-  assert(!hasUnanalyzableTriggers(ternary), "JS ternary in run block ignored");
-
-  const mrkdwn = [
-    "jobs:",
-    "  a:",
-    "    steps:",
-    "      - uses: actions/github-script@v7",
-    "        with:",
-    "          script: |",
-    "            const s = `- **${x}** &y`;",
-    "            const t = `*${z}*`;",
-  ].join("\n");
-  assert(!hasUnanalyzableTriggers(mrkdwn), "markdown in script block ignored");
-
-  // The introducer line itself is still scanned: an anchor BEFORE the block
-  // scalar (`run: &tpl |`) must fail before the content skip kicks in.
-  assert(
-    hasUnanalyzableTriggers(
-      "jobs:\n  a:\n    steps:\n      - run: &tpl |\n          echo hi\n",
-    ),
-    "anchored block scalar refused",
-  );
-});
-
-test("anchored/aliased mapping KEYS are refused (not just value positions)", () => {
-  assert(
-    hasUnanalyzableTriggers(
-      "on:\n  &event pull_request:\njobs:\n  a:\n    steps:\n      - run: echo hi\n",
-    ),
-    "anchored trigger key refused",
-  );
-  assert(
-    hasUnanalyzableTriggers("on:\n  *event pull_request:\n"),
-    "aliased key refused",
-  );
-});
-
-test("letter-synthesizing escapes in double-quoted scalars are refused", () => {
-  assert(
-    hasUnanalyzableTriggers(
-      'jobs:\n  a:\n    env:\n      TOKEN: "${{ se\\u0063rets.TOKEN }}"\n',
-    ),
-    "\\u escape refused (decodes to secrets reference)",
-  );
-  assert(hasUnanalyzableTriggers('x: "\\x63"\n'), "\\x escape refused");
-  assert(hasUnanalyzableTriggers('x: "\\U00000063"\n'), "\\U escape refused");
-  assert(
-    !hasUnanalyzableTriggers(
-      'jobs:\n  a:\n    steps:\n      - run: |\n          printf "\\u0041"\n          grep -P "\\x41" file\n',
-    ),
-    "escapes inside block scalars are literal text, not flagged",
-  );
-  assert(
-    !hasUnanalyzableTriggers('x: "line1\\nline2"\n'),
-    "non-letter escapes (\\n, \\t) pass",
-  );
-});
-
-test("id-token: write is a credential (WIF token exchange), like a secret", () => {
-  const base = [
+test("github.head_ref guard spelling also clears it", () => {
+  const body = [
     "on:",
     "  pull_request:",
     "jobs:",
     "  leak:",
     "    runs-on: ubuntu-latest",
-    "PERMS",
-    "    steps:",
-    "      - uses: actions/checkout@v4",
+    "    if: ${{ !startsWith(github.head_ref, 'sentry-autofix/') }}",
+    SECRET_STEP,
   ].join("\n");
-  const block = base.replace(
-    "PERMS",
-    "    permissions:\n      id-token: write",
-  );
-  let v = evaluateWorkflow(block);
-  assert(!v.ok && /\[leak\]/.test(v.reason), "block-form id-token refused");
+  assert(evaluateWorkflow(body).ok, "head_ref guard passes");
+});
 
-  const inline = base.replace("PERMS", "    permissions: { id-token: write }");
-  v = evaluateWorkflow(inline);
-  assert(!v.ok && /\[leak\]/.test(v.reason), "inline-flow id-token refused");
+test("file-level and job-level annotations clear it", () => {
+  const fileLevel = [
+    "# autofix-ci-trust: fixtures only, no live secrets",
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  assert(evaluateWorkflow(fileLevel).ok, "file annotation covers the job");
 
-  const writeAll = base.replace("PERMS", "    permissions: write-all");
-  v = evaluateWorkflow(writeAll);
-  assert(!v.ok && /\[leak\]/.test(v.reason), "permissions: write-all refused");
+  const jobLevel = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    # autofix-ci-trust: token is actor-gated below",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  assert(evaluateWorkflow(jobLevel).ok, "job annotation covers its own job");
+});
 
-  const readOnly = base.replace("PERMS", "    permissions: read-all");
+test("no pull_request trigger → not our concern", () => {
+  assert(evaluateWorkflow(unguarded("on:\n  push:")).ok, "push-only passes");
   assert(
-    evaluateWorkflow(readOnly).ok,
-    "read-only permissions without secrets passes",
+    evaluateWorkflow(unguarded("on:\n  workflow_dispatch:")).ok,
+    "dispatch-only passes",
+  );
+});
+
+test("no credential → passes even on pull_request", () => {
+  const body = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo hi",
+  ].join("\n");
+  assert(evaluateWorkflow(body).ok, "no-secret PR job passes");
+});
+
+test("pull_request_target is always refused", () => {
+  assert(
+    !evaluateWorkflow("on:\n  pull_request_target:\njobs: {}\n").ok,
+    "block form refused",
+  );
+  assert(
+    !evaluateWorkflow("on: [push, pull_request_target]\njobs: {}\n").ok,
+    "list form refused",
+  );
+});
+
+// ── trigger detection across every shape (parser-resolved) ───────────────────
+
+test("pull_request trigger detected in scalar/list/mapping forms", () => {
+  assert(hasPullRequestTrigger("on: pull_request\njobs: {}"), "scalar");
+  assert(hasPullRequestTrigger("on: [push, pull_request]\njobs: {}"), "list");
+  assert(
+    hasPullRequestTrigger(
+      "on:\n  pull_request:\n    branches: [main]\njobs: {}",
+    ),
+    "mapping with config",
+  );
+  assert(
+    hasPullRequestTrigger("on:\n  - push\n  - pull_request\njobs: {}"),
+    "sequence",
+  );
+});
+
+test("a branch/tag named pull_request is NOT a trigger (parser sees structure)", () => {
+  const pushBranch = unguarded(
+    "on:\n  push:\n    branches:\n      - pull_request",
+  );
+  assert(!hasPullRequestTrigger(pushBranch), "branch value is not a trigger");
+  assert(evaluateWorkflow(pushBranch).ok, "push-only workflow not blocked");
+
+  const inlineNested = unguarded("on: { push: { branches: [pull_request] } }");
+  assert(
+    !hasPullRequestTrigger(inlineNested),
+    "nested flow branch not a trigger",
+  );
+  assert(evaluateWorkflow(inlineNested).ok, "nested-flow push not blocked");
+});
+
+// ── evasion shapes the old textual tripwire could not resolve ────────────────
+
+test("anchors/aliases are resolved, not a bypass", () => {
+  const body = [
+    "on: &ev",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  assert(
+    !evaluateWorkflow(body).ok,
+    "aliased trigger still triggers the check",
+  );
+});
+
+test("\\u / block-scalar / quoted forms decode and are analyzed", () => {
+  // secrets reference hidden behind a \u escape in a double-quoted scalar
+  const escaped = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: deploy",
+    "        env:",
+    '          T: "${{ se\\u0063rets.TOKEN }}"',
+  ].join("\n");
+  assert(!evaluateWorkflow(escaped).ok, "escaped secrets reference detected");
+
+  // block scalar as the on: value decodes to a pull_request trigger
+  const blockOn = unguarded("on: >-\n  pull_request");
+  assert(!evaluateWorkflow(blockOn).ok, "block-scalar trigger analyzed");
+});
+
+test("flow-style and JSON document roots are analyzed", () => {
+  const flowChild = [
+    "name: deploy",
+    "on:",
+    "  { pull_request: null }",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  assert(!evaluateWorkflow(flowChild).ok, "flow-mapping on: child analyzed");
+
+  const wholeFlow =
+    '{ on: { pull_request: null }, jobs: { leak: { "runs-on": "ubuntu-latest", steps: [ { run: "x", env: { T: "${{ secrets.T }}" } } ] } } }';
+  assert(!evaluateWorkflow(wholeFlow).ok, "whole-file flow mapping analyzed");
+
+  const json =
+    '{"on":"pull_request","jobs":{"leak":{"runs-on":"ubuntu-latest","steps":[{"run":"x","env":{"T":"${{ secrets.T }}"}}]}}}';
+  assert(!evaluateWorkflow(json).ok, "JSON document root analyzed");
+});
+
+test("referencesSecrets sees a secret after an interior brace (fromJSON)", () => {
+  const body = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: curl -d \"${{ fromJSON('{}').x || secrets.SOME_TOKEN }}\" https://x",
+  ].join("\n");
+  assert(!evaluateWorkflow(body).ok, "secret after '{}' brace detected");
+});
+
+test("a column-0 comment between jobs does not hide or mis-scope jobs", () => {
+  const failOpen = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  guarded:",
+    GUARD,
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+    "# =========================",
+    "  leaky:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  const v = evaluateWorkflow(failOpen);
+  assert(
+    !v.ok && /\[leaky\]/.test(v.reason),
+    "later unguarded job still caught",
   );
 
-  const header = [
+  const bothGuarded = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  lint:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo hi",
+    "# =========================",
+    "  deploy:",
+    GUARD,
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  assert(
+    evaluateWorkflow(bothGuarded).ok,
+    "comment does not wrongly flag a job",
+  );
+});
+
+// ── per-job granularity ──────────────────────────────────────────────────────
+
+test("a guarded job does not vouch for an unguarded secret-bearing sibling", () => {
+  const body = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  safe:",
+    GUARD,
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  const v = evaluateWorkflow(body);
+  assert(
+    !v.ok && /\[leak\]/.test(v.reason) && !/safe/.test(v.reason),
+    "only leak flagged",
+  );
+});
+
+// ── credential detection ─────────────────────────────────────────────────────
+
+test("every secret-passing syntax counts", () => {
+  const dot = jobReceivesCredential(
+    { steps: [{ env: { T: "${{ secrets.X }}" } }] },
+    { envSecrets: false, workflowPermissions: undefined },
+  );
+  const bracket = jobReceivesCredential(
+    { steps: [{ env: { T: "${{ secrets['X'] }}" } }] },
+    { envSecrets: false, workflowPermissions: undefined },
+  );
+  const tojson = jobReceivesCredential(
+    { steps: [{ env: { T: "${{ toJSON(secrets) }}" } }] },
+    { envSecrets: false, workflowPermissions: undefined },
+  );
+  const inherit = jobReceivesCredential(
+    { uses: "./.github/workflows/x.yml", secrets: "inherit" },
+    { envSecrets: false, workflowPermissions: undefined },
+  );
+  const block = jobReceivesCredential(
+    { uses: "./.github/workflows/x.yml", secrets: { T: "${{ secrets.X }}" } },
+    { envSecrets: false, workflowPermissions: undefined },
+  );
+  assert(
+    dot && bracket && tojson && inherit && block,
+    "all secret forms detected",
+  );
+  assert(
+    !jobReceivesCredential(
+      { steps: [{ run: "echo secrets are cool" }] },
+      { envSecrets: false, workflowPermissions: undefined },
+    ),
+    "prose 'secrets' without an expression is not a credential",
+  );
+});
+
+test("workflow-level env secrets and permissions are inherited", () => {
+  const envSecrets = [
+    "on:",
+    "  pull_request:",
+    "env:",
+    "  T: ${{ secrets.GLOBAL }}",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo hi",
+  ].join("\n");
+  assert(
+    !evaluateWorkflow(envSecrets).ok,
+    "inherited env secret makes the job unsafe",
+  );
+
+  const wfOidc = [
     "on:",
     "  pull_request:",
     "permissions:",
@@ -705,87 +366,301 @@ test("id-token: write is a credential (WIF token exchange), like a secret", () =
     "  leak:",
     "    runs-on: ubuntu-latest",
     "    steps:",
-    "      - uses: actions/checkout@v4",
+    "      - run: echo hi",
   ].join("\n");
-  v = evaluateWorkflow(header);
   assert(
-    !v.ok && /\[leak\]/.test(v.reason),
-    "workflow-level id-token inherited by jobs",
-  );
-
-  const guarded = block.replace(
-    "    runs-on: ubuntu-latest",
-    "    runs-on: ubuntu-latest\n    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
-  );
-  assert(evaluateWorkflow(guarded).ok, "guarded id-token job passes");
-});
-
-test("block scalars used as security-key values are refused", () => {
-  assert(
-    !evaluateWorkflow(
-      "on: >-\n  pull_request\njobs:\n  leak:\n    steps:\n      - run: x\n        env:\n          T: ${{ secrets.T }}\n",
-    ).ok,
-    "on: >- pull_request refused",
-  );
-  assert(
-    !evaluateWorkflow(
-      "on:\n  pull_request:\njobs:\n  leak:\n    uses: ./.github/workflows/x.yml\n    secrets: >-\n      inherit\n",
-    ).ok,
-    "secrets: >- inherit refused",
-  );
-  assert(
-    !evaluateWorkflow(
-      "on:\n  pull_request:\njobs:\n  leak:\n    permissions:\n      id-token: >-\n        write\n    steps:\n      - run: x\n",
-    ).ok,
-    "id-token: >- write refused",
+    !evaluateWorkflow(wfOidc).ok,
+    "inherited OIDC grant makes the job unsafe",
   );
 });
 
-test("unsegmented (flow-style) jobs fail closed on ANY credential, not just secrets", () => {
-  assert(
-    !evaluateWorkflow(
-      "on:\n  pull_request:\njobs: { leak: { permissions: { id-token: write }, steps: [] } }\n",
-    ).ok,
-    "flow-style id-token job refused",
-  );
-  assert(
-    !evaluateWorkflow(
-      "on:\n  pull_request:\njobs: { leak: { environment: production, steps: [] } }\n",
-    ).ok,
-    "flow-style environment job refused",
-  );
-});
+test("id-token and environment are credentials (block and flow forms)", () => {
+  assert(grantsOidc({ "id-token": "write" }), "map id-token");
+  assert(grantsOidc("write-all"), "write-all umbrella");
+  assert(!grantsOidc({ contents: "read" }), "read-only is not oidc");
 
-test("a branch/tag named pull_request is not mistaken for a PR trigger", () => {
-  const pushBranch = [
+  const idTokenFlow = unguarded("on:\n  pull_request:").replace(
+    "    runs-on: ubuntu-latest\n" + SECRET_STEP,
+    "    runs-on: ubuntu-latest\n    permissions: { contents: read, id-token: write }\n    steps:\n      - run: deploy",
+  );
+  assert(!evaluateWorkflow(idTokenFlow).ok, "flow id-token job refused");
+
+  const envMap = [
     "on:",
-    "  push:",
-    "    branches:",
-    "      - pull_request",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    environment: { name: production }",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: deploy",
+  ].join("\n");
+  assert(!evaluateWorkflow(envMap).ok, "environment map is a credential");
+});
+
+// ── guard credit boundaries ──────────────────────────────────────────────────
+
+test("guard only counts at JOB level, and only in the real if: value", () => {
+  // step-level if does NOT gate the job
+  const stepIf = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: deploy",
+    "        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+    "        env:",
+    "          T: ${{ secrets.X }}",
+  ].join("\n");
+  assert(!evaluateWorkflow(stepIf).ok, "step-level if does not clear the job");
+
+  // guard text living only inside a comment is dropped by the parser
+  const commentGuard = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    # !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  assert(
+    !evaluateWorkflow(commentGuard).ok,
+    "guard text in a comment does not certify the job",
+  );
+
+  assert(
+    !jobGuarded({ if: "startsWith(github.head_ref, 'sentry-autofix/')" }),
+    "a POSITIVE (non-excluding) startsWith is not a guard",
+  );
+  assert(
+    !jobGuarded({ if: "github.actor != 'x'" }),
+    "an unrelated if is not a guard",
+  );
+});
+
+// ── fail-closed on unparsable input ─────────────────────────────────────────
+
+test("unparsable YAML fails closed", () => {
+  assert(!evaluateWorkflow("on: [pull_request\njobs: {}\n").ok, "syntax error");
+  assert(
+    !evaluateWorkflow("on:\n  pull_request:\n---\non:\n  push:\n").ok,
+    "multi-document stream",
+  );
+  assert(
+    !evaluateWorkflow("on:\n\tpull_request:\njobs: {}\n").ok,
+    "tab indentation",
+  );
+});
+
+test("collectTriggers and parseWorkflow behave on edge inputs", () => {
+  assert(parseWorkflow(":\n:") === null, "malformed → null");
+  assert(collectTriggers(null).size === 0, "null doc → no triggers");
+  assert(
+    collectTriggers({ on: { pull_request: null, push: null } }).has(
+      "pull_request",
+    ),
+    "mapping keys become triggers",
+  );
+  assert(
+    usesPullRequestTarget("on: pull_request_target\njobs: {}"),
+    "prt detected",
+  );
+});
+
+// ── case-insensitivity: GitHub resolves contexts/functions case-insensitively ─
+
+test("the secrets context is detected in any casing", () => {
+  for (const ctx of ["SECRETS", "Secrets", "SeCRetS"]) {
+    const body = [
+      "on:",
+      "  pull_request:",
+      "jobs:",
+      "  leak:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: deploy",
+      "        env:",
+      `          T: \${{ ${ctx}.DEPLOY_TOKEN }}`,
+    ].join("\n");
+    assert(!evaluateWorkflow(body).ok, `${ctx} context detected`);
+  }
+});
+
+test("a guard using case-variant startsWith is credited", () => {
+  for (const fn of ["startsWith", "startswith", "STARTSWITH"]) {
+    const body = [
+      "on:",
+      "  pull_request:",
+      "jobs:",
+      "  deploy:",
+      `    if: \${{ !${fn}(github.event.pull_request.head.ref, 'sentry-autofix/') }}`,
+      "    runs-on: ubuntu-latest",
+      SECRET_STEP,
+    ].join("\n");
+    assert(evaluateWorkflow(body).ok, `${fn} guard credited`);
+  }
+});
+
+// ── permissions replace semantics ────────────────────────────────────────────
+
+test("a job's own permissions REPLACE the workflow grant (no false positive)", () => {
+  const narrowed = [
+    "on:",
+    "  pull_request:",
+    "permissions:",
+    "  id-token: write",
     "jobs:",
     "  build:",
+    "    runs-on: ubuntu-latest",
+    "    permissions:",
+    "      contents: read",
     "    steps:",
-    "      - run: x",
-    "        env:",
-    "          T: ${{ secrets.T }}",
+    "      - run: echo hi",
   ].join("\n");
   assert(
-    !hasPullRequestTrigger(pushBranch),
-    "branch named pull_request is not a trigger",
+    evaluateWorkflow(narrowed).ok,
+    "job that drops id-token is not flagged",
   );
+
+  // …but a job that does NOT declare permissions still inherits the grant.
+  const inheriting = [
+    "on:",
+    "  pull_request:",
+    "permissions:",
+    "  id-token: write",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: echo hi",
+  ].join("\n");
+  assert(!evaluateWorkflow(inheriting).ok, "inherited id-token still flagged");
+});
+
+// ── annotation attribution is a GENUINE comment, correctly scoped ─────────────
+
+test("a '# autofix-ci-trust:' line inside a run: block scalar is NOT an annotation", () => {
+  const body = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: |",
+    "          # autofix-ci-trust: bypass",
+    "          ./deploy.sh",
+    "        env:",
+    "          TOKEN: ${{ secrets.DEPLOY_TOKEN }}",
+  ].join("\n");
+  const v = evaluateWorkflow(body);
   assert(
-    evaluateWorkflow(pushBranch).ok,
-    "push-only workflow with such a branch is not blocked",
+    !v.ok && /\[leak\]/.test(v.reason),
+    "script-content # is not credited",
   );
-  // Genuine triggers in every form still detected.
+});
+
+test("an annotation in one job does not leak to a same-named nested key elsewhere", () => {
+  const body = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    outputs:",
+    "      deploy: ok",
+    "      # autofix-ci-trust: unrelated note in build",
+    "    steps:",
+    "      - run: echo hi",
+    "  deploy:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: ./d.sh",
+    "        env:",
+    "          T: ${{ secrets.X }}",
+  ].join("\n");
+  const v = evaluateWorkflow(body);
   assert(
-    hasPullRequestTrigger("on:\n  pull_request:\n    branches: [main]\n"),
-    "block-mapping event key still detected",
+    !v.ok && /\[deploy\]/.test(v.reason),
+    "deploy job located at its own key, not the nested output",
   );
+});
+
+test("an annotation is credited only when UNAMBIGUOUSLY inside a job's body", () => {
+  // A comment describing the job BELOW it must not silence the preceding job.
+  const above = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+    "  # autofix-ci-trust: the docs job below uses no secrets",
+    "  docs:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: ./build-docs.sh",
+  ].join("\n");
+  const v1 = evaluateWorkflow(above);
   assert(
-    hasPullRequestTrigger("on:\n  - push\n  - pull_request\n"),
-    "sequence-item event still detected",
+    !v1.ok && /\[leak\]/.test(v1.reason),
+    "comment above docs does not clear leak",
   );
+
+  // A trailing file-footer comment belongs to no job.
+  const footer = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: make",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+    "# autofix-ci-trust: build compiles fixtures only",
+  ].join("\n");
+  const v2 = evaluateWorkflow(footer);
+  assert(
+    !v2.ok && /\[leak\]/.test(v2.reason),
+    "trailing footer does not clear leak",
+  );
+
+  // A comment between `jobs:` and the first job (at key indent) is NOT file-level.
+  const leadComment = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  # autofix-ci-trust: build is safe",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: make",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  const v3 = evaluateWorkflow(leadComment);
+  assert(
+    !v3.ok && /\[leak\]/.test(v3.reason),
+    "a comment inside the jobs section is not file-level",
+  );
+
+  // …and a genuine in-body annotation (deeper than the key) STILL clears its job.
+  const inBody = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    "    # autofix-ci-trust: token is step-scoped away from PR-head code",
+    SECRET_STEP,
+  ].join("\n");
+  assert(evaluateWorkflow(inBody).ok, "in-body annotation still credited");
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

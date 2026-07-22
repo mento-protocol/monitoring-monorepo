@@ -17,9 +17,12 @@
  *  1. NO workflow may use `pull_request_target` (it hands secrets to
  *     PR-controlled context by design; the repo has none and must stay that
  *     way).
- *  2. Every JOB that can receive secrets in a `pull_request`-triggered
- *     workflow (its own reference, or one inherited from workflow-level
- *     `env:`) must either
+ *  2. Every JOB that can receive a CREDENTIAL in a `pull_request`-triggered
+ *     workflow — a `${{ secrets.* }}` reference (its own or inherited from
+ *     workflow-level `env:`), a reusable-workflow `secrets:` forward, an
+ *     `id-token: write` / `permissions: write-all` OIDC grant (this repo's WIF
+ *     pool trusts any repository-attributed OIDC token — `terraform/ci-wif.tf`),
+ *     or a GitHub `environment:` binding — must either
  *       (a) carry the strict EXCLUDING guard on its job-level `if:`
  *           (`!startsWith(github.event.pull_request.head.ref,
  *           'sentry-autofix/')` — see GUARD_PATTERN; nothing looser counts),
@@ -32,17 +35,27 @@
  *           secret lane to reason about the autofix trust boundary in the
  *           diff, where review sees it.
  *
- * SCOPE / STATED LIMITATION: this is a textual tripwire, not an expression
- * evaluator. It verifies the excluding guard is PRESENT on the job-level
- * `if:`; it cannot prove the surrounding expression ENFORCES it (e.g. a guard
- * OR-ed against a bypass would pass — as would any semantics a YAML/expression
- * theorem prover would need). That residual is owned by human review of the
- * workflow diff, which this checker forces to happen by refusing silent
- * additions; the reviewed annotation is the escape hatch for anything the
- * pattern cannot express. Do not weaken the guard pattern to "contains the
- * branch name" — see the test suite for the shapes deliberately refused.
+ * HOW: the workflow is parsed with `js-yaml` (a real YAML 1.2 parser), and the
+ * trigger / credential / job analysis runs over the PARSED structure. This is
+ * a deliberate rewrite of an earlier textual-regex tripwire (issue #1424): raw
+ * text diverges from YAML semantics in unbounded ways (anchors and aliases,
+ * `\uXXXX` escapes, block scalars, flow/JSON document roots, comment-split job
+ * blocks) — every one an evasion the parser resolves for free. Parsing fails
+ * CLOSED: malformed YAML, multi-document streams, and tab-indented files all
+ * throw, and a throw is treated as a violation.
  *
- * No external dependencies — reads files with pure Node.js.
+ * The one place raw text is still consulted is COMMENT attribution: `js-yaml`
+ * drops comments, but the `# autofix-ci-trust:` annotation IS a comment, so
+ * annotations are located in the source and attributed to jobs by the line
+ * range of each (parser-known) job key.
+ *
+ * SCOPE / STATED LIMITATION: the guard check verifies the excluding guard is
+ * PRESENT on the job-level `if:`; it does not prove the surrounding expression
+ * ENFORCES it (a guard OR-ed against a bypass would pass). That residual is
+ * owned by human review of the workflow diff, which this checker forces to
+ * happen by refusing silent additions; the reviewed annotation is the escape
+ * hatch. Do not weaken GUARD_PATTERN to "contains the branch name" — see the
+ * test suite for the shapes deliberately refused.
  *
  * Run: `node scripts/check-autofix-ci-trust.mjs`
  * CI:  .github/workflows/ci.yml  (scripts job)
@@ -51,6 +64,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import yaml from "js-yaml";
 
 const ROOT = process.cwd();
 const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
@@ -60,22 +74,15 @@ const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
 // occurrence (a comment, a step name, a POSITIVE `startsWith` that routes
 // autofix PRs TOWARD a lane) must not certify a job — anything that isn't
 // this exact exclusion shape needs the reviewed annotation escape hatch.
+// Case-insensitive: GitHub Actions resolves function names (`startswith`),
+// context paths (`github.EVENT…`), AND the `startsWith` string comparison
+// itself case-insensitively, so a guard written in any casing is genuinely
+// enforced and must be credited (`sentry-autofix/*` heads are excluded
+// regardless of the literal's case).
 const GUARD_PATTERN =
-  /!\s*startsWith\(\s*github\.(?:event\.pull_request\.head\.ref|head_ref)\s*,\s*'sentry-autofix\/'\s*\)/;
+  /!\s*startsWith\s*\(\s*github\.(?:event\.pull_request\.head\.ref|head_ref)\s*,\s*'sentry-autofix\/'\s*\)/i;
 const ANNOTATION = "# autofix-ci-trust:";
-
-/** True when the text contains a GENUINE annotation: a YAML comment line
- * (optionally indented `#` at line start). A raw substring check would accept
- * lookalikes smuggled into string values (`run: "echo '# autofix-ci-trust:'"`)
- * — the line-anchored form refuses those. (A lookalike nested inside a block
- * scalar still line-starts with `#` and passes; distinguishing that needs a
- * YAML parser. Accepted: workflow files are NOT autofix-editable — the diff
- * guard forbids `.github/` — so this checker defends against honest omissions
- * in reviewed human PRs, not adversarial workflow authors, who by definition
- * hold write access to CI itself.) */
-function hasAnnotation(text) {
-  return /^\s*#\s*autofix-ci-trust:/m.test(text);
-}
+const ANNOTATION_LINE = /^\s*#\s*autofix-ci-trust:/;
 
 let failures = 0;
 
@@ -90,396 +97,319 @@ function ok(msg) {
   console.log(`\x1b[32m✔ ${msg}\x1b[0m`);
 }
 
-/** Strip YAML comments line-wise (good enough for trigger detection — the
- * `#` character inside trigger keys never appears in valid workflow syntax). */
-function stripComments(body) {
-  return body
-    .split("\n")
-    .map((line) => line.replace(/#.*$/, ""))
-    .join("\n");
+/**
+ * Parse a workflow body. Returns the parsed document, or null when the source
+ * is not analyzable as a single YAML document (syntax error, multi-document
+ * stream, tab indentation — all of which `js-yaml` throws on). A null return
+ * is the signal to FAIL CLOSED.
+ *
+ * Exported for tests.
+ * @param {string} body
+ * @returns {any}
+ */
+export function parseWorkflow(body) {
+  try {
+    return yaml.load(body, { schema: yaml.CORE_SCHEMA });
+  } catch {
+    return null;
+  }
 }
 
 /**
- * True when the file uses YAML the textual analyzer cannot affirmatively
- * resolve, ANYWHERE in the document:
- *   - any YAML anchor (`&name`) or alias (`*name`), in value OR key position
- *     (`  &event pull_request:` is a valid trigger key) and with any legal
- *     anchor name (numeric `&1`, dashed) — an alias can carry a pull_request
- *     trigger, a secret-bearing env mapping, or a whole job body defined
- *     elsewhere, so every occurrence is a smuggling channel for BOTH the
- *     trigger analysis and the per-job secret analysis;
- *   - YAML explicit-key syntax (`? pull_request`), invisible to the block
- *     trigger matcher;
- *   - a letter-synthesizing escape (`\uXXXX` / `\xXX` / `\UXXXXXXXX`) in a
- *     double-quoted scalar — `"${{ secrets.TOKEN }}"` decodes to a live
- *     secrets reference the raw scans cannot see;
- *   - a flow sequence/mapping left unterminated on the `on:` line
- *     (multi-line `on: [pull_request,`).
- * Block-scalar bodies (`run:`/`script:` `|`/`>`) are literal string content
- * with no YAML semantics, so they are skipped — the introducer line itself is
- * still scanned. The only safe answer for the exotic forms is to REFUSE
- * analysis (fail closed) and make the author write the workflow literally — no
- * repo workflow uses them, and the repo's prettier/trunk YAML style never
- * produces them.
+ * Normalize the parsed `on:` value into the set of event names it declares,
+ * across every legal shape: a scalar (`on: pull_request`), a sequence
+ * (`on: [push, pull_request]`), or a mapping (`on: { pull_request: {…} }`).
+ * `js-yaml` has already resolved anchors, flow/JSON forms, and quoting, so
+ * this only has to walk the resulting value. Defends against the YAML 1.1
+ * `on`→boolean coercion by also reading a `true` key.
+ *
+ * Exported for tests.
+ * @param {any} doc
+ * @returns {Set<string>}
  */
-export function hasUnanalyzableTriggers(body) {
-  const stripped = stripComments(body);
-  const lines = stripped.split("\n");
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    // Anchor/alias token in a YAML VALUE position — the only places YAML
-    // grammar allows them: as a mapping value (`key: &name` / `key: *name`),
-    // as a list item (`- *name`), or as a flow-sequence element
-    // (`on: [*pr]`). Content INSIDE quoted strings (Slack mrkdwn `*bold*`,
-    // glob patterns) starts with a quote or other char at the value boundary
-    // and therefore never matches.
-    // Anchor names may be ANY non-space run (incl. numeric `&1`).
-    if (/(?:^|:\s+|-\s+|[[,{]\s*)[&*][^\s,\]}]+/.test(line)) return true;
-    // Anchor/alias as the FIRST token of a line: an anchored mapping KEY
-    // (`  &event pull_request:`) parses as an ordinary key but is invisible
-    // to the trigger matcher, which expects the key at the line start.
-    if (/^\s*[&*][^\s,\]}]+/.test(line)) return true;
-    // YAML explicit-key syntax (`? pull_request`) is valid for triggers and
-    // invisible to the block matcher — refuse it (write keys plainly).
-    if (/^\s*\?\s/.test(line)) return true;
-    // Double-quoted scalars PROCESS \uXXXX/\UXXXXXXXX/\xXX escapes, so
-    // `"${{ secrets.TOKEN }}"` (or an escaped trigger key) decodes to
-    // text the raw scans cannot see. These are the only YAML escapes that
-    // can synthesize letters; block scalars are literal and already skipped,
-    // and no workflow has a legitimate need for them — refuse outright.
-    if (/\\(?:u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{2})/.test(line))
-      return true;
-    const m = line.match(/^(['"]?)on\1\s*:\s*(.*)$/);
-    if (m) {
-      const value = m[2].trim();
-      // Unterminated flow form: opens [ or { without closing on the same line.
-      const opens = (value.match(/[[{]/g) ?? []).length;
-      const closes = (value.match(/[\]}]/g) ?? []).length;
-      if (opens > closes) return true;
-    }
-    // A block scalar is a legitimate VALUE for security-relevant keys:
-    // `on: >-`\n`  pull_request` decodes to `on: pull_request`, and the same
-    // trick hides `secrets: |`→`inherit`, `id-token: >-`→`write`,
-    // `permissions: >-`→`write-all`. The single-line scans below (and the
-    // generic content-skip that follows) would treat the decoded value as
-    // absent. Nobody writes these keys as block scalars — fail closed.
-    if (
-      /^\s*(['"]?)(on|secrets|permissions|id-token)\1\s*:\s*[|>][0-9+-]*\s*$/.test(
-        line,
-      )
-    )
-      return true;
-    // Block-scalar introducer (`run: |`, `script: >-`, `- |2`): every deeper-
-    // indented line that follows is STRING content with zero YAML semantics
-    // (JS ternaries starting `? `, markdown `- **bold**`, shell globs), so
-    // skipping it is exact, not a heuristic. This skip runs AFTER the checks
-    // above so an introducer line like `key: &a |` still fails on its anchor,
-    // and after the security-key guard so `on: >-` fails rather than skips.
-    // A false introducer (plain scalar ending in ` |`) is harmless: deeper
-    // lines after a scalar-valued key can only be scalar continuations or
-    // YAML errors, never active structure.
-    if (/(?:^|\s)[|>][0-9+-]{0,2}\s*$/.test(line)) {
-      const indent = /^ */.exec(line)[0].length;
-      let j = i + 1;
-      while (
-        j < lines.length &&
-        (lines[j].trim() === "" || /^ */.exec(lines[j])[0].length > indent)
-      ) {
-        j += 1;
-      }
-      i = j - 1;
-    }
+export function collectTriggers(doc) {
+  const events = new Set();
+  if (!doc || typeof doc !== "object") return events;
+  const on = "on" in doc ? doc.on : doc[true];
+  if (on == null) return events;
+  if (typeof on === "string") events.add(on);
+  else if (Array.isArray(on)) {
+    for (const e of on) if (typeof e === "string") events.add(e);
+  } else if (typeof on === "object") {
+    for (const k of Object.keys(on)) events.add(k);
   }
-  return false;
-}
-
-/**
- * True when the comment-stripped body declares the given trigger in ANY valid
- * GitHub Actions form:
- *   - block mapping:  `on:` newline `  pull_request:` (or bare `pull_request`)
- *   - inline list:    `on: [push, pull_request]`
- *   - inline scalar:  `on: pull_request`
- *   - inline mapping: `on: { pull_request: { … } }`
- *   - any of the above with the event name in single or double QUOTES
- *     (`on: ["pull_request"]`, `"pull_request":` — valid YAML scalars/keys)
- * A pure line-anchored match misses the inline/quoted forms, which would let
- * a workflow adopt the trigger while bypassing this check entirely.
- */
-export function hasTrigger(body, trigger) {
-  const stripped = stripComments(body);
-  // Word-ish boundary that will not let `pull_request` match inside
-  // `pull_request_target` (nor `_target` match a longer name). Optional
-  // single/double quote on either side covers quoted YAML scalars and keys.
-  const t = trigger.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const q = `['"]?`;
-  const asKeyOrItem = new RegExp(`(^|[\\s\\[{,])${q}${t}${q}(?![\\w-])`, "m");
-  // Only consider occurrences in trigger position: either inside the value of
-  // a top-level `on:` line (inline forms) or as an indented key/item in the
-  // block following `on:`. Scanning the whole body for the bare word would
-  // false-positive on step names; scoping to the `on:` region keeps precision.
-  const lines = stripped.split("\n");
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const onInline = line.match(/^(['"]?)on\1\s*:\s*(.+)$/);
-    if (onInline && asKeyOrItem.test(onInline[2])) return true;
-    if (/^(['"]?)on\1\s*:\s*$/.test(line)) {
-      // Events are the DIRECT children of `on:` — mapping keys
-      // (`  pull_request:`) or sequence items (`  - pull_request`) at the
-      // first child indentation. Deeper lines are that event's config
-      // (`branches:`, `paths:`, and their VALUES), and a branch/tag/path
-      // value may legitimately be named `pull_request` — matching at any
-      // depth would reject a push-only workflow that targets such a branch.
-      // So pin the match to the event indent and skip anything deeper.
-      let eventIndent = null;
-      for (let j = i + 1; j < lines.length; j += 1) {
-        const l = lines[j];
-        if (l.trim() === "") continue;
-        if (!/^\s/.test(l)) break; // dedent to col 0 => left `on:`
-        const ind = /^ */.exec(l)[0].length;
-        if (eventIndent === null) eventIndent = ind;
-        if (ind < eventIndent) break; // dedented below events => left `on:`
-        if (ind > eventIndent) continue; // nested event config => not a trigger
-        // Event-level line: a mapping key (`name:`), a sequence item
-        // (`- name`), or a bare scalar — optionally quoted.
-        if (new RegExp(`^\\s*-?\\s*${q}${t}${q}\\s*:`).test(l)) return true;
-        if (new RegExp(`^\\s*-\\s*${q}${t}${q}(?![\\w-])\\s*$`).test(l))
-          return true;
-        if (new RegExp(`^\\s*${q}${t}${q}(?![\\w-])\\s*$`).test(l)) return true;
-      }
-    }
-  }
-  return false;
-}
-
-/** True when the job/workflow text can receive repository secrets, in ANY of
- * GitHub's secret-passing syntaxes:
- *   - dot expression:      `${{ secrets.NAME }}`
- *   - bracket expression:  `${{ secrets['NAME'] }}` / `secrets["NAME"]`
- *   - expression via functions: any `secrets.` / `secrets[` inside `${{ }}`
- *   - reusable-workflow inheritance: `secrets: inherit` (hands the CALLER'S
- *     whole secret set to the called workflow, which may execute PR-head code)
- *   - reusable-workflow explicit block: a `secrets:` mapping under a job that
- *     `uses:` another workflow. */
-export function referencesSecrets(body) {
-  // Any use of the `secrets` CONTEXT inside an expression counts — dot and
-  // bracket access, but also bare references like `toJSON(secrets)`, which
-  // expand EVERY repository secret at once.
-  if (/\$\{\{[^}]*\bsecrets\b/.test(body)) return true;
-  const stripped = stripComments(body);
-  // `inherit` may be a quoted YAML scalar with identical semantics.
-  if (/^\s*(['"]?)secrets\1\s*:\s*(['"]?)inherit\2\s*$/m.test(stripped))
-    return true;
-  // Explicit `secrets:` mapping on a reusable-workflow call. Only meaningful
-  // when the block also calls a workflow (`uses: .../.github/workflows/...`).
-  if (
-    /^\s*(['"]?)secrets\1\s*:\s*$/m.test(stripped) &&
-    /^\s*uses\s*:\s*\S*\.github\/workflows\//m.test(stripped)
-  ) {
-    return true;
-  }
-  return false;
-}
-
-/**
- * True when the text grants OIDC token-minting capability — a CREDENTIAL even
- * with zero `secrets.*` references: this repo's WIF pool (terraform/ci-wif.tf)
- * trusts any OIDC token carrying this repository's `attribute.repository`, so a
- * PR job holding the permission can exchange it for the plan-readonly service
- * account — the same state-reading identity the Terraform lanes guard. Matches
- * block and inline-flow permission forms plus `permissions: write-all` (which
- * includes id-token). Non-anchored on purpose: matching prose that merely
- * mentions the string only ADDS scrutiny (fail-safe direction).
- */
-export function grantsOidc(text) {
-  const s = stripComments(text);
-  return (
-    /(['"]?)\bid-token\1\s*:\s*(['"]?)write\2/.test(s) ||
-    /(['"]?)\bpermissions\1\s*:\s*(['"]?)write-all\2/.test(s)
-  );
-}
-
-/** True when the text binds a job to a GitHub `environment:`, which delivers
- * that environment's secrets server-side with no textual secrets reference. */
-export function bindsEnvironment(text) {
-  return /(^|[\s,{])(['"]?)environment\2\s*:/m.test(stripComments(text));
-}
-
-/** True when the workflow uses the pull_request_target trigger in any form. */
-export function usesPullRequestTarget(body) {
-  return hasTrigger(body, "pull_request_target");
+  return events;
 }
 
 /** True when the workflow triggers on pull_request (any form). */
 export function hasPullRequestTrigger(body) {
-  return hasTrigger(body, "pull_request");
+  return collectTriggers(parseWorkflow(body)).has("pull_request");
 }
 
-/**
- * Split the workflow body into named job blocks. Textual, indentation-based:
- * the repo's workflows are prettier/trunk-formatted with 2-space YAML indent,
- * so a job is a `  name:` key directly under the top-level `jobs:` key. ALL
- * top-level content OUTSIDE the jobs block — before it AND after it (YAML
- * allows `env:`/`permissions:` etc. below `jobs:`) — is merged into the file
- * HEADER (returned under the empty-string key): a file-level annotation there
- * covers every job, and a workflow-level `env:` secret there is inherited by
- * every job, wherever it appears in the file.
- */
-export function splitJobs(body) {
-  const lines = body.split("\n");
-  const blocks = new Map();
-  const headerParts = [];
-  let current = ""; // "" = accumulating header content
-  let inJobs = false;
-  let buf = [];
-  const flush = () => {
-    if (current === "") headerParts.push(buf.join("\n"));
-    else blocks.set(current, buf.join("\n"));
-    buf = [];
-  };
-  for (const line of lines) {
-    if (!inJobs && /^jobs\s*:\s*(#.*)?$/.test(line)) {
-      flush();
-      inJobs = true;
-      current = null;
-      continue;
-    }
-    if (inJobs) {
-      // Job IDs may be quoted (valid YAML): `"leak":` — accept optional
-      // matching quotes so a quoted job cannot hide inside a sibling's block.
-      const jobKey = line.match(/^ {2}(['"]?)([A-Za-z0-9_-]+)\1\s*:\s*(#.*)?$/);
-      if (jobKey) {
-        if (current !== null) flush();
-        current = jobKey[2];
-        continue;
-      }
-      if (/^\S/.test(line) && line.trim() !== "") {
-        // Left the jobs: block — this and following top-level content is
-        // header material again (workflow-level env:, concurrency:, …).
-        if (current !== null) flush();
-        current = "";
-        inJobs = false;
-        buf.push(line);
-        continue;
-      }
-    }
-    buf.push(line);
+/** True when the workflow uses the pull_request_target trigger in any form. */
+export function usesPullRequestTarget(body) {
+  return collectTriggers(parseWorkflow(body)).has("pull_request_target");
+}
+
+/** Yield every string value nested anywhere inside a parsed value. Secret and
+ * other expression references only ever live in VALUES (`${{ … }}` scalars),
+ * so keys are intentionally not walked. */
+function* walkStrings(value) {
+  if (typeof value === "string") yield value;
+  else if (Array.isArray(value)) {
+    for (const item of value) yield* walkStrings(item);
+  } else if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) yield* walkStrings(value[key]);
   }
-  if (current !== null) flush();
-  blocks.set("", headerParts.join("\n"));
-  return blocks;
 }
 
-/**
- * True when the job block's JOB-LEVEL `if:` condition contains the excluding
- * autofix guard. Only the `if:` value counts — the same text inside a step's
- * `run:`, a comment, or a step-level `if:` does not gate whether the JOB (and
- * its secret-bearing env/steps) runs for an autofix PR. A job block's own
- * keys sit at 4-space indent; the job-level `if:` value is the rest of that
- * line plus any deeper-indented continuation lines (block scalars `|`/`>`,
- * folded expressions) up to the next 4-space key.
- *
- * Exported for tests.
- */
-export function jobIfGuarded(block) {
-  const lines = block.split("\n");
-  for (let i = 0; i < lines.length; i += 1) {
-    const m = lines[i].match(/^ {4}if\s*:\s*(.*)$/);
-    if (!m) continue;
-    let value = m[1];
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const l = lines[j];
-      if (/^ {4}[A-Za-z0-9_-]+\s*:/.test(l) || /^ {0,3}\S/.test(l)) break;
-      value += `\n${l}`;
-    }
-    // Strip YAML comments BEFORE testing: `if: X # !startsWith(...)` runs as
-    // just `X` (YAML drops the trailing comment), so guard text inside a
-    // comment must not certify the job. Over-stripping (a # inside a quoted
-    // string) can only REMOVE guard evidence — fail-closed by construction.
-    if (GUARD_PATTERN.test(stripComments(value))) return true;
+/** True when any nested string is a `${{ … secrets … }}` expression. Post-parse
+ * the scalar is fully decoded (escapes resolved, quoting stripped, braces from
+ * `fromJSON('{}')` are literal characters inside the string), so a per-string
+ * scan sees the real `secrets` context the raw source could hide. The match is
+ * case-INSENSITIVE: GitHub resolves the `secrets` context case-insensitively
+ * (`${{ SECRETS.X }}` injects the real credential), so the checker must too. */
+function referencesSecrets(value) {
+  for (const s of walkStrings(value)) {
+    if (/\$\{\{[\s\S]*?\bsecrets\b/i.test(s)) return true;
   }
   return false;
+}
+
+/**
+ * True when a parsed `permissions:` value grants OIDC token minting —
+ * `id-token: write` or the umbrella `write-all`. OIDC capability is a
+ * credential even with zero `secrets.*` references: this repo's WIF pool
+ * (terraform/ci-wif.tf) trusts any OIDC token carrying this repository's
+ * `attribute.repository`, so a PR job holding it can exchange the token for
+ * the plan-readonly service account.
+ *
+ * Exported for tests.
+ * @param {any} permissions
+ */
+export function grantsOidc(permissions) {
+  if (permissions === "write-all") return true;
+  if (permissions && typeof permissions === "object") {
+    return permissions["id-token"] === "write";
+  }
+  return false;
+}
+
+/**
+ * True when a parsed job can receive a repository credential, considering
+ * workflow-level inheritance. "Credential" is the full set: a `${{ secrets.* }}`
+ * reference, a reusable-workflow `secrets:` forward (`inherit` or an explicit
+ * map), an OIDC grant, or an `environment:` binding (delivers that
+ * environment's secrets server-side).
+ *
+ * `inherited.workflowPermissions` is the workflow-level `permissions:` value. A
+ * job's OWN `permissions:` block REPLACES it wholesale (unspecified scopes drop
+ * to none), so OIDC is inherited ONLY when the job declares no permissions of
+ * its own — matching GitHub's semantics and avoiding a false positive on a job
+ * that narrows a broad workflow grant.
+ *
+ * Exported for tests.
+ * @param {any} job
+ * @param {{ envSecrets: boolean, workflowPermissions: any }} inherited
+ */
+export function jobReceivesCredential(job, inherited) {
+  const effectivePermissions =
+    job && typeof job === "object" && job.permissions !== undefined
+      ? job.permissions
+      : inherited.workflowPermissions;
+  if (grantsOidc(effectivePermissions)) return true;
+  if (!job || typeof job !== "object") return inherited.envSecrets;
+  if (inherited.envSecrets) return true;
+  if (referencesSecrets(job)) return true;
+  // A `secrets:` key exists only on a reusable-workflow (`uses:`) call and
+  // always forwards the caller's secrets — `inherit` (string) or a map.
+  if (job.secrets != null) return true;
+  if (job.environment != null) return true;
+  return false;
+}
+
+/** True when a parsed job's OWN job-level `if:` carries the excluding guard.
+ * `js-yaml` already dropped any trailing comment, so the value is exactly the
+ * expression GitHub evaluates; a step-level `if:` lives under `steps[]` and is
+ * correctly not consulted here.
+ *
+ * Exported for tests. */
+export function jobGuarded(job) {
+  return (
+    !!job && typeof job === "object" && GUARD_PATTERN.test(String(job.if ?? ""))
+  );
+}
+
+/** Mark the source lines that are CONTENT of a block scalar (`run: |`,
+ * `script: >-`, `- |2`). A `#` inside such content is literal script/text, not
+ * a YAML comment, so it must not be read as an annotation. Every content line
+ * is more-indented than its introducer (blank lines belong to it too). */
+function blockScalarContentLines(lines) {
+  const content = new Array(lines.length).fill(false);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s*#/.test(line)) continue; // the introducer itself is never a comment
+    if (!/(?:^|\s)[|>][0-9+-]{0,2}\s*(#.*)?$/.test(line)) continue;
+    const indent = line.search(/\S/);
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (lines[j].trim() !== "" && lines[j].search(/\S/) <= indent) break;
+      content[j] = true;
+    }
+  }
+  return content;
+}
+
+/**
+ * Locate `# autofix-ci-trust:` annotation comments in the SOURCE and attribute
+ * them to jobs. `js-yaml` discards comments, so this is the one raw-text pass.
+ * It is anchored to the parser's ground truth and attributes UNAMBIGUOUSLY:
+ *   1. Only GENUINE comment lines count — a `#` line inside a block scalar is
+ *      script content, not a comment, and is excluded.
+ *   2. Each job's key line is matched at the exact job-block indentation (not
+ *      any depth), so a same-named nested key — an `outputs:` entry called
+ *      `deploy`, say — cannot be mistaken for the `deploy` job.
+ *   3. A JOB annotation must sit INSIDE that job's body: after its key line and
+ *      indented deeper than the key. A comment at job-key indent between jobs
+ *      documents the job BELOW it (universal convention), and a column-0 footer
+ *      after the last job belongs to no job — neither may silence a credential
+ *      job it happens to physically follow.
+ *   4. A FILE annotation must sit above `jobs:` (the true header); a comment
+ *      inside the jobs section is scoped to a job, never file-wide.
+ *
+ * @param {string} body
+ * @param {string[]} jobNames
+ * @returns {{ fileAnnotated: boolean, jobAnnotated: (name: string) => boolean }}
+ */
+function annotationScopes(body, jobNames) {
+  const lines = body.split("\n");
+  const inScalar = blockScalarContentLines(lines);
+  const annotationLines = [];
+  lines.forEach((line, i) => {
+    if (!inScalar[i] && ANNOTATION_LINE.test(line)) annotationLines.push(i);
+  });
+  if (annotationLines.length === 0) {
+    return { fileAnnotated: false, jobAnnotated: () => false };
+  }
+  const jobsLine = lines.findIndex(
+    (l, i) => !inScalar[i] && /^(['"]?)jobs\1\s*:\s*(#.*)?$/.test(l),
+  );
+  // Indentation of the job keys: the first real mapping key under `jobs:`.
+  let jobIndent = null;
+  if (jobsLine >= 0) {
+    for (let i = jobsLine + 1; i < lines.length; i += 1) {
+      if (inScalar[i] || lines[i].trim() === "" || /^\s*#/.test(lines[i]))
+        continue;
+      const ind = lines[i].search(/\S/);
+      if (ind === 0) break; // dedented out of the jobs block
+      jobIndent = ind;
+      break;
+    }
+  }
+  const jobStart = new Map();
+  if (jobIndent != null) {
+    const pad = " ".repeat(jobIndent);
+    for (const name of jobNames) {
+      const re = new RegExp(
+        `^${pad}(['"]?)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\1\\s*:`,
+      );
+      for (let i = jobsLine + 1; i < lines.length; i += 1) {
+        if (!inScalar[i] && re.test(lines[i])) {
+          jobStart.set(name, i);
+          break;
+        }
+      }
+    }
+  }
+  const ordered = [...jobStart.entries()].sort((a, b) => a[1] - b[1]);
+  // File-level annotation: a comment ABOVE `jobs:` (the true header). This is
+  // deliberately stricter than "before the first job": a comment sitting
+  // between `jobs:` and the first job key, or at job-key indent above a job,
+  // documents the job BELOW it by universal convention and must not blanket
+  // the whole file.
+  const fileAnnotated =
+    jobsLine >= 0 && annotationLines.some((i) => i < jobsLine);
+  const jobAnnotated = (name) => {
+    const idx = jobStart.get(name);
+    if (idx == null || jobIndent == null) return false;
+    const pos = ordered.findIndex(([n]) => n === name);
+    const end = pos + 1 < ordered.length ? ordered[pos + 1][1] : lines.length;
+    // The annotation must be UNAMBIGUOUSLY inside this job's body: strictly
+    // after its key line, before the next job, and indented DEEPER than the
+    // job key. A comment at job-key indent (or shallower) between two jobs
+    // describes the following job — crediting it to the preceding one silences
+    // the wrong job; a column-0 footer after the last job belongs to no job at
+    // all. Requiring deeper indentation ties the annotation to the job it is
+    // structurally part of.
+    return annotationLines.some(
+      (i) => i > idx && i < end && lines[i].search(/\S/) > jobIndent,
+    );
+  };
+  return { fileAnnotated, jobAnnotated };
 }
 
 /**
  * Evaluate one workflow body. Returns `{ ok: true }` or `{ ok: false, reason }`.
  *
- * Granularity is PER JOB, not per file: in a multi-job workflow, one guarded
- * job must not vouch for an unguarded sibling that also reaches secrets. A
- * job passes when ITS OWN block contains the strict excluding-`if:` guard
- * (GUARD_PATTERN — a bare `sentry-autofix/` mention in a comment or a
- * positive lane-router does NOT count) or an `# autofix-ci-trust:`
- * annotation; a file-level annotation in the header (before `jobs:`) covers
- * all jobs — annotations are deliberate reasoned prose, so file scope is
- * acceptable for them, while the guard must sit in the job it protects.
+ * Granularity is PER JOB: in a multi-job workflow, one guarded job must not
+ * vouch for an unguarded sibling that also reaches a credential.
  *
  * Exported for tests.
+ * @param {string} body
  */
 export function evaluateWorkflow(body) {
-  if (hasUnanalyzableTriggers(body)) {
+  const doc = parseWorkflow(body);
+  if (doc === null) {
     return {
       ok: false,
       reason:
-        "the on: declaration uses YAML anchors/aliases or a multi-line flow form this checker cannot resolve — write triggers literally (fail-closed: an alias could smuggle a pull_request trigger past the analysis)",
+        "could not be parsed as a single YAML document (syntax error, multi-document stream, or tab indentation) — fail closed: an unparsable workflow cannot be proven safe. Write it as one well-formed YAML document.",
     };
   }
-  if (usesPullRequestTarget(body)) {
+  // A non-mapping root (or empty file) is not a runnable workflow — nothing to
+  // trigger, nothing to leak.
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+    return { ok: true };
+  }
+  const triggers = collectTriggers(doc);
+  if (triggers.has("pull_request_target")) {
     return {
       ok: false,
       reason:
         "uses pull_request_target, which hands secrets to PR-controlled context by design — use pull_request with an explicit trust gate instead",
     };
   }
-  if (!hasPullRequestTrigger(body)) {
+  if (!triggers.has("pull_request")) {
     return { ok: true };
   }
-  const blocks = splitJobs(body);
-  const header = blocks.get("") ?? "";
-  const fileAnnotated = hasAnnotation(header);
-  const jobNames = [...blocks.keys()].filter((k) => k !== "");
-  // FAIL CLOSED when segmentation finds no jobs but the file as a whole can
-  // receive a credential: a workflow written flow-style (`jobs: { leak: {…} }`)
-  // or with non-2-space indentation must not silently bypass the per-job
-  // analysis. "Credential" is the full set — a secrets reference, OIDC
-  // token-minting, OR an environment binding — since a flow-style job with
-  // only `id-token: write` or `environment:` has no `secrets.*` text at all.
-  // Reformat to the repo's 2-space YAML style or annotate at file level.
-  if (
-    jobNames.length === 0 &&
-    (referencesSecrets(body) || grantsOidc(body) || bindsEnvironment(body))
-  ) {
-    if (fileAnnotated) return { ok: true };
-    return {
-      ok: false,
-      reason:
-        "triggers on pull_request and can receive a credential (secrets, id-token, or an environment binding), but no job blocks could be segmented (flow-style or non-standard indentation?). The per-job trust analysis cannot run — reformat to the repo's 2-space YAML style or add a file-level '# autofix-ci-trust:' annotation above `jobs:`.",
-    };
+  const jobs =
+    doc.jobs && typeof doc.jobs === "object" && !Array.isArray(doc.jobs)
+      ? doc.jobs
+      : {};
+  const jobNames = Object.keys(jobs);
+  const inherited = {
+    envSecrets: referencesSecrets(doc.env),
+    workflowPermissions: doc.permissions,
+  };
+  // A pull_request workflow with a workflow-level credential but no analyzable
+  // jobs still leaks — fail closed unless file-annotated.
+  const { fileAnnotated, jobAnnotated } = annotationScopes(body, jobNames);
+  if (jobNames.length === 0) {
+    if (inherited.envSecrets || grantsOidc(doc.permissions)) {
+      if (fileAnnotated) return { ok: true };
+      return {
+        ok: false,
+        reason:
+          "triggers on pull_request and inherits a workflow-level credential (env secrets or an OIDC grant) but declares no jobs to guard — add a file-level '# autofix-ci-trust:' annotation or remove the credential.",
+      };
+    }
+    return { ok: true };
   }
-  // Workflow-level `env:` (or any header secret expression) is inherited by
-  // EVERY job, so a header secret makes every job secret-bearing even when no
-  // job block contains the textual reference itself.
-  const headerHasSecrets = referencesSecrets(header);
-  const headerGrantsOidc = grantsOidc(header);
   const offenders = [];
-  for (const [job, block] of blocks) {
-    if (job === "") continue;
-    // A job bound to a GitHub ENVIRONMENT receives that environment's secrets
-    // server-side with no textual secrets reference in the YAML at all.
-    const environmentBound = /^ {4}(['"]?)environment\1\s*:/m.test(block);
-    // Workflow-level permissions are inherited unless the job declares its
-    // own `permissions:` key, but a job that overrides COULD still include
-    // id-token — grantsOidc(block) catches that; treating a narrowing
-    // override as still-inheriting only over-approximates (fail-safe).
-    const oidcCapable = grantsOidc(block) || headerGrantsOidc;
-    if (
-      !referencesSecrets(block) &&
-      !headerHasSecrets &&
-      !environmentBound &&
-      !oidcCapable
-    )
-      continue;
+  for (const name of jobNames) {
+    if (!jobReceivesCredential(jobs[name], inherited)) continue;
     if (fileAnnotated) continue;
-    if (jobIfGuarded(block) || hasAnnotation(block)) continue;
-    offenders.push(job);
+    if (jobGuarded(jobs[name]) || jobAnnotated(name)) continue;
+    offenders.push(name);
   }
   if (offenders.length === 0) {
     return { ok: true };
@@ -487,8 +417,8 @@ export function evaluateWorkflow(body) {
   return {
     ok: false,
     reason:
-      `triggers on pull_request, and job(s) [${offenders.join(", ")}] can receive secrets without an excluding autofix guard (\`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')\` on the job's if:) or an '${ANNOTATION}' annotation in that job (or a file-level annotation above \`jobs:\`). ` +
-      "Machine-authored autofix PRs pass every fork/dependabot check, so each secret-bearing PR job must either exclude the sentry-autofix/* head branch " +
+      `triggers on pull_request, and job(s) [${offenders.join(", ")}] can receive a credential without an excluding autofix guard (\`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')\` on the job's if:) or an '${ANNOTATION}' annotation in that job (or a file-level annotation above \`jobs:\`). ` +
+      "Machine-authored autofix PRs pass every fork/dependabot check, so each credential-bearing PR job must either exclude the sentry-autofix/* head branch " +
       "or document why its secrets are unreachable from PR-head code execution.",
   };
 }
@@ -516,7 +446,7 @@ function main() {
     process.exit(1);
   }
   ok(
-    `All ${checked} workflow(s) respect the autofix CI trust boundary (no pull_request_target; every secret-bearing pull_request lane guards or annotates).`,
+    `All ${checked} workflow(s) respect the autofix CI trust boundary (no pull_request_target; every credential-bearing pull_request lane guards or annotates).`,
   );
 }
 
