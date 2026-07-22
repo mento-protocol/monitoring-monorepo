@@ -1,8 +1,17 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { load as parseYaml } from "js-yaml";
+
+import {
+  classifyDocumentation,
+  DOCUMENT_STATUSES,
+  parseDocumentationMetadata,
+} from "./docs-index-helpers.mjs";
+import { assessStaleness, daysSince } from "./check-agent-context-helpers.mjs";
 
 const TIER_ORDER = ["trivial", "standard", "full"];
 const DEFAULT_BASE = "origin/main";
@@ -11,6 +20,16 @@ const FULL_LINE_CHANGE_THRESHOLD = 800;
 const STANDARD_LINE_CHANGE_THRESHOLD = 200;
 const FULL_FILE_COUNT_THRESHOLD = 25;
 const STANDARD_FILE_COUNT_THRESHOLD = 8;
+const REQUIRED_CANONICAL_NOTE_METADATA = [
+  "title",
+  "status",
+  "owner",
+  "last_verified",
+  "doc_type",
+  "scope",
+  "review_interval_days",
+  "garden_lane",
+];
 
 function usage() {
   return `Usage: pnpm agent:review-materiality [options]
@@ -72,9 +91,24 @@ function runGit(args) {
   return execFileSync("git", args, { encoding: "utf8" });
 }
 
+function runGitQuiet(args) {
+  return execFileSync("git", args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+}
+
 function tryGit(args) {
   try {
     return runGit(args);
+  } catch {
+    return "";
+  }
+}
+
+function tryGitQuiet(args) {
+  try {
+    return runGitQuiet(args);
   } catch {
     return "";
   }
@@ -88,12 +122,29 @@ function gitErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function diffOutput(diffArgs, base, head) {
+function diffSnapshot(effectiveBase, head) {
+  const output = (format) =>
+    runGit(["diff", format, "--no-renames", effectiveBase, head]);
+  return {
+    nameOnly: output("--name-only"),
+    numstat: output("--numstat"),
+  };
+}
+
+function resolveDiffComparison(base, head) {
   try {
-    return runGit(["diff", ...diffArgs, `${base}...${head}`]);
+    const effectiveBase = runGit(["merge-base", base, head]).trim();
+    if (!effectiveBase)
+      throw new Error(`no merge base for ${base} and ${head}`);
+    return { effectiveBase, head, ...diffSnapshot(effectiveBase, head) };
   } catch (tripleDotError) {
     try {
-      return runGit(["diff", ...diffArgs, base, head]);
+      const effectiveBase = runGit([
+        "rev-parse",
+        "--verify",
+        `${base}^{commit}`,
+      ]).trim();
+      return { effectiveBase, head, ...diffSnapshot(effectiveBase, head) };
     } catch (twoDotError) {
       throw new Error(
         `unable to read git diff for ${base}..${head}: ${gitErrorMessage(twoDotError) || gitErrorMessage(tripleDotError)}`,
@@ -103,14 +154,23 @@ function diffOutput(diffArgs, base, head) {
   }
 }
 
+function resolveMetadataBase(base, head) {
+  const mergeBase = tryGitQuiet(["merge-base", base, head]).trim();
+  if (mergeBase) return mergeBase;
+
+  return (
+    tryGitQuiet(["rev-parse", "--verify", `${base}^{commit}`]).trim() || base
+  );
+}
+
 function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort();
 }
 
-function changedPathsFromGit(base, head) {
-  const outputs = [diffOutput(["--name-only", "--no-renames"], base, head)];
+function changedPathsFromGit(comparison) {
+  const outputs = [comparison.nameOnly];
 
-  if (head === "HEAD") {
+  if (comparison.head === "HEAD") {
     outputs.push(
       tryGit(["diff", "--name-only", "--no-renames"]),
       tryGit(["diff", "--cached", "--name-only", "--no-renames"]),
@@ -129,6 +189,42 @@ function changedPathsFromGit(base, head) {
 function changedPathsFromFile(filePath) {
   const output = readFileSync(filePath, "utf8");
   return uniqueSorted(output.split("\n").map((line) => line.trim()));
+}
+
+function isSafeWorktreeRegularFile(filePath) {
+  if (!filePath || isAbsolute(filePath)) return false;
+
+  try {
+    const root = process.cwd();
+    const absolute = resolve(root, filePath);
+    const relativePath = relative(root, absolute);
+    if (
+      !relativePath ||
+      relativePath === ".." ||
+      relativePath.startsWith(`..${sep}`) ||
+      isAbsolute(relativePath)
+    ) {
+      return false;
+    }
+
+    let current = root;
+    let entry;
+    for (const segment of relativePath.split(sep)) {
+      current = join(current, segment);
+      entry = lstatSync(current);
+      if (entry.isSymbolicLink()) return false;
+    }
+    return entry?.isFile() === true;
+  } catch {
+    return false;
+  }
+}
+
+function readWorktreeTextFile(filePath) {
+  if (!isSafeWorktreeRegularFile(filePath)) {
+    throw new Error(`not a regular worktree file: ${filePath}`);
+  }
+  return readFileSync(filePath, "utf8");
 }
 
 function addNumstatOutput(stats, output) {
@@ -158,7 +254,7 @@ function addUntrackedStats(stats, paths) {
     if (stats.has(filePath)) continue;
     let additions;
     try {
-      additions = countTextLines(readFileSync(filePath, "utf8"));
+      additions = countTextLines(readWorktreeTextFile(filePath));
     } catch {
       additions = 0;
     }
@@ -166,14 +262,11 @@ function addUntrackedStats(stats, paths) {
   }
 }
 
-function numstatFromGit(base, head) {
+function numstatFromGit(comparison) {
   const stats = new Map();
-  addNumstatOutput(
-    stats,
-    diffOutput(["--numstat", "--no-renames"], base, head),
-  );
+  addNumstatOutput(stats, comparison.numstat);
 
-  if (head === "HEAD") {
+  if (comparison.head === "HEAD") {
     addNumstatOutput(stats, tryGit(["diff", "--numstat", "--no-renames"]));
     addNumstatOutput(
       stats,
@@ -191,10 +284,29 @@ function numstatFromGit(base, head) {
   return stats;
 }
 
+function readTextAtRef(ref, filePath) {
+  return runGitQuiet(["show", `${ref}:${filePath}`]);
+}
+
+function readTextAtHead(ref, filePath) {
+  return ref === "HEAD"
+    ? readWorktreeTextFile(filePath)
+    : readTextAtRef(ref, filePath);
+}
+
+function isRegularFileAtHead(ref, filePath) {
+  if (ref === "HEAD") {
+    return isSafeWorktreeRegularFile(filePath);
+  }
+
+  const entry = runGitQuiet(["ls-tree", "-z", ref, "--", filePath]);
+  return entry.startsWith("100644 blob ") || entry.startsWith("100755 blob ");
+}
+
 function readJsonAtRef(ref, filePath) {
   if (ref === "HEAD") {
     try {
-      return JSON.parse(readFileSync(filePath, "utf8"));
+      return JSON.parse(readWorktreeTextFile(filePath));
     } catch {
       return null;
     }
@@ -272,7 +384,7 @@ function isAgentRuntimeContextPath(filePath) {
   );
 }
 
-function isCanonicalContextPath(filePath) {
+function isConventionBasedCanonicalContextPath(filePath) {
   return (
     filePath === "AGENTS.md" ||
     filePath.endsWith("/AGENTS.md") ||
@@ -289,6 +401,70 @@ function isCanonicalContextPath(filePath) {
   );
 }
 
+function parseFrontmatterDocument(content) {
+  if (typeof content !== "string" || !content.startsWith("---\n")) {
+    return null;
+  }
+  const end = content.indexOf("\n---\n", 4);
+  if (end === -1) return null;
+  const document = parseYaml(content.slice(4, end));
+  return document && typeof document === "object" && !Array.isArray(document)
+    ? document
+    : null;
+}
+
+function isCanonicalNotePath(filePath) {
+  return filePath.startsWith("docs/notes/") && filePath.endsWith(".md");
+}
+
+function readCanonicalNoteState(filePath, readContextFile) {
+  if (!isCanonicalNotePath(filePath)) return null;
+
+  try {
+    // Canonical authority comes from the source marker itself. Catalog and
+    // freshness validation decide whether head context is complete, but must
+    // not downgrade review materiality for an authoritative base or head note.
+    const content = readContextFile(filePath);
+    const frontmatter = parseFrontmatterDocument(content);
+    if (frontmatter?.canonical !== true && frontmatter?.canonical !== "true") {
+      return null;
+    }
+    return { metadata: parseDocumentationMetadata(filePath, content) };
+  } catch {
+    return null;
+  }
+}
+
+function hasValidCanonicalNoteMetadata(filePath, state) {
+  const { metadata } = state;
+  const verifiedAge = daysSince(metadata?.last_verified);
+  return (
+    metadata?.canonical === "true" &&
+    DOCUMENT_STATUSES.includes(metadata.status) &&
+    REQUIRED_CANONICAL_NOTE_METADATA.every((key) => metadata[key]?.trim()) &&
+    classifyDocumentation(filePath, metadata).errors.length === 0 &&
+    verifiedAge !== null &&
+    assessStaleness(verifiedAge) === "ok"
+  );
+}
+
+function isReadableContextPath(filePath, readContextFile) {
+  try {
+    readContextFile(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isRegularHeadContextPath(filePath, isHeadContextFile) {
+  try {
+    return isHeadContextFile(filePath) === true;
+  } catch {
+    return false;
+  }
+}
+
 function isRepoToolingTestPath(filePath) {
   return (
     (filePath.startsWith("scripts/") || filePath.startsWith("tools/")) &&
@@ -296,8 +472,8 @@ function isRepoToolingTestPath(filePath) {
   );
 }
 
-function classifyPath(filePath) {
-  if (filePath.startsWith("docs/PLAN-") || filePath.startsWith("docs/notes/")) {
+function classifyPath(filePath, canonicalContextPaths) {
+  if (filePath.startsWith("docs/PLAN-")) {
     return signal(
       filePath,
       "trivial",
@@ -325,8 +501,16 @@ function classifyPath(filePath) {
     return signal(filePath, "full", "agent, build, or repository tooling");
   }
 
-  if (isCanonicalContextPath(filePath)) {
+  if (canonicalContextPaths.has(filePath)) {
     return signal(filePath, "full", "canonical agent or operator context");
+  }
+
+  if (filePath.startsWith("docs/notes/")) {
+    return signal(
+      filePath,
+      "trivial",
+      "non-canonical planning or note document",
+    );
   }
 
   if (
@@ -516,9 +700,53 @@ export function analyzeMateriality({
   paths,
   numstat = new Map(),
   scriptChanges = [],
+  readBaseContextFile = (filePath) => readFileSync(filePath, "utf8"),
+  readHeadContextFile = (filePath) => readFileSync(filePath, "utf8"),
+  isHeadContextFile = () => true,
 } = {}) {
   const changedPaths = uniqueSorted(paths ?? []);
-  const pathSignals = changedPaths.map(classifyPath);
+  const headCanonicalContextPaths = new Set();
+  const materialityCanonicalContextPaths = new Set();
+  for (const filePath of changedPaths) {
+    if (isConventionBasedCanonicalContextPath(filePath)) {
+      materialityCanonicalContextPaths.add(filePath);
+      if (
+        isRegularHeadContextPath(filePath, isHeadContextFile) &&
+        isReadableContextPath(filePath, readHeadContextFile)
+      ) {
+        headCanonicalContextPaths.add(filePath);
+      }
+      continue;
+    }
+
+    if (!isCanonicalNotePath(filePath)) continue;
+
+    const regularHeadNote = isRegularHeadContextPath(
+      filePath,
+      isHeadContextFile,
+    );
+    const headNote = regularHeadNote
+      ? readCanonicalNoteState(filePath, readHeadContextFile)
+      : null;
+    if (headNote) {
+      materialityCanonicalContextPaths.add(filePath);
+      if (hasValidCanonicalNoteMetadata(filePath, headNote)) {
+        headCanonicalContextPaths.add(filePath);
+      }
+      continue;
+    }
+
+    if (!regularHeadNote) {
+      materialityCanonicalContextPaths.add(filePath);
+    }
+
+    if (readCanonicalNoteState(filePath, readBaseContextFile)) {
+      materialityCanonicalContextPaths.add(filePath);
+    }
+  }
+  const pathSignals = changedPaths.map((filePath) =>
+    classifyPath(filePath, materialityCanonicalContextPaths),
+  );
   const lineChanges = summarizeLineChanges(changedPaths, numstat);
   const sizeSignal = classifyBySize(changedPaths.length, lineChanges.total);
   const allSignals = sizeSignal ? [...pathSignals, sizeSignal] : pathSignals;
@@ -527,7 +755,7 @@ export function analyzeMateriality({
     "trivial",
   );
   const contextReasons = contextRequirementSignals(changedPaths, scriptChanges);
-  const contextUpdatesPresent = changedPaths.some(isCanonicalContextPath);
+  const contextUpdatesPresent = headCanonicalContextPaths.size > 0;
   const contextUpdateRequired = contextReasons.length > 0;
 
   return {
@@ -585,16 +813,27 @@ async function main() {
     return;
   }
 
+  const comparison = args.changedPathsFile
+    ? null
+    : resolveDiffComparison(args.base, args.head);
+  const effectiveBase = args.changedPathsFile
+    ? resolveMetadataBase(args.base, args.head)
+    : comparison.effectiveBase;
   const paths = args.changedPathsFile
     ? changedPathsFromFile(args.changedPathsFile)
-    : changedPathsFromGit(args.base, args.head);
-  const numstat = args.changedPathsFile
-    ? new Map()
-    : numstatFromGit(args.base, args.head);
+    : changedPathsFromGit(comparison);
+  const numstat = comparison ? numstatFromGit(comparison) : new Map();
   const scriptChanges = paths.includes("package.json")
-    ? rootScriptChanges(args.base, args.head)
+    ? rootScriptChanges(effectiveBase, args.head)
     : [];
-  const report = analyzeMateriality({ paths, numstat, scriptChanges });
+  const report = analyzeMateriality({
+    paths,
+    numstat,
+    scriptChanges,
+    readBaseContextFile: (filePath) => readTextAtRef(effectiveBase, filePath),
+    readHeadContextFile: (filePath) => readTextAtHead(args.head, filePath),
+    isHeadContextFile: (filePath) => isRegularFileAtHead(args.head, filePath),
+  });
 
   process.stdout.write(
     args.json ? `${JSON.stringify(report, null, 2)}\n` : renderHuman(report),
