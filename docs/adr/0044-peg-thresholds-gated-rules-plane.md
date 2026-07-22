@@ -41,8 +41,11 @@ auto-resolves a live page whenever the threshold series blips.
 
 - Peg thresholds — and every declared parameter that changes whether a
   page can fire: warn/critical bps, sustain windows, per-source reference
-  sizes, staleness gates, spread-envelope parameters, and the deep-venue
-  (primary) designation — are data in one repo-internal JSON
+  sizes, staleness gates, spread-envelope parameters, per-source poll
+  cadences (the coverage predicate's expected cadence and the loop's
+  actual cadence come from this same approved artifact, so an ungated
+  cadence change can neither suppress nor cheapen coverage), and the
+  deep-venue (primary) designation — are data in one repo-internal JSON
   (`alerts/rules/peg-thresholds.json`), consumed by the alerts stack via
   `jsondecode(file(...))` with `dynamic "rule"` / `for_each` generation —
   both established patterns in this repo. The service-local registry
@@ -55,11 +58,13 @@ auto-resolves a live page whenever the threshold series blips.
   an ordinary ungated bridge deploy cannot activate page-affecting policy
   ahead of approval. Activation is two-phase because artifact publish and
   bridge pickup cannot be atomic: the generated rules accept both the
-  previous and the new policy version for a bounded rollover window
-  anchored at apply time, deviation evaluation stays live on the previous
-  policy throughout, and a distinct rollover-stuck alert fires if the
-  bridge has not confirmed the new version before the window closes — a
-  policy apply never opens a critical-monitoring gap. There is no HCL
+  previous and the new policy version until the producer ACKNOWLEDGES the
+  new version — old-version acceptance is ack-terminated, never expired by
+  wall-clock alone, so a delayed or unavailable artifact poll can never
+  leave the rules without an accepted producer version. Deviation
+  evaluation stays live on the previous policy throughout, and a distinct
+  rollover-stuck alert fires when acknowledgment exceeds the expected
+  window — a policy apply never opens a critical-monitoring gap. There is no HCL
   mirror, so the existing
   mirror-drift check is unnecessary for this class; a sibling integrity
   check validates at source level: every threshold source key and the
@@ -80,6 +85,11 @@ auto-resolves a live page whenever the threshold series blips.
   - Every peg rule is freshness-gated on `mento_peg_observation_at` /
     heartbeat using the established `time() - *_at` idiom — a stalled
     poller must never satisfy or suppress a rule with stale gauge values.
+    `mento_peg_observation_at` advances only on an authoritative
+    venue-data timestamp or sequence from the venue payload, never on mere
+    HTTP fetch success; a source whose venue-side signal stops advancing
+    fails closed to unhealthy, so a frozen at-par book behind a healthy
+    endpoint cannot certify freshness or coverage during a real depeg.
   - Blindness and heartbeat rules set `no_data_state = "Alerting"` with the
     documented justification and ~5-minute grace, following the
     bridge-down/pool-coverage precedent: for these rules, absence of data

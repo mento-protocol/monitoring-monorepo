@@ -62,12 +62,18 @@ monitoring, extending — not replacing — ADR 0027's scope:
   swap flow alone gives only the numerator, and pool-level pressure fields
   collapse token direction. Saturation is computed per configured window on
   the monitored token's inflow direction, taking the maximum across the
-  active L0/L1 windows. Window durations (`timestep0`/`timestep1`) are not
-  indexed: they are read live from the pool's on-chain trading-limit
-  config through the existing RPC clients, and a window's retained netflow
-  counts only while `now − lastUpdated < timestep` (TradingLimitsV2's lazy
-  reset) — stale flow never feeds saturation after its window has ended.
-  Swap amounts are normalized from raw token units
+  active L0/L1 windows. Window durations (`timestep0`/`timestep1`) are
+  exposed by neither the indexed `TradingLimit` entity nor the FPMM's
+  current RPC surface — `getTradingLimits` returns limits, decimals, and
+  netflow state only, and the timestep-bearing `tradingLimitsConfig`
+  getter belongs to the legacy Broker. Phase 2 must establish the
+  authoritative duration source (indexed configuration events, an FPMM
+  getter verified against the deployed ABI, or constants vendored from
+  `@mento-protocol/contracts`) and the structural saturation signal fails
+  closed as unavailable until that source is verified; a window's retained
+  netflow counts only while `now − lastUpdated < timestep`
+  (TradingLimitsV2's lazy reset) — stale flow must never feed saturation
+  after its window has ended. Swap amounts are normalized from raw token units
   into TradingLimitsV2's fixed 15-decimal limit scale (using each token's
   decimals) before the fraction — `SwapEvent` stores raw event units while
   `TradingLimit.limit*`/`netflow*` use the 15-decimal internal precision,
@@ -84,9 +90,12 @@ monitoring, extending — not replacing — ADR 0027's scope:
   viem clients, following the rebalance-probe `readContract` pattern.
   `medianRate` alone returns the last stored value with no age, so the leg
   retains alert authority only while the median timestamp is within the
-  feed's expiry read live via `SortedOracles.reportExpirySeconds(feedId)`
-  — never a copied constant, so a governance expiry change cannot strand a
-  stale bound — and a stale conversion demotes the converted source to
+  feed's effective expiry, resolved live and token-first —
+  `tokenReportExpirySeconds(feedId)`, falling back to the zero-argument
+  global `reportExpirySeconds()` when the override is unset, mirroring the
+  indexer's existing `fetchReportExpiry` helper — never a copied constant,
+  so a governance expiry change cannot strand a stale bound — and a stale
+  conversion demotes the converted source to
   display before it can create or mask deviation. Conversion is
   currency-directed and explicit: for a venue quoted in currency Q and a
   peg in currency P, the converted price is `venuePx[Q] ÷ f` where `f` is

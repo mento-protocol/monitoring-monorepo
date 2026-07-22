@@ -63,7 +63,8 @@ authority); optional `convertVia` naming a rate-feed ID read via
 `SortedOracles.medianRate` over existing bridge RPC (the
 `oracle-reporters.json` identifiers are Mento rate-feed IDs, not Chainlink
 aggregator contracts; declared error band widens that source's thresholds;
-leg staleness — on-chain `medianTimestamp` + feed expiry, plus FX weekend
+leg staleness — on-chain `medianTimestamp` + effective expiry resolved
+token-first per the indexer's `fetchReportExpiry`, plus FX weekend
 and reopen grace — demotes the source to display); `coverageClass` per
 asset. Alert-affecting parameters —
 per-source `refSize`, staleness gates, spread envelopes, and the
@@ -114,10 +115,11 @@ saturation flag; no Hasura `_aggregate` per ADR 0014), already-polled
 denominator. Token-native amounts (USD rollups are zero for EURm/EUROP).
 Anomaly = net directional inflow vs trading-limit-implied max rate
 (saturation fraction, per configured window on the monitored token's
-inflow direction, max across active L0/L1 windows; window durations
-read live from on-chain trading-limit config with lazy-reset expiry;
-swap amounts normalized from raw token units into the 15-decimal
-TradingLimitsV2 scale before division). Counterparty diversity (`caller` = tx.from) is
+inflow direction, max across active L0/L1 windows; the window-duration
+source must be established in Phase 2 — the FPMM RPC surface exposes no
+timesteps — and saturation fails closed until it is verified; lazy-reset
+expiry applies; swap amounts normalized from raw token units into the
+15-decimal TradingLimitsV2 scale before division). Counterparty diversity (`caller` = tx.from) is
 dashboard-advisory only. Never pages alone; escalates price-based pages.
 
 ### Metrics (ADR 0042)
@@ -138,8 +140,10 @@ change passes the `production-infra` gate, and the gated apply also
 publishes the same policy as an IaC-owned versioned runtime artifact
 that the bridge polls (never baked into the image;
 `mento_peg_policy_version` asserted by the rules with two-phase
-rollover: previous + new version accepted for a bounded window, rollover
-stuck alert if the bridge doesn't confirm). Per-rule conventions: freshness
+rollover: previous + new version accepted until producer ack — never
+expired by wall-clock alone — with a rollover-stuck alert when ack
+exceeds the expected window; per-source poll cadences live in the same
+artifact so coverage cannot be gamed by an ungated cadence change). Per-rule conventions: freshness
 gate (`time() - mento_peg_observation_at`) on **every** peg rule;
 `no_data_state = "Alerting"` (+~5 min grace, documented) on blindness and
 heartbeat rules; duration-fraction sustain
@@ -149,7 +153,9 @@ ANDed with a sample-coverage predicate — `increase` over a monotonic
 `mento_peg_poll_success_total` vs expected cadence (timestamp-gauge
 `changes` undercounts between scrapes; failed polls drop/stale the
 series) — because range functions ignore gaps and a sparse post-outage
-window must not read as sustained.
+window must not read as sustained. `observation_at` advances only on an
+authoritative venue-data timestamp/sequence, never on HTTP fetch success
+alone; a frozen venue feed fails the source closed.
 
 Ladder (EUROP initial values; per-asset data):
 
