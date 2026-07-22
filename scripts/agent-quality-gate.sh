@@ -163,7 +163,10 @@ cd "$repo_root"
 scratch_dir="$repo_root/.tmp/agent-quality-gate"
 mkdir -p "$scratch_dir"
 success_stamp_file="$scratch_dir/last-success.stamp"
-success_stamp_ttl_seconds=900
+# An exact-signature success may cover the manual-run-to-pre-push interval even
+# for the slowest mapped suites. Keep this fixed rather than environment-
+# configurable so callers cannot extend validation reuse beyond two hours.
+success_stamp_ttl_seconds=$((2 * 60 * 60))
 # Avoid overriding a usable TMPDIR: Terraform providers use go-plugin grpc on
 # a socket in TMPDIR, and repo-local paths can be blocked by agent seatbelts.
 # Trunk hooks can strip TMPDIR entirely, so prefer the system temp directory
@@ -257,6 +260,9 @@ command_dedupe_key() {
   case "$command" in
     "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
       echo "agent-quality-gate.test"
+      ;;
+    "pnpm agent:autoreview:test"|"bash scripts/agent-autoreview.test.sh")
+      echo "agent-autoreview.test"
       ;;
     *)
       echo "$command"
@@ -468,7 +474,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/agent:autoreview|/scripts/agent:autoreview:test|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -1487,7 +1493,7 @@ while IFS= read -r path; do
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
         scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
-          add_command "bash scripts/agent-autoreview.test.sh" "agent autoreview adapter changed"
+          add_command "pnpm agent:autoreview:test" "agent autoreview adapter changed"
           ;;
         scripts/deploy-bridge.sh)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
@@ -1506,7 +1512,7 @@ while IFS= read -r path; do
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in
         scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs|scripts/agent-autoreview-target-guard.test.mjs)
-          add_command "bash scripts/agent-autoreview.test.sh" "agent autoreview helper changed"
+          add_command "pnpm agent:autoreview:test" "agent autoreview helper changed"
           ;;
         scripts/check-agent-context.mjs|scripts/check-agent-context-helpers.mjs|scripts/check-agent-context.test.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
@@ -1999,6 +2005,46 @@ filter_expected_output() {
   done
 }
 
+is_autoreview_test_command() {
+  local command="$1"
+  case "$command" in
+    *"pnpm agent:autoreview:test"*|*"bash scripts/agent-autoreview.test.sh"*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+latest_autoreview_test_progress() {
+  local output_file="$1"
+  awk '
+    length($0) <= 512 &&
+      $0 ~ /^AUTOREVIEW_TEST_PROGRESS family=[[:alnum:]_,-]+ elapsed=[0-9]+s$/ {
+      latest = $0
+    }
+    END {
+      if (latest != "") {
+        print latest
+      }
+    }
+  ' "$output_file"
+}
+
+print_autoreview_test_timings() {
+  local output_file="$1"
+  # A canonical run currently has only a handful of families. Cap accepted
+  # protocol lines defensively so a noisy child cannot flood otherwise-quiet
+  # successful gate output while preserving each accepted marker verbatim.
+  awk '
+    count < 32 && length($0) <= 512 &&
+      $0 ~ /^AUTOREVIEW_TEST_TIMING family=[[:alnum:]_-]+ status=(ok|failed) elapsed=[0-9]+s$/ {
+      print
+      count++
+    }
+  ' "$output_file"
+}
+
 record_command_summary() {
   local status="$1"
   local elapsed="$2"
@@ -2028,9 +2074,37 @@ print_command_summary() {
   done
 }
 
+monitor_sequential_autoreview_progress() {
+  local command="$1"
+  local output_file="$2"
+  local start_ts="$3"
+  local done_file="$4"
+  local parent_pid="$5"
+  local last_heartbeat_ts="$start_ts"
+  local heartbeat_interval=20
+  local now_ts
+
+  while [[ ! -e "$done_file" ]] && kill -0 "$parent_pid" 2>/dev/null; do
+    sleep 1
+    if [[ -e "$done_file" ]] || ! kill -0 "$parent_pid" 2>/dev/null; then
+      break
+    fi
+    now_ts="$(date +%s)"
+    if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
+      printf '⏳ still running after %s:\n' "$(format_duration $((now_ts - start_ts)))"
+      printf '    · %s\n' "$command"
+      latest_autoreview_test_progress "$output_file"
+      last_heartbeat_ts="$now_ts"
+    fi
+  done
+}
+
 run_mapped_command() {
   local command="$1"
   local output_file
+  local gate_pid="$$"
+  local monitor_done_file=""
+  local monitor_pid=""
   local start_ts
   local end_ts
   local elapsed
@@ -2040,15 +2114,31 @@ run_mapped_command() {
   start_ts="$(date +%s)"
   echo
   echo "+ ${command}"
+  if is_autoreview_test_command "$command"; then
+    monitor_done_file="${output_file}.done"
+    tmpfiles+=("$monitor_done_file")
+    rm -f "$monitor_done_file"
+    monitor_sequential_autoreview_progress \
+      "$command" "$output_file" "$start_ts" "$monitor_done_file" "$gate_pid" &
+    monitor_pid="$!"
+  fi
   set +e
   bash -c "$command" > "$output_file" 2>&1
   exit_code=$?
   set -e
+  if [[ -n "$monitor_pid" ]]; then
+    : > "$monitor_done_file"
+    wait "$monitor_pid" 2>/dev/null || true
+    rm -f "$monitor_done_file"
+  fi
   end_ts="$(date +%s)"
   elapsed=$((end_ts - start_ts))
 
   if [[ "$exit_code" -eq 0 ]]; then
     record_command_summary "ok" "$elapsed" "$command"
+    if is_autoreview_test_command "$command"; then
+      print_autoreview_test_timings "$output_file"
+    fi
     echo "✓ ${command} ($(format_duration "$elapsed"))"
     rm -f "$output_file"
     return 0
@@ -2253,6 +2343,9 @@ run_mapped_entries_parallel() {
 
       if [[ "$status" -eq 0 ]]; then
         record_command_summary "ok" "$elapsed" "$command"
+        if is_autoreview_test_command "$command"; then
+          print_autoreview_test_timings "$output_file"
+        fi
         echo "✓ ${command} ($(format_duration "$elapsed"))"
       else
         failures=$((failures + 1))
@@ -2278,8 +2371,12 @@ run_mapped_entries_parallel() {
       if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
         printf '⏳ still running after %s (%d/%d done):\n' \
           "$(format_duration $((now_ts - phase_start_ts)))" "$completed" "$total"
-        for hb_cmd in "${active_commands[@]}"; do
+        for i in "${!active_commands[@]}"; do
+          hb_cmd="${active_commands[$i]}"
           printf '    · %s\n' "$hb_cmd"
+          if is_autoreview_test_command "$hb_cmd"; then
+            latest_autoreview_test_progress "${active_output_files[$i]}"
+          fi
         done
         last_heartbeat_ts="$now_ts"
       fi
