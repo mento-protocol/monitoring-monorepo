@@ -58,4 +58,14 @@ fi
 
 grep -q "refus" "$output_file" || fail "apply against unsafe trunk cache root did not explain the refusal"
 
+# An ancestor of the repo root (not just an exact match) must also be
+# refused, or --apply would delete depth-1 directories under it.
+ancestor_of_repo_root="$(dirname "$repo_root")"
+if JANITOR_TRUNK_REPOS_DIR="$ancestor_of_repo_root" JANITOR_SKIP_SYSTEM=1 \
+  scripts/dev-janitor.sh --apply > "$output_file" 2>&1; then
+  fail "apply against an ancestor-of-repo-root cache dir exited 0, expected nonzero"
+fi
+
+grep -q "refus" "$output_file" || fail "apply against an ancestor-of-repo-root cache dir did not explain the refusal"
+
 echo "dev-janitor.test.sh: all checks passed"

@@ -64,7 +64,18 @@ echo
 real_root="$(cd "$trunk_repos_dir" 2>/dev/null && pwd -P || true)"
 repo_root="$(cd "$(git rev-parse --show-toplevel)" && pwd -P)"
 real_home="$(cd "$HOME" && pwd -P)"
-if [[ -n "$real_root" && ( "$real_root" == "/" || "$real_root" == "$real_home" || "$real_root" == "$repo_root" ) ]]; then
+unsafe_root=0
+if [[ -n "$real_root" ]]; then
+  if [[ "$real_root" == "/" || "$real_root" == "$real_home" || "$real_root" == "$repo_root" ]]; then
+    unsafe_root=1
+  # Also refuse when the configured root is an *ancestor* of $HOME or the
+  # repo root, not just an exact match — otherwise --apply would delete
+  # depth-1 directories (potentially other users' homes) under it.
+  elif [[ "$real_home" == "$real_root"/* || "$repo_root" == "$real_root"/* ]]; then
+    unsafe_root=1
+  fi
+fi
+if [[ $unsafe_root -eq 1 ]]; then
   echo "refusing to operate on unsafe trunk cache root: $real_root" >&2
   exit 1
 fi
