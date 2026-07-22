@@ -67,7 +67,7 @@ overrides:
 
 patchedDependencies:
   '@lhci/utils@0.15.1': d543de2cd2dadadbb6465e9411e7bc12dd6706a75c6d3ef9fe352cf51f90761c
-  blamer@1.0.7: bc4ab6dfcffe981840444b5c343030b7a1dd8cfefa8b7850a03a643455576258
+  blamer@1.0.7: f5ee3b92ec5ced48acd18179bf85b499cc0f4a1ba91e20eb9acbf16de50e30d9
 
 importers:
 
@@ -11148,7 +11148,7 @@ snapshots:
     dependencies:
       '@jscpd/core': 4.0.5
       '@jscpd/tokenizer': 4.0.5
-      blamer: 1.0.7(patch_hash=bc4ab6dfcffe981840444b5c343030b7a1dd8cfefa8b7850a03a643455576258)
+      blamer: 1.0.7(patch_hash=f5ee3b92ec5ced48acd18179bf85b499cc0f4a1ba91e20eb9acbf16de50e30d9)
       bytes: 3.1.2
       cli-table3: 0.6.5
       colors: 1.4.0
@@ -13565,7 +13565,7 @@ snapshots:
       inherits: 2.0.4
       readable-stream: 3.6.2
 
-  blamer@1.0.7(patch_hash=bc4ab6dfcffe981840444b5c343030b7a1dd8cfefa8b7850a03a643455576258):
+  blamer@1.0.7(patch_hash=f5ee3b92ec5ced48acd18179bf85b499cc0f4a1ba91e20eb9acbf16de50e30d9):
     dependencies:
       execa: 4.1.0
       which: 2.0.2
