@@ -1304,6 +1304,35 @@ assert_not_contains "cd aegis && forge test"
 assert_not_contains "@mento-protocol/integration-probes test:coverage"
 assert_not_contains "workspace dependency/config changed (coverage floor)"
 
+# Scoped dashboard/indexer importer bumps keep the workspace route's extra
+# coverage: size-limit (dependency-driven bundle regressions) and the full
+# indexer codegen matrix (testnet/bridge-only resolutions can break even when
+# mainnet codegen passes).
+run_lockfile_scope_gate 'lockfileVersion: '"'"'9.0'"'"'
+settings:
+  autoInstallPeers: true
+overrides: {}
+importers:
+  .:
+    dependencies: {}
+  ui-dashboard:
+    dependencies:
+      viem:
+        specifier: ^2.1.0
+        version: 2.1.0
+  indexer-envio:
+    dependencies:
+      viem:
+        specifier: ^2.1.0
+        version: 2.1.0
+packages:
+  viem@2.0.0: {}
+'
+assert_contains "turbo run size-limit --filter=@mento-protocol/ui-dashboard"
+assert_contains "- pnpm indexer:testnet:codegen (lockfile importer indexer-envio changed)"
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio test:coverage (lockfile importer indexer-envio changed (coverage floor))"
+assert_not_contains "workspace dependency/config changed (coverage floor)"
+
 # An importer version bump PLUS an unrelated small source edit in that same
 # package must still run the package's FULL test:coverage — the
 # lockfile-triggered coverage floor stands in for the dependency-bump

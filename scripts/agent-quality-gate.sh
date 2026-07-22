@@ -920,9 +920,15 @@ map_lockfile_importer_to_bundle() {
     ui-dashboard)
       mark_lockfile_scoped_package "@mento-protocol/ui-dashboard"
       add_dashboard_quality_commands "$reason"
+      # Dependency resolution changes can regress bundle size; the workspace
+      # route ran size-limit for lockfile edits, so the scoped route must too.
+      add_ui_size_limit "$reason"
       ;;
     indexer-envio)
       mark_lockfile_scoped_package "@mento-protocol/indexer-envio"
+      # A changed Envio resolution can break the testnet/bridge-only codegen
+      # even when mainnet codegen passes; keep the workspace route's coverage.
+      add_all_indexer_codegen "$reason"
       add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
       ;;
     metrics-bridge)
