@@ -20,12 +20,12 @@ the rules in [`context-standards.md`](context-standards.md).
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
-| [`.agents/roles/standards-enforcer.md`](../.agents/roles/standards-enforcer.md) | Standards Enforcer Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-05-20 |
-| [`.agents/roles/verifier.md`](../.agents/roles/verifier.md) | Verifier Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-05-20 |
-| [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md) | Babysit PR Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-28 |
-| [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md) | Deploy Indexer Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-29 |
-| [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
-| [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
+| [`.agents/roles/standards-enforcer.md`](../.agents/roles/standards-enforcer.md) | Standards Enforcer Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`.agents/roles/verifier.md`](../.agents/roles/verifier.md) | Verifier Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md) | Babysit PR Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md) | Deploy Indexer Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md) | Forensic Report Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-06-15 |
 | [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md) | 0xADDRESS_CASE_PRESERVED — Display Name (persona/ENS if known) | unmanaged / unmanaged | skill / repo-wide | unowned | 90d |
 | [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md) | Monorepo Import Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-26 |

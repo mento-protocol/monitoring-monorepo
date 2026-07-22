@@ -335,6 +335,13 @@ The status watcher only proves a deployment caught up. Promotion additionally
 requires `deploy:indexer:verify` to pass core-row and Polygon replay semantics;
 `--allow-syncing` never waives those data-integrity checks.
 
+For an agent-operated production rollout, use the repo's `/deploy-indexer`
+skill: it also captures the prior production commit, confirms promotion, waits
+for endpoint propagation, and verifies the dashboard in the browser. After a
+pre-merge `/deploy-indexer --no-promote`, finish a tree-matching candidate with
+an explicitly authorized `/deploy-indexer --resume-preload <commit>`; do not
+use the bare promote command as a shortcut.
+
 If a promotion turns out bad, roll back with
 `pnpm deploy:indexer:rollback <last-good-sha>` - see
 [docs/deployment.md](./docs/deployment.md#rollback-a-bad-promotion).

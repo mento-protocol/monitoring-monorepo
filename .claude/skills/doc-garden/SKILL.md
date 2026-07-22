@@ -5,7 +5,7 @@ title: Documentation Garden Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-21
+last_verified: 2026-07-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90

@@ -1,6 +1,9 @@
 # Babysit Indexer Deploy
 
-Monitor an in-flight Envio HyperIndex deployment for `mento-protocol/mento` until every chain is caught up, then prompt the user to verify it before promotion. Never auto-promote.
+Monitor an in-flight Envio HyperIndex deployment for `mento-protocol/mento`
+until every chain is caught up, then hand the exact commit to the guarded
+verification/promotion workflow. Never auto-promote or offer the bare promote
+wrapper as closeout.
 
 Target commit: `$1` (default: derive from `git fetch origin envio && git rev-parse --short origin/envio`)
 
@@ -108,7 +111,7 @@ while true; do
     emit "REGISTERED prod_status=$PROD_STATUS elapsed=$(elapsed_min)m"
     REGISTERED=1
     if [[ "$PROD_STATUS" == "prod" ]]; then
-      emit "ALREADY_PROMOTED commit=$TARGET — re-run case, no further action needed"
+      emit "ALREADY_PROMOTED commit=$TARGET — promotion is complete; full deploy closeout still owns propagation and UI verification"
       exit 0
     fi
   fi
@@ -127,17 +130,18 @@ while true; do
   # `(.data | length) > 0 and (... | all)` guards against the vacuous-truth
   # case: `[.data[]? | …] | all` returns true on an empty array, so a
   # `data: []` response (e.g. before any chain row is created) would
-  # otherwise emit a false READY_TO_PROMOTE.
+  # otherwise emit a false SYNCED_PENDING_DATA_VERIFY.
   ALL_CAUGHT_UP=$(echo "$STATUS_JSON" | jq -r \
     '(.data | length) > 0 and ([.data[] | (.timestamp_caught_up_to_head_or_endblock // "") != ""] | all)' 2>/dev/null)
 
   if [[ "$ALL_CAUGHT_UP" == "true" ]]; then
     PER_CHAIN=$(echo "$STATUS_JSON" | jq -r \
       '.data[]? | "  \(.network // .chain_id): caught_up=\(.timestamp_caught_up_to_head_or_endblock)"')
-    emit "READY_TO_PROMOTE elapsed=$(elapsed_min)m commit=$TARGET"
+    emit "SYNCED_PENDING_DATA_VERIFY elapsed=$(elapsed_min)m commit=$TARGET"
     emit "$PER_CHAIN"
     emit "Run: pnpm deploy:indexer:verify $TARGET"
-    emit "Then: pnpm deploy:indexer:promote $TARGET -y"
+    emit "Then: return to /deploy-indexer Phase 4, or use /deploy-indexer --resume-preload $TARGET for an unclassified/preloaded candidate after explicit production authorization"
+    emit "Never run pnpm deploy:indexer:promote as a standalone monitor shortcut"
     exit 0
   fi
 
@@ -147,16 +151,16 @@ done
 
 ### Emit policy
 
-| Event                                             | Emit                                                                   |
-| ------------------------------------------------- | ---------------------------------------------------------------------- |
-| Deployment first registers                        | `REGISTERED prod_status=<status> elapsed=<m>m`                         |
-| Found `prod_status: "prod"` (re-run / idempotent) | `ALREADY_PROMOTED commit=<sha>` then `exit 0`                          |
-| All chains caught up                              | `READY_TO_PROMOTE elapsed=<m>m commit=<sha>` + per-chain timestamps    |
-| Build not registered after 30 min                 | `BUILD_FAILED elapsed=30m+` then `exit 1`                              |
-| Sync not all-caught-up after 90 min               | `SYNC_DEADLINE elapsed=90m` + last snapshot then `exit 1`              |
-| Auth-expired / network failure                    | `ERROR auth_or_network: <msg>` (debounced — only emits on kind change) |
-| Status fetch failure                              | `ERROR status_fetch: <msg>` (debounced)                                |
-| All other progress (per-chain blocks ticking up)  | silent — internal poll only                                            |
+| Event                                             | Emit                                                                          |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Deployment first registers                        | `REGISTERED prod_status=<status> elapsed=<m>m`                                |
+| Found `prod_status: "prod"` (re-run / idempotent) | `ALREADY_PROMOTED commit=<sha>` then `exit 0`                                 |
+| All chains caught up                              | `SYNCED_PENDING_DATA_VERIFY elapsed=<m>m commit=<sha>` + per-chain timestamps |
+| Build not registered after 30 min                 | `BUILD_FAILED elapsed=30m+` then `exit 1`                                     |
+| Sync not all-caught-up after 90 min               | `SYNC_DEADLINE elapsed=90m` + last snapshot then `exit 1`                     |
+| Auth-expired / network failure                    | `ERROR auth_or_network: <msg>` (debounced — only emits on kind change)        |
+| Status fetch failure                              | `ERROR status_fetch: <msg>` (debounced)                                       |
+| All other progress (per-chain blocks ticking up)  | silent — internal poll only                                                   |
 
 The emit-on-error rule preserves the visibility the cron version got implicitly from "the next cycle's network/auth failure surfaces loudly". Without it, a stuck Monitor with expired auth would sit silent until the wall-clock deadline. Kind-debouncing prevents a flapping outage from flooding the chat.
 
@@ -168,10 +172,14 @@ Each emit is either **terminal** (the script exits after emitting) or **transien
 
 **Terminal emits** — the calling skill treats these as the final result:
 
-- `READY_TO_PROMOTE` → success; run deployment verification, surface the
-  paste-ready promote command, and wait for explicit user approval. Never
-  promote from this monitor-only command.
-- `ALREADY_PROMOTED` → success; report that no promotion action remains.
+- `SYNCED_PENDING_DATA_VERIFY` → success; run deployment verification, then
+  return to the active `/deploy-indexer` pipeline. If provenance is not already
+  bound to that pipeline, use its guarded `--resume-preload <commit>` path after
+  explicit production authorization. Never surface or run a bare promote
+  command from this monitor-only command.
+- `ALREADY_PROMOTED` → success; report that no promotion action remains, but
+  preserve propagation/UI verification when this is part of full deploy
+  closeout.
 - `BUILD_FAILED` / `SYNC_DEADLINE` → failure; stop without promoting.
 
 **Transient emits** — the script keeps polling after these; the calling skill should NOT stop on them:
@@ -183,7 +191,10 @@ The Monitor process exits cleanly on terminal events — no `TaskStop` needed. C
 
 ## Rules
 
-- **Never auto-promote.** Surface `pnpm deploy:indexer:verify <commit>` first, then `pnpm deploy:indexer:promote <commit>` only after verification passes — the user runs promotion, not you.
+- **Never auto-promote or hand off a bare promote command.** Run
+  `pnpm deploy:indexer:verify <commit>`, then return to the active
+  `/deploy-indexer` pipeline or its guarded `--resume-preload` continuation;
+  explicit production authorization is still required.
 - **Prefer the `pnpm deploy:indexer:*` wrappers** over raw `envio-cloud` calls (they handle auth + repo defaults), with two exceptions:
   - `indexer get` — no wrapper exists.
   - `deployment status <commit>` — wrapper auto-resolves _latest_ (we want explicit commit targeting).
@@ -196,9 +207,14 @@ The Monitor process exits cleanly on terminal events — no `TaskStop` needed. C
 
 Callers (notably the `deploy-indexer` skill, Phase 2) invoke this command with a target commit string and treat the Monitor's terminal emit as the result:
 
-- `READY_TO_PROMOTE` / `ALREADY_PROMOTED` → success, continue to deployment verification before promotion
+- `SYNCED_PENDING_DATA_VERIFY` → success; continue to deployment verification,
+  then the guarded full deploy continuation before promotion
+- `ALREADY_PROMOTED` → success; preserve full deploy propagation/UI closeout
 - `BUILD_FAILED` / `SYNC_DEADLINE` → failure, stop, do not promote
 - User-cancelled (`TaskStop`) → stop, do not promote
 - `ERROR <kind>` is **non-terminal** — keep waiting; the Monitor will continue polling. A stuck error eventually escalates via the wall-clock deadline checks above.
 
-The terminal-emit names (`READY_TO_PROMOTE`, `ALREADY_PROMOTED`, `BUILD_FAILED`, `SYNC_DEADLINE`) replace the previous cron-based version's prose returns (`"ready to promote"`, etc.) — `deploy-indexer` Phase 2 needs to map to the new names.
+The terminal-emit names (`SYNCED_PENDING_DATA_VERIFY`, `ALREADY_PROMOTED`,
+`BUILD_FAILED`, `SYNC_DEADLINE`) replace the previous cron-based prose returns.
+`deploy-indexer` Phase 2 maps caught-up state to verification—not direct
+promotion.

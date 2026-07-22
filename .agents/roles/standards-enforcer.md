@@ -3,7 +3,7 @@ title: Standards Enforcer Role
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-07-22
 doc_type: role
 scope: repo-wide
 review_interval_days: 90
