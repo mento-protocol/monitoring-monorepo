@@ -640,6 +640,64 @@ await test("OIDC authorization binds creation to the exact workflow run", async 
   assert.equal(request.init.headers.authorization, "bearer runner-bound-token");
 });
 
+await test("OIDC authorization accepts a regional GitHub pipeline host", async () => {
+  const { claims, env, nowSeconds } = workflowOidcFixture();
+  const regionalEnv = {
+    ...env,
+    ACTIONS_ID_TOKEN_REQUEST_URL:
+      "https://pipelinesghubeus13.actions.githubusercontent.com/example/idtoken?api-version=2.0",
+  };
+  let requestedUrl;
+  await assertAuthorizedGardenWorkflow(
+    { repo: "owner/repo" },
+    {
+      env: regionalEnv,
+      now: () => nowSeconds * 1000,
+      fetchImpl: async (url) => {
+        requestedUrl = String(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ value: oidcToken(claims) }),
+        };
+      },
+    },
+  );
+  assert.match(
+    requestedUrl,
+    /^https:\/\/pipelinesghubeus13\.actions\.githubusercontent\.com\//,
+  );
+});
+
+await test("OIDC authorization rejects untrusted request URL variants", async () => {
+  const { env } = workflowOidcFixture();
+  const rejectedUrls = [
+    "https://pipelinesghubeus13.actions.githubusercontent.com.evil.example/idtoken",
+    "http://pipelines.actions.githubusercontent.com/idtoken",
+    "https://runner.actions.githubusercontent.com/idtoken",
+  ];
+
+  for (const requestUrl of rejectedUrls) {
+    let fetched = false;
+    await assert.rejects(
+      assertAuthorizedGardenWorkflow(
+        { repo: "owner/repo" },
+        {
+          env: {
+            ...env,
+            ACTIONS_ID_TOKEN_REQUEST_URL: requestUrl,
+          },
+          fetchImpl: async () => {
+            fetched = true;
+          },
+        },
+      ),
+      /runner credentials are unavailable/,
+    );
+    assert.equal(fetched, false);
+  }
+});
+
 await test("OIDC authorization rejects env spoofing and claim drift", async () => {
   const { claims, env, nowSeconds } = workflowOidcFixture();
   let fetched = false;
