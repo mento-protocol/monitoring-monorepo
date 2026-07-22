@@ -1521,10 +1521,11 @@ assert_order \
 
 run_gate "indexer-envio/config/aggregators.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer config data flow changed)"
-# JSON config is production source (not in the scoping exclusion list), so a
-# lone config edit scopes to `vitest related` (issue #1413).
-assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio exec vitest related --run config/aggregators.json (indexer-envio changed (coverage floor) (scoped-tests))"
-assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio test:coverage"
+# Non-module files (JSON/YAML/assets) may be read by tests via fs rather than
+# the import graph `vitest related` follows, so they disqualify scoping and
+# the full coverage floor runs (fail toward full).
+assert_contains "- pnpm --filter @mento-protocol/indexer-envio test:coverage"
+assert_not_contains "vitest related --run config/aggregators.json"
 
 run_gate "metrics-bridge/src/graphql.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
@@ -1783,8 +1784,11 @@ assert_not_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handle
 run_gate "alerts/infra/onchain-event-handler/src/safe-abi.json"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
 assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
-assert_raw_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler exec vitest related --run src/safe-abi.json (Safe ABI changed (handler imports it) (coverage floor) (scoped-tests))"
-assert_not_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage"
+# Even though this JSON is genuinely imported, non-module files may be fs-read
+# elsewhere and the gate cannot tell statically — they disqualify scoping, so
+# the full coverage floor runs (fail toward full).
+assert_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage"
+assert_not_contains "vitest related --run src/safe-abi.json"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra init -backend=false -input=false (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra validate -no-color (Safe ABI changed (listener filter uses it at plan time))"

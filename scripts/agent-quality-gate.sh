@@ -726,7 +726,12 @@ scoped_is_non_source_path() {
     *.graphql) return 0 ;;
     __generated__/* | */__generated__/* | generated/* | */generated/* | *.gen.ts) return 0 ;;
     fixtures/* | */fixtures/* | __fixtures__/* | */__fixtures__/*) return 0 ;;
-    *) return 1 ;;
+    # Only recognized TS/JS module extensions count as production source.
+    # Anything else (YAML/JSON/CSS/assets) may be read by tests via fs rather
+    # than the import graph `vitest related` follows, so it disqualifies
+    # scoping (fail toward full).
+    *.ts | *.tsx | *.mts | *.cts | *.js | *.jsx | *.mjs | *.cjs) return 1 ;;
+    *) return 0 ;;
   esac
 }
 
@@ -2644,6 +2649,7 @@ run_mapped_entries_sequential() {
         echo
         echo "Stopping after first failed mapped command (--fail-fast)." >&2
         print_command_summary
+        log_duration_line "fail" "$(($(date +%s) - gate_start_ts))" "__run_total__" "run" || true
         exit 1
       fi
     fi

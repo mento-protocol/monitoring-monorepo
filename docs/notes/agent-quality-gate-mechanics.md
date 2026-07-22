@@ -175,10 +175,14 @@ feedback loop.
 The rewrite fires for a package only when **all** of these hold:
 
 - the run has 15 or fewer total changed paths;
-- every changed path inside that package directory is production source — not
-  `*.test.*`/`*.spec.*`, `__tests__/**`, `test/**`/`tests/**`, `vitest.config.*`,
-  `vitest.hermetic-setup.ts`, `tsconfig*`, `package.json`, `*.graphql`,
-  `__generated__/**` or other generated types, or `fixtures/**`;
+- every changed path inside that package directory is production source: a
+  recognized TS/JS module extension (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`,
+  `.jsx`, `.mjs`, `.cjs`) that is not `*.test.*`/`*.spec.*`, `__tests__/**`,
+  `test/**`/`tests/**`, `vitest.config.*`, `vitest.hermetic-setup.ts`,
+  `tsconfig*`, `package.json`, `*.graphql`, `__generated__/**` or other
+  generated types, or `fixtures/**`. Non-module files (JSON/YAML/CSS/assets)
+  disqualify scoping because tests may read them via `fs` rather than the
+  import graph `vitest related` follows;
 - the package is not `@mento-protocol/config` (shared-config's downstream blast
   radius is the point, so it keeps full suites);
 - the run is not a full-workspace escalation (those keep full `test:coverage`
