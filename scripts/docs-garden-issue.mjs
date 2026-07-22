@@ -24,7 +24,12 @@ import {
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 const GARDEN_OIDC_AUDIENCE = "mento-docs-garden";
 const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
-const GITHUB_OIDC_REQUEST_HOST = "pipelines.actions.githubusercontent.com";
+const GITHUB_OIDC_REQUEST_HOST_PATTERN =
+  /^pipelines(?:ghub[a-z0-9]+)?\.actions\.githubusercontent\.com$/u;
+
+function isGithubOidcRequestHost(hostname) {
+  return GITHUB_OIDC_REQUEST_HOST_PATTERN.test(hostname);
+}
 
 function parseBoolean(value, name) {
   if (value == null || String(value).trim() === "") return false;
@@ -195,7 +200,7 @@ export async function assertAuthorizedGardenWorkflow(
   }
   if (
     requestUrl.protocol !== "https:" ||
-    requestUrl.hostname !== GITHUB_OIDC_REQUEST_HOST ||
+    !isGithubOidcRequestHost(requestUrl.hostname) ||
     !requestToken
   ) {
     throw new Error("GitHub Actions OIDC runner credentials are unavailable");
