@@ -40,6 +40,7 @@ import { createHash } from "node:crypto";
 
 import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
 import {
+  CODE_FIX_VERDICT_LABEL,
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
   LABEL_DEFINITIONS,
@@ -343,6 +344,38 @@ export function buildAutofixComment(url) {
   return `${AUTOFIX_COMMENT_PREFIX}${String(url ?? "").trim()}`;
 }
 
+/** True when the queue stub STILL carries the code-fix verdict. The terminal
+ * autofix marker (fix-pr-opened) must only be written while the verdict that
+ * justified the diff still stands. Ingest runs on its own concurrency group and
+ * can shed the verdict mid-run (a regression re-queue), so the finalize step
+ * re-reads the stub's labels immediately before the marker write and calls this
+ * — separate from the pre-push guard, because the push + PR-create span is a
+ * second window where the verdict can vanish. Pure + exported for tests. */
+export function markerWriteStillValid(labels) {
+  const set = new Set(
+    (Array.isArray(labels) ? labels : [])
+      .map((s) => String(s ?? "").trim())
+      .filter(Boolean),
+  );
+  return set.has(CODE_FIX_VERDICT_LABEL);
+}
+
+/** Comment posted when a fix PR OPENED this run is closed because the verdict
+ * was shed during the push/PR-create span (a regression re-queue). Closing the
+ * PR matters because the selector dedups on an OPEN autofix PR as well as the
+ * label — leaving it open would suppress the re-fix the regression should
+ * trigger. */
+export function buildStaleVerdictCloseComment() {
+  return (
+    "Autofix withdrew this PR: the `sentry:verdict-code-fix` verdict was removed " +
+    "while the fix was being pushed — most likely a regression re-queue by the " +
+    "ingest workflow. The diff rested on evidence that no longer stands, so the " +
+    "PR was closed rather than left open (an open autofix PR would block the " +
+    "re-fix the regression should trigger). The issue is reconsidered after " +
+    "re-triage.\n"
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tracker run record. Mirrors the ingest's rolling-comment run record
 // (buildRunRecordBody / RUN_RECORD_MARKER, sentry-triage-ingest.mjs) so the
@@ -521,6 +554,13 @@ Commands:
       Print the sentry:fix-pr-opened label definition as JSON.
   refused-label-def
       Print the sentry:fix-refused label definition as JSON.
+  marker-still-valid --labels-file <path>
+      Print "yes" if the stub's labels (newline-separated in the file) still
+      include the code-fix verdict, else "no". Re-checked before the marker
+      write to catch a mid-run regression re-queue.
+  stale-verdict-close-comment
+      Print the comment posted when a fix PR opened this run is closed because
+      the verdict was shed during the push/PR-create span.
   run-record --timestamp <iso> --trigger <t> --disposition <d> \\
              --candidates <n> --opened <n> --refused <n> --incomplete <n>
       Print the tracker run-record comment body (rolling comment, marker-keyed).
@@ -591,6 +631,21 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
     }
     case "label-def": {
       stdout.write(`${JSON.stringify(fixPrOpenedLabelDef())}\n`);
+      return;
+    }
+    case "marker-still-valid": {
+      // Prints "yes" if the stub still carries the code-fix verdict, else "no".
+      // The workflow reads stdout (not the exit code) so a shed verdict is a
+      // normal outcome, not an error.
+      const labels = readFileSync(
+        readFlag(args, "--labels-file"),
+        "utf8",
+      ).split("\n");
+      stdout.write(markerWriteStillValid(labels) ? "yes\n" : "no\n");
+      return;
+    }
+    case "stale-verdict-close-comment": {
+      stdout.write(buildStaleVerdictCloseComment());
       return;
     }
     case "refused-label-def": {

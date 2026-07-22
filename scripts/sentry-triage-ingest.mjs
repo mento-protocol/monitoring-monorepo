@@ -214,6 +214,14 @@ export const LABEL_DEFINITIONS = [
 
 export const PROJECTED_LABEL = "sentry:projected";
 
+// The verdict that makes a queue stub eligible for the autofix leg. The autofix
+// finalize step re-reads this immediately before writing a terminal marker: the
+// diff is only justified while the verdict that produced it still stands, and
+// ingest (its own concurrency group) can shed it mid-run on a regression
+// re-queue. Single source of truth for the literal, shared with the select
+// step's AUTOFIX_SELECT_LABEL and the LABEL_DEFINITIONS entry above.
+export const CODE_FIX_VERDICT_LABEL = "sentry:verdict-code-fix";
+
 // Applied to a `code-fix` queue stub once the autofix leg (ADR 0036 Phase 2b,
 // `.github/workflows/sentry-autofix.yml`) has opened a scoped fix PR for it.
 // The autofix select step reads it as a dedup marker so a stub is never
