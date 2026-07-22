@@ -90,7 +90,10 @@ resolved against Hasura at bridge startup, failing that asset's
   printing permanent phantom deviation while still contributing evidence.
   A capped deep venue also counts as blind (no usable primary price),
   keeping the blind-while-stressed critical path reachable during partial
-  evacuation.
+  evacuation — but the stress leg must be independent of the capped
+  condition (structural saturation, envelope-excess spread, or a
+  partial-fill VWAP shortfall ≥ critical); capped-at-par depth thinning
+  stays warn-tier.
 - Venue states: `ok | wide | one_sided_bid | one_sided_ask | evacuated |
 halted`. `wide` counts as stress only beyond the venue's observed diurnal
   spread envelope; thin-secondary book-shape states never escalate;
@@ -107,7 +110,9 @@ saturation flag; no Hasura `_aggregate` per ADR 0014), already-polled
 denominator. Token-native amounts (USD rollups are zero for EURm/EUROP).
 Anomaly = net directional inflow vs trading-limit-implied max rate
 (saturation fraction, per configured window on the monitored token's
-inflow direction, max across active L0/L1 windows). Counterparty diversity (`caller` = tx.from) is
+inflow direction, max across active L0/L1 windows; swap amounts
+normalized from raw token units into the 15-decimal TradingLimitsV2
+scale before division). Counterparty diversity (`caller` = tx.from) is
 dashboard-advisory only. Never pages alone; escalates price-based pages.
 
 ### Metrics (ADR 0042)
@@ -124,14 +129,18 @@ Own gauge module + reset lifecycle (CDP precedent), own loop from
 
 Thresholds in `alerts/rules/peg-thresholds.json`, read via
 `jsondecode(file())` into `for_each`/`dynamic` rule generation; every
-change passes the `production-infra` gate. Per-rule conventions: freshness
+change passes the `production-infra` gate, and the gated apply also
+publishes the same policy as an IaC-owned versioned runtime artifact
+that the bridge polls (never baked into the image;
+`mento_peg_policy_version` asserted fresh by the rules). Per-rule conventions: freshness
 gate (`time() - mento_peg_observation_at`) on **every** peg rule;
 `no_data_state = "Alerting"` (+~5 min grace, documented) on blindness and
 heartbeat rules; duration-fraction sustain
 (`quantile_over_time(0.2, deviation[W]) >= threshold`, W ≈ 20–30 min) so
 one favorable sample cannot reset a real breach on a flapping thin book —
-ANDed with a sample-coverage predicate (`count_over_time` vs expected
-cadence over the same window), because range functions ignore gaps and a
+ANDed with a sample-coverage predicate counting successful observation
+updates (`changes` over `observation_at` vs expected cadence; failed
+polls drop/stale the series), because range functions ignore gaps and a
 sparse post-outage window must not read as sustained.
 
 Ladder (EUROP initial values; per-asset data):

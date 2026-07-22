@@ -62,7 +62,12 @@ monitoring, extending — not replacing — ADR 0027's scope:
   swap flow alone gives only the numerator, and pool-level pressure fields
   collapse token direction. Saturation is computed per configured window on
   the monitored token's inflow direction, taking the maximum across the
-  active L0/L1 windows. Queries page to a bounded maximum and emit an
+  active L0/L1 windows. Swap amounts are normalized from raw token units
+  into TradingLimitsV2's fixed 15-decimal limit scale (using each token's
+  decimals) before the fraction — `SwapEvent` stores raw event units while
+  `TradingLimit.limit*`/`netflow*` use the 15-decimal internal precision,
+  so unnormalized division misstates saturation by orders of magnitude.
+  Queries page to a bounded maximum and emit an
   explicit saturation flag when the window overflows; per
   [ADR 0014](0014-snapshot-entities-no-aggregate.md), no Hasura
   `_aggregate` — reduction happens in the bridge. Amounts are token-native:
@@ -75,7 +80,13 @@ monitoring, extending — not replacing — ADR 0027's scope:
   `medianRate` alone returns the last stored value with no age, so the leg
   retains alert authority only while the median timestamp is within the
   feed's configured expiry — a stale conversion demotes the converted
-  source to display before it can create or mask deviation. The
+  source to display before it can create or mask deviation. Conversion is
+  currency-directed and explicit: for a venue quoted in currency Q and a
+  peg in currency P, the converted price is `venuePx[Q] ÷ f` where `f` is
+  the `P/Q` feed's `rate ÷ denominator` (units: Q per P) — e.g. a
+  USD-quoted EUROP price divides by the EUR/USD value; legs whose feed
+  pair does not compose the venue quote currency into the peg currency are
+  rejected at validation. The
   identifiers canonicalized in `oracle-reporters.json` are Mento rate-feed
   IDs, not Chainlink aggregator contracts; a direct aggregator read would
   need a separately canonicalized aggregator address and ABI.

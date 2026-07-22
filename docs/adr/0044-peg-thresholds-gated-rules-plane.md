@@ -47,7 +47,13 @@ auto-resolves a live page whenever the threshold series blips.
   `jsondecode(file(...))` with `dynamic "rule"` / `for_each` generation —
   both established patterns in this repo. The service-local registry
   (ADR 0043) holds venue identity and topology only; it carries no
-  page-affecting policy. There is no HCL mirror, so the existing
+  page-affecting policy. Delivery to BOTH planes is gated: the
+  `production-infra` apply regenerates the Grafana rules and publishes the
+  same policy content as an IaC-owned versioned runtime artifact that the
+  bridge polls — the bridge never bakes this JSON into its image, exports
+  `mento_peg_policy_version`, and the rules assert version freshness, so
+  an ordinary ungated bridge deploy cannot activate page-affecting policy
+  ahead of approval. There is no HCL mirror, so the existing
   mirror-drift check is unnecessary for this class; a sibling integrity
   check validates at source level: every threshold source key and the
   deep-venue designation must name an existing registry source id, every
@@ -77,9 +83,12 @@ auto-resolves a live page whenever the threshold series blips.
     breach; this is a new idiom in the stack, adopted deliberately for
     thin-market series and documented in the rule file banner. Range
     functions ignore gaps, so the quantile counts as a duration fraction
-    only when a sample-coverage predicate also passes
-    (`count_over_time` over the same window against the expected poll
-    cadence) — after an API outage a sparse window with one fresh deviated
+    only when a sample-coverage predicate also passes — counting
+    successful observation updates (`changes` over
+    `mento_peg_observation_at` in the same window against the expected
+    poll cadence), never scrapes of a retained gauge, with failed polls
+    dropping or staling the per-source series instead of holding last-good
+    values — after an API outage a sparse window with one fresh deviated
     sample must not read as a sustained breach.
   - Severity and routing stay per-rule: warn → Slack, critical → page, each
     with its own contact-point wiring.

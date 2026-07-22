@@ -46,11 +46,15 @@ or structurally missing (thin second venue).
   excluded from deviation alerting entirely — it feeds depth/stress
   signals instead of printing phantom deviation. A capped observation on
   the designated deep venue additionally counts as no usable primary
-  price — it feeds `mento_peg_blind` — so a capped, draining book
-  escalates through the blind-while-stressed critical path instead of
-  idling at warn.
+  price — it feeds `mento_peg_blind` — but blindness and stress must be
+  independent conditions: the blind-while-stressed page requires a stress
+  leg that is not the capped condition itself (structural saturation,
+  envelope-excess spread, or a partial-fill VWAP shortfall at or beyond
+  the critical threshold). A capped book still quoting par — benign depth
+  thinning — stays warn-tier.
 - **The deep venue pages alone.** Sustained executable deviation beyond the
-  critical threshold on the registry-designated deep venue pages by
+  critical threshold on the policy-designated deep venue (designated in
+  the gated thresholds artifact, ADR 0044 — not in the registry) pages by
   itself. Corroboration — structural drain saturation, or uncapped
   deviation on a second distinct venue — raises page annotation/priority
   but is never a precondition. Rationale: a false page costs one human
@@ -74,9 +78,14 @@ or structurally missing (thin second venue).
   source mix can reach (e.g. `cex-book+indexed-pool`). Onboarding an asset
   whose class leaves critical unreachable, or whose price and structural
   signals are the same venue (DEX-primary circularity), fails unless an
-  explicit per-class policy is written and reviewed. Assets on chains or
-  venues outside indexer coverage (XRPL books) have no structural plane
-  and must say so.
+  explicit per-class policy is written and reviewed. Class semantics are
+  deterministic, not declarative optimism: a validator maps every class to
+  the independent capabilities it requires (e.g. `cex-book+indexed-pool`
+  requires a policy-designated deep venue able to produce uncapped
+  observations at reference size AND an indexed pool monitor distinct from
+  every price source) and rejects declarations the source mix does not
+  imply. Assets on chains or venues outside indexer coverage (XRPL books)
+  have no structural plane and must say so.
 - **Fatigue budget.** Warn is Slack-only with repeat suppression
   (alert-plane grouping and repeat-interval dedup); a hard per-asset daily
   notification cap is not expressible in the rules plane and, if ever
