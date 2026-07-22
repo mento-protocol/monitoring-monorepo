@@ -242,6 +242,7 @@ export async function bootstrapFeedBreakerConfigs(
     // Empty list is itself authoritative (no breakers registered for this
     // BreakerBox at this block) — safe to cache so we don't refetch.
     markBootstrapAttempted(cacheKey);
+    // phase-state-cache: bounded rebuildable bootstrap cache; loss only repeats authoritative RPC hydration.
     _bootstrapBackoffUntilTs.delete(cacheKey);
     return true;
   }
@@ -276,6 +277,7 @@ export async function bootstrapFeedBreakerConfigs(
 
   if (allSucceeded) {
     markBootstrapAttempted(cacheKey);
+    // phase-state-cache: bounded rebuildable bootstrap cache; loss only repeats authoritative RPC hydration.
     _bootstrapBackoffUntilTs.delete(cacheKey);
   } else {
     setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
@@ -292,8 +294,12 @@ function setBootstrapBackoff(cacheKey: string, untilTs: bigint): void {
     !_bootstrapBackoffUntilTs.has(cacheKey)
   ) {
     const oldest = _bootstrapBackoffUntilTs.keys().next().value;
-    if (oldest !== undefined) _bootstrapBackoffUntilTs.delete(oldest);
+    if (oldest !== undefined) {
+      // phase-state-cache: bounded rebuildable bootstrap cache; loss only repeats authoritative RPC hydration.
+      _bootstrapBackoffUntilTs.delete(oldest);
+    }
   }
+  // phase-state-cache: bounded rebuildable bootstrap cache; loss only repeats authoritative RPC hydration.
   _bootstrapBackoffUntilTs.set(cacheKey, untilTs);
 }
 
@@ -308,10 +314,13 @@ function markBootstrapAttempted(cacheKey: string): void {
   ) {
     const oldest = _bootstrapAttempted.values().next().value;
     if (oldest !== undefined) {
+      // phase-state-cache: bounded rebuildable bootstrap cache; loss only repeats authoritative RPC hydration.
       _bootstrapAttempted.delete(oldest);
+      // phase-state-cache: bounded rebuildable bootstrap cache; loss only repeats authoritative RPC hydration.
       _bootstrapBackoffUntilTs.delete(oldest);
     }
   }
+  // phase-state-cache: bounded rebuildable bootstrap cache; loss only repeats authoritative RPC hydration.
   _bootstrapAttempted.add(cacheKey);
 }
 
@@ -967,7 +976,10 @@ export async function loadFeedDependencies(args: {
     setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
     // A forced refresh that fails must not stay "attempted", or a later oracle
     // event won't retry the changed set.
-    if (args.force) _bootstrapAttempted.delete(cacheKey);
+    if (args.force) {
+      // phase-state-cache: bounded rebuildable bootstrap cache; loss only repeats authoritative RPC hydration.
+      _bootstrapAttempted.delete(cacheKey);
+    }
     return false;
   }
   await reconcileDependencyEdges(context, chainId, rateFeedID, deps);
@@ -992,6 +1004,7 @@ export async function loadFeedDependencies(args: {
   }
   if (allHydrated) {
     markBootstrapAttempted(cacheKey);
+    // phase-state-cache: bounded rebuildable bootstrap cache; loss only repeats authoritative RPC hydration.
     _bootstrapBackoffUntilTs.delete(cacheKey);
   } else {
     // A dependency's config bootstrap failed transiently — do NOT mark the
@@ -1000,7 +1013,10 @@ export async function loadFeedDependencies(args: {
     // already reconciled so the re-sync below still runs (best-effort, self-
     // corrects once the dependency hydrates).
     setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
-    if (args.force) _bootstrapAttempted.delete(cacheKey);
+    if (args.force) {
+      // phase-state-cache: bounded rebuildable bootstrap cache; loss only repeats authoritative RPC hydration.
+      _bootstrapAttempted.delete(cacheKey);
+    }
   }
   return true;
 }

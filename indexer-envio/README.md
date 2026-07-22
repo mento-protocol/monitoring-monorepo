@@ -290,9 +290,20 @@ look healthy. Bump a marker only in the same change as the new replay invariant
 and its handler-level regression tests.
 
 Replay-integrity v2 additionally requires effect eligibility to be derived in
-both Envio passes. Never carry preload decisions in a module-scoped `Set` or
-`Map`: hosted preload and processing workers, and restarted processes, do not
-share that memory. The code-health invariant rejects that pattern in handlers.
+both Envio passes. Never carry preload decisions in any module-scoped mutable
+marker: hosted preload and processing workers, and restarted processes, do not
+share that memory. The code-health invariant follows every `onEvent`, `onBlock`,
+and `contractRegister` callback plus imported helpers. It rejects direct and
+symbol-propagated assignment, update, deletion, object/record write, and native
+collection/array mutator forms for top-level bindings, including primitive,
+object, array, native-collection, and factory-result state. Returned
+module-state aliases and custom receiver methods that mutate through `this`
+remain a manual-review requirement tracked in
+[#1462](https://github.com/mento-protocol/monitoring-monorepo/issues/1462).
+Narrow processing-only exceptions require an adjacent `phase-state-exempt`
+reason and tracking issue at each mutation. Rebuildable optimization caches
+whose loss can only repeat authoritative/idempotent work use an adjacent
+`phase-state-cache` reason at each write.
 
 The `mento` project on Envio Cloud watches this branch. Envio registers
 deployments under the short commit hash, and the registration can lag the Git

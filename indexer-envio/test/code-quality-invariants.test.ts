@@ -615,19 +615,23 @@ function buildEffectfulProgramAnalysis(): EffectfulProgramAnalysis {
 
 const effectfulProgramAnalysis = buildEffectfulProgramAnalysis();
 
-type ModuleCollectionInfo = {
-  kind: "Set" | "Map";
+type ModuleStateInfo = {
+  kind: "Set" | "Map" | "state";
   name: string;
+  owner: ts.Symbol;
   sourceFile: ts.SourceFile;
 };
 
 // Follow real TypeScript symbols so imported helpers, callbacks, aliases, and
-// collection parameters cannot hide worker-local mutations. Read-only lookup
-// collections are intentionally allowed.
-function findModuleCollectionMutationsReachableFromPreload(
+// parameters cannot hide worker-local mutations. Read-only module bindings are
+// intentionally allowed.
+function findModuleStateMutationsReachableFromRegisteredHandlers(
   program: ts.Program,
   includesSourceFile: (sourceFile: ts.SourceFile) => boolean,
   displayRoot: string,
+  includesStateSourceFile: (
+    sourceFile: ts.SourceFile,
+  ) => boolean = includesSourceFile,
 ): string[] {
   const checker = program.getTypeChecker();
   const sourceFileList = program
@@ -638,34 +642,40 @@ function findModuleCollectionMutationsReachableFromPreload(
     );
   type SymbolAccess = { path: string[]; root: ts.Symbol };
   type PathBinding = {
-    collections: Set<ModuleCollectionInfo>;
+    states: Set<ModuleStateInfo>;
     path: string[];
   };
-  type CollectionPathBindings = Map<ts.Symbol, Map<string, PathBinding>>;
-  const collectionPathBindings: CollectionPathBindings = new Map();
+  type StatePathBindings = Map<ts.Symbol, Map<string, PathBinding>>;
+  const statePathBindings: StatePathBindings = new Map();
   const moduleScopedBindingSymbols = new Set<ts.Symbol>();
   const pathKey = (propertyPath: readonly string[]): string =>
     JSON.stringify(propertyPath);
   const mergePathBinding = (
     symbol: ts.Symbol,
     propertyPath: readonly string[],
-    collections: ReadonlySet<ModuleCollectionInfo>,
+    states: ReadonlySet<ModuleStateInfo>,
   ): boolean => {
-    const byPath = collectionPathBindings.get(symbol) ?? new Map();
+    const byPath = statePathBindings.get(symbol) ?? new Map();
     const key = pathKey(propertyPath);
     const existing = byPath.get(key) ?? {
-      collections: new Set<ModuleCollectionInfo>(),
+      states: new Set<ModuleStateInfo>(),
       path: [...propertyPath],
     };
-    const initialSize = existing.collections.size;
-    for (const collection of collections) {
-      existing.collections.add(collection);
+    const initialSize = existing.states.size;
+    for (const state of states) {
+      existing.states.add(state);
     }
-    if (existing.collections.size === initialSize) return false;
+    if (existing.states.size === initialSize) return false;
     byPath.set(key, existing);
-    collectionPathBindings.set(symbol, byPath);
+    statePathBindings.set(symbol, byPath);
     return true;
   };
+  const isPathPrefix = (
+    prefix: readonly string[],
+    candidate: readonly string[],
+  ): boolean =>
+    prefix.length <= candidate.length &&
+    prefix.every((segment, index) => candidate[index] === segment);
   const expressionAccess = (
     expression: ts.Expression,
   ): SymbolAccess | undefined => {
@@ -691,17 +701,19 @@ function findModuleCollectionMutationsReachableFromPreload(
         ? { path: [...parent.path, expression.name.text], root: parent.root }
         : undefined;
     }
-    if (
-      ts.isElementAccessExpression(expression) &&
-      expression.argumentExpression &&
-      (ts.isStringLiteral(expression.argumentExpression) ||
-        ts.isNoSubstitutionTemplateLiteral(expression.argumentExpression) ||
-        ts.isNumericLiteral(expression.argumentExpression))
-    ) {
+    if (ts.isElementAccessExpression(expression)) {
       const parent = expressionAccess(expression.expression);
+      const argument = expression.argumentExpression;
+      const property =
+        argument &&
+        (ts.isStringLiteral(argument) ||
+          ts.isNoSubstitutionTemplateLiteral(argument) ||
+          ts.isNumericLiteral(argument))
+          ? argument.text
+          : "<computed>";
       return parent
         ? {
-            path: [...parent.path, expression.argumentExpression.text],
+            path: [...parent.path, property],
             root: parent.root,
           }
         : undefined;
@@ -713,19 +725,15 @@ function findModuleCollectionMutationsReachableFromPreload(
     target: SymbolAccess,
   ): boolean => {
     let changed = false;
-    for (const binding of collectionPathBindings.get(target.root)?.values() ??
-      []) {
-      if (
-        target.path.length > binding.path.length ||
-        target.path.some((segment, index) => binding.path[index] !== segment)
-      ) {
-        continue;
-      }
+    for (const binding of statePathBindings.get(target.root)?.values() ?? []) {
+      const targetContainsBinding = isPathPrefix(target.path, binding.path);
+      const bindingContainsTarget = isPathPrefix(binding.path, target.path);
+      if (!targetContainsBinding && !bindingContainsTarget) continue;
       if (
         mergePathBinding(
           alias,
-          binding.path.slice(target.path.length),
-          binding.collections,
+          targetContainsBinding ? binding.path.slice(target.path.length) : [],
+          binding.states,
         )
       ) {
         changed = true;
@@ -738,41 +746,47 @@ function findModuleCollectionMutationsReachableFromPreload(
     target: SymbolAccess;
   }> = [];
   for (const sourceFile of sourceFileList) {
-    const collectModuleBindingSymbols = (name: ts.BindingName): void => {
+    const collectModuleBindingState = (
+      name: ts.BindingName,
+      kind: ModuleStateInfo["kind"],
+    ): void => {
       if (ts.isIdentifier(name)) {
         const symbol = canonicalSymbol(
           checker,
           checker.getSymbolAtLocation(name),
         );
-        if (symbol) moduleScopedBindingSymbols.add(symbol);
+        if (symbol) {
+          moduleScopedBindingSymbols.add(symbol);
+          mergePathBinding(
+            symbol,
+            [],
+            new Set([
+              {
+                kind,
+                name: name.text,
+                owner: symbol,
+                sourceFile,
+              },
+            ]),
+          );
+        }
         return;
       }
       for (const element of name.elements) {
         if (!ts.isOmittedExpression(element)) {
-          collectModuleBindingSymbols(element.name);
+          collectModuleBindingState(element.name, "state");
         }
       }
     };
-    for (const statement of sourceFile.statements) {
-      if (!ts.isVariableStatement(statement)) continue;
-      for (const declaration of statement.declarationList.declarations) {
-        collectModuleBindingSymbols(declaration.name);
-      }
-    }
-    for (const {
-      kind,
-      name,
-      propertyPath,
-      rootSymbolNode,
-    } of topLevelSetOrMapDeclarationNodes(sourceFile)) {
-      const collection = { kind, name, sourceFile };
-      const root = canonicalSymbol(
-        checker,
-        checker.getSymbolAtLocation(rootSymbolNode),
-      );
-      if (root) {
-        const collections = new Set([collection]);
-        mergePathBinding(root, propertyPath, collections);
+    if (includesStateSourceFile(sourceFile)) {
+      for (const statement of sourceFile.statements) {
+        if (!ts.isVariableStatement(statement)) continue;
+        for (const declaration of statement.declarationList.declarations) {
+          const kind = declaration.initializer
+            ? (newCollectionKind(declaration.initializer) ?? "state")
+            : "state";
+          collectModuleBindingState(declaration.name, kind);
+        }
       }
     }
     const collectAliases = (node: ts.Node): void => {
@@ -871,19 +885,14 @@ function findModuleCollectionMutationsReachableFromPreload(
       invokedTargets: Set<ts.FunctionLikeDeclaration>;
     }>
   >();
-  const preloadFunctions = new Set<ts.FunctionLikeDeclaration>();
   for (const fn of functions) {
     const targets = new Set<ts.FunctionLikeDeclaration>();
     const callSites: Array<{
       call: ts.CallExpression;
       invokedTargets: Set<ts.FunctionLikeDeclaration>;
     }> = [];
-    let preloadAware = false;
     const visit = (node: ts.Node): void => {
       if (node !== fn && isFunctionLikeNode(node)) return;
-      if (isPreloadAccess(node)) {
-        preloadAware = true;
-      }
       if (ts.isCallExpression(node)) {
         const invokedTargets = new Set<ts.FunctionLikeDeclaration>();
         for (const calledSymbol of callExpressionSymbols(node, checker)) {
@@ -910,11 +919,49 @@ function findModuleCollectionMutationsReachableFromPreload(
     visit(fn);
     edges.set(fn, targets);
     callSitesByFunction.set(fn, callSites);
-    if (preloadAware) preloadFunctions.add(fn);
   }
 
-  const reachableFunctions = new Set(preloadFunctions);
-  const pendingFunctions = [...preloadFunctions];
+  const registeredHandlerFunctions = new Set<ts.FunctionLikeDeclaration>();
+  for (const sourceFile of sourceFileList) {
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ["contractRegister", "onBlock", "onEvent"].includes(
+          node.expression.name.text,
+        )
+      ) {
+        const indexerSymbol = checker.getSymbolAtLocation(
+          node.expression.expression,
+        );
+        const callback = node.arguments[1];
+        if (indexerSymbol?.name === "indexer" && callback) {
+          if (isFunctionLikeNode(callback)) {
+            registeredHandlerFunctions.add(
+              callback as ts.FunctionLikeDeclaration,
+            );
+          } else {
+            const callbackSymbol = expressionSymbol(callback, checker);
+            if (callbackSymbol) {
+              for (const fn of functionsBySymbol.get(callbackSymbol) ?? []) {
+                registeredHandlerFunctions.add(fn);
+              }
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+  if (registeredHandlerFunctions.size === 0) {
+    throw new Error(
+      "Module-state analysis found no registered indexer callbacks",
+    );
+  }
+
+  const reachableFunctions = new Set(registeredHandlerFunctions);
+  const pendingFunctions = [...registeredHandlerFunctions];
   while (pendingFunctions.length > 0) {
     const fn = pendingFunctions.pop();
     if (!fn) continue;
@@ -988,19 +1035,122 @@ function findModuleCollectionMutationsReachableFromPreload(
             }
           }
         }
+        const receiverAccess = ts.isPropertyAccessExpression(call.expression)
+          ? expressionAccess(call.expression.expression)
+          : undefined;
+        if (receiverAccess) {
+          for (const argument of call.arguments) {
+            const callbackTargets = new Set<ts.FunctionLikeDeclaration>();
+            if (isFunctionLikeNode(argument)) {
+              callbackTargets.add(argument as ts.FunctionLikeDeclaration);
+            }
+            const callbackSymbol = expressionSymbol(argument, checker);
+            if (callbackSymbol) {
+              for (const target of functionsBySymbol.get(callbackSymbol) ??
+                []) {
+                callbackTargets.add(target);
+              }
+            }
+            for (const callbackTarget of callbackTargets) {
+              const valueParameter = callbackTarget.parameters[0];
+              if (!valueParameter || !ts.isIdentifier(valueParameter.name)) {
+                continue;
+              }
+              const valueSymbol = canonicalSymbol(
+                checker,
+                checker.getSymbolAtLocation(valueParameter.name),
+              );
+              if (
+                valueSymbol &&
+                copyAccessBindings(valueSymbol, receiverAccess)
+              ) {
+                bindingsChanged = true;
+              }
+            }
+          }
+        }
       }
     }
   }
 
-  const mutatedCollectionsByFunction = new Map<
+  const statesForAccess = (
+    access: SymbolAccess,
+    includeDescendants: boolean,
+  ): Set<ModuleStateInfo> => {
+    const states = new Set<ModuleStateInfo>();
+    for (const binding of statePathBindings.get(access.root)?.values() ?? []) {
+      if (
+        !isPathPrefix(binding.path, access.path) &&
+        !(includeDescendants && isPathPrefix(access.path, binding.path))
+      ) {
+        continue;
+      }
+      for (const state of binding.states) states.add(state);
+    }
+    const directlyOwned = new Set(
+      [...states].filter((state) => state.owner === access.root),
+    );
+    return directlyOwned.size > 0 ? directlyOwned : states;
+  };
+  const mutatedStatesByFunction = new Map<
     ts.FunctionLikeDeclaration,
-    Set<ModuleCollectionInfo>
+    Set<ModuleStateInfo>
   >();
   const isAssignmentOperator = (kind: ts.SyntaxKind): boolean =>
     kind >= ts.SyntaxKind.FirstAssignment &&
     kind <= ts.SyntaxKind.LastAssignment;
+  const mutatingMethodNames = new Set([
+    "add",
+    "clear",
+    "copyWithin",
+    "delete",
+    "fill",
+    "pop",
+    "push",
+    "reverse",
+    "set",
+    "shift",
+    "sort",
+    "splice",
+    "unshift",
+  ]);
+  const objectMutationMethods = new Set([
+    "assign",
+    "defineProperties",
+    "defineProperty",
+    "setPrototypeOf",
+  ]);
+  const reflectMutationMethods = new Set([
+    "defineProperty",
+    "deleteProperty",
+    "set",
+    "setPrototypeOf",
+  ]);
+  const hasPhaseStateAllowance = (node: ts.Node): boolean => {
+    const sourceFile = node.getSourceFile();
+    const leadingTrivia = sourceFile.text.slice(
+      node.getFullStart(),
+      node.getStart(sourceFile),
+    );
+    return (
+      /phase-state-exempt:[ \t]*[^#\r\n]*[A-Za-z][^#\r\n]*#\d+/.test(
+        leadingTrivia,
+      ) ||
+      /phase-state-cache:[ \t]*[^\r\n]*[A-Za-z][^\r\n]*/.test(leadingTrivia)
+    );
+  };
   for (const fn of functions) {
-    const mutatedCollections = new Set<ModuleCollectionInfo>();
+    const mutatedStates = new Set<ModuleStateInfo>();
+    const recordMutation = (
+      access: SymbolAccess | undefined,
+      includeDescendants: boolean,
+      mutationNode: ts.Node,
+    ): void => {
+      if (!access || hasPhaseStateAllowance(mutationNode)) return;
+      for (const state of statesForAccess(access, includeDescendants)) {
+        mutatedStates.add(state);
+      }
+    };
     const visit = (node: ts.Node): void => {
       if (node !== fn && isFunctionLikeNode(node)) return;
       if (
@@ -1016,53 +1166,61 @@ function findModuleCollectionMutationsReachableFromPreload(
           (!ts.isIdentifier(node.left) ||
             moduleScopedBindingSymbols.has(assignedAccess.root));
         if (assignedAccess && mayReplaceModuleState) {
-          for (const binding of collectionPathBindings
-            .get(assignedAccess.root)
-            ?.values() ?? []) {
-            if (
-              assignedAccess.path.length > binding.path.length ||
-              assignedAccess.path.some(
-                (segment, index) => binding.path[index] !== segment,
-              )
-            ) {
-              continue;
-            }
-            for (const collection of binding.collections) {
-              mutatedCollections.add(collection);
-            }
-          }
+          recordMutation(assignedAccess, true, node);
         }
+      }
+      if (
+        (ts.isPrefixUnaryExpression(node) ||
+          ts.isPostfixUnaryExpression(node)) &&
+        (node.operator === ts.SyntaxKind.PlusPlusToken ||
+          node.operator === ts.SyntaxKind.MinusMinusToken)
+      ) {
+        const operand = node.operand;
+        const access = expressionAccess(operand);
+        if (
+          access &&
+          (!ts.isIdentifier(operand) ||
+            moduleScopedBindingSymbols.has(access.root))
+        ) {
+          recordMutation(access, true, node);
+        }
+      }
+      if (ts.isDeleteExpression(node)) {
+        recordMutation(expressionAccess(node.expression), false, node);
       }
       if (
         ts.isCallExpression(node) &&
         ts.isPropertyAccessExpression(node.expression) &&
-        ["add", "clear", "delete", "set"].includes(node.expression.name.text)
+        mutatingMethodNames.has(node.expression.name.text)
       ) {
         const receiverAccess = expressionAccess(node.expression.expression);
-        const binding =
-          receiverAccess &&
-          collectionPathBindings
-            .get(receiverAccess.root)
-            ?.get(pathKey(receiverAccess.path));
-        if (binding) {
-          for (const collection of binding.collections) {
-            mutatedCollections.add(collection);
-          }
-        }
+        recordMutation(receiverAccess, false, node);
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        ((node.expression.expression.text === "Object" &&
+          objectMutationMethods.has(node.expression.name.text)) ||
+          (node.expression.expression.text === "Reflect" &&
+            reflectMutationMethods.has(node.expression.name.text)))
+      ) {
+        const target = node.arguments[0];
+        if (target) recordMutation(expressionAccess(target), false, node);
       }
       ts.forEachChild(node, visit);
     };
     visit(fn);
-    mutatedCollectionsByFunction.set(fn, mutatedCollections);
+    mutatedStatesByFunction.set(fn, mutatedStates);
   }
 
-  const reachableCollections = new Set<ModuleCollectionInfo>();
+  const reachableStates = new Set<ModuleStateInfo>();
   for (const fn of reachableFunctions) {
-    for (const collection of mutatedCollectionsByFunction.get(fn) ?? []) {
-      reachableCollections.add(collection);
+    for (const state of mutatedStatesByFunction.get(fn) ?? []) {
+      reachableStates.add(state);
     }
   }
-  return [...reachableCollections]
+  return [...reachableStates]
     .map(
       ({ kind, name, sourceFile }) =>
         `${path.relative(displayRoot, sourceFile.fileName)} ${name} (${kind})`,
@@ -1070,16 +1228,14 @@ function findModuleCollectionMutationsReachableFromPreload(
     .sort();
 }
 
-function findHandlerCollectionMutationsReachableFromPreload(): string[] {
-  const handlersRoot = path.join(srcRoot, "handlers");
-  // RPC/effect modules own intentional process-local client and test caches;
-  // this guard targets phase-bridging state hidden in the handler module graph.
-  return findModuleCollectionMutationsReachableFromPreload(
+function includesIndexerSourceFile(sourceFile: ts.SourceFile): boolean {
+  return path.resolve(sourceFile.fileName).startsWith(`${srcRoot}${path.sep}`);
+}
+
+function findHandlerModuleStateMutationsReachableFromHandlers(): string[] {
+  return findModuleStateMutationsReachableFromRegisteredHandlers(
     effectfulProgramAnalysis.program,
-    (sourceFile) =>
-      path
-        .resolve(sourceFile.fileName)
-        .startsWith(`${handlersRoot}${path.sep}`),
+    includesIndexerSourceFile,
     packageRoot,
   );
 }
@@ -1839,14 +1995,14 @@ function hiddenEffectNamesInProgram(
   ).map((offender) => offender.slice(offender.lastIndexOf(" ") + 1));
 }
 
-function phaseCollectionNamesInProgram(
+function phaseStateNamesInProgram(
   files: Readonly<Record<string, string>>,
 ): string[] {
   const { fixtureFiles, fixtureRoot, program } = createProgramFixture(
     files,
-    "__preload-phase-collection-fixtures__",
+    "__preload-phase-state-fixtures__",
   );
-  return findModuleCollectionMutationsReachableFromPreload(
+  return findModuleStateMutationsReachableFromRegisteredHandlers(
     program,
     (sourceFile) => fixtureFiles.has(path.resolve(sourceFile.fileName)),
     fixtureRoot,
@@ -1879,12 +2035,23 @@ describe("indexer code quality invariants", () => {
     );
   });
 
-  it("keeps preload-aware handlers from mutating imported handler collections", () => {
+  it("keeps registered handlers from mutating module-scoped handler state", () => {
     assert.deepEqual(
-      findHandlerCollectionMutationsReachableFromPreload(),
+      findHandlerModuleStateMutationsReachableFromHandlers(),
       [],
-      "Hosted Envio workers do not share module state; preload-aware handlers must not mutate module-local Set/Map state through imported handler helpers",
+      "Hosted Envio workers and restarts do not share module state; registered handlers must not mutate module-scoped state through imported handler helpers",
     );
+  });
+
+  it("includes non-handler source modules in phase-state analysis", () => {
+    const sourceFile = effectfulProgramAnalysis.program.getSourceFile(
+      path.join(srcRoot, "contractAddresses.ts"),
+    );
+    assert.ok(
+      sourceFile,
+      "expected contractAddresses.ts in the indexer program",
+    );
+    assert.equal(includesIndexerSourceFile(sourceFile), true);
   });
 
   it("detects helper-hidden phase collections without flagging locals", () => {
@@ -1935,14 +2102,17 @@ describe("indexer code quality invariants", () => {
     );
   });
 
-  it("follows imported helper calls to phase collections across files", () => {
+  it("follows imported helper calls to module phase state across files", () => {
     assert.deepEqual(
-      phaseCollectionNamesInProgram({
+      phaseStateNamesInProgram({
         "entry.ts": `
           import { consume, remember } from "./helpers.js";
+          const indexer = { onEvent: (..._args: unknown[]) => undefined };
+          function isPreloadPhase(context: { isPreload: boolean }) {
+            return context.isPreload;
+          }
           export function handler(context: { isPreload: boolean }) {
-            const { isPreload } = context;
-            if (isPreload) {
+            if (isPreloadPhase(context)) {
               remember("event");
               return;
             }
@@ -1950,6 +2120,7 @@ describe("indexer code quality invariants", () => {
             const local = new Set<string>();
             local.add("safe");
           }
+          indexer.onEvent({}, handler);
         `,
         "helpers.ts": `
           import {
@@ -1966,8 +2137,22 @@ describe("indexer code quality invariants", () => {
             mutateSharedAlias,
             replaceNestedState,
             replaceState,
+            writeArrayState,
+            writeAssignedRecordState,
+            writeCacheState,
+            writeCallbackObjectState,
+            writeComputedRecordState,
+            writeDeletedRecordState,
+            writeExemptState,
+            writeFactoryArrayState,
+            writeFactorySetState,
+            writeInvalidCacheState,
+            writeInvalidExemptState,
+            writePrimitiveState,
           } from "./phase-state.js";
           const unrelatedStaticLookup = new Set(["safe"]);
+          const unrelatedStaticArray = ["safe"];
+          const unrelatedStaticRecord: Record<string, boolean> = { safe: true };
           export function remember(id: string) {
             writeDirectState(id);
             writeNestedState(id);
@@ -1980,6 +2165,18 @@ describe("indexer code quality invariants", () => {
             replaceContainerState(id);
             replaceNestedState(id);
             replaceState(id);
+            writeArrayState(id);
+            writeAssignedRecordState(id);
+            writeCacheState(id);
+            writeCallbackObjectState();
+            writeComputedRecordState(id);
+            writeDeletedRecordState(id);
+            writeExemptState(id);
+            writeFactoryArrayState(id);
+            writeFactorySetState(id);
+            writeInvalidCacheState(id);
+            writeInvalidExemptState(id);
+            writePrimitiveState(id);
             unrelated();
           }
           export function consume(id: string) {
@@ -1987,7 +2184,11 @@ describe("indexer code quality invariants", () => {
             mutateSharedAlias();
           }
           export function unrelated() {
-            return unrelatedStaticLookup.has("safe");
+            return (
+              unrelatedStaticLookup.has("safe") &&
+              unrelatedStaticArray.includes("safe") &&
+              unrelatedStaticRecord.safe
+            );
           }
         `,
         "phase-state.ts": `
@@ -2001,13 +2202,31 @@ describe("indexer code quality invariants", () => {
           const callbackState = new Map<string, boolean>();
           const assignmentState = new Set<string>();
           const aliasStateSeed = new Set<string>();
+          const arrayState: string[] = [];
+          const assignedRecordState: Record<string, boolean> = {};
+          const cacheState = new Set<string>();
+          const callbackObjectState = [{ done: false }];
+          const computedRecordState: Record<string, boolean> = {};
+          const deletedRecordState: Record<string, boolean> = {};
+          const exemptState = new Set<string>();
+          const factoryArrayState = makeArrayState();
+          const factorySetState = makeSetState();
+          const invalidCacheState = new Set<string>();
+          const invalidExemptState = new Set<string>();
           const reassignedNestedState = { remembered: new Set<string>() };
           const sharedAliasState = new Set<string>();
           const unrelatedPathState = new Set<string>();
           let aliasState = aliasStateSeed;
+          let primitiveState: string | undefined;
           let replacedContainerState = { remembered: new Set<string>() };
           let reassignedState = new Set<string>();
           let sharedAlias: Set<string> | undefined;
+          function makeArrayState() {
+            return [] as string[];
+          }
+          function makeSetState() {
+            return new Set<string>();
+          }
           function mutate(target: Set<string>, id: string) {
             target.add(id);
           }
@@ -2059,15 +2278,59 @@ describe("indexer code quality invariants", () => {
           export function replaceState(id: string) {
             reassignedState = new Set([id]);
           }
+          export function writeArrayState(id: string) {
+            arrayState.push(id);
+          }
+          export function writeAssignedRecordState(id: string) {
+            Object.assign(assignedRecordState, { [id]: true });
+          }
+          export function writeCacheState(id: string) {
+            // phase-state-cache: bounded rebuildable fixture cache; loss only repeats work.
+            cacheState.add(id);
+          }
+          export function writeCallbackObjectState() {
+            callbackObjectState.forEach((item) => {
+              item.done = true;
+            });
+          }
+          export function writeComputedRecordState(id: string) {
+            computedRecordState[id] = true;
+          }
+          export function writeDeletedRecordState(id: string) {
+            delete deletedRecordState[id];
+          }
+          export function writeExemptState(id: string) {
+            // phase-state-exempt: ordered fixture state; remove with #123.
+            exemptState.add(id);
+          }
+          export function writeFactoryArrayState(id: string) {
+            factoryArrayState.splice(0, 0, id);
+          }
+          export function writeFactorySetState(id: string) {
+            factorySetState.add(id);
+          }
+          export function writeInvalidCacheState(id: string) {
+            // phase-state-cache:
+            invalidCacheState.add(id);
+          }
+          export function writeInvalidExemptState(id: string) {
+            // phase-state-exempt: missing tracking issue.
+            invalidExemptState.add(id);
+          }
+          export function writePrimitiveState(id: string) {
+            primitiveState = id;
+          }
           export function mutateOnlyOutsideThePreloadGraph() {
             mutate(unrelatedPathState, "unrelated");
           }
         `,
         "bracket-entry.ts": `
           import { writeBracketState } from "./bracket-state.js";
+          const indexer = { onEvent: (..._args: unknown[]) => undefined };
           export function bracketHandler(context: { isPreload: boolean }) {
             if (context["isPreload"]) writeBracketState("event");
           }
+          indexer.onEvent({}, bracketHandler);
         `,
         "bracket-state.ts": `
           const bracketState = new Set<string>();
@@ -2078,17 +2341,49 @@ describe("indexer code quality invariants", () => {
       }),
       [
         "bracket-state.ts bracketState (Set)",
-        "phase-state.ts aliasStateSeed (Set)",
+        "phase-state.ts aliasState (state)",
+        "phase-state.ts arrayState (state)",
+        "phase-state.ts assignedRecordState (state)",
         "phase-state.ts assignmentState (Set)",
+        "phase-state.ts callbackObjectState (state)",
         "phase-state.ts callbackState (Map)",
+        "phase-state.ts computedRecordState (state)",
+        "phase-state.ts deletedRecordState (state)",
         "phase-state.ts directState (Set)",
-        "phase-state.ts nestedState.remembered (Set)",
+        "phase-state.ts factoryArrayState (state)",
+        "phase-state.ts factorySetState (state)",
+        "phase-state.ts invalidCacheState (Set)",
+        "phase-state.ts invalidExemptState (Set)",
+        "phase-state.ts nestedState (state)",
         "phase-state.ts parameterState (Set)",
-        "phase-state.ts reassignedNestedState.remembered (Set)",
+        "phase-state.ts primitiveState (state)",
+        "phase-state.ts reassignedNestedState (state)",
         "phase-state.ts reassignedState (Set)",
-        "phase-state.ts replacedContainerState.remembered (Set)",
-        "phase-state.ts sharedAliasState (Set)",
+        "phase-state.ts replacedContainerState (state)",
+        "phase-state.ts sharedAlias (state)",
       ],
+    );
+  });
+
+  it("follows module state outside the registered handler directory", () => {
+    assert.deepEqual(
+      phaseStateNamesInProgram({
+        "handlers/entry.ts": `
+          import { writeImportedState } from "../outside-helper.js";
+          const indexer = { onEvent: (..._args: unknown[]) => undefined };
+          function handler() {
+            writeImportedState("event");
+          }
+          indexer.onEvent({}, handler);
+        `,
+        "outside-helper.ts": `
+          let warmedId: string | undefined;
+          export function writeImportedState(id: string) {
+            warmedId = id;
+          }
+        `,
+      }),
+      ["outside-helper.ts warmedId (state)"],
     );
   });
 

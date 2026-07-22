@@ -50,12 +50,22 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
   ordered-state exemption. Do not substitute a later event's value for exact
   event/block state.
 - Do not hide phase-bridging state in an imported handler helper. The blocking
-  code-quality invariant follows TypeScript-resolved calls from preload-aware
-  handlers through imported and transitive handler helpers, including callbacks,
-  aliases, and collection arguments. A reachable mutation of a module-level
-  native `Set` or `Map` (`add`, `set`, `delete`, or `clear`) fails; deterministic
-  read-only lookup collections remain valid outside the preload-aware handler
-  module.
+  code-quality invariant starts at registered `indexer.onEvent`, `onBlock`, and
+  `contractRegister` callbacks and follows TypeScript-resolved imported calls,
+  transitive calls,
+  callbacks, aliases, destructuring, and arguments. Every top-level handler
+  binding is a potential module-state root regardless of initializer. The
+  invariant rejects direct assignment, update, deletion, object/record write,
+  and native collection/array mutator forms reached through those
+  symbol-propagated paths. Returned module-state aliases and custom receiver
+  methods that mutate through `this` still require manual review until
+  [#1462](https://github.com/mento-protocol/monitoring-monorepo/issues/1462) is
+  resolved. Deterministic read-only lookup state and module-initialization
+  builders remain valid. A necessary processing-only write requires an adjacent
+  `// phase-state-exempt: <reason>; ... #<issue>.` at each mutation call site;
+  never exempt an entire binding. A bounded or rebuildable optimization cache
+  whose loss can only repeat authoritative/idempotent work may instead use
+  `// phase-state-cache: <why loss cannot change entity output>.` at each write.
 - The blocking code-quality invariant rejects a direct effect that exists only
   after a positive preload return (including exact `maybePreloadPool(...)` and
   `maybePreloadBreaker(...)` wrappers)
