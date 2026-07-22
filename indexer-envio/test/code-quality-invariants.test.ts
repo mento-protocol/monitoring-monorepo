@@ -1210,6 +1210,22 @@ describe("indexer code quality invariants", () => {
     assert.deepEqual(offenders, []);
   });
 
+  it("does not bridge preload and processing with module-local collections", () => {
+    const moduleLocalPreloadCollection =
+      /(?:preload|preloaded)[A-Za-z0-9_]*\s*=\s*new\s+(?:Set|Map)\b/i;
+    const offenders = sourceFiles(path.join(srcRoot, "handlers"))
+      .filter((file) =>
+        moduleLocalPreloadCollection.test(readFileSync(file, "utf8")),
+      )
+      .map((file) => path.relative(packageRoot, file));
+
+    assert.deepEqual(
+      offenders,
+      [],
+      "Hosted Envio may run preload and processing in different workers; derive effect conditions in each pass instead of bridging them with module-local Set/Map state",
+    );
+  });
+
   it("keeps multi-field Envio getWhere calls chain-scoped or pool-scoped", () => {
     assert.deepEqual(findUnsafeMultiFieldGetWhereCalls(), []);
   });

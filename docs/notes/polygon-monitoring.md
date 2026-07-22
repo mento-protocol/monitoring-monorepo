@@ -102,6 +102,12 @@ The promotion verifier additionally reads the versioned
 which prevents a pre-fix replay from passing solely because a later event made
 the final pool row look current.
 
+Version 2 also records the hosted-worker boundary discovered during the first
+fail-closed replay: preload and processing must independently derive whether an
+effect is needed. Module-local collections cannot bridge those passes because
+Envio may place them in different workers or restart the process. The v1
+candidate therefore remains incompatible even if it later appears caught up.
+
 ## Alert conditions
 
 The ordinary v3 FPMM rule groups apply to Polygon automatically because the

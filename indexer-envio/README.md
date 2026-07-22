@@ -289,6 +289,11 @@ lacks the required version is never promotion-compatible even if later rows
 look healthy. Bump a marker only in the same change as the new replay invariant
 and its handler-level regression tests.
 
+Replay-integrity v2 additionally requires effect eligibility to be derived in
+both Envio passes. Never carry preload decisions in a module-scoped `Set` or
+`Map`: hosted preload and processing workers, and restarted processes, do not
+share that memory. The code-health invariant rejects that pattern in handlers.
+
 The `mento` project on Envio Cloud watches this branch. Envio registers
 deployments under the short commit hash, and the registration can lag the Git
 push by several minutes. Use the explicit commit form above while babysitting a

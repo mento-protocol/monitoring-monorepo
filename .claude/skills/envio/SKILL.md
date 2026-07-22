@@ -204,6 +204,13 @@ Notes:
   their exact-block median timestamp remains unavailable after transient retry
   and fallback. A caught-up deployment with those historical reads missing is
   tainted and requires a clean replay.
+- **Never bridge Envio's preload and processing passes with module-local mutable
+  state.** Hosted workers and process restarts do not share a module-scoped
+  `Set` or `Map`. Derive conditional-effect eligibility from the entity/event
+  inputs in each pass (or use a phase-stable event-only condition), invoke the
+  identical effect key before the preload return, and let a rare newly-visible
+  entity take the safe serialized exact-block path. A missing warmed result must
+  fail closed; it must not be reconstructed from a later event.
 - **Version drift is common around V3 RCs.** Check the installed CLI and package before relying on older docs, memory, or notes; do not reintroduce V2-only fields such as `preload_handlers:`.
 - Development-plan retention and quota rules change independently of this
   repo. Check Envio's current hosted deployment/billing pages instead of
