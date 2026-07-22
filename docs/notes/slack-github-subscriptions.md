@@ -3,7 +3,7 @@ title: GitHub-to-Slack notifications for Terraform-applying workflows
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-22
 doc_type: runbook
 scope: terraform/infra
 review_interval_days: 30
@@ -21,16 +21,19 @@ different places, and none should be treated as a substitute for the others.
 
 The official GitHub Slack App posts a card for every subscribed workflow run
 and — for a run that pauses on a GitHub Environment protection rule — an
-in-Slack **Approve / Reject** button for the gated deployment. It is
-configured entirely inside Slack with the `/github` slash command; there is
-no GitHub or Slack Terraform provider resource for a channel's App
-subscriptions, so this **cannot** be brought under IaC. This document is
-therefore the versioned record of what should be subscribed and where — keep
-it in sync whenever someone runs `/github subscribe`.
+in-Slack deployment approval prompt. The channel-subscription state is
+configured inside Slack with the `/github` slash command; first use may require
+authorizing Actions notifications, and an approver must be signed in and
+authorized for the protected environment. There is no GitHub or Slack Terraform
+provider resource for a channel's App subscriptions, so this **cannot** be
+brought under IaC. This document is therefore the versioned record of what
+should be subscribed and where — keep it in sync whenever someone runs
+`/github subscribe`. See GitHub's
+[Slack notification reference](https://docs.github.com/en/integrations/how-tos/slack/customize-notifications).
 
 ### The approval prompt comes from the `workflows` feature, filtered by name
 
-The Approve/Reject button for a `production-infra`-gated Terraform apply is
+The approval control for a `production-infra`-gated Terraform apply is
 surfaced by the App's **`workflows`** feature, not `deployments`. A bare
 `/github subscribe … workflows` defaults to workflow runs on pull requests
 against the default branch, which **misses** the push-triggered apply runs —
@@ -88,11 +91,12 @@ above.
 
 The step reads `env.SLACK_BOT_TOKEN` (`secrets.TF_VAR_SLACK_BOT_TOKEN`) and
 posts via `chat.postMessage` under `continue-on-error: true` — a deliberate
-choice so a Slack outage never blocks a Terraform apply, but it also means a
-failed post is **silent** (the step shows green in the Actions UI even when
-nothing reached Slack). The bot's `chat:write.public` OAuth scope lets it
-post to any _public_ channel without being a member, so the default
-`#deploys` and any public reroute target need no setup.
+choice so a Slack outage never blocks a Terraform apply. A failed post remains
+visible in the step logs and underlying outcome, but the continued step's
+conclusion does not fail the plan job and there is no secondary alert. The
+bot's `chat:write.public` OAuth scope lets it post to any _public_ channel
+without being a member, so the default `#deploys` and any public reroute
+target need no setup.
 
 A **private** channel is the only case that needs the bot present, and there
 is deliberately no Terraform resource for it: Slack's API cannot self-join a
@@ -104,10 +108,10 @@ ones). If you point `TERRAFORM_APPLY_SLACK_CHANNEL` at a private channel,
 ### `TERRAFORM_APPLY_SLACK_CHANNEL` routing variable (IaC-managed)
 
 The step reads `SLACK_CHANNEL` from `TERRAFORM_APPLY_SLACK_CHANNEL`, falling
-back to `#deploys`. During the `#ci-operations` retirement, the workflows also
-coerce a stale live `#ci-operations` variable value to `#deploys` so the
-alerts-delivery apply can archive the old channel without creating a silent
-notification sink. This repository variable is managed by the `platform` stack:
+back to `#deploys`. The workflows retain a compatibility guard that coerces
+the retired `#ci-operations` value to `#deploys`, preventing an old variable
+value from recreating a notification sink. This repository variable is managed
+by the `platform` stack:
 `terraform/variables.tf`'s `terraform_apply_slack_channel` (default `"#deploys"`)
 feeds
 `terraform/github-variables.tf`'s `github_actions_variable
@@ -116,11 +120,12 @@ and run `pnpm tf apply platform` (manual-apply stack, human-approved local
 apply — see `docs/terraform.md`); if the new channel is private, `/invite`
 the bot as above. The platform PAT needs **both** `Secrets: Read/write` and
 `Variables: Read/write` — GitHub scopes repo Secrets and repo Variables
-independently, so a Secrets-only PAT gets a silent 403 on the first apply.
+independently, so a Secrets-only PAT makes the
+`github_actions_variable` resource fail with HTTP 403.
 
 ## 3. `Terraform Deploy Queue Watch`
 
-`.github/workflows/terraform-deploy-queue-watch.yml` is the pre-plan guard for a
+`.github/workflows/terraform-deploy-queue-watch.yml` is the pre-plan detector for a
 different failure mode: a post-merge Terraform deploy workflow can sit
 `queued`/`pending` behind an older run before any job starts. In that state the
 GitHub Slack App approval card and `scripts/notify-terraform-apply.mjs` summary
@@ -131,11 +136,12 @@ deploy workflows, and uses the same `TERRAFORM_APPLY_SLACK_CHANNEL` destination
 and `#deploys` fallback as the apply-pending notifier steps. It also coerces the
 retired `#ci-operations` value to `#deploys`.
 
-It alerts when a `push`/`workflow_dispatch` run is older than 60 minutes and
-still has zero started jobs. It fails its own workflow run after posting so the
+It alerts when a `push`/`workflow_dispatch` run on `main` is older than 60
+minutes, remains `queued`, `pending`, `requested`, or `waiting`, and still
+has zero started jobs. It fails its own workflow run after posting so the
 generic `#ci-failures` listener also has a machine-visible failure signal. It
-is observer-only: it does not join the deploy workflows' `*-deploy` concurrency
-groups, cancel runs, approve environments, or apply Terraform.
+is observer-only: it does not join the deploy workflows' `*-deploy`
+concurrency groups, cancel runs, approve environments, or apply Terraform.
 
 ## Out of scope
 

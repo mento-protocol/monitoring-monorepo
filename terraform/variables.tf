@@ -27,16 +27,14 @@ variable "github_owner" {
 
 variable "github_token" {
   description = <<-EOT
-    GitHub PAT for writing repository Actions secrets on
+    GitHub PAT for writing repository Actions secrets and variables on
     `mento-protocol/monitoring-monorepo`. Fine-grained PAT scoped to that
     repo with Repository → Secrets: Read/write — least-privilege for this
-    stack's use case (org-admin scope is NOT needed because the secrets
-    managed here are repo-level, not org-level). Used only by
-    `github_actions_secret` resources in this stack.
-
-    Managing `terraform_apply_slack_channel` below also requires the
-    separate "Variables: Read and write" repository permission on this
-    same PAT — GitHub scopes repo Secrets and repo Variables independently.
+    stack's use case (org-admin scope is NOT needed because the resources
+    managed here are repo-level, not org-level). The separate
+    "Variables: Read and write" repository permission is also required for
+    `github_actions_variable` resources — GitHub scopes repo Secrets and
+    repo Variables independently.
   EOT
   type        = string
   sensitive   = true
