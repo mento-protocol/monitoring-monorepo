@@ -182,11 +182,18 @@ test("retired historical verification traps need not remain in the corpus", () =
   const suite = structuredClone(context.suite);
   suite.questions[0].sources_requiring_verification = [
     {
-      path: "docs/retired-navigation-trap.md",
+      path: "docs/PLAN-celo-mainnet-indexer.md",
       verify_against: ["shared-config/AGENTS.md"],
     },
   ];
   assert.deepEqual(validateFixtureSuite(suite, context.inventory), []);
+
+  suite.questions[0].sources_requiring_verification[0].path =
+    "docs/PLAN-celo-mainnet-indexre.md";
+  assert.match(
+    validateFixtureSuite(suite, context.inventory).join("\n"),
+    /verification source is missing/,
+  );
 
   suite.questions[0].sources_requiring_verification[0].path = "";
   assert.match(

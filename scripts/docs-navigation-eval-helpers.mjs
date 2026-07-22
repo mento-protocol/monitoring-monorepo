@@ -33,6 +33,10 @@ const ISSUE_LABELS = [
   "risk:low",
 ];
 const NAVIGATION_EVAL_OWNERSHIP_LABEL = "source:audit";
+const RETIRED_VERIFICATION_SOURCE_TOMBSTONES = new Set([
+  // Retained by the immutable pre-garden fixture after issue #1442 deleted it.
+  "docs/PLAN-celo-mainnet-indexer.md",
+]);
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -258,6 +262,15 @@ export function validateFixtureSuite(suite, inventory) {
         const sourceRecord = hasValidSourcePath
           ? records.get(sourcePath)
           : null;
+        if (
+          hasValidSourcePath &&
+          !sourceRecord &&
+          !RETIRED_VERIFICATION_SOURCE_TOMBSTONES.has(sourcePath)
+        ) {
+          errors.push(
+            `question ${question.id} verification source is missing: ${sourcePath}`,
+          );
+        }
         if (sourceRecord?.authority === "canonical") {
           errors.push(
             `question ${question.id} verification source is already canonical: ${sourcePath}`,
