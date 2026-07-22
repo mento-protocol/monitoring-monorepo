@@ -167,9 +167,12 @@ non-Dependabot — they pass every historical CI trust check — but their diffs
 are machine-authored from untrusted Sentry input, so any secret a `pull_request`
 job exposes to their PR-head code is an exfiltration channel (issue #1388).
 `scripts/check-autofix-ci-trust.mjs` enforces this structurally in the
-`scripts` CI job.
+`scripts` CI job. It parses the workflow with `js-yaml` and analyzes the parsed
+structure, so exotic-but-valid YAML (anchors, `\uXXXX` escapes, block scalars,
+flow/JSON roots) cannot slip a trigger or secret past it; unparsable YAML fails
+closed.
 
-- [ ] If the workflow triggers on `pull_request` (any form — block, `on: [pull_request]`, inline mapping) and a JOB references `${{ secrets.* }}`, either exclude autofix PRs in THAT job (`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')` on its `if:`, or route them to a secretless lane like lighthouse.yml's fixture path), or add an `# autofix-ci-trust: <why the secret is unreachable from PR-head code>` annotation inside that job (a file-level annotation above `jobs:` covers every job). The checker is per-job: one guarded job does not vouch for an unguarded sibling
+- [ ] If the workflow triggers on `pull_request` (any form — block, `on: [pull_request]`, inline mapping) and a JOB references `${{ secrets.* }}`, either exclude autofix PRs in THAT job (`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')` on its `if:`, or route them to a secretless lane like lighthouse.yml's fixture path), or add an `# autofix-ci-trust: <why the secret is unreachable from PR-head code>` annotation. A job annotation must be a genuine comment INSIDE that job's body (indented deeper than the job key); a comment above `jobs:` is file-level and covers every job. The checker is per-job: one guarded job does not vouch for an unguarded sibling
 - [ ] "Secret-bearing" is broader than `${{ secrets.* }}`: a job bound to a
       GitHub `environment:`, holding `id-token: write` (this repo's WIF pool
       trusts any OIDC token from this repository — `terraform/ci-wif.tf` —

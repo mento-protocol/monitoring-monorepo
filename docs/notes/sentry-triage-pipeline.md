@@ -999,9 +999,12 @@ plan` executes PR-head HCL, and the plan job holds a state-reading SA.
   an LLM holding `pull-requests: write` invites steered, misleading
   commentary; Codex review + the human merge gate remain).
 - `scripts/check-autofix-ci-trust.mjs` (CI `scripts` job + the quality gate)
-  enforces the boundary structurally: no `pull_request_target` anywhere, and
-  every secret-referencing `pull_request` workflow must carry a
-  `sentry-autofix/` guard or an `# autofix-ci-trust:` justification
+  enforces the boundary structurally by parsing each workflow with `js-yaml`
+  and analyzing the parsed structure (issue #1424 replaced an earlier
+  textual-regex version): no `pull_request_target` anywhere, and every
+  credential-bearing (`secrets`, `id-token`/`write-all`, or `environment:`)
+  `pull_request` job must carry a `sentry-autofix/` guard or an
+  `# autofix-ci-trust:` justification
   annotation. A new secret lane added without reasoning about autofix trust
   fails CI. Checklist: `docs/pr-checklists/ci-workflow-gates.md` §10.
   The PR body is assembled deterministically from a fixed template (`## The
