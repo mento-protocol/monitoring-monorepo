@@ -2,16 +2,18 @@ import { createHash } from "node:crypto";
 
 const FINDING_EXCERPT_LENGTH = 240;
 const FAILURE_TERM = /\b(?:error|errors|fail|fails|failed|failure|failures)\b/i;
-const SAFE_FAILURE_ASSERTION =
-  /\b(?:Error|Failure)\s+handling\s+(?:is|was)\s+(?:correct|clean|complete|covered|expected|verified)(?:\s+and\s+(?:correct|clean|complete|covered|expected|verified))*\b/gi;
 const NEGATED_FAILURE =
-  /\b(?:no|zero|0)[ \t]+(?:errors?|fails?|failed|failures?)(?:[ \t]+(?:and|or)[ \t]+(?:errors?|fails?|failed|failures?)(?=[ \t]*(?:[.,;:]|$)))?\b/gi;
+  /\b(?:no|zero|0)[ \t]+(?:errors?|fails?|failed|failures?)(?:[ \t]+(?:and|or)[ \t]+(?:errors?|fails?|failed|failures?))?(?:[ \t]+(?:are|was|were)[ \t]+(?:found|observed|reported))?(?=[ \t]*(?:[.,;:]|$))/gi;
 const CLEAN_FINDING_MARKER =
-  /^(?:None\s+blocking|No\s+action(?:\s+required)?|Good\s+hygiene|Lockfile\s+diff\s+is\s+fully\s+mechanical|(?:Error|Failure)\s+handling\s+(?:is|was)\s+(?:correct|clean|complete|covered|expected|verified)(?:\s+and\s+(?:correct|clean|complete|covered|expected|verified))*)\b[\s:—.,]*(.*)$/i;
+  /^(?:None\s+blocking|No\s+action(?:\s+required)?|Good\s+hygiene|Lockfile\s+diff\s+is\s+fully\s+mechanical)\b[\s:—.,]*(.*)$/i;
+const UNSAFE_EVIDENCE_QUALIFIER =
+  /\b(?:not|never|cannot|can't|doesn't|does\s+not|fails?\s+to|may|might|could)\b/i;
 const POSITIVE_EVIDENCE =
-  /^(?:(?:clean|well\s+scoped|correct|covered|bounded|mechanical|verified|complete)\b.*|exact\s+removal\s+condition|no\s+(?:unrelated|leftover|vulnerable)\b.*|.+\s+should\s+(?:stay|continue\s+rejecting)\b.*|(?:.+\s+)?(?:is|are|was|were)\s+(?:correctly\s+)?(?:confirmed\s+)?(?:clean|well\s+scoped|correct|covered|bounded|mechanical|verified|complete)\b.*|(?:.+\s+)?(?:matches?|documents?|satisf(?:y|ies)|covers?|confirms?|confirmed)\b.*)$/i;
+  /^(?:clean(?:,\s+well\s+scoped)?(?:\s+fix)?|well\s+scoped(?:\s+fix)?|correct|covered|bounded|mechanical|verified|complete|exact\s+removal\s+condition|(?:no|zero|0)\s+(?:errors?|fails?|failed|failures?)(?:\s+(?:and|or)\s+(?:errors?|fails?|failed|failures?))?(?:\s+(?:are|was|were)\s+(?:found|observed|reported))?|no\s+unrelated\s+version\s+bumps?|no\s+vulnerable\s+sharp@0\.34\.5\s+remains?\s+anywhere\s+in\s+(?:the\s+)?repo(?:'s)?\s+lockfiles|parser\s+should\s+continue\s+rejecting\s+malformed\s+input|fallback\s+should\s+stay|fix\s+is\s+correct|override\s+selector\s+is\s+correctly\s+bounded|lockfile\s+churn\s+beyond\s+sharp\s+itself\s+is\s+confirmed\s+mechanical,\s+not\s+scope\s+creep|(?:the\s+)?bounded\s+selector\s+matches\s+the\s+repo(?:'s)?\s+established\s+override\s+pattern|matches\s+repo\s+convention|(?:the\s+)?inline\s+comment\s+documents\s+the\s+advisory|removal\s+condition\s+comment\s+satisfies\s+the\s+temporary\s+override\s+documentation\s+expectation|tests\s+cover\s+the\s+changed\s+paths)$/i;
+const SAFE_CLAUDE_PREAMBLE_LINE =
+  /^(?:\*\*Claude\s+finished\s+@[A-Za-z0-9_-]+'s\s+task\s+in\s+\d+m\s+\d+s\*\*|---|#{1,6}\s+Review:\s+fix\(deps\):\s+upgrade\s+sharp\s+past\s+vulnerable\s+libvips|#{1,6}\s+What\s+I\s+checked|(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?|-\s+\[[xX]\]\s+(?:`pnpm-workspace\.yaml`\s+override\s+syntax\/scope|`pnpm-lock\.yaml`\s+regeneration\s+for\s+unrelated\s+drift|Supply-chain\/lockfile-lint\s+compliance\s+and\s+CI\s+status|Other\s+standalone\s+lockfiles\s+for\s+leftover\s+vulnerable\s+`sharp@0\.34\.5`))$/i;
 const SAFE_NON_P3_FINDING =
-  /^(?:\d+[.)]\s+Confirmed\s+no\s+leftover\s+[^;]+\s+anywhere|\d+[.)]\s+[A-Za-z][A-Za-z0-9 ]*\s+CI\s+already\s+passed\s+on\s+this\s+PR|No\s+inline\s+comments\s+filed\s+(?:—\s+)?nothing\s+rose\s+to\s+an\s+actionable,\s+line\s+specific\s+issue)[.!?]?$/i;
+  /^(?:\d+[.)]\s+Confirmed\s+no\s+leftover\s+sharp@0\.34\.5\s+anywhere|\d+[.)]\s+Supply\s+Chain\s+CI\s+already\s+passed\s+on\s+this\s+PR|No\s+inline\s+comments\s+filed\s+(?:—\s+)?nothing\s+rose\s+to\s+an\s+actionable,\s+line\s+specific\s+issue)[.!?]?$/i;
 const CLEAN_ROLLUP_ENTRY = /^\d+[.)]\s+\[[Pp]3\]\s+(No\s+action:.*)$/i;
 const CLEAN_REVIEW_SUMMARY =
   /\b(?:no\s+changes\s+requested|no\s+[Pp][0-2]\s+(?:issues?|findings?)|(?:no|zero|0)\s+(?:Critical|High|Medium|Low)\s+Severity\s+(?:issues?|findings?))\b/gi;
@@ -64,9 +66,7 @@ function isReviewBotComment(comment) {
   ].includes(String(comment.author ?? "").toLowerCase());
 }
 function hasUnnegatedFailure(value) {
-  const scrubbed = String(value ?? "")
-    .replace(SAFE_FAILURE_ASSERTION, "")
-    .replace(NEGATED_FAILURE, "");
+  const scrubbed = String(value ?? "").replace(NEGATED_FAILURE, "");
   return FAILURE_TERM.test(scrubbed);
 }
 function hasReviewContradiction(value) {
@@ -80,7 +80,18 @@ function hasPositiveCleanEvidence(value) {
   if (tail === undefined) return false;
   return tail
     .split(/(?:[!?;]+|\.(?=\s|$)|\b(?:and|but|however|although|yet)\b)/i)
-    .every((clause) => !clause.trim() || POSITIVE_EVIDENCE.test(clause.trim()));
+    .every((clause) => {
+      const evidence = clause.trim();
+      const withoutSafeNegation = evidence.replace(
+        /,\s+not\s+scope\s+creep$/i,
+        "",
+      );
+      return (
+        !evidence ||
+        (!UNSAFE_EVIDENCE_QUALIFIER.test(withoutSafeNegation) &&
+          POSITIVE_EVIDENCE.test(evidence))
+      );
+    });
 }
 function isCleanFindingLine(line) {
   const normalized = normalizeText(line);
@@ -102,6 +113,14 @@ function isExplicitlyCleanClaudeReview(comment) {
   if (!/^Findings,Roll up$/i.test(headingOrder)) return false;
   const findingsIndex = lines.indexOf(headings[0]);
   const rollupIndex = lines.indexOf(headings[1]);
+  if (
+    !lines
+      .slice(0, findingsIndex)
+      .every(
+        (line) => !line.trim() || SAFE_CLAUDE_PREAMBLE_LINE.test(line.trim()),
+      )
+  )
+    return false;
   const nonempty = (line) => line.trim();
   const findings = lines.slice(findingsIndex + 1, rollupIndex).filter(nonempty);
   const rollup = lines.slice(rollupIndex + 1).filter(nonempty);

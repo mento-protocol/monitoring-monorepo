@@ -59,7 +59,6 @@ function assertThrows(fn, expectedMessage) {
 }
 
 const PR_1431_HEAD = "278eb7c96526f2b6c63b7dda92ca4da1ebac51a9";
-
 // Captures the structure of PR #1431 issuecomment-5043637970: an LGTM
 // verdict, explanatory [P3] findings, and an all-No-action roll-up.
 const PR_1431_CLEAN_CLAUDE_REVIEW = {
@@ -109,7 +108,6 @@ const ACTIONABLE_CLAUDE_REVIEW_LOOKALIKE = {
     "4. [P2] Action required: remove the remaining vulnerable `sharp@0.34.5` lockfile entry.",
   ),
 };
-
 function normalizedReadyStateForClaudeReview(comment) {
   return summarizeReadyState({
     pr: {
@@ -844,14 +842,16 @@ test("classifies clean and actionable Claude review variants", () => {
   const preface = (text) => before("Findings", text);
   const cleanBodies = [
     "Verdict: lgtm\n\n### Findings\n1. [P3] No action: tests cover the changed paths.\n2. [P3] No action: fix is correct and covered.\n\n### Roll up\n1. [P3] No-action: tests cover the changed paths.",
+    "Verdict: LGTM\n\n### Findings\n1. [P3] No action: clean. No errors or failures were observed.\n\n### Roll-up\n1. [P3] No-action: clean.",
     ...[
       "[P3] No action: parser should continue rejecting malformed input.",
       "[P3] None blocking: fallback should stay.",
-      "[P3] Error handling is correct and covered.",
     ].map(finding),
   ];
   const blockingBodies = [
     ACTIONABLE_CLAUDE_REVIEW_LOOKALIKE.body,
+    "Verdict: LGTM\n\n### Findings\n1. [P3] No action: tests confirm the fallback allows unauthenticated writes.\n\n### Roll-up\n1. [P3] No-action: tests confirm the fallback allows unauthenticated writes.",
+    "Verdict: LGTM\n\n### Findings\n1. [P3] No action: tests cover the changed paths while exposing that the fallback allows unauthenticated writes.\n\n### Roll-up\n1. [P3] No-action: tests cover the changed paths while exposing that the fallback allows unauthenticated writes.",
     ...[
       "[P3] Regression: malformed input reaches the parser and crashes requests.",
       "[P3] None blocking — but please remove the unsafe fallback before merge.",
@@ -860,9 +860,9 @@ test("classifies clean and actionable Claude review variants", () => {
       "P0:",
       "**P1**",
       "P2 Badge",
-      "Confirmed no leftover entries anywhere; blocker remains.",
+      "[P3] No action: the missing authorization check is verified.",
       "Supply Chain CI already passed on this PR; blocker remains.",
-      "[P3] Good hygiene: exact removal condition is missing.",
+      "[P3] No action: override selector does not match repo convention.",
     ].map(finding),
     ...[
       "Restore bounds validation before merge.",
@@ -870,7 +870,7 @@ test("classifies clean and actionable Claude review variants", () => {
       "No errors or failure blocks release.",
       "| Severity | Finding |\n| --- | --- |\n| Medium Severity | Input crash |",
       "> Low Severity:\n> Malformed input crashes requests.",
-      "Cross-cutting: **Critical Severity** malformed input crash.",
+      "- [x] Tests confirm the fallback allows unauthenticated writes.",
     ].map(preface),
     preface("### High Severity Notes\nMalformed input crashes requests."),
     ...["**Severity:** High", "**Severity**: High"].map((label) =>
@@ -947,10 +947,10 @@ test("blocks on bot review bodies tied to the current commit", () => {
     topLevelBotComments: [
       {
         id: "review-1",
-        author: "chatgpt-codex-connector[bot]",
+        author: "cursor[bot]",
         commitOid: currentHead,
         createdAt: "2026-06-05T16:31:00Z",
-        body: "| # | Severity | Issue |\n| 1 | [P2] | Fix this |",
+        body: "Failure handling is correct only for reads; writes remain unauthenticated.",
       },
     ],
   });
