@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+gate_start_ts="$(date +%s)"
+
 usage() {
   cat <<'USAGE'
-Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going] [--skip-if-fresh] [--parallel <n>]
+Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going] [--skip-if-fresh] [--parallel <n>] [--full-local-tests]
 
 Maps changed paths to the local commands and PR checklists an agent should run
 before opening or updating a PR. Defaults to dry-run.
@@ -29,6 +31,10 @@ Options:
                  n concurrent jobs. Default: auto, capped at 4. Fail-fast mode
                  stays sequential so it still stops before starting the next
                  mapped command.
+  --full-local-tests
+                 Force full per-package `test:coverage` locally instead of the
+                 scoped `vitest related` optimization. CI always runs the full
+                 coverage floors regardless of this flag.
   -h, --help     Show this help.
 
 Environment:
@@ -41,6 +47,8 @@ Environment:
                       Same behavior as --fail-fast when set to 1 or true.
   AGENT_QUALITY_PARALLELISM
                       Same behavior as --parallel. Use auto for the default.
+  AGENT_GATE_FULL_TESTS
+                      Same behavior as --full-local-tests when set to 1 or true.
 USAGE
 }
 
@@ -52,6 +60,7 @@ allow_package_script_changes="${AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES:-}"
 fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
 skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
 quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
+full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
 if [[ -z "$allow_package_script_changes" ]]; then
   allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
 fi
@@ -106,6 +115,10 @@ while [[ $# -gt 0 ]]; do
       skip_if_fresh="true"
       shift
       ;;
+    --full-local-tests)
+      full_local_tests="true"
+      shift
+      ;;
     --parallel|--jobs)
       quality_parallelism="${2:-}"
       if [[ -z "$quality_parallelism" ]]; then
@@ -151,6 +164,11 @@ if [[ ! "$quality_parallelism" =~ ^[0-9]+$ || "$quality_parallelism" -lt 1 ]]; t
   exit 2
 fi
 
+# Resolve this script's own directory before the cd below so node helpers it
+# invokes (e.g. lockfile-scope.mjs) resolve from the real checkout even when the
+# gate runs against a temp fixture repo whose working directory is elsewhere.
+script_source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
@@ -162,6 +180,7 @@ cd "$repo_root"
 # the system default (which sandboxed shells often cannot write to).
 scratch_dir="$repo_root/.tmp/agent-quality-gate"
 mkdir -p "$scratch_dir"
+durations_file="$scratch_dir/durations.jsonl"
 success_stamp_file="$scratch_dir/last-success.stamp"
 # An exact-signature success may cover the manual-run-to-pre-push interval even
 # for the slowest mapped suites. Keep this fixed rather than environment-
@@ -238,6 +257,25 @@ quality_commands=()
 checklists=()
 surfaces=()
 package_script_risk_changed=false
+# Set true whenever a full-workspace suite is routed. Scoped-test rewriting
+# (GitHub issue #1413) is suppressed in that case so escalations keep the full
+# per-package `test:coverage` floors everywhere.
+saw_workspace_escalation=false
+# Space-padded set of package names whose test:coverage must not be narrowed
+# by apply_scoped_test_commands, because pnpm-lock.yaml also bumped their
+# importer section this run (issue #1414). The lockfile-triggered coverage
+# floor exists specifically to catch a dependency bump's effect on the whole
+# package, so an unrelated small source edit in the same package must not
+# narrow it down to just that edit's related tests.
+lockfile_scoped_packages=""
+
+mark_lockfile_scoped_package() {
+  lockfile_scoped_packages+=" $1 "
+}
+
+is_lockfile_scoped_package() {
+  [[ "$lockfile_scoped_packages" == *" $1 "* ]]
+}
 
 has_command() {
   local command="$1"
@@ -465,6 +503,8 @@ classify_root_package_json_changes() {
   local saw_tooling_script=false
   local saw_non_tooling_script=false
   local saw_non_script=false
+  local saw_dev_metadata=false
+  local saw_non_dev_metadata=false
 
   while IFS= read -r change; do
     [[ -n "$change" ]] || continue
@@ -483,8 +523,16 @@ classify_root_package_json_changes() {
       /scripts/*)
         saw_non_tooling_script=true
         ;;
+      # Dev-metadata pointers (GitHub issue #1414): devDependencies plus the
+      # descriptive top-level keys. A manifest whose only non-script changes are
+      # these is safe to scope to the config canary rather than the full suite.
+      /devDependencies | /devDependencies/* | /name | /description | /license | /keywords | /keywords/* | /author | /author/* | /repository | /repository/* | /bugs | /bugs/* | /homepage)
+        saw_non_script=true
+        saw_dev_metadata=true
+        ;;
       *)
         saw_non_script=true
+        saw_non_dev_metadata=true
         ;;
     esac
   done < <(json_change_paths "package.json")
@@ -495,6 +543,8 @@ classify_root_package_json_changes() {
     echo "root-tooling-scripts"
   elif [[ "$saw_tooling_script" == true || "$saw_non_tooling_script" == true ]]; then
     echo "package-scripts"
+  elif [[ "$saw_dev_metadata" == true && "$saw_non_dev_metadata" != true ]]; then
+    echo "workspace-dev-metadata"
   else
     echo "workspace"
   fi
@@ -606,6 +656,7 @@ add_indexer_mutation_baseline() {
 
 add_workspace_quality_commands() {
   local reason="$1"
+  saw_workspace_escalation=true
   add_command "pnpm skew:check" "$reason"
   add_all_indexer_codegen "$reason"
   # Use the lightweight dashboard quality (typecheck/lint/test/knip) for
@@ -631,6 +682,319 @@ add_workspace_quality_commands() {
   add_package_quality_commands "@mento-protocol/config" "$reason"
   add_package_quality_commands "@mento-protocol/governance-watchdog" "$reason"
   add_aegis_quality_commands "$reason"
+}
+
+# ── Scoped local test runs (GitHub issue #1413) ─────────────────────────────
+# A per-package quality bundle normally runs `pnpm --filter <pkg> test:coverage`
+# (the full suite + coverage floor). Locally, when a package's changed paths are
+# a small set of production source files, narrow that one command to
+# `pnpm --filter <pkg> exec vitest related --run <files>` so agents only pay for
+# the tests touching their edit. CI is untouched — it always runs the full
+# coverage floors — so this is a local-signal optimization, not a floor change.
+# Every ambiguity fails toward the full suite.
+
+# Package name → repo-relative importer directory. Unmapped packages have no
+# directory, so scoping never fires for them (→ full suite).
+scoped_package_dir_for() {
+  case "$1" in
+    @mento-protocol/ui-dashboard) echo "ui-dashboard" ;;
+    @mento-protocol/indexer-envio) echo "indexer-envio" ;;
+    @mento-protocol/metrics-bridge) echo "metrics-bridge" ;;
+    @mento-protocol/integration-probes) echo "integration-probes" ;;
+    @mento-protocol/governance-watchdog) echo "governance-watchdog" ;;
+    @mento-protocol/alerts-onchain-event-handler) echo "alerts/infra/onchain-event-handler" ;;
+    @mento-protocol/alerts-oncall-announcer) echo "alerts/infra/oncall-announcer" ;;
+    *) return 1 ;;
+  esac
+}
+
+# True iff a package-relative path is NOT production source. Tests, specs, test
+# directories, vitest/tsconfig config, package manifests, GraphQL schemas,
+# generated types, and fixtures all disqualify a package from scoping so its
+# full suite still runs. Ambiguous paths are treated as non-source (fail toward
+# full).
+scoped_is_non_source_path() {
+  local path="$1"
+  case "$path" in
+    *.test.* | *.spec.*) return 0 ;;
+    __tests__/* | */__tests__/*) return 0 ;;
+    test/* | tests/* | */test/* | */tests/*) return 0 ;;
+    vitest.config.* | */vitest.config.* | vitest.*.config.* | */vitest.*.config.*) return 0 ;;
+    vitest.hermetic-setup.ts | */vitest.hermetic-setup.ts) return 0 ;;
+    tsconfig* | */tsconfig*) return 0 ;;
+    package.json | */package.json) return 0 ;;
+    *.graphql) return 0 ;;
+    __generated__/* | */__generated__/* | generated/* | */generated/* | *.gen.ts) return 0 ;;
+    fixtures/* | */fixtures/* | __fixtures__/* | */__fixtures__/*) return 0 ;;
+    # Only recognized TS/JS module extensions count as production source.
+    # Anything else (YAML/JSON/CSS/assets) may be read by tests via fs rather
+    # than the import graph `vitest related` follows, so it disqualifies
+    # scoping (fail toward full).
+    *.ts | *.tsx | *.mts | *.cts | *.js | *.jsx | *.mjs | *.cjs) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# True iff any changed path anywhere is a test-infra file whose edit can change
+# which tests run for unrelated source, or a shared-config path whose edit can
+# regress any consumer through the dependency graph (`vitest related` only
+# follows imports from the changed files themselves, so a consumer's scoped
+# run would miss shared-config-induced regressions). Either disables scoping
+# globally.
+scoped_test_infra_changed() {
+  local path
+  while IFS= read -r path; do
+    case "$path" in
+      scripts/envio-schema-stubs.graphql) return 0 ;;
+      shared-config/*) return 0 ;;
+      vitest.hermetic-setup.ts | */vitest.hermetic-setup.ts) return 0 ;;
+      vitest.config.* | */vitest.config.* | vitest.*.config.* | */vitest.*.config.*) return 0 ;;
+      */test/setup/* | */tests/setup/*) return 0 ;;
+    esac
+  done < "$changed_paths_file"
+  return 1
+}
+
+# True iff the repo-relative path exists in the head state: the working tree
+# when head_ref is HEAD (the common case, so local uncommitted edits count),
+# otherwise the given ref via git. A deleted file, or the old side of a
+# --no-renames rename, reports false.
+scoped_path_exists_at_head() {
+  local path="$1"
+  if [[ "$head_ref" == "HEAD" ]]; then
+    [[ -e "$path" ]]
+  else
+    git cat-file -e "${head_ref}:${path}" 2>/dev/null
+  fi
+}
+
+# Print the package-relative production-source paths changed inside a package
+# directory, one per line. Returns non-zero (no output) when the package is
+# unscopable: no changed paths inside it, any non-source path inside it, or a
+# changed path that no longer exists at head (a deletion, or the old side of a
+# rename — `vitest related --run` silently finds zero tests for a missing
+# path instead of erroring, which would otherwise skip the coverage floor
+# entirely instead of failing toward the full suite).
+scoped_source_files_for_package() {
+  local package_name="$1"
+  local package_dir
+  package_dir="$(scoped_package_dir_for "$package_name")" || return 1
+
+  local path rel
+  local saw_source=false
+  local files=()
+  while IFS= read -r path; do
+    case "$path" in
+      "$package_dir"/*)
+        rel="${path#"$package_dir"/}"
+        if scoped_is_non_source_path "$rel"; then
+          return 1
+        fi
+        if ! scoped_path_exists_at_head "$path"; then
+          return 1
+        fi
+        files+=("$rel")
+        saw_source=true
+        ;;
+    esac
+  done < "$changed_paths_file"
+
+  [[ "$saw_source" == true ]] || return 1
+  printf '%s\n' "${files[@]}"
+}
+
+# True iff scoping is globally permitted for this run.
+scoped_tests_enabled() {
+  [[ "$full_local_tests" == "1" || "$full_local_tests" == "true" ]] && return 1
+  [[ "$saw_workspace_escalation" == true ]] && return 1
+  local changed_count
+  changed_count="$(wc -l < "$changed_paths_file" | tr -d '[:space:]')"
+  [[ "$changed_count" =~ ^[0-9]+$ && "$changed_count" -le 15 ]] || return 1
+  scoped_test_infra_changed && return 1
+  return 0
+}
+
+# Rewrite eligible `pnpm --filter <pkg> test:coverage` quality commands to the
+# scoped `vitest related --run` form. Runs once, after the full dispatch, so the
+# escalation flag and the complete changed-path set are final.
+apply_scoped_test_commands() {
+  scoped_tests_enabled || return 0
+
+  local i entry command reason package_name package_dir files scoped_files rel
+  for i in "${!quality_commands[@]}"; do
+    entry="${quality_commands[$i]}"
+    command="${entry%%|*}"
+    reason="${entry#*|}"
+
+    [[ "$command" =~ ^pnpm\ --filter\ (@mento-protocol/[a-z-]+)\ test:coverage$ ]] || continue
+    package_name="${BASH_REMATCH[1]}"
+
+    # shared-config's blast radius is the point — keep its full suite (issue #1413).
+    [[ "$package_name" == "@mento-protocol/config" ]] && continue
+
+    # A lockfile importer bump for this package (issue #1414) means the
+    # coverage floor is standing in for the dependency-bump regression check;
+    # an unrelated small source edit in the same package must not narrow it
+    # down to just that edit's related tests.
+    is_lockfile_scoped_package "$package_name" && continue
+
+    files="$(scoped_source_files_for_package "$package_name")" || continue
+
+    scoped_files=""
+    while IFS= read -r rel; do
+      [[ -n "$rel" ]] || continue
+      scoped_files+=" $(quote_path "$rel")"
+    done <<< "$files"
+    [[ -n "$scoped_files" ]] || continue
+
+    quality_commands[i]="pnpm --filter ${package_name} exec vitest related --run${scoped_files}|${reason} (scoped-tests)"
+  done
+}
+
+# ── Lockfile-importer scoping (GitHub issue #1414) ──────────────────────────
+# A pnpm-lock.yaml change normally escalates to the full workspace suite. When
+# the lockfile is the ONLY workspace-manifest-class change and it structurally
+# touches only importer sections, narrow the suite to the affected packages.
+# Every ambiguity (co-changed manifests, non-importer sections, an unmapped or
+# root importer, parse/git failure) fails toward the full suite.
+
+# True iff pnpm-lock.yaml changed and no other workspace-manifest-class path did.
+lockfile_only_manifest_change() {
+  local path
+  local saw_lock=false
+  while IFS= read -r path; do
+    case "$path" in
+      pnpm-lock.yaml)
+        saw_lock=true
+        ;;
+      package.json | */package.json | pnpm-workspace.yaml | patches/* | .npmrc | */.npmrc | pnpmfile.cjs | .pnpmfile.cjs | .node-version)
+        return 1
+        ;;
+    esac
+  done < "$changed_paths_file"
+  [[ "$saw_lock" == true ]]
+}
+
+# Print the changed importer keys (one per line) on stdout when the lockfile
+# change is scopable; return non-zero to signal fail-toward-full.
+lockfile_scoped_importers() {
+  local base_file
+  local head_file
+  base_file="$(make_tmpfile)"
+  head_file="$(make_tmpfile)"
+
+  if ! git show "${base_ref}:pnpm-lock.yaml" > "$base_file" 2>/dev/null; then
+    rm -f "$base_file" "$head_file"
+    return 1
+  fi
+
+  if [[ "$head_ref" == "HEAD" && -f "pnpm-lock.yaml" ]]; then
+    cp "pnpm-lock.yaml" "$head_file"
+  elif ! git show "${head_ref}:pnpm-lock.yaml" > "$head_file" 2>/dev/null; then
+    rm -f "$base_file" "$head_file"
+    return 1
+  fi
+
+  local rc=0
+  node "$script_source_dir/lockfile-scope.mjs" "$base_file" "$head_file" < /dev/null || rc=$?
+  rm -f "$base_file" "$head_file"
+  return "$rc"
+}
+
+# Known importer dir → package quality bundle. `.` (root) and any unknown
+# importer are absent, so is_mappable/map both reject them (→ full suite).
+lockfile_importer_is_mappable() {
+  case "$1" in
+    aegis | ui-dashboard | indexer-envio | metrics-bridge | integration-probes | shared-config | governance-watchdog | alerts/infra/onchain-event-handler | alerts/infra/oncall-announcer)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+map_lockfile_importer_to_bundle() {
+  local importer="$1"
+  local reason="$2"
+  case "$importer" in
+    aegis)
+      mark_lockfile_scoped_package "@mento-protocol/aegis"
+      add_aegis_quality_commands "$reason"
+      ;;
+    ui-dashboard)
+      mark_lockfile_scoped_package "@mento-protocol/ui-dashboard"
+      add_dashboard_quality_commands "$reason"
+      # Dependency resolution changes can regress bundle size; the workspace
+      # route ran size-limit for lockfile edits, so the scoped route must too.
+      add_ui_size_limit "$reason"
+      ;;
+    indexer-envio)
+      mark_lockfile_scoped_package "@mento-protocol/indexer-envio"
+      # A changed Envio resolution can break the testnet/bridge-only codegen
+      # even when mainnet codegen passes; keep the workspace route's coverage.
+      add_all_indexer_codegen "$reason"
+      add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
+      ;;
+    metrics-bridge)
+      mark_lockfile_scoped_package "@mento-protocol/metrics-bridge"
+      add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
+      ;;
+    integration-probes)
+      mark_lockfile_scoped_package "@mento-protocol/integration-probes"
+      add_package_quality_commands "@mento-protocol/integration-probes" "$reason"
+      ;;
+    shared-config)
+      mark_lockfile_scoped_package "@mento-protocol/config"
+      add_package_quality_commands "@mento-protocol/config" "$reason"
+      ;;
+    governance-watchdog)
+      mark_lockfile_scoped_package "@mento-protocol/governance-watchdog"
+      add_package_quality_commands "@mento-protocol/governance-watchdog" "$reason"
+      ;;
+    alerts/infra/onchain-event-handler)
+      mark_lockfile_scoped_package "@mento-protocol/alerts-onchain-event-handler"
+      add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "$reason"
+      ;;
+    alerts/infra/oncall-announcer)
+      mark_lockfile_scoped_package "@mento-protocol/alerts-oncall-announcer"
+      add_alerts_oncall_quality_commands "$reason"
+      ;;
+  esac
+}
+
+# Route a pnpm-lock.yaml change: scoped when eligible and every changed importer
+# maps to a package bundle, otherwise the full workspace suite.
+route_lockfile_change() {
+  add_surface "workspace"
+  add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
+
+  local importers
+  if lockfile_only_manifest_change && importers="$(lockfile_scoped_importers)"; then
+    local importer
+    local mappable=true
+    while IFS= read -r importer; do
+      [[ -n "$importer" ]] || continue
+      lockfile_importer_is_mappable "$importer" || {
+        mappable=false
+        break
+      }
+    done <<< "$importers"
+
+    if [[ "$mappable" == true ]]; then
+      add_command "pnpm skew:check" "lockfile change scoped to importers"
+      add_command "pnpm lockfile:lint" "lockfile change scoped to importers"
+      while IFS= read -r importer; do
+        [[ -n "$importer" ]] || continue
+        map_lockfile_importer_to_bundle "$importer" "lockfile importer ${importer} changed"
+      done <<< "$importers"
+      return
+    fi
+  fi
+
+  # Fail toward the full workspace suite.
+  add_workspace_quality_commands "workspace dependency/config changed"
+  add_adr_reminder "workspace membership/policy changed — ADR reminder (a new package likely needs an ADR)"
 }
 
 add_root_tooling_package_script_checks() {
@@ -1632,6 +1996,9 @@ while IFS= read -r path; do
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
           ;;
+        scripts/lockfile-scope.mjs|scripts/lockfile-scope.test.mjs)
+          add_command "node scripts/lockfile-scope.test.mjs" "lockfile scope helper changed"
+          ;;
         scripts/pnpm-audit-high-gate.mjs|scripts/pnpm-audit-high-gate.test.mjs)
           add_command "node scripts/pnpm-audit-high-gate.test.mjs" "pnpm audit high gate changed"
           ;;
@@ -1742,6 +2109,17 @@ while IFS= read -r path; do
           ;;
         package-scripts)
           ;;
+        workspace-dev-metadata)
+          # devDependencies / descriptive metadata only (GitHub issue #1414):
+          # reinstall + skew/lockfile lint, plus the @mento-protocol/config
+          # bundle as canary (it typechecks three downstream consumers). Trunk
+          # still full-scans package.json via trunk_requires_full_scan.
+          add_surface "workspace"
+          add_preflight_command "pnpm install --frozen-lockfile" "workspace dev metadata changed"
+          add_command "pnpm skew:check" "workspace dev metadata changed"
+          add_command "pnpm lockfile:lint" "workspace dev metadata changed"
+          add_package_quality_commands "@mento-protocol/config" "workspace dev metadata changed (config typechecks downstream consumers as canary)"
+          ;;
         *)
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
@@ -1750,7 +2128,10 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
-    pnpm-lock.yaml|pnpm-workspace.yaml)
+    pnpm-lock.yaml)
+      route_lockfile_change
+      ;;
+    pnpm-workspace.yaml)
       add_surface "workspace"
       add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
       add_workspace_quality_commands "workspace dependency/config changed"
@@ -1786,6 +2167,7 @@ done < "$changed_paths_file"
 add_trunk_check_command
 sort_codegen_commands
 compact_turbo_quality_commands
+apply_scoped_test_commands
 
 hash_sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -2076,11 +2458,27 @@ print_autoreview_test_timings() {
   ' "$output_file"
 }
 
+log_duration_line() {
+  # Best-effort append; a logging failure must never fail the gate itself.
+  local status="$1"
+  local elapsed="$2"
+  local command="$3"
+  local line_mode="$4"
+  local ts
+  local escaped_command
+
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
+  escaped_command="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' -- "$command" 2>/dev/null)" || return 0
+  printf '{"ts":"%s","command":%s,"status":"%s","seconds":%s,"mode":"%s"}\n' \
+    "$ts" "$escaped_command" "$status" "$elapsed" "$line_mode" >> "$durations_file" 2>/dev/null || true
+}
+
 record_command_summary() {
   local status="$1"
   local elapsed="$2"
   local command="$3"
   command_summaries+=("${status}|${elapsed}|${command}")
+  log_duration_line "$status" "$elapsed" "$command" "$mode" || true
 }
 
 print_command_summary() {
@@ -2267,6 +2665,7 @@ run_mapped_entries_sequential() {
         echo
         echo "Stopping after first failed mapped command (--fail-fast)." >&2
         print_command_summary
+        log_duration_line "fail" "$(($(date +%s) - gate_start_ts))" "__run_total__" "run" || true
         exit 1
       fi
     fi
@@ -2476,11 +2875,16 @@ run_quality_phase
 
 print_command_summary
 
+gate_total_elapsed=$(( $(date +%s) - gate_start_ts ))
+
 if [[ "$failures" -gt 0 ]]; then
+  log_duration_line "fail" "$gate_total_elapsed" "__run_total__" "run" || true
   echo
   echo "${failures} mapped command(s) failed." >&2
   exit 1
 fi
+
+log_duration_line "ok" "$gate_total_elapsed" "__run_total__" "run" || true
 
 echo
 echo "All mapped commands passed."
