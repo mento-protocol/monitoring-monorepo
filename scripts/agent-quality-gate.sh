@@ -1286,6 +1286,7 @@ while IFS= read -r path; do
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
       add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions workflow/action changed"
+      add_command "node scripts/check-autofix-ci-trust.mjs" "GitHub Actions workflow/action changed (autofix CI trust boundary)"
       add_adr_reminder "workflow/action changed — ADR reminder (a new workflow likely needs an ADR)"
       case "$path" in
         .github/workflows/ci.yml)
@@ -1650,6 +1651,10 @@ while IFS= read -r path; do
         scripts/check-github-action-pins.mjs)
           add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions pin checker changed"
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker changed"
+          ;;
+        scripts/check-autofix-ci-trust.mjs|scripts/check-autofix-ci-trust.test.mjs)
+          add_command "node scripts/check-autofix-ci-trust.mjs" "autofix CI trust checker changed"
+          add_command "node scripts/check-autofix-ci-trust.test.mjs" "autofix CI trust checker changed"
           ;;
         scripts/check-github-action-pins.test.mjs)
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"

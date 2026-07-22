@@ -9,6 +9,13 @@ name: CI
 # Third-party actions are pinned to commit SHAs per the policy in
 # .github/workflows/claude.yml — update via Dependabot
 # (.github/dependabot.yml).
+#
+# autofix-ci-trust: the only repository secret here is CODECOV_TOKEN, and it
+# is step-scoped to the pinned codecov-action's `with: token` — it is never in
+# a job/workflow `env:` and never in the environment of a step that executes
+# PR-head code. Every checkout also sets `persist-credentials: false`, so no
+# checkout token sits in .git/config while PR code (incl. a machine-authored
+# sentry-autofix diff) builds or tests. See check-autofix-ci-trust.mjs.
 
 on:
   pull_request:
@@ -979,6 +986,18 @@ jobs:
         # Also triggered by changes to the notifier itself (rootScripts filter
         # above includes the notifier YAML).
         run: node scripts/check-notifier-coverage.mjs
+      - name: Autofix CI trust unit tests
+        # Behavioral coverage of scripts/check-autofix-ci-trust.mjs (trigger/
+        # secret detectors, pull_request_target refusal, guard + annotation
+        # acceptance).
+        run: node scripts/check-autofix-ci-trust.test.mjs
+      - name: Autofix CI trust assertion
+        # Machine-authored sentry-autofix/* PRs pass every fork/dependabot
+        # check, so every secret-bearing pull_request workflow must either
+        # guard against them or document (autofix-ci-trust annotation) why its
+        # secrets are unreachable from PR-head code. Issue #1388 — an
+        # activation gate for the autofix leg.
+        run: node scripts/check-autofix-ci-trust.mjs
       - name: Override prune report self-tests
         # Behavioral coverage of scripts/override-prune-report.mjs (verdict
         # heuristic, lockfile parsing, git-blame age check). The report

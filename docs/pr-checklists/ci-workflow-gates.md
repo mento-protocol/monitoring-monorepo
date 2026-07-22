@@ -160,7 +160,35 @@ Decision framework for `runs-on` (applied in PR #822 — partial migration savin
 
 `workflow_run.workflows` does NOT support wildcards — every new workflow name must be listed explicitly.
 
-## 10. Lessons already paid for
+## 10. Autofix CI trust boundary — machine-authored PRs are untrusted
+
+Sentry-autofix PRs (head branch `sentry-autofix/*`) are same-repo, non-fork,
+non-Dependabot — they pass every historical CI trust check — but their diffs
+are machine-authored from untrusted Sentry input, so any secret a `pull_request`
+job exposes to their PR-head code is an exfiltration channel (issue #1388).
+`scripts/check-autofix-ci-trust.mjs` enforces this structurally in the
+`scripts` CI job. It parses the workflow with `js-yaml` and analyzes the parsed
+structure, so exotic-but-valid YAML (anchors, `\uXXXX` escapes, block scalars,
+flow/JSON roots) cannot slip a trigger or secret past it; unparsable YAML fails
+closed.
+
+- [ ] The trust boundary covers every way an autofix branch is REACHABLE, not just `pull_request`: the eventual PR (`pull_request`), the `push` the finalizer makes to `sentry-autofix/*` before the PR exists (when the workflow's `branches:`/`branches-ignore:` filter admits that branch — a `branches: [main]` or tags-only push does not), and that branch's `create` event. A credential-bearing job reachable via a context must exclude it on the job's `if:` for THAT context — `!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')` for pull_request; `!startsWith(github.ref, 'refs/heads/sentry-autofix/')` (or `github.ref_name`, `'sentry-autofix/'`) for push/create — or carry an `# autofix-ci-trust: <why unreachable>` annotation. A job annotation must be a genuine comment INSIDE that job's body (indented deeper than the job key); a comment above `jobs:` is file-level and covers every job. The checker is per-job: one guarded job does not vouch for an unguarded sibling
+- [ ] "Credential-bearing" is broader than `${{ secrets.* }}`. It also covers: a
+      job bound to a GitHub `environment:`; `id-token: write` (this repo's WIF
+      pool trusts any OIDC token from this repository — `terraform/ci-wif.tf` —
+      so the permission alone exchanges into the plan-readonly service account)
+      or `permissions: write-all`; a **write-scoped `${{ github.token }}`** (its
+      effective permissions grant any `write` scope); a reusable-workflow
+      `secrets:` forward; and a call to an **in-repo reusable workflow**
+      (`uses: ./.github/workflows/…` or the fully-qualified
+      `mento-protocol/monitoring-monorepo/.github/workflows/…@ref`), whose
+      callee may bind a credential the caller cannot see. All need the same
+      guard or annotation
+- [ ] Never introduce `pull_request_target` — the checker refuses it outright
+- [ ] Checkouts in jobs that execute PR-head code set `persist-credentials: false` (the checkout token in `.git/config` is readable by any test/build the PR controls)
+- [ ] `node scripts/check-autofix-ci-trust.mjs` must pass after the change
+
+## 11. Lessons already paid for
 
 - PR #188 — consolidating per-package CI workflows nearly removed the push-to-main guard on the metrics-bridge deploy and the workflow_dispatch branch check
 - PR #191 — `paths:` filter on the supply-chain workflow would have made the required check skip on PRs that don't touch deps, blocking unrelated merges

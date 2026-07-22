@@ -52,6 +52,10 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # This job builds and executes the PR head's dashboard code; keep
+          # the (read-only) checkout token out of .git/config anyway.
+          persist-credentials: false
       - id: filter
         # `continue-on-error: true` keeps a failed path-detection step from
         # failing the job; the `decide` step below interprets a missing/failed

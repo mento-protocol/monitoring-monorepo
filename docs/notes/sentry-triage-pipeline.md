@@ -981,12 +981,38 @@ checkout token ever sits in `.git/config` where PR-head code (autofix-authored
 or otherwise) could read and exfiltrate it — CI jobs only lint/test/build and
 never need an authenticated git remote (the repo is public, so plain fetches
 are anonymous).
-The PR body is assembled deterministically from a fixed template (`## The
+
+**CI trust boundary (issue #1388 — was an activation gate, now enforced).**
+Autofix PRs pass every historical CI trust check (same-repo, non-fork,
+non-Dependabot), so every secret-bearing `pull_request` lane must treat the
+`sentry-autofix/*` head branch as UNTRUSTED explicitly:
+
+- `lighthouse.yml` routes autofix PRs to the secretless deterministic-fixture
+  lane — they never receive the Vercel deploy-protection bypass secret, which
+  the preview lane sends as a request header to the PR's OWN server code.
+- The four Terraform-family plan jobs (`governance-watchdog`, `alerts-infra`,
+  `alerts-rules`, `aegis-terraform`) skip autofix PRs entirely: `terraform
+plan` executes PR-head HCL, and the plan job holds a state-reading SA.
+  (Defense in depth — the diff guard also forbids `*.tf`/`*.hcl`/`*.tfvars`
+  at any depth.)
+- `claude.yml` skips auto-review on autofix PRs (feeding an untrusted diff to
+  an LLM holding `pull-requests: write` invites steered, misleading
+  commentary; Codex review + the human merge gate remain).
+- `scripts/check-autofix-ci-trust.mjs` (CI `scripts` job + the quality gate)
+  enforces the boundary structurally by parsing each workflow with `js-yaml`
+  and analyzing the parsed structure (issue #1424 replaced an earlier
+  textual-regex version): no `pull_request_target` anywhere, and every
+  credential-bearing (`secrets`, `id-token`/`write-all`, or `environment:`)
+  `pull_request` job must carry a `sentry-autofix/` guard or an
+  `# autofix-ci-trust:` justification
+  annotation. A new secret lane added without reasoning about autofix trust
+  fails CI. Checklist: `docs/pr-checklists/ci-workflow-gates.md` §10.
+  The PR body is assembled deterministically from a fixed template (`## The
 Problem` / `## The Solution` referencing the SHORT-ID, plus `Fixes <SHORT-ID>`,
-`Refs <queue issue #>`, and a provenance note that the PR was machine-authored
-from a triage verdict and enters the normal review gauntlet). It contains **no
-agent-authored text** — see "No agent free-text is ever published" above; the
-diff is the artifact a human reviews.
+  `Refs <queue issue #>`, and a provenance note that the PR was machine-authored
+  from a triage verdict and enters the normal review gauntlet). It contains **no
+  agent-authored text** — see "No agent free-text is ever published" above; the
+  diff is the artifact a human reviews.
 
 **Branch collisions + orphan recovery.** If the branch already exists AND
 already has a PR, that PR is left untouched (it may be under review) and the run
