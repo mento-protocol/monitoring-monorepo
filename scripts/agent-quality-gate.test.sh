@@ -1097,6 +1097,271 @@ assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script 
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
 
+# ── Root package.json workspace-dev-metadata classification (issue #1414) ────
+
+# devDependencies-only change → config canary set, not the full workspace suite.
+dev_metadata_devdeps_repo="$(mktemp -d)"
+(
+  cd "$dev_metadata_devdeps_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "devDependencies": {
+    "typescript": "5.4.0"
+  }
+}
+JSON
+  git add package.json
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.devDependencies.typescript = "5.5.0";
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$dev_metadata_devdeps_repo"
+# The preflight install is deduped to the first-arm reason ("workspace package
+# manifest changed"); the scoped skew/lockfile-lint/canary lines below carry the
+# dev-metadata reason and distinguish this class from the full suite.
+assert_contains "- pnpm install --frozen-lockfile (workspace package manifest changed)"
+assert_contains "- pnpm skew:check (workspace dev metadata changed)"
+assert_contains "- pnpm lockfile:lint (workspace dev metadata changed)"
+assert_contains "- pnpm --filter @mento-protocol/config test:coverage (workspace dev metadata changed"
+assert_not_contains "cd aegis && forge test"
+assert_not_contains "@mento-protocol/indexer-envio test:coverage"
+assert_not_contains "workspace dependency/config changed"
+
+# Metadata-only change (description) → same config canary set.
+dev_metadata_only_repo="$(mktemp -d)"
+(
+  cd "$dev_metadata_only_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "description": "before"
+}
+JSON
+  git add package.json
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.description = "after";
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$dev_metadata_only_repo"
+assert_contains "- pnpm --filter @mento-protocol/config test:coverage (workspace dev metadata changed"
+assert_not_contains "cd aegis && forge test"
+assert_not_contains "workspace dependency/config changed"
+
+# devDependencies + a dependencies change → full suite (not dev-metadata).
+dev_metadata_mixed_repo="$(mktemp -d)"
+(
+  cd "$dev_metadata_mixed_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "dependencies": {
+    "left-pad": "1.3.0"
+  },
+  "devDependencies": {
+    "typescript": "5.4.0"
+  }
+}
+JSON
+  git add package.json
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.devDependencies.typescript = "5.5.0";
+pkg.dependencies["left-pad"] = "1.2.0";
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$dev_metadata_mixed_repo"
+assert_contains "- cd aegis && forge test (workspace dependency/config changed)"
+assert_contains "- pnpm install --frozen-lockfile (workspace package manifest changed)"
+assert_not_contains "workspace dev metadata changed"
+
+# devDependencies + a script change → package-scripts refusal path, unchanged.
+dev_metadata_scripts_repo="$(mktemp -d)"
+(
+  cd "$dev_metadata_scripts_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  cat > package.json <<'JSON'
+{
+  "name": "fixture",
+  "scripts": {
+    "agent:quality-gate": "./scripts/agent-quality-gate.sh"
+  },
+  "devDependencies": {
+    "typescript": "5.4.0"
+  }
+}
+JSON
+  git add package.json
+  git commit -qm init
+  node - <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+pkg.devDependencies.typescript = "5.5.0";
+pkg.scripts.build = "tsc";
+fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
+NODE
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$dev_metadata_scripts_repo"
+assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
+assert_not_contains "workspace dev metadata changed"
+
+# ── Lockfile-importer scoping (issue #1414) ─────────────────────────────────
+
+# Reusable lockfile fixture body: writes a base pnpm-lock.yaml, commits, then
+# overwrites the working copy with $1 before running the gate against HEAD.
+lockfile_scope_base_yaml='lockfileVersion: '"'"'9.0'"'"'
+settings:
+  autoInstallPeers: true
+overrides: {}
+importers:
+  .:
+    dependencies: {}
+  metrics-bridge:
+    dependencies:
+      viem:
+        specifier: ^2.0.0
+        version: 2.0.0
+  integration-probes:
+    dependencies:
+      undici:
+        specifier: ^6.0.0
+        version: 6.0.0
+packages:
+  viem@2.0.0: {}
+'
+
+run_lockfile_scope_gate() {
+  local head_yaml="$1"
+  local repo
+  repo="$(mktemp -d)"
+  (
+    cd "$repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    printf '{ "name": "fixture" }\n' > package.json
+    printf '%s' "$lockfile_scope_base_yaml" > pnpm-lock.yaml
+    git add package.json pnpm-lock.yaml
+    git commit -qm init
+    printf '%s' "$head_yaml" > pnpm-lock.yaml
+    "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+  )
+  rm -rf "$repo"
+}
+
+# Single importer version bump → that package's bundle + scoped skew/lockfile
+# lint, and NOT the full workspace suite.
+run_lockfile_scope_gate 'lockfileVersion: '"'"'9.0'"'"'
+settings:
+  autoInstallPeers: true
+overrides: {}
+importers:
+  .:
+    dependencies: {}
+  metrics-bridge:
+    dependencies:
+      viem:
+        specifier: ^2.1.0
+        version: 2.1.0
+  integration-probes:
+    dependencies:
+      undici:
+        specifier: ^6.0.0
+        version: 6.0.0
+packages:
+  viem@2.0.0: {}
+'
+assert_contains "- pnpm skew:check (lockfile change scoped to importers)"
+assert_contains "- pnpm lockfile:lint (lockfile change scoped to importers)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (lockfile importer metrics-bridge changed (coverage floor))"
+assert_not_contains "cd aegis && forge test"
+assert_not_contains "@mento-protocol/integration-probes test:coverage"
+assert_not_contains "workspace dependency/config changed (coverage floor)"
+
+# Two importers changed → both bundles.
+run_lockfile_scope_gate 'lockfileVersion: '"'"'9.0'"'"'
+settings:
+  autoInstallPeers: true
+overrides: {}
+importers:
+  .:
+    dependencies: {}
+  metrics-bridge:
+    dependencies:
+      viem:
+        specifier: ^2.1.0
+        version: 2.1.0
+  integration-probes:
+    dependencies:
+      undici:
+        specifier: ^6.1.0
+        version: 6.1.0
+packages:
+  viem@2.0.0: {}
+'
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (lockfile importer metrics-bridge changed (coverage floor))"
+assert_contains "- pnpm --filter @mento-protocol/integration-probes test:coverage (lockfile importer integration-probes changed (coverage floor))"
+assert_not_contains "cd aegis && forge test"
+
+# Overrides section change → full workspace suite (fail toward full).
+run_lockfile_scope_gate 'lockfileVersion: '"'"'9.0'"'"'
+settings:
+  autoInstallPeers: true
+overrides:
+  cross-spawn: '"'"'>=7.0.5'"'"'
+importers:
+  .:
+    dependencies: {}
+  metrics-bridge:
+    dependencies:
+      viem:
+        specifier: ^2.0.0
+        version: 2.0.0
+  integration-probes:
+    dependencies:
+      undici:
+        specifier: ^6.0.0
+        version: 6.0.0
+packages:
+  viem@2.0.0: {}
+'
+assert_contains "- cd aegis && forge test (workspace dependency/config changed)"
+assert_not_contains "lockfile change scoped to importers"
+
+# Corrupt (unparsable) lockfile head → full workspace suite (fail toward full).
+run_lockfile_scope_gate 'lockfileVersion: '"'"'9.0'"'"'
+importers:
+  metrics-bridge: [unterminated
+'
+assert_contains "- cd aegis && forge test (workspace dependency/config changed)"
+assert_not_contains "lockfile change scoped to importers"
+
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
 assert_occurrences 1 "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
@@ -1118,7 +1383,10 @@ assert_order \
 
 run_gate "indexer-envio/src/bridge.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
-assert_contains "- pnpm --filter @mento-protocol/indexer-envio test:coverage (indexer-envio changed (coverage floor))"
+# Single production-source edit → scoped `vitest related` (issue #1413); the
+# full test:coverage floor still runs in CI.
+assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio exec vitest related --run src/bridge.ts (indexer-envio changed (coverage floor) (scoped-tests))"
+assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio test:coverage"
 assert_not_contains "indexer:bridge-only:codegen"
 assert_not_contains "indexer:testnet:codegen"
 # Mainnet codegen now runs as a preflight for every indexer quality command
@@ -1208,12 +1476,16 @@ assert_order \
 
 run_gate "indexer-envio/config/aggregators.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer config data flow changed)"
-assert_contains "- pnpm --filter @mento-protocol/indexer-envio test:coverage (indexer-envio changed (coverage floor))"
+# JSON config is production source (not in the scoping exclusion list), so a
+# lone config edit scopes to `vitest related` (issue #1413).
+assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio exec vitest related --run config/aggregators.json (indexer-envio changed (coverage floor) (scoped-tests))"
+assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio test:coverage"
 
 run_gate "metrics-bridge/src/graphql.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
-assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics-bridge changed (coverage floor))"
+assert_raw_contains "- pnpm --filter @mento-protocol/metrics-bridge exec vitest related --run src/graphql.ts (metrics-bridge changed (coverage floor) (scoped-tests))"
+assert_not_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage"
 
 run_gate "metrics-bridge/src/poller.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
@@ -1253,7 +1525,8 @@ run_gate "ui-dashboard/src/lib/gql-retry.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
 assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
-assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage (ui-dashboard changed (coverage floor))"
+assert_raw_contains "- pnpm --filter @mento-protocol/ui-dashboard exec vitest related --run src/lib/gql-retry.ts (ui-dashboard changed (coverage floor) (scoped-tests))"
+assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (ui-dashboard changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:browser (ui-dashboard changed)"
 assert_contains "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
@@ -1459,12 +1732,14 @@ assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud 
 run_gate "alerts/infra/onchain-event-handler/src/slack.ts"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (alerts onchain-event-handler changed)"
 assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (alerts onchain-event-handler changed)"
-assert_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage (alerts onchain-event-handler changed (coverage floor))"
+assert_raw_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler exec vitest related --run src/slack.ts (alerts onchain-event-handler changed (coverage floor) (scoped-tests))"
+assert_not_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage"
 
 run_gate "alerts/infra/onchain-event-handler/src/safe-abi.json"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
 assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
-assert_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage (Safe ABI changed (handler imports it) (coverage floor))"
+assert_raw_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler exec vitest related --run src/safe-abi.json (Safe ABI changed (handler imports it) (coverage floor) (scoped-tests))"
+assert_not_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra init -backend=false -input=false (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra validate -no-color (Safe ABI changed (listener filter uses it at plan time))"
@@ -1576,8 +1851,70 @@ assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:br
 run_gate "shared-config/src/thresholds.ts"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
 assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync (shared deviation threshold source changed)"
+# shared-config's downstream blast radius is the point — it keeps the full suite
+# and never scopes to `vitest related` (issue #1413, condition c).
 assert_contains "- pnpm --filter @mento-protocol/config test:coverage (shared-config changed (coverage floor))"
+assert_not_contains "exec vitest related --run"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
+
+# ── Scoped local test runs (GitHub issue #1413) ─────────────────────────────
+# A small production-source-only edit narrows a package's full `test:coverage`
+# floor to `pnpm exec vitest related --run <files>` locally. CI always runs the
+# full coverage floors, so this only trims the local signal.
+
+# Two production-source files in one package → both listed (sorted) + scoped.
+run_gate "ui-dashboard/src/lib/aardvark.ts" "ui-dashboard/src/lib/zebra.ts"
+assert_raw_contains "- pnpm --filter @mento-protocol/ui-dashboard exec vitest related --run src/lib/aardvark.ts src/lib/zebra.ts (ui-dashboard changed (coverage floor) (scoped-tests))"
+assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+
+# A test-file-only edit keeps the full suite (test files are not scopable source).
+run_gate "ui-dashboard/src/lib/__tests__/scope-probe.test.ts"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+assert_not_contains "exec vitest related --run"
+
+# A source edit co-changed with a test file in the same package keeps the full
+# suite — any non-source path inside the package disqualifies scoping (b).
+run_gate "ui-dashboard/src/lib/scope-probe.ts" "ui-dashboard/src/lib/scope-probe.test.ts"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+assert_not_contains "exec vitest related --run"
+
+# 16+ changed paths → too broad to scope; full suite (a).
+scope_probe_paths=()
+for scope_probe_i in $(seq 1 16); do
+  scope_probe_paths+=("ui-dashboard/src/lib/scope-probe-$scope_probe_i.ts")
+done
+run_gate "${scope_probe_paths[@]}"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+assert_not_contains "exec vitest related --run"
+
+# A test-infra change anywhere disables scoping globally (e).
+run_gate "ui-dashboard/src/lib/scope-probe.ts" "scripts/envio-schema-stubs.graphql"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+assert_not_contains "exec vitest related --run"
+
+# Escape hatch: --full-local-tests forces the full suite for a lone source edit.
+: > "$paths_file"
+printf 'ui-dashboard/src/lib/scope-probe.ts\n' > "$paths_file"
+AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+  scripts/agent-quality-gate.sh \
+  --changed-paths-file "$paths_file" \
+  --base origin/test \
+  --full-local-tests \
+  > "$output_file"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+assert_not_contains "exec vitest related --run"
+
+# Escape hatch: AGENT_GATE_FULL_TESTS=1 forces the full suite too.
+: > "$paths_file"
+printf 'ui-dashboard/src/lib/scope-probe.ts\n' > "$paths_file"
+AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+  AGENT_GATE_FULL_TESTS=1 \
+  scripts/agent-quality-gate.sh \
+  --changed-paths-file "$paths_file" \
+  --base origin/test \
+  > "$output_file"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+assert_not_contains "exec vitest related --run"
 
 assert_hermetic_setup_routes() {
   local path="$1"
@@ -1784,6 +2121,17 @@ STUB
   printf 'changed\n' >> fixture.txt
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD --run > "$output_file" 2>&1
 )
+quiet_success_durations_file="$quiet_success_repo/.tmp/agent-quality-gate/durations.jsonl"
+[[ -f "$quiet_success_durations_file" ]] ||
+  fail "expected durations file to exist: $quiet_success_durations_file"
+quiet_success_last_duration_line="$(tail -n1 "$quiet_success_durations_file")"
+node -e '
+  const parsed = JSON.parse(process.argv[1]);
+  if (parsed.command !== "__run_total__") {
+    process.exit(1);
+  }
+' -- "$quiet_success_last_duration_line" ||
+  fail "expected last durations.jsonl line to be __run_total__, got: $quiet_success_last_duration_line"
 rm -rf "$quiet_success_repo"
 assert_contains "+ ./tools/trunk check fixture.txt"
 assert_contains "Command elapsed-time summary:"

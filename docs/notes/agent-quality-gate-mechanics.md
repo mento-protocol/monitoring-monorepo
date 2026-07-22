@@ -42,6 +42,13 @@ and timing lines. For deterministic autoreview-runtime closeout, pass
 coverage. Hosted-CI hermeticity remains the separate follow-up tracked in
 #1422.
 
+`--run` appends one JSON line per mapped command (plus one `__run_total__`
+summary line per invocation) to `.tmp/agent-quality-gate/durations.jsonl`, a
+gitignored scratch file, for local wall-clock tracking. Budget targets: the
+common-case mapped set should finish in 3 minutes or less; the full workspace
+suite in 8 minutes or less. Treat a durations regression against these targets
+like any other perf regression (Refs #1415).
+
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
 
@@ -120,6 +127,64 @@ source-fingerprinting tests such as autoreview from observing synthetic drift.
 A browser setup failure still lets independent lint/typecheck/unit/knip
 feedback run. `--fail-fast` stays sequential so it still stops before starting
 the next mapped command.
+
+Two manifest-class changes are narrowed away from the full workspace suite
+instead of escalating unconditionally (Refs #1414). Every ambiguity fails toward
+the full suite:
+
+| Change                                               | Escalation                                                                                                                                                        |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm-lock.yaml`, importer sections only             | `pnpm install --frozen-lockfile` + `pnpm skew:check` + `pnpm lockfile:lint` + each changed importer's package quality bundle (`.` root importer → full suite).    |
+| Root `package.json`, `devDependencies`/metadata only | `pnpm install --frozen-lockfile` + `pnpm skew:check` + `pnpm lockfile:lint` + the `@mento-protocol/config` bundle as canary (it typechecks downstream consumers). |
+
+Lockfile scoping applies only when `pnpm-lock.yaml` is the sole
+workspace-manifest-class change and `scripts/lockfile-scope.mjs` (js-yaml
+structural diff) reports that only importer sections changed; a parse/`git show`
+failure, a co-changed manifest, any non-importer top-level section
+(`settings`, `catalogs`, `overrides`, `patchedDependencies`,
+`packageExtensionsChecksum`, `packages`, `snapshots`, …), or an importer that
+maps to no known package bundle falls back to the full suite. The dev-metadata
+class covers a root `package.json` whose changed JSON pointers are all under
+`/devDependencies` or `/name`, `/description`, `/license`, `/keywords`,
+`/author`, `/repository`, `/bugs`, `/homepage`; any `/dependencies`, `/pnpm`,
+`/packageManager`, `/engines`, `/scripts`, or unknown-key change keeps today's
+full-suite and package-script refusal behavior. Both classes still set the
+package-script risk flag, so `--run` continues to refuse until
+`--allow-package-script-changes`, and `package.json` still gets a full-repo
+Trunk scan.
+
+### Scoped local test runs (Refs #1413)
+
+A per-package quality bundle normally runs `pnpm --filter <pkg> test:coverage`
+(the package's full suite plus its coverage floor). Locally, when a package's
+changed paths are a small set of production source files, the gate narrows that
+one command to `pnpm --filter <pkg> exec vitest related --run <files>` so an
+agent only pays for the tests reaching its edit. The reason string carries
+`(scoped-tests)` so the substitution is visible in dry-run output. This is a
+local-signal optimization only: CI still runs the full `test:coverage` coverage
+floors, so scoping never changes what gets enforced — it only trims the local
+feedback loop.
+
+The rewrite fires for a package only when **all** of these hold:
+
+- the run has 15 or fewer total changed paths;
+- every changed path inside that package directory is production source — not
+  `*.test.*`/`*.spec.*`, `__tests__/**`, `test/**`/`tests/**`, `vitest.config.*`,
+  `vitest.hermetic-setup.ts`, `tsconfig*`, `package.json`, `*.graphql`,
+  `__generated__/**` or other generated types, or `fixtures/**`;
+- the package is not `@mento-protocol/config` (shared-config's downstream blast
+  radius is the point, so it keeps full suites);
+- the run is not a full-workspace escalation (those keep full `test:coverage`
+  everywhere);
+- no test-infra file changed anywhere in the diff
+  (`scripts/envio-schema-stubs.graphql`, any vitest setup file).
+
+Anything outside those bounds keeps the full `test:coverage`. `vitest related`
+takes the file list relative to the package root and exits 0 when a changed file
+has no related tests. Two escape hatches force the full local suite everywhere:
+the `--full-local-tests` flag and the `AGENT_GATE_FULL_TESTS=1` environment
+variable. Aegis (`test:cov` + `forge test`) is out of scope and always runs its
+full suite.
 
 QuickNode webhook state parsing has a dedicated fail-closed regression suite.
 Changes to its shared parser, repair tool, shell test, or the listener
@@ -532,7 +597,9 @@ task orchestrator.
 Per-package coverage floors run as direct package commands such as
 `pnpm --filter <pkg> test:coverage` (or Aegis `test:cov`) so they always
 exercise the current local coverage threshold rather than a stale cached test
-result.
+result. A small production-source-only diff narrows the local `test:coverage`
+command to `vitest related` per the scoped-test rules above; the full coverage
+floor still runs in CI.
 Dashboard build/browser/React Doctor cache keys explicitly include
 `shared-config`, package-manager, workflow, wrapper-script, and relevant env
 inputs; CI still runs browser tests normally and remains the Linux snapshot
