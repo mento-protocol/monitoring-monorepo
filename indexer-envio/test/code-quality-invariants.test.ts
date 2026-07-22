@@ -643,6 +643,7 @@ function findModuleCollectionMutationsReachableFromPreload(
   };
   type CollectionPathBindings = Map<ts.Symbol, Map<string, PathBinding>>;
   const collectionPathBindings: CollectionPathBindings = new Map();
+  const moduleScopedBindingSymbols = new Set<ts.Symbol>();
   const pathKey = (propertyPath: readonly string[]): string =>
     JSON.stringify(propertyPath);
   const mergePathBinding = (
@@ -737,6 +738,27 @@ function findModuleCollectionMutationsReachableFromPreload(
     target: SymbolAccess;
   }> = [];
   for (const sourceFile of sourceFileList) {
+    const collectModuleBindingSymbols = (name: ts.BindingName): void => {
+      if (ts.isIdentifier(name)) {
+        const symbol = canonicalSymbol(
+          checker,
+          checker.getSymbolAtLocation(name),
+        );
+        if (symbol) moduleScopedBindingSymbols.add(symbol);
+        return;
+      }
+      for (const element of name.elements) {
+        if (!ts.isOmittedExpression(element)) {
+          collectModuleBindingSymbols(element.name);
+        }
+      }
+    };
+    for (const statement of sourceFile.statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        collectModuleBindingSymbols(declaration.name);
+      }
+    }
     for (const {
       kind,
       name,
@@ -748,7 +770,10 @@ function findModuleCollectionMutationsReachableFromPreload(
         checker,
         checker.getSymbolAtLocation(rootSymbolNode),
       );
-      if (root) mergePathBinding(root, propertyPath, new Set([collection]));
+      if (root) {
+        const collections = new Set([collection]);
+        mergePathBinding(root, propertyPath, collections);
+      }
     }
     const collectAliases = (node: ts.Node): void => {
       if (
@@ -971,10 +996,43 @@ function findModuleCollectionMutationsReachableFromPreload(
     ts.FunctionLikeDeclaration,
     Set<ModuleCollectionInfo>
   >();
+  const isAssignmentOperator = (kind: ts.SyntaxKind): boolean =>
+    kind >= ts.SyntaxKind.FirstAssignment &&
+    kind <= ts.SyntaxKind.LastAssignment;
   for (const fn of functions) {
     const mutatedCollections = new Set<ModuleCollectionInfo>();
     const visit = (node: ts.Node): void => {
       if (node !== fn && isFunctionLikeNode(node)) return;
+      if (
+        ts.isBinaryExpression(node) &&
+        isAssignmentOperator(node.operatorToken.kind) &&
+        (ts.isIdentifier(node.left) ||
+          ts.isPropertyAccessExpression(node.left) ||
+          ts.isElementAccessExpression(node.left))
+      ) {
+        const assignedAccess = expressionAccess(node.left);
+        const mayReplaceModuleState =
+          assignedAccess &&
+          (!ts.isIdentifier(node.left) ||
+            moduleScopedBindingSymbols.has(assignedAccess.root));
+        if (assignedAccess && mayReplaceModuleState) {
+          for (const binding of collectionPathBindings
+            .get(assignedAccess.root)
+            ?.values() ?? []) {
+            if (
+              assignedAccess.path.length > binding.path.length ||
+              assignedAccess.path.some(
+                (segment, index) => binding.path[index] !== segment,
+              )
+            ) {
+              continue;
+            }
+            for (const collection of binding.collections) {
+              mutatedCollections.add(collection);
+            }
+          }
+        }
+      }
       if (
         ts.isCallExpression(node) &&
         ts.isPropertyAccessExpression(node.expression) &&
@@ -1903,7 +1961,11 @@ describe("indexer code quality invariants", () => {
             writeParameterizedState,
             mutateLocalNestedState,
             prepareSharedAlias,
+            replaceAliasState,
+            replaceContainerState,
             mutateSharedAlias,
+            replaceNestedState,
+            replaceState,
           } from "./phase-state.js";
           const unrelatedStaticLookup = new Set(["safe"]);
           export function remember(id: string) {
@@ -1914,6 +1976,10 @@ describe("indexer code quality invariants", () => {
             writeAssignedState(id);
             mutateLocalNestedState(id);
             prepareSharedAlias();
+            replaceAliasState(id);
+            replaceContainerState(id);
+            replaceNestedState(id);
+            replaceState(id);
             unrelated();
           }
           export function consume(id: string) {
@@ -1934,8 +2000,13 @@ describe("indexer code quality invariants", () => {
           const parameterState = new Set<string>();
           const callbackState = new Map<string, boolean>();
           const assignmentState = new Set<string>();
+          const aliasStateSeed = new Set<string>();
+          const reassignedNestedState = { remembered: new Set<string>() };
           const sharedAliasState = new Set<string>();
           const unrelatedPathState = new Set<string>();
+          let aliasState = aliasStateSeed;
+          let replacedContainerState = { remembered: new Set<string>() };
+          let reassignedState = new Set<string>();
           let sharedAlias: Set<string> | undefined;
           function mutate(target: Set<string>, id: string) {
             target.add(id);
@@ -1949,8 +2020,12 @@ describe("indexer code quality invariants", () => {
           }
           export function mutateLocalNestedState(id: string) {
             const local: NestedState = { remembered: new Set<string>() };
+            let localAlias = moduleLookup.remembered;
+            localAlias.has(id);
+            localAlias = new Set([id]);
             local.remembered.add(id);
             moduleLookup.remembered.has(id);
+            localAlias.has(id);
           }
           export function writeParameterizedState(id: string) {
             mutate(parameterState, id);
@@ -1972,6 +2047,18 @@ describe("indexer code quality invariants", () => {
           export function mutateSharedAlias() {
             sharedAlias?.delete("event");
           }
+          export function replaceAliasState(id: string) {
+            aliasState = new Set([id]);
+          }
+          export function replaceContainerState(id: string) {
+            replacedContainerState = { remembered: new Set([id]) };
+          }
+          export function replaceNestedState(id: string) {
+            reassignedNestedState.remembered = new Set([id]);
+          }
+          export function replaceState(id: string) {
+            reassignedState = new Set([id]);
+          }
           export function mutateOnlyOutsideThePreloadGraph() {
             mutate(unrelatedPathState, "unrelated");
           }
@@ -1991,11 +2078,15 @@ describe("indexer code quality invariants", () => {
       }),
       [
         "bracket-state.ts bracketState (Set)",
+        "phase-state.ts aliasStateSeed (Set)",
         "phase-state.ts assignmentState (Set)",
         "phase-state.ts callbackState (Map)",
         "phase-state.ts directState (Set)",
         "phase-state.ts nestedState.remembered (Set)",
         "phase-state.ts parameterState (Set)",
+        "phase-state.ts reassignedNestedState.remembered (Set)",
+        "phase-state.ts reassignedState (Set)",
+        "phase-state.ts replacedContainerState.remembered (Set)",
         "phase-state.ts sharedAliasState (Set)",
       ],
     );
