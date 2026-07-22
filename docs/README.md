@@ -169,7 +169,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-17 |
 | [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | unmanaged / unmanaged | reference / indexer-envio | unowned | 180d |
 | [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-21 |
-| [`SPEC.md`](../SPEC.md) | Mento v3 Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-17 |
+| [`SPEC.md`](../SPEC.md) | Mento Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-22 |
 
 ## notes-plans-archive
 
