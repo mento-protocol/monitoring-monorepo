@@ -350,6 +350,44 @@ test("malformed canonical note metadata fails closed", () => {
   }
 });
 
+test("incomplete canonical note metadata fails closed", () => {
+  for (const key of ["title", "status", "owner", "last_verified"]) {
+    const content = contextNote("true").replace(
+      new RegExp(`^${key}:.*\\n`, "m"),
+      "",
+    );
+    const report = analyzeMateriality({
+      paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
+      readBaseContextFile: () => content,
+      readHeadContextFile: () => content,
+    });
+
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.reason,
+      "non-canonical planning or note document",
+    );
+  }
+});
+
+test("head-canonical notes do not require a redundant base read", () => {
+  let baseReads = 0;
+  const report = analyzeMateriality({
+    paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
+    readBaseContextFile: () => {
+      baseReads += 1;
+      return contextNote("true");
+    },
+    readHeadContextFile: () => contextNote("true"),
+  });
+
+  assertEqual(baseReads, 0);
+  assertEqual(report.contextUpdatesPresent, true);
+  assertEqual(report.contextUpdateMissing, false);
+});
+
 test("unreadable canonical note metadata fails closed", () => {
   const report = analyzeMateriality({
     paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],

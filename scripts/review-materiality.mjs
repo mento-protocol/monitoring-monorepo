@@ -14,6 +14,13 @@ const FULL_LINE_CHANGE_THRESHOLD = 800;
 const STANDARD_LINE_CHANGE_THRESHOLD = 200;
 const FULL_FILE_COUNT_THRESHOLD = 25;
 const STANDARD_FILE_COUNT_THRESHOLD = 8;
+const REQUIRED_CANONICAL_NOTE_METADATA = [
+  "title",
+  "status",
+  "owner",
+  "last_verified",
+];
+const VALID_CONTEXT_STATUSES = new Set(["active", "archived", "draft"]);
 
 function usage() {
   return `Usage: pnpm agent:review-materiality [options]
@@ -326,7 +333,11 @@ function hasCanonicalNoteMetadata(filePath, readContextFile) {
       return false;
     }
     const metadata = parseDocumentationMetadata(filePath, content);
-    return metadata?.canonical === "true";
+    return (
+      metadata?.canonical === "true" &&
+      VALID_CONTEXT_STATUSES.has(metadata.status) &&
+      REQUIRED_CANONICAL_NOTE_METADATA.every((key) => metadata[key]?.trim())
+    );
   } catch {
     // Deleted, unreadable, and malformed notes must not satisfy a required
     // context update merely because their path sits under docs/notes/.
@@ -598,7 +609,10 @@ export function analyzeMateriality({
   );
   const materialityCanonicalContextPaths = new Set(headCanonicalContextPaths);
   for (const filePath of changedPaths) {
-    if (isCanonicalContextPath(filePath, readBaseContextFile)) {
+    if (
+      !materialityCanonicalContextPaths.has(filePath) &&
+      isCanonicalContextPath(filePath, readBaseContextFile)
+    ) {
       materialityCanonicalContextPaths.add(filePath);
     }
   }
