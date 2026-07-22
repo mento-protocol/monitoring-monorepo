@@ -3,7 +3,7 @@ title: Reserve-Yield Indexer Topology
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-03
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -14,8 +14,8 @@ garden_lane: operator-runbooks
 
 Reserve-yield actuals are part of the production `mento` Envio project. The
 primary hosted project uses `indexer-envio/config.multichain.mainnet.yaml` for
-Ethereum reserve-yield events, Celo, and Monad; no separate hosted Envio project
-or dashboard endpoint is required.
+Ethereum reserve-yield events, Celo, Monad, and Polygon; no separate hosted
+Envio project or dashboard endpoint is required.
 
 The reserve-yield test harness is:
 

@@ -1,4 +1,4 @@
-<!-- agent-context: title="On-chain Event Listeners Module" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=alerts/infra/onchain-event-listeners review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="On-chain Event Listeners Module" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=runbook scope=alerts/infra/onchain-event-listeners review_interval_days=90 garden_lane=operator-runbooks -->
 
 # On-chain Event Listeners Module
 
@@ -18,63 +18,29 @@ nine operational events to `#multisig-events`.
 - `../onchain-event-handler/src/constants.ts` computes the same hashes at
   runtime and defines the security-event subset.
 
-Regenerate and validate the committed hashes after changing the ABI:
+Regenerate the committed hashes after changing the ABI:
 
 ```bash
 pnpm --filter @mento-protocol/alerts-onchain-event-handler build:event-hashes
 ```
 
-## Usage
+The command overwrites `event-hashes.json`. When the ABI is not meant to
+change, verify the result with
+`git diff --exit-code -- alerts/infra/onchain-event-listeners/event-hashes.json`.
+For an intentional ABI change, review and commit the regenerated file.
 
-The root stack owns module instantiation. Its current shape is:
+## Ownership and configuration
 
-```hcl
-module "onchain_event_listeners" {
-  source   = "./onchain-event-listeners"
-  for_each = local.multisigs_by_chain
-
-  providers = {
-    restapi.quicknode = restapi.quicknode
-  }
-
-  chain_key               = each.key
-  webhook_endpoint_url     = module.onchain_event_handler.function_url
-  multisig_addresses       = [for _, multisig in each.value : multisig.address]
-  webhook_name             = "safe-multisig-monitor-${each.key}"
-  quicknode_network_name   = local.multisigs_by_chain_network[each.key]
-  quicknode_api_key        = var.quicknode_api_key
-  quicknode_signing_secret = var.quicknode_signing_secret
-  debug_mode               = var.debug_mode
-}
-```
-
-Do not instantiate this module independently. The parent stack validates that
-all multisigs grouped under a chain use the same QuickNode network and wires the
-handler URL and signing secret consistently.
-
-## Inputs
-
-| Name                       | Description                                                    | Default                 |
-| -------------------------- | -------------------------------------------------------------- | ----------------------- |
-| `chain_key`                | Lowercase parent `for_each` key used to scope state operations | required                |
-| `webhook_endpoint_url`     | HTTPS on-chain event handler URL                               | required                |
-| `multisig_addresses`       | Safe addresses monitored by this chain's webhook               | required                |
-| `quicknode_api_key`        | QuickNode API key used by Terraform and the repair helper      | required                |
-| `quicknode_signing_secret` | At least 32 characters; sent as the webhook security token     | required                |
-| `webhook_name`             | Base name; a config hash is appended during creation           | `safe-multisig-monitor` |
-| `quicknode_network_name`   | QuickNode network identifier                                   | `celo-mainnet`          |
-| `compression`              | Destination payload compression (`none` or `gzip`)             | `none`                  |
-| `debug_mode`               | REST provider request/response logging                         | `false`                 |
+The parent [`alerts/infra`](../README.md) stack owns module instantiation. Its
+current wiring is in [`../main.tf`](../main.tf), while
+[`variables.tf`](variables.tf) and [`outputs.tf`](outputs.tf) are the maintained
+input and output contracts. Do not instantiate this module independently: the
+parent validates that all multisigs grouped under a chain use the same
+QuickNode network and wires the handler URL and signing secret consistently.
 
 The module has no `is_active` input. Pause or resume a webhook in the QuickNode
 dashboard only as an explicitly coordinated incident action; reconcile any
 resulting drift before the next apply.
-
-## Outputs
-
-- `webhook_id`
-- `webhook_endpoint`
-- `webhook_name`
 
 ## Update and state behavior
 
@@ -91,11 +57,18 @@ REST provider would attempt unsupported PUT/PATCH operations.
 
 If a webhook was deleted outside Terraform and planning reports a 404, stop
 before applying. After explicit state-repair approval, run
-`alerts/infra/scripts/fix-webhook-state.sh`, inspect its proposed state changes,
-then run `pnpm alerts:infra:plan` again. Deployment and recreation happen only
-through the reviewed `production-infra`-gated CI workflow. The repair tool
-ignores provider-rendered nested IDs and refuses all state changes when a
-QuickNode read is rate-limited, unavailable, or otherwise inconclusive.
+`(cd alerts/infra && ./scripts/fix-webhook-state.sh)`, inspect its proposed state
+changes, then run `pnpm alerts:infra:plan` again from the repository root.
+For state-only recovery, dispatch `.github/workflows/alerts-infra.yml` from
+`main`, review its authoritative plan, and approve the `production-infra`
+environment. If the owning configuration also needs correction, use a reviewed
+PR and its merge-triggered apply instead. The repair tool ignores
+provider-rendered nested IDs and refuses all state changes when a QuickNode read
+is rate-limited, unavailable, or otherwise inconclusive.
+
+To roll back a listener change, revert the owning configuration, inspect
+`pnpm alerts:infra:plan`, and let the protected main-branch workflow replace
+the webhook. Never recreate, pause, or delete a webhook manually as a rollback.
 
 ## Debugging and security
 

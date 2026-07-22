@@ -681,6 +681,7 @@ function txReserveScratchKey(
 function pruneOldTxPreRebalanceReserves(blockNumber: bigint): void {
   for (const [key, snapshot] of txPreRebalanceReserves) {
     if (snapshot.blockNumber < blockNumber) {
+      // phase-state-exempt: bounded ordered same-tx reserve scratch; remove with #1394.
       txPreRebalanceReserves.delete(key);
     }
   }
@@ -716,6 +717,7 @@ function captureTxPreRebalanceReserves(args: {
   pruneOldTxPreRebalanceReserves(args.blockNumber);
   const key = txReserveScratchKey(args.chainId, args.poolId, args.txHash);
   if (txPreRebalanceReserves.has(key)) return;
+  // phase-state-exempt: bounded ordered same-tx reserve scratch; remove with #1394.
   txPreRebalanceReserves.set(key, {
     ...args.reserves,
     blockNumber: args.blockNumber,
@@ -732,6 +734,7 @@ function consumeTxPreRebalanceReserves(args: {
   const key = txReserveScratchKey(args.chainId, args.poolId, args.txHash);
   const snapshot = txPreRebalanceReserves.get(key);
   if (!snapshot) return null;
+  // phase-state-exempt: bounded ordered same-tx reserve scratch; remove with #1394.
   txPreRebalanceReserves.delete(key);
   return snapshot.blockNumber === args.blockNumber
     ? { reserve0: snapshot.reserve0, reserve1: snapshot.reserve1 }

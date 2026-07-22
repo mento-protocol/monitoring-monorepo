@@ -30,6 +30,16 @@ binary `terraform plan -out` artifacts: Terraform plan files can include full
 configuration, variable values, and sensitive values in cleartext even when
 terminal output redacts them.
 
+Machine-authored Sentry-autofix PRs (head branch `sentry-autofix/*`) are
+excluded from every Terraform plan job outright (issue #1388): even the
+placeholder/read-only PR posture is too much for them, because `terraform
+plan` executes PR-head HCL (`data "external"` runs programs at plan time)
+while the job holds the read-only plan SA — whose state-bucket
+`storage.objectViewer` access includes cleartext secret values in state. The
+autofix diff guard also forbids `*.tf`/`*.hcl`/`*.tfvars` at any depth;
+the plan-job `if:` exclusion is defense in depth behind it, and
+`scripts/check-autofix-ci-trust.mjs` enforces the pattern structurally.
+
 ## Stack inventory
 
 | Stack                 | Secret classes                                                                                                                                                                                                                             | PR plan posture                                                                                                                                              | Migration notes                                                                                                                                                                                                                                                                                   |

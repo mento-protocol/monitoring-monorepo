@@ -1286,6 +1286,7 @@ while IFS= read -r path; do
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
       add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions workflow/action changed"
+      add_command "node scripts/check-autofix-ci-trust.mjs" "GitHub Actions workflow/action changed (autofix CI trust boundary)"
       add_adr_reminder "workflow/action changed — ADR reminder (a new workflow likely needs an ADR)"
       case "$path" in
         .github/workflows/ci.yml)
@@ -1575,7 +1576,7 @@ while IFS= read -r path; do
         scripts/agent-prewarm.mjs|scripts/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
           ;;
-        scripts/review-materiality.mjs|scripts/review-materiality.test.mjs)
+        scripts/review-materiality.mjs|scripts/review-materiality-context.mjs|scripts/review-materiality.test.mjs)
           add_command "pnpm agent:review-materiality:test" "agent review materiality helper changed"
           ;;
         scripts/agent-issue-board.mjs|scripts/agent-issue-board.test.mjs)
@@ -1650,6 +1651,10 @@ while IFS= read -r path; do
         scripts/check-github-action-pins.mjs)
           add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions pin checker changed"
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker changed"
+          ;;
+        scripts/check-autofix-ci-trust.mjs|scripts/check-autofix-ci-trust.test.mjs)
+          add_command "node scripts/check-autofix-ci-trust.mjs" "autofix CI trust checker changed"
+          add_command "node scripts/check-autofix-ci-trust.test.mjs" "autofix CI trust checker changed"
           ;;
         scripts/check-github-action-pins.test.mjs)
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"

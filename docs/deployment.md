@@ -70,13 +70,17 @@ pnpm deploy:indexer:promote "$COMMIT"
 
 Promotion authority depends on the request. For a monitor-only or babysit
 request, wait until every chain is caught up, run
-`pnpm deploy:indexer:verify "$COMMIT"`, surface the paste-ready promote
-command, and stop until the user explicitly approves promotion. For a
-pre-merge feature-branch preload, `/deploy-indexer --no-promote` stops after
-sync and prints the later verify/promote commands without running them. Do not
-infer promotion approval from a request to monitor, preload, or report
-readiness; an explicitly authorized end-to-end production deploy is a separate
-case.
+`pnpm deploy:indexer:verify "$COMMIT"`, then stop until the user explicitly
+approves the guarded `/deploy-indexer` continuation; do not offer the bare
+promote wrapper as monitor closeout. For a pre-merge feature-branch preload,
+`/deploy-indexer --no-promote` stops after sync. After merge,
+`/deploy-indexer --resume-preload "$COMMIT"` first requires the preloaded
+`indexer-envio/` tree to match freshly fetched protected `main` from the
+canonical `mento-protocol/monitoring-monorepo` remote, then reconfirms sync and
+runs the complete verify, prior-prod capture, promote, propagation-wait, and
+UI-verification path. Do not infer promotion approval from a request to
+monitor, preload, or report readiness; an explicitly authorized end-to-end
+production deploy is a separate case.
 
 ### Force Retrigger Without Code Changes
 
@@ -94,9 +98,10 @@ pnpm deploy:indexer --yes
 2. Inspect build and runtime errors with explicit commit-scoped logs (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h`).
 3. Capture a combined status/metrics/log snapshot for comparison (`pnpm deploy:indexer:perf "$COMMIT"`).
 4. Verify sync, metrics, endpoint resolution, core rows, and fail-closed Polygon replay semantics (`pnpm deploy:indexer:verify "$COMMIT"`). The verifier reads `indexer-envio/config/replay-integrity.json` from that exact commit, so a pre-invariant replay cannot pass merely because later rows look healthy. A caught-up status alone is only `SYNCED_PENDING_DATA_VERIFY`.
-5. Promote the same caught-up, semantically verified commit (`pnpm deploy:indexer:promote "$COMMIT"`) so the static production endpoint serves it.
-6. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
-7. Verify monitoring.mento.org loads data.
+5. Capture the current production commit for rollback, then promote the same caught-up, semantically verified commit (`pnpm deploy:indexer:promote "$COMMIT"`) and confirm its `prod_status=prod`. The `deploy-indexer` skill owns the exact prefix-safe query and guarded rollback command.
+6. Wait the full five-minute static-endpoint propagation window.
+7. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
+8. Verify monitoring.mento.org in the browser, including the affected pages and console errors. A bare successful promote is not rollout closeout.
 
 Reserve-yield actuals deploy through the primary `mento` Envio project. The
 Ethereum sUSDS handlers in `config.multichain.mainnet.yaml` are event-only, and

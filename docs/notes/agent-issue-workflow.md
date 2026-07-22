@@ -3,7 +3,7 @@ title: Agent Issue Workflow
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90

@@ -129,6 +129,19 @@ await test("guard refuses nested scripts dirs and CI-executed config surfaces", 
     "ui-dashboard/vercel.json",
     "turbo.json",
     "indexer-envio/Dockerfile",
+    // Terraform at ANY depth: the non-root stacks' PR plan jobs execute
+    // `terraform plan` on the PR head, and HCL runs programs at plan time
+    // (data "external") with a state-reading SA + checkout token in the job.
+    "alerts/rules/oracle.tf",
+    "alerts/infra/main.tf",
+    "governance-watchdog/infra/storage.tf",
+    "aegis/terraform/dashboard.tf",
+    "anywhere/nested/module.hcl",
+    "terraform/terraform.tfvars.example",
+    // Terraform's JSON syntax loads identically to HCL — same plan-time
+    // execution surface, same prohibition.
+    "alerts/infra/main.tf.json",
+    "aegis/terraform/values.tfvars.json",
   ]) {
     assert(isForbiddenPath(path), `expected forbidden: ${path}`);
   }

@@ -116,10 +116,17 @@ jobs:
     # GCP auth step would resolve empty and fail every time.
     # Skip the job in those contexts — the plan is only meaningful when
     # secrets are available. Internal PRs + main pushes run.
+    # Machine-authored Sentry-autofix PRs (head branch sentry-autofix/*) are
+    # also skipped: `terraform plan` executes PR-head HCL (data "external"
+    # runs programs at plan time) while this job holds the read-only plan SA —
+    # whose state-bucket access includes cleartext secret values — so an
+    # untrusted-in-effect autofix diff must never reach it. Defense in depth
+    # behind the autofix diff guard, which already forbids *.tf/*.hcl edits.
     if: >-
       (github.event_name == 'pull_request'
         && github.event.pull_request.head.repo.fork == false
-        && github.event.pull_request.user.login != 'dependabot[bot]')
+        && github.event.pull_request.user.login != 'dependabot[bot]'
+        && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/'))
       || (github.ref == 'refs/heads/main'
         && (github.event_name == 'push' || github.event_name == 'workflow_dispatch'))
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
@@ -150,6 +157,9 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          # PR-head HCL is planned in this job; never leave the checkout token
+          # in .git/config where plan-time-executed code could read it.
+          persist-credentials: false
 
       - name: Detect stack path changes
         id: stack_changes
@@ -539,6 +549,10 @@ jobs:
   apply:
     name: Terraform Apply (alerts/infra)
     needs: plan
+    # autofix-ci-trust: this job's if: requires github.ref == main plus a
+    # push/workflow_dispatch event, so it can never run for ANY pull_request
+    # (autofix or otherwise) — its production secrets are unreachable from
+    # PR context. See scripts/check-autofix-ci-trust.mjs.
     # Apply when (a) on main, (b) push or dispatch event, (c) plan said
     # there are real changes, AND (d) the stack root changed or a maintainer
     # explicitly dispatched the workflow. Workflow/notifier-only edits can

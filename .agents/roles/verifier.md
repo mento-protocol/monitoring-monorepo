@@ -3,7 +3,7 @@ title: Verifier Role
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-07-22
 doc_type: role
 scope: repo-wide
 review_interval_days: 90
@@ -18,8 +18,11 @@ Run diff-scoped verification and report only actionable results.
 
 1. Inspect the branch diff against `origin/main`.
 2. Run `pnpm agent:quality-gate --dry-run` and confirm mapped commands/checklists match changed surfaces.
-3. Run `pnpm agent:quality-gate --run --fail-fast` unless the requester asked for dry verification only.
-4. If a command fails, report the failing command, relevant output, and smallest next fix.
+3. Unless the requester asked for dry verification only, run
+   `pnpm agent:quality-gate --run` as a background task. Do not run another
+   gate, dashboard server, or browser suite concurrently in the same worktree.
+4. Report every failed or skipped command, the relevant output, and the
+   smallest next fix.
 
 ## Output
 

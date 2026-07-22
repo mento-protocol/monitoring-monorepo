@@ -1,8 +1,18 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+
+import {
+  changedPathsFromFile,
+  changedPathsFromGit,
+  createContextSnapshotReaders,
+  isAgentRuntimeContextPath,
+  numstatFromGit,
+  resolveCanonicalContextPaths,
+  resolveDiffComparison,
+  resolveMetadataBase,
+  rootScriptChanges,
+} from "./review-materiality-context.mjs";
 
 const TIER_ORDER = ["trivial", "standard", "full"];
 const DEFAULT_BASE = "origin/main";
@@ -68,172 +78,8 @@ function parseArgs(argv) {
   return args;
 }
 
-function runGit(args) {
-  return execFileSync("git", args, { encoding: "utf8" });
-}
-
-function tryGit(args) {
-  try {
-    return runGit(args);
-  } catch {
-    return "";
-  }
-}
-
-function gitErrorMessage(error) {
-  if (error && typeof error === "object" && "stderr" in error) {
-    const stderr = error.stderr?.toString?.().trim();
-    if (stderr) return stderr;
-  }
-  return error instanceof Error ? error.message : String(error);
-}
-
-function diffOutput(diffArgs, base, head) {
-  try {
-    return runGit(["diff", ...diffArgs, `${base}...${head}`]);
-  } catch (tripleDotError) {
-    try {
-      return runGit(["diff", ...diffArgs, base, head]);
-    } catch (twoDotError) {
-      throw new Error(
-        `unable to read git diff for ${base}..${head}: ${gitErrorMessage(twoDotError) || gitErrorMessage(tripleDotError)}`,
-        { cause: twoDotError },
-      );
-    }
-  }
-}
-
 function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort();
-}
-
-function changedPathsFromGit(base, head) {
-  const outputs = [diffOutput(["--name-only", "--no-renames"], base, head)];
-
-  if (head === "HEAD") {
-    outputs.push(
-      tryGit(["diff", "--name-only", "--no-renames"]),
-      tryGit(["diff", "--cached", "--name-only", "--no-renames"]),
-      tryGit(["ls-files", "--others", "--exclude-standard"]),
-    );
-  }
-
-  return uniqueSorted(
-    outputs
-      .join("\n")
-      .split("\n")
-      .map((line) => line.trim()),
-  );
-}
-
-function changedPathsFromFile(filePath) {
-  const output = readFileSync(filePath, "utf8");
-  return uniqueSorted(output.split("\n").map((line) => line.trim()));
-}
-
-function addNumstatOutput(stats, output) {
-  for (const line of output.split("\n")) {
-    if (!line.trim()) continue;
-    const [rawAdditions, rawDeletions, filePath] = line.split("\t");
-    const additions = Number.parseInt(rawAdditions, 10);
-    const deletions = Number.parseInt(rawDeletions, 10);
-    const previous = stats.get(filePath) ?? { additions: 0, deletions: 0 };
-    stats.set(filePath, {
-      additions:
-        previous.additions + (Number.isFinite(additions) ? additions : 0),
-      deletions:
-        previous.deletions + (Number.isFinite(deletions) ? deletions : 0),
-    });
-  }
-}
-
-function countTextLines(contents) {
-  if (contents.length === 0) return 0;
-  const newlineCount = contents.split("\n").length - 1;
-  return contents.endsWith("\n") ? newlineCount : newlineCount + 1;
-}
-
-function addUntrackedStats(stats, paths) {
-  for (const filePath of paths) {
-    if (stats.has(filePath)) continue;
-    let additions;
-    try {
-      additions = countTextLines(readFileSync(filePath, "utf8"));
-    } catch {
-      additions = 0;
-    }
-    stats.set(filePath, { additions, deletions: 0 });
-  }
-}
-
-function numstatFromGit(base, head) {
-  const stats = new Map();
-  addNumstatOutput(
-    stats,
-    diffOutput(["--numstat", "--no-renames"], base, head),
-  );
-
-  if (head === "HEAD") {
-    addNumstatOutput(stats, tryGit(["diff", "--numstat", "--no-renames"]));
-    addNumstatOutput(
-      stats,
-      tryGit(["diff", "--cached", "--numstat", "--no-renames"]),
-    );
-    addUntrackedStats(
-      stats,
-      tryGit(["ls-files", "--others", "--exclude-standard"])
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean),
-    );
-  }
-
-  return stats;
-}
-
-function readJsonAtRef(ref, filePath) {
-  if (ref === "HEAD") {
-    try {
-      return JSON.parse(readFileSync(filePath, "utf8"));
-    } catch {
-      return null;
-    }
-  }
-
-  try {
-    return JSON.parse(runGit(["show", `${ref}:${filePath}`]));
-  } catch {
-    return null;
-  }
-}
-
-function rootScriptChanges(base, head) {
-  const beforePackage = readJsonAtRef(base, "package.json");
-  const afterPackage = readJsonAtRef(head, "package.json");
-  if (beforePackage === null) {
-    throw new Error(`unable to read package.json at ${base}`);
-  }
-  if (afterPackage === null) {
-    throw new Error(`unable to read package.json at ${head}`);
-  }
-
-  const before = beforePackage.scripts ?? {};
-  const after = afterPackage.scripts ?? {};
-  const names = uniqueSorted([...Object.keys(before), ...Object.keys(after)]);
-
-  return names
-    .filter((name) => before[name] !== after[name])
-    .map((name) => ({
-      name,
-      before: before[name] ?? null,
-      after: after[name] ?? null,
-      kind:
-        before[name] === undefined
-          ? "added"
-          : after[name] === undefined
-            ? "removed"
-            : "changed",
-    }));
 }
 
 function tierMax(a, b) {
@@ -266,29 +112,6 @@ function isPackageManagerPath(filePath) {
   );
 }
 
-function isAgentRuntimeContextPath(filePath) {
-  return (
-    filePath === ".codex/hooks.json" || filePath === ".claude/settings.json"
-  );
-}
-
-function isCanonicalContextPath(filePath) {
-  return (
-    filePath === "AGENTS.md" ||
-    filePath.endsWith("/AGENTS.md") ||
-    filePath === "CLAUDE.md" ||
-    filePath.endsWith("/CLAUDE.md") ||
-    filePath === "README.md" ||
-    filePath === "docs/context-standards.md" ||
-    filePath === "docs/deployment.md" ||
-    filePath.startsWith("docs/pr-checklists/") ||
-    filePath.startsWith(".agents/skills/") ||
-    filePath.startsWith(".agents/roles/") ||
-    filePath.startsWith(".claude/skills/") ||
-    isAgentRuntimeContextPath(filePath)
-  );
-}
-
 function isRepoToolingTestPath(filePath) {
   return (
     (filePath.startsWith("scripts/") || filePath.startsWith("tools/")) &&
@@ -296,8 +119,8 @@ function isRepoToolingTestPath(filePath) {
   );
 }
 
-function classifyPath(filePath) {
-  if (filePath.startsWith("docs/PLAN-") || filePath.startsWith("docs/notes/")) {
+function classifyPath(filePath, canonicalContextPaths) {
+  if (filePath.startsWith("docs/PLAN-")) {
     return signal(
       filePath,
       "trivial",
@@ -325,8 +148,16 @@ function classifyPath(filePath) {
     return signal(filePath, "full", "agent, build, or repository tooling");
   }
 
-  if (isCanonicalContextPath(filePath)) {
+  if (canonicalContextPaths.has(filePath)) {
     return signal(filePath, "full", "canonical agent or operator context");
+  }
+
+  if (filePath.startsWith("docs/notes/")) {
+    return signal(
+      filePath,
+      "trivial",
+      "non-canonical planning or note document",
+    );
   }
 
   if (
@@ -516,9 +347,21 @@ export function analyzeMateriality({
   paths,
   numstat = new Map(),
   scriptChanges = [],
+  readBaseContextFile,
+  readHeadContextFile,
+  isHeadContextFile = () => true,
 } = {}) {
   const changedPaths = uniqueSorted(paths ?? []);
-  const pathSignals = changedPaths.map(classifyPath);
+  const { headCanonicalContextPaths, materialityCanonicalContextPaths } =
+    resolveCanonicalContextPaths({
+      paths: changedPaths,
+      readBaseContextFile,
+      readHeadContextFile,
+      isHeadContextFile,
+    });
+  const pathSignals = changedPaths.map((filePath) =>
+    classifyPath(filePath, materialityCanonicalContextPaths),
+  );
   const lineChanges = summarizeLineChanges(changedPaths, numstat);
   const sizeSignal = classifyBySize(changedPaths.length, lineChanges.total);
   const allSignals = sizeSignal ? [...pathSignals, sizeSignal] : pathSignals;
@@ -527,7 +370,7 @@ export function analyzeMateriality({
     "trivial",
   );
   const contextReasons = contextRequirementSignals(changedPaths, scriptChanges);
-  const contextUpdatesPresent = changedPaths.some(isCanonicalContextPath);
+  const contextUpdatesPresent = headCanonicalContextPaths.size > 0;
   const contextUpdateRequired = contextReasons.length > 0;
 
   return {
@@ -585,16 +428,29 @@ async function main() {
     return;
   }
 
+  const comparison = args.changedPathsFile
+    ? null
+    : resolveDiffComparison(args.base, args.head);
+  const effectiveBase = args.changedPathsFile
+    ? resolveMetadataBase(args.base, args.head)
+    : comparison.effectiveBase;
   const paths = args.changedPathsFile
     ? changedPathsFromFile(args.changedPathsFile)
-    : changedPathsFromGit(args.base, args.head);
-  const numstat = args.changedPathsFile
-    ? new Map()
-    : numstatFromGit(args.base, args.head);
+    : changedPathsFromGit(comparison);
+  const numstat = comparison ? numstatFromGit(comparison) : new Map();
   const scriptChanges = paths.includes("package.json")
-    ? rootScriptChanges(args.base, args.head)
+    ? rootScriptChanges(effectiveBase, args.head)
     : [];
-  const report = analyzeMateriality({ paths, numstat, scriptChanges });
+  const contextSnapshotReaders = createContextSnapshotReaders({
+    base: effectiveBase,
+    head: args.head,
+  });
+  const report = analyzeMateriality({
+    paths,
+    numstat,
+    scriptChanges,
+    ...contextSnapshotReaders,
+  });
 
   process.stdout.write(
     args.json ? `${JSON.stringify(report, null, 2)}\n` : renderHuman(report),

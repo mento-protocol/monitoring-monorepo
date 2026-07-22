@@ -20,7 +20,7 @@ import {
 
 const NOW_SECONDS = 2_000_000_000;
 const VALID_REPLAY_INTEGRITY = {
-  value: { polygonExactMedianTimestamp: 1 },
+  value: { polygonExactMedianTimestamp: 2 },
   readError: "",
 };
 
@@ -127,6 +127,13 @@ assert.equal(
 assert.equal(resolveProdDeployment(indexerJson)?.commit_hash, "abc1234");
 
 assert.equal(summarizeReplayIntegrity(VALID_REPLAY_INTEGRITY).ok, true);
+assert.match(
+  summarizeReplayIntegrity({
+    value: { polygonExactMedianTimestamp: 1 },
+    readError: "",
+  }).failures.join("\n"),
+  /predates Polygon exact-median replay integrity v2/,
+);
 assert.match(
   summarizeReplayIntegrity({
     value: null,

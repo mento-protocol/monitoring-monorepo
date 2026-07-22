@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -46,6 +46,9 @@ pnpm code-health:history           # CodeScene-style git history report → repo
 pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/ (advisory, never blocks)
 pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs origin/main (advisory, never blocks)
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
+pnpm agent:quality-gate            # Map changed paths to required local checks and PR checklists
+pnpm agent:quality-gate --run      # Execute the mapped local-only checks
+pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
 pnpm agent:autoreview              # Isolated closeout review; multi-pass uses --prepare-bundle-dir DIR + one fresh-context reviewer; quality gate owns tests
 pnpm agent:autoreview:test         # Full autoreview regression families; defaults to up to 3 workers with progress + timings
@@ -61,6 +64,8 @@ pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only eva
 pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
+pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
+pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
 node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
 node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics
 pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
@@ -123,11 +128,11 @@ pnpm aegis:test               # Jest tests
 pnpm aegis:lint               # ESLint baseline gate for Aegis
 pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-monitoring
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
-# Secrets are IaC-first; do not create, rotate, or overwrite them manually
-# unless the owning integration/runbook explicitly allows the path.
-pnpm aegis:agent:seed-secrets # Seed/rotate Alloy remote-write Secret Manager versions
-pnpm aegis:agent:deploy       # Deploy the Grafana Alloy App Engine collector
-pnpm aegis:tf:init / aegis:tf:plan
+# Alloy deploy requires existing enabled secrets and a verified runtime identity.
+# Bootstrap/rotation remains blocked by open owner-decision issue #1473; never run the legacy seed command.
+pnpm aegis:agent:deploy       # Deploy the already provisioned Alloy collector
+pnpm aegis:tf:init
+pnpm aegis:tf:plan
 # Apply runs in CI on merge to main (aegis-terraform.yml; production-infra gate).
 
 # Infrastructure (Terraform)
@@ -138,11 +143,15 @@ pnpm infra:plan               # Preview infrastructure changes
 # Never run apply without explicit human approval. Plan first and surface the diff.
 pnpm infra:apply              # Apply infrastructure changes
 # Event-driven alerts stack (Cloud Functions + Slack channels/usergroups + Sentry bridge + QuickNode webhooks):
-pnpm alerts:infra:init / alerts:infra:plan
-pnpm alerts:oncall:typecheck / alerts:oncall:test / alerts:oncall:build
+pnpm alerts:infra:init
+pnpm alerts:infra:plan
+pnpm alerts:oncall:typecheck
+pnpm alerts:oncall:test
+pnpm alerts:oncall:build
 # Grafana metric alert rules (v3 Slack rules):
 pnpm alerts:rules:lint
-pnpm alerts:rules:init / alerts:rules:plan
+pnpm alerts:rules:init
+pnpm alerts:rules:plan
 # Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
 # The production-infra gate enforces required-reviewer approval and allows
 # self-review for the sole-maintainer workflow.

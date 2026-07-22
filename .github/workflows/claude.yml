@@ -22,6 +22,11 @@ permissions: read-all
 
 jobs:
   claude:
+    # autofix-ci-trust: this job only fires on @claude mentions from
+    # OWNER/MEMBER authors (issue_comment / review events) — never
+    # automatically on a pull_request, so a machine-authored autofix PR
+    # cannot reach its secret without a maintainer explicitly invoking it.
+    # See scripts/check-autofix-ci-trust.mjs.
     if: |
       (
         github.event_name == 'issue_comment' &&
@@ -61,7 +66,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
-      - uses: anthropics/claude-code-action@f87768c6d25f92ae6efa7175e223ef77d4cbf97f # v1.0.166
+      - uses: anthropics/claude-code-action@12531344451323133b0493233c759991ac61da12 # v1.0.174
         with:
           github_token: ${{ github.token }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -94,11 +99,18 @@ jobs:
     # secrets (CLAUDE_CODE_OAUTH_TOKEN by default), so the action would fail
     # with an empty token. To re-enable on Dependabot PRs, mirror the secret
     # under Settings → Secrets and variables → Dependabot.
+    # Also skip machine-authored Sentry-autofix PRs (head sentry-autofix/*):
+    # their diffs derive from untrusted Sentry input, and auto-reviewing one
+    # feeds that untrusted content to an LLM holding pull-requests:write — an
+    # injected diff could steer the reviewer into posting misleading
+    # commentary, which is worse than no review. Codex review and the human
+    # merge gate still cover autofix PRs.
     if: |
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft != true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.actor != 'dependabot[bot]'
+      github.actor != 'dependabot[bot]' &&
+      !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
@@ -112,7 +124,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
-      - uses: anthropics/claude-code-action@f87768c6d25f92ae6efa7175e223ef77d4cbf97f # v1.0.166
+      - uses: anthropics/claude-code-action@12531344451323133b0493233c759991ac61da12 # v1.0.174
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_sticky_comment: true

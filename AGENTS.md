@@ -103,8 +103,7 @@ last-reviewed owning-checkout wrapper. Autoreview reviews source only: it runs
 no tests and proves no behavior, so mapped gate, browser, generated-artifact,
 and runtime checks still apply. Exact target, bundle, isolation, trust,
 engine-selection, and command contracts live in
-[`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md)
-and [`docs/notes/codex-agent-skills.md`](docs/notes/codex-agent-skills.md).
+[`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md).
 
 ## PR description standard
 
@@ -112,6 +111,12 @@ Every PR description starts with `## The Problem` followed by
 `## The Solution`. The problem has at most three plain-language bullets; the
 solution explains the approach before implementation detail. The checked-in
 template, validator, and `ship` skill own the complete format.
+
+Open every PR through the `ship` skill — on every agent surface, including
+hosted sessions; do not hand-roll PR creation. PRs open ready for review,
+never as drafts: platform draft defaults do not apply in this repo. Use draft
+only when the user explicitly asks for one or required validation is
+intentionally still pending, and state that reason in the PR body.
 
 ## Deferral rule
 
@@ -141,13 +146,15 @@ review-triggered patch cycles rather than starting a third automatically.
 Before all-clear, run:
 
 ```bash
+pnpm --silent pr:feedback-state --pr <number> --json
 pnpm pr:ready-state --pr <number> --json
 ```
 
-All-clear requires its current-head required state to be ready, including the
-current-head `chatgpt-codex-connector[bot]` PR-description approval. Do not post
-routine or duplicate `@codex review` requests. The feedback projection,
-break-glass contract, optional-bot treatment, and watch loop live in
+All-clear requires a clean feedback ledger plus ready-state's current-head
+required state, including the current-head
+`chatgpt-codex-connector[bot]` PR-description approval. Do not post routine or
+duplicate `@codex review` requests. The projection contract, break-glass
+behavior, optional-bot treatment, and watch loop live in
 [`docs/notes/pr-ready-state.md`](docs/notes/pr-ready-state.md) and the
 `babysit-pr` skill.
 
@@ -204,8 +211,8 @@ the `/verify-ui` command owns the route-level smoke sequence.
 ## Agent Tooling and Setup
 
 Reusable project workflows live under `.agents/skills/`; Claude mirrors under
-`.claude/skills/` must stay aligned. Runtime setup, autoreview bundle behavior,
-and skill ownership are in
+`.claude/skills/` must stay aligned. Codex Cloud routing, status-polling
+guidance, the SessionEnd hook, and skill ownership are in
 [`docs/notes/codex-agent-skills.md`](docs/notes/codex-agent-skills.md).
 Claude slash commands live under `.claude/commands/`.
 

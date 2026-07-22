@@ -202,6 +202,78 @@ wait_for_process_exit_or_zombie() {
   return 1
 }
 
+signal_cleanup_fixture_is_ready() {
+  local capture="$1"
+  local require_grandchild_ready="${2:-0}"
+
+  [[
+    -s "$capture.child-pid" &&
+      -s "$capture.grandchild-pid" &&
+      -s "$capture.helper-pid" &&
+      -s "$capture.snapshot"
+  ]] || return 1
+  if [[ "$require_grandchild_ready" -eq 1 ]]; then
+    [[ -s "$capture.grandchild-ready" ]] || return 1
+  fi
+}
+
+report_signal_cleanup_startup_failure() {
+  local scenario="$1"
+  local reason="$2"
+  local elapsed_seconds="$3"
+  local status="$4"
+  local capture="$5"
+  local stream
+
+  printf 'signal-cleanup startup failed: scenario=%s reason=%s elapsed=%ss status=%s\n' \
+    "$scenario" "$reason" "$elapsed_seconds" "$status" >&2
+  for stream in stdout stderr; do
+    printf '%s:\n' "$stream" >&2
+    if [[ -s "$capture.$stream" ]]; then
+      cat "$capture.$stream" >&2
+    else
+      printf '<empty>\n' >&2
+    fi
+  done
+}
+
+wait_for_signal_cleanup_fixture_startup() {
+  local scenario="$1"
+  local engine_pid="$2"
+  local capture="$3"
+  local timeout_seconds="$4"
+  local require_grandchild_ready="${5:-0}"
+  local started_at="$SECONDS"
+  local deadline=$((SECONDS + timeout_seconds))
+  local elapsed_seconds
+  local wait_status
+
+  while true; do
+    if signal_cleanup_fixture_is_ready \
+      "$capture" "$require_grandchild_ready"; then
+      return 0
+    fi
+    if ! process_is_runnable "$engine_pid"; then
+      if wait "$engine_pid" 2>/dev/null; then
+        wait_status=0
+      else
+        wait_status=$?
+      fi
+      elapsed_seconds=$((SECONDS - started_at))
+      report_signal_cleanup_startup_failure \
+        "$scenario" "engine-exited" "$elapsed_seconds" "$wait_status" "$capture"
+      return 1
+    fi
+    if [[ "$SECONDS" -ge "$deadline" ]]; then
+      elapsed_seconds=$((SECONDS - started_at))
+      report_signal_cleanup_startup_failure \
+        "$scenario" "deadline-exceeded" "$elapsed_seconds" "running" "$capture"
+      return 1
+    fi
+    sleep 0.05
+  done
+}
+
 run_autoreview_test_suite() {
   local jobs=3
   while [[ $# -gt 0 ]]; do
@@ -2714,6 +2786,27 @@ CLAUDE
 #!/usr/bin/env node
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+if (process.env.AUTOREVIEW_FAKE_EXIT_BEFORE_STARTUP) {
+  process.stdout.write("early startup stdout\n");
+  process.stderr.write("early startup stderr\n");
+  process.exit(23);
+}
+const startupDelayText = process.env.AUTOREVIEW_FAKE_STARTUP_DELAY_MS || "";
+const startupDelayMs = /^[0-9]+$/.test(startupDelayText)
+  ? Number.parseInt(startupDelayText, 10)
+  : 0;
+if (startupDelayMs > 0) {
+  fs.writeFileSync(
+    `${process.env.AUTOREVIEW_FAKE_CAPTURE}.startup-delay`,
+    `${startupDelayMs}\n`,
+  );
+  Atomics.wait(
+    new Int32Array(new SharedArrayBuffer(4)),
+    0,
+    0,
+    startupDelayMs,
+  );
+}
 const leaderExitsOnTermination = Boolean(
   process.env.AUTOREVIEW_FAKE_EXIT_LEADER_ON_TERM,
 );
@@ -2795,24 +2888,90 @@ CODEX
   local descendant_pid
   local grandchild_pid
   local snapshot_path
-  local launched
   local snapshot_unlinked
   local completion_mode
   local leader_exit_code
   local termination_mode
   local wait_status
   local launch_dir
+  local startup_diagnostic
+  # This is intentionally an internal test constant rather than a repo-level
+  # environment knob. The wait helper accepts an explicit timeout so focused
+  # deadline fixtures can use a shorter bound without changing the production
+  # autoreview configuration.
+  local startup_timeout_seconds=30
+  local delayed_live_startup_ms=11000
   local -a signal_env_args
   local -a termination_args
   launch_dir="$(pwd -P)"
-  for scenario in claude-probe claude codex; do
+
+  engine_capture="$tmp_dir/engine-startup-early-exit"
+  startup_diagnostic="$engine_capture.diagnostic"
+  signal_env_args=(
+    "PATH=$fake_bin:$PATH"
+    "HOME=$HOME"
+    "TMPDIR=$signal_tmp"
+    "SSL_CERT_FILE=$ssl_cert_file"
+    "AUTOREVIEW_FAKE_CAPTURE=$engine_capture"
+    "AUTOREVIEW_FAKE_EXIT_BEFORE_STARTUP=1"
+    "AUTOREVIEW_HEARTBEAT_SECONDS=60"
+  )
+  cd "$review_repo"
+  /usr/bin/env -i "${signal_env_args[@]}" \
+    "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+    --mode local --engine codex --stream-engine-output \
+    >"$engine_capture.stdout" 2>"$engine_capture.stderr" &
+  engine_pid=$!
+  cd "$launch_dir"
+  if wait_for_signal_cleanup_fixture_startup \
+    early-exit "$engine_pid" "$engine_capture" "$startup_timeout_seconds" \
+    2>"$startup_diagnostic"; then
+    printf 'signal-cleanup startup wait accepted an early engine exit\n' >&2
+    exit 1
+  fi
+  expect_file_contains "$startup_diagnostic" \
+    "scenario=early-exit reason=engine-exited elapsed="
+  expect_file_contains "$startup_diagnostic" "status=1"
+  expect_file_contains "$startup_diagnostic" "stdout:"
+  expect_file_contains "$startup_diagnostic" "early startup stdout"
+  expect_file_contains "$startup_diagnostic" "stderr:"
+  expect_file_contains "$startup_diagnostic" "early startup stderr"
+  expect_file_contains "$startup_diagnostic" "failed (23)"
+
+  engine_capture="$tmp_dir/engine-startup-deadline"
+  startup_diagnostic="$engine_capture.diagnostic"
+  printf 'slow startup stdout\n' >"$engine_capture.stdout"
+  printf 'slow startup stderr\n' >"$engine_capture.stderr"
+  "$node_bin" -e 'setInterval(() => {}, 1000)' &
+  engine_pid=$!
+  if wait_for_signal_cleanup_fixture_startup \
+    delayed-timeout "$engine_pid" "$engine_capture" 1 \
+    2>"$startup_diagnostic"; then
+    kill -KILL "$engine_pid" 2>/dev/null || true
+    wait "$engine_pid" 2>/dev/null || true
+    printf 'signal-cleanup startup wait ignored its explicit deadline\n' >&2
+    exit 1
+  fi
+  kill -KILL "$engine_pid" 2>/dev/null || true
+  wait "$engine_pid" 2>/dev/null || true
+  expect_file_contains "$startup_diagnostic" \
+    "scenario=delayed-timeout reason=deadline-exceeded elapsed="
+  expect_file_contains "$startup_diagnostic" "status=running"
+  expect_file_contains "$startup_diagnostic" "stdout:"
+  expect_file_contains "$startup_diagnostic" "slow startup stdout"
+  expect_file_contains "$startup_diagnostic" "stderr:"
+  expect_file_contains "$startup_diagnostic" "slow startup stderr"
+
+  for scenario in claude-probe claude codex codex-delayed-live; do
     engine="${scenario%%-*}"
     engine_capture="$tmp_dir/engine-signal-$scenario"
+    startup_diagnostic="$engine_capture.startup-diagnostic"
     rm -f \
       "$engine_capture.child-pid" \
       "$engine_capture.grandchild-pid" \
       "$engine_capture.helper-pid" \
-      "$engine_capture.snapshot"
+      "$engine_capture.snapshot" \
+      "$engine_capture.startup-delay"
     signal_env_args=(
       "PATH=$fake_bin:$PATH"
       "HOME=$HOME"
@@ -2826,6 +2985,10 @@ CODEX
         "AUTOREVIEW_FAKE_DETACH_GRANDCHILD=1"
         "AUTOREVIEW_FAKE_HANG_CLAUDE_PROBE=1"
       )
+    elif [[ "$scenario" == "codex-delayed-live" ]]; then
+      signal_env_args+=(
+        "AUTOREVIEW_FAKE_STARTUP_DELAY_MS=$delayed_live_startup_ms"
+      )
     fi
     cd "$review_repo"
     /usr/bin/env -i "${signal_env_args[@]}" \
@@ -2833,28 +2996,18 @@ CODEX
       --mode local --engine "$engine" >"$engine_capture.stdout" 2>"$engine_capture.stderr" &
     engine_pid=$!
     cd "$launch_dir"
-    launched=0
-    for _ in {1..200}; do
-      if [[
-        -s "$engine_capture.child-pid" &&
-          -s "$engine_capture.grandchild-pid" &&
-          -s "$engine_capture.helper-pid" &&
-          -s "$engine_capture.snapshot"
-      ]]; then
-        launched=1
-        break
-      fi
-      if ! process_is_runnable "$engine_pid"; then
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$launched" -ne 1 ]]; then
+    if ! wait_for_signal_cleanup_fixture_startup \
+      "$scenario" "$engine_pid" "$engine_capture" "$startup_timeout_seconds" \
+      2>"$startup_diagnostic"; then
       kill -TERM "$engine_pid" 2>/dev/null || true
       wait "$engine_pid" 2>/dev/null || true
-      printf '%s did not reach the signal-cleanup fixture\n' "$scenario" >&2
-      cat "$engine_capture.stderr" >&2
+      cat "$startup_diagnostic" >&2
       exit 1
+    fi
+    if [[ "$scenario" == "codex-delayed-live" ]]; then
+      expect_file_contains \
+        "$engine_capture.startup-delay" \
+        "$delayed_live_startup_ms"
     fi
     child_pid="$(cat "$engine_capture.child-pid")"
     grandchild_pid="$(cat "$engine_capture.grandchild-pid")"
@@ -2941,6 +3094,7 @@ CODEX
 
   for termination_mode in signal timeout; do
     engine_capture="$tmp_dir/engine-leader-exit-$termination_mode"
+    startup_diagnostic="$engine_capture.startup-diagnostic"
     rm -f \
       "$engine_capture.child-pid" \
       "$engine_capture.grandchild-pid" \
@@ -2966,28 +3120,16 @@ CODEX
       "${termination_args[@]}" >"$engine_capture.stdout" 2>"$engine_capture.stderr" &
     engine_pid=$!
     cd "$launch_dir"
-    launched=0
-    for _ in {1..200}; do
-      if [[
-        -s "$engine_capture.child-pid" &&
-          -s "$engine_capture.grandchild-pid" &&
-          -s "$engine_capture.grandchild-ready" &&
-          -s "$engine_capture.helper-pid" &&
-          -s "$engine_capture.snapshot"
-      ]]; then
-        launched=1
-        break
-      fi
-      if ! process_is_runnable "$engine_pid"; then
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$launched" -ne 1 ]]; then
+    if ! wait_for_signal_cleanup_fixture_startup \
+      "leader-exit-$termination_mode" \
+      "$engine_pid" \
+      "$engine_capture" \
+      "$startup_timeout_seconds" \
+      1 \
+      2>"$startup_diagnostic"; then
       kill -KILL "$engine_pid" 2>/dev/null || true
       wait "$engine_pid" 2>/dev/null || true
-      printf 'leader-exit %s fixture did not launch\n' "$termination_mode" >&2
-      cat "$engine_capture.stderr" >&2
+      cat "$startup_diagnostic" >&2
       exit 1
     fi
     child_pid="$(cat "$engine_capture.child-pid")"

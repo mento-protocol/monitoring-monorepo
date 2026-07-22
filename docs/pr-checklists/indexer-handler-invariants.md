@@ -3,7 +3,7 @@ title: Indexer Handler Invariants
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-21
+last_verified: 2026-07-22
 doc_type: checklist
 scope: indexer-envio
 review_interval_days: 90
@@ -40,10 +40,32 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
 - Start event-derived effects before any entity-dependent early return. A
   concurrent preload pass can see an empty lookup while ordered processing for
   the same event sees a row created by an earlier event in the batch.
-- For state-dependent retry effects, carry an event-scoped in-memory marker
-  only when preload actually scheduled the key. Processing must stay
-  fail-closed and defer newly visible rows until the next event rather than
-  issuing an un-preloaded call.
+- For effects whose eligibility depends on entity state, derive the condition
+  independently in preload and processing; never carry eligibility across the
+  phase boundary in a module-scoped `Set`, `Map`, or other mutable marker.
+  Hosted Envio may run the passes in different workers or after a restart. Use
+  the identical event-only effect key in both passes. If ordered processing
+  newly exposes a row, take a bounded safe serialized exact-block path when the
+  handler requires that event's state; otherwise fail closed with a documented
+  ordered-state exemption. Do not substitute a later event's value for exact
+  event/block state.
+- Do not hide phase-bridging state in an imported handler helper. The blocking
+  code-quality invariant starts at registered `indexer.onEvent`, `onBlock`, and
+  `contractRegister` callbacks and follows TypeScript-resolved imported calls,
+  transitive calls,
+  callbacks, aliases, destructuring, and arguments. Every top-level handler
+  binding is a potential module-state root regardless of initializer. The
+  invariant rejects direct assignment, update, deletion, object/record write,
+  and native collection/array mutator forms reached through those
+  symbol-propagated paths. Returned module-state aliases and custom receiver
+  methods that mutate through `this` still require manual review until
+  [#1462](https://github.com/mento-protocol/monitoring-monorepo/issues/1462) is
+  resolved. Deterministic read-only lookup state and module-initialization
+  builders remain valid. A necessary processing-only write requires an adjacent
+  `// phase-state-exempt: <reason>; ... #<issue>.` at each mutation call site;
+  never exempt an entire binding. A bounded or rebuildable optimization cache
+  whose loss can only repeat authoritative/idempotent work may instead use
+  `// phase-state-cache: <why loss cannot change entity output>.` at each write.
 - The blocking code-quality invariant rejects a direct effect that exists only
   after a positive preload return (including exact `maybePreloadPool(...)` and
   `maybePreloadBreaker(...)` wrappers)

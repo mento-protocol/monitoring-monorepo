@@ -3,7 +3,7 @@ title: Codex Cloud Setup and Maintenance
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -13,60 +13,77 @@ garden_lane: operator-runbooks
 # Codex Cloud Setup and Maintenance
 
 Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
-`~/.claude` directories. Cloud setup and maintenance therefore rely on the
-repo-local helper at `scripts/agent-autoreview.mjs`; they fail fast only if that
-repo-owned executable is missing or an explicit compatible `AUTOREVIEW_HELPER`
-override is not executable. Prepared-bundle overrides must implement the pinned
-helper's final handoff contract, including `--bundle-output`,
-`--bundle-output-display`, and `--trusted-input-root`. The wrapper-attested
-helper owns source fingerprinting and untracked-file serialization from a
-private manifest-bound runtime created before the final handoff. The owning
-checkout must match the pinned protected-main wrapper and materialize compatible
-helper/core blobs from that object; runtime-changing reviews use a separate
-trusted wrapper checkout physically outside the reviewed checkout. An explicit
-override that names that external wrapper's default sibling is still privately
-attested before use. PR shipping requires
-`pnpm agent:autoreview` as the structured batch-boundary review.
-Configure the Codex Cloud environment setup script as:
+`~/.claude` directories. Configure the environment setup script and optional
+cached-container maintenance script as:
 
 ```bash
 ./scripts/codex-cloud-setup.sh
-```
-
-Configure the optional Codex Cloud environment maintenance script as:
-
-```bash
 ./scripts/codex-cloud-maintenance.sh
 ```
 
-Codex Cloud setup expects `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for GitHub
-CLI-backed PR workflows, installs GitHub CLI from the official apt repository if
-the base image lacks it, configures git to use `gh` credentials for fetch/push,
-and refreshes `origin/main` before agent work starts. It also
-prewarms the pinned Trunk CLI and runs `./tools/trunk install` so
-Trunk-managed linters/runtimes are available before a task starts. If the cloud
-proxy blocks Trunk, allowlist
-`https://trunk.io/releases/`; if direct egress is available but the proxy is the
-blocker, set `CODEX_CLOUD_TRUNK_BYPASS_PROXY=1` to add `trunk.io` to `NO_PROXY`
-during setup. If neither route is available, set `CODEX_CLOUD_TRUNK_TARBALL_URL`
-to a reachable mirror of the pinned Linux Trunk tarball and set
-`CODEX_CLOUD_TRUNK_TARBALL_SHA256` so setup verifies the mirrored artifact before
-installing it. Keep `CODEX_CLOUD_TRUNK_INSTALL_TOOLS=true` (the default) for
-normal Cloud runs; set it to `false` only when using a base image with a
-prewarmed Trunk cache. Setup also installs Foundry by default
-(`CODEX_CLOUD_INSTALL_FOUNDRY=true`) so Aegis `forge test` checks can run. Set
-`CODEX_CLOUD_FOUNDRYUP_URL` to use a mirrored installer and
-`CODEX_CLOUD_FOUNDRYUP_SHA256` to verify that mirrored installer before
-execution. Setup checks OSV API egress by POSTing to
-`https://api.osv.dev/v1/querybatch` unless `CODEX_CLOUD_CHECK_OSV_EGRESS=false`,
-and verifies the repo-local autoreview helper at
-`scripts/agent-autoreview.mjs` before tool prewarm. Set `AUTOREVIEW_HELPER` only
-for an intentional compatible executable override; setup fails fast when the
-effective helper is missing.
+## Setup contract
 
-Codex Cloud maintenance runs when Codex resumes a cached container after
-checking out the task branch. It skips apt/tool installation, re-establishes
-repo-local git state, refreshes `origin/main`, verifies that the repo-local
-autoreview helper is still present, syncs branch lockfile changes via
-`CI=true pnpm install --frozen-lockfile --prefer-offline`, regenerates Envio
-types, and runs `pnpm agent:context-check`.
+Setup prepares a fresh container. It:
+
+- marks the checkout safe for Git, configures token-backed GitHub credentials,
+  and adds or rewrites `origin` to HTTPS when required;
+- refreshes `origin/main` and enables `.trunk/hooks`;
+- activates the `packageManager` version from `package.json` through Corepack;
+- verifies the repo-local autoreview helper, prewarms Trunk, installs Foundry,
+  and checks OSV API egress;
+- installs the frozen workspace dependencies; and
+- regenerates and verifies Envio types, then runs `pnpm agent:context-check`.
+
+Setup fails closed when required GitHub auth/fetch, helper, tool installation,
+dependency installation, codegen, or context validation fails. It can modify
+global Git credential configuration and the checkout's `origin` URL; use a
+dedicated Cloud container rather than a developer workstation.
+
+## GitHub and package tooling
+
+Setup expects `GH_TOKEN` (preferred) or `GITHUB_TOKEN`. If `gh` is absent on an
+apt-based image, it first tries the configured apt sources and then adds the
+official GitHub CLI repository as a fallback. It verifies `gh` auth before
+configuring fetch/push credentials and refreshing `origin/main`.
+
+The pinned Trunk CLI is prewarmed and `./tools/trunk install` supplies its
+managed linters and runtimes. If the Cloud proxy blocks Trunk, allowlist
+`https://trunk.io/releases/`; when direct egress works, set
+`CODEX_CLOUD_TRUNK_BYPASS_PROXY=1` to add `trunk.io` to `NO_PROXY`. Otherwise,
+set both `CODEX_CLOUD_TRUNK_TARBALL_URL` and
+`CODEX_CLOUD_TRUNK_TARBALL_SHA256` to a reachable verified mirror. Keep
+`CODEX_CLOUD_TRUNK_INSTALL_TOOLS=true` unless the image already has a prewarmed
+Trunk cache.
+
+Foundry installs by default so Aegis `forge test` checks can run. Set
+`CODEX_CLOUD_INSTALL_FOUNDRY=false` only when the image already supplies it. A
+custom `CODEX_CLOUD_FOUNDRYUP_URL` executes installer code, so always pair it
+with `CODEX_CLOUD_FOUNDRYUP_SHA256`; never use an unverified custom mirror.
+Fail-closed script enforcement is tracked in
+[#1477](https://github.com/mento-protocol/monitoring-monorepo/issues/1477).
+
+Setup POSTs to `https://api.osv.dev/v1/querybatch` to prove osv-scanner egress.
+Set `CODEX_CLOUD_CHECK_OSV_EGRESS=false` only when that check is intentionally
+unavailable and the resulting quality-gate limitation is accepted.
+
+## Autoreview helper
+
+The default helper is `scripts/agent-autoreview.mjs`. Set `AUTOREVIEW_HELPER`
+only for an intentional compatible executable override. The helper and
+prepared-bundle trust contracts live in
+[`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md); do not
+duplicate them here.
+
+## Maintenance contract
+
+Maintenance runs after a cached container checks out the task branch. It skips
+apt and tool installation, then re-establishes Git/origin state, refreshes
+`origin/main`, enables repo hooks, activates pnpm, verifies the autoreview
+helper, syncs the branch lockfile with:
+
+```bash
+CI=true pnpm install --frozen-lockfile --prefer-offline
+```
+
+It finishes by regenerating Envio types and running
+`pnpm agent:context-check`.

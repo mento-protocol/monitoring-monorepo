@@ -20,12 +20,12 @@ the rules in [`context-standards.md`](context-standards.md).
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
-| [`.agents/roles/standards-enforcer.md`](../.agents/roles/standards-enforcer.md) | Standards Enforcer Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-05-20 |
-| [`.agents/roles/verifier.md`](../.agents/roles/verifier.md) | Verifier Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-05-20 |
+| [`.agents/roles/standards-enforcer.md`](../.agents/roles/standards-enforcer.md) | Standards Enforcer Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`.agents/roles/verifier.md`](../.agents/roles/verifier.md) | Verifier Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md) | Babysit PR Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md) | Deploy Indexer Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-29 |
-| [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
-| [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
+| [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md) | Deploy Indexer Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md) | Forensic Report Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-06-15 |
 | [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md) | 0xADDRESS_CASE_PRESERVED — Display Name (persona/ENS if known) | unmanaged / unmanaged | skill / repo-wide | unowned | 90d |
 | [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md) | Monorepo Import Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-26 |
@@ -56,26 +56,25 @@ the rules in [`context-standards.md`](context-standards.md).
 | --- | --- | --- | --- | --- | --- |
 | [`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md) | Grafana Alloy | canonical / active | runbook / aegis/grafana-agent | eng | 90d; verified 2026-07-17 |
 | [`alerts/infra/channels/sentry-bridge/README.md`](../alerts/infra/channels/sentry-bridge/README.md) | Sentry Alerts Module | canonical / active | runbook / alerts/infra/channels/sentry-bridge | eng | 90d; verified 2026-07-17 |
-| [`alerts/infra/onchain-event-handler/README.md`](../alerts/infra/onchain-event-handler/README.md) | On-chain Event Handler Module | canonical / active | runbook / alerts/infra/onchain-event-handler | eng | 90d; verified 2026-07-17 |
-| [`alerts/infra/onchain-event-listeners/README.md`](../alerts/infra/onchain-event-listeners/README.md) | On-chain Event Listeners Module | canonical / active | runbook / alerts/infra/onchain-event-listeners | eng | 90d; verified 2026-07-17 |
-| [`alerts/infra/onchain-event-listeners/WEBHOOK_STATE_MANAGEMENT.md`](../alerts/infra/onchain-event-listeners/WEBHOOK_STATE_MANAGEMENT.md) | QuickNode Webhook State Management | unmanaged / unmanaged | runbook / alerts | unowned | 90d |
+| [`alerts/infra/onchain-event-handler/README.md`](../alerts/infra/onchain-event-handler/README.md) | On-chain Event Handler Module | canonical / active | runbook / alerts/infra/onchain-event-handler | eng | 90d; verified 2026-07-22 |
+| [`alerts/infra/onchain-event-listeners/README.md`](../alerts/infra/onchain-event-listeners/README.md) | On-chain Event Listeners Module | canonical / active | runbook / alerts/infra/onchain-event-listeners | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-17 |
-| [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-19 |
+| [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-22 |
 | [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-21 |
-| [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-08 |
+| [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md) | Codex Agent Skills — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
-| [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md) | Codex Cloud Setup and Maintenance | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md) | Cross-Protocol Context | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-06 |
-| [`docs/notes/dashboard-verification.md`](notes/dashboard-verification.md) | Dashboard Local and Browser Verification | canonical / active | runbook / ui-dashboard | eng | 90d; verified 2026-07-17 |
-| [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md) | Documentation gardening | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-19 |
+| [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md) | Codex Agent Skills | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md) | Codex Cloud Setup and Maintenance | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md) | Cross-Protocol Context | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/dashboard-verification.md`](notes/dashboard-verification.md) | Dashboard Local and Browser Verification | canonical / active | runbook / ui-dashboard | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md) | Documentation gardening | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/github-tooling-surfaces.md`](notes/github-tooling-surfaces.md) | GitHub Tooling Surfaces — gh CLI vs MCP | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md) | Hasura isolation trigger | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
+| [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md) | Hasura isolation trigger | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`docs/notes/reserve-yield-indexer.md`](notes/reserve-yield-indexer.md) | Reserve-Yield Indexer Topology | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-03 |
+| [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/reserve-yield-indexer.md`](notes/reserve-yield-indexer.md) | Reserve-Yield Indexer Topology | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md) | Sentry Triage Pipeline | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-19 |
 | [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md) | GitHub-to-Slack notifications for Terraform-applying workflows | canonical / active | runbook / terraform/infra | eng | 30d; verified 2026-07-17 |
 | [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md) | Spoken Attention Nudge | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-05 |
@@ -94,7 +93,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/pr-checklists/ci-workflow-gates.md`](pr-checklists/ci-workflow-gates.md) | CI Workflow Gates Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/code-health.md`](pr-checklists/code-health.md) | Code Health Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/dynamic-route-metadata.md`](pr-checklists/dynamic-route-metadata.md) | Dynamic Route Metadata and Private Data Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |
-| [`docs/pr-checklists/indexer-handler-invariants.md`](pr-checklists/indexer-handler-invariants.md) | Indexer Handler Invariants | canonical / active | checklist / indexer-envio | eng | 90d; verified 2026-07-21 |
+| [`docs/pr-checklists/indexer-handler-invariants.md`](pr-checklists/indexer-handler-invariants.md) | Indexer Handler Invariants | canonical / active | checklist / indexer-envio | eng | 90d; verified 2026-07-22 |
 | [`docs/pr-checklists/keyboard-a11y-controlled-widgets.md`](pr-checklists/keyboard-a11y-controlled-widgets.md) | Keyboard Accessibility on Controlled Widgets Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/mutation-testing.md`](pr-checklists/mutation-testing.md) | Mutation Testing Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/pr-checklists/recurring-review-patterns.md`](pr-checklists/recurring-review-patterns.md) | Recurring PR Review Patterns | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-21 |
@@ -133,7 +132,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0024-plotly-basic-dist-bundle-budgets.md`](adr/0024-plotly-basic-dist-bundle-budgets.md) | Plotly.js basic-dist plus enforced bundle-size budgets | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0025-fixture-browser-tests-react-doctor.md`](adr/0025-fixture-browser-tests-react-doctor.md) | Fixture-driven browser tests, visual snapshots, and a react-doctor score gate | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0026-aegis-nestjs-app-engine.md`](adr/0026-aegis-nestjs-app-engine.md) | Aegis is a NestJS App Engine service polling view calls into Prometheus | canonical / active | adr / aegis | eng | 90d; verified 2026-07-06 |
-| [`docs/adr/0027-metrics-bridge-hasura-to-prometheus.md`](adr/0027-metrics-bridge-hasura-to-prometheus.md) | A Hasura to Prometheus bridge exists so v3 DB data can drive Grafana alerts | canonical / active | adr / metrics-bridge | eng | 90d; verified 2026-07-06 |
+| [`docs/adr/0027-metrics-bridge-hasura-to-prometheus.md`](adr/0027-metrics-bridge-hasura-to-prometheus.md) | A Hasura to Prometheus bridge exists so v3 DB data can drive Grafana alerts | canonical / active | adr / metrics-bridge | eng | 90d; verified 2026-07-22 |
 | [`docs/adr/0028-terraform-stack-registry.md`](adr/0028-terraform-stack-registry.md) | Terraform ownership is a registry with roots split by cadence and blast radius | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-06 |
 | [`docs/adr/0029-ci-apply-production-infra-gate.md`](adr/0029-ci-apply-production-infra-gate.md) | Infra applies on merge to main behind the production-infra environment gate | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-08 |
 | [`docs/adr/0030-iac-before-cli-secrets.md`](adr/0030-iac-before-cli-secrets.md) | All secrets are managed by IaC; agents never touch them with CLI commands | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-06 |
@@ -148,6 +147,10 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0039-multistrategy-pools-historical-fx-volume.md`](adr/0039-multistrategy-pools-historical-fx-volume.md) | Model pool strategies many-to-many and price same-currency swaps from historical FX crosses | canonical / active | adr / indexer-envio, ui-dashboard, metrics-bridge | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0040-bounded-documentation-garden-queue.md`](adr/0040-bounded-documentation-garden-queue.md) | Documentation gardening runs through one bounded issue queue | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-19 |
 | [`docs/adr/0041-offline-documentation-navigation-evaluation.md`](adr/0041-offline-documentation-navigation-evaluation.md) | Documentation navigation is evaluated offline with deterministic scoring | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-21 |
+| [`docs/adr/0042-metrics-bridge-external-price-poller.md`](adr/0042-metrics-bridge-external-price-poller.md) | metrics-bridge hosts the external market-price peg poller | canonical / active | adr / metrics-bridge | eng | 90d; verified 2026-07-22 |
+| [`docs/adr/0043-peg-registry-service-local.md`](adr/0043-peg-registry-service-local.md) | The peg-monitor registry is service-local config, not published shared-config | canonical / active | adr / metrics-bridge / shared-config | eng | 90d; verified 2026-07-22 |
+| [`docs/adr/0044-peg-thresholds-gated-rules-plane.md`](adr/0044-peg-thresholds-gated-rules-plane.md) | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON | canonical / active | adr / alerts | eng | 90d; verified 2026-07-22 |
+| [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) | Peg paging measures executable sell price; the deep venue pages alone | canonical / active | adr / metrics-bridge / alerts | eng | 90d; verified 2026-07-22 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
 ## package-readmes-reference
@@ -187,3 +190,4 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) | AI Review Process Integration Plan | non-canonical / archived | plan / ci/process | eng | 365d; verified 2026-07-17 |
 | [`docs/PLAN-cdps-monitoring.md`](PLAN-cdps-monitoring.md) | ROADMAP refresh + CDPs monitoring (Liquity v2 indexing & dashboard) | unmanaged / unmanaged | plan / repo-wide | unowned | 365d |
 | [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Oracle health-state decision retrospective | non-canonical / archived | plan / repo-wide | eng | 365d |
+| [`docs/PLAN-peg-monitoring.md`](PLAN-peg-monitoring.md) | Peg monitoring for oracle-less stablecoins (EUROP first) | non-canonical / active | plan / repo-wide | eng | 365d |

@@ -107,12 +107,25 @@ const FORBIDDEN_BASENAMES = new Set([
 // container files, workflow/config YAML). Autofix territory is product source
 // only; a config-shaped path is refused even when the fix "needs" it — that is
 // a human's change to make.
+//
+// Terraform (*.tf/*.hcl/*.tfvars) is forbidden at ANY depth, not just the root
+// terraform/ prefix: the alerts/rules, alerts/infra, governance-watchdog/infra,
+// and aegis/terraform stacks live outside root terraform/, and their PR plan
+// jobs EXECUTE `terraform plan` on the PR head — HCL can run arbitrary
+// programs at plan time (`data "external"`) while that job holds a read-only
+// plan SA (whose state-bucket access includes cleartext secret values) and a
+// write-scoped checkout token. A Sentry runtime bug is never fixed in HCL.
 const FORBIDDEN_BASENAME_PATTERNS = [
   /\.config\.[cm]?[jt]s$/,
   /^\.?lighthouserc/,
   /\.sh$/,
   /^Dockerfile/,
   /\.ya?ml$/,
+  // Terraform in BOTH syntaxes: HCL (*.tf/*.hcl/*.tfvars) and the JSON forms
+  // Terraform loads identically (*.tf.json, *.tfvars.json).
+  /\.tf(\.json)?$/,
+  /\.hcl(\.json)?$/,
+  /\.tfvars(\.example|\.json)?$/,
 ];
 
 // ---------------------------------------------------------------------------

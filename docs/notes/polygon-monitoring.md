@@ -3,7 +3,7 @@ title: Polygon monitoring coverage and rollout
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-21
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -101,6 +101,12 @@ The promotion verifier additionally reads the versioned
 `indexer-envio/config/replay-integrity.json` marker from the deployed commit,
 which prevents a pre-fix replay from passing solely because a later event made
 the final pool row look current.
+
+Version 2 also records the hosted-worker boundary discovered during the first
+fail-closed replay: preload and processing must independently derive whether an
+effect is needed. Module-local collections cannot bridge those passes because
+Envio may place them in different workers or restart the process. The v1
+candidate therefore remains incompatible even if it later appears caught up.
 
 ## Alert conditions
 

@@ -25,7 +25,10 @@ After creating a new worktree manually or cloning the repo, run:
 
 This ensures deps are installed, Playwright Chromium is available for dashboard
 browser tests, and Envio codegen has produced the generated type facade
-required for `indexer-envio` TypeScript to compile.
+required for `indexer-envio` TypeScript to compile. A `pnpm patch` on
+`blamer@1.0.7` (jscpd's transitive git-blame dependency) strips its shipped
+`.idea/` directory so sandboxed installs no longer hit a deterministic EPERM
+at `importPackage`.
 Worktrunk-created worktrees (`wt switch --create` / `wt switch -c`) run the
 same setup script automatically through `.config/wt.toml` as a blocking
 `pre-start` hook before any launch command configured with `-x` starts.

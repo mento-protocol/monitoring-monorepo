@@ -62,8 +62,12 @@ STATE
 fi
 
 if [[ ${1-} == "state" && ${2-} == "rm" ]]; then
-	echo "unexpected terraform state rm" >&2
-	exit 97
+	if [[ ${3-} != "-lock-timeout=30s" ]]; then
+		echo "state rm did not use the bounded lock timeout" >&2
+		exit 97
+	fi
+	printf '%s\n' "Removed ${4-}"
+	exit 0
 fi
 
 echo "unexpected terraform invocation: $*" >&2
@@ -108,6 +112,7 @@ chmod +x "${fake_bin}/terraform" "${fake_bin}/curl"
 run_repair() {
 	local http_code="$1"
 	local state_mode="${2:-normal}"
+	local confirmation="${3:-n}"
 	(
 		cd "${fixture_root}"
 		PATH="${fake_bin}:${PATH}" \
@@ -115,7 +120,7 @@ run_repair() {
 			FAKE_CALL_LOG="${call_log}" \
 			FAKE_HTTP_CODE="${http_code}" \
 			FAKE_STATE_MODE="${state_mode}" \
-			bash "${repair_script}"
+			bash "${repair_script}" <<<"${confirmation}"
 	)
 }
 
@@ -134,6 +139,21 @@ grep -Fq "curl https://api.quicknode.com/webhooks/rest/v1/webhooks/canonical-web
 	fail "curl did not receive exactly the resource-level ID"
 if grep -Fq "nested-" "${call_log}"; then
 	fail "a nested provider response ID leaked into the QuickNode URL"
+fi
+
+: >"${call_log}"
+if ! output=$(run_repair 404 normal y 2>&1); then
+	echo "${output}" >&2
+	fail "confirmed missing webhook should permit approved state repair"
+fi
+grep -Fq "terraform state rm -lock-timeout=30s" "${call_log}" ||
+	fail "approved repair did not use a bounded Terraform state lock"
+grep -Fq ".github/workflows/alerts-infra.yml" <<<"${output}" ||
+	fail "approved repair did not name the state-only workflow dispatch"
+grep -Fq "production-infra" <<<"${output}" ||
+	fail "approved repair did not name the apply approval environment"
+if grep -Fq -- "-lock=false" "${call_log}"; then
+	fail "standalone repair disabled Terraform state locking"
 fi
 
 : >"${call_log}"
