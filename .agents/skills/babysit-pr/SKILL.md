@@ -73,8 +73,11 @@ Do not foreground-poll and never sleep-poll. Instead:
    CI failures arrive as webhook activity.
 2. Arm a scheduled self check-in (for example `send_later`, roughly an hour
    out) before ending the turn; webhook events do not cover CI success, new
-   pushes, or merge-conflict transitions. Re-arm on each firing until the PR
-   is merged or closed.
+   pushes, or merge-conflict transitions. Re-arming is bounded by the same
+   babysitting deadline as the local loop (one hour unless the user set a
+   different budget): at the deadline, report the current state and stop or
+   escalate instead of re-arming silently. Stop when the PR is merged or
+   closed.
 3. On every event or check-in, run the MCP emulation of the readiness sweep
    (tool mapping in
    [`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)):
@@ -90,13 +93,18 @@ Do not foreground-poll and never sleep-poll. Instead:
      not readable over MCP; report it as unverified rather than assumed.
 4. Blocker handling, reply shapes, and Codex-request discipline are identical
    to the local path (see below); use the MCP write tools
-   (`add_reply_to_pull_request_comment`, `resolve_review_thread`,
-   `update_pull_request`) in place of `gh` commands. Reply before resolving,
-   always.
+   (`add_reply_to_pull_request_comment` for inline review comments,
+   `add_issue_comment` for top-level PR conversation comments,
+   `resolve_review_thread`, `update_pull_request`) in place of `gh`
+   commands. Reply before resolving, always.
 5. Label any all-clear as **MCP-emulated readiness**, never as
    probe-verified: `pnpm pr:ready-state` did not run, and the Codex approval
-   gate plus required-context classification are approximations. The
-   probe-verified all-clear belongs to a surface where the probe runs.
+   gate plus required-context classification are approximations. An
+   MCP-emulated all-clear is a status report, not a terminal state: keep the
+   step-2 loop armed, name the gates the sweep could not verify (for example
+   the Codex reaction approval) as unverified rather than clear, and hand
+   the final probe-verified readiness decision to a gh-capable surface
+   (local babysitter or CI).
 
 ## Act On Required Blockers
 

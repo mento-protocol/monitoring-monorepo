@@ -76,6 +76,7 @@ Do not build a gh-over-MCP shim; the skills document the two native paths.
 | `gh pr edit` / body updates                    | `update_pull_request`                                                                                   |
 | `gh pr merge --update-branch` equivalents      | `update_pull_request_branch`                                                                            |
 | reply to a review comment                      | `add_reply_to_pull_request_comment`                                                                     |
+| reply to a top-level PR comment                | `add_issue_comment` (pass the PR number as the issue number)                                            |
 | resolve a review thread (GraphQL)              | `resolve_review_thread`                                                                                 |
 | failing-check log reads                        | `get_job_logs`, `get_check_run`                                                                         |
 | `gh issue edit` / labels / comments            | `issue_write`, `issue_read`, `add_issue_comment`                                                        |
