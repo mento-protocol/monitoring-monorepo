@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { Pool, RateFeed } from "envio";
+import type { OracleFeedState, Pool, RateFeed } from "envio";
 import {
   indexerTestHelpers,
   type MockDbWith,
@@ -18,8 +18,10 @@ import {
 } from "../src/EventHandlers.ts";
 import { UNKNOWN_ORACLE_REPORTERS } from "../src/constants.js";
 import { syncRateFeedFromRpc } from "../src/handlers/rateFeed.js";
+import { bootstrapOracleFeedState } from "../src/oracleFeedState.js";
 
 type MockDb = MockDbWith<{
+  OracleFeedState: WritableEntity<OracleFeedState>;
   Pool: WritableEntity<Pool>;
   RateFeed: WritableEntity<RateFeed>;
 }>;
@@ -35,6 +37,19 @@ const MONAD_GBP_FEED = "0xea4103a6a122fbe2cdb07a80d4d293be07bb29fa";
 const MONAD_GBP_REPORTER = "0xdb8fc8c6daac8f73e21e9cc145440ab899d60e55";
 const UNKNOWN_REPORTER = "0x0000000000000000000000000000000000000001";
 const SORTED_ORACLES = "0xefb84935239dacdecf7c5ba76d8de40b077b7b33";
+
+function seedOracleFeedState(mockDb: MockDb, eventBlock: bigint): MockDb {
+  return mockDb.entities.OracleFeedState.set(
+    bootstrapOracleFeedState({
+      chainId: CELO,
+      rateFeedID: CELO_GBP_FEED,
+      reporters: [CELO_GBP_REPORTER],
+      timestamps: [1_700_000_000n],
+      reportExpiry: 300n,
+      bootstrapThroughBlock: eventBlock - 1n,
+    }),
+  );
+}
 
 describe("RateFeed handlers", () => {
   beforeEach(() => {
@@ -294,6 +309,7 @@ describe("RateFeed handlers", () => {
         reserves1: 10n ** 18n,
       }),
     );
+    mockDb = seedOracleFeedState(mockDb, 104n);
 
     mockDb = await SortedOracles.MedianUpdated.processEvent({
       event: SortedOracles.MedianUpdated.createMockEvent({
@@ -465,6 +481,7 @@ describe("RateFeed handlers", () => {
       UNKNOWN_REPORTER,
     ]);
     _setMockNumReporters(CELO, CELO_GBP_FEED, 2);
+    mockDb = seedOracleFeedState(mockDb, 102n);
     mockDb = await SortedOracles.MedianUpdated.processEvent({
       event: SortedOracles.MedianUpdated.createMockEvent({
         token: CELO_GBP_FEED,
@@ -520,6 +537,7 @@ describe("RateFeed handlers", () => {
         reserves1: 10n ** 18n,
       }),
     );
+    mockDb = seedOracleFeedState(mockDb, 103n);
 
     mockDb = await SortedOracles.MedianUpdated.processEvent({
       event: SortedOracles.MedianUpdated.createMockEvent({
@@ -569,6 +587,7 @@ describe("RateFeed handlers", () => {
         reserves1: 10n ** 18n,
       }),
     );
+    mockDb = seedOracleFeedState(mockDb, 104n);
 
     mockDb = await SortedOracles.MedianUpdated.processEvent({
       event: SortedOracles.MedianUpdated.createMockEvent({
@@ -605,6 +624,7 @@ describe("RateFeed handlers", () => {
         reserves1: 10n ** 18n,
       }),
     );
+    mockDb = seedOracleFeedState(mockDb, 200n);
 
     mockDb = await SortedOracles.MedianUpdated.processEvent({
       event: SortedOracles.MedianUpdated.createMockEvent({

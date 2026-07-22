@@ -150,6 +150,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0043-peg-registry-service-local.md`](adr/0043-peg-registry-service-local.md) | The peg-monitor registry is service-local config, not published shared-config | canonical / active | adr / metrics-bridge / shared-config | eng | 90d; verified 2026-07-22 |
 | [`docs/adr/0044-peg-thresholds-gated-rules-plane.md`](adr/0044-peg-thresholds-gated-rules-plane.md) | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON | canonical / active | adr / alerts | eng | 90d; verified 2026-07-22 |
 | [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) | Peg paging measures executable sell price; the deep venue pages alone | canonical / active | adr / metrics-bridge / alerts | eng | 90d; verified 2026-07-22 |
+| [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) | Oracle freshness is reconstructed from persisted report events | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-22 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
 ## package-readmes-reference
@@ -169,7 +170,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md) | Terraform secret strategy hardening | canonical / active | reference / terraform/infra | eng | 90d; verified 2026-07-17 |
 | [`docs/README.md`](README.md) | Documentation Catalog | canonical / active | index / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/vp-oracle-staleness-alerting-spec.md`](vp-oracle-staleness-alerting-spec.md) | Virtual Pool Oracle Staleness Alerting Spec | non-canonical / draft | reference / repo-wide | eng | 180d; verified 2026-06-16 |
-| [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-17 |
+| [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-22 |
 | [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | unmanaged / unmanaged | reference / indexer-envio | unowned | 180d |
 | [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`SPEC.md`](../SPEC.md) | Mento Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-22 |

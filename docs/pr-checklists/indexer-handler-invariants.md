@@ -32,6 +32,11 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
 
 - Block-keyed RPC caches must be bounded with an LRU or block-height eviction;
   never retain one entry per block in an unbounded `Map`.
+- Envio stores rate-limit state on each created effect object. In the multichain
+  indexer, a provider-specific floor or burst policy must use a chain/provider-
+  scoped effect object; never apply one chain's RPC limit to an effect shared by
+  every chain. Keep preload and processing on the same selected object so
+  identical-input deduplication still works.
 - Envio V3 runs each handler in a concurrent preload pass and then an ordered
   processing pass. Any direct `context.effect(...)` whose key can be derived
   before writes must be requested before or inside the positive
@@ -91,6 +96,32 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
 - When adding an effect to a replayed handler, audit the event's historical
   cardinality and add preload-aware coverage. Processing-only correctness tests
   do not prove that hosted replay will batch the external calls.
+- SortedOracles freshness is event-sourced. For a tracked feed without an
+  `OracleFeedState`, only the first `OracleReported` or
+  `OracleReportRemoved` may perform the bounded processing-only bootstrap: one
+  exact-boundary `getTimestamps` call plus an effective expiry. When a currently
+  referencing pool row was last persisted before the event block, use the
+  parent block and apply the current log. Otherwise initialize exact
+  block-close timestamps and expiry, then absorb that block's report/removal
+  logs. Raw global/token expiry must come from the same boundary. Keep the
+  timestamp-list effect provider-family scoped and uncached. Missing or
+  malformed arrays, reporters, timestamps, or expiry fail the event before
+  entity writes; never fall back to latest-block state.
+- After bootstrap, apply `OracleReported` reporter/timestamp upserts and
+  `OracleReportRemoved` deletions in block/log order, then recompute the upper
+  median timestamp at sorted index `floor(count / 2)`. `MedianUpdated` consumes
+  that state and `OracleRemoved` does not mutate it. Keep raw global/token and
+  effective expiry in a per-feed `OracleExpiryState`: bootstrap it once at the
+  same exact boundary, then apply both expiry events in block/log order. A zero
+  token value derives the persisted global fallback; never read block-close
+  state from inside an earlier config log. Never-tracked feeds must not perform
+  expiry RPC or fail replay. Cover same-block ordering, flat reports, removals,
+  malformed bootstraps, and absent state before changing this path.
+- Do not restore traffic-scaled `medianTimestamp` or `reportExpiry` effects to
+  `OracleReported`, `OracleReportRemoved`, or `MedianUpdated`. A change to this
+  replay contract requires a full replay, a replay-integrity marker bump with
+  verifier regression coverage, and matching `OracleReportRemoved`
+  registration in both mainnet and testnet configs.
 - Local derivations from `lastMedianPrice` must use
   `hasFreshLiveMedian(pool, eventTimestamp)`, not merely `medianLive` or a
   non-zero price. The gate requires non-zero median, `medianLive`, `oracleOk`,

@@ -20,7 +20,7 @@
 // (groups A, B, F) are safe to flip later.
 // ---------------------------------------------------------------------------
 
-import { createEffect as createEnvioEffect, S } from "envio";
+import { S } from "envio";
 import {
   fetchErc20Decimals,
   fetchInvertRateFeed,
@@ -31,11 +31,11 @@ import {
   fetchTradingLimits,
 } from "./pool-state.js";
 import {
-  fetchMedianTimestamp,
   fetchNumReporters,
   fetchRateFeedOracles,
   fetchReferenceRateFeedID,
   fetchReportExpiry,
+  fetchReportExpiryConfig,
 } from "./oracle-state.js";
 import { fetchFees, fetchRebalanceIncentiveAtBlock } from "./pool-fees.js";
 import { fetchBlockTimestamp } from "./block.js";
@@ -53,32 +53,9 @@ import {
   type BreakerKindRpc,
 } from "./breakers.js";
 import { resolveFeeTokenMeta, UNKNOWN_FEE_TOKEN_META } from "../feeToken.js";
-import { trackEffectExecution } from "../performance.js";
+import { createEffect } from "./tracked-effect.js";
 import { fetchSusdsSharePriceUsdWei } from "./susds.js";
 import { fetchStethBalanceOf } from "./steth.js";
-
-type UntypedCreateEffect = (
-  options: unknown,
-  handler: (args: unknown) => Promise<unknown>,
-) => unknown;
-
-const createEffect = ((options: unknown, handler: unknown) => {
-  const effectName =
-    typeof options === "object" &&
-    options !== null &&
-    "name" in options &&
-    typeof (options as { name?: unknown }).name === "string"
-      ? (options as { name: string }).name
-      : "unknown";
-
-  return (createEnvioEffect as unknown as UntypedCreateEffect)(
-    options,
-    (args) =>
-      trackEffectExecution(effectName, () =>
-        (handler as (value: unknown) => Promise<unknown>)(args),
-      ),
-  );
-}) as typeof createEnvioEffect;
 
 // ---------------------------------------------------------------------------
 // Output schemas — defined once so they can be shared / referenced. Sury
@@ -162,6 +139,12 @@ const vpExchangeIdShape = S.schema({
 const feeTokenMetaShape = S.schema({
   symbol: S.string,
   decimals: S.int32,
+});
+
+const reportExpiryConfigShape = S.schema({
+  globalReportExpiry: S.bigint,
+  tokenReportExpiry: S.bigint,
+  reportExpiry: S.bigint,
 });
 
 // ---------------------------------------------------------------------------
@@ -665,29 +648,32 @@ export const reportExpiryEffect = createEffect(
     )) ?? null,
 );
 
-export const medianTimestampEffect = createEffect(
+export const reportExpiryConfigEffect = createEffect(
   {
-    name: "medianTimestamp",
+    name: "reportExpiryConfigV1",
     input: {
       chainId: S.int32,
       rateFeedID: S.string,
       blockNumber: S.bigint,
     },
-    output: S.nullable(S.bigint),
-    // dRPC's stressed public-tier floor is 40 eth_call/s. This exact-block
-    // read fans out during Polygon replays, so stay within that floor instead
-    // of creating a retry/fallback storm after transport-level batching.
-    rateLimit: { calls: 40, per: "second" },
+    output: S.nullable(reportExpiryConfigShape),
+    rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
   async ({ input, context }) =>
-    (await fetchMedianTimestamp(
+    (await fetchReportExpiryConfig(
       input.chainId,
       input.rateFeedID,
       input.blockNumber,
       context.log,
     )) ?? null,
 );
+
+export {
+  MEDIAN_TIMESTAMP_RATE_LIMITS,
+  medianTimestampEffectForChain,
+} from "./median-timestamp-effect.js";
+export { oracleReportTimestampsEffectForChain } from "./oracle-report-timestamps-effect.js";
 
 // ---------------------------------------------------------------------------
 // Group E — trading limits.

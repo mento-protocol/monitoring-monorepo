@@ -23,7 +23,7 @@
     "generate:env": "node ./bin/generate-env.mjs",
     "knip": "knip --config knip.json --no-progress",
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
-    "lint": "eslint src/",
+    "lint": "eslint src/ --cache --cache-strategy content --cache-location .eslintcache",
     "logs": "./bin/get-logs.sh",
     "reprocess:event": "tsx bin/reprocess-event.ts",
     "prestart": "pnpm run build",
