@@ -67,7 +67,8 @@ root_node_snapshot_diagnostic_file=""
 set_root_node_snapshot_stage() {
   case "$1" in
     source-proof | snapshot-trust | native-format | preload-policy | \
-      elf-metadata | interpreter-path | loader-policy | ambient-loader-list | \
+      elf-metadata | interpreter-path | loader-policy | ambient-loader-exec | \
+      ambient-loader-stderr | ambient-loader-parse | ambient-loader-policy | \
       dependency-closure | alias-policy | controlled-loader-list | \
       manifest-seal | closure-attestation | version-exec | version-output | \
       version-reattest | smoke-exec | smoke-reattest)
@@ -95,17 +96,20 @@ report_root_node_snapshot_rejection() {
     elf-metadata) rank=5 ;;
     interpreter-path) rank=6 ;;
     loader-policy) rank=7 ;;
-    ambient-loader-list) rank=8 ;;
-    dependency-closure) rank=9 ;;
-    alias-policy) rank=10 ;;
-    controlled-loader-list) rank=11 ;;
-    manifest-seal) rank=12 ;;
-    closure-attestation) rank=13 ;;
-    version-exec) rank=14 ;;
-    version-output) rank=15 ;;
-    version-reattest) rank=16 ;;
-    smoke-exec) rank=17 ;;
-    smoke-reattest) rank=18 ;;
+    ambient-loader-exec) rank=8 ;;
+    ambient-loader-stderr) rank=9 ;;
+    ambient-loader-parse) rank=10 ;;
+    ambient-loader-policy) rank=11 ;;
+    dependency-closure) rank=12 ;;
+    alias-policy) rank=13 ;;
+    controlled-loader-list) rank=14 ;;
+    manifest-seal) rank=15 ;;
+    closure-attestation) rank=16 ;;
+    version-exec) rank=17 ;;
+    version-output) rank=18 ;;
+    version-reattest) rank=19 ;;
+    smoke-exec) rank=20 ;;
+    smoke-reattest) rank=21 ;;
   esac
   [[ -n "$root_node_snapshot_diagnostic_file" ]] || return 0
   if [[
@@ -119,7 +123,8 @@ report_root_node_snapshot_rejection() {
       case "$existing_stage" in
         source-proof | snapshot-trust | native-format | preload-policy | \
           elf-metadata | interpreter-path | loader-policy | \
-          ambient-loader-list | dependency-closure | alias-policy | \
+          ambient-loader-exec | ambient-loader-stderr | ambient-loader-parse | \
+          ambient-loader-policy | dependency-closure | alias-policy | \
           controlled-loader-list | manifest-seal | closure-attestation | \
           version-exec | version-output | version-reattest | smoke-exec | \
           smoke-reattest) ;;
@@ -2074,7 +2079,7 @@ linux_node_snapshot_has_safe_closure() {
   : >"$loader_output"
   : >"$loader_error"
   /bin/chmod 0600 "$loader_output" "$loader_error"
-  set_root_node_snapshot_stage ambient-loader-list
+  set_root_node_snapshot_stage ambient-loader-exec
   if ! run_strict_linux_loader_list \
     "$resolved_interpreter" \
     "$candidate" \
@@ -2084,10 +2089,12 @@ linux_node_snapshot_has_safe_closure() {
     /bin/rm -f -- "$loader_output" "$loader_error"
     return 1
   fi
+  set_root_node_snapshot_stage ambient-loader-stderr
   if [[ -s "$loader_error" ]]; then
     /bin/rm -f -- "$loader_output" "$loader_error"
     return 1
   fi
+  set_root_node_snapshot_stage ambient-loader-parse
   loader_metadata="$({
     strict_linux_loader_list_metadata \
       "$loader_output" \
@@ -2098,6 +2105,7 @@ linux_node_snapshot_has_safe_closure() {
     return 1
   }
   /bin/rm -f -- "$loader_output" "$loader_error"
+  set_root_node_snapshot_stage ambient-loader-policy
   while IFS=$'\t' read -r metadata_kind metadata_value metadata_third metadata_extra; do
     [[ -z "$metadata_extra" ]] || return 1
     case "$metadata_kind" in
