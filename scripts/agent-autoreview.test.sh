@@ -3,9 +3,53 @@ if [[ "${AUTOREVIEW_TEST_SYSTEM_BASH:-}" != "1" && -x /bin/bash ]]; then
   export AUTOREVIEW_TEST_SYSTEM_BASH=1
   exec /bin/bash "$0" "$@"
 fi
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
 unset SSL_CERT_DIR
+
+report_unexpected_test_failure() {
+  local status="$1"
+  local line="$2"
+  local case_name="bootstrap"
+  local frame
+  local source="${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}"
+
+  # ERR also fires while errexit is deliberately disabled around expected
+  # failures. Keep those paths quiet and report only commands that would abort
+  # a family under the suite's fail-fast contract.
+  case "$-" in
+    *e*) ;;
+    *) return 0 ;;
+  esac
+
+  for frame in "${FUNCNAME[@]:1}"; do
+    case "$frame" in
+      run_*_regression | run_*_regressions)
+        case_name="$frame"
+        break
+        ;;
+    esac
+  done
+  if [[ "$case_name" == "bootstrap" ]]; then
+    for frame in "${FUNCNAME[@]:1}"; do
+      case "$frame" in
+        run_*)
+          case_name="$frame"
+          break
+          ;;
+      esac
+    done
+  fi
+
+  printf 'AUTOREVIEW_TEST_FAILURE focus=%s case=%s status=%s source=%s line=%s\n' \
+    "${AUTOREVIEW_TEST_FOCUS:-all}" \
+    "$case_name" \
+    "$status" \
+    "${source##*/}" \
+    "$line" >&2
+  return 0
+}
+trap 'report_unexpected_test_failure "$?" "$LINENO"' ERR
 
 suite_tmp_dir=""
 suite_child_pids=()
@@ -104,6 +148,58 @@ terminate_suite_process_group() {
     kill -KILL -- "-$group_pid" 2>/dev/null || true
   fi
   wait "$group_pid" 2>/dev/null || true
+}
+
+process_state_code() {
+  local pid="$1"
+  local ps_bin=""
+  local state
+
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  if [[ -x /bin/ps ]]; then
+    ps_bin=/bin/ps
+  elif [[ -x /usr/bin/ps ]]; then
+    ps_bin=/usr/bin/ps
+  else
+    return 1
+  fi
+  state="$("$ps_bin" -o stat= -p "$pid" 2>/dev/null)" || return 1
+  state="${state#"${state%%[![:space:]]*}"}"
+  [[ -n "$state" ]] || return 1
+  printf '%s\n' "${state:0:1}"
+}
+
+process_is_runnable() {
+  local pid="$1"
+  local state
+
+  # Invalid fixture output must fail closed as a surviving process.
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 0
+  kill -0 "$pid" 2>/dev/null || return 1
+  if state="$(process_state_code "$pid")"; then
+    case "$state" in
+      Z | X)
+        return 1
+        ;;
+    esac
+  fi
+  # If process state cannot be inspected, preserve the existing fail-closed
+  # behavior and only accept an exit that kill(2) can confirm.
+  kill -0 "$pid" 2>/dev/null
+}
+
+wait_for_process_exit_or_zombie() {
+  local pid="$1"
+  local attempts="${2:-100}"
+  local attempt
+
+  for ((attempt = 0; attempt < attempts; attempt++)); do
+    if ! process_is_runnable "$pid"; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  return 1
 }
 
 run_autoreview_test_suite() {
@@ -316,6 +412,19 @@ run_autoreview_test_suite() {
     done
   }
 
+  report_failed_family() {
+    local family="$1"
+    local status
+    status="$(cat "$suite_tmp_dir/$family.status")"
+    printf '\n===== autoreview family failed: %s =====\n' "$family" >&2
+    printf 'AUTOREVIEW_TEST_FAILURE family=%s status=%s elapsed=%ss rerun="AUTOREVIEW_TEST_FOCUS=%s bash scripts/agent-autoreview.test.sh"\n' \
+      "$family" \
+      "$status" \
+      "$(cat "$suite_tmp_dir/$family.elapsed")" \
+      "$family" >&2
+    cat "$suite_tmp_dir/$family.log" >&2
+  }
+
   if [[ "${AUTOREVIEW_TEST_SUITE_SIGNAL_FIXTURE:-}" == "1" ]]; then
     run_suite_family_group 1 suite-wrapper-fixture
     if [[ "$(cat "$suite_tmp_dir/suite-wrapper-fixture.status")" != "0" ]]; then
@@ -323,6 +432,28 @@ run_autoreview_test_suite() {
     fi
     printf 'suite wrapper signal fixture exited without cancellation\n' >&2
     return 1
+  fi
+
+  if [[ "${AUTOREVIEW_TEST_SUITE_DIAGNOSTIC_FIXTURE:-}" == "1" ]]; then
+    run_suite_family_group 1 family-diagnostic-fixture
+    local diagnostic_status
+    diagnostic_status="$(cat "$suite_tmp_dir/family-diagnostic-fixture.status")"
+    if [[ "$diagnostic_status" != "1" ]]; then
+      cat "$suite_tmp_dir/family-diagnostic-fixture.log" >&2
+      printf 'expected diagnostic fixture status 1, got %s\n' \
+        "$diagnostic_status" >&2
+      return 1
+    fi
+    if ! grep -Fq \
+      'AUTOREVIEW_TEST_FAILURE focus=family-diagnostic-fixture case=run_family_diagnostic_fixture status=1' \
+      "$suite_tmp_dir/family-diagnostic-fixture.log"; then
+      cat "$suite_tmp_dir/family-diagnostic-fixture.log" >&2
+      printf 'family failure log omitted the actionable case diagnostic\n' >&2
+      return 1
+    fi
+    report_failed_family family-diagnostic-fixture
+    printf 'autoreview suite family diagnostics passed\n'
+    return 0
   fi
 
   # Engine lifecycle and signal assertions are timing-sensitive, so this family
@@ -354,8 +485,7 @@ run_autoreview_test_suite() {
       engine-isolation target-selection runtime-trust bundle-integrity adapter; do
       status="$(cat "$suite_tmp_dir/$family.status")"
       if [[ "$status" != "0" ]]; then
-        printf '\n===== autoreview family failed: %s =====\n' "$family" >&2
-        cat "$suite_tmp_dir/$family.log" >&2
+        report_failed_family "$family"
       fi
     done
     return 1
@@ -363,6 +493,34 @@ run_autoreview_test_suite() {
 
   printf 'autoreview test suite passed in %ss with jobs=%s\n' \
     "$(( $(date +%s) - suite_started_at ))" "$jobs"
+}
+
+run_family_diagnostic_fixture() {
+  false
+}
+
+run_suite_family_diagnostic_regression() {
+  local nested_stdout="$tmp_dir/suite-family-diagnostic.stdout"
+  local nested_stderr="$tmp_dir/suite-family-diagnostic.stderr"
+
+  if ! AUTOREVIEW_TEST_FOCUS=suite \
+    AUTOREVIEW_TEST_SUITE_DIAGNOSTIC_FIXTURE=1 \
+    /bin/bash "${BASH_SOURCE[0]}" --jobs 1 \
+      >"$nested_stdout" 2>"$nested_stderr"; then
+    printf 'nested suite family diagnostic regression failed\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$nested_stdout")" \
+      "$(cat "$nested_stderr")" >&2
+    exit 1
+  fi
+  expect_file_contains \
+    "$nested_stdout" \
+    "autoreview suite family diagnostics passed"
+  expect_file_contains \
+    "$nested_stderr" \
+    "AUTOREVIEW_TEST_FAILURE family=family-diagnostic-fixture status=1"
+  expect_file_contains \
+    "$nested_stderr" \
+    "AUTOREVIEW_TEST_FAILURE focus=family-diagnostic-fixture case=run_family_diagnostic_fixture status=1"
 }
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -463,6 +621,36 @@ mkdir "$trusted_test_node_dir"
 ln -s "$node_exec_path" "$trusted_test_node_dir/node"
 PATH="$trusted_test_node_dir:$PATH"
 export PATH
+
+# Make ambient GitHub and semantic CLIs actively hostile. Every fixture that
+# needs gh, Claude, or Codex must put its own executable ahead of these
+# sentinels; missing-tool fixtures use a deliberately bounded PATH instead.
+ambient_external_tool_bin="$tmp_dir/ambient-external-tool-bin"
+ambient_external_tool_log="$tmp_dir/ambient-external-tool.log"
+mkdir "$ambient_external_tool_bin"
+for ambient_external_tool in gh claude codex; do
+  cat >"$ambient_external_tool_bin/$ambient_external_tool" <<TOOL
+#!/bin/bash
+printf '%s\n' '$ambient_external_tool' >>'$ambient_external_tool_log'
+printf 'unexpected ambient $ambient_external_tool fixture executed\n' >&2
+exit 97
+TOOL
+  chmod +x "$ambient_external_tool_bin/$ambient_external_tool"
+done
+PATH="$trusted_test_node_dir:$ambient_external_tool_bin:$PATH"
+export PATH
+
+hermetic_git_bin="$tmp_dir/hermetic-git-bin"
+mkdir "$hermetic_git_bin"
+ln -s /usr/bin/git "$hermetic_git_bin/git"
+
+assert_no_ambient_external_tool_use() {
+  if [[ -s "$ambient_external_tool_log" ]]; then
+    printf 'autoreview fixture reached ambient external-tool sentinels:\n%s\n' \
+      "$(cat "$ambient_external_tool_log")" >&2
+    exit 1
+  fi
+}
 
 terminal_manifest_node_dir="$tmp_dir/terminal-manifest-node"
 terminal_manifest_node="$terminal_manifest_node_dir/node"
@@ -1001,7 +1189,10 @@ expect_capture_not_contains_line() {
 expect_stderr_contains() {
   local expected="$1"
   if ! grep -Fq -- "$expected" "$stderr"; then
-    printf 'expected stderr to contain %s\nstderr:\n%s\n' "$expected" "$(cat "$stderr")" >&2
+    printf 'expected stderr to contain %s\nstdout:\n%s\nstderr:\n%s\n' \
+      "$expected" \
+      "$(cat "$stdout")" \
+      "$(cat "$stderr")" >&2
     exit 1
   fi
 }
@@ -1009,7 +1200,10 @@ expect_stderr_contains() {
 expect_stdout_contains() {
   local expected="$1"
   if ! grep -Fq -- "$expected" "$stdout"; then
-    printf 'expected stdout to contain %s\nstdout:\n%s\n' "$expected" "$(cat "$stdout")" >&2
+    printf 'expected stdout to contain %s\nstdout:\n%s\nstderr:\n%s\n' \
+      "$expected" \
+      "$(cat "$stdout")" \
+      "$(cat "$stderr")" >&2
     exit 1
   fi
 }
@@ -1532,7 +1726,7 @@ run_node_helper_in_repo_expect_failure() {
   (
     cd "$review_repo"
     env -i \
-      "PATH=/bin:/usr/bin" \
+      "PATH=$hermetic_git_bin" \
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
       "GIT_CONFIG_GLOBAL=/dev/null" \
@@ -1901,10 +2095,12 @@ if [[ -n "${AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE:-}" ]]; then
     >"$AUTOREVIEW_FAKE_MUTATE_AWS_CONFIG_SOURCE"
 fi
 if [[ "${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -2220,13 +2416,9 @@ CLAUDE
       run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
   ) &
   fifo_helper_pid=$!
-  for _ in {1..200}; do
-    if ! kill -0 "$fifo_helper_pid" 2>/dev/null; then
-      fifo_completed=1
-      break
-    fi
-    sleep 0.05
-  done
+  if wait_for_process_exit_or_zombie "$fifo_helper_pid" 200; then
+    fifo_completed=1
+  fi
   if [[ "$fifo_completed" -eq 0 ]]; then
     "$node_bin" -e '
       const fs = require("node:fs");
@@ -2499,20 +2691,24 @@ function captureAndHang() {
   );
   setInterval(() => {}, 1000);
 }
+function completeCapabilityProbe(output) {
+  process.stdin.once("end", () => {
+    process.stdout.write(output);
+  });
+  process.stdin.resume();
+}
 if (
   process.argv[2] === "--version" &&
   !process.env.AUTOREVIEW_FAKE_HANG_CLAUDE_PROBE
 ) {
-  process.stdout.write("2.1.210\n");
-  process.exit(0);
-}
-if (process.argv[2] === "--help") {
-  process.stdout.write(
+  completeCapabilityProbe("2.1.210\n");
+} else if (process.argv[2] === "--help") {
+  completeCapabilityProbe(
     "--safe-mode\n--setting-sources\n--strict-mcp-config\n--disallowedTools\n--tools\n",
   );
-  process.exit(0);
+} else {
+  captureAndHang();
 }
-captureAndHang();
 CLAUDE
   cat >"$fake_bin/codex" <<'CODEX'
 #!/usr/bin/env node
@@ -2601,8 +2797,6 @@ CODEX
   local snapshot_path
   local launched
   local snapshot_unlinked
-  local helper_exited
-  local descendants_exited
   local completion_mode
   local leader_exit_code
   local termination_mode
@@ -2650,7 +2844,7 @@ CODEX
         launched=1
         break
       fi
-      if ! kill -0 "$engine_pid" 2>/dev/null; then
+      if ! process_is_runnable "$engine_pid"; then
         break
       fi
       sleep 0.05
@@ -2677,10 +2871,10 @@ CODEX
         snapshot_unlinked=1
         break
       fi
-      if ! kill -0 "$helper_pid" 2>/dev/null; then
+      if ! process_is_runnable "$helper_pid"; then
         break
       fi
-      if [[ "$scenario" == "claude-probe" ]] && ! kill -0 "$grandchild_pid" 2>/dev/null; then
+      if [[ "$scenario" == "claude-probe" ]] && ! process_is_runnable "$grandchild_pid"; then
         break
       fi
       sleep 0.05
@@ -2691,28 +2885,20 @@ CODEX
       printf '%s credential snapshot remained readable during interruption grace period\n' "$scenario" >&2
       exit 1
     fi
-    if ! kill -0 "$helper_pid" 2>/dev/null; then
+    if ! process_is_runnable "$helper_pid"; then
       kill -KILL "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
       printf '%s helper exited before credential snapshot cleanup was observed\n' "$scenario" >&2
       cat "$engine_capture.stderr" >&2
       exit 1
     fi
-    if [[ "$scenario" == "claude-probe" ]] && ! kill -0 "$grandchild_pid" 2>/dev/null; then
+    if [[ "$scenario" == "claude-probe" ]] && ! process_is_runnable "$grandchild_pid"; then
       kill -KILL "$helper_pid" "$engine_pid" "$child_pid" 2>/dev/null || true
       wait "$engine_pid" 2>/dev/null || true
       printf 'detached probe grandchild exited before credential snapshot cleanup was observed\n' >&2
       exit 1
     fi
     kill -TERM "$helper_pid"
-    helper_exited=0
-    for _ in {1..240}; do
-      if ! kill -0 "$helper_pid" 2>/dev/null; then
-        helper_exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$helper_exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$helper_pid" 240; then
       kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
       wait "$engine_pid" 2>/dev/null || true
       printf '%s helper did not terminate within the signal-cleanup deadline\n' "$scenario" >&2
@@ -2726,15 +2912,7 @@ CODEX
       printf '%s helper exited successfully after SIGTERM\n' "$scenario" >&2
       exit 1
     fi
-    descendants_exited=0
-    for _ in {1..100}; do
-      if ! kill -0 "$child_pid" 2>/dev/null; then
-        descendants_exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$descendants_exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$child_pid"; then
       kill -KILL "$child_pid" "$grandchild_pid" 2>/dev/null || true
       printf '%s direct engine child survived helper interruption\n' "$scenario" >&2
       exit 1
@@ -2745,15 +2923,7 @@ CODEX
       exit 1
     fi
     if [[ "$scenario" != "claude-probe" ]]; then
-      descendants_exited=0
-      for _ in {1..100}; do
-        if ! kill -0 "$grandchild_pid" 2>/dev/null; then
-          descendants_exited=1
-          break
-        fi
-        sleep 0.05
-      done
-      if [[ "$descendants_exited" -ne 1 ]]; then
+      if ! wait_for_process_exit_or_zombie "$grandchild_pid"; then
         kill -KILL "$grandchild_pid" 2>/dev/null || true
         printf '%s same-group grandchild survived helper interruption\n' "$scenario" >&2
         exit 1
@@ -2808,7 +2978,7 @@ CODEX
         launched=1
         break
       fi
-      if ! kill -0 "$engine_pid" 2>/dev/null; then
+      if ! process_is_runnable "$engine_pid"; then
         break
       fi
       sleep 0.05
@@ -2832,15 +3002,7 @@ CODEX
     if [[ "$termination_mode" == "signal" ]]; then
       kill -TERM "$helper_pid"
     fi
-    helper_exited=0
-    for _ in {1..240}; do
-      if ! kill -0 "$helper_pid" 2>/dev/null; then
-        helper_exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$helper_exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$helper_pid" 240; then
       kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
       wait "$engine_pid" 2>/dev/null || true
       printf 'leader-exit %s helper did not terminate within the deadline\n' "$termination_mode" >&2
@@ -2856,15 +3018,7 @@ CODEX
       exit 1
     fi
     for descendant_pid in "$child_pid" "$grandchild_pid"; do
-      descendants_exited=0
-      for _ in {1..100}; do
-        if ! kill -0 "$descendant_pid" 2>/dev/null; then
-          descendants_exited=1
-          break
-        fi
-        sleep 0.05
-      done
-      if [[ "$descendants_exited" -ne 1 ]]; then
+      if ! wait_for_process_exit_or_zombie "$descendant_pid"; then
         kill -KILL "$descendant_pid" 2>/dev/null || true
         printf 'leader-exit %s descendant survived termination: %s\n' \
           "$termination_mode" "$descendant_pid" >&2
@@ -2937,15 +3091,7 @@ CODEX
     fi
     grandchild_pid="$(cat "$engine_capture.grandchild-pid")"
     snapshot_path="$(cat "$engine_capture.snapshot")"
-    descendants_exited=0
-    for _ in {1..100}; do
-      if ! kill -0 "$grandchild_pid" 2>/dev/null; then
-        descendants_exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$descendants_exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$grandchild_pid"; then
       kill -KILL "$grandchild_pid" 2>/dev/null || true
       printf 'ordinary-%s background descendant survived completion\n' \
         "$completion_mode" >&2
@@ -3014,13 +3160,99 @@ CODEX
   expect_stderr_contains "reviewer closed stdin early"
 }
 
+verify_process_liveness_probe() {
+  local live_pid
+  local zombie_parent_pid
+  local zombie_pid=""
+  local zombie_pid_file="$tmp_dir/zombie-aware-process.pid"
+  local zombie_state=""
+  local zombie_observed=0
+
+  "$node_bin" -e 'setInterval(() => {}, 1000)' &
+  live_pid=$!
+  if wait_for_process_exit_or_zombie "$live_pid" 2; then
+    kill -KILL "$live_pid" 2>/dev/null || true
+    wait "$live_pid" 2>/dev/null || true
+    printf 'process-state probe accepted a runnable process as exited\n' >&2
+    exit 1
+  fi
+  kill -KILL "$live_pid" 2>/dev/null || true
+  wait "$live_pid" 2>/dev/null || true
+  if ! wait_for_process_exit_or_zombie "$live_pid" 2; then
+    printf 'process-state probe rejected a reaped process\n' >&2
+    exit 1
+  fi
+
+  # Darwin reaps these fixture children promptly. Linux gets an explicit
+  # delayed-reaping fixture so kill -0 remains true for a known zombie.
+  if [[ "$(/usr/bin/uname -s)" != "Linux" ]]; then
+    return 0
+  fi
+  /usr/bin/perl -e '
+    use strict;
+    use warnings;
+    $| = 1;
+    my $child = fork();
+    die "fork failed: $!\n" unless defined $child;
+    exit 0 if $child == 0;
+    $SIG{TERM} = sub {
+      waitpid($child, 0);
+      exit 0;
+    };
+    print "$child\n";
+    sleep 60;
+    waitpid($child, 0);
+  ' >"$zombie_pid_file" &
+  zombie_parent_pid=$!
+  for _ in {1..100}; do
+    if [[ -s "$zombie_pid_file" ]]; then
+      zombie_pid="$(cat "$zombie_pid_file")"
+      zombie_state="$(process_state_code "$zombie_pid" || true)"
+      if [[ "$zombie_state" == "Z" ]]; then
+        zombie_observed=1
+        break
+      fi
+    fi
+    if ! process_is_runnable "$zombie_parent_pid"; then
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$zombie_observed" -ne 1 ]]; then
+    kill -TERM "$zombie_parent_pid" 2>/dev/null || true
+    wait "$zombie_parent_pid" 2>/dev/null || true
+    printf 'Linux process-state fixture did not retain a zombie child\n' >&2
+    exit 1
+  fi
+  if ! kill -0 "$zombie_pid" 2>/dev/null; then
+    kill -TERM "$zombie_parent_pid" 2>/dev/null || true
+    wait "$zombie_parent_pid" 2>/dev/null || true
+    printf 'Linux zombie fixture was reaped before the raw kill -0 check\n' >&2
+    exit 1
+  fi
+  if ! wait_for_process_exit_or_zombie "$zombie_pid" 2; then
+    kill -TERM "$zombie_parent_pid" 2>/dev/null || true
+    wait "$zombie_parent_pid" 2>/dev/null || true
+    printf 'process-state probe rejected a killed zombie process\n' >&2
+    exit 1
+  fi
+  if ! process_is_runnable "$zombie_parent_pid"; then
+    kill -TERM "$zombie_parent_pid" 2>/dev/null || true
+    wait "$zombie_parent_pid" 2>/dev/null || true
+    printf 'process-state probe rejected the live zombie parent\n' >&2
+    exit 1
+  fi
+  kill -TERM "$zombie_parent_pid"
+  wait "$zombie_parent_pid"
+}
+
 run_suite_process_group_cleanup_regression() {
   local fixture="$tmp_dir/suite-process-group-fixture.mjs"
   local fixture_state="$tmp_dir/suite-process-group-state"
   local leader_pid
   local descendant_pid
   local launched=0
-  local exited
+  verify_process_liveness_probe
   mkdir "$fixture_state"
   cat >"$fixture" <<'NODE'
 import { spawn } from "node:child_process";
@@ -3054,7 +3286,7 @@ NODE
       launched=1
       break
     fi
-    if ! kill -0 "$leader_pid" 2>/dev/null; then
+    if ! process_is_runnable "$leader_pid"; then
       break
     fi
     sleep 0.05
@@ -3069,15 +3301,7 @@ NODE
   terminate_suite_process_group "$leader_pid" 2
   for role in leader child grandchild; do
     descendant_pid="$(cat "$fixture_state/$role.pid")"
-    exited=0
-    for _ in {1..100}; do
-      if ! kill -0 "$descendant_pid" 2>/dev/null; then
-        exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$descendant_pid"; then
       kill -KILL "$descendant_pid" 2>/dev/null || true
       printf 'suite process-group descendant survived cleanup: %s (%s)\n' \
         "$role" "$descendant_pid" >&2
@@ -3094,7 +3318,6 @@ run_suite_wrapper_signal_regression() {
   local suite_pid
   local suite_status
   local descendant_pid
-  local exited
   local launched=0
   mkdir "$fixture_state"
 
@@ -3110,7 +3333,7 @@ run_suite_wrapper_signal_regression() {
       launched=1
       break
     fi
-    if ! kill -0 "$suite_pid" 2>/dev/null; then
+    if ! process_is_runnable "$suite_pid"; then
       break
     fi
     sleep 0.05
@@ -3150,15 +3373,7 @@ run_suite_wrapper_signal_regression() {
   fi
   for role in worker reviewer; do
     descendant_pid="$(cat "$fixture_state/$role.pid")"
-    exited=0
-    for _ in {1..100}; do
-      if ! kill -0 "$descendant_pid" 2>/dev/null; then
-        exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$descendant_pid"; then
       kill -KILL "$descendant_pid" 2>/dev/null || true
       printf 'nested suite cancellation orphaned %s process: %s\n' \
         "$role" "$descendant_pid" >&2
@@ -3389,10 +3604,12 @@ run_dirty_source_drift_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -3422,10 +3639,12 @@ run_untracked_churn_scope_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -3462,10 +3681,12 @@ run_index_source_drift_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -3504,10 +3725,12 @@ run_mode_source_drift_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -3554,10 +3777,12 @@ run_branch_identity_source_drift_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -4688,10 +4913,12 @@ run_bundle_output_deferred_regression() {
   cat >"$fake_bin/claude" <<CLAUDE
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "\${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -4726,10 +4953,12 @@ run_claude_multi_pass_regression() {
 #!/usr/bin/env bash
 printf 'invoked\n' >"$AUTOREVIEW_FAKE_CAPTURE.invoked"
 if [[ "${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -4808,10 +5037,12 @@ run_heartbeat_regression() {
   cat >"$fake_bin/claude" <<'CLAUDE'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--version" ]]; then
+  cat >/dev/null
   printf '2.1.210\n'
   exit 0
 fi
 if [[ "${1:-}" == "--help" ]]; then
+  cat >/dev/null
   printf '%s\n' --safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools
   exit 0
 fi
@@ -5307,6 +5538,7 @@ run_untrusted_cleanup_retention_regression() {
 
 run_engine_isolation_family() {
   run_requested_codex_missing_regression
+  run_suite_family_diagnostic_regression
   run_claude_no_tools_regression
   run_codex_isolation_regression
   run_engine_signal_cleanup_regression
@@ -6302,21 +6534,30 @@ if [[ -e "$prepared_target_drift_bundle" ]]; then
 fi
 git -C "$pr_base_repo" switch feature >/dev/null 2>&1
 
-no_gh_bin="$tmp_dir/no-gh-bin"
-no_gh_bundle="$tmp_dir/context-bundle-no-gh-feedback"
-mkdir "$no_gh_bin"
-ln -s "$node_bin" "$no_gh_bin/node"
+empty_pr_gh_bin="$tmp_dir/empty-pr-gh-bin"
+empty_pr_bundle="$tmp_dir/context-bundle-empty-pr-feedback"
+mkdir "$empty_pr_gh_bin"
+cat >"$empty_pr_gh_bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [[ "$1" == "pr" && "$2" == "list" ]]; then
+  printf '0\n'
+  exit 0
+fi
+printf 'unexpected empty-PR gh arguments: %s\n' "$*" >&2
+exit 91
+GH
+chmod +x "$empty_pr_gh_bin/gh"
 (
   cd "$pr_base_repo"
   run_adapter_expect_failure \
-    "PATH=$no_gh_bin:/usr/bin:/bin" \
-    --prepare-bundle-dir "$no_gh_bundle" \
+    "PATH=$empty_pr_gh_bin:$PATH" \
+    --prepare-bundle-dir "$empty_pr_bundle" \
     --feedback-pr auto \
     --mode branch
 )
 expect_stderr_contains "--feedback-pr auto requires exactly one open PR"
-if [[ -e "$no_gh_bundle" ]]; then
-  printf 'automatic feedback bundle was published without GitHub metadata\n' >&2
+if [[ -e "$empty_pr_bundle" ]]; then
+  printf 'automatic feedback bundle was published without an open PR\n' >&2
   exit 1
 fi
 
@@ -6685,6 +6926,9 @@ printf 'agent-autoreview adapter tests passed\n'
 test_focus="${AUTOREVIEW_TEST_FOCUS:-all}"
 verify_canonical_family_partition
 case "$test_focus" in
+  family-diagnostic-fixture)
+    run_family_diagnostic_fixture
+    ;;
   engine-isolation)
     run_engine_isolation_family
     ;;
@@ -6738,4 +6982,5 @@ case "$test_focus" in
     ;;
 esac
 
+assert_no_ambient_external_tool_use
 printf 'focused autoreview %s tests passed\n' "$test_focus"

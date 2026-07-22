@@ -1810,6 +1810,9 @@ while IFS= read -r path; do
         scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
           add_command "pnpm agent:autoreview:test" "agent autoreview adapter changed"
           ;;
+        scripts/dev-janitor.sh|scripts/dev-janitor.test.sh)
+          add_command "bash scripts/dev-janitor.test.sh" "dev janitor script changed"
+          ;;
         scripts/deploy-bridge.sh)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
           add_command "pnpm agent:context-check" "Cloud Run revision suffix guard changed"

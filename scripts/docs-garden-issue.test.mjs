@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import jsYaml from "js-yaml";
+
 import {
   buildDocsGardenIssueSpec,
   DOCS_GARDEN_MARKER,
@@ -669,12 +671,42 @@ await test("OIDC authorization accepts a regional GitHub pipeline host", async (
   );
 });
 
+await test("OIDC authorization accepts a GitHub Actions managed-runner host", async () => {
+  const { claims, env, nowSeconds } = workflowOidcFixture();
+  const managedRunnerEnv = {
+    ...env,
+    ACTIONS_ID_TOKEN_REQUEST_URL:
+      "https://run-actions-3-azure-eastus.actions.githubusercontent.com/example/idtoken?api-version=2.0",
+  };
+  let requestedUrl;
+  await assertAuthorizedGardenWorkflow(
+    { repo: "owner/repo" },
+    {
+      env: managedRunnerEnv,
+      now: () => nowSeconds * 1000,
+      fetchImpl: async (url) => {
+        requestedUrl = String(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ value: oidcToken(claims) }),
+        };
+      },
+    },
+  );
+  assert.match(
+    requestedUrl,
+    /^https:\/\/run-actions-3-azure-eastus\.actions\.githubusercontent\.com\//,
+  );
+});
+
 await test("OIDC authorization rejects untrusted request URL variants", async () => {
   const { env } = workflowOidcFixture();
   const rejectedUrls = [
     "https://pipelinesghubeus13.actions.githubusercontent.com.evil.example/idtoken",
     "http://pipelines.actions.githubusercontent.com/idtoken",
-    "https://runner.actions.githubusercontent.com/idtoken",
+    "https://actions.githubusercontent.com/idtoken",
+    "https://run-actions-3-azure-eastus.actions.githubusercontent.example/idtoken",
   ];
 
   for (const requestUrl of rejectedUrls) {
@@ -745,7 +777,13 @@ await test("scheduled workflow fetches the history required by packet evidence",
     workflow,
     /actions\/checkout@[a-f0-9]+[^\n]*\n\s+with:\n(?:\s+#[^\n]*\n)*\s+#[^\n]*\n\s+fetch-depth: 0/,
   );
-  assert.match(workflow, /id-token: write/);
+  const parsedWorkflow = jsYaml.load(workflow);
+  assert.equal(parsedWorkflow.permissions, "read-all");
+  assert.deepEqual(parsedWorkflow.jobs?.["schedule-issue"]?.permissions, {
+    contents: "read",
+    "id-token": "write",
+    issues: "write",
+  });
   assert.match(
     workflow,
     /github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)/,

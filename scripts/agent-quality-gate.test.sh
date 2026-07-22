@@ -3489,6 +3489,12 @@ assert_contains "- pnpm agent:autoreview:test (agent autoreview adapter changed)
 run_gate "scripts/agent-autoreview.test.sh"
 assert_contains "- pnpm agent:autoreview:test (agent autoreview adapter changed)"
 
+run_gate "scripts/dev-janitor.sh"
+assert_contains "- bash scripts/dev-janitor.test.sh (dev janitor script changed)"
+
+run_gate "scripts/dev-janitor.test.sh"
+assert_contains "- bash scripts/dev-janitor.test.sh (dev janitor script changed)"
+
 # Other root-script changes only need the standalone scripts ESLint.
 run_gate "scripts/code-health-history.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"

@@ -87,7 +87,7 @@ describe("SortedOracles.OracleReported median parity", () => {
     existingPriceDifference?: bigint;
     value: bigint;
     blockTimestamp?: number;
-    medianTimestamp?: bigint;
+    medianTimestamp?: bigint | null;
   }) {
     registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, []);
     _setMockMedianTimestamp(CHAIN_ID, FEED, medianTimestamp);
