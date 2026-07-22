@@ -48,7 +48,7 @@ stale_days="${JANITOR_STALE_DAYS:-30}"
 skip_system="${JANITOR_SKIP_SYSTEM:-0}"
 
 print_disk_free() {
-  df -g / | awk 'NR==2 {print "Free disk: " $4 " GiB"}'
+  df -Pk / | awk 'NR==2 {printf "Free disk: %.1f GiB\n", $4/1024/1024}'
 }
 
 echo "== dev-janitor =="
@@ -59,6 +59,14 @@ else
 fi
 print_disk_free
 echo
+
+real_root="$(cd "$trunk_repos_dir" 2>/dev/null && pwd -P || true)"
+repo_root="$(cd "$(git rev-parse --show-toplevel)" && pwd -P)"
+real_home="$(cd "$HOME" && pwd -P)"
+if [[ -n "$real_root" && ( "$real_root" == "/" || "$real_root" == "$real_home" || "$real_root" == "$repo_root" ) ]]; then
+  echo "refusing to operate on unsafe trunk cache root: $real_root" >&2
+  exit 1
+fi
 
 echo "-- Trunk repo caches (older than ${stale_days}d, ${trunk_repos_dir}) --"
 stale_repos=()
