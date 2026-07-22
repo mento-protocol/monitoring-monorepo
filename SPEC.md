@@ -76,9 +76,11 @@ The system has four principal data paths:
    Prometheus gauges, while Aegis polls v2 contract views. Grafana Alloy sends
    both metric streams to Grafana Cloud for evaluation and routing.
 3. **Event and incident path:** discrete events bypass the metric path.
-   QuickNode, Sentry, and governance handlers deliver through their owning
-   Cloud Functions. Scheduled Sentry workflows also triage incidents into
-   GitHub issues and eligible autofix PRs.
+   QuickNode and governance handlers deliver through their owning Cloud
+   Functions. The Sentry-to-Slack bridge is configured directly through the
+   Sentry and Slack providers, with no function in that path; scheduled Sentry
+   workflows separately triage incidents into GitHub issues and eligible
+   autofix PRs.
 4. **Integration-health path:** scheduled read-only quote probes publish a
    bounded snapshot to Upstash for the dashboard.
 
@@ -91,18 +93,20 @@ The governing decisions are
 
 ## Runtime boundaries
 
-| Surface                     | Responsibility                                                                | Runtime or platform                | Owning source                                                      |
-| --------------------------- | ----------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------ |
-| Shared config               | Chain, token, deployment, threshold, and ABI metadata                         | Published TypeScript package       | [`shared-config/AGENTS.md`](./shared-config/AGENTS.md)             |
-| Indexer and GraphQL         | Event/RPC ingestion, entities, rollups, Hasura API                            | Envio hosted                       | [`indexer-envio/AGENTS.md`](./indexer-envio/AGENTS.md)             |
-| Dashboard                   | Human-facing monitoring and analysis                                          | Vercel                             | [`ui-dashboard/AGENTS.md`](./ui-dashboard/AGENTS.md)               |
-| Metrics bridge              | Indexed v3 state to bounded Prometheus gauges                                 | Cloud Run                          | [`metrics-bridge/AGENTS.md`](./metrics-bridge/AGENTS.md)           |
-| Aegis                       | v2 contract view calls to Prometheus metrics                                  | App Engine                         | [`aegis/AGENTS.md`](./aegis/AGENTS.md)                             |
-| Collector                   | Aegis and bridge scrape jobs to Grafana Cloud                                 | Grafana Alloy on App Engine        | `aegis/grafana-agent/`                                             |
-| Metric rules and routing    | Grafana rules, contact points, templates, mute timings                        | Grafana Cloud                      | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                           |
-| Event and incident delivery | QuickNode, Sentry, and on-call notification handlers; Sentry triage workflows | Cloud Functions and GitHub Actions | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                           |
-| Governance watchdog         | Governance event notifications                                                | Cloud Function                     | [`governance-watchdog/README.md`](./governance-watchdog/README.md) |
-| Integration probes          | Read-only aggregator and router coverage snapshots                            | GitHub Actions and Upstash         | [`integration-probes/AGENTS.md`](./integration-probes/AGENTS.md)   |
+| Surface                    | Responsibility                                          | Runtime or platform          | Owning source                                                                |
+| -------------------------- | ------------------------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------- |
+| Shared config              | Chain, token, deployment, threshold, and ABI metadata   | Published TypeScript package | [`shared-config/AGENTS.md`](./shared-config/AGENTS.md)                       |
+| Indexer and GraphQL        | Event/RPC ingestion, entities, rollups, Hasura API      | Envio hosted                 | [`indexer-envio/AGENTS.md`](./indexer-envio/AGENTS.md)                       |
+| Dashboard                  | Human-facing monitoring and analysis                    | Vercel                       | [`ui-dashboard/AGENTS.md`](./ui-dashboard/AGENTS.md)                         |
+| Metrics bridge             | Indexed v3 state to bounded Prometheus gauges           | Cloud Run                    | [`metrics-bridge/AGENTS.md`](./metrics-bridge/AGENTS.md)                     |
+| Aegis                      | v2 contract view calls to Prometheus metrics            | App Engine                   | [`aegis/AGENTS.md`](./aegis/AGENTS.md)                                       |
+| Collector                  | Aegis and bridge scrape jobs to Grafana Cloud           | Grafana Alloy on App Engine  | `aegis/grafana-agent/`                                                       |
+| Metric rules and routing   | Grafana rules, contact points, templates, mute timings  | Grafana Cloud                | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                                     |
+| Event delivery             | QuickNode handler and on-call rotation announcer        | Cloud Functions              | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                                     |
+| Sentry notification bridge | Direct Sentry-to-Slack alert and channel configuration  | Terraform providers          | [`sentry-bridge/README.md`](./alerts/infra/channels/sentry-bridge/README.md) |
+| Sentry triage and autofix  | Incident ingest, issue projection, and eligible fix PRs | GitHub Actions               | [ADR 0036](./docs/adr/0036-sentry-triage-pipeline.md)                        |
+| Governance watchdog        | Governance event notifications                          | Cloud Function               | [`governance-watchdog/README.md`](./governance-watchdog/README.md)           |
+| Integration probes         | Read-only aggregator and router coverage snapshots      | GitHub Actions and Upstash   | [`integration-probes/AGENTS.md`](./integration-probes/AGENTS.md)             |
 
 ## Networks, contracts, and identifiers
 
@@ -187,7 +191,7 @@ ordering remain in
 | Which networks, symbols, thresholds, namespaces, and ABIs are shared? | [`shared-config/AGENTS.md`](./shared-config/AGENTS.md) and package source                                                                     |
 | Which dashboard routes and behaviors exist?                           | [`ui-dashboard/AGENTS.md`](./ui-dashboard/AGENTS.md) and `ui-dashboard/src/`                                                                  |
 | Which alerts fire and where do they route?                            | [`alerts/AGENTS.md`](./alerts/AGENTS.md), `alerts/rules/`, and `aegis/config.yaml`                                                            |
-| What is planned rather than shipped?                                  | [`docs/ROADMAP.md`](./docs/ROADMAP.md) and GitHub Issues                                                                                      |
+| What is planned rather than shipped?                                  | GitHub Issues are the active-work authority; [`docs/ROADMAP.md`](./docs/ROADMAP.md) is non-canonical planning context that must be verified   |
 | Which commands and CI checks are current?                             | [`docs/notes/quick-commands.md`](./docs/notes/quick-commands.md) and the package manifests/workflows                                          |
 
 When an implementation change alters one of these boundaries, update the

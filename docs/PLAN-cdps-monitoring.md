@@ -357,8 +357,9 @@ After Liquity v2 indexing lands, add a follow-up bullet:
 ### Historical SPEC update requested by this plan (then §11)
 
 At execution time, mirror the ROADMAP "Next" change: Liquity v2 replaces CDP
-strategy entity as the top Next item. Current status now belongs in the ROADMAP,
-not the high-level specification.
+strategy entity as the top Next item. Current active work now belongs in GitHub
+Issues and current behavior in the owning implementation sources; the ROADMAP
+is non-canonical planning context, not part of the high-level specification.
 
 ---
 
