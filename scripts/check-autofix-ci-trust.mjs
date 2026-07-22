@@ -81,6 +81,12 @@ const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
 // regardless of the literal's case).
 const GUARD_PATTERN =
   /!\s*startsWith\s*\(\s*github\.(?:event\.pull_request\.head\.ref|head_ref)\s*,\s*'sentry-autofix\/'\s*\)/i;
+// The push-context analogue: on a `push` event the pull_request context is
+// empty, so a job that runs on the pushed `sentry-autofix/*` branch is excluded
+// by a `github.ref` test instead. Both `refs/heads/sentry-autofix/` and the
+// short `sentry-autofix/` (as used with a stripped ref) count.
+const PUSH_GUARD_PATTERN =
+  /!\s*startsWith\s*\(\s*github\.ref\s*,\s*'(?:refs\/heads\/)?sentry-autofix\/'\s*\)/i;
 const ANNOTATION = "# autofix-ci-trust:";
 const ANNOTATION_LINE = /^\s*#\s*autofix-ci-trust:/;
 
@@ -149,6 +155,58 @@ export function hasPullRequestTrigger(body) {
 /** True when the workflow uses the pull_request_target trigger in any form. */
 export function usesPullRequestTarget(body) {
   return collectTriggers(parseWorkflow(body)).has("pull_request_target");
+}
+
+/** True when a GitHub Actions ref-glob (`main`, `sentry-autofix/**`, `**`, …)
+ * could match a pushed autofix branch. `*` matches within a path segment, `**`
+ * across segments, `?` one char — the forms GitHub documents. Anything with
+ * other glob metacharacters (`[`, `+`, `!`, `{`) is treated as a POSSIBLE match
+ * (fail closed) rather than parsed precisely. */
+function refGlobAdmitsAutofix(pattern) {
+  if (typeof pattern !== "string") return true;
+  if (/[[\]{}!+]/.test(pattern)) return true; // un-modeled metachar → fail closed
+  const rx = pattern
+    .replace(/[.^$()|\\]/g, "\\$&")
+    .replace(/\*\*/g, "\0") // placeholder for cross-segment
+    .replace(/\*/g, "[^/]*")
+    .replace(/\0/g, ".*")
+    .replace(/\?/g, "[^/]");
+  return new RegExp(`^${rx}$`).test("sentry-autofix/x");
+}
+
+/**
+ * True when a `push` trigger config could fire on a pushed `sentry-autofix/*`
+ * branch — the finalizer pushes that branch (with an App token) BEFORE opening
+ * the PR, so a secret-bearing push job that runs on it is an exfiltration lane
+ * with no `pull_request` in sight.
+ *   - bare `push` (null/true) or a config with no branch filter → all branches,
+ *     UNLESS it is tags-only (`tags:` without `branches:` never fires on branch
+ *     pushes);
+ *   - `branches: […]` → admits if any pattern matches;
+ *   - `branches-ignore: […]` → admits unless a pattern matches.
+ *
+ * Exported for tests.
+ * @param {any} pushCfg the parsed value of `on.push`
+ */
+export function pushAdmitsAutofix(pushCfg) {
+  if (pushCfg == null || pushCfg === true) return true;
+  if (typeof pushCfg !== "object" || Array.isArray(pushCfg)) return true;
+  if ("branches" in pushCfg) {
+    const pats = Array.isArray(pushCfg.branches)
+      ? pushCfg.branches
+      : [pushCfg.branches];
+    return pats.some(refGlobAdmitsAutofix);
+  }
+  if ("branches-ignore" in pushCfg) {
+    const pats = Array.isArray(pushCfg["branches-ignore"])
+      ? pushCfg["branches-ignore"]
+      : [pushCfg["branches-ignore"]];
+    return !pats.some(refGlobAdmitsAutofix);
+  }
+  // No branch filter: a tags-only config never fires on branch pushes; anything
+  // else (paths-only, or an empty config) fires on every branch.
+  const tagsOnly = "tags" in pushCfg || "tags-ignore" in pushCfg;
+  return !tagsOnly;
 }
 
 /** Yield every string value nested anywhere inside a parsed value. Secret and
@@ -225,19 +283,35 @@ export function jobReceivesCredential(job, inherited) {
   // always forwards the caller's secrets — `inherit` (string) or a map.
   if (job.secrets != null) return true;
   if (job.environment != null) return true;
+  // A job that CALLS a LOCAL reusable workflow (`uses: ./.github/workflows/…`)
+  // can receive a credential the CALLEE binds — an `environment:` or its own
+  // `secrets:`/OIDC — with no caller-side `secrets:` key at all. Following the
+  // callee cross-file is out of this pass's scope, so fail closed: treat any
+  // local reusable-workflow call as credential-bearing (the author guards or
+  // annotates, stating the callee is credential-free). Step `uses:` (actions)
+  // live under `steps[]`, not here, so this only matches reusable-workflow
+  // calls. Remote reusable workflows (`org/repo/.github/…@ref`) receive secrets
+  // only via an explicit caller `secrets:` key, already caught above.
+  if (typeof job.uses === "string" && /^\.\.?\//.test(job.uses)) return true;
   return false;
 }
 
-/** True when a parsed job's OWN job-level `if:` carries the excluding guard.
- * `js-yaml` already dropped any trailing comment, so the value is exactly the
- * expression GitHub evaluates; a step-level `if:` lives under `steps[]` and is
- * correctly not consulted here.
+/** True when a parsed job's OWN job-level `if:` carries the excluding guard for
+ * the given trigger CONTEXT — `"pull_request"` excludes on the PR head ref,
+ * `"push"` excludes on `github.ref`. The contexts are independent: a job
+ * reachable via both must exclude in both. `js-yaml` already dropped any
+ * trailing comment, so the value is exactly the expression GitHub evaluates; a
+ * step-level `if:` lives under `steps[]` and is correctly not consulted here.
  *
- * Exported for tests. */
-export function jobGuarded(job) {
-  return (
-    !!job && typeof job === "object" && GUARD_PATTERN.test(String(job.if ?? ""))
-  );
+ * Exported for tests.
+ * @param {any} job
+ * @param {"pull_request"|"push"} context
+ */
+export function jobGuarded(job, context = "pull_request") {
+  if (!job || typeof job !== "object") return false;
+  const expr = String(job.if ?? "");
+  const pattern = context === "push" ? PUSH_GUARD_PATTERN : GUARD_PATTERN;
+  return pattern.test(expr);
 }
 
 /** Mark the source lines that are CONTENT of a block scalar (`run: |`,
@@ -259,12 +333,57 @@ function blockScalarContentLines(lines) {
   return content;
 }
 
+/** The quote character (`"` or `'`) left OPEN at the end of `line`, given the
+ * quote state entering it — or null when the line ends outside any quote.
+ * Honors `\`-escapes inside `"…"` and `''`-escapes inside `'…'`, and stops at
+ * an unquoted `#` (a YAML comment start, at line-start or after whitespace). A
+ * best-effort scanner: any imprecision only ever marks MORE lines as scalar
+ * content, which fails CLOSED for annotation detection (an uncredited
+ * annotation just means the job must guard instead). */
+function quoteStateAfter(line, openQuote) {
+  let q = openQuote;
+  for (let k = 0; k < line.length; k += 1) {
+    const c = line[k];
+    if (q === '"') {
+      if (c === "\\") k += 1;
+      else if (c === '"') q = null;
+    } else if (q === "'") {
+      if (c === "'") {
+        if (line[k + 1] === "'") k += 1;
+        else q = null;
+      }
+    } else {
+      if (c === "#" && (k === 0 || /\s/.test(line[k - 1]))) break;
+      if (c === '"' || c === "'") q = c;
+    }
+  }
+  return q;
+}
+
+/** Lines that are CONTINUATIONS of a multiline quoted scalar (2nd+ line of a
+ * `key: "a\n# not-a-comment\nb"`). A line-leading `#` there is string content,
+ * not a YAML comment. Block-scalar content (already marked) is literal and
+ * cannot be mid-quote, so it resets the quote scan. */
+function quotedScalarContentLines(lines, blockContent) {
+  const content = new Array(lines.length).fill(false);
+  let open = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (blockContent[i]) {
+      open = null;
+      continue;
+    }
+    if (open) content[i] = true;
+    open = quoteStateAfter(lines[i], open);
+  }
+  return content;
+}
+
 /**
  * Locate `# autofix-ci-trust:` annotation comments in the SOURCE and attribute
  * them to jobs. `js-yaml` discards comments, so this is the one raw-text pass.
  * It is anchored to the parser's ground truth and attributes UNAMBIGUOUSLY:
- *   1. Only GENUINE comment lines count — a `#` line inside a block scalar is
- *      script content, not a comment, and is excluded.
+ *   1. Only GENUINE comment lines count — a `#` line inside a block scalar OR a
+ *      multiline quoted scalar is string content, not a comment, and is excluded.
  *   2. Each job's key line is matched at the exact job-block indentation (not
  *      any depth), so a same-named nested key — an `outputs:` entry called
  *      `deploy`, say — cannot be mistaken for the `deploy` job.
@@ -282,7 +401,9 @@ function blockScalarContentLines(lines) {
  */
 function annotationScopes(body, jobNames) {
   const lines = body.split("\n");
-  const inScalar = blockScalarContentLines(lines);
+  const blockContent = blockScalarContentLines(lines);
+  const quotedContent = quotedScalarContentLines(lines, blockContent);
+  const inScalar = lines.map((_, i) => blockContent[i] || quotedContent[i]);
   const annotationLines = [];
   lines.forEach((line, i) => {
     if (!inScalar[i] && ANNOTATION_LINE.test(line)) annotationLines.push(i);
@@ -378,9 +499,23 @@ export function evaluateWorkflow(body) {
         "uses pull_request_target, which hands secrets to PR-controlled context by design — use pull_request with an explicit trust gate instead",
     };
   }
-  if (!triggers.has("pull_request")) {
+  // A workflow is reachable on an UNTRUSTED autofix branch two ways: the PR it
+  // eventually opens (`pull_request`), or the branch PUSH the finalizer makes
+  // before the PR exists (`push`, when its branch filter admits
+  // `sentry-autofix/*`). Each is its own guard context — a job reachable via
+  // both must exclude in both.
+  const contexts = [];
+  if (triggers.has("pull_request")) contexts.push("pull_request");
+  const onValue = "on" in doc ? doc.on : doc[true];
+  const pushCfg =
+    onValue && typeof onValue === "object" && !Array.isArray(onValue)
+      ? onValue.push
+      : undefined;
+  if (triggers.has("push") && pushAdmitsAutofix(pushCfg)) contexts.push("push");
+  if (contexts.length === 0) {
     return { ok: true };
   }
+  const via = contexts.join("/");
   const jobs =
     doc.jobs && typeof doc.jobs === "object" && !Array.isArray(doc.jobs)
       ? doc.jobs
@@ -390,7 +525,7 @@ export function evaluateWorkflow(body) {
     envSecrets: referencesSecrets(doc.env),
     workflowPermissions: doc.permissions,
   };
-  // A pull_request workflow with a workflow-level credential but no analyzable
+  // A reachable workflow with a workflow-level credential but no analyzable
   // jobs still leaks — fail closed unless file-annotated.
   const { fileAnnotated, jobAnnotated } = annotationScopes(body, jobNames);
   if (jobNames.length === 0) {
@@ -398,8 +533,7 @@ export function evaluateWorkflow(body) {
       if (fileAnnotated) return { ok: true };
       return {
         ok: false,
-        reason:
-          "triggers on pull_request and inherits a workflow-level credential (env secrets or an OIDC grant) but declares no jobs to guard — add a file-level '# autofix-ci-trust:' annotation or remove the credential.",
+        reason: `triggers on ${via} (reachable on an autofix branch) and inherits a workflow-level credential (env secrets or an OIDC grant) but declares no jobs to guard — add a file-level '# autofix-ci-trust:' annotation or remove the credential.`,
       };
     }
     return { ok: true };
@@ -407,8 +541,9 @@ export function evaluateWorkflow(body) {
   const offenders = [];
   for (const name of jobNames) {
     if (!jobReceivesCredential(jobs[name], inherited)) continue;
-    if (fileAnnotated) continue;
-    if (jobGuarded(jobs[name]) || jobAnnotated(name)) continue;
+    if (fileAnnotated || jobAnnotated(name)) continue;
+    // Reachable via both contexts → must be guarded in BOTH.
+    if (contexts.every((ctx) => jobGuarded(jobs[name], ctx))) continue;
     offenders.push(name);
   }
   if (offenders.length === 0) {
@@ -417,9 +552,9 @@ export function evaluateWorkflow(body) {
   return {
     ok: false,
     reason:
-      `triggers on pull_request, and job(s) [${offenders.join(", ")}] can receive a credential without an excluding autofix guard (\`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')\` on the job's if:) or an '${ANNOTATION}' annotation in that job (or a file-level annotation above \`jobs:\`). ` +
-      "Machine-authored autofix PRs pass every fork/dependabot check, so each credential-bearing PR job must either exclude the sentry-autofix/* head branch " +
-      "or document why its secrets are unreachable from PR-head code execution.",
+      `triggers on ${via} (reachable on an autofix branch), and job(s) [${offenders.join(", ")}] can receive a credential without an excluding autofix guard (${via.includes("push") ? "`!startsWith(github.ref, 'refs/heads/sentry-autofix/')` for push, " : ""}\`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')\` for pull_request, on the job's if:) or an '${ANNOTATION}' annotation in that job (or a file-level annotation above \`jobs:\`). ` +
+      "Machine-authored autofix PRs pass every fork/dependabot check, and the finalizer pushes the sentry-autofix/* branch before the PR exists, so each credential-bearing job reachable on that branch must exclude it " +
+      "or document why its secrets are unreachable from autofix-branch code execution.",
   };
 }
 

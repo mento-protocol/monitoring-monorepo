@@ -7,6 +7,7 @@ import {
   jobGuarded,
   jobReceivesCredential,
   parseWorkflow,
+  pushAdmitsAutofix,
   usesPullRequestTarget,
 } from "./check-autofix-ci-trust.mjs";
 
@@ -107,11 +108,23 @@ test("file-level and job-level annotations clear it", () => {
   assert(evaluateWorkflow(jobLevel).ok, "job annotation covers its own job");
 });
 
-test("no pull_request trigger → not our concern", () => {
-  assert(evaluateWorkflow(unguarded("on:\n  push:")).ok, "push-only passes");
+test("triggers that cannot reach an autofix branch are not our concern", () => {
   assert(
     evaluateWorkflow(unguarded("on:\n  workflow_dispatch:")).ok,
     "dispatch-only passes",
+  );
+  assert(
+    evaluateWorkflow(unguarded("on:\n  schedule:\n    - cron: '0 0 * * *'")).ok,
+    "schedule-only passes",
+  );
+  // A push restricted to main (or tags-only) never fires on sentry-autofix/*.
+  assert(
+    evaluateWorkflow(unguarded("on:\n  push:\n    branches: [main]")).ok,
+    "push-to-main passes",
+  );
+  assert(
+    evaluateWorkflow(unguarded("on:\n  push:\n    tags: ['v*']")).ok,
+    "tag-push-only passes",
   );
 });
 
@@ -661,6 +674,119 @@ test("an annotation is credited only when UNAMBIGUOUSLY inside a job's body", ()
     SECRET_STEP,
   ].join("\n");
   assert(evaluateWorkflow(inBody).ok, "in-body annotation still credited");
+});
+
+// ── push-triggered lanes (the finalizer pushes sentry-autofix/* pre-PR) ───────
+
+test("a push that admits autofix branches is guarded like a pull_request", () => {
+  // Bare push (all branches) with a secret job → refused.
+  const bare = unguarded("on:\n  push:");
+  const v = evaluateWorkflow(bare);
+  assert(
+    !v.ok && /\[leak\]/.test(v.reason) && /push/.test(v.reason),
+    "bare push refused",
+  );
+
+  // branches-ignore that does not exclude autofix → refused.
+  assert(
+    !evaluateWorkflow(
+      unguarded("on:\n  push:\n    branches-ignore: [gh-pages]"),
+    ).ok,
+    "branches-ignore not covering autofix refused",
+  );
+
+  // A ref-based push guard clears it.
+  const guardedPush = [
+    "on:",
+    "  push:",
+    "jobs:",
+    "  leak:",
+    "    if: ${{ !startsWith(github.ref, 'refs/heads/sentry-autofix/') }}",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  assert(evaluateWorkflow(guardedPush).ok, "push-ref guard clears it");
+
+  // The PR-context guard does NOT satisfy the push context.
+  const wrongGuard = [
+    "on:",
+    "  push:",
+    "jobs:",
+    "  leak:",
+    GUARD, // pull_request head_ref guard — empty on push
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  assert(!evaluateWorkflow(wrongGuard).ok, "pr guard does not cover push");
+});
+
+test("pushAdmitsAutofix models branch filters", () => {
+  assert(pushAdmitsAutofix(null), "bare push admits");
+  assert(pushAdmitsAutofix({ branches: ["**"] }), "** admits");
+  assert(
+    pushAdmitsAutofix({ branches: ["sentry-autofix/**"] }),
+    "explicit admits",
+  );
+  assert(!pushAdmitsAutofix({ branches: ["main"] }), "main-only excludes");
+  assert(!pushAdmitsAutofix({ branches: ["release/*"] }), "release/* excludes");
+  assert(
+    !pushAdmitsAutofix({ tags: ["v*"] }),
+    "tags-only excludes branch pushes",
+  );
+  assert(
+    !pushAdmitsAutofix({ "branches-ignore": ["sentry-autofix/**"] }),
+    "ignore excludes",
+  );
+  assert(pushAdmitsAutofix({ paths: ["src/**"] }), "paths-only still admits");
+});
+
+// ── local reusable-workflow calls (callee may bind a credential) ──────────────
+
+test("a pull_request job calling a LOCAL reusable workflow is credential-bearing", () => {
+  const body = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  call:",
+    "    uses: ./.github/workflows/deploy.yml",
+  ].join("\n");
+  const v = evaluateWorkflow(body);
+  assert(
+    !v.ok && /\[call\]/.test(v.reason),
+    "local reusable call refused without guard",
+  );
+
+  // …and clears with a guard.
+  const guarded = [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  call:",
+    "    if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+    "    uses: ./.github/workflows/deploy.yml",
+  ].join("\n");
+  assert(evaluateWorkflow(guarded).ok, "guarded local reusable call passes");
+});
+
+// ── multiline quoted scalar can't smuggle an annotation ──────────────────────
+
+test("a '# autofix-ci-trust:' line inside a multiline quoted scalar is not an annotation", () => {
+  const body = [
+    'name: "line one',
+    "  # autofix-ci-trust: fake",
+    '  line three"',
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  const v = evaluateWorkflow(body);
+  assert(
+    !v.ok && /\[leak\]/.test(v.reason),
+    "quoted-scalar marker does not become a file annotation",
+  );
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
