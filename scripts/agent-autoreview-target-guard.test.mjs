@@ -733,10 +733,12 @@ try {
     `#!/bin/sh
 case "\${1:-}" in
   --version)
+    cat >/dev/null
     printf '%s\\n' '2.1.169'
     exit 0
     ;;
   --help)
+    cat >/dev/null
     printf '%s\\n' '--safe-mode --setting-sources --strict-mcp-config --disallowedTools --tools'
     exit 0
     ;;
