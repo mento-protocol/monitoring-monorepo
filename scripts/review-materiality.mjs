@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { load as parseYaml } from "js-yaml";
@@ -90,9 +91,24 @@ function runGit(args) {
   return execFileSync("git", args, { encoding: "utf8" });
 }
 
+function runGitQuiet(args) {
+  return execFileSync("git", args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+}
+
 function tryGit(args) {
   try {
     return runGit(args);
+  } catch {
+    return "";
+  }
+}
+
+function tryGitQuiet(args) {
+  try {
+    return runGitQuiet(args);
   } catch {
     return "";
   }
@@ -138,6 +154,15 @@ function resolveDiffComparison(base, head) {
   }
 }
 
+function resolveMetadataBase(base, head) {
+  const mergeBase = tryGitQuiet(["merge-base", base, head]).trim();
+  if (mergeBase) return mergeBase;
+
+  return (
+    tryGitQuiet(["rev-parse", "--verify", `${base}^{commit}`]).trim() || base
+  );
+}
+
 function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort();
 }
@@ -164,6 +189,42 @@ function changedPathsFromGit(comparison) {
 function changedPathsFromFile(filePath) {
   const output = readFileSync(filePath, "utf8");
   return uniqueSorted(output.split("\n").map((line) => line.trim()));
+}
+
+function isSafeWorktreeRegularFile(filePath) {
+  if (!filePath || isAbsolute(filePath)) return false;
+
+  try {
+    const root = process.cwd();
+    const absolute = resolve(root, filePath);
+    const relativePath = relative(root, absolute);
+    if (
+      !relativePath ||
+      relativePath === ".." ||
+      relativePath.startsWith(`..${sep}`) ||
+      isAbsolute(relativePath)
+    ) {
+      return false;
+    }
+
+    let current = root;
+    let entry;
+    for (const segment of relativePath.split(sep)) {
+      current = join(current, segment);
+      entry = lstatSync(current);
+      if (entry.isSymbolicLink()) return false;
+    }
+    return entry?.isFile() === true;
+  } catch {
+    return false;
+  }
+}
+
+function readWorktreeTextFile(filePath) {
+  if (!isSafeWorktreeRegularFile(filePath)) {
+    throw new Error(`not a regular worktree file: ${filePath}`);
+  }
+  return readFileSync(filePath, "utf8");
 }
 
 function addNumstatOutput(stats, output) {
@@ -193,7 +254,7 @@ function addUntrackedStats(stats, paths) {
     if (stats.has(filePath)) continue;
     let additions;
     try {
-      additions = countTextLines(readFileSync(filePath, "utf8"));
+      additions = countTextLines(readWorktreeTextFile(filePath));
     } catch {
       additions = 0;
     }
@@ -224,19 +285,28 @@ function numstatFromGit(comparison) {
 }
 
 function readTextAtRef(ref, filePath) {
-  return runGit(["show", `${ref}:${filePath}`]);
+  return runGitQuiet(["show", `${ref}:${filePath}`]);
 }
 
 function readTextAtHead(ref, filePath) {
   return ref === "HEAD"
-    ? readFileSync(filePath, "utf8")
+    ? readWorktreeTextFile(filePath)
     : readTextAtRef(ref, filePath);
+}
+
+function isRegularFileAtHead(ref, filePath) {
+  if (ref === "HEAD") {
+    return isSafeWorktreeRegularFile(filePath);
+  }
+
+  const entry = runGitQuiet(["ls-tree", "-z", ref, "--", filePath]);
+  return entry.startsWith("100644 blob ") || entry.startsWith("100755 blob ");
 }
 
 function readJsonAtRef(ref, filePath) {
   if (ref === "HEAD") {
     try {
-      return JSON.parse(readFileSync(filePath, "utf8"));
+      return JSON.parse(readWorktreeTextFile(filePath));
     } catch {
       return null;
     }
@@ -343,10 +413,12 @@ function parseFrontmatterDocument(content) {
     : null;
 }
 
+function isCanonicalNotePath(filePath) {
+  return filePath.startsWith("docs/notes/") && filePath.endsWith(".md");
+}
+
 function readCanonicalNoteState(filePath, readContextFile) {
-  if (!filePath.startsWith("docs/notes/") || !filePath.endsWith(".md")) {
-    return null;
-  }
+  if (!isCanonicalNotePath(filePath)) return null;
 
   try {
     // Canonical authority comes from the source marker itself. Catalog and
@@ -380,6 +452,14 @@ function isReadableContextPath(filePath, readContextFile) {
   try {
     readContextFile(filePath);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+function isRegularHeadContextPath(filePath, isHeadContextFile) {
+  try {
+    return isHeadContextFile(filePath) === true;
   } catch {
     return false;
   }
@@ -622,6 +702,7 @@ export function analyzeMateriality({
   scriptChanges = [],
   readBaseContextFile = (filePath) => readFileSync(filePath, "utf8"),
   readHeadContextFile = (filePath) => readFileSync(filePath, "utf8"),
+  isHeadContextFile = () => true,
 } = {}) {
   const changedPaths = uniqueSorted(paths ?? []);
   const headCanonicalContextPaths = new Set();
@@ -629,19 +710,34 @@ export function analyzeMateriality({
   for (const filePath of changedPaths) {
     if (isConventionBasedCanonicalContextPath(filePath)) {
       materialityCanonicalContextPaths.add(filePath);
-      if (isReadableContextPath(filePath, readHeadContextFile)) {
+      if (
+        isRegularHeadContextPath(filePath, isHeadContextFile) &&
+        isReadableContextPath(filePath, readHeadContextFile)
+      ) {
         headCanonicalContextPaths.add(filePath);
       }
       continue;
     }
 
-    const headNote = readCanonicalNoteState(filePath, readHeadContextFile);
+    if (!isCanonicalNotePath(filePath)) continue;
+
+    const regularHeadNote = isRegularHeadContextPath(
+      filePath,
+      isHeadContextFile,
+    );
+    const headNote = regularHeadNote
+      ? readCanonicalNoteState(filePath, readHeadContextFile)
+      : null;
     if (headNote) {
       materialityCanonicalContextPaths.add(filePath);
       if (hasValidCanonicalNoteMetadata(filePath, headNote)) {
         headCanonicalContextPaths.add(filePath);
       }
       continue;
+    }
+
+    if (!regularHeadNote) {
+      materialityCanonicalContextPaths.add(filePath);
     }
 
     if (readCanonicalNoteState(filePath, readBaseContextFile)) {
@@ -720,7 +816,9 @@ async function main() {
   const comparison = args.changedPathsFile
     ? null
     : resolveDiffComparison(args.base, args.head);
-  const effectiveBase = comparison?.effectiveBase ?? args.base;
+  const effectiveBase = args.changedPathsFile
+    ? resolveMetadataBase(args.base, args.head)
+    : comparison.effectiveBase;
   const paths = args.changedPathsFile
     ? changedPathsFromFile(args.changedPathsFile)
     : changedPathsFromGit(comparison);
@@ -734,6 +832,7 @@ async function main() {
     scriptChanges,
     readBaseContextFile: (filePath) => readTextAtRef(effectiveBase, filePath),
     readHeadContextFile: (filePath) => readTextAtHead(args.head, filePath),
+    isHeadContextFile: (filePath) => isRegularFileAtHead(args.head, filePath),
   });
 
   process.stdout.write(

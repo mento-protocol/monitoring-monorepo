@@ -1,5 +1,11 @@
 #!/usr/bin/env node
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -185,6 +191,8 @@ test("CLI rejects a workflow plus non-canonical note in human and JSON output", 
     const json = runMaterialityCli(dir, pathsFile, true);
     assertEqual(human.status, 0);
     assertEqual(json.status, 0);
+    assertEqual(human.stderr, "");
+    assertEqual(json.stderr, "");
     assertIncludes(human.stdout, "Context update: required but not present");
 
     const report = JSON.parse(json.stdout);
@@ -199,6 +207,80 @@ test("CLI rejects a workflow plus non-canonical note in human and JSON output", 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("CLI never follows untracked symlinked context during normal analysis", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-symlink-test-"));
+  const script = new URL("./review-materiality.mjs", import.meta.url).pathname;
+  const workflow = join(dir, ".github", "workflows", "ci.yml");
+  const note = join(dir, "docs", "notes", "runbook.md");
+  const agents = join(dir, "AGENTS.md");
+  const fifo = join(dir, "context.fifo");
+
+  try {
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test User"]);
+    mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+    mkdirSync(join(dir, "docs", "notes"), { recursive: true });
+    writeFileSync(workflow, "name: CI\n");
+    git(dir, ["add", ".github/workflows/ci.yml"]);
+    git(dir, ["commit", "-m", "base"]);
+    writeFileSync(workflow, "name: Updated CI\n");
+
+    const fifoResult = spawnSync("mkfifo", [fifo], { encoding: "utf8" });
+    assertEqual(fifoResult.status, 0);
+    symlinkSync(fifo, note);
+    symlinkSync(fifo, agents);
+
+    const result = spawnSync(
+      process.execPath,
+      [script, "--base", "HEAD", "--head", "HEAD", "--json"],
+      { cwd: dir, encoding: "utf8", timeout: 2_000 },
+    );
+    assert(!result.error, result.error?.message ?? "CLI timed out");
+    assertEqual(result.status, 0);
+    const report = JSON.parse(result.stdout);
+    assertEqual(report.contextUpdateRequired, true);
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.reason,
+      "canonical agent or operator context",
+    );
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "AGENTS.md")?.reason,
+      "canonical agent or operator context",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("non-regular context paths are rejected before their targets are read", () => {
+  let headReads = 0;
+  const report = analyzeMateriality({
+    paths: [".github/workflows/ci.yml", "AGENTS.md", "docs/notes/runbook.md"],
+    readBaseContextFile: () => {
+      throw new Error("absent at base");
+    },
+    readHeadContextFile: () => {
+      headReads += 1;
+      return contextNote("true");
+    },
+    isHeadContextFile: () => false,
+  });
+
+  assertEqual(headReads, 0);
+  assertEqual(report.contextUpdatesPresent, false);
+  assertEqual(report.contextUpdateMissing, true);
+  assertEqual(report.tier, "full");
+  assertEqual(
+    report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+      ?.reason,
+    "canonical agent or operator context",
+  );
 });
 
 test("CLI keeps a deleted canonical note full without counting context present", () => {
@@ -251,6 +333,7 @@ test("CLI uses merge-base canonical metadata across divergent histories", () => 
   const script = new URL("./review-materiality.mjs", import.meta.url).pathname;
   const workflow = join(dir, ".github", "workflows", "ci.yml");
   const note = join(dir, "docs", "notes", "runbook.md");
+  const pathsFile = join(dir, "paths.txt");
 
   try {
     git(dir, ["init"]);
@@ -274,27 +357,41 @@ test("CLI uses merge-base canonical metadata across divergent histories", () => 
     writeFileSync(note, contextNote("false"));
     git(dir, ["add", "docs/notes/runbook.md"]);
     git(dir, ["commit", "-m", "base demotes runbook"]);
-
-    const result = spawnSync(
-      process.execPath,
-      [script, "--base", "named-base", "--head", "feature", "--json"],
-      { cwd: dir, encoding: "utf8" },
+    writeFileSync(
+      pathsFile,
+      ".github/workflows/ci.yml\ndocs/notes/runbook.md\n",
     );
 
-    assertEqual(result.status, 0);
-    const report = JSON.parse(result.stdout);
-    assertEqual(report.contextUpdatesPresent, false);
-    assertEqual(report.contextUpdateMissing, true);
-    assertEqual(
-      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
-        ?.tier,
-      "full",
-    );
-    assertEqual(
-      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
-        ?.reason,
-      "canonical agent or operator context",
-    );
+    for (const extraArgs of [[], ["--changed-paths-file", pathsFile]]) {
+      const result = spawnSync(
+        process.execPath,
+        [
+          script,
+          "--base",
+          "named-base",
+          "--head",
+          "feature",
+          ...extraArgs,
+          "--json",
+        ],
+        { cwd: dir, encoding: "utf8" },
+      );
+
+      assertEqual(result.status, 0);
+      const report = JSON.parse(result.stdout);
+      assertEqual(report.contextUpdatesPresent, false);
+      assertEqual(report.contextUpdateMissing, true);
+      assertEqual(
+        report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+          ?.tier,
+        "full",
+      );
+      assertEqual(
+        report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+          ?.reason,
+        "canonical agent or operator context",
+      );
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
