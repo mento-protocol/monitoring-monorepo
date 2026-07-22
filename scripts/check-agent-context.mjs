@@ -412,6 +412,18 @@ function isClaudeBashScriptPermission(permission) {
   return /^Bash\(bash\s+(?:\.\/)?scripts\/[^)]*\)$/.test(permission);
 }
 
+function isClaudeSagPermission(permission) {
+  if (!permission.startsWith("Bash(")) return false;
+
+  const command = permission.slice(
+    "Bash(".length,
+    permission.endsWith(")") ? -1 : undefined,
+  );
+  return /(?:^|[\s;&|()'"`])(?:[^\s;&|()'"`]+\/)?sag(?=$|[\s:;&|()'"`])/.test(
+    command,
+  );
+}
+
 function validateClaudePermissions(settings) {
   const allow = settings?.permissions?.allow;
   if (!Array.isArray(allow)) {
@@ -423,7 +435,7 @@ function validateClaudePermissions(settings) {
     if (typeof permission !== "string") continue;
 
     if (
-      /^Bash\(sag(?:\s|:|\))/.test(permission) &&
+      isClaudeSagPermission(permission) &&
       !/(?:^|\s)--api-key-file(?:=|\s+)~\/\.config\/elevenlabs_api_key(?=\s|\))/.test(
         permission,
       )

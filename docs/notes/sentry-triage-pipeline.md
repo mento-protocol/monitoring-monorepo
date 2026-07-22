@@ -28,7 +28,7 @@ enabling or operating a later stage.
 | Stage                    | Owner                                                                              | Schedule or trigger                                    | Writes                                                                   |
 | ------------------------ | ---------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------ |
 | Ingest                   | `.github/workflows/sentry-triage-ingest.yml`, `scripts/sentry-triage-ingest.mjs`   | 05:30 and 13:30 UTC daily; manual dispatch from `main` | Redacted queue issues and the ingest run record                          |
-| Triage                   | `.github/workflows/sentry-triage-agent.yml`, `.github/prompts/sentry-triage.md`    | 07:55 UTC weekdays; manual dispatch from `main`        | One verdict comment per selected issue                                   |
+| Triage                   | `.github/workflows/sentry-triage-agent.yml`, `.github/prompts/sentry-triage.md`    | 07:55 UTC weekdays; manual dispatch must select `main` | One verdict comment per selected issue                                   |
 | Deterministic settlement | `scripts/sentry-triage-project-core.mjs`, `scripts/sentry-triage-project.mjs`      | After each triage batch                                | Verdict labels, queue closure, and optional owning-repo issue projection |
 | Autofix                  | `.github/workflows/sentry-autofix.yml`, `.github/prompts/sentry-autofix.md`        | 08:30 UTC weekdays; manual dispatch from `main`        | A scoped branch and PR for eligible local code fixes                     |
 | Archive                  | `.github/workflows/sentry-triage-archive.yml`, `scripts/sentry-triage-archive.mjs` | Human approval label or manual dispatch from `main`    | Sentry `archived_until_escalating` state and a queue audit record        |
@@ -37,6 +37,13 @@ The workflows own permissions, concurrency, branch guards, and exact
 invocations. The scripts own parsing, idempotency, and state transitions. The
 ADRs own the trust boundaries and rationale. Update those sources and this
 runbook together when a contract changes.
+
+The triage row states an operator requirement, not a mechanical guarantee.
+The triage workflow does not yet guard its dispatch ref: a feature-ref dispatch
+checks out that ref while holding the read-only Sentry token and issue-write
+workflow token. Always select `main`.
+GitHub Environment enforcement for this surface is tracked in
+[#1289](https://github.com/mento-protocol/monitoring-monorepo/issues/1289).
 
 ## Non-negotiable invariants
 
@@ -258,6 +265,11 @@ the existing Claude PR workflow after applying it.
 - A failed or invalid triage verdict retains `sentry:needs-triage`; rerun the
   agent workflow after correcting the underlying failure. Manual
   `issue_number` dispatches must target an open queue issue.
+- A refused autofix is terminal until a human reviews the refusal, corrects
+  any transient cause, and removes `sentry:fix-refused` from the queue issue.
+  Then dispatch `Sentry Autofix` from `main` for that issue or let the next
+  scheduled run select it. A later Sentry regression clears the marker
+  automatically.
 - A projection without its token closes the queue issue with an explicit
   skipped note. Provision the token and re-triage only when the owning-repo
   issue is still required.
