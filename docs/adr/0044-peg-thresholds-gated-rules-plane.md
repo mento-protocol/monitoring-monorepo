@@ -1,0 +1,106 @@
+---
+title: Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-22
+scope: alerts
+date: 2026-07
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
+---
+
+# ADR 0044 — Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON
+
+**Status:** Accepted (Jul 2026), in force. Decided ahead of implementation;
+the rule group lands in the alerts phase of
+[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
+**Scope:** alerts
+
+## Context
+
+Peg monitoring adds a per-asset alert class (warn/critical deviation bps,
+sustain windows, structural-saturation thresholds). Two governance designs
+were considered. The first — export thresholds as metrics
+(`mento_peg_critical_bps{asset}`) and let one static Grafana rule compare
+`composite > threshold` — makes onboarding require no Terraform apply at
+all.
+
+Adversarial review rejected it as a governance regression: paging
+thresholds would move from the `production-infra` human-approval gate
+([ADR 0029](0029-ci-apply-production-infra-gate.md)) onto the ungated
+service-deploy path (`pnpm bridge:deploy` needs no approval), a reviewer
+would see no Terraform diff for a paging-policy change, and the repo's
+threshold-parity machinery would be orphaned for the new class. Rule-level
+concerns compound it: severity, routing, mute timings, and `no_data_state`
+are deliberately per-rule in this stack, and a single series-join rule
+auto-resolves a live page whenever the threshold series blips.
+
+## Decision
+
+- Peg thresholds are data in one repo-internal JSON
+  (`alerts/rules/peg-thresholds.json`), consumed by the alerts stack via
+  `jsondecode(file(...))` with `dynamic "rule"` / `for_each` generation —
+  both established patterns in this repo. There is no HCL mirror, so the
+  existing mirror-drift check is unnecessary for this class; a sibling
+  integrity check validates that every registry asset has a threshold entry
+  and vice versa.
+- Changing any peg threshold or onboarding an asset's rules is therefore a
+  reviewed PR plus a human-approved `alerts-rules` apply through the
+  `production-infra` gate. That apply-per-asset cost is deliberate: paging
+  policy for a breaker-tripping decision deserves the same review as every
+  other threshold in the stack.
+- Per-rule semantics follow stack conventions:
+  - Every peg rule is freshness-gated on `mento_peg_observation_at` /
+    heartbeat using the established `time() - *_at` idiom — a stalled
+    poller must never satisfy or suppress a rule with stale gauge values.
+  - Blindness and heartbeat rules set `no_data_state = "Alerting"` with the
+    documented justification and ~5-minute grace, following the
+    bridge-down/pool-coverage precedent: for these rules, absence of data
+    is the signal.
+  - Deviation sustain uses a duration-fraction window
+    (`quantile_over_time`) rather than the rule `for` clock alone, so a
+    single favorable sample on a thin, flapping book cannot reset a real
+    breach; this is a new idiom in the stack, adopted deliberately for
+    thin-market series and documented in the rule file banner.
+  - Severity and routing stay per-rule: warn → Slack, critical → page, each
+    with its own contact-point wiring.
+
+## Alternatives considered
+
+- **Thresholds-as-metrics + one static rule** — rejected: bypasses the
+  production-infra gate, invisible paging-policy diffs, no_data/auto-resolve
+  hazards (detailed above).
+- **Hand-written HCL per asset with TS mirror + drift check** — rejected:
+  the mirror exists today only because two code planes both need the
+  constants; for peg rules the JSON is the single consumer-facing source,
+  so `jsondecode` removes the mirror instead of policing it.
+- **Thresholds inside the peg registry
+  ([ADR 0043](0043-peg-registry-service-local.md))** — rejected: the bridge
+  does not evaluate alert thresholds (rules do), and placing paging policy
+  in a service-deployable file recreates the governance bypass through the
+  back door. The registry and the thresholds JSON are cross-checked
+  instead.
+
+## Consequences
+
+- Onboarding an asset touches exactly two reviewed data files (registry +
+  thresholds JSON) and requires one gated apply — a feature, preserving
+  human sign-off on anything that can page or justify a breaker trip.
+- The alerts stack gains its first `jsondecode`-driven rule group; the
+  pattern is available for future per-asset rule classes.
+- The integrity check joins the quality gate and CI, so a registry/threshold
+  mismatch fails before review.
+
+## Evidence
+
+- `docs/PLAN-peg-monitoring.md` (review findings that reversed the
+  thresholds-as-metrics lean)
+- `alerts/rules/rules-reserve-balances.tf`, `rules-oracle-relayers.tf`
+  (per-key `for_each` threshold precedents)
+- `alerts/rules/rules-metrics-bridge.tf` (deliberate `no_data_state =
+"Alerting"` precedent)
+- `scripts/check-deviation-threshold-drift.mjs` (the mirror-drift pattern
+  this class deliberately avoids needing)
+- ADRs 0029, 0043, 0045

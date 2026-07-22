@@ -3,7 +3,7 @@ title: A Hasura to Prometheus bridge exists so v3 DB data can drive Grafana aler
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-22
 scope: metrics-bridge
 date: 2026-04
 doc_type: adr
@@ -13,7 +13,10 @@ garden_lane: adrs-architecture
 
 # ADR 0027 — A Hasura→Prometheus bridge exists so v3 DB data can drive Grafana alerts
 
-**Status:** Accepted (Apr 2026), in force.
+**Status:** Accepted (Apr 2026), in force. Scope extended by
+[ADR 0042](0042-metrics-bridge-external-price-poller.md) (Jul 2026): the
+bridge additionally hosts an isolated external market-price peg-polling
+lifecycle.
 **Scope:** metrics-bridge
 
 ## Context

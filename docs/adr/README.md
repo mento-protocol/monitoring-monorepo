@@ -75,10 +75,11 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### shared-config
 
-| ADR                                                  | Decision                                                               |
-| ---------------------------------------------------- | ---------------------------------------------------------------------- |
-| [0011](0011-shared-config-single-source-of-truth.md) | `shared-config` is the single source of truth for chain/token metadata |
-| [0035](0035-config-public-npm-package.md)            | `shared-config` publishes as public `@mento-protocol/config`           |
+| ADR                                                  | Decision                                                                                       |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| [0011](0011-shared-config-single-source-of-truth.md) | `shared-config` is the single source of truth for chain/token metadata                         |
+| [0035](0035-config-public-npm-package.md)            | `shared-config` publishes as public `@mento-protocol/config`                                   |
+| [0043](0043-peg-registry-service-local.md)           | The peg-monitor registry is service-local config referencing, never duplicating, shared-config |
 
 ### indexer-envio
 
@@ -116,18 +117,23 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### metrics-bridge
 
-| ADR                                                      | Decision                                                                     |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [0027](0027-metrics-bridge-hasura-to-prometheus.md)      | A Hasura→Prometheus bridge exists so v3 DB data can drive Grafana alerts     |
-| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool blockage requires every active indexed strategy to be confirmed blocked |
+| ADR                                                      | Decision                                                                      |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [0027](0027-metrics-bridge-hasura-to-prometheus.md)      | A Hasura→Prometheus bridge exists so v3 DB data can drive Grafana alerts      |
+| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool blockage requires every active indexed strategy to be confirmed blocked  |
+| [0042](0042-metrics-bridge-external-price-poller.md)     | The bridge hosts an isolated external market-price peg-polling lifecycle      |
+| [0043](0043-peg-registry-service-local.md)               | The peg-monitor registry is service-local config, not published shared-config |
+| [0045](0045-peg-paging-semantics.md)                     | Peg paging measures executable sell price; the deep venue pages alone         |
 
 ### terraform / infra
 
-| ADR                                            | Decision                                                                                |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------- |
-| [0028](0028-terraform-stack-registry.md)       | Terraform ownership is a registry (`terraform.stacks.json`) with roots split by cadence |
-| [0029](0029-ci-apply-production-infra-gate.md) | Infra applies on merge to `main` behind the `production-infra` environment gate         |
-| [0030](0030-iac-before-cli-secrets.md)         | All secrets are managed by IaC; agents never touch them with CLI commands               |
+| ADR                                              | Decision                                                                                |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| [0028](0028-terraform-stack-registry.md)         | Terraform ownership is a registry (`terraform.stacks.json`) with roots split by cadence |
+| [0029](0029-ci-apply-production-infra-gate.md)   | Infra applies on merge to `main` behind the `production-infra` environment gate         |
+| [0030](0030-iac-before-cli-secrets.md)           | All secrets are managed by IaC; agents never touch them with CLI commands               |
+| [0044](0044-peg-thresholds-gated-rules-plane.md) | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON           |
+| [0045](0045-peg-paging-semantics.md)             | Peg paging measures executable sell price; the deep venue pages alone                   |
 
 ### governance-watchdog
 
