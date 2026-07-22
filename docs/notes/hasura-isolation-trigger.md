@@ -3,7 +3,7 @@ title: Hasura isolation trigger
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -29,24 +29,30 @@ alerts. Today this is the same hosted endpoint the public dashboard reads.
 
 Envio's small tier has returned HTTP 429 `"Tier Quota"` without `Retry-After`
 when the shared monthly endpoint quota is exhausted
-(`ui-dashboard/src/lib/gql-retry.ts`). The dashboard backs off on those 429s;
-the bridge records them as
-`mento_pool_bridge_poll_errors_total{kind="hasura_rate_limit"}`.
+(`ui-dashboard/src/lib/gql-retry.ts`). The dashboard recognizes that response
+body and backs off. The bridge classifies every GraphQL HTTP 429 as
+`mento_pool_bridge_poll_errors_total{kind="hasura_rate_limit"}` without checking
+the body, so that metric proves rate limiting, not shared-quota exhaustion.
 
 ## Trigger condition
+
+The `Metrics Bridge Poll Errors` Grafana rule fires above `0.01/s` for 10
+minutes. The two-day threshold below is a manual isolation decision after
+corroboration, not the alert's query.
 
 Act when any of these fire:
 
 - The `Metrics Bridge Poll Errors` alert fires with
-  `kind="hasura_rate_limit"` on at least two distinct days within a rolling
-  14-day window.
+  `kind="hasura_rate_limit"`, the underlying response body or Envio usage
+  corroborates shared-quota pressure, and this happens on at least two distinct
+  days within a rolling 14-day window.
 - Dashboard Sentry shows sustained 429 `"Tier Quota"` `ClientError` events
   outside a known quota-burn incident.
 - Envio usage shows more than 80% of the monthly tier quota consumed before
   day 21 of the month.
 
-For non-429 Hasura failures, inspect bridge logs before treating the event as
-quota pressure:
+Inspect bridge logs and Envio usage before treating any bridge 429 or non-429
+Hasura failure as shared-quota pressure:
 
 ```bash
 gcloud run services logs read metrics-bridge --project mento-monitoring --region europe-west1
@@ -56,8 +62,10 @@ gcloud run services logs read metrics-bridge --project mento-monitoring --region
 
 1. Contact Envio support to confirm whether hosted Hasura applies
    per-consumer rate limits and to price a tier upgrade or dedicated endpoint.
-2. Protect paging first: provision a dedicated Envio endpoint or replica for
-   `metrics-bridge` and point its `HASURA_URL` there.
+2. Protect paging first: add a dedicated bridge-only Terraform input, provision
+   a dedicated Envio endpoint or replica, and point `metrics-bridge` at it. The
+   current shared `var.hasura_url` configures both the dashboard and bridge, so
+   changing that value alone does not isolate either consumer.
 3. Reduce public load: route anonymous browser polling through a Next.js route
    handler with short-TTL shared caching.
 
