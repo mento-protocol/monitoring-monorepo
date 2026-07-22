@@ -181,6 +181,36 @@ function assertStrictLoaderListMetadataWiring() {
   }
 }
 
+function assertRequestedLoaderExecutionWiring() {
+  const lines = readFileSync(wrapper, "utf8").split("\n");
+  const calls = lines.flatMap((line, index) =>
+    line.trim() === "if ! run_strict_linux_loader_list \\"
+      ? [lines.slice(index, index + 3).map((entry) => entry.trim())]
+      : [],
+  );
+  assert.deepEqual(
+    calls,
+    [
+      [
+        "if ! run_strict_linux_loader_list \\",
+        '"$loader_requested" \\',
+        '"$candidate" \\',
+      ],
+      [
+        "if ! run_strict_linux_loader_list \\",
+        '"$interpreter" \\',
+        '"$candidate" \\',
+      ],
+      [
+        "if ! run_strict_linux_loader_list \\",
+        '"$interpreter" \\',
+        '"$candidate" \\',
+      ],
+    ],
+    "loader-list calls must execute the attested requested PT_INTERP path",
+  );
+}
+
 function assertLoaderFingerprintPrecedesExecution() {
   const source = readFileSync(wrapper, "utf8");
   const functionOffset = source.indexOf(
@@ -651,11 +681,22 @@ function exerciseStrictLoaderListMetadataParser() {
     0,
     "strict loader-list parser accepted a missing non-interpreter dependency",
   );
+  writeFileSync(
+    output,
+    `${interpreterAlias} => ${process.execPath} (0x7f0000000000)\nlibfixture.so.1 => ${process.execPath} (0x7f0000001000)\n`,
+  );
+  const absoluteInterpreterAlias = run(interpreterName, "libfixture.so.1");
+  assert.notEqual(
+    absoluteInterpreterAlias.status,
+    0,
+    "strict loader-list parser broadened absolute aliases instead of requiring requested-path execution",
+  );
 }
 
 try {
   exerciseStrictElfMetadataParser();
   assertStrictLoaderListMetadataWiring();
+  assertRequestedLoaderExecutionWiring();
   assertLoaderFingerprintPrecedesExecution();
   assertHelperBindsSealedLoaderFingerprint();
   exerciseStrictLoaderListMetadataParser();

@@ -1490,6 +1490,9 @@ strict_linux_alias_directory_metadata() {
 }
 
 run_strict_linux_loader_list() {
+  # Use the attested PT_INTERP spelling, not its resolved target. glibc emits
+  # its own loader as a standalone row only when the invocation name matches;
+  # the metadata parser still binds that row to the resolved loader inode.
   local loader="$1"
   local candidate="$2"
   local library_path="$3"
@@ -1855,7 +1858,7 @@ linux_node_snapshot_closure_is_trusted() {
   : >"$loader_error"
   /bin/chmod 0600 "$loader_output" "$loader_error"
   if ! run_strict_linux_loader_list \
-    "$loader_resolved" \
+    "$loader_requested" \
     "$candidate" \
     "$alias_dir" \
     "$loader_output" \
@@ -2081,7 +2084,7 @@ linux_node_snapshot_has_safe_closure() {
   /bin/chmod 0600 "$loader_output" "$loader_error"
   set_root_node_snapshot_stage ambient-loader-exec
   if ! run_strict_linux_loader_list \
-    "$resolved_interpreter" \
+    "$interpreter" \
     "$candidate" \
     - \
     "$loader_output" \
@@ -2309,7 +2312,7 @@ linux_node_snapshot_has_safe_closure() {
   /bin/chmod 0600 "$loader_output" "$loader_error"
   set_root_node_snapshot_stage controlled-loader-list
   if ! run_strict_linux_loader_list \
-    "$resolved_interpreter" \
+    "$interpreter" \
     "$candidate" \
     "$alias_dir" \
     "$loader_output" \
