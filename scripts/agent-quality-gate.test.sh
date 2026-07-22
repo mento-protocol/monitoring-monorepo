@@ -1304,6 +1304,51 @@ assert_not_contains "cd aegis && forge test"
 assert_not_contains "@mento-protocol/integration-probes test:coverage"
 assert_not_contains "workspace dependency/config changed (coverage floor)"
 
+# An importer version bump PLUS an unrelated small source edit in that same
+# package must still run the package's FULL test:coverage — the
+# lockfile-triggered coverage floor stands in for the dependency-bump
+# regression check (issue #1414), so scoped-tests (issue #1413) must not
+# narrow it down to just the unrelated edit's related tests.
+lockfile_and_source_repo="$(mktemp -d)"
+(
+  cd "$lockfile_and_source_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf '{ "name": "fixture" }\n' > package.json
+  printf '%s' "$lockfile_scope_base_yaml" > pnpm-lock.yaml
+  mkdir -p metrics-bridge/src
+  echo "export const x = 1;" > metrics-bridge/src/existing.ts
+  git add package.json pnpm-lock.yaml metrics-bridge/src/existing.ts
+  git commit -qm init
+  cat > pnpm-lock.yaml <<'YAML'
+lockfileVersion: '9.0'
+settings:
+  autoInstallPeers: true
+overrides: {}
+importers:
+  .:
+    dependencies: {}
+  metrics-bridge:
+    dependencies:
+      viem:
+        specifier: ^2.1.0
+        version: 2.1.0
+  integration-probes:
+    dependencies:
+      undici:
+        specifier: ^6.0.0
+        version: 6.0.0
+packages:
+  viem@2.0.0: {}
+YAML
+  echo "export const x = 2;" > metrics-bridge/src/existing.ts
+  "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
+)
+rm -rf "$lockfile_and_source_repo"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics-bridge changed (coverage floor))"
+assert_not_contains "exec vitest related --run"
+
 # Two importers changed → both bundles.
 run_lockfile_scope_gate 'lockfileVersion: '"'"'9.0'"'"'
 settings:
@@ -1863,9 +1908,20 @@ assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the das
 # full coverage floors, so this only trims the local signal.
 
 # Two production-source files in one package → both listed (sorted) + scoped.
-run_gate "ui-dashboard/src/lib/aardvark.ts" "ui-dashboard/src/lib/zebra.ts"
-assert_raw_contains "- pnpm --filter @mento-protocol/ui-dashboard exec vitest related --run src/lib/aardvark.ts src/lib/zebra.ts (ui-dashboard changed (coverage floor) (scoped-tests))"
+# Real, existing files: scoping now requires each changed path to exist at
+# head (see the deletion test below), so placeholder paths would no longer
+# qualify.
+run_gate "ui-dashboard/src/lib/address-book.ts" "ui-dashboard/src/lib/arkham.ts"
+assert_raw_contains "- pnpm --filter @mento-protocol/ui-dashboard exec vitest related --run src/lib/address-book.ts src/lib/arkham.ts (ui-dashboard changed (coverage floor) (scoped-tests))"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+
+# A deleted production-source file (or the old side of a --no-renames rename)
+# keeps the full suite: `vitest related --run <missing path>` silently finds
+# zero tests instead of erroring, which would otherwise skip the coverage
+# floor entirely rather than failing toward it.
+run_gate "ui-dashboard/src/lib/this-file-does-not-exist.ts"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+assert_not_contains "exec vitest related --run"
 
 # A test-file-only edit keeps the full suite (test files are not scopable source).
 run_gate "ui-dashboard/src/lib/__tests__/scope-probe.test.ts"

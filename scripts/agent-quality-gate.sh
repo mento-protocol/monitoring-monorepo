@@ -261,6 +261,21 @@ package_script_risk_changed=false
 # (GitHub issue #1413) is suppressed in that case so escalations keep the full
 # per-package `test:coverage` floors everywhere.
 saw_workspace_escalation=false
+# Space-padded set of package names whose test:coverage must not be narrowed
+# by apply_scoped_test_commands, because pnpm-lock.yaml also bumped their
+# importer section this run (issue #1414). The lockfile-triggered coverage
+# floor exists specifically to catch a dependency bump's effect on the whole
+# package, so an unrelated small source edit in the same package must not
+# narrow it down to just that edit's related tests.
+lockfile_scoped_packages=""
+
+mark_lockfile_scoped_package() {
+  lockfile_scoped_packages+=" $1 "
+}
+
+is_lockfile_scoped_package() {
+  [[ "$lockfile_scoped_packages" == *" $1 "* ]]
+}
 
 has_command() {
   local command="$1"
@@ -730,9 +745,26 @@ scoped_test_infra_changed() {
   return 1
 }
 
+# True iff the repo-relative path exists in the head state: the working tree
+# when head_ref is HEAD (the common case, so local uncommitted edits count),
+# otherwise the given ref via git. A deleted file, or the old side of a
+# --no-renames rename, reports false.
+scoped_path_exists_at_head() {
+  local path="$1"
+  if [[ "$head_ref" == "HEAD" ]]; then
+    [[ -e "$path" ]]
+  else
+    git cat-file -e "${head_ref}:${path}" 2>/dev/null
+  fi
+}
+
 # Print the package-relative production-source paths changed inside a package
 # directory, one per line. Returns non-zero (no output) when the package is
-# unscopable: no changed paths inside it, or any non-source path inside it.
+# unscopable: no changed paths inside it, any non-source path inside it, or a
+# changed path that no longer exists at head (a deletion, or the old side of a
+# rename — `vitest related --run` silently finds zero tests for a missing
+# path instead of erroring, which would otherwise skip the coverage floor
+# entirely instead of failing toward the full suite).
 scoped_source_files_for_package() {
   local package_name="$1"
   local package_dir
@@ -746,6 +778,9 @@ scoped_source_files_for_package() {
       "$package_dir"/*)
         rel="${path#"$package_dir"/}"
         if scoped_is_non_source_path "$rel"; then
+          return 1
+        fi
+        if ! scoped_path_exists_at_head "$path"; then
           return 1
         fi
         files+=("$rel")
@@ -786,6 +821,12 @@ apply_scoped_test_commands() {
 
     # shared-config's blast radius is the point — keep its full suite (issue #1413).
     [[ "$package_name" == "@mento-protocol/config" ]] && continue
+
+    # A lockfile importer bump for this package (issue #1414) means the
+    # coverage floor is standing in for the dependency-bump regression check;
+    # an unrelated small source edit in the same package must not narrow it
+    # down to just that edit's related tests.
+    is_lockfile_scoped_package "$package_name" && continue
 
     files="$(scoped_source_files_for_package "$package_name")" || continue
 
@@ -868,30 +909,39 @@ map_lockfile_importer_to_bundle() {
   local reason="$2"
   case "$importer" in
     aegis)
+      mark_lockfile_scoped_package "@mento-protocol/aegis"
       add_aegis_quality_commands "$reason"
       ;;
     ui-dashboard)
+      mark_lockfile_scoped_package "@mento-protocol/ui-dashboard"
       add_dashboard_quality_commands "$reason"
       ;;
     indexer-envio)
+      mark_lockfile_scoped_package "@mento-protocol/indexer-envio"
       add_package_quality_commands "@mento-protocol/indexer-envio" "$reason"
       ;;
     metrics-bridge)
+      mark_lockfile_scoped_package "@mento-protocol/metrics-bridge"
       add_package_quality_commands "@mento-protocol/metrics-bridge" "$reason"
       ;;
     integration-probes)
+      mark_lockfile_scoped_package "@mento-protocol/integration-probes"
       add_package_quality_commands "@mento-protocol/integration-probes" "$reason"
       ;;
     shared-config)
+      mark_lockfile_scoped_package "@mento-protocol/config"
       add_package_quality_commands "@mento-protocol/config" "$reason"
       ;;
     governance-watchdog)
+      mark_lockfile_scoped_package "@mento-protocol/governance-watchdog"
       add_package_quality_commands "@mento-protocol/governance-watchdog" "$reason"
       ;;
     alerts/infra/onchain-event-handler)
+      mark_lockfile_scoped_package "@mento-protocol/alerts-onchain-event-handler"
       add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "$reason"
       ;;
     alerts/infra/oncall-announcer)
+      mark_lockfile_scoped_package "@mento-protocol/alerts-oncall-announcer"
       add_alerts_oncall_quality_commands "$reason"
       ;;
   esac
