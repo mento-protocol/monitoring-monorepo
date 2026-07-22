@@ -10,8 +10,9 @@ set -euo pipefail
 
 # A set -e abort outside fail() would otherwise die with no message at all —
 # which is exactly how a CI-only failure stays undiagnosable. Name the dying
-# command on stdout (some CI captures drop stderr).
-trap 'echo "agent-quality-gate test suite aborted: line $LINENO: $BASH_COMMAND (exit $?)"' ERR
+# command on stdout (some CI captures drop stderr) and dump the in-flight
+# gate output, which usually holds the actual error.
+trap 'echo "agent-quality-gate test suite aborted: line $LINENO: $BASH_COMMAND (exit $?)"; echo "Last gate output (tail):"; tail -40 "$output_file" 2>/dev/null | sed "s/^/  /"' ERR
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -4042,8 +4043,9 @@ prereq_reuse_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p bin scripts sub tools
+  mkdir -p bin scripts shared-config/src sub tools
   printf '{"name":"sub"}\n' > sub/package.json
+  printf 'export const x = 1;\n' > shared-config/src/x.ts
   printf 'process.exit(0);\n' > scripts/check-adr-reminder.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
@@ -4055,6 +4057,10 @@ if [[ "$*" == "install --frozen-lockfile" ]]; then
   echo run >> "$INSTALL_SIDE_EFFECT"
   exit 0
 fi
+if [[ "$*" == "--filter @mento-protocol/config build" ]]; then
+  echo run >> "$BUILD_SIDE_EFFECT"
+  exit 0
+fi
 if [[ "$*" == "skew:check" ]]; then
   echo run >> "$SKEW_SIDE_EFFECT"
   exit 0
@@ -4064,9 +4070,10 @@ STUB
   chmod +x bin/pnpm tools/trunk
   git add .
   git commit -qm init
-  printf 'sub/package.json\n' > changed-paths.txt
+  printf 'sub/package.json\nshared-config/src/x.ts\n' > changed-paths.txt
   for _ in 1 2; do
     INSTALL_SIDE_EFFECT="$prereq_reuse_repo/install-side-effect" \
+      BUILD_SIDE_EFFECT="$prereq_reuse_repo/build-side-effect" \
       SKEW_SIDE_EFFECT="$prereq_reuse_repo/skew-side-effect" \
       PATH="$prereq_reuse_repo/bin:$PATH" \
       "$repo_root/scripts/agent-quality-gate.sh" \
@@ -4080,6 +4087,12 @@ STUB
   done
   [[ "$(wc -l < "$prereq_reuse_repo/install-side-effect" | tr -d ' ')" == "2" ]] ||
     fail "expected the preflight install to run on BOTH runs (prerequisites are never reused)"
+  # PR 1492 review: the --parallel 1 sequential branch bypasses
+  # run_prerequisite_phase, so setup exemption must come from the command
+  # classification — the shared-config build (a quality-setup command whose
+  # dist/ output the fingerprint cannot see) must also run on BOTH runs.
+  [[ "$(wc -l < "$prereq_reuse_repo/build-side-effect" | tr -d ' ')" == "2" ]] ||
+    fail "expected the quality-setup config build to run on BOTH runs (setup commands are never reused)"
   [[ "$(wc -l < "$prereq_reuse_repo/skew-side-effect" | tr -d ' ')" == "1" ]] ||
     fail "expected the quality command to be reused on the second run"
 )

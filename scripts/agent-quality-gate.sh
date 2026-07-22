@@ -2797,7 +2797,12 @@ record_command_stamp() {
   local command="$1"
   # Prerequisite outputs (node_modules, generated code) are invisible to the
   # source fingerprint, so prerequisite commands are never stamped or reused.
+  # Quality-setup commands (shared-config build, Terraform init/validate) get
+  # the same treatment by classification, not phase bookkeeping: the
+  # --parallel 1 / --fail-fast sequential branch never enters
+  # run_prerequisite_phase, so the phase flag alone would miss them there.
   [[ "${in_prerequisite_phase:-false}" == true ]] && return 0
+  is_quality_setup_command "$command" && return 0
   is_stamp_exempt_command "$command" && return 0
   # Best-effort: a stamp-write failure must never fail the gate.
   printf '%s\t%s\t%s\n' \
@@ -2841,6 +2846,7 @@ prune_command_stamps() {
 try_reuse_command() {
   local command="$1"
   [[ "${in_prerequisite_phase:-false}" == true ]] && return 1
+  is_quality_setup_command "$command" && return 1
   is_stamp_exempt_command "$command" && return 1
   command_stamp_is_fresh "$command" || return 1
   echo
