@@ -990,6 +990,12 @@ non-Dependabot), so every secret-bearing `pull_request` lane must treat the
 - `lighthouse.yml` routes autofix PRs to the secretless deterministic-fixture
   lane — they never receive the Vercel deploy-protection bypass secret, which
   the preview lane sends as a request header to the PR's OWN server code.
+- Vercel's NATIVE Git integration is a separate deploy path outside CI: it is
+  denied for the autofix namespace via `ui-dashboard/vercel.json`
+  (`git.deploymentEnabled: { "sentry-autofix/*": false }`, issue #1452), so
+  Vercel never builds an autofix branch with the dashboard project's production
+  secrets in scope. The finalize diff guard forbids editing `vercel.json`, so
+  autofix cannot re-enable its own deployment.
 - The four Terraform-family plan jobs (`governance-watchdog`, `alerts-infra`,
   `alerts-rules`, `aegis-terraform`) skip autofix PRs entirely: `terraform
 plan` executes PR-head HCL, and the plan job holds a state-reading SA.
