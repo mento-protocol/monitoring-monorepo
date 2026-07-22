@@ -3764,7 +3764,7 @@ function reviewDocsDrift(repo, target, paths, findings) {
   }
 }
 
-function diffCheckCommands(target) {
+function diffCheckCommands(repo, target) {
   if (target.mode === "branch") {
     return [["diff", "--check", `${target.ref}...${target.head}`]];
   }
@@ -3772,7 +3772,15 @@ function diffCheckCommands(target) {
     return [["show", "--format=", "--check", target.ref]];
   }
   if (target.mode === "branch-local") {
-    return [["diff", "--check", target.ref]];
+    const mergeBase = runGit(repo, [
+      "merge-base",
+      target.ref,
+      target.head,
+    ]).trim();
+    if (!/^[0-9a-f]{40,64}$/i.test(mergeBase)) {
+      throw new Error("branch-local review target has no valid merge base");
+    }
+    return [["diff", "--check", mergeBase]];
   }
   return [
     ["diff", "--cached", "--check", target.head],
@@ -3782,7 +3790,7 @@ function diffCheckCommands(target) {
 
 function reviewDiffCheck(repo, target, findings) {
   const outputs = [];
-  for (const gitArgs of diffCheckCommands(target)) {
+  for (const gitArgs of diffCheckCommands(repo, target)) {
     const result = runGitResult(repo, gitArgs);
     const output = `${result.stdout || ""}${result.stderr || ""}`.trim();
     if (output) outputs.push(output);
