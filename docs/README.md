@@ -22,14 +22,14 @@ the rules in [`context-standards.md`](context-standards.md).
 | --- | --- | --- | --- | --- | --- |
 | [`.agents/roles/standards-enforcer.md`](../.agents/roles/standards-enforcer.md) | Standards Enforcer Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-05-20 |
 | [`.agents/roles/verifier.md`](../.agents/roles/verifier.md) | Verifier Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-05-20 |
-| [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md) | Babysit PR Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-28 |
+| [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md) | Babysit PR Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md) | Deploy Indexer Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-29 |
 | [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md) | Forensic Report Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-06-15 |
 | [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md) | 0xADDRESS_CASE_PRESERVED — Display Name (persona/ENS if known) | unmanaged / unmanaged | skill / repo-wide | unowned | 90d |
 | [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md) | Monorepo Import Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-26 |
-| [`.agents/skills/ship/SKILL.md`](../.agents/skills/ship/SKILL.md) | Ship Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-16 |
+| [`.agents/skills/ship/SKILL.md`](../.agents/skills/ship/SKILL.md) | Ship Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`.claude/agents/dashboard-explorer.md`](../.claude/agents/dashboard-explorer.md) | Dashboard Explorer | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
 | [`.claude/agents/indexer-explorer.md`](../.claude/agents/indexer-explorer.md) | Indexer Explorer | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
 | [`.claude/agents/infra-reader.md`](../.claude/agents/infra-reader.md) | Infra Reader | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
@@ -70,15 +70,16 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md) | Cross-Protocol Context | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-06 |
 | [`docs/notes/dashboard-verification.md`](notes/dashboard-verification.md) | Dashboard Local and Browser Verification | canonical / active | runbook / ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md) | Documentation gardening | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-19 |
+| [`docs/notes/github-tooling-surfaces.md`](notes/github-tooling-surfaces.md) | GitHub Tooling Surfaces — gh CLI vs MCP | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md) | Hasura isolation trigger | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
-| [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
+| [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/notes/reserve-yield-indexer.md`](notes/reserve-yield-indexer.md) | Reserve-Yield Indexer Topology | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-03 |
 | [`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md) | Sentry Triage Pipeline | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-19 |
 | [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md) | GitHub-to-Slack notifications for Terraform-applying workflows | canonical / active | runbook / terraform/infra | eng | 30d; verified 2026-07-17 |
 | [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md) | Spoken Attention Nudge | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-05 |
-| [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md) | New Worktree / Clone Setup and Claude Code on the Web Setup | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
+| [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md) | New Worktree / Clone Setup and Claude Code on the Web Setup | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-08 |
 | [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md) | Adding New Events to Governance Watchdog | unmanaged / unmanaged | runbook / governance-watchdog | unowned | 90d |
 | [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md) | Deployment from Scratch | unmanaged / unmanaged | runbook / governance-watchdog | unowned | 90d |

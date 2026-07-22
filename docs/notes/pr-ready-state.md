@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -20,6 +20,12 @@ The command must be the source of truth before either agent signals all-clear.
 Agent-specific loops can still gather extra context or post replies, but their
 final readiness decision should come from this command so Claude and Codex do
 not drift.
+
+The probe shells out to gh, so it cannot run in Claude cloud sessions, where
+the platform blocks gh's API paths. Those sessions use the MCP emulation
+documented in
+[`github-tooling-surfaces.md`](github-tooling-surfaces.md) and label their
+all-clear MCP-emulated rather than probe-verified.
 
 ## Readiness model
 

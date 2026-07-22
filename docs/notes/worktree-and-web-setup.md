@@ -3,7 +3,7 @@ title: New Worktree / Clone Setup and Claude Code on the Web Setup
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -61,7 +61,23 @@ Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
 (mirrored under `.agents/skills/` for Codex), so the familiar `/ship` and
 `/babysit-pr` workflows resolve to repo-visible commands (`pnpm
 agent:quality-gate`, `pnpm agent:autoreview`, `pnpm pr:ready-state`) without
-needing a developer's personal skills present. When the Claude `Monitor` tool
-is unavailable in the hosted session, the `babysit-pr` skill falls back to
-`pnpm pr:ready-state --pr <number> --watch --compact` as the foreground watch
-loop.
+needing a developer's personal skills present.
+
+### GitHub access in hosted sessions: gh is platform-blocked
+
+The gh CLI cannot do repo-scoped API work in Claude cloud sessions, and this
+is not fixable from the environment settings. The platform's GitHub credential
+proxy intercepts `github.com`/`api.github.com` (it is independent of the
+network-access allowlist — entries for GitHub hosts are inert), overrides any
+client `Authorization` header (a `GH_TOKEN` env var is ignored), and serves
+structured 403s for every `/repos/*` path and for GraphQL. `gh auth status`
+still succeeds because `/user` is served, so it is not a capability signal.
+`pnpm pr:ready-state` therefore cannot run in hosted sessions.
+
+Hosted sessions use the GitHub MCP tools for PR/issue/API work and the
+`babysit-pr` skill's cloud watch loop (webhook subscription plus scheduled
+self check-ins) for monitoring; the foreground
+`pnpm pr:ready-state --pr <number> --watch --compact` loop remains the local
+fallback when the Claude `Monitor` tool is unavailable. The full gh→MCP
+mapping and the empirical findings live in
+[`github-tooling-surfaces.md`](github-tooling-surfaces.md).

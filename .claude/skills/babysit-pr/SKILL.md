@@ -5,7 +5,7 @@ title: Babysit PR Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-28
+last_verified: 2026-07-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -17,6 +17,22 @@ garden_lane: agent-entry-points
 Use this repo-local adapter when the user's personal `babysit-pr` skill or
 Claude `Monitor` tool is not available. The readiness source of truth is the
 repo command, not a hand-rolled interpretation of green checks.
+
+## Surface Detection
+
+Pick the path before the first GitHub call; the full gh→MCP mapping and the
+reasoning live in
+[`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md).
+
+- **Local session or Codex Cloud** (no `CLAUDE_CODE_REMOTE`): gh works. Use
+  the sections below as written — `pnpm pr:ready-state` is the readiness
+  source of truth.
+- **Claude cloud session** (`CLAUDE_CODE_REMOTE` set): the platform's GitHub
+  credential proxy blocks gh's API paths regardless of tokens or allowlist
+  entries, and `pnpm pr:ready-state` cannot run. Follow
+  [Cloud Watch Loop](#cloud-watch-loop-claude-cloud-sessions) instead. Do not
+  trust `gh auth status` as a capability signal; only a successful
+  `gh api repos/<owner>/<repo>` call proves the gh path works.
 
 ## Resolve Target
 
@@ -48,6 +64,39 @@ different budget. Report state changes only when something becomes actionable:
 required CI failure, merge conflict, unreplied review comment, unresolved
 thread, Codex approval missing after current-head review, all-clear, merged, or
 closed.
+
+## Cloud Watch Loop (Claude cloud sessions)
+
+Do not foreground-poll and never sleep-poll. Instead:
+
+1. Subscribe to PR events (`subscribe_pr_activity`) so comments, reviews, and
+   CI failures arrive as webhook activity.
+2. Arm a scheduled self check-in (for example `send_later`, roughly an hour
+   out) before ending the turn; webhook events do not cover CI success, new
+   pushes, or merge-conflict transitions. Re-arm on each firing until the PR
+   is merged or closed.
+3. On every event or check-in, run the MCP emulation of the readiness sweep
+   (tool mapping in
+   [`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)):
+   - PR state via `pull_request_read` method `get`, including
+     `mergeable_state`, draft state, and current head SHA;
+   - head check runs via methods `get_check_runs` and `get_status`;
+   - unresolved review threads via method `get_review_comments` (page to the
+     end);
+   - unreplied root review comments and top-level comments via methods
+     `get_review_comments`, `get_reviews`, and `get_comments`;
+   - the Codex current-head signal from Codex's visible reviews/comments for
+     the current head. The reaction-backed PR-description approval gate is
+     not readable over MCP; report it as unverified rather than assumed.
+4. Blocker handling, reply shapes, and Codex-request discipline are identical
+   to the local path (see below); use the MCP write tools
+   (`add_reply_to_pull_request_comment`, `resolve_review_thread`,
+   `update_pull_request`) in place of `gh` commands. Reply before resolving,
+   always.
+5. Label any all-clear as **MCP-emulated readiness**, never as
+   probe-verified: `pnpm pr:ready-state` did not run, and the Codex approval
+   gate plus required-context classification are approximations. The
+   probe-verified all-clear belongs to a surface where the probe runs.
 
 ## Act On Required Blockers
 
@@ -93,3 +142,7 @@ pnpm pr:ready-state --pr <number> --json
 Only report all-clear when `ready` is `true` for the current head. Include the
 PR URL, head SHA, required blocker count, unresolved thread count, unreplied
 review-comment count, required-check state, and any optional reviewer lag.
+
+In a Claude cloud session, rerun the full MCP emulation checklist from
+[Cloud Watch Loop](#cloud-watch-loop-claude-cloud-sessions) instead, report
+the same fields, and label the result MCP-emulated.
