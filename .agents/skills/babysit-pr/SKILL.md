@@ -5,7 +5,7 @@ title: Babysit PR Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-28
+last_verified: 2026-07-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -20,27 +20,65 @@ repo command, not a hand-rolled interpretation of green checks.
 
 ## Resolve Target
 
-If no PR number is provided, resolve the current branch PR:
+If no PR number is provided, resolve the current branch PR. For every target,
+capture the PR URL, head repository, branch, and commit:
 
 ```bash
-gh pr view --json number,url,title,headRefName,baseRefName
+gh pr view --json number,url,title,headRefName,headRefOid,baseRefName,headRepository,headRepositoryOwner,isCrossRepository
 ```
 
-For an explicit target, accept a bare number or PR URL. Use `--repo` only when
-the PR is not in `mento-protocol/monitoring-monorepo`.
+For an explicit target, accept a bare number or PR URL. Derive and preserve
+`BASE_REPO` (`owner/name`) from the resolved PR URL before changing checkouts.
+After that initial resolution, pass `--repo <BASE_REPO>` to every `gh pr view`,
+feedback-state, and ready-state call—even when the PR began in the current
+repository.
 
-## Watch Loop
+Before any blocker fix mutates files or Git history, bind the checkout to that
+resolved target:
 
-Run the shared probe:
+- Select `HEAD_REMOTE` only after verifying that its repository equals
+  `headRepository.nameWithOwner`. For a cross-repository PR, use a dedicated
+  checkout with the fork as `HEAD_REMOTE`; keep a separately verified
+  `BASE_REMOTE` for `BASE_REPO` and never swap their roles.
+- `git status --porcelain` must be empty and `git rev-parse HEAD` must equal
+  the resolved `headRefOid`. If either differs, stop or switch to a clean,
+  dedicated checkout at the PR head before editing.
+- Preserve `BASE_REPO`, `BASE_REMOTE`, `HEAD_REMOTE`, and `headRefName` for the
+  full session. Fetch `baseRefName` only from `BASE_REMOTE`.
+
+After each fix commit, push explicitly with `git push <HEAD_REMOTE>
+HEAD:<headRefName>`, re-resolve with `gh pr view <number> --repo <BASE_REPO>`,
+and require the new `headRefOid` to equal local `HEAD` before returning to the
+watch loop. Never rely on the current branch name, implicit push target, or
+repository inferred from the active checkout.
+
+Before the first review pass, freeze the request, target/owner, changed files,
+and non-test changed-line count as the scope baseline. Classify later additions
+as in-scope, follow-up, or stop; create an issue before deferring valid work.
+
+## Feedback and Watch Loop
+
+Use the normalized feedback projection instead of ad hoc API scraping:
 
 ```bash
-pnpm pr:ready-state --pr <number> --json
+pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
+```
+
+Inspect `requiredFeedbackBlockers`, `unresolvedReviewThreads`,
+`unrepliedRootReviewComments`, `blockingTopLevelBotComments`,
+`topLevelBotComments`, and `findings`. Informational deployment/status bot
+comments are context, not blockers.
+
+Use the shared readiness probe for the final decision:
+
+```bash
+pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
 ```
 
 For a foreground wait, use:
 
 ```bash
-pnpm pr:ready-state --pr <number> --watch --compact
+pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --watch --compact --until-ready
 ```
 
 Keep a practical one-hour wall-clock deadline unless the user asked for a
@@ -57,39 +95,42 @@ item required.
 
 - Failing required check: inspect the failing workflow/log, fix only PR-caused
   failures, run focused validation, commit, and push.
-- Merge conflict: fetch the base branch, merge or rebase once according to the
-  repo's current workflow, resolve, run focused validation, commit, and push.
-- Unreplied review comment or unresolved thread: fetch every feedback surface,
-  triage each finding, implement valid fixes, and reply to every comment. In
-  Codex, inspect `pnpm pr:ready-state --pr <number> --json` first as a triage
-  shortcut for the currently reported blockers: its `unresolvedReviewThreads[]`
-  and `unrepliedRootReviewComments[]` entries often include the full comment
-  body, URL, path, line, and id needed to understand the finding before making
-  raw `gh api` calls. This does **not** replace the required full feedback
-  sweep across review comments, review bodies, top-level comments, threads,
-  check annotations, and failing check logs before all-clear. Do not resolve a
-  thread without a reply first. Use these exact reply shapes:
+- Merge conflict: fetch `baseRefName` from the verified `BASE_REMOTE` and merge
+  that remote-tracking ref into the already-published PR branch. Resolve, run
+  focused validation, commit, and push through `HEAD_REMOTE`. Do not rebase a
+  published PR because the resulting force-push violates this workflow.
+- Feedback blocker: triage every normalized finding, implement valid fixes,
+  and sweep review bodies, top-level comments, threads, annotations, and
+  failing logs before all-clear. Reply before resolving a thread, using:
   - Fixed: `Fixed in <commit> — <what changed>`
   - Won't fix: `Won't fix: <technical reason why>`
-- Codex current-head approval missing, stale, or in flight: wait for the
-  automatic current-head review path before taking action. Codex re-reviews new
-  pushes automatically in this repo; do not post `@codex review` as a routine
-  post-push step, and do not treat a `stale` signal immediately after a push as
-  permission to comment again. Never post duplicate requests while the probe
-  says a current-head request is `requested`, `in_flight`, or `approved`. Use
-  one manual request only as a fallback when the current head still has no
-  Codex signal after the normal automatic-review window.
+- Codex approval missing or stale: wait for the automatic current-head review.
+  Never post a duplicate request while state is `requested`, `in_flight`, or
+  `approved`; use one manual request only when the normal automatic-review
+  window ended with no current-head signal.
 
-Never force-push or amend while babysitting.
+Batch sibling findings before pushing. Run the mapped quality gate once for
+each fix batch and `pnpm agent:autoreview` for a non-trivial batch. If two
+review-triggered patch cycles have completed, pause for scope reclassification
+instead of automatically starting a third.
+
+Never force-push or amend while babysitting. If target binding fails, move to a
+clean dedicated checkout and repeat the guard before editing; do not continue
+in the unbound checkout.
 
 ## Final Sweep
 
-Before reporting all-clear, rerun:
+Before reporting all-clear, rerun both projections:
 
 ```bash
-pnpm pr:ready-state --pr <number> --json
+pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
+pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
 ```
 
-Only report all-clear when `ready` is `true` for the current head. Include the
-PR URL, head SHA, required blocker count, unresolved thread count, unreplied
-review-comment count, required-check state, and any optional reviewer lag.
+If an optional review-producing workflow finishes while watching, rerun
+feedback-state to catch late findings. Only report all-clear when the feedback
+ledger has no required blocker and ready-state `ready` is `true` for the
+current head. The Codex approval exception is only the exact head-scoped
+break-glass contract in `docs/notes/pr-ready-state.md`; it waives no other
+gate. Include the PR URL, head SHA, required blocker count, unresolved thread
+count, unreplied review-comment count, required-check state, and optional lag.

@@ -5,7 +5,7 @@ title: Envio Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-21
+last_verified: 2026-07-22
 allowed-tools: Bash, Read, Grep, Glob, WebFetch
 doc_type: skill
 scope: repo-wide
@@ -28,10 +28,11 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 
 - Treat this repo as HyperIndex V3-first. Verify the exact installed package with `pnpm --filter @mento-protocol/indexer-envio exec envio --version`; the pinned version in `indexer-envio/package.json` is `envio@3.2.1`.
 - V3 preload optimization is always on. There is no `preload_handlers:` config flag, and loader-era patterns should be translated into normal handler code.
-- V3 handlers run twice: a concurrent preload pass for DB reads/effects, then an ordered processing pass for writes. Do not put expensive `context.effect(...)` calls behind an early `if (context.isPreload) return`; do keep writes out of preload.
-- `indexer-envio/test/code-quality-invariants.test.ts` blocks direct effects that exist only after a positive preload return (including exact `await maybePreloadPool(...)` and `await maybePreloadBreaker(...)` wrappers) or after an earlier entity-dependent return. Start event-derived effects before lookups whose empty result can differ between concurrent preload and ordered processing, then reuse the identical effect + input key across both passes. An effect that must remain processing-only for ordered-state correctness, or is permanently bounded, needs an adjacent call-site `// preload-effect-exempt: <ordered-state or bounded-cardinality reason>` comment. A comment on the preload guard never suppresses direct-effect checks.
-- When code that preload cannot eagerly reach—after an entity-dependent return or a positive preload return—calls a helper that directly or transitively reaches `context.effect`, the invariant derives that boundary from TypeScript symbols. Declare the exact used set with one or more adjacent `// preload-effect-helpers: <helper names>` lines plus a non-empty `// preload-handler-note: <reason>` line. Missing and unused helper declarations both fail. A phase-stable event-derived filter may be declared only when the effect is still awaited during preload; say that explicitly. Never exempt replay-traffic-scaled effects merely for convenience; when preloading would violate sequential semantics, state the exact ordering invariant and track a preload-safe redesign.
-- For an effect that is needed only when preloaded entity state meets a condition, carry an event-scoped in-memory preload marker into processing. If a row appears only during ordered processing, stay fail-closed and defer the RPC until the next event instead of issuing a serialized call.
+- V3 handlers run twice: a concurrent preload pass for reads/effects, then an
+  ordered processing pass for writes. Before changing a handler or RPC effect,
+  read `indexer-envio/AGENTS.md` and
+  `docs/pr-checklists/indexer-handler-invariants.md`; that checklist owns effect
+  ordering, preload markers, exemption syntax, helper declarations, and tests.
 - Prefer the installed CLI help over stale docs when they disagree. In this baseline, `envio metrics`, `envio metrics runtime`, `envio tools search-docs`, and `envio tools fetch-docs` exist; `envio benchmark-summary` does not.
 
 ## Mento repo quick reference
@@ -42,13 +43,14 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 
 ```bash
 pnpm deploy:indexer [--yes]         # Push HEAD to `envio` → Envio auto-builds
-pnpm deploy:indexer:status [--watch] [--compact] [--json]
+pnpm deploy:indexer:status [<commit>] [--watch] [--compact] [--json]
 pnpm deploy:indexer:metrics [<commit>] [--json]
 pnpm deploy:indexer:info [<commit>]
 pnpm deploy:indexer:perf [<commit>] [--json]
 pnpm deploy:indexer:verify [<commit>] [--prod] [--json]
 pnpm deploy:indexer:promote [<commit>]
-pnpm deploy:indexer:logs [--follow] [--level error] [--build]
+pnpm deploy:indexer:logs [<commit>] [--follow] [--level error] [--build]
+pnpm deploy:indexer:rollback <commit> [--dry-run]
 ```
 
 - Dashboard: <https://envio.dev/app/mento-protocol/mento>
@@ -56,11 +58,18 @@ pnpm deploy:indexer:logs [--follow] [--level error] [--build]
 ## Deployment lifecycle
 
 1. **Push** to the `envio` branch — Envio GitHub App picks it up and starts a build. There is **no** `envio deploy` command.
-2. **Build** produces a new deployment keyed by the short commit hash. A deployment with commit X appears in `envio-cloud indexer get mento mento-protocol` a few minutes after push (expect ~5–15 min). Until then `deployment status` returns **404**. If no new deployment appears and `data.deployments[]` already has three entries, Envio has no room to create another deployment; delete, or ask the user to delete, an obsolete non-prod deployment before retrying with a fresh SHA.
+2. **Build** produces a new deployment keyed by a commit-hash prefix. In this
+   repo registration normally takes 2–3 minutes; the deploy skill warns at
+   three and uses a five-minute ceiling. Until registration, deployment status
+   is unavailable. If `data.deployments[]` already has three entries, delete,
+   or ask the user to delete, an obsolete non-prod deployment before retrying.
 3. **Sync** — the new deployment re-indexes from `start_block`. The previous deployment keeps serving the GraphQL endpoint with zero downtime.
 4. **Promote** — when sync completes, call `deployment promote` to swap `prod_status` to `prod`. Only then does the public GraphQL endpoint point at the new deployment.
 
-Every push triggers a full re-index (event handlers, schema, config.yaml, ABIs, or contract-address changes all invalidate cache). Rollback = `deployment promote <older-commit>`.
+Each new deployment performs a full re-index. Use
+`pnpm deploy:indexer:rollback <last-good-sha> --dry-run` and then the guarded
+rollback wrapper; direct promotion is only its fast path when the old
+deployment is still retained.
 
 ### Static vs per-deployment endpoint URLs
 
@@ -93,43 +102,40 @@ Per-chain fields that matter:
 `latest_processed_block === block_height` is a close proxy but can flicker
 because `block_height` keeps advancing.
 
-Add `--watch-till-synced` to block until all chains hit 100%. Useful in CI or a foreground terminal; for agentic monitoring, poll with `-o json` and parse.
+The repo status wrapper owns blocking agent watches; use raw
+`--watch-till-synced` only outside that workflow.
 
 Progress math for a per-chain % estimate: `(latest_processed_block - start_block) / (block_height - start_block)`.
 
 ## Logs
 
 ```bash
-pnpm deploy:indexer:logs --level error        # last 100 runtime error lines
-pnpm deploy:indexer:logs --build              # build logs (useful when a deploy doesn't register)
-pnpm deploy:indexer:logs --follow             # tail (polls every 10s)
+pnpm deploy:indexer:logs <commit> --level error  # runtime errors
+pnpm deploy:indexer:logs <commit> --build        # registered build logs
+pnpm deploy:indexer:logs <commit> --follow       # tail every 10s
 ```
 
-`envio-cloud` defaults to 100 log lines and supports `--limit` up to 100; the wrapper passes that flag through unchanged. `--level` is comma-separated: `trace,debug,info,warn,error`. `--build` flips to build-time logs — check these first if a push never produces a deployment record.
+`envio-cloud` defaults to 100 log lines and supports `--limit` up to 100; the
+wrapper passes that flag through. `--level` is comma-separated and `--build`
+selects build-time logs. If the target never registers, do not substitute an
+unscoped older deployment's logs; use the registration diagnostic and Envio UI.
 
-## envio-cloud CLI cheat sheet
+## `envio-cloud` CLI
 
 ```bash
-envio-cloud login                                         # GitHub OAuth
-envio-cloud config set-org mento-protocol                 # kubectl-style default context
-envio-cloud config set-indexer mento
-envio-cloud indexer list --org mento-protocol             # public indexers
-envio-cloud indexer get mento mento-protocol -o json      # indexer + deployments[]
-envio-cloud indexer env list mento mento-protocol         # dashboard env vars (ENVIO_-prefixed)
-envio-cloud indexer security                              # IP/domain allowlist
-envio-cloud deployment metrics  mento <commit> mento-protocol   # throughput, error rate
-envio-cloud deployment info     mento <commit> mento-protocol   # cache/DB exposure config
-envio-cloud deployment status   mento <commit> mento-protocol
-envio-cloud deployment endpoint mento <commit> mento-protocol   # GraphQL URL
-envio-cloud deployment logs     mento <commit> mento-protocol
-envio-cloud deployment promote  mento <commit> mento-protocol
-envio-cloud deployment restart  mento <commit> mento-protocol
-envio-cloud deployment delete   mento <commit> mento-protocol
+pnpm exec envio-cloud --help
+pnpm exec envio-cloud indexer get mento mento-protocol -o json
+pnpm exec envio-cloud deployment status mento <commit> mento-protocol -o json
+pnpm exec envio-cloud deployment endpoint mento <commit> mento-protocol
+pnpm exec envio-cloud indexer env list mento mento-protocol
 ```
 
-`envio-cloud indexer env list` can print raw `ENVIO_*` secret values. Run it
-only when you specifically need to inspect hosted env configuration, and never
-paste or quote its output in chat, PRs, logs, or docs.
+Use the workspace-pinned CLI and its current `--help`; `envio-cloud` is still
+pre-1.0. Prefer repo wrappers for deploy, verify, promote, rollback, logs,
+metrics, and info so org/indexer defaults and guards stay centralized.
+`envio-cloud indexer env list` masks values by default. Its `--show-values`
+form reveals raw `ENVIO_*` secrets; run that only when explicitly required and
+never paste or quote the output in chat, PRs, logs, or docs.
 
 For CI, set `ENVIO_GITHUB_TOKEN` to skip interactive login.
 
@@ -177,15 +183,17 @@ Notes:
 - Public docs may lag the installed CLI. In `envio@3.2.1`, `envio metrics` and `envio metrics runtime` exist; `envio benchmark-summary` does not.
 - Watch these generic metrics first: `envio_processing_handler_seconds`, `envio_preload_handler_seconds`, `envio_preload_handler_seconds_total`, `envio_effect_call_seconds_total`, `envio_effect_call_total`, `envio_effect_active_calls`, `envio_effect_queue*`, `envio_storage_load_seconds_total`, `envio_storage_write_seconds`, `envio_fetching_block_range_*`, `envio_progress_events`.
 - Combine Envio metrics with this repo's `INDEXER_PERF=1` logs. The repo profiler adds handler/effect/entity summaries and a derived `hit~` count (`effect requests - effect handler executions`) that helps detect preload/cache reuse.
-- If a handler has `if (context.isPreload) return` before expensive `context.effect(...)` calls, preload optimization is disabled for those calls. The preferred shape is: perform preload DB reads and independent `context.effect(...)` calls first, then return before entity writes. The processing pass should call the same effect key so it reuses preload results.
-- Do not remove every `context.isPreload` guard blindly: storage writes still belong only in the processing pass. The fix is to move bottleneck reads/effects before the guard's return.
+- Apply `docs/pr-checklists/indexer-handler-invariants.md` before moving any
+  effect or preload guard; it distinguishes batchable calls from ordered-state
+  exceptions and owns the required regression coverage.
 
 ## Gotchas
 
 - **Hasura silently caps queries at 1000 rows.** Aggregate functions are disabled on the hosted service. For large pulls, use the offset-pagination helper (`ui-dashboard/src/lib/network-fetcher/fetch.ts` exports `fetchAllFeeSnapshotPages`) or do rollups indexer-side — do not rely on `limit: 10000` working.
-- **Free tier auto-deletes after 30 days** (or 7 days idle, or 20GB storage, or 100k events). Paid tiers lift this; the mento indexer is on the `medium` tier. Don't confuse "deployment disappeared" with "build failed" — check `indexer get` first.
 - **Hosted deployment cap is three live deployments.** `envio-cloud indexer get mento mento-protocol -o json` shows the full `data.deployments[]` list. If it already contains three entries, a new push can fail to register because Envio has no capacity for another deployment. Keep the `prod_status == "prod"` deployment and remove an obsolete non-prod deployment before retrying.
-- **Re-index on every push.** Schema changes, handler edits, ABI bumps, and config tweaks all invalidate cache. Budget sync time before any deploy (the mento indexer takes ~15–40 min depending on how far behind head).
+- **Re-index on every new deployment.** Schema changes, handler edits, ABI
+  bumps, and config tweaks all require replay. Do not promise a fixed duration;
+  monitor the exact commit with the status wrapper.
 - **`has_processed_to_end_block: false` is not a failure.** Live indexers have `end_block: 0` so this flag can never flip. Use `timestamp_caught_up_to_head_or_endblock` instead.
 - **Don't set generic `ENVIO_RPC_URL` in multichain mode** — it routes every chain to the same RPC. Use `ENVIO_RPC_URL_<chainId>` (e.g. `ENVIO_RPC_URL_42220`).
 - **Celo Sepolia / Monad Testnet may fall back to RPC** instead of HyperSync. Slower but works; set `ENVIO_API_TOKEN` for HyperRPC access on testnets.
@@ -197,16 +205,31 @@ Notes:
   and fallback. A caught-up deployment with those historical reads missing is
   tainted and requires a clean replay.
 - **Version drift is common around V3 RCs.** Check the installed CLI and package before relying on older docs, memory, or notes; do not reintroduce V2-only fields such as `preload_handlers:`.
+- Development-plan retention and quota rules change independently of this
+  repo. Check Envio's current hosted deployment/billing pages instead of
+  copying those limits into an operational answer.
 
 ## Monitoring playbook (agentic)
 
 When asked to "monitor the latest deployment until ready to promote":
 
 1. `pnpm exec envio-cloud indexer get mento mento-protocol -o json` — required to surface `deployments[]` + `prod_status`. Filter for the newest entry where `prod_status !== "prod"`. (`pnpm deploy:indexer:info <commit>` is the wrapper for inspecting a specific known commit, not for the "find newest pending" step.) If no pending deployment exists, count `deployments[]` first: three live entries means Envio has no room for a new deployment and you must delete, or ask the user to delete, an obsolete non-prod deployment before retrying. If fewer than three deployments exist, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
-2. Poll `deployment status <commit> -o json` every 5–15 min (Envio builds finish fast, syncs take minutes–hours).
+2. Run `pnpm deploy:indexer:status <commit> --watch --compact`; the wrapper
+   owns registration diagnostics and polling. Enforce the separate sync
+   deadline in the active agent/monitor.
 3. Caught-up condition: every chain in `data[]` has a non-empty `timestamp_caught_up_to_head_or_endblock`; classify this as `SYNCED_PENDING_DATA_VERIFY`.
 4. Run `pnpm deploy:indexer:verify <commit>` to batch status, metrics, endpoint resolution, core rows, and Polygon replay semantics before promotion. Polygon semantic failures are never waived by `--allow-syncing`.
-5. Only a passing verifier transitions the candidate to `READY_TO_PROMOTE`. Surface the result with a progress table and `pnpm deploy:indexer:promote <commit>` as the suggested next step — **do not promote without the user's OK.**
+5. A passing verifier yields `VERIFIED_PENDING_PROMOTION`, not permission to
+   run the promote wrapper by itself. If this monitor belongs to an active
+   `/deploy-indexer` run, return control to Phase 4 so it captures prior prod
+   and completes promotion, propagation, and UI verification after explicit
+   authorization.
+6. Otherwise treat the candidate's provenance as unclassified. With explicit
+   production authorization, route it through
+   `/deploy-indexer --resume-preload <commit>`; that guarded continuation binds
+   protected main to the canonical repository, checks tree equality, reconfirms
+   sync, and executes Phases 3–6. Never suggest a bare
+   `pnpm deploy:indexer:promote` command as monitor closeout.
 
 ## Useful links
 
