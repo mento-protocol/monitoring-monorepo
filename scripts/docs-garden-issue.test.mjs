@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import jsYaml from "js-yaml";
+
 import {
   buildDocsGardenIssueSpec,
   DOCS_GARDEN_MARKER,
@@ -745,7 +747,13 @@ await test("scheduled workflow fetches the history required by packet evidence",
     workflow,
     /actions\/checkout@[a-f0-9]+[^\n]*\n\s+with:\n(?:\s+#[^\n]*\n)*\s+#[^\n]*\n\s+fetch-depth: 0/,
   );
-  assert.match(workflow, /id-token: write/);
+  const parsedWorkflow = jsYaml.load(workflow);
+  assert.equal(parsedWorkflow.permissions, "read-all");
+  assert.deepEqual(parsedWorkflow.jobs?.["schedule-issue"]?.permissions, {
+    contents: "read",
+    "id-token": "write",
+    issues: "write",
+  });
   assert.match(
     workflow,
     /github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)/,
