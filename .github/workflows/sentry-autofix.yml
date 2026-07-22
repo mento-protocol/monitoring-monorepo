@@ -570,14 +570,18 @@ jobs:
           # the selector also dedups on an OPEN autofix PR, withdrawing means
           # CLOSING the PR we opened, not just skipping the label.
 
-          # Live verdict: prints "yes" | "no" | "__READ_FAILED__". A read failure
-          # falls through to the marker write (fail-open) so a transient gh hiccup
-          # never strands an opened PR unmarked.
+          # Live verdict: prints "yes" only when it POSITIVELY confirms
+          # sentry:verdict-code-fix is still present; prints "no" both when the
+          # verdict was shed AND when the read itself fails. Fail CLOSED — an
+          # unverified verdict must not receive the terminal marker (that is the
+          # #1389 suppression bug), and a needlessly-withdrawn PR self-corrects when
+          # the stub is re-selected next run, whereas a wrongly-written marker does
+          # not.
           verdict_live() {
             local names
             names=$(gh issue view "${QUEUE_ISSUE}" --repo "${REPO}" \
               --json labels --jq '.labels[].name' 2>/dev/null) \
-              || { printf '__READ_FAILED__'; return 0; }
+              || { printf 'no'; return 0; }
             printf '%s\n' "${names}" > "${RUNNER_TEMP}/labels-live.txt"
             node "${fin}" marker-still-valid --labels-file "${RUNNER_TEMP}/labels-live.txt"
           }
@@ -617,7 +621,7 @@ jobs:
           # fresh verdict onto THIS stale diff — so an unconfirmable close fails the
           # job loudly rather than posting a misleading "withdrawn" comment.
           withdraw_stale_verdict() {
-            echo "::notice::#${QUEUE_ISSUE} lost sentry:verdict-code-fix during finalize (regression re-queue); withdrawing rather than marking fix-pr-opened."
+            echo "::notice::#${QUEUE_ISSUE} lost or could not re-confirm sentry:verdict-code-fix during finalize (regression re-queue or read failure); withdrawing rather than marking fix-pr-opened."
             if [ "${opened_new_pr}" = "true" ]; then
               retry3 "close stale-verdict PR ${pr_url}" close_stale_pr || exit 1
             fi
