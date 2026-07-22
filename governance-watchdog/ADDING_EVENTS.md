@@ -77,9 +77,10 @@ Do not create a temporary production webhook. If the change genuinely needs a
 third webhook, add its Terraform resource, destination, health checks, and
 deployment-script routing in the same PR.
 
-The filter files also seed the bootstrap payload recorded in
-`infra/quicknode.tf`; when bootstrap behavior changes, keep that creation
-payload synchronized as part of the infrastructure change.
+`infra/quicknode.tf` uses `filebase64(...)` on these same files for the
+first-creation `filter_function`. Updating the reviewed filter source therefore
+updates both the bootstrap input and the later live-patch input without a
+second encoded copy.
 
 ### 4. Add fixtures and regression coverage
 
