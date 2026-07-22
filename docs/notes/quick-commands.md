@@ -33,7 +33,7 @@ pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Runtime issue
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:perf <commit>     # Combined status/metrics/log snapshot for perf comparisons
-pnpm deploy:indexer:verify <commit>   # Batch status, metrics, endpoint, and GraphQL row probe
+pnpm deploy:indexer:verify <commit>   # Gate promotion on sync, core rows, and Polygon replay semantics
 pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod
 pnpm deploy:indexer:rollback <last-good-sha>  # Roll prod back: re-promote if still registered, else rebuild + resync
 
@@ -56,6 +56,10 @@ pnpm docs:index --write            # Regenerate docs/README.md from tracked + no
 pnpm docs:index --check            # Fail on catalog drift, invalid classification, or broken internal Markdown links
 pnpm docs:audit --dry-run          # Print this week's bounded semantic-review packet without mutating documentation
 pnpm docs:garden --dry-run --json  # Read the garden queue and preview the exact weekly issue decision without mutations
+pnpm docs:navigation-eval -- --check-fixtures  # Validate fresh-agent navigation questions, routes, and budgets
+pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only evaluation prompt; never invokes a model
+pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
+pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
 node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics
@@ -142,4 +146,8 @@ pnpm alerts:rules:init / alerts:rules:plan
 # Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
 # The production-infra gate enforces required-reviewer approval and allows
 # self-review for the sole-maintainer workflow.
+
+# Dev janitor
+bash scripts/dev-janitor.sh            # Dry-run: report stale trunk repo caches, pnpm store, git worktrees, /private/tmp trees
+bash scripts/dev-janitor.sh --apply    # Delete stale trunk repo caches, prune pnpm store, and run git worktree prune
 ```

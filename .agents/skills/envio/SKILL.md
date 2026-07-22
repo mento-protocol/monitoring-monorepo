@@ -87,7 +87,11 @@ Per-chain fields that matter:
 | `has_processed_to_end_block`              | Only `true` when config has a concrete `end_block`; ignore for live indexers where `end_block: 0` |
 | `num_events_processed`                    | Cumulative; useful for progress feel but not completion                                           |
 
-**"Ready to promote"** = `timestamp_caught_up_to_head_or_endblock` is non-empty on **every** chain in the response. `latest_processed_block === block_height` is a close proxy but can flicker because `block_height` keeps advancing.
+**"Caught up"** = `timestamp_caught_up_to_head_or_endblock` is non-empty on
+**every** chain in the response. This is `SYNCED_PENDING_DATA_VERIFY`, not
+`READY_TO_PROMOTE`: the commit-scoped deployment verifier must still pass.
+`latest_processed_block === block_height` is a close proxy but can flicker
+because `block_height` keeps advancing.
 
 Add `--watch-till-synced` to block until all chains hit 100%. Useful in CI or a foreground terminal; for agentic monitoring, poll with `-o json` and parse.
 
@@ -186,6 +190,12 @@ Notes:
 - **Don't set generic `ENVIO_RPC_URL` in multichain mode** — it routes every chain to the same RPC. Use `ENVIO_RPC_URL_<chainId>` (e.g. `ENVIO_RPC_URL_42220`).
 - **Celo Sepolia / Monad Testnet may fall back to RPC** instead of HyperSync. Slower but works; set `ENVIO_API_TOKEN` for HyperRPC access on testnets.
 - **HyperRPC does NOT support `eth_call`** — only event sync (HyperSync) + a subset of chain-info methods (`eth_blockNumber` etc.). Contract reads in handlers (`client.readContract`, `getBreakers()`, `getReserves()`, etc.) MUST use a full-node RPC (`forno.celo.org` for Celo, `rpc2.monad.xyz` / quiknode for Monad). The constraint is hard-documented in `indexer-envio/src/rpc/client.ts` near `RPC_CONFIG_BY_CHAIN`. Don't suggest "switch to HyperRPC for archive depth" as a perf lever — it won't run the call shape we need at all.
+- **dRPC public JSON-RPC batches are capped at three calls.** The repo applies
+  `{ batchSize: 3 }` to exact `drpc.org` hosts; do not replace it with viem's
+  default 1,000-call batch. Tracked SortedOracles events also fail closed when
+  their exact-block median timestamp remains unavailable after transient retry
+  and fallback. A caught-up deployment with those historical reads missing is
+  tainted and requires a clean replay.
 - **Version drift is common around V3 RCs.** Check the installed CLI and package before relying on older docs, memory, or notes; do not reintroduce V2-only fields such as `preload_handlers:`.
 
 ## Monitoring playbook (agentic)
@@ -194,9 +204,9 @@ When asked to "monitor the latest deployment until ready to promote":
 
 1. `pnpm exec envio-cloud indexer get mento mento-protocol -o json` — required to surface `deployments[]` + `prod_status`. Filter for the newest entry where `prod_status !== "prod"`. (`pnpm deploy:indexer:info <commit>` is the wrapper for inspecting a specific known commit, not for the "find newest pending" step.) If no pending deployment exists, count `deployments[]` first: three live entries means Envio has no room for a new deployment and you must delete, or ask the user to delete, an obsolete non-prod deployment before retrying. If fewer than three deployments exist, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
 2. Poll `deployment status <commit> -o json` every 5–15 min (Envio builds finish fast, syncs take minutes–hours).
-3. Ready-to-promote condition: every chain in `data[]` has a non-empty `timestamp_caught_up_to_head_or_endblock`.
-4. Run `pnpm deploy:indexer:verify <commit>` to batch status, metrics, endpoint resolution, and the GraphQL row probe before promotion.
-5. Surface the result with a progress table and `pnpm deploy:indexer:promote <commit>` as the suggested next step — **do not promote without the user's OK.**
+3. Caught-up condition: every chain in `data[]` has a non-empty `timestamp_caught_up_to_head_or_endblock`; classify this as `SYNCED_PENDING_DATA_VERIFY`.
+4. Run `pnpm deploy:indexer:verify <commit>` to batch status, metrics, endpoint resolution, core rows, and Polygon replay semantics before promotion. Polygon semantic failures are never waived by `--allow-syncing`.
+5. Only a passing verifier transitions the candidate to `READY_TO_PROMOTE`. Surface the result with a progress table and `pnpm deploy:indexer:promote <commit>` as the suggested next step — **do not promote without the user's OK.**
 
 ## Useful links
 

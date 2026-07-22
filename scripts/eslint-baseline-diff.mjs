@@ -95,7 +95,18 @@ if (eslintInputPath) {
   // running eslint inside the script keeps the contract self-contained.
   const eslintRun = spawnSync(
     "pnpm",
-    ["exec", "eslint", ".", "--format", "json"],
+    [
+      "exec",
+      "eslint",
+      ".",
+      "--format",
+      "json",
+      "--cache",
+      "--cache-strategy",
+      "content",
+      "--cache-location",
+      ".eslintcache",
+    ],
     { cwd, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 },
   );
   if (eslintRun.error) {

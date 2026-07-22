@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "suite_id": "documentation-navigation-v1",
+  "targets": {
+    "routing_accuracy_percent": 90,
+    "unqualified_noncanonical_sources": 0,
+    "answer_evidence_percent": 100,
+    "questions_over_context_budget": 0,
+    "max_question_source_bytes": 45000,
+    "max_total_unique_source_bytes": 260000
+  },
+  "bootstrap_sources": ["AGENTS.md", "docs/README.md"],
+  "forbidden_sources": [
+    "docs/evals/documentation-navigation-fixtures.json",
+    "docs/evals/documentation-navigation-baseline.json",
+    "scripts/docs-navigation-eval.mjs",
+    "scripts/docs-navigation-eval-helpers.mjs",
+    "scripts/docs-navigation-eval-result.mjs",
+    "scripts/docs-navigation-eval.test.mjs"
+  ],
+  "questions": [
+    {
+      "id": "package-shared-config-authority",
+      "category": "packages",
+      "question": "Where should chain IDs, explorer URLs, deployment namespaces, token labels, thresholds, and shared ABIs be changed, and which checks are required when an exported shape changes?",
+      "accepted_routes": [["shared-config/AGENTS.md"]],
+      "sources_requiring_verification": []
+    },
+    {
+      "id": "package-indexer-add-contract",
+      "category": "packages",
+      "question": "You are adding a new indexed contract and event. Which current package documentation defines the config, ABI, handler-entry-point, codegen, and hosted-build mirror procedure?",
+      "accepted_routes": [
+        ["indexer-envio/AGENTS.md", "indexer-envio/README.md"]
+      ],
+      "sources_requiring_verification": [
+        {
+          "path": "docs/PLAN-celo-mainnet-indexer.md",
+          "verify_against": [
+            "indexer-envio/AGENTS.md",
+            "indexer-envio/README.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "package-dashboard-browser-verification",
+      "category": "packages",
+      "question": "How must a dashboard UI change be verified in the browser, including logged-in and logged-out behavior and the data source used by local verification?",
+      "accepted_routes": [
+        ["docs/notes/dashboard-verification.md"],
+        ["ui-dashboard/AGENTS.md", "docs/notes/dashboard-verification.md"]
+      ],
+      "sources_requiring_verification": [
+        {
+          "path": "docs/CODE-REVIEW-UI-DASHBOARD.md",
+          "verify_against": [
+            "ui-dashboard/AGENTS.md",
+            "docs/notes/dashboard-verification.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "deployment-indexer-promote",
+      "category": "deployment",
+      "question": "What is the current sequence for deploying a new Envio indexer version, monitoring its sync, and promoting it without allowing an agent to auto-promote?",
+      "accepted_routes": [
+        ["docs/deployment.md"],
+        [".agents/skills/deploy-indexer/SKILL.md"]
+      ],
+      "sources_requiring_verification": [
+        {
+          "path": "docs/PLAN-celo-mainnet-indexer.md",
+          "verify_against": ["docs/deployment.md"]
+        }
+      ]
+    },
+    {
+      "id": "deployment-terraform-registry-apply",
+      "category": "deployment",
+      "question": "Which source maps Terraform stack ownership, and when may a stack be applied locally versus through the production-infra environment on main?",
+      "accepted_routes": [["docs/terraform.md"]],
+      "sources_requiring_verification": [
+        {
+          "path": "docs/notes/terraform-cicd-hardening-decisions-2026-05.md",
+          "verify_against": ["docs/terraform.md"]
+        }
+      ]
+    },
+    {
+      "id": "deployment-cloudrun-checklist",
+      "category": "deployment",
+      "question": "For a Terraform-managed Cloud Run service change, which checklist governs plan safety, rollout health, rollback readiness, and post-deploy verification?",
+      "accepted_routes": [["docs/pr-checklists/terraform-cloudrun.md"]],
+      "sources_requiring_verification": []
+    },
+    {
+      "id": "architecture-issues-work-queue",
+      "category": "architecture",
+      "question": "Why are GitHub Issues the canonical active-work queue instead of BACKLOG.md, and what consequence does that have for migrated tasks?",
+      "accepted_routes": [["docs/adr/0006-github-issues-backlog.md"]],
+      "sources_requiring_verification": [
+        {
+          "path": "docs/adr/README.md",
+          "verify_against": ["docs/adr/0006-github-issues-backlog.md"]
+        }
+      ]
+    },
+    {
+      "id": "architecture-steth-sampler",
+      "category": "architecture",
+      "question": "Why are stETH actuals sampled sub-daily and rolled into daily rows rather than remaining event-only or using a single midnight read?",
+      "accepted_routes": [["docs/adr/0034-steth-wallet-daily-sampler.md"]],
+      "sources_requiring_verification": [
+        {
+          "path": "docs/notes/indexer-spec-followups.md",
+          "verify_against": ["docs/adr/0034-steth-wallet-daily-sampler.md"]
+        }
+      ]
+    },
+    {
+      "id": "architecture-bounded-doc-garden",
+      "category": "architecture",
+      "question": "Why does recurring documentation gardening create one bounded issue instead of letting a scheduled model edit or merge documentation directly?",
+      "accepted_routes": [
+        ["docs/adr/0040-bounded-documentation-garden-queue.md"]
+      ],
+      "sources_requiring_verification": [
+        {
+          "path": "docs/adr/README.md",
+          "verify_against": [
+            "docs/adr/0040-bounded-documentation-garden-queue.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pr-hazard-stateful-data-ui",
+      "category": "pr-hazards",
+      "question": "An indexer field is being added and rendered in the dashboard. Which checklist defines writer/reader/schema alignment, degraded behavior, interaction coverage, and rollout sequencing?",
+      "accepted_routes": [["docs/pr-checklists/stateful-data-ui.md"]],
+      "sources_requiring_verification": [
+        {
+          "path": "docs/CODE-REVIEW-UI-DASHBOARD.md",
+          "verify_against": ["docs/pr-checklists/stateful-data-ui.md"]
+        }
+      ]
+    },
+    {
+      "id": "pr-hazard-ci-workflow-gates",
+      "category": "pr-hazards",
+      "question": "When changing a GitHub Actions workflow or required check, which checklist protects the required CI sentinel, path routing, action pinning, permissions, and notifier coverage?",
+      "accepted_routes": [["docs/pr-checklists/ci-workflow-gates.md"]],
+      "sources_requiring_verification": []
+    },
+    {
+      "id": "pr-hazard-package-script-refusal",
+      "category": "pr-hazards",
+      "question": "Why does the agent quality gate refuse to run after package scripts or lockfiles change, and what explicit flag is required after reviewing that lifecycle surface?",
+      "accepted_routes": [["docs/notes/agent-quality-gate-mechanics.md"]],
+      "sources_requiring_verification": [
+        {
+          "path": "docs/PLAN-ai-review-process.md",
+          "verify_against": ["docs/notes/agent-quality-gate-mechanics.md"]
+        }
+      ]
+    },
+    {
+      "id": "commands-documentation-tooling",
+      "category": "commands",
+      "question": "Which commands regenerate and verify the documentation catalog, preview a bounded audit packet, and preview the weekly garden issue decision without mutation?",
+      "accepted_routes": [["docs/notes/quick-commands.md"]],
+      "sources_requiring_verification": []
+    },
+    {
+      "id": "commands-issue-lifecycle",
+      "category": "commands",
+      "question": "Which commands claim an agent-ready issue, move it to review with a PR, and release it back to ready or needs-grooming when work cannot continue?",
+      "accepted_routes": [["docs/notes/agent-issue-workflow.md"]],
+      "sources_requiring_verification": []
+    },
+    {
+      "id": "commands-pr-readiness",
+      "category": "commands",
+      "question": "What exact shared probe must run before declaring a PR all clear, and which current-head Codex approval or break-glass signal is required?",
+      "accepted_routes": [["docs/notes/pr-ready-state.md"]],
+      "sources_requiring_verification": [
+        {
+          "path": "docs/PLAN-ai-review-process.md",
+          "verify_against": ["docs/notes/pr-ready-state.md"]
+        }
+      ]
+    },
+    {
+      "id": "operator-alerts-stack-boundary",
+      "category": "operator-workflows",
+      "question": "Which alert stack owns QuickNode webhook delivery, Sentry-to-Slack, and on-call announcements, and what safety checks apply before changing it?",
+      "accepted_routes": [["alerts/AGENTS.md"]],
+      "sources_requiring_verification": []
+    },
+    {
+      "id": "operator-worktree-bootstrap",
+      "category": "operator-workflows",
+      "question": "What is the supported setup path for a fresh worktree or clone, and how does the hosted Claude Code bootstrap differ from a local setup?",
+      "accepted_routes": [["docs/notes/worktree-and-web-setup.md"]],
+      "sources_requiring_verification": []
+    },
+    {
+      "id": "operator-doc-garden-recovery",
+      "category": "operator-workflows",
+      "question": "How does the recurring documentation garden select a packet, handle an already claimed or blocked issue, and require evidence before changing or deleting a document?",
+      "accepted_routes": [
+        [".agents/skills/doc-garden/SKILL.md"],
+        ["docs/notes/documentation-gardening.md"]
+      ],
+      "sources_requiring_verification": []
+    }
+  ]
+}

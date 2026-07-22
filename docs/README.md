@@ -24,7 +24,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.agents/roles/verifier.md`](../.agents/roles/verifier.md) | Verifier Role | canonical / active | role / repo-wide | eng | 90d; verified 2026-05-20 |
 | [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md) | Babysit PR Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-28 |
 | [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md) | Deploy Indexer Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-29 |
-| [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-19 |
+| [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md) | Forensic Report Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-06-15 |
 | [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md) | 0xADDRESS_CASE_PRESERVED — Display Name (persona/ENS if known) | unmanaged / unmanaged | skill / repo-wide | unowned | 90d |
@@ -62,8 +62,9 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-17 |
 | [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-19 |
 | [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
+| [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-21 |
 | [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-08 |
-| [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
+| [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md) | Codex Agent Skills — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-21 |
 | [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md) | Codex Cloud Setup and Maintenance | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md) | Cross-Protocol Context | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-06 |
@@ -145,6 +146,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0038-sentry-central-plane-verdict-projection.md`](adr/0038-sentry-central-plane-verdict-projection.md) | Central Sentry triage plane with owning-repo verdict projection | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0039-multistrategy-pools-historical-fx-volume.md`](adr/0039-multistrategy-pools-historical-fx-volume.md) | Model pool strategies many-to-many and price same-currency swaps from historical FX crosses | canonical / active | adr / indexer-envio, ui-dashboard, metrics-bridge | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0040-bounded-documentation-garden-queue.md`](adr/0040-bounded-documentation-garden-queue.md) | Documentation gardening runs through one bounded issue queue | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-19 |
+| [`docs/adr/0041-offline-documentation-navigation-evaluation.md`](adr/0041-offline-documentation-navigation-evaluation.md) | Documentation navigation is evaluated offline with deterministic scoring | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-21 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
 ## package-readmes-reference
@@ -167,7 +169,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-17 |
 | [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | unmanaged / unmanaged | reference / indexer-envio | unowned | 180d |
 | [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-21 |
-| [`SPEC.md`](../SPEC.md) | Mento v3 Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-17 |
+| [`SPEC.md`](../SPEC.md) | Mento Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-22 |
 
 ## notes-plans-archive
 
@@ -183,11 +185,4 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) | UI Dashboard Performance Plan — monitoring.mento.org | unmanaged / unmanaged | note / repo-wide | unowned | 365d |
 | [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) | AI Review Process Integration Plan | non-canonical / archived | plan / ci/process | eng | 365d; verified 2026-07-17 |
 | [`docs/PLAN-cdps-monitoring.md`](PLAN-cdps-monitoring.md) | ROADMAP refresh + CDPs monitoring (Liquity v2 indexing & dashboard) | unmanaged / unmanaged | plan / repo-wide | unowned | 365d |
-| [`docs/PLAN-celo-mainnet-indexer.md`](PLAN-celo-mainnet-indexer.md) | Plan: Celo Mainnet Envio Indexer | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-oracle-health-state-DOD.md`](PLAN-oracle-health-state-DOD.md) | Oracle & Health State — Definition of Done | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Plan: Oracle & Health State in the Indexer + Dashboard | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-oracle-snapshot-chart.md`](PLAN-oracle-snapshot-chart.md) | Plan: OracleSnapshot Chart — Oracle Price History Timeline | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-rebalancer-liveness.md`](PLAN-rebalancer-liveness.md) | Plan: Rebalancer Liveness & Effectiveness | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-stream-c-dashboard.md`](PLAN-stream-c-dashboard.md) | Stream C: Dashboard Components for Trading Limits & Rebalancer Liveness | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/PLAN-trading-limit-tracking.md`](PLAN-trading-limit-tracking.md) | Plan: Trading Limit Tracking | non-canonical / archived | plan / repo-wide | eng | 365d |
-| [`docs/ROADMAP.md`](ROADMAP.md) | Monitoring Monorepo — Roadmap | unmanaged / unmanaged | plan / repo-wide | unowned | 365d |
+| [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Oracle health-state decision retrospective | non-canonical / archived | plan / repo-wide | eng | 365d |

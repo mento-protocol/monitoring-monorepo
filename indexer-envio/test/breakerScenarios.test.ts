@@ -13,6 +13,8 @@ import {
   _setMockBreakerList,
   _clearBreakerMocks,
   _clearBootstrapCaches,
+  _clearMockMedianTimestamps,
+  _setMockMedianTimestamp,
 } from "../src/EventHandlers.ts";
 import { makeBreakerConfigId, makeBreakerId } from "../src/breakers.ts";
 import { makePoolId } from "../src/helpers.ts";
@@ -54,6 +56,7 @@ describe("Issue #1052 scenario gap-closing", () => {
   beforeEach(() => {
     _clearBreakerMocks();
     _clearBootstrapCaches();
+    _setMockMedianTimestamp(CHAIN_ID, FEED, 1_700_001_950n);
     _setMockBreakerList(CHAIN_ID, [MD_BREAKER]);
     _setMockBreakerKind(CHAIN_ID, MD_BREAKER, "MEDIAN_DELTA");
     _setMockBreakerDefaults(CHAIN_ID, MD_BREAKER, {
@@ -75,6 +78,7 @@ describe("Issue #1052 scenario gap-closing", () => {
 
   afterEach(() => {
     _clearBreakerMocks();
+    _clearMockMedianTimestamps();
   });
 
   // ---------------------------------------------------------------------

@@ -48,6 +48,7 @@ import {
   syncHaltOnColdStart,
 } from "../breakers.js";
 import { ensureRateFeed, preloadRateFeed } from "./rateFeed.js";
+import { requireExactMedianTimestamp } from "./exact-median-timestamp.js";
 
 function priceDifferenceForOracleSample(
   pool: Pool,
@@ -469,9 +470,17 @@ indexer.onEvent(
     if (poolIds.length === 0) return;
 
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const medianTimestamp = medianTimestampPromise
+    let medianTimestamp = medianTimestampPromise
       ? await medianTimestampPromise
       : null;
+    medianTimestamp = requireExactMedianTimestamp({
+      timestamp: medianTimestamp,
+      eventName: "OracleReported",
+      chainId: event.chainId,
+      rateFeedID,
+      blockNumber,
+      log: context.log,
+    });
     const reportExpiry = reportExpiryPromise ? await reportExpiryPromise : null;
 
     await ensureRateFeed({
@@ -622,9 +631,19 @@ indexer.onEvent(
     if (poolIds.length === 0 && breakerConfigs.length === 0) return;
 
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const medianTimestamp = medianTimestampPromise
+    let medianTimestamp = medianTimestampPromise
       ? await medianTimestampPromise
       : null;
+    if (poolIds.length > 0) {
+      medianTimestamp = requireExactMedianTimestamp({
+        timestamp: medianTimestamp,
+        eventName: "MedianUpdated",
+        chainId: event.chainId,
+        rateFeedID,
+        blockNumber,
+        log: context.log,
+      });
+    }
     const reportExpiry = reportExpiryPromise ? await reportExpiryPromise : null;
 
     await ensureRateFeed({

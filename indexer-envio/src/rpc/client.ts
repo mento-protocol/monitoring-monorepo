@@ -1,9 +1,9 @@
 // RPC client management, structured failure logging, and rate-limit
 // detection. Extracted from rpc.ts in PR-S6; pinned by rpcClient.test.ts +
 // hyperRpcToken.test.ts. The internal helpers (`isRateLimitError`,
-// `logRpcFailure`, `_resetRpcFailureCounts`, `RATE_LIMIT_RETRY_DELAYS_MS`)
-// are imported by rpc.ts for use by its remaining fetchers and the
-// `_testHooks` proxy.
+// `isRetryableRpcError`, `logRpcFailure`, `_resetRpcFailureCounts`,
+// `RPC_TRANSIENT_RETRY_DELAYS_MS`) are imported by rpc.ts for use by its
+// remaining fetchers and the `_testHooks` proxy.
 
 import { createPublicClient, http } from "viem";
 
@@ -196,26 +196,39 @@ const RPC_CONFIG_BY_CHAIN: Record<number, { default: string; envVar: string }> =
     }, // Monad Testnet (no public full-node RPC known)
   };
 
-/** True when viem's JSON-RPC batching is safe for this RPC URL.
+export type RpcBatchConfig = boolean | { batchSize: number };
+
+/** Return the viem JSON-RPC batching policy for an RPC URL.
  *
  * Monad's tokenized monadinfra primary currently serves historical
  * `eth_call`s correctly when the request body is a single JSON-RPC object,
  * but returns "Block requested not found" when the exact same call is wrapped
  * in a JSON-RPC batch array. `latest` batch calls still work, which makes the
  * failure look like an archive-depth miss during backfills. Disable batching
- * only for that host so historical reads stay on the primary and don't spill
+ * for that exact host so historical reads stay on the primary and don't spill
  * into archive fallback unnecessarily.
+ *
+ * dRPC's public endpoints allow at most three calls in one JSON-RPC batch.
+ * Viem otherwise defaults to batches of up to 1,000 calls, which can turn an
+ * Envio replay burst into HTTP 500 responses. Keep batching enabled for dRPC,
+ * but cap every `drpc.org` host (including Polygon mainnet and Amoy) at the
+ * provider's documented limit.
  */
-export function rpcBatchEnabledForUrl(url: string): boolean {
+export function rpcBatchConfigForUrl(url: string): RpcBatchConfig {
   try {
-    return new URL(url).hostname !== "rpc-mainnet.monadinfra.com";
+    const hostname = new URL(url).hostname;
+    if (hostname === "rpc-mainnet.monadinfra.com") return false;
+    if (hostname === "drpc.org" || hostname.endsWith(".drpc.org")) {
+      return { batchSize: 3 };
+    }
+    return true;
   } catch {
     return true;
   }
 }
 
 function rpcTransport(url: string): ReturnType<typeof http> {
-  return http(url, { batch: rpcBatchEnabledForUrl(url) });
+  return http(url, { batch: rpcBatchConfigForUrl(url) });
 }
 
 /**
@@ -443,7 +456,7 @@ export function fallbackLikelyHasBlock(
 }
 
 // ---------------------------------------------------------------------------
-// Rate limit detection & retry
+// Transient provider failure detection & retry
 // ---------------------------------------------------------------------------
 
 /** Matches common rate-limit error messages from RPC providers.
@@ -454,7 +467,7 @@ export function fallbackLikelyHasBlock(
  * - Generic / RFC 6585: `429`, `too many requests`, `throttled`
  *
  * Add new provider phrasings here when they show up in `[RPC_FAILURE]`
- * lines that should have been retried + faled-over instead. Without a
+ * lines that should have been retried + failed over instead. Without a
  * match, the rate-limit retry/fallback path in `block-fallback.ts` is
  * skipped and the error escapes to the caller (visible as a viem stack
  * trace dump in the logs). */
@@ -467,5 +480,17 @@ export function isRateLimitError(err: unknown): boolean {
   return RATE_LIMIT_RE.test(err.message);
 }
 
-/** Delays for rate-limit retries before falling back. */
-export const RATE_LIMIT_RETRY_DELAYS_MS = [200, 500, 1000];
+/** Matches provider/network HTTP failures that are normally safe to retry.
+ * Keep the numeric alternatives anchored to HTTP/status wording so an
+ * unrelated block number such as 500 is never treated as transient. */
+const TRANSIENT_SERVER_ERROR_RE =
+  /(?:\b(?:http(?:\s+status)?|status(?:\s+code)?)\s*[:=]?\s*(?:500|502|503|504)\b)|(?:\binternal server error\b|\bbad gateway\b|\bservice unavailable\b|\bgateway timeout\b)/i;
+
+/** Returns true for rate limiting and retryable HTTP 5xx provider failures. */
+export function isRetryableRpcError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return isRateLimitError(err) || TRANSIENT_SERVER_ERROR_RE.test(err.message);
+}
+
+/** Delays for transient RPC retries before falling back. */
+export const RPC_TRANSIENT_RETRY_DELAYS_MS = [200, 500, 1000];

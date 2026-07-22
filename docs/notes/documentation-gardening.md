@@ -74,9 +74,12 @@ The queue is deliberately serialized:
 - empty selected lane: report a no-op and create nothing.
 
 Identity comes from the two leading `docs-garden-issue:v1` and
-`docs-garden-packet:v1` markers. Do not remove or hand-copy them. Queue labels
-cannot identify an occurrence because claiming intentionally moves
-`agent-ready` to `agent-active` and then `in-pr`.
+`docs-garden-packet:v1` markers together with the durable `source:audit` label.
+Marker text on an unlabeled public issue is ignored; only the workflow or a
+maintainer with label permissions may apply the ownership label. Do not remove
+or hand-copy these markers. Queue-state labels cannot identify an occurrence
+because claiming intentionally moves `agent-ready` to `agent-active` and then
+`in-pr`, while `source:audit` remains attached.
 
 Use the CLI for a local or operator preview. Dry-run still reads the full issue
 set and computes the exact decision but performs no label, issue, or repository
@@ -123,3 +126,13 @@ Every document receives one evidence-backed disposition: **Keep**,
 Run `pnpm docs:index --check` after a gardening batch. If classification changed,
 regenerate the catalog with `pnpm docs:index --write` and review the generated
 diff before committing it.
+
+## Fresh-agent navigation evaluation
+
+The same scheduled workflow also synchronizes one separate monthly navigation
+evaluation issue. That step is deterministic and issue-only: it never invokes a
+model or edits documentation. The fixture, scorer, baseline, cost policy, and
+manual fresh-agent procedure live in
+[`docs/evals/documentation-navigation.md`](../evals/documentation-navigation.md).
+Use its post-garden comparison only after all six baseline lane trackers
+#1348–#1353 have closed.

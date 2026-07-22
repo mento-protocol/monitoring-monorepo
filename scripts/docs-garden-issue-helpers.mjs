@@ -6,6 +6,7 @@ export const DOCS_GARDEN_MARKER = "<!-- docs-garden-issue:v1 -->";
 export const DOCS_GARDEN_PACKET_MARKER_PREFIX = "<!-- docs-garden-packet:v1 ";
 export const DOCS_GARDEN_EPIC = 1341;
 export const MAX_ISSUE_BODY_CHARS = 65_000;
+export const DOCS_AUTOMATION_OWNERSHIP_LABEL = "source:audit";
 
 export const ISSUE_STATE_LABELS = [
   "needs-grooming",
@@ -154,15 +155,20 @@ export function normalizeGithubIssuePages(pages) {
       continue;
     uniqueIssues.set(issue.number, issue);
   }
-  return [...uniqueIssues.values()].map((issue) => ({
-    number: issue.number,
-    title: String(issue.title ?? ""),
-    body: String(issue.body ?? ""),
-    state: String(issue.state ?? "").toUpperCase(),
-    labels: (issue.labels ?? []).map(labelName).filter(Boolean),
-    url: issue.html_url ?? null,
-    marker: parseLeadingDocsGardenMarkers(issue.body),
-  }));
+  return [...uniqueIssues.values()].map((issue) => {
+    const labels = (issue.labels ?? []).map(labelName).filter(Boolean);
+    return {
+      number: issue.number,
+      title: String(issue.title ?? ""),
+      body: String(issue.body ?? ""),
+      state: String(issue.state ?? "").toUpperCase(),
+      labels,
+      url: issue.html_url ?? null,
+      marker: labels.includes(DOCS_AUTOMATION_OWNERSHIP_LABEL)
+        ? parseLeadingDocsGardenMarkers(issue.body)
+        : null,
+    };
+  });
 }
 
 export function resolveTargetWeekSerial(currentWeekSerial, issues) {

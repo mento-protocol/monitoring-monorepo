@@ -90,6 +90,7 @@ Deploy branch: `envio` → triggers hosted reindex on push.
 ```bash
 cp indexer-envio/.env.example indexer-envio/.env
 # Mainnet defaults (forno, rpc2.monad.xyz, polygon.drpc.org) work out of the box.
+# dRPC transports are capped at three calls per JSON-RPC batch for replay safety.
 # For testnet, set ENVIO_API_TOKEN or override ENVIO_RPC_URL_10143.
 # For a custom Celo Sepolia provider, set ENVIO_RPC_URL_CELO_SEPOLIA for event
 # sync and ENVIO_RPC_URL_11142220 for handler eth_call reads.
@@ -111,6 +112,10 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
   cover the full replay/archive window as well as rate-limit failover. Celo
   Sepolia event sync uses `ENVIO_RPC_URL_CELO_SEPOLIA`; handler contract reads
   use `ENVIO_RPC_URL_11142220`, so a full provider override sets both.
+- Polygon dRPC transports retain batching with a three-call cap. Transient
+  rate-limit and HTTP 5xx errors retry and use a same-block fallback when one is
+  configured. Tracked OracleReported and MedianUpdated events reject a missing
+  exact-block median timestamp so a later event cannot hide replay corruption.
 - Hasura must use port 8080. Envio's startup liveness URL is hard-coded to that
   port, so a different `HASURA_EXTERNAL_PORT` stalls startup. All configs also
   share Docker project `generated`; run only one local indexer at a time.
@@ -136,7 +141,7 @@ pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Show runtime 
 pnpm deploy:indexer:metrics <commit>         # Show per-chain indexing progress
 pnpm deploy:indexer:info <commit>            # Show deployment info/cache state
 pnpm deploy:indexer:perf <commit>            # Combined status/metrics/log snapshot for perf comparisons
-pnpm deploy:indexer:verify <commit>          # Batch status, metrics, endpoint, and GraphQL row probe
+pnpm deploy:indexer:verify <commit>          # Gate promotion on sync, core rows, and Polygon replay semantics
 pnpm deploy:indexer:promote <commit>         # Promote a synced deployment to prod
 ```
 
@@ -273,6 +278,16 @@ pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
 ```
+
+A caught-up watcher exit is `SYNCED_PENDING_DATA_VERIFY`, not promotion
+readiness. The verifier must pass the canonical Polygon FPMM feed/expiry,
+oracle-anchor, snapshot-cursor, and health-counter checks before promotion.
+It also reads `config/replay-integrity.json` from the deployed commit. That
+versioned marker is the commit-scoped proof that the candidate was replayed by
+code enforcing the exact-median fail-closed invariant; a candidate whose commit
+lacks the required version is never promotion-compatible even if later rows
+look healthy. Bump a marker only in the same change as the new replay invariant
+and its handler-level regression tests.
 
 The `mento` project on Envio Cloud watches this branch. Envio registers
 deployments under the short commit hash, and the registration can lag the Git
