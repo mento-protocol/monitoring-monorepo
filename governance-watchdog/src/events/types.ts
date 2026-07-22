@@ -77,17 +77,13 @@ export interface ProposalCanceledEvent {
   proposalId: bigint;
 }
 
-/**
- * Type helper to ensure all EventTypes (except Unknown) are mapped
- * This will cause a TypeScript error if you forget to add a new event to EventTypeMap
- * Intentionally unused - exists purely for compile-time validation
- */
+type AssertNoMissingEventTypeMappings<T extends never> = T;
+
+/** Compile-time assertion that every supported EventType has a payload map entry. */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-type ValidateEventTypeMap = {
-  [K in Exclude<EventType, EventType.Unknown>]: K extends keyof EventTypeMap
-    ? EventTypeMap[K]
-    : never;
-};
+type ValidateEventTypeMap = AssertNoMissingEventTypeMappings<
+  Exclude<Exclude<EventType, EventType.Unknown>, keyof EventTypeMap>
+>;
 
 /**
  * QuickNode event payload structure
