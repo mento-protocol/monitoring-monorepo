@@ -25,10 +25,9 @@
 #     `terraform destroy` the channel is archived; a re-apply would create
 #     a fresh channel with a new ID (the archived one becomes a name-collision
 #     hazard — unarchive manually first or rename if you ever recreate).
-#   - Slack channels can't be "updated" in place via Terraform here — we
-#     force recreation by setting `update_method = "POST"` (invalid for
-#     updates) following the QuickNode pattern documented in
-#     `onchain-event-listeners/WEBHOOK_STATE_MANAGEMENT.md`.
+#   - Slack channels can't be updated in place through this name-only resource.
+#     The empty update path prevents the REST provider from calling an unrelated
+#     Slack endpoint; lifecycle changes must be reviewed as replacements.
 
 resource "restapi_object" "sentry_slack_channel" {
   for_each = local.projects
@@ -50,10 +49,9 @@ resource "restapi_object" "sentry_slack_channel" {
   destroy_path   = "/conversations.archive?channel={id}"
   destroy_method = "POST"
 
-  # Force recreation rather than attempted updates — Slack doesn't expose
-  # rename/topic-update via this provider cleanly, and our channel config
-  # is name-only so updates would be a no-op anyway. See the QuickNode
-  # WEBHOOK_STATE_MANAGEMENT.md for the rationale on this pattern.
+  # Prevent attempted updates: Slack doesn't expose rename/topic mutation
+  # through this name-only resource, so any lifecycle change must be reviewed
+  # explicitly as a replacement.
   update_path   = ""
   update_method = "POST"
 

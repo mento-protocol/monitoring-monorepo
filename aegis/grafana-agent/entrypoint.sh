@@ -11,19 +11,17 @@
 #   even after Secret Manager rotation. Fetching at runtime keeps secrets
 #   in Secret Manager only.
 #
-# Required IAM: the App Engine default service account
-# (`<project>@appspot.gserviceaccount.com`) needs
+# Required IAM: the effective App Engine version service account needs
 # `roles/secretmanager.secretAccessor` on each legacy grafana-agent-* secret:
 #   - grafana-agent-endpoint
 #   - grafana-agent-username
 #   - grafana-agent-password
-# Provisioned by `terraform/aegis-bootstrap.tf` → `grafana_agent_appspot_accessor`.
+# Terraform currently grants the expected AppSpot principal through
+# `terraform/aegis-bootstrap.tf` → `grafana_agent_appspot_accessor`.
 #
-# Why the AppSpot SA, not the Compute default SA: App Engine Flex apps run as
-# the App Engine default service account (`<project>@appspot.gserviceaccount.com`)
-# even though the underlying GCE VM runs as the Compute Engine default SA.
-# The metadata server inside the application context returns the App Engine
-# SA's token, so that's the identity that needs the Secret Manager binding.
+# `grafana-agent.yaml` does not pin `service_account`, so the version inherits
+# the mutable app-level default. Verify that effective identity before deploy;
+# issue #1473 tracks a pinned or fail-closed identity design.
 
 set -eu
 
@@ -31,8 +29,8 @@ GCP_PROJECT="${GOOGLE_CLOUD_PROJECT:-mento-monitoring}"
 METADATA="http://metadata.google.internal/computeMetadata/v1"
 HTTP_TIMEOUT=10
 
-# Get an access token from the App Engine default service account via the
-# GCE metadata server. --max-time bounds the request so a transient
+# Get an access token for the effective runtime service account via the GCE
+# metadata server. --max-time bounds the request so a transient
 # metadata-server outage doesn't wedge the container indefinitely (no
 # health-check responses, no logs, no rotation possible). The `|| { ... }`
 # guard catches transport-layer failures (DNS, TCP, timeout) which would

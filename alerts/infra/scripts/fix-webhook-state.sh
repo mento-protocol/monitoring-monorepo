@@ -3,9 +3,9 @@
 # QuickNode Webhook State Repair Tool
 #
 # Purpose:
-#   Automatically detect and fix Terraform state drift for QuickNode webhooks.
-#   This script identifies webhooks that exist in Terraform state but have been
-#   deleted in QuickNode (or vice versa) and offers to clean up the state.
+#   Detect one safe class of Terraform state drift for QuickNode webhooks:
+#   resources that remain in Terraform state after remote deletion. The script
+#   offers to remove only remotely confirmed missing resources from state.
 #
 # Usage:
 #   ./scripts/fix-webhook-state.sh
@@ -21,7 +21,7 @@
 #   2. Checks if each webhook exists in QuickNode via API
 #   3. Identifies orphaned webhooks (in state but not in QuickNode)
 #   4. Offers to remove them from state (interactive prompt)
-#   5. Provides next steps for running terraform apply
+#   5. Provides next steps for a reviewed plan and protected CI apply
 #
 # When to use:
 #   - Error: unexpected response code '404' during terraform apply
@@ -164,18 +164,18 @@ if [[ ${#MISSING_WEBHOOKS[@]} -gt 0 ]]; then
 	if [[ ${REPLY} =~ ^[Yy]$ ]]; then
 		for webhook in "${MISSING_WEBHOOKS[@]}"; do
 			echo "Removing: ${webhook}"
-			terraform state rm -lock=false "${webhook}"
+			terraform state rm -lock-timeout=30s "${webhook}"
 		done
 		info "✓ Removed missing webhooks from state"
 		echo ""
 		echo "Next steps:"
-		echo "  1. Run 'terraform plan' to see what will be created"
-		echo "  2. Run 'terraform apply' to recreate the missing webhooks"
+		echo "  1. From the repository root, run 'pnpm alerts:infra:plan'"
+		echo "  2. For state-only recovery, dispatch '.github/workflows/alerts-infra.yml' from main"
+		echo "  3. Review its authoritative plan and approve the 'production-infra' environment"
+		echo "  4. If configuration also changes, use a reviewed PR and merge-triggered apply instead"
 	else
 		echo "Skipped state cleanup."
-		echo ""
-		echo "To manually remove a webhook from state, run:"
-		echo "  terraform state rm 'module.onchain_event_listeners[\"<network>\"].restapi_object.multisig_webhook'"
+		echo "Re-run this tool after approval instead of removing state manually."
 	fi
 else
 	info "✓ All webhooks in Terraform state exist in QuickNode"

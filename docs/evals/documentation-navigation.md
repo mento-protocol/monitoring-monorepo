@@ -3,7 +3,7 @@ title: Documentation Navigation Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-21
+last_verified: 2026-07-22
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90

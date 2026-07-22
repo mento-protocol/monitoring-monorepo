@@ -361,13 +361,19 @@ pnpm aegis:logs
 ```
 
 Grafana Alloy deploys from the same project under the existing `grafana-agent`
-service/command names. On a fresh project bootstrap, create the Secret Manager
-versions before the first deploy:
+service/command names. Deploy only when its three Secret Manager values already
+have enabled versions and the effective App Engine runtime identity has been
+verified:
 
 ```bash
-pnpm aegis:agent:seed-secrets
 pnpm aegis:agent:deploy
 ```
+
+The legacy seed command writes secret versions with `gcloud` and is not an
+agent-authorized bootstrap or rotation path under ADR 0030. Follow
+[`aegis/grafana-agent/README.md`](./aegis/grafana-agent/README.md); issue
+[#1473](https://github.com/mento-protocol/monitoring-monorepo/issues/1473)
+tracks its policy-compliant replacement.
 
 The Aegis dashboard lives in `aegis/terraform` and keeps the existing GCS
 backend prefix `aegis`; the Aegis service-health alert rules moved to

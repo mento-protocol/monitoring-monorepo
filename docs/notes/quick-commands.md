@@ -123,10 +123,9 @@ pnpm aegis:test               # Jest tests
 pnpm aegis:lint               # ESLint baseline gate for Aegis
 pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-monitoring
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
-# Secrets are IaC-first; do not create, rotate, or overwrite them manually
-# unless the owning integration/runbook explicitly allows the path.
-pnpm aegis:agent:seed-secrets # Seed/rotate Alloy remote-write Secret Manager versions
-pnpm aegis:agent:deploy       # Deploy the Grafana Alloy App Engine collector
+# Alloy deploy requires existing enabled secrets and a verified runtime identity.
+# Bootstrap/rotation is blocked on issue #1473; never run the legacy seed command.
+pnpm aegis:agent:deploy       # Deploy the already provisioned Alloy collector
 pnpm aegis:tf:init / aegis:tf:plan
 # Apply runs in CI on merge to main (aegis-terraform.yml; production-infra gate).
 
