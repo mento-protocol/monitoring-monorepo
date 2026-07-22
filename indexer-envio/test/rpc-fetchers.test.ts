@@ -12,6 +12,7 @@ import {
   fetchOracleReportTimestamps,
   fetchRateFeedOracles,
   fetchReportExpiry,
+  fetchReportExpiryConfig,
   fetchRebalanceThresholds,
   fetchReserves,
   fetchTradingLimits,
@@ -176,6 +177,59 @@ describe("RPC fetchers reject non-historical latest fallbacks", () => {
     });
 
     const result = await fetchReportExpiry(CHAIN_ID, FEED, BLOCK, noopLogger);
+
+    assert.equal(result, null);
+  });
+
+  it("fetchReportExpiryConfig reads raw token and global expiry at the exact block", async () => {
+    const calls: ReadContractArgs[] = [];
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const call = args as ReadContractArgs;
+        calls.push(call);
+        assert.equal(call.blockNumber, BLOCK);
+        return call.functionName === "tokenReportExpirySeconds" ? 0n : 150n;
+      },
+    });
+
+    const result = await fetchReportExpiryConfig(
+      CHAIN_ID,
+      FEED,
+      BLOCK,
+      noopLogger,
+    );
+
+    assert.deepEqual(result, {
+      globalReportExpiry: 150n,
+      tokenReportExpiry: 0n,
+      reportExpiry: 150n,
+    });
+    assert.deepEqual(
+      calls.map((call) => call.functionName),
+      ["tokenReportExpirySeconds", "reportExpirySeconds"],
+    );
+  });
+
+  it("fetchReportExpiryConfig rejects a latest fallback for either raw value", async () => {
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const call = args as ReadContractArgs;
+        if (
+          call.functionName === "reportExpirySeconds" &&
+          call.blockNumber !== undefined
+        ) {
+          throw new Error("header not found");
+        }
+        return call.functionName === "tokenReportExpirySeconds" ? 0n : 150n;
+      },
+    });
+
+    const result = await fetchReportExpiryConfig(
+      CHAIN_ID,
+      FEED,
+      BLOCK,
+      noopLogger,
+    );
 
     assert.equal(result, null);
   });

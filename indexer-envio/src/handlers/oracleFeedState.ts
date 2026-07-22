@@ -11,10 +11,11 @@ import {
 } from "../oracleFeedState.js";
 import { computeHealthStatus, maybePreloadPool } from "../pool.js";
 import { getPoolsByFeed } from "../rpc.js";
+import { oracleReportTimestampsEffectForChain } from "../rpc/effects.js";
 import {
-  oracleReportTimestampsEffectForChain,
-  reportExpiryEffect,
-} from "../rpc/effects.js";
+  preloadOracleExpiryState,
+  resolveOracleExpiryState,
+} from "./oracleExpiryState.js";
 
 type FeedMutation =
   | { kind: "report"; reporterAddress: string; reportTimestamp: bigint }
@@ -41,27 +42,16 @@ export async function oracleFeedBootstrapInputs(
   poolIds: readonly string[],
   eventBlockNumber: bigint,
 ): Promise<{
-  knownReportExpiry: bigint | null;
   bootstrapThroughBlock: bigint;
 }> {
   const pools = await Promise.all(
     poolIds.map((poolId) => context.Pool.get(poolId)),
-  );
-  const expiries = new Set(
-    pools.flatMap((pool) =>
-      pool && pool.oracleExpiry > 0n ? [pool.oracleExpiry] : [],
-    ),
   );
   const hasTrackedPoolStateFromEarlierBlock = pools.some(
     (pool) => pool !== undefined && pool.updatedAtBlock < eventBlockNumber,
   );
   const bootstrapAtBlockClose = !hasTrackedPoolStateFromEarlierBlock;
   return {
-    // Keep timestamps and expiry on the same boundary. A current-block Pool
-    // row can still predate a later expiry event in that block, so block-close
-    // bootstrap must recover the exact effective expiry by RPC.
-    knownReportExpiry:
-      !bootstrapAtBlockClose && expiries.size === 1 ? [...expiries][0]! : null,
     // JSON-RPC cannot snapshot an intra-block log boundary. If no currently
     // referencing pool row was persisted before this block, the feed may have
     // become tracked after an earlier oracle log (deployment or self-heal).
@@ -87,7 +77,6 @@ function unavailableMessage(
 async function bootstrapFeedState(
   context: EvmOnEventContext,
   event: FeedEvent,
-  knownReportExpiry: bigint | null,
   bootstrapThroughBlock: bigint,
 ): Promise<OracleFeedState> {
   if (
@@ -108,25 +97,21 @@ async function bootstrapFeedState(
       blockNumber: bootstrapThroughBlock,
     },
   );
-  const expiryPromise =
-    knownReportExpiry !== null
-      ? Promise.resolve(knownReportExpiry)
-      : // preload-effect-exempt: one exact-boundary expiry recovery per feed whose pool deployment did not seed it.
-        context.effect(reportExpiryEffect, {
-          chainId: event.chainId,
-          rateFeedID: event.rateFeedID,
-          blockNumber: bootstrapThroughBlock,
-        });
-  const [reports, reportExpiry] = await Promise.all([
+  const expiryStatePromise = resolveOracleExpiryState({
+    context,
+    event,
+    bootstrapThroughBlock,
+  });
+  const [reports, expiryState] = await Promise.all([
     reportsPromise,
-    expiryPromise,
+    expiryStatePromise,
   ]);
   if (reports == null) {
     const message = unavailableMessage(event, "timestamps");
     context.log.error(message);
     throw new Error(message);
   }
-  if (reportExpiry == null || reportExpiry <= 0n) {
+  if (expiryState.reportExpiry <= 0n) {
     const message = unavailableMessage(event, "expiry");
     context.log.error(message);
     throw new Error(message);
@@ -138,7 +123,7 @@ async function bootstrapFeedState(
       rateFeedID: event.rateFeedID,
       reporters: reports.reporters,
       timestamps: reports.timestamps,
-      reportExpiry,
+      reportExpiry: expiryState.reportExpiry,
       bootstrapThroughBlock,
     });
   } catch (error) {
@@ -155,7 +140,6 @@ export async function resolveOracleFeedState(args: {
   context: EvmOnEventContext;
   event: FeedEvent;
   mutation: FeedMutation;
-  knownReportExpiry: bigint | null;
   bootstrapThroughBlock: bigint;
 }): Promise<OracleFeedState> {
   const id = oracleFeedStateId(args.event.chainId, args.event.rateFeedID);
@@ -165,7 +149,6 @@ export async function resolveOracleFeedState(args: {
     (await bootstrapFeedState(
       args.context,
       args.event,
-      args.knownReportExpiry,
       args.bootstrapThroughBlock,
     ));
   // A feed with no referencing Pool row persisted before this block is
@@ -293,6 +276,7 @@ indexer.onEvent(
     if (context.isPreload) {
       await Promise.all([
         preloadOracleFeedState(context, event.chainId, rateFeedID),
+        preloadOracleExpiryState(context, event.chainId, rateFeedID),
         maybePreloadPool(context, poolIds),
       ]);
       return;

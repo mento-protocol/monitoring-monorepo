@@ -51,6 +51,14 @@ export function _clearMockRateFeedIDs(): void {
 
 const _testReportExpiry = new Map<string, bigint | null>();
 
+export type ReportExpiryConfig = {
+  globalReportExpiry: bigint;
+  tokenReportExpiry: bigint;
+  reportExpiry: bigint;
+};
+
+const _testReportExpiryConfig = new Map<string, ReportExpiryConfig | null>();
+
 /** @internal Test-only: pre-set a mock report expiry for a rateFeedID. */
 export function _setMockReportExpiry(
   chainId: number,
@@ -81,12 +89,62 @@ export function _setMockReportExpiry(
       callArgs: [rateFeedID],
       result: expiry,
     });
+    setTestRpcMock({
+      group: "reportExpiry",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "reportExpirySeconds",
+      result: expiry,
+    });
   }
+}
+
+/** @internal Test-only: pre-set raw global/token expiry configuration. */
+export function _setMockReportExpiryConfig(
+  chainId: number,
+  rateFeedID: string,
+  config: ReportExpiryConfig | null,
+): void {
+  const key = `${chainId}:${rateFeedID.toLowerCase()}`;
+  _testReportExpiryConfig.set(key, config);
+  let sortedOraclesAddress: string | undefined;
+  try {
+    sortedOraclesAddress = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return;
+  }
+  if (config === null) {
+    setTestRpcErrorMock({
+      group: "reportExpiryConfig",
+      chainId,
+      address: sortedOraclesAddress,
+      functionName: "tokenReportExpirySeconds",
+      callArgs: [rateFeedID],
+    });
+    return;
+  }
+  setTestRpcMock({
+    group: "reportExpiryConfig",
+    chainId,
+    address: sortedOraclesAddress,
+    functionName: "tokenReportExpirySeconds",
+    callArgs: [rateFeedID],
+    result: config.tokenReportExpiry,
+  });
+  setTestRpcMock({
+    group: "reportExpiryConfig",
+    chainId,
+    address: sortedOraclesAddress,
+    functionName: "reportExpirySeconds",
+    result: config.globalReportExpiry,
+  });
 }
 
 export function _clearMockReportExpiry(): void {
   _testReportExpiry.clear();
+  _testReportExpiryConfig.clear();
   clearTestRpcMockGroup("reportExpiry");
+  clearTestRpcMockGroup("reportExpiryConfig");
 }
 
 const _testMedianTimestamp = new Map<string, bigint | null>();
@@ -462,6 +520,104 @@ export async function fetchOracleReportTimestamps(
     };
   } catch (err) {
     logRpcFailure(chainId, "getTimestamps", rateFeedID, err, blockNumber, log);
+    return null;
+  }
+}
+
+function mockedReportExpiryConfig(
+  chainId: number,
+  rateFeedID: string,
+): ReportExpiryConfig | null | undefined {
+  const mockKey = `${chainId}:${rateFeedID.toLowerCase()}`;
+  if (_testReportExpiryConfig.has(mockKey)) {
+    return _testReportExpiryConfig.get(mockKey) ?? null;
+  }
+  // Existing effective-expiry fixtures predate raw config state. Treat a
+  // positive fixture as an active override so old handler tests retain their
+  // intended boundary without weakening production validation.
+  if (!_testReportExpiry.has(mockKey)) return undefined;
+  const reportExpiry = _testReportExpiry.get(mockKey) ?? null;
+  if (reportExpiry == null || reportExpiry <= 0n) return null;
+  return {
+    globalReportExpiry: reportExpiry,
+    tokenReportExpiry: reportExpiry,
+    reportExpiry,
+  };
+}
+
+/** Returns raw global/token expiry configuration plus the effective value at
+ * one exact block boundary. Both raw values are required to replay later
+ * ReportExpirySet and TokenReportExpirySet logs without importing block-close
+ * state from a later log. */
+export async function fetchReportExpiryConfig(
+  chainId: number,
+  rateFeedID: string,
+  blockNumber: bigint,
+  log: RpcLogger = consoleLogger,
+): Promise<ReportExpiryConfig | null> {
+  const mocked = mockedReportExpiryConfig(chainId, rateFeedID);
+  if (mocked !== undefined) return mocked;
+
+  let address: `0x${string}`;
+  try {
+    address = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return null;
+  }
+  try {
+    const client = getRpcClient(chainId);
+    const fallback = getFallbackRpcClient(chainId);
+    const [tokenExpiryRes, globalExpiryRes] = await Promise.all([
+      readContractWithBlockFallback(
+        chainId,
+        client,
+        {
+          address,
+          abi: SortedOraclesContract.abi,
+          functionName: "tokenReportExpirySeconds",
+          args: [rateFeedID as `0x${string}`],
+        },
+        blockNumber,
+        fallback,
+        log,
+      ),
+      readContractWithBlockFallback(
+        chainId,
+        client,
+        {
+          address,
+          abi: SortedOraclesContract.abi,
+          functionName: "reportExpirySeconds",
+        },
+        blockNumber,
+        fallback,
+        log,
+      ),
+    ]);
+    if (
+      tokenExpiryRes.usedLatestFallback ||
+      globalExpiryRes.usedLatestFallback
+    ) {
+      return null;
+    }
+    const tokenReportExpiry = tokenExpiryRes.result as bigint;
+    const globalReportExpiry = globalExpiryRes.result as bigint;
+    if (tokenReportExpiry < 0n || globalReportExpiry <= 0n) return null;
+    return {
+      globalReportExpiry,
+      tokenReportExpiry,
+      reportExpiry:
+        tokenReportExpiry > 0n ? tokenReportExpiry : globalReportExpiry,
+    };
+  } catch (err) {
+    logRpcFailure(
+      chainId,
+      "reportExpiryConfig",
+      rateFeedID,
+      err,
+      blockNumber,
+      log,
+    );
     return null;
   }
 }

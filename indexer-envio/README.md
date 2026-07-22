@@ -39,7 +39,7 @@ event list; the table highlights the main monitoring surfaces.
 
 | Entity group            | Description                                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `OracleFeedState`, `TradingLimit`                                                                                         |
+| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `OracleFeedState`, `OracleExpiryState`, `TradingLimit`                                                                    |
 | Pool strategies         | `PoolLiquidityStrategy` (authoritative active many-to-many registry; `Pool.rebalancerAddress` is compatibility-only)                                                            |
 | Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                      |
 | Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                          |
@@ -117,10 +117,12 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
   configured. The first tracked `OracleReported` or `OracleReportRemoved` for a
   feed bootstraps its active reporter timestamp list at an exact boundary:
   parent block when referencing pool state predates the block, or exact
-  block-close timestamps and expiry when it does not. Missing or malformed data fail
-  that event before writes. Later blocks update persisted `OracleFeedState` in
-  log order, so replay traffic does not issue one `medianTimestamp` archive read
-  per event.
+  block-close timestamps and expiry when it does not. Missing or malformed
+  data fail that event before writes. Later blocks update persisted
+  `OracleFeedState` in log order, so replay traffic does not issue one
+  `medianTimestamp` archive read per event. Raw global/token expiry is likewise
+  bootstrapped once into `OracleExpiryState`; both expiry events then update it
+  in log order, and a zero token value derives the persisted global fallback.
 - Hasura must use port 8080. Envio's startup liveness URL is hard-coded to that
   port, so a different `HASURA_EXTERNAL_PORT` stalls startup. All configs also
   share Docker project `generated`; run only one local indexer at a time.
@@ -297,19 +299,21 @@ invariant and its handler-level regression tests.
 Replay-integrity v3 replaces traffic-scaled exact `medianTimestamp` reads with
 a persisted, event-sourced `OracleFeedState`. On the first tracked
 `OracleReported` or `OracleReportRemoved`, processing performs one
-exact-boundary `getTimestamps` bootstrap and obtains the effective expiry from
-unique seeded pool state at a parent boundary or an exact boundary recovery.
-It validates the
+exact-boundary `getTimestamps` bootstrap and obtains raw/effective expiry
+configuration from that same boundary. It validates the
 reporter/timestamp arrays, computes SortedOracles' upper median, then applies
 `OracleReported` upserts and `OracleReportRemoved` deletions in block/log order.
 `MedianUpdated` consumes that state but does not renew freshness itself. When
 no currently referencing pool row predates the initialization block, exact
 block-close state absorbs that block's logs so a report before deployment or
 feed self-heal cannot be stranded outside a parent snapshot; later blocks use
-log order. Missing or
-malformed bootstrap data fails before entity writes. This is a full-replay
-boundary: v1 and v2 candidates are incompatible with v3 even when their final
-pool rows happen to look healthy.
+log order. `OracleExpiryState` stores raw global/token and effective expiry at
+the same bootstrap boundary, then applies both expiry events by block/log
+cursor. A zero token value derives the persisted global fallback without a
+block-close RPC inside the event, and never-tracked feeds create no state.
+Missing or malformed bootstrap data fails before entity writes. This is a
+full-replay boundary: v1 and v2 candidates are incompatible with v3 even when
+their final pool rows happen to look healthy.
 
 The inherited replay-integrity v2 requirement still applies: effect eligibility
 must be derived independently in both Envio passes. Never carry preload

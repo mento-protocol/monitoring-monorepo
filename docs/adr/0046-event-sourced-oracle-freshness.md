@@ -49,9 +49,11 @@ Persist one `OracleFeedState` row per feed referenced by an indexed pool:
   upper median timestamp from the persisted active reports after each change.
 - Let `MedianUpdated` consume the state written by its preceding report or
   removal log; it must not perform a traffic-scaled RPC fallback.
-- Update effective expiry from expiry events. The bounded global-expiry event
-  may make one exact effective-expiry read per feed because token overrides
-  cannot be derived from the global event alone.
+- Bootstrap raw global/token expiry configuration once per tracked feed into
+  `OracleExpiryState`, then apply `ReportExpirySet` and
+  `TokenReportExpirySet` in block/log order. A zero token value derives the
+  global fallback from persisted state, so a later same-block governance log
+  cannot leak backward. Never-tracked feeds create no state and perform no RPC.
 - Fail the event before writes when an exact bootstrap, positive expiry, or
   ordered state transition cannot be proven. A semantics change requires a
   replay-integrity marker bump and a clean full replay before promotion.
@@ -90,9 +92,12 @@ Persist one `OracleFeedState` row per feed referenced by an indexed pool:
 
 - `indexer-envio/src/oracleFeedState.ts` implements the pure ordered state
   transitions and SortedOracles upper-median rule.
+- `indexer-envio/src/oracleExpiryState.ts` implements raw/effective expiry
+  fallback and ordered governance transitions.
 - `indexer-envio/src/handlers/oracleFeedState.ts` owns bounded bootstrap,
   fail-closed validation, report removal, and pool freshness propagation.
-- `indexer-envio/test/oracleFeedState.test.ts` and
+- `indexer-envio/test/oracleFeedState.test.ts`,
+  `indexer-envio/test/oracleExpiryState.test.ts`, and
   `indexer-envio/test/oracleFeedStateHandlers.test.ts` cover deterministic
   transitions, same-block ordering, bootstrap bounding, expiry changes, and
   removal-only freshness updates.

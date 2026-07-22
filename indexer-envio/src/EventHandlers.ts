@@ -74,6 +74,7 @@ export {
   _setMockRateFeedID,
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
+  _setMockReportExpiryConfig,
   _clearMockReportExpiry,
   _setMockMedianTimestamp,
   _clearMockMedianTimestamps,

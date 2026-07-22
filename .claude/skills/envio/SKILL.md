@@ -204,13 +204,17 @@ Notes:
   default 1,000-call batch. The first tracked `OracleReported` or
   `OracleReportRemoved` for a feed performs one exact-boundary `getTimestamps`
   bootstrap. A feed with referencing pool state persisted before the block uses
-  the parent boundary and may reuse one unique seeded expiry. Otherwise use
-  exact block-close timestamps and expiry, absorbing that block's logs so a
-  report before deployment or feed self-heal cannot be lost.
+  the parent boundary. Otherwise use exact block-close timestamps and expiry,
+  absorbing that block's logs so a report before deployment or feed self-heal
+  cannot be lost. Raw global/token expiry comes from the same boundary.
   Later blocks update persisted `OracleFeedState` in log order, while
   `MedianUpdated` consumes that state. Never restore traffic-scaled
-  `medianTimestamp` or `reportExpiry` calls. A missing or malformed bootstrap
-  fails before writes and taints the candidate for a clean replay.
+  `medianTimestamp` or `reportExpiry` calls. Bootstrap raw global/token expiry
+  once into `OracleExpiryState`, then apply both expiry events in block/log
+  order; a zero token value must derive the persisted global fallback, never a
+  block-close RPC that can import a later same-block log. Never-tracked feeds
+  perform no expiry RPC. A missing or malformed bootstrap fails before writes
+  and taints the candidate for a clean replay.
 - **Effect rate limits are global to each created effect object.** A provider-
   specific cap in this multichain indexer must be routed through distinct
   chain/provider-scoped effect objects. Keep preload and processing on the same

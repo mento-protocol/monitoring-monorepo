@@ -15,7 +15,7 @@ import {
   _setMockBreakerKind,
   _setMockBreakerList,
   _setMockOracleReportTimestamps,
-  _setMockReportExpiry,
+  _setMockReportExpiryConfig,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 import { makePool } from "./helpers/makePool.js";
@@ -40,6 +40,15 @@ const MD_BREAKER = "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9";
 const FEED = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
 const SORTED_ORACLES = "0xefb84935239dacdecf7c5ba76d8de40b077b7b33";
 const ONE = 10n ** 24n;
+const DEFAULT_ORACLE_EXPIRY = 1_700_010_000n;
+
+function setReportExpiryConfig(reportExpiry: bigint): void {
+  _setMockReportExpiryConfig(CHAIN_ID, FEED, {
+    globalReportExpiry: reportExpiry,
+    tokenReportExpiry: 0n,
+    reportExpiry,
+  });
+}
 
 describe("SortedOracles.OracleReported median parity", () => {
   beforeEach(() => {
@@ -62,6 +71,7 @@ describe("SortedOracles.OracleReported median parity", () => {
       medianRatesEMA: ONE,
       referenceValue: null,
     });
+    setReportExpiryConfig(DEFAULT_ORACLE_EXPIRY);
   });
 
   afterEach(() => {
@@ -74,7 +84,7 @@ describe("SortedOracles.OracleReported median parity", () => {
     lastMedianPrice,
     lastOracleReportAt = 1_700_000_000n,
     medianLive = true,
-    oracleExpiry = 1_700_010_000n,
+    oracleExpiry = DEFAULT_ORACLE_EXPIRY,
     existingPriceDifference = 0n,
     value,
     blockTimestamp = 1_700_002_000,
@@ -193,7 +203,7 @@ describe("SortedOracles.OracleReported median parity", () => {
   });
 
   it("bootstraps report expiry before healing an unseeded pool", async () => {
-    _setMockReportExpiry(CHAIN_ID, FEED, 31_536_000n);
+    setReportExpiryConfig(31_536_000n);
     const { mockDb, poolId } = await processReport({
       lastMedianPrice: ONE,
       oracleExpiry: 0n,
@@ -228,6 +238,7 @@ describe("SortedOracles.OracleReported median parity", () => {
   });
 
   it("freezes when a non-median report arrives after the median anchor expired", async () => {
+    setReportExpiryConfig(100n);
     const { mockDb, poolId, snapshotId } = await processReport({
       lastMedianPrice: 3n * ONE,
       lastOracleReportAt: 1_700_000_000n,

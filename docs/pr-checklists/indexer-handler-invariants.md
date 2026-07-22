@@ -101,17 +101,21 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
   `OracleReportRemoved` may perform the bounded processing-only bootstrap: one
   exact-boundary `getTimestamps` call plus an effective expiry. When a currently
   referencing pool row was last persisted before the event block, use the
-  parent block, apply the current log, and reuse a unique positive pool expiry
-  if available. Otherwise initialize exact block-close timestamps and expiry,
-  then absorb that block's report/removal logs. Keep the
+  parent block and apply the current log. Otherwise initialize exact
+  block-close timestamps and expiry, then absorb that block's report/removal
+  logs. Raw global/token expiry must come from the same boundary. Keep the
   timestamp-list effect provider-family scoped and uncached. Missing or
   malformed arrays, reporters, timestamps, or expiry fail the event before
   entity writes; never fall back to latest-block state.
 - After bootstrap, apply `OracleReported` reporter/timestamp upserts and
   `OracleReportRemoved` deletions in block/log order, then recompute the upper
   median timestamp at sorted index `floor(count / 2)`. `MedianUpdated` consumes
-  that state and `OracleRemoved` does not mutate it. Expiry events update only
-  the persisted expiry. Cover same-block ordering, flat reports, removals,
+  that state and `OracleRemoved` does not mutate it. Keep raw global/token and
+  effective expiry in a per-feed `OracleExpiryState`: bootstrap it once at the
+  same exact boundary, then apply both expiry events in block/log order. A zero
+  token value derives the persisted global fallback; never read block-close
+  state from inside an earlier config log. Never-tracked feeds must not perform
+  expiry RPC or fail replay. Cover same-block ordering, flat reports, removals,
   malformed bootstraps, and absent state before changing this path.
 - Do not restore traffic-scaled `medianTimestamp` or `reportExpiry` effects to
   `OracleReported`, `OracleReportRemoved`, or `MedianUpdated`. A change to this

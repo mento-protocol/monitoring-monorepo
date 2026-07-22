@@ -259,6 +259,25 @@ type OracleFeedState @index(fields: ["chainId", "rateFeedID"]) {
   updatedAtTimestamp: BigInt!
 }
 
+# Raw and effective SortedOracles expiry configuration for one tracked feed.
+# A zero tokenReportExpiry means the feed inherits globalReportExpiry. The row
+# is bootstrapped once at an exact block boundary, then both governance events
+# advance it in block/log order so later same-block state cannot leak backward.
+type OracleExpiryState @index(fields: ["chainId", "rateFeedID"]) {
+  id: ID! # "{chainId}-{rateFeedID}"
+  chainId: Int! @index
+  rateFeedID: String! @index
+  globalReportExpiry: BigInt!
+  tokenReportExpiry: BigInt!
+  reportExpiry: BigInt!
+  # Parent block for an already-tracked feed, or block close when tracking
+  # began in the initialization block and all expiry logs there are absorbed.
+  bootstrapThroughBlock: BigInt!
+  updatedAtBlock: BigInt!
+  updatedAtLogIndex: Int!
+  updatedAtTimestamp: BigInt!
+}
+
 type DeviationThresholdBreach @index(fields: ["poolId", "startedAt"]) {
   id: ID! # "{poolId}-{startedAt}"
   chainId: Int! @index

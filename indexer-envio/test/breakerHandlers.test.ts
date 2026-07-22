@@ -13,7 +13,9 @@ import {
   _clearBreakerMocks,
   _clearBootstrapCaches,
   _clearMockMedianTimestamps,
+  _clearMockReportExpiry,
   _setMockMedianTimestamp,
+  _setMockReportExpiryConfig,
 } from "../src/EventHandlers.ts";
 import {
   makeBreakerConfigId,
@@ -66,6 +68,11 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     _clearBreakerMocks();
     _clearBootstrapCaches();
     _setMockMedianTimestamp(CHAIN_ID, FEED, 1_700_001_950n);
+    _setMockReportExpiryConfig(CHAIN_ID, FEED, {
+      globalReportExpiry: 1_700_010_000n,
+      tokenReportExpiry: 0n,
+      reportExpiry: 1_700_010_000n,
+    });
     // RPC self-heal payload for fetchBreakerKind / Defaults / FeedState.
     _setMockBreakerList(CHAIN_ID, [MD_BREAKER]);
     _setMockBreakerKind(CHAIN_ID, MD_BREAKER, "MEDIAN_DELTA");
@@ -89,6 +96,7 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
   afterEach(() => {
     _clearBreakerMocks();
     _clearMockMedianTimestamps();
+    _clearMockReportExpiry();
   });
 
   it("BreakerStatusUpdated bootstraps Breaker + BreakerConfig from RPC mocks", async () => {

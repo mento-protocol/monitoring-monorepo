@@ -35,6 +35,7 @@ import {
   fetchRateFeedOracles,
   fetchReferenceRateFeedID,
   fetchReportExpiry,
+  fetchReportExpiryConfig,
 } from "./oracle-state.js";
 import { fetchFees, fetchRebalanceIncentiveAtBlock } from "./pool-fees.js";
 import { fetchBlockTimestamp } from "./block.js";
@@ -138,6 +139,12 @@ const vpExchangeIdShape = S.schema({
 const feeTokenMetaShape = S.schema({
   symbol: S.string,
   decimals: S.int32,
+});
+
+const reportExpiryConfigShape = S.schema({
+  globalReportExpiry: S.bigint,
+  tokenReportExpiry: S.bigint,
+  reportExpiry: S.bigint,
 });
 
 // ---------------------------------------------------------------------------
@@ -634,6 +641,27 @@ export const reportExpiryEffect = createEffect(
   },
   async ({ input, context }) =>
     (await fetchReportExpiry(
+      input.chainId,
+      input.rateFeedID,
+      input.blockNumber,
+      context.log,
+    )) ?? null,
+);
+
+export const reportExpiryConfigEffect = createEffect(
+  {
+    name: "reportExpiryConfigV1",
+    input: {
+      chainId: S.int32,
+      rateFeedID: S.string,
+      blockNumber: S.bigint,
+    },
+    output: S.nullable(reportExpiryConfigShape),
+    rateLimit: { calls: 200, per: "second" },
+    cache: false,
+  },
+  async ({ input, context }) =>
+    (await fetchReportExpiryConfig(
       input.chainId,
       input.rateFeedID,
       input.blockNumber,

@@ -14,13 +14,17 @@ import {
   _clearMockReportExpiry,
   _setMockBreakerList,
   _setMockOracleReportTimestamps,
-  _setMockReportExpiry,
+  _setMockReportExpiryConfig,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 import {
   bootstrapOracleFeedState,
   oracleFeedStateId,
 } from "../src/oracleFeedState.ts";
+import {
+  bootstrapOracleExpiryState,
+  oracleExpiryStateId,
+} from "../src/oracleExpiryState.ts";
 import { registerMockRateFeedDependenciesHttp } from "../src/rpc/http-test-mock-bridge.js";
 import { makePool } from "./helpers/makePool.js";
 
@@ -29,6 +33,7 @@ type MockDb = MockDbWith<{
   BreakerConfig: WritableEntity;
   DeviationThresholdBreach: EntityCollection;
   OracleFeedState: WritableEntity;
+  OracleExpiryState: WritableEntity;
   OracleSnapshot: EntityCollection;
   Pool: WritableEntity<Pool>;
   PoolDailySnapshot: EntityCollection;
@@ -69,6 +74,11 @@ describe("SortedOracles event-sourced feed state", () => {
     _clearBreakerMocks();
     _clearBootstrapCaches();
     _setMockBreakerList(CHAIN_ID, []);
+    _setMockReportExpiryConfig(CHAIN_ID, FEED, {
+      globalReportExpiry: 3_600n,
+      tokenReportExpiry: 0n,
+      reportExpiry: 3_600n,
+    });
     registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, []);
   });
 
@@ -115,7 +125,6 @@ describe("SortedOracles event-sourced feed state", () => {
       ],
       timestamps: [firstTimestamp, secondTimestamp, thirdTimestamp],
     });
-    _setMockReportExpiry(CHAIN_ID, FEED, 3_600n);
     const block = { number: 60_664_502, timestamp: 1_700_002_300 };
     const poolId = makePoolId(
       CHAIN_ID,
@@ -204,6 +213,11 @@ describe("SortedOracles event-sourced feed state", () => {
     assert.equal(state.reportExpiry, 3_600n);
     assert.equal(state.bootstrapThroughBlock, BigInt(block.number));
     assert.equal(state.updatedAtTimestamp, BigInt(block.timestamp));
+    const expiryState = mockDb.entities.OracleExpiryState.get(
+      oracleExpiryStateId(CHAIN_ID, FEED),
+    ) as { reportExpiry: bigint; bootstrapThroughBlock: bigint };
+    assert.equal(expiryState.reportExpiry, 3_600n);
+    assert.equal(expiryState.bootstrapThroughBlock, BigInt(block.number));
     assert.equal(mockDb.entities.Pool.get(poolId)?.oracleExpiry, 3_600n);
 
     // The block-close snapshot already includes this later log. Processing it
@@ -446,12 +460,232 @@ describe("SortedOracles event-sourced feed state", () => {
     assert.equal(mockDb.entities.Pool.get(poolId)?.oracleExpiry, 31_536_000n);
   });
 
-  it("preserves a token override when the global expiry changes", async () => {
+  it("restores the global expiry when a token override is cleared", async () => {
     const tokenOverride = 31_536_000n;
-    _setMockReportExpiry(CHAIN_ID, FEED, tokenOverride);
+    const globalExpiry = 150n;
+    _setMockReportExpiryConfig(CHAIN_ID, FEED, {
+      globalReportExpiry: globalExpiry,
+      tokenReportExpiry: tokenOverride,
+      reportExpiry: tokenOverride,
+    });
     const feedStateId = oracleFeedStateId(CHAIN_ID, FEED);
     const seeded = createTrackedPoolDb(
       "0x0000000000000000000000000000000000008565",
+      { oracleExpiry: tokenOverride },
+    );
+    let { mockDb } = seeded;
+    const { poolId } = seeded;
+    mockDb = mockDb.entities.OracleFeedState.set(
+      bootstrapOracleFeedState({
+        chainId: CHAIN_ID,
+        rateFeedID: FEED,
+        reporters: ["0x00000000000000000000000000000000000000aa"],
+        timestamps: [1_700_003_000n],
+        reportExpiry: tokenOverride,
+        bootstrapThroughBlock: 60_664_520n,
+      }),
+    );
+
+    mockDb = await SortedOracles.TokenReportExpirySet.processEvent({
+      event: SortedOracles.TokenReportExpirySet.createMockEvent({
+        token: FEED,
+        reportExpiry: 0n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 3,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 60_664_521, timestamp: 1_700_003_600 },
+        },
+      }),
+      mockDb,
+    });
+
+    const state = mockDb.entities.OracleFeedState.get(feedStateId) as {
+      reportExpiry: bigint;
+      updatedAtBlock: bigint;
+      updatedAtLogIndex: number;
+      updatedAtTimestamp: bigint;
+    };
+    assert.equal(state.reportExpiry, globalExpiry);
+    assert.equal(state.updatedAtBlock, 60_664_521n);
+    assert.equal(state.updatedAtLogIndex, 3);
+    assert.equal(state.updatedAtTimestamp, 1_700_003_600n);
+    assert.equal(mockDb.entities.Pool.get(poolId)?.oracleExpiry, globalExpiry);
+  });
+
+  it("applies same-block token and global expiry events in log order", async () => {
+    const tokenOverride = 31_536_000n;
+    const feedStateId = oracleFeedStateId(CHAIN_ID, FEED);
+    const expiryStateId = oracleExpiryStateId(CHAIN_ID, FEED);
+    const seeded = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008566",
+      { oracleExpiry: tokenOverride },
+    );
+    let { mockDb } = seeded;
+    const { poolId } = seeded;
+    mockDb = mockDb.entities.OracleFeedState.set(
+      bootstrapOracleFeedState({
+        chainId: CHAIN_ID,
+        rateFeedID: FEED,
+        reporters: ["0x00000000000000000000000000000000000000aa"],
+        timestamps: [1_700_003_000n],
+        reportExpiry: tokenOverride,
+        bootstrapThroughBlock: 60_664_519n,
+      }),
+    );
+    mockDb = mockDb.entities.OracleExpiryState.set(
+      bootstrapOracleExpiryState({
+        chainId: CHAIN_ID,
+        rateFeedID: FEED,
+        globalReportExpiry: 300n,
+        tokenReportExpiry: tokenOverride,
+        bootstrapThroughBlock: 60_664_519n,
+      }),
+    );
+    // Prove both events consume persisted raw state instead of consulting the
+    // block-close RPC value, which could include the later log.
+    _setMockReportExpiryConfig(CHAIN_ID, FEED, null);
+    const block = { number: 60_664_520, timestamp: 1_700_003_500 };
+
+    mockDb = await SortedOracles.TokenReportExpirySet.processEvent({
+      event: SortedOracles.TokenReportExpirySet.createMockEvent({
+        token: FEED,
+        reportExpiry: 0n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 1,
+          srcAddress: SORTED_ORACLES,
+          block,
+        },
+      }),
+      mockDb,
+    });
+    const clearedState = mockDb.entities.OracleExpiryState.get(
+      expiryStateId,
+    ) as { reportExpiry: bigint; updatedAtLogIndex: number };
+    assert.equal(clearedState.reportExpiry, 300n);
+    assert.equal(clearedState.updatedAtLogIndex, 1);
+    assert.equal(mockDb.entities.Pool.get(poolId)?.oracleExpiry, 300n);
+
+    mockDb = await SortedOracles.ReportExpirySet.processEvent({
+      event: SortedOracles.ReportExpirySet.createMockEvent({
+        reportExpiry: 600n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 3,
+          srcAddress: SORTED_ORACLES,
+          block,
+        },
+      }),
+      mockDb,
+    });
+    const expiryState = mockDb.entities.OracleExpiryState.get(
+      expiryStateId,
+    ) as {
+      globalReportExpiry: bigint;
+      tokenReportExpiry: bigint;
+      reportExpiry: bigint;
+      updatedAtLogIndex: number;
+    };
+    assert.equal(expiryState.globalReportExpiry, 600n);
+    assert.equal(expiryState.tokenReportExpiry, 0n);
+    assert.equal(expiryState.reportExpiry, 600n);
+    assert.equal(expiryState.updatedAtLogIndex, 3);
+    assert.equal(
+      (
+        mockDb.entities.OracleFeedState.get(feedStateId) as {
+          reportExpiry: bigint;
+        }
+      ).reportExpiry,
+      600n,
+    );
+    assert.equal(mockDb.entities.Pool.get(poolId)?.oracleExpiry, 600n);
+  });
+
+  it("ignores zero-clear events for feeds that were never tracked", async () => {
+    _setMockReportExpiryConfig(CHAIN_ID, FEED, null);
+    const mockDb = await SortedOracles.TokenReportExpirySet.processEvent({
+      event: SortedOracles.TokenReportExpirySet.createMockEvent({
+        token: FEED,
+        reportExpiry: 0n,
+        mockEventData: {
+          chainId: CHAIN_ID,
+          logIndex: 1,
+          srcAddress: SORTED_ORACLES,
+          block: { number: 60_664_521, timestamp: 1_700_003_600 },
+        },
+      }),
+      mockDb: MockDb.createMockDb(),
+    });
+
+    assert.deepEqual(mockDb.entities.Pool.getAll(), []);
+    assert.equal(
+      mockDb.entities.OracleExpiryState.get(
+        oracleExpiryStateId(CHAIN_ID, FEED),
+      ),
+      undefined,
+    );
+  });
+
+  it("fails before writes when a cleared override fallback is unavailable", async () => {
+    const tokenOverride = 31_536_000n;
+    _setMockReportExpiryConfig(CHAIN_ID, FEED, null);
+    const feedStateId = oracleFeedStateId(CHAIN_ID, FEED);
+    const seeded = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008567",
+      { oracleExpiry: tokenOverride },
+    );
+    let { mockDb } = seeded;
+    const { poolId } = seeded;
+    mockDb = mockDb.entities.OracleFeedState.set(
+      bootstrapOracleFeedState({
+        chainId: CHAIN_ID,
+        rateFeedID: FEED,
+        reporters: ["0x00000000000000000000000000000000000000aa"],
+        timestamps: [1_700_003_000n],
+        reportExpiry: tokenOverride,
+        bootstrapThroughBlock: 60_664_521n,
+      }),
+    );
+
+    await assert.rejects(
+      SortedOracles.TokenReportExpirySet.processEvent({
+        event: SortedOracles.TokenReportExpirySet.createMockEvent({
+          token: FEED,
+          reportExpiry: 0n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 4,
+            srcAddress: SORTED_ORACLES,
+            block: { number: 60_664_522, timestamp: 1_700_003_700 },
+          },
+        }),
+        mockDb,
+      }),
+      /Worker exited with code 1/,
+    );
+
+    assert.equal(
+      (
+        mockDb.entities.OracleFeedState.get(feedStateId) as {
+          reportExpiry: bigint;
+        }
+      ).reportExpiry,
+      tokenOverride,
+    );
+    assert.equal(mockDb.entities.Pool.get(poolId)?.oracleExpiry, tokenOverride);
+  });
+
+  it("preserves a token override when the global expiry changes", async () => {
+    const tokenOverride = 31_536_000n;
+    _setMockReportExpiryConfig(CHAIN_ID, FEED, {
+      globalReportExpiry: 300n,
+      tokenReportExpiry: tokenOverride,
+      reportExpiry: tokenOverride,
+    });
+    const feedStateId = oracleFeedStateId(CHAIN_ID, FEED);
+    const seeded = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008568",
       { oracleExpiry: tokenOverride },
     );
     let { mockDb } = seeded;

@@ -38,7 +38,6 @@ import {
   getPoolsWithReferenceFeed,
   getBreakerConfigsByFeed,
 } from "../rpc.js";
-import { reportExpiryEffect } from "../rpc/effects.js";
 import {
   bootstrapAndResolveBreakerSnapshotFields,
   bootstrapFeedBreakerConfigs,
@@ -55,6 +54,12 @@ import {
   resolveOracleFeedState,
   updateOracleFeedStateExpiryIfPresent,
 } from "./oracleFeedState.js";
+import { oracleExpiryStateId } from "../oracleExpiryState.js";
+import { oracleFeedStateId } from "../oracleFeedState.js";
+import {
+  preloadOracleExpiryState,
+  resolveOracleExpiryState,
+} from "./oracleExpiryState.js";
 
 function priceDifferenceForOracleSample(
   pool: Pool,
@@ -392,6 +397,7 @@ indexer.onEvent(
     if (context.isPreload) {
       await Promise.all([
         preloadOracleFeedState(context, event.chainId, rateFeedID),
+        preloadOracleExpiryState(context, event.chainId, rateFeedID),
         preloadRateFeed(context, event.chainId, rateFeedID),
         maybePreloadPool(context, poolIds),
         ...breakerConfigs.map(async (cfg) => {
@@ -1012,18 +1018,47 @@ indexer.onEvent(
   { contract: "SortedOracles", event: "TokenReportExpirySet" },
   async ({ event, context }) => {
     const rateFeedID = asAddress(event.params.token);
+    const blockNumber = asBigInt(event.block.number);
     const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
-    // preload-handler-note: token expiry changes are bounded config events and update persisted feed state without RPC.
+    // preload-handler-note: ordered processing must observe expiry configuration written by earlier same-block governance logs; only the first relevant event performs the bounded exact bootstrap.
+    // preload-effect-helpers: resolveOracleExpiryState
     if (context.isPreload) {
       await Promise.all([
         preloadOracleFeedState(context, event.chainId, rateFeedID),
+        preloadOracleExpiryState(context, event.chainId, rateFeedID),
         maybePreloadPool(context, poolIds),
       ]);
       return;
     }
-    const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    const oracleExpiry = event.params.reportExpiry;
+    const [existingExpiryState, existingFeedState] = await Promise.all([
+      context.OracleExpiryState.get(
+        oracleExpiryStateId(event.chainId, rateFeedID),
+      ),
+      context.OracleFeedState.get(oracleFeedStateId(event.chainId, rateFeedID)),
+    ]);
+    if (
+      poolIds.length === 0 &&
+      existingExpiryState === undefined &&
+      existingFeedState === undefined
+    ) {
+      return;
+    }
+    const bootstrapInputs = existingExpiryState
+      ? { bootstrapThroughBlock: existingExpiryState.bootstrapThroughBlock }
+      : await oracleFeedBootstrapInputs(context, poolIds, blockNumber);
+    const expiryState = await resolveOracleExpiryState({
+      context,
+      event: {
+        chainId: event.chainId,
+        rateFeedID,
+        blockNumber,
+        blockTimestamp,
+        logIndex: event.logIndex,
+      },
+      mutation: { kind: "token", reportExpiry: event.params.reportExpiry },
+      ...bootstrapInputs,
+    });
 
     await updateOracleFeedStateExpiryIfPresent({
       context,
@@ -1034,13 +1069,13 @@ indexer.onEvent(
         blockTimestamp,
         logIndex: event.logIndex,
       },
-      reportExpiry: oracleExpiry,
+      reportExpiry: expiryState.reportExpiry,
     });
 
     await updatePoolsOracleExpiry(
       context,
       poolIds,
-      oracleExpiry,
+      expiryState.reportExpiry,
       blockNumber,
       blockTimestamp,
     );
@@ -1054,23 +1089,37 @@ indexer.onEvent(
 indexer.onEvent(
   { contract: "SortedOracles", event: "ReportExpirySet" },
   async ({ event, context }) => {
-    const pools = await getPoolsWithReferenceFeed(context, event.chainId);
+    const [pools, expiryStates] = await Promise.all([
+      getPoolsWithReferenceFeed(context, event.chainId),
+      context.OracleExpiryState.getWhere({
+        chainId: { _eq: event.chainId },
+      }),
+    ]);
     const poolsByFeed = new Map<string, string[]>();
     for (const pool of pools) {
       const ids = poolsByFeed.get(pool.referenceRateFeedID) ?? [];
       ids.push(pool.id);
       poolsByFeed.set(pool.referenceRateFeedID, ids);
     }
-    // preload-handler-note: global expiry changes are bounded config events; one exact effective-expiry read is shared by every pool on a feed.
+    const expiryStateByFeed = new Map(
+      expiryStates.map((state) => [state.rateFeedID, state]),
+    );
+    const rateFeedIDs = new Set([
+      ...poolsByFeed.keys(),
+      ...expiryStateByFeed.keys(),
+    ]);
+    // preload-handler-note: ordered processing must observe expiry configuration written by earlier same-block governance logs; only an uninitialized relevant feed performs the bounded exact bootstrap.
+    // preload-effect-helpers: resolveOracleExpiryState
     if (context.isPreload) {
       await Promise.all([
         maybePreloadPool(
           context,
           pools.map((pool) => pool.id),
         ),
-        ...[...poolsByFeed.keys()].map((rateFeedID) =>
+        ...[...rateFeedIDs].flatMap((rateFeedID) => [
           preloadOracleFeedState(context, event.chainId, rateFeedID),
-        ),
+          preloadOracleExpiryState(context, event.chainId, rateFeedID),
+        ]),
       ]);
       return;
     }
@@ -1078,20 +1127,29 @@ indexer.onEvent(
     const blockTimestamp = asBigInt(event.block.timestamp);
 
     await Promise.all(
-      [...poolsByFeed].map(async ([rateFeedID, poolIds]) => {
-        // preload-effect-exempt: one effective-expiry lookup per feed per bounded global governance event.
-        const oracleExpiry = await context.effect(reportExpiryEffect, {
-          chainId: event.chainId,
-          rateFeedID,
-          blockNumber,
+      [...rateFeedIDs].map(async (rateFeedID) => {
+        const poolIds = poolsByFeed.get(rateFeedID) ?? [];
+        const existingExpiryState = expiryStateByFeed.get(rateFeedID);
+        const bootstrapInputs = existingExpiryState
+          ? {
+              bootstrapThroughBlock: existingExpiryState.bootstrapThroughBlock,
+            }
+          : await oracleFeedBootstrapInputs(context, poolIds, blockNumber);
+        const expiryState = await resolveOracleExpiryState({
+          context,
+          event: {
+            chainId: event.chainId,
+            rateFeedID,
+            blockNumber,
+            blockTimestamp,
+            logIndex: event.logIndex,
+          },
+          mutation: {
+            kind: "global",
+            reportExpiry: event.params.reportExpiry,
+          },
+          ...bootstrapInputs,
         });
-        if (oracleExpiry == null || oracleExpiry <= 0n) {
-          const message =
-            `sortedOracles.reportExpiryUnavailable event=ReportExpirySet ` +
-            `chainId=${event.chainId} feed=${rateFeedID} block=${blockNumber}`;
-          context.log.error(message);
-          throw new Error(message);
-        }
         await updateOracleFeedStateExpiryIfPresent({
           context,
           event: {
@@ -1101,12 +1159,12 @@ indexer.onEvent(
             blockTimestamp,
             logIndex: event.logIndex,
           },
-          reportExpiry: oracleExpiry,
+          reportExpiry: expiryState.reportExpiry,
         });
         await updatePoolsOracleExpiry(
           context,
           poolIds,
-          oracleExpiry,
+          expiryState.reportExpiry,
           blockNumber,
           blockTimestamp,
         );

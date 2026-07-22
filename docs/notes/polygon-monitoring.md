@@ -94,10 +94,14 @@ effective expiry. It then computes SortedOracles' upper median timestamp (the
 sorted element at `floor(count / 2)`).
 
 After bootstrap, `OracleReported` upserts that reporter's event timestamp and
-`OracleReportRemoved` deletes the reporter in block/log order. Expiry events
-update the persisted expiry. `MedianUpdated` consumes the already-updated feed
-state; it does not renew the TTL, and `OracleRemoved` alone does not remove a
-report. This preserves flat-report correctness because reporter timestamps can
+`OracleReportRemoved` deletes the reporter in block/log order. Raw global/token
+and effective expiry are bootstrapped once into `OracleExpiryState`; both
+expiry events then advance it in log order. Clearing a token override with zero
+uses the persisted global fallback, so a later governance log in the same
+block cannot leak backward. Feeds that have never been tracked perform no
+expiry RPC. `MedianUpdated` consumes the already-updated feed state; it does not
+renew the TTL, and `OracleRemoved` alone does not remove a report. This
+preserves flat-report correctness because reporter timestamps can
 advance while the median value stays unchanged and no `MedianUpdated` is
 emitted. `Pool.lastOracleReportAt` stores the event-sourced upper median and is
 the freshness anchor used by the dashboard, uptime counters, and
