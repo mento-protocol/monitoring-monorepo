@@ -43,15 +43,17 @@ babysit_repo_gate() {
 
   # In Claude cloud sessions the platform's GitHub credential proxy blocks
   # gh's /repos/* and GraphQL paths regardless of tokens, so pr:ready-state
-  # cannot run there (docs/notes/github-tooling-surfaces.md). Only a
-  # repo-scoped call proves capability — `gh auth status` passes in those
-  # sessions even while the repo API is blocked. The probe also needs
-  # `gh api --slurp` (missing from the default Ubuntu gh 2.45 a variant may
-  # ship), so gate on both. Without this guard the probe failure below would
-  # read as FAIL and poison every cloud babysit run.
+  # cannot run there (docs/notes/github-tooling-surfaces.md). Only repo-scoped
+  # calls prove capability — `gh auth status` passes in those sessions even
+  # while the repo API is blocked. The probe needs REST /repos/*, GraphQL
+  # (`gh pr view` and the reviewThreads query), and `gh api --slurp` (missing
+  # from the default Ubuntu gh 2.45 a variant may ship), so gate on all three.
+  # Without this guard the probe failure below would read as FAIL and poison
+  # every cloud babysit run.
   if [[ -n "${CLAUDE_CODE_REMOTE:-}" ]] &&
     { ! gh api --help 2>/dev/null | grep -q -- '--slurp' ||
-      ! gh api "repos/${owner}/${repo}" --jq .full_name >/dev/null 2>&1; }; then
+      ! gh api "repos/${owner}/${repo}" --jq .full_name >/dev/null 2>&1 ||
+      ! gh api graphql -f query='query{viewer{login}}' >/dev/null 2>&1; }; then
     printf 'PENDING pr:ready-state unavailable in this Claude cloud session (gh repo API is platform-blocked); use the MCP emulation in docs/notes/github-tooling-surfaces.md — probe-verified all-clear needs a gh-capable surface'
     return 0
   fi
