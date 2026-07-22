@@ -60,6 +60,16 @@ if SKILLS_MIRROR_ROOT_A="$root_a" SKILLS_MIRROR_ROOT_B="$root_b" \
 fi
 grep -q "EXTRA.md" "$output_file" || fail "extra-file output did not name the extra file"
 
+# Symlink in either tree: exit nonzero, even if it resolves to identical bytes.
+reset_fixture
+rm "$root_b/example-skill/SKILL.md"
+ln -s "$root_a/example-skill/SKILL.md" "$root_b/example-skill/SKILL.md"
+if SKILLS_MIRROR_ROOT_A="$root_a" SKILLS_MIRROR_ROOT_B="$root_b" \
+  scripts/check-skills-mirror.sh > "$output_file" 2>&1; then
+  fail "symlink in one tree exited 0, expected nonzero"
+fi
+grep -q "symlink" "$output_file" || fail "symlink output did not explain the failure"
+
 # Missing directory: exit nonzero.
 rm -rf "$root_a" "$root_b"
 if SKILLS_MIRROR_ROOT_A="$root_a" SKILLS_MIRROR_ROOT_B="$root_b" \

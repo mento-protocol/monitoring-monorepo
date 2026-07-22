@@ -9,7 +9,9 @@ Verifies that .agents/skills/ and .claude/skills/ are byte-for-byte
 identical. Docs and tooling reference both directories as an exact-mirror
 pair (see docs/notes/codex-agent-skills.md); this script is the enforcement
 for that contract. Exits nonzero and prints a drift report naming the
-differing files if the trees diverge or either tree is missing.
+differing files if the trees diverge, either tree is missing, or either
+tree contains a symlink (byte comparison can't verify a symlink's target,
+so symlinks are rejected outright rather than silently trusted).
 
 Environment:
   SKILLS_MIRROR_ROOT_A  First tree to compare. Default: .agents/skills
@@ -42,6 +44,13 @@ if [[ ! -d "$root_b" ]]; then
   missing=1
 fi
 if [[ "$missing" -ne 0 ]]; then
+  exit 1
+fi
+
+symlinks="$(find "$root_a" "$root_b" -type l 2>/dev/null)"
+if [[ -n "$symlinks" ]]; then
+  echo "check-skills-mirror: symlinks are not supported in the mirrored trees (diff can't verify a symlink's target):" >&2
+  echo "$symlinks" >&2
   exit 1
 fi
 
