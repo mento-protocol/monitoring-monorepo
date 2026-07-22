@@ -10,6 +10,7 @@ import {
   DOCUMENT_STATUSES,
   parseDocumentationMetadata,
 } from "./docs-index-helpers.mjs";
+import { assessStaleness, daysSince } from "./check-agent-context-helpers.mjs";
 
 const TIER_ORDER = ["trivial", "standard", "full"];
 const DEFAULT_BASE = "origin/main";
@@ -342,38 +343,40 @@ function parseFrontmatterDocument(content) {
     : null;
 }
 
-function hasCanonicalNoteMetadata(filePath, readContextFile) {
+function readCanonicalNoteState(filePath, readContextFile) {
   if (!filePath.startsWith("docs/notes/") || !filePath.endsWith(".md")) {
-    return false;
+    return null;
   }
 
   try {
-    // The documentation catalog derives authority from this same metadata. Do
-    // not fall back to its generated label: the catalog does not promote a
-    // document, and it may be stale while the working tree is being edited.
+    // Canonical authority comes from the source marker itself. Catalog and
+    // freshness validation decide whether head context is complete, but must
+    // not downgrade review materiality for an authoritative base or head note.
     const content = readContextFile(filePath);
     const frontmatter = parseFrontmatterDocument(content);
     if (frontmatter?.canonical !== true && frontmatter?.canonical !== "true") {
-      return false;
+      return null;
     }
-    const metadata = parseDocumentationMetadata(filePath, content);
-    return (
-      metadata?.canonical === "true" &&
-      DOCUMENT_STATUSES.includes(metadata.status) &&
-      REQUIRED_CANONICAL_NOTE_METADATA.every((key) => metadata[key]?.trim()) &&
-      classifyDocumentation(filePath, metadata).errors.length === 0
-    );
+    return { metadata: parseDocumentationMetadata(filePath, content) };
   } catch {
-    // Deleted, unreadable, and malformed notes must not satisfy a required
-    // context update merely because their path sits under docs/notes/.
-    return false;
+    return null;
   }
 }
 
-function isCanonicalContextPath(filePath, readContextFile) {
-  if (hasCanonicalNoteMetadata(filePath, readContextFile)) return true;
-  if (!isConventionBasedCanonicalContextPath(filePath)) return false;
+function hasValidCanonicalNoteMetadata(filePath, state) {
+  const { metadata } = state;
+  const verifiedAge = daysSince(metadata?.last_verified);
+  return (
+    metadata?.canonical === "true" &&
+    DOCUMENT_STATUSES.includes(metadata.status) &&
+    REQUIRED_CANONICAL_NOTE_METADATA.every((key) => metadata[key]?.trim()) &&
+    classifyDocumentation(filePath, metadata).errors.length === 0 &&
+    verifiedAge !== null &&
+    assessStaleness(verifiedAge) === "ok"
+  );
+}
 
+function isReadableContextPath(filePath, readContextFile) {
   try {
     readContextFile(filePath);
     return true;
@@ -621,20 +624,27 @@ export function analyzeMateriality({
   readHeadContextFile = (filePath) => readFileSync(filePath, "utf8"),
 } = {}) {
   const changedPaths = uniqueSorted(paths ?? []);
-  const headCanonicalContextPaths = new Set(
-    changedPaths.filter((filePath) =>
-      isCanonicalContextPath(filePath, readHeadContextFile),
-    ),
-  );
-  const materialityCanonicalContextPaths = new Set([
-    ...headCanonicalContextPaths,
-    ...changedPaths.filter(isConventionBasedCanonicalContextPath),
-  ]);
+  const headCanonicalContextPaths = new Set();
+  const materialityCanonicalContextPaths = new Set();
   for (const filePath of changedPaths) {
-    if (
-      !materialityCanonicalContextPaths.has(filePath) &&
-      isCanonicalContextPath(filePath, readBaseContextFile)
-    ) {
+    if (isConventionBasedCanonicalContextPath(filePath)) {
+      materialityCanonicalContextPaths.add(filePath);
+      if (isReadableContextPath(filePath, readHeadContextFile)) {
+        headCanonicalContextPaths.add(filePath);
+      }
+      continue;
+    }
+
+    const headNote = readCanonicalNoteState(filePath, readHeadContextFile);
+    if (headNote) {
+      materialityCanonicalContextPaths.add(filePath);
+      if (hasValidCanonicalNoteMetadata(filePath, headNote)) {
+        headCanonicalContextPaths.add(filePath);
+      }
+      continue;
+    }
+
+    if (readCanonicalNoteState(filePath, readBaseContextFile)) {
       materialityCanonicalContextPaths.add(filePath);
     }
   }

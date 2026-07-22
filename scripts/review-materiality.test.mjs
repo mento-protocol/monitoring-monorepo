@@ -62,7 +62,7 @@ title: Fixture runbook
 status: active
 owner: eng
 canonical: ${canonical}
-last_verified: 2026-07-22
+last_verified: ${new Date().toISOString().slice(0, 10)}
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -376,7 +376,7 @@ test("incomplete canonical note metadata fails closed", () => {
     assertEqual(
       report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
         ?.reason,
-      "non-canonical planning or note document",
+      "canonical agent or operator context",
     );
   }
 });
@@ -402,7 +402,46 @@ test("invalid canonical note classification metadata fails closed", () => {
 
     assertEqual(report.contextUpdatesPresent, false);
     assertEqual(report.contextUpdateMissing, true);
+    assertEqual(report.tier, "full");
   }
+});
+
+test("invalid canonical note verification dates fail presence closed", () => {
+  for (const lastVerified of ["not-a-date", "2000-01-01", "2999-01-01"]) {
+    const content = contextNote("true").replace(
+      /^last_verified:.*$/m,
+      `last_verified: ${lastVerified}`,
+    );
+    const report = analyzeMateriality({
+      paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
+      readBaseContextFile: () => content,
+      readHeadContextFile: () => content,
+    });
+
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
+    assertEqual(report.tier, "full");
+  }
+});
+
+test("incomplete canonical metadata at base retains full materiality", () => {
+  const baseContent = contextNote("true").replace(/^doc_type:.*\n/m, "");
+  const report = analyzeMateriality({
+    paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
+    readBaseContextFile: () => baseContent,
+    readHeadContextFile: () => {
+      throw new Error("deleted at head");
+    },
+  });
+
+  assertEqual(report.contextUpdatesPresent, false);
+  assertEqual(report.contextUpdateMissing, true);
+  assertEqual(report.tier, "full");
+  assertEqual(
+    report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+      ?.reason,
+    "canonical agent or operator context",
+  );
 });
 
 test("head-canonical notes do not require a redundant base read", () => {
