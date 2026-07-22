@@ -620,7 +620,11 @@ unchanged; that same invalidation, plus a start-of-run prune that drops
 non-matching and expired entries, keeps the file bounded. Prerequisite phases
 (install/codegen/quality-setup) and quality/serialized/parallel commands are all
 stamped, but the Trunk check and the gate self-test are exempt and always
-re-run: they validate repo/gate state cheaply and self-referentially.
+re-run: they validate repo/gate state cheaply and self-referentially. The ADR
+reminder also re-runs every time, for a mechanical reason rather than an
+exemption: its command string embeds the run's temporary changed-paths file
+path, so its stamp key never matches a prior run (fail-safe — an advisory,
+self-suppressing check that only ever over-runs).
 
 Every mapped command runs under a per-command watchdog so no single check can
 hang forever. A command that runs longer than the timeout (default 900 seconds,

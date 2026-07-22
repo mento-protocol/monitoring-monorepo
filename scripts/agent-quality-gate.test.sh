@@ -3851,4 +3851,73 @@ STUB
 rm -rf "$command_timeout_repo"
 assert_raw_contains "Command timed out after 2s: pnpm agent:prewarm:test"
 
+# GitHub issue #1410: a manual interrupt (TERM sent to the gate process) must
+# escalate to KILL exactly like the timeout watchdog, so a SIGTERM-ignoring
+# mapped command cannot survive an interactive Ctrl-C/TERM teardown. The TERM
+# below targets ONLY the gate's pid — never a process group — so the test
+# suite itself is not signalled.
+command_interrupt_repo="$(mktemp -d)"
+(
+  cd "$command_interrupt_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  # Ignores TERM and respawns its sleep child each second, so only the KILL
+  # escalation can reap it.
+  cat > bin/qg-interrupt-victim <<'STUB'
+#!/usr/bin/env bash
+trap '' TERM
+while :; do sleep 1; done
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "agent:prewarm:test" ]]; then
+  exec qg-interrupt-victim
+fi
+exit 0
+STUB
+  chmod +x bin/pnpm bin/qg-interrupt-victim tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  set +e
+  PATH="$command_interrupt_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$output_file" 2>&1 &
+  gate_pid=$!
+  waited=0
+  until pgrep -f "qg-interrupt-victim" >/dev/null 2>&1; do
+    sleep 1
+    waited=$((waited + 1))
+    if [[ "$waited" -ge 20 ]]; then
+      kill -KILL "$gate_pid" 2>/dev/null
+      pkill -KILL -f "qg-interrupt-victim" 2>/dev/null
+      fail "interrupt fixture never started its victim"
+    fi
+  done
+  kill -TERM "$gate_pid" 2>/dev/null
+  wait "$gate_pid"
+  interrupt_exit=$?
+  set -e
+  [[ "$interrupt_exit" -ne 0 ]] ||
+    fail "expected the gate to exit nonzero when interrupted by TERM"
+  # The trap teardown TERMs immediately, then KILLs after its 3s grace.
+  sleep 5
+  if pgrep -f "qg-interrupt-victim" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-interrupt-victim" 2>/dev/null || true
+    fail "interrupted gate left a SIGTERM-ignoring process running"
+  fi
+)
+rm -rf "$command_interrupt_repo"
+
 echo "agent quality gate tests passed"
