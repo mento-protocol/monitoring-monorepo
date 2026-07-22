@@ -44,6 +44,11 @@ complete family set sequentially on `ubuntu-latest` whenever autoreview runtime
 or fixture inputs change. The required `ci` sentinel allows the job to skip for
 unrelated paths and requires it to pass whenever the path filter selects it.
 
+Agent sessions must run `--run` gate invocations and `git push` as background
+tasks: foreground commands are killed at 600s, and a killed run writes no
+freshness stamp, so the next invocation re-runs the full mapped command set
+instead of hitting `--skip-if-fresh`.
+
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
 
@@ -504,7 +509,8 @@ concurrently (the heavy `test:coverage` suites and the gate self-test overlap
 instead of summing to the serial total), and it reuses a recent successful
 manual gate run when the fetched base commit, mapped command plan, gate
 implementation, changed paths, validated file content, and package-risk state
-are unchanged. Because it runs in parallel rather than `--fail-fast`, a red
+are unchanged and the recorded success is no older than the freshness TTL
+(two hours). Because it runs in parallel rather than `--fail-fast`, a red
 push runs the remaining in-flight members before failing (green pushes, the
 common case, get the full speedup). Package-script acknowledgement is folded out
 of the reuse key when there is no package-script risk, so a warm
