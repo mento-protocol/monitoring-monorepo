@@ -64,6 +64,9 @@ packageConfigs:
 
 overrides:
   "envio>react": 19.2.6
+  # GHSA-f88m-g3jw-g9cj: stable Next 16.2.x still requests sharp ^0.34.5.
+  # Remove once the supported stable Next line selects sharp >=0.35.0.
+  "sharp@<0.35.0": 0.35.3
   "flatted@<3.4.2": 3.4.2
   "brace-expansion@>=2.0.0 <3": 2.1.2
   "brace-expansion@>=5.0.0 <6": 5.0.7
