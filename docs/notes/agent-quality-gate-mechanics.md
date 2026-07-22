@@ -187,7 +187,10 @@ The rewrite fires for a package only when **all** of these hold:
   radius is the point, so it keeps full suites);
 - the run is not a full-workspace escalation (those keep full `test:coverage`
   everywhere);
-- no test-infra file changed anywhere in the diff
+- no test-infra file and no `shared-config/**` path changed anywhere in the
+  diff (shared-config edits can regress any consumer through the dependency
+  graph, which `vitest related` on the consumer's own changed files cannot
+  see)
   (`scripts/envio-schema-stubs.graphql`, any vitest setup file).
 
 Anything outside those bounds keeps the full `test:coverage`. `vitest related`

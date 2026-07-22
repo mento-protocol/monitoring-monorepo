@@ -1609,6 +1609,14 @@ assert_occurrences 1 "- pnpm --filter @mento-protocol/ui-dashboard test:browser 
 assert_occurrences 1 "- pnpm dashboard:size-limit (ui-dashboard bundle inputs changed)"
 assert_not_contains_mapped "- pnpm dashboard:build"
 
+# A shared-config change alongside a small consumer edit must disable scoping
+# globally: `vitest related` only follows imports from the changed files, so a
+# scoped consumer run would miss shared-config-induced regressions in tests
+# that import @mento-protocol/config through OTHER consumer source.
+run_gate "shared-config/src/chains.ts" "ui-dashboard/src/lib/gql-retry.ts"
+assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
+assert_not_contains "vitest related --run src/lib/gql-retry.ts"
+
 run_gate "ui-dashboard/react-doctor.config.json"
 assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"

@@ -736,12 +736,17 @@ scoped_is_non_source_path() {
 }
 
 # True iff any changed path anywhere is a test-infra file whose edit can change
-# which tests run for unrelated source. Such a change disables scoping globally.
+# which tests run for unrelated source, or a shared-config path whose edit can
+# regress any consumer through the dependency graph (`vitest related` only
+# follows imports from the changed files themselves, so a consumer's scoped
+# run would miss shared-config-induced regressions). Either disables scoping
+# globally.
 scoped_test_infra_changed() {
   local path
   while IFS= read -r path; do
     case "$path" in
       scripts/envio-schema-stubs.graphql) return 0 ;;
+      shared-config/*) return 0 ;;
       vitest.hermetic-setup.ts | */vitest.hermetic-setup.ts) return 0 ;;
       vitest.config.* | */vitest.config.* | vitest.*.config.* | */vitest.*.config.*) return 0 ;;
       */test/setup/* | */tests/setup/*) return 0 ;;
