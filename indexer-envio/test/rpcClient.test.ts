@@ -2,7 +2,7 @@ import { strict as assert } from "assert";
 import { getRpcClient, _clearRpcClients, _testHooks } from "../src/rpc.js";
 import {
   getFallbackRpcClient,
-  rpcBatchEnabledForUrl,
+  rpcBatchConfigForUrl,
 } from "../src/rpc/client.js";
 
 // ---------------------------------------------------------------------------
@@ -149,25 +149,38 @@ describe("getRpcClient", () => {
 });
 
 // ---------------------------------------------------------------------------
-// rpcBatchEnabledForUrl
+// rpcBatchConfigForUrl
 // ---------------------------------------------------------------------------
 
-describe("rpcBatchEnabledForUrl", () => {
+describe("rpcBatchConfigForUrl", () => {
   it("disables batching for the Monad monadinfra primary", () => {
     assert.equal(
-      rpcBatchEnabledForUrl(
+      rpcBatchConfigForUrl(
         "https://rpc-mainnet.monadinfra.com/rpc/token-value",
       ),
       false,
     );
   });
 
+  it("caps Polygon mainnet and Amoy dRPC batches at three calls", () => {
+    assert.deepEqual(rpcBatchConfigForUrl("https://polygon.drpc.org"), {
+      batchSize: 3,
+    });
+    assert.deepEqual(rpcBatchConfigForUrl("https://polygon-amoy.drpc.org"), {
+      batchSize: 3,
+    });
+  });
+
+  it("does not apply the dRPC policy to spoofed suffix hosts", () => {
+    assert.equal(rpcBatchConfigForUrl("https://drpc.org.example.com"), true);
+  });
+
   it("keeps batching enabled for rpc2.monad.xyz fallback", () => {
-    assert.equal(rpcBatchEnabledForUrl("https://rpc2.monad.xyz"), true);
+    assert.equal(rpcBatchConfigForUrl("https://rpc2.monad.xyz"), true);
   });
 
   it("keeps batching enabled for malformed URLs rather than failing client setup", () => {
-    assert.equal(rpcBatchEnabledForUrl("not a url"), true);
+    assert.equal(rpcBatchConfigForUrl("not a url"), true);
   });
 });
 
@@ -206,6 +219,37 @@ describe("isRateLimitError", () => {
     assert.equal(_testHooks.isRateLimitError(null), false);
     assert.equal(_testHooks.isRateLimitError(undefined), false);
     assert.equal(_testHooks.isRateLimitError({ message: "rate limit" }), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isRetryableRpcError
+// ---------------------------------------------------------------------------
+
+describe("isRetryableRpcError", () => {
+  const cases: Array<[string, boolean]> = [
+    ["HTTP request failed.\nStatus: 500\nURL: https://polygon.drpc.org", true],
+    ["HTTP status 502 Bad Gateway", true],
+    ["Status code: 503 Service Unavailable", true],
+    ["504 Gateway Timeout", true],
+    ["Internal Server Error", true],
+    ["429 Too Many Requests", true],
+    ["Status: 400 Bad Request", false],
+    ["Status: 404 Not Found", false],
+    ["execution reverted at block 500", false],
+    ["block 503 is not available", false],
+    ["execution reverted", false],
+  ];
+
+  for (const [msg, expected] of cases) {
+    it(`returns ${expected} for "${msg.split("\n")[0]}"`, () => {
+      assert.equal(_testHooks.isRetryableRpcError(new Error(msg)), expected);
+    });
+  }
+
+  it("returns false for non-Error values", () => {
+    assert.equal(_testHooks.isRetryableRpcError("Status: 500"), false);
+    assert.equal(_testHooks.isRetryableRpcError(null), false);
   });
 });
 

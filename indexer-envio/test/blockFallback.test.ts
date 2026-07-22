@@ -407,6 +407,92 @@ describe("readContractWithBlockFallback", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Transient HTTP failures
+  // -------------------------------------------------------------------------
+
+  it("retries a viem HTTP 500 at the same historical block and recovers", async () => {
+    const calls: MockReadContractArgs[] = [];
+    const captured = captureLogs();
+    const client = mockClient(async (args) => {
+      calls.push({ ...args });
+      if (calls.length === 1) {
+        throw new Error(
+          "HTTP request failed.\nStatus: 500\nURL: https://polygon.drpc.org",
+        );
+      }
+      return "recovered";
+    });
+
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      client,
+      baseArgs,
+      90_450_421n,
+      null,
+      captured.logger,
+    );
+
+    assert.equal(res.result, "recovered");
+    assert.equal(res.usedFallback, false);
+    assert.equal(res.usedLatestFallback, false);
+    assert.equal(calls.length, 2);
+    assert.ok(calls.every((call) => call.blockNumber === 90_450_421n));
+    assert.match(captured.debug.join("\n"), /RPC_TRANSIENT_RETRY/);
+  });
+
+  it("uses the secondary at the same block after persistent HTTP 5xx", async () => {
+    const primaryCalls: MockReadContractArgs[] = [];
+    const fallbackCalls: MockReadContractArgs[] = [];
+    const primary = mockClient(async (args) => {
+      primaryCalls.push({ ...args });
+      throw new Error("HTTP request failed. Status: 503 Service Unavailable");
+    });
+    const fallback = mockClient(async (args) => {
+      fallbackCalls.push({ ...args });
+      return "secondary-block-result";
+    });
+
+    const res = await readContractWithBlockFallback(
+      TEST_CHAIN_ID,
+      primary,
+      baseArgs,
+      90_450_421n,
+      fallback,
+    );
+
+    assert.equal(res.result, "secondary-block-result");
+    assert.equal(res.usedFallback, true);
+    assert.equal(res.usedLatestFallback, false);
+    assert.equal(primaryCalls.length, 4);
+    assert.equal(fallbackCalls.length, 1);
+    assert.equal(fallbackCalls[0].blockNumber, 90_450_421n);
+  });
+
+  it("fails closed after persistent HTTP 5xx without a secondary", async () => {
+    const calls: MockReadContractArgs[] = [];
+    const client = mockClient(async (args) => {
+      calls.push({ ...args });
+      throw new Error("HTTP request failed. Status: 504 Gateway Timeout");
+    });
+
+    await assert.rejects(
+      readContractWithBlockFallback(
+        TEST_CHAIN_ID,
+        client,
+        baseArgs,
+        90_450_421n,
+        null,
+      ),
+      /Status: 504/,
+    );
+    assert.equal(calls.length, 4);
+    assert.ok(
+      calls.every((call) => call.blockNumber === 90_450_421n),
+      "transient recovery must never replace a historical read with latest",
+    );
+  });
+
+  // -------------------------------------------------------------------------
   // Archive-depth fallback (primary's archive doesn't reach this block, but
   // a deeper-archive secondary does). Distinct from rate-limit fallback
   // because the secondary is consulted on the archive-depth error pattern,

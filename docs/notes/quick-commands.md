@@ -33,7 +33,7 @@ pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Runtime issue
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:perf <commit>     # Combined status/metrics/log snapshot for perf comparisons
-pnpm deploy:indexer:verify <commit>   # Batch status, metrics, endpoint, and GraphQL row probe
+pnpm deploy:indexer:verify <commit>   # Gate promotion on sync, core rows, and Polygon replay semantics
 pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod
 pnpm deploy:indexer:rollback <last-good-sha>  # Roll prod back: re-promote if still registered, else rebuild + resync
 

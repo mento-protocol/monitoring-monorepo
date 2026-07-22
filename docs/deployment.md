@@ -93,8 +93,8 @@ pnpm deploy:indexer --yes
 1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch --compact` for low-noise agent output, `pnpm deploy:indexer:status "$COMMIT" --watch` for the full terminal table, or [envio.dev/app](https://envio.dev/app)).
 2. Inspect build and runtime errors with explicit commit-scoped logs (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h`).
 3. Capture a combined status/metrics/log snapshot for comparison (`pnpm deploy:indexer:perf "$COMMIT"`).
-4. Verify sync, metrics, endpoint resolution, and core GraphQL rows (`pnpm deploy:indexer:verify "$COMMIT"`).
-5. Promote the same caught-up commit (`pnpm deploy:indexer:promote "$COMMIT"`) so the static production endpoint serves it.
+4. Verify sync, metrics, endpoint resolution, core rows, and fail-closed Polygon replay semantics (`pnpm deploy:indexer:verify "$COMMIT"`). The verifier reads `indexer-envio/config/replay-integrity.json` from that exact commit, so a pre-invariant replay cannot pass merely because later rows look healthy. A caught-up status alone is only `SYNCED_PENDING_DATA_VERIFY`.
+5. Promote the same caught-up, semantically verified commit (`pnpm deploy:indexer:promote "$COMMIT"`) so the static production endpoint serves it.
 6. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
 7. Verify monitoring.mento.org loads data.
 

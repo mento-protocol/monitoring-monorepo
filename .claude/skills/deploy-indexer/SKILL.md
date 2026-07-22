@@ -179,10 +179,10 @@ pnpm deploy:indexer:logs <TARGET_COMMIT> --level error,warn --since 2h
 pnpm deploy:indexer:perf <TARGET_COMMIT>
 ```
 
-Treat a successful caught-up exit as `READY_TO_PROMOTE`. If the command exits
-non-zero, the deployment never registers within 5-10 min, or full sync is not
-reached within 90 minutes, stop and surface the failure. **Never promote a
-non-synced deployment.**
+Treat a successful caught-up exit as `SYNCED_PENDING_DATA_VERIFY`, not
+`READY_TO_PROMOTE`. If the command exits non-zero, the deployment never
+registers within 5-10 min, or full sync is not reached within 90 minutes, stop
+and surface the failure. **Never promote a non-synced deployment.**
 
 If the target is already in `prod_status=prod`, treat it as `ALREADY_PROMOTED`
 and continue through the DNS wait + verify path for idempotency.
@@ -193,7 +193,7 @@ synced commit and the paste-ready promote command for the user to run later
 removals/renames until a compatibility or cutover plan is confirmed):
 
 ```text
-Pre-merge deploy complete. Commit <TARGET_COMMIT> is fully synced and ready.
+Pre-merge deploy complete. Commit <TARGET_COMMIT> is fully synced and pending deployment verification.
 For additive fields/entities, promote after the PR lands and before the matching dashboard deployment serves traffic:
   pnpm deploy:indexer:verify <TARGET_COMMIT>
   pnpm deploy:indexer:promote <TARGET_COMMIT> -y
@@ -228,11 +228,25 @@ Run the narrow deployment verifier before promoting:
 pnpm deploy:indexer:verify <TARGET_COMMIT>
 ```
 
-This batches the Envio deployment status, metrics, endpoint resolution, and
-core GraphQL row probe into one pre-promotion gate. Do not promote if this
+This batches the Envio deployment status, metrics, endpoint resolution, core
+GraphQL rows, and Polygon replay semantics into one pre-promotion gate. The
+Polygon checks require the canonical three FPMMs, exact feed/expiry mappings,
+positive historical oracle anchors and snapshot cursors, valid health
+counters, and a current one-year EURm/EUROP oracle. Do not promote if this
 command exits non-zero. `--allow-syncing` is for diagnostics only here: it can
-waive an in-progress chain status during investigation, but it does not waive
-empty GraphQL probe tables and is not a promotion approval.
+waive an in-progress chain status during investigation, but it never waives
+empty rows or semantic failures and is not a promotion approval.
+
+The verifier reads `indexer-envio/config/replay-integrity.json` from the exact
+deployed commit. Missing or outdated marker versions are a hard failure: later
+healthy-looking rows cannot make a candidate replayed by pre-invariant code
+promotion-compatible.
+
+Any `sortedOracles.exactMedianTimestampUnavailable` failure for a tracked pool
+means the event was deliberately rejected and will retry. If an older candidate
+instead reached head after `[RPC_FAILURE] chainId=137 fn=medianTimestamp`,
+classify it as `TAINTED`; never promote it, and deploy a fresh commit for a
+clean replay.
 
 ## Phase 4 — Promote
 
@@ -344,7 +358,7 @@ user to verify manually.
 - **Push to envio fails** → stop; never force-push.
 - **Build doesn't register in 30 min** → stop; suggest `pnpm deploy:indexer:logs --build`.
 - **Sync stalls past 90 min** → stop; report last status. Don't promote.
-- **Deployment verification fails** → stop; do not promote until status, metrics, endpoint, and GraphQL row probe pass.
+- **Deployment verification fails** → stop; do not promote until status, metrics, endpoint, core rows, and semantic replay checks pass. A tainted historical replay requires a fresh deployment, not another promotion attempt.
 - **Promote fails** → stop; the previous deployment is still serving. Surface the error.
 - **DNS wait interrupted** (user cancels) → stop; do not skip to verify.
 - **Verify UI finds errors** → surface them with file/line, ask the user whether to roll back. Don't auto-rollback — promote-to-prior is destructive.

@@ -10,8 +10,36 @@ import {
   resolveDeployment,
   resolveProdDeployment,
   summarizeProbe,
+  summarizeReplayIntegrity,
   summarizeStatus,
 } from "./deploy-indexer-verify.mjs";
+import {
+  POLYGON_FPMM_EXPECTATIONS,
+  summarizePolygonPools,
+} from "./lib/polygon-deployment-semantics.mjs";
+
+const NOW_SECONDS = 2_000_000_000;
+const VALID_REPLAY_INTEGRITY = {
+  value: { polygonExactMedianTimestamp: 1 },
+  readError: "",
+};
+
+function validPolygonPools() {
+  return POLYGON_FPMM_EXPECTATIONS.map((expected, index) => ({
+    id: expected.id,
+    source: "fpmm_factory",
+    referenceRateFeedID: expected.referenceRateFeedID,
+    lastOracleReportAt: String(NOW_SECONDS - 1_000 - index),
+    oracleExpiry: expected.oracleExpiry.toString(),
+    oracleOk: true,
+    medianLive: true,
+    healthStatus: "OK",
+    hasHealthData: true,
+    lastOracleSnapshotTimestamp: String(NOW_SECONDS - 500 - index),
+    healthTotalSeconds: "1000",
+    healthBinarySeconds: "900",
+  }));
+}
 
 const indexerJson = {
   data: {
@@ -98,6 +126,22 @@ assert.equal(
 );
 assert.equal(resolveProdDeployment(indexerJson)?.commit_hash, "abc1234");
 
+assert.equal(summarizeReplayIntegrity(VALID_REPLAY_INTEGRITY).ok, true);
+assert.match(
+  summarizeReplayIntegrity({
+    value: null,
+    readError: "marker missing from old commit",
+  }).failures.join("\n"),
+  /marker missing[\s\S]*predates Polygon exact-median replay integrity/,
+);
+assert.equal(
+  summarizeReplayIntegrity({
+    value: { polygonExactMedianTimestamp: "not-a-version" },
+    readError: "",
+  }).ok,
+  false,
+);
+
 assert.deepEqual(
   summarizeStatus({
     data: [
@@ -144,6 +188,56 @@ assert.deepEqual(
       },
     ],
   },
+);
+
+assert.equal(summarizePolygonPools(validPolygonPools(), NOW_SECONDS).ok, true);
+
+const missingPolygonPool = validPolygonPools().slice(1);
+assert.match(
+  summarizePolygonPools(missingPolygonPool, NOW_SECONDS).failures.join("\n"),
+  /missing Polygon FPMMs/,
+);
+
+const zeroCursors = validPolygonPools();
+zeroCursors[0].lastOracleReportAt = "0";
+zeroCursors[0].lastOracleSnapshotTimestamp = "0";
+assert.match(
+  summarizePolygonPools(zeroCursors, NOW_SECONDS).failures.join("\n"),
+  /no positive exact oracle anchor[\s\S]*no positive oracle snapshot cursor/,
+);
+
+const wrongFeedAndExpiry = validPolygonPools();
+wrongFeedAndExpiry[1].referenceRateFeedID =
+  "0x0000000000000000000000000000000000000001";
+wrongFeedAndExpiry[1].oracleExpiry = "31536000";
+assert.match(
+  summarizePolygonPools(wrongFeedAndExpiry, NOW_SECONDS).failures.join("\n"),
+  /feed is[\s\S]*expiry is/,
+);
+
+const expiredOneYearPool = validPolygonPools();
+expiredOneYearPool[2].lastOracleReportAt = String(NOW_SECONDS - 31_536_001);
+assert.match(
+  summarizePolygonPools(expiredOneYearPool, NOW_SECONDS).failures.join("\n"),
+  /one-year oracle anchor is expired/,
+);
+
+const invalidHealthCounters = validPolygonPools();
+invalidHealthCounters[0].healthTotalSeconds = "10";
+invalidHealthCounters[0].healthBinarySeconds = "11";
+assert.match(
+  summarizePolygonPools(invalidHealthCounters, NOW_SECONDS).failures.join("\n"),
+  /health binary seconds exceed total seconds/,
+);
+
+const unexpectedPolygonPool = validPolygonPools();
+unexpectedPolygonPool.push({
+  ...unexpectedPolygonPool[0],
+  id: "137-0x0000000000000000000000000000000000000001",
+});
+assert.match(
+  summarizePolygonPools(unexpectedPolygonPool, NOW_SECONDS).failures.join("\n"),
+  /unexpected Polygon FPMMs/,
 );
 
 assert.deepEqual(
@@ -215,15 +309,58 @@ const summary = buildSummary({
   graphqlJson: {
     data: {
       Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
       SusdsYieldSummary: [{ id: "susds" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
     },
   },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
 });
 
 assert.equal(summary.ok, true);
 assert.match(renderText(summary), /Result: verified/);
+
+const semanticFailureWhileSyncing = buildSummary({
+  args: { allowSyncing: true },
+  deployment: indexerJson.data.deployments[1],
+  endpoint: indexerJson.data.deployments[1].gql_endpoint,
+  endpointMode: "deployment",
+  statusJson: {
+    data: [
+      {
+        chain_id: 137,
+        block_height: 100,
+        latest_processed_block: 50,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "non-polygon-core-row" }],
+      PolygonPool: missingPolygonPool,
+      SusdsYieldSummary: [{ id: "susds" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+});
+assert.equal(semanticFailureWhileSyncing.ok, false);
+assert.match(
+  semanticFailureWhileSyncing.failures.join("\n"),
+  /missing Polygon FPMMs/,
+);
+assert.doesNotMatch(
+  semanticFailureWhileSyncing.failures.join("\n"),
+  /not caught up/,
+);
 
 console.log("deploy-indexer-verify tests passed.");
