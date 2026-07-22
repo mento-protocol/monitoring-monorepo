@@ -1576,7 +1576,7 @@ while IFS= read -r path; do
         scripts/agent-prewarm.mjs|scripts/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
           ;;
-        scripts/review-materiality.mjs|scripts/review-materiality.test.mjs)
+        scripts/review-materiality.mjs|scripts/review-materiality-context.mjs|scripts/review-materiality.test.mjs)
           add_command "pnpm agent:review-materiality:test" "agent review materiality helper changed"
           ;;
         scripts/agent-issue-board.mjs|scripts/agent-issue-board.test.mjs)

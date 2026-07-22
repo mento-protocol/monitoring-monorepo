@@ -2976,6 +2976,9 @@ assert_contains "- pnpm sanitize:test (Terraform output sanitizer test changed)"
 run_gate "scripts/review-materiality.mjs"
 assert_contains "- pnpm agent:review-materiality:test (agent review materiality helper changed)"
 
+run_gate "scripts/review-materiality-context.mjs"
+assert_contains "- pnpm agent:review-materiality:test (agent review materiality helper changed)"
+
 run_gate "scripts/review-materiality.test.mjs"
 assert_contains "- pnpm agent:review-materiality:test (agent review materiality helper changed)"
 

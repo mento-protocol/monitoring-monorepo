@@ -15,6 +15,10 @@ import {
   parseArgs,
   renderHuman,
 } from "./review-materiality.mjs";
+import {
+  createContextSnapshotReaders,
+  resolveCanonicalContextPaths,
+} from "./review-materiality-context.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -104,6 +108,87 @@ function runMaterialityCli(cwd, pathsFile, json = false) {
 }
 
 console.log("\nreview-materiality.mjs tests\n");
+
+test("context helper separates base authority from valid head presence", () => {
+  const note = "docs/notes/runbook.md";
+  const { headCanonicalContextPaths, materialityCanonicalContextPaths } =
+    resolveCanonicalContextPaths({
+      paths: ["AGENTS.md", note],
+      readBaseContextFile: (filePath) => {
+        if (filePath === note) return contextNote("true");
+        throw new Error("absent at base");
+      },
+      readHeadContextFile: (filePath) => {
+        if (filePath === note) return contextNote("false");
+        throw new Error("unreadable at head");
+      },
+      isHeadContextFile: (filePath) => filePath === note,
+    });
+
+  assert(materialityCanonicalContextPaths.has("AGENTS.md"));
+  assert(materialityCanonicalContextPaths.has(note));
+  assertEqual(headCanonicalContextPaths.has("AGENTS.md"), false);
+  assertEqual(headCanonicalContextPaths.has(note), false);
+});
+
+test("context snapshot readers bind refs and reject worktree symlinks", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-reader-test-"));
+  const originalCwd = process.cwd();
+  const filePath = "context.md";
+
+  try {
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test User"]);
+    writeFileSync(join(dir, filePath), "base\n");
+    git(dir, ["add", filePath]);
+    git(dir, ["commit", "-m", "base"]);
+    const base = git(dir, ["rev-parse", "HEAD"]).trim();
+
+    writeFileSync(join(dir, filePath), "committed head\n");
+    git(dir, ["add", filePath]);
+    git(dir, ["commit", "-m", "head"]);
+    const committedHead = git(dir, ["rev-parse", "HEAD"]).trim();
+    writeFileSync(join(dir, filePath), "worktree head\n");
+    process.chdir(dir);
+
+    const worktreeReaders = createContextSnapshotReaders({
+      base,
+      head: "HEAD",
+    });
+    assertEqual(worktreeReaders.readBaseContextFile(filePath), "base\n");
+    assertEqual(
+      worktreeReaders.readHeadContextFile(filePath),
+      "worktree head\n",
+    );
+    assertEqual(worktreeReaders.isHeadContextFile(filePath), true);
+
+    rmSync(join(dir, filePath));
+    writeFileSync(join(dir, "target.md"), "symlink target\n");
+    symlinkSync("target.md", join(dir, filePath));
+    assertEqual(worktreeReaders.isHeadContextFile(filePath), false);
+    let readError = null;
+    try {
+      worktreeReaders.readHeadContextFile(filePath);
+    } catch (error) {
+      readError = error;
+    }
+    assertIncludes(String(readError), "not a regular worktree file");
+
+    const committedReaders = createContextSnapshotReaders({
+      base,
+      head: committedHead,
+    });
+    assertEqual(
+      committedReaders.readHeadContextFile(filePath),
+      "committed head\n",
+    );
+    assertEqual(committedReaders.isHeadContextFile(filePath), true);
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("classifies non-canonical plan-only edits as trivial", () => {
   const report = analyzeMateriality({
