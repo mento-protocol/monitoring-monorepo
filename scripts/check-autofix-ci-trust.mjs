@@ -167,25 +167,56 @@ export function usesPullRequestTarget(body) {
   return collectTriggers(parseWorkflow(body)).has("pull_request_target");
 }
 
-/** Three-valued match of a GitHub Actions ref-glob (`main`, `sentry-autofix/**`,
- * `**`, …) against a pushed autofix branch: `"match"`, `"no-match"`, or
- * `"unknown"`. `*` matches within a path segment, `**` across segments, `?` one
- * char — the forms GitHub documents. A pattern with other glob metacharacters
- * (`[`, `+`, `!`, `{`) is `"unknown"` — never asserted as a definite match OR a
- * definite non-match, so BOTH the `branches` (admit-if-could-match) and the
- * `branches-ignore` (exclude-only-if-definitely-matches) directions fail
- * closed. (An earlier two-valued version fed `true` into the negated
- * branches-ignore path and became fail-OPEN there.) */
-function refGlobMatch(pattern) {
-  if (typeof pattern !== "string") return "unknown";
-  if (/[[\]{}!+]/.test(pattern)) return "unknown";
+/** Compile a GitHub Actions ref-glob to a RegExp, or null when it uses a glob
+ * metacharacter this checker does not model (`[`, `+`, `!`, `{`). `*` matches
+ * within a path segment, `**` across segments, `?` one char. */
+function globToRegExp(pattern) {
+  if (typeof pattern !== "string" || /[[\]{}!+]/.test(pattern)) return null;
   const rx = pattern
     .replace(/[.^$()|\\]/g, "\\$&")
     .replace(/\*\*/g, "\0") // placeholder for cross-segment
     .replace(/\*/g, "[^/]*")
     .replace(/\0/g, ".*")
     .replace(/\?/g, "[^/]");
-  return new RegExp(`^${rx}$`).test("sentry-autofix/x") ? "match" : "no-match";
+  return new RegExp(`^${rx}$`);
+}
+
+// The finalizer pushes `sentry-autofix/<lowercased Sentry short-id>` — a
+// single extra path segment whose content is project-derived and open-ended.
+// A branch filter must be tested against the WHOLE namespace, not one sample:
+// `sentry-autofix/app-*` matches a future `app-…` project's branch even though
+// it misses `sentry-autofix/x`.
+const AUTOFIX_BRANCH_PROBES = [
+  "sentry-autofix/x",
+  "sentry-autofix/app-mento-org-2g",
+  "sentry-autofix/analytics-mento-org-7x",
+  "sentry-autofix/aegis-1a",
+];
+
+/** True when SOME autofix branch could match `pattern` — used for the `branches`
+ * (admit-if-could-match) direction, so it over-approximates (fail closed toward
+ * admitting): any probe match, or any un-modeled pattern that names the
+ * namespace, counts. */
+function patternAdmitsSomeAutofix(pattern) {
+  const rx = globToRegExp(pattern);
+  if (rx === null) return true; // un-modeled → could match → admit (fail closed)
+  if (AUTOFIX_BRANCH_PROBES.some((b) => rx.test(b))) return true;
+  // A pattern that names the namespace but matched no probe (e.g. a future
+  // project prefix) could still match a real branch — fail closed.
+  return typeof pattern === "string" && pattern.includes("sentry-autofix");
+}
+
+/** True when EVERY autofix branch definitely matches `pattern` — used for the
+ * `branches-ignore` (exclude-only-if-certain) direction, so it MUST be
+ * conservative: only the structural whole-namespace wildcards qualify. Anything
+ * partial (`sentry-autofix/app-*`) does not exclude the whole namespace and so
+ * leaves the branch admitted. */
+function patternExcludesAllAutofix(pattern) {
+  return (
+    pattern === "**" ||
+    pattern === "sentry-autofix/*" ||
+    pattern === "sentry-autofix/**"
+  );
 }
 
 /**
@@ -209,16 +240,16 @@ export function pushAdmitsAutofix(pushCfg) {
     const pats = Array.isArray(pushCfg.branches)
       ? pushCfg.branches
       : [pushCfg.branches];
-    // Admit if any pattern could match (match or unknown) — fail closed.
-    return pats.some((p) => refGlobMatch(p) !== "no-match");
+    // Admit if any pattern could match some autofix branch — fail closed.
+    return pats.some(patternAdmitsSomeAutofix);
   }
   if ("branches-ignore" in pushCfg) {
     const pats = Array.isArray(pushCfg["branches-ignore"])
       ? pushCfg["branches-ignore"]
       : [pushCfg["branches-ignore"]];
-    // Excluded ONLY if a pattern DEFINITELY matches; an unknown pattern is not
-    // a definite exclusion, so it leaves the branch admitted — fail closed.
-    return !pats.some((p) => refGlobMatch(p) === "match");
+    // Excluded ONLY if a pattern excludes the WHOLE autofix namespace; a partial
+    // or un-modeled pattern is not a definite exclusion — fail closed (admit).
+    return !pats.some(patternExcludesAllAutofix);
   }
   // No branch filter: a tags-only config never fires on branch pushes; anything
   // else (paths-only, or an empty config) fires on every branch.
@@ -284,6 +315,17 @@ export function hasWritePermission(permissions) {
   return false;
 }
 
+const THIS_REPO = "mento-protocol/monitoring-monorepo";
+
+/** True when a job's `uses:` value names a reusable workflow IN THIS REPO —
+ * either the relative form (`./.github/workflows/…`) or the fully-qualified
+ * self-reference (`mento-protocol/monitoring-monorepo/.github/workflows/…@ref`),
+ * which GitHub resolves to the same repository. */
+function callsInRepoReusableWorkflow(uses) {
+  if (/^\.\.?\//.test(uses)) return true;
+  return uses.startsWith(`${THIS_REPO}/.github/workflows/`);
+}
+
 /** True when a nested string references the automatic workflow token via the
  * `github` context (`${{ github.token }}`). The `secrets.GITHUB_TOKEN` spelling
  * is caught by referencesSecrets; this is the OTHER spelling of the same
@@ -335,16 +377,20 @@ export function jobReceivesCredential(job, inherited) {
   // always forwards the caller's secrets — `inherit` (string) or a map.
   if (job.secrets != null) return true;
   if (job.environment != null) return true;
-  // A job that CALLS a LOCAL reusable workflow (`uses: ./.github/workflows/…`)
-  // can receive a credential the CALLEE binds — an `environment:` or its own
-  // `secrets:`/OIDC — with no caller-side `secrets:` key at all. Following the
-  // callee cross-file is out of this pass's scope, so fail closed: treat any
-  // local reusable-workflow call as credential-bearing (the author guards or
-  // annotates, stating the callee is credential-free). Step `uses:` (actions)
-  // live under `steps[]`, not here, so this only matches reusable-workflow
-  // calls. Remote reusable workflows (`org/repo/.github/…@ref`) receive secrets
+  // A job that CALLS a reusable workflow IN THIS REPOSITORY can receive a
+  // credential the CALLEE binds — an `environment:` or its own `secrets:`/OIDC —
+  // with no caller-side `secrets:` key at all. Following the callee cross-file
+  // is out of this pass's scope, so fail closed: treat an in-repo reusable-
+  // workflow call as credential-bearing (the author guards or annotates,
+  // stating the callee is credential-free). This covers the relative form
+  // (`./.github/workflows/…`) AND the fully-qualified self-reference
+  // (`mento-protocol/monitoring-monorepo/.github/workflows/…@ref`), which
+  // GitHub resolves to the same repo. Step `uses:` (actions) live under
+  // `steps[]`, not here. A reusable workflow in ANOTHER repo receives secrets
   // only via an explicit caller `secrets:` key, already caught above.
-  if (typeof job.uses === "string" && /^\.\.?\//.test(job.uses)) return true;
+  if (typeof job.uses === "string" && callsInRepoReusableWorkflow(job.uses)) {
+    return true;
+  }
   return false;
 }
 
@@ -364,25 +410,6 @@ export function jobGuarded(job, context = "pull_request") {
   const expr = String(job.if ?? "");
   const pattern = context === "push" ? PUSH_GUARD_PATTERN : GUARD_PATTERN;
   return pattern.test(expr);
-}
-
-/** Mark the source lines that are CONTENT of a block scalar (`run: |`,
- * `script: >-`, `- |2`). A `#` inside such content is literal script/text, not
- * a YAML comment, so it must not be read as an annotation. Every content line
- * is more-indented than its introducer (blank lines belong to it too). */
-function blockScalarContentLines(lines) {
-  const content = new Array(lines.length).fill(false);
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^\s*#/.test(line)) continue; // the introducer itself is never a comment
-    if (!/(?:^|\s)[|>][0-9+-]{0,2}\s*(#.*)?$/.test(line)) continue;
-    const indent = line.search(/\S/);
-    for (let j = i + 1; j < lines.length; j += 1) {
-      if (lines[j].trim() !== "" && lines[j].search(/\S/) <= indent) break;
-      content[j] = true;
-    }
-  }
-  return content;
 }
 
 /** The quote character (`"` or `'`) left OPEN at the end of `line`, given the
@@ -412,20 +439,49 @@ function quoteStateAfter(line, openQuote) {
   return q;
 }
 
-/** Lines that are CONTINUATIONS of a multiline quoted scalar (2nd+ line of a
- * `key: "a\n# not-a-comment\nb"`). A line-leading `#` there is string content,
- * not a YAML comment. Block-scalar content (already marked) is literal and
- * cannot be mid-quote, so it resets the quote scan. */
-function quotedScalarContentLines(lines, blockContent) {
+/** Mark every source line that is scalar CONTENT — inside a block scalar
+ * (`run: |`, `script: >-`) or a continuation of a multiline quoted scalar
+ * (`key: "a\n# not-a-comment\nb"`). A line-leading `#` in either is string
+ * content, not a YAML comment, so it must not be read as an annotation.
+ *
+ * The two are tracked in ONE pass with quote state checked FIRST: a structural
+ * line that ends inside an open quote opens a quoted scalar (its trailing `|`
+ * is a character INSIDE the string, never a block-scalar introducer), and only
+ * a line that ends OUTSIDE any quote can introduce a block scalar. That
+ * ordering is what stops a quoted continuation ending in `|` from being
+ * misread as a block introducer (which would reset the quote state and let a
+ * later `#` line in the same scalar pose as a comment). */
+function scalarContentLines(lines) {
   const content = new Array(lines.length).fill(false);
-  let open = null;
+  let inQuote = null; // open quote char, or null
+  let blockIndent = null; // indent of the active block-scalar introducer, or null
   for (let i = 0; i < lines.length; i += 1) {
-    if (blockContent[i]) {
-      open = null;
+    const line = lines[i];
+    if (blockIndent !== null) {
+      if (line.trim() === "" || line.search(/\S/) > blockIndent) {
+        content[i] = true;
+        continue;
+      }
+      blockIndent = null; // dedented out of the block scalar — reprocess line
+    }
+    if (inQuote) {
+      content[i] = true;
+      inQuote = quoteStateAfter(line, inQuote);
       continue;
     }
-    if (open) content[i] = true;
-    open = quoteStateAfter(lines[i], open);
+    // Structural line. A quote it leaves OPEN wins over a `|` introducer (the
+    // `|` would be inside that quote).
+    const q = quoteStateAfter(line, null);
+    if (q) {
+      inQuote = q;
+      continue;
+    }
+    if (
+      !/^\s*#/.test(line) &&
+      /(?:^|\s)[|>][0-9+-]{0,2}\s*(#.*)?$/.test(line)
+    ) {
+      blockIndent = line.search(/\S/);
+    }
   }
   return content;
 }
@@ -453,9 +509,7 @@ function quotedScalarContentLines(lines, blockContent) {
  */
 function annotationScopes(body, jobNames) {
   const lines = body.split("\n");
-  const blockContent = blockScalarContentLines(lines);
-  const quotedContent = quotedScalarContentLines(lines, blockContent);
-  const inScalar = lines.map((_, i) => blockContent[i] || quotedContent[i]);
+  const inScalar = scalarContentLines(lines);
   const annotationLines = [];
   lines.forEach((line, i) => {
     if (!inScalar[i] && ANNOTATION_LINE.test(line)) annotationLines.push(i);

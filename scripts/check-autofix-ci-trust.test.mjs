@@ -910,5 +910,63 @@ test("a workflow-level env github.token with write perms is inherited by jobs", 
   );
 });
 
+test("branch globs are matched against the whole autofix namespace", () => {
+  // A namespace-prefix glob admits (a future app-* project's branch matches),
+  // and does NOT definitely exclude in the branches-ignore direction.
+  assert(
+    pushAdmitsAutofix({ branches: ["sentry-autofix/app-*"] }),
+    "sentry-autofix/app-* admits",
+  );
+  assert(
+    pushAdmitsAutofix({ "branches-ignore": ["sentry-autofix/app-*"] }),
+    "partial namespace ignore does not exclude the whole namespace",
+  );
+  assert(
+    !pushAdmitsAutofix({ "branches-ignore": ["sentry-autofix/**"] }),
+    "whole-namespace ignore excludes",
+  );
+  assert(!pushAdmitsAutofix({ branches: ["main"] }), "main still excluded");
+  assert(!pushAdmitsAutofix({ branches: ["*"] }), "single-segment * excluded");
+});
+
+test("a fully-qualified in-repo reusable-workflow self-call is credential-bearing", () => {
+  const inherited = { envSecrets: false, workflowPermissions: undefined };
+  assert(
+    jobReceivesCredential(
+      {
+        uses: "mento-protocol/monitoring-monorepo/.github/workflows/deploy.yml@main",
+      },
+      inherited,
+    ),
+    "FQN self-reference treated as local",
+  );
+  assert(
+    !jobReceivesCredential(
+      { uses: "other-org/other-repo/.github/workflows/deploy.yml@main" },
+      inherited,
+    ),
+    "genuinely remote reusable workflow not flagged",
+  );
+});
+
+test("a quoted-scalar continuation ending in | is not a block introducer", () => {
+  const body = [
+    'name: "start |',
+    "  # autofix-ci-trust: fake",
+    '  end"',
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  leak:",
+    "    runs-on: ubuntu-latest",
+    SECRET_STEP,
+  ].join("\n");
+  const v = evaluateWorkflow(body);
+  assert(
+    !v.ok && /\[leak\]/.test(v.reason),
+    "marker inside the pipe-ending quoted scalar is not an annotation",
+  );
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exitCode = 1;

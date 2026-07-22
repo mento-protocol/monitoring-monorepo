@@ -172,13 +172,18 @@ structure, so exotic-but-valid YAML (anchors, `\uXXXX` escapes, block scalars,
 flow/JSON roots) cannot slip a trigger or secret past it; unparsable YAML fails
 closed.
 
-- [ ] If the workflow triggers on `pull_request` (any form — block, `on: [pull_request]`, inline mapping) and a JOB references `${{ secrets.* }}`, either exclude autofix PRs in THAT job (`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')` on its `if:`, or route them to a secretless lane like lighthouse.yml's fixture path), or add an `# autofix-ci-trust: <why the secret is unreachable from PR-head code>` annotation. A job annotation must be a genuine comment INSIDE that job's body (indented deeper than the job key); a comment above `jobs:` is file-level and covers every job. The checker is per-job: one guarded job does not vouch for an unguarded sibling
-- [ ] "Secret-bearing" is broader than `${{ secrets.* }}`: a job bound to a
-      GitHub `environment:`, holding `id-token: write` (this repo's WIF pool
-      trusts any OIDC token from this repository — `terraform/ci-wif.tf` —
-      so the permission alone exchanges into the plan-readonly service
-      account), or granted `permissions: write-all` counts too and needs
-      the same guard or annotation
+- [ ] The trust boundary covers every way an autofix branch is REACHABLE, not just `pull_request`: the eventual PR (`pull_request`), the `push` the finalizer makes to `sentry-autofix/*` before the PR exists (when the workflow's `branches:`/`branches-ignore:` filter admits that branch — a `branches: [main]` or tags-only push does not), and that branch's `create` event. A credential-bearing job reachable via a context must exclude it on the job's `if:` for THAT context — `!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')` for pull_request; `!startsWith(github.ref, 'refs/heads/sentry-autofix/')` (or `github.ref_name`, `'sentry-autofix/'`) for push/create — or carry an `# autofix-ci-trust: <why unreachable>` annotation. A job annotation must be a genuine comment INSIDE that job's body (indented deeper than the job key); a comment above `jobs:` is file-level and covers every job. The checker is per-job: one guarded job does not vouch for an unguarded sibling
+- [ ] "Credential-bearing" is broader than `${{ secrets.* }}`. It also covers: a
+      job bound to a GitHub `environment:`; `id-token: write` (this repo's WIF
+      pool trusts any OIDC token from this repository — `terraform/ci-wif.tf` —
+      so the permission alone exchanges into the plan-readonly service account)
+      or `permissions: write-all`; a **write-scoped `${{ github.token }}`** (its
+      effective permissions grant any `write` scope); a reusable-workflow
+      `secrets:` forward; and a call to an **in-repo reusable workflow**
+      (`uses: ./.github/workflows/…` or the fully-qualified
+      `mento-protocol/monitoring-monorepo/.github/workflows/…@ref`), whose
+      callee may bind a credential the caller cannot see. All need the same
+      guard or annotation
 - [ ] Never introduce `pull_request_target` — the checker refuses it outright
 - [ ] Checkouts in jobs that execute PR-head code set `persist-credentials: false` (the checkout token in `.git/config` is readable by any test/build the PR controls)
 - [ ] `node scripts/check-autofix-ci-trust.mjs` must pass after the change
