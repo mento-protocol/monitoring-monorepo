@@ -38,7 +38,10 @@ import {
   getPoolsWithReferenceFeed,
   getBreakerConfigsByFeed,
 } from "../rpc.js";
-import { medianTimestampEffect, reportExpiryEffect } from "../rpc/effects.js";
+import {
+  medianTimestampEffectForChain,
+  reportExpiryEffect,
+} from "../rpc/effects.js";
 import {
   bootstrapAndResolveBreakerSnapshotFields,
   bootstrapFeedBreakerConfigs,
@@ -394,7 +397,7 @@ indexer.onEvent(
     // makes a warmed exact-block result look absent during processing.
     const requestMedianTimestamp = poolIds.length > 0;
     const medianTimestampPromise = requestMedianTimestamp
-      ? context.effect(medianTimestampEffect, {
+      ? context.effect(medianTimestampEffectForChain(event.chainId), {
           chainId: event.chainId,
           rateFeedID,
           blockNumber,
@@ -547,7 +550,7 @@ indexer.onEvent(
     // module-local state that disappears across hosted workers or restarts.
     const requestMedianTimestamp = poolIds.length > 0;
     const medianTimestampPromise = requestMedianTimestamp
-      ? context.effect(medianTimestampEffect, {
+      ? context.effect(medianTimestampEffectForChain(event.chainId), {
           chainId: event.chainId,
           rateFeedID,
           blockNumber,

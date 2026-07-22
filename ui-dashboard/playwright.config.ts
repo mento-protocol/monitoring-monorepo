@@ -2,16 +2,30 @@ import { defineConfig, devices } from "@playwright/test";
 import { unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  FIXTURE_DIST_DIR,
+  FIXTURE_HASURA_PORT,
+} from "./scripts/fixture-constants.mjs";
 
 const nextPort = Number(process.env.PLAYWRIGHT_NEXT_PORT ?? 3210);
-const fixturePort = Number(process.env.PLAYWRIGHT_FIXTURE_PORT ?? 3211);
+// Fixed, not env-overridable: the fixture Hasura URL is inlined into the
+// client bundle at build time (see scripts/fixture-build.mjs), so the server
+// must answer on the exact port the build baked in. run-browser-tests.mjs
+// enforces this before Playwright loads this config; a direct `playwright
+// test` invocation gets the same guarantee here.
+const fixturePort = FIXTURE_HASURA_PORT;
 const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
 const nextUrl = `http://127.0.0.1:${nextPort}`;
+// The fixture Hasura server listens on a fixed port baked into the build, so a
+// healthy one left over from a prior run (or a sibling worktree) is safe to
+// reuse rather than hard-fail on. Opt out with PLAYWRIGHT_REUSE_FIXTURE_SERVER=false.
 const reuseFixtureServer =
-  process.env.PLAYWRIGHT_REUSE_FIXTURE_SERVER === "true";
+  process.env.PLAYWRIGHT_REUSE_FIXTURE_SERVER !== "false";
+// Browser tests serve a production `next build` via `next start` (the runner
+// sets NEXT_DIST_DIR=.next-fixture), not a `next dev` server.
 const nextCommand =
   process.env.PLAYWRIGHT_NEXT_COMMAND?.replaceAll("{port}", String(nextPort)) ??
-  `pnpm dev --hostname 127.0.0.1 --port ${nextPort}`;
+  `pnpm exec next start --hostname 127.0.0.1 --port ${nextPort}`;
 const nextTimeout = Number(process.env.PLAYWRIGHT_NEXT_TIMEOUT_MS ?? 120_000);
 const fixedWeekendServerClock = pathToFileURL(
   resolve("tests/browser/fixtures/fixed-weekend-server-clock.mjs"),
@@ -100,8 +114,11 @@ export default defineConfig({
       command: nextCommand,
       env: {
         NODE_OPTIONS: nextServerNodeOptions,
-        NEXT_PUBLIC_HASURA_URL: `${fixtureUrl}/graphql`,
-        NEXT_PUBLIC_BROWSER_TEST_FIXTURES: "true",
+        // Serve the fixture build in FIXTURE_DIST_DIR. NEXT_PUBLIC_* vars are
+        // NOT set here: they're build-inlined by scripts/fixture-build.mjs
+        // and already baked into this dist dir, so setting them for `next
+        // start` would be a no-op.
+        NEXT_DIST_DIR: FIXTURE_DIST_DIR,
         NEXT_TELEMETRY_DISABLED: "1",
       },
       url: nextUrl,

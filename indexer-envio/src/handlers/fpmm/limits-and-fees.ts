@@ -14,7 +14,7 @@ import {
   tradingLimitStateFromEntity,
 } from "../../tradingLimits.js";
 import {
-  medianTimestampEffect,
+  medianTimestampEffectForChain,
   rebalancingStateEffect,
 } from "../../rpc/effects.js";
 import {
@@ -117,7 +117,7 @@ async function resolveThresholdRecompute(args: {
       blockNumber: args.blockNumber,
     }),
     rateFeedID
-      ? args.context.effect(medianTimestampEffect, {
+      ? args.context.effect(medianTimestampEffectForChain(args.chainId), {
           chainId: args.chainId,
           rateFeedID,
           blockNumber: args.blockNumber,

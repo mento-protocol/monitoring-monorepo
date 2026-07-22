@@ -7,6 +7,10 @@ const swrCacheBuildSalt =
   "dev";
 
 const nextConfig: NextConfig = {
+  // Browser tests build a fixture-mode app into `.next-fixture` (see
+  // `scripts/fixture-build.mjs`) so it never clobbers the production `.next`
+  // that `size-limit` measures. `next start` reads the same env to serve it.
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   reactCompiler: {
     compilationMode: "annotation",
   },

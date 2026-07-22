@@ -32,6 +32,11 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
 
 - Block-keyed RPC caches must be bounded with an LRU or block-height eviction;
   never retain one entry per block in an unbounded `Map`.
+- Envio stores rate-limit state on each created effect object. In the multichain
+  indexer, a provider-specific floor or burst policy must use a chain/provider-
+  scoped effect object; never apply one chain's RPC limit to an effect shared by
+  every chain. Keep preload and processing on the same selected object so
+  identical-input deduplication still works.
 - Envio V3 runs each handler in a concurrent preload pass and then an ordered
   processing pass. Any direct `context.effect(...)` whose key can be derived
   before writes must be requested before or inside the positive

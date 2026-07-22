@@ -205,6 +205,11 @@ Notes:
   their exact-block median timestamp remains unavailable after transient retry
   and fallback. A caught-up deployment with those historical reads missing is
   tainted and requires a clean replay.
+- **Effect rate limits are global to each created effect object.** A provider-
+  specific cap in this multichain indexer must be routed through distinct
+  chain/provider-scoped effect objects. Keep preload and processing on the same
+  selected object so Envio still deduplicates identical inputs; never let one
+  chain's public-tier floor throttle every chain.
 - **Version drift is common around V3 RCs.** Check the installed CLI and package before relying on older docs, memory, or notes; do not reintroduce V2-only fields such as `preload_handlers:`.
 - Development-plan retention and quota rules change independently of this
   repo. Check Envio's current hosted deployment/billing pages instead of
