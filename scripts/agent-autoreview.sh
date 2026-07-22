@@ -3082,8 +3082,23 @@ attested_helper_runtime_manifest=""
 
 # Bound each automatic-lookup gh call (and the multi-call feedback capture) so a
 # hung GitHub CLI cannot stall autoreview forever. Overridable for tests.
+#
+# Validate the overrides here rather than trusting them into run_with_deadline:
+# its `[[ "$waited" -lt "$deadline" ]]` loop evaluates $deadline as arithmetic,
+# and under this script's `set -u` a non-numeric value (e.g. a typo'd
+# AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS=foo) aborts the subshell there -- after
+# the job has already been backgrounded -- leaving it orphaned instead of
+# bounded.
 gh_lookup_deadline_seconds="${AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS:-60}"
+if ! [[ "$gh_lookup_deadline_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  echo "agent:autoreview: AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS='$gh_lookup_deadline_seconds' is not a positive integer; using default 60s" >&2
+  gh_lookup_deadline_seconds=60
+fi
 feedback_capture_deadline_seconds="${AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS:-120}"
+if ! [[ "$feedback_capture_deadline_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  echo "agent:autoreview: AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS='$feedback_capture_deadline_seconds' is not a positive integer; using default 120s" >&2
+  feedback_capture_deadline_seconds=120
+fi
 
 # Unify per-stage timing between the wrapper and the helper. When a runtime-
 # changing PR is reviewed from a separate trusted checkout, repo_root names that
