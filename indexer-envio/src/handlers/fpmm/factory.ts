@@ -17,7 +17,7 @@ import {
   decodeInvertRateFeedEffectResult,
   feesEffect,
   invertRateFeedEffect,
-  medianTimestampEffect,
+  medianTimestampEffectForChain,
   numReportersEffect,
   rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
@@ -224,7 +224,7 @@ indexer.onEvent(
           blockNumber,
         }),
         // preload-effect-exempt: one deployment-time median lookup per pool.
-        context.effect(medianTimestampEffect, {
+        context.effect(medianTimestampEffectForChain(event.chainId), {
           chainId: event.chainId,
           rateFeedID,
           blockNumber,

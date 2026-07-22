@@ -233,6 +233,29 @@ create an issue before deferring a valid follow-up, warn when non-test scope
 approaches twice the baseline, and pause for reclassification after two
 review-triggered patch cycles instead of starting a third automatically.
 
+**Stage timing and gh-lookup deadlines.** Both the wrapper and the helper
+append one best-effort JSON line per stage (`target-selection`, `bundle-prep`,
+`engine-invocation` from the helper; `prepare-bundle`, `verification` from the
+wrapper) to `.tmp/agent-autoreview/durations.jsonl` (gitignored), each shaped
+`{"ts","stage","seconds","mode"}`. `AGENT_AUTOREVIEW_DURATIONS_DIR` overrides
+that directory; `AGENT_AUTOREVIEW_STAGE_SUMMARY` (any non-empty value) also
+echoes a filterable `agent:autoreview: stage-timing ...` line per stage to
+stderr — off by default so it never violates the reviewer-cleanliness stderr
+contract. Logging failure never aborts or fails a run. Automatic `gh`-based PR
+lookups for base-branch detection and `--feedback-pr auto` resolution are
+bounded by `AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS` (default 60s); the separate
+multi-call PR feedback capture is bounded by its own
+`AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS` (default 120s, higher because it
+runs several GitHub calls in one pass). Either way a hung `gh` process cannot
+stall autoreview indefinitely; a lookup that exceeds its deadline fails closed
+like any other lookup error. The wrapper's
+own `gh`/subprocess deadlines (`run_with_deadline`) run the command in its own
+process group and escalate `SIGTERM` then `SIGKILL` on timeout or on the
+wrapper itself being interrupted; the helper's `gh` calls (`spawnSync`) use
+`SIGKILL` directly, since a synchronous child-process call blocks until the
+child actually exits and a `SIGTERM`-ignoring child would otherwise hang it
+despite the timeout.
+
 This adapter uses the repo-local helper at `scripts/agent-autoreview.mjs` and
 keeps the repo's branch-local target: merge-base-to-`HEAD` commits plus current
 tracked and untracked work. It includes deterministic Mento checks and selected

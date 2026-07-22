@@ -1,4 +1,4 @@
-<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Mento v3 Envio HyperIndex Indexer
 
@@ -25,7 +25,7 @@ event list; the table highlights the main monitoring surfaces.
 | FPMM (pool)           | `Swap`, `Mint`, `Burn`, `Transfer`, `UpdateReserves`, `Rebalanced`, `TradingLimitConfigured`, `LiquidityStrategyUpdated`, `LPFeeUpdated`, `ProtocolFeeUpdated`, `RebalanceIncentiveUpdated`, `RebalanceThresholdUpdated` |
 | VirtualPool           | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`                                                                                                                                                                   |
 | VirtualPoolFactory    | `VirtualPoolDeployed`, `PoolDeprecated`                                                                                                                                                                                  |
-| SortedOracles         | `OracleAdded`, `OracleRemoved`, `OracleReported`, `MedianUpdated`, `ReportExpirySet`, `TokenReportExpirySet`                                                                                                             |
+| SortedOracles         | `OracleAdded`, `OracleRemoved`, `OracleReported`, `OracleReportRemoved`, `MedianUpdated`, `ReportExpirySet`, `TokenReportExpirySet`                                                                                      |
 | BiPoolManager         | `ExchangeCreated`, `ExchangeDestroyed`, `BucketsUpdated`, `SpreadUpdated`                                                                                                                                                |
 | OpenLiquidityStrategy | `PoolAdded`, `PoolRemoved`, `LiquidityMoved`, `RebalanceCooldownSet`                                                                                                                                                     |
 | ERC20FeeToken         | `Transfer` (dynamically registered from FPMMDeployed events)                                                                                                                                                             |
@@ -39,7 +39,7 @@ event list; the table highlights the main monitoring surfaces.
 
 | Entity group            | Description                                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `TradingLimit`                                                                                                            |
+| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `OracleFeedState`, `OracleExpiryState`, `TradingLimit`                                                                    |
 | Pool strategies         | `PoolLiquidityStrategy` (authoritative active many-to-many registry; `Pool.rebalancerAddress` is compatibility-only)                                                            |
 | Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                      |
 | Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                          |
@@ -114,8 +114,11 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
   use `ENVIO_RPC_URL_11142220`, so a full provider override sets both.
 - Polygon dRPC transports retain batching with a three-call cap. Transient
   rate-limit and HTTP 5xx errors retry and use a same-block fallback when one is
-  configured. Tracked OracleReported and MedianUpdated events reject a missing
-  exact-block median timestamp so a later event cannot hide replay corruption.
+  configured. A tracked feed bootstraps timestamps plus raw expiry at the parent
+  block when existing pool state predates the event, or at block close otherwise.
+  Missing or malformed data fail before writes. Later events update
+  `OracleFeedState` and `OracleExpiryState` in log order; zero token expiry uses
+  the persisted global fallback. This removes per-event archive reads.
 - Hasura must use port 8080. Envio's startup liveness URL is hard-coded to that
   port, so a different `HASURA_EXTERNAL_PORT` stalls startup. All configs also
   share Docker project `generated`; run only one local indexer at a time.
@@ -284,21 +287,41 @@ readiness. The verifier must pass the canonical Polygon FPMM feed/expiry,
 oracle-anchor, snapshot-cursor, and health-counter checks before promotion.
 It also reads `config/replay-integrity.json` from the deployed commit. That
 versioned marker is the commit-scoped proof that the candidate was replayed by
-code enforcing the exact-median fail-closed invariant; a candidate whose commit
-lacks the required version is never promotion-compatible even if later rows
-look healthy. Bump a marker only in the same change as the new replay invariant
-and its handler-level regression tests.
+code enforcing the current oracle-freshness invariant; a candidate whose
+commit lacks the required version is never promotion-compatible even if later
+rows look healthy. Bump a marker only in the same change as the new replay
+invariant and its handler-level regression tests.
 
-Replay-integrity v2 additionally requires effect eligibility to be derived in
-both Envio passes. Never carry preload decisions in any module-scoped mutable
-marker: hosted preload and processing workers, and restarted processes, do not
-share that memory. The code-health invariant follows every `onEvent`, `onBlock`,
-and `contractRegister` callback plus imported helpers. It rejects direct and
+Replay-integrity v3 replaces traffic-scaled exact `medianTimestamp` reads with
+a persisted, event-sourced `OracleFeedState`. On the first tracked
+`OracleReported` or `OracleReportRemoved`, processing performs one
+exact-boundary `getTimestamps` bootstrap and obtains raw/effective expiry
+configuration from that same boundary. It validates the
+reporter/timestamp arrays, computes SortedOracles' upper median, then applies
+`OracleReported` upserts and `OracleReportRemoved` deletions in block/log order.
+`MedianUpdated` consumes that state but does not renew freshness itself. When
+no currently referencing pool row predates the initialization block, exact
+block-close state absorbs that block's logs so a report before deployment or
+feed self-heal cannot be stranded outside a parent snapshot; later blocks use
+log order. `OracleExpiryState` stores raw global/token and effective expiry at
+the same bootstrap boundary, then applies both expiry events by block/log
+cursor. A zero token value derives the persisted global fallback without a
+block-close RPC inside the event, and never-tracked feeds create no state.
+Missing or malformed bootstrap data fails before entity writes. This is a
+full-replay boundary: v1 and v2 candidates are incompatible with v3 even when
+their final pool rows happen to look healthy.
+
+The inherited replay-integrity v2 requirement still applies: effect eligibility
+must be derived independently in both Envio passes. Never carry preload
+decisions in any module-scoped mutable marker because hosted preload and
+processing workers, and restarted processes, do not share that memory. The
+code-health invariant follows every `onEvent`, `onBlock`, and
+`contractRegister` callback plus imported helpers. It rejects direct and
 symbol-propagated assignment, update, deletion, object/record write, and native
 collection/array mutator forms for top-level bindings, including primitive,
-object, array, native-collection, and factory-result state. Returned
-module-state aliases and custom receiver methods that mutate through `this`
-remain a manual-review requirement tracked in
+object, array, native-collection, and factory-result state. Returned module-
+state aliases and custom receiver methods that mutate through `this` remain a
+manual-review requirement tracked in
 [#1462](https://github.com/mento-protocol/monitoring-monorepo/issues/1462).
 Narrow processing-only exceptions require an adjacent `phase-state-exempt`
 reason and tracking issue at each mutation. Rebuildable optimization caches
@@ -325,6 +348,8 @@ See [`STATUS.md`](./STATUS.md) for the static endpoint and deployment reference.
 | ----------------------------------- | ------------------------------------------------------- |
 | `schema.graphql`                    | Entity model                                            |
 | `src/EventHandlers.ts`              | Event → entity mapping                                  |
+| `src/oracleFeedState.ts`            | Pure event-sourced oracle timestamp-list transitions    |
+| `src/handlers/oracleFeedState.ts`   | Feed bootstrap, removal handling, and pool propagation  |
 | `src/helpers.ts`                    | `makePoolId`, `poolIdToAddress` utilities               |
 | `src/rpc.ts` + `src/rpc/`           | RPC read helpers (per-chain clients, effects, fallback) |
 | `config.multichain.mainnet.yaml`    | Production config (Ethereum + Celo + Monad + Polygon)   |
