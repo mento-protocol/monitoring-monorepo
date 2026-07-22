@@ -74,90 +74,37 @@ become eligible when stack-owned deployment inputs changed or a maintainer used
 `terraform-drift.yml` also runs a daily read-only plan for all four CI-applied
 stacks under `org-terraform` impersonation. It never applies changes.
 
-For secret-bearing plan workflows (`alerts-rules.yml`, `alerts-infra.yml`,
-`aegis-terraform.yml`, and `governance-watchdog.yml`), eligible same-repo human
-PR plans intentionally receive validation-safe placeholder `TF_VAR_*` values
-instead of production secrets. Fork, Dependabot, and `sentry-autofix/*` plans
-are skipped. Push/workflow_dispatch plans and environment-gated apply jobs keep
-the real secrets and are the authoritative plan before production mutation.
-The Aegis and governance-watchdog PR plans verify Terraform shape and config
-diffs with placeholders. The alerts-rules PR plan targets
-`terraform_data.pr_plan_secretless_guard` plus the non-secret rule groups that
-route through the global notification policy and do not directly depend on
-Slack/Splunk contact points. It still skips contact points, notification
-policies, and rule groups with direct `notification_settings`; trusted
-main/apply plans remain the source of truth for refreshed Grafana diffs and the
-full notification graph. The alerts-delivery PR plan is also narrower by design:
-it runs init/validate plus a targeted secretless plan for
-`terraform_data.pr_plan_secretless_guard`. The handler module is not yet safe to
-target from PRs because it depends on Slack channel outputs and
-placeholder-backed Secret Manager versions; the sentinel also covers Sentry,
-Slack, QuickNode, and GitHub provider/resource surfaces that perform
-authenticated plan-time checks and cannot run with dummy credentials.
-Reviewers should treat the main-branch re-plan behind `production-infra` as the
-source of truth for alerts-rules and alerts-delivery full-stack diffs,
-third-party provider changes, and all secret value changes.
+Secret-bearing workflows use validation-safe placeholder `TF_VAR_*` values or
+guarded targets for eligible same-repo human PR plans. Fork, Dependabot, and
+`sentry-autofix/*` plans are skipped. Trusted push/dispatch plans and the
+environment-gated apply jobs retain the real secrets and are authoritative for
+full-stack, third-party-provider, and secret-value diffs. In particular,
+alerts-rules and alerts-delivery PR plans are intentionally partial; do not
+interpret them as full production plans.
 See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
-for the current secret classification and migration posture.
+for the exact placeholder and target boundaries.
 
-Routine service deploy workflows use the separate `production-services` GitHub
-Environment. That environment records deploy history and scopes production
-secrets, but should not require routine manual approval; PR review plus
-required CI before merge is the approval path for normal service rollouts.
-
-When one of those CI-applied stacks plans real changes on `main`, the plan job
-posts a Slack apply-pending summary before the environment-gated apply job waits
-for approval, but only for stack-owned deployment-input changes or explicit
-manual dispatches.
-The summary links back to the merged PR when GitHub can associate the main
-commit with a PR, and lists Terraform resource actions by resource type plus
-exact resource address. Attribute values are intentionally omitted from Slack;
-use the workflow run for the full sanitized plan. The default destination is
-`#deploys`; the platform stack manages the repository variable
-`TERRAFORM_APPLY_SLACK_CHANNEL` (`terraform_apply_slack_channel` tfvar,
-`terraform/github-variables.tf`) — set the tfvar and apply to route these
-summaries to another channel. See
-[`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md)
-for the GitHub Slack App subscription, apply-pending summary, queue watcher,
-and failure-notifier relationship.
-
-`Terraform Deploy Queue Watch` runs daily and warns in the same Terraform apply
-Slack channel when one of the production Terraform deploy workflows has been
-queued, pending, requested, or waiting on `main` for at least 60 minutes with
-zero started jobs. The watcher is observer-only: it does not share the deploy
-workflows' `*-deploy` concurrency groups, cancel runs, approve environments, or
-change apply ordering.
-
-If a post-merge Terraform deploy workflow stays `pending` with no jobs, start
-from the watcher alert or inspect that workflow's run queue directly before
-waiting on the current run. Older `waiting` or `pending` runs in the same deploy
-concurrency group can block the current merge commit. Confirm the older runs are
-obsolete, cancel them, then watch the current run until both plan and apply reach
-a terminal state. If approval was granted before the apply job existed, GitHub
-can require a fresh `production-infra` approval after the plan creates the apply
-job.
-
-If an older queued or waiting run is intentionally approved because it carries
-needed state reconciliation, keep watching the same deploy workflow until every
-queued `main` run reaches a terminal state. Later queued jobs can pass the
-`production-infra` gate without an obvious second prompt, so do not call a drift
-issue fixed from the first successful apply alone. Verify the live resource and
-dispatch `terraform-drift.yml` from `main` before closing the drift issue.
+For a real `main` plan, the workflow posts a secretless Slack action summary
+before its apply waits for approval. `Terraform Deploy Queue Watch` warns when
+a production Terraform workflow has had no job start for at least 60 minutes;
+it observes only and never cancels or approves runs. Inspect the whole workflow
+queue: cancel a predecessor only after confirming it is obsolete; otherwise let
+its reconciliation finish. Approval given before the apply job existed may need
+repeating after the plan creates that job. Follow every queued `main` run to a
+terminal state because later runs can pass the gate without an obvious second
+prompt. Never close drift from the first successful apply alone: verify the live
+resource and dispatch `terraform-drift.yml` from `main`. Channel routing and
+notification boundaries live in
+[`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md).
 
 ## Platform GitHub Actions secrets and variables
 
-The manual-apply platform stack owns the repo-level Actions mirrors declared in
-`terraform/github-secrets.tf` and `terraform/github-variables.tf`. Values come
-from platform resources or the gitignored, operator-held tfvars described by
-[`terraform/terraform.tfvars.example`](../terraform/terraform.tfvars.example). Some
-resource-derived mirrors are unconditional; optional provider keys and Sentry
-credentials are `count`-gated on non-empty inputs. Clearing a count-gated input
-can therefore plan deletion of the live Actions secret or variable.
-
-Review every planned secret deletion. `CLAUDE_CODE_OAUTH_TOKEN` is the only
-current mirror with `prevent_destroy` because it adopts a shared credential
-used outside the Sentry pipeline. Do not assume the other optional mirrors have
-that protection.
+The manual-apply platform stack owns repository Actions mirrors in
+`terraform/github-secrets.tf` and `terraform/github-variables.tf`; values come
+from platform resources or operator-held tfvars. Optional mirrors are
+`count`-gated, so clearing an input can plan deletion. Review every planned
+secret deletion: only `CLAUDE_CODE_OAUTH_TOKEN` currently has
+`prevent_destroy`.
 
 The Sentry triage, projection, autofix, and archive credentials and their three
 kill switches are routed by
@@ -181,9 +128,8 @@ Keep exactly two production GitHub Environments for this repository:
   `main` deploys do not require an extra human approval.
 
 Do not recreate the retired `Production`/`production` environments. GitHub can
-auto-create an unprotected environment when a workflow first references a
-missing name, so create any future environment with its reviewed protection
-before merging that reference.
+auto-create an unprotected environment for a new workflow reference, so review
+and create any future environment protection before merging that reference.
 
 Never move or recreate environment secrets with CLI commands. Use the owning
 IaC or documented owning integration; if neither exists, stop and establish an
@@ -199,16 +145,8 @@ removal procedure. Current ownership is:
   policy, contact points, message templates, and mute timings.
 - `aegis` owns only the Aegis Grafana folder and Aegis dashboard.
 
-Use each stack's maintained input template instead of copying a partial list
-from this overview:
-
-- [`terraform/terraform.tfvars.example`](../terraform/terraform.tfvars.example)
-- [`alerts/rules/terraform.tfvars.example`](../alerts/rules/terraform.tfvars.example)
-- [`alerts/infra/terraform.tfvars.example`](../alerts/infra/terraform.tfvars.example)
-- [`governance-watchdog/infra/terraform.tfvars.example`](../governance-watchdog/infra/terraform.tfvars.example)
-- `aegis/terraform` currently requires only
-  `grafana_service_account_token`; see
-  [`aegis/terraform/variables.tf`](../aegis/terraform/variables.tf).
+Use each stack's maintained `terraform.tfvars.example` (or
+`aegis/terraform/variables.tf`) instead of copying inputs from this overview.
 
 Verify ownership and drift with:
 
