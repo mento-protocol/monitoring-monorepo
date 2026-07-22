@@ -130,6 +130,8 @@ const attestedNodeLibraryPathRecords = new Map();
 let trustedExecutableCleanupRegistered = false;
 let pendingTerminationSignal = null;
 let reviewerForceKillTimer = null;
+const stageTimings = [];
+let stageDurationsContext = null;
 
 function usage() {
   console.log(`Usage:
@@ -1887,6 +1889,19 @@ function githubRepositorySlug(repo) {
   return `${match[1]}/${match[2]}`;
 }
 
+// Bound each automatic PR-base gh lookup so a hung GitHub CLI cannot stall
+// autoreview indefinitely; a timeout fails closed like any other lookup error.
+// Overridable (seconds) so tests can exercise the timeout path quickly.
+const GH_LOOKUP_TIMEOUT_MS = (() => {
+  const configured = Number.parseInt(
+    process.env.AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS || "",
+    10,
+  );
+  return Number.isFinite(configured) && configured > 0
+    ? configured * 1000
+    : 60_000;
+})();
+
 function detectPrBase(repo, branch) {
   if (!branch) return null;
   const gh = resolveTrustedCommand("gh", repo, { required: false });
@@ -1916,8 +1931,18 @@ function detectPrBase(repo, branch) {
         env,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
+        timeout: GH_LOOKUP_TIMEOUT_MS,
+        killSignal: "SIGTERM",
       },
     );
+    if (
+      repoResult.error?.code === "ETIMEDOUT" ||
+      repoResult.signal === "SIGTERM"
+    ) {
+      throw new Error(
+        `failed to inspect repository owner: gh repo view timed out after ${GH_LOOKUP_TIMEOUT_MS / 1000}s; pass --base explicitly`,
+      );
+    }
     if (repoResult.error) {
       throw new Error(
         `failed to inspect repository owner: ${repoResult.error.message}`,
@@ -1963,8 +1988,15 @@ function detectPrBase(repo, branch) {
         env,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
+        timeout: GH_LOOKUP_TIMEOUT_MS,
+        killSignal: "SIGTERM",
       },
     );
+    if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGTERM") {
+      throw new Error(
+        `failed to inspect PR base: gh pr list timed out after ${GH_LOOKUP_TIMEOUT_MS / 1000}s; pass --base explicitly`,
+      );
+    }
     if (result.error) {
       throw new Error(`failed to inspect PR base: ${result.error.message}`);
     }
@@ -4180,6 +4212,53 @@ function assertReviewSourceState(
   assertSourceSnapshot(repo, expectedSource, target, message);
 }
 
+function recordStageDuration(stage, startedAtMs) {
+  stageTimings.push({ stage, seconds: (Date.now() - startedAtMs) / 1000 });
+}
+
+// Stage-duration logging is best-effort observability; it mirrors the gate's
+// `.tmp/agent-<tool>/durations.jsonl` convention and must never fail the review.
+function flushStageDurations() {
+  if (!stageDurationsContext || stageTimings.length === 0) return;
+  const { repo, mode } = stageDurationsContext;
+  const timings = stageTimings.splice(0);
+  const ts = new Date().toISOString();
+  try {
+    const dir =
+      process.env.AGENT_AUTOREVIEW_DURATIONS_DIR ||
+      path.join(repo, ".tmp", "agent-autoreview");
+    mkdirSync(dir, { recursive: true });
+    const lines = timings
+      .map((entry) =>
+        JSON.stringify({
+          ts,
+          stage: entry.stage,
+          seconds: entry.seconds,
+          mode,
+        }),
+      )
+      .join("\n");
+    writeFileSync(path.join(dir, "durations.jsonl"), `${lines}\n`, {
+      flag: "a",
+    });
+  } catch {
+    // Never let logging failure abort or fail the review.
+  }
+  // The durable JSONL above is always written; the human-readable stderr
+  // summary is opt-in so it cannot leak into the wrapper's strict reviewer-
+  // cleanliness stderr contract.
+  if (!process.env.AGENT_AUTOREVIEW_STAGE_SUMMARY) return;
+  const summary = timings
+    .map(
+      (entry) =>
+        `agent:autoreview: stage-timing   ${entry.stage} ${entry.seconds.toFixed(2)}s`,
+    )
+    .join("\n");
+  console.error(
+    `agent:autoreview: stage-timing summary (mode=${mode}):\n${summary}`,
+  );
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === "--serialize-untracked-file") {
@@ -4203,6 +4282,8 @@ async function main() {
     );
     return 0;
   }
+  stageDurationsContext = { repo, mode: args.mode };
+  const targetSelectionStartedAt = Date.now();
   const selectionState = targetSelectionState(repo);
   const targetSelectionSourceSnapshot = args.dryRun
     ? null
@@ -4239,6 +4320,8 @@ async function main() {
       "source changed while the review target was being selected; rerun autoreview against the updated tree",
     );
   }
+  recordStageDuration("target-selection", targetSelectionStartedAt);
+  const bundlePrepStartedAt = Date.now();
   const guardTargetSelectionDuringReview = args.mode === "auto";
   const branch = selectionState.branch || "detached";
 
@@ -4263,6 +4346,7 @@ async function main() {
       guardTargetSelectionDuringReview,
       "source changed while the review target was being selected; rerun autoreview against the updated tree",
     );
+    recordStageDuration("bundle-prep", bundlePrepStartedAt);
     console.log("autoreview clean: no changed files for selected target");
     return 0;
   }
@@ -4346,9 +4430,11 @@ async function main() {
           2,
         ),
       );
+      recordStageDuration("bundle-prep", bundlePrepStartedAt);
       return 0;
     }
   }
+  recordStageDuration("bundle-prep", bundlePrepStartedAt);
 
   if (args.engine !== "local" && prompts.length > 1) {
     throw new Error(
@@ -4357,6 +4443,7 @@ async function main() {
   }
 
   let report;
+  const engineStartedAt = Date.now();
   if (args.engine === "local") {
     assertReviewSourceState(
       repo,
@@ -4398,6 +4485,7 @@ async function main() {
       "source changed during semantic review; rerun autoreview against the updated tree",
     );
   }
+  recordStageDuration("engine-invocation", engineStartedAt);
 
   if (args.bundleOutput) {
     const displayedBundleOutput = args.bundleOutputDisplay || args.bundleOutput;
@@ -4436,4 +4524,7 @@ entrypoint()
     }
     process.exitCode = 1;
   })
-  .finally(finishPendingProcessTermination);
+  .finally(() => {
+    flushStageDurations();
+    finishPendingProcessTermination();
+  });

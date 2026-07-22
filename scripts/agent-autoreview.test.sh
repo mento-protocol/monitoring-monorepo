@@ -1220,7 +1220,8 @@ expect_empty_stderr() {
   local unexpected
   unexpected="$(
     grep -v \
-      '^agent:autoreview: leaving external-command runtime because an explicit helper may have surviving same-UID writers: ' \
+      -e '^agent:autoreview: leaving external-command runtime because an explicit helper may have surviving same-UID writers: ' \
+      -e '^agent:autoreview: stage-timing' \
       "$stderr" || true
   )"
   if [[ -n "$unexpected" ]]; then
@@ -1346,6 +1347,9 @@ init_review_repo() {
   git -C "$review_repo" init -b main >/dev/null
   git -C "$review_repo" config user.name "Agent Test"
   git -C "$review_repo" config user.email "agent-test@example.invalid"
+  # Match the real repo: the gitignored scratch dir that receives best-effort
+  # stage-duration logs must never enter the reviewed source enumeration.
+  printf '%s\n' '.tmp/' >>"$review_repo/.git/info/exclude"
 }
 
 commit_review_repo() {
@@ -3539,6 +3543,52 @@ GH
   expect_stderr_contains "open PR for head branch feature is not owned by mento-protocol"
 }
 
+run_gh_lookup_timeout_regression() {
+  local review_repo="$tmp_dir/gh-lookup-timeout"
+  local fake_bin="$tmp_dir/gh-lookup-timeout-bin"
+  init_review_repo "$review_repo"
+  git -C "$review_repo" remote add origin \
+    https://github.com/mento-protocol/monitoring-monorepo.git
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'feature\n' >"$review_repo/feature.txt"
+  commit_review_repo "$review_repo" feature
+  mkdir "$fake_bin"
+  cat >"$fake_bin/gh" <<GH
+#!/usr/bin/env bash
+git rev-parse --show-toplevel >/dev/null || exit 81
+if [[ "\$1" == "repo" && "\$2" == "view" ]]; then
+  printf '%s\n' '{"owner":{"login":"mento-protocol"}}'
+  exit 0
+fi
+if [[ "\$1" == "pr" && "\$2" == "list" ]]; then
+  exec sleep 3600
+fi
+exit 82
+GH
+  chmod +x "$fake_bin/gh"
+
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$fake_bin:$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS=1" \
+      "$repo_root/scripts/agent-autoreview.sh" \
+      --engine local --dry-run >"$stdout" 2>"$stderr"
+  ) || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'hung gh pr list lookup unexpectedly succeeded\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains "gh pr list timed out after 1s"
+}
+
 run_target_selection_drift_regression() {
   local review_repo="$tmp_dir/target-selection-drift"
   local fake_bin="$tmp_dir/target-selection-drift-bin"
@@ -4045,6 +4095,84 @@ run_frozen_checklist_provenance_regression() {
     "$local_bundle/patches/unstaged.diff" \
     "malicious local checklist injection"
   expect_empty_stderr
+}
+
+run_stage_timing_manifest_regression() {
+  local review_repo="$tmp_dir/stage-timing-manifest"
+  local bundle_dir="$tmp_dir/stage-timing-manifest-bundle"
+  local durations_dir="$tmp_dir/stage-timing-manifest-durations"
+  local counter_file="$tmp_dir/stage-timing-manifest-counter"
+  local durations_file="$durations_dir/durations.jsonl"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c release >/dev/null 2>&1
+  printf 'release\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" release
+  git -C "$review_repo" update-ref refs/remotes/origin/release HEAD
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'feature change\n' >"$review_repo/feature.txt"
+  commit_review_repo "$review_repo" feature
+
+  : >"$counter_file"
+  : >"$stdout"
+  : >"$stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AGENT_AUTOREVIEW_DURATIONS_DIR=$durations_dir" \
+      "AGENT_AUTOREVIEW_MANIFEST_COUNTER_FILE=$counter_file" \
+      "$adapter_wrapper" \
+      --prepare-bundle-dir "$bundle_dir" \
+      --mode branch \
+      --base origin/release \
+      --engine local >"$stdout" 2>"$stderr"
+  )
+  cleanup_retained_test_command_runtimes
+
+  # Item 1: every stage-duration line is parseable JSON with the agreed keys,
+  # and both the wrapper stage and the helper stages were recorded.
+  expect_file_exists "$durations_file"
+  if ! "$node_bin" -e '
+    const fs = require("node:fs");
+    const lines = fs
+      .readFileSync(process.argv[1], "utf8")
+      .split("\n")
+      .filter((line) => line.length > 0);
+    if (lines.length === 0) throw new Error("no duration lines written");
+    const stages = new Set();
+    for (const line of lines) {
+      const record = JSON.parse(line);
+      for (const key of ["ts", "stage", "seconds", "mode"]) {
+        if (!(key in record)) throw new Error("missing key " + key);
+      }
+      if (typeof record.seconds !== "number") {
+        throw new Error("seconds must be numeric");
+      }
+      stages.add(record.stage);
+    }
+    if (!stages.has("prepare-bundle")) throw new Error("missing prepare-bundle stage");
+    if (!stages.has("target-selection")) throw new Error("missing target-selection stage");
+    if (!stages.has("bundle-prep")) throw new Error("missing bundle-prep stage");
+  ' "$durations_file"; then
+    printf 'stage-duration log was not valid\nlog:\n%s\n' \
+      "$(cat "$durations_file")" >&2
+    exit 1
+  fi
+
+  # Item 2: the staging tree is hashed exactly once per distinct (tree,moment):
+  # pre/post helper evidence + pre/post source-validation snapshot = 4, with the
+  # publication manifest reused from the post-snapshot moment (no re-hash).
+  local staging_hashes
+  staging_hashes="$(grep -c '\.agent-autoreview-context\.' "$counter_file" || true)"
+  if [[ "$staging_hashes" -ne 4 ]]; then
+    printf 'expected staging tree hashed 4 times, saw %s\ncounter:\n%s\n' \
+      "$staging_hashes" "$(cat "$counter_file")" >&2
+    exit 1
+  fi
 }
 
 run_prepared_unsupported_path_regressions() {
@@ -5562,6 +5690,7 @@ run_target_selection_family() {
   run_branch_local_deleted_reference_regression
   run_branch_local_deleted_reference_fixed_regression
   run_pr_base_detection_regression
+  run_gh_lookup_timeout_regression
   run_target_selection_drift_regression
   run_dry_run_unresolved_ref_regression
   run_dirty_source_drift_regression
@@ -5589,6 +5718,7 @@ run_runtime_trust_family() {
 
 run_bundle_integrity_family() {
   run_frozen_checklist_provenance_regression
+  run_stage_timing_manifest_regression
   run_prepared_unsupported_path_regressions
   run_frozen_checklist_symlink_regression
   run_prepared_untracked_symlink_regression
