@@ -114,15 +114,11 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
   use `ENVIO_RPC_URL_11142220`, so a full provider override sets both.
 - Polygon dRPC transports retain batching with a three-call cap. Transient
   rate-limit and HTTP 5xx errors retry and use a same-block fallback when one is
-  configured. The first tracked `OracleReported` or `OracleReportRemoved` for a
-  feed bootstraps its active reporter timestamp list at an exact boundary:
-  parent block when referencing pool state predates the block, or exact
-  block-close timestamps and expiry when it does not. Missing or malformed
-  data fail that event before writes. Later blocks update persisted
-  `OracleFeedState` in log order, so replay traffic does not issue one
-  `medianTimestamp` archive read per event. Raw global/token expiry is likewise
-  bootstrapped once into `OracleExpiryState`; both expiry events then update it
-  in log order, and a zero token value derives the persisted global fallback.
+  configured. A tracked feed bootstraps timestamps plus raw expiry at the parent
+  block when existing pool state predates the event, or at block close otherwise.
+  Missing or malformed data fail before writes. Later events update
+  `OracleFeedState` and `OracleExpiryState` in log order; zero token expiry uses
+  the persisted global fallback. This removes per-event archive reads.
 - Hasura must use port 8080. Envio's startup liveness URL is hard-coded to that
   port, so a different `HASURA_EXTERNAL_PORT` stalls startup. All configs also
   share Docker project `generated`; run only one local indexer at a time.
