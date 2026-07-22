@@ -196,7 +196,7 @@ export const LABEL_DEFINITIONS = [
     name: "sentry:fix-refused",
     color: "bfdadc",
     description:
-      "Autofix declined to open a PR (no change or guard-refused); remove the label to retry (ADR 0036)",
+      "Autofix declined to open a PR (no change/guard-refused); remove to retry (ADR 0036 Phase 2b)",
   },
   {
     name: "sentry:approved-archive",
