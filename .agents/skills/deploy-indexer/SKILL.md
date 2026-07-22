@@ -69,7 +69,7 @@ In parallel:
   git fetch "$CANONICAL_REMOTE" main:refs/remotes/"$CANONICAL_REMOTE"/main
   ```
   Capture that fetched ref as `CANONICAL_MAIN_REF`. Stop if no verified remote
-  exists. In a Claude cloud session `gh repo view` cannot run
+  exists. In a Claude cloud session without the capability-gate exception `gh repo view` cannot run
   ([`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md));
   verify by content: the remote URL's repository path must end in
   `mento-protocol/monitoring-monorepo` (the git credential proxy embeds the

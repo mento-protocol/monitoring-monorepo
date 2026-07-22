@@ -85,8 +85,8 @@ paths at this runtime-changing checkout.
    verification step.
 6. For PR work, do not call the PR clean until
    `pnpm pr:ready-state --pr <number> --json` is ready. In a Claude cloud
-   session the probe cannot run (gh's repo API is platform-blocked); run the
-   MCP emulation checklist from the `babysit-pr` skill instead, label the
-   result MCP-emulated rather than probe-verified, and leave the
-   probe-verified all-clear to a gh-capable surface
+   session without the REST + GraphQL + `--slurp` capability gate the probe
+   cannot run; run the MCP emulation checklist from the `babysit-pr` skill
+   instead, label the result MCP-emulated rather than probe-verified, and
+   leave the probe-verified all-clear to a gh-capable surface
    (`docs/notes/github-tooling-surfaces.md`).

@@ -26,15 +26,17 @@ skills link here instead of duplicating it.
 
 ## Surface detection
 
-1. `CLAUDE_CODE_REMOTE` is set → Claude cloud session → MCP-first. This is the
-   same gate `scripts/claude-code-web-setup.sh` uses.
+1. `CLAUDE_CODE_REMOTE` is set → Claude cloud session → MCP-first, unless
+   the variant passes the full capability gate in step 3 — then gh-first
+   applies with `--repo <owner/name>` on PR-scoped calls. This is the same
+   gate `scripts/claude-code-web-setup.sh` and `.claude/babysit-pr.sh` use.
 2. Otherwise → local (or Codex Cloud) → gh-first.
-3. Runtime confirmation when in doubt: run
-   `gh api repos/<owner>/<repo> --jq .full_name`. **Do not use
+3. The capability gate: a repo-scoped `gh api repos/<owner>/<repo>` call, a
+   minimal GraphQL query (`gh api graphql -f query='query{viewer{login}}'`),
+   and `gh api --slurp` support must all succeed. **Do not use
    `gh auth status` or `/user` reachability as the signal** — in Claude cloud
    sessions the proxy serves `/user` and `/rate_limit` (so `gh auth status`
    succeeds) while every `/repos/*` path and GraphQL query is still blocked.
-   Only a successful repo-scoped call proves gh-backed flows can work.
 
 ## Why gh cannot work in Claude cloud sessions
 
@@ -86,7 +88,8 @@ Do not build a gh-over-MCP shim; the skills document the two native paths.
 
 `pnpm issue:claim`, `issue:review`, and `issue:release` shell out to gh —
 including `gh api graphql` for Project #12 status and the Claim ID ownership
-field — so they cannot run in Claude cloud sessions. The cloud fallback is a
+field — so they cannot run in Claude cloud sessions absent the
+capability-gate exception. The cloud fallback is a
 partial MCP emulation plus an explicit gh-capable handoff:
 
 1. Perform the label transition with `issue_write` (send the full resulting

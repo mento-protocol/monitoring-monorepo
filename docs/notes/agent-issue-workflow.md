@@ -98,7 +98,8 @@ pnpm issue:board sync
 pnpm issue:board:test
 ```
 
-These helpers shell out to gh and cannot run in Claude cloud sessions; use
+These helpers shell out to gh and cannot run in Claude cloud sessions absent
+the capability-gate exception; use
 the MCP fallback and gh-capable handoff in
 [`github-tooling-surfaces.md`](github-tooling-surfaces.md) there.
 

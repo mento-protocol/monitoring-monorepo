@@ -76,7 +76,7 @@ needing a developer's personal skills present.
 In Claude cloud sessions the platform's GitHub credential proxy blocks gh's
 repo API and GraphQL regardless of tokens or allowlist entries (`gh auth
 status` still passes, so it is not a capability signal), and
-`pnpm pr:ready-state` cannot run. Hosted sessions use the GitHub MCP tools
+`pnpm pr:ready-state` cannot run absent the capability-gate exception. Hosted sessions use the GitHub MCP tools
 plus the `babysit-pr` cloud watch loop; the foreground
 `pnpm pr:ready-state --pr <number> --watch --compact --until-ready` loop
 remains the local fallback when the Claude `Monitor` tool is unavailable.
