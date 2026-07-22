@@ -201,6 +201,132 @@ test("CLI rejects a workflow plus non-canonical note in human and JSON output", 
   }
 });
 
+test("CLI keeps a deleted canonical note full without counting context present", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-delete-test-"));
+  const script = new URL("./review-materiality.mjs", import.meta.url).pathname;
+  const workflow = join(dir, ".github", "workflows", "ci.yml");
+  const note = join(dir, "docs", "notes", "runbook.md");
+
+  try {
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test User"]);
+    mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+    mkdirSync(join(dir, "docs", "notes"), { recursive: true });
+    writeFileSync(workflow, "name: CI\n");
+    writeFileSync(note, contextNote("true"));
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "-m", "base"]);
+
+    writeFileSync(workflow, "name: Updated CI\n");
+    rmSync(note);
+    const result = spawnSync(
+      process.execPath,
+      [script, "--base", "HEAD", "--head", "HEAD", "--json"],
+      { cwd: dir, encoding: "utf8" },
+    );
+
+    assertEqual(result.status, 0);
+    const report = JSON.parse(result.stdout);
+    assertEqual(report.contextUpdateRequired, true);
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.tier,
+      "full",
+    );
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.reason,
+      "canonical agent or operator context",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI uses merge-base canonical metadata across divergent histories", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-materiality-diverge-test-"));
+  const script = new URL("./review-materiality.mjs", import.meta.url).pathname;
+  const workflow = join(dir, ".github", "workflows", "ci.yml");
+  const note = join(dir, "docs", "notes", "runbook.md");
+
+  try {
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "test@example.com"]);
+    git(dir, ["config", "user.name", "Test User"]);
+    mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+    mkdirSync(join(dir, "docs", "notes"), { recursive: true });
+    writeFileSync(workflow, "name: CI\n");
+    writeFileSync(note, contextNote("true"));
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "-m", "merge base"]);
+    const mergeBase = git(dir, ["rev-parse", "HEAD"]).trim();
+
+    git(dir, ["checkout", "-b", "feature"]);
+    writeFileSync(workflow, "name: Feature CI\n");
+    rmSync(note);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-m", "feature deletes runbook"]);
+
+    git(dir, ["checkout", "-b", "named-base", mergeBase]);
+    writeFileSync(note, contextNote("false"));
+    git(dir, ["add", "docs/notes/runbook.md"]);
+    git(dir, ["commit", "-m", "base demotes runbook"]);
+
+    const result = spawnSync(
+      process.execPath,
+      [script, "--base", "named-base", "--head", "feature", "--json"],
+      { cwd: dir, encoding: "utf8" },
+    );
+
+    assertEqual(result.status, 0);
+    const report = JSON.parse(result.stdout);
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.tier,
+      "full",
+    );
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.reason,
+      "canonical agent or operator context",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("canonical base keeps demoted or malformed head notes full", () => {
+  for (const headContent of [
+    contextNote("false"),
+    "---\ncanonical: true\nnot valid metadata\n---\n",
+  ]) {
+    const report = analyzeMateriality({
+      paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
+      readBaseContextFile: () => contextNote("true"),
+      readHeadContextFile: () => headContent,
+    });
+
+    assertEqual(report.tier, "full");
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.tier,
+      "full",
+    );
+    assertEqual(
+      report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+        ?.reason,
+      "canonical agent or operator context",
+    );
+  }
+});
+
 test("malformed canonical note metadata fails closed", () => {
   for (const content of [
     "---\ncanonical: true\n# Missing delimiter\n",
@@ -210,7 +336,8 @@ test("malformed canonical note metadata fails closed", () => {
   ]) {
     const report = analyzeMateriality({
       paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
-      readContextFile: () => content,
+      readBaseContextFile: () => content,
+      readHeadContextFile: () => content,
     });
 
     assertEqual(report.contextUpdatesPresent, false);
@@ -226,13 +353,21 @@ test("malformed canonical note metadata fails closed", () => {
 test("unreadable canonical note metadata fails closed", () => {
   const report = analyzeMateriality({
     paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
-    readContextFile: () => {
+    readBaseContextFile: () => {
+      throw new Error("permission denied");
+    },
+    readHeadContextFile: () => {
       throw new Error("permission denied");
     },
   });
 
   assertEqual(report.contextUpdatesPresent, false);
   assertEqual(report.contextUpdateMissing, true);
+  assertEqual(
+    report.pathSignals.find((item) => item.path === "docs/notes/runbook.md")
+      ?.reason,
+    "non-canonical planning or note document",
+  );
 });
 
 test("recognizes scoped Claude context files as canonical context", () => {
