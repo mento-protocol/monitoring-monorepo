@@ -222,6 +222,7 @@ jobs:
               - scripts/**/*.cjs
               - scripts/**/*.js
               - scripts/**/*.sh
+              - docs/evals/documentation-navigation-*.json
               - .lighthouserc.cjs
               - "**/vitest.hermetic-setup.ts"
               - "**/vitest.config.ts"
@@ -868,6 +869,9 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          # Baseline validation reads source blobs from its claimed pre-baseline
+          # commit so results remain reproducible after later doc changes.
+          fetch-depth: 0
       - uses: ./.github/actions/pnpm-install
       - name: ESLint root scripts
         run: pnpm lint:scripts
@@ -911,6 +915,12 @@ jobs:
         run: pnpm docs:audit --dry-run
       - name: Documentation garden issue automation tests
         run: pnpm docs:garden:test
+      - name: Documentation navigation evaluation tests
+        run: pnpm docs:navigation-eval:test
+      - name: Documentation navigation fixture contract
+        run: pnpm docs:navigation-eval -- --check-fixtures
+      - name: Documentation navigation committed baseline
+        run: pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json
       - name: Agent context budget tests
         run: pnpm agent:context-budget:test
       - name: Enforce agent context budgets
