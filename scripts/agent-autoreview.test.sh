@@ -150,6 +150,58 @@ terminate_suite_process_group() {
   wait "$group_pid" 2>/dev/null || true
 }
 
+process_state_code() {
+  local pid="$1"
+  local ps_bin=""
+  local state
+
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  if [[ -x /bin/ps ]]; then
+    ps_bin=/bin/ps
+  elif [[ -x /usr/bin/ps ]]; then
+    ps_bin=/usr/bin/ps
+  else
+    return 1
+  fi
+  state="$("$ps_bin" -o stat= -p "$pid" 2>/dev/null)" || return 1
+  state="${state#"${state%%[![:space:]]*}"}"
+  [[ -n "$state" ]] || return 1
+  printf '%s\n' "${state:0:1}"
+}
+
+process_is_runnable() {
+  local pid="$1"
+  local state
+
+  # Invalid fixture output must fail closed as a surviving process.
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 0
+  kill -0 "$pid" 2>/dev/null || return 1
+  if state="$(process_state_code "$pid")"; then
+    case "$state" in
+      Z | X)
+        return 1
+        ;;
+    esac
+  fi
+  # If process state cannot be inspected, preserve the existing fail-closed
+  # behavior and only accept an exit that kill(2) can confirm.
+  kill -0 "$pid" 2>/dev/null
+}
+
+wait_for_process_exit_or_zombie() {
+  local pid="$1"
+  local attempts="${2:-100}"
+  local attempt
+
+  for ((attempt = 0; attempt < attempts; attempt++)); do
+    if ! process_is_runnable "$pid"; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  return 1
+}
+
 run_autoreview_test_suite() {
   local jobs=3
   while [[ $# -gt 0 ]]; do
@@ -2364,13 +2416,9 @@ CLAUDE
       run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" --mode local --engine claude --no-tools
   ) &
   fifo_helper_pid=$!
-  for _ in {1..200}; do
-    if ! kill -0 "$fifo_helper_pid" 2>/dev/null; then
-      fifo_completed=1
-      break
-    fi
-    sleep 0.05
-  done
+  if wait_for_process_exit_or_zombie "$fifo_helper_pid" 200; then
+    fifo_completed=1
+  fi
   if [[ "$fifo_completed" -eq 0 ]]; then
     "$node_bin" -e '
       const fs = require("node:fs");
@@ -2749,8 +2797,6 @@ CODEX
   local snapshot_path
   local launched
   local snapshot_unlinked
-  local helper_exited
-  local descendants_exited
   local completion_mode
   local leader_exit_code
   local termination_mode
@@ -2798,7 +2844,7 @@ CODEX
         launched=1
         break
       fi
-      if ! kill -0 "$engine_pid" 2>/dev/null; then
+      if ! process_is_runnable "$engine_pid"; then
         break
       fi
       sleep 0.05
@@ -2825,10 +2871,10 @@ CODEX
         snapshot_unlinked=1
         break
       fi
-      if ! kill -0 "$helper_pid" 2>/dev/null; then
+      if ! process_is_runnable "$helper_pid"; then
         break
       fi
-      if [[ "$scenario" == "claude-probe" ]] && ! kill -0 "$grandchild_pid" 2>/dev/null; then
+      if [[ "$scenario" == "claude-probe" ]] && ! process_is_runnable "$grandchild_pid"; then
         break
       fi
       sleep 0.05
@@ -2839,28 +2885,20 @@ CODEX
       printf '%s credential snapshot remained readable during interruption grace period\n' "$scenario" >&2
       exit 1
     fi
-    if ! kill -0 "$helper_pid" 2>/dev/null; then
+    if ! process_is_runnable "$helper_pid"; then
       kill -KILL "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
       printf '%s helper exited before credential snapshot cleanup was observed\n' "$scenario" >&2
       cat "$engine_capture.stderr" >&2
       exit 1
     fi
-    if [[ "$scenario" == "claude-probe" ]] && ! kill -0 "$grandchild_pid" 2>/dev/null; then
+    if [[ "$scenario" == "claude-probe" ]] && ! process_is_runnable "$grandchild_pid"; then
       kill -KILL "$helper_pid" "$engine_pid" "$child_pid" 2>/dev/null || true
       wait "$engine_pid" 2>/dev/null || true
       printf 'detached probe grandchild exited before credential snapshot cleanup was observed\n' >&2
       exit 1
     fi
     kill -TERM "$helper_pid"
-    helper_exited=0
-    for _ in {1..240}; do
-      if ! kill -0 "$helper_pid" 2>/dev/null; then
-        helper_exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$helper_exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$helper_pid" 240; then
       kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
       wait "$engine_pid" 2>/dev/null || true
       printf '%s helper did not terminate within the signal-cleanup deadline\n' "$scenario" >&2
@@ -2874,15 +2912,7 @@ CODEX
       printf '%s helper exited successfully after SIGTERM\n' "$scenario" >&2
       exit 1
     fi
-    descendants_exited=0
-    for _ in {1..100}; do
-      if ! kill -0 "$child_pid" 2>/dev/null; then
-        descendants_exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$descendants_exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$child_pid"; then
       kill -KILL "$child_pid" "$grandchild_pid" 2>/dev/null || true
       printf '%s direct engine child survived helper interruption\n' "$scenario" >&2
       exit 1
@@ -2893,15 +2923,7 @@ CODEX
       exit 1
     fi
     if [[ "$scenario" != "claude-probe" ]]; then
-      descendants_exited=0
-      for _ in {1..100}; do
-        if ! kill -0 "$grandchild_pid" 2>/dev/null; then
-          descendants_exited=1
-          break
-        fi
-        sleep 0.05
-      done
-      if [[ "$descendants_exited" -ne 1 ]]; then
+      if ! wait_for_process_exit_or_zombie "$grandchild_pid"; then
         kill -KILL "$grandchild_pid" 2>/dev/null || true
         printf '%s same-group grandchild survived helper interruption\n' "$scenario" >&2
         exit 1
@@ -2956,7 +2978,7 @@ CODEX
         launched=1
         break
       fi
-      if ! kill -0 "$engine_pid" 2>/dev/null; then
+      if ! process_is_runnable "$engine_pid"; then
         break
       fi
       sleep 0.05
@@ -2980,15 +3002,7 @@ CODEX
     if [[ "$termination_mode" == "signal" ]]; then
       kill -TERM "$helper_pid"
     fi
-    helper_exited=0
-    for _ in {1..240}; do
-      if ! kill -0 "$helper_pid" 2>/dev/null; then
-        helper_exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$helper_exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$helper_pid" 240; then
       kill -KILL "$helper_pid" "$engine_pid" "$child_pid" "$grandchild_pid" 2>/dev/null || true
       wait "$engine_pid" 2>/dev/null || true
       printf 'leader-exit %s helper did not terminate within the deadline\n' "$termination_mode" >&2
@@ -3004,15 +3018,7 @@ CODEX
       exit 1
     fi
     for descendant_pid in "$child_pid" "$grandchild_pid"; do
-      descendants_exited=0
-      for _ in {1..100}; do
-        if ! kill -0 "$descendant_pid" 2>/dev/null; then
-          descendants_exited=1
-          break
-        fi
-        sleep 0.05
-      done
-      if [[ "$descendants_exited" -ne 1 ]]; then
+      if ! wait_for_process_exit_or_zombie "$descendant_pid"; then
         kill -KILL "$descendant_pid" 2>/dev/null || true
         printf 'leader-exit %s descendant survived termination: %s\n' \
           "$termination_mode" "$descendant_pid" >&2
@@ -3085,15 +3091,7 @@ CODEX
     fi
     grandchild_pid="$(cat "$engine_capture.grandchild-pid")"
     snapshot_path="$(cat "$engine_capture.snapshot")"
-    descendants_exited=0
-    for _ in {1..100}; do
-      if ! kill -0 "$grandchild_pid" 2>/dev/null; then
-        descendants_exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$descendants_exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$grandchild_pid"; then
       kill -KILL "$grandchild_pid" 2>/dev/null || true
       printf 'ordinary-%s background descendant survived completion\n' \
         "$completion_mode" >&2
@@ -3162,13 +3160,99 @@ CODEX
   expect_stderr_contains "reviewer closed stdin early"
 }
 
+verify_process_liveness_probe() {
+  local live_pid
+  local zombie_parent_pid
+  local zombie_pid=""
+  local zombie_pid_file="$tmp_dir/zombie-aware-process.pid"
+  local zombie_state=""
+  local zombie_observed=0
+
+  "$node_bin" -e 'setInterval(() => {}, 1000)' &
+  live_pid=$!
+  if wait_for_process_exit_or_zombie "$live_pid" 2; then
+    kill -KILL "$live_pid" 2>/dev/null || true
+    wait "$live_pid" 2>/dev/null || true
+    printf 'process-state probe accepted a runnable process as exited\n' >&2
+    exit 1
+  fi
+  kill -KILL "$live_pid" 2>/dev/null || true
+  wait "$live_pid" 2>/dev/null || true
+  if ! wait_for_process_exit_or_zombie "$live_pid" 2; then
+    printf 'process-state probe rejected a reaped process\n' >&2
+    exit 1
+  fi
+
+  # Darwin reaps these fixture children promptly. Linux gets an explicit
+  # delayed-reaping fixture so kill -0 remains true for a known zombie.
+  if [[ "$(/usr/bin/uname -s)" != "Linux" ]]; then
+    return 0
+  fi
+  /usr/bin/perl -e '
+    use strict;
+    use warnings;
+    $| = 1;
+    my $child = fork();
+    die "fork failed: $!\n" unless defined $child;
+    exit 0 if $child == 0;
+    $SIG{TERM} = sub {
+      waitpid($child, 0);
+      exit 0;
+    };
+    print "$child\n";
+    sleep 60;
+    waitpid($child, 0);
+  ' >"$zombie_pid_file" &
+  zombie_parent_pid=$!
+  for _ in {1..100}; do
+    if [[ -s "$zombie_pid_file" ]]; then
+      zombie_pid="$(cat "$zombie_pid_file")"
+      zombie_state="$(process_state_code "$zombie_pid" || true)"
+      if [[ "$zombie_state" == "Z" ]]; then
+        zombie_observed=1
+        break
+      fi
+    fi
+    if ! process_is_runnable "$zombie_parent_pid"; then
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$zombie_observed" -ne 1 ]]; then
+    kill -TERM "$zombie_parent_pid" 2>/dev/null || true
+    wait "$zombie_parent_pid" 2>/dev/null || true
+    printf 'Linux process-state fixture did not retain a zombie child\n' >&2
+    exit 1
+  fi
+  if ! kill -0 "$zombie_pid" 2>/dev/null; then
+    kill -TERM "$zombie_parent_pid" 2>/dev/null || true
+    wait "$zombie_parent_pid" 2>/dev/null || true
+    printf 'Linux zombie fixture was reaped before the raw kill -0 check\n' >&2
+    exit 1
+  fi
+  if ! wait_for_process_exit_or_zombie "$zombie_pid" 2; then
+    kill -TERM "$zombie_parent_pid" 2>/dev/null || true
+    wait "$zombie_parent_pid" 2>/dev/null || true
+    printf 'process-state probe rejected a killed zombie process\n' >&2
+    exit 1
+  fi
+  if ! process_is_runnable "$zombie_parent_pid"; then
+    kill -TERM "$zombie_parent_pid" 2>/dev/null || true
+    wait "$zombie_parent_pid" 2>/dev/null || true
+    printf 'process-state probe rejected the live zombie parent\n' >&2
+    exit 1
+  fi
+  kill -TERM "$zombie_parent_pid"
+  wait "$zombie_parent_pid"
+}
+
 run_suite_process_group_cleanup_regression() {
   local fixture="$tmp_dir/suite-process-group-fixture.mjs"
   local fixture_state="$tmp_dir/suite-process-group-state"
   local leader_pid
   local descendant_pid
   local launched=0
-  local exited
+  verify_process_liveness_probe
   mkdir "$fixture_state"
   cat >"$fixture" <<'NODE'
 import { spawn } from "node:child_process";
@@ -3202,7 +3286,7 @@ NODE
       launched=1
       break
     fi
-    if ! kill -0 "$leader_pid" 2>/dev/null; then
+    if ! process_is_runnable "$leader_pid"; then
       break
     fi
     sleep 0.05
@@ -3217,15 +3301,7 @@ NODE
   terminate_suite_process_group "$leader_pid" 2
   for role in leader child grandchild; do
     descendant_pid="$(cat "$fixture_state/$role.pid")"
-    exited=0
-    for _ in {1..100}; do
-      if ! kill -0 "$descendant_pid" 2>/dev/null; then
-        exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$descendant_pid"; then
       kill -KILL "$descendant_pid" 2>/dev/null || true
       printf 'suite process-group descendant survived cleanup: %s (%s)\n' \
         "$role" "$descendant_pid" >&2
@@ -3242,7 +3318,6 @@ run_suite_wrapper_signal_regression() {
   local suite_pid
   local suite_status
   local descendant_pid
-  local exited
   local launched=0
   mkdir "$fixture_state"
 
@@ -3258,7 +3333,7 @@ run_suite_wrapper_signal_regression() {
       launched=1
       break
     fi
-    if ! kill -0 "$suite_pid" 2>/dev/null; then
+    if ! process_is_runnable "$suite_pid"; then
       break
     fi
     sleep 0.05
@@ -3298,15 +3373,7 @@ run_suite_wrapper_signal_regression() {
   fi
   for role in worker reviewer; do
     descendant_pid="$(cat "$fixture_state/$role.pid")"
-    exited=0
-    for _ in {1..100}; do
-      if ! kill -0 "$descendant_pid" 2>/dev/null; then
-        exited=1
-        break
-      fi
-      sleep 0.05
-    done
-    if [[ "$exited" -ne 1 ]]; then
+    if ! wait_for_process_exit_or_zombie "$descendant_pid"; then
       kill -KILL "$descendant_pid" 2>/dev/null || true
       printf 'nested suite cancellation orphaned %s process: %s\n' \
         "$role" "$descendant_pid" >&2
