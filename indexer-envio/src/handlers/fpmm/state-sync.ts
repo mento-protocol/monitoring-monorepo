@@ -46,7 +46,7 @@ import {
   type ResolvedRebalanceState,
 } from "../../priceDifference.js";
 import {
-  medianTimestampEffect,
+  medianTimestampEffectForChain,
   rebalanceIncentiveAtBlockEffect,
   rebalancingStateEffect,
   reservesEffect,
@@ -126,7 +126,7 @@ async function fetchAuthoritativeRebalanceState(args: {
       blockNumber: args.blockNumber,
     }),
     rateFeedID
-      ? args.context.effect(medianTimestampEffect, {
+      ? args.context.effect(medianTimestampEffectForChain(args.chainId), {
           chainId: args.chainId,
           rateFeedID,
           blockNumber: args.blockNumber,
