@@ -720,5 +720,73 @@ test("id-token: write is a credential (WIF token exchange), like a secret", () =
   assert(evaluateWorkflow(guarded).ok, "guarded id-token job passes");
 });
 
+test("block scalars used as security-key values are refused", () => {
+  assert(
+    !evaluateWorkflow(
+      "on: >-\n  pull_request\njobs:\n  leak:\n    steps:\n      - run: x\n        env:\n          T: ${{ secrets.T }}\n",
+    ).ok,
+    "on: >- pull_request refused",
+  );
+  assert(
+    !evaluateWorkflow(
+      "on:\n  pull_request:\njobs:\n  leak:\n    uses: ./.github/workflows/x.yml\n    secrets: >-\n      inherit\n",
+    ).ok,
+    "secrets: >- inherit refused",
+  );
+  assert(
+    !evaluateWorkflow(
+      "on:\n  pull_request:\njobs:\n  leak:\n    permissions:\n      id-token: >-\n        write\n    steps:\n      - run: x\n",
+    ).ok,
+    "id-token: >- write refused",
+  );
+});
+
+test("unsegmented (flow-style) jobs fail closed on ANY credential, not just secrets", () => {
+  assert(
+    !evaluateWorkflow(
+      "on:\n  pull_request:\njobs: { leak: { permissions: { id-token: write }, steps: [] } }\n",
+    ).ok,
+    "flow-style id-token job refused",
+  );
+  assert(
+    !evaluateWorkflow(
+      "on:\n  pull_request:\njobs: { leak: { environment: production, steps: [] } }\n",
+    ).ok,
+    "flow-style environment job refused",
+  );
+});
+
+test("a branch/tag named pull_request is not mistaken for a PR trigger", () => {
+  const pushBranch = [
+    "on:",
+    "  push:",
+    "    branches:",
+    "      - pull_request",
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: x",
+    "        env:",
+    "          T: ${{ secrets.T }}",
+  ].join("\n");
+  assert(
+    !hasPullRequestTrigger(pushBranch),
+    "branch named pull_request is not a trigger",
+  );
+  assert(
+    evaluateWorkflow(pushBranch).ok,
+    "push-only workflow with such a branch is not blocked",
+  );
+  // Genuine triggers in every form still detected.
+  assert(
+    hasPullRequestTrigger("on:\n  pull_request:\n    branches: [main]\n"),
+    "block-mapping event key still detected",
+  );
+  assert(
+    hasPullRequestTrigger("on:\n  - push\n  - pull_request\n"),
+    "sequence-item event still detected",
+  );
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exitCode = 1;

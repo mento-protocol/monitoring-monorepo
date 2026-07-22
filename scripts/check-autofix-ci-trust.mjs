@@ -157,11 +157,24 @@ export function hasUnanalyzableTriggers(body) {
       const closes = (value.match(/[\]}]/g) ?? []).length;
       if (opens > closes) return true;
     }
+    // A block scalar is a legitimate VALUE for security-relevant keys:
+    // `on: >-`\n`  pull_request` decodes to `on: pull_request`, and the same
+    // trick hides `secrets: |`→`inherit`, `id-token: >-`→`write`,
+    // `permissions: >-`→`write-all`. The single-line scans below (and the
+    // generic content-skip that follows) would treat the decoded value as
+    // absent. Nobody writes these keys as block scalars — fail closed.
+    if (
+      /^\s*(['"]?)(on|secrets|permissions|id-token)\1\s*:\s*[|>][0-9+-]*\s*$/.test(
+        line,
+      )
+    )
+      return true;
     // Block-scalar introducer (`run: |`, `script: >-`, `- |2`): every deeper-
     // indented line that follows is STRING content with zero YAML semantics
     // (JS ternaries starting `? `, markdown `- **bold**`, shell globs), so
     // skipping it is exact, not a heuristic. This skip runs AFTER the checks
-    // above so an introducer line like `key: &a |` still fails on its anchor.
+    // above so an introducer line like `key: &a |` still fails on its anchor,
+    // and after the security-key guard so `on: >-` fails rather than skips.
     // A false introducer (plain scalar ending in ` |`) is harmless: deeper
     // lines after a scalar-valued key can only be scalar continuations or
     // YAML errors, never active structure.
@@ -210,17 +223,28 @@ export function hasTrigger(body, trigger) {
     const onInline = line.match(/^(['"]?)on\1\s*:\s*(.+)$/);
     if (onInline && asKeyOrItem.test(onInline[2])) return true;
     if (/^(['"]?)on\1\s*:\s*$/.test(line)) {
+      // Events are the DIRECT children of `on:` — mapping keys
+      // (`  pull_request:`) or sequence items (`  - pull_request`) at the
+      // first child indentation. Deeper lines are that event's config
+      // (`branches:`, `paths:`, and their VALUES), and a branch/tag/path
+      // value may legitimately be named `pull_request` — matching at any
+      // depth would reject a push-only workflow that targets such a branch.
+      // So pin the match to the event indent and skip anything deeper.
+      let eventIndent = null;
       for (let j = i + 1; j < lines.length; j += 1) {
         const l = lines[j];
         if (l.trim() === "") continue;
-        if (!/^\s/.test(l)) break; // left the `on:` block
-        // Trigger names appear as indented keys or list items at ANY positive
-        // indentation (one-space indent is valid YAML), optionally quoted.
-        // Config keys (branches/paths) never equal a trigger name, so
-        // accepting any depth cannot false-positive on config.
-        if (new RegExp(`^\\s+-?\\s*${q}${t}${q}(?![\\w-])`).test(l)) {
+        if (!/^\s/.test(l)) break; // dedent to col 0 => left `on:`
+        const ind = /^ */.exec(l)[0].length;
+        if (eventIndent === null) eventIndent = ind;
+        if (ind < eventIndent) break; // dedented below events => left `on:`
+        if (ind > eventIndent) continue; // nested event config => not a trigger
+        // Event-level line: a mapping key (`name:`), a sequence item
+        // (`- name`), or a bare scalar — optionally quoted.
+        if (new RegExp(`^\\s*-?\\s*${q}${t}${q}\\s*:`).test(l)) return true;
+        if (new RegExp(`^\\s*-\\s*${q}${t}${q}(?![\\w-])\\s*$`).test(l))
           return true;
-        }
+        if (new RegExp(`^\\s*${q}${t}${q}(?![\\w-])\\s*$`).test(l)) return true;
       }
     }
   }
@@ -254,6 +278,30 @@ export function referencesSecrets(body) {
     return true;
   }
   return false;
+}
+
+/**
+ * True when the text grants OIDC token-minting capability — a CREDENTIAL even
+ * with zero `secrets.*` references: this repo's WIF pool (terraform/ci-wif.tf)
+ * trusts any OIDC token carrying this repository's `attribute.repository`, so a
+ * PR job holding the permission can exchange it for the plan-readonly service
+ * account — the same state-reading identity the Terraform lanes guard. Matches
+ * block and inline-flow permission forms plus `permissions: write-all` (which
+ * includes id-token). Non-anchored on purpose: matching prose that merely
+ * mentions the string only ADDS scrutiny (fail-safe direction).
+ */
+export function grantsOidc(text) {
+  const s = stripComments(text);
+  return (
+    /(['"]?)\bid-token\1\s*:\s*(['"]?)write\2/.test(s) ||
+    /(['"]?)\bpermissions\1\s*:\s*(['"]?)write-all\2/.test(s)
+  );
+}
+
+/** True when the text binds a job to a GitHub `environment:`, which delivers
+ * that environment's secrets server-side with no textual secrets reference. */
+export function bindsEnvironment(text) {
+  return /(^|[\s,{])(['"]?)environment\2\s*:/m.test(stripComments(text));
 }
 
 /** True when the workflow uses the pull_request_target trigger in any form. */
@@ -389,38 +437,27 @@ export function evaluateWorkflow(body) {
   const fileAnnotated = hasAnnotation(header);
   const jobNames = [...blocks.keys()].filter((k) => k !== "");
   // FAIL CLOSED when segmentation finds no jobs but the file as a whole can
-  // receive secrets: a workflow written with non-2-space indentation (or any
-  // shape this textual splitter cannot segment) must not silently bypass the
-  // per-job analysis. Reformat the workflow (trunk/prettier enforce 2-space
-  // YAML in this repo) or annotate at file level.
-  if (jobNames.length === 0 && referencesSecrets(body)) {
+  // receive a credential: a workflow written flow-style (`jobs: { leak: {…} }`)
+  // or with non-2-space indentation must not silently bypass the per-job
+  // analysis. "Credential" is the full set — a secrets reference, OIDC
+  // token-minting, OR an environment binding — since a flow-style job with
+  // only `id-token: write` or `environment:` has no `secrets.*` text at all.
+  // Reformat to the repo's 2-space YAML style or annotate at file level.
+  if (
+    jobNames.length === 0 &&
+    (referencesSecrets(body) || grantsOidc(body) || bindsEnvironment(body))
+  ) {
     if (fileAnnotated) return { ok: true };
     return {
       ok: false,
       reason:
-        "triggers on pull_request and references secrets, but no job blocks could be segmented (non-standard indentation?). The per-job trust analysis cannot run — reformat to the repo's 2-space YAML style or add a file-level '# autofix-ci-trust:' annotation above `jobs:`.",
+        "triggers on pull_request and can receive a credential (secrets, id-token, or an environment binding), but no job blocks could be segmented (flow-style or non-standard indentation?). The per-job trust analysis cannot run — reformat to the repo's 2-space YAML style or add a file-level '# autofix-ci-trust:' annotation above `jobs:`.",
     };
   }
   // Workflow-level `env:` (or any header secret expression) is inherited by
   // EVERY job, so a header secret makes every job secret-bearing even when no
   // job block contains the textual reference itself.
   const headerHasSecrets = referencesSecrets(header);
-  // `id-token: write` is a CREDENTIAL even with zero secrets references: this
-  // repo's WIF pool (terraform/ci-wif.tf) trusts any OIDC token carrying this
-  // repository's `attribute.repository`, so a PR job holding the permission
-  // can mint a token and exchange it for the plan-readonly service account —
-  // the same state-reading identity the Terraform lanes guard. Match block
-  // and inline-flow permission forms plus `permissions: write-all` (which
-  // includes id-token), at job level or inherited from the workflow header.
-  // Non-anchored on purpose: matching prose that merely mentions the string
-  // only ADDS scrutiny (fail-safe direction).
-  const grantsOidc = (text) => {
-    const s = stripComments(text);
-    return (
-      /(['"]?)\bid-token\1\s*:\s*(['"]?)write\2/.test(s) ||
-      /(['"]?)\bpermissions\1\s*:\s*(['"]?)write-all\2/.test(s)
-    );
-  };
   const headerGrantsOidc = grantsOidc(header);
   const offenders = [];
   for (const [job, block] of blocks) {
