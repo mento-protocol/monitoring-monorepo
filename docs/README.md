@@ -132,7 +132,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0024-plotly-basic-dist-bundle-budgets.md`](adr/0024-plotly-basic-dist-bundle-budgets.md) | Plotly.js basic-dist plus enforced bundle-size budgets | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0025-fixture-browser-tests-react-doctor.md`](adr/0025-fixture-browser-tests-react-doctor.md) | Fixture-driven browser tests, visual snapshots, and a react-doctor score gate | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0026-aegis-nestjs-app-engine.md`](adr/0026-aegis-nestjs-app-engine.md) | Aegis is a NestJS App Engine service polling view calls into Prometheus | canonical / active | adr / aegis | eng | 90d; verified 2026-07-06 |
-| [`docs/adr/0027-metrics-bridge-hasura-to-prometheus.md`](adr/0027-metrics-bridge-hasura-to-prometheus.md) | A Hasura to Prometheus bridge exists so v3 DB data can drive Grafana alerts | canonical / active | adr / metrics-bridge | eng | 90d; verified 2026-07-06 |
+| [`docs/adr/0027-metrics-bridge-hasura-to-prometheus.md`](adr/0027-metrics-bridge-hasura-to-prometheus.md) | A Hasura to Prometheus bridge exists so v3 DB data can drive Grafana alerts | canonical / active | adr / metrics-bridge | eng | 90d; verified 2026-07-22 |
 | [`docs/adr/0028-terraform-stack-registry.md`](adr/0028-terraform-stack-registry.md) | Terraform ownership is a registry with roots split by cadence and blast radius | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-06 |
 | [`docs/adr/0029-ci-apply-production-infra-gate.md`](adr/0029-ci-apply-production-infra-gate.md) | Infra applies on merge to main behind the production-infra environment gate | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-08 |
 | [`docs/adr/0030-iac-before-cli-secrets.md`](adr/0030-iac-before-cli-secrets.md) | All secrets are managed by IaC; agents never touch them with CLI commands | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-06 |
@@ -147,6 +147,10 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0039-multistrategy-pools-historical-fx-volume.md`](adr/0039-multistrategy-pools-historical-fx-volume.md) | Model pool strategies many-to-many and price same-currency swaps from historical FX crosses | canonical / active | adr / indexer-envio, ui-dashboard, metrics-bridge | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0040-bounded-documentation-garden-queue.md`](adr/0040-bounded-documentation-garden-queue.md) | Documentation gardening runs through one bounded issue queue | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-19 |
 | [`docs/adr/0041-offline-documentation-navigation-evaluation.md`](adr/0041-offline-documentation-navigation-evaluation.md) | Documentation navigation is evaluated offline with deterministic scoring | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-21 |
+| [`docs/adr/0042-metrics-bridge-external-price-poller.md`](adr/0042-metrics-bridge-external-price-poller.md) | metrics-bridge hosts the external market-price peg poller | canonical / active | adr / metrics-bridge | eng | 90d; verified 2026-07-22 |
+| [`docs/adr/0043-peg-registry-service-local.md`](adr/0043-peg-registry-service-local.md) | The peg-monitor registry is service-local config, not published shared-config | canonical / active | adr / metrics-bridge / shared-config | eng | 90d; verified 2026-07-22 |
+| [`docs/adr/0044-peg-thresholds-gated-rules-plane.md`](adr/0044-peg-thresholds-gated-rules-plane.md) | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON | canonical / active | adr / alerts | eng | 90d; verified 2026-07-22 |
+| [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) | Peg paging measures executable sell price; the deep venue pages alone | canonical / active | adr / metrics-bridge / alerts | eng | 90d; verified 2026-07-22 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
 ## package-readmes-reference
@@ -186,3 +190,4 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) | AI Review Process Integration Plan | non-canonical / archived | plan / ci/process | eng | 365d; verified 2026-07-17 |
 | [`docs/PLAN-cdps-monitoring.md`](PLAN-cdps-monitoring.md) | ROADMAP refresh + CDPs monitoring (Liquity v2 indexing & dashboard) | unmanaged / unmanaged | plan / repo-wide | unowned | 365d |
 | [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Oracle health-state decision retrospective | non-canonical / archived | plan / repo-wide | eng | 365d |
+| [`docs/PLAN-peg-monitoring.md`](PLAN-peg-monitoring.md) | Peg monitoring for oracle-less stablecoins (EUROP first) | non-canonical / active | plan / repo-wide | eng | 365d |
