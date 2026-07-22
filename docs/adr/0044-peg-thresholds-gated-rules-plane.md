@@ -39,13 +39,21 @@ auto-resolves a live page whenever the threshold series blips.
 
 ## Decision
 
-- Peg thresholds are data in one repo-internal JSON
+- Peg thresholds — and every declared parameter that changes whether a
+  page can fire: warn/critical bps, sustain windows, per-source reference
+  sizes, staleness gates, spread-envelope parameters, and the deep-venue
+  (primary) designation — are data in one repo-internal JSON
   (`alerts/rules/peg-thresholds.json`), consumed by the alerts stack via
   `jsondecode(file(...))` with `dynamic "rule"` / `for_each` generation —
-  both established patterns in this repo. There is no HCL mirror, so the
-  existing mirror-drift check is unnecessary for this class; a sibling
-  integrity check validates that every registry asset has a threshold entry
-  and vice versa.
+  both established patterns in this repo. The service-local registry
+  (ADR 0043) holds venue identity and topology only; it carries no
+  page-affecting policy. There is no HCL mirror, so the existing
+  mirror-drift check is unnecessary for this class; a sibling integrity
+  check validates that every registry asset has a threshold entry and vice
+  versa. Residual trust boundary, stated plainly: the gate protects
+  declared policy data — bridge _code_ remains service-deployable and has
+  always been able to change what any `mento_*` metric means; measurement
+  code is governed by normal review, not the apply gate.
 - Changing any peg threshold or onboarding an asset's rules is therefore a
   reviewed PR plus a human-approved `alerts-rules` apply through the
   `production-infra` gate. That apply-per-asset cost is deliberate: paging
@@ -63,7 +71,12 @@ auto-resolves a live page whenever the threshold series blips.
     (`quantile_over_time`) rather than the rule `for` clock alone, so a
     single favorable sample on a thin, flapping book cannot reset a real
     breach; this is a new idiom in the stack, adopted deliberately for
-    thin-market series and documented in the rule file banner.
+    thin-market series and documented in the rule file banner. Range
+    functions ignore gaps, so the quantile counts as a duration fraction
+    only when a sample-coverage predicate also passes
+    (`count_over_time` over the same window against the expected poll
+    cadence) — after an API outage a sparse window with one fresh deviated
+    sample must not read as a sustained breach.
   - Severity and routing stay per-rule: warn → Slack, critical → page, each
     with its own contact-point wiring.
 

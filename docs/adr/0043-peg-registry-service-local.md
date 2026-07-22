@@ -63,9 +63,17 @@ unpublished.
   - `tokenRefs` supports non-EVM identity forms (XRPL issuer+currency).
   - `monitors[]` holds one entry per (chain, pool, rate feed) —
     asset-level vs pool-level identity is explicit. Breaker thresholds are
-    not stored: they are governance-mutable on-chain state already indexed
-    (`BreakerConfig.rateChangeThreshold`) and are read live, so the
-    registry cannot carry stale breaker policy.
+    not stored: they are governance-mutable on-chain state already
+    indexed, read live through the indexer's effective-threshold
+    resolution — per-feed `BreakerConfig.rateChangeThreshold` where set,
+    falling back to `Breaker.defaultRateChangeThreshold` when the per-feed
+    field is the inherit sentinel `0` — so the registry cannot carry stale
+    breaker policy and the decision package never shows a zero band.
+  - Alert-affecting parameters (reference sizes, staleness gates,
+    spread-envelope parameters, deep-venue designation) do NOT live here:
+    they belong to the gated thresholds JSON
+    ([ADR 0044](0044-peg-thresholds-gated-rules-plane.md)), so a bridge
+    deploy cannot change page behavior through registry data.
   - Source ids are stable internal names (`bitvavo_eur`) decoupled from
     venue pair spellings, so a venue renaming a pair is a config edit, not
     Grafana label churn that orphans alert history.

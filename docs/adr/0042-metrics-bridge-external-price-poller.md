@@ -56,12 +56,18 @@ monitoring, extending — not replacing — ADR 0027's scope:
   the critical path.
 - Structural-flow inputs come from new bounded companion queries against the
   indexer's `SwapEvent` entity (indexed by `poolId, blockTimestamp`, with
-  `caller` identity) plus the already-polled pool reserves. Queries page to a
-  bounded maximum and emit an explicit saturation flag when the window
-  overflows; per [ADR 0014](0014-snapshot-entities-no-aggregate.md), no
-  Hasura `_aggregate` — reduction happens in the bridge. Amounts are
-  token-native: USD-denominated rollups are defined as zero for pools with
-  no USD-pegged leg, so they cannot serve pairs like EURm/EUROP.
+  `caller` identity), the already-polled pool reserves, and the indexed
+  `TradingLimit` rows (`limit0`/`limit1`, `netflow0`/`netflow1`, window
+  update times), which supply the denominator for the saturation fraction —
+  swap flow alone gives only the numerator, and pool-level pressure fields
+  collapse token direction. Saturation is computed per configured window on
+  the monitored token's inflow direction, taking the maximum across the
+  active L0/L1 windows. Queries page to a bounded maximum and emit an
+  explicit saturation flag when the window overflows; per
+  [ADR 0014](0014-snapshot-entities-no-aggregate.md), no Hasura
+  `_aggregate` — reduction happens in the bridge. Amounts are token-native:
+  USD-denominated rollups are defined as zero for pools with no USD-pegged
+  leg, so they cannot serve pairs like EURm/EUROP.
 - Conversion legs (needed for USD-quoted venues on non-USD pegs) read
   `SortedOracles.medianRate(feedId)` through the existing per-chain viem
   clients, following the rebalance-probe `readContract` pattern. The

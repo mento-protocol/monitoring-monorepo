@@ -51,15 +51,22 @@ attestation PDFs — no machine-readable API; runbook inputs only.
 
 Service-local `metrics-bridge/peg-registry.json` + schema + fixtures.
 Slug-keyed assets; `tokenRefs` per chain (EVM + XRPL forms); `monitors[]`
-per (chain, pool, feed) — breaker thresholds are read live from indexed
-`BreakerConfig`, never stored; stable source ids decoupled from venue
-pair spellings; roles `primary | secondary | display` (display has zero
-alert authority); per-source `refSize`, gates, optional `convertVia`
-naming a rate-feed ID read via `SortedOracles.medianRate` over existing
-bridge RPC (the `oracle-reporters.json` identifiers are Mento rate-feed
-IDs, not Chainlink aggregator contracts; declared error
-band widens that source's thresholds; leg staleness incl. FX weekend +
-reopen grace demotes the source to display); `coverageClass` per asset.
+per (chain, pool, feed) — breaker thresholds are never stored, read live
+via the indexer's effective-threshold resolution (per-feed
+`BreakerConfig.rateChangeThreshold`, falling back to
+`Breaker.defaultRateChangeThreshold` when the per-feed field is the
+inherit sentinel `0`); stable source ids decoupled from venue pair
+spellings; roles `primary | secondary | display` (display has zero alert
+authority); optional `convertVia` naming a rate-feed ID read via
+`SortedOracles.medianRate` over existing bridge RPC (the
+`oracle-reporters.json` identifiers are Mento rate-feed IDs, not Chainlink
+aggregator contracts; declared error band widens that source's thresholds;
+leg staleness incl. FX weekend + reopen grace demotes the source to
+display); `coverageClass` per asset. Alert-affecting parameters —
+per-source `refSize`, staleness gates, spread envelopes, and the
+deep-venue designation — live in the gated thresholds JSON (ADR 0044),
+not in the registry, so a bridge deploy cannot change page behavior
+through registry data.
 Referential-integrity script vs `shared-config/oracle-reporters.json` and
 token registry runs in the quality gate and CI; pool references are
 resolved against Hasura at bridge startup, failing that asset's
@@ -87,10 +94,13 @@ halted`. `wide` counts as stress only beyond the venue's observed diurnal
 
 New bounded bridge companion queries on `SwapEvent`
 (poolId+blockTimestamp index, `caller` identity; ≤1000-row page + explicit
-saturation flag; no Hasura `_aggregate` per ADR 0014) plus already-polled
-`reserves0/1`. Token-native amounts (USD rollups are zero for EURm/EUROP).
+saturation flag; no Hasura `_aggregate` per ADR 0014), already-polled
+`reserves0/1`, and the indexed `TradingLimit` rows (`limit0`/`limit1`,
+`netflow0`/`netflow1`, window update times) supplying the saturation
+denominator. Token-native amounts (USD rollups are zero for EURm/EUROP).
 Anomaly = net directional inflow vs trading-limit-implied max rate
-(saturation fraction). Counterparty diversity (`caller` = tx.from) is
+(saturation fraction, per configured window on the monitored token's
+inflow direction, max across active L0/L1 windows). Counterparty diversity (`caller` = tx.from) is
 dashboard-advisory only. Never pages alone; escalates price-based pages.
 
 ### Metrics (ADR 0042)
@@ -112,7 +122,10 @@ gate (`time() - mento_peg_observation_at`) on **every** peg rule;
 `no_data_state = "Alerting"` (+~5 min grace, documented) on blindness and
 heartbeat rules; duration-fraction sustain
 (`quantile_over_time(0.2, deviation[W]) >= threshold`, W ≈ 20–30 min) so
-one favorable sample cannot reset a real breach on a flapping thin book.
+one favorable sample cannot reset a real breach on a flapping thin book —
+ANDed with a sample-coverage predicate (`count_over_time` vs expected
+cadence over the same window), because range functions ignore gaps and a
+sparse post-outage window must not read as sustained.
 
 Ladder (EUROP initial values; per-asset data):
 
