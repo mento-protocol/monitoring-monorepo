@@ -24,6 +24,8 @@ babysit_repo_init() {
 
 babysit_repo_gate() {
   local pr=$1
+  local owner=$2
+  local repo=$3
   local repo_root=$4
 
   if [[ ! -f "$repo_root/package.json" ]]; then
@@ -36,6 +38,18 @@ babysit_repo_gate() {
   # the file guard above already keys on the absolute "$repo_root/package.json".
   if ! (cd "$repo_root" && node -e 'const scripts=require("./package.json").scripts||{}; process.exit(scripts["pr:ready-state"] ? 0 : 1)') >/dev/null 2>&1; then
     printf 'PASS pr:ready-state script unavailable in this checkout'
+    return 0
+  fi
+
+  # In Claude cloud sessions the platform's GitHub credential proxy blocks
+  # gh's /repos/* and GraphQL paths regardless of tokens, so pr:ready-state
+  # cannot run there (docs/notes/github-tooling-surfaces.md). Only a
+  # repo-scoped call proves capability — `gh auth status` passes in those
+  # sessions even while the repo API is blocked. Without this guard the probe
+  # failure below would read as FAIL and poison every cloud babysit run.
+  if [[ -n "${CLAUDE_CODE_REMOTE:-}" ]] &&
+    ! gh api "repos/${owner}/${repo}" --jq .full_name >/dev/null 2>&1; then
+    printf 'PENDING pr:ready-state unavailable in this Claude cloud session (gh repo API is platform-blocked); use the MCP emulation in docs/notes/github-tooling-surfaces.md — probe-verified all-clear needs a gh-capable surface'
     return 0
   fi
 

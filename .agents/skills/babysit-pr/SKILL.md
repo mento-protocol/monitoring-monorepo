@@ -43,6 +43,12 @@ capture the PR URL, head repository, branch, and commit:
 gh pr view --json number,url,title,headRefName,headRefOid,baseRefName,headRepository,headRepositoryOwner,isCrossRepository
 ```
 
+In a Claude cloud session, resolve the same fields over MCP instead:
+`list_pull_requests` filtered by the current head branch when no number was
+given, or `pull_request_read` method `get` for a known number (it returns the
+head/base refs, head SHA, and repository slugs). The git-side binding guards
+below run unchanged.
+
 For an explicit target, accept a bare number or PR URL. Derive and preserve
 `BASE_REPO` (`owner/name`) from the resolved PR URL before changing checkouts.
 After that initial resolution, pass `--repo <BASE_REPO>` to every `gh pr view`,

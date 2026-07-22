@@ -82,6 +82,25 @@ Do not build a gh-over-MCP shim; the skills document the two native paths.
 | `gh issue edit` / labels / comments            | `issue_write`, `issue_read`, `add_issue_comment`                                                        |
 | `pnpm pr:ready-state --watch` foreground loop  | `subscribe_pr_activity` webhook events + scheduled self check-ins (e.g. `send_later`); never sleep-poll |
 
+## Issue workboard transitions
+
+`pnpm issue:claim`, `issue:review`, and `issue:release` shell out to gh —
+including `gh api graphql` for Project #12 status and the Claim ID ownership
+field — so they cannot run in Claude cloud sessions. The cloud fallback is a
+partial MCP emulation plus an explicit gh-capable handoff:
+
+1. Perform the label transition with `issue_write` (send the full resulting
+   label set, e.g. swap `agent-ready` for `agent-active` on claim, or
+   `agent-active` for `in-pr` when the PR opens).
+2. Post the matching helper-format comment with `add_issue_comment` (claim
+   comments include the `Claim ID:` / `Branch:` / `Claimed at:` lines), and
+   state in it that Project #12 fields were not set from this session.
+3. The Project Claim ID race guard is absent on this path, so the claim
+   comment is the ownership record; check for a fresher competing claim
+   comment before starting work.
+4. Hand off to a gh-capable surface: run `pnpm issue:board sync` (or a local
+   claim backfill) afterward to reconcile Project #12 status and fields.
+
 ## Known MCP gaps
 
 - **No arbitrary GraphQL.** Anything the probes derive from GraphQL-only data
