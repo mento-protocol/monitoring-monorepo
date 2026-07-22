@@ -125,9 +125,12 @@ Do not foreground-poll and never sleep-poll. Instead:
 
 1. Subscribe to PR events (`subscribe_pr_activity`) so comments, reviews, and
    CI failures arrive as webhook activity.
-2. Arm a scheduled self check-in (for example `send_later`, roughly an hour
-   out) before ending the turn; webhook events do not cover CI success, new
-   pushes, or merge-conflict transitions. Re-arming is bounded by the same
+2. Arm a scheduled self check-in (for example `send_later`) before ending
+   the turn, at a cadence short enough to catch quiet transitions inside the
+   babysitting window — every 15–20 minutes against the default one-hour
+   deadline; webhook events do not cover CI success, new pushes, or
+   merge-conflict transitions, so a check-in that only fires at the deadline
+   would miss a mid-window green. Re-arming is bounded by the same
    babysitting deadline as the local loop (one hour unless the user set a
    different budget): at the deadline, report the current state and stop or
    escalate instead of re-arming silently. Stop when the PR is merged or
