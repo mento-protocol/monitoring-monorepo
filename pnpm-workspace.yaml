@@ -121,6 +121,7 @@ overrides:
 
 patchedDependencies:
   "@lhci/utils@0.15.1": patches/@lhci__utils@0.15.1.patch
+  blamer@1.0.7: patches/blamer@1.0.7.patch
 
 # pnpm 11 records dependency build-script policy explicitly.
 allowBuilds:
