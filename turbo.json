@@ -100,6 +100,44 @@
       "env": ["VERCEL_ENV", "VERCEL_DEPLOYMENT_ID", "VERCEL_GIT_COMMIT_SHA"],
       "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"]
     },
+    "fixture-build": {
+      "cache": true,
+      "inputs": [
+        "src/**",
+        "public/**",
+        "package.json",
+        "next.config.*",
+        "postcss.config.*",
+        "tsconfig*.json",
+        "sentry.*.config.*",
+        "sentry.shared.ts",
+        "vercel.json",
+        ".env.production.local.example",
+        "scripts/fixture-build.mjs",
+        "$TURBO_ROOT$/shared-config/src/**",
+        "$TURBO_ROOT$/shared-config/*.json",
+        "$TURBO_ROOT$/shared-config/package.json",
+        "$TURBO_ROOT$/shared-config/tsconfig*.json",
+        "$TURBO_ROOT$/shared-config/dist/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/pnpm-lock.yaml",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/.npmrc",
+        "$TURBO_ROOT$/.node-version",
+        "$TURBO_ROOT$/.github/actions/pnpm-install/**",
+        "$TURBO_ROOT$/turbo.json"
+      ],
+      "env": [
+        "VERCEL_ENV",
+        "VERCEL_DEPLOYMENT_ID",
+        "VERCEL_GIT_COMMIT_SHA",
+        "NEXT_DIST_DIR",
+        "NEXT_PUBLIC_BROWSER_TEST_FIXTURES",
+        "NEXT_PUBLIC_HASURA_URL",
+        "NEXT_TELEMETRY_DISABLED"
+      ],
+      "outputs": [".next-fixture/**", "!.next-fixture/cache/**"]
+    },
     "size-limit": {
       "cache": true,
       "dependsOn": ["build"],
@@ -123,6 +161,7 @@
     },
     "test:browser": {
       "cache": true,
+      "dependsOn": ["fixture-build"],
       "inputs": [
         "src/**",
         "public/**",
@@ -136,6 +175,7 @@
         ".env.production.local.example",
         "playwright.config.ts",
         "scripts/run-browser-tests.mjs",
+        "scripts/fixture-build.mjs",
         "tests/browser/**",
         "next-env.d.ts",
         "$TURBO_ROOT$/shared-config/src/**",
@@ -165,6 +205,7 @@
         "PLAYWRIGHT_REUSE_FIXTURE_SERVER",
         "VERCEL_ENV",
         "CI",
+        "NEXT_DIST_DIR",
         "NEXT_TELEMETRY_DISABLED",
         "NEXT_PUBLIC_HASURA_URL",
         "NEXT_PUBLIC_BROWSER_TEST_FIXTURES"

@@ -136,9 +136,11 @@ also executes that shell fixture in CI.
 
 Do not launch dashboard browser tests, a dashboard dev server, or another
 quality-gate run concurrently with `pnpm agent:quality-gate --run` in the same
-worktree. Next processes share `ui-dashboard/.next`; competing writers can
-produce false `Another next dev server is already running` or
-`ChunkLoadError` failures. The gate also schedules coverage alongside other
+worktree. Browser tests serve a fixture production build (`.next-fixture`) via
+`next start` rather than `next dev`, but their `next build` and size-limit's
+`next build` both rewrite the tracked `next-env.d.ts`, and a stray dev server
+still writes `ui-dashboard/.next`; competing writers can produce false
+`Another next dev server is already running` or `ChunkLoadError` failures. The gate also schedules coverage alongside other
 independent checks, so an extra ad hoc coverage run only adds load and can turn
 normally passing accessibility tests into timeout noise. Run focused tests
 before the gate, then let one gate invocation own the full mapped batch.

@@ -6,6 +6,7 @@
     "dev": "node scripts/dev-with-live-hasura.mjs",
     "codegen": "node scripts/generate-graphql-types.mjs",
     "build": "next build",
+    "fixture-build": "node scripts/fixture-build.mjs",
     "start": "next start",
     "lint": "node ../scripts/eslint-baseline-diff.mjs check",
     "lint:baseline:update": "node ../scripts/eslint-baseline-diff.mjs update",

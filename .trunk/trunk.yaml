@@ -20,6 +20,7 @@ lint:
       paths:
         - "**/node_modules/**"
         - "**/.next/**"
+        - "**/.next-fixture/**"
         - "**/coverage/**"
         - "**/generated/**"
         - "**/.envio/**"

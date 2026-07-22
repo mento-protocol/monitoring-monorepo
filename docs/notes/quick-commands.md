@@ -81,8 +81,8 @@ pnpm dashboard:codegen        # Generate dashboard GraphQL operation types from 
 pnpm dashboard:build          # Production build
 pnpm dashboard:size-limit     # Check bundle size against budgets (run after build)
 pnpm dashboard:lighthouse:pool-fixture # Production-build canonical pool Lighthouse: deterministic fixture, delayed breaker revalidation, blocking 1 700 ms median LCP
-pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture-driven browser interaction + visual snapshot tests
-pnpm --filter @mento-protocol/ui-dashboard test:browser:production        # Build-backed fixture browser tests via next start
+pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture browser + visual snapshot tests against a cached next build served by next start
+pnpm --filter @mento-protocol/ui-dashboard test:browser:production        # Same, but force a fresh fixture build first
 pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots # Re-baseline visual snapshots after a legitimate UI change
 pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
 pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge rebalance probe logic

@@ -498,6 +498,18 @@ assert_turbo_task_has_env "test:browser" "NEXT_PUBLIC_HASURA_URL"
 assert_turbo_task_has_env "test:browser" "NEXT_PUBLIC_BROWSER_TEST_FIXTURES"
 assert_turbo_task_has_env "test:browser" "VERCEL_ENV"
 assert_turbo_task_absent "test:browser:update-snapshots"
+
+# Browser tests serve a cached fixture production build via `next start`; the
+# build is a dedicated `fixture-build` task so it is produced at most once per
+# run and reused across re-runs.
+assert_turbo_task_depends_on "test:browser" "fixture-build"
+assert_turbo_task_has_input "test:browser" "scripts/fixture-build.mjs"
+assert_turbo_task_has_env "test:browser" "NEXT_DIST_DIR"
+assert_turbo_task_has_output "fixture-build" ".next-fixture/**"
+assert_turbo_task_has_input "fixture-build" "scripts/fixture-build.mjs"
+assert_turbo_task_has_env "fixture-build" "NEXT_PUBLIC_BROWSER_TEST_FIXTURES"
+assert_turbo_task_has_env "fixture-build" "NEXT_PUBLIC_HASURA_URL"
+assert_turbo_task_has_env "fixture-build" "NEXT_DIST_DIR"
 node - <<'NODE' ||
 const fs = require("node:fs");
 const pkg = JSON.parse(fs.readFileSync("ui-dashboard/package.json", "utf8"));

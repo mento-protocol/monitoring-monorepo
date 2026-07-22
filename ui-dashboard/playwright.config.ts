@@ -7,11 +7,16 @@ const nextPort = Number(process.env.PLAYWRIGHT_NEXT_PORT ?? 3210);
 const fixturePort = Number(process.env.PLAYWRIGHT_FIXTURE_PORT ?? 3211);
 const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
 const nextUrl = `http://127.0.0.1:${nextPort}`;
+// The fixture Hasura server listens on a fixed port baked into the build, so a
+// healthy one left over from a prior run (or a sibling worktree) is safe to
+// reuse rather than hard-fail on. Opt out with PLAYWRIGHT_REUSE_FIXTURE_SERVER=false.
 const reuseFixtureServer =
-  process.env.PLAYWRIGHT_REUSE_FIXTURE_SERVER === "true";
+  process.env.PLAYWRIGHT_REUSE_FIXTURE_SERVER !== "false";
+// Browser tests serve a production `next build` via `next start` (the runner
+// sets NEXT_DIST_DIR=.next-fixture), not a `next dev` server.
 const nextCommand =
   process.env.PLAYWRIGHT_NEXT_COMMAND?.replaceAll("{port}", String(nextPort)) ??
-  `pnpm dev --hostname 127.0.0.1 --port ${nextPort}`;
+  `pnpm exec next start --hostname 127.0.0.1 --port ${nextPort}`;
 const nextTimeout = Number(process.env.PLAYWRIGHT_NEXT_TIMEOUT_MS ?? 120_000);
 const fixedWeekendServerClock = pathToFileURL(
   resolve("tests/browser/fixtures/fixed-weekend-server-clock.mjs"),
@@ -100,6 +105,9 @@ export default defineConfig({
       command: nextCommand,
       env: {
         NODE_OPTIONS: nextServerNodeOptions,
+        // Serve the fixture build in `.next-fixture` (mirrors
+        // FIXTURE_DIST_DIR in scripts/fixture-build.mjs).
+        NEXT_DIST_DIR: ".next-fixture",
         NEXT_PUBLIC_HASURA_URL: `${fixtureUrl}/graphql`,
         NEXT_PUBLIC_BROWSER_TEST_FIXTURES: "true",
         NEXT_TELEMETRY_DISABLED: "1",
