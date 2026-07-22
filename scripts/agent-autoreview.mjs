@@ -130,6 +130,8 @@ const attestedNodeLibraryPathRecords = new Map();
 let trustedExecutableCleanupRegistered = false;
 let pendingTerminationSignal = null;
 let reviewerForceKillTimer = null;
+const stageTimings = [];
+let stageDurationsContext = null;
 
 function usage() {
   console.log(`Usage:
@@ -1887,6 +1889,34 @@ function githubRepositorySlug(repo) {
   return `${match[1]}/${match[2]}`;
 }
 
+// Bound each automatic PR-base gh lookup so a hung GitHub CLI cannot stall
+// autoreview indefinitely; a timeout fails closed like any other lookup error.
+// Overridable (seconds) so tests can exercise the timeout path quickly.
+const GH_LOOKUP_TIMEOUT_MS = (() => {
+  const configured = Number.parseInt(
+    process.env.AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS || "",
+    10,
+  );
+  return Number.isFinite(configured) && configured > 0
+    ? configured * 1000
+    : 60_000;
+})();
+
+// spawnSync's built-in timeout only signals the direct child; it does not
+// reach descendants the child has already forked (a gh helper call that
+// backgrounds a subprocess, say). The lookups below spawn with
+// detached: true so the child leads its own process group, letting this sweep
+// the whole group after a timeout instead of leaving an orphan running.
+function killProcessGroup(pid) {
+  if (!pid) return;
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // Already exited, or not a process group leader on this platform --
+    // nothing left to clean up.
+  }
+}
+
 function detectPrBase(repo, branch) {
   if (!branch) return null;
   const gh = resolveTrustedCommand("gh", repo, { required: false });
@@ -1916,8 +1946,24 @@ function detectPrBase(repo, branch) {
         env,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
+        timeout: GH_LOOKUP_TIMEOUT_MS,
+        // SIGKILL, not SIGTERM: spawnSync blocks until the child actually
+        // exits after the timeout fires, so a child that handles or ignores
+        // SIGTERM would hang this call (and autoreview) indefinitely despite
+        // the "timeout" option. SIGKILL can't be caught or ignored.
+        killSignal: "SIGKILL",
+        detached: true,
       },
     );
+    if (
+      repoResult.error?.code === "ETIMEDOUT" ||
+      repoResult.signal === "SIGKILL"
+    ) {
+      killProcessGroup(repoResult.pid);
+      throw new Error(
+        `failed to inspect repository owner: gh repo view timed out after ${GH_LOOKUP_TIMEOUT_MS / 1000}s; pass --base explicitly`,
+      );
+    }
     if (repoResult.error) {
       throw new Error(
         `failed to inspect repository owner: ${repoResult.error.message}`,
@@ -1963,8 +2009,17 @@ function detectPrBase(repo, branch) {
         env,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
+        timeout: GH_LOOKUP_TIMEOUT_MS,
+        killSignal: "SIGKILL",
+        detached: true,
       },
     );
+    if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGKILL") {
+      killProcessGroup(result.pid);
+      throw new Error(
+        `failed to inspect PR base: gh pr list timed out after ${GH_LOOKUP_TIMEOUT_MS / 1000}s; pass --base explicitly`,
+      );
+    }
     if (result.error) {
       throw new Error(`failed to inspect PR base: ${result.error.message}`);
     }
@@ -4180,6 +4235,53 @@ function assertReviewSourceState(
   assertSourceSnapshot(repo, expectedSource, target, message);
 }
 
+function recordStageDuration(stage, startedAtMs) {
+  stageTimings.push({ stage, seconds: (Date.now() - startedAtMs) / 1000 });
+}
+
+// Stage-duration logging is best-effort observability; it mirrors the gate's
+// `.tmp/agent-<tool>/durations.jsonl` convention and must never fail the review.
+function flushStageDurations() {
+  if (!stageDurationsContext || stageTimings.length === 0) return;
+  const { repo, mode } = stageDurationsContext;
+  const timings = stageTimings.splice(0);
+  const ts = new Date().toISOString();
+  try {
+    const dir =
+      process.env.AGENT_AUTOREVIEW_DURATIONS_DIR ||
+      path.join(repo, ".tmp", "agent-autoreview");
+    mkdirSync(dir, { recursive: true });
+    const lines = timings
+      .map((entry) =>
+        JSON.stringify({
+          ts,
+          stage: entry.stage,
+          seconds: entry.seconds,
+          mode,
+        }),
+      )
+      .join("\n");
+    writeFileSync(path.join(dir, "durations.jsonl"), `${lines}\n`, {
+      flag: "a",
+    });
+  } catch {
+    // Never let logging failure abort or fail the review.
+  }
+  // The durable JSONL above is always written; the human-readable stderr
+  // summary is opt-in so it cannot leak into the wrapper's strict reviewer-
+  // cleanliness stderr contract.
+  if (!process.env.AGENT_AUTOREVIEW_STAGE_SUMMARY) return;
+  const summary = timings
+    .map(
+      (entry) =>
+        `agent:autoreview: stage-timing   ${entry.stage} ${entry.seconds.toFixed(2)}s`,
+    )
+    .join("\n");
+  console.error(
+    `agent:autoreview: stage-timing summary (mode=${mode}):\n${summary}`,
+  );
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   if (argv[0] === "--serialize-untracked-file") {
@@ -4203,42 +4305,55 @@ async function main() {
     );
     return 0;
   }
-  const selectionState = targetSelectionState(repo);
-  const targetSelectionSourceSnapshot = args.dryRun
-    ? null
-    : selectionState.snapshot;
+  stageDurationsContext = { repo, mode: args.mode };
+  const targetSelectionStartedAt = Date.now();
+  let selectionState;
   let target;
-  try {
-    target = chooseTarget(repo, args, selectionState);
-  } catch (error) {
-    if (
-      args.dryRun &&
-      error.message ===
-        "no review target: clean main checkout and no forced mode"
-    ) {
-      target = { mode: "none", ref: null };
-    } else {
-      throw error;
-    }
-  }
+  let targetSelectionSourceSnapshot;
   let reviewSourceSnapshot = null;
-  if (!args.dryRun) {
-    target = freezeTargetRef(repo, target, selectionState);
-    assertTargetSelectionSnapshot(
-      repo,
-      targetSelectionSourceSnapshot,
-      "source changed while the review target was being selected; rerun autoreview against the updated tree",
-    );
-    reviewSourceSnapshot = sourceSnapshot(
-      repo,
-      snapshotOptionsForTarget(target),
-    );
-    assertTargetSelectionSnapshot(
-      repo,
-      targetSelectionSourceSnapshot,
-      "source changed while the review target was being selected; rerun autoreview against the updated tree",
-    );
+  try {
+    selectionState = targetSelectionState(repo);
+    targetSelectionSourceSnapshot = args.dryRun
+      ? null
+      : selectionState.snapshot;
+    try {
+      target = chooseTarget(repo, args, selectionState);
+    } catch (error) {
+      if (
+        args.dryRun &&
+        error.message ===
+          "no review target: clean main checkout and no forced mode"
+      ) {
+        target = { mode: "none", ref: null };
+      } else {
+        throw error;
+      }
+    }
+    if (!args.dryRun) {
+      target = freezeTargetRef(repo, target, selectionState);
+      assertTargetSelectionSnapshot(
+        repo,
+        targetSelectionSourceSnapshot,
+        "source changed while the review target was being selected; rerun autoreview against the updated tree",
+      );
+      reviewSourceSnapshot = sourceSnapshot(
+        repo,
+        snapshotOptionsForTarget(target),
+      );
+      assertTargetSelectionSnapshot(
+        repo,
+        targetSelectionSourceSnapshot,
+        "source changed while the review target was being selected; rerun autoreview against the updated tree",
+      );
+    }
+  } finally {
+    // Record the span even when selection throws -- e.g. an automatic gh base
+    // lookup timing out, or a post-freeze source-state check failing -- so a
+    // failed run still reports where it spent time. The top-level `.finally`
+    // flushes whatever spans were recorded.
+    recordStageDuration("target-selection", targetSelectionStartedAt);
   }
+  const bundlePrepStartedAt = Date.now();
   const guardTargetSelectionDuringReview = args.mode === "auto";
   const branch = selectionState.branch || "detached";
 
@@ -4253,101 +4368,114 @@ async function main() {
   console.log(`web_search: ${args.webSearch ? "on" : "off"}`);
   if (args.dryRun) return 0;
 
-  const paths = changedPaths(repo, target);
-  if (paths.size === 0) {
-    assertReviewSourceState(
-      repo,
-      reviewSourceSnapshot,
-      target,
-      targetSelectionSourceSnapshot,
-      guardTargetSelectionDuringReview,
-      "source changed while the review target was being selected; rerun autoreview against the updated tree",
-    );
-    console.log("autoreview clean: no changed files for selected target");
-    return 0;
-  }
-  const baseline = scopeBaseline(repo, target, paths);
-  console.log(
-    `scope_baseline: changed_files=${baseline.changedFiles} non_test_loc=${baseline.nonTestLoc}`,
-  );
-
-  const needsBundle =
-    args.engine !== "local" ||
-    args.prepareOnly ||
-    Boolean(args.bundleOutput) ||
-    args.prompts.length > 0 ||
-    args.promptFiles.length > 0 ||
-    args.datasets.length > 0;
+  let paths;
   let prompts = [];
-  let bundleOutputs = [];
-  if (needsBundle) {
-    const bundle =
-      target.mode === "local"
-        ? localBundle(repo, target)
-        : target.mode === "branch"
-          ? branchBundle(repo, target)
-          : target.mode === "branch-local"
-            ? branchLocalBundle(repo, target)
-            : commitBundle(repo, target.ref);
-    assertReviewableBundle(paths, bundle);
-    assertNoSecretLikeContent("current branch", branch);
-    if (target.requested_ref) {
-      assertNoSecretLikeContent(
-        "requested review target ref",
-        target.requested_ref,
+  try {
+    paths = changedPaths(repo, target);
+    if (paths.size === 0) {
+      assertReviewSourceState(
+        repo,
+        reviewSourceSnapshot,
+        target,
+        targetSelectionSourceSnapshot,
+        guardTargetSelectionDuringReview,
+        "source changed while the review target was being selected; rerun autoreview against the updated tree",
       );
-    }
-    if (target.ref) assertNoSecretLikeContent("review target ref", target.ref);
-    const bundleBytes = utf8Size(bundle);
-    const extras = loadExtras(repo, args, MAX_REVIEW_INPUT_BYTES - bundleBytes);
-    prompts = buildBoundedReviewPrompts(bundle, (chunk, position) =>
-      renderReviewPrompt(target, branch, baseline, chunk, extras, position),
-    );
-    assertReviewSourceState(
-      repo,
-      reviewSourceSnapshot,
-      target,
-      targetSelectionSourceSnapshot,
-      guardTargetSelectionDuringReview,
-      "source changed while the review bundle was being created; rerun autoreview against the updated tree",
-    );
-    console.log(
-      `bundle: ${bundleBytes} bytes; review passes: ${prompts.length}`,
-    );
-    if (args.prepareOnly) {
-      const displayedBundleOutput =
-        args.bundleOutputDisplay || args.bundleOutput;
-      if (args.bundleOutput) {
-        writeReviewPromptOutputs(args.bundleOutput, prompts);
-        bundleOutputs = reviewPromptOutputPaths(
-          displayedBundleOutput,
-          prompts.length,
-        );
-        console.log(`bundle_output: ${displayedBundleOutput}`);
-      }
-      console.log(
-        JSON.stringify(
-          {
-            target,
-            branch,
-            engine: args.engine,
-            changed_paths: [...paths].sort(),
-            scope_baseline: baseline,
-            bundle_bytes: bundleBytes,
-            review_passes: prompts.length,
-            prompt_bytes: prompts.map(utf8Size),
-            bundle_output: displayedBundleOutput,
-            bundle_outputs: bundleOutputs,
-            behavior_validation_required: true,
-            recommended_next_step:
-              "Inside Codex, adapter-published bundles must follow their README: verify before review, retain the printed manifest digest, have one fresh-context read-only subagent inspect every listed bounded pass, then run the bound post-review check with that retained digest. Standalone-helper output may proceed directly to the reviewer. In either case, also run the separate quality, browser, runtime, or generated-artifact proof required by the change.",
-          },
-          null,
-          2,
-        ),
-      );
+      console.log("autoreview clean: no changed files for selected target");
       return 0;
     }
+    const baseline = scopeBaseline(repo, target, paths);
+    console.log(
+      `scope_baseline: changed_files=${baseline.changedFiles} non_test_loc=${baseline.nonTestLoc}`,
+    );
+
+    const needsBundle =
+      args.engine !== "local" ||
+      args.prepareOnly ||
+      Boolean(args.bundleOutput) ||
+      args.prompts.length > 0 ||
+      args.promptFiles.length > 0 ||
+      args.datasets.length > 0;
+    let bundleOutputs = [];
+    if (needsBundle) {
+      const bundle =
+        target.mode === "local"
+          ? localBundle(repo, target)
+          : target.mode === "branch"
+            ? branchBundle(repo, target)
+            : target.mode === "branch-local"
+              ? branchLocalBundle(repo, target)
+              : commitBundle(repo, target.ref);
+      assertReviewableBundle(paths, bundle);
+      assertNoSecretLikeContent("current branch", branch);
+      if (target.requested_ref) {
+        assertNoSecretLikeContent(
+          "requested review target ref",
+          target.requested_ref,
+        );
+      }
+      if (target.ref)
+        assertNoSecretLikeContent("review target ref", target.ref);
+      const bundleBytes = utf8Size(bundle);
+      const extras = loadExtras(
+        repo,
+        args,
+        MAX_REVIEW_INPUT_BYTES - bundleBytes,
+      );
+      prompts = buildBoundedReviewPrompts(bundle, (chunk, position) =>
+        renderReviewPrompt(target, branch, baseline, chunk, extras, position),
+      );
+      assertReviewSourceState(
+        repo,
+        reviewSourceSnapshot,
+        target,
+        targetSelectionSourceSnapshot,
+        guardTargetSelectionDuringReview,
+        "source changed while the review bundle was being created; rerun autoreview against the updated tree",
+      );
+      console.log(
+        `bundle: ${bundleBytes} bytes; review passes: ${prompts.length}`,
+      );
+      if (args.prepareOnly) {
+        const displayedBundleOutput =
+          args.bundleOutputDisplay || args.bundleOutput;
+        if (args.bundleOutput) {
+          writeReviewPromptOutputs(args.bundleOutput, prompts);
+          bundleOutputs = reviewPromptOutputPaths(
+            displayedBundleOutput,
+            prompts.length,
+          );
+          console.log(`bundle_output: ${displayedBundleOutput}`);
+        }
+        console.log(
+          JSON.stringify(
+            {
+              target,
+              branch,
+              engine: args.engine,
+              changed_paths: [...paths].sort(),
+              scope_baseline: baseline,
+              bundle_bytes: bundleBytes,
+              review_passes: prompts.length,
+              prompt_bytes: prompts.map(utf8Size),
+              bundle_output: displayedBundleOutput,
+              bundle_outputs: bundleOutputs,
+              behavior_validation_required: true,
+              recommended_next_step:
+                "Inside Codex, adapter-published bundles must follow their README: verify before review, retain the printed manifest digest, have one fresh-context read-only subagent inspect every listed bounded pass, then run the bound post-review check with that retained digest. Standalone-helper output may proceed directly to the reviewer. In either case, also run the separate quality, browser, runtime, or generated-artifact proof required by the change.",
+            },
+            null,
+            2,
+          ),
+        );
+        return 0;
+      }
+    }
+  } finally {
+    // Record the span even when bundle prep throws -- e.g. scopeBaseline or
+    // bundle assembly failing -- so a failed run still reports where it spent
+    // time. The top-level `.finally` flushes whatever spans were recorded.
+    recordStageDuration("bundle-prep", bundlePrepStartedAt);
   }
 
   if (args.engine !== "local" && prompts.length > 1) {
@@ -4357,46 +4485,55 @@ async function main() {
   }
 
   let report;
-  if (args.engine === "local") {
-    assertReviewSourceState(
-      repo,
-      reviewSourceSnapshot,
-      target,
-      targetSelectionSourceSnapshot,
-      guardTargetSelectionDuringReview,
-      "source changed before local review; rerun autoreview against the updated tree",
-    );
-    report = runLocalReview(repo, target, paths);
-    assertReviewSourceState(
-      repo,
-      reviewSourceSnapshot,
-      target,
-      targetSelectionSourceSnapshot,
-      guardTargetSelectionDuringReview,
-      "source changed during local review; rerun autoreview against the updated tree",
-    );
-  } else {
-    assertReviewSourceState(
-      repo,
-      reviewSourceSnapshot,
-      target,
-      targetSelectionSourceSnapshot,
-      guardTargetSelectionDuringReview,
-      "source changed before semantic review; rerun autoreview against the updated tree",
-    );
-    const raw =
-      args.engine === "codex"
-        ? await runCodex(repo, args, prompts[0])
-        : await runClaude(repo, args, prompts[0]);
-    report = validateReport(extractReviewJson(raw), paths);
-    assertReviewSourceState(
-      repo,
-      reviewSourceSnapshot,
-      target,
-      targetSelectionSourceSnapshot,
-      guardTargetSelectionDuringReview,
-      "source changed during semantic review; rerun autoreview against the updated tree",
-    );
+  const engineStartedAt = Date.now();
+  try {
+    if (args.engine === "local") {
+      assertReviewSourceState(
+        repo,
+        reviewSourceSnapshot,
+        target,
+        targetSelectionSourceSnapshot,
+        guardTargetSelectionDuringReview,
+        "source changed before local review; rerun autoreview against the updated tree",
+      );
+      report = runLocalReview(repo, target, paths);
+      assertReviewSourceState(
+        repo,
+        reviewSourceSnapshot,
+        target,
+        targetSelectionSourceSnapshot,
+        guardTargetSelectionDuringReview,
+        "source changed during local review; rerun autoreview against the updated tree",
+      );
+    } else {
+      assertReviewSourceState(
+        repo,
+        reviewSourceSnapshot,
+        target,
+        targetSelectionSourceSnapshot,
+        guardTargetSelectionDuringReview,
+        "source changed before semantic review; rerun autoreview against the updated tree",
+      );
+      const raw =
+        args.engine === "codex"
+          ? await runCodex(repo, args, prompts[0])
+          : await runClaude(repo, args, prompts[0]);
+      report = validateReport(extractReviewJson(raw), paths);
+      assertReviewSourceState(
+        repo,
+        reviewSourceSnapshot,
+        target,
+        targetSelectionSourceSnapshot,
+        guardTargetSelectionDuringReview,
+        "source changed during semantic review; rerun autoreview against the updated tree",
+      );
+    }
+  } finally {
+    // Record the engine span even when the invocation throws -- a nonzero
+    // engine exit, or a post-invocation source-state check failing -- so the
+    // runs operators most need to profile still get an engine-invocation
+    // duration. The top-level `.finally` flushes whatever spans were recorded.
+    recordStageDuration("engine-invocation", engineStartedAt);
   }
 
   if (args.bundleOutput) {
@@ -4436,4 +4573,7 @@ entrypoint()
     }
     process.exitCode = 1;
   })
-  .finally(finishPendingProcessTermination);
+  .finally(() => {
+    flushStageDurations();
+    finishPendingProcessTermination();
+  });
