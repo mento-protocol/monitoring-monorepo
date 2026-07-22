@@ -3920,4 +3920,126 @@ STUB
 )
 rm -rf "$command_interrupt_repo"
 
+# PR 1492 review: with --parallel greater than 1 the timed commands' pids live
+# only inside the worker subshells, so the parent's interrupt teardown must
+# signal the tracked worker pids (active_worker_pids) or a SIGTERM-ignoring
+# mapped command survives the gate's death. TERM targets ONLY the gate pid.
+parallel_interrupt_repo="$(mktemp -d)"
+(
+  cd "$parallel_interrupt_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  printf 'console.log("fixture");\n' > scripts/agent-context-budget.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/qg-par-victim <<'STUB'
+#!/usr/bin/env bash
+trap '' TERM
+while :; do sleep 1; done
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "agent:prewarm:test" ]]; then
+  exec qg-par-victim
+fi
+if [[ "$*" == "agent:context-budget:test" ]]; then
+  exec sleep 45
+fi
+exit 0
+STUB
+  chmod +x bin/pnpm bin/qg-par-victim tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\nscripts/agent-context-budget.mjs\n' > changed-paths.txt
+  set +e
+  PATH="$parallel_interrupt_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 2 \
+      > "$output_file" 2>&1 &
+  gate_pid=$!
+  waited=0
+  until pgrep -f "qg-par-victim" >/dev/null 2>&1; do
+    sleep 1
+    waited=$((waited + 1))
+    if [[ "$waited" -ge 20 ]]; then
+      kill -KILL "$gate_pid" 2>/dev/null
+      pkill -KILL -f "qg-par-victim" 2>/dev/null
+      fail "parallel interrupt fixture never started its victim"
+    fi
+  done
+  kill -TERM "$gate_pid" 2>/dev/null
+  wait "$gate_pid"
+  parallel_interrupt_exit=$?
+  set -e
+  [[ "$parallel_interrupt_exit" -ne 0 ]] ||
+    fail "expected the gate to exit nonzero when interrupted during the parallel pool"
+  sleep 5
+  if pgrep -f "qg-par-victim" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-par-victim" 2>/dev/null || true
+    fail "interrupted parallel gate left a SIGTERM-ignoring worker command running"
+  fi
+)
+rm -rf "$parallel_interrupt_repo"
+
+# PR 1492 review: prerequisite commands (install/codegen/setup) produce outputs
+# the source fingerprint cannot see, so they must never be stamped or reused —
+# two identical successful runs execute the preflight install twice, while a
+# stampable quality command is reused on the second run.
+prereq_reuse_repo="$(mktemp -d)"
+(
+  cd "$prereq_reuse_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts sub tools
+  printf '{"name":"sub"}\n' > sub/package.json
+  printf 'process.exit(0);\n' > scripts/check-adr-reminder.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "install --frozen-lockfile" ]]; then
+  echo run >> "$INSTALL_SIDE_EFFECT"
+  exit 0
+fi
+if [[ "$*" == "skew:check" ]]; then
+  echo run >> "$SKEW_SIDE_EFFECT"
+  exit 0
+fi
+exit 0
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'sub/package.json\n' > changed-paths.txt
+  for _ in 1 2; do
+    INSTALL_SIDE_EFFECT="$prereq_reuse_repo/install-side-effect" \
+      SKEW_SIDE_EFFECT="$prereq_reuse_repo/skew-side-effect" \
+      PATH="$prereq_reuse_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        --parallel 1 \
+        --allow-package-script-changes \
+        > "$output_file" 2>&1 ||
+      fail "prerequisite-reuse fixture run failed unexpectedly"
+  done
+  [[ "$(wc -l < "$prereq_reuse_repo/install-side-effect" | tr -d ' ')" == "2" ]] ||
+    fail "expected the preflight install to run on BOTH runs (prerequisites are never reused)"
+  [[ "$(wc -l < "$prereq_reuse_repo/skew-side-effect" | tr -d ' ')" == "1" ]] ||
+    fail "expected the quality command to be reused on the second run"
+)
+rm -rf "$prereq_reuse_repo"
+
 echo "agent quality gate tests passed"

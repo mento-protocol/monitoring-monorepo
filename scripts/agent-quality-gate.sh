@@ -236,8 +236,16 @@ timeout_seq=0
 # PIDs (command + watchdog) of any in-flight timed command in THIS process, so a
 # wrapper SIGINT/SIGTERM tears them down instead of leaking the watchdog's
 # background sleeps. Sequential commands run in the gate process; parallel
-# members run in their own `&` subshells, each maintaining its own copy.
+# members run in their own `&` subshells, each maintaining its own copy — which
+# the parent's signal traps cannot see, so the parallel pool ALSO registers its
+# worker subshell PIDs in active_worker_pids below.
 active_timeout_pids=()
+
+# Worker subshell PIDs of the in-flight parallel pool, maintained by the pool's
+# parent loop. A SIGTERM-ignoring mapped command inside a worker would survive
+# a gate interrupt if teardown only signalled active_timeout_pids (which are
+# empty in the parent during --parallel runs).
+active_worker_pids=()
 
 kill_process_tree() {
   local pid="$1"
@@ -250,21 +258,47 @@ kill_process_tree() {
   kill "-${sig}" "$pid" 2>/dev/null || true
 }
 
+# Print pid plus every live descendant, one per line, deepest first.
+collect_process_tree() {
+  local pid="$1"
+  local child
+  [[ -n "$pid" ]] || return 0
+  while IFS= read -r child; do
+    [[ -n "$child" ]] && collect_process_tree "$child"
+  done < <(pgrep -P "$pid" 2>/dev/null || true)
+  echo "$pid"
+}
+
 teardown_active_timeouts() {
   local pid
-  local -a pids=("${active_timeout_pids[@]+"${active_timeout_pids[@]}"}")
+  local -a roots=(
+    "${active_timeout_pids[@]+"${active_timeout_pids[@]}"}"
+    "${active_worker_pids[@]+"${active_worker_pids[@]}"}"
+  )
   active_timeout_pids=()
-  [[ ${#pids[@]} -gt 0 ]] || return 0
-  for pid in "${pids[@]}"; do
-    kill_process_tree "$pid" TERM
+  active_worker_pids=()
+  [[ ${#roots[@]} -gt 0 ]] || return 0
+  # Snapshot every descendant BEFORE signalling: TERM kills intermediate
+  # subshells first, which reparents a SIGTERM-ignoring survivor away from the
+  # tree, so a post-TERM re-walk would miss it. The KILL pass targets the
+  # saved pid list, not a fresh walk.
+  local -a tree=()
+  for pid in "${roots[@]}"; do
+    while IFS= read -r child_pid; do
+      [[ -n "$child_pid" ]] && tree+=("$child_pid")
+    done < <(collect_process_tree "$pid")
+  done
+  [[ ${#tree[@]} -gt 0 ]] || return 0
+  for pid in "${tree[@]}"; do
+    kill "-TERM" "$pid" 2>/dev/null || true
   done
   # Same TERM-then-KILL grace as run_with_timeout's watchdog: a manual
   # interrupt (Ctrl-C/TERM to the gate) must not leave a SIGTERM-ignoring
   # mapped command (or descendant) running just because it wasn't the
   # timeout path that tore it down.
   sleep 3
-  for pid in "${pids[@]}"; do
-    kill_process_tree "$pid" KILL
+  for pid in "${tree[@]}"; do
+    kill "-KILL" "$pid" 2>/dev/null || true
   done
 }
 
@@ -2741,6 +2775,9 @@ command_stamp_is_fresh() {
 
 record_command_stamp() {
   local command="$1"
+  # Prerequisite outputs (node_modules, generated code) are invisible to the
+  # source fingerprint, so prerequisite commands are never stamped or reused.
+  [[ "${in_prerequisite_phase:-false}" == true ]] && return 0
   is_stamp_exempt_command "$command" && return 0
   # Best-effort: a stamp-write failure must never fail the gate.
   printf '%s\t%s\t%s\n' \
@@ -2783,6 +2820,7 @@ prune_command_stamps() {
 # skips execution), 1 when the command must run.
 try_reuse_command() {
   local command="$1"
+  [[ "${in_prerequisite_phase:-false}" == true ]] && return 1
   is_stamp_exempt_command "$command" && return 1
   command_stamp_is_fresh "$command" || return 1
   echo
@@ -3021,6 +3059,10 @@ run_mapped_entries_parallel() {
       pid="$!"
 
       active_pids+=("$pid")
+      # Mirror into the signal-trap teardown set so an interrupt reaches the
+      # worker's whole tree (the worker-local active_timeout_pids are invisible
+      # to the parent's traps).
+      active_worker_pids+=("$pid")
       active_commands+=("$command")
       active_output_files+=("$output_file")
       active_status_files+=("$status_file")
@@ -3087,6 +3129,7 @@ run_mapped_entries_parallel() {
     done
 
     active_pids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
+    active_worker_pids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
     active_commands=("${next_active_commands[@]+"${next_active_commands[@]}"}")
     active_output_files=("${next_active_output_files[@]+"${next_active_output_files[@]}"}")
     active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
@@ -3135,7 +3178,14 @@ run_prerequisite_phase() {
   # mutex), so they are run keep-going and still collect their own feedback.
   local previous_fail_fast="$fail_fast"
   fail_fast=true
+  # Prerequisite commands (install/codegen/quality-setup) produce OUTPUTS
+  # (node_modules, generated code, built packages) that the source fingerprint
+  # cannot see. A stamp from a prior run must not skip them — deleting
+  # node_modules between runs would otherwise start dependent commands against
+  # missing inputs. They are cheap and idempotent; always re-run them.
+  in_prerequisite_phase=true
   run_mapped_entries_sequential "$@"
+  in_prerequisite_phase=false
   fail_fast="$previous_fail_fast"
 }
 

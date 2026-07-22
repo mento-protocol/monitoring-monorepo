@@ -617,10 +617,13 @@ fails toward rerun. Because the fingerprint includes the content hash of every
 changed file, ANY edit to a validated file invalidates every per-command stamp,
 so reuse only helps the killed-run / single-flake case where content is
 unchanged; that same invalidation, plus a start-of-run prune that drops
-non-matching and expired entries, keeps the file bounded. Prerequisite phases
-(install/codegen/quality-setup) and quality/serialized/parallel commands are all
-stamped, but the Trunk check and the gate self-test are exempt and always
-re-run: they validate repo/gate state cheaply and self-referentially. The ADR
+non-matching and expired entries, keeps the file bounded. Only
+quality/serialized/parallel commands are stamped. Prerequisite phases
+(install/codegen/quality-setup) always re-run: their outputs (node_modules,
+generated code, built packages) are invisible to the source fingerprint, so a
+stamp could skip them after their outputs were deleted. The Trunk check and
+the gate self-test are also exempt and always re-run: they validate repo/gate
+state cheaply and self-referentially. The ADR
 reminder also re-runs every time, for a mechanical reason rather than an
 exemption: its command string embeds the run's temporary changed-paths file
 path, so its stamp key never matches a prior run (fail-safe — an advisory,
