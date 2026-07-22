@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -12,14 +12,15 @@ garden_lane: operator-runbooks
 
 # PR Ready State
 
-`pnpm pr:ready-state` is the shared readiness probe for Claude Code and Codex
-PR babysitting. It should answer one question: is the PR ready to report as
-all-clear right now?
+`pnpm pr:ready-state` is the shared required-readiness probe for Claude Code and
+Codex PR babysitting. It answers whether the current head's required GitHub and
+repo-policy gates are clear.
 
-The command must be the source of truth before either agent signals all-clear.
-Agent-specific loops can still gather extra context or post replies, but their
-final readiness decision should come from this command so Claude and Codex do
-not drift.
+The command is the final required-gate source of truth, not a replacement for
+the feedback sweep. Before either agent signals all-clear, `pr:feedback-state`
+must have a clean feedback ledger and the subsequent current-head
+`pr:ready-state` result must be ready. Agent-specific loops may gather extra
+context or post replies, but they must preserve that two-projection contract.
 
 ## Readiness model
 
@@ -84,15 +85,14 @@ separate advisory state: report it in the readiness output, but do not hold the
 all-clear on it unless the Cursor check or review is required by branch
 protection.
 
-Some non-required workflows still post review feedback that can become required
-repo-policy blockers after the required status surface is already green. For
-example, an in-progress `auto-review` job does not block by status alone, but it
-can later create inline threads, unreplied review comments, or actionable
-top-level bot feedback. The probe result remains the readiness source of truth:
-do not block `ready` on those workflows unless branch protection makes them
-required. If one is visibly in progress during handoff, report it as optional
-lag; when you are still babysitting the PR anyway, rerun `pr:feedback-state`
-after it reaches a terminal state so late feedback is not missed.
+Some non-required workflows still post feedback that becomes a repo-policy
+blocker after the required status surface is green. Their workflow status stays
+optional, but inline threads, unreplied review comments, and actionable
+top-level bot feedback do not. `pr:feedback-state` owns that ledger;
+`pr:ready-state` does not project actionable top-level summaries into its
+required blockers. If a review-producing workflow is visibly in progress,
+report it as optional lag and rerun `pr:feedback-state` after it reaches a
+terminal state so late feedback is not missed.
 
 ## Expected CLI contract
 
@@ -206,8 +206,9 @@ Field expectations:
   not flip this to `false`. A PR whose `pr.state` is `MERGED` is terminal-ready;
   a PR whose `pr.state` is `CLOSED` without merge is terminal-blocked with a
   `state` blocker.
-- `required.ready`: mirrors the required-only decision and should be the value
-  agents use for all-clear.
+- `required.ready`: mirrors the required-readiness half of the decision. Agents
+  use it only after `pr:feedback-state` has a clean feedback ledger; it is not
+  sufficient for all-clear by itself.
 - `pr.state`: GitHub's PR state (`OPEN`, `MERGED`, or `CLOSED`). The probe uses
   this before fetching comments, reactions, check sources, and branch
   protection so post-merge babysitting exits quickly and does not mistake
@@ -262,51 +263,17 @@ Field expectations:
    review-triggered patch cycles rather than starting a third automatically.
 3. Run the mapped local gate once for the batch.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
-   run `pnpm agent:autoreview` as a structured closeout review. The command is
-   a repo adapter for the pinned helper at `scripts/agent-autoreview.mjs`. It
-   reviews the complete branch-local target without truncation. Direct semantic
-   engines fail closed if the target needs more than one prompt; prepared
-   bundles preserve a bounded lossless pass index that one fresh-context
-   reviewer must inspect completely. Semantic engines run from an isolated
-   empty workspace with restricted project configuration and environment, and
-   review inputs fail closed when sensitive paths or content are detected. A
-   quiet semantic pass emits a heartbeat every 60 seconds.
-   Verify accepted findings before editing; if review-triggered fixes change
-   code, rerun focused checks and autoreview for that fixed batch. Inside an
-   active Codex sandbox, the adapter may default to the helper's local
-   deterministic engine only when no engine is explicitly selected. An
-   explicitly selected unavailable semantic engine fails closed. For a true
-   fresh-context Codex semantic pass, prepare a bundle and hand it to the
-   reviewer:
+   run `pnpm agent:autoreview` as a structured source-review closeout. Verify
+   accepted findings before editing and rerun focused checks plus autoreview if
+   those fixes change the batch. The exact target, prepared-bundle, isolation,
+   and trust contracts live in
+   [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md); keep
+   behavioral and runtime verification in the validation record.
 
-   ```bash
-   pnpm agent:autoreview --prepare-bundle-dir <dir>
-   pnpm agent:autoreview --verify-bundle-dir <dir>
-   # Retain the printed digest outside the bundle, review every pass, then:
-   pnpm agent:autoreview --verify-bundle-dir <dir> \
-     --expected-bundle-manifest <retained-pre-review-digest>
-   ```
-
-   Use a directory outside the repo worktree whose parent already exists so
-   local-mode bundles do not include themselves. Every canonical parent
-   ancestor must be owned by the current user or root; group/other-writable
-   ancestors require sticky-bit protection. On macOS, write-granting ACLs on
-   parent ancestors or bundle entries fail preparation or verification. Direct supplemental evidence
-   must be repo-relative; adapter-generated `--feedback-pr <number>` state and
-   protected-main checklist copies inside the trusted bundle directory are the
-   narrow exceptions. The owning-checkout default semantic helper and automatic
-   feedback use Node modules from that same pinned `origin/main` object with
-   canonical repository routing rather than a PR-selected base, mutable
-   worktree, or package scripts; wrapper-owned Node launches discard
-   `NODE_OPTIONS` and `NODE_PATH`. Reviewer web search is disabled by
-   default; opt in only with `--web-search`. Do not pass the removed
-   `--parallel-tests` option; the quality gate owns tests. A clean source review
-   does not prove UI, CLI/API, generated-artifact, or runtime behavior, so keep
-   all applicable verification in the validation record.
-
-5. Run `pnpm --silent pr:feedback-state --pr <number> --json` for a feedback-only sweep,
-   or `pnpm pr:ready-state --pr <number> --json` for the final readiness
-   source of truth. For a foreground wait loop, use
+5. Run `pnpm --silent pr:feedback-state --pr <number> --json` for the feedback
+   sweep. After its ledger is clean, run
+   `pnpm pr:ready-state --pr <number> --json` for the final required-readiness
+   decision. For a foreground wait loop, use
    `pnpm pr:ready-state --pr <number> --watch --compact --until-ready`.
 6. If feedback-state `ready` is false, inspect and handle
    `requiredFeedbackBlockers`, `unresolvedReviewThreads`,
@@ -319,8 +286,8 @@ Field expectations:
    in-progress review-producing workflows. If you are still watching the PR when
    one finishes, rerun `pr:feedback-state` to catch late feedback; do not treat
    the optional workflow status itself as a blocker.
-9. Signal all-clear only after final ready-state `ready` is true for the
-   current head.
+9. Signal all-clear only after feedback-state has no required blocker and final
+   ready-state `ready` is true for the current head.
 
 Claude Code and Codex intentionally use the same command and readiness fields.
 Differences between Claude `Monitor` wiring and Codex polling should stay
@@ -355,5 +322,6 @@ watching until Codex approves, posts new feedback, or the signal becomes stale.
 - Cap manual Codex fallback to one request per head.
 - If `codexReviewSignal` is `requested` or `in_flight`, wait instead of posting
   another `@codex review`.
-- Declare all-clear from the required-only readiness result, not from optional
-  reviewer lag clearing first.
+- Declare all-clear only after the feedback ledger is clean and the
+  required-only readiness result is ready; optional reviewer lag does not need
+  to clear first.

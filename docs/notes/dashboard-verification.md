@@ -3,7 +3,7 @@ title: Dashboard Local and Browser Verification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-22
 doc_type: runbook
 scope: ui-dashboard
 review_interval_days: 90
@@ -74,9 +74,9 @@ For a simulated authenticated session:
    render, and authenticated controls are visible.
 
 The `/volume` Organic/All protocol-actor control is authenticated-only.
-Logged-out sessions intentionally hide it and force all-volume queries, so a
-protocol actor appearing while logged out does not disprove organic filtering.
-Verify that filter in a simulated session or query with
+Logged-out sessions intentionally hide it and force all-actor queries, so a
+protocol actor appearing while logged out is expected and does not exercise the
+Organic filter. Verify that filter in a simulated session or query with
 `isProtocolActorIn: [false]`.
 
 ## Production-build differences
@@ -85,10 +85,12 @@ For `pnpm build` plus `pnpm start`:
 
 - `NEXT_PUBLIC_HASURA_URL` must exist at build time; only `pnpm dev` supplies a
   production default.
-- Sentry initializes only when `VERCEL_ENV` is set at build time. Use
-  `VERCEL_ENV=preview` and a placeholder-format `NEXT_PUBLIC_SENTRY_DSN` for
-  local Sentry behavior. `next.config.ts` owns the
-  `NEXT_PUBLIC_VERCEL_ENV` mirror; do not set that mirror directly.
+- Client Sentry initializes only when `VERCEL_ENV` is set at build time because
+  `next.config.ts` inlines its `NEXT_PUBLIC_VERCEL_ENV` mirror. Server and edge
+  instrumentation also read `VERCEL_ENV` at runtime, so keep it set when
+  starting the built app. Use `VERCEL_ENV=preview` and a placeholder-format
+  `NEXT_PUBLIC_SENTRY_DSN` for local Sentry behavior; do not set the public
+  mirror directly.
 - The persisted SWR build salt is derived from
   `VERCEL_DEPLOYMENT_ID ?? VERCEL_GIT_COMMIT_SHA ?? "dev"` and inlined as
   `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`. Do not configure the public mirror. The
@@ -163,8 +165,11 @@ Current intentional silences are:
 - `no-secrets-in-client-code` in tests/scripts with placeholder public data;
 - `js-tosorted-immutable` for the ES2017 compatibility workaround and
   `effect/no-event-handler` for debounced/URL-state false positives;
-- `knip/files` for runtime-loaded browser fixtures and mutation config;
-- `knip/exports` only for the compatibility `HASURA_TIMEOUT_MS` re-export in
-  `src/lib/graphql.ts`; new server imports use `@/lib/hasura-timeout`.
+- `knip/files` for scripts, runtime-loaded browser fixtures, mutation config,
+  and generated GraphQL;
+- `knip/exports` and `knip/types` for generated GraphQL; outside generated
+  code, the only `knip/exports` exception is the compatibility
+  `HASURA_TIMEOUT_MS` re-export in `src/lib/graphql.ts`. New server imports use
+  `@/lib/hasura-timeout`.
 
 Do not broaden these silences to make a changed file pass.
