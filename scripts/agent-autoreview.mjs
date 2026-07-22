@@ -1932,12 +1932,16 @@ function detectPrBase(repo, branch) {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         timeout: GH_LOOKUP_TIMEOUT_MS,
-        killSignal: "SIGTERM",
+        // SIGKILL, not SIGTERM: spawnSync blocks until the child actually
+        // exits after the timeout fires, so a child that handles or ignores
+        // SIGTERM would hang this call (and autoreview) indefinitely despite
+        // the "timeout" option. SIGKILL can't be caught or ignored.
+        killSignal: "SIGKILL",
       },
     );
     if (
       repoResult.error?.code === "ETIMEDOUT" ||
-      repoResult.signal === "SIGTERM"
+      repoResult.signal === "SIGKILL"
     ) {
       throw new Error(
         `failed to inspect repository owner: gh repo view timed out after ${GH_LOOKUP_TIMEOUT_MS / 1000}s; pass --base explicitly`,
@@ -1989,10 +1993,10 @@ function detectPrBase(repo, branch) {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         timeout: GH_LOOKUP_TIMEOUT_MS,
-        killSignal: "SIGTERM",
+        killSignal: "SIGKILL",
       },
     );
-    if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGTERM") {
+    if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGKILL") {
       throw new Error(
         `failed to inspect PR base: gh pr list timed out after ${GH_LOOKUP_TIMEOUT_MS / 1000}s; pass --base explicitly`,
       );

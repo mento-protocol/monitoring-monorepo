@@ -3178,6 +3178,13 @@ run_with_deadline() {
   if [[ "$had_monitor" -eq 0 ]]; then
     set +m
   fi
+  # If the wrapper itself is interrupted while this job is running, kill the
+  # whole backgrounded process group instead of leaving it to run orphaned and
+  # undetected -- exactly the hung-command class this function exists to
+  # bound. Re-raise the signal against ourselves afterward so the interrupted
+  # script still terminates with the expected signal-death semantics.
+  trap 'kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$out_file"; trap - INT TERM; kill -s TERM "$$"' TERM
+  trap 'kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$out_file"; trap - INT TERM; kill -s INT "$$"' INT
   while [[ "$waited" -lt "$deadline" ]] && kill -0 "$child" 2>/dev/null; do
     sleep 1
     waited=$((waited + 1))
@@ -3189,6 +3196,7 @@ run_with_deadline() {
     wait "$child" 2>/dev/null || true
     echo "agent:autoreview: $label timed out after ${deadline}s" >&2
     rm -f "$out_file"
+    trap - INT TERM
     return 124
   fi
   if wait "$child"; then
@@ -3196,6 +3204,7 @@ run_with_deadline() {
   else
     status=$?
   fi
+  trap - INT TERM
   cat "$out_file"
   rm -f "$out_file"
   return "$status"
