@@ -351,7 +351,16 @@ test("malformed canonical note metadata fails closed", () => {
 });
 
 test("incomplete canonical note metadata fails closed", () => {
-  for (const key of ["title", "status", "owner", "last_verified"]) {
+  for (const key of [
+    "title",
+    "status",
+    "owner",
+    "last_verified",
+    "doc_type",
+    "scope",
+    "review_interval_days",
+    "garden_lane",
+  ]) {
     const content = contextNote("true").replace(
       new RegExp(`^${key}:.*\\n`, "m"),
       "",
@@ -369,6 +378,30 @@ test("incomplete canonical note metadata fails closed", () => {
         ?.reason,
       "non-canonical planning or note document",
     );
+  }
+});
+
+test("invalid canonical note classification metadata fails closed", () => {
+  for (const content of [
+    contextNote("true").replace("status: active", "status: unknown"),
+    contextNote("true").replace("doc_type: runbook", "doc_type: unknown"),
+    contextNote("true").replace(
+      "garden_lane: operator-runbooks",
+      "garden_lane: unknown",
+    ),
+    contextNote("true").replace(
+      "review_interval_days: 90",
+      "review_interval_days: 0",
+    ),
+  ]) {
+    const report = analyzeMateriality({
+      paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
+      readBaseContextFile: () => content,
+      readHeadContextFile: () => content,
+    });
+
+    assertEqual(report.contextUpdatesPresent, false);
+    assertEqual(report.contextUpdateMissing, true);
   }
 });
 

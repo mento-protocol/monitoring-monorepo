@@ -5,7 +5,11 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { load as parseYaml } from "js-yaml";
 
-import { parseDocumentationMetadata } from "./docs-index-helpers.mjs";
+import {
+  classifyDocumentation,
+  DOCUMENT_STATUSES,
+  parseDocumentationMetadata,
+} from "./docs-index-helpers.mjs";
 
 const TIER_ORDER = ["trivial", "standard", "full"];
 const DEFAULT_BASE = "origin/main";
@@ -19,8 +23,11 @@ const REQUIRED_CANONICAL_NOTE_METADATA = [
   "status",
   "owner",
   "last_verified",
+  "doc_type",
+  "scope",
+  "review_interval_days",
+  "garden_lane",
 ];
-const VALID_CONTEXT_STATUSES = new Set(["active", "archived", "draft"]);
 
 function usage() {
   return `Usage: pnpm agent:review-materiality [options]
@@ -352,8 +359,9 @@ function hasCanonicalNoteMetadata(filePath, readContextFile) {
     const metadata = parseDocumentationMetadata(filePath, content);
     return (
       metadata?.canonical === "true" &&
-      VALID_CONTEXT_STATUSES.has(metadata.status) &&
-      REQUIRED_CANONICAL_NOTE_METADATA.every((key) => metadata[key]?.trim())
+      DOCUMENT_STATUSES.includes(metadata.status) &&
+      REQUIRED_CANONICAL_NOTE_METADATA.every((key) => metadata[key]?.trim()) &&
+      classifyDocumentation(filePath, metadata).errors.length === 0
     );
   } catch {
     // Deleted, unreadable, and malformed notes must not satisfy a required
