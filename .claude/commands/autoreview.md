@@ -84,9 +84,11 @@ paths at this runtime-changing checkout.
    or runtime proof. Keep every applicable browser, quality-gate, and runtime
    verification step.
 6. For PR work, do not call the PR clean until
-   `pnpm pr:ready-state --pr <number> --json` is ready. In a Claude cloud
-   session without the REST + GraphQL + `--slurp` capability gate the probe
-   cannot run; run the MCP emulation checklist from the `babysit-pr` skill
-   instead, label the result MCP-emulated rather than probe-verified, and
-   leave the probe-verified all-clear to a gh-capable surface
+   `pnpm pr:ready-state --pr <number> --json` is ready; in a capable Claude
+   cloud variant add `--repo <owner/name>` (gh cannot infer the repo from
+   the proxy remote). In a Claude cloud session without the REST + GraphQL +
+   `--slurp` capability gate the probe cannot run; run the MCP emulation
+   checklist from the `babysit-pr` skill instead, label the result
+   MCP-emulated rather than probe-verified, and leave the probe-verified
+   all-clear to a gh-capable surface
    (`docs/notes/github-tooling-surfaces.md`).

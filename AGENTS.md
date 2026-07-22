@@ -66,9 +66,10 @@ storage only. Claim before substantive edits:
 pnpm issue:claim --count 3 --agent codex
 ```
 
-In Claude cloud sessions these helpers cannot run (gh is platform-blocked);
-use the MCP workboard fallback in
+In Claude cloud sessions without the REST + GraphQL + `--slurp` capability
+gate these helpers cannot run; use the MCP workboard fallback in
 [`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
+Capable variants run the helpers as written.
 When a PR opens, run `pnpm issue:review --pr <number> --issue <issue>`. Use
 `Closes #N` only when the issue's **Done means** is fully satisfied; otherwise
 use `Refs #N`. Release incomplete work with `pnpm issue:release` and choose
