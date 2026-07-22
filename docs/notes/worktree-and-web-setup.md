@@ -68,19 +68,12 @@ needing a developer's personal skills present.
 
 ### GitHub access in hosted sessions: gh is platform-blocked
 
-The gh CLI cannot do repo-scoped API work in Claude cloud sessions, and this
-is not fixable from the environment settings. The platform's GitHub credential
-proxy intercepts `github.com`/`api.github.com` (it is independent of the
-network-access allowlist — entries for GitHub hosts are inert), overrides any
-client `Authorization` header (a `GH_TOKEN` env var is ignored), and serves
-structured 403s for every `/repos/*` path and for GraphQL. `gh auth status`
-still succeeds because `/user` is served, so it is not a capability signal.
-`pnpm pr:ready-state` therefore cannot run in hosted sessions.
-
-Hosted sessions use the GitHub MCP tools for PR/issue/API work and the
-`babysit-pr` skill's cloud watch loop (webhook subscription plus scheduled
-self check-ins) for monitoring; the foreground
+In Claude cloud sessions the platform's GitHub credential proxy blocks gh's
+repo API and GraphQL regardless of tokens or allowlist entries (`gh auth
+status` still passes, so it is not a capability signal), and
+`pnpm pr:ready-state` cannot run. Hosted sessions use the GitHub MCP tools
+plus the `babysit-pr` cloud watch loop; the foreground
 `pnpm pr:ready-state --pr <number> --watch --compact` loop remains the local
-fallback when the Claude `Monitor` tool is unavailable. The full gh→MCP
-mapping and the empirical findings live in
+fallback when the Claude `Monitor` tool is unavailable. Mechanics, the
+gh→MCP mapping, and the empirical findings live in
 [`github-tooling-surfaces.md`](github-tooling-surfaces.md).

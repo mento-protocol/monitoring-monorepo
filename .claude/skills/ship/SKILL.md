@@ -34,7 +34,10 @@ gh→MCP mapping lives in
   replace each gh call with its MCP equivalent — `pull_request_read` for the
   preflight PR lookup, `create_pull_request` / `update_pull_request` for the
   PR step — and hand post-push readiness to the `babysit-pr` cloud watch
-  loop.
+  loop. Exception: in a cloud variant where a repo-scoped `gh api` call
+  succeeds and gh supports `--slurp` (the same capability gate `babysit-pr`
+  and `.claude/babysit-pr.sh` apply), use the gh commands and the readiness
+  probe as written.
 
 ## Preflight
 

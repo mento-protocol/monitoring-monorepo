@@ -149,6 +149,10 @@ Do not foreground-poll and never sleep-poll. Instead:
      end);
    - unreplied root review comments and top-level comments via methods
      `get_review_comments`, `get_reviews`, and `get_comments`;
+   - the latest per-reviewer review state from `get_reviews`: an outstanding
+     `CHANGES_REQUESTED` on the current head is a required blocker. Whether
+     an approval is required at all (`REVIEW_REQUIRED`) rides on branch
+     protection, which MCP cannot read — name it unverified;
    - the Codex current-head signal from Codex's visible reviews/comments for
      the current head. The reaction-backed PR-description approval gate is
      not readable over MCP; report it as unverified rather than assumed.

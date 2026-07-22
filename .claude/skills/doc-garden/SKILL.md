@@ -30,12 +30,10 @@ list for review.
 1. Read the generated issue and verify that its first lines contain the
    `docs-garden-issue:v1` and `docs-garden-packet:v1` markers. Confirm all
    eight Agent Task sections and the complete generated planner packet exist.
-2. Claim the issue through `pnpm issue:claim` before semantic edits. In a
-   Claude cloud session the helper cannot run (gh's repo API is
-   platform-blocked); use the MCP workboard fallback in
+2. Claim the issue through `pnpm issue:claim` before semantic edits; in a
+   Claude cloud session use the MCP workboard fallback in
    [`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)
-   instead — label transition, helper-format claim comment, and the
-   gh-capable `issue:board sync` handoff. Do not
+   (label transition, claim comment, `issue:board sync` handoff). Do not
    overwrite a packet already labeled `needs-grooming`, `agent-active`, or
    `in-pr`; it remains the one live packet until resolved or closed.
 3. Reproduce the packet when needed:
