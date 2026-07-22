@@ -51,3 +51,19 @@ Two gates:
 
 - Browser interaction suite PR #403 (2026-05-13); react-doctor PR-diff gate PR #367 (2026-05-09).
 - Commands + gates in [`docs/notes/dashboard-verification.md`](../notes/dashboard-verification.md); [`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md).
+
+## Addendum (2026-07-22): browser tests serve a cached fixture build
+
+`test:browser` no longer boots `next dev`; it serves a **fixture production
+build** (`next start` on a separate `.next-fixture` distDir, built by
+`ui-dashboard/scripts/fixture-build.mjs` and cached as the turbo
+`fixture-build` task). Rationale: the fixture flag and Hasura URL are
+build-inlined `NEXT_PUBLIC_*` values, so a dedicated fixture build is
+required either way; caching it removes the rebuild from every run
+(no-change rerun ~180ms, test-edit rerun ~32s) and eliminates the dev-server
+flake class. The fixture GraphQL port is now fixed (3211) so the build is
+cacheable; only the Next port stays OS-assigned. `--production` forces a
+rebuild rather than selecting a different serving mode. The core decision —
+fixture-driven Playwright plus react-doctor gates — is unchanged. See PR for
+alternatives (shared size-limit build rejected: env differences make the
+builds byte-distinct).

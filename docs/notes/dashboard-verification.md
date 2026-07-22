@@ -107,24 +107,31 @@ separately. Non-Sentry 429s and failed GraphQL/API calls are regressions.
 
 ## Fixture browser tests
 
-`pnpm test:browser` starts the real Next app and
+`pnpm test:browser` serves a fixture-mode production build (`next build` into
+`.next-fixture`) via `next start`, alongside
 `tests/browser/fixtures/hasura-fixture-server.mjs`, then runs Playwright under
-`tests/browser/`. The fixture server is the only GraphQL source for these
-tests; never point them at hosted Hasura/Envio. The app-level harness covers App
-Router navigation, URL state, hydration, CSP, SWR request behavior, and real
-browser focus. On a fresh checkout, install Chromium once with
-`pnpm exec playwright install chromium`; the quality gate does this
-automatically. The wrapper restores `next-env.d.ts` and removes dev route types.
+`tests/browser/`. There is no `next dev` server: the build is produced at most
+once per gate run (the turbo `test:browser` task `dependsOn` the cached
+`fixture-build` task) and reused across re-runs; direct callers build it
+in-script when `.next-fixture` is absent. The fixture server is the only GraphQL
+source for these tests; never point them at hosted Hasura/Envio. The app-level
+harness covers App Router navigation, URL state, hydration, CSP, SWR request
+behavior, and real browser focus. On a fresh checkout, install Chromium once
+with `pnpm exec playwright install chromium`; the quality gate does this
+automatically. The fixture build snapshots and restores `next-env.d.ts` around
+the `next build` that rewrites it.
 
-Use `pnpm test:browser:production` for `next build` plus `next start`. It
-allocates fixture ports before build, starts Hasura first, bakes the fixture URL
-into the build, and reuses the same Playwright suite. For no-refetch assertions,
-filter `?_rsc=` requests to the current route: production `next/link` may
-prefetch unrelated routes after load. `PLAYWRIGHT_NEXT_START_TIMEOUT_MS` tunes
-the production server; `PLAYWRIGHT_NEXT_TIMEOUT_MS` tunes dev.
+The fixture Hasura server listens on a fixed port (`3211`) baked into the build;
+the Next server port is OS-assigned at runtime. Only the fixture URL, not the
+Next port, is inlined, so the build stays byte-stable and turbo-cacheable. Run
+`pnpm test:browser:production` to force a fresh fixture build first. For
+no-refetch assertions, filter `?_rsc=` requests to the current route: production
+`next/link` may prefetch unrelated routes after load. `PLAYWRIGHT_NEXT_TIMEOUT_MS`
+tunes how long Playwright waits for `next start`.
 
 For local macOS runs with Chromium frame-detach flakes, use
-`PLAYWRIGHT_FORCE_SINGLE_PROCESS=true`. If Turbopack panics locally, use
+`PLAYWRIGHT_FORCE_SINGLE_PROCESS=true`. To fall back to a dev server (e.g. a
+Turbopack production-build panic), set
 `PLAYWRIGHT_NEXT_COMMAND='pnpm dev --webpack --hostname 127.0.0.1 --port {port}'`.
 CI leaves both overrides unset.
 

@@ -234,6 +234,7 @@ export default tseslint.config(
     ignores: [
       "**/node_modules/**",
       "**/.next/**",
+      "**/.next-fixture/**",
       "coverage/**",
       "**/.trunk/**",
       "**/*.mjs",

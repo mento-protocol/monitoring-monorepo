@@ -2626,12 +2626,13 @@ is_quality_serial_command() {
   local command="$1"
   # Dashboard browser setup/tests and size-limit must stay ordered relative to
   # each other, but they are not prerequisites for lint/typecheck/unit/knip.
-  # Browser tests need Chromium installed first; browser tests start a Next dev
-  # server while size-limit runs a build-backed Turbo task, and both touch
-  # ui-dashboard/.next, so keep those two mutually exclusive. The quality-gate
-  # self-test temporarily mutates tracked fixture files in the current checkout,
-  # so it must also finish before source-fingerprinting tests enter the parallel
-  # pool.
+  # Browser tests need Chromium installed first; browser tests build a fixture
+  # app (`.next-fixture`) served by `next start` while size-limit runs a
+  # build-backed Turbo task (`.next`), and both `next build` steps transiently
+  # rewrite the tracked `next-env.d.ts`, so keep those two mutually exclusive.
+  # The quality-gate self-test temporarily mutates tracked fixture files in
+  # the current checkout, so it must also finish before source-fingerprinting
+  # tests enter the parallel pool.
   case "$command" in
     "pnpm agent:quality-gate:test"|"bash scripts/agent-quality-gate.test.sh")
       return 0
