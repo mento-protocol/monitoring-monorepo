@@ -36,7 +36,12 @@ or structurally missing (thin second venue).
 - **Measurand.** Deviation is computed from the executable _sell_ price at
   a per-asset reference size tied to real exposure (bounded by the FPMM
   per-window trading limit, floored near the issuer redemption minimum) —
-  never from the mid. Observations carry `{vwap, filledFraction, capped}`;
+  never from the mid, and it is downside-only shortfall:
+  `max(0, (target − executableSellPx) / target)` in bps, so a premium can
+  never page the drain path and implementations cannot invert the sign. A
+  sustained premium beyond the warn threshold surfaces as a warn-tier
+  observation only — it stresses the reserve's opposite, bounded exposure,
+  a different decision than the breaker trip. Observations carry `{vwap, filledFraction, capped}`;
   an observation that cannot fill the reference size is `capped` and is
   excluded from deviation alerting entirely — it feeds depth/stress
   signals instead of printing phantom deviation. A capped observation on

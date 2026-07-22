@@ -61,13 +61,17 @@ authority); optional `convertVia` naming a rate-feed ID read via
 `SortedOracles.medianRate` over existing bridge RPC (the
 `oracle-reporters.json` identifiers are Mento rate-feed IDs, not Chainlink
 aggregator contracts; declared error band widens that source's thresholds;
-leg staleness incl. FX weekend + reopen grace demotes the source to
-display); `coverageClass` per asset. Alert-affecting parameters —
+leg staleness — on-chain `medianTimestamp` + feed expiry, plus FX weekend
+and reopen grace — demotes the source to display); `coverageClass` per
+asset. Alert-affecting parameters —
 per-source `refSize`, staleness gates, spread envelopes, and the
 deep-venue designation — live in the gated thresholds JSON (ADR 0044),
 not in the registry, so a bridge deploy cannot change page behavior
 through registry data.
-Referential-integrity script vs `shared-config/oracle-reporters.json` and
+Referential-integrity script (asset- and source-level: threshold source
+keys and the deep-venue designation must name registry source ids, and
+alert-authoritative sources need complete policy) vs
+`shared-config/oracle-reporters.json` and
 token registry runs in the quality gate and CI; pool references are
 resolved against Hasura at bridge startup, failing that asset's
 `indexed-pool` coverage path with a distinct ops alert when unresolved.
@@ -78,6 +82,9 @@ resolved against Hasura at bridge startup, failing that asset's
   (min(FPMM per-window inflow limit, configured cap), floored near the
   issuer redemption minimum). Observation:
   `{vwap, filledFraction, capped, bid, ask, lastTradeAt, fetchedAt, venueState}`.
+  Deviation is downside-only shortfall
+  (`max(0, (target − executableSellPx)/target)` in bps); a sustained
+  premium surfaces warn-tier only.
 - `capped` observations never produce deviation — they feed depth-collapse
   stress. This is what keeps Kraken (16.5k near-par depth < ref size) from
   printing permanent phantom deviation while still contributing evidence.

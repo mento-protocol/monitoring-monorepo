@@ -49,8 +49,12 @@ auto-resolves a live page whenever the threshold series blips.
   (ADR 0043) holds venue identity and topology only; it carries no
   page-affecting policy. There is no HCL mirror, so the existing
   mirror-drift check is unnecessary for this class; a sibling integrity
-  check validates that every registry asset has a threshold entry and vice
-  versa. Residual trust boundary, stated plainly: the gate protects
+  check validates at source level: every threshold source key and the
+  deep-venue designation must name an existing registry source id, every
+  alert-authoritative source must carry complete policy (reference size,
+  gates), and every registry asset must have a threshold entry and vice
+  versa — a mistyped or renamed source id must fail the build, not
+  silently leave an asset's critical path unreachable. Residual trust boundary, stated plainly: the gate protects
   declared policy data — bridge _code_ remains service-deployable and has
   always been able to change what any `mento_*` metric means; measurement
   code is governed by normal review, not the apply gate.

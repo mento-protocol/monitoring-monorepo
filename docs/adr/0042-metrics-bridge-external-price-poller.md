@@ -69,8 +69,13 @@ monitoring, extending — not replacing — ADR 0027's scope:
   USD-denominated rollups are defined as zero for pools with no USD-pegged
   leg, so they cannot serve pairs like EURm/EUROP.
 - Conversion legs (needed for USD-quoted venues on non-USD pegs) read
-  `SortedOracles.medianRate(feedId)` through the existing per-chain viem
-  clients, following the rebalance-probe `readContract` pattern. The
+  `SortedOracles.medianRate(feedId)` together with
+  `SortedOracles.medianTimestamp(feedId)` through the existing per-chain
+  viem clients, following the rebalance-probe `readContract` pattern.
+  `medianRate` alone returns the last stored value with no age, so the leg
+  retains alert authority only while the median timestamp is within the
+  feed's configured expiry — a stale conversion demotes the converted
+  source to display before it can create or mask deviation. The
   identifiers canonicalized in `oracle-reporters.json` are Mento rate-feed
   IDs, not Chainlink aggregator contracts; a direct aggregator read would
   need a separately canonicalized aggregator address and ABI.
