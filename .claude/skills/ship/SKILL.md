@@ -37,7 +37,9 @@ gh→MCP mapping lives in
   loop. Exception: in a cloud variant passing the full capability gate —
   repo-scoped REST call, minimal GraphQL query, and `--slurp` support (the
   same gate `babysit-pr` and `.claude/babysit-pr.sh` probe) — use the gh
-  commands and the readiness probe as written.
+  commands and the readiness probe, passing `--repo <owner/name>` (or
+  setting `GH_REPO`) on PR-scoped calls: gh cannot infer a repository from
+  the proxy remote.
 
 ## Preflight
 
