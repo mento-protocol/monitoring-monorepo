@@ -2690,6 +2690,13 @@ run_with_timeout() {
       echo "$pid"
     }
     sleep "$timeout_secs"
+    # Teardown on normal command completion kills this watchdog children-first,
+    # so the dying sleep must not be mistaken for an elapsed timeout: bash
+    # advances past a signal-killed sleep (rc>128) before the watchdog itself
+    # receives TERM, and writing the marker in that window reports a false
+    # "timed out after Ns" for a command that already succeeded (the race hits
+    # reliably on Linux, rarely on macOS).
+    [ "$?" -eq 0 ] || exit 0
     echo timeout > "$marker"
     # Snapshot the whole tree BEFORE TERM: a root that exits on TERM reparents
     # a TERM-ignoring descendant away from the tree, so a post-TERM re-walk
