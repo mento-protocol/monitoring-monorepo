@@ -252,10 +252,20 @@ kill_process_tree() {
 
 teardown_active_timeouts() {
   local pid
-  for pid in "${active_timeout_pids[@]+"${active_timeout_pids[@]}"}"; do
+  local -a pids=("${active_timeout_pids[@]+"${active_timeout_pids[@]}"}")
+  active_timeout_pids=()
+  [[ ${#pids[@]} -gt 0 ]] || return 0
+  for pid in "${pids[@]}"; do
     kill_process_tree "$pid" TERM
   done
-  active_timeout_pids=()
+  # Same TERM-then-KILL grace as run_with_timeout's watchdog: a manual
+  # interrupt (Ctrl-C/TERM to the gate) must not leave a SIGTERM-ignoring
+  # mapped command (or descendant) running just because it wasn't the
+  # timeout path that tore it down.
+  sleep 3
+  for pid in "${pids[@]}"; do
+    kill_process_tree "$pid" KILL
+  done
 }
 
 cleanup_tmpfiles() {
