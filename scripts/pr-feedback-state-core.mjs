@@ -1,6 +1,22 @@
 import { createHash } from "node:crypto";
 
 const FINDING_EXCERPT_LENGTH = 240;
+const FAILURE_TERM = /\b(?:error|errors|fail|fails|failed|failure|failures)\b/i;
+const SAFE_FAILURE_ASSERTION =
+  /\b(?:Error|Failure)\s+handling\s+(?:is|was)\s+(?:correct|clean|complete|covered|expected|verified)(?:\s+and\s+(?:correct|clean|complete|covered|expected|verified))*\b/gi;
+const NEGATED_FAILURE =
+  /\b(?:no|zero|0)[ \t]+(?:errors?|fails?|failed|failures?)(?:[ \t]+(?:and|or)[ \t]+(?:errors?|fails?|failed|failures?)(?=[ \t]*(?:[.,;:]|$)))?\b/gi;
+const CLEAN_FINDING_MARKER =
+  /^(?:None\s+blocking|No\s+action(?:\s+required)?|Good\s+hygiene|Lockfile\s+diff\s+is\s+fully\s+mechanical|(?:Error|Failure)\s+handling\s+(?:is|was)\s+(?:correct|clean|complete|covered|expected|verified)(?:\s+and\s+(?:correct|clean|complete|covered|expected|verified))*)\b[\s:—.,]*(.*)$/i;
+const POSITIVE_EVIDENCE =
+  /^(?:(?:clean|well\s+scoped|correct|covered|bounded|mechanical|verified|complete)\b.*|exact\s+removal\s+condition|no\s+(?:unrelated|leftover|vulnerable)\b.*|.+\s+should\s+(?:stay|continue\s+rejecting)\b.*|(?:.+\s+)?(?:is|are|was|were)\s+(?:correctly\s+)?(?:confirmed\s+)?(?:clean|well\s+scoped|correct|covered|bounded|mechanical|verified|complete)\b.*|(?:.+\s+)?(?:matches?|documents?|satisf(?:y|ies)|covers?|confirms?|confirmed)\b.*)$/i;
+const SAFE_NON_P3_FINDING =
+  /^(?:\d+[.)]\s+Confirmed\s+no\s+leftover\s+[^;]+\s+anywhere|\d+[.)]\s+[A-Za-z][A-Za-z0-9 ]*\s+CI\s+already\s+passed\s+on\s+this\s+PR|No\s+inline\s+comments\s+filed\s+(?:—\s+)?nothing\s+rose\s+to\s+an\s+actionable,\s+line\s+specific\s+issue)[.!?]?$/i;
+const CLEAN_ROLLUP_ENTRY = /^\d+[.)]\s+\[[Pp]3\]\s+(No\s+action:.*)$/i;
+const CLEAN_REVIEW_SUMMARY =
+  /\b(?:no\s+changes\s+requested|no\s+[Pp][0-2]\s+(?:issues?|findings?)|(?:no|zero|0)\s+(?:Critical|High|Medium|Low)\s+Severity\s+(?:issues?|findings?))\b/gi;
+const REVIEW_CONTRADICTION =
+  /(?:BUGBOT_BUG_ID|\b[Pp][0-2]\b|\b(?:Critical|High|Medium|Low)\s+Severity\b|\bSeverity\s*:\s*(?:Critical|High|Medium|Low)\b|\bAction\s+items?\s*:|\b(?:Action\s+required|changes\s+requested|needs[- ]changes)\b|\b(?:please|must|need(?:s)?\s+to|should)\s+(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate)\b|\b(?:but|however|although|yet)\b[^.!?\r\n]*\b(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate)\b|(?:^|[\r\n])\s*(?:[-*>]\s*)?(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate)\b)/i;
 
 function gateReady(gate) {
   return gate?.required === false || Boolean(gate?.ready ?? true);
@@ -47,30 +63,68 @@ function isReviewBotComment(comment) {
     "cursor[bot]",
   ].includes(String(comment.author ?? "").toLowerCase());
 }
-
+function hasUnnegatedFailure(value) {
+  const scrubbed = String(value ?? "")
+    .replace(SAFE_FAILURE_ASSERTION, "")
+    .replace(NEGATED_FAILURE, "");
+  return FAILURE_TERM.test(scrubbed);
+}
+function hasReviewContradiction(value) {
+  const body = String(value ?? "")
+    .replace(/[*_~]/g, "")
+    .replace(CLEAN_REVIEW_SUMMARY, "");
+  return REVIEW_CONTRADICTION.test(body) || hasUnnegatedFailure(body);
+}
+function hasPositiveCleanEvidence(value) {
+  const tail = normalizeText(value).match(CLEAN_FINDING_MARKER)?.[1];
+  if (tail === undefined) return false;
+  return tail
+    .split(/(?:[!?;]+|\.(?=\s|$)|\b(?:and|but|however|although|yet)\b)/i)
+    .every((clause) => !clause.trim() || POSITIVE_EVIDENCE.test(clause.trim()));
+}
+function isCleanFindingLine(line) {
+  const normalized = normalizeText(line);
+  const p3 = normalized.match(/^\d+[.)]\s+\[[Pp]3\]\s+(.+)$/);
+  if (p3) return hasPositiveCleanEvidence(p3[1]);
+  return SAFE_NON_P3_FINDING.test(normalized);
+}
+function isExplicitlyCleanClaudeReview(comment) {
+  const author = String(comment.author ?? "").toLowerCase();
+  if (author !== "claude" && author !== "claude[bot]") return false;
+  const body = String(comment.body ?? "");
+  if (!/^\s*(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?\s*$/im.test(body)) return false;
+  if (hasReviewContradiction(body)) return false;
+  const lines = body.split(/\r?\n/);
+  const headings = lines.filter((line) =>
+    /^\s*#{1,6}\s+(?:Findings|Roll[- ]up)\s*$/i.test(line),
+  );
+  const headingOrder = headings.map(normalizeText).join(",");
+  if (!/^Findings,Roll up$/i.test(headingOrder)) return false;
+  const findingsIndex = lines.indexOf(headings[0]);
+  const rollupIndex = lines.indexOf(headings[1]);
+  const nonempty = (line) => line.trim();
+  const findings = lines.slice(findingsIndex + 1, rollupIndex).filter(nonempty);
+  const rollup = lines.slice(rollupIndex + 1).filter(nonempty);
+  return (
+    findings.length > 0 &&
+    findings.every(isCleanFindingLine) &&
+    rollup.length > 0 &&
+    rollup.every((line) =>
+      hasPositiveCleanEvidence(
+        normalizeText(line).match(CLEAN_ROLLUP_ENTRY)?.[1],
+      ),
+    )
+  );
+}
 function isActionableReviewBotComment(comment) {
   if (!isReviewBotComment(comment)) return false;
   const body = String(comment.body ?? "");
-
-  if (/BUGBOT_BUG_ID/.test(body)) return true;
-  if (
-    /\bchanges requested\b/i.test(body) &&
-    !/\bno\s+changes requested\b/i.test(body)
-  ) {
-    return true;
-  }
-  if (/(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b)/.test(body)) return true;
-  if (/\*\*\s*(?:Critical|High|Medium|Low)\s+Severity\s*\*\*/i.test(body)) {
-    return true;
-  }
-  if (
-    /\b(?:error|errors|fail|fails|failed|failure|failures)\b/i.test(body) &&
-    !/\b(?:no|zero|0)\s+(?:errors?|fails?|failed|failures?)\b/i.test(body)
-  ) {
-    return true;
-  }
-
-  return false;
+  if (hasReviewContradiction(body)) return true;
+  const actionableSignal =
+    /(?:\[[Pp]3\]|\*\*[Pp]3\*\*|\b[Pp]3\s*(?::|[-—|]|Badge\b))/.test(body) ||
+    (/^claude(?:\[bot\])?$/i.test(comment.author ?? "") &&
+      /^\s*(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?\s*$/im.test(body));
+  return actionableSignal && !isExplicitlyCleanClaudeReview(comment);
 }
 
 function normalizeText(value) {
