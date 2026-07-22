@@ -1039,6 +1039,23 @@ digest's "Autofixed" section reads) and applies the `sentry:fix-pr-opened`
 label, self-healed first from the ingest's `LABEL_DEFINITIONS` single source.
 The App token is never used for these local writes.
 
+**Stale-verdict withdrawal (a terminal path, not a failure).** The marker is
+written under a re-read of `sentry:verdict-code-fix` taken immediately before and
+again after the label write (issue #1389). Ingest runs in its own concurrency
+group and can shed the verdict on a regression re-queue while the fix PR is being
+opened; marking the stub fixed off that stale verdict would suppress the re-fix
+the regression must trigger. So if the verdict is gone at either check, the
+finalize step **closes the PR it opened** (the selector dedups on an open autofix
+PR too, so skipping the label alone would not free the stub), removes the marker
+if it had already applied it, and posts a `fix not finalized … reconsidered after
+re-triage` comment **instead of** the `Autofixed by PR:` comment and
+`sentry:fix-pr-opened` marker. An operator seeing a just-opened autofix PR closed
+with that comment and no `sentry:fix-pr-opened` label is looking at this
+deliberate outcome, not an orphaned or failed run — the stub is intentionally
+left selectable so the regression gets a fresh fix. A close that cannot be
+confirmed after retries fails the run loudly rather than leaving a stale open PR
+masquerading as withdrawn.
+
 **Run record (observability).** A final `record-run` job runs on every
 **on-`main`** autofix run — scheduled runs and `main` dispatches, including when
 the leg is disabled, unprovisioned, finds zero candidates, or selection itself

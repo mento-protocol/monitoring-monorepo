@@ -41,6 +41,7 @@ import {
   validateAffectedRepo,
 } from "./sentry-triage-project-core.mjs";
 import {
+  CODE_FIX_VERDICT_LABEL,
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
   PROJECTED_LABEL,
@@ -51,9 +52,10 @@ import { autofixBranchName } from "./sentry-autofix-finalize.mjs";
 // filters to these, but the re-parse cross-checks the verdict value too.
 const AUTOFIX_VERDICT = "code-fix";
 
-// The verdict label the select scans for. Owned by the Stage A ingest bootstrap
-// (LABEL_DEFINITIONS) — `code-fix` maps to this label.
-export const AUTOFIX_SELECT_LABEL = "sentry:verdict-code-fix";
+// The verdict label the select scans for — re-exported from the ingest's single
+// source of truth (`code-fix` maps to this label), so a future rename can't
+// desync selection from the finalize marker re-read that shares the constant.
+export const AUTOFIX_SELECT_LABEL = CODE_FIX_VERDICT_LABEL;
 
 // The one Sentry project whose source lives in THIS repo (ui-dashboard).
 // affected_repo `mento-protocol/monitoring-monorepo` corresponds to this

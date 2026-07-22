@@ -218,8 +218,12 @@ export const PROJECTED_LABEL = "sentry:projected";
 // finalize step re-reads this immediately before writing a terminal marker: the
 // diff is only justified while the verdict that produced it still stands, and
 // ingest (its own concurrency group) can shed it mid-run on a regression
-// re-queue. Single source of truth for the literal, shared with the select
-// step's AUTOFIX_SELECT_LABEL and the LABEL_DEFINITIONS entry above.
+// re-queue. Single source of truth for the JS consumers — the select step
+// imports it as AUTOFIX_SELECT_LABEL and the finalize marker re-read imports it
+// as its expected verdict. The LABEL_DEFINITIONS entry above and the workflow's
+// pre-push grep guard (.github/workflows/sentry-autofix.yml) are deliberate
+// literal twins: the label bootstrap must list every label inline, and a shell
+// `grep -Fxq` cannot import a JS constant.
 export const CODE_FIX_VERDICT_LABEL = "sentry:verdict-code-fix";
 
 // Applied to a `code-fix` queue stub once the autofix leg (ADR 0036 Phase 2b,
