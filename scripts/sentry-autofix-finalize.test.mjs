@@ -21,11 +21,13 @@ import {
   buildStaleVerdictCloseComment,
   diffTrees,
   evaluateDiffGuard,
+  filesWithCredentialShapedName,
   fixPrOpenedLabelDef,
   fixRefusedLabelDef,
   isForbiddenPath,
   markerWriteStillValid,
   MAX_CHANGED_FILES,
+  redactCredentialShaped,
   runCli,
 } from "./sentry-autofix-finalize.mjs";
 import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
@@ -656,6 +658,105 @@ await test("selected-verdict-id fails closed to 'none' (#1506)", () => {
       `fails closed to none for ${f}`,
     );
   }
+});
+
+// ── #1551: credential-shaped FILENAME bypass + reason path-echo redaction ─────
+// Fixtures are built by concatenation so no contiguous credential-shaped literal
+// sits in this source file (avoids tripping secret scanners on a test fixture).
+const CRED = {
+  ghs: "ghs_" + "A".repeat(20),
+  pat: "github_pat_" + "A".repeat(16),
+  skant: "sk-ant-" + "abcdefgh",
+  xox: "xoxb-" + "abcdefghij",
+  akia: "AKIA" + "ABCDEFGHIJKLMNOP",
+};
+
+await test("guard refuses a changed path whose NAME is credential-shaped (#1551)", () => {
+  // The content scan reads file BODIES, so a clean-content file NAMED after a
+  // token passes it and the name is published in the public PR file tree. The
+  // name scan refuses it, count-only — never echoing the token.
+  const dir = mkdtempSync(join(tmpdir(), "autofix-name-"));
+  const name = `${CRED.ghs}.ts`;
+  writeFileSync(join(dir, name), "export const x = 1;\n");
+  const r = evaluateDiffGuard([name], { workRoot: dir });
+  assert(!r.ok, "credential-named path refused");
+  assert(
+    !r.reason.includes(CRED.ghs),
+    "reason must not echo the token embedded in the filename",
+  );
+  // An ordinary source path is unaffected.
+  assert(
+    evaluateDiffGuard(["ui-dashboard/lib/helper.ts"]).ok,
+    "clean path still allowed",
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+await test("filesWithCredentialShapedName matches every credential prefix family (#1551)", () => {
+  const hits = filesWithCredentialShapedName([
+    "clean/path.ts",
+    `${CRED.ghs}.ts`,
+    `${CRED.pat}.md`,
+    `dir/${CRED.skant}.txt`,
+    `${CRED.xox}.json`,
+    `${CRED.akia}.env`,
+  ]);
+  assert(
+    hits.length === 5,
+    `expected 5 credential-named paths, got ${hits.length}`,
+  );
+  assert(!hits.includes("clean/path.ts"), "clean path not flagged");
+});
+
+await test("redactCredentialShaped masks credential substrings in an echoed path (#1551)", () => {
+  const out = redactCredentialShaped(
+    `path/${CRED.ghs}/a, dir/${CRED.skant}.tf, ${CRED.akia}`,
+  );
+  assert(!out.includes(CRED.ghs), "ghs_ token masked");
+  assert(!out.includes(CRED.skant), "sk-ant- token masked");
+  assert(!out.includes(CRED.akia), "AKIA token masked");
+  assert(out.includes("[redacted]"), "redaction marker present");
+  assert(
+    redactCredentialShaped("ui-dashboard/lib/a.ts") === "ui-dashboard/lib/a.ts",
+    "a clean path is unchanged",
+  );
+});
+
+await test("guard resists filename-credential obfuscation and avoids false positives (#1551 red-team)", () => {
+  // Filenames are agent-controlled: padding before the prefix, or splitting the
+  // body/prefix with a separator, must not hide a recoverable token. Fixtures are
+  // concatenated so no contiguous credential literal sits in this source.
+  const TOKEN = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8"; // 36 alnum
+  const G = "ghs" + "_";
+  const attacks = [
+    `ui-dashboard/lib/x${G}${TOKEN}.ts`, // padded before the prefix (kills \b)
+    `${G}a1b2/c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8.ts`, // body split by /
+    `${G}a1b2-c3d4-e5f6-g7h8-i9j0-k1l2-m3n4-o5p6.ts`, // body split by -
+    `g/hs_${TOKEN}.ts`, // prefix split by /
+    `x${"github" + "_pat_"}${TOKEN}.ts`, // padded github_pat
+  ];
+  for (const p of attacks) {
+    assert(
+      filesWithCredentialShapedName([p]).length === 1,
+      `obfuscated credential filename must be refused: ${p}`,
+    );
+  }
+  // Legit source paths — including deceptive substrings ("highschool" contains
+  // "ghs", "Graphs" nearly does) — must NOT be refused.
+  for (const p of [
+    "ui-dashboard/src/lib/helper.ts",
+    "docs/highschool-notes.md",
+    "ui-dashboard/components/LightShowGraphs.tsx",
+    "alerts/rules/oracle.tf",
+  ]) {
+    assert(
+      filesWithCredentialShapedName([p]).length === 0,
+      `legit path must not false-positive: ${p}`,
+    );
+  }
+  // A padded token that reaches a path-echoing reason is masked by redaction.
+  const red = redactCredentialShaped(`forbidden: scripts/x${G}${TOKEN}.ts`);
+  assert(!red.includes(`${G}a1b2`), "padded token masked in a redacted reason");
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

@@ -227,6 +227,51 @@ const DIFF_CREDENTIAL_PATTERNS = [
   /\bAKIA[A-Z0-9]{16}\b/,
 ];
 
+// For FILENAMES the agent controls the exact bytes, so unlike the CONTENT scan
+// (DIFF_CREDENTIAL_PATTERNS keeps \b + a length floor to avoid false positives on
+// code hashes) the filename match must survive obfuscation: padding before the
+// prefix (`xghs_…` kills a leading \b) and splitting the body with a separator to
+// beat a length floor (`ghs_a1b2/c3d4…`). So it uses NO \b and only a MINIMAL
+// body — the distinctive `_`/`-`-bearing prefix is the low-false-positive signal
+// — and every path is ALSO tested with `/`, `.`, `-`, and whitespace removed so a
+// prefix split across those rejoins. A real source filename is never named after
+// a token, so refusing on the bare prefix is safe and fail-closed. (#1551)
+const FILENAME_CREDENTIAL_PREFIXES = [
+  /(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]/,
+  /github_pat_[A-Za-z0-9]/,
+  /sk-ant-[A-Za-z0-9]/,
+  /xox[a-z]-[A-Za-z0-9]/,
+  /AKIA[A-Z0-9]{4}/,
+];
+
+// Full-token patterns (no \b, global) for MASKING a credential wherever it
+// appears in a public refusal reason — masks the maximal run, not just the
+// prefix. filesWithCredentialShapedName refuses a credential-bearing path
+// count-only BEFORE any path-echoing reason, so this is an aligned backstop that
+// deliberately does not share the \b-anchored content patterns (#1551).
+const REDACTION_PATTERNS = [
+  /(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{16,}/g,
+  /github_pat_[A-Za-z0-9_]{16,}/g,
+  /sk-ant-[A-Za-z0-9-]{8,}/g,
+  /xox[a-z]-[A-Za-z0-9-]{8,}/g,
+  /AKIA[A-Z0-9]{16}/g,
+];
+
+/** Mask any credential-shaped substring before a path is echoed into a public
+ * refusal reason. Changed-path NAMES are agent-controlled and can embed a token
+ * the agent read from process-env (the documented residual); a refusal reason
+ * lands on a public queue issue, so a raw echo would itself be an exfil channel
+ * (#1551). Belt-and-suspenders: filesWithCredentialShapedName already refuses a
+ * credential-bearing path before any of these reasons is reached. Exported for
+ * tests. */
+export function redactCredentialShaped(text) {
+  let out = String(text);
+  for (const re of REDACTION_PATTERNS) {
+    out = out.replace(re, "[redacted]");
+  }
+  return out;
+}
+
 /** Changed paths (present in the work tree as regular files) whose CONTENT
  * contains a credential-shaped string. Pure fs reads from the tainted tree —
  * no git, no execution; the guard runs credential-free from the pristine
@@ -253,6 +298,23 @@ export function filesWithCredentialShapedContent(workRoot, files) {
     }
   }
   return hits;
+}
+
+/** Changed paths whose NAME (not content) carries a runner-credential prefix.
+ * filesWithCredentialShapedContent reads file BODIES, so a token placed in a
+ * clean-content file's PATH would pass it and be published in the public PR's
+ * file tree (and echoed by the forbidden/credential reasons). This scans the
+ * path bytes — see FILENAME_CREDENTIAL_PREFIXES for why it does NOT reuse the
+ * content scan's \b-anchored patterns (agent-controlled names defeat them). Pure
+ * string check — no workRoot needed. (#1551) */
+export function filesWithCredentialShapedName(files) {
+  return (Array.isArray(files) ? files : []).filter((f) => {
+    const p = String(f ?? "");
+    const collapsed = p.replace(/[/.\s-]/g, "");
+    return FILENAME_CREDENTIAL_PREFIXES.some(
+      (re) => re.test(p) || re.test(collapsed),
+    );
+  });
 }
 
 /** True when `path` under `workRoot` is a symlink (lstat, so it never
@@ -328,13 +390,26 @@ export function evaluateDiffGuard(files, { workRoot = null } = {}) {
   // after a runner token the agent read from process-env (the documented
   // residual), so publishing them onto the public queue issue would itself be an
   // exfil channel — omission is the module's standing policy for agent-controlled
-  // text (see the note above buildAnalysisComment). The path-echo hardening for
-  // the other guard reasons (forbidden/credential) is tracked separately (#1551).
+  // text (see the note above buildAnalysisComment). The forbidden/symlink/
+  // credential reasons below redact credential-shaped substrings before echoing a
+  // path, and a credential-shaped NAME is refused outright just below (#1551).
   const malformed = changed.filter(hasUnsafePathBytes);
   if (malformed.length > 0) {
     return {
       ok: false,
       reason: `The autofix diff contains ${malformed.length} path(s) with leading/trailing whitespace or control characters, which are refused: such bytes make the guard's scans disagree with the byte-for-byte copy that publishes the branch, and a legitimate source path never contains them. No PR opened.`,
+    };
+  }
+  // Refuse any changed path whose NAME is credential-shaped. The content scan
+  // (filesWithCredentialShapedContent) reads file BODIES; a token placed in a
+  // clean-content file's PATH would pass it and be published in the public PR's
+  // file tree (#1551). Count-only reason — echoing the offending path would
+  // republish the token.
+  const nameHits = filesWithCredentialShapedName(changed);
+  if (nameHits.length > 0) {
+    return {
+      ok: false,
+      reason: `The autofix diff has ${nameHits.length} changed path(s) whose name is credential-shaped; such paths are refused wholesale (a token in a filename would be published in the public PR file tree). No PR opened.`,
     };
   }
   if (changed.length > MAX_CHANGED_FILES) {
@@ -347,7 +422,7 @@ export function evaluateDiffGuard(files, { workRoot = null } = {}) {
   if (forbidden.length > 0) {
     return {
       ok: false,
-      reason: `The autofix diff touches forbidden path(s): ${forbidden.join(", ")}. Deploy/CI/infra, dependency-manager, and toolchain surfaces are out of scope for autofix. No PR opened.`,
+      reason: `The autofix diff touches forbidden path(s): ${redactCredentialShaped(forbidden.join(", "))}. Deploy/CI/infra, dependency-manager, and toolchain surfaces are out of scope for autofix. No PR opened.`,
     };
   }
   if (workRoot) {
@@ -355,16 +430,17 @@ export function evaluateDiffGuard(files, { workRoot = null } = {}) {
     if (symlinks.length > 0) {
       return {
         ok: false,
-        reason: `The autofix diff replaces path(s) with a symlink: ${symlinks.join(", ")}. Symlinked paths are refused — a symlink would be dereferenced by the credentialed byte-copy and could exfiltrate runner secrets. No PR opened.`,
+        reason: `The autofix diff replaces path(s) with a symlink: ${redactCredentialShaped(symlinks.join(", "))}. Symlinked paths are refused — a symlink would be dereferenced by the credentialed byte-copy and could exfiltrate runner secrets. No PR opened.`,
       };
     }
     const credentialHits = filesWithCredentialShapedContent(workRoot, changed);
     if (credentialHits.length > 0) {
       return {
         ok: false,
-        // Names the FILES, never the matched content — the reason lands on a
-        // public queue issue.
-        reason: `The autofix diff contains credential-shaped content in: ${credentialHits.join(", ")}. Changed files are scanned before any push because a pushed branch is public immediately — a diff carrying anything token-shaped is refused wholesale. No PR opened.`,
+        // Names the FILES, never the matched content — and redacts any
+        // credential-shaped substring in a filename (#1551). The reason lands on
+        // a public queue issue.
+        reason: `The autofix diff contains credential-shaped content in: ${redactCredentialShaped(credentialHits.join(", "))}. Changed files are scanned before any push because a pushed branch is public immediately — a diff carrying anything token-shaped is refused wholesale. No PR opened.`,
       };
     }
   }
