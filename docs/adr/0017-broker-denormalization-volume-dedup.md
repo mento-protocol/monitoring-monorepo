@@ -1,9 +1,9 @@
 ---
-title: Denormalize the v2 Broker swap path to de-duplicate router-routed volume
+title: Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed volume
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: indexer-envio
 date: 2026-05
 doc_type: adr
@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0017 — Denormalize the v2 Broker swap path to de-duplicate router-routed volume
+# ADR 0017 — Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed volume
 
 **Status:** Accepted (May 2026), in force.
 **Scope:** indexer-envio
@@ -25,10 +25,14 @@ both double-counts volume.
 
 ## Decision
 
-Denormalize each Broker `Swap` at index time with a boolean
-`routedViaV3Router` (`tx.to == Routerv300`). The homepage chart excludes Broker
-rows that were router-driven, because those are already counted on the v3 side.
-The Broker is indexed on Celo only (there is no Broker on Monad).
+Write every Broker `Swap` to `BrokerSwapEvent` for audit. Mark
+`routedViaV3Router` only when `tx.to == Routerv300` **and** the immediate Broker
+caller is a registered VirtualPool; a direct legacy Broker call through that
+router remains v2. Exclude every VirtualPool caller from the legacy-v2
+`BrokerDailySnapshot` and producer rollups, including third-party
+aggregator → VirtualPool → Broker paths whose `tx.to` is not `Routerv300`.
+`BrokerExchangeDailySnapshot` retains full per-exchange activity. The Broker is
+indexed on Celo only; Monad and Polygon have no configured Broker.
 
 ## Alternatives considered
 
@@ -39,12 +43,14 @@ The Broker is indexed on Celo only (there is no Broker on Monad).
 
 ## Consequences
 
-- The de-dup rule is a data invariant carried on the entity, not a UI filter —
-  changing the router address or split logic is a cross-layer change.
+- The load-bearing de-duplication happens when legacy-v2 rollups are written;
+  the dashboard's `routedViaV3Router: false` predicate is defensive. Changing
+  VirtualPool classification or the split logic is a cross-layer change.
 - Related fee-revenue accounting has its own de-dup concerns (Mento-stable fee legs);
   keep them distinct from volume.
 
 ## Evidence
 
-- Homepage v3(Router)+v2(Broker) volume split PR #318 (2026-05-04).
+- Homepage v3(Router)+v2(Broker) volume split PR #318 and the broader
+  VirtualPool-caller de-duplication in PR #363.
 - [`indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md) §Contract Types (Broker).

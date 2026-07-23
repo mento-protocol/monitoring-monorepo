@@ -42,10 +42,10 @@ handlers: null
 # ---------------------------------------------------------------------------
 contracts:
   # Mento Broker — settles legacy v2 swaps (Broker → IExchangeProvider →
-  # BiPoolManager). v3 swaps bypass this contract entirely (the v3 Router
-  # calls FPMM/VirtualPool pools directly), so Broker.Swap is the single
-  # source of truth for v2 volume on the dashboard. No address on Monad —
-  # only Celo has a Broker today.
+  # BiPoolManager) and emits the settlement sibling of VirtualPool-routed v3
+  # swaps. The handler retains every raw Broker.Swap for audit and excludes
+  # VirtualPool callers from legacy-v2 volume rollups. Only Celo has a
+  # configured Broker today.
   - name: Broker
     abi_file_path: abis/Broker.json
     handler: src/EventHandlers.ts

@@ -3,7 +3,7 @@ title: Indexer observability is structured logs to Loki and Grafana, not Sentry
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: indexer-envio
 date: 2026-04
 doc_type: adr
@@ -15,6 +15,12 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (2026), in force.
 **Scope:** indexer-envio
+
+**Verification gap (2026-07-23):** Repository and live Grafana checks did not
+find the claimed Loki ingestion, labels, dashboard, or alert rule. This ADR
+records the accepted intent, but does not prove that the alert path is
+operational. Owner decision and remediation are tracked in
+[#1561](https://github.com/mento-protocol/monitoring-monorepo/issues/1561).
 
 ## Context
 
@@ -45,4 +51,8 @@ indexer.
 
 ## Evidence
 
-- Indexer logging convention and Loki/Grafana path documented in [`indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md); Sentry is used only by the dashboard and `alerts/infra` (ADR 0004).
+- Indexer logging convention and current operator commands in
+  [`indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md); Sentry is used
+  only by the dashboard and `alerts/infra` (ADR 0004).
+- Re-verification gap and current live evidence:
+  [issue #1561](https://github.com/mento-protocol/monitoring-monorepo/issues/1561).

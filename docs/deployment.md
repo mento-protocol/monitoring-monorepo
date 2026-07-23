@@ -436,7 +436,8 @@ envio
 
 The dashboard project intentionally skips builds when no dashboard-affecting
 files changed. The skip script is `ui-dashboard/scripts/vercel-ignore-build.sh`;
-it watches `ui-dashboard/`, `shared-config/`, and workspace dependency metadata.
+it watches `ui-dashboard/`, `shared-config/`, workspace dependency metadata,
+and `.lighthouserc.cjs` so Lighthouse-required PRs receive a preview.
 The script uses local Git metadata when available, then falls back to GitHub's
 API when Vercel has stripped `.git` from the uploaded source. It tries three
 anchors in order:

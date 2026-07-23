@@ -294,8 +294,9 @@ export async function fetchBreakerKind(
   // MARKET_HOURS so an unknown-breaker misclassification (future kind,
   // proxy upgrade, EOA added via governance) cannot survive a restart.
   // The Breaker entity row still pins the kind once written; a mid-stream
-  // misclassification requires manual re-sync. The warn signature
-  // `breakers.fetchBreakerKind.market_hours_default` is wired to Loki.
+  // misclassification requires manual re-sync. Keep the stable warn signature
+  // for commit-scoped Envio log filtering. Loki/Grafana alert ownership remains
+  // unresolved in repository issue #1561.
   log.warn(
     `breakers.fetchBreakerKind.market_hours_default chain=${chainId} breaker=${breakerAddress} — neither MedianDelta nor ValueDelta selectors present; defaulting to MARKET_HOURS (not cached)`,
   );
