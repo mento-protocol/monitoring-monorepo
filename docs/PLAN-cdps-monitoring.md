@@ -1,3 +1,17 @@
+---
+title: "ROADMAP refresh + CDPs monitoring plan (archived)"
+status: archived
+owner: eng
+canonical: false
+last_verified: 2026-07-23
+archived: 2026-07-23
+archived_reason: "Historical execution plan; CDPs indexing + dashboard shipped and debt accounting is superseded by docs/notes/liquity-monitoring-invariants.md. Retained for decision history."
+doc_type: plan
+scope: repo-wide
+review_interval_days: 365
+garden_lane: notes-plans-archive
+---
+
 # ROADMAP refresh + CDPs monitoring (Liquity v2 indexing & dashboard)
 
 > **Historical plan, not current operating truth.** The implementation has

@@ -71,6 +71,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md) | Documentation gardening | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md) | Hasura isolation trigger | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md) | PR Operating Card | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/reserve-yield-indexer.md`](notes/reserve-yield-indexer.md) | Reserve-Yield Indexer Topology | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
@@ -163,9 +164,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/CODE-REVIEW-UI-DASHBOARD.md`](CODE-REVIEW-UI-DASHBOARD.md) | Code Review — ui-dashboard | non-canonical / archived | reference / repo-wide | eng | 180d |
 | [`docs/context-standards.md`](context-standards.md) | Agent Context Standards | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/metrics/review-process-after-1045-comparison-2026-07-07.md`](metrics/review-process-after-1045-comparison-2026-07-07.md) | Review Process Metrics After PR 1045 | non-canonical / active | reference / repo-wide | eng | 180d; verified 2026-07-07 |
-| [`docs/monad-launch-plan.md`](monad-launch-plan.md) | Monad Monitoring — Launch Runbook | unmanaged / unmanaged | reference / repo-wide | unowned | 180d |
-| [`docs/multichain-indexer-analysis.md`](multichain-indexer-analysis.md) | Multichain Indexer Analysis: Merging Celo + Monad into One Envio Instance | unmanaged / unmanaged | reference / repo-wide | unowned | 180d |
-| [`docs/mutation-testing.md`](mutation-testing.md) | Mutation Testing | unmanaged / unmanaged | reference / repo-wide | unowned | 180d |
+| [`docs/mutation-testing.md`](mutation-testing.md) | Mutation Testing | non-canonical / active | reference / repo-wide | eng | 180d; verified 2026-07-23 |
 | [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md) | Liquity Monitoring Invariants | canonical / active | reference / indexer-envio/ui-dashboard | eng | 90d; verified 2026-07-17 |
 | [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md) | Terraform secret strategy hardening | canonical / active | reference / terraform/infra | eng | 90d; verified 2026-07-17 |
 | [`docs/README.md`](README.md) | Documentation Catalog | canonical / active | index / repo-wide | eng | 90d; verified 2026-07-17 |
@@ -180,14 +179,16 @@ the rules in [`context-standards.md`](context-standards.md).
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
 | [`BACKLOG.md`](../BACKLOG.md) | Backlog | unmanaged / unmanaged | tracker / repo-wide | unowned | 365d |
-| [`docs/BACKLOG.md`](BACKLOG.md) | Monitoring Monorepo — Task Backlog (retired) | unmanaged / unmanaged | tracker / repo-wide | unowned | 365d |
+| [`docs/BACKLOG.md`](BACKLOG.md) | Monitoring Monorepo — Task Backlog (retired) | non-canonical / archived | tracker / repo-wide | eng | 365d; verified 2026-07-23 |
+| [`docs/monad-launch-plan.md`](monad-launch-plan.md) | Monad Monitoring — Launch Runbook (archived) | non-canonical / archived | runbook / indexer | eng | 365d; verified 2026-07-23 |
+| [`docs/multichain-indexer-analysis.md`](multichain-indexer-analysis.md) | Multichain Indexer Analysis — Celo + Monad merge (archived) | non-canonical / archived | report / indexer | eng | 365d; verified 2026-07-23 |
 | [`docs/notes/file-size-watch.md`](notes/file-size-watch.md) | File-size and lint-hygiene watch list | canonical / active | report / repo-wide | eng | 30d; verified 2026-07-17 |
 | [`docs/notes/indexer-spec-followups.md`](notes/indexer-spec-followups.md) | Indexer SPEC §2 follow-up metrics (archived) | non-canonical / archived | note / indexer-envio | eng | 365d; verified 2026-07-17 |
-| [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) | React Compiler annotation-mode pilot | unmanaged / unmanaged | note / repo-wide | unowned | 365d |
+| [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) | React Compiler annotation-mode pilot (archived) | non-canonical / archived | note / ui-dashboard | eng | 365d; verified 2026-07-23 |
 | [`docs/notes/review-process-metrics.md`](notes/review-process-metrics.md) | Review process metrics evaluation | non-canonical / archived | report / ci/process | eng | 365d; verified 2026-07-17 |
 | [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) | Terraform CI/CD hardening — declined alternatives | non-canonical / archived | note / terraform/infra | eng | 365d; verified 2026-07-17 |
-| [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) | UI Dashboard Performance Plan — monitoring.mento.org | unmanaged / unmanaged | note / repo-wide | unowned | 365d |
+| [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) | UI Dashboard Performance Plan (archived) | non-canonical / archived | plan / ui-dashboard | eng | 365d; verified 2026-07-23 |
 | [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) | AI Review Process Integration Plan | non-canonical / archived | plan / ci/process | eng | 365d; verified 2026-07-17 |
-| [`docs/PLAN-cdps-monitoring.md`](PLAN-cdps-monitoring.md) | ROADMAP refresh + CDPs monitoring (Liquity v2 indexing & dashboard) | unmanaged / unmanaged | plan / repo-wide | unowned | 365d |
+| [`docs/PLAN-cdps-monitoring.md`](PLAN-cdps-monitoring.md) | ROADMAP refresh + CDPs monitoring plan (archived) | non-canonical / archived | plan / repo-wide | eng | 365d; verified 2026-07-23 |
 | [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Oracle health-state decision retrospective | non-canonical / archived | plan / repo-wide | eng | 365d |
 | [`docs/PLAN-peg-monitoring.md`](PLAN-peg-monitoring.md) | Peg monitoring for oracle-less stablecoins (EUROP first) | non-canonical / active | plan / repo-wide | eng | 365d |
