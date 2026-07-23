@@ -44,27 +44,42 @@ gh→MCP mapping lives in
 ## Preflight
 
 1. Read root `AGENTS.md` and the package `AGENTS.md` files for changed paths.
-2. Resolve the target before fetching or pushing. If the user supplied a PR
-   URL/number, pass that exact value to `gh pr view`; it overrides local branch
-   discovery. Otherwise query open PRs for the current branch and require zero
-   or one result:
+2. Resolve the checkout repository and its upstream base before querying PRs.
+   A fork checkout uses its parent as `BASE_REPO`; a non-fork uses itself:
 
 ```bash
-git branch --show-current
-gh pr view <explicit-pr-url-or-number> \
+CURRENT_REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+BASE_REPO=$(gh repo view --json nameWithOwner,parent \
+  --jq '.parent.nameWithOwner // .nameWithOwner')
+HEAD_OWNER=${CURRENT_REPO%%/*}
+CURRENT_BRANCH=$(git branch --show-current)
+```
+
+If the user supplied a PR URL, pass that exact URL to `gh pr view`; its
+owner/repository overrides the inferred base. For a bare PR number, bind the
+lookup to `BASE_REPO`. With no explicit target, query `BASE_REPO` by branch,
+then filter same-named fork branches by `headRepositoryOwner`; require zero or
+one result after filtering:
+
+```bash
+gh pr view <explicit-pr-url> \
+  --json number,url,state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner
+gh pr view <explicit-pr-number> --repo "$BASE_REPO" \
   --json number,url,state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner
 # No explicit target:
-gh pr list --head <current-branch> --state open \
-  --json number,url,state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner
+gh pr list --repo "$BASE_REPO" --head "$CURRENT_BRANCH" --state open \
+  --json number,url,state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner \
+  | jq --arg owner "$HEAD_OWNER" \
+    '[.[] | select(.headRepositoryOwner.login == $owner)]'
 ```
 
 Do not discard lookup errors. A failed GitHub query is not evidence that no PR
-exists. Verify the resolved PR URL belongs to this repository and carry its
-base slug as `BASE_REPO`. For an existing PR, identify a git remote whose URL
-matches that base repository and carry its name as `BASE_REMOTE`; identify the
-head repository separately as `HEAD_REMOTE`, carry `baseRefName` as `BASE_REF`,
-and carry `headRefName` as `HEAD_REF`. With no existing PR, verify `origin`
-matches the current repository, then set `BASE_REMOTE=origin`,
+exists. Carry the resolved PR URL's owner/repository as `BASE_REPO`. For an
+existing PR, identify a git remote whose URL matches that base repository and
+carry its name as `BASE_REMOTE`; identify the head repository separately as
+`HEAD_REMOTE`, carry `baseRefName` as `BASE_REF`, and carry `headRefName` as
+`HEAD_REF`. With no existing PR, verify `origin` matches `CURRENT_REPO`, then set
+`BASE_REMOTE=origin`,
 `HEAD_REMOTE=origin`, `BASE_REF=main`, and `HEAD_REF` to the current branch.
 
 3. Fetch the resolved base:

@@ -766,11 +766,40 @@ const partial = {
 ```
 
 **Write it via the owner implementation.** Immediately before uploading, HGET
-the current record again and derive its normalized base version: `""` for a
-create-only write, otherwise the positive integer version (`1` for a
-legacy/invalid stored version). Copy the current `UPSERT_SCRIPT` from
-`ui-dashboard/src/lib/address-reports.ts` exactly; that file owns normalization,
-the expected-version check, and the response envelope.
+the current record again. Capture the unwrapped HGET value as `currentValue`;
+abort on malformed JSON instead of treating it as an absent report. Derive the
+exact expected-version argument before invoking EVAL:
+
+```js
+const current =
+  currentValue == null
+    ? null
+    : typeof currentValue === "string"
+      ? JSON.parse(currentValue)
+      : currentValue;
+if (
+  current !== null &&
+  (typeof current !== "object" || Array.isArray(current))
+) {
+  throw new Error("stored report is not an object — refusing to upload");
+}
+
+const storedVersion = current?.version;
+const expectedVersion =
+  current === null
+    ? "" // create-only: fail if another writer creates it first
+    : String(
+        typeof storedVersion === "number" &&
+          Number.isFinite(storedVersion) &&
+          storedVersion > 0
+          ? Math.floor(storedVersion)
+          : 1, // legacy, missing, null, or invalid versions normalize to 1
+      );
+```
+
+Copy the current `UPSERT_SCRIPT` from
+`ui-dashboard/src/lib/address-reports.ts` exactly; that file owns the matching
+server-side normalization, expected-version check, and response envelope.
 
 ```js
 mcp__upstash__redis_database_run_redis_commands({
