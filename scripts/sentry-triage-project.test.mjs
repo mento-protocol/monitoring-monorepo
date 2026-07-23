@@ -29,6 +29,7 @@ import {
   sanitizeFreeText,
   selectVerdictComment,
   validateAffectedRepo,
+  verdictCommentIdFromUrl,
   VERDICT_MARKER,
   VERDICT_TO_LABEL,
 } from "./sentry-triage-project.mjs";
@@ -597,6 +598,7 @@ await test("selectVerdictComment ignores marker comments from untrusted authors"
   assertDeepEqual(selectVerdictComment(comments), {
     body: null,
     reason: "no-verdict-comment",
+    url: null,
   });
 });
 
@@ -667,7 +669,44 @@ await test("selectVerdictComment reports no-verdict-comment when none present", 
   assertDeepEqual(selectVerdictComment([botComment("hi", "x")]), {
     body: null,
     reason: "no-verdict-comment",
+    url: null,
   });
+});
+
+await test("selectVerdictComment surfaces the selected comment url (#1506 token)", () => {
+  const url =
+    "https://github.com/mento-protocol/monitoring-monorepo/issues/1#issuecomment-42";
+  const comments = [
+    {
+      ...botComment(verdictComment({ summary: "s" }), "2026-07-17T10:00:00Z"),
+      url,
+    },
+  ];
+  assertEqual(selectVerdictComment(comments).url, url);
+  // A urlless comment (older gh shapes / synthetic) yields null, not undefined.
+  assertEqual(
+    selectVerdictComment([
+      botComment(verdictComment({ summary: "s" }), "2026-07-17T10:00:00Z"),
+    ]).url,
+    null,
+  );
+});
+
+await test("verdictCommentIdFromUrl parses the numeric issuecomment id", () => {
+  assertEqual(
+    verdictCommentIdFromUrl(
+      "https://github.com/o/r/issues/1#issuecomment-4994848410",
+    ),
+    "4994848410",
+  );
+  assertEqual(
+    verdictCommentIdFromUrl("https://github.com/o/r/pull/2#issuecomment-1"),
+    "1",
+  );
+  assertEqual(verdictCommentIdFromUrl("https://github.com/o/r/issues/1"), null);
+  assertEqual(verdictCommentIdFromUrl("#issuecomment-abc"), null);
+  assertEqual(verdictCommentIdFromUrl(null), null);
+  assertEqual(verdictCommentIdFromUrl(undefined), null);
 });
 
 // ---------------------------------------------------------------------------

@@ -442,6 +442,13 @@ jobs:
       QUEUE_ISSUE: ${{ matrix.entry.issue }}
       SHORT_ID: ${{ matrix.entry.shortId }}
       REPO: ${{ github.repository }}
+      # The generation token (issue #1506): the numeric id of the verdict comment
+      # this fix was selected from, captured by the trusted select job. The marker
+      # guard refuses if the live selected verdict comment no longer matches (a
+      # re-triage replaced it — ABA). Empty for reconcile entries and the rare
+      # unparseable-url fallback, in which case the guard degrades to the #1389
+      # label-presence check. NEVER sourced from the agent job or the artifact.
+      VERDICT_COMMENT_ID: ${{ matrix.entry.verdictCommentId }}
       # Pinned to github.sha (main's HEAD; select refuses off main). The pristine
       # clone that runs every deterministic node helper checks out this SHA, and it
       # is the diff BASE the agent's downloaded tree is compared against.
@@ -471,6 +478,11 @@ jobs:
           fi
           if ! [[ "${SHORT_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9]+$ ]]; then
             echo "::error::matrix shortId '${SHORT_ID}' is not a valid Sentry SHORT-ID"; exit 1
+          fi
+          # The #1506 generation token, when present, must be a bare integer (the
+          # numeric #issuecomment id). Empty is allowed (reconcile / fallback).
+          if [ -n "${VERDICT_COMMENT_ID:-}" ] && ! [[ "${VERDICT_COMMENT_ID}" =~ ^[0-9]+$ ]]; then
+            echo "::error::matrix verdictCommentId '${VERDICT_COMMENT_ID}' is not a bare integer"; exit 1
           fi
 
       # Download the agent's working-tree TARBALL (untrusted DATA — never executed). A
@@ -744,20 +756,41 @@ jobs:
           # the selector also dedups on an OPEN autofix PR, withdrawing means
           # CLOSING the PR we opened, not just skipping the label.
 
-          # Live verdict: prints "yes" only when it POSITIVELY confirms
-          # sentry:verdict-code-fix is still present; prints "no" both when the
-          # verdict was shed AND when the read itself fails. Fail CLOSED — an
-          # unverified verdict must not receive the terminal marker (that is the
-          # #1389 suppression bug), and a needlessly-withdrawn PR self-corrects when
-          # the stub is re-selected next run, whereas a wrongly-written marker does
-          # not.
+          # Live verdict: prints "yes" only when it POSITIVELY confirms BOTH
+          # (a) sentry:verdict-code-fix is still present, AND (b) — when select
+          # threaded a generation token (issue #1506) — the currently-selected
+          # verdict comment is still the SAME one this fix was based on. Prints
+          # "no" on a shed label, a REPLACED verdict comment (an ABA re-triage
+          # posts a NEW verdict comment, which label-presence alone cannot see),
+          # or any read/parse failure. Fail CLOSED — an unverified or superseded
+          # verdict must not receive the terminal marker (the #1389 suppression
+          # bug); a needlessly-withdrawn PR self-corrects when the stub is
+          # re-selected next run, whereas a wrongly-written marker does not.
           verdict_live() {
-            local names
-            names=$(gh issue view "${QUEUE_ISSUE}" --repo "${REPO}" \
-              --json labels --jq '.labels[].name' 2>/dev/null) \
+            local json
+            json=$(gh issue view "${QUEUE_ISSUE}" --repo "${REPO}" \
+              --json labels,comments 2>/dev/null) \
               || { printf 'no'; return 0; }
-            printf '%s\n' "${names}" > "${RUNNER_TEMP}/labels-live.txt"
-            node "${fin}" marker-still-valid --labels-file "${RUNNER_TEMP}/labels-live.txt"
+            printf '%s' "${json}" > "${RUNNER_TEMP}/stub-live.json"
+            jq -r '.labels[].name' "${RUNNER_TEMP}/stub-live.json" \
+              > "${RUNNER_TEMP}/labels-live.txt"
+            if [ "$(node "${fin}" marker-still-valid --labels-file "${RUNNER_TEMP}/labels-live.txt")" != "yes" ]; then
+              printf 'no'
+              return 0
+            fi
+            # Generation check (issue #1506): only when select threaded a token.
+            # selected-verdict-id fails closed to "none" (never matches).
+            if [ -n "${VERDICT_COMMENT_ID:-}" ]; then
+              local live_id
+              live_id=$(node "${fin}" selected-verdict-id \
+                --comments-file "${RUNNER_TEMP}/stub-live.json")
+              if [ "${live_id}" != "${VERDICT_COMMENT_ID}" ]; then
+                echo "#${QUEUE_ISSUE} verdict comment changed (was ${VERDICT_COMMENT_ID}, now ${live_id}); a re-triage superseded the verdict this fix was based on (ABA) — withdrawing." >&2
+                printf 'no'
+                return 0
+              fi
+            fi
+            printf 'yes'
           }
 
           # Retry a gh mutation up to 3×; on the final failure emit ::error:: and
@@ -836,9 +869,11 @@ jobs:
           # confirmed, since a stuck marker also suppresses the re-fix — and withdraw
           # the PR, so the re-queued occurrence stays selectable. A regression
           # arriving strictly after this check self-heals on ingest's next re-queue,
-          # which sheds the marker again (REOPEN_SHED_LABELS). This guards a SHED
-          # verdict, not a re-added one: an ABA where a re-triage restores the label
-          # inside the window is tracked for the deterministic finalize job (#1506).
+          # which sheds the marker again (REOPEN_SHED_LABELS). verdict_live also
+          # covers the ABA case (issue #1506): a re-triage that sheds then re-adds
+          # the label posts a NEW verdict comment, so the generation-token check
+          # inside verdict_live sees the mismatch and withdraws even though the label
+          # is present again.
           if [ "$(verdict_live)" = "no" ]; then
             retry3 "remove stale fix-pr-opened marker on #${QUEUE_ISSUE}" remove_stale_marker || exit 1
             withdraw_stale_verdict

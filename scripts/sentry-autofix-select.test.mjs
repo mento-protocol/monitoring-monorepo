@@ -308,6 +308,42 @@ await test("skips a stub with an unrecognized affected_repo (not confidently loc
   assertDeepEqual(selected, []);
 });
 
+await test("emits the verdict-comment generation token when present (#1506)", async () => {
+  const stubs = [
+    stub({
+      number: 22,
+      shortId: "APP-MENTO-ORG-7T",
+      comments: [
+        {
+          ...verdictComment(),
+          url: "https://github.com/o/r/issues/22#issuecomment-9012",
+        },
+      ],
+    }),
+  ];
+  const { runGh } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
+  assertDeepEqual(selected, [
+    { issue: 22, shortId: "APP-MENTO-ORG-7T", verdictCommentId: "9012" },
+  ]);
+});
+
+await test("falls back to no token when the verdict comment url is unparsable (#1506)", async () => {
+  const stubs = [
+    stub({
+      number: 23,
+      shortId: "APP-MENTO-ORG-7U",
+      // url without a #issuecomment anchor → no derivable token
+      comments: [
+        { ...verdictComment(), url: "https://github.com/o/r/issues/23" },
+      ],
+    }),
+  ];
+  const { runGh } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
+  assertDeepEqual(selected, [{ issue: 23, shortId: "APP-MENTO-ORG-7U" }]);
+});
+
 await test("skips a stub whose verdict comment is missing/invalid (fail-soft, no throw)", async () => {
   const stubs = [
     stub({ number: 50, shortId: "APP-MENTO-ORG-AA", comments: [] }),

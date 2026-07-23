@@ -532,5 +532,45 @@ await test("CLI marker-still-valid reads a labels file; stale-verdict-close-comm
   );
 });
 
+await test("selected-verdict-id prints the numeric verdict-comment id (#1506)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "autofix-genid-"));
+  const file = join(dir, "stub.json");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      labels: [{ name: "sentry:verdict-code-fix" }],
+      comments: [
+        {
+          body: "<!-- sentry-triage-verdict:v1 -->\nverdict: code-fix\n",
+          createdAt: "2026-07-17T10:00:00Z",
+          author: { login: "github-actions" },
+          url: "https://github.com/o/r/issues/1#issuecomment-777",
+        },
+      ],
+    }),
+  );
+  assert(
+    captureCli(["selected-verdict-id", "--comments-file", file]).trim() ===
+      "777",
+    "prints the live verdict comment's numeric id",
+  );
+});
+
+await test("selected-verdict-id fails closed to 'none' (#1506)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "autofix-genid-none-"));
+  const noVerdict = join(dir, "empty.json");
+  writeFileSync(noVerdict, JSON.stringify({ comments: [] }));
+  const malformed = join(dir, "bad.json");
+  writeFileSync(malformed, "{not json");
+  const missing = join(dir, "nope.json");
+  for (const f of [noVerdict, malformed, missing]) {
+    assert(
+      captureCli(["selected-verdict-id", "--comments-file", f]).trim() ===
+        "none",
+      `fails closed to none for ${f}`,
+    );
+  }
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exitCode = 1;

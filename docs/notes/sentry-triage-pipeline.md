@@ -220,6 +220,17 @@ is that intentional regression-re-queue outcome, not an orphaned run; an
 unconfirmable close fails the run loudly rather than leaving a stale PR that
 would suppress the re-fix.
 
+That re-read also checks the verdict comment's **identity**, not just the label's
+presence (a **generation token**, issue #1506). The trusted select job captures
+the numeric id of the verdict comment the fix was based on and threads it to
+finalize through the matrix; finalize re-selects the live verdict comment and
+withdraws if the id no longer matches. This catches an ABA a re-triage can create
+inside the window — sheds the label, then re-adds it with a **new** verdict
+comment — which label-presence alone cannot see. Reconcile entries carry no token
+(they relink a prior run's PR, whose originating verdict id select never saw), so
+they stay on the label-presence guard; the token is never sourced from the agent
+job or the handoff artifact.
+
 ### Human-approved archive
 
 Archiving is independent of the verdict. An authorized human may apply
