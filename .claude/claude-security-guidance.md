@@ -1,16 +1,19 @@
 # Security guidance — Mento monitoring-monorepo
 
-Project-specific rules for the model-backed security reviewer. Additive to the
-built-in vulnerability checklist. These are guidance; PR review and `/red-team`
-remain the enforcement layers.
+Project-specific semantic rules for the official
+`security-guidance@claude-plugins-official` model-backed diff reviewer. The
+plugin must be installed/enabled by the developer; this repo does not declare a
+user-scoped plugin installation. Regex-enforceable patterns live in
+`.claude/security-patterns.json`; canonical workflow detail lives in package
+instructions and PR checklists. These rules supplement, but do not replace,
+`/security-review`, autoreview, tests, or normal PR gates.
 
 ## Secrets and credentials
 
-- Never log, echo, or persist values from `AUTH_SECRET`, `KV_REST_API_TOKEN`,
-  `KV_REST_API_READ_ONLY_TOKEN`, `ENVIO_HASURA_TOKEN`, `SENTRY_AUTH_TOKEN`,
-  `*_SLACK_BOT_TOKEN`, `DUNE_API_KEY`, `ARKHAM_API_KEY`, or any value sourced
-  from `.env*`. Redact before passing into logs, error messages, or Sentry
-  breadcrumbs.
+- Never log, echo, or persist secrets such as `AUTH_SECRET`,
+  `UPSTASH_REDIS_REST_TOKEN`, `ENVIO_API_TOKEN`, `SENTRY_AUTH_TOKEN`,
+  QuickNode credentials, Slack bot tokens, or third-party API keys. Redact them
+  before logs, errors, or Sentry breadcrumbs.
 - Never commit `.env`, `.env.local`, `.env.production.local`, or any file
   matching `*credential*`, `*secret*`. Example files (`.env.example`,
   `.env.production.local.example`) with placeholder values are allowed.
@@ -20,13 +23,13 @@ remain the enforcement layers.
 
 ## GCP and Terraform
 
-- App code (indexer-envio, ui-dashboard, aegis, metrics-bridge) must never
-  shell out to `gcloud`. Sandbox-side reads use the `mcp__gcloud__*` MCP
-  tools with agent-readonly SA impersonation. Server-side reads use the
-  GCP client libraries with workload identity, not the CLI.
+- App code must never shell out to `gcloud`. Agent-side inspection uses an
+  available read-only connector; server-side reads use GCP client libraries
+  with workload identity.
 - Terraform secret values (`*.tfvars`, `*.auto.tfvars`) stay in the main
   checkout only — never copy them into worktrees, never commit them, never
-  echo them. The GCS backend in `terraform/` is the source of truth.
+  echo them. The backend registered for each Terraform stack is the state source
+  of truth; do not infer ownership from directory names.
 
 ## Indexer (indexer-envio)
 
@@ -37,10 +40,12 @@ remain the enforcement layers.
 - Trading-limit state (Mento v2) is keyed on `bytes32(exchangeId XOR token)`,
   NOT on trader. Logic that "resets" limits by rotating callers is wrong;
   surface this as a finding.
-- RPC handling: handlers must not assume getter calls succeed. Use the
-  `rpc/` helpers (`tryRead`, heal effects), and report missing data via
-  `context.log.error("<area>.<event>", { ... })`. Never `throw` from a
-  handler — it halts the indexer; this is a Sev-1 condition.
+- RPC handling: handlers must not assume getter calls succeed. Use the effect
+  helpers for transient getter/RPC failures and structured error reporting.
+  Invariant violations, corrupt data, and failures before a safe write may
+  intentionally throw and stop processing. Follow
+  `docs/pr-checklists/indexer-handler-invariants.md`; do not apply a blanket
+  throw/no-throw rule.
 - Bridge/NTT transceiver and FPMM addresses must be read from
   `indexer-envio/config/nttAddresses.json` and the chain registry, not
   hardcoded inline. Mismatched addresses across chains have caused outages.
@@ -80,7 +85,7 @@ remain the enforcement layers.
   GCP Cloud Function) MUST verify the QuickNode signature via
   `verify-quicknode-signature.ts` BEFORE parsing the request body. Reject
   unauthenticated requests early.
-- Outbound destinations (Slack, Discord) are templated. Never pass a
+- Outbound Slack destinations are templated. Never pass a
   request-controlled string directly into the channel selector or the
   message body without escaping `<>&` in mrkdwn/HTML targets.
 
@@ -91,8 +96,7 @@ remain the enforcement layers.
   triggers must NOT grant `pull-requests: write` or `contents: write`
   unless they also gate on `github.event.pull_request.head.repo.full_name`
   matching the upstream repo (forks shouldn't get write tokens).
-- **Ruleset-required** CI checks must NOT use `paths:` filters — that creates
-  permanently-pending checks on PRs that don't touch the paths and blocks
-  the merge queue. "Required" = enforced by the `main` ruleset (`ci`,
-  `Code Quality`, the Vercel checks). Advisory workflows (everything else)
-  SHOULD use `paths:` filters to avoid booting a runner on irrelevant PRs.
+- **Ruleset-required** CI checks must not use workflow-level `paths:` filters;
+  skipped workflows leave required checks pending. Advisory workflows should
+  use path filters. Read `docs/pr-checklists/ci-workflow-gates.md` and the live
+  ruleset before changing either class.

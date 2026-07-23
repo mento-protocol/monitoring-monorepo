@@ -1,3 +1,15 @@
+---
+title: Forensic Report Output Template
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-23
+doc_type: skill
+scope: repo-wide
+review_interval_days: 90
+garden_lane: agent-entry-points
+---
+
 # `0xADDRESS_CASE_PRESERVED` — Display Name (persona/ENS if known)
 
 ## TL;DR
@@ -19,7 +31,10 @@ Roles are descriptive, not fixed. Add or drop rows to match the topology. For an
 
 ## Related addresses / fleet
 
-The operator's other contracts/EOAs surfaced by clustering (skill Step 2.5). Each link carries the evidence and a confidence tier — never a bare assertion. Omit this section only if clustering found nothing, and say so in one line rather than dropping the heading.
+The operator's other contracts/EOAs surfaced by clustering (skill Step 2.5).
+Each link carries evidence and a confidence tier—never a bare assertion. Always
+keep this heading. If clustering found nothing, replace the table with one
+evidence-backed sentence saying so.
 
 | Address | Link type                         | Evidence                                            | Confidence |
 | ------- | --------------------------------- | --------------------------------------------------- | ---------- |
@@ -56,7 +71,8 @@ status: ok / sometimes error
 
 - Selector `0x…` (custom — not in 4byte/OpenChain — / matched on OpenChain → name it)
 - Calldata shape: [N dynamic arrays of (tokens, pools, amounts, swap-data, dexIds, minOuts, deadline)] OR [structured args: …]
-- Revert rate: ~N% (normal arb-sniping miss rate / unusual)
+- Revert rate: ~N%, measured over `<window>`; interpret against this chain's
+  ordering model rather than assuming an Ethereum-style baseline
 - Permissioning: [allowlist / open / signature-gated]
 
 ## Capital and scale
@@ -66,7 +82,9 @@ Principal wallet `0x…` holdings on chain `<CHAIN_ID>` (the chain you investiga
 - **`<amount>` `<TOKEN>`** (~$`<usd>` notional) — note any token with dual-native semantics (e.g. CELO is both native gas + ERC20)
 - $`<usd>` stablecoin (split by stablecoin if it matters: USDC / USDT / DAI / chain-native cUSD-cEUR-etc.)
 - `<list any meaningful additional holdings>`
-- A handful of scam airdrops noted only to confirm they're noise (helps a future reader understand why the headline number is what it is — filter via DefiLlama price-presence / `confidence`, see skill Step 5.5, not by token name)
+- Unpriced or low-confidence assets listed separately as requiring
+  corroboration. DefiLlama price presence/confidence is evidence quality, not a
+  deterministic scam or liquidity verdict.
 
 Estimated **operating capital ≈ $`<usd>`** (value time-sensitive flows at block time via DefiLlama historical prices — skill Step 5.5 — not current spot). Volume is `<N>` txs / `<D>` days ≈ one fire every `<T>`s. With $`<lo>`–$`<hi>` trade sizes, this is **`<high-frequency small-ticket arb / whale flows / dust-sized testing / etc.>`** activity — not `<the opposite category that would otherwise be a reasonable hypothesis>`.
 
@@ -84,14 +102,15 @@ Connect the behaviour to the on-chain economics — don't just describe, explain
 
 One row per source attempted — `HIT` / `EMPTY` / `NOT-COVERED` / `NOT-ATTEMPTED` with a one-line why. The `EMPTY` (covers this chain, found nothing) vs `NOT-COVERED` (can't see this chain) distinction is the whole point — don't collapse them.
 
-| Source                | Result      | Note                                                          |
-| --------------------- | ----------- | ------------------------------------------------------------- |
-| Arkham (cache / live) | NOT-COVERED | Celo/Monad not indexed; operator EOA on covered chains: `<…>` |
-| Mento Envio indexer   | HIT / EMPTY | `<N SwapEvents, isProtocolActor=…>`                           |
-| Sim / Dune            | HIT         | `<…>`                                                         |
-| Sourcify / Celoscan   | EMPTY       | unverified — decompiled instead                               |
-| Sanctions screen      | EMPTY       | not OFAC-listed (Celo oracle + static list)                   |
-| `<…>`                 | `<…>`       | `<…>`                                                         |
+| Source                | Result      | Note                                        |
+| --------------------- | ----------- | ------------------------------------------- |
+| Arkham (target chain) | NOT-COVERED | target chain not indexed (when true)        |
+| Arkham (identity leg) | HIT / EMPTY | operator EOA on supported chains: `<…>`     |
+| Mento Envio indexer   | HIT / EMPTY | `<N SwapEvents, isProtocolActor=…>`         |
+| Sim / Dune            | HIT         | `<…>`                                       |
+| Sourcify / Celoscan   | EMPTY       | unverified — decompiled instead             |
+| Sanctions screen      | EMPTY       | not OFAC-listed (Celo oracle + static list) |
+| `<…>`                 | `<…>`       | `<…>`                                       |
 
 **Top alternative hypothesis considered** (skill Step 8.5): `<e.g. MM rebalancer rather than arb bot>` — rejected because `<disconfirming evidence>`.
 
@@ -99,7 +118,12 @@ One row per source attempted — `HIT` / `EMPTY` / `NOT-COVERED` / `NOT-ATTEMPTE
 
 ## Bottom line
 
-Five bullets, one sentence each. The LITERAL placeholder text is below — replace every value with what you actually found. Do NOT ship the placeholders. The skill's worked-example section (`SKILL.md` → "Worked example") points at the seed report's real bottom line for tone calibration; this template stays placeholder-only so a fresh investigation that copy-pastes blindly doesn't accidentally persist seed facts about a different address.
+Five bullets, one sentence each. The LITERAL placeholder text is below—replace
+every value with what you actually found. Do not ship the placeholders. The
+skill's "Tone reference" explains how historical production reports may be used
+without treating them as structural authority; this template remains
+placeholder-only so a fresh investigation cannot persist another target's
+facts.
 
 - **Who**: `<persona / entity, one sentence — who's behind this address>` `[CONFIRMED / PROBABLE / POSSIBLE]`
 - **What**: `<contract type / behavioural class, one sentence — what does it do>`

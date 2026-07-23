@@ -38,8 +38,9 @@ All child entities (`poolId` FKs) follow the same format.
 
 `indexer-envio/config.multichain.mainnet.yaml` — covers Ethereum (1)
 sUSDS/stETH reserve-yield accounting, Celo (42220), Monad (143), and Polygon
-(137). Polygon is configured here and becomes production-visible only after the
-normal deploy, sync verification, and promotion workflow completes.
+(137). Polygon is live at the static production endpoint; future replacements
+still require the normal deploy, sync verification, semantic verification, and
+promotion workflow.
 
 Git release branch: `envio` — push to this branch to trigger a redeployment.
 
