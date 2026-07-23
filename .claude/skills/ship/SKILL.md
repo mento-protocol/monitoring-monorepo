@@ -75,12 +75,28 @@ gh pr list --repo "$BASE_REPO" --head "$CURRENT_BRANCH" --state open \
 
 Do not discard lookup errors. A failed GitHub query is not evidence that no PR
 exists. Carry the resolved PR URL's owner/repository as `BASE_REPO`. For an
-existing PR, identify a git remote whose URL matches that base repository and
-carry its name as `BASE_REMOTE`; identify the head repository separately as
-`HEAD_REMOTE`, carry `baseRefName` as `BASE_REF`, and carry `headRefName` as
-`HEAD_REF`. With no existing PR, verify `origin` matches `CURRENT_REPO`, then set
-`BASE_REMOTE=origin`,
-`HEAD_REMOTE=origin`, `BASE_REF=main`, and `HEAD_REF` to the current branch.
+existing PR, identify the head repository separately and require a configured
+remote that matches it; carry that name as `HEAD_REMOTE`, `baseRefName` as
+`BASE_REF`, and `headRefName` as `HEAD_REF`. Stop if the PR head repository has
+no matching push remote. With no existing PR, verify `origin` matches
+`CURRENT_REPO`, then set `HEAD_REMOTE=origin`, `BASE_REF=main`, and `HEAD_REF`
+to the current branch.
+
+For every path, identify a configured remote whose URL matches `BASE_REPO` and
+carry its name as `BASE_REMOTE`. Never substitute a fork's `origin` for its
+parent repository. If no remote matches, add the parent as `upstream`; do not
+overwrite or retarget an existing remote:
+
+```bash
+if [ -z "$BASE_REMOTE" ]; then
+  if git remote get-url upstream >/dev/null 2>&1; then
+    echo "upstream exists but does not match $BASE_REPO" >&2
+    exit 1
+  fi
+  git remote add upstream "https://github.com/${BASE_REPO}.git"
+  BASE_REMOTE=upstream
+fi
+```
 
 3. Fetch the resolved base:
 
