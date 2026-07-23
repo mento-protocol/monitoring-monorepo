@@ -16,6 +16,7 @@ import {
   ghPaginate,
   indexQueueIssuesByShortId,
   isSafeNextPageUrl,
+  LABEL_DEFINITIONS,
   mapSentryIssue,
   mergeSentryIssues,
   normalizeRestIssues,
@@ -96,6 +97,22 @@ await test("title truncation cuts at 90 chars and adds an ellipsis", () => {
   assertEqual(truncated.length, 91);
   assert(truncated.endsWith("…"), "expected ellipsis suffix");
   assertEqual(truncated.slice(0, 90), "x".repeat(90));
+});
+
+// ---------------------------------------------------------------------------
+// Label definitions must satisfy GitHub's limits — the bootstrap `gh label
+// create` calls them at ingest startup, and an over-length description returns
+// HTTP 422 that fails the whole scheduled run (this test guards that at PR
+// time, since the ensure calls are mocked elsewhere).
+// ---------------------------------------------------------------------------
+
+await test("every label description is within GitHub's 100-char limit", () => {
+  for (const { name, description } of LABEL_DEFINITIONS) {
+    assert(
+      description.length <= 100,
+      `label ${name} description is ${description.length} chars (max 100): ${description}`,
+    );
+  }
 });
 
 await test("queue title format matches the normative v2 contract", () => {
