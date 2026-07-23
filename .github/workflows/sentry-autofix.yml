@@ -2,10 +2,11 @@ name: Sentry Autofix
 
 # Stage C / Phase 2b of the Sentry triage pipeline (ADR 0036): for queue stubs
 # verdicted `code-fix` whose parsed `affected_repo` is EXACTLY this repo, a
-# claude-code-action agent implements a scoped fix in a fresh checkout, then a
-# DETERMINISTIC finalize step commits, pushes a branch, and opens a PR via a
-# GitHub App token. PR-ONLY — nothing ever merges automatically; merge stays
-# human (ADR 0036).
+# claude-code-action agent implements a scoped fix in an isolated READ-ONLY
+# `agent` job (issue #1373), which hands its whole working tree to a separate
+# TRUSTED `finalize` job that re-validates the diff, commits, pushes a branch,
+# and opens a PR via a GitHub App token. PR-ONLY — nothing ever merges
+# automatically; merge stays human (ADR 0036).
 #
 # Prompt-injection containment is the whole design point (the verdict is
 # second-order UNTRUSTED Sentry data):
@@ -22,8 +23,10 @@ name: Sentry Autofix
 #     diff guard + required CI + human review catch. (Residual: claude-code-action
 #     itself holds its `github_token` input + the Claude OAuth token in the CLI
 #     process env, which the agent's Read tool could in principle reach via a
-#     process-env surface — inherent to the action, same as claude.yml, tracked
-#     as a sandboxing follow-up.)
+#     process-env surface. Because the `agent` job is READ-ONLY (contents:read +
+#     issues:read, issue #1373), an exfiltrated `github_token` cannot write
+#     issues, push, or open PRs; only the Claude OAuth inference token remains —
+#     inherent to the action, tracked as a sandboxing follow-up.)
 #   - NO git AT ALL against the agent-tainted checkout, and NO write credential
 #     in the LLM step. The agent has Write access to the checkout INCLUDING
 #     .git/, so any git command there would run agent-planted hooks / clean-smudge
@@ -35,8 +38,11 @@ name: Sentry Autofix
 #     pristine clone (the helper scripts are themselves agent-editable in the
 #     checkout); and the App token (contents:write + pull-requests:write) touches
 #     only pristine-config clones. An injected instruction cannot execute code,
-#     push, or open a PR — the LLM step has no credential and nothing the later
-#     credentialed steps run comes from the tainted checkout.
+#     push, or open a PR — the LLM job has no write credential, and the trusted
+#     finalize job re-derives the diff + guard against its OWN pristine clone from
+#     the handed-off working tree, trusting nothing the agent produced except raw
+#     file bytes that pass the guard. A live-FS symlink tripwire in the agent job
+#     rejects a symlink-exfil diff before it can reach the handoff artifact.
 #
 # Inert until activation: the `SENTRY_AUTOFIX_ENABLED` repo variable gates the
 # whole workflow, and the select job additionally no-ops unless the Claude OAuth
@@ -181,24 +187,33 @@ jobs:
   # Branch push + PR creation authority comes EXCLUSIVELY from the App token
   # minted inside the finalize steps — the LLM step holds no write credential.
   # ---------------------------------------------------------------------------
-  autofix:
+  # The UNTRUSTED half (issue #1373 credential split). Runs the LLM fix agent in a
+  # job with READ-ONLY permissions and NO App token: contents:read + issues:read
+  # only. The agent edits its checkout and hands the whole working tree to the
+  # trusted `finalize` job as an artifact — so even if a prompt-injected agent
+  # exfiltrates this job's github.token via /proc/self/environ, that token cannot
+  # write issues, push, or open PRs. (Residual, out of scope for #1373: the Claude
+  # OAuth inference token is still in the action's env — inherent to
+  # claude-code-action; worst case is inference-quota abuse, not repo/queue writes.)
+  agent:
     needs: select
     if: ${{ needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
-      max-parallel: 1
+      # No branch push or marker write happens in this job, so the push race that
+      # forces `finalize` to serialize does not exist here — run both agents in
+      # parallel.
+      max-parallel: 2
       fail-fast: false
       matrix:
         entry: ${{ fromJSON(needs.select.outputs.entries) }}
     permissions:
+      # READ-ONLY. issues:read is only for the pre-agent verdict snapshot; there is
+      # deliberately no issues:write and no pull-requests scope in the job the agent
+      # runs in — every write happens in `finalize`.
       contents: read
-      issues: write
-      # The reconcile-only step lists PRs with the ambient github.token to
-      # re-resolve an orphaned autofix PR; PR read access defaults to none, so
-      # grant it explicitly (read-only — branch push + PR create still come
-      # exclusively from the App token in the deterministic steps).
-      pull-requests: read
+      issues: read
     # Deliberately NO GH_TOKEN at job level: it must not reach the claude-code
     # LLM step's process env, where a prompt-injected agent could read it from a
     # process-environment surface. Each deterministic step that needs GitHub auth
@@ -331,15 +346,19 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" base
           git -C "${base}" checkout --quiet "${BASE_SHA}"
 
-      # Detect the agent's changes WITHOUT git and run the guard — CREDENTIAL-FREE.
-      # `diff-trees` compares the tainted checkout against the pristine clone with
-      # pure filesystem reads, so NO git runs against the tainted checkout at all:
-      # git add/diff/status would execute agent-controlled clean/smudge filters +
-      # textconv from .gitattributes/.git/config (arbitrary code execution that
-      # hardened flags do NOT disable). Both this detector and the guard run from
-      # the pristine clone (code the agent never touched), with no token in env.
-      - name: Detect changes (filter-free) + diff guard (deterministic)
-        id: guard
+      # Live-FS tripwire (issue #1373). The AUTHORITATIVE diff + guard runs in the
+      # trusted `finalize` job against the downloaded artifact; this step is the
+      # credential-free FIRST line of defense, run against the live checkout where a
+      # symlink is genuinely a symlink. Artifact upload may DEREFERENCE symlinks, so
+      # a symlink-exfil path (an allowed source file the agent swapped for a symlink
+      # to /proc/self/environ) must be rejected HERE, before it can reach the
+      # artifact. diff-trees uses pure filesystem reads: NO git runs against the
+      # tainted checkout (clean/smudge filters + textconv from agent-controlled
+      # .gitattributes/.git/config are arbitrary code execution hardened flags do NOT
+      # disable). This step sets no `proceed` output — finalize re-derives and
+      # decides; benign refusals (zero / >3 / forbidden path) do NOT fail here, they
+      # upload so finalize can post the clean fix-refused outcome.
+      - name: Diff tripwire (filter-free, live FS)
         if: ${{ matrix.entry.reconcile != true }}
         env:
           GH_TOKEN: ""
@@ -350,18 +369,151 @@ jobs:
             --base "${RUNNER_TEMP}/base" \
             --work "${GITHUB_WORKSPACE}" \
             > "${RUNNER_TEMP}/changed.txt"
+          # Reject the one attack signature that the artifact boundary could hide:
+          # any changed path the agent turned into a SYMLINK. lstat only (no
+          # dereference/read). Fail the agent job hard so NOTHING is uploaded —
+          # finalize then finds no artifact and records the entry incomplete, never
+          # publishing the symlink target. (Credential-shaped content is still caught
+          # authoritatively by finalize's guard, which reads file bytes.)
+          while IFS= read -r f; do
+            [ -n "${f}" ] || continue
+            if [ -L "${GITHUB_WORKSPACE}/${f}" ]; then
+              echo "::error::Autofix agent turned '${f}' into a symlink; refusing to hand off (possible exfiltration)."
+              exit 1
+            fi
+          done < "${RUNNER_TEMP}/changed.txt"
+          # Log (do NOT enforce) the full guard verdict for visibility; finalize
+          # re-runs it authoritatively against the downloaded artifact.
+          echo "::notice::Tripwire diff for #${QUEUE_ISSUE}: $(node "${fin}" guard \
+            --files-file "${RUNNER_TEMP}/changed.txt" \
+            --work "${GITHUB_WORKSPACE}")"
 
-          # guard: refuse on zero changes, >3 files, ANY forbidden path (incl.
-          # all of scripts/), or a changed path the agent turned into a SYMLINK.
-          # Enforced in code, from the pristine clone, with NO write token in env
-          # (this whole step is credential-free) — so a prompt-injected or
-          # over-eager agent cannot get a forbidden-path, oversized, or
-          # symlink-exfiltration diff past this point, and the symlink rejection
-          # happens BEFORE the App token is ever minted. `--work` is lstat-only
-          # (no dereference, no read, no git filter) against the tainted checkout.
+      # Hand the agent's WHOLE working tree to the trusted finalize job (not a diff or
+      # a file list) so finalize re-derives the changed set itself against its own
+      # pristine clone and trusts NO agent-provided metadata. include-hidden-files is
+      # MANDATORY: without it .github/, .node-version, .trunk/ etc. would be absent
+      # from the download and read as DELETED in finalize's diff, false-refusing every
+      # run. Do NOT add `pnpm install` to this job — it would pull node_modules into
+      # the tree (ballooning the artifact + making finalize's hashTree walk it).
+      - name: Hand off working tree to finalize
+        if: ${{ matrix.entry.reconcile != true }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sentry-autofix-worktree-${{ matrix.entry.issue }}
+          path: ${{ github.workspace }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  # The TRUSTED half (issue #1373 credential split). No untrusted agent runs here.
+  # Holds issues:write + mints the App token, downloads the agent's working tree,
+  # RE-DERIVES the diff + guard against its OWN pristine clone (trusting no agent
+  # metadata), and does every write: refused analysis, PR open, marker, reconcile.
+  finalize:
+    needs: [select, agent]
+    # !cancelled() (not success()) so one entry's failed agent does not skip the
+    # whole finalize matrix; each finalize entry decides from its OWN download (a
+    # missing artifact fails only that entry).
+    if: ${{ !cancelled() && needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      # Serialize: the branch push + marker write must not race between entries.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        entry: ${{ fromJSON(needs.select.outputs.entries) }}
+    permissions:
+      contents: read
+      issues: write
+      # The reconcile step and the dup/relink checks list PRs with the ambient
+      # github.token; branch push + PR create still come exclusively from the App
+      # token in the deterministic steps.
+      pull-requests: read
+    env:
+      QUEUE_ISSUE: ${{ matrix.entry.issue }}
+      SHORT_ID: ${{ matrix.entry.shortId }}
+      REPO: ${{ github.repository }}
+      # Pinned to github.sha (main's HEAD; select refuses off main). The pristine
+      # clone that runs every deterministic node helper checks out this SHA, and it
+      # is the diff BASE the agent's downloaded tree is compared against.
+      BASE_SHA: ${{ github.sha }}
+    steps:
+      # This checkout is PRISTINE — no agent runs in this job — so the reconcile
+      # helper is safe to run from $GITHUB_WORKSPACE. persist-credentials:false keeps
+      # the checkout token out of .git/config on principle. The fix path still runs
+      # every helper from a separate pristine clone (base) and copies the agent's
+      # changes byte-for-byte from the DOWNLOAD (work), never from this checkout.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Validate matrix inputs
+        run: |
+          set -euo pipefail
+          # Defense in depth: re-validate the matrix entry independently in the
+          # trusted job before it touches sed / branch names / git refs.
+          if ! [[ "${QUEUE_ISSUE}" =~ ^[0-9]+$ ]]; then
+            echo "::error::matrix issue '${QUEUE_ISSUE}' is not an integer"; exit 1
+          fi
+          if ! [[ "${SHORT_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9]+$ ]]; then
+            echo "::error::matrix shortId '${SHORT_ID}' is not a valid Sentry SHORT-ID"; exit 1
+          fi
+
+      # Download the agent's working tree (untrusted DATA — never executed). A
+      # missing artifact (the agent job failed pre-upload, e.g. the tripwire tripped)
+      # makes this step fail, recording THIS entry incomplete without blocking the
+      # other finalize entries.
+      - name: Download agent working tree
+        if: ${{ matrix.entry.reconcile != true }}
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: sentry-autofix-worktree-${{ matrix.entry.issue }}
+          path: ${{ runner.temp }}/work
+
+      # Clone the repo at BASE_SHA into a PRISTINE location. Every post-download node
+      # helper runs from here (never from the downloaded tree) AND it is the diff
+      # BASE the download is compared against. A plain clone from origin — no agent
+      # code — so github.token is safe.
+      - name: Clone pristine base
+        if: ${{ matrix.entry.reconcile != true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="${RUNNER_TEMP}/base"
+          rm -rf "${base}"
+          git -C "${RUNNER_TEMP}" clone --filter=blob:none --no-tags \
+            "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" base
+          git -C "${base}" checkout --quiet "${BASE_SHA}"
+
+      # AUTHORITATIVE diff + guard (issue #1373). Re-derived here in the trusted job
+      # against the DOWNLOADED tree, trusting no agent-provided list. Same code path
+      # as before the split — diff-trees is pure filesystem reads (no git against the
+      # download), the guard refuses on zero / >3 files / forbidden path / symlink /
+      # credential-shaped content, all from the pristine clone with NO write token in
+      # env, BEFORE the App token is ever minted. `--work` is lstat-only for the
+      # symlink check (no dereference, no read, no git filter).
+      - name: Detect changes (filter-free) + diff guard (deterministic)
+        id: guard
+        if: ${{ matrix.entry.reconcile != true }}
+        env:
+          GH_TOKEN: ""
+        run: |
+          set -euo pipefail
+          fin="${RUNNER_TEMP}/base/scripts/sentry-autofix-finalize.mjs"
+          node "${fin}" diff-trees \
+            --base "${RUNNER_TEMP}/base" \
+            --work "${RUNNER_TEMP}/work" \
+            > "${RUNNER_TEMP}/changed.txt"
           guard=$(node "${fin}" guard \
             --files-file "${RUNNER_TEMP}/changed.txt" \
-            --work "${GITHUB_WORKSPACE}")
+            --work "${RUNNER_TEMP}/work")
           if [ "$(jq -r '.ok' <<<"${guard}")" != "true" ]; then
             jq -r '.reason' <<<"${guard}" > "${RUNNER_TEMP}/refuse-reason.txt"
             echo "proceed=false" >> "${GITHUB_OUTPUT}"
@@ -505,15 +657,15 @@ jobs:
             cp -a "${base}" "${push}"
             while IFS= read -r f; do
               [ -n "${f}" ] || continue
-              # Copy ONLY genuine regular files, never symlinks: `-f` alone would
-              # follow a symlink and `cp` would dereference it, so an agent that
-              # replaced an allowed source file with a symlink to a secret-bearing
-              # path (e.g. /proc/self/environ) could publish this step's tokens.
-              # The guard above already refuses such diffs; this `! -L` check is
-              # defense in depth at the exact point APP_TOKEN is in scope.
-              if [ -f "${GITHUB_WORKSPACE}/${f}" ] && [ ! -L "${GITHUB_WORKSPACE}/${f}" ]; then
+              # Copy ONLY genuine regular files from the DOWNLOADED agent tree, never
+              # symlinks: `-f` alone would follow a symlink and `cp` would dereference
+              # it, so an agent that replaced an allowed source file with a symlink to
+              # a secret-bearing path (e.g. /proc/self/environ) could publish this
+              # step's tokens. The guard above already refuses such diffs; this `! -L`
+              # check is defense in depth at the exact point APP_TOKEN is in scope.
+              if [ -f "${RUNNER_TEMP}/work/${f}" ] && [ ! -L "${RUNNER_TEMP}/work/${f}" ]; then
                 mkdir -p "${push}/$(dirname "${f}")"
-                cp "${GITHUB_WORKSPACE}/${f}" "${push}/${f}"
+                cp "${RUNNER_TEMP}/work/${f}" "${push}/${f}"
               else
                 rm -f "${push}/${f}"
               fi
@@ -758,8 +910,8 @@ jobs:
   # ingest's, so the two records coexist on the tracker.
   # ---------------------------------------------------------------------------
   record-run:
-    needs: [select, autofix]
-    # always() so a failed/skipped autofix still leaves a record — but ONLY on
+    needs: [select, agent, finalize]
+    # always() so a failed/skipped agent or finalize still leaves a record — but ONLY on
     # main: this job checks out ${{ github.sha }} and EXECUTES the finalize
     # helper from it with an issues:write token, so an off-main
     # workflow_dispatch (which the select job refuses as a no-op) must not get
