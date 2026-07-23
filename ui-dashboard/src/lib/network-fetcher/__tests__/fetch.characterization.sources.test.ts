@@ -429,7 +429,9 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     const result = await resultPromise;
     dateNow.mockRestore();
 
-    expect(result.strategyError).toBeNull();
+    expect(result.strategyError?.message).toBe(
+      "strategy-detection: schema-lag fallback skipped because its source budget was exhausted",
+    );
     expect(result.reservePoolIds).toEqual(new Set());
     expect(mockDetectProbedStrategies).not.toHaveBeenCalled();
   });

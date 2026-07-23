@@ -126,7 +126,9 @@ async function requestFallbackStrategies(
   // Starting the fixed-length RPC probe with less time remaining would turn a
   // near-timeout schema-lag response into an additional three-second delay.
   if (Date.now() + RUNTIME_STRATEGY_PROBE_TIMEOUT_MS > deadlineMs) {
-    return emptyStrategyIds();
+    throw new Error(
+      "strategy-detection: schema-lag fallback skipped because its source budget was exhausted",
+    );
   }
   return detectProbedStrategies(network, pools);
 }
@@ -181,7 +183,8 @@ function buildSourcePromises(
   };
   // The compatibility probe is sequential by design, so make it consume the
   // same five-second budget as the registry query rather than extending this
-  // source phase beyond the rest of the fan-out.
+  // source phase beyond the rest of the fan-out. A budget-exhausted fallback
+  // rejects so the partial classification cannot enter the healthy SSR cache.
   const strategySourceDeadlineMs = Date.now() + REQUEST_TIMEOUT_MS;
   const activeStrategies = requestActiveLiquidityStrategies(network, timed);
   // PoolLiquidityStrategy is authoritative whenever its query succeeds,
