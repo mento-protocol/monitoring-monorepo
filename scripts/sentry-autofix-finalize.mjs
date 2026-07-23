@@ -243,23 +243,31 @@ const DIFF_CREDENTIAL_PATTERNS = [
 //    strip along with an attacker separator, so they are matched SEPARATOR-
 //    TOLERANT on the raw path: the internal dashes may be any separator or absent
 //    (`sk.ant-…` still trips), with the content scan's body floor.
-// Bodies allow `_`: a github_pat suffix legitimately contains underscores
-// (`github_pat_XXXX_YYYY`), and for the ghs_ family an attacker can INSERT `_`
-// to split the body (the collapse keeps `_`). The `_` never causes a false
-// positive here because each pattern still requires the literal credential
-// prefix, which no source filename carries. AWS keys have no `_` (and AWS is not
-// an autofix runner credential), so AKIA keeps the plain alphabet.
+// Filenames are agent-controlled. The GitHub/AWS credential prefixes are
+// distinctive (a literal `_`, or `AKIA`+caps), so they are matched on a FULLY
+// collapsed form of the path — every byte outside the token alphabet
+// `[A-Za-z0-9_]` removed — which rejoins ANY separator an attacker inserts to
+// split the prefix or body (`/`·`.`·`-`·`@`·`+`·whitespace·…). The {16,}/{16}
+// body floors then catch the rejoined token while leaving cross-segment joins too
+// short to match, and the literal prefix keeps it false-positive-free (no source
+// path is named after a token; a github_pat suffix and a `_`-split ghs body both
+// keep their underscores). (#1551)
 const FILENAME_CREDENTIAL_COLLAPSED = [
   /(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9_]{16,}/,
   /github_pat_[A-Za-z0-9_]{16,}/,
   /AKIA[A-Z0-9]{16}/,
 ];
-// The internal separators of these prefixes may be ANY non-alphanumeric run (a
-// substituted `-`/`.`/`_`/`/`/space still yields a recoverable token), and the
-// body may contain `-` (real Anthropic/Slack keys do).
-const FILENAME_CREDENTIAL_SEPARATOR_TOLERANT = [
-  /sk[^A-Za-z0-9]*ant[^A-Za-z0-9]*[A-Za-z0-9-]{8,}/i,
-  /xox[^A-Za-z0-9]*[a-z][^A-Za-z0-9]*[A-Za-z0-9-]{8,}/i,
+// The Anthropic/Slack prefixes are SHORT and their collapsed forms (`skant`,
+// `xox`) collide with ordinary words ("riskantenna", camelCase "TaskAntenna"),
+// so they are matched only in CANONICAL dashed form on the raw path — no false
+// positive on normal code. Heavy filename-obfuscation of these lower-value tokens
+// is a documented residual: the Anthropic inference token is an accepted #1373
+// residual (worst case quota abuse, not repo/queue compromise) and Slack is not
+// an autofix runner credential; the content scan still catches a real token
+// written into a file body.
+const FILENAME_CREDENTIAL_CANONICAL = [
+  /sk-ant-[A-Za-z0-9-]{8,}/i,
+  /xox[a-z]-[A-Za-z0-9-]{8,}/i,
 ];
 
 // Full-token patterns (no \b, global) for MASKING a credential wherever it
@@ -328,13 +336,12 @@ export function filesWithCredentialShapedContent(workRoot, files) {
 export function filesWithCredentialShapedName(files) {
   return (Array.isArray(files) ? files : []).filter((f) => {
     const p = String(f ?? "");
-    // Collapse for the separator-less prefixes: rejoin a split prefix/body while
-    // keeping `_` (which those prefixes require). The {16,} floor on this form
-    // both catches the rejoined token and avoids a cross-segment false positive.
-    const collapsed = p.replace(/[/.\s-]/g, "");
+    // Strip EVERY byte outside the token alphabet (not a fixed separator list),
+    // so any separator an attacker inserts to split a GitHub/AWS token rejoins.
+    const collapsed = p.replace(/[^A-Za-z0-9_]/g, "");
     return (
       FILENAME_CREDENTIAL_COLLAPSED.some((re) => re.test(collapsed)) ||
-      FILENAME_CREDENTIAL_SEPARATOR_TOLERANT.some((re) => re.test(p))
+      FILENAME_CREDENTIAL_CANONICAL.some((re) => re.test(p))
     );
   });
 }

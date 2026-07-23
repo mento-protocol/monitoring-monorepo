@@ -759,34 +759,42 @@ await test("guard resists filename-credential obfuscation and avoids false posit
   assert(!red.includes(`${G}a1b2`), "padded token masked in a redacted reason");
 });
 
-await test("guard resists sk-ant-/xox- obfuscation and cross-segment false positives (#1551 review)", () => {
-  // Review findings: the sk-ant-/xox- prefixes carry a literal '-' the collapse
-  // used to strip, so a substituted internal dash (sk.ant-…) evaded them (P2);
-  // and stripping '/' across the whole path must not let two segments spell a
-  // prefix (P3). Fixtures concatenated so no contiguous credential literal here.
+await test("guard: full-collapse GitHub/AWS, canonical-only Anthropic/Slack, no camelCase FP (#1551 review)", () => {
   const T = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8";
+  const G = "ghs" + "_";
   const SK = "sk" + "-" + "ant" + "-";
+  // GitHub/AWS families collapse EVERY non-token byte, so any inserted separator
+  // (incl. '@', '+') rejoins to trip the {16,} floor.
   for (const p of [
-    "sk.ant-AAAAAAAAAAAA.ts", // dot substituted for the first required dash
-    "xox.b-AAAAAAAAAAAA.ts",
-    `config/${SK}api03-${T}.ts`, // real Anthropic key shape (dashes in the body)
-    `x/${"xox" + "b-"}${T}.ts`,
+    `src/${G}a1b2@c3d4e5f6g7h8i9j0.ts`, // '@' separator
+    `src/${G}a1b2+c3d4+e5f6+g7h8+i9j0.ts`, // '+' separators
+    `${G}a1b2/c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8.ts`, // '/' split
   ]) {
     assert(
       filesWithCredentialShapedName([p]).length === 1,
-      `obfuscated Anthropic/Slack filename must be refused: ${p}`,
+      `must refuse: ${p}`,
     );
   }
-  for (const p of [
-    "src/gh/s_util.ts", // two segments join to 'ghs_util' — short body, not a token
-    "src/risk-antenna.ts", // 'sk'+'ant' with a short body
-    "src/task-antler.ts",
-  ]) {
+  // Anthropic/Slack matched only in CANONICAL dashed form — real keys caught.
+  for (const p of [`config/${SK}api03-${T}.ts`, `x/${"xox" + "b-"}${T}.ts`]) {
     assert(
-      filesWithCredentialShapedName([p]).length === 0,
-      `legit path must not false-positive: ${p}`,
+      filesWithCredentialShapedName([p]).length === 1,
+      `must refuse: ${p}`,
     );
   }
+  // No false positive: canonical-only matching keeps ordinary camelCase and
+  // hyphenated code clear where the short sk-ant/xox collapsed forms would collide.
+  for (const p of [
+    "ui-dashboard/src/TaskAntennaComponentHelperFactory.ts",
+    "src/risk-antenna.ts",
+    "src/task-antler.ts",
+    "src/gh/s_util.ts", // cross-segment join, short body
+    "docs/highschool-curriculum-planning-notes.md",
+  ]) {
+    assert(filesWithCredentialShapedName([p]).length === 0, `must allow: ${p}`);
+  }
+  // Documented residual (NOT asserted; low-value inference/Slack tokens): heavy
+  // obfuscation of the short prefixes, e.g. `sk.ant-…` or `sk-ant-a/bcdefgh`.
 });
 
 await test("guard catches underscore-containing / underscore-split credential filenames (#1551 review P1)", () => {
@@ -797,7 +805,6 @@ await test("guard catches underscore-containing / underscore-split credential fi
     `ui-dashboard/src/${GP}AAAAAAAA_BBBBBBBB.ts`, // github_pat suffix contains '_' (P1)
     `${GP}11ABCDEFG0${T}.ts`, // realistic github_pat shape
     `${GHS}a1b2_c3d4_e5f6_g7h8_i9j0_k1l2_m3n4_o5p6.ts`, // ghs_ body split with '_'
-    `sk_ant_${T}.ts`, // sk-ant- with '_' substituted for its dashes
   ]) {
     assert(
       filesWithCredentialShapedName([p]).length === 1,
