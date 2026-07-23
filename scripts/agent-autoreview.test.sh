@@ -723,8 +723,6 @@ begin_deadline_fixture_registration() {
 arm_deadline_fixture_cleanup() {
   active_deadline_wrapper_pid="$1"
   active_deadline_state_dir="$2"
-  printf '%s\n' "$active_deadline_wrapper_pid" \
-    >"$active_deadline_state_dir/wrapper.pid"
   finish_deadline_fixture_registry_update
 }
 
