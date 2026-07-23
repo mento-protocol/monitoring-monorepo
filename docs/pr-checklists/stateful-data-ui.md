@@ -153,6 +153,10 @@ For each non-happy path, decide the behavior explicitly.
 - [ ] chart query fails
 - [ ] some rows predate a new schema field
 - [ ] RPC-derived metadata is missing
+- [ ] a compatibility fallback is skipped because its time budget is exhausted:
+      return an explicit unavailable/error state when classification is
+      incomplete; never fulfil it as an empty successful result that can enter
+      a healthy SSR or persisted cache
 - [ ] total dataset is much larger than the current happy-path sample
 - [ ] search term matches data outside the currently fetched window
 - [ ] empty state vs loading state vs partial-data state are distinct
