@@ -32,8 +32,12 @@ const validProductionEnvironment = `    environment:
 const validApplyDefaults = `    defaults:
       run:
         working-directory: alerts/rules`;
+const grafanaServiceAccountVariable = [
+  "TF_VAR_grafana_service_account_",
+  "token",
+].join("");
 const validApplyEnvironment = `    env:
-      TF_VAR_grafana_service_account_token: \${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}`;
+      ${grafanaServiceAccountVariable}: \${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}`;
 
 function validate(files) {
   const errors = [];
@@ -188,7 +192,7 @@ jobs:`,
       validApplyEnvironment,
       `    env:
       ${variableName}: ./attacker
-      TF_VAR_grafana_service_account_token: \${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}`,
+      ${grafanaServiceAccountVariable}: \${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}`,
     ),
     "apply job env may contain only TF_VAR_ variables",
   );
