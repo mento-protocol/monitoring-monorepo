@@ -400,13 +400,102 @@ export function expectString(block, attribute, expected, errors, label) {
   }
 }
 
-export function expectMapEntry(block, key, value, errors, label) {
-  const pattern = new RegExp(
-    `^\\s*"${escapeRegExp(key)}"\\s*=\\s*"${escapeRegExp(value)}"\\s*$`,
-    "gmu",
+function exactStringMapAttribute(block, attribute) {
+  if (!block) return undefined;
+  const analysis = analyzeHcl(block.code);
+  const assignmentPattern = new RegExp(
+    `(?:^|\\n)[ \\t\\uFEFF]*${escapeRegExp(attribute)}[ \\t]*=[ \\t]*`,
+    "gu",
   );
-  if ([...block.code.matchAll(pattern)].length !== 1) {
-    errors.push(`${label}: must map ${key} exactly from ${value}`);
+  const outerOpeningBrace = analysis.delimiters.indexOf("{");
+  if (outerOpeningBrace === -1) return undefined;
+
+  const assignments = [
+    ...analysis.structural.matchAll(assignmentPattern),
+  ].filter((match) => {
+    const start = match.index + (match[0].startsWith("\n") ? 1 : 0);
+    let depth = 0;
+    for (let index = outerOpeningBrace; index < start; index += 1) {
+      if (analysis.delimiters[index] === "{") depth += 1;
+      if (analysis.delimiters[index] === "}") depth -= 1;
+    }
+    return depth === 1;
+  });
+  if (assignments.length !== 1) return undefined;
+
+  const assignment = assignments[0];
+  const openingBrace = assignment.index + assignment[0].length;
+  if (analysis.delimiters[openingBrace] !== "{") return undefined;
+  const end = findMatchingDelimiter(
+    analysis.delimiters,
+    openingBrace,
+    "{",
+    "}",
+  );
+  if (end === undefined) return undefined;
+
+  const lineEnd = analysis.structural.indexOf("\n", end);
+  const trailing = analysis.structural.slice(
+    end,
+    lineEnd === -1 ? analysis.structural.length : lineEnd,
+  );
+  if (trailing.trim() !== "") return undefined;
+  const following = analysis.structural.slice(end);
+  const nextTokenOffset = following.search(/\S/u);
+  if (nextTokenOffset !== -1) {
+    const nextToken = end + nextTokenOffset;
+    if (analysis.delimiters[nextToken] !== "}") {
+      const nextLineStart =
+        analysis.structural.lastIndexOf("\n", nextToken - 1) + 1;
+      const nextLine = analysis.structural.slice(nextToken);
+      if (
+        analysis.structural.slice(nextLineStart, nextToken).trim() !== "" ||
+        !/^[A-Za-z_][A-Za-z0-9_-]*(?:[ \t]+[^={\s]+)*[ \t]*(?:=|\{)/u.test(
+          nextLine,
+        )
+      ) {
+        return undefined;
+      }
+    }
+  }
+
+  const body = analysis.structural.slice(openingBrace + 1, end - 1);
+  const entryPattern =
+    /"((?:[^"\\]|\\.)*)"[ \t\r\n]*=[ \t\r\n]*"((?:[^"\\]|\\.)*)"[ \t\r\n]*,?/gu;
+  const entries = [...body.matchAll(entryPattern)];
+  const residue = body.replace(entryPattern, "").replace(/\s+/gu, "");
+  if (residue !== "") return undefined;
+
+  const mapping = Object.create(null);
+  for (const entry of entries) {
+    const key = parseHclString(`"${entry[1]}"`);
+    const value = parseHclString(`"${entry[2]}"`);
+    if (
+      key === undefined ||
+      value === undefined ||
+      Object.hasOwn(mapping, key)
+    ) {
+      return undefined;
+    }
+    mapping[key] = value;
+  }
+  return mapping;
+}
+
+export function expectExactStringMap(
+  block,
+  attribute,
+  expected,
+  errors,
+  label,
+) {
+  const actual = exactStringMapAttribute(block, attribute);
+  if (
+    !actual ||
+    Object.keys(actual).length !== Object.keys(expected).length ||
+    Object.entries(expected).some(([key, value]) => actual[key] !== value)
+  ) {
+    errors.push(`${label}: ${attribute} must be exactly the registered map`);
   }
 }
 

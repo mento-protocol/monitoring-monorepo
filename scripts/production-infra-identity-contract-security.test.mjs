@@ -197,6 +197,35 @@ assert.deepEqual(
 );
 
 expectFailure(
+  mutateCiWif(
+    `  attribute_mapping = {
+    "google.subject"          = "assertion.sub"
+    "attribute.repository"    = "assertion.repository"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
+  }`,
+    `  attribute_mapping = {
+    "google.subject"          = "\\"repo:attacker/example:ref:refs/heads/main\\""
+    "attribute.repository"    = "\\"mento-protocol/monitoring-monorepo\\""
+    "attribute.repository_id" = "\\"1172025835\\""
+    "attribute.ref"           = "\\"refs/heads/main\\""
+  }
+  lifecycle {
+    precondition {
+      condition = google_project.monitoring.project_id != "" && length({
+        "google.subject"          = "assertion.sub"
+        "attribute.repository"    = "assertion.repository"
+        "attribute.repository_id" = "assertion.repository_id"
+        "attribute.ref"           = "assertion.ref"
+      }) == 4
+      error_message = "decoy"
+    }
+  }`,
+  ),
+  "generic GitHub WIF provider: attribute_mapping must be exactly",
+);
+
+expectFailure(
   withTerraformFile(
     "terraform/extra.tf",
     `locals {

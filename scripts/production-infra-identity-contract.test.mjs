@@ -345,7 +345,7 @@ function runFixtureTests() {
         "",
         occurrence,
       ),
-      `${label}: must map attribute.repository_id exactly`,
+      `${label}: attribute_mapping must be exactly`,
     );
     expectContractFailure(
       mutateFileOccurrence(
@@ -358,9 +358,20 @@ function runFixtureTests() {
         ),
         occurrence,
       ),
-      `${label}: must map attribute.repository_id exactly`,
+      `${label}: attribute_mapping must be exactly`,
     );
   }
+  expectContractFailure(
+    mutateFileOccurrence(
+      validFiles,
+      "terraform/ci-wif.tf",
+      repositoryIdMapping,
+      `${repositoryIdMapping}
+    "__proto__"              = "assertion.actor"`,
+      0,
+    ),
+    "generic GitHub WIF provider: attribute_mapping must be exactly",
+  );
 
   expectContractFailure(
     {

@@ -12,7 +12,7 @@ import {
   commentMaskedHcl,
   escapeRegExp,
   expectExpression,
-  expectMapEntry,
+  expectExactStringMap,
   expectNoResourceMultiplicity,
   expectString,
   extractExpressionList,
@@ -247,31 +247,15 @@ export function validateProvider(
         `${conditionLabel}: attribute_condition must be the exact non-bypassable condition`,
       );
     }
-    expectMapEntry(
+    expectExactStringMap(
       provider,
-      "google.subject",
-      "assertion.sub",
-      errors,
-      conditionLabel,
-    );
-    expectMapEntry(
-      provider,
-      "attribute.repository",
-      "assertion.repository",
-      errors,
-      conditionLabel,
-    );
-    expectMapEntry(
-      provider,
-      "attribute.repository_id",
-      "assertion.repository_id",
-      errors,
-      conditionLabel,
-    );
-    expectMapEntry(
-      provider,
-      "attribute.ref",
-      "assertion.ref",
+      "attribute_mapping",
+      {
+        "google.subject": "assertion.sub",
+        "attribute.repository": "assertion.repository",
+        "attribute.repository_id": "assertion.repository_id",
+        "attribute.ref": "assertion.ref",
+      },
       errors,
       conditionLabel,
     );
