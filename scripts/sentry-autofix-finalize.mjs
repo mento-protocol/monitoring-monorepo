@@ -455,8 +455,9 @@ export function buildAutofixRunRecordBody({
 // surface is to not publish it at all. Both the fix-PR body and the no-PR
 // analysis comment are therefore assembled from DETERMINISTIC text only; the
 // authoritative artifact is the reviewed diff (for a fix PR) or the
-// deterministic guard `reason` (for a refusal). The agent's working notes stay
-// in the run logs, which are not a public artifact.
+// deterministic guard `reason` (for a refusal). The agent's response may remain
+// in externally readable Actions run logs, so the prompt requires abstract,
+// redacted responses.
 // ---------------------------------------------------------------------------
 
 /**
@@ -473,7 +474,7 @@ export function buildAnalysisComment(reason) {
       String(reason ?? "").trim(),
       "",
       "_The agent's working notes are omitted by policy (untrusted-input " +
-        "surface); see the run logs for detail._",
+        "surface)._",
     ].join("\n") + "\n"
   );
 }

@@ -3,7 +3,7 @@ title: Envio Indexer Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: agent-instructions
 scope: indexer-envio
 review_interval_days: 90
