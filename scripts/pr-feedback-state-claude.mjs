@@ -29,9 +29,9 @@ const CLEAN_ATTESTATION_SEVERITY =
 const CLEAN_ATTESTATION_NON_CLEAN_VERDICT =
   /\b(?:needs?|requires?)[- ](?:changes?|discussion)\b/i;
 const CLEAN_ATTESTATION_CLEAN_NEGATION =
-  /\b(?:no\s+(?:(?:code|test|documentation|workflow)\s+)?changes?\s+(?:are\s+)?(?:needed|required|requested)|no\s+action(?:s|\s+items?)?\s+(?:(?:is|are)\s+)?(?:needed|required|requested)|(?:the\s+)?fix\s+does\s+not\s+require\s+changes|no\s+P1\/P2\/P3\s+findings(?:\s+(?:are|were)\s+found)?)\b/gi;
+  /\b(?:no\s+(?:(?:code|test|documentation|workflow)\s+)?changes?\s+(?:are\s+)?(?:needed|required|requested)|no\s+action(?:s|\s+items?)?\s+(?:(?:is|are)\s+)?(?:needed|required|requested)|no\s+(?:further\s+)?fix(?:es)?\s+(?:(?:is|are)\s+)?(?:needed|required|requested)|(?:an?\s+|the\s+)?fix\s+(?:is\s+)?not\s+(?:needed|required|requested)|(?:the\s+)?fix\s+does\s+not\s+require\s+changes|no\s+P1\/P2\/P3\s+findings(?:\s+(?:are|were)\s+found)?)\b/gi;
 const CLEAN_ATTESTATION_ACTION_REQUEST =
-  /\b(?:changes?\s+(?:(?:is|are)\s+)?(?:needed|required|requested)|request(?:s|ed|ing)?\s+(?:an?\s+)?(?:action|change)|action\s+(?:required|requested|items?)|please\s+(?:add|address|change|ensure|fix|implement|prevent|reject|remove|restore|update|validate))\b/i;
+  /\b(?:changes?\s+(?:(?:is|are)\s+)?(?:needed|required|requested)|(?:an?\s+|the\s+)?fix(?:es)?\s+(?:(?:is|are)\s+)?(?:needed|required|requested)|request(?:s|ed|ing)?\s+(?:an?\s+)?(?:action|change)|action\s+(?:required|requested|items?)|please\s+(?:add|address|change|ensure|fix|implement|prevent|reject|remove|restore|update|validate))\b/i;
 const CLEAN_ATTESTATION_DIRECTIVE =
   /(?:^|[\r\n])\s*(?:[-*>]\s*)?(?:(?:(?:you|we)\s+)?(?:must|should|need(?:s)?\s+to)\s+)?(?:add|address|change|ensure|fix|implement|prevent|reject|remove|restore|update|validate)\b(?!\s+(?:is|are|was|were)\b)(?!\s+[A-Za-z0-9_-]+\s+(?:is|are|was|were)\b)/i;
 const CLEAN_ATTESTATION_MODAL_ACTION =
@@ -40,8 +40,7 @@ const CLEAN_ATTESTATION_CONTRAST_ACTION =
   /\b(?:but|however|although|yet)\b[^\r\n.!?]*\b(?:please\s+)?(?:add|address|change|ensure|fix|implement|prevent|reject|remove|restore|update|validate)\b/i;
 const CLEAN_ATTESTATION_INLINE_FINDING =
   /(?:\b(?:filed|left|posted|created|added|reported)\s+(?:an?\s+|\d+\s+)?inline\s+(?:comments?|findings?)\b|\binline\s+(?:comments?|findings?)\s*:\s*(?!0\b|none\b|no\b)|\b(?:an?|\d+)\s+inline\s+(?:comments?|findings?)\s+(?:(?:was|were)\s+)?(?:exists?|remains?|filed|left|posted|created|added|reported)\b|\bthere\s+(?:is|are)\s+(?:an?|\d+)\s+inline\s+(?:comments?|findings?)\b|\binline\s+(?:comments?|findings?)\s+(?:(?:is|are)\s+)?(?:remain(?:s)?\s+)?(?:open|unresolved|outstanding|actionable)\b)/i;
-const CLEAN_ATTESTATION_SECONDARY_VERDICT =
-  /(?:^|[\r\n])\s*(?:[-*>]\s*)?Verdict\s*:/i;
+const CLEAN_ATTESTATION_SECONDARY_VERDICT = /^(?:Overall\s+)?Verdict\s*:/i;
 const CLEAN_ATTESTATION_BUGBOT_MARKER = /\bBUGBOT_BUG_ID\b/;
 const OVERALL_CLEAN_REVIEW_COMPATIBILITY = new Map([
   [
@@ -371,7 +370,119 @@ function lineIsInsideMarkdownQuote(lines, lineIndex) {
   return false;
 }
 
+function activeMarkdownHtmlTags(lines, lineIndex) {
+  const codeSpans = markdownCodeSpans(lines);
+  const tags = [];
+  let codeIndex = 0;
+  let insideComment = false;
+  let fence = null;
+  let offset = 0;
+
+  for (let index = 0; index < lineIndex; index += 1) {
+    const line = lines[index];
+    const lineEnd = offset + line.length;
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (!insideComment && fenceMatch) {
+      const marker = fenceMatch[1];
+      if (fence === null) {
+        fence = { character: marker[0], length: marker.length };
+      } else if (
+        marker[0] === fence.character &&
+        marker.length >= fence.length &&
+        fenceMatch[2].trim() === ""
+      ) {
+        fence = null;
+      }
+      offset = lineEnd + 1;
+      continue;
+    }
+    if (fence !== null) {
+      offset = lineEnd + 1;
+      continue;
+    }
+
+    let cursor = 0;
+    while (cursor < line.length) {
+      if (insideComment) {
+        const close = line.indexOf("-->", cursor);
+        if (close < 0) break;
+        insideComment = false;
+        cursor = close + 3;
+        continue;
+      }
+
+      while (
+        codeIndex < codeSpans.length &&
+        codeSpans[codeIndex].closeEnd <= offset + cursor
+      )
+        codeIndex += 1;
+      const code = codeSpans[codeIndex];
+      if (
+        code &&
+        code.openStart <= offset + cursor &&
+        code.closeEnd > offset + cursor
+      ) {
+        cursor = Math.min(line.length, code.closeEnd - offset);
+        continue;
+      }
+
+      const token = line
+        .slice(cursor)
+        .match(/<!--|<\/?(?:details|summary)\b[^>]*>/i);
+      if (!token) break;
+      const tokenStart = cursor + (token.index ?? 0);
+      if (code && code.openStart < offset + tokenStart) {
+        cursor = Math.min(line.length, code.closeEnd - offset);
+        continue;
+      }
+      if (token[0] === "<!--") {
+        insideComment = true;
+      } else {
+        tags.push({
+          end: offset + tokenStart + token[0].length,
+          raw: token[0],
+          start: offset + tokenStart,
+        });
+      }
+      cursor = tokenStart + token[0].length;
+    }
+    offset = lineEnd + 1;
+  }
+  return tags;
+}
+
 function lineIsInsideExampleContext(lines, lineIndex) {
+  const openDetails = [];
+  const detailsPrefix = lines.slice(0, lineIndex).join("\n");
+  let openSummary = null;
+  for (const tag of activeMarkdownHtmlTags(lines, lineIndex)) {
+    if (/^<details\b/i.test(tag.raw)) {
+      openDetails.push({ isExample: false });
+    } else if (/^<\/details\b/i.test(tag.raw)) {
+      const closedDetails = openDetails.pop();
+      if (openSummary?.details === closedDetails) openSummary = null;
+    } else if (/^<summary\b/i.test(tag.raw) && openDetails.length > 0) {
+      openSummary = {
+        contentStart: tag.end,
+        details: openDetails.at(-1),
+      };
+    } else if (/^<\/summary\b/i.test(tag.raw) && openSummary !== null) {
+      if (
+        /\bexample\b/i.test(
+          detailsPrefix.slice(openSummary.contentStart, tag.start),
+        )
+      )
+        openSummary.details.isExample = true;
+      openSummary = null;
+    }
+  }
+  if (
+    openSummary !== null &&
+    /\bexample\b/i.test(detailsPrefix.slice(openSummary.contentStart))
+  )
+    openSummary.details.isExample = true;
+  if (openDetails.some((details) => details.isExample)) return true;
+
   for (let index = lineIndex - 1; index >= 0; index -= 1) {
     const line = lines[index].trim();
     if (!line) continue;
@@ -381,6 +492,23 @@ function lineIsInsideExampleContext(lines, lineIndex) {
     if (/^(?:for\s+)?example\b[^.!?]*:\s*$/i.test(line)) return true;
   }
   return false;
+}
+
+function hasSecondaryAttestationVerdict(value) {
+  return String(value ?? "")
+    .split(/\r?\n/)
+    .some((valueLine) => {
+      let line = valueLine;
+      for (let prefixCount = 0; prefixCount < 3; prefixCount += 1) {
+        const withoutPrefix = line.replace(
+          /^ {0,3}(?:>\s?|(?:#{1,6}|[-+*]|\d{1,9}[.)])(?:[ \t]+|$))/,
+          "",
+        );
+        if (withoutPrefix === line) break;
+        line = withoutPrefix;
+      }
+      return CLEAN_ATTESTATION_SECONDARY_VERDICT.test(line.trimStart());
+    });
 }
 
 function normalizeAttestationSignals(value) {
@@ -444,7 +572,10 @@ function isExplicitlyCleanClaudeReviewAttestation(comment, pr) {
   )
     return false;
 
-  const attestedReview = lines.slice(0, markerIndex).join("\n");
+  const attestedReview = lines
+    .slice(0, markerIndex)
+    .filter((_, index) => index !== verdictIndex)
+    .join("\n");
   const contradictionReview = normalizeAttestationSignals(attestedReview)
     .replace(CLEAN_ATTESTATION_CLEAN_NEGATION, "\n")
     .replace(/(?:^|[\r\n])\s*[,;:.!?]\s*/g, "\n");
@@ -457,7 +588,7 @@ function isExplicitlyCleanClaudeReviewAttestation(comment, pr) {
     CLEAN_ATTESTATION_MODAL_ACTION.test(contradictionReview) ||
     CLEAN_ATTESTATION_CONTRAST_ACTION.test(contradictionReview) ||
     CLEAN_ATTESTATION_INLINE_FINDING.test(contradictionReview) ||
-    CLEAN_ATTESTATION_SECONDARY_VERDICT.test(contradictionReview) ||
+    hasSecondaryAttestationVerdict(contradictionReview) ||
     CLEAN_ATTESTATION_BUGBOT_MARKER.test(contradictionReview)
   );
 }

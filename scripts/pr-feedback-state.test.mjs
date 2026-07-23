@@ -1288,6 +1288,9 @@ test("accepts benign adversarial prose in Claude v1 clean attestations", () => {
     ["completed fix", "Fix is correct and covered."],
     ["completed update", "Update handling is correct."],
     ["negated change request", "The fix does not require changes."],
+    ["negated required fix", "No fix is required."],
+    ["negated needed fixes", "No fixes are needed."],
+    ["explicitly unneeded fix", "A fix is not needed."],
     ["negated priorities", "No P1/P2/P3 findings were found."],
     [
       "error path",
@@ -1474,6 +1477,18 @@ test("fails closed on malformed or contradictory Claude v1 attestations", () => 
       { body: insertBeforeRollup("Action required: fix the parser.") },
     ],
     [
+      "fix required",
+      { body: insertBeforeRollup("A fix is required before merge.") },
+    ],
+    [
+      "fix needed",
+      { body: insertBeforeRollup("The fix is needed before merge.") },
+    ],
+    [
+      "plural fixes needed",
+      { body: insertBeforeRollup("Fixes are needed before merge.") },
+    ],
+    [
       "direct request",
       { body: insertBeforeRollup("Please fix the parser before merge.") },
     ],
@@ -1536,6 +1551,22 @@ test("fails closed on malformed or contradictory Claude v1 attestations", () => 
     [
       "secondary legacy clean verdict",
       { body: insertBeforeRollup("**Verdict: LGTM**") },
+    ],
+    [
+      "heading-wrapped secondary verdict",
+      { body: insertBeforeRollup("### Verdict: REJECT") },
+    ],
+    [
+      "bullet-wrapped secondary overall verdict",
+      { body: insertBeforeRollup("- Overall verdict: REJECT") },
+    ],
+    [
+      "quoted emphasized secondary verdict",
+      { body: insertBeforeRollup("> **Verdict: NEEDS CHANGES**") },
+    ],
+    [
+      "ordered secondary overall verdict",
+      { body: insertBeforeRollup("1. Overall verdict: REJECT") },
     ],
     [
       "Bugbot finding marker",
@@ -1693,6 +1724,51 @@ test("requires the Claude v1 verdict and ending outside inert Markdown contexts"
       },
     ],
     [
+      "details-example verdict below a child heading",
+      {
+        body: clean.replace(
+          verdict,
+          `<details open>\n<summary>Clean review example</summary>\n\n### Output\n\n${verdict}\n\n</details>`,
+        ),
+      },
+    ],
+    [
+      "nested details-example verdict below a child heading",
+      {
+        body: clean.replace(
+          verdict,
+          `<details>\n<summary><strong>Example output</strong></summary>\n\n### Output\n\n<details>\n<summary>Result</summary>\n\n${verdict}\n\n</details>\n</details>`,
+        ),
+      },
+    ],
+    [
+      "details-example verdict after inline-code closing-tag decoy",
+      {
+        body: clean.replace(
+          verdict,
+          `<details>\n<summary>Clean review example</summary>\n\n\`</details>\`\n\n### Output\n\n${verdict}\n\n</details>`,
+        ),
+      },
+    ],
+    [
+      "details-example verdict after fenced closing-tag decoy",
+      {
+        body: clean.replace(
+          verdict,
+          `<details>\n<summary>Clean review example</summary>\n\n\`\`\`html\n</details>\n\`\`\`\n\n### Output\n\n${verdict}\n\n</details>`,
+        ),
+      },
+    ],
+    [
+      "details-example verdict after HTML-comment closing-tag decoy",
+      {
+        body: clean.replace(
+          verdict,
+          `<details>\n<summary>Clean review example</summary>\n\n<!--\n</details>\n-->\n\n### Output\n\n${verdict}\n\n</details>`,
+        ),
+      },
+    ],
+    [
       "HTML-commented terminal suffix",
       {
         body: clean.replace("### Roll-up", "<!--\n### Roll-up"),
@@ -1784,6 +1860,32 @@ test("does not pair Claude v1 code-span delimiters across block boundaries", () 
     assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
     assertEqual(feedbackState.counts.blockingFindings, 0);
   }
+});
+
+test("ends Claude v1 example-details scope at a legitimate closing tag", () => {
+  const verdict = "**Overall verdict: LGTM**";
+  const body = cleanClaudeReviewAttestation().replace(
+    verdict,
+    `<details>\n<summary>Clean review example</summary>\n\n### Output\n\nExample only.\n\n</details>\n\n${verdict}`,
+  );
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    cleanAttestationComment({
+      id: 5061000190,
+      body,
+    }),
+    {
+      number: CLEAN_ATTESTATION_PR,
+      title: "fix(tooling): accept bounded Claude clean attestations",
+      headRefOid: CLEAN_ATTESTATION_HEAD,
+      headUpdatedAt: "2026-07-23T18:00:00Z",
+      reactionCreatedAt: "2026-07-23T18:06:00Z",
+    },
+  );
+  const feedbackState = summarizeFeedbackState(normalizedReadyState);
+  assertEqual(normalizedReadyState.required.ready, true);
+  assertEqual(feedbackState.ready, true);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  assertEqual(feedbackState.counts.blockingFindings, 0);
 });
 
 test("keeps Claude v1 attestation head freshness independent", () => {
