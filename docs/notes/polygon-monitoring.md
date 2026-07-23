@@ -3,7 +3,7 @@ title: Polygon monitoring coverage and rollout
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -152,6 +152,14 @@ must not guess them. Stuck bridge-transfer paging is tracked in #1362.
 
 ## Rollout order and proof
 
+The initial production cutover passed its data-producer boundary on 2026-07-23:
+Envio production deployment `b5d14b7` served all three Polygon pools and four
+active strategy rows at the static endpoint, metrics-bridge exposed exactly
+three `mento_pool_health_status{chain_id="137"}` series, and Aegis recorded
+successful Polygon view calls. Polygon is therefore live in the production
+indexer and producer telemetry. Dashboard and alert-state verification remain
+separate checks in steps 7-8.
+
 The code being merged is configuration, not proof that production has already
 cut over. The `Polygon Pool Coverage Incomplete` rule intentionally treats no
 data as alerting after 10 minutes, and the per-chain Aegis liveness rule does
@@ -193,8 +201,9 @@ Roll out in this order:
    exercise alert delivery only through the repository's documented safe test
    path.
 
-Until the static endpoint and producer checks in steps 4-5 pass, `Configured`
-is the correct status; do not describe Polygon as live.
+For every future cutover or rollback, use `Configured` until the static endpoint
+and producer checks in steps 4-5 pass. Do not infer liveness from configuration
+or sync alone.
 
 ### Rollback order
 

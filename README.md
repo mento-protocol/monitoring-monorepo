@@ -36,7 +36,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
                                           Grafana Alloy / Cloud
 ```
 
-`config.multichain.mainnet.yaml` configures a single Envio project (`mento`) for Celo Mainnet (42220), Monad Mainnet (143), Polygon Mainnet (137), and Ethereum reserve-yield events (1). Polygon becomes live at the static endpoint after the normal indexer deploy, sync verification, and promotion workflow. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing is event-only; the historical sUSDS onBlock heartbeat is not registered in the hosted indexer.
+`config.multichain.mainnet.yaml` configures a single Envio project (`mento`) for Celo Mainnet (42220), Monad Mainnet (143), Polygon Mainnet (137), and Ethereum reserve-yield events (1). Polygon is live at the static production endpoint after completing the normal deploy, sync verification, promotion, and producer checks. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing is event-only; the historical sUSDS onBlock heartbeat is not registered in the hosted indexer.
 
 `metrics-bridge` retains its indexed Hasura poller and owns an isolated peg
 lifecycle. When the protected policy artifact is configured, that loop combines
@@ -51,7 +51,7 @@ conversion views before exporting bounded Prometheus gauges.
 | ------------- | -------- | --------------------------------------------------------------------- |
 | Celo Mainnet  | 42220    | Live in the production multichain indexer                             |
 | Monad Mainnet | 143      | Live in the production multichain indexer                             |
-| Polygon       | 137      | Configured in the production multichain indexer                       |
+| Polygon       | 137      | Live in the production multichain indexer                             |
 | Ethereum      | 1        | Live in the production multichain indexer — reserve-yield events only |
 | Celo Sepolia  | 11142220 | Hosted dashboard support is opt-in via testnet env vars               |
 | Monad Testnet | 10143    | Hosted dashboard support is opt-in via testnet env vars               |
