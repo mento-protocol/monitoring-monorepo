@@ -166,6 +166,8 @@ commit:
 
 **Vercel's native Git integration watches `main`** — every push that changes dashboard-affecting files triggers an automatic production deploy. Pushes that only touch unrelated directories (e.g. `terraform/`, `indexer-envio/`) are skipped by `ui-dashboard/scripts/vercel-ignore-build.sh`. PR preview deployments diff each push incrementally against that branch's previous preview deployment (falling back to the merge base with `origin/main` on a branch's first push). So a docs-only PR skips, and once a branch's dashboard change has been previewed, later non-dashboard commits on the same branch skip too instead of rebuilding the whole branch on every push.
 
+**Autofix branches never deploy.** `ui-dashboard/vercel.json` sets `git.deploymentEnabled` to deny `sentry-autofix/*`, so Vercel never _creates_ a deployment for a machine-authored autofix branch (ADR 0036 Phase 2b, issue #1452). This is a trust boundary, not an optimization: the skip script decides skip-vs-build for _eligible_ branches, but running an untrusted autofix diff through a preview build would expose it to the dashboard's production-linked secrets before human review. The denial is strictly earlier — the build never starts. See [ADR 0019](adr/0019-vercel-path-aware-deploys.md).
+
 The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](https://monitoring.mento.org).
 
 ### Infrastructure (Terraform)
