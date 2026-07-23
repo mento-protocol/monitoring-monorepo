@@ -759,5 +759,35 @@ await test("guard resists filename-credential obfuscation and avoids false posit
   assert(!red.includes(`${G}a1b2`), "padded token masked in a redacted reason");
 });
 
+await test("guard resists sk-ant-/xox- obfuscation and cross-segment false positives (#1551 review)", () => {
+  // Review findings: the sk-ant-/xox- prefixes carry a literal '-' the collapse
+  // used to strip, so a substituted internal dash (sk.ant-…) evaded them (P2);
+  // and stripping '/' across the whole path must not let two segments spell a
+  // prefix (P3). Fixtures concatenated so no contiguous credential literal here.
+  const T = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8";
+  const SK = "sk" + "-" + "ant" + "-";
+  for (const p of [
+    "sk.ant-AAAAAAAAAAAA.ts", // dot substituted for the first required dash
+    "xox.b-AAAAAAAAAAAA.ts",
+    `config/${SK}api03-${T}.ts`, // real Anthropic key shape (dashes in the body)
+    `x/${"xox" + "b-"}${T}.ts`,
+  ]) {
+    assert(
+      filesWithCredentialShapedName([p]).length === 1,
+      `obfuscated Anthropic/Slack filename must be refused: ${p}`,
+    );
+  }
+  for (const p of [
+    "src/gh/s_util.ts", // two segments join to 'ghs_util' — short body, not a token
+    "src/risk-antenna.ts", // 'sk'+'ant' with a short body
+    "src/task-antler.ts",
+  ]) {
+    assert(
+      filesWithCredentialShapedName([p]).length === 0,
+      `legit path must not false-positive: ${p}`,
+    );
+  }
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exitCode = 1;

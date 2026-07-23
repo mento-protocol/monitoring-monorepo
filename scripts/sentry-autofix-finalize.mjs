@@ -228,20 +228,29 @@ const DIFF_CREDENTIAL_PATTERNS = [
 ];
 
 // For FILENAMES the agent controls the exact bytes, so unlike the CONTENT scan
-// (DIFF_CREDENTIAL_PATTERNS keeps \b + a length floor to avoid false positives on
-// code hashes) the filename match must survive obfuscation: padding before the
-// prefix (`xghs_…` kills a leading \b) and splitting the body with a separator to
-// beat a length floor (`ghs_a1b2/c3d4…`). So it uses NO \b and only a MINIMAL
-// body — the distinctive `_`/`-`-bearing prefix is the low-false-positive signal
-// — and every path is ALSO tested with `/`, `.`, `-`, and whitespace removed so a
-// prefix split across those rejoins. A real source filename is never named after
-// a token, so refusing on the bare prefix is safe and fail-closed. (#1551)
-const FILENAME_CREDENTIAL_PREFIXES = [
-  /(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]/,
-  /github_pat_[A-Za-z0-9]/,
-  /sk-ant-[A-Za-z0-9]/,
-  /xox[a-z]-[A-Za-z0-9]/,
-  /AKIA[A-Z0-9]{4}/,
+// (DIFF_CREDENTIAL_PATTERNS keeps \b to avoid false positives on code hashes) the
+// filename match must survive obfuscation: padding before the prefix (`xghs_…`
+// kills a leading \b) and splitting the prefix/body with a separator (`ghs_a1b2/
+// c3d4…`, `g/hs_…`). Two families, matched differently (#1551):
+//
+//  • GitHub/AWS prefixes carry NO literal separator, so they are matched on a
+//    SEPARATOR-COLLAPSED form of the path (`/`·`.`·`-`·whitespace removed, `_`
+//    kept) with the content scan's {16,}/{16} body floor. The collapse rejoins an
+//    attacker's split; the floor still holds because a split token rejoins to full
+//    length — and it simultaneously kills the cross-segment false positive (two
+//    unrelated path segments joining to spell a prefix leave only a short body).
+//  • The Anthropic/Slack prefixes carry literal `-`, which the collapse would
+//    strip along with an attacker separator, so they are matched SEPARATOR-
+//    TOLERANT on the raw path: the internal dashes may be any separator or absent
+//    (`sk.ant-…` still trips), with the content scan's body floor.
+const FILENAME_CREDENTIAL_COLLAPSED = [
+  /(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{16,}/,
+  /github_pat_[A-Za-z0-9]{16,}/,
+  /AKIA[A-Z0-9]{16}/,
+];
+const FILENAME_CREDENTIAL_SEPARATOR_TOLERANT = [
+  /sk[-._/\s]*ant[-._/\s]*[A-Za-z0-9-]{8,}/i,
+  /xox[-._/\s]*[a-z][-._/\s]*[A-Za-z0-9-]{8,}/i,
 ];
 
 // Full-token patterns (no \b, global) for MASKING a credential wherever it
@@ -310,9 +319,13 @@ export function filesWithCredentialShapedContent(workRoot, files) {
 export function filesWithCredentialShapedName(files) {
   return (Array.isArray(files) ? files : []).filter((f) => {
     const p = String(f ?? "");
+    // Collapse for the separator-less prefixes: rejoin a split prefix/body while
+    // keeping `_` (which those prefixes require). The {16,} floor on this form
+    // both catches the rejoined token and avoids a cross-segment false positive.
     const collapsed = p.replace(/[/.\s-]/g, "");
-    return FILENAME_CREDENTIAL_PREFIXES.some(
-      (re) => re.test(p) || re.test(collapsed),
+    return (
+      FILENAME_CREDENTIAL_COLLAPSED.some((re) => re.test(collapsed)) ||
+      FILENAME_CREDENTIAL_SEPARATOR_TOLERANT.some((re) => re.test(p))
     );
   });
 }
