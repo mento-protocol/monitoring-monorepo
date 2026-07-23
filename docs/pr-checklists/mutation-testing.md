@@ -3,7 +3,7 @@ title: Mutation Testing Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -26,7 +26,7 @@ one of the current mutation targets.
 - Classify every survivor as a real test gap, equivalent mutant/noise, or tool
   limitation. Add tests only for real gaps.
 - **Mutation runs weekly + on-demand, not per-PR.** Each `stryker.config.mjs`
-  sets a `break` floor at "rounded baseline score − 2" for measurement
+  sets a `break` floor at "floor(measured mutation score) − 2" for measurement
   noise; a run whose score drops below the floor fails the job.
   `.github/workflows/mutation-testing.yml` currently triggers on the
   weekly `schedule` cron and `workflow_dispatch` only — it is **not** in the
@@ -35,15 +35,20 @@ one of the current mutation targets.
   Mutation testing measures test-suite strength, not per-commit regression,
   so a weekly cadence is the right altitude. To get a mutation signal for a
   specific branch before merge, trigger the workflow on demand via the
-  GitHub "Run workflow" button (or `gh workflow run "Mutation Testing"
---ref <branch>`). Each per-package job keeps its internal `filter`/`decide`
+  GitHub "Run workflow" button (or
+  `gh workflow run "Mutation Testing" --ref <branch>`). Each per-package job
+  keeps its internal `filter`/`decide`
   steps; on a non-`pull_request` trigger the gate always runs.
 
-  | Package          | Config                              | `break` | Baseline | Job                               |
-  | ---------------- | ----------------------------------- | ------: | -------: | --------------------------------- |
-  | `metrics-bridge` | `metrics-bridge/stryker.config.mjs` |      84 |   86.01% | `bridge-rebalance-probe-baseline` |
-  | `ui-dashboard`   | `ui-dashboard/stryker.config.mjs`   |      86 |   88.81% | `dashboard-logic-baseline`        |
-  | `indexer-envio`  | `indexer-envio/stryker.config.mjs`  |      92 |   94.19% | `indexer-logic-baseline`          |
+  | Package          | Config                              | `break` | Job                               |
+  | ---------------- | ----------------------------------- | ------: | --------------------------------- |
+  | `metrics-bridge` | `metrics-bridge/stryker.config.mjs` |      84 | `bridge-rebalance-probe-baseline` |
+  | `ui-dashboard`   | `ui-dashboard/stryker.config.mjs`   |      86 | `dashboard-logic-baseline`        |
+  | `indexer-envio`  | `indexer-envio/stryker.config.mjs`  |      92 | `indexer-logic-baseline`          |
+
+  Measured scores, runtimes, and survivor classifications belong in
+  [`docs/mutation-testing.md`](../mutation-testing.md), not this workflow
+  checklist.
 
   When a mutation step runs and the score drops below the package's
   `break` floor, the job fails. If your PR fails the gate, treat any new

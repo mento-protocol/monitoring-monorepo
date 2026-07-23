@@ -3,7 +3,7 @@ title: Architecture Decision Records — when and how
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -43,7 +43,8 @@ These changes almost always encode a decision. `pnpm adr:check` (and the agent
 quality gate) flags them when no ADR accompanies the diff:
 
 - **A new package/service** — a new top-level directory with its own
-  `AGENTS.md` / `package.json`.
+  `AGENTS.md` / `package.json`, or a new workspace package registered in
+  `pnpm-workspace.yaml`.
 - **A new Terraform stack** — a new entry in `terraform.stacks.json`.
 - **A new CI/deploy workflow** — a new file under `.github/workflows/` (a new
   required check, deploy path, or gate).
@@ -55,17 +56,18 @@ supply-chain control, or context rule).
 
 ## How to write one
 
-1. Copy the shape of a recent ADR (e.g. `docs/adr/0001-*.md`). Sections:
-   **Status · Context · Decision · Alternatives considered · Consequences ·
-   Evidence.**
+1. Copy the latest applicable active ADR linked from
+   [`docs/adr/README.md`](../adr/README.md). Sections: **Status · Context ·
+   Decision · Alternatives considered · Consequences · Evidence.**
 2. Number it with the next free `NNNN` and a kebab-case title:
    `docs/adr/NNNN-short-title.md`.
 3. Frontmatter follows the repo metadata contract (enforced by
    `pnpm agent:context-check`): `status: active` for an in-force decision
    (`archived` for a superseded one), `canonical: true`, `owner: eng`,
-   `last_verified: <today>`, plus `scope:` and `date:`. **Do not** use
-   `status: accepted` — that is not a valid contract status; put "Accepted" in
-   the body's Status line instead.
+   `last_verified: <today>`, `scope:`, `date:`, `doc_type: adr`,
+   `review_interval_days: 90`, and `garden_lane: adrs-architecture`. **Do not**
+   use `status: accepted` — that is not a valid contract status; put "Accepted"
+   in the body's Status line instead.
 4. Cite real evidence: the PR number(s) / commit(s) and the canonical file(s)
    that now enforce the decision.
 5. Add a row to the matching scope group in
@@ -83,5 +85,6 @@ the new decision, then flip the old one to `status: archived` with a
 
 If the gate flags a trigger surface but the change is not a decision (e.g. a new
 workflow that only reformats logs, a stack-file reorder), that is fine — say so
-on the PR's **"Architecture decision?"** line with a one-line reason. A
-won't-record with a reason is complete; a silent skip is not.
+on the [PR template's](../../.github/PULL_REQUEST_TEMPLATE.md)
+**"Architecture decision?"** line with a one-line reason. A won't-record with a
+reason is complete; a silent skip is not.

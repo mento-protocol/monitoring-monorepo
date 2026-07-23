@@ -3,7 +3,7 @@ title: Indexer Handler Invariants
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 doc_type: checklist
 scope: indexer-envio
 review_interval_days: 90
