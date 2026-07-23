@@ -72,12 +72,11 @@ apply behavior on `main`, gated by the `production-infra` GitHub Environment.
 Their plan jobs can run for workflow/notifier edits too, but the apply jobs only
 become eligible when stack-owned deployment inputs changed or a maintainer used
 `workflow_dispatch`. The platform stack remains manual-plan/manual-apply only.
-`terraform-drift.yml` also runs a daily plan-only check for all four CI-applied
-stacks. It never applies changes. During the identity bootstrap, its
-Google-provider legs still authenticate through the legacy write-capable
-deployer. A separate cutover-routing PR moves trusted-main plans and every
-scheduled-drift leg to the refresh chain while retaining the legacy
-write-capable path for rollback until live proof and drain checks complete.
+`terraform-drift.yml` runs a daily plan-only check for all four stacks. During
+the identity bootstrap, its Google-provider legs still use the legacy
+write-capable deployer. A separate routing PR moves trusted-main plans and
+scheduled drift to the refresh chain, retaining the legacy path for rollback
+until live proof and drain checks pass.
 
 Secret-bearing workflows use validation-safe placeholder `TF_VAR_*` values or
 guarded targets for eligible same-repo human PR plans. Fork, Dependabot, and
@@ -104,67 +103,53 @@ notification boundaries live in
 
 ## Terraform CI identities
 
-[ADR 0047](adr/0047-separated-terraform-ci-identities.md) separates four
-authentication lanes. The identity-bootstrap PR creates the replacement
-chains and switches production applies after its approved platform apply. A
-separate cutover-routing PR switches trusted-main refresh/drift while retaining
-the legacy routine-deployer impersonation grant. A final removal PR deletes
-that grant only after live proof, queue drain, and IAM audit.
+[ADR 0047](adr/0047-separated-terraform-ci-identities.md) defines four
+authentication lanes. The bootstrap creates replacement chains and routes
+production applies to selectors populated by its approved platform apply. A
+routing PR later switches trusted-main refresh and drift; a final PR removes
+the legacy impersonation grant after live proof, queue drain, and IAM audit.
 
 - Routine service workflows retain the general repository WIF provider and
-  `metrics-bridge-deployer`. After the final removal apply, that identity has
-  only its direct monitoring-project service-deploy roles and cannot
-  impersonate `org-terraform`.
+  `metrics-bridge-deployer`. After final removal, it retains only direct
+  monitoring-project deploy roles and cannot impersonate `org-terraform`.
 - Same-repo PR plans retain `metrics-bridge-plan-readonly` →
-  `org-terraform-plan-readonly`. It can read unlocked Terraform state but has
-  no live-project roles.
-- The cutover-routing PR routes trusted-`main` plans and scheduled drift through
+  `org-terraform-plan-readonly`, which reads unlocked state but has no
+  live-project roles.
+- The routing PR sends trusted-`main` plans and drift through
   `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT` →
-  `org-terraform-refresh-readonly`. It can read unlocked state, project
-  and service metadata, IAM policies, only the Terraform-managed secret
-  payloads, and only the Cloud Function deployment-source objects required for
-  a faithful refresh. It has no write roles and is not reachable from PR refs.
-  The identity-bootstrap workflows must not read this selector before that
-  routing change lands.
-- Apply jobs use
-  `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
-  `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. The provider lives in a
-  dedicated pool and accepts only the exact repository, `refs/heads/main`, and
-  `production-infra` environment subject. Its seed-project applier can
-  impersonate `org-terraform`.
+  `org-terraform-refresh-readonly`. It reads unlocked state, required project
+  and service metadata, IAM policies, managed secret payloads, and required
+  function-source objects, but has no write roles and is unreachable from PR
+  refs. Bootstrap workflows must not use this selector.
+- Apply jobs use `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
+  `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. Its dedicated pool accepts only
+  the exact repository, `refs/heads/main`, and `production-infra` environment
+  subject; its seed-project applier can impersonate `org-terraform`.
 
-The trusted-main read bundle is intentionally explicit. Alerts-delivery and
-governance-watchdog grant a curated non-basic project read-role set for the
-services each stack refreshes. Its guaranteed core is
-`roles/browser`, `roles/iam.securityReviewer`, and
-`roles/storage.bucketViewer`; the owning Terraform root enumerates any
-additional service-specific read roles. Never substitute basic `roles/viewer`:
-on uniform-bucket-level-access buckets its `projectViewer` convenience-group
-membership also grants legacy object reads.
+Alerts-delivery and governance-watchdog grant only curated non-basic project
+read roles for services they refresh. The core is `roles/browser`,
+`roles/iam.securityReviewer`, and `roles/storage.bucketViewer`; each owning root
+lists additional service readers. Never use basic `roles/viewer`: on
+uniform-bucket-level-access buckets, its `projectViewer` convenience group also
+grants legacy object reads.
 
-GCS object and Secret Manager payload access is separately scoped.
-Alerts-delivery and governance-watchdog grant
-`roles/secretmanager.secretAccessor` only on their Terraform-managed secrets
-and `roles/storage.objectViewer` only on their function deployment-source
-buckets. Replay, rotation-state, and log bucket objects remain outside the
-refresh identity. Service-specific predefined readers can still expose
-project-wide Cloud Logging entries, Monitoring time series, and Artifact
-Registry contents. These reads expose IAM policy, service data, managed secret
-payloads, and deployment source to trusted-main CI; that confidentiality cost
-is accepted so drift refresh remains accurate without mutation authority.
+Payload access stays separately scoped:
+`roles/secretmanager.secretAccessor` covers only Terraform-managed secrets, and
+`roles/storage.objectViewer` only function deployment-source buckets. Replay,
+rotation-state, and log bucket objects remain excluded. Service readers can
+still expose project-wide logs, metrics, and Artifact Registry contents. This
+accepted confidentiality cost lets trusted-main CI refresh accurately without
+mutation authority.
 
 Read-only plans pass `-lock=false`: state-bucket
 `roles/storage.objectViewer` cannot create or delete the GCS lock object.
 
-Terraform validation does not prove that this curated set can refresh the live
-resource graph. After the cutover-routing PR lands, use its checked-in
-trusted-main route to complete a live full-refresh, unlocked plan
-(`-lock=false`, without `-refresh=false`) for every CI-managed Google-provider
-stack. The current registry set is `alerts-delivery` and
-`governance-watchdog`. Add permissions only in response to a concrete provider
-denial; do not recover by granting a basic role. Inspect the resulting IAM
-policies to confirm that object-payload access remains limited to the state and
-deployment-source buckets and the explicitly managed secrets.
+Validation cannot prove live refresh. After routing lands, use its checked-in
+trusted-main path for a live full-refresh, unlocked plan (`-lock=false`, without
+`-refresh=false`) of every CI-managed Google-provider stack: currently
+`alerts-delivery` and `governance-watchdog`. Add only the permission named by a
+provider denial, never a basic role. Confirm that object-payload access remains
+limited to state and deployment-source buckets and managed secrets.
 
 ## Identity bootstrap, routing cutover, and authority removal
 
@@ -172,39 +157,30 @@ Use this order for the identity bootstrap, routing cutover, and final authority
 removal:
 
 1. Merge the PR, then cancel every infrastructure apply queued by that merge.
-   Do not approve or reuse those runs because their repository variable
-   context may predate the platform bootstrap.
-2. From a clean current `main`, run `pnpm infra:plan`. Review it, obtain
-   explicit approval, and run the local platform apply. This creates the
-   dedicated production pool/provider, seed-project applier, trusted-main
-   refresh chain, state access, and the three repository variables listed
-   below.
-3. Re-run the alerts-delivery and governance-watchdog `main` workflows. Review
-   and approve their live-read-grant applies.
-4. Verify the new production apply authentication path and final bootstrap
-   grants. Keep the old routine deployer's Token Creator binding as a temporary
-   rollback path.
-5. Land a separate cutover-routing PR that routes trusted-main plans and
-   scheduled drift through `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. This
-   PR must retain the old Token Creator rollback grant.
-6. Through that checked-in `main` route, run the live full-refresh, unlocked
-   proof described above for every CI-managed Google-provider stack. Cancel
-   superseded queued runs, drain every pre-routing and proof run to a terminal
-   state, and audit the refresh grants and both remaining apply paths.
-7. Only after step 6 succeeds, land a final removal PR that deletes the routine
-   deployer's `org-terraform` Token Creator grant from the platform
-   configuration. Cancel superseded runs and confirm that every infrastructure
-   run has reached a terminal state. From clean current `main`, run and review
-   `pnpm infra:plan`, obtain explicit approval, and apply the platform stack
-   locally. Audit the final WIF and service-account IAM bindings after the
-   apply.
+   Do not approve or reuse runs whose variable context may predate bootstrap.
+2. From clean current `main`, review `pnpm infra:plan`, obtain explicit
+   approval, and apply locally. This creates the dedicated production
+   pool/provider, seed-project applier, refresh chain, state access, and three
+   repository variables below.
+3. Re-run alerts-delivery and governance-watchdog on `main`; review and approve
+   their live-read-grant applies.
+4. Verify the new apply-auth path and bootstrap grants. Keep the routine
+   deployer's Token Creator binding temporarily for rollback.
+5. Land a separate routing PR for trusted-main plans and scheduled drift using
+   `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`; retain the rollback grant.
+6. Run the live unlocked proof above through that checked-in `main` route for
+   every CI-managed Google-provider stack. Cancel superseded runs, drain all
+   pre-routing and proof runs, and audit refresh grants and both apply paths.
+7. After step 6 succeeds, land a final PR deleting the routine deployer's
+   `org-terraform` Token Creator grant. Cancel superseded runs and drain all
+   infrastructure runs. From clean current `main`, review `pnpm infra:plan`,
+   obtain explicit approval, and apply locally. Audit final WIF and
+   service-account IAM bindings.
 
-Do not create a peg-policy GCP project or bucket before step 7 has been applied,
-all queued and active infrastructure runs have drained, and the final IAM audit
-confirms the legacy path is gone. While the routine deployer can still
-impersonate `org-terraform`, it can inherit authority in a newly created project
-and defeat the intended isolation. Create that project and bucket only in a
-later reviewed change after final removal, drain, and audit.
+Do not create a peg-policy GCP project or bucket until step 7 is applied, all
+runs drain, and the IAM audit confirms the legacy path is gone. Until then, the
+routine deployer can inherit `org-terraform` authority in a new project and
+defeat its isolation. Create those resources only in a later reviewed change.
 
 ## Platform GitHub Actions secrets and variables
 
@@ -224,9 +200,8 @@ The platform stack owns these non-secret Terraform identity selectors:
 Workflows read them through the `vars` context. Do not replace them with
 manually populated secrets or rename one side without updating every workflow,
 Terraform resource, output, regression check, and this runbook in the same PR.
-The bootstrap writes `GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`, but bootstrap
-workflows must not consume it. Only the later cutover-routing PR may route
-trusted-main plans and scheduled drift through that selector.
+Bootstrap writes `GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`, but only the later
+routing PR may use it for trusted-main plans and scheduled drift.
 
 The Sentry triage, projection, autofix, and archive credentials and their three
 kill switches are routed by
