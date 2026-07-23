@@ -1314,7 +1314,6 @@ test("#1461 jobGuarded distinguishes the workflow_run context", () => {
   );
 });
 
-
 // ── #1453: CODECOV_TOKEN is isolated from PR-controlled steps on autofix heads ─
 test("#1453 every codecov upload step in ci.yml excludes sentry-autofix heads", () => {
   // The token step shares a job with PR-head build/test, which can write
