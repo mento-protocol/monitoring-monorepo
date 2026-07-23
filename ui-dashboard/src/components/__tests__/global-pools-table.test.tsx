@@ -48,6 +48,7 @@ import {
   GlobalPoolsTable,
   filterGlobalPools,
   globalPoolKey,
+  resolveAvailableChainId,
   sortGlobalPools,
   type GlobalPoolEntry,
   type GlobalSortContext,
@@ -155,6 +156,18 @@ describe("filterGlobalPools", () => {
 
   it("keeps all chains when no chain is selected", () => {
     expect(filterGlobalPools(entries, "", null)).toEqual(entries);
+  });
+});
+
+describe("resolveAvailableChainId", () => {
+  const chainOptions = [{ chainId: 42220 }, { chainId: 143 }];
+
+  it("keeps a selected chain while it remains available", () => {
+    expect(resolveAvailableChainId(143, chainOptions)).toBe(143);
+  });
+
+  it("resets to all when the selected chain is unavailable", () => {
+    expect(resolveAvailableChainId(137, chainOptions)).toBeNull();
   });
 });
 

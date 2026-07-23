@@ -52,6 +52,16 @@ export function filterGlobalPools(
   });
 }
 
+export function resolveAvailableChainId(
+  selectedChainId: number | null,
+  chainOptions: readonly { chainId: number }[],
+): number | null {
+  if (selectedChainId === null) return null;
+  return chainOptions.some((option) => option.chainId === selectedChainId)
+    ? selectedChainId
+    : null;
+}
+
 function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
   return entries.some((e) => e.network.hasVirtualPools);
 }
@@ -253,14 +263,24 @@ function useGlobalPoolFilters(entries: GlobalPoolEntry[]) {
       return [{ chainId: entry.network.chainId, label: entry.network.label }];
     });
   }, [entries]);
+  const availableSelectedChainId = resolveAvailableChainId(
+    selectedChainId,
+    chainOptions,
+  );
+  // A failed network query removes that chain from `entries`. Clear its
+  // selection during render so the same commit presents "All" and the
+  // remaining loaded pools instead of a filter-miss empty state.
+  if (availableSelectedChainId !== selectedChainId) {
+    setSelectedChainId(availableSelectedChainId);
+  }
   const filteredEntries = useMemo(
-    () => filterGlobalPools(entries, search, selectedChainId),
-    [entries, search, selectedChainId],
+    () => filterGlobalPools(entries, search, availableSelectedChainId),
+    [entries, search, availableSelectedChainId],
   );
   return {
     search,
     setSearch,
-    selectedChainId,
+    selectedChainId: availableSelectedChainId,
     chainOptions,
     filteredEntries,
     selectChain: setSelectedChainId,
