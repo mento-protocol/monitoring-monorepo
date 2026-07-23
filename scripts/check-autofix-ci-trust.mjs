@@ -20,7 +20,9 @@
  *  2. Every JOB that can receive a CREDENTIAL in a workflow REACHABLE on an
  *     autofix branch — the eventual `pull_request`, the `push` the finalizer
  *     makes to `sentry-autofix/*` before the PR exists (when its branch filter
- *     admits that branch), or the `create` event of that branch — must guard or
+ *     admits that branch), the `create` event of that branch, or a
+ *     `workflow_run` fired by an upstream workflow that itself ran on that
+ *     branch — must guard or
  *     annotate. "Credential" is: a `${{ secrets.* }}` reference (its own or
  *     inherited from workflow-level `env:`), a reusable-workflow `secrets:`
  *     forward or local reusable-workflow (`uses: ./…`) call, an
@@ -33,7 +35,10 @@
  *           'sentry-autofix/')` for pull_request (GUARD_PATTERN),
  *           `!startsWith(github.ref, 'refs/heads/sentry-autofix/')` (or
  *           `github.ref_name`, `'sentry-autofix/'`) for push/create
- *           (PUSH_GUARD_PATTERN); nothing looser counts — or
+ *           (PUSH_GUARD_PATTERN),
+ *           `!startsWith(github.event.workflow_run.head_branch,
+ *           'sentry-autofix/')` for workflow_run (WORKFLOW_RUN_GUARD_PATTERN);
+ *           nothing looser counts — or
  *       (b) carry an `# autofix-ci-trust:` annotation COMMENT LINE stating
  *           WHY no guard is needed (secret step-scoped away from PR-head code
  *           execution, actor-gated job, paths the autofix diff guard forbids,
@@ -97,6 +102,16 @@ const GUARD_PATTERN =
 // `sentry-autofix/…`.
 const PUSH_GUARD_PATTERN =
   /!\s*startsWith\s*\(\s*github\.(?:ref\s*,\s*'refs\/heads\/sentry-autofix\/'|ref_name\s*,\s*'sentry-autofix\/')\s*\)/i;
+// The workflow_run analogue: `github.event.workflow_run.head_branch` is the
+// SHORT branch name of the upstream run (`sentry-autofix/…`, NOT a
+// `refs/heads/…` ref), so the excluding guard tests that short prefix directly
+// — a `refs/heads/` literal would never match head_branch and would be a broken
+// guard (evaluates true → job runs). head_branch excludes the whole autofix
+// namespace regardless of the upstream run's repository, so this is the
+// autofix-trust key; broader fork exclusion via head_repository.full_name is a
+// separate concern this checker does not model.
+const WORKFLOW_RUN_GUARD_PATTERN =
+  /!\s*startsWith\s*\(\s*github\.event\.workflow_run\.head_branch\s*,\s*'sentry-autofix\/'\s*\)/i;
 const ANNOTATION = "# autofix-ci-trust:";
 const ANNOTATION_LINE = /^\s*#\s*autofix-ci-trust:/;
 
@@ -315,6 +330,74 @@ export function hasWritePermission(permissions) {
   return false;
 }
 
+/**
+ * True when a step `uses:` value invokes `actions/checkout` at ANY ref — the
+ * canonical `actions/checkout@<ref>`, a bare `actions/checkout`, or a subpath
+ * action under that repo — matched case-insensitively (GitHub resolves action
+ * owner/repo case-insensitively). Anchored on the path segment so a LOOKALIKE
+ * like `actions/checkout-something-else` is NOT credited: the `checkout`
+ * segment must terminate at `@`, `/`, or end-of-string.
+ *
+ * The value is TRIMMED first: js-yaml preserves leading/trailing whitespace
+ * inside a QUOTED scalar (`uses: " actions/checkout@v4"`), and the anchored
+ * match would otherwise MISS it — a fail-OPEN. Trimming can only ever match
+ * MORE, never fewer, so it is strictly fail-closed (this checker refuses to
+ * depend on whether GitHub happens to trim such a value at resolve time).
+ */
+function isCheckoutAction(uses) {
+  return /^actions\/checkout(?=@|\/|$)/i.test(uses.trim());
+}
+
+/**
+ * True when a job with an effective WRITE permission runs `actions/checkout`
+ * that PERSISTS the automatic GITHUB_TOKEN into `.git/config`. checkout's
+ * `persist-credentials` defaults to TRUE, writing the run's write-scoped
+ * `GITHUB_TOKEN` into the working tree's git config, where any later step —
+ * including one executing a machine-authored autofix diff's own code — can read
+ * it and push/mutate the repo. So a write-permission job that checks out
+ * WITHOUT `persist-credentials: false` holds a mutating credential even when it
+ * never names `github.token` textually.
+ *
+ * A step opts OUT only with the boolean `false` or a string that
+ * case-insensitively equals "false" — exactly what actions/checkout's own
+ * core.getBooleanInput accepts (false/False/FALSE; js-yaml's CORE_SCHEMA yields
+ * a boolean for unquoted `false`, a string for a quoted `"false"`). ANY other
+ * value (true, an expression, unset, a missing `with:` block) leaves the token
+ * on disk. Multiple checkout steps: if ANY persists, the token is written →
+ * flag (a persist-credentials:false step does not undo a sibling plain
+ * checkout).
+ *
+ * Fails CLOSED on ambiguity: reached only for object jobs; a missing/non-array
+ * `steps`, non-object steps, steps without a string `uses`, or a non-object
+ * `with:` contribute no opt-out and cannot clear the job.
+ *
+ * ASSUMPTIONS (kept explicit, same as the github.token branch): a job with no
+ * explicit `permissions:` anywhere resolves to effectivePermissions=undefined →
+ * hasWritePermission=false → not flagged; this relies on the repo default token
+ * being read-only. A composite/local action that internally checks out is not
+ * followed cross-file.
+ *
+ * Exported for tests.
+ * @param {any} job
+ * @param {any} effectivePermissions the job's effective `permissions:` (own or inherited)
+ */
+export function jobPersistsWriteCheckout(job, effectivePermissions) {
+  if (!hasWritePermission(effectivePermissions)) return false;
+  if (!job || typeof job !== "object" || !Array.isArray(job.steps))
+    return false;
+  for (const step of job.steps) {
+    if (!step || typeof step !== "object") continue;
+    if (typeof step.uses !== "string" || !isCheckoutAction(step.uses)) continue;
+    const w = step.with;
+    const pc =
+      w != null && typeof w === "object" ? w["persist-credentials"] : undefined;
+    const optsOut =
+      pc === false || (typeof pc === "string" && pc.toLowerCase() === "false");
+    if (!optsOut) return true;
+  }
+  return false;
+}
+
 const THIS_REPO = "mento-protocol/monitoring-monorepo";
 
 /** True when a job's `uses:` value names a reusable workflow IN THIS REPO —
@@ -375,6 +458,11 @@ export function jobReceivesCredential(job, inherited) {
   ) {
     return true;
   }
+  // A write-permission job that runs actions/checkout WITHOUT
+  // `persist-credentials: false` leaves the run's write-scoped GITHUB_TOKEN in
+  // .git/config, readable by any later step that executes PR-head (autofix-diff)
+  // code — a mutating credential even with no textual github.token reference.
+  if (jobPersistsWriteCheckout(job, effectivePermissions)) return true;
   // A `secrets:` key exists only on a reusable-workflow (`uses:`) call and
   // always forwards the caller's secrets — `inherit` (string) or a map.
   if (job.secrets != null) return true;
@@ -398,19 +486,26 @@ export function jobReceivesCredential(job, inherited) {
 
 /** True when a parsed job's OWN job-level `if:` carries the excluding guard for
  * the given trigger CONTEXT — `"pull_request"` excludes on the PR head ref,
- * `"push"` excludes on `github.ref`. The contexts are independent: a job
- * reachable via both must exclude in both. `js-yaml` already dropped any
- * trailing comment, so the value is exactly the expression GitHub evaluates; a
- * step-level `if:` lives under `steps[]` and is correctly not consulted here.
+ * `"push"` excludes on `github.ref`, `"workflow_run"` excludes on the upstream
+ * run's `github.event.workflow_run.head_branch`. The contexts are independent:
+ * a job reachable via several must exclude in each. `js-yaml` already dropped
+ * any trailing comment, so the value is exactly the expression GitHub
+ * evaluates; a step-level `if:` lives under `steps[]` and is correctly not
+ * consulted here.
  *
  * Exported for tests.
  * @param {any} job
- * @param {"pull_request"|"push"} context
+ * @param {"pull_request"|"push"|"workflow_run"} context
  */
 export function jobGuarded(job, context = "pull_request") {
   if (!job || typeof job !== "object") return false;
   const expr = String(job.if ?? "");
-  const pattern = context === "push" ? PUSH_GUARD_PATTERN : GUARD_PATTERN;
+  const pattern =
+    context === "push"
+      ? PUSH_GUARD_PATTERN
+      : context === "workflow_run"
+        ? WORKFLOW_RUN_GUARD_PATTERN
+        : GUARD_PATTERN;
   return pattern.test(expr);
 }
 
@@ -624,6 +719,16 @@ export function evaluateWorkflow(body) {
   // `create` fires when the finalizer creates the sentry-autofix/* branch; the
   // job then sees that ref, so it needs the same ref-based exclusion as push.
   if (triggers.has("create")) contextSet.add("push");
+  // `workflow_run` fires when an upstream workflow (CI, …) COMPLETES. On an
+  // autofix-branch PR that upstream run is on the sentry-autofix/* head, and the
+  // downstream job can check out github.event.workflow_run.head_sha — running
+  // autofix-authored code while holding this repo's secrets and a privileged
+  // token. Every pull_request/push workflow here is already autofix-reachable,
+  // so ANY workflow_run listening to a repo-internal workflow is reachable too:
+  // treat every workflow_run trigger as an autofix context (conservative fail
+  // closed; no cross-workflow resolution). Its excluding guard tests
+  // github.event.workflow_run.head_branch.
+  if (triggers.has("workflow_run")) contextSet.add("workflow_run");
   const contexts = [...contextSet];
   if (contexts.length === 0) {
     return { ok: true };
@@ -666,7 +771,7 @@ export function evaluateWorkflow(body) {
   return {
     ok: false,
     reason:
-      `triggers on ${via} (reachable on an autofix branch), and job(s) [${offenders.join(", ")}] can receive a credential without an excluding autofix guard (${via.includes("push") ? "`!startsWith(github.ref, 'refs/heads/sentry-autofix/')` for push, " : ""}\`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')\` for pull_request, on the job's if:) or an '${ANNOTATION}' annotation in that job (or a file-level annotation above \`jobs:\`). ` +
+      `triggers on ${via} (reachable on an autofix branch), and job(s) [${offenders.join(", ")}] can receive a credential without an excluding autofix guard (${via.includes("push") ? "`!startsWith(github.ref, 'refs/heads/sentry-autofix/')` for push, " : ""}${via.includes("workflow_run") ? "`!startsWith(github.event.workflow_run.head_branch, 'sentry-autofix/')` for workflow_run, " : ""}\`!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')\` for pull_request, on the job's if:) or an '${ANNOTATION}' annotation in that job (or a file-level annotation above \`jobs:\`). ` +
       "Machine-authored autofix PRs pass every fork/dependabot check, and the finalizer pushes the sentry-autofix/* branch before the PR exists, so each credential-bearing job reachable on that branch must exclude it " +
       "or document why its secrets are unreachable from autofix-branch code execution.",
   };

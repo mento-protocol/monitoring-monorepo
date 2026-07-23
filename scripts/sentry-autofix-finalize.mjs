@@ -267,6 +267,27 @@ function isWorkTreeSymlink(workRoot, path) {
   }
 }
 
+// A changed path is STRUCTURALLY malformed when it carries leading/trailing
+// whitespace or ANY control byte (C0 U+0000-U+001F or DEL U+007F). These are the
+// bytes behind the whitespace/control-char bypass (#1526). The LOAD-BEARING fix
+// is that evaluateDiffGuard and the CLI now keep EXACT bytes, so the
+// credential/symlink scans lstat the same file the byte-copy will cp; this
+// reject is a fast structural refusal on top of that authoritative scan, not a
+// substitute for it. A legitimate tracked source path never contains these
+// bytes, so refusing them is free.
+function hasUnsafePathBytes(path) {
+  const p = String(path ?? "");
+  if (/^\s/.test(p) || /\s$/.test(p)) return true;
+  // Scan by code point rather than a control-char regex class: the latter trips
+  // eslint's no-control-regex and can embed literal control bytes in source. C0
+  // controls are U+0000-U+001F; U+007F is DEL.
+  for (const ch of p) {
+    const cp = ch.codePointAt(0);
+    if (cp <= 0x1f || cp === 0x7f) return true;
+  }
+  return false;
+}
+
 /**
  * The mechanical diff guard. Returns `{ ok: true }` when the changed-file set
  * is a legitimate scoped autofix, or `{ ok: false, reason }` otherwise. The
@@ -282,15 +303,38 @@ function isWorkTreeSymlink(workRoot, path) {
  * before any write token is minted — closes that exfiltration path.
  */
 export function evaluateDiffGuard(files, { workRoot = null } = {}) {
+  // Keep the EXACT bytes of every path (NO .trim()): the credential scan, the
+  // symlink check, the forbidden check, and the workflow's byte-for-byte copy
+  // must all reason about the identical path the copy will `cp`. A prior
+  // String(f).trim() here (and the CLI's /\r?\n/ split) silently rewrote a path
+  // like "leak.ts " / "leak.ts\r" to a name that lstat's to ENOENT — the scans
+  // were skipped while the raw byte-copy still published the real
+  // credential/symlink-bearing file (#1526). Only drop empty entries.
   const changed = (Array.isArray(files) ? files : [])
-    .map((f) => String(f ?? "").trim())
-    .filter(Boolean);
+    .map((f) => String(f ?? ""))
+    .filter((f) => f.length > 0);
 
   if (changed.length === 0) {
     return {
       ok: false,
       reason:
         "The autofix agent made no code changes — it could not confirm a scoped code-level fix. No PR opened.",
+    };
+  }
+  // Structurally refuse any path carrying leading/trailing whitespace or a
+  // control byte. The exact-byte scans below are the authoritative backstop for
+  // any byte; this is the fast, clear refusal. The reason echoes only a COUNT,
+  // NEVER the offending path: path bytes are agent-controlled and can be named
+  // after a runner token the agent read from process-env (the documented
+  // residual), so publishing them onto the public queue issue would itself be an
+  // exfil channel — omission is the module's standing policy for agent-controlled
+  // text (see the note above buildAnalysisComment). The path-echo hardening for
+  // the other guard reasons (forbidden/credential) is tracked separately (#1551).
+  const malformed = changed.filter(hasUnsafePathBytes);
+  if (malformed.length > 0) {
+    return {
+      ok: false,
+      reason: `The autofix diff contains ${malformed.length} path(s) with leading/trailing whitespace or control characters, which are refused: such bytes make the guard's scans disagree with the byte-for-byte copy that publishes the branch, and a legitimate source path never contains them. No PR opened.`,
     };
   }
   if (changed.length > MAX_CHANGED_FILES) {
@@ -620,10 +664,16 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
       // Optional: the tainted work tree, so the guard can refuse changed paths
       // the agent turned into symlinks (credential-free, before token minting).
       const workRoot = readFlag(args, "--work");
+      // Split on \n ONLY and DO NOT trim, matching the workflow byte-copy's
+      // `IFS= read -r f` (strips the trailing \n delimiter, nothing else).
+      // Trimming or eating a \r here would re-open the #1526 divergence: the
+      // guard would scan a normalized path while the copy publishes raw bytes.
+      // evaluateDiffGuard keeps these exact bytes and structurally refuses
+      // edge-whitespace/control-char paths, so exact-byte lines are what it
+      // must receive.
       const files = readFileMaybe(filesFile)
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
+        .split("\n")
+        .filter((line) => line.length > 0);
       stdout.write(
         `${JSON.stringify(evaluateDiffGuard(files, { workRoot }))}\n`,
       );

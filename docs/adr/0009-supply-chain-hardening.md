@@ -3,7 +3,7 @@ title: Supply-chain hardening — release-age gate, lockfile-lint, SHA-pinned Ac
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: ci/process
 date: 2026-05
 doc_type: adr
@@ -30,10 +30,12 @@ Adopt a defense-in-depth posture:
   younger than 3 days. `@mento-protocol/*` and narrow, reviewed security
   releases may bypass the delay; frozen-lockfile installs verify new entries
   against the same policy.
-- **`pnpm lockfile:lint`** validates lockfile integrity + registry provenance,
-  with no install needed, as a blocking gate.
-- **SHA-pin every GitHub Action** `uses:` ref, enforced by
-  `scripts/check-github-action-pins.mjs`.
+- **`pnpm lockfile:lint`** fails closed when invoked and validates lockfile
+  integrity, registry provenance, and bounded override/resolution floors with
+  no install needed. The advisory Supply Chain workflow runs it on dependency
+  inputs and daily.
+- **SHA-pin every GitHub Action** `uses:` ref, enforced by the ruleset-required
+  Code Quality job through `scripts/check-github-action-pins.mjs`.
 
 ## Alternatives considered
 
@@ -49,5 +51,6 @@ Adopt a defense-in-depth posture:
 
 ## Evidence
 
-- `minimumReleaseAge` PR #418; lockfile-lint PR #447; enforce-pinned-actions PR #922; early action pins PR #177.
+- `minimumReleaseAge` PR #418; lockfile-lint PR #447; advisory workflow split
+  PR #813; enforce-pinned-actions PR #922; early action pins PR #177.
 - Guards in `pnpm-workspace.yaml`, `scripts/check-github-action-pins.mjs`, [`docs/pr-checklists/recurring-review-patterns.md`](../pr-checklists/recurring-review-patterns.md).

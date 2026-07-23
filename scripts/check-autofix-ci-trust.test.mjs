@@ -5,11 +5,15 @@ import {
   grantsOidc,
   hasPullRequestTrigger,
   jobGuarded,
+  jobPersistsWriteCheckout,
   jobReceivesCredential,
   parseWorkflow,
   pushAdmitsAutofix,
   usesPullRequestTarget,
 } from "./check-autofix-ci-trust.mjs";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 let passed = 0;
 let failed = 0;
@@ -975,6 +979,382 @@ test("a quoted-scalar continuation ending in | is not a block introducer", () =>
     !v.ok && /\[leak\]/.test(v.reason),
     "marker inside the pipe-ending quoted scalar is not an annotation",
   );
+});
+
+// ── #1460: write-permission jobs with a credential-persisting checkout ────────
+// A pull_request workflow (autofix-reachable) whose `build` job has a write
+// permission + a checkout but NO secret/github.token reference, so ONLY the
+// #1460 checkout-persistence path can make it credential-bearing.
+const WRITE_PERM_1460 = ["    permissions:", "      contents: write"];
+const READ_PERM_1460 = ["    permissions:", "      contents: read"];
+
+function prBuildJob(jobLines) {
+  return [
+    "on:",
+    "  pull_request:",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-latest",
+    ...jobLines,
+  ].join("\n");
+}
+
+test("#1460 write-perm job with a plain checkout is flagged (persists GITHUB_TOKEN)", () => {
+  const v = evaluateWorkflow(
+    prBuildJob([
+      ...WRITE_PERM_1460,
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+    ]),
+  );
+  assert(
+    !v.ok && /\[build\]/.test(v.reason),
+    "write-perm + plain checkout flagged",
+  );
+});
+
+test("#1460 write-perm job with persist-credentials:false is cleared", () => {
+  const v = evaluateWorkflow(
+    prBuildJob([
+      ...WRITE_PERM_1460,
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+      "        with:",
+      "          persist-credentials: false",
+    ]),
+  );
+  assert(v.ok, "persist-credentials:false clears it");
+});
+
+test("#1460 read-only job with a checkout is cleared", () => {
+  const v = evaluateWorkflow(
+    prBuildJob([
+      ...READ_PERM_1460,
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+    ]),
+  );
+  assert(v.ok, "read-only + checkout is not a credential");
+});
+
+test("#1460 workflow-level write perm inherited by a no-perms job + checkout is flagged", () => {
+  const v = evaluateWorkflow(
+    [
+      "on:",
+      "  pull_request:",
+      "permissions:",
+      "  contents: write",
+      "jobs:",
+      "  build:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+    ].join("\n"),
+  );
+  assert(
+    !v.ok && /\[build\]/.test(v.reason),
+    "inherited write perm + checkout flagged",
+  );
+});
+
+test("#1460 persist-credentials as an expression still persists (flagged)", () => {
+  const v = evaluateWorkflow(
+    prBuildJob([
+      ...WRITE_PERM_1460,
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+      "        with:",
+      "          persist-credentials: ${{ inputs.persist }}",
+    ]),
+  );
+  assert(
+    !v.ok && /\[build\]/.test(v.reason),
+    "expression persist-credentials flagged",
+  );
+});
+
+test("#1460 a subpath actions/checkout/foo@v1 is treated as a checkout (flagged)", () => {
+  const v = evaluateWorkflow(
+    prBuildJob([
+      ...WRITE_PERM_1460,
+      "    steps:",
+      "      - uses: actions/checkout/foo@v1",
+    ]),
+  );
+  assert(!v.ok && /\[build\]/.test(v.reason), "subpath checkout flagged");
+});
+
+test("#1460 a matrix job with a checkout is flagged", () => {
+  const v = evaluateWorkflow(
+    [
+      "on:",
+      "  pull_request:",
+      "jobs:",
+      "  build:",
+      "    runs-on: ubuntu-latest",
+      "    permissions:",
+      "      contents: write",
+      "    strategy:",
+      "      matrix:",
+      "        node: [18, 20]",
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+    ].join("\n"),
+  );
+  assert(
+    !v.ok && /\[build\]/.test(v.reason),
+    "matrix job with checkout flagged",
+  );
+});
+
+test('#1460 a quoted "False" persist-credentials opt-out is honored (case-insensitive)', () => {
+  const v = evaluateWorkflow(
+    prBuildJob([
+      ...WRITE_PERM_1460,
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+      "        with:",
+      '          persist-credentials: "False"',
+    ]),
+  );
+  assert(v.ok, "capitalized False opt-out clears it");
+});
+
+test("#1460 a leading-whitespace quoted checkout uses is still detected (fail-closed)", () => {
+  const v = evaluateWorkflow(
+    prBuildJob([
+      ...WRITE_PERM_1460,
+      "    steps:",
+      '      - uses: " actions/checkout@v4"',
+    ]),
+  );
+  assert(
+    !v.ok && /\[build\]/.test(v.reason),
+    "space-prefixed quoted checkout flagged",
+  );
+});
+
+test("#1460 jobPersistsWriteCheckout fails closed on odd step shapes", () => {
+  const wp = { contents: "write" };
+  assert(
+    jobPersistsWriteCheckout({ permissions: wp }, wp) === false,
+    "missing steps → false",
+  );
+  assert(
+    jobPersistsWriteCheckout({ steps: "nope" }, wp) === false,
+    "non-array steps → false",
+  );
+  assert(
+    jobPersistsWriteCheckout({ steps: [null, 42, {}] }, wp) === false,
+    "junk steps contribute nothing → false",
+  );
+  assert(
+    jobPersistsWriteCheckout(
+      { steps: [{ uses: "actions/checkout@v4" }] },
+      { contents: "read" },
+    ) === false,
+    "no write perm short-circuits → false",
+  );
+  assert(
+    jobPersistsWriteCheckout(
+      { steps: [{ uses: "actions/checkout@v4" }] },
+      wp,
+    ) === true,
+    "write perm + plain checkout → true",
+  );
+  assert(
+    jobPersistsWriteCheckout(
+      {
+        steps: [
+          {
+            uses: "actions/checkout@v4",
+            with: { "persist-credentials": false },
+          },
+          { uses: "actions/checkout@v4" },
+        ],
+      },
+      wp,
+    ) === true,
+    "a persisting sibling checkout is not undone by an opt-out sibling → true",
+  );
+  assert(
+    jobPersistsWriteCheckout(
+      { steps: [{ uses: "actions/checkout-lookalike@v4" }] },
+      wp,
+    ) === false,
+    "actions/checkout-lookalike is not a checkout → false",
+  );
+});
+
+// ── #1461: workflow_run chains from autofix-branch upstream runs ───────────────
+const WF_RUN_ON = [
+  "on:",
+  "  workflow_run:",
+  "    workflows: [CI]",
+  "    types: [completed]",
+];
+
+function wfRunNotifyJob(jobLines) {
+  return [
+    ...WF_RUN_ON,
+    "jobs:",
+    "  notify:",
+    "    runs-on: ubuntu-latest",
+    ...jobLines,
+  ].join("\n");
+}
+
+test("#1461 an unguarded credential-bearing workflow_run job is flagged (names the head_branch guard form)", () => {
+  const v = evaluateWorkflow(wfRunNotifyJob([SECRET_STEP]));
+  assert(
+    !v.ok && /\[notify\]/.test(v.reason),
+    "workflow_run secret job flagged",
+  );
+  assert(
+    /workflow_run\.head_branch/.test(v.reason),
+    "reason names the workflow_run guard form, not just the token 'workflow_run'",
+  );
+});
+
+test("#1461 a workflow_run job guarded on head_branch startsWith is cleared", () => {
+  const v = evaluateWorkflow(
+    wfRunNotifyJob([
+      "    if: ${{ !startsWith(github.event.workflow_run.head_branch, 'sentry-autofix/') }}",
+      SECRET_STEP,
+    ]),
+  );
+  assert(v.ok, "short head_branch startsWith guard clears it");
+});
+
+test("#1461 an annotated workflow_run job is cleared", () => {
+  const v = evaluateWorkflow(
+    [
+      ...WF_RUN_ON,
+      "jobs:",
+      "  notify:",
+      "    # autofix-ci-trust: reads only workflow_run metadata; gated to main below",
+      "    runs-on: ubuntu-latest",
+      SECRET_STEP,
+    ].join("\n"),
+  );
+  assert(v.ok, "annotation clears the workflow_run job");
+});
+
+test("#1461 a workflow_run workflow with no credential job passes", () => {
+  const v = evaluateWorkflow(
+    [
+      ...WF_RUN_ON,
+      "jobs:",
+      "  notify:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: echo hi",
+    ].join("\n"),
+  );
+  assert(v.ok, "no-credential workflow_run passes");
+});
+
+test("#1461 a full refs/heads prefix on the SHORT head_branch field is NOT credited (flagged)", () => {
+  // head_branch is the short branch name; a refs/heads/ literal never matches it,
+  // so it is a broken guard and must be rejected — mirror of the push short-prefix rule.
+  const v = evaluateWorkflow(
+    wfRunNotifyJob([
+      "    if: ${{ !startsWith(github.event.workflow_run.head_branch, 'refs/heads/sentry-autofix/') }}",
+      SECRET_STEP,
+    ]),
+  );
+  assert(
+    !v.ok && /\[notify\]/.test(v.reason),
+    "refs/heads prefix on head_branch rejected",
+  );
+});
+
+test("#1461 a workflow_run job gated ONLY by head_branch == 'main' is flagged; an annotation clears it", () => {
+  const equality = wfRunNotifyJob([
+    "    if: ${{ github.event.workflow_run.head_branch == 'main' }}",
+    SECRET_STEP,
+  ]);
+  assert(
+    !evaluateWorkflow(equality).ok,
+    "== 'main' equality is not auto-credited",
+  );
+  const annotated = [
+    ...WF_RUN_ON,
+    "jobs:",
+    "  notify:",
+    "    # autofix-ci-trust: gated to head_branch == 'main' (stronger than the credited startsWith)",
+    "    runs-on: ubuntu-latest",
+    "    if: ${{ github.event.workflow_run.head_branch == 'main' }}",
+    SECRET_STEP,
+  ].join("\n");
+  assert(
+    evaluateWorkflow(annotated).ok,
+    "annotation documents the equality gate",
+  );
+});
+
+test("#1461 jobGuarded distinguishes the workflow_run context", () => {
+  const wfGuarded = {
+    if: "${{ !startsWith(github.event.workflow_run.head_branch, 'sentry-autofix/') }}",
+  };
+  const prGuarded = {
+    if: "${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}",
+  };
+  assert(
+    jobGuarded(wfGuarded, "workflow_run") === true,
+    "wf guard matches workflow_run context",
+  );
+  assert(
+    jobGuarded(prGuarded, "workflow_run") === false,
+    "a PR guard does not vouch for the workflow_run context",
+  );
+  assert(
+    jobGuarded(wfGuarded, "pull_request") === false,
+    "a workflow_run guard does not vouch for the pull_request context",
+  );
+});
+
+// ── #1453: CODECOV_TOKEN is isolated from PR-controlled steps on autofix heads ─
+test("#1453 every codecov upload step in ci.yml excludes sentry-autofix heads", () => {
+  // The token step shares a job with PR-head build/test, which can write
+  // $GITHUB_ENV/$GITHUB_PATH — so step-scoping alone does not isolate it. Each
+  // codecov step must therefore carry the excluding autofix guard so the token
+  // never runs on a machine-authored sentry-autofix/* PR (issue #1453). jobGuarded
+  // reads `.if`, so it validates a STEP's guard exactly as it does a job's, using
+  // the canonical GUARD_PATTERN (cannot drift from the checker's own definition).
+  const ciPath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    ".github",
+    "workflows",
+    "ci.yml",
+  );
+  const doc = parseWorkflow(readFileSync(ciPath, "utf8"));
+  assert(doc && typeof doc.jobs === "object", "ci.yml parses with a jobs map");
+  const codecovSteps = [];
+  for (const job of Object.values(doc.jobs)) {
+    if (!job || typeof job !== "object" || !Array.isArray(job.steps)) continue;
+    for (const step of job.steps) {
+      if (
+        step &&
+        typeof step === "object" &&
+        typeof step.uses === "string" &&
+        step.uses.includes("codecov/codecov-action")
+      ) {
+        codecovSteps.push(step);
+      }
+    }
+  }
+  assert(
+    codecovSteps.length >= 9,
+    `expected at least 9 codecov upload steps in ci.yml, found ${codecovSteps.length}`,
+  );
+  for (const step of codecovSteps) {
+    assert(
+      jobGuarded(step, "pull_request"),
+      `a codecov upload step is not guarded against sentry-autofix heads: ${JSON.stringify(step.uses)}`,
+    );
+  }
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
