@@ -45,6 +45,12 @@ dependency metadata.
   (first push before `gh pr create` lacks PR id/previous SHA); it fails **open**
   (builds) when it can't prove a deploy is dashboard-clean.
 - Env-only production changes need a manual `vercel deploy --prod` from the repo root.
+- The skip script governs which _eligible_ branches build; it does not gate the
+  Sentry-autofix trust boundary. `vercel.json` additionally sets
+  `git.deploymentEnabled: { "sentry-autofix/*": false }` (issue #1452) so Vercel
+  never _creates_ a deployment for a machine-authored autofix branch (which would
+  otherwise run untrusted code with the dashboard's production secrets). That is
+  strictly earlier than the skip script — the build never starts.
 
 ## Evidence
 
