@@ -3,7 +3,7 @@ title: Infra applies on merge to main behind the production-infra environment ga
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-23
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
@@ -46,6 +46,15 @@ manual-plan/manual-apply.
 Routine service deploys use a separate `production-services` environment that records
 history but doesn't require manual approval.
 
+Cloud identity is part of the infrastructure gate. Production Terraform apply
+jobs use a dedicated WIF pool whose provider requires the exact repository,
+protected `main` ref, and `production-infra` environment subject before they
+can impersonate the seed-project production applier. PR plans retain their
+state-only identity, and a separate cutover-routing PR moves trusted-`main`
+refresh/drift to a read-only chain before authority removal.
+[ADR 0047](0047-separated-terraform-ci-identities.md) owns the identity split
+and its staged bootstrap, routing, proof, and removal procedure.
+
 ## Alternatives considered
 
 - **Manual applies only** — rejected: unauditable, drift-prone, and not agent-runnable.
@@ -57,8 +66,15 @@ history but doesn't require manual approval.
 
 - Local `pnpm tf apply` on CI-applied stacks is guarded (clean `main` at
   `origin/main`, or the deliberate `--force-local-apply`).
-- The deployer's Workload Identity Federation is ref-gated to `refs/heads/main`
-  (non-`main` refs 403); worktrees lack `terraform.tfvars`, so run TF from `main`.
+- Production applies authenticate through a pool isolated from routine deploy
+  and PR-plan identities; a token must prove the repository, `refs/heads/main`,
+  and the `production-infra` environment subject.
+- The legacy routine-deployer Token Creator grant may exist only during the
+  staged ADR 0047 cutover. First land the trusted-main refresh routing while
+  retaining the grant, prove every CI-managed Google-provider stack through
+  that checked-in route, and drain and audit the runs. Only a separate final
+  removal PR and explicitly approved platform apply may delete the grant.
+- Worktrees lack `terraform.tfvars`, so run TF from `main`.
 - Agents never apply without explicit human approval; plan first, surface the diff.
 
 ## Evidence

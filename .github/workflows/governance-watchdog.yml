@@ -7,11 +7,11 @@ name: Governance Watchdog Infra
 # matching the alerts/infra + aegis stacks. The GCS backend and google provider both
 # impersonate a seed-project SA (see versions.tf). The plan and apply jobs use a
 # read/write split for plan-time blast-radius reduction:
-#   - apply (on merge) authenticates as the write-capable CI deployer SA
-#     (`GCP_SERVICE_ACCOUNT`); the backend AND the google provider impersonate
-#     `org-terraform@…seed` (state writes + locking + full GCP resource ops).
-#     The deployer SA's `roles/iam.serviceAccountTokenCreator` grant on
-#     `org-terraform` lives in `terraform/ci-wif.tf` (shared across CI stacks).
+#   - apply (on merge) authenticates through the production-infra-only WIF
+#     provider as `production-infra-applier@…seed`; the backend AND the google
+#     provider then impersonate `org-terraform@…seed` for state writes, locking,
+#     and full GCP resource operations. The applier's service-account-scoped
+#     Token Creator grant lives in `terraform/ci-wif.tf`.
 #   - plan (on PR) authenticates as the read-only CI SA
 #     (`GCP_SERVICE_ACCOUNT_PLAN`), overrides the backend impersonation to
 #     `org-terraform-plan-readonly@…seed` via `-backend-config`, points the
@@ -23,10 +23,12 @@ name: Governance Watchdog Infra
 #     Skipping refresh keeps the PR plan to a config-vs-last-state diff needing
 #     only state read + the token the read-only CI SA already holds — zero new
 #     IAM. Tradeoff: the PR plan won't surface out-of-band drift; that's
-#     `terraform-drift.yml`'s job (full refresh, write SA) and the apply-time
-#     re-plan's. The read-only + `-refresh=false` treatment is gated on
+#     `terraform-drift.yml`'s job (full refresh, transitionally using the write
+#     SA) and the apply-time re-plan's. The read-only + `-refresh=false`
+#     treatment is gated on
 #     `github.event_name == 'pull_request'`: the same plan job on push /
-#     workflow_dispatch keeps the write deployer SA + full refresh + locking.
+#     workflow_dispatch keeps the write deployer SA + full refresh + locking
+#     until the follow-up trusted-main refresh-identity cutover.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
@@ -213,9 +215,11 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           # On PRs, authenticate as the read-only plan SA so a malicious PR's
           # plan-time data source can't mint tokens for the write-capable
-          # deployer. push / workflow_dispatch (the apply-gating path, incl.
-          # drift reconcile) and the apply job keep `GCP_SERVICE_ACCOUNT`.
-          # See file header + `terraform/ci-wif.tf`.
+          # deployer. Until the follow-up refresh-identity cutover, push /
+          # workflow_dispatch (the pre-gate planning path, including drift
+          # reconcile) keeps `GCP_SERVICE_ACCOUNT`; the apply job uses the
+          # production-infra-only identity. See file header +
+          # `terraform/ci-wif.tf`.
           service_account: ${{ github.event_name == 'pull_request' && secrets.GCP_SERVICE_ACCOUNT_PLAN || secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
@@ -587,8 +591,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1

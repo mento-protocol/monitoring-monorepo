@@ -13,17 +13,16 @@ name: Terraform Drift Detection
 # alerts/rules rollout surfaced ~25 template renames worth of accumulated
 # drift; a daily plan job would have caught it days earlier.
 #
-# Auth note: each drift leg authenticates with the least-privileged SA that can
-# still run a full-refresh plan, picked from `matrix.planSa` (derived in the
-# discover step from each stack's registry `providers[]`). Grafana-only stacks
-# (`alerts-rules`, `aegis`) plan under the read-only plan SA
-# (`GCP_SERVICE_ACCOUNT_PLAN` → `org-terraform-plan-readonly@…seed`,
-# `objectViewer` on the state bucket). `alerts/infra` keeps the write-capable
-# deployer (`GCP_SERVICE_ACCOUNT`): its google provider must refresh GCP
-# resources the read-only seed SA has no project roles to read. Making that leg
-# read-only too would need a `roles/viewer` grant for the seed SA on the
-# `project_factory`-managed project (operator/seed creds) — deferred by design;
-# see docs/notes/terraform-cicd-hardening-decisions-2026-05.md.
+# Transitional auth note: the identity-bootstrap change provisions the
+# trusted-main refresh chain and curated project read grants but deliberately
+# leaves this workflow's selector cutover for a later PR. Until that cutover,
+# `matrix.planSa` keeps Grafana-only stacks (`alerts-rules`, `aegis`) on the
+# state-only plan chain and Google-provider stacks (`alerts-delivery`,
+# `governance-watchdog`) on the generic write-capable deployer. The workflow
+# never applies, but those latter legs still carry legacy apply authority.
+# Before removing that legacy path, route every drift leg through
+# `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT` and prove a live full refresh
+# with the curated non-basic read-role set described in ADR 0047.
 
 on:
   schedule:
@@ -71,15 +70,13 @@ jobs:
               const { stacks } = JSON.parse(stdin);
               const filtered = stacks
                 .filter(s => s.ci.apply === "push-main-production-infra-environment" || s.ci.drift === "scheduled")
-                // `planSa` routes each leg to the least-privileged SA that can
-                // still run a full-refresh drift plan. A stack whose only GCP
-                // touch is the GCS backend (no google* provider) refreshes fine
-                // under the read-only seed SA (`objectViewer` on the state
-                // bucket is enough). A stack with a google* provider needs the
-                // write-capable deployer because the read-only seed SA has no
-                // project roles, so refreshing its GCP resources would 403.
-                // Registry-driven so new stacks route correctly without editing
-                // this workflow.
+                // Transitional routing until the follow-up refresh-identity
+                // cutover. A stack whose only GCP touch is the GCS backend
+                // refreshes under the state-only plan chain. A google* provider
+                // stack stays on the legacy write-capable deployer even though
+                // the bootstrap now provisions a separate curated read chain.
+                // The cutover must replace this write path rather than broadening
+                // the PR-plan identity.
                 .map(s => ({
                   id: s.id,
                   name: s.name,
@@ -170,16 +167,15 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          # Per-leg least privilege: grafana-only stacks (`planSa == readonly`)
-          # plan under the read-only plan SA; google-provider stacks
-          # (`alerts/infra`) stay on the write-capable deployer because a
-          # full-refresh drift plan reads GCP resources the read-only seed SA
-          # has no project roles to see. `==` yields a real boolean, so the
-          # ternary can't misfire on a stringified matrix value. The deployer
-          # WIF binding (terraform/ci-wif.tf) is ref-gated to refs/heads/main:
-          # schedule runs and main dispatches still authenticate, while a
-          # non-main dispatch intentionally fails the write leg at auth. The
-          # plan-SA binding stays repo-scoped for read-only PR/ref checks.
+          # Transitional per-leg routing: grafana-only stacks
+          # (`planSa == readonly`) use the state-only plan SA; Google-provider
+          # stacks use the legacy write-capable deployer until the follow-up
+          # refresh-identity cutover. `==` yields a real boolean, so the ternary
+          # cannot misfire on a stringified matrix value. The deployer binding
+          # is ref-gated to refs/heads/main: schedules and main dispatches
+          # authenticate, while a non-main dispatch fails at auth. The later
+          # cutover must replace both branches with the trusted-main refresh
+          # selector after its live-plan proof.
           service_account: ${{ matrix.planSa == 'readonly' && secrets.GCP_SERVICE_ACCOUNT_PLAN || secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
@@ -193,7 +189,8 @@ jobs:
       - name: Init
         # Read-only legs override the GCS backend impersonation to the
         # read-only seed SA (the CLI value beats the write SA hardcoded in
-        # versions.tf). Write legs init plain against the deployer.
+        # versions.tf). Transitional write legs init plain against the deployer
+        # until the refresh-identity cutover.
         env:
           PLAN_SA: ${{ matrix.planSa }}
           GCP_SA_PLAN: ${{ secrets.GCP_SERVICE_ACCOUNT_PLAN }}
@@ -265,10 +262,11 @@ jobs:
           fi
 
           set +e
-          # Read-only legs must pass `-lock=false`: the read-only seed SA holds
-          # `objectViewer` on the state bucket and can't write the GCS lock
-          # object. Write legs keep advisory locking. Both run a full refresh —
-          # the point of drift detection is to read live resource state.
+          # State-only legs pass `-lock=false`: the read-only seed SA holds
+          # `objectViewer` on the state bucket and cannot write the GCS lock
+          # object. Transitional write legs keep advisory locking. After
+          # cutover, the trusted-main refresh chain must also use `-lock=false`.
+          # Every leg runs a full refresh to read live resource state.
           if [ "$PLAN_SA" = "readonly" ]; then
             terraform plan -detailed-exitcode -no-color -input=false -lock=false > /tmp/tf-plan.raw 2>&1
           else

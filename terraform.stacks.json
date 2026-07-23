@@ -6,7 +6,7 @@
       "id": "platform",
       "name": "Platform",
       "path": "terraform",
-      "description": "Dashboard Vercel project, Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, CI Workload Identity Federation, project IAM, and repo-level GitHub Actions secrets and variables.",
+      "description": "Dashboard Vercel project, Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, separated CI Workload Identity Federation identities, project IAM, and repo-level GitHub Actions secrets and variables.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",
@@ -61,7 +61,7 @@
       "id": "alerts-delivery",
       "name": "Alerts Delivery",
       "path": "alerts/infra",
-      "description": "Event-driven alert delivery: QuickNode webhooks, Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, and related GCP resources.",
+      "description": "Event-driven alert delivery: QuickNode webhooks, Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources, and stack-local trusted-main refresh grants.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",
@@ -127,7 +127,7 @@
       "id": "governance-watchdog",
       "name": "Governance Watchdog",
       "path": "governance-watchdog/infra",
-      "description": "Mento Governance event watchdog: dedicated GCP project, Cloud Function (QuickNode webhook -> Discord/Telegram), QuickNode webhooks, Cloud Scheduler health check, Secret Manager, and Cloud Monitoring alert policies. Owns its own GCP project; not part of the alerts-delivery mento-alerts project.",
+      "description": "Mento Governance event watchdog: dedicated GCP project, Cloud Function (QuickNode webhook -> Discord/Telegram), QuickNode webhooks, Cloud Scheduler health check, Secret Manager, Cloud Monitoring alert policies, and stack-local trusted-main refresh grants. Owns its own GCP project; not part of the alerts-delivery mento-alerts project.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",

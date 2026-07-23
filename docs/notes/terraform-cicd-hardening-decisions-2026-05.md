@@ -3,7 +3,7 @@ title: Terraform CI/CD hardening — declined alternatives
 status: archived
 owner: eng
 canonical: false
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: note
 scope: terraform/infra
 review_interval_days: 365
@@ -19,11 +19,11 @@ apply behavior belongs in
 [`docs/terraform.md`](../terraform.md), and
 [`terraform-secret-strategy-2026-07.md`](terraform-secret-strategy-2026-07.md).
 
-The two alternatives below were deliberately declined. They remain here so a
-future change in constraints can reopen the decision without treating it as
-forgotten work.
+The alternatives below were deliberately declined. The first was reopened in
+July 2026 under a stricter identity invariant; the historical rejection remains
+here to show why the replacement does not broaden the PR trust boundary.
 
-## Declined: full-refresh read-only planning for alerts delivery
+## Reopened for trusted main only: full-refresh read-only planning
 
 The alerts-delivery stack could not use the state-only plan identity for a
 full-refresh plan: refreshing its Google-provider resources requires project
@@ -39,9 +39,29 @@ Terraform state object.
   track the stack's resource set, while apply jobs would still require the
   write deployer and pinned shared actions.
 
-Reopen this only under a stated invariant that no unattended CI job may hold
-write credentials, such as a new audit requirement or a material expansion in
-what auto-applies.
+That invariant changed in July 2026. [ADR 0047](../adr/0047-separated-terraform-ci-identities.md)
+requires unattended trusted-`main` plans and scheduled drift to carry no write
+credentials, while production apply authentication must prove the exact
+repository, protected `main` ref, and `production-infra` environment through a
+dedicated WIF pool.
+
+The reopened design creates a separate main-ref refresh chain rather than
+broadening the PR identity. Its downstream seed service account receives a
+curated non-basic project read-role set in the target projects. The guaranteed
+core includes Browser, IAM Security Reviewer, and Storage Bucket Viewer, with
+additional service-specific readers enumerated by each owning stack. Secret
+Accessor remains limited to Terraform-managed secrets, and Storage Object
+Viewer remains limited to the Cloud Function deployment-source buckets. Basic
+Viewer is deliberately absent because its convenience-group behavior would
+grant object reads on uniform-bucket-level-access buckets. The result supports
+faithful provider refresh at an explicit confidentiality cost: trusted-main CI
+can see IAM policy, service data such as logs, metrics, and Artifact Registry
+contents, managed secret payloads, and deployment source. It cannot mutate
+those resources, cannot read replay/rotation-state/log bucket objects through
+the targeted GCS grants, and cannot be impersonated by PR refs. A live full
+refresh-only plan, not configuration validation alone, must prove the curated
+permissions through the checked-in routing cutover before final authority
+removal.
 
 ## Declined: saved-plan binding via KMS
 

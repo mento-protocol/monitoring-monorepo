@@ -3,7 +3,7 @@ title: Terraform secret strategy hardening
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: reference
 scope: terraform/infra
 review_interval_days: 90
@@ -39,6 +39,54 @@ while the job holds the read-only plan SA — whose state-bucket
 autofix diff guard also forbids `*.tf`/`*.hcl`/`*.tfvars` at any depth;
 the plan-job `if:` exclusion is defense in depth behind it, and
 `scripts/check-autofix-ci-trust.mjs` enforces the pattern structurally.
+
+## CI identity boundaries
+
+[ADR 0047](../adr/0047-separated-terraform-ci-identities.md) keeps routine
+service deploy, same-repo PR plan, trusted-main refresh, and production apply
+on separate identities:
+
+- Routine services use the general repository WIF provider and
+  `metrics-bridge-deployer`. The final removal apply removes its ability to
+  impersonate `org-terraform`.
+- PR plans use the state-only plan chain. It receives neither project/service
+  read roles nor live secret/object access.
+- The separate cutover-routing PR routes trusted-main plans and scheduled drift
+  through `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The downstream
+  `org-terraform-refresh-readonly` identity has state Object Viewer, a curated
+  non-basic project read-role set, Secret Accessor on only Terraform-managed
+  secrets, and Storage Object Viewer on only Cloud Function deployment-source
+  buckets. The project-read core includes Browser, IAM Security Reviewer, and
+  Storage Bucket Viewer; each owning stack enumerates its additional
+  service-specific readers. That routing PR retains the legacy routine-deployer
+  Token Creator grant until live proof and drain checks complete.
+- Production applies select
+  `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
+  `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. The dedicated pool accepts only
+  the exact repository, protected `main` ref, and `production-infra`
+  environment subject before the seed-project applier can impersonate
+  `org-terraform`.
+
+The refresh read bundle is a deliberate confidentiality tradeoff. Terraform's
+pinned Google providers read managed Secret Manager payloads and deployment
+source objects during a faithful refresh, and IAM resources require policy
+visibility. Basic `roles/viewer` is forbidden because its `projectViewer`
+convenience-group behavior grants legacy object reads on
+uniform-bucket-level-access buckets. The exact Secret Accessor and Object Viewer
+bindings exclude replay, rotation-state, and log bucket objects. The curated
+service readers can still expose project-wide Cloud Logging entries, Monitoring
+time series, and Artifact Registry contents. The complete bundle confers no
+mutation permissions and is unreachable from PR refs.
+
+After the cutover-routing PR lands, use its checked-in `main` route to run a
+live full-refresh, unlocked plan (`-lock=false`, without `-refresh=false`) for
+every CI-managed Google-provider stack; the current set is `alerts-delivery`
+and `governance-watchdog`. Treat a provider 403 as a request to review one exact
+read permission, not as justification for a basic role. Validation and an
+IAM-grants-only plan do not prove the full resource graph can refresh or that
+payload boundaries remain intact. Drain the pre-routing and proof runs and
+audit the read boundary before a separate final removal PR deletes the legacy
+Token Creator grant through an explicitly approved platform apply.
 
 ## Stack inventory
 
@@ -76,10 +124,10 @@ Current residual state exposure:
   still required in trusted main/apply jobs.
 
 Those values are accepted only on trusted paths and protected by encrypted
-remote state, Workload Identity Federation, `org-terraform` impersonation, and
-the `production-infra` environment gate. If provider schemas later expose
-write-only alternatives for these exact resources, migrate one surface at a time
-and update this note in the same PR.
+remote state, the separated Workload Identity Federation chains in ADR 0047,
+and the `production-infra` environment gate. If provider schemas later expose
+write-only alternatives for these exact resources, migrate one surface at a
+time and update this note in the same PR.
 
 ## Next safe increments
 
@@ -98,6 +146,8 @@ Prefer small, reviewable hardening steps:
   mechanisms where the provider supports them for the resources used here.
 
 Do not broaden the read-only PR service account with project read permissions
-just to recover full-refresh PR plans. That would make a PR-reachable identity
-more powerful and is explicitly declined in
+just to recover full-refresh PR plans. The former full-refresh proposal was
+reopened only for the separate trusted-main identity in ADR 0047; the
+PR-reachable identity remains state-only. The historical decision and reopened
+invariant are recorded in
 [`terraform-cicd-hardening-decisions-2026-05.md`](terraform-cicd-hardening-decisions-2026-05.md).

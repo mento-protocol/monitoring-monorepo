@@ -5,12 +5,10 @@ name: Alerts Rules
 # backend impersonates a seed-project SA (see `alerts/rules/versions.tf`).
 # The plan and apply jobs use a read/write split for plan-time blast-radius
 # reduction:
-#   - apply (on merge) authenticates as the write-capable CI deployer SA
-#     (`GCP_SERVICE_ACCOUNT`) and impersonates `org-terraform@…seed` for the
-#     backend (state writes + locking via `storage.admin`). The deployer SA's
-#     `roles/iam.serviceAccountTokenCreator` grant on `org-terraform` lives in
-#     `terraform/ci-wif.tf` (`ci_alerts_org_terraform_token_creator`, shared
-#     with `alerts/infra/`).
+#   - apply (on merge) authenticates through the production-infra-only WIF
+#     provider as `production-infra-applier@…seed`, then impersonates
+#     `org-terraform@…seed` for backend state writes + locking. The applier's
+#     service-account-scoped Token Creator grant lives in `terraform/ci-wif.tf`.
 #   - plan (on PR) authenticates as the read-only CI SA
 #     (`GCP_SERVICE_ACCOUNT_PLAN`) and overrides the backend impersonation to
 #     `org-terraform-plan-readonly@…seed` via `-backend-config`. That seed SA
@@ -181,8 +179,9 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           # Read-only plan SA: PR plan jobs authenticate as the plan-readonly
           # CI SA so a malicious PR's plan-time data source can't mint tokens
-          # for the write-capable deployer. The apply job below keeps
-          # `GCP_SERVICE_ACCOUNT`. See file header + `terraform/ci-wif.tf`.
+          # for the write-capable deployer. The apply job below uses the
+          # production-infra-only provider and applier. See file header +
+          # `terraform/ci-wif.tf`.
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_PLAN }}
 
       - name: Set up Cloud SDK
@@ -557,8 +556,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1

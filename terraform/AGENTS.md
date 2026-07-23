@@ -16,7 +16,7 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, Workload Identity Federation, and repo-level GitHub Actions secrets and variables owned by the platform stack. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, the separated Terraform/service-deploy Workload Identity Federation chains, and repo-level GitHub Actions secrets and variables owned by the platform stack. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
 
 ## Operating Rules
 
@@ -38,6 +38,29 @@ garden_lane: agent-entry-points
   change alters Terraform-owned template shape (env, probes, resources, or
   template scaling), re-audit or remove `template[0].revision` for that PR.
 - Project-level IAM changes must be ordered behind required bootstrap/API enablement dependencies.
+- Keep routine deploy, PR plan, trusted-main refresh, and production apply
+  identities separate as required by
+  [`ADR 0047`](../docs/adr/0047-separated-terraform-ci-identities.md). The
+  IaC-owned workflow selectors are
+  `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER`,
+  `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`, and
+  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The bootstrap must not route
+  workflows through the refresh selector; a separate cutover-routing PR owns
+  that change while retaining the legacy Token Creator rollback grant.
+- Build trusted-main refresh access from curated non-basic project read roles;
+  never use basic `roles/viewer`. Keep Secret Accessor limited to the exact
+  Terraform-managed secrets and Storage Object Viewer limited to state and
+  deployment-source buckets. Treat service data exposed by predefined readers
+  (including logs, metrics, and artifacts) as part of the confidentiality
+  review. After the routing PR lands, prove the role set through its checked-in
+  `main` route with live full-refresh, unlocked plans for every CI-managed
+  Google-provider stack; add only the exact missing permission named by a
+  provider denial. Drain and audit those runs before authority removal.
+- Only a separate final removal PR may delete the routine deployer's
+  `org-terraform` Token Creator grant, and only through an explicitly approved
+  platform apply. Do not create the peg-policy project or bucket until that
+  removal is applied, all queued and active runs drain, and the final IAM audit
+  confirms the old path is gone.
 
 ## Verification
 

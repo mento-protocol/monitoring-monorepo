@@ -3,7 +3,7 @@ title: governance-watchdog stays a standalone source root in its own GCP project
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: governance-watchdog
 date: 2026-06
 doc_type: adr
@@ -42,8 +42,9 @@ way the first-party packages are.
 
 - Its lockfile is maintained independently (a range once bumped undici and broke
   Discord delivery; it's pinned exact — see the supply-chain override discipline).
-- Its Terraform is a registered stack with CI apply-on-merge + daily drift detection
-  under `org-terraform` impersonation (ADR 0028/0029).
+- Its Terraform is a registered stack with CI apply-on-merge and daily drift
+  detection. Production apply and trusted-main refresh use separate
+  impersonation chains (ADRs 0028, 0029, and 0047).
 
 ## Evidence
 

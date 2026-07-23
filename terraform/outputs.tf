@@ -53,14 +53,29 @@ output "ci_wif_provider" {
   value       = google_iam_workload_identity_pool_provider.github.name
 }
 
+output "ci_production_infra_wif_provider" {
+  description = "Full resource name of the production-infra-only GitHub Actions WIF provider."
+  value       = google_iam_workload_identity_pool_provider.github_production_infra.name
+}
+
 output "ci_deployer_email" {
-  description = "CI deployer SA email — impersonated by GitHub workflow apply jobs. Set as GH repo secret GCP_SERVICE_ACCOUNT."
+  description = "Generic CI deployer SA email — used by service deploys and transitional trusted-main Terraform plans. Set as GH repo secret GCP_SERVICE_ACCOUNT."
   value       = google_service_account.metrics_bridge_deployer.email
+}
+
+output "ci_production_infra_applier_email" {
+  description = "Seed-project CI applier SA email — impersonated only by production-infra environment jobs."
+  value       = google_service_account.production_infra_applier.email
 }
 
 output "ci_plan_readonly_email" {
   description = "CI plan SA email — read-only; impersonated by GitHub workflow plan jobs. Set as GH repo secret GCP_SERVICE_ACCOUNT_PLAN."
   value       = google_service_account.metrics_bridge_plan_readonly.email
+}
+
+output "ci_terraform_refresh_readonly_email" {
+  description = "CI refresh SA email — after cutover, trusted-main read-only plans impersonate it before the seed refresh identity."
+  value       = google_service_account.terraform_refresh_readonly.email
 }
 
 output "agent_readonly_email" {

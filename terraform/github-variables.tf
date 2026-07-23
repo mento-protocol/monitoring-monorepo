@@ -1,6 +1,46 @@
 # GitHub repo Actions variables (as opposed to secrets — see
 # `github-secrets.tf`) managed by the platform stack.
 #
+# Terraform CI identity routing
+# ──────────────────────────────
+#
+# Provider resource names and service-account emails are identifiers, not
+# credentials. Keep them as IaC-owned repository variables and publish them only
+# after the platform-owned IAM chains exist in the same reviewed apply.
+resource "github_actions_variable" "gcp_production_infra_workload_identity_provider" {
+  repository    = "monitoring-monorepo"
+  variable_name = "GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER"
+  value         = google_iam_workload_identity_pool_provider.github_production_infra.name
+
+  depends_on = [
+    google_service_account_iam_member.production_infra_applier_wif_binding,
+    google_service_account_iam_member.production_infra_applier_org_terraform_token_creator,
+  ]
+}
+
+resource "github_actions_variable" "gcp_production_infra_service_account" {
+  repository    = "monitoring-monorepo"
+  variable_name = "GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT"
+  value         = google_service_account.production_infra_applier.email
+
+  depends_on = [
+    google_service_account_iam_member.production_infra_applier_wif_binding,
+    google_service_account_iam_member.production_infra_applier_org_terraform_token_creator,
+  ]
+}
+
+resource "github_actions_variable" "gcp_terraform_refresh_service_account" {
+  repository    = "monitoring-monorepo"
+  variable_name = "GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT"
+  value         = google_service_account.terraform_refresh_readonly.email
+
+  depends_on = [
+    google_service_account_iam_member.terraform_refresh_readonly_wif_binding,
+    google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator,
+    google_storage_bucket_iam_member.state_bucket_refresh_readonly,
+  ]
+}
+
 # Terraform-apply Slack channel routing
 # ───────────────────────────────────────
 #
