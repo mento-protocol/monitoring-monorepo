@@ -23,9 +23,15 @@ through `ui-dashboard/src/lib/csp.ts` and polls through `useGQL` every 30s. A
 single pool page fans out roughly 15-20 parallel GraphQL hooks
 (`ui-dashboard/src/lib/graphql.ts`).
 
-`metrics-bridge` polls `HASURA_URL` every 30s (`metrics-bridge/src/config.ts`
-and `metrics-bridge/src/env.ts`) and exports the gauges that back Grafana
-alerts. Today this is the same hosted endpoint the public dashboard reads.
+The primary `metrics-bridge` loop polls `HASURA_URL` every 30s by default
+(`metrics-bridge/src/config.ts` and `metrics-bridge/src/env.ts`) and exports the
+gauges that back Grafana alerts. The isolated peg loop also uses `HASURA_URL`:
+once `PEG_POLICY_URL` activates it, every 15s cycle issues one bounded
+Pool/TradingLimit/SwapEvent companion query per registry monitor, with at most
+1,000 SwapEvent rows per query (`metrics-bridge/src/peg/runtime.ts` and
+`metrics-bridge/src/peg/graphql.ts`). It remains dormant while the protected
+policy artifact is absent. Both bridge paths share the same hosted endpoint as
+the public dashboard, even though peg failures never gate `/health`.
 
 Envio's small tier has returned HTTP 429 `"Tier Quota"` without `Retry-After`
 when the shared monthly endpoint quota is exhausted

@@ -19,6 +19,7 @@ import {
   BRIDGE_POOLS_ORACLE_TX_QUERY,
   BRIDGE_POOLS_QUERY,
 } from "../src/graphql.js";
+import { PEG_STRUCTURAL_QUERY } from "../src/peg/graphql.js";
 
 // See ui-dashboard/src/lib/__tests__/graphql-contract.test.ts for the full
 // rationale. Two complementary checks run per query, mirroring that test:
@@ -182,6 +183,7 @@ const QUERIES: Array<[string, string]> = [
     BRIDGE_POOL_LIQUIDITY_STRATEGIES_QUERY,
   ],
   ["BRIDGE_CDPS_QUERY", BRIDGE_CDPS_QUERY],
+  ["PEG_STRUCTURAL_QUERY", PEG_STRUCTURAL_QUERY],
 ];
 
 describe("GraphQL contract: metrics-bridge queries vs indexer-envio/schema.graphql", () => {

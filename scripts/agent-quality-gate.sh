@@ -706,6 +706,9 @@ add_package_quality_commands() {
   fi
   add_turbo_package_task "$package_name" "lint" "$reason"
   add_turbo_package_task "$package_name" "typecheck" "$reason"
+  if [[ "$package_name" == "@mento-protocol/metrics-bridge" ]]; then
+    add_command "pnpm --filter $package_name build" "$reason"
+  fi
   add_command "pnpm --filter $package_name test:coverage" "$reason (coverage floor)"
   add_turbo_package_task "$package_name" "knip" "$reason (knip: unused files/deps/exports)"
   add_command "pnpm code-health:deps" "$reason (dep-cruiser: cross-package boundaries + cycles)"
@@ -1099,6 +1102,7 @@ map_lockfile_importer_to_bundle() {
 route_lockfile_change() {
   add_surface "workspace"
   add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
+  add_command "node scripts/check-peg-registry-integrity.mjs" "root lockfile changed (peg registry authority dependency)"
 
   local importers
   if lockfile_only_manifest_change && importers="$(lockfile_scoped_importers)"; then
@@ -1703,13 +1707,18 @@ while IFS= read -r path; do
     metrics-bridge/*)
       add_surface "metrics-bridge"
       case "$path" in
+        metrics-bridge/peg-registry.json)
+          add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry changed"
+          ;;
+      esac
+      case "$path" in
         metrics-bridge/src/*)
           add_checklist "docs/pr-checklists/stateful-data-ui.md" "metrics bridge data flow changed"
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run runtime changed"
           ;;
       esac
       case "$path" in
-        metrics-bridge/src/metrics.ts|metrics-bridge/src/cdp-metrics.ts)
+        metrics-bridge/src/metrics.ts|metrics-bridge/src/cdp-metrics.ts|metrics-bridge/src/peg/metrics.ts)
           add_command "pnpm alerts:rules:lint" "metrics-bridge gauge registry changed (alerts cross-check)"
           ;;
       esac
@@ -1766,6 +1775,11 @@ while IFS= read -r path; do
       # metadata or helpers can shift the emitted JS. Mirrors the
       # `shared-config/**` entry in `.github/workflows/size-limit.yml`.
       add_ui_size_limit "shared-config exports feed the dashboard bundle"
+      case "$path" in
+        shared-config/chain-metadata.json|shared-config/deployment-namespaces.json|shared-config/oracle-reporters.json|shared-config/src/chains.ts|shared-config/src/oracle-reporters.ts|shared-config/src/tokens.ts)
+          add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry authority input changed"
+          ;;
+      esac
       case "$path" in
         shared-config/src/thresholds.ts)
           add_command "node scripts/check-deviation-threshold-drift.mjs" "shared deviation threshold source changed"
@@ -1836,6 +1850,9 @@ while IFS= read -r path; do
       add_terraform_validate_commands "alerts/rules" "alerts/rules Terraform changed"
       add_command "pnpm alerts:rules:lint" "alerts/rules PromQL lint + metric cross-check"
       case "$path" in
+        alerts/rules/peg-thresholds.json)
+          add_command "node scripts/check-peg-registry-integrity.mjs" "peg threshold policy changed"
+          ;;
         alerts/rules/main.tf|alerts/rules/rules-fpmms.tf)
           add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold Terraform consumer changed"
           ;;
@@ -2175,6 +2192,10 @@ while IFS= read -r path; do
           ;;
         scripts/alert-rules-lint.mjs|scripts/alert-rules-lint.test.mjs)
           add_command "pnpm alerts:rules:lint:test" "alert-rules lint helper changed"
+          ;;
+        scripts/check-peg-registry-integrity.mjs|scripts/check-peg-registry-integrity.test.mjs)
+          add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry integrity checker changed"
+          add_command "node scripts/check-peg-registry-integrity.test.mjs" "peg registry integrity checker changed"
           ;;
         scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
           add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "active": {
+    "version": "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f",
+    "rolloverAckExpectedSeconds": 300,
+    "assets": {
+      "europ-schuman": {
+        "target": 1,
+        "warnDeviationBps": 25,
+        "criticalDeviationBps": 50,
+        "premiumWarnBps": 25,
+        "warnSustainSeconds": 600,
+        "criticalSustainSeconds": 1200,
+        "durationQuantile": 0.2,
+        "minimumCoverageFraction": 0.8,
+        "blindConsecutivePolls": 10,
+        "permanentlyDeadSeconds": 259200,
+        "structuralWarnFraction": 0.8,
+        "freshnessGraceSeconds": 300,
+        "deepVenueSource": "bitvavo_eur",
+        "sources": {
+          "bitvavo_eur": {
+            "authority": "deep",
+            "referenceSizeCap": 50000,
+            "pollIntervalSeconds": 30,
+            "staleAfterSeconds": 120,
+            "spreadEnvelopeBps": 30,
+            "conversionErrorBps": 0
+          },
+          "kraken_eur": {
+            "authority": "secondary",
+            "referenceSizeCap": 50000,
+            "pollIntervalSeconds": 60,
+            "staleAfterSeconds": 300,
+            "spreadEnvelopeBps": 75,
+            "conversionErrorBps": 0
+          },
+          "kraken_usd": {
+            "authority": "display",
+            "referenceSizeCap": 50000,
+            "pollIntervalSeconds": 300,
+            "staleAfterSeconds": 600,
+            "spreadEnvelopeBps": 100,
+            "conversionErrorBps": 30
+          }
+        }
+      }
+    }
+  },
+  "previous": null
+}

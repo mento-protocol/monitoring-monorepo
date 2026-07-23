@@ -40,6 +40,11 @@ routing.
   when the base alert query is firing. Do not let annotation-only series
   disappear while the base alert can still fire; prefer a label-matched
   fallback or sentinel series, then branch Slack templates on the sentinel.
+- **Peg rollover rule scope is encoded in local names.** PromQL locals that
+  select versioned peg metrics must use `peg_active_*_(promql|expr)`,
+  `peg_previous_*_(promql|expr)`, or
+  `peg_rollover_ack_*_(promql|expr)`. The alert-rule linter extracts this scope
+  and rejects unscoped or cross-version selectors while `previous` is retained.
 
 ## Verification
 
