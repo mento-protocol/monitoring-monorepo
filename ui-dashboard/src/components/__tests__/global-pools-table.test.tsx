@@ -149,15 +149,12 @@ describe("filterGlobalPools", () => {
     expect(filterGlobalPools(entries, "does-not-exist", null)).toEqual([]);
   });
 
-  it("keeps the union of selected chains", () => {
-    expect(filterGlobalPools(entries, "", [143, 137])).toEqual([
-      entries[1],
-      entries[2],
-    ]);
+  it("keeps only the selected chain", () => {
+    expect(filterGlobalPools(entries, "", 143)).toEqual([entries[1]]);
   });
 
-  it("keeps an explicit empty chain selection empty", () => {
-    expect(filterGlobalPools(entries, "", [])).toEqual([]);
+  it("keeps all chains when no chain is selected", () => {
+    expect(filterGlobalPools(entries, "", null)).toEqual(entries);
   });
 });
 
@@ -190,8 +187,10 @@ describe("GlobalPoolsTable filters", () => {
       />,
     );
 
-    expect(html).toContain('aria-label="Filter pools by chain"');
-    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain(
+      'role="radiogroup" aria-label="Filter pools by chain"',
+    );
+    expect(html).toContain('role="radio" aria-checked="true"');
     expect(html).toContain(">All</button>");
     expect(html).toContain(">Celo</button>");
     expect(html).toContain(">Monad</button>");

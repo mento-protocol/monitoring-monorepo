@@ -7,6 +7,7 @@ import { useIsWeekend } from "@/hooks/use-is-weekend";
 import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { useTableSort } from "@/lib/use-table-sort";
+import { useRovingTabIndex } from "@/lib/use-roving-tab-index";
 import {
   GLOBAL_SORT_KEYS,
   globalPoolKey,
@@ -35,11 +36,11 @@ export { globalPoolKey, sortGlobalPools } from "./global-pools-table/sort";
 export function filterGlobalPools(
   entries: GlobalPoolEntry[],
   search: string,
-  chainIds: readonly number[] | null,
+  chainId: number | null,
 ): GlobalPoolEntry[] {
   const normalizedSearch = search.trim().toLocaleLowerCase();
   return entries.filter((entry) => {
-    if (chainIds !== null && !chainIds.includes(entry.network.chainId)) {
+    if (chainId !== null && chainId !== entry.network.chainId) {
       return false;
     }
     return (
@@ -57,7 +58,7 @@ function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
 
 interface GlobalPoolsTableProps {
   entries: GlobalPoolEntry[];
-  /** Homepage owns the local pool-name and multi-chain controls. */
+  /** Homepage owns the local pool-name and chain controls. */
   showFilters?: boolean;
   initialIsWeekend?: boolean;
   volume24hByKey?: Map<string, number | null | undefined>;
@@ -149,6 +150,27 @@ function GlobalPoolFilters({
 }: {
   filters: ReturnType<typeof useGlobalPoolFilters>;
 }) {
+  const activeIndex =
+    filters.selectedChainId === null
+      ? 0
+      : Math.max(
+          0,
+          filters.chainOptions.findIndex(
+            (option) => option.chainId === filters.selectedChainId,
+          ) + 1,
+        );
+  const { groupRef, getItemProps, handleKeyDown } = useRovingTabIndex({
+    activeIndex,
+    itemCount: filters.chainOptions.length + 1,
+    activation: "automatic",
+    arrowKeys: "all",
+    onActivate: (index) =>
+      filters.selectChain(
+        index === 0 ? null : (filters.chainOptions[index - 1]?.chainId ?? null),
+      ),
+  });
+  const allRovingProps = getItemProps(0);
+
   return (
     <div className="mb-2 flex flex-wrap items-center gap-2">
       <label className="min-w-48 flex-1 sm:max-w-xs">
@@ -163,35 +185,48 @@ function GlobalPoolFilters({
         />
       </label>
       <div
-        role="group"
+        ref={groupRef}
+        role="radiogroup"
         aria-label="Filter pools by chain"
         className="flex flex-wrap items-center gap-1.5"
+        onKeyDown={handleKeyDown}
+        tabIndex={-1}
       >
-        <span className="mr-1 text-xs text-slate-500">Chains:</span>
+        <span className="text-xs text-slate-500 mr-1">Chains:</span>
         <button
           type="button"
-          aria-pressed={filters.selectedChainIds === null}
-          onClick={() => filters.setAllChains()}
+          role="radio"
+          aria-checked={filters.selectedChainId === null}
+          ref={allRovingProps.ref}
+          tabIndex={allRovingProps.tabIndex}
+          onFocus={allRovingProps.onFocus}
+          onClick={() =>
+            filters.selectedChainId !== null && filters.selectChain(null)
+          }
           className={
-            "rounded-full px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
-            (filters.selectedChainIds === null
+            "rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+            (filters.selectedChainId === null
               ? "bg-indigo-900/40 text-indigo-200"
               : "bg-slate-800/60 text-slate-400 hover:text-slate-200")
           }
         >
           All
         </button>
-        {filters.chainOptions.map((option) => {
-          const active =
-            filters.selectedChainIds?.includes(option.chainId) ?? false;
+        {filters.chainOptions.map((option, index) => {
+          const active = filters.selectedChainId === option.chainId;
+          const rovingProps = getItemProps(index + 1);
           return (
             <button
               key={option.chainId}
               type="button"
-              aria-pressed={active}
-              onClick={() => filters.toggleChain(option.chainId)}
+              role="radio"
+              aria-checked={active}
+              ref={rovingProps.ref}
+              tabIndex={rovingProps.tabIndex}
+              onFocus={rovingProps.onFocus}
+              onClick={() => !active && filters.selectChain(option.chainId)}
               className={
-                "rounded-full px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+                "rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
                 (active
                   ? "bg-slate-700 text-slate-200"
                   : "bg-slate-800/60 text-slate-400 hover:text-slate-200")
@@ -208,11 +243,8 @@ function GlobalPoolFilters({
 
 function useGlobalPoolFilters(entries: GlobalPoolEntry[]) {
   const [search, setSearch] = useState("");
-  // `null` represents all chains; an empty array is the intentional
-  // zero-chain state after the user deselects every option.
-  const [selectedChainIds, setSelectedChainIds] = useState<number[] | null>(
-    null,
-  );
+  // `null` represents all chains; otherwise exactly one chain is selected.
+  const [selectedChainId, setSelectedChainId] = useState<number | null>(null);
   const chainOptions = useMemo(() => {
     const seen = new Set<number>();
     return entries.flatMap((entry) => {
@@ -222,28 +254,16 @@ function useGlobalPoolFilters(entries: GlobalPoolEntry[]) {
     });
   }, [entries]);
   const filteredEntries = useMemo(
-    () => filterGlobalPools(entries, search, selectedChainIds),
-    [entries, search, selectedChainIds],
+    () => filterGlobalPools(entries, search, selectedChainId),
+    [entries, search, selectedChainId],
   );
-  const allChainIds = chainOptions.map((option) => option.chainId);
   return {
     search,
     setSearch,
-    selectedChainIds,
+    selectedChainId,
     chainOptions,
-    allChainIds,
     filteredEntries,
-    setAllChains: () => setSelectedChainIds(null),
-    toggleChain: (chainId: number) =>
-      setSelectedChainIds((current) => {
-        const next =
-          current === null
-            ? [chainId]
-            : current.includes(chainId)
-              ? current.filter((id) => id !== chainId)
-              : [...current, chainId];
-        return next.length === allChainIds.length ? null : next;
-      }),
+    selectChain: setSelectedChainId,
   };
 }
 
