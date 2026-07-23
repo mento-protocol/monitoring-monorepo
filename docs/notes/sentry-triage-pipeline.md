@@ -193,6 +193,17 @@ contract. `ui-dashboard/vercel.json` denies `git.deploymentEnabled` for
 deployment (and its production-linked secrets) before human review — a trust
 boundary earlier than the path-aware skip script (ADR 0019, issue #1452).
 
+The LLM agent runs in a **read-only `agent` job** (contents:read + issues:read,
+no App token) and hands its whole working tree to a separate **trusted
+`finalize` job** as an artifact (issue #1373). Finalize re-derives the changed
+set and re-runs the diff guard against its own pristine clone — trusting no
+agent-provided metadata — before it mints the App token, pushes, and opens the
+PR. So a prompt-injected agent that exfiltrates its job's `github.token` gets a
+read-only token that cannot write issues, push, or open PRs; only the Claude
+OAuth inference token stays exposed (inherent to the action, out of scope for
+#1373). A live-FS symlink tripwire in the agent job rejects a symlink-exfil diff
+before it can reach the handoff artifact.
+
 Do not use manual dispatch as a probe: there is no dry-run mode. Dispatch from
 `main`; an off-`main` dispatch is a deliberate no-op. On `main`, when the
 stage is enabled and the issue is eligible, dispatch creates a real branch and
