@@ -12,8 +12,9 @@ garden_lane: pr-checklists-process
 
 # Code Health PR Checklist
 
-Triggered when your change touches lint configs, package boundaries, package
-dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
+Triggered when your change touches lint configs, package boundaries,
+dependencies, coverage thresholds, TypeScript compiler options, env loading,
+or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 
 ## Before pushing
 
@@ -37,6 +38,34 @@ dependencies, or the `.dependency-cruiser.cjs` / `*/knip.json` files.
       `ui-dashboard/src/app/<new-route>/`, add a matching
       `dashboard-route-private-<new-route>` rule to `.dependency-cruiser.cjs`
       so that directory stays private to its route.
+
+## Adjacent enforced conventions
+
+- CI coverage floors run through each package's `test:coverage` command (Aegis
+  uses `test:cov`), not a bare `test`; CI remains the full-floor authority when
+  the local gate selects scoped related tests. Use `--full-local-tests` to force
+  the full local floor. The threshold source of truth is the package's Vitest
+  config or Aegis Jest config. Re-measure after material test or source changes
+  and use `floor(measured) - 2`, preserving any scoped buckets and exclusions.
+- [`shared-config/tsconfig.json`](../../shared-config/tsconfig.json) enables
+  `verbatimModuleSyntax`; use `import type` for type-only imports there.
+- [ADR 0009](../adr/0009-supply-chain-hardening.md) owns override and
+  release-age policy. The weekly `override-prune-report` job flags stale
+  overrides and release-age exclusions in its canonical issue; it is advisory
+  and never edits package-manager config. Any `pnpm audit --json` exception
+  stays scoped by advisory, module, version, and exact dependency path.
+- `pnpm skew:check` compares every cataloged dependency with
+  [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml). Workspace-only consumers
+  use `catalog:`; independently installed or deployed roots keep literal pins,
+  and [`version-skew-check.mjs`](../../scripts/version-skew-check.mjs) prevents
+  those pins from drifting.
+- Packages with an env module parse supported variables through Zod at module
+  load. The dashboard keeps public values in
+  [`src/env.ts`](../../ui-dashboard/src/env.ts) and server-only values in
+  [`src/server-env.ts`](../../ui-dashboard/src/server-env.ts); never import
+  `serverEnv` from a Client Component. Keep direct `process.env` reads when a
+  test changes the value after module initialization or the key is computed at
+  runtime.
 
 ## How the gates behave
 

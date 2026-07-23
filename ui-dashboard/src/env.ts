@@ -5,7 +5,7 @@ import { z } from "zod/mini";
 // `process.env.X === "true"` semantics exactly. Using an optional string
 // instead of `z.enum(["true","false"])` so a typo
 // doesn't crash the dashboard at module load. See
-// docs/pr-checklists/recurring-review-patterns.md "Env-var validation".
+// docs/pr-checklists/code-health.md "Adjacent enforced conventions".
 const envBool = z.pipe(
   z.optional(z.string()),
   z.transform((value) => value === "true"),
