@@ -164,6 +164,18 @@ generated-artifact, or runtime proof; retain all applicable verification.
    If browser tools are unavailable in the session, say so explicitly and do not
    claim browser verification happened.
 
+4. Deep security scan: when the diff adds or changes logic on a
+   security-sensitive surface — authn/authz, secrets handling, injection
+   surfaces, network-facing handlers, deploy/CI paths, or onchain code —
+   check whether the `claude-security` plugin's scan-changes job is available
+   in this session. The plugin is developer-installed and Claude Code only;
+   this repo does not declare it. When available, run the gated scan as the
+   user's personal ship flow does. When unavailable (Codex, hosted checkouts,
+   or no plugin), do not install or imitate it: direct the quality gate and
+   closeout review at those surfaces instead and record
+   `Claude Security scan: skipped (<surface>)` in the final summary so the
+   deep pass can run from a session that has the plugin.
+
 ## Commit And Push
 
 Stage only the intended files. Use a conventional commit prefix that matches the
