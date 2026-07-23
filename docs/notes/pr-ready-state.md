@@ -22,6 +22,14 @@ must have a clean feedback ledger and the subsequent current-head
 `pr:ready-state` result must be ready. Agent-specific loops may gather extra
 context or post replies, but they must preserve that two-projection contract.
 
+The probe shells out to gh, so it cannot run in Claude cloud sessions whose
+proxy blocks gh's API paths; a variant passing the REST + GraphQL +
+`--slurp` capability gate runs it as written, passing `--repo <owner/name>`
+since gh cannot infer the repo from the proxy remote. Blocked sessions use
+the MCP emulation documented in
+[`github-tooling-surfaces.md`](github-tooling-surfaces.md) and label their
+all-clear MCP-emulated rather than probe-verified.
+
 ## Readiness model
 
 Readiness is driven by the raw GitHub status rollup plus required review gates.
@@ -297,11 +305,13 @@ Field expectations:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md); keep
    behavioral and runtime verification in the validation record.
 
-5. Run `pnpm --silent pr:feedback-state --pr <number> --json` for the feedback
-   sweep. After its ledger is clean, run
-   `pnpm pr:ready-state --pr <number> --json` for the final required-readiness
-   decision. For a foreground wait loop, use
-   `pnpm pr:ready-state --pr <number> --watch --compact --until-ready`.
+5. Run `pnpm --silent pr:feedback-state --pr <number> --repo <BASE_OWNER/REPO>
+--json` for the feedback sweep. After its ledger is clean, run
+   `pnpm pr:ready-state --pr <number> --repo <BASE_OWNER/REPO> --json` for the
+   final required-readiness decision. For a foreground wait loop, use
+   `pnpm pr:ready-state --pr <number> --repo <BASE_OWNER/REPO> --watch
+--compact --until-ready`. Bind `--repo` to the base repository — checkout
+   inference can select the wrong same-number PR on fork PRs.
 6. If feedback-state `ready` is false, inspect and handle
    `requiredFeedbackBlockers`, `unresolvedReviewThreads`,
    `unrepliedRootReviewComments`, `blockingTopLevelBotComments`, and any

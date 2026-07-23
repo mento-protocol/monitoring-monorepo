@@ -46,6 +46,24 @@ every fresh macOS worktree. Linux still requires a per-worktree successful
 Playwright installer marker because `--with-deps` also provisions host libraries
 there.
 
+To keep a fresh per-PR worktree from starting with a 100% cold Turbo cache,
+`setup.sh`, `bootstrap-worktree.sh`, and the agent quality gate export
+`TURBO_CACHE_DIR="$HOME/.cache/turbo-monitoring-monorepo"` (unless the caller
+already set `TURBO_CACHE_DIR`, or opted out with `AGENT_TURBO_SHARED_CACHE=0`),
+so every worktree reads and writes one shared local Turbo cache outside any
+worktree. When `HOME` is unset or that directory cannot be created or written to
+(e.g. a sandboxed agent whose writable allowlist excludes it), the scripts leave
+`TURBO_CACHE_DIR` unset and fall back to Turbo's per-worktree default, so those
+runs stay cold. Turbo 2.9.x writes each cache artifact through a temp file plus
+atomic rename with PID-namespaced temp names and only reaps orphaned `.tmp` files
+older than an hour, so concurrent gate runs in two worktrees share the dir
+safely. The shared dir is not reclaimed when a worktree is deleted and grows
+without bound; it is pure cache, so `rm -rf
+"$HOME/.cache/turbo-monitoring-monorepo"` any time to reclaim disk (see
+[agent-quality-gate-mechanics.md](agent-quality-gate-mechanics.md)). Remote
+caching stays disabled (`turbo.json` `remoteCache.enabled: false`); this is local
+sharing only. Refs GitHub issue 1411.
+
 ## Claude Code on the web setup
 
 Claude Code on the web sessions run in a hosted container that does not inherit
@@ -69,7 +87,16 @@ Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
 (mirrored under `.agents/skills/` for Codex), so the familiar `/ship` and
 `/babysit-pr` workflows resolve to repo-visible commands (`pnpm
 agent:quality-gate`, `pnpm agent:autoreview`, `pnpm pr:ready-state`) without
-needing a developer's personal skills present. When the Claude `Monitor` tool
-is unavailable in the hosted session, the `babysit-pr` skill falls back to
-`pnpm pr:ready-state --pr <number> --watch --compact --until-ready` as the
-foreground watch loop.
+needing a developer's personal skills present.
+
+### GitHub access in hosted sessions: gh is platform-blocked
+
+In Claude cloud sessions the platform's GitHub credential proxy blocks gh's
+repo API and GraphQL regardless of tokens or allowlist entries (`gh auth
+status` still passes, so it is not a capability signal), and
+`pnpm pr:ready-state` cannot run absent the capability-gate exception. Hosted sessions use the GitHub MCP tools
+plus the `babysit-pr` cloud watch loop; the foreground
+`pnpm pr:ready-state --pr <number> --watch --compact --until-ready` loop
+remains the local fallback when the Claude `Monitor` tool is unavailable.
+Mechanics, the gh→MCP mapping, and the empirical findings live in
+[`github-tooling-surfaces.md`](github-tooling-surfaces.md).

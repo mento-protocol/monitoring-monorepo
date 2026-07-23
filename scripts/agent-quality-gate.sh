@@ -227,6 +227,29 @@ fi
 # for TTY confirmation.
 export CI="${CI:-true}"
 
+# Shared Turbo cache across worktrees (GitHub issue #1411): a fresh per-PR
+# worktree otherwise starts with a 100% cold Turbo cache and re-runs every
+# typecheck/lint/knip/build from scratch even when inputs match main. Point
+# Turbo's local filesystem cache at one stable per-repo location outside any
+# worktree so warm entries carry across worktrees. Turbo 2.9.x writes every
+# cache artifact (.tar.zst, manifest, meta) via temp-file + atomic rename with
+# PID-namespaced temp names, and its GC only removes orphaned .tmp files older
+# than an hour, so concurrent gate runs sharing this dir cannot corrupt it.
+# Respect a caller-provided TURBO_CACHE_DIR; set AGENT_TURBO_SHARED_CACHE=0 to
+# opt out and fall back to Turbo's per-worktree default. Also fall back when
+# the candidate directory cannot be created or written to: sandboxed/agent
+# environments can have a restricted writable allowlist that excludes paths
+# outside the repo, same reasoning as the TMPDIR check above.
+if [[ -z "${TURBO_CACHE_DIR:-}" &&
+  "${AGENT_TURBO_SHARED_CACHE:-1}" != "0" &&
+  "${AGENT_TURBO_SHARED_CACHE:-1}" != "false" &&
+  -n "${HOME:-}" ]]; then
+  turbo_cache_candidate="${HOME}/.cache/turbo-monitoring-monorepo"
+  if mkdir -p "$turbo_cache_candidate" 2>/dev/null && [[ -w "$turbo_cache_candidate" ]]; then
+    export TURBO_CACHE_DIR="$turbo_cache_candidate"
+  fi
+fi
+
 tmpfiles=()
 # Set by run_with_timeout for the most recent mapped command so callers can tell
 # a timeout apart from an ordinary non-zero exit. Read only right after the call.
@@ -2457,6 +2480,9 @@ echo
 echo "Base: ${base_ref}"
 echo "Head: ${head_ref}"
 echo "Mode: ${mode}"
+if [[ -n "${TURBO_CACHE_DIR:-}" ]]; then
+  echo "Turbo cache dir: ${TURBO_CACHE_DIR}"
+fi
 echo
 echo "Changed paths:"
 sed 's/^/- /' "$changed_paths_file"

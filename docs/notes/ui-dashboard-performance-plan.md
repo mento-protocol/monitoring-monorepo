@@ -1,3 +1,17 @@
+---
+title: "UI Dashboard Performance Plan (archived)"
+status: archived
+owner: eng
+canonical: false
+last_verified: 2026-07-23
+archived: 2026-07-23
+archived_reason: "Execution plan for the local-dev/dashboard performance epic (#1404); shipped levers are live and remaining follow-ups are tracked as GitHub Issues. Retained for the measurement baselines and rationale."
+doc_type: plan
+scope: ui-dashboard
+review_interval_days: 365
+garden_lane: notes-plans-archive
+---
+
 # UI Dashboard Performance Plan — monitoring.mento.org
 
 > Status: draft execution plan (2026-07-06). Grounded in live production measurement

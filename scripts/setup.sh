@@ -17,6 +17,24 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Shared Turbo cache across worktrees (GitHub issue #1411): keep the local Turbo
+# filesystem cache at one stable per-repo location outside any worktree so a
+# fresh per-PR worktree reuses warm entries instead of starting 100% cold.
+# Respect a caller-provided TURBO_CACHE_DIR; set AGENT_TURBO_SHARED_CACHE=0 to
+# opt out and fall back to Turbo's per-worktree default. Also fall back when
+# the candidate directory cannot be created or written to: sandboxed/agent
+# environments can have a restricted writable allowlist that excludes paths
+# outside the repo.
+if [ -z "${TURBO_CACHE_DIR:-}" ] &&
+  [ "${AGENT_TURBO_SHARED_CACHE:-1}" != "0" ] &&
+  [ "${AGENT_TURBO_SHARED_CACHE:-1}" != "false" ] &&
+  [ -n "${HOME:-}" ]; then
+  turbo_cache_candidate="${HOME}/.cache/turbo-monitoring-monorepo"
+  if mkdir -p "$turbo_cache_candidate" 2>/dev/null && [ -w "$turbo_cache_candidate" ]; then
+    export TURBO_CACHE_DIR="$turbo_cache_candidate"
+  fi
+fi
+
 hash_inputs() {
   local file_list
   file_list="$(mktemp "${TMPDIR:-/tmp}/monitoring-setup-hash.XXXXXX")"

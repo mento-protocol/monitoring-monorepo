@@ -69,7 +69,16 @@ In parallel:
   git fetch "$CANONICAL_REMOTE" main:refs/remotes/"$CANONICAL_REMOTE"/main
   ```
   Capture that fetched ref as `CANONICAL_MAIN_REF`. Stop if no verified remote
-  exists. In normal mode, require `CANONICAL_REMOTE=origin` because the deploy
+  exists. In any Claude cloud session skip the `gh repo view` check — the
+  remote is the credential-proxy URL, which gh cannot map to a repository
+  even when the capability gate passes
+  ([`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md));
+  verify by content: the remote URL's repository path must end in
+  `mento-protocol/monitoring-monorepo` (the git credential proxy embeds the
+  attached repo slug) and the `git fetch` above must succeed — otherwise stop
+  and hand the deploy to a gh-capable surface. This check does not waive the
+  `CANONICAL_REMOTE=origin` requirement. In normal mode, require
+  `CANONICAL_REMOTE=origin` because the deploy
   wrapper pushes `origin/envio`; a fork `origin` cannot trigger the canonical
   Envio deployment.
 - In normal mode, `git rev-parse --abbrev-ref HEAD` supplies `BRANCH`. A
