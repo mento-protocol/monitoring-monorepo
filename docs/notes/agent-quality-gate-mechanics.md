@@ -693,30 +693,17 @@ install, dep-cruiser, coverage floors, mutation baselines, and Terraform.
 The gate exports `TURBO_CACHE_DIR="$HOME/.cache/turbo-monitoring-monorepo"`
 before running any Turbo task (unless the caller already set `TURBO_CACHE_DIR`,
 or opted out with `AGENT_TURBO_SHARED_CACHE=0`), so every worktree shares one
-local Turbo cache outside any worktree and a fresh per-PR worktree reuses warm
-typecheck/lint/knip/build/size-limit entries instead of starting 100% cold. The
-cache location is deliberately absent from the gate's freshness stamp: Turbo
-restores a cache entry only when the entry's own content-addressed input hash
-matches, so the cache directory changes a command's speed, never its pass/fail
-outcome, and the `implementation_signature`/stamp machinery does not need to
-fingerprint it. Editing this script does re-hash `implementation_signature` and
-invalidate existing stamps once (expected). Turbo 2.9.x writes each cache
-artifact via temp file + atomic rename with PID-namespaced temp names, so two
-worktrees' gates writing the shared dir concurrently cannot corrupt it.
-
-When `HOME` is unset or `$HOME/.cache/turbo-monitoring-monorepo` cannot be
-created or written to — e.g. a sandboxed agent whose writable allowlist excludes
-paths outside the repo — the gate leaves `TURBO_CACHE_DIR` unset and falls back
-to Turbo's per-worktree default, so those runs stay cold and share nothing. The
-`Turbo cache dir:` header line is printed only when the shared path is active;
-its absence means the fallback (or the opt-out) is in effect.
-
-The shared cache lives outside every worktree, so unlike the old per-worktree
-`.turbo/cache` it is not reclaimed when a worktree is deleted. Turbo only reaps
-its own orphaned `.tmp` files, never finished entries, so the directory grows
-without bound as task hashes accumulate. It is pure cache — delete it any time to
-reclaim disk and Turbo repopulates on the next run: `rm -rf
-"$HOME/.cache/turbo-monitoring-monorepo"`. Refs GitHub issue 1411.
+Turbo cache and a fresh per-PR worktree reuses warm entries instead of starting
+cold. The location is deliberately absent from the freshness stamp: Turbo
+restores an entry only on a content-addressed input-hash match, so the
+directory changes speed, never pass/fail. Turbo 2.9.x writes artifacts via
+temp file + atomic rename with PID-namespaced temp names, so concurrent gates
+cannot corrupt the shared dir. When `HOME` is unset or the dir is unwritable
+(e.g. a sandbox allowlist excluding it), the gate leaves `TURBO_CACHE_DIR`
+unset and falls back to Turbo's per-worktree default; the `Turbo cache dir:`
+header prints only when sharing is active. The shared dir is pure cache and
+grows without bound — delete it any time to reclaim disk:
+`rm -rf "$HOME/.cache/turbo-monitoring-monorepo"`. Refs GitHub issue 1411.
 
 ## Common local-gate traps
 
