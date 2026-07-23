@@ -679,8 +679,22 @@ jobs:
           # subsequently-withdrawn run. Idempotent: the selector's dedup (SHORT-ID in
           # an open PR OR the fix-pr-opened label) stops the stub from being
           # re-picked, so it does not re-comment on later runs.
-          gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
-            --body "$(node "${fin}" autofix-comment --url "${pr_url}")"
+          #
+          # The marker is already applied, and the selector skips a marked stub —
+          # so a marker without this pointer would strand the stub as Routed (the
+          # digest's extractAutofixUrl finds no pointer) with no path to repair,
+          # since the marker also blocks the reconcile path. Retry the pointer; if
+          # it still fails, ROLL BACK the marker so the open PR routes to reconcile
+          # next run, which re-applies both the marker and this pointer. A rollback
+          # that itself cannot be confirmed fails the job loudly (issue #1389).
+          post_pointer() {
+            gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
+              --body "$(node "${fin}" autofix-comment --url "${pr_url}")"
+          }
+          if ! retry3 "post Autofixed pointer on #${QUEUE_ISSUE}" post_pointer; then
+            echo "::warning::pointer write failed after retries; rolling back the fix-pr-opened marker so the reconcile path re-applies both next run."
+            retry3 "roll back fix-pr-opened marker on #${QUEUE_ISSUE}" remove_stale_marker || exit 1
+          fi
 
       # Reconcile-only path (no agent, no push). The selector routes a stub here
       # when an OPEN fix PR already references its SHORT-ID but the stub never
