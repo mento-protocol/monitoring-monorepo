@@ -3,7 +3,7 @@ title: Monitoring Dashboard Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: agent-instructions
 scope: ui-dashboard
 review_interval_days: 90
