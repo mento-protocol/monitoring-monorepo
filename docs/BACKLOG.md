@@ -1,3 +1,17 @@
+---
+title: "Monitoring Monorepo — Task Backlog (retired)"
+status: archived
+owner: eng
+canonical: false
+last_verified: 2026-07-23
+archived: 2026-05-29
+archived_reason: "Active items migrated to GitHub Issues (label source:backlog) on 2026-05-29; completed work is preserved in git history."
+doc_type: tracker
+scope: repo-wide
+review_interval_days: 365
+garden_lane: notes-plans-archive
+---
+
 # Monitoring Monorepo — Task Backlog (retired)
 
 This legacy task backlog has been retired. As of 2026-05-29 its active items

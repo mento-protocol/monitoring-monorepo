@@ -1,3 +1,17 @@
+---
+title: "Multichain Indexer Analysis — Celo + Monad merge (archived)"
+status: archived
+owner: eng
+canonical: false
+last_verified: 2026-07-23
+archived: 2026-07-23
+archived_reason: "Superseded by the shipped Envio v3 multichain config (indexer-envio/config.multichain.mainnet.yaml); retained for the merge-decision rationale."
+doc_type: report
+scope: indexer
+review_interval_days: 365
+garden_lane: notes-plans-archive
+---
+
 # Multichain Indexer Analysis: Merging Celo + Monad into One Envio Instance
 
 **Date:** 2026-03-18

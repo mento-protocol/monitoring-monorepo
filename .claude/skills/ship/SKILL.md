@@ -231,8 +231,12 @@ Include this marker when practical:
 Run the shared readiness probe before calling the PR clean:
 
 ```bash
-pnpm pr:ready-state --pr <number> --json
+pnpm pr:ready-state --pr <number> --repo <BASE_OWNER/REPO> --json
 ```
+
+Always pass `--repo` bound to the base repository: without it the probe infers
+the repo from the checkout, which inspects the wrong same-number PR on fork
+PRs or repo-bound checkouts.
 
 In a Claude cloud session without the Surface Detection capability exception,
 the probe cannot run; use the `babysit-pr` skill's cloud watch loop (MCP

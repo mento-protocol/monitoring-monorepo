@@ -1,3 +1,15 @@
+---
+title: "Mutation Testing"
+status: active
+owner: eng
+canonical: false
+last_verified: 2026-07-23
+doc_type: reference
+scope: repo-wide
+review_interval_days: 180
+garden_lane: package-readmes-reference
+---
+
 # Mutation Testing
 
 Mutation testing is intentionally scoped to proven pure-logic targets:
