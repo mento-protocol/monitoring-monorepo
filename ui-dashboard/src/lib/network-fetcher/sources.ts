@@ -29,6 +29,7 @@ import {
   fetchAllDailySnapshotPages,
   fetchAllFeeSnapshotPages,
   fetchAllLpAddressPages,
+  REQUEST_TIMEOUT_MS,
 } from "./pagination";
 import {
   emptyStrategyIds,
@@ -116,9 +117,17 @@ function requestIndexedCdpPools(
 async function requestFallbackStrategies(
   network: Network,
   pools: Pool[],
+  deadlineMs: number,
 ): Promise<Readonly<ProbedStrategies>> {
   if (!usesRuntimeStrategyProbe(network)) return emptyStrategyIds();
-  const { detectProbedStrategies } = await import("@/lib/strategy-detection");
+  const { detectProbedStrategies, RUNTIME_STRATEGY_PROBE_TIMEOUT_MS } =
+    await import("@/lib/strategy-detection");
+  // The registry and its compatibility probe share one source-phase budget.
+  // Starting the fixed-length RPC probe with less time remaining would turn a
+  // near-timeout schema-lag response into an additional three-second delay.
+  if (Date.now() + RUNTIME_STRATEGY_PROBE_TIMEOUT_MS > deadlineMs) {
+    return emptyStrategyIds();
+  }
   return detectProbedStrategies(network, pools);
 }
 
@@ -170,6 +179,10 @@ function buildSourcePromises(
     truncated: false,
     error: null,
   };
+  // The compatibility probe is sequential by design, so make it consume the
+  // same five-second budget as the registry query rather than extending this
+  // source phase beyond the rest of the fan-out.
+  const strategySourceDeadlineMs = Date.now() + REQUEST_TIMEOUT_MS;
   const activeStrategies = requestActiveLiquidityStrategies(network, timed);
   // PoolLiquidityStrategy is authoritative whenever its query succeeds,
   // including an empty row set. Only its explicit missing-field compatibility
@@ -180,7 +193,7 @@ function buildSourcePromises(
     (result) =>
       result.available
         ? emptyStrategyIds()
-        : requestFallbackStrategies(network, pools),
+        : requestFallbackStrategies(network, pools, strategySourceDeadlineMs),
     () => emptyStrategyIds(),
   );
 
