@@ -63,6 +63,13 @@ permissions:
 
 jobs:
   notify:
+    # autofix-ci-trust: fires only for upstream runs where
+    #   workflow_run.head_branch == 'main' (see the if: gate below), so a
+    #   sentry-autofix/* upstream run never reaches it; and this job checks out
+    #   no PR-head code — it reads workflow_run.* metadata into env and posts to
+    #   Slack. The == 'main' equality is a STRONGER exclusion than the
+    #   mechanically-credited !startsWith(head_branch,'sentry-autofix/') shape,
+    #   which the checker cannot recognize — hence this annotation.
     # Test-fire path: workflow_dispatch always posts (no failure gate).
     # Real path: only post when a watched workflow's push-to-main run failed.
     # Catch every "silent failure" conclusion, not just plain `failure`:
