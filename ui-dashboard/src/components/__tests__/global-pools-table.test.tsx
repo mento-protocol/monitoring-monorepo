@@ -182,7 +182,7 @@ describe("GlobalPoolsTable — FX weekend SSR banner", () => {
 });
 
 describe("GlobalPoolsTable filters", () => {
-  it("uses the dashboard's labelled native multi-select pattern", () => {
+  it("uses a compact bridge-style chain dropdown", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable
         entries={[makeEntry({}, CELO_NETWORK), makeEntry({}, MONAD_NETWORK)]}
@@ -190,10 +190,11 @@ describe("GlobalPoolsTable filters", () => {
       />,
     );
 
-    expect(html).toContain('aria-label="Chains"');
-    expect(html).toContain("multiple");
-    expect(html).toContain(">Celo</option>");
-    expect(html).toContain(">Monad</option>");
+    expect(html).toContain('aria-label="Chains: All chains"');
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain(">Celo</label>");
+    expect(html).toContain(">Monad</label>");
+    expect(html).toContain('<span class="sr-only">Search pools</span>');
   });
 
   it("keeps the shared table free of homepage-only controls by default", () => {

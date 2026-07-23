@@ -149,41 +149,75 @@ function GlobalPoolFilters({
 }: {
   filters: ReturnType<typeof useGlobalPoolFilters>;
 }) {
+  const selectedChainLabel =
+    filters.selectedChainIds === null
+      ? "All chains"
+      : filters.selectedChainIds.length === 0
+        ? "No chains"
+        : filters.selectedChainIds.length === 1
+          ? (filters.chainOptions.find(
+              (option) => option.chainId === filters.selectedChainIds?.[0],
+            )?.label ?? "1 chain")
+          : `${filters.selectedChainIds.length} chains`;
+
   return (
-    <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-slate-400 sm:max-w-sm">
-        Search pools
+    <div className="mb-2 flex flex-wrap items-center gap-2">
+      <label className="min-w-48 flex-1 sm:max-w-xs">
+        <span className="sr-only">Search pools</span>
         <input
           type="search"
+          aria-label="Search pools"
           value={filters.search}
           onChange={(event) => filters.setSearch(event.target.value)}
           placeholder="Filter by pool name"
-          className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
         />
       </label>
-      <label className="flex items-center gap-1.5 text-xs text-slate-500">
+      <div className="flex items-center gap-1.5 text-xs text-slate-500">
         <span>Chains:</span>
-        <select
-          aria-label="Chains"
-          multiple
-          size={Math.min(3, Math.max(1, filters.chainOptions.length))}
-          value={(filters.selectedChainIds ?? filters.allChainIds).map(String)}
-          onChange={(event) =>
-            filters.setChainIds(
-              Array.from(event.currentTarget.selectedOptions, (option) =>
-                Number(option.value),
-              ),
-            )
-          }
-          className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-        >
-          {filters.chainOptions.map((option) => (
-            <option key={option.chainId} value={option.chainId}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
+        <details className="group relative">
+          <summary
+            role="button"
+            aria-label={`Chains: ${selectedChainLabel}`}
+            className="cursor-pointer list-none rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 [&::-webkit-details-marker]:hidden"
+          >
+            {selectedChainLabel}
+            <span aria-hidden="true" className="ml-2 text-slate-500">
+              ▾
+            </span>
+          </summary>
+          <div className="absolute right-0 z-20 mt-1 min-w-40 overflow-hidden rounded border border-slate-700 bg-slate-900 py-1 shadow-lg shadow-slate-950/40">
+            <label className="flex cursor-pointer items-center gap-2 border-b border-slate-800 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-800/70">
+              <input
+                type="checkbox"
+                checked={filters.selectedChainIds === null}
+                onChange={(event) =>
+                  filters.setAllChains(event.currentTarget.checked)
+                }
+                className="accent-indigo-500"
+              />
+              All chains
+            </label>
+            {filters.chainOptions.map((option) => (
+              <label
+                key={option.chainId}
+                className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-800/70"
+              >
+                <input
+                  type="checkbox"
+                  checked={
+                    filters.selectedChainIds === null ||
+                    filters.selectedChainIds.includes(option.chainId)
+                  }
+                  onChange={() => filters.toggleChain(option.chainId)}
+                  className="accent-indigo-500"
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        </details>
+      </div>
     </div>
   );
 }
@@ -215,10 +249,16 @@ function useGlobalPoolFilters(entries: GlobalPoolEntry[]) {
     chainOptions,
     allChainIds,
     filteredEntries,
-    setChainIds: (chainIds: number[]) =>
-      setSelectedChainIds(
-        chainIds.length === allChainIds.length ? null : chainIds,
-      ),
+    setAllChains: (selected: boolean) =>
+      setSelectedChainIds(selected ? null : []),
+    toggleChain: (chainId: number) =>
+      setSelectedChainIds((current) => {
+        const active = current ?? allChainIds;
+        const next = active.includes(chainId)
+          ? active.filter((id) => id !== chainId)
+          : [...active, chainId];
+        return next.length === allChainIds.length ? null : next;
+      }),
   };
 }
 

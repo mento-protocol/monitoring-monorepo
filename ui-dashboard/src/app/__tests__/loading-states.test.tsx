@@ -140,7 +140,7 @@ describe("route-level loading UIs", () => {
 
   it("HomeLoading reserves the homepage pool-filter toolbar", () => {
     render(<HomeLoading />);
-    expect(container.querySelector(".h-\\[100px\\]")).not.toBeNull();
+    expect(container.querySelector(".h-\\[28px\\]")).not.toBeNull();
   });
 
   it("PoolsLoading renders exactly one polite live region", () => {

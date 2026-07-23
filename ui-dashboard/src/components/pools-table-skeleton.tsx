@@ -56,7 +56,7 @@ export function PoolsTableSkeleton({
   return (
     <div {...liveRegion(presentational)}>
       {showFilters && (
-        <div className="mb-3 h-[100px] animate-pulse rounded bg-slate-800/30 sm:h-[56px]" />
+        <div className="mb-2 h-[28px] animate-pulse rounded bg-slate-800/30" />
       )}
       <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900/30">
         <div

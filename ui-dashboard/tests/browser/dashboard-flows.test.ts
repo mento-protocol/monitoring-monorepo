@@ -153,22 +153,29 @@ test.describe("dashboard browser flows", () => {
     await page.goto("/");
 
     const search = page.getByPlaceholder("Filter by pool name");
-    const chainFilters = page.getByRole("listbox", { name: "Chains" });
+    const chainFilter = page.getByRole("button", {
+      name: "Chains: All chains",
+    });
     await expect(search).toBeVisible();
-    await expect(chainFilters).toHaveValues(["42220", "143"]);
+    await expect(chainFilter).toBeVisible();
 
     await search.fill("AUSD/USDm");
     await expect(page.getByRole("link", { name: "AUSD/USDm" })).toHaveCount(1);
     await expect(page.getByRole("link", { name: "USDC/USDm" })).toHaveCount(0);
 
     await search.fill("");
-    await chainFilters.selectOption(["143"]);
-    await expect(chainFilters).toHaveValues(["143"]);
+    await chainFilter.click();
+    await page.getByRole("checkbox", { name: "Celo" }).uncheck();
+    await expect(
+      page.getByRole("button", { name: "Chains: Monad" }),
+    ).toBeVisible();
     await expect(page.getByRole("link", { name: "USDC/USDm" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "AUSD/USDm" })).toHaveCount(1);
 
-    await chainFilters.selectOption([]);
-    await expect(chainFilters).toHaveValues([]);
+    await page.getByRole("checkbox", { name: "Monad" }).uncheck();
+    await expect(
+      page.getByRole("button", { name: "Chains: No chains" }),
+    ).toBeVisible();
     await expect(
       page.getByRole("status", { name: "Filtered pool results" }),
     ).toHaveText("No pools match these filters.");
