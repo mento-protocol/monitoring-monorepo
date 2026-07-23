@@ -29,15 +29,17 @@ export { globalPoolKey, sortGlobalPools } from "./global-pools-table/sort";
  * Homepage pool filters intentionally operate on the already loaded global
  * entries. They do not alter the page's independently aggregated KPIs or
  * charts, and the table has no pagination window that could hide a match.
+ * Filter state is intentionally local: changing it needs no server render,
+ * and sharing a temporary filtered table view is outside this slice.
  */
 export function filterGlobalPools(
   entries: GlobalPoolEntry[],
   search: string,
-  chainIds: readonly number[],
+  chainIds: readonly number[] | null,
 ): GlobalPoolEntry[] {
   const normalizedSearch = search.trim().toLocaleLowerCase();
   return entries.filter((entry) => {
-    if (chainIds.length > 0 && !chainIds.includes(entry.network.chainId)) {
+    if (chainIds !== null && !chainIds.includes(entry.network.chainId)) {
       return false;
     }
     return (
@@ -126,7 +128,7 @@ export function GlobalPoolsTable({
         >
           <ChainFilterButton
             label="All chains"
-            active={filters.selectedChainIds.length === 0}
+            active={filters.selectedChainIds === null}
             onClick={filters.clearChains}
           />
           {filters.chainOptions.map((option) => (
@@ -134,7 +136,7 @@ export function GlobalPoolsTable({
               key={option.chainId}
               label={option.label}
               active={
-                filters.selectedChainIds.length === 0 ||
+                filters.selectedChainIds === null ||
                 filters.selectedChainIds.includes(option.chainId)
               }
               onClick={() => filters.toggleChain(option.chainId)}
@@ -173,9 +175,11 @@ export function GlobalPoolsTable({
 
 function useGlobalPoolFilters(entries: GlobalPoolEntry[]) {
   const [search, setSearch] = useState("");
-  // An empty selection represents all chains. This keeps the default stable
-  // as configured networks load and makes the All chains control one action.
-  const [selectedChainIds, setSelectedChainIds] = useState<number[]>([]);
+  // `null` represents all chains; an empty array is the intentional
+  // zero-chain state after the user deselects every option.
+  const [selectedChainIds, setSelectedChainIds] = useState<number[] | null>(
+    null,
+  );
   const chainOptions = useMemo(() => {
     const seen = new Set<number>();
     return entries.flatMap((entry) => {
@@ -191,13 +195,13 @@ function useGlobalPoolFilters(entries: GlobalPoolEntry[]) {
   const toggleChain = (chainId: number) => {
     setSelectedChainIds((current) => {
       const active =
-        current.length === 0
+        current === null
           ? chainOptions.map((option) => option.chainId)
           : current;
       const next = active.includes(chainId)
         ? active.filter((id) => id !== chainId)
         : [...active, chainId];
-      return next.length === chainOptions.length ? [] : next;
+      return next.length === chainOptions.length ? null : next;
     });
   };
   return {
@@ -207,7 +211,7 @@ function useGlobalPoolFilters(entries: GlobalPoolEntry[]) {
     chainOptions,
     filteredEntries,
     toggleChain,
-    clearChains: () => setSelectedChainIds([]),
+    clearChains: () => setSelectedChainIds(null),
   };
 }
 
@@ -239,15 +243,38 @@ function useSortedGlobalPools({
   entries,
   sortKey,
   sortDir,
-  ...context
+  tvlByKey,
+  totalVolumeByKey,
+  nowSeconds,
+  volume24hByKey,
+  volume7dByKey,
+  tvlChangeWoWByKey,
 }: {
   entries: GlobalPoolEntry[];
   sortKey: GlobalSortKey;
   sortDir: SortDir;
 } & GlobalSortContext) {
   return useMemo(
-    () => sortGlobalPools(entries, sortKey, sortDir, context),
-    [entries, sortKey, sortDir, context],
+    () =>
+      sortGlobalPools(entries, sortKey, sortDir, {
+        tvlByKey,
+        totalVolumeByKey,
+        nowSeconds,
+        volume24hByKey,
+        volume7dByKey,
+        tvlChangeWoWByKey,
+      }),
+    [
+      entries,
+      sortKey,
+      sortDir,
+      tvlByKey,
+      totalVolumeByKey,
+      nowSeconds,
+      volume24hByKey,
+      volume7dByKey,
+      tvlChangeWoWByKey,
+    ],
   );
 }
 

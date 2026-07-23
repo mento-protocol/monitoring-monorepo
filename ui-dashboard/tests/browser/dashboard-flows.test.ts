@@ -178,6 +178,12 @@ test.describe("dashboard browser flows", () => {
     ).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("link", { name: "USDC/USDm" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "AUSD/USDm" })).toHaveCount(1);
+
+    await chainFilters.getByRole("button", { name: "Monad" }).click();
+    await expect(
+      chainFilters.getByRole("button", { name: "Monad" }),
+    ).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByText("No pools match these filters.")).toBeVisible();
   });
 
   test("switches chain context through the pool list target", async ({

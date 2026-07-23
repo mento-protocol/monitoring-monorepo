@@ -145,8 +145,8 @@ describe("filterGlobalPools", () => {
   ];
 
   it("matches pool names without changing case", () => {
-    expect(filterGlobalPools(entries, "kesm/usdm", [])).toEqual(entries);
-    expect(filterGlobalPools(entries, "does-not-exist", [])).toEqual([]);
+    expect(filterGlobalPools(entries, "kesm/usdm", null)).toEqual(entries);
+    expect(filterGlobalPools(entries, "does-not-exist", null)).toEqual([]);
   });
 
   it("keeps the union of selected chains", () => {
@@ -154,6 +154,10 @@ describe("filterGlobalPools", () => {
       entries[1],
       entries[2],
     ]);
+  });
+
+  it("keeps an explicit empty chain selection empty", () => {
+    expect(filterGlobalPools(entries, "", [])).toEqual([]);
   });
 });
 
