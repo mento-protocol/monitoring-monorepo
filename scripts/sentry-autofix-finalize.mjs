@@ -243,14 +243,23 @@ const DIFF_CREDENTIAL_PATTERNS = [
 //    strip along with an attacker separator, so they are matched SEPARATOR-
 //    TOLERANT on the raw path: the internal dashes may be any separator or absent
 //    (`sk.ant-…` still trips), with the content scan's body floor.
+// Bodies allow `_`: a github_pat suffix legitimately contains underscores
+// (`github_pat_XXXX_YYYY`), and for the ghs_ family an attacker can INSERT `_`
+// to split the body (the collapse keeps `_`). The `_` never causes a false
+// positive here because each pattern still requires the literal credential
+// prefix, which no source filename carries. AWS keys have no `_` (and AWS is not
+// an autofix runner credential), so AKIA keeps the plain alphabet.
 const FILENAME_CREDENTIAL_COLLAPSED = [
-  /(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{16,}/,
-  /github_pat_[A-Za-z0-9]{16,}/,
+  /(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9_]{16,}/,
+  /github_pat_[A-Za-z0-9_]{16,}/,
   /AKIA[A-Z0-9]{16}/,
 ];
+// The internal separators of these prefixes may be ANY non-alphanumeric run (a
+// substituted `-`/`.`/`_`/`/`/space still yields a recoverable token), and the
+// body may contain `-` (real Anthropic/Slack keys do).
 const FILENAME_CREDENTIAL_SEPARATOR_TOLERANT = [
-  /sk[-._/\s]*ant[-._/\s]*[A-Za-z0-9-]{8,}/i,
-  /xox[-._/\s]*[a-z][-._/\s]*[A-Za-z0-9-]{8,}/i,
+  /sk[^A-Za-z0-9]*ant[^A-Za-z0-9]*[A-Za-z0-9-]{8,}/i,
+  /xox[^A-Za-z0-9]*[a-z][^A-Za-z0-9]*[A-Za-z0-9-]{8,}/i,
 ];
 
 // Full-token patterns (no \b, global) for MASKING a credential wherever it

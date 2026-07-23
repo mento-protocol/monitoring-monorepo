@@ -789,5 +789,28 @@ await test("guard resists sk-ant-/xox- obfuscation and cross-segment false posit
   }
 });
 
+await test("guard catches underscore-containing / underscore-split credential filenames (#1551 review P1)", () => {
+  const T = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8";
+  const GP = "github" + "_pat_";
+  const GHS = "ghs" + "_";
+  for (const p of [
+    `ui-dashboard/src/${GP}AAAAAAAA_BBBBBBBB.ts`, // github_pat suffix contains '_' (P1)
+    `${GP}11ABCDEFG0${T}.ts`, // realistic github_pat shape
+    `${GHS}a1b2_c3d4_e5f6_g7h8_i9j0_k1l2_m3n4_o5p6.ts`, // ghs_ body split with '_'
+    `sk_ant_${T}.ts`, // sk-ant- with '_' substituted for its dashes
+  ]) {
+    assert(
+      filesWithCredentialShapedName([p]).length === 1,
+      `underscore-obfuscated credential filename must be refused: ${p}`,
+    );
+  }
+  // A SCREAMING_SNAKE constants file must not false-positive.
+  assert(
+    filesWithCredentialShapedName(["src/AUTH_CONFIG_CONSTANTS.ts"]).length ===
+      0,
+    "SCREAMING_SNAKE const path allowed",
+  );
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exitCode = 1;
