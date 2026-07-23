@@ -92,6 +92,9 @@ repository inferred from the active checkout.
 Before the first review pass, freeze the request, target/owner, changed files,
 and non-test changed-line count as the scope baseline. Classify later additions
 as in-scope, follow-up, or stop; create an issue before deferring valid work.
+An explicit user correction updates the request baseline. Before the next push,
+update the PR description so current-head reviewers do not enforce superseded
+behavior.
 
 ## Feedback and Watch Loop
 
