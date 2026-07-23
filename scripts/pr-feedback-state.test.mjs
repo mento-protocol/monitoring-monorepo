@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import {
   buildFeedbackFindings,
   summarizeFeedbackState,
@@ -108,21 +109,72 @@ const ACTIONABLE_CLAUDE_REVIEW_LOOKALIKE = {
     "4. [P2] Action required: remove the remaining vulnerable `sharp@0.34.5` lockfile entry.",
   ),
 };
+
+const PR_1544_HEAD = "aab83bc74ae0585147a058d92f1f13afac7be109";
+// Verbatim REST issuecomment 5060594122 from PR #1544. Keep the complete body
+// frozen: the parser trusts this protocol only when every structural field
+// remains valid.
+const PR_1544_CLEAN_CLAUDE_REVIEW = {
+  id: 5060594122,
+  html_url:
+    "https://github.com/mento-protocol/monitoring-monorepo/pull/1544#issuecomment-5060594122",
+  created_at: "2026-07-23T16:00:49Z",
+  updated_at: "2026-07-23T16:03:25Z",
+  user: { login: "claude[bot]", type: "Bot" },
+  body: [
+    "**Claude finished @chapati23's task in 2m 19s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30023164230)",
+    "",
+    "---",
+    "### Code Review — PR #1544",
+    "",
+    "- [x] Gather context (read changed files, diff)",
+    "- [x] Understand the request (code review)",
+    "- [x] Review `scripts/agent-quality-gate.sh` changes",
+    "- [x] Review `scripts/agent-quality-gate.test.sh` changes",
+    "- [x] Review `scripts/docs-navigation-eval.test.mjs` changes",
+    "- [x] Review `docs/notes/agent-quality-gate-mechanics.md` changes",
+    "- [x] Post findings",
+    "",
+    "**Overall verdict: LGTM**",
+    "",
+    "### Summary",
+    "",
+    "This closes the gap where routing-sensitive changes (any `AGENTS.md`, `README.md`, `package.json`, `docs/`, skill/command files, or workflow files) could skip the local `--check-fixtures` gate but still get caught by hosted CI. The fix reuses the existing `isRoutingSensitivePath` classifier from `scripts/docs-navigation-eval-helpers.mjs` (`scripts/agent-quality-gate.sh:429-458`) rather than re-implementing routing rules in Bash, which keeps the two systems from drifting.",
+    "",
+    "### Verification notes (no issues found)",
+    "",
+    "1. **Fail-closed behavior is correct.** The `node --input-type=module -` invocation (`scripts/agent-quality-gate.sh:430-447`) captures only stdout for the `true`/`false` result; any Node error (missing helper, import failure, thrown exception) makes the command substitution fail, hitting the `if !` branch and exiting 2 with `error: failed to classify routing-sensitive changed paths`. Node's own stderr (e.g., stack trace) still passes through for debugging since only stdout is captured. The `--input-type=module -` heredoc is single-quoted (`<<'NODE'`), so there's no shell-injection risk from changed path contents.",
+    '2. **Output-contract validation is real, not decorative.** The `case ... true|false) ;; *) exit 2 ;;` guard (`scripts/agent-quality-gate.sh:452-458`) is exercised by the "missing helper" test (`scripts/agent-quality-gate.test.sh:379-394`), which copies only the `.sh` file to an isolated dir (no sibling `docs-navigation-eval-helpers.mjs`) and asserts exit code 2 + the friendly error message.',
+    '3. **First-wins dedup claim checks out.** `add_command` (`scripts/agent-quality-gate.sh:562-568`) is a no-op if the command string is already queued. Since the routing-sensitive block runs *after* the per-path loop, any specialized mapping (e.g., for `scripts/docs-navigation-eval.mjs` itself, which adds `--check-fixtures` with a more specific reason) wins and the generic "routing-sensitive source changed" reason is only used when no specialized mapping already added the same command. Confirmed by `assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"` across every combination in the test file, including the new `docs/notes/agent-quality-gate-mechanics.md` case (which only has the generic reason) and the `ui-dashboard/src/app/page.tsx` negative case.',
+    "4. **Freshness invalidation is wired correctly.** `scripts/docs-navigation-eval-helpers.mjs` was added to `implementation_signature()`'s hashed file list (`scripts/agent-quality-gate.sh:2474`), and the new fixture test at `scripts/agent-quality-gate.test.sh:3201-3210` confirms a change to that file busts the fresh-run stamp (trunk-count goes 4→5).",
+    '5. **Test infra fix is justified, not a red herring.** The `PATH="$node_executable_dir:$PATH"` additions (`scripts/agent-quality-gate.test.sh:724-728, 772`) are necessary because those two subtests override `HOME` to an isolated tmp dir — if `node` is resolved via a version-manager shim that reads `$HOME` (nvm/volta/asdf), overriding `HOME` would break `node` resolution now that the classifier unconditionally shells out to `node` on every gate run (dry-run included). Prepending the real resolved node dir sidesteps that. The `bin/node` stub update (`scripts/agent-quality-gate.test.sh:2954-2960` and similar) correctly special-cases `--input-type=module` to exec the real node while still no-op\'ing other stubbed invocations.',
+    "6. **Docs update is accurate** and matches the implemented behavior (offline, no model invocation, added once per routing-sensitive change).",
+    "",
+    "No P1/P2/P3 findings — implementation, tests, and docs are internally consistent and the claims in the PR description are verifiable in the diff.",
+  ].join("\n"),
+};
+
 function normalizedReadyStateForClaudeReview(
   comment,
-  { title = "fix(deps): upgrade sharp past vulnerable libvips" } = {},
+  {
+    number = 1431,
+    title = "fix(deps): upgrade sharp past vulnerable libvips",
+    headRefOid = PR_1431_HEAD,
+    headUpdatedAt = "2026-07-22T08:29:00Z",
+    reactionCreatedAt = "2026-07-22T08:31:00Z",
+  } = {},
 ) {
   return summarizeReadyState({
     pr: {
-      number: 1431,
-      url: "https://github.com/mento-protocol/monitoring-monorepo/pull/1431",
+      number,
+      url: `https://github.com/mento-protocol/monitoring-monorepo/pull/${number}`,
       title,
       state: "OPEN",
       author: { login: "chapati23" },
       isDraft: false,
       headRefName: "fix/1420-sharp-035",
-      headRefOid: PR_1431_HEAD,
-      headUpdatedAt: "2026-07-22T08:29:00Z",
+      headRefOid,
+      headUpdatedAt,
       baseRefName: "main",
       mergeable: "MERGEABLE",
       reviewDecision: "APPROVED",
@@ -133,7 +185,7 @@ function normalizedReadyStateForClaudeReview(
     reactions: [
       {
         content: "+1",
-        created_at: "2026-07-22T08:31:00Z",
+        created_at: reactionCreatedAt,
         user: { login: "chatgpt-codex-connector[bot]" },
       },
     ],
@@ -835,6 +887,316 @@ test("agrees with ready-state on the normalized PR #1431 clean Claude review", (
   assertEqual(feedbackState.counts.blockingFindings, 0);
 });
 
+test("accepts the frozen PR #1544 Overall-verdict Claude review", () => {
+  assertEqual(PR_1544_CLEAN_CLAUDE_REVIEW.body.length, 4244);
+  assertEqual(
+    createHash("sha256")
+      .update(PR_1544_CLEAN_CLAUDE_REVIEW.body, "utf8")
+      .digest("hex"),
+    "039923882eee9f880165543ef85e1ca251d84b995a78647b41c2b788d02a4885",
+  );
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    PR_1544_CLEAN_CLAUDE_REVIEW,
+    {
+      number: 1544,
+      title: "fix(tooling): validate navigation fixtures in local gate",
+      headRefOid: PR_1544_HEAD,
+      headUpdatedAt: "2026-07-23T15:52:22Z",
+      reactionCreatedAt: "2026-07-23T16:05:00Z",
+    },
+  );
+  const feedbackState = summarizeFeedbackState(normalizedReadyState);
+
+  assertEqual(normalizedReadyState.ready, true);
+  assertEqual(feedbackState.ready, normalizedReadyState.required.ready);
+  assertEqual(feedbackState.counts.topLevelBotComments, 1);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  assertEqual(feedbackState.counts.blockingFindings, 0);
+});
+
+test("fails closed on single-field PR #1544 Overall-verdict mutations", () => {
+  const clean = PR_1544_CLEAN_CLAUDE_REVIEW.body;
+  const reviewHeading = "### Code Review — PR #1544";
+  const verificationHeading = "### Verification notes (no issues found)";
+  const terminal =
+    "No P1/P2/P3 findings — implementation, tests, and docs are internally consistent and the claims in the PR description are verifiable in the diff.";
+  const replaceFirstVerificationNote = (body) =>
+    clean.replace(/^1\. \*\*Fail-closed behavior is correct\.\*\*.*$/m, body);
+  const options = {
+    number: 1544,
+    title: "fix(tooling): validate navigation fixtures in local gate",
+    headRefOid: PR_1544_HEAD,
+    headUpdatedAt: "2026-07-23T15:52:22Z",
+    reactionCreatedAt: "2026-07-23T16:05:00Z",
+  };
+  const mutations = [
+    ["wrong comment ID", { id: 5060594123, body: clean }],
+    ["wrong author", { user: { login: "claude", type: "Bot" }, body: clean }],
+    [
+      "wrong PR number",
+      { body: clean.replace(reviewHeading, `${reviewHeading}5`) },
+    ],
+    [
+      "zero-padded PR number",
+      { body: clean.replace(reviewHeading, "### Code Review — PR #01544") },
+    ],
+    [
+      "changes-requested verdict",
+      {
+        body: clean.replace(
+          "**Overall verdict: LGTM**",
+          "**Overall verdict: CHANGES REQUESTED**",
+        ),
+      },
+    ],
+    [
+      "mostly-LGTM verdict",
+      {
+        body: clean.replace(
+          "**Overall verdict: LGTM**",
+          "**Overall verdict: mostly LGTM**",
+        ),
+      },
+    ],
+    [
+      "missing Overall-verdict marker",
+      { body: clean.replace("\n**Overall verdict: LGTM**\n", "\n") },
+    ],
+    ["CRLF body", { body: clean.replaceAll("\n", "\r\n") }],
+    [
+      "missing Verification marker",
+      { body: clean.replace(`\n${verificationHeading}\n`, "\n") },
+    ],
+    [
+      "renamed Verification marker",
+      {
+        body: clean.replace(
+          verificationHeading,
+          "### Verification details (no issues found)",
+        ),
+      },
+    ],
+    ["missing terminal marker", { body: clean.replace(`\n\n${terminal}`, "") }],
+    [
+      "hedged terminal marker",
+      { body: clean.replace(terminal, `Probably ${terminal.toLowerCase()}`) },
+    ],
+    [
+      "hedged positive terminal evidence",
+      {
+        body: clean.replace(
+          terminal,
+          "No P1/P2/P3 findings — the implementation could be complete.",
+        ),
+      },
+    ],
+    [
+      "likely terminal evidence",
+      {
+        body: clean.replace(
+          terminal,
+          "No P1/P2/P3 findings — the implementation is likely complete.",
+        ),
+      },
+    ],
+    [
+      "unchecked task",
+      {
+        body: clean.replace(
+          "- [x] Gather context (read changed files, diff)",
+          "- [ ] Gather context (read changed files, diff)",
+        ),
+      },
+    ],
+    [
+      "missing View-job suffix",
+      {
+        body: clean.replace(
+          " —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30023164230)",
+          "",
+        ),
+      },
+    ],
+    [
+      "path traversal review target",
+      {
+        body: clean.replace(
+          "Review `scripts/agent-quality-gate.sh` changes",
+          "Review `../agent-quality-gate.sh` changes",
+        ),
+      },
+    ],
+    [
+      "reordered checklist",
+      {
+        body: clean.replace(
+          "- [x] Gather context (read changed files, diff)\n- [x] Understand the request (code review)",
+          "- [x] Understand the request (code review)\n- [x] Gather context (read changed files, diff)",
+        ),
+      },
+    ],
+    [
+      "appended actionable request",
+      { body: `${clean}\n\nPlease fix the parser before merge.` },
+    ],
+    [
+      "actionable request inside a verification note",
+      {
+        body: clean.replace(
+          "6. **Docs update is accurate** and matches the implemented behavior (offline, no model invocation, added once per routing-sensitive change).",
+          "6. **Docs update is accurate** but please fix the stale runbook before merge.",
+        ),
+      },
+    ],
+    [
+      "credential leak with a positive-looking label",
+      {
+        body: replaceFirstVerificationNote(
+          "1. **A credential leak is real.** Private signing keys are exposed.",
+        ),
+      },
+    ],
+    [
+      "plaintext key logging behind a positive label",
+      {
+        body: replaceFirstVerificationNote(
+          "1. **Authentication is correct.** Private signing keys are logged in plaintext.",
+        ),
+      },
+    ],
+    [
+      "request crashes behind a positive label",
+      {
+        body: replaceFirstVerificationNote(
+          "1. **Error handling is correct.** Every malformed request crashes the service.",
+        ),
+      },
+    ],
+    [
+      "positive evidence cue cannot launder exposed keys",
+      {
+        body: replaceFirstVerificationNote(
+          "1. **Authentication is correct.** The test confirms private signing keys are exposed.",
+        ),
+      },
+    ],
+    [
+      "arbitrary unevidenced note body",
+      {
+        body: replaceFirstVerificationNote(
+          "1. **Validation is correct.** The fallback silently drops every authorization check.",
+        ),
+      },
+    ],
+    [
+      "contradictory issue remains inside a verification note",
+      {
+        body: clean.replace(
+          "6. **Docs update is accurate** and matches the implemented behavior (offline, no model invocation, added once per routing-sensitive change).",
+          "6. **Docs update is accurate** but one routing issue remains.",
+        ),
+      },
+    ],
+    [
+      "identified issue inside a verification note",
+      {
+        body: clean.replace(
+          "6. **Docs update is accurate** and matches the implemented behavior (offline, no model invocation, added once per routing-sensitive change).",
+          "6. **Docs update is accurate** but I identified an issue in the runbook.",
+        ),
+      },
+    ],
+    [
+      "negated positive note label",
+      {
+        body: clean.replace(
+          "**Fail-closed behavior is correct.**",
+          "**Fail-closed behavior is not correct.**",
+        ),
+      },
+    ],
+    [
+      "hedged positive note label",
+      {
+        body: clean.replace(
+          "**Fail-closed behavior is correct.**",
+          "**Fail-closed behavior is likely correct.**",
+        ),
+      },
+    ],
+    [
+      "injected P2 note",
+      {
+        body: clean.replace(
+          `\n\n${terminal}`,
+          `\n7. **[P2] Action required.** Restore the unsafe fallback.\n\n${terminal}`,
+        ),
+      },
+    ],
+    [
+      "duplicate Summary marker",
+      { body: clean.replace("### Summary", "### Summary\n\n### Summary") },
+    ],
+    [
+      "fenced Summary prose",
+      {
+        body: clean.replace(
+          "This closes the gap where routing-sensitive changes",
+          "```text This closes the gap where routing-sensitive changes",
+        ),
+      },
+    ],
+    [
+      "structural Markdown in note evidence",
+      {
+        body: clean.replace(
+          "6. **Docs update is accurate** and matches the implemented behavior (offline, no model invocation, added once per routing-sensitive change).",
+          "6. **Docs update is accurate** - The test confirms the implemented behavior.",
+        ),
+      },
+    ],
+    [
+      "reordered Summary and Verification markers",
+      {
+        body: clean
+          .replace("### Summary", "### __TEMP_HEADING__")
+          .replace(verificationHeading, "### Summary")
+          .replace("### __TEMP_HEADING__", verificationHeading),
+      },
+    ],
+  ];
+
+  for (const [label, mutation] of mutations) {
+    const normalizedReadyState = normalizedReadyStateForClaudeReview(
+      {
+        ...PR_1544_CLEAN_CLAUDE_REVIEW,
+        ...mutation,
+      },
+      options,
+    );
+    const feedbackState = summarizeFeedbackState(normalizedReadyState);
+    assertEqual(normalizedReadyState.required.ready, true);
+    assert(
+      feedbackState.ready === false,
+      `${label}: expected feedback-state to fail closed`,
+    );
+    assertEqual(feedbackState.counts.blockingTopLevelBotComments, 1);
+    assertEqual(feedbackState.counts.blockingFindings > 0, true);
+  }
+
+  const wrongHeadReadyState = normalizedReadyStateForClaudeReview(
+    PR_1544_CLEAN_CLAUDE_REVIEW,
+    {
+      ...options,
+      headRefOid: "b".repeat(40),
+    },
+  );
+  const wrongHeadFeedbackState = summarizeFeedbackState(wrongHeadReadyState);
+  assertEqual(wrongHeadReadyState.required.ready, true);
+  assertEqual(wrongHeadFeedbackState.ready, false);
+  assertEqual(wrongHeadFeedbackState.counts.blockingTopLevelBotComments, 1);
+});
+
 function structuredClaudeReview({
   title,
   checklist = ["Parser structure and unit-test coverage", "Runtime behavior"],
@@ -877,6 +1239,14 @@ test("accepts bounded clean Claude reviews for unrelated ordinary PR titles", ()
         "Review title and checklist routing",
         "Documentation examples and unit tests",
       ],
+    },
+    {
+      title: "docs(parser): explain Overall verdict: compatibility",
+      checklist: ["Parser behavior", "Unit-test coverage"],
+    },
+    {
+      title: "docs(parser): explain Verification notes compatibility",
+      checklist: ["Parser structure", "Documentation examples"],
     },
   ];
 

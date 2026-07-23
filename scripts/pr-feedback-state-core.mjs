@@ -1,9 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  hasControlCharacter,
-  hasMarkdownCodeBlockIndentation,
-  isOrdinaryReviewTitle,
-} from "./pr-feedback-state-claude.mjs";
+import * as claudeReview from "./pr-feedback-state-claude.mjs";
 
 const FINDING_EXCERPT_LENGTH = 240;
 const FAILURE_TERM = /\b(?:error|errors|fail|fails|failed|failure|failures)\b/i;
@@ -15,8 +11,6 @@ const UNSAFE_EVIDENCE_QUALIFIER =
   /\b(?:not|never|cannot|can't|doesn't|does\s+not|fails?\s+to|may|might|could|appears?|seems?|probably|likely|possibly|perhaps|unclear|unknown)\b/i;
 const POSITIVE_EVIDENCE =
   /^(?:clean(?:,\s+well\s+scoped)?(?:\s+fix)?|well\s+scoped(?:\s+fix)?|correct|covered|bounded|mechanical|verified|complete|exact\s+removal\s+condition|(?:no|zero|0)\s+(?:errors?|fails?|failed|failures?)(?:\s+(?:and|or)\s+(?:errors?|fails?|failed|failures?))?(?:\s+(?:are|was|were)\s+(?:found|observed|reported))?|no\s+unrelated\s+version\s+bumps?|no\s+vulnerable\s+sharp@0\.34\.5\s+remains?\s+anywhere\s+in\s+(?:the\s+)?repo(?:'s)?\s+lockfiles|parser\s+should\s+continue\s+rejecting\s+malformed\s+input|fallback\s+should\s+stay|fix\s+is\s+correct|override\s+selector\s+is\s+correctly\s+bounded|lockfile\s+churn\s+beyond\s+sharp\s+itself\s+is\s+confirmed\s+mechanical,\s+not\s+scope\s+creep|(?:the\s+)?bounded\s+selector\s+matches\s+the\s+repo(?:'s)?\s+established\s+override\s+pattern|matches\s+repo\s+convention|(?:the\s+)?inline\s+comment\s+documents\s+the\s+advisory|removal\s+condition\s+comment\s+satisfies\s+the\s+temporary\s+override\s+documentation\s+expectation|tests\s+cover\s+the\s+changed\s+paths)$/i;
-const CLAUDE_TASK_COMPLETION_LINE =
-  /^\*\*Claude\s+finished\s+@[A-Za-z0-9_-]+'s\s+task\s+in\s+\d+m\s+\d+s\*\*(?:\s+——\s+\[View\s+job\]\(https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+\))?$/i;
 const CLAUDE_REVIEW_TITLE_LINE = /^#{1,6}\s+Review:\s+(.{1,200})$/i;
 const CLAUDE_VERDICT_LINE = /^(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?$/i;
 const CLAUDE_CHECKLIST_HEADING = /^#{1,6}\s+What\s+I\s+checked$/i;
@@ -123,7 +117,7 @@ function isBenignChecklistSubject(value) {
   if (
     !subject ||
     subject.length > 200 ||
-    hasControlCharacter(subject) ||
+    claudeReview.hasControlCharacter(subject) ||
     (subject.match(/`/g)?.length ?? 0) % 2 !== 0
   )
     return false;
@@ -138,12 +132,13 @@ function isSafeClaudePreamble(lines, pr) {
   const preamble = lines.map((line) => line.trim()).filter(Boolean);
   let index = 0;
 
-  if (CLAUDE_TASK_COMPLETION_LINE.test(preamble[index] ?? "")) index += 1;
+  if (claudeReview.isClaudeTaskCompletionLine(preamble[index])) index += 1;
   if (preamble[index] === "---") index += 1;
 
   const reviewTitle = (preamble[index] ?? "").match(CLAUDE_REVIEW_TITLE_LINE);
   if (reviewTitle) {
-    if (!isOrdinaryReviewTitle(reviewTitle[1], pr?.title)) return false;
+    if (!claudeReview.isOrdinaryReviewTitle(reviewTitle[1], pr?.title))
+      return false;
     index += 1;
   }
 
@@ -207,7 +202,7 @@ function isExplicitlyCleanClaudeReview(comment, pr) {
   if (author !== "claude" && author !== "claude[bot]") return false;
   const body = String(comment.body ?? "");
   const lines = body.split(/\r?\n/);
-  if (hasMarkdownCodeBlockIndentation(lines)) return false;
+  if (claudeReview.hasMarkdownCodeBlockIndentation(lines)) return false;
   if (!/^\s*(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?\s*$/im.test(body)) return false;
   const headings = lines.filter((line) =>
     /^\s*#{1,6}\s+(?:Findings|Roll[- ]up)\s*$/i.test(line),
@@ -230,14 +225,18 @@ function isExplicitlyCleanClaudeReview(comment, pr) {
 }
 function isActionableReviewBotComment(comment, pr) {
   if (!isReviewBotComment(comment)) return false;
-  const body = String(comment.body ?? "");
-  const isClaudeLgtm =
-    /^claude(?:\[bot\])?$/i.test(comment.author ?? "") &&
-    /^\s*(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?\s*$/im.test(body);
-  if (isClaudeLgtm) return !isExplicitlyCleanClaudeReview(comment, pr);
-  if (hasReviewContradiction(body)) return true;
+  if (claudeReview.isClaudeLgtmReview(comment))
+    return !isExplicitlyCleanClaudeReview(comment, pr);
+  const overallClaudeReview = claudeReview.classifyOverallClaudeReview(
+    comment,
+    pr,
+  );
+  if (overallClaudeReview !== null) return overallClaudeReview;
+  if (hasReviewContradiction(comment.body)) return true;
   const actionableSignal =
-    /(?:\[[Pp]3\]|\*\*[Pp]3\*\*|\b[Pp]3\s*(?::|[-—|]|Badge\b))/.test(body);
+    /(?:\[[Pp]3\]|\*\*[Pp]3\*\*|\b[Pp]3\s*(?::|[-—|]|Badge\b))/.test(
+      comment.body ?? "",
+    );
   return actionableSignal;
 }
 
