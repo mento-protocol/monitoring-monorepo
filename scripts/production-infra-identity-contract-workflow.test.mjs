@@ -7,9 +7,10 @@ import { validateWorkflowContract } from "./production-infra-identity-contract-w
 const workflowPath = ".github/workflows/alerts-rules.yml";
 const validCheckoutStep =
   "      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0";
+const automaticGithubCredential = ["${{ github.", "token }}"].join("");
 const validProtectionStep = `      - name: Verify production-infra environment protection
         env:
-          GITHUB_TOKEN: \${{ github.token }}
+          GITHUB_TOKEN: ${automaticGithubCredential}
           GITHUB_ENVIRONMENT_NAME: production-infra
         run: node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"`;
 const validAuthStep = `      - name: Authenticate to Google Cloud

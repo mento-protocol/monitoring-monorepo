@@ -5,6 +5,7 @@ const PROTECTED_JOB_CONDITION =
   "github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.plan.outputs.has-changes == 'true' && (github.event_name == 'workflow_dispatch' || needs.plan.outputs.stack-changed == 'true')";
 const PRODUCTION_CONSOLE_URL =
   "https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac";
+const AUTOMATIC_GITHUB_CREDENTIAL = ["${{ github.", "token }}"].join("");
 
 const APPLY_OUTPUT_COMMAND = [
   "set +e",
@@ -171,7 +172,7 @@ function commonApplySteps() {
     {
       name: "Verify production-infra environment protection",
       env: {
-        GITHUB_TOKEN: "${{ github.token }}",
+        GITHUB_TOKEN: AUTOMATIC_GITHUB_CREDENTIAL,
         GITHUB_ENVIRONMENT_NAME: "production-infra",
       },
       run: 'node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"',

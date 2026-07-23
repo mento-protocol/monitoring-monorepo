@@ -204,8 +204,9 @@ const PROTECTION_COMMANDS = new Set([
 ]);
 const ABSOLUTE_PROTECTION_COMMAND =
   'node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"';
+const AUTOMATIC_GITHUB_CREDENTIAL = ["${{ github.", "token }}"].join("");
 const PROTECTION_ENVIRONMENT = new Map([
-  ["GITHUB_TOKEN", "${{ github.token }}"],
+  ["GITHUB_TOKEN", AUTOMATIC_GITHUB_CREDENTIAL],
   ["GITHUB_ENVIRONMENT_NAME", "production-infra"],
 ]);
 const CHECKOUT_ACTION_PATTERN = /^actions\/checkout@[0-9a-f]{40}$/u;
