@@ -1994,11 +1994,6 @@ assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
   "- pnpm --filter @mento-protocol/indexer-envio lint (central CI workflow changed)"
 
-run_gate ".github/workflows/claude.yml"
-assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
-assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
-assert_contains "- pnpm pr:feedback-state:test (Claude review protocol workflow changed)"
-
 run_gate ".github/workflows/infra.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"

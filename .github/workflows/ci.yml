@@ -938,10 +938,6 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
-      - name: PR feedback-state parser regression suite
-        # Keeps the security-sensitive clean-review marker contract covered in
-        # the required root-scripts job. The focused suite runs sub-second.
-        run: pnpm pr:feedback-state:test
       - name: Terraform source-format target regression suite
         # Proves ignored operator tfvars stay outside the explicit format target
         # list while tracked and non-ignored source paths remain covered.

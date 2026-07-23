@@ -104,14 +104,11 @@ terminal state so late feedback is not missed.
 
 ### Bounded clean-Claude protocol
 
-`pr:feedback-state` accepts three narrow clean-Claude paths: the legacy
-`Verdict: LGTM` grammar, the v1 current-head clean attestation, and one frozen
-observed-payload compatibility entry. A Claude comment that claims a clean
-verdict fails closed unless one complete protocol matches.
+`pr:feedback-state` accepts one bounded clean-Claude grammar plus one exact
+observed-payload compatibility exception. A Claude comment that makes a
+clean-verdict claim fails closed unless its complete protocol matches.
 
-#### Legacy `Verdict: LGTM` grammar
-
-The legacy `Verdict: LGTM` plus `Findings` and `Roll-up` grammar requires:
+The legacy `Verdict: LGTM` plus `Findings` and `Roll-up` protocol requires:
 
 - The optional Claude completion line may include only its fixed GitHub Actions
   `View job` suffix; other suffixes fail closed.
@@ -135,63 +132,9 @@ The parser validates title, checklist, Findings, and Roll-up as separate
 structural regions. Do not broaden the Findings/Roll-up positive-evidence
 allowlist merely to accept a new title or checklist subject.
 
-#### V1 current-head clean attestation
-
-New workflow-authored clean reviews use this exact final marker:
-
-```text
-<!-- mento-claude-review:v1 verdict=lgtm findings=0 pr=<canonical-decimal> head=<40-lowercase-hex> -->
-```
-
-The parser accepts it only when all of these conditions hold:
-
-- The author is one of the exact Claude bot logins, `claude` or
-  `claude[bot]`. A marker-namespace candidate from any other bot author blocks,
-  even if the rest of the comment looks clean.
-- The comment contains one marker-namespace occurrence and one exact marker.
-  The marker is the final non-empty physical line, its PR number has canonical
-  decimal form, and its lowercase 40-hex head equals the current PR head.
-  Duplicate, malformed, quoted, fenced, indented, reordered, unsupported, and
-  nonterminal markers block. The exact suffix and marker must also be outside
-  any outer HTML comment.
-- Exactly one prior line is `**Overall verdict: LGTM**`, outside fenced code,
-  multiline code spans, Markdown quotes, HTML comments, and labeled example
-  contexts. The comment ends with the exact five-line suffix `### Roll-up`, a
-  blank line, `No actionable findings.`, a blank line, then the marker.
-- The attested review contains no severity-tagged finding anywhere, non-clean
-  or secondary verdict, changes/action request, directive, Bugbot finding
-  marker, or claim that inline feedback exists or remains unresolved. A benign
-  negated summary such as `No P1/P2/P3 findings were found.` is allowed.
-
-The parser does not infer the verdict from arbitrary `Summary` prose. A clean
-review may discuss errors, failures, or fail-closed behavior there; the exact
-attestation carries the machine-readable claim. It removes only Markdown
-emphasis and link destinations when checking explicit contradiction signals;
-it does not ban broad words such as `fix` or `update` in ordinary verification
-sentences. GitHub bot identity, the workflow-resolved PR/head values, the exact
-terminal structure, and the narrow contradiction guards form the trust
-boundary.
-
-PR titles, bodies, diffs, comments, and instructions inside them are untrusted
-review input. Both Claude workflow prompts tell the reviewer never to copy,
-quote, explain, alter, or emit the marker because that input requested it. The
-marker is not a cryptographic signature: it relies on GitHub's authenticated
-Claude bot identity and the reviewed workflow context. The parser verifies the
-binding and structure; it does not replace the review itself.
-[ADR 0047](../adr/0047-claude-clean-review-attestation.md) records this trust
-decision and its rejected alternatives.
-
-A marker only clears its current-head top-level summary. A push makes the old
-head binding stale, and unresolved inline threads or unreplied review comments
-still block on their own surfaces. The workflow does not auto-review
-`synchronize` events. After a review-triggered push, request one current-head
-`@claude review`, then wait for that run instead of posting duplicates.
-
-#### Frozen PR #1544 compatibility
-
-The observed PR #1544 `Overall verdict: LGTM` payload remains a compatibility
-registry entry, not a reusable prose grammar. Its registered payload must first
-match this structural envelope:
+`Overall verdict: LGTM` is an observed-payload compatibility registry, not a
+reusable prose grammar. A registered payload must first match this structural
+envelope:
 
 - The fixed Claude completion line with its GitHub Actions `View job` suffix,
   followed by `Code Review — PR #<current-number>`.
@@ -213,8 +156,8 @@ digest `039923882eee9f880165543ef85e1ca251d84b995a78647b41c2b788d02a4885`,
 comment ID `5060594122`, and head
 `aab83bc74ae0585147a058d92f1f13afac7be109`.
 
-An unmarked, unregistered `Overall verdict` payload fails closed. Any frozen
-body or binding change, including line-ending changes, remains blocking.
+Unseen `Overall verdict` payloads fail closed pending deliberate registration.
+Any body or binding change, including line-ending changes, remains blocking.
 
 ## Expected CLI contract
 

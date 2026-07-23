@@ -72,7 +72,6 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0038](0038-sentry-central-plane-verdict-projection.md)     | Central Sentry triage plane; actionable verdicts projected into owning repos         |
 | [0040](0040-bounded-documentation-garden-queue.md)          | Weekly bounded documentation packets enter one serialized GitHub Issue queue         |
 | [0041](0041-offline-documentation-navigation-evaluation.md) | Fresh-agent documentation navigation is evaluated offline with deterministic scoring |
-| [0047](0047-claude-clean-review-attestation.md)             | Clean Claude reviews use a bot-authored marker bound to the current PR head          |
 
 ### shared-config
 

@@ -1884,9 +1884,6 @@ while IFS= read -r path; do
           add_terraform_validate_commands "alerts/infra" "Terraform registry-backed CI workflow changed"
           add_terraform_validate_commands "aegis/terraform" "Terraform registry-backed CI workflow changed"
           ;;
-        .github/workflows/claude.yml)
-          add_command "pnpm pr:feedback-state:test" "Claude review protocol workflow changed"
-          ;;
         .github/workflows/documentation-garden.yml)
           add_command "pnpm docs:garden:test" "documentation garden workflow changed"
           add_command "pnpm docs:navigation-eval:test" "documentation navigation scheduler workflow changed"
