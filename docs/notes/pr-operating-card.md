@@ -70,19 +70,24 @@ authority.
 4. **Autoreview.** For a non-trivial completed batch:
 
    ```bash
-   pnpm agent:autoreview                       # non-trivial completed batch
-   pnpm agent:autoreview --verify-bundle-dir <dir>  # pre-review manifest check
+   pnpm agent:autoreview --prepare-bundle-dir <dir>  # publish the review bundle
+   pnpm agent:autoreview --verify-bundle-dir <dir>   # pre-review manifest check
    ```
 
-   Run `--verify-bundle-dir` immediately before review, retain its printed
-   digest outside the bundle, and pass that digest to the post-review check.
-   Autoreview reviews the complete branch-local target without truncation, but
-   it is **source review only**: it runs no tests and proves no behavior, so the
-   mapped gate, browser, generated-artifact, and runtime checks still apply. One
-   fresh-context reviewer must inspect every prepared-bundle pass, with manifest
+   Prepare the bundle, then run `--verify-bundle-dir` immediately before
+   review, retain its printed digest outside the bundle, and pass that digest
+   to the post-review check. Autoreview reviews the complete branch-local
+   target without truncation, but it is **source review only**: it runs no
+   tests and proves no behavior, so the mapped gate, browser,
+   generated-artifact, and runtime checks still apply. One fresh-context
+   reviewer must inspect every prepared-bundle pass, with manifest
    verification before and after review. Capture, bundle-integrity,
    sensitive-input, runtime-trust, and explicitly-selected-unavailable-engine
-   failures all fail closed. Authority:
+   failures all fail closed. **If this PR changes `scripts/agent-autoreview*`,
+   the current checkout is not a trust boundary for its own review** — run the
+   wrapper and helper from the last independently reviewed pre-change commit
+   instead, and run `pnpm agent:autoreview:test -- --jobs 1` as the sequential
+   full regression closeout. Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 5. **Ship.** Open the PR through the `ship` skill on every surface, including
@@ -92,7 +97,10 @@ Solution` (approach before implementation detail). PRs open **ready for
    review, never as drafts**; use draft only when the user asks or required
    validation is intentionally pending, and state that reason in the body. Link
    the issue with `Closes #N` **only when the issue's Done means is fully
-   satisfied**; otherwise use `Refs #N`.
+   satisfied**; otherwise use `Refs #N`. For issue-backed work, once the PR is
+   open, run `pnpm issue:review --pr <pr> --issue <issue>` to move the issue
+   out of `agent-active` and into review. Authority:
+   [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
 6. **Babysit.** Run the `babysit-pr` skill. Sweep every feedback surface:
    top-level comments, review bodies, inline comments and threads, annotations,
