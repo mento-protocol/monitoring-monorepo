@@ -236,12 +236,18 @@ export CI="${CI:-true}"
 # PID-namespaced temp names, and its GC only removes orphaned .tmp files older
 # than an hour, so concurrent gate runs sharing this dir cannot corrupt it.
 # Respect a caller-provided TURBO_CACHE_DIR; set AGENT_TURBO_SHARED_CACHE=0 to
-# opt out and fall back to Turbo's per-worktree default.
+# opt out and fall back to Turbo's per-worktree default. Also fall back when
+# the candidate directory cannot be created or written to: sandboxed/agent
+# environments can have a restricted writable allowlist that excludes paths
+# outside the repo, same reasoning as the TMPDIR check above.
 if [[ -z "${TURBO_CACHE_DIR:-}" &&
   "${AGENT_TURBO_SHARED_CACHE:-1}" != "0" &&
   "${AGENT_TURBO_SHARED_CACHE:-1}" != "false" &&
   -n "${HOME:-}" ]]; then
-  export TURBO_CACHE_DIR="${HOME}/.cache/turbo-monitoring-monorepo"
+  turbo_cache_candidate="${HOME}/.cache/turbo-monitoring-monorepo"
+  if mkdir -p "$turbo_cache_candidate" 2>/dev/null && [[ -w "$turbo_cache_candidate" ]]; then
+    export TURBO_CACHE_DIR="$turbo_cache_candidate"
+  fi
 fi
 
 tmpfiles=()

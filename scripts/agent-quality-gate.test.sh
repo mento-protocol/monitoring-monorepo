@@ -717,6 +717,38 @@ TURBO_CACHE_DIR="/tmp/agentqg-caller-turbo-cache" \
 assert_raw_contains "Turbo cache dir: /tmp/agentqg-caller-turbo-cache"
 assert_not_contains "/.cache/turbo-monitoring-monorepo"
 
+# AGENT_TURBO_SHARED_CACHE=0/false is the documented operator escape hatch;
+# assert it actually suppresses the export, not just documented intent.
+env -u TURBO_CACHE_DIR AGENT_TURBO_SHARED_CACHE=0 \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+  scripts/agent-quality-gate.sh \
+  --changed-paths-file "$paths_file" \
+  --base origin/test \
+  > "$output_file"
+assert_not_contains "Turbo cache dir: "
+
+env -u TURBO_CACHE_DIR AGENT_TURBO_SHARED_CACHE=false \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+  scripts/agent-quality-gate.sh \
+  --changed-paths-file "$paths_file" \
+  --base origin/test \
+  > "$output_file"
+assert_not_contains "Turbo cache dir: "
+
+# Falls back to Turbo's per-worktree default (no TURBO_CACHE_DIR export) when
+# the shared-cache candidate cannot be created, e.g. a sandboxed agent
+# environment whose writable allowlist excludes it.
+turbo_cache_unwritable_home="$(mktemp -d)"
+: > "$turbo_cache_unwritable_home/.cache"
+env -u TURBO_CACHE_DIR HOME="$turbo_cache_unwritable_home" \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+  scripts/agent-quality-gate.sh \
+  --changed-paths-file "$paths_file" \
+  --base origin/test \
+  > "$output_file"
+assert_not_contains "Turbo cache dir: "
+rm -rf "$turbo_cache_unwritable_home"
+
 run_gate_expect_failure "ui-dashboard/package.json"
 assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "re-run with --allow-package-script-changes if they are safe."
