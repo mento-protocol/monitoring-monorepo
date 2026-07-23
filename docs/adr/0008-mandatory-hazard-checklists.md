@@ -3,7 +3,7 @@ title: Cross-layer and stateful changes must run dedicated PR checklists
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: ci/process
 date: 2026-05
 doc_type: adr
@@ -42,12 +42,14 @@ not discovered in review.
 
 ## Consequences
 
-- Checklists are canonical context (ADR 0005); package `AGENTS.md` files hard-link
-  to the relevant one and mark it mandatory.
+- Checklists are canonical context (ADR 0005). Root and relevant package entry
+  points hard-link the applicable checklist, while the local quality gate maps
+  changed data-flow paths to mandatory review.
 - Recurring automated-review hazards are canonicalized so bots don't re-litigate
   settled patterns.
 
 ## Evidence
 
 - [`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md), [`docs/pr-checklists/recurring-review-patterns.md`](../pr-checklists/recurring-review-patterns.md).
-- Enforced from [`AGENTS.md`](../../AGENTS.md) and each package `AGENTS.md` "Before Opening PRs" section.
+- Enforced from [`AGENTS.md`](../../AGENTS.md), relevant package `AGENTS.md`
+  routes, and `scripts/agent-quality-gate.sh`.

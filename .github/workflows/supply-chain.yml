@@ -1,11 +1,12 @@
 name: Supply Chain
 
-# Five gates that protect the dependency supply chain:
+# Five controls that protect the dependency supply chain:
 #
-# 1. npm advisory audit — blocks merges when a high/critical advisory exists
-#    against any package in the root or standalone deploy lockfiles. The
-#    governance-watchdog high-audit leg is duplicated in the required Code
-#    Quality job so that deploy lockfile stays covered by a required check.
+# 1. npm advisory audit — fails this advisory workflow when a high/critical
+#    advisory exists against any package in the root or standalone deploy
+#    lockfiles. The governance-watchdog high-audit leg is duplicated in the
+#    required Code Quality job so that deploy lockfile stays covered by a
+#    ruleset-required check.
 #
 # 2. lockfile-lint — validates pnpm-lock.yaml structural integrity for the root
 #    workspace lockfile and the package-local Cloud Build lockfiles:
@@ -17,6 +18,8 @@ name: Supply Chain
 #       files instead. This catches the same class of "poisoned mirror" attacks
 #       that lockfile-lint(1) was designed for — a rogue `registry=` line that
 #       silently redirects all installs to an attacker-controlled server.
+#    c) Override and resolution floors remain bounded so a fresh lockfile
+#       cannot jump to an unreviewed major version.
 #
 # 3. dependency version-skew check — validates every manifest entry for a
 #    cataloged package is either "catalog:" or the exact catalog version. This
@@ -91,8 +94,8 @@ on:
     # notify-slack-on-main-failure.yml.
     - cron: 17 6 * * *
     # Weekly trigger for the non-blocking moderate-advisory report job below.
-    # The blocking audit/lockfile/version-skew jobs also run on this cron; the
-    # duplicate Monday run is harmless.
+    # The fail-closed audit/lockfile/version-skew jobs also run on this cron;
+    # the duplicate Monday run is harmless.
     - cron: 17 7 * * 1
 
 concurrency:
@@ -156,6 +159,7 @@ jobs:
         #      hash (prevents tampered-tarball installs).
         #   2. No custom registry= in any .npmrc or registries: in
         #      pnpm-workspace.yaml (prevents registry-redirect attacks).
+        #   3. Override and resolution floors are bounded.
         run: node scripts/lockfile-lint.mjs
       - name: handler lockfile integrity + registry check
         # Same gate for the package-local lockfile Cloud Build uses as the

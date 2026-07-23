@@ -3,7 +3,7 @@ title: GitHub Issues are the canonical agent work queue, not BACKLOG.md
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: ci/process
 date: 2026-05
 doc_type: adr
@@ -25,11 +25,12 @@ with atomic claim + state.
 
 ## Decision
 
-**GitHub Issues are the canonical active-work queue.** Ready work is
-`label:agent-ready`; a helper (`pnpm issue:claim`) atomically flips labels
-(`agent-ready` → `agent-active` → `in-pr`) and syncs a workboard. `BACKLOG.md` is
-demoted to transition storage only; durable context lives in `AGENTS.md`,
-checklists, notes, or tests.
+**GitHub Issues are the canonical active-work queue.** Ready work carries
+`agent-ready`. `pnpm issue:claim` transitions one claimable issue to
+`agent-active`, records and verifies its Project Claim ID, and projects it to
+In Progress. `pnpm issue:review` later transitions an issue represented by an
+open PR to `in-pr`. `BACKLOG.md` is transition storage only; durable context
+lives in `AGENTS.md`, checklists, notes, or tests.
 
 ## Alternatives considered
 

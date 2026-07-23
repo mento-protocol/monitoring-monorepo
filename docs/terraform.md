@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -57,12 +57,13 @@ Environment approval.
 
 ## CI Model
 
-`.github/workflows/infra.yml` and the required `.github/workflows/ci.yml`
-sentinel use coarse YAML path filters to admit a run. After admission,
-`scripts/tf-stacks.mjs` uses `terraform.stacks.json` to classify changed stacks
-and validate only their registered roots. The registry remains the ownership
-source of truth, but a new `changedPathPatterns` entry must also reach both
-workflow admission filters until
+`.github/workflows/infra.yml` uses coarse YAML path filters to admit a run. The
+required `.github/workflows/ci.yml` sentinel runs on every PR and routes
+internally. Its change filter and `scripts/tf-stacks.mjs` use
+`terraform.stacks.json` to classify changed stacks and validate only their
+registered roots. The registry remains the ownership source of truth, but a new
+`changedPathPatterns` entry must also reach the infra admission filter and the
+CI internal filter until
 [#1501](https://github.com/mento-protocol/monitoring-monorepo/issues/1501)
 replaces that duplication with enforced parity.
 

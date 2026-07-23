@@ -19,6 +19,10 @@ aggregators and cross-chain routers. It publishes the latest snapshot to
 Upstash Redis for the dashboard `/integrations` page. The default mainnet
 probe fleet is Celo (42220), Monad (143), and Polygon (137).
 
+Apply
+[`docs/pr-checklists/stateful-data-ui.md`](../docs/pr-checklists/stateful-data-ui.md)
+when probe snapshot changes propagate through Upstash into the dashboard.
+
 ## Commands
 
 ```bash

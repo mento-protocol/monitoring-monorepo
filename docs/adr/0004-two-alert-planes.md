@@ -3,7 +3,7 @@ title: Two alert planes — Grafana metric thresholds and event-driven delivery
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: repo-wide
 date: 2026-04
 doc_type: adr

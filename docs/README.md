@@ -74,13 +74,13 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md) | PR Operating Card | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/reserve-yield-indexer.md`](notes/reserve-yield-indexer.md) | Reserve-Yield Indexer Topology | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md) | Sentry Triage Pipeline | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md) | GitHub-to-Slack notifications for Terraform-applying workflows | canonical / active | runbook / terraform/infra | eng | 30d; verified 2026-07-22 |
 | [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md) | Spoken Attention Nudge | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md) | New Worktree / Clone Setup and Claude Code on the Web Setup | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md) | Adding Governance Watchdog Events | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md) | Governance Watchdog Bootstrap | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/README.md`](../governance-watchdog/README.md) | Governance Watchdog | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
@@ -107,16 +107,16 @@ the rules in [`context-standards.md`](context-standards.md).
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
-| [`docs/adr/0001-monorepo-independent-deploys.md`](adr/0001-monorepo-independent-deploys.md) | One pnpm+Turbo monorepo with independently deployed services | canonical / active | adr / repo-wide | eng | 90d; verified 2026-07-08 |
-| [`docs/adr/0002-envio-hosted-indexer.md`](adr/0002-envio-hosted-indexer.md) | Envio HyperIndex Hosted is the indexer; deploy via a dedicated envio branch | canonical / active | adr / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`docs/adr/0003-hasura-graphql-read-api.md`](adr/0003-hasura-graphql-read-api.md) | Hasura auto-generated GraphQL over Postgres is the read API | canonical / active | adr / repo-wide | eng | 90d; verified 2026-07-06 |
-| [`docs/adr/0004-two-alert-planes.md`](adr/0004-two-alert-planes.md) | Two alert planes — Grafana metric thresholds and event-driven delivery | canonical / active | adr / repo-wide | eng | 90d; verified 2026-07-06 |
-| [`docs/adr/0005-context-as-product.md`](adr/0005-context-as-product.md) | Context is product — canonical authority model with a metadata contract | canonical / active | adr / repo-wide | eng | 90d; verified 2026-07-06 |
-| [`docs/adr/0006-github-issues-backlog.md`](adr/0006-github-issues-backlog.md) | GitHub Issues are the canonical agent work queue, not BACKLOG.md | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-06 |
-| [`docs/adr/0007-agent-quality-gate-and-merge-oracle.md`](adr/0007-agent-quality-gate-and-merge-oracle.md) | Local agent quality gate plus pr:ready-state merge oracle and Codex gate | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-06 |
-| [`docs/adr/0008-mandatory-hazard-checklists.md`](adr/0008-mandatory-hazard-checklists.md) | Cross-layer and stateful changes must run dedicated PR checklists | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-06 |
-| [`docs/adr/0009-supply-chain-hardening.md`](adr/0009-supply-chain-hardening.md) | Supply-chain hardening — release-age gate, lockfile-lint, SHA-pinned Actions | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-06 |
-| [`docs/adr/0010-required-checks-no-paths-filters.md`](adr/0010-required-checks-no-paths-filters.md) | Required CI checks carry no paths filters; only advisory jobs may | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-06 |
+| [`docs/adr/0001-monorepo-independent-deploys.md`](adr/0001-monorepo-independent-deploys.md) | One pnpm+Turbo monorepo with independently deployed services | canonical / active | adr / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0002-envio-hosted-indexer.md`](adr/0002-envio-hosted-indexer.md) | Envio HyperIndex Hosted is the indexer; deploy via a dedicated envio branch | canonical / active | adr / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0003-hasura-graphql-read-api.md`](adr/0003-hasura-graphql-read-api.md) | Hasura auto-generated GraphQL over Postgres is the read API | canonical / active | adr / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0004-two-alert-planes.md`](adr/0004-two-alert-planes.md) | Two alert planes — Grafana metric thresholds and event-driven delivery | canonical / active | adr / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0005-context-as-product.md`](adr/0005-context-as-product.md) | Context is product — canonical authority model with a metadata contract | canonical / active | adr / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0006-github-issues-backlog.md`](adr/0006-github-issues-backlog.md) | GitHub Issues are the canonical agent work queue, not BACKLOG.md | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0007-agent-quality-gate-and-merge-oracle.md`](adr/0007-agent-quality-gate-and-merge-oracle.md) | Local agent quality gate plus two-projection PR all-clear and Codex gate | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0008-mandatory-hazard-checklists.md`](adr/0008-mandatory-hazard-checklists.md) | Cross-layer and stateful changes must run dedicated PR checklists | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0009-supply-chain-hardening.md`](adr/0009-supply-chain-hardening.md) | Supply-chain hardening — release-age gate, lockfile-lint, SHA-pinned Actions | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0010-required-checks-no-paths-filters.md`](adr/0010-required-checks-no-paths-filters.md) | Required CI checks carry no paths filters; only advisory jobs may | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-23 |
 | [`docs/adr/0011-shared-config-single-source-of-truth.md`](adr/0011-shared-config-single-source-of-truth.md) | shared-config is the single source of truth for chain and token metadata | canonical / active | adr / shared-config | eng | 90d; verified 2026-07-08 |
 | [`docs/adr/0012-one-multichain-indexer.md`](adr/0012-one-multichain-indexer.md) | One multichain indexer project; Ethereum reserve-yield shares the hosted deployment | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-17 |
 | [`docs/adr/0013-vendored-shared-config-mirror.md`](adr/0013-vendored-shared-config-mirror.md) | The indexer vendors a mirror of shared-config because Envio builds outside the workspace | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-08 |

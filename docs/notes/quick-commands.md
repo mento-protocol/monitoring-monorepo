@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -68,8 +68,8 @@ pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-re
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
 node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
 node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics
-pnpm lockfile:lint                 # Lockfile integrity + registry check (blocking; no install needed)
-pnpm skew:check                    # Dependency version-skew check vs the pnpm catalog (blocking; no install needed)
+pnpm lockfile:lint                 # Fail-closed integrity + registry + override-floor check; no install needed
+pnpm skew:check                    # Fail on dependency version skew vs the pnpm catalog; no install needed
 pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
 pnpm override:prune-report          # pnpm.overrides + minimumReleaseAgeExclude pruning report (advisory; no install needed)
 pnpm adr:check                      # Advisory ADR reminder for architectural changes (new package/stack/workflow); --strict to hard-gate
