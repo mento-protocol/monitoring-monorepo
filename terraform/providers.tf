@@ -61,8 +61,10 @@ provider "google" {
 # `monitoring-monorepo` that belong to the platform stack, such as the
 # Vercel automation bypass mirror and integration-probe credentials.
 # `var.github_token` should be a fine-grained PAT scoped to
-# `mento-protocol/monitoring-monorepo` with Repository → Secrets: Read/write
-# and Variables: Read/write.
+# `mento-protocol/monitoring-monorepo` with Repository → Secrets: Read/write,
+# Variables: Read/write, and Administration: Read/write (the last is required by
+# `github_workflow_repository_permissions` in `github-actions-permissions.tf`,
+# which pins the default workflow-token permission to read-only — issue #1557).
 # This keeps the credential repository-scoped and avoids the org-admin scope
 # that an organization-level secret or variable would force.
 provider "github" {
