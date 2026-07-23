@@ -149,17 +149,6 @@ function GlobalPoolFilters({
 }: {
   filters: ReturnType<typeof useGlobalPoolFilters>;
 }) {
-  const selectedChainLabel =
-    filters.selectedChainIds === null
-      ? "All chains"
-      : filters.selectedChainIds.length === 0
-        ? "No chains"
-        : filters.selectedChainIds.length === 1
-          ? (filters.chainOptions.find(
-              (option) => option.chainId === filters.selectedChainIds?.[0],
-            )?.label ?? "1 chain")
-          : `${filters.selectedChainIds.length} chains`;
-
   return (
     <div className="mb-2 flex flex-wrap items-center gap-2">
       <label className="min-w-48 flex-1 sm:max-w-xs">
@@ -173,50 +162,45 @@ function GlobalPoolFilters({
           className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
         />
       </label>
-      <div className="flex items-center gap-1.5 text-xs text-slate-500">
-        <span>Chains:</span>
-        <details className="group relative">
-          <summary
-            role="button"
-            aria-label={`Chains: ${selectedChainLabel}`}
-            className="cursor-pointer list-none rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 [&::-webkit-details-marker]:hidden"
-          >
-            {selectedChainLabel}
-            <span aria-hidden="true" className="ml-2 text-slate-500">
-              ▾
-            </span>
-          </summary>
-          <div className="absolute right-0 z-20 mt-1 min-w-40 overflow-hidden rounded border border-slate-700 bg-slate-900 py-1 shadow-lg shadow-slate-950/40">
-            <label className="flex cursor-pointer items-center gap-2 border-b border-slate-800 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-800/70">
-              <input
-                type="checkbox"
-                checked={filters.selectedChainIds === null}
-                onChange={(event) =>
-                  filters.setAllChains(event.currentTarget.checked)
-                }
-                className="accent-indigo-500"
-              />
-              All chains
-            </label>
-            {filters.chainOptions.map((option) => (
-              <label
-                key={option.chainId}
-                className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-800/70"
-              >
-                <input
-                  type="checkbox"
-                  checked={
-                    filters.selectedChainIds === null ||
-                    filters.selectedChainIds.includes(option.chainId)
-                  }
-                  onChange={() => filters.toggleChain(option.chainId)}
-                  className="accent-indigo-500"
-                />
-                {option.label}
-              </label>
-            ))}
-          </div>
-        </details>
+      <div
+        role="group"
+        aria-label="Filter pools by chain"
+        className="flex flex-wrap items-center gap-1.5"
+      >
+        <span className="mr-1 text-xs text-slate-500">Chains:</span>
+        <button
+          type="button"
+          aria-pressed={filters.selectedChainIds === null}
+          onClick={() => filters.setAllChains()}
+          className={
+            "rounded-full px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+            (filters.selectedChainIds === null
+              ? "bg-indigo-900/40 text-indigo-200"
+              : "bg-slate-800/60 text-slate-400 hover:text-slate-200")
+          }
+        >
+          All
+        </button>
+        {filters.chainOptions.map((option) => {
+          const active =
+            filters.selectedChainIds?.includes(option.chainId) ?? false;
+          return (
+            <button
+              key={option.chainId}
+              type="button"
+              aria-pressed={active}
+              onClick={() => filters.toggleChain(option.chainId)}
+              className={
+                "rounded-full px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+                (active
+                  ? "bg-slate-700 text-slate-200"
+                  : "bg-slate-800/60 text-slate-400 hover:text-slate-200")
+              }
+            >
+              {option.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -249,14 +233,15 @@ function useGlobalPoolFilters(entries: GlobalPoolEntry[]) {
     chainOptions,
     allChainIds,
     filteredEntries,
-    setAllChains: (selected: boolean) =>
-      setSelectedChainIds(selected ? null : []),
+    setAllChains: () => setSelectedChainIds(null),
     toggleChain: (chainId: number) =>
       setSelectedChainIds((current) => {
-        const active = current ?? allChainIds;
-        const next = active.includes(chainId)
-          ? active.filter((id) => id !== chainId)
-          : [...active, chainId];
+        const next =
+          current === null
+            ? [chainId]
+            : current.includes(chainId)
+              ? current.filter((id) => id !== chainId)
+              : [...current, chainId];
         return next.length === allChainIds.length ? null : next;
       }),
   };

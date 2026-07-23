@@ -182,7 +182,7 @@ describe("GlobalPoolsTable — FX weekend SSR banner", () => {
 });
 
 describe("GlobalPoolsTable filters", () => {
-  it("uses a compact bridge-style chain dropdown", () => {
+  it("uses the bridge status filter pill design for chains", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable
         entries={[makeEntry({}, CELO_NETWORK), makeEntry({}, MONAD_NETWORK)]}
@@ -190,10 +190,11 @@ describe("GlobalPoolsTable filters", () => {
       />,
     );
 
-    expect(html).toContain('aria-label="Chains: All chains"');
-    expect(html).toContain('type="checkbox"');
-    expect(html).toContain(">Celo</label>");
-    expect(html).toContain(">Monad</label>");
+    expect(html).toContain('aria-label="Filter pools by chain"');
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain(">All</button>");
+    expect(html).toContain(">Celo</button>");
+    expect(html).toContain(">Monad</button>");
     expect(html).toContain('<span class="sr-only">Search pools</span>');
   });
 
