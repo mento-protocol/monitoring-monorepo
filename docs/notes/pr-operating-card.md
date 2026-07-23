@@ -29,8 +29,8 @@ authority.
    ```
 
    Claiming moves the issue out of the ready queue; if you cannot continue,
-   release it with `pnpm issue:release` and choose `agent-ready` versus
-   `needs-grooming` from how much clarity remains. Authority:
+   release it with `pnpm issue:release --issue <n>` (add `--needs-grooming`
+   when clarity is missing; default restores `agent-ready`). Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
 2. **Implement.** Work in a dedicated per-PR worktree and unique branch, never
@@ -56,7 +56,8 @@ authority.
 
    `--run` maps changed paths to the safe local checks (lint, typecheck, tests,
    browser suite) and stamps freshness so a later pre-push `--skip-if-fresh`
-   cache-hits. It does not run `trunk fmt` — run `trunk fmt` (or Prettier)
+   cache-hits. It does not run `trunk fmt` — run `./tools/trunk fmt` (the
+   checked-in launcher; a global `trunk` may not exist)
    before committing so the required Code Quality CI stays green. The gate never
    deploys and never applies Terraform. It **refuses package-script,
    package-manager, or lockfile changes until their lifecycle risk is reviewed
@@ -73,9 +74,10 @@ authority.
    non-trivial completed batch, run the closeout review. Outside an active
    Codex session — the standalone helper or `--engine claude` — a bare
    `pnpm agent:autoreview` is the closeout, matching the `ship` skill and root
-   [`AGENTS.md`](../../AGENTS.md). Inside an active Codex session, use the
-   prepared-bundle fresh-context flow so a separate reviewer inspects every
-   pass:
+   [`AGENTS.md`](../../AGENTS.md). Inside an active Codex session, a bare
+   invocation silently selects the local deterministic engine — the `ship`
+   skill's bare closeout is NOT sufficient there; use the prepared-bundle
+   fresh-context flow so a separate reviewer inspects every pass:
 
    ```bash
    pnpm agent:autoreview --prepare-bundle-dir <dir>  # publish the review bundle
