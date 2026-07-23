@@ -188,7 +188,10 @@ Autofix considers only local `code-fix` stubs without an existing fix PR,
 caps each run at two, and uses a GitHub App scoped to Contents and Pull
 requests on this repository. The fix agent receives no Sentry credential.
 Deterministic selection and finalization enforce the issue/branch/diff
-contract.
+contract. `ui-dashboard/vercel.json` denies `git.deploymentEnabled` for
+`sentry-autofix/*`, so an autofix branch's untrusted diff never gets a Vercel
+deployment (and its production-linked secrets) before human review — a trust
+boundary earlier than the path-aware skip script (ADR 0019, issue #1452).
 
 Do not use manual dispatch as a probe: there is no dry-run mode. Dispatch from
 `main`; an off-`main` dispatch is a deliberate no-op. On `main`, when the
