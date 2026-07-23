@@ -259,16 +259,26 @@ timeout_seq=0
 # PIDs (command + watchdog) of any in-flight timed command in THIS process, so a
 # wrapper SIGINT/SIGTERM tears them down instead of leaking the watchdog's
 # background sleeps. Sequential commands run in the gate process; parallel
-# members run in their own `&` subshells, each maintaining its own copy — which
-# the parent's signal traps cannot see, so the parallel pool ALSO registers its
-# worker subshell PIDs in active_worker_pids below.
+# members run in their own process-group worker subshells, each maintaining its
+# own copy — which the parent's signal traps cannot see.
 active_timeout_pids=()
 
-# Worker subshell PIDs of the in-flight parallel pool, maintained by the pool's
-# parent loop. A SIGTERM-ignoring mapped command inside a worker would survive
-# a gate interrupt if teardown only signalled active_timeout_pids (which are
-# empty in the parent during --parallel runs).
-active_worker_pids=()
+# Process-group IDs of the in-flight parallel workers. Non-interactive Bash job
+# control gives each worker a dedicated group whose ID equals its leader PID.
+# Group tracking survives the leader exiting and descendants reparenting, unlike
+# a process-tree walk rooted at that leader.
+active_worker_pgids=()
+
+# A signal can arrive after Bash creates a parallel worker but before the parent
+# records its process group. Defer INT/TERM handling across that short registry
+# update, then replay the first pending signal after the group is reachable.
+worker_registration_in_progress=0
+pending_terminating_signal=""
+worker_registration_test_barrier="${AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER:-}"
+if [[ -n "$worker_registration_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
 
 kill_process_tree() {
   local pid="$1"
@@ -294,34 +304,43 @@ collect_process_tree() {
 
 teardown_active_timeouts() {
   local pid
-  local -a roots=(
-    "${active_timeout_pids[@]+"${active_timeout_pids[@]}"}"
-    "${active_worker_pids[@]+"${active_worker_pids[@]}"}"
-  )
+  local pgid
+  local -a roots=("${active_timeout_pids[@]+"${active_timeout_pids[@]}"}")
+  local -a worker_pgids=("${active_worker_pgids[@]+"${active_worker_pgids[@]}"}")
   active_timeout_pids=()
-  active_worker_pids=()
-  [[ ${#roots[@]} -gt 0 ]] || return 0
+  active_worker_pgids=()
+  [[ -n "${roots[*]-}" || -n "${worker_pgids[*]-}" ]] || return 0
   # Snapshot every descendant BEFORE signalling: TERM kills intermediate
   # subshells first, which reparents a SIGTERM-ignoring survivor away from the
   # tree, so a post-TERM re-walk would miss it. The KILL pass targets the
-  # saved pid list, not a fresh walk.
+  # saved pid list, not a fresh walk. Parallel workers do not need a snapshot:
+  # their registered process groups remain addressable after reparenting.
   local -a tree=()
-  for pid in "${roots[@]}"; do
+  for pid in "${roots[@]+"${roots[@]}"}"; do
     while IFS= read -r child_pid; do
       [[ -n "$child_pid" ]] && tree+=("$child_pid")
     done < <(collect_process_tree "$pid")
   done
-  [[ ${#tree[@]} -gt 0 ]] || return 0
-  for pid in "${tree[@]}"; do
+  for pid in "${tree[@]+"${tree[@]}"}"; do
     kill "-TERM" "$pid" 2>/dev/null || true
+  done
+  for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
+    kill -TERM -- "-$pgid" 2>/dev/null || true
   done
   # Same TERM-then-KILL grace as run_with_timeout's watchdog: a manual
   # interrupt (Ctrl-C/TERM to the gate) must not leave a SIGTERM-ignoring
   # mapped command (or descendant) running just because it wasn't the
   # timeout path that tore it down.
   sleep 3
-  for pid in "${tree[@]}"; do
+  for pid in "${tree[@]+"${tree[@]}"}"; do
     kill "-KILL" "$pid" 2>/dev/null || true
+  done
+  for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
+    kill -KILL -- "-$pgid" 2>/dev/null || true
+    # The group leader is the direct child the gate can reap. If it already
+    # exited, wait returns immediately; the negative-PGID signals above still
+    # reached any surviving reparented descendants.
+    wait "$pgid" 2>/dev/null || true
   done
 }
 
@@ -335,9 +354,35 @@ trap cleanup_tmpfiles EXIT
 
 on_terminating_signal() {
   local signal="$1"
+  if [[ "$worker_registration_in_progress" -eq 1 ]]; then
+    [[ -n "$pending_terminating_signal" ]] ||
+      pending_terminating_signal="$signal"
+    return 0
+  fi
+  trap '' INT TERM
   teardown_active_timeouts
   trap - "$signal"
   kill "-${signal}" "$$" 2>/dev/null || exit 143
+}
+
+finish_worker_registration() {
+  local signal
+  worker_registration_in_progress=0
+  if [[ -n "$pending_terminating_signal" ]]; then
+    signal="$pending_terminating_signal"
+    pending_terminating_signal=""
+    on_terminating_signal "$signal"
+  fi
+}
+
+drain_worker_process_group() {
+  local pgid="$1"
+  if kill -0 -- "-$pgid" 2>/dev/null; then
+    kill -TERM -- "-$pgid" 2>/dev/null || true
+    sleep 3
+    kill -KILL -- "-$pgid" 2>/dev/null || true
+  fi
+  wait "$pgid" 2>/dev/null || true
 }
 trap 'on_terminating_signal INT' INT
 trap 'on_terminating_signal TERM' TERM
@@ -3117,6 +3162,7 @@ run_mapped_entries_parallel() {
   local timed_out
   local phase_start_ts last_heartbeat_ts now_ts hb_cmd
   local heartbeat_interval=20
+  local had_monitor=0
 
   if [[ "$total" -eq 0 ]]; then
     return
@@ -3152,14 +3198,43 @@ run_mapped_entries_parallel() {
 
       echo
       echo "+ ${command}"
-      run_mapped_command_to_files "$command" "$output_file" "$status_file" "$elapsed_file" "$timeout_file" &
+      worker_registration_in_progress=1
+      had_monitor=0
+      case "$-" in
+        *m*) had_monitor=1 ;;
+      esac
+      # macOS has no setsid(1). Bash job control is available in stock Bash
+      # 3.2 and gives this background worker a dedicated process group whose ID
+      # is the worker PID, so the parent can tear down the group after the
+      # leader exits or its descendants reparent.
+      set -m
+      (
+        # The parent needs monitor mode only to create this worker group. Turn
+        # it back off inside the worker so run_with_timeout's command and
+        # watchdog children stay in that group instead of becoming new jobs.
+        set +m
+        run_mapped_command_to_files \
+          "$command" "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
+      ) </dev/null &
       pid="$!"
+      if [[ "$had_monitor" -eq 0 ]]; then
+        set +m
+      fi
+
+      # Private deterministic barrier for the signal-registration regression.
+      # It is inert unless the test suite opts in.
+      if [[ -n "$worker_registration_test_barrier" ]]; then
+        if [[ ! -e "${worker_registration_test_barrier}.ready" ]]; then
+          printf '%s\n' "$pid" > "${worker_registration_test_barrier}.ready"
+        fi
+        while [[ ! -e "${worker_registration_test_barrier}.release" ]]; do
+          sleep 0.05 || true
+        done
+      fi
 
       active_pids+=("$pid")
-      # Mirror into the signal-trap teardown set so an interrupt reaches the
-      # worker's whole tree (the worker-local active_timeout_pids are invisible
-      # to the parent's traps).
-      active_worker_pids+=("$pid")
+      active_worker_pgids+=("$pid")
+      finish_worker_registration
       active_commands+=("$command")
       active_output_files+=("$output_file")
       active_status_files+=("$status_file")
@@ -3193,6 +3268,10 @@ run_mapped_entries_parallel() {
       if ! wait "$pid"; then
         :
       fi
+      # A worker normally leaves an empty group because run_with_timeout reaps
+      # its command and watchdog. If the leader exited unexpectedly, drain any
+      # surviving same-group descendants before unregistering the PGID.
+      drain_worker_process_group "$pid"
 
       command="${active_commands[$i]}"
       output_file="${active_output_files[$i]}"
@@ -3226,7 +3305,7 @@ run_mapped_entries_parallel() {
     done
 
     active_pids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
-    active_worker_pids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
+    active_worker_pgids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
     active_commands=("${next_active_commands[@]+"${next_active_commands[@]}"}")
     active_output_files=("${next_active_output_files[@]+"${next_active_output_files[@]}"}")
     active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
