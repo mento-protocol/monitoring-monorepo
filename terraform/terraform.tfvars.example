@@ -180,7 +180,9 @@ gcp_billing_account = "..."
 
 # Container image for the metrics-bridge Cloud Run service.
 # Built by CI on merge to main, or manually via `pnpm bridge:deploy`.
-# Leave empty until first image is built — Cloud Run won't be provisioned.
+# Omit this override to use the digest-pinned bootstrap image in variables.tf.
+# Empty strings are invalid; set a concrete image only when intentionally
+# changing the service's first-creation image.
 # metrics_bridge_image = "europe-west1-docker.pkg.dev/mento-monitoring/metrics-bridge/metrics-bridge:abc123"
 
 # Dev team IAM — defaults to group:eng@mentolabs.xyz in variables.tf.
