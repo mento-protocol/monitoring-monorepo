@@ -210,6 +210,92 @@ await test("guard refuses a changed path the agent turned into a symlink", () =>
   rmSync(dir, { recursive: true, force: true });
 });
 
+await test("guard refuses a credential file whose path has a trailing space (#1526)", () => {
+  // The load-bearing fix keeps EXACT path bytes: pre-fix, String(f).trim() ate
+  // the trailing space so the credential scan lstat'd ENOENT and skipped it
+  // (ok:true) while the byte-copy still published the real token-bearing file.
+  // The malformed check now refuses it structurally BEFORE the scan runs.
+  const dir = mkdtempSync(join(tmpdir(), "autofix-ws-cred-"));
+  mkdirSync(join(dir, "ui-dashboard"), { recursive: true });
+  writeFileSync(
+    join(dir, "ui-dashboard", "leak.ts "),
+    'const t = "ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345";\n',
+  );
+  const r = evaluateDiffGuard(["ui-dashboard/leak.ts "], { workRoot: dir });
+  assert(
+    !r.ok && /whitespace or control/i.test(r.reason),
+    "trailing-space credential path refused as malformed",
+  );
+  // Count-only reason — the offending path (which could be named after a real
+  // token) is NEVER echoed.
+  assert(!r.reason.includes("ghs_AbCd"), "reason must not echo the token");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+await test("guard refuses a symlink whose path has a trailing space (#1526)", () => {
+  // Same divergence via the symlink vector: pre-fix the trim hid the trailing
+  // space so the symlink check lstat'd ENOENT and passed; the byte-copy would
+  // then dereference the real symlink and exfiltrate runner secrets.
+  const dir = mkdtempSync(join(tmpdir(), "autofix-ws-symlink-"));
+  mkdirSync(join(dir, "ui-dashboard"), { recursive: true });
+  symlinkSync("/proc/self/environ", join(dir, "ui-dashboard", "evil.ts "));
+  const r = evaluateDiffGuard(["ui-dashboard/evil.ts "], { workRoot: dir });
+  assert(
+    !r.ok && /whitespace or control/i.test(r.reason),
+    "trailing-space symlink path refused as malformed (before the symlink check)",
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+await test("guard refuses edge-whitespace and control-char paths; allows internal whitespace (#1526)", () => {
+  // Every path with leading/trailing whitespace or a control byte (C0 or DEL)
+  // is refused structurally — no workRoot needed, it is a pure string check.
+  for (const p of [
+    "ui-dashboard/leak.ts\r",
+    "ui-dashboard/leak.ts\n",
+    "ui-dashboard/leak.ts\t",
+    " ui-dashboard/leak.ts",
+    "ui-dashboard/leak.ts ",
+    "ui-dashboard/le\x00ak.ts",
+    "ui-dashboard/leak.ts\x7f", // trailing DEL — exercises the widened class
+  ]) {
+    const r = evaluateDiffGuard([p]);
+    assert(
+      !r.ok && /whitespace or control/i.test(r.reason),
+      `edge/control path refused: ${JSON.stringify(p)}`,
+    );
+  }
+  // INTERNAL whitespace never caused guard/copy divergence (the trim only
+  // touched edges) and the byte-copy quotes "${f}" correctly — stays allowed.
+  assert(
+    evaluateDiffGuard(["ui-dashboard/lib/a b.ts"]).ok,
+    "internal-space path allowed",
+  );
+  // Locks the count-only reason (revision 1): a path named after a token must
+  // NOT surface that token in the public refusal reason.
+  const leak = evaluateDiffGuard(["ghs_AAAABBBBCCCCDDDD1234.ts "]);
+  assert(!leak.ok, "token-named trailing-space path refused");
+  assert(
+    !leak.reason.includes("ghs_AAAA"),
+    "malformed reason must not echo the offending path bytes",
+  );
+});
+
+await test("CLI guard refuses a trailing-space line and preserves \\r (split on \\n only) (#1526)", () => {
+  // Proves the CLI parser now passes EXACT bytes (no trim) and keeps a trailing
+  // \r (split on \n only, matching `IFS= read -r`) so the malformed check can
+  // fire. It does NOT exercise the credential scan — malformed short-circuits.
+  const dir = mkdtempSync(join(tmpdir(), "autofix-ws-cli-"));
+  const file = join(dir, "changed.txt");
+  writeFileSync(file, "ui-dashboard/leak.ts \nui-dashboard/other.ts\r\n");
+  const out = JSON.parse(captureCli(["guard", "--files-file", file]));
+  assert(
+    !out.ok && /whitespace or control/i.test(out.reason),
+    "CLI guard refuses the trailing-space / trailing-\\r lines",
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
 await test("guard allows ordinary product source", () => {
   for (const path of [
     "ui-dashboard/lib/x.ts",
