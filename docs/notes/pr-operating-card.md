@@ -67,16 +67,22 @@ authority.
    Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
-4. **Autoreview.** For a non-trivial completed batch:
+4. **Autoreview.** Freeze the scope baseline first — the initial request,
+   target/owner, changed-file set, and non-test changed-line count — as the
+   reference Babysit (step 6) checks new additions against. Then, for a
+   non-trivial completed batch:
 
    ```bash
    pnpm agent:autoreview --prepare-bundle-dir <dir>  # publish the review bundle
    pnpm agent:autoreview --verify-bundle-dir <dir>   # pre-review manifest check
+   pnpm agent:autoreview --verify-bundle-dir <dir> \
+     --expected-bundle-manifest <digest-from-pre-review-check>  # post-review check
    ```
 
-   Prepare the bundle, then run `--verify-bundle-dir` immediately before
-   review, retain its printed digest outside the bundle, and pass that digest
-   to the post-review check. Autoreview reviews the complete branch-local
+   Prepare the bundle, run `--verify-bundle-dir` immediately before review,
+   retain its printed digest outside the bundle, and pass that digest to the
+   post-review check above so bundle replacement or drift during review
+   cannot go undetected. Autoreview reviews the complete branch-local
    target without truncation, but it is **source review only**: it runs no
    tests and proves no behavior, so the mapped gate, browser,
    generated-artifact, and runtime checks still apply. One fresh-context
@@ -112,10 +118,9 @@ Solution` (approach before implementation detail). PRs open **ready for
    After finding one instance of a hazard, audit its sibling surfaces — bots
    sample, they do not enumerate; review is a batch-boundary verifier, not the
    inner edit loop. Never force-push or amend while babysitting,
-   and `git fetch` before every push because reviewers push mid-session. Freeze
-   the review baseline (user request, target/owner, changed files, non-test
-   changed lines) before the first pass; classify each addition as in-scope,
-   follow-up, or stop; **file a GitHub issue before deferring any valid
+   and `git fetch` before every push because reviewers push mid-session. Check
+   new additions against the scope baseline frozen at step 4; classify each as
+   in-scope, follow-up, or stop; **file a GitHub issue before deferring any valid
    follow-up** and link it from the PR's `## Deferrals` section. Warn as the
    diff approaches twice the baseline, and pause for reclassification after two
    review-triggered patch cycles rather than starting a third. Authority:
