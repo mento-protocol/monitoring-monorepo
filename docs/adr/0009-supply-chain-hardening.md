@@ -27,8 +27,9 @@ by a range, and a mutated GitHub Action tag executing arbitrary code in CI.
 Adopt a defense-in-depth posture:
 
 - **`minimumReleaseAge`** in `pnpm-workspace.yaml` refuses registry versions
-  younger than 3 days (`@mento-protocol/*` exempted; frozen-lockfile installs
-  unaffected).
+  younger than 3 days. `@mento-protocol/*` and narrow, reviewed security
+  releases may bypass the delay; frozen-lockfile installs verify new entries
+  against the same policy.
 - **`pnpm lockfile:lint`** validates lockfile integrity + registry provenance,
   with no install needed, as a blocking gate.
 - **SHA-pin every GitHub Action** `uses:` ref, enforced by

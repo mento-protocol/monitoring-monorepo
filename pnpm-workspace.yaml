@@ -38,6 +38,19 @@ minimumReleaseAgeExclude:
   - form-data
   - js-yaml
   - multer@2.2.0
+  # July 2026 security releases: Next 16.2.11 and Auth.js 5.0.0-beta.32.
+  - next@16.2.11
+  - "@next/env@16.2.11"
+  - "@next/swc-darwin-arm64@16.2.11"
+  - "@next/swc-darwin-x64@16.2.11"
+  - "@next/swc-linux-arm64-gnu@16.2.11"
+  - "@next/swc-linux-arm64-musl@16.2.11"
+  - "@next/swc-linux-x64-gnu@16.2.11"
+  - "@next/swc-linux-x64-musl@16.2.11"
+  - "@next/swc-win32-arm64-msvc@16.2.11"
+  - "@next/swc-win32-x64-msvc@16.2.11"
+  - next-auth@5.0.0-beta.32
+  - "@auth/core@0.41.3"
   - protobufjs
   - tar
   - undici@7.28.0
