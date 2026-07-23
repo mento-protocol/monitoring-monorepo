@@ -305,11 +305,13 @@ Field expectations:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md); keep
    behavioral and runtime verification in the validation record.
 
-5. Run `pnpm --silent pr:feedback-state --pr <number> --json` for the feedback
-   sweep. After its ledger is clean, run
-   `pnpm pr:ready-state --pr <number> --json` for the final required-readiness
-   decision. For a foreground wait loop, use
-   `pnpm pr:ready-state --pr <number> --watch --compact --until-ready`.
+5. Run `pnpm --silent pr:feedback-state --pr <number> --repo <BASE_OWNER/REPO>
+--json` for the feedback sweep. After its ledger is clean, run
+   `pnpm pr:ready-state --pr <number> --repo <BASE_OWNER/REPO> --json` for the
+   final required-readiness decision. For a foreground wait loop, use
+   `pnpm pr:ready-state --pr <number> --repo <BASE_OWNER/REPO> --watch
+--compact --until-ready`. Bind `--repo` to the base repository — checkout
+   inference can select the wrong same-number PR on fork PRs.
 6. If feedback-state `ready` is false, inspect and handle
    `requiredFeedbackBlockers`, `unresolvedReviewThreads`,
    `unrepliedRootReviewComments`, `blockingTopLevelBotComments`, and any
