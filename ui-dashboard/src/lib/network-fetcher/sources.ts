@@ -1,10 +1,12 @@
-// Fires the 14-way parallel fan-out behind `fetchNetworkData`: fee/daily/
+// Fires the independent data-source fan-out behind `fetchNetworkData`: fee/daily/
 // broker snapshots, LP addresses, legacy OLS pools, the active strategy
 // registry, breach rollup, health cursor,
 // rebalance-threshold-known, VP oracle freshness, VP deprecation x2, indexed
-// CDP pools, and fallback strategy probes. Each branch is isolated behind
-// `Promise.allSettled` so one query's schema-lag or timeout degrades only
-// its own slice instead of failing the whole pool list.
+// CDP pools, and fallback strategy probes. The fallback deliberately waits on
+// the strategy registry: it only exists for the narrow schema-lag window, so
+// a successful registry response must never trigger browser-side RPC traffic.
+// Each branch is isolated behind `Promise.allSettled` so one query's schema-lag
+// or timeout degrades only its own slice instead of failing the whole pool list.
 
 import type { GraphQLClient } from "@/lib/graphql-fetch";
 import type { Network } from "@/lib/networks";
@@ -132,9 +134,9 @@ type SourcesArgs = {
 };
 
 // Positional tuple matching `fetchNetworkSources`'s destructure order below —
-// kept as its own function so the 14-item fan-out (with its per-branch
-// isolation rationale) stays readable as one literal instead of folded into
-// a larger function body.
+// kept as its own function so the independent requests, plus the intentionally
+// registry-dependent fallback, stay readable as one literal instead of folded
+// into a larger function body.
 function buildSourcePromises(
   args: SourcesArgs,
 ): [
@@ -168,6 +170,19 @@ function buildSourcePromises(
     truncated: false,
     error: null,
   };
+  const activeStrategies = requestActiveLiquidityStrategies(network, timed);
+  // PoolLiquidityStrategy is authoritative whenever its query succeeds,
+  // including an empty row set. Only its explicit missing-field compatibility
+  // result needs the legacy runtime probe. A transport failure is deliberately
+  // not a fallback trigger: `resolveStrategyError` surfaces it instead of
+  // multiplying an upstream outage into public-RPC traffic.
+  const fallbackStrategies = activeStrategies.then(
+    (result) =>
+      result.available
+        ? emptyStrategyIds()
+        : requestFallbackStrategies(network, pools),
+    () => emptyStrategyIds(),
+  );
 
   return [
     fetchAllFeeSnapshotPages(client, network.chainId, network.id),
@@ -191,7 +206,7 @@ function buildSourcePromises(
           error: null,
         }),
     timed<OlsPoolsResult>(ALL_OLS_POOLS, chainVariables),
-    requestActiveLiquidityStrategies(network, timed),
+    activeStrategies,
     // Uptime rollup — isolated from ALL_POOLS_WITH_HEALTH so a schema-
     // lag fail degrades just the uptime column to "—", not the entire
     // pools page.
@@ -224,7 +239,7 @@ function buildSourcePromises(
     // runtime probe is a non-Celo Reserve fallback and must not produce CDP
     // badges.
     requestIndexedCdpPools(network, timed),
-    requestFallbackStrategies(network, pools),
+    fallbackStrategies,
   ];
 }
 

@@ -345,6 +345,49 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     expect(result.reservePoolIds).toEqual(new Set());
   });
 
+  it("Monad uses its indexed strategy registry without issuing fallback RPC probes", async () => {
+    const pool = makePool("143-0xstrategy-registry", {
+      chainId: 143,
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    });
+    installGraphQLMock({
+      AllPoolsWithHealth: { Pool: [pool] },
+      AllActivePoolLiquidityStrategies: {
+        PoolLiquidityStrategy: [
+          {
+            poolId: pool.id,
+            strategyAddress: pool.rebalancerAddress,
+            kind: "RESERVE",
+          },
+        ],
+      },
+    });
+
+    const result = await fetchNetworkData(MONAD_NETWORK, WINDOWS);
+
+    expect(result.strategyError).toBeNull();
+    expect(result.reservePoolIds).toEqual(new Set([pool.id]));
+    expect(mockDetectProbedStrategies).not.toHaveBeenCalled();
+  });
+
+  it("Monad does not issue fallback RPC probes when its strategy registry transport fails", async () => {
+    const pool = makePool("143-0xstrategy-transport-fail", {
+      chainId: 143,
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    });
+    const err = new Error("strategy registry transport down");
+    installGraphQLMock({
+      AllPoolsWithHealth: { Pool: [pool] },
+      AllActivePoolLiquidityStrategies: reject(err),
+    });
+
+    const result = await fetchNetworkData(MONAD_NETWORK, WINDOWS);
+
+    expect(result.strategyError).toBe(err);
+    expect(result.reservePoolIds).toEqual(new Set());
+    expect(mockDetectProbedStrategies).not.toHaveBeenCalled();
+  });
+
   it("missing strategy registry schema falls back to legacy OLS and CDP rows", async () => {
     const rebalancer = "0x000000000000000000000000000000000000d0d0";
     const pool = makePool("42220-0xstrategy-schema-lag", {
@@ -533,5 +576,6 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     expect(result.strategyError).toBe(err);
     expect(result.reservePoolIds).toEqual(new Set());
     expect(result.cdpPoolIds).toEqual(new Set());
+    expect(mockDetectProbedStrategies).toHaveBeenCalledTimes(1);
   });
 });
