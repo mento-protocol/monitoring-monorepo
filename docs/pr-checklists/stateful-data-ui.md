@@ -113,6 +113,10 @@ If the PR touches a table with pagination, sort, filter, search, or linked chart
 - [ ] Is that behavior documented in code comments and PR notes?
 - [ ] If bounded, is the cap explicit and user-visible?
 - [ ] If unbounded, can the backend/query path actually support it?
+- [ ] If filter options are data-driven, what happens when the selected option
+      disappears during refresh or partial failure? Reset to a valid state
+      before paint or show an explicit unavailable state, and cover the case
+      where sibling data still loads.
 
 ### Coupled visualizations
 
