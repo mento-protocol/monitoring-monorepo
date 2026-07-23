@@ -41,9 +41,9 @@ Terraform state object.
 
 That invariant changed in July 2026. [ADR 0047](../adr/0047-separated-terraform-ci-identities.md)
 requires unattended trusted-`main` plans and scheduled drift to carry no write
-credentials, while production apply authentication must prove the exact
-repository, protected `main` ref, and `production-infra` environment through a
-dedicated WIF pool.
+credentials, while production apply authentication must prove immutable
+repository ID `1172025835`, the expected repository slug, protected `main` ref,
+and the `production-infra` environment through a dedicated WIF pool.
 
 The reopened design creates a separate main-ref refresh chain rather than
 broadening the PR identity. Its downstream seed service account receives a

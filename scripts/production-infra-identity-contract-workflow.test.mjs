@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { validFixtureFiles } from "./production-infra-identity-contract-fixtures.mjs";
 import { validateWorkflowContract } from "./production-infra-identity-contract-workflow.mjs";
 
@@ -7,16 +8,31 @@ const workflowPath = ".github/workflows/alerts-rules.yml";
 const validCheckoutStep =
   "      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0";
 const validProtectionStep = `      - name: Verify production-infra environment protection
-        run: node scripts/verify-github-environment-protection.mjs`;
-const validAuthStep = `      - uses: google-github-actions/auth@pinned
+        env:
+          GITHUB_TOKEN: \${{ github.token }}
+          GITHUB_ENVIRONMENT_NAME: production-infra
+        run: node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"`;
+const validAuthStep = `      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
           workload_identity_provider: \${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: \${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}`;
-const githubTokenEnvironmentKey = ["GITHUB", "TOKEN"].join("_");
-const validApplyHeader = `  apply:
-    environment:
+const escapedProductionProviderDot =
+  '"${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROV\\u0049DER }}"';
+const escapedProductionServiceAccountDot =
+  '"${{ vars.GCP_PRODUCTION_INFRA_SERVICE_\\u0041CCOUNT }}"';
+const escapedProductionServiceAccountBracket =
+  '"${{ vars[\\"GCP_PRODUCTION_INFRA_SERVICE_\\u0041CCOUNT\\"] }}"';
+const escapedRefreshServiceAccountDot =
+  '"${{ vars.GCP_TERRAFORM_REFRESH_SERVICE_\\u0041CCOUNT }}"';
+const validProductionEnvironment = `    environment:
       name: production-infra
-    runs-on: ubuntu-latest`;
+      url: https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac`;
+const validApplyDefaults = `    defaults:
+      run:
+        working-directory: alerts/rules`;
+const validApplyEnvironment = `    env:
+      TF_VAR_grafana_service_account_token: \${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}`;
 
 function validate(files) {
   const errors = [];
@@ -41,22 +57,32 @@ function replaceWorkflow(files, from, to) {
   };
 }
 
+function liveWorkflowFiles() {
+  const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
+  const workflowFiles = Object.fromEntries(
+    readdirSync(workflowDirectory)
+      .filter((fileName) => /\.ya?ml$/u.test(fileName))
+      .map((fileName) => [
+        `.github/workflows/${fileName}`,
+        readFileSync(new URL(fileName, workflowDirectory), "utf8"),
+      ]),
+  );
+  return {
+    ...workflowFiles,
+    "scripts/sanitize-terraform-output.sh": readFileSync(
+      new URL("./sanitize-terraform-output.sh", import.meta.url),
+      "utf8",
+    ),
+    "scripts/verify-github-environment-protection.mjs": readFileSync(
+      new URL("./verify-github-environment-protection.mjs", import.meta.url),
+      "utf8",
+    ),
+  };
+}
+
 const validFiles = validFixtureFiles();
 assert.deepEqual(validate(validFiles), []);
-assert.deepEqual(
-  validate(
-    replaceWorkflow(
-      validFiles,
-      validProtectionStep,
-      `      - name: Verify production-infra environment protection
-        env:
-          ${githubTokenEnvironmentKey}: \${{ github.token }}
-          GITHUB_ENVIRONMENT_NAME: production-infra
-        run: node scripts/verify-github-environment-protection.mjs`,
-    ),
-  ),
-  [],
-);
+assert.deepEqual(validate(liveWorkflowFiles()), []);
 
 expectFailure(
   replaceWorkflow(
@@ -158,10 +184,10 @@ jobs:`,
   expectFailure(
     replaceWorkflow(
       validFiles,
-      validApplyHeader,
-      `${validApplyHeader}
-    env:
-      ${variableName}: ./attacker`,
+      validApplyEnvironment,
+      `    env:
+      ${variableName}: ./attacker
+      TF_VAR_grafana_service_account_token: \${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}`,
     ),
     "apply job env may contain only TF_VAR_ variables",
   );
@@ -182,8 +208,8 @@ ${validProtectionStep}`,
 expectFailure(
   replaceWorkflow(
     validFiles,
-    "        run: node scripts/verify-github-environment-protection.mjs",
-    "        run: node scripts/verify-github-environment-protection.mjs\n          || true",
+    '        run: node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"',
+    '        run: node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"\n          || true',
   ),
   "must verify environment protection exactly once before Google authentication",
 );
@@ -191,8 +217,8 @@ expectFailure(
 expectFailure(
   replaceWorkflow(
     validFiles,
-    "        run: node scripts/verify-github-environment-protection.mjs",
-    "        run: node scripts/verify-github-environment-protection.mjs || true",
+    '        run: node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"',
+    '        run: node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs" || true',
   ),
   "must verify environment protection exactly once before Google authentication",
 );
@@ -282,10 +308,8 @@ expectFailure(
 expectFailure(
   replaceWorkflow(
     validFiles,
-    validApplyHeader,
-    `${validApplyHeader}
-    defaults:
-      run:
+    validApplyDefaults,
+    `${validApplyDefaults}
         shell: /bin/true {0}`,
   ),
   "must verify environment protection exactly once before Google authentication",
@@ -306,19 +330,18 @@ jobs:`,
 expectFailure(
   replaceWorkflow(
     validFiles,
-    validApplyHeader,
-    `${validApplyHeader}
-    defaults:
+    validApplyDefaults,
+    `    defaults:
       run:
         working-directory: decoy`,
   ),
-  "must verify environment protection exactly once before Google authentication",
+  "apply job must match the exact protected semantic inventory",
 );
 
 expectFailure(
   replaceWorkflow(
     validFiles,
-    "    environment:\n      name: production-infra",
+    validProductionEnvironment,
     "    environment: production-infra\n      staging",
   ),
   "apply job must use exactly the production-infra environment",
@@ -403,6 +426,142 @@ expectFailure(
 `,
   },
   "workflow YAML must be valid and duplicate-free",
+);
+
+expectFailure(
+  {
+    ...validFiles,
+    [workflowPath]: `${validFiles[workflowPath]}  shadow:
+    environment: production-infra
+    permissions:
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${escapedProductionProviderDot}
+          service_account: ${escapedProductionServiceAccountDot}
+`,
+  },
+  "production identity variables must appear exactly once and only in the apply auth step",
+);
+
+expectFailure(
+  {
+    ...validFiles,
+    ".github/workflows/unlisted-escaped-selector.yml": `jobs:
+  consume:
+    runs-on: ubuntu-latest
+    env:
+      BAD: ${escapedProductionServiceAccountBracket}
+`,
+  },
+  "production identity variables are allowed only in a protected apply auth step",
+);
+
+expectFailure(
+  {
+    ...validFiles,
+    ".github/workflows/unlisted-escaped-key.yml": `jobs:
+  consume:
+    runs-on: ubuntu-latest
+    env:
+      ${escapedProductionProviderDot}: harmless
+`,
+  },
+  "production identity variables are allowed only in a protected apply auth step",
+);
+
+expectFailure(
+  {
+    ...validFiles,
+    ".github/workflows/unlisted-escaped-refresh.yml": `jobs:
+  consume:
+    runs-on: ubuntu-latest
+    env:
+      BAD: ${escapedRefreshServiceAccountDot}
+`,
+  },
+  "must not be used during bootstrap",
+);
+
+expectFailure(
+  replaceWorkflow(
+    validFiles,
+    validAuthStep,
+    `${validAuthStep}
+      - name: Hidden production mutation
+        run: gcloud projects add-iam-policy-binding mento-monitoring --member=serviceAccount:attacker@example.com --role=roles/owner`,
+  ),
+  "apply job must match the exact protected semantic inventory",
+);
+
+expectFailure(
+  replaceWorkflow(
+    validFiles,
+    "      - name: Set up Cloud SDK\n        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db",
+    "      - name: Set up Cloud SDK\n        uses: attacker/setup-gcloud@0123456789012345678901234567890123456789",
+  ),
+  "apply job must match the exact protected semantic inventory",
+);
+
+expectFailure(
+  replaceWorkflow(
+    validFiles,
+    "      - name: Init\n        run: terraform init -input=false",
+    "      - name: Init\n        run: terraform init -input=false && gcloud projects add-iam-policy-binding mento-monitoring",
+  ),
+  "apply job must match the exact protected semantic inventory",
+);
+
+const indirectBackdoorFiles = {
+  ...validFiles,
+  ".github/workflows/indirect-production-backdoor.yml": `jobs:
+  mutate:
+    environment: production-infra
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Export repository variables
+        env:
+          ALL_VARS: \${{ toJSON(vars) }}
+        run: echo "ALL_VARS=$ALL_VARS" >> "$GITHUB_ENV"
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: \${{ fromJSON(env.ALL_VARS)[format('GCP_{0}_WORKLOAD_IDENTITY_PROVIDER', 'PRODUCTION_INFRA')] }}
+          service_account: \${{ fromJSON(env.ALL_VARS)[format('GCP_{0}_SERVICE_ACCOUNT', 'PRODUCTION_INFRA')] }}
+      - run: gcloud projects add-iam-policy-binding mento-monitoring --member=serviceAccount:attacker@example.com --role=roles/owner
+`,
+};
+expectFailure(
+  indirectBackdoorFiles,
+  "workflow job environments must match the exact registered inventory",
+);
+expectFailure(
+  indirectBackdoorFiles,
+  "workflow variable selectors must be literal and must not serialize vars",
+);
+
+expectFailure(
+  {
+    ...validFiles,
+    "scripts/sanitize-terraform-output.sh": `${validFiles["scripts/sanitize-terraform-output.sh"]}
+gcloud projects add-iam-policy-binding mento-monitoring --member=serviceAccount:attacker@example.com --role=roles/owner
+`,
+  },
+  "post-auth apply helper must match its pinned content hash",
+);
+
+expectFailure(
+  {
+    ...validFiles,
+    "scripts/verify-github-environment-protection.mjs": `${validFiles["scripts/verify-github-environment-protection.mjs"]}
+process.exit(0);
+`,
+  },
+  "pre-auth protection verifier must match its pinned content hash",
 );
 
 console.log(

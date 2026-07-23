@@ -47,15 +47,17 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   workload_identity_pool_provider_id = "github"
   display_name                       = "GitHub"
 
-  # Attribute condition gates which OIDC tokens are accepted. Restrict to the
-  # monitoring-monorepo repo so other mento-protocol repos can't use this pool
-  # to impersonate our deployer SA.
-  attribute_condition = "attribute.repository == \"mento-protocol/monitoring-monorepo\""
+  # Attribute condition gates which OIDC tokens are accepted. Require both the
+  # current repository slug and GitHub's immutable numeric repository ID so a
+  # renamed or deleted repository's old name cannot be reused to enter this
+  # pool.
+  attribute_condition = "attribute.repository == \"mento-protocol/monitoring-monorepo\" && attribute.repository_id == \"1172025835\""
 
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject"          = "assertion.sub"
+    "attribute.repository"    = "assertion.repository"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
   }
 
   oidc {
@@ -84,15 +86,16 @@ resource "google_iam_workload_identity_pool_provider" "github_production_infra" 
   display_name                       = "GitHub production infra"
 
   # `sub` is signed by GitHub and includes the job's environment when one is
-  # attached. Check it together with the independently signed repository and
-  # ref claims so only protected-main production-infra jobs can exchange a
-  # token through this provider.
-  attribute_condition = "assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && assertion.sub == \"repo:mento-protocol/monitoring-monorepo:environment:production-infra\""
+  # attached. Check it together with the independently signed repository ID,
+  # repository slug, and ref claims so only protected-main production-infra
+  # jobs from this immutable repository identity can exchange a token.
+  attribute_condition = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && assertion.sub == \"repo:mento-protocol/monitoring-monorepo:environment:production-infra\""
 
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject"          = "assertion.sub"
+    "attribute.repository"    = "assertion.repository"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
   }
 
   oidc {
@@ -140,12 +143,11 @@ resource "google_service_account" "metrics_bridge_deployer" {
 # Ref-gated: only workflow runs whose OIDC `ref` claim is `refs/heads/main`
 # can impersonate the write-capable deployer SA: routine service deploys plus
 # the transitional trusted-main Terraform plan and scheduled-drift consumers.
-# The repo gate is enforced upstream by the provider's `attribute_condition`
-# above
-# (repository == mento-protocol/monitoring-monorepo); binding + condition
-# together enforce repo and ref. Dispatching a deployer-consuming workflow
-# from a non-main ref now fails at the auth step by design; PR jobs use the
-# read-only plan SA below.
+# The repository gate is enforced upstream by the provider's
+# `attribute_condition` above (slug plus immutable repository ID); binding +
+# condition together enforce repository identity and ref. Dispatching a
+# deployer-consuming workflow from a non-main ref now fails at the auth step by
+# design; PR jobs use the read-only plan SA below.
 # Invariant: repo scope relies on the provider's `attribute_condition` above.
 # If that condition ever allows another repo, that repo's refs/heads/main
 # workflows would also match this binding. Review both resources together.
@@ -284,8 +286,9 @@ resource "google_service_account" "metrics_bridge_plan_readonly" {
 
 # Repo-scoped: deliberately not ref-gated like `deployer_wif_binding` above.
 # PR plan jobs run from PR merge refs (`refs/pull/<n>/merge`), so this binding
-# must stay on `attribute.repository`. The SA is read-only; worst case a rogue
-# repo workflow reads Terraform state, not write infra.
+# must stay on `attribute.repository`; the provider separately requires the
+# immutable repository ID. The SA is read-only; worst case a rogue workflow in
+# the trusted repository reads Terraform state, not write infra.
 resource "google_service_account_iam_member" "plan_readonly_wif_binding" {
   service_account_id = google_service_account.metrics_bridge_plan_readonly.name
   role               = "roles/iam.workloadIdentityUser"
@@ -335,8 +338,9 @@ resource "google_service_account" "terraform_refresh_readonly" {
   depends_on = [google_project_service.iam]
 }
 
-# The generic provider already enforces the repository. This binding adds the
-# trusted-main restriction while leaving PR plans on their separate identity.
+# The generic provider already enforces the repository slug and immutable ID.
+# This binding adds the trusted-main restriction while leaving PR plans on
+# their separate identity.
 resource "google_service_account_iam_member" "terraform_refresh_readonly_wif_binding" {
   service_account_id = google_service_account.terraform_refresh_readonly.name
   role               = "roles/iam.workloadIdentityUser"

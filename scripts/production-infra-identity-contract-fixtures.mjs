@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { dump as dumpYaml } from "js-yaml";
+import { protectedApplyJobInventory } from "./production-infra-identity-contract-workflow-inventory.mjs";
+
 const commonRoles = [
   "roles/artifactregistry.viewer",
   "roles/browser",
@@ -32,11 +36,12 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   project                            = google_project.monitoring.project_id
   workload_identity_pool_id          = google_iam_workload_identity_pool.github_actions.workload_identity_pool_id
   workload_identity_pool_provider_id = "github"
-  attribute_condition                = "attribute.repository == \"mento-protocol/monitoring-monorepo\""
+  attribute_condition                = "attribute.repository == \"mento-protocol/monitoring-monorepo\" && attribute.repository_id == \"1172025835\""
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject"          = "assertion.sub"
+    "attribute.repository"    = "assertion.repository"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
   }
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
@@ -52,11 +57,12 @@ resource "google_iam_workload_identity_pool_provider" "github_production_infra" 
   project                            = google_project.monitoring.project_id
   workload_identity_pool_id          = google_iam_workload_identity_pool.github_production_infra.workload_identity_pool_id
   workload_identity_pool_provider_id = "github"
-  attribute_condition                = "assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && assertion.sub == \"repo:mento-protocol/monitoring-monorepo:environment:production-infra\""
+  attribute_condition                = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && assertion.sub == \"repo:mento-protocol/monitoring-monorepo:environment:production-infra\""
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject"          = "assertion.sub"
+    "attribute.repository"    = "assertion.repository"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
   }
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
@@ -120,6 +126,7 @@ resource "github_actions_variable" "gcp_production_infra_workload_identity_provi
   repository    = "monitoring-monorepo"
   variable_name = "GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER"
   value         = google_iam_workload_identity_pool_provider.github_production_infra.name
+
   depends_on = [
     google_service_account_iam_member.production_infra_applier_wif_binding,
     google_service_account_iam_member.production_infra_applier_org_terraform_token_creator,
@@ -129,6 +136,7 @@ resource "github_actions_variable" "gcp_production_infra_service_account" {
   repository    = "monitoring-monorepo"
   variable_name = "GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT"
   value         = google_service_account.production_infra_applier.email
+
   depends_on = [
     google_service_account_iam_member.production_infra_applier_wif_binding,
     google_service_account_iam_member.production_infra_applier_org_terraform_token_creator,
@@ -138,6 +146,7 @@ resource "github_actions_variable" "gcp_terraform_refresh_service_account" {
   repository    = "monitoring-monorepo"
   variable_name = "GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT"
   value         = google_service_account.terraform_refresh_readonly.email
+
   depends_on = [
     google_service_account_iam_member.terraform_refresh_readonly_wif_binding,
     google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator,
@@ -184,34 +193,45 @@ ${Object.entries(entries)
 `;
 }
 
-function applyWorkflowFixture() {
-  return `
-name: Terraform fixture
-jobs:
-  plan:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: google-github-actions/auth@pinned
-        with:
-          workload_identity_provider: \${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: \${{ secrets.GCP_SERVICE_ACCOUNT }}
-  apply:
-    environment:
-      name: production-infra
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
-      - name: Verify production-infra environment protection
-        run: node scripts/verify-github-environment-protection.mjs
-      - uses: google-github-actions/auth@pinned
-        with:
-          workload_identity_provider: \${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: \${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}
-`;
+function applyWorkflowFixture(workflowPath) {
+  return dumpYaml(
+    {
+      name: "Terraform fixture",
+      jobs: {
+        plan: {
+          "runs-on": "ubuntu-latest",
+          steps: [
+            {
+              uses: "google-github-actions/auth@pinned",
+              with: {
+                workload_identity_provider:
+                  "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}",
+                service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}",
+              },
+            },
+          ],
+        },
+        apply: protectedApplyJobInventory(workflowPath),
+      },
+    },
+    {
+      lineWidth: -1,
+      noCompatMode: true,
+      noRefs: true,
+    },
+  );
 }
 
 export function validFixtureFiles() {
   return {
+    "scripts/sanitize-terraform-output.sh": readFileSync(
+      new URL("./sanitize-terraform-output.sh", import.meta.url),
+      "utf8",
+    ),
+    "scripts/verify-github-environment-protection.mjs": readFileSync(
+      new URL("./verify-github-environment-protection.mjs", import.meta.url),
+      "utf8",
+    ),
     "terraform/ci-wif.tf": productionTerraformFixture,
     "terraform/github-variables.tf": githubVariablesFixture,
     "alerts/infra/main.tf": targetProjectFixture("local.project_id"),
@@ -275,12 +295,30 @@ export function validFixtureFiles() {
         ["x_auth", "google_secret_manager_secret.x_auth_token.secret_id"],
       ]),
     ),
-    ".github/workflows/alerts-rules.yml": applyWorkflowFixture(),
-    ".github/workflows/alerts-infra.yml": applyWorkflowFixture(),
-    ".github/workflows/aegis-terraform.yml": applyWorkflowFixture(),
-    ".github/workflows/governance-watchdog.yml": applyWorkflowFixture(),
-    ".github/workflows/metrics-bridge.yml": "jobs:\n  deploy:\n",
-    ".github/workflows/aegis-app-engine.yml": "jobs:\n  deploy:\n",
+    ".github/workflows/alerts-rules.yml": applyWorkflowFixture(
+      ".github/workflows/alerts-rules.yml",
+    ),
+    ".github/workflows/alerts-infra.yml": applyWorkflowFixture(
+      ".github/workflows/alerts-infra.yml",
+    ),
+    ".github/workflows/aegis-terraform.yml": applyWorkflowFixture(
+      ".github/workflows/aegis-terraform.yml",
+    ),
+    ".github/workflows/governance-watchdog.yml": applyWorkflowFixture(
+      ".github/workflows/governance-watchdog.yml",
+    ),
+    ".github/workflows/metrics-bridge.yml": `jobs:
+  deploy:
+    environment:
+      name: production-services
+      url: https://console.cloud.google.com/run?project=mento-monitoring
+`,
+    ".github/workflows/aegis-app-engine.yml": `jobs:
+  deploy:
+    environment:
+      name: production-services
+      url: https://mento-monitoring.uc.r.appspot.com
+`,
     ".github/workflows/terraform-drift.yml": "jobs:\n  drift:\n",
   };
 }

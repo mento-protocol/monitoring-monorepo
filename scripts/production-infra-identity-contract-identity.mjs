@@ -263,6 +263,13 @@ export function validateProvider(
     );
     expectMapEntry(
       provider,
+      "attribute.repository_id",
+      "assertion.repository_id",
+      errors,
+      conditionLabel,
+    );
+    expectMapEntry(
+      provider,
       "attribute.ref",
       "assertion.ref",
       errors,

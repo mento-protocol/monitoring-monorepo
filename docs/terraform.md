@@ -108,6 +108,8 @@ authentication lanes. The bootstrap creates replacement chains and routes
 production applies to selectors populated by its approved platform apply. A
 routing PR later switches trusted-main refresh and drift; a final PR removes
 the legacy impersonation grant after live proof, queue drain, and IAM audit.
+Both GitHub WIF providers require the repository slug plus immutable repository
+ID `1172025835`; a recycled slug cannot enter either pool.
 
 - Routine service workflows retain the general repository WIF provider and
   `metrics-bridge-deployer`. After final removal, it retains only direct
@@ -123,8 +125,17 @@ the legacy impersonation grant after live proof, queue drain, and IAM audit.
   refs. Bootstrap workflows must not use this selector.
 - Apply jobs use `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. Its dedicated pool accepts only
-  the exact repository, `refs/heads/main`, and `production-infra` environment
-  subject; its seed-project applier can impersonate `org-terraform`.
+  repository ID `1172025835`, the expected repository slug,
+  `refs/heads/main`, and the `production-infra` environment subject; its
+  seed-project applier can impersonate `org-terraform`.
+
+The identity contract guards enumerated Terraform identity and authority
+blocks, credential and secret-payload sinks, output and declassification sites,
+imperative execution, and protected-workflow shapes. It is a regression guard,
+not a sandbox for arbitrary HCL or application-source data flow, operator
+inputs, deliberate registry changes, or provider/toolchain compromise.
+Environment approval and live-plan review remain mandatory. ADR 0047 records
+the full boundary.
 
 Alerts-delivery and governance-watchdog grant only curated non-basic project
 read roles for services they refresh. The core is `roles/browser`,
@@ -220,7 +231,8 @@ Keep exactly two production GitHub Environments for this repository:
   protected `main`. Terraform apply workflows verify this before cloud
   authentication and fail closed if protection drifts. Their dedicated WIF
   provider also requires the signed `production-infra` environment subject,
-  exact repository, and protected `main` ref.
+  immutable repository ID `1172025835`, expected repository slug, and protected
+  `main` ref.
 - `production-services`: used by routine service deploy jobs such as
   `metrics-bridge.yml` and `aegis-app-engine.yml`. Limit deployment branches to
   protected `main`, but leave required reviewers unset by default so green

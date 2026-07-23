@@ -49,11 +49,18 @@ Keep four separate authentication chains:
 | Trusted-`main` refresh and drift | `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`                                                           | `terraform-refresh-readonly`            | `org-terraform-refresh-readonly` with read-only state and explicitly granted live-resource reads; no write roles |
 | Production Terraform apply       | `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT` | Seed-project `production-infra-applier` | Service-account-scoped Token Creator on `org-terraform`, reachable only through the dedicated production pool    |
 
+Both GitHub providers require the repository slug and GitHub's immutable
+repository ID `1172025835`. The numeric ID prevents a renamed or deleted
+repository's old name from becoming a new trusted principal. Keeping the slug
+check as well ensures a transferred or renamed repository does not retain
+access under a different owner or name.
+
 The production provider lives in a dedicated
 `github-production-infra` Workload Identity pool. Its condition requires all
-three signed GitHub claims:
+four signed GitHub claims:
 
-- repository `mento-protocol/monitoring-monorepo`;
+- repository ID `1172025835`;
+- repository slug `mento-protocol/monitoring-monorepo`;
 - ref `refs/heads/main`;
 - subject
   `repo:mento-protocol/monitoring-monorepo:environment:production-infra`.
@@ -152,8 +159,9 @@ pass.
 ## Consequences
 
 - Production Terraform authentication now cryptographically includes the
-  repository, protected `main` ref, and `production-infra` environment rather
-  than relying on workflow structure alone.
+  immutable repository ID, repository slug, protected `main` ref, and
+  `production-infra` environment rather than relying on workflow structure
+  alone.
 - Trusted-`main` plans and scheduled drift can refresh live state without
   carrying apply authority. Read-only still includes sensitive state, managed
   secret payloads, and function source, so this identity remains unavailable
@@ -161,6 +169,14 @@ pass.
 - The staged rollout deliberately has a short period where both the legacy and
   replacement appliers can reach `org-terraform`. Queue control, terminal-run
   verification, and the later IAM audit are required parts of the cutover.
+- The checked-in identity contract is a regression guard over enumerated
+  Terraform identity and authority blocks, credential and secret-payload
+  sinks, output and declassification sites, imperative execution, and
+  protected-workflow shapes. It is not a sandbox against arbitrary HCL or
+  application-source data flow, operator-supplied `-var`/`TF_VAR_*` values,
+  deliberate registry changes, or a compromised provider/toolchain.
+  Protected-environment approval and review of the live Terraform plan remain
+  required.
 - Adding a Terraform-managed project with a stricter data boundary remains a
   separate post-cutover decision and change.
 

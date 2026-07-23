@@ -11,6 +11,10 @@ import {
   escapeRegExp,
   requireFile,
 } from "./production-infra-identity-contract-hcl.mjs";
+import {
+  validateWorkflowDependencyInventory,
+  validateWorkflowInventory,
+} from "./production-infra-identity-contract-workflow-inventory.mjs";
 
 function stripYamlComments(contents) {
   return contents
@@ -330,6 +334,33 @@ function variableOccurrences(contents, variableName) {
   return contextVariableOccurrences(contents, "vars", variableName);
 }
 
+function decodedVariableOccurrenceCount(root, variableName) {
+  const ancestors = new WeakSet();
+
+  function visit(value) {
+    if (typeof value === "string") {
+      return variableOccurrences(value, variableName).length;
+    }
+    if (value === null || typeof value !== "object") return 0;
+    if (ancestors.has(value)) return 0;
+
+    ancestors.add(value);
+    let count = 0;
+    if (Array.isArray(value)) {
+      for (const entry of value) count += visit(entry);
+    } else {
+      for (const [key, entry] of Object.entries(value)) {
+        count += variableOccurrences(key, variableName).length;
+        count += visit(entry);
+      }
+    }
+    ancestors.delete(value);
+    return count;
+  }
+
+  return visit(root);
+}
+
 export function validateWorkflowContract(files, errors) {
   for (const workflowPath of [
     ...APPLY_WORKFLOWS,
@@ -337,6 +368,7 @@ export function validateWorkflowContract(files, errors) {
   ]) {
     requireFile(files, workflowPath, errors);
   }
+  validateWorkflowDependencyInventory(files, errors);
 
   const workflowPaths = Object.keys(files)
     .filter((filePath) => /^\.github\/workflows\/.+\.ya?ml$/u.test(filePath))
@@ -357,9 +389,16 @@ export function validateWorkflowContract(files, errors) {
       continue;
     }
 
+    validateWorkflowInventory(workflowPath, parsedWorkflow, errors);
+
     const code = stripYamlComments(files[workflowPath]);
+    const decodedRefreshUses = decodedVariableOccurrenceCount(
+      parsedWorkflow,
+      REFRESH_SERVICE_ACCOUNT_VARIABLE,
+    );
     if (
-      variableOccurrences(code, REFRESH_SERVICE_ACCOUNT_VARIABLE).length > 0
+      variableOccurrences(code, REFRESH_SERVICE_ACCOUNT_VARIABLE).length > 0 ||
+      decodedRefreshUses > 0
     ) {
       errors.push(
         `${workflowPath}: vars.${REFRESH_SERVICE_ACCOUNT_VARIABLE} must not be used during bootstrap`,
@@ -374,9 +413,22 @@ export function validateWorkflowContract(files, errors) {
       code,
       PRODUCTION_SERVICE_ACCOUNT_VARIABLE,
     );
+    const decodedProviderUses = decodedVariableOccurrenceCount(
+      parsedWorkflow,
+      PRODUCTION_PROVIDER_VARIABLE,
+    );
+    const decodedServiceAccountUses = decodedVariableOccurrenceCount(
+      parsedWorkflow,
+      PRODUCTION_SERVICE_ACCOUNT_VARIABLE,
+    );
 
     if (!APPLY_WORKFLOWS.includes(workflowPath)) {
-      if (providerUses.length > 0 || serviceAccountUses.length > 0) {
+      if (
+        providerUses.length > 0 ||
+        serviceAccountUses.length > 0 ||
+        decodedProviderUses > 0 ||
+        decodedServiceAccountUses > 0
+      ) {
         errors.push(
           `${workflowPath}: production identity variables are allowed only in a protected apply auth step`,
         );
@@ -473,6 +525,8 @@ export function validateWorkflowContract(files, errors) {
     if (
       providerUses.length !== 1 ||
       serviceAccountUses.length !== 1 ||
+      decodedProviderUses !== 1 ||
+      decodedServiceAccountUses !== 1 ||
       providerUses.some(outsideAuth) ||
       serviceAccountUses.some(outsideAuth)
     ) {

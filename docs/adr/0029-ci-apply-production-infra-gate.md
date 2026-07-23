@@ -47,11 +47,12 @@ Routine service deploys use a separate `production-services` environment that re
 history but doesn't require manual approval.
 
 Cloud identity is part of the infrastructure gate. Production Terraform apply
-jobs use a dedicated WIF pool whose provider requires the exact repository,
-protected `main` ref, and `production-infra` environment subject before they
-can impersonate the seed-project production applier. PR plans retain their
-state-only identity, and a separate cutover-routing PR moves trusted-`main`
-refresh/drift to a read-only chain before authority removal.
+jobs use a dedicated WIF pool whose provider requires the immutable repository
+ID `1172025835`, repository slug, protected `main` ref, and `production-infra`
+environment subject before they can impersonate the seed-project production
+applier. PR plans retain their state-only identity, and a separate
+cutover-routing PR moves trusted-`main` refresh/drift to a read-only chain
+before authority removal.
 [ADR 0047](0047-separated-terraform-ci-identities.md) owns the identity split
 and its staged bootstrap, routing, proof, and removal procedure.
 
@@ -67,8 +68,9 @@ and its staged bootstrap, routing, proof, and removal procedure.
 - Local `pnpm tf apply` on CI-applied stacks is guarded (clean `main` at
   `origin/main`, or the deliberate `--force-local-apply`).
 - Production applies authenticate through a pool isolated from routine deploy
-  and PR-plan identities; a token must prove the repository, `refs/heads/main`,
-  and the `production-infra` environment subject.
+  and PR-plan identities; a token must prove the immutable repository ID,
+  repository slug, `refs/heads/main`, and the `production-infra` environment
+  subject.
 - The legacy routine-deployer Token Creator grant may exist only during the
   staged ADR 0047 cutover. First land the trusted-main refresh routing while
   retaining the grant, prove every CI-managed Google-provider stack through

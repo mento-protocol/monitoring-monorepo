@@ -20,14 +20,13 @@ export const REFRESH_SERVICE_ACCOUNT_VARIABLE =
 
 export const PRODUCTION_SUBJECT =
   "repo:mento-protocol/monitoring-monorepo:environment:production-infra";
+export const GITHUB_REPOSITORY_ID = "1172025835";
 export const SEED_PROJECT_ID = "mento-terraform-seed-ffac";
 export const REFRESH_TARGET_EMAIL =
   "org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com";
 
-export const GENERIC_PROVIDER_CONDITION =
-  'attribute.repository == "mento-protocol/monitoring-monorepo"';
-export const PRODUCTION_PROVIDER_CONDITION =
-  'assertion.repository == "mento-protocol/monitoring-monorepo" && assertion.ref == "refs/heads/main" && assertion.sub == "repo:mento-protocol/monitoring-monorepo:environment:production-infra"';
+export const GENERIC_PROVIDER_CONDITION = `attribute.repository == "mento-protocol/monitoring-monorepo" && attribute.repository_id == "${GITHUB_REPOSITORY_ID}"`;
+export const PRODUCTION_PROVIDER_CONDITION = `assertion.repository_id == "${GITHUB_REPOSITORY_ID}" && assertion.repository == "mento-protocol/monitoring-monorepo" && assertion.ref == "refs/heads/main" && assertion.sub == "repo:mento-protocol/monitoring-monorepo:environment:production-infra"`;
 
 export const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
 

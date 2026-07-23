@@ -12,14 +12,21 @@ import {
   validateProvider,
   validateProviderInventory,
 } from "./production-infra-identity-contract-identity.mjs";
+import { validateIamGrantSinkInventory } from "./production-infra-identity-contract-iam.mjs";
 import { validateRefreshIdentity } from "./production-infra-identity-contract-refresh.mjs";
 import { validateWorkflowContract } from "./production-infra-identity-contract-workflow.mjs";
 
-export function validateProductionInfraIdentityContract(files) {
+function validateIdentityContract(files, completeInventory) {
   const errors = [];
   const topLevelBlocks = terraformTopLevelBlocks(files, errors);
   const blocks = topLevelBlocks.filter((block) => block.kind === "resource");
   validateProviderInventory(blocks, errors);
+  validateIamGrantSinkInventory(
+    files,
+    topLevelBlocks,
+    errors,
+    completeInventory,
+  );
   validateProvider(
     blocks,
     {
@@ -50,8 +57,12 @@ export function validateProductionInfraIdentityContract(files) {
   return errors;
 }
 
+export function validateProductionInfraIdentityContract(files) {
+  return validateIdentityContract(files, false);
+}
+
 export function assertProductionInfraIdentityContract(files) {
-  const errors = validateProductionInfraIdentityContract(files);
+  const errors = validateIdentityContract(files, true);
   if (errors.length > 0) {
     throw new Error(
       `Production infrastructure identity contract failed:\n- ${errors.join("\n- ")}`,

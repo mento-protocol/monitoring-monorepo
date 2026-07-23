@@ -1,6 +1,18 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validFixtureFiles } from "./production-infra-identity-contract-fixtures.mjs";
@@ -262,6 +274,10 @@ function testBootstrapLegacyBinding(validFiles) {
 
 function runFixtureTests() {
   const validFiles = validFixtureFiles();
+  const genericProviderCondition =
+    'attribute.repository == \\"mento-protocol/monitoring-monorepo\\" && attribute.repository_id == \\"1172025835\\"';
+  const productionProviderCondition =
+    'assertion.repository_id == \\"1172025835\\" && assertion.repository == \\"mento-protocol/monitoring-monorepo\\" && assertion.ref == \\"refs/heads/main\\" && assertion.sub == \\"repo:mento-protocol/monitoring-monorepo:environment:production-infra\\"';
   assert.deepEqual(validateProductionInfraIdentityContract(validFiles), []);
   testOidcProviders(validFiles);
   testHeredocParsing(validFiles);
@@ -271,28 +287,80 @@ function runFixtureTests() {
 
   for (const weakenedCondition of [
     'assertion.repository == \\"mento-protocol/monitoring-monorepo\\" || true',
-    'assertion.repository == \\"mento-protocol/monitoring-monorepo\\" && assertion.ref == \\"refs/heads/main\\" && (assertion.sub == \\"repo:mento-protocol/monitoring-monorepo:environment:production-infra\\" || assertion.actor == \\"trusted\\")',
+    'assertion.repository_id == \\"1172025835\\" && assertion.repository == \\"mento-protocol/monitoring-monorepo\\" && assertion.ref == \\"refs/heads/main\\" && (assertion.sub == \\"repo:mento-protocol/monitoring-monorepo:environment:production-infra\\" || assertion.actor == \\"trusted\\")',
   ]) {
     expectContractFailure(
       mutateFile(
         validFiles,
         "terraform/ci-wif.tf",
-        'assertion.repository == \\"mento-protocol/monitoring-monorepo\\" && assertion.ref == \\"refs/heads/main\\" && assertion.sub == \\"repo:mento-protocol/monitoring-monorepo:environment:production-infra\\"',
+        productionProviderCondition,
         weakenedCondition,
       ),
       "exact non-bypassable condition",
     );
   }
 
-  expectContractFailure(
-    mutateFile(
-      validFiles,
-      "terraform/ci-wif.tf",
-      'attribute.repository == \\"mento-protocol/monitoring-monorepo\\"',
-      "true",
-    ),
-    "generic GitHub WIF provider: attribute_condition",
-  );
+  for (const { condition, withoutRepositoryId, wrongRepositoryId, label } of [
+    {
+      condition: genericProviderCondition,
+      withoutRepositoryId:
+        'attribute.repository == \\"mento-protocol/monitoring-monorepo\\"',
+      wrongRepositoryId:
+        'attribute.repository == \\"mento-protocol/monitoring-monorepo\\" && attribute.repository_id == \\"999999999\\"',
+      label: "generic GitHub WIF provider",
+    },
+    {
+      condition: productionProviderCondition,
+      withoutRepositoryId:
+        'assertion.repository == \\"mento-protocol/monitoring-monorepo\\" && assertion.ref == \\"refs/heads/main\\" && assertion.sub == \\"repo:mento-protocol/monitoring-monorepo:environment:production-infra\\"',
+      wrongRepositoryId:
+        'assertion.repository_id == \\"999999999\\" && assertion.repository == \\"mento-protocol/monitoring-monorepo\\" && assertion.ref == \\"refs/heads/main\\" && assertion.sub == \\"repo:mento-protocol/monitoring-monorepo:environment:production-infra\\"',
+      label: "production WIF provider",
+    },
+  ]) {
+    for (const weakenedCondition of [withoutRepositoryId, wrongRepositoryId]) {
+      expectContractFailure(
+        mutateFile(
+          validFiles,
+          "terraform/ci-wif.tf",
+          condition,
+          weakenedCondition,
+        ),
+        `${label}: attribute_condition`,
+      );
+    }
+  }
+
+  const repositoryIdMapping =
+    '    "attribute.repository_id" = "assertion.repository_id"';
+  for (const [occurrence, label] of [
+    [0, "generic GitHub WIF provider"],
+    [1, "production WIF provider"],
+  ]) {
+    expectContractFailure(
+      mutateFileOccurrence(
+        validFiles,
+        "terraform/ci-wif.tf",
+        repositoryIdMapping,
+        "",
+        occurrence,
+      ),
+      `${label}: must map attribute.repository_id exactly`,
+    );
+    expectContractFailure(
+      mutateFileOccurrence(
+        validFiles,
+        "terraform/ci-wif.tf",
+        repositoryIdMapping,
+        repositoryIdMapping.replace(
+          "assertion.repository_id",
+          "assertion.repository_owner_id",
+        ),
+        occurrence,
+      ),
+      `${label}: must map attribute.repository_id exactly`,
+    );
+  }
 
   expectContractFailure(
     {
@@ -364,8 +432,8 @@ resource "google_service_account_iam_member" "refresh_can_write" {
     mutateFile(
       validFiles,
       ".github/workflows/alerts-rules.yml",
-      "      - uses: google-github-actions/auth@pinned\n        with:\n          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}\n          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}",
-      "      - uses: google-github-actions/auth@pinned\n        with:\n          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}\n          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}\n      - uses: google-github-actions/auth@second",
+      "      - name: Authenticate to Google Cloud\n        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093\n        with:\n          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}\n          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}",
+      "      - name: Authenticate to Google Cloud\n        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093\n        with:\n          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}\n          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}\n      - uses: google-github-actions/auth@second",
     ),
     "exactly one Google auth action",
   );
@@ -487,20 +555,153 @@ resource "google_project_iam_member" "refresh_platform_viewer" {
   );
 }
 
-function collectFiles(directory, files, predicate) {
-  for (const entry of readdirSync(path.join(repoRoot, directory), {
+function collectFilesFromRoot(root, directory, files, predicate) {
+  const directoryPath = path.join(root, directory);
+  if (lstatSync(directoryPath).isSymbolicLink()) {
+    throw new Error(
+      `Terraform identity contract roots must not contain source symlinks: ${directory}`,
+    );
+  }
+  for (const entry of readdirSync(directoryPath, {
     withFileTypes: true,
   })) {
-    if (entry.name === ".terraform") continue;
-    const relativePath = path.posix.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      collectFiles(relativePath, files, predicate);
-    } else if (entry.isFile() && predicate(entry.name)) {
-      files[relativePath] = readFileSync(
-        path.join(repoRoot, relativePath),
-        "utf8",
-      );
+    if (
+      entry.isDirectory() &&
+      (entry.name.startsWith(".terraform") || entry.name === "node_modules")
+    ) {
+      continue;
     }
+    const relativePath = path.posix.join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      const absolutePath = path.join(root, relativePath);
+      let targetIsDirectory = true;
+      try {
+        targetIsDirectory = statSync(absolutePath).isDirectory();
+      } catch {
+        // A broken link cannot be a valid Terraform source.
+      }
+      if (targetIsDirectory || predicate(entry.name)) {
+        throw new Error(
+          `Terraform identity contract roots must not contain source symlinks: ${relativePath}`,
+        );
+      }
+      continue;
+    }
+    if (entry.isDirectory()) {
+      collectFilesFromRoot(root, relativePath, files, predicate);
+    } else if (entry.isFile() && predicate(entry.name)) {
+      files[relativePath] = readFileSync(path.join(root, relativePath), "utf8");
+    }
+  }
+}
+
+function collectFiles(directory, files, predicate) {
+  collectFilesFromRoot(repoRoot, directory, files, predicate);
+}
+
+function collectTrackedAutomaticVariableFiles(files, root = repoRoot) {
+  const filePaths = execFileSync(
+    "git",
+    [
+      "ls-files",
+      "-z",
+      "--",
+      "terraform",
+      "aegis/terraform",
+      "alerts/infra",
+      "alerts/rules",
+      "governance-watchdog/infra",
+    ],
+    { cwd: root, encoding: "utf8" },
+  )
+    .split("\0")
+    .filter((filePath) =>
+      /(?:^|\/)(?:terraform\.tfvars(?:\.json)?|[^/]*\.auto\.tfvars(?:\.json)?)$/u.test(
+        filePath,
+      ),
+    );
+  for (const filePath of filePaths) {
+    files[filePath] = readFileSync(path.join(root, filePath), "utf8");
+  }
+}
+
+function testCollectorRejectsSymlink() {
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), "identity-contract-symlink-"),
+  );
+  try {
+    mkdirSync(path.join(temporaryRoot, "terraform"));
+    mkdirSync(path.join(temporaryRoot, "outside-module"));
+    writeFileSync(
+      path.join(temporaryRoot, "outside-module", "main.tf"),
+      'resource "google_project_iam_member" "escaped" {}\n',
+    );
+    symlinkSync(
+      "../outside-module",
+      path.join(temporaryRoot, "terraform", "linked-module"),
+      "dir",
+    );
+    assert.throws(
+      () =>
+        collectFilesFromRoot(temporaryRoot, "terraform", {}, (name) =>
+          name.endsWith(".tf"),
+        ),
+      /Terraform identity contract roots must not contain source symlinks: terraform\/linked-module/u,
+    );
+    symlinkSync(
+      "outside-module",
+      path.join(temporaryRoot, "linked-root"),
+      "dir",
+    );
+    assert.throws(
+      () =>
+        collectFilesFromRoot(temporaryRoot, "linked-root", {}, (name) =>
+          name.endsWith(".tf"),
+        ),
+      /Terraform identity contract roots must not contain source symlinks: linked-root/u,
+    );
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+function testCollectorIncludesDotAutomaticVariableFiles() {
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), "identity-contract-auto-tfvars-"),
+  );
+  try {
+    mkdirSync(path.join(temporaryRoot, "terraform"));
+    mkdirSync(path.join(temporaryRoot, "alerts", "rules"), {
+      recursive: true,
+    });
+    for (const fileName of [
+      ".auto.tfvars",
+      ".auto.tfvars.json",
+      "ignored.tfvars",
+    ]) {
+      writeFileSync(path.join(temporaryRoot, "terraform", fileName), "{}\n");
+    }
+    writeFileSync(
+      path.join(temporaryRoot, "alerts", "rules", ".auto.tfvars"),
+      "{}\n",
+    );
+    execFileSync("git", ["init", "--quiet"], { cwd: temporaryRoot });
+    execFileSync("git", ["add", "--", "terraform", "alerts/rules"], {
+      cwd: temporaryRoot,
+    });
+    const files = {};
+    collectTrackedAutomaticVariableFiles(files, temporaryRoot);
+    assert.deepEqual(Object.keys(files).sort(), [
+      "alerts/rules/.auto.tfvars",
+      "terraform/.auto.tfvars",
+      "terraform/.auto.tfvars.json",
+    ]);
+    expectContractFailure(
+      { ...validFixtureFiles(), ...files },
+      "checked-in automatic variable files are forbidden",
+    );
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
   }
 }
 
@@ -519,6 +720,14 @@ function realRepositoryFiles() {
       (name) => name.endsWith(".tf") || name.endsWith(".tf.json"),
     );
   }
+  collectFiles("alerts/infra/scripts", files, (name) => name.endsWith(".sh"));
+  for (const filePath of [
+    "scripts/sanitize-terraform-output.sh",
+    "scripts/verify-github-environment-protection.mjs",
+  ]) {
+    files[filePath] = readFileSync(path.join(repoRoot, filePath), "utf8");
+  }
+  collectTrackedAutomaticVariableFiles(files);
   collectFiles(
     ".github/workflows",
     files,
@@ -527,6 +736,8 @@ function realRepositoryFiles() {
   return files;
 }
 
+testCollectorRejectsSymlink();
+testCollectorIncludesDotAutomaticVariableFiles();
 runFixtureTests();
 
 if (process.argv.includes("--fixtures-only")) {

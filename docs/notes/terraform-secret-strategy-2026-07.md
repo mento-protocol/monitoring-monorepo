@@ -48,7 +48,8 @@ on separate identities:
 
 - Routine services use the general repository WIF provider and
   `metrics-bridge-deployer`. The final removal apply removes its ability to
-  impersonate `org-terraform`.
+  impersonate `org-terraform`. The provider requires both the repository slug
+  and immutable repository ID `1172025835`.
 - PR plans use the state-only plan chain. It receives neither project/service
   read roles nor live secret/object access.
 - The separate cutover-routing PR routes trusted-main plans and scheduled drift
@@ -63,9 +64,9 @@ on separate identities:
 - Production applies select
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. The dedicated pool accepts only
-  the exact repository, protected `main` ref, and `production-infra`
-  environment subject before the seed-project applier can impersonate
-  `org-terraform`.
+  repository ID `1172025835`, the expected repository slug, protected `main`
+  ref, and `production-infra` environment subject before the seed-project
+  applier can impersonate `org-terraform`.
 
 The refresh read bundle is a deliberate confidentiality tradeoff. Terraform's
 pinned Google providers read managed Secret Manager payloads and deployment
