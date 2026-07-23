@@ -383,7 +383,7 @@ backend prefix `aegis`; the Aegis service-health alert rules moved to
 pnpm aegis:tf:init
 pnpm aegis:tf:plan
 # Apply runs in CI on merge to main (.github/workflows/aegis-terraform.yml),
-# gated by the `production` GitHub Environment required-reviewer rule.
+# gated by the `production-infra` GitHub Environment required-reviewer rule.
 ```
 
 Protocol Grafana alert rules and global Grafana routing live in

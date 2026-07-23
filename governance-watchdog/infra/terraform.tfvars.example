@@ -36,11 +36,11 @@ victorops_webhook_url = ""
 
 # Slack notification channel ID for error alerts. Leave empty for the initial
 # deployment; the channel can only be created after the GCP project exists.
-# Bootstrap or rotate the matching
-# TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID repository secret for
-# plan jobs, and keep the production-infra Environment secret in sync for gated
-# applies. Do not reuse the alerts-owned TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID
-# secret.
+# After the channel exists, set this value and apply through the registered
+# governance-watchdog stack. Terraform mirrors the stack-specific
+# TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID repository secret;
+# do not create a competing secret manually or reuse the alerts-owned
+# TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID name.
 # slack_notification_channel_id = ""
 
 # --- GitHub Actions secret mirror ---

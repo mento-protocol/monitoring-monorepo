@@ -78,10 +78,10 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md) | GitHub-to-Slack notifications for Terraform-applying workflows | canonical / active | runbook / terraform/infra | eng | 30d; verified 2026-07-22 |
 | [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md) | Spoken Attention Nudge | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md) | New Worktree / Clone Setup and Claude Code on the Web Setup | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-08 |
-| [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md) | Adding New Events to Governance Watchdog | unmanaged / unmanaged | runbook / governance-watchdog | unowned | 90d |
-| [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md) | Deployment from Scratch | unmanaged / unmanaged | runbook / governance-watchdog | unowned | 90d |
-| [`governance-watchdog/README.md`](../governance-watchdog/README.md) | Governance Watchdog | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-17 |
+| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md) | Adding Governance Watchdog Events | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
+| [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md) | Governance Watchdog Bootstrap | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
+| [`governance-watchdog/README.md`](../governance-watchdog/README.md) | Governance Watchdog | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 
 ## pr-checklists-process
 
