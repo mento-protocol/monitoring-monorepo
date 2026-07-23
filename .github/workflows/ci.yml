@@ -241,9 +241,17 @@ jobs:
               - "**/vitest.hermetic-setup.ts"
               - "**/vitest.config.ts"
               - "**/vitest.mutation.config.ts"
+              # The production infrastructure identity contract reads every
+              # registered Terraform root. Keep its `pnpm tf:test` runner
+              # reachable when a PR changes only protected infrastructure.
+              - terraform/**
+              - aegis/terraform/**
+              - alerts/infra/**
+              - governance-watchdog/infra/**
               # Alert-rules lint inputs: the scripts job parses alerts/rules
               # PromQL and cross-checks metric names against the metrics-bridge
-              # gauge registry.
+              # gauge registry. This is also the fifth Terraform root covered
+              # by the production infrastructure identity contract.
               - alerts/rules/**
               - metrics-bridge/src/metrics.ts
               - metrics-bridge/src/cdp-metrics.ts

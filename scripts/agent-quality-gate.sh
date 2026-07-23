@@ -2130,6 +2130,9 @@ while IFS= read -r path; do
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in
+        scripts/production-infra-identity-contract-routing.test.mjs)
+          add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
+          ;;
         scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs|scripts/agent-autoreview-target-guard.test.mjs)
           add_command "pnpm agent:autoreview:test" "agent autoreview helper changed"
           ;;
@@ -2398,6 +2401,15 @@ while IFS= read -r path; do
           add_adr_reminder "top-level package.json changed — ADR reminder (a new package/service likely needs an ADR)"
           ;;
       esac
+      ;;
+  esac
+  # `pnpm tf:test` owns the fail-closed production identity contract. Route
+  # every complete-inventory input plus the contract implementation itself.
+  # Keep this after the specialized cases so ci.yml/infra.yml retain their
+  # more specific command reasons while `add_command` deduplicates the run.
+  case "$path" in
+    terraform/*|aegis/terraform/*|alerts/infra/*|alerts/rules/*|governance-watchdog/infra/*|.github/workflows/*|scripts/production-infra-identity-contract*.mjs|scripts/sanitize-terraform-output.sh|scripts/verify-github-environment-protection.mjs)
+      add_command "pnpm tf:test" "production infrastructure identity contract surface changed"
       ;;
   esac
 done < "$changed_paths_file"
