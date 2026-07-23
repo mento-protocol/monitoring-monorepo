@@ -159,8 +159,6 @@ the rules in [`context-standards.md`](context-standards.md).
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
-| [`.claude/projects/-Users-chapati-code-mento-monitoring-monorepo/memory/f_redteam_workflow_hardens_validators.md`](../.claude/projects/-Users-chapati-code-mento-monitoring-monorepo/memory/f_redteam_workflow_hardens_validators.md) | f_redteam_workflow_hardens_validators.md | unmanaged / unmanaged | reference / repo-wide | unowned | 180d |
-| [`.claude/projects/-Users-chapati-code-mento-monitoring-monorepo/memory/p_sentry_autofix_activation_gates.md`](../.claude/projects/-Users-chapati-code-mento-monitoring-monorepo/memory/p_sentry_autofix_activation_gates.md) | p_sentry_autofix_activation_gates.md | unmanaged / unmanaged | reference / repo-wide | unowned | 180d |
 | [`aegis/README.md`](../aegis/README.md) | Aegis | canonical / active | reference / aegis | eng | 90d; verified 2026-07-17 |
 | [`alerts/infra/channels/slack-channels/README.md`](../alerts/infra/channels/slack-channels/README.md) | Slack Channels | canonical / active | reference / alerts/infra/channels/slack-channels | eng | 90d; verified 2026-07-17 |
 | [`alerts/infra/oncall-announcer/README.md`](../alerts/infra/oncall-announcer/README.md) | On-call Announcer | canonical / active | reference / alerts/infra/oncall-announcer | eng | 90d; verified 2026-07-17 |
