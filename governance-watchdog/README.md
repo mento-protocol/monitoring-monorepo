@@ -19,6 +19,8 @@ ID. It is not part of the `mento-alerts` or `mento-monitoring` projects.
 - Stack ownership and apply policy: [`docs/terraform.md`](../docs/terraform.md)
   and the `governance-watchdog` row in
   [`terraform.stacks.json`](../terraform.stacks.json).
+- Terraform, Cloud Function, and deploy-input review:
+  [`docs/pr-checklists/terraform-cloudrun.md`](../docs/pr-checklists/terraform-cloudrun.md).
 - Adding an event or changing a QuickNode filter:
   [`ADDING_EVENTS.md`](ADDING_EVENTS.md).
 - First deployment into a new GCP project:

@@ -3,7 +3,7 @@ title: Terraform and Cloud Run Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: checklist
 scope: terraform/infra
 review_interval_days: 90
@@ -18,7 +18,7 @@ Use this checklist for any change to `terraform/` or to a deploy script that tal
 
 > **Every project-level mutation must be ordered behind the IAM owner binding, and every Cloud Run knob must work on bootstrap, on re-apply, AND on workflow-dispatch retry.**
 
-## 1. Resource refactors
+## 1. Resource refactors and retirement
 
 When you rename a resource, change its address (e.g. remove `count`/`for_each`, move it into a module), or split one resource into two:
 
@@ -26,9 +26,20 @@ When you rename a resource, change its address (e.g. remove `count`/`for_each`, 
   - Fails immediately if the resource has `deletion_protection = true` (Cloud Run services in this repo do)
   - Briefly destroys IAM members, revoking public access for the duration of the apply
   - Loses any drift the team accepted out-of-band (e.g. an image rolled by `gcloud run services update`)
-- [ ] Run `pnpm infra:plan` and confirm the plan shows `# ... will be moved to ...`, NOT `# ... will be destroyed`
+- [ ] When Terraform should stop managing an object but the remote object must
+      survive, replace its resource block with a `removed` block whose
+      `lifecycle` sets `destroy = false`. Simply deleting the resource block
+      plans remote destruction. `removed` blocks require Terraform 1.7 or
+      newer; raise the owning root's `required_version` when needed.
+- [ ] Find the owning stack with `pnpm tf list` or
+      `terraform.stacks.json`, then run `pnpm tf plan <owning-stack>`.
+      `pnpm infra:plan` is only an alias for the `platform` stack. Confirm the
+      plan shows the intended move or state removal and no unintended
+      `# ... will be destroyed` action.
 
-The canonical example is `terraform/metrics-bridge.tf` — the metrics-bridge `moved` blocks added in PR #201.
+Current examples are the metrics-bridge `moved` blocks in
+`terraform/metrics-bridge.tf` and the state-only retirement in
+`terraform/dashboard.tf`.
 
 ## 2. Cloud Run service shape
 
@@ -110,7 +121,8 @@ New GCP project, Cloud Function, or versioned-bucket stacks ship WITH retention 
 
 ## 8. Pre-apply rituals
 
-- [ ] `pnpm infra:plan` ALWAYS before apply; read every `# ... will be destroyed` line
+- [ ] Run `pnpm tf plan <owning-stack>` ALWAYS before apply; read every
+      `# ... will be destroyed` line
 - [ ] If the plan touches `google_cloud_run_v2_service`, double-check that image/API bookkeeping drift is ignored and probe paths still match the deployed app
 - [ ] After apply, hit the public URL once and confirm a 200 from `/health` — Cloud Run can return 503s for ~30s while the new revision rolls
 
