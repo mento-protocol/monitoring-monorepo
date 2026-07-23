@@ -13,8 +13,16 @@
 # the REPO DEFAULT is read-only. The default was `write`, so a future
 # no-`permissions` autofix-reachable job running `actions/checkout` would persist
 # a write-scoped token the checker would NOT flag. Pinning the default to `read`
-# makes the checker's assumption hold; drift back to `write` is caught by the
-# terraform-drift plan (the "check fails on drift" of #1557's done-means).
+# makes the checker's assumption hold.
+#
+# Drift note: enforcement is DECLARATIVE — every `pnpm tf apply platform`
+# re-asserts `read`, and a manual reversion to `write` surfaces as a diff the
+# next time this stack is planned. The platform stack is manual plan/apply and
+# is NOT in the scheduled terraform-drift matrix (it opts in via
+# `ci.drift == "scheduled"`, which platform does not set, and the daily drift job
+# lacks the github/upstash/vercel plan credentials platform needs), so a manual
+# reversion is not caught by a DAILY check. Scheduled drift detection for the
+# platform stack is tracked as a follow-up (issue #1564).
 #
 # `can_approve_pull_request_reviews = false`: no workflow approves PRs via the
 # automatic token (verified), so denying it is free least-privilege hardening.
