@@ -46,6 +46,7 @@ vi.mock("next/link", () => ({
 
 import {
   GlobalPoolsTable,
+  filterGlobalPools,
   globalPoolKey,
   sortGlobalPools,
   type GlobalPoolEntry,
@@ -126,6 +127,33 @@ describe("globalPoolKey", () => {
     const celoEntry = makeEntry({ id: "pool-1" }, CELO_NETWORK);
     const monadEntry = makeEntry({ id: "pool-1" }, MONAD_NETWORK);
     expect(globalPoolKey(celoEntry)).not.toBe(globalPoolKey(monadEntry));
+  });
+});
+
+describe("filterGlobalPools", () => {
+  const polygonNetwork: Network = {
+    ...CELO_NETWORK,
+    id: "polygon-mainnet",
+    label: "Polygon",
+    chainId: 137,
+  };
+
+  const entries = [
+    makeEntry({ id: "celo-pool" }, CELO_NETWORK),
+    makeEntry({ id: "monad-pool" }, MONAD_NETWORK),
+    makeEntry({ id: "polygon-pool" }, polygonNetwork),
+  ];
+
+  it("matches pool names without changing case", () => {
+    expect(filterGlobalPools(entries, "kesm/usdm", [])).toEqual(entries);
+    expect(filterGlobalPools(entries, "does-not-exist", [])).toEqual([]);
+  });
+
+  it("keeps the union of selected chains", () => {
+    expect(filterGlobalPools(entries, "", [143, 137])).toEqual([
+      entries[1],
+      entries[2],
+    ]);
   });
 });
 

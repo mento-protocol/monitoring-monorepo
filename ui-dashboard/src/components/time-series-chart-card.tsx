@@ -164,6 +164,10 @@ interface TimeSeriesChartCardProps {
    * height jump on the /volume daily-volume card.
    */
   reserveDeltaRow?: boolean;
+  /** Optional color override for the non-stacked aggregate trace. */
+  totalLineColor?: string;
+  /** Optional fill override for the non-stacked aggregate trace. */
+  totalFillColor?: string;
 }
 
 // Intentional react-doctor suppression: chart shell + hover overlay + trace
@@ -197,6 +201,8 @@ export function TimeSeriesChartCard({
   yAxisReferenceValues = EMPTY_Y_AXIS_REFERENCE_VALUES,
   plotlyDeferMode = "none",
   reserveDeltaRow = true,
+  totalLineColor = "#6366f1",
+  totalFillColor = "rgba(99,102,241,0.08)",
 }: TimeSeriesChartCardProps) {
   const resolvedHeadlineLoading = headlineLoading ?? isLoading;
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
@@ -271,9 +277,9 @@ export function TimeSeriesChartCard({
           ...(hasBreakdown ? { name: "Total" } : {}),
           type: "scatter" as const,
           mode: "lines" as const,
-          line: { color: "#6366f1", width: 2 },
+          line: { color: totalLineColor, width: 2 },
           fill: "tozeroy" as const,
-          fillcolor: "rgba(99,102,241,0.08)",
+          fillcolor: totalFillColor,
           hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
         };
     const breakdownTraces = (breakdown ?? []).map((b) => {
