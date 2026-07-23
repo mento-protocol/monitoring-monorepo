@@ -198,6 +198,17 @@ Do not use manual dispatch as a probe: there is no dry-run mode. Dispatch from
 stage is enabled and the issue is eligible, dispatch creates a real branch and
 PR. The workflow never merges it.
 
+If the `code-fix` verdict is shed while the PR is being opened (a regression
+re-queue in ingest's separate concurrency group), finalization withdraws rather
+than marking the stub fixed. It re-reads the verdict immediately before and
+after writing the `sentry:fix-pr-opened` marker; on a shed verdict it closes the
+just-opened PR (the selector dedups on an open autofix PR too, so skipping the
+label alone would not free the stub), removes any marker it already applied, and
+comments that the fix was not finalized. A closed autofix PR carrying no marker
+is that intentional regression-re-queue outcome, not an orphaned run; an
+unconfirmable close fails the run loudly rather than leaving a stale PR that
+would suppress the re-fix.
+
 ### Human-approved archive
 
 Archiving is independent of the verdict. An authorized human may apply
