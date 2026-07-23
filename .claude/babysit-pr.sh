@@ -24,6 +24,8 @@ babysit_repo_init() {
 
 babysit_repo_gate() {
   local pr=$1
+  local owner=$2
+  local repo=$3
   local repo_root=$4
 
   if [[ ! -f "$repo_root/package.json" ]]; then
@@ -39,16 +41,35 @@ babysit_repo_gate() {
     return 0
   fi
 
+  # In Claude cloud sessions the platform's GitHub credential proxy blocks
+  # gh's /repos/* and GraphQL paths regardless of tokens, so pr:ready-state
+  # cannot run there (docs/notes/github-tooling-surfaces.md). Only repo-scoped
+  # calls prove capability — `gh auth status` passes in those sessions even
+  # while the repo API is blocked. The probe needs REST /repos/*, GraphQL
+  # (`gh pr view` and the reviewThreads query), and `gh api --slurp` (missing
+  # from the default Ubuntu gh 2.45 a variant may ship), so gate on all three.
+  # Without this guard the probe failure below would read as FAIL and poison
+  # every cloud babysit run.
+  if [[ -n "${CLAUDE_CODE_REMOTE:-}" ]] &&
+    { ! gh api --help 2>/dev/null | grep -q -- '--slurp' ||
+      ! gh api "repos/${owner}/${repo}" --jq .full_name >/dev/null 2>&1 ||
+      ! gh api graphql -f query='query{viewer{login}}' >/dev/null 2>&1; }; then
+    printf 'PENDING pr:ready-state unavailable in this Claude cloud session (gh repo API is platform-blocked); use the MCP emulation in docs/notes/github-tooling-surfaces.md — probe-verified all-clear needs a gh-capable surface'
+    return 0
+  fi
+
   # `pnpm <script>` prints a "> pkg@ <script> <path>" banner to STDOUT before
   # the script's own output. Piping that into jq makes it choke on the
   # non-JSON preamble ("Invalid numeric literal"), and the `|| ready="false"`
   # fallbacks below then silently report PENDING forever even when the PR is
   # green + approved. `--silent` suppresses the banner so `--json` is clean,
   # parseable output; capturing stderr to /dev/null keeps any script warning
-  # from corrupting the JSON too.
+  # from corrupting the JSON too. `--repo` is required: a cloud checkout's
+  # origin is the credential-proxy URL, which gh cannot map to a repository,
+  # so an implicit-repo invocation fails even after the capability gate passes.
   local output
-  output=$(cd "$repo_root" && pnpm --silent pr:ready-state --pr "$pr" --json 2>/dev/null) || {
-    printf 'FAIL pr:ready-state errored (repro: pnpm pr:ready-state --pr %s --json)' "$pr"
+  output=$(cd "$repo_root" && pnpm --silent pr:ready-state --pr "$pr" --repo "${owner}/${repo}" --json 2>/dev/null) || {
+    printf 'FAIL pr:ready-state errored (repro: pnpm pr:ready-state --pr %s --repo %s/%s --json)' "$pr" "$owner" "$repo"
     return 0
   }
 

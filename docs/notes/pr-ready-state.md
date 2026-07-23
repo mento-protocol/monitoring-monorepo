@@ -22,6 +22,14 @@ must have a clean feedback ledger and the subsequent current-head
 `pr:ready-state` result must be ready. Agent-specific loops may gather extra
 context or post replies, but they must preserve that two-projection contract.
 
+The probe shells out to gh, so it cannot run in Claude cloud sessions whose
+proxy blocks gh's API paths; a variant passing the REST + GraphQL +
+`--slurp` capability gate runs it as written, passing `--repo <owner/name>`
+since gh cannot infer the repo from the proxy remote. Blocked sessions use
+the MCP emulation documented in
+[`github-tooling-surfaces.md`](github-tooling-surfaces.md) and label their
+all-clear MCP-emulated rather than probe-verified.
+
 ## Readiness model
 
 Readiness is driven by the raw GitHub status rollup plus required review gates.

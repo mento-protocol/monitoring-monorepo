@@ -66,6 +66,9 @@ storage only. Claim before substantive edits:
 pnpm issue:claim --count 3 --agent codex
 ```
 
+In Claude cloud sessions these helpers run only behind the capability gate;
+otherwise use the MCP workboard fallback in
+[`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
 When a PR opens, run `pnpm issue:review --pr <number> --issue <issue>`. Use
 `Closes #N` only when the issue's **Done means** is fully satisfied; otherwise
 use `Refs #N`. Release incomplete work with `pnpm issue:release` and choose
@@ -168,7 +171,13 @@ pnpm pr:ready-state --pr <number> --json
 
 All-clear requires a clean feedback ledger plus ready-state's current-head
 required state, including the current-head
-`chatgpt-codex-connector[bot]` PR-description approval. Do not post routine or
+`chatgpt-codex-connector[bot]` PR-description approval. Exception: in Claude
+cloud sessions the probes run only behind the capability gate; otherwise use
+the `babysit-pr` MCP emulation checklist, label any all-clear MCP-emulated
+rather than probe-verified, and leave the probe-verified all-clear to a
+gh-capable surface — see
+[`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
+Do not post routine or
 duplicate `@codex review` requests. The projection contract, break-glass
 behavior, optional-bot treatment, and watch loop live in
 [`docs/notes/pr-ready-state.md`](docs/notes/pr-ready-state.md) and the
