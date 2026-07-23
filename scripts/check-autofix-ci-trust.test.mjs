@@ -10,6 +10,9 @@ import {
   pushAdmitsAutofix,
   usesPullRequestTarget,
 } from "./check-autofix-ci-trust.mjs";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 let passed = 0;
 let failed = 0;
@@ -975,6 +978,49 @@ test("a quoted-scalar continuation ending in | is not a block introducer", () =>
     !v.ok && /\[leak\]/.test(v.reason),
     "marker inside the pipe-ending quoted scalar is not an annotation",
   );
+});
+
+// ── #1453: CODECOV_TOKEN is isolated from PR-controlled steps on autofix heads ─
+test("#1453 every codecov upload step in ci.yml excludes sentry-autofix heads", () => {
+  // The token step shares a job with PR-head build/test, which can write
+  // $GITHUB_ENV/$GITHUB_PATH — so step-scoping alone does not isolate it. Each
+  // codecov step must therefore carry the excluding autofix guard so the token
+  // never runs on a machine-authored sentry-autofix/* PR (issue #1453). jobGuarded
+  // reads `.if`, so it validates a STEP's guard exactly as it does a job's, using
+  // the canonical GUARD_PATTERN (cannot drift from the checker's own definition).
+  const ciPath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    ".github",
+    "workflows",
+    "ci.yml",
+  );
+  const doc = parseWorkflow(readFileSync(ciPath, "utf8"));
+  assert(doc && typeof doc.jobs === "object", "ci.yml parses with a jobs map");
+  const codecovSteps = [];
+  for (const job of Object.values(doc.jobs)) {
+    if (!job || typeof job !== "object" || !Array.isArray(job.steps)) continue;
+    for (const step of job.steps) {
+      if (
+        step &&
+        typeof step === "object" &&
+        typeof step.uses === "string" &&
+        step.uses.includes("codecov/codecov-action")
+      ) {
+        codecovSteps.push(step);
+      }
+    }
+  }
+  assert(
+    codecovSteps.length >= 9,
+    `expected at least 9 codecov upload steps in ci.yml, found ${codecovSteps.length}`,
+  );
+  for (const step of codecovSteps) {
+    assert(
+      jobGuarded(step, "pull_request"),
+      `a codecov upload step is not guarded against sentry-autofix heads: ${JSON.stringify(step.uses)}`,
+    );
+  }
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
