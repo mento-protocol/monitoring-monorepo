@@ -153,37 +153,25 @@ test.describe("dashboard browser flows", () => {
     await page.goto("/");
 
     const search = page.getByPlaceholder("Filter by pool name");
-    const chainFilters = page.getByRole("group", {
-      name: "Filter pools by chain",
-    });
+    const chainFilters = page.getByRole("listbox", { name: "Chains" });
     await expect(search).toBeVisible();
-    await expect(
-      chainFilters.getByRole("button", { name: "Celo" }),
-    ).toHaveAttribute("aria-pressed", "true");
-    await expect(
-      chainFilters.getByRole("button", { name: "Monad" }),
-    ).toHaveAttribute("aria-pressed", "true");
+    await expect(chainFilters).toHaveValues(["42220", "143"]);
 
     await search.fill("AUSD/USDm");
     await expect(page.getByRole("link", { name: "AUSD/USDm" })).toHaveCount(1);
     await expect(page.getByRole("link", { name: "USDC/USDm" })).toHaveCount(0);
 
     await search.fill("");
-    await chainFilters.getByRole("button", { name: "Celo" }).click();
-    await expect(
-      chainFilters.getByRole("button", { name: "Celo" }),
-    ).toHaveAttribute("aria-pressed", "false");
-    await expect(
-      chainFilters.getByRole("button", { name: "Monad" }),
-    ).toHaveAttribute("aria-pressed", "true");
+    await chainFilters.selectOption(["143"]);
+    await expect(chainFilters).toHaveValues(["143"]);
     await expect(page.getByRole("link", { name: "USDC/USDm" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "AUSD/USDm" })).toHaveCount(1);
 
-    await chainFilters.getByRole("button", { name: "Monad" }).click();
+    await chainFilters.selectOption([]);
+    await expect(chainFilters).toHaveValues([]);
     await expect(
-      chainFilters.getByRole("button", { name: "Monad" }),
-    ).toHaveAttribute("aria-pressed", "false");
-    await expect(page.getByText("No pools match these filters.")).toBeVisible();
+      page.getByRole("status", { name: "Filtered pool results" }),
+    ).toHaveText("No pools match these filters.");
   });
 
   test("switches chain context through the pool list target", async ({

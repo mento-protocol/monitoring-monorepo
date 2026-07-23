@@ -46,28 +46,33 @@ function liveRegion(
 
 export function PoolsTableSkeleton({
   presentational,
+  showFilters = false,
 }: {
   /** True when a parent already provides the live region (route fallback). */
   presentational?: boolean;
+  /** Reserves the homepage-only name and chain-filter toolbar. */
+  showFilters?: boolean;
 } = {}) {
   return (
-    <div
-      className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900/30"
-      {...liveRegion(presentational)}
-    >
-      <div
-        className="animate-pulse border-b border-slate-800 bg-slate-800/50"
-        style={{ height: POOLS_TABLE_HEADER_HEIGHT_PX }}
-      />
-      <div className="divide-y divide-slate-800/50">
-        {Array.from({ length: POOLS_TABLE_SKELETON_ROWS }, (_, i) => (
-          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-          <div
-            key={`skel-pool-row-${i}`}
-            className="animate-pulse bg-slate-800/30"
-            style={{ height: POOLS_TABLE_ROW_HEIGHT_PX }}
-          />
-        ))}
+    <div {...liveRegion(presentational)}>
+      {showFilters && (
+        <div className="mb-3 h-[100px] animate-pulse rounded bg-slate-800/30 sm:h-[56px]" />
+      )}
+      <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900/30">
+        <div
+          className="animate-pulse border-b border-slate-800 bg-slate-800/50"
+          style={{ height: POOLS_TABLE_HEADER_HEIGHT_PX }}
+        />
+        <div className="divide-y divide-slate-800/50">
+          {Array.from({ length: POOLS_TABLE_SKELETON_ROWS }, (_, i) => (
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+            <div
+              key={`skel-pool-row-${i}`}
+              className="animate-pulse bg-slate-800/30"
+              style={{ height: POOLS_TABLE_ROW_HEIGHT_PX }}
+            />
+          ))}
+        </div>
       </div>
       {!presentational && <span className="sr-only">Loading…</span>}
     </div>

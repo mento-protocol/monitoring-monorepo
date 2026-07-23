@@ -104,7 +104,7 @@ export default function RootLoading() {
           table exactly, instead of under-reserving on a slow SSR resolve. */}
       <section>
         <div className={`mb-3 h-6 w-24 ${SHIMMER}`} />
-        <PoolsTableSkeleton presentational />
+        <PoolsTableSkeleton presentational showFilters />
       </section>
 
       <span className="sr-only">Loading…</span>

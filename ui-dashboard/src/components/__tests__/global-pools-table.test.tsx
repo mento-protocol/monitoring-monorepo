@@ -181,6 +181,31 @@ describe("GlobalPoolsTable — FX weekend SSR banner", () => {
   });
 });
 
+describe("GlobalPoolsTable filters", () => {
+  it("uses the dashboard's labelled native multi-select pattern", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[makeEntry({}, CELO_NETWORK), makeEntry({}, MONAD_NETWORK)]}
+        showFilters
+      />,
+    );
+
+    expect(html).toContain('aria-label="Chains"');
+    expect(html).toContain("multiple");
+    expect(html).toContain(">Celo</option>");
+    expect(html).toContain(">Monad</option>");
+  });
+
+  it("keeps the shared table free of homepage-only controls by default", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry({}, CELO_NETWORK)]} />,
+    );
+
+    expect(html).not.toContain('aria-label="Chains"');
+    expect(html).not.toContain("Filter by pool name");
+  });
+});
+
 describe("GlobalPoolsTable — column structure", () => {
   it("renders a branded chain icon before the pool name", () => {
     const html = renderToStaticMarkup(

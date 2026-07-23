@@ -57,6 +57,8 @@ function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
 
 interface GlobalPoolsTableProps {
   entries: GlobalPoolEntry[];
+  /** Homepage owns the local pool-name and multi-chain controls. */
+  showFilters?: boolean;
   initialIsWeekend?: boolean;
   volume24hByKey?: Map<string, number | null | undefined>;
   volume24hLoading?: boolean;
@@ -72,6 +74,7 @@ interface GlobalPoolsTableProps {
 
 export function GlobalPoolsTable({
   entries,
+  showFilters = false,
   initialIsWeekend = false,
   volume24hByKey,
   volume24hLoading = false,
@@ -94,7 +97,7 @@ export function GlobalPoolsTable({
   const filters = useGlobalPoolFilters(entries);
   const { tvlByKey, totalVolumeByKey } = useGlobalPoolValues(entries);
   const sortedEntries = useSortedGlobalPools({
-    entries: filters.filteredEntries,
+    entries: showFilters ? filters.filteredEntries : entries,
     sortKey,
     sortDir,
     tvlByKey,
@@ -110,40 +113,7 @@ export function GlobalPoolsTable({
   return (
     <>
       <WeekendBanner initialIsWeekend={initialIsWeekend} />
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-slate-400 sm:max-w-sm">
-          Search pools
-          <input
-            type="search"
-            value={filters.search}
-            onChange={(event) => filters.setSearch(event.target.value)}
-            placeholder="Filter by pool name"
-            className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-          />
-        </label>
-        <div
-          role="group"
-          aria-label="Filter pools by chain"
-          className="flex flex-wrap gap-1"
-        >
-          <ChainFilterButton
-            label="All chains"
-            active={filters.selectedChainIds === null}
-            onClick={filters.clearChains}
-          />
-          {filters.chainOptions.map((option) => (
-            <ChainFilterButton
-              key={option.chainId}
-              label={option.label}
-              active={
-                filters.selectedChainIds === null ||
-                filters.selectedChainIds.includes(option.chainId)
-              }
-              onClick={() => filters.toggleChain(option.chainId)}
-            />
-          ))}
-        </div>
-      </div>
+      {showFilters && <GlobalPoolFilters filters={filters} />}
       <Table>
         <PoolTableHeader
           sortKey={sortKey}
@@ -153,6 +123,7 @@ export function GlobalPoolsTable({
         />
         <GlobalPoolRows
           entries={sortedEntries}
+          showEmptyState={showFilters && entries.length > 0}
           showVirtualPoolSource={showVirtualPoolSource}
           tvlByKey={tvlByKey}
           volume24hByKey={volume24hByKey}
@@ -170,6 +141,50 @@ export function GlobalPoolsTable({
         />
       </Table>
     </>
+  );
+}
+
+function GlobalPoolFilters({
+  filters,
+}: {
+  filters: ReturnType<typeof useGlobalPoolFilters>;
+}) {
+  return (
+    <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-slate-400 sm:max-w-sm">
+        Search pools
+        <input
+          type="search"
+          value={filters.search}
+          onChange={(event) => filters.setSearch(event.target.value)}
+          placeholder="Filter by pool name"
+          className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+        />
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-slate-500">
+        <span>Chains:</span>
+        <select
+          aria-label="Chains"
+          multiple
+          size={Math.min(3, Math.max(1, filters.chainOptions.length))}
+          value={(filters.selectedChainIds ?? filters.allChainIds).map(String)}
+          onChange={(event) =>
+            filters.setChainIds(
+              Array.from(event.currentTarget.selectedOptions, (option) =>
+                Number(option.value),
+              ),
+            )
+          }
+          className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+        >
+          {filters.chainOptions.map((option) => (
+            <option key={option.chainId} value={option.chainId}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
   );
 }
 
@@ -192,26 +207,18 @@ function useGlobalPoolFilters(entries: GlobalPoolEntry[]) {
     () => filterGlobalPools(entries, search, selectedChainIds),
     [entries, search, selectedChainIds],
   );
-  const toggleChain = (chainId: number) => {
-    setSelectedChainIds((current) => {
-      const active =
-        current === null
-          ? chainOptions.map((option) => option.chainId)
-          : current;
-      const next = active.includes(chainId)
-        ? active.filter((id) => id !== chainId)
-        : [...active, chainId];
-      return next.length === chainOptions.length ? null : next;
-    });
-  };
+  const allChainIds = chainOptions.map((option) => option.chainId);
   return {
     search,
     setSearch,
     selectedChainIds,
     chainOptions,
+    allChainIds,
     filteredEntries,
-    toggleChain,
-    clearChains: () => setSelectedChainIds(null),
+    setChainIds: (chainIds: number[]) =>
+      setSelectedChainIds(
+        chainIds.length === allChainIds.length ? null : chainIds,
+      ),
   };
 }
 
@@ -281,10 +288,12 @@ function useSortedGlobalPools({
 function GlobalPoolRows({
   entries,
   showVirtualPoolSource,
+  showEmptyState,
   ...rowProps
 }: {
   entries: GlobalPoolEntry[];
   showVirtualPoolSource: boolean;
+  showEmptyState: boolean;
 } & Omit<ComponentProps<typeof PoolRow>, "entry" | "showVirtualPoolSource">) {
   return (
     <tbody>
@@ -296,43 +305,19 @@ function GlobalPoolRows({
           {...rowProps}
         />
       ))}
-      {entries.length === 0 && (
+      {showEmptyState && entries.length === 0 && (
         <tr>
           <td
             colSpan={showVirtualPoolSource ? 11 : 10}
             className="px-3 py-8 text-center text-sm text-slate-400"
           >
-            No pools match these filters.
+            <span role="status" aria-label="Filtered pool results">
+              No pools match these filters.
+            </span>
           </td>
         </tr>
       )}
     </tbody>
-  );
-}
-
-function ChainFilterButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={
-        "rounded-md border px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
-        (active
-          ? "border-indigo-400/70 bg-indigo-400/15 text-indigo-100"
-          : "border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-600 hover:text-slate-200")
-      }
-    >
-      {label}
-    </button>
   );
 }
 
