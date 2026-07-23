@@ -702,8 +702,21 @@ outcome, and the `implementation_signature`/stamp machinery does not need to
 fingerprint it. Editing this script does re-hash `implementation_signature` and
 invalidate existing stamps once (expected). Turbo 2.9.x writes each cache
 artifact via temp file + atomic rename with PID-namespaced temp names, so two
-worktrees' gates writing the shared dir concurrently cannot corrupt it. Refs
-GitHub issue 1411.
+worktrees' gates writing the shared dir concurrently cannot corrupt it.
+
+When `HOME` is unset or `$HOME/.cache/turbo-monitoring-monorepo` cannot be
+created or written to — e.g. a sandboxed agent whose writable allowlist excludes
+paths outside the repo — the gate leaves `TURBO_CACHE_DIR` unset and falls back
+to Turbo's per-worktree default, so those runs stay cold and share nothing. The
+`Turbo cache dir:` header line is printed only when the shared path is active;
+its absence means the fallback (or the opt-out) is in effect.
+
+The shared cache lives outside every worktree, so unlike the old per-worktree
+`.turbo/cache` it is not reclaimed when a worktree is deleted. Turbo only reaps
+its own orphaned `.tmp` files, never finished entries, so the directory grows
+without bound as task hashes accumulate. It is pure cache — delete it any time to
+reclaim disk and Turbo repopulates on the next run: `rm -rf
+"$HOME/.cache/turbo-monitoring-monorepo"`. Refs GitHub issue 1411.
 
 ## Common local-gate traps
 

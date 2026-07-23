@@ -698,15 +698,21 @@ assert_not_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metric
 # Shared Turbo cache across worktrees (GitHub issue #1411): with TURBO_CACHE_DIR
 # unset the gate exports the stable per-repo default so all worktrees share one
 # cache; a caller-provided TURBO_CACHE_DIR is preserved untouched.
+# Pin a temporary writable HOME and explicitly clear AGENT_TURBO_SHARED_CACHE so
+# this default-path case stays valid when the suite itself is invoked under the
+# supported opt-out or a restricted real HOME.
 : > "$paths_file"
 printf 'metrics-bridge/src/main.ts\n' >> "$paths_file"
-env -u TURBO_CACHE_DIR AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+turbo_cache_writable_home="$(mktemp -d)"
+env -u TURBO_CACHE_DIR -u AGENT_TURBO_SHARED_CACHE HOME="$turbo_cache_writable_home" \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
   scripts/agent-quality-gate.sh \
   --changed-paths-file "$paths_file" \
   --base origin/test \
   > "$output_file"
 assert_raw_contains "Turbo cache dir: "
 assert_raw_contains "/.cache/turbo-monitoring-monorepo"
+rm -rf "$turbo_cache_writable_home"
 
 TURBO_CACHE_DIR="/tmp/agentqg-caller-turbo-cache" \
   AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
