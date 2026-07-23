@@ -99,9 +99,9 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/pr-checklists/mutation-testing.md`](pr-checklists/mutation-testing.md) | Mutation Testing Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-23 |
 | [`docs/pr-checklists/recurring-review-patterns.md`](pr-checklists/recurring-review-patterns.md) | Recurring PR Review Patterns | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/pr-checklists/review-prompt-exclusions.md`](pr-checklists/review-prompt-exclusions.md) | Review Prompt Exclusions | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-03 |
-| [`docs/pr-checklists/stateful-data-ui.md`](pr-checklists/stateful-data-ui.md) | Stateful Data and UI Checklist | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`docs/pr-checklists/swr-polling-hasura.md`](pr-checklists/swr-polling-hasura.md) | SWR and Hasura Polling Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-17 |
-| [`docs/pr-checklists/terraform-cloudrun.md`](pr-checklists/terraform-cloudrun.md) | Terraform and Cloud Run Checklist | canonical / active | checklist / terraform/infra | eng | 90d; verified 2026-07-17 |
+| [`docs/pr-checklists/stateful-data-ui.md`](pr-checklists/stateful-data-ui.md) | Stateful Data and UI Checklist | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`docs/pr-checklists/swr-polling-hasura.md`](pr-checklists/swr-polling-hasura.md) | SWR and Hasura Polling Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-23 |
+| [`docs/pr-checklists/terraform-cloudrun.md`](pr-checklists/terraform-cloudrun.md) | Terraform and Cloud Run Checklist | canonical / active | checklist / terraform/infra | eng | 90d; verified 2026-07-23 |
 
 ## adrs-architecture
 
