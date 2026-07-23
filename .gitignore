@@ -23,6 +23,7 @@ dist/
 .vercel
 .env*.local
 .claude/worktrees
+.claude/projects
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 .claude/*.jq
