@@ -1936,6 +1936,39 @@ run_branch_diff_check_regression() {
   expect_empty_stderr
 }
 
+run_branch_local_upstream_whitespace_regression() {
+  local review_repo="$tmp_dir/branch-local-upstream-whitespace"
+  local prompt="$tmp_dir/branch-local-upstream-whitespace.md"
+  init_review_repo "$review_repo"
+  printf 'legacy trailing whitespace   \n' >"$review_repo/upstream.txt"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'feature\n' >"$review_repo/feature.txt"
+  commit_review_repo "$review_repo" feature
+  git -C "$review_repo" switch main >/dev/null 2>&1
+  printf 'upstream cleanup\n' >"$review_repo/upstream.txt"
+  commit_review_repo "$review_repo" "fix upstream whitespace"
+  git -C "$review_repo" switch feature >/dev/null 2>&1
+  printf 'local clean\n' >"$review_repo/local.txt"
+
+  run_helper_in_repo "$review_repo" \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$prompt"
+  expect_stdout_contains '"feature.txt"'
+  expect_stdout_contains '"local.txt"'
+  expect_stdout_not_contains '"upstream.txt"'
+  expect_file_not_contains "$prompt" "upstream.txt"
+  expect_empty_stderr
+
+  run_helper_in_repo "$review_repo" --base main --engine local
+  expect_stdout_contains "autoreview target: branch-local"
+  expect_stdout_contains "autoreview clean"
+  expect_stdout_not_contains "Diff contains whitespace"
+  expect_empty_stderr
+}
+
 run_local_deleted_reference_regression() {
   local review_repo="$tmp_dir/deleted-reference"
   init_review_repo "$review_repo"
@@ -5980,6 +6013,7 @@ run_target_selection_family() {
   run_core_target_node_tests
   run_review_target_metadata_regression
   run_branch_diff_check_regression
+  run_branch_local_upstream_whitespace_regression
   run_local_deleted_reference_regression
   run_commit_target_reads_selected_ref_regression
   run_non_utf8_git_blob_regression

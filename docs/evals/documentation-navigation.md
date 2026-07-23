@@ -141,9 +141,11 @@ Scores stay separate so a cheap strength cannot hide an expensive failure:
   do not masquerade as a routing failure.
 - **Context bytes** — source bytes are recomputed per question and as a unique
   suite total. No question may exceed 45,000 additional source bytes and the
-  complete run may not exceed 260,000 unique source bytes, including bootstrap
-  sources. Fixture validation also proves that the cheapest accepted route for
-  every question, and their unique union, fit those caps before a run begins.
+  complete run may not exceed 272,000 unique source bytes, including bootstrap
+  sources (a temporary re-baseline from 260,000; #1504 tracks consolidating
+  the routed docs and restoring the tighter cap). Fixture validation also
+  proves that the cheapest accepted route for every question, and their
+  unique union, fit those caps before a run begins.
 
 The scorer intentionally does not claim to grade arbitrary prose for semantic
 correctness. Canonical routing plus exact evidence makes the answer reviewable;

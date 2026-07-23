@@ -79,6 +79,7 @@ data "archive_file" "function_source" {
     ".project_vars_cache",
     "bin",
     "arch-diagram.png",
+    "ADDING_EVENTS.md",
     "DEPLOY_FROM_SCRATCH.md",
     "README.md",
     "dist",
