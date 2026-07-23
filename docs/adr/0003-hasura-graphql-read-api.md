@@ -3,7 +3,7 @@ title: Hasura auto-generated GraphQL over Postgres is the read API
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: repo-wide
 date: 2026-03
 doc_type: adr
@@ -39,10 +39,11 @@ service between the database and the clients.
 
 - The GraphQL schema is a generated artifact of the Envio schema — schema changes
   propagate straight to query and UI types (hence ADR 0008's cross-layer checklist).
-- Hasura's `_aggregate` is available but deliberately **not** used for hot paths;
-  we precompute snapshot entities instead (ADR 0014, ADR 0020).
-- Verify production behavior via Hasura introspection, not the indexer CLI, because
-  parallel deploys can prune a CLI-reported entry mid-serve.
+- Hosted Hasura disables `_aggregate`; precompute snapshot entities for
+  full-lifetime and hot-path aggregation instead (ADR 0014, ADR 0020).
+- Verify an explicitly promoted deployment with the commit-scoped verifier,
+  the full propagation wait, and an affected data/UI probe. Static-endpoint
+  introspection alone is not rollout proof.
 
 ## Evidence
 

@@ -3,7 +3,7 @@ title: Context is product — canonical authority model with a metadata contract
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: repo-wide
 date: 2026-07
 doc_type: adr

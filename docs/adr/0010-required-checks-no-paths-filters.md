@@ -3,7 +3,7 @@ title: Required CI checks carry no paths filters; only advisory jobs may
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: ci/process
 date: 2026-04
 doc_type: adr
@@ -25,10 +25,11 @@ the check stays **pending forever** and the PR can never satisfy protection.
 
 ## Decision
 
-**Required checks (and sticky-comment / security-gate jobs) must not use `paths:`
-filters.** They run on every PR via a single required sentinel job that internally
-routes to the right per-package work. Advisory, non-required, non-comment
-workflows may use `paths:` to save cost.
+**Ruleset-required workflows must not use `paths:` or `paths-ignore:` filters.**
+They run on every PR and route internally to the relevant work. Advisory,
+non-required workflows should use workflow-level path filters when safe. A
+workflow whose sticky comment must be cleared when the relevant diff disappears
+stays unfiltered and performs its run/skip decision inside the job.
 
 ## Alternatives considered
 
@@ -39,11 +40,13 @@ workflows may use `paths:` to save cost.
 
 ## Consequences
 
-- Terraform/package routing lives inside the sentinel (backed by
-  `terraform.stacks.json`, ADR 0028), not in workflow `paths:` YAML.
-- Advisory cost is controlled with path filters + Blacksmith runner tuning instead.
+- Required package and Terraform-validation routing lives inside the CI sentinel,
+  with stack classification backed by `terraform.stacks.json` (ADR 0028).
+- Advisory cost is controlled with path filters and Blacksmith runner tuning;
+  workflows with cleanup semantics route inside the job instead.
 
 ## Evidence
 
-- Path-filter unification PR #176; Blacksmith cost/advisory split PR #813.
+- Path-filter unification PR #176; Blacksmith cost/advisory split PR #813;
+  live `main` ruleset verified 2026-07-23.
 - Rule in [`docs/pr-checklists/ci-workflow-gates.md`](../pr-checklists/ci-workflow-gates.md); CI model in [`docs/terraform.md`](../terraform.md) §CI Model.

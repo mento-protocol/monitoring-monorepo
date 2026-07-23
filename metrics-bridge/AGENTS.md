@@ -19,6 +19,11 @@ garden_lane: agent-entry-points
 `metrics-bridge/` exports Hasura/Envio data, rebalance probes, and isolated
 external peg observations as Prometheus gauges for Grafana alerting.
 
+Apply
+[`docs/pr-checklists/stateful-data-ui.md`](../docs/pr-checklists/stateful-data-ui.md)
+when GraphQL or metric-state changes propagate across the indexer, bridge, or
+downstream alerts/dashboard.
+
 ## Operating Rules
 
 - Keep `/health` as the health endpoint. Cloud Run v2 reserves `/healthz` at the frontend.

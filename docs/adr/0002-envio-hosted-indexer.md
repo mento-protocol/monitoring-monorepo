@@ -3,7 +3,7 @@ title: Envio HyperIndex Hosted is the indexer; deploy via a dedicated envio bran
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 scope: repo-wide
 date: 2026-03
 doc_type: adr
@@ -42,8 +42,10 @@ static production endpoint, with a defined rollback path.
 
 - A promote step gates production: sync a deployment, verify rows, then promote —
   the endpoint hash is static and doesn't change on redeploy.
-- Schema-additive changes must ship as one PR that resyncs and promotes **before**
-  merge, or the dashboard breaks (see the schema-single-PR discipline).
+- Schema-additive changes ship with their consumers in one PR. The indexer may
+  preload and sync before merge with `--no-promote`; after merge, promotion
+  requires an equivalent protected-`main` indexer tree and explicit production
+  authorization.
 - Rollback is re-promote-if-live else rebuild+resync; both are scripted.
 
 ## Evidence
