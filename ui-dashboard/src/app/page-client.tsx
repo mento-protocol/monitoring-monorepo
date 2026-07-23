@@ -469,12 +469,13 @@ function GlobalContent({
           // rhythm (`PoolsTableSkeleton`, `@/components/pools-table-skeleton`)
           // — same shape `(home)/loading.tsx` and /pools's stand-ins
           // reserve, not the shared TableSkeleton's generic 36/44.
-          <PoolsTableSkeleton />
+          <PoolsTableSkeleton showFilters />
         ) : shouldShowEmptyPools ? (
           <EmptyBox message="No pools found across any chain." />
         ) : (
           <GlobalPoolsTable
             entries={globalEntries}
+            showFilters
             initialIsWeekend={initialIsWeekend}
             volume24hByKey={volume24hByKey}
             volume7dByKey={volume7dByKey}

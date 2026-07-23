@@ -3,7 +3,7 @@ title: Integration Probes Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: agent-instructions
 scope: integration-probes
 review_interval_days: 90

@@ -3,7 +3,7 @@ title: Monitoring Monorepo Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: agent-instructions
 scope: repo-wide
 review_interval_days: 90
@@ -62,44 +62,55 @@ rule are in
   or plan feedback needs attention, follow
   [`docs/notes/spoken-attention-nudge.md`](docs/notes/spoken-attention-nudge.md).
 
-## Issue-Driven Backlog
+## PR Workflow
 
 GitHub Issues are the canonical active-work queue; `BACKLOG.md` is transition
-storage only. Claim before substantive edits:
+storage only. Claim before substantive edits, then follow the
+[operating card](docs/notes/pr-operating-card.md) through implementation,
+review, shipping, readiness, and merge sync:
 
 ```bash
 pnpm issue:claim --count 3 --agent codex
+pnpm agent:quality-gate
+pnpm agent:quality-gate --run
 ```
 
-In Claude cloud sessions these helpers run only behind the capability gate;
+Claude cloud sessions run issue helpers only behind the capability gate;
 otherwise use the MCP workboard fallback in
 [`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
-Review linkage (`Closes` vs `Refs`), release, and post-merge sync are on the
-[operating card](docs/notes/pr-operating-card.md); label, workboard, and Claim
-ID depth lives in
-[`docs/notes/agent-issue-workflow.md`](docs/notes/agent-issue-workflow.md).
+For non-trivial batches, use the card's surface-correct autoreview flow. Inside
+an active Codex session that means a verified prepared bundle and one
+fresh-context reviewer; a bare deterministic review is not the semantic
+closeout. Autoreview proves source review only, so mapped tests, browser checks,
+generated artifacts, and runtime evidence still apply.
 
-## Agent Quality Gate
+Open every PR through the `ship` skill, ready for review unless the user
+explicitly requests a draft or required validation is intentionally pending.
+The body starts with `## The Problem` (at most three plain-language bullets)
+then `## The Solution` (approach before implementation detail). Use `Closes
+#N` only when the issue's Done means is complete; otherwise use `Refs #N`.
+Knowingly deferred valid work needs a linked issue before the deferral reply.
 
-Before opening or updating an agent-authored PR, inspect and run the mapped
-local-only checks:
+Reply to every review item before resolving it:
+
+- `Fixed in <commit> — <what changed>`
+- `Won't fix: <technical reason why>`
+
+Never force-push or amend while babysitting. Before all-clear, require a clean
+feedback ledger followed by current-head readiness:
 
 ```bash
-pnpm agent:quality-gate          # inspect mapped commands and checklists
-pnpm agent:quality-gate --run    # execute the safe local mapped commands
-pnpm agent:autoreview            # non-trivial completed batches
+pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
+pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
 ```
 
-The gate never deploys or applies Terraform, and refuses package-script,
-package-manager, or lockfile changes until their lifecycle risk is explicitly
-acknowledged. Do not run a competing dashboard server/browser suite or second
-gate in the same worktree. Background `--run` gates and `git push`; a 600s
-foreground kill discards the freshness stamp. Autoreview is source review only —
-it runs no tests and proves no behavior, so mapped gate, browser, and runtime
-checks still apply. The full gate → autoreview loop is on the
-[operating card](docs/notes/pr-operating-card.md); invocation, parallelism,
-caching, isolation, trust, and engine contracts live in
-[`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md).
+The current-head `chatgpt-codex-connector[bot]` description approval is part of
+readiness. Never merge without the user's explicit approval for that specific
+merge. Claude cloud sessions use these helpers only behind the capability gate;
+the MCP fallback and its qualified all-clear live in
+[`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
+Label, workboard, Claim ID, release, and merge-sync depth lives in
+[`docs/notes/agent-issue-workflow.md`](docs/notes/agent-issue-workflow.md).
 
 ## Prose Style
 
@@ -116,56 +127,6 @@ do not add one-off word or punctuation bans on top of it.
 - Do not announce what you are about to say — say it.
 - Vary sentence shape. Do not pad lists or examples to three for rhythm.
 - Break any rule above sooner than writing something unclear or imprecise.
-
-## PR description standard
-
-Every PR description starts with `## The Problem` followed by
-`## The Solution`. The problem has at most three plain-language bullets; the
-solution explains the approach before implementation detail. The checked-in
-template, validator, and `ship` skill own the complete format.
-
-Open every PR through the `ship` skill — on every agent surface, including
-hosted sessions; do not hand-roll PR creation. PRs open ready for review,
-never as drafts: platform draft defaults do not apply in this repo. Use draft
-only when the user explicitly asks for one or required validation is
-intentionally still pending, and state that reason in the PR body.
-
-## Deferral rule
-
-Knowingly deferred work requires a GitHub issue before posting the deferral
-reply, and the PR's optional `## Deferrals` section must link it. An
-evidence-backed won't-fix is not a deferral. See
-[`docs/notes/agent-issue-workflow.md`](docs/notes/agent-issue-workflow.md).
-
-## PR Feedback and Readiness
-
-Sweep every feedback surface: top-level comments, review bodies, inline
-comments/threads, annotations, and failing logs. Reply before resolving:
-
-- `Fixed in <commit> — <what changed>`
-- `Won't fix: <technical reason why>`
-
-Audit sibling surfaces after one instance of a hazard is found. Never
-force-push or amend while babysitting. Before all-clear, run:
-
-```bash
-pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
-pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
-```
-
-All-clear requires a clean feedback ledger plus ready-state's current-head
-required state, including the current-head
-`chatgpt-codex-connector[bot]` PR-description approval. Exception: in Claude
-cloud sessions the probes run only behind the capability gate; otherwise use
-the `babysit-pr` MCP emulation checklist, label any all-clear MCP-emulated
-rather than probe-verified, and leave the probe-verified all-clear to a
-gh-capable surface — see
-[`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
-The review-baseline discipline and full babysit → ready-state loop are on the
-[operating card](docs/notes/pr-operating-card.md); the projection contract,
-break-glass behavior, optional-bot treatment, and watch loop live in
-[`docs/notes/pr-ready-state.md`](docs/notes/pr-ready-state.md) and the
-`babysit-pr` skill.
 
 ## Documentation and Review Drift
 
@@ -230,9 +191,3 @@ setup and Worktrunk hooks are described in
 [`docs/notes/worktree-and-web-setup.md`](docs/notes/worktree-and-web-setup.md).
 Environment prerequisites and service startup belong to the root and package
 READMEs.
-
-## Pre-Push Checklist (server-side work)
-
-Do not assume hooks are installed. Run the Agent Quality Gate explicitly; when
-a full manual server-side baseline is required, use the ordered command list in
-[`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md).

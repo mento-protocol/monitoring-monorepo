@@ -519,6 +519,8 @@ export function TvlOverTimeChart({
       hasSnapshotError={chartHasSnapshotError}
       emptyMessage={emptyMessage}
       plotlyDeferMode={plotlyDeferMode}
+      totalLineColor="#e2e8f0"
+      totalFillColor="rgba(226,232,240,0.08)"
     />
   );
 }

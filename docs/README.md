@@ -26,10 +26,10 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md) | Deploy Indexer Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md) | Documentation Garden Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`.agents/skills/envio/SKILL.md`](../.agents/skills/envio/SKILL.md) | Envio Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md) | Forensic Report Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-06-15 |
-| [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md) | 0xADDRESS_CASE_PRESERVED — Display Name (persona/ENS if known) | unmanaged / unmanaged | skill / repo-wide | unowned | 90d |
-| [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md) | Monorepo Import Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-26 |
-| [`.agents/skills/ship/SKILL.md`](../.agents/skills/ship/SKILL.md) | Ship Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md) | Forensic Report Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md) | Forensic Report Output Template | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md) | Monorepo Import Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`.agents/skills/ship/SKILL.md`](../.agents/skills/ship/SKILL.md) | Ship Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`.claude/agents/dashboard-explorer.md`](../.claude/agents/dashboard-explorer.md) | Dashboard Explorer | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
 | [`.claude/agents/indexer-explorer.md`](../.claude/agents/indexer-explorer.md) | Indexer Explorer | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
 | [`.claude/agents/infra-reader.md`](../.claude/agents/infra-reader.md) | Infra Reader | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
@@ -39,16 +39,16 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.claude/commands/verify-ui.md`](../.claude/commands/verify-ui.md) | Verify UI | unmanaged / unmanaged | command / repo-wide | unowned | 180d |
 | [`.github/prompts/sentry-autofix.md`](../.github/prompts/sentry-autofix.md) | sentry-autofix.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
 | [`.github/prompts/sentry-triage.md`](../.github/prompts/sentry-triage.md) | sentry-triage.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
-| [`aegis/AGENTS.md`](../aegis/AGENTS.md) | Aegis Instructions | canonical / active | agent-instructions / aegis | eng | 90d; verified 2026-05-20 |
-| [`AGENTS.md`](../AGENTS.md) | Monitoring Monorepo Instructions | canonical / active | agent-instructions / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`alerts/AGENTS.md`](../alerts/AGENTS.md) | Alerts Instructions | canonical / active | agent-instructions / alerts | eng | 90d; verified 2026-05-21 |
-| [`indexer-envio/AGENTS.md`](../indexer-envio/AGENTS.md) | Envio Indexer Instructions | canonical / active | agent-instructions / indexer-envio | eng | 90d; verified 2026-07-17 |
-| [`integration-probes/AGENTS.md`](../integration-probes/AGENTS.md) | Integration Probes Instructions | canonical / active | agent-instructions / integration-probes | eng | 90d; verified 2026-07-17 |
-| [`metrics-bridge/AGENTS.md`](../metrics-bridge/AGENTS.md) | Metrics Bridge Instructions | canonical / active | agent-instructions / metrics-bridge | eng | 90d; verified 2026-07-22 |
-| [`scripts/AGENTS.md`](../scripts/AGENTS.md) | Scripts Instructions | canonical / active | agent-instructions / scripts | eng | 90d; verified 2026-05-20 |
-| [`shared-config/AGENTS.md`](../shared-config/AGENTS.md) | Shared Config Instructions | canonical / active | agent-instructions / shared-config | eng | 90d; verified 2026-07-21 |
-| [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-05-20 |
-| [`ui-dashboard/AGENTS.md`](../ui-dashboard/AGENTS.md) | Monitoring Dashboard Instructions | canonical / active | agent-instructions / ui-dashboard | eng | 90d; verified 2026-07-17 |
+| [`aegis/AGENTS.md`](../aegis/AGENTS.md) | Aegis Instructions | canonical / active | agent-instructions / aegis | eng | 90d; verified 2026-07-23 |
+| [`AGENTS.md`](../AGENTS.md) | Monitoring Monorepo Instructions | canonical / active | agent-instructions / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`alerts/AGENTS.md`](../alerts/AGENTS.md) | Alerts Instructions | canonical / active | agent-instructions / alerts | eng | 90d; verified 2026-07-23 |
+| [`indexer-envio/AGENTS.md`](../indexer-envio/AGENTS.md) | Envio Indexer Instructions | canonical / active | agent-instructions / indexer-envio | eng | 90d; verified 2026-07-23 |
+| [`integration-probes/AGENTS.md`](../integration-probes/AGENTS.md) | Integration Probes Instructions | canonical / active | agent-instructions / integration-probes | eng | 90d; verified 2026-07-23 |
+| [`metrics-bridge/AGENTS.md`](../metrics-bridge/AGENTS.md) | Metrics Bridge Instructions | canonical / active | agent-instructions / metrics-bridge | eng | 90d; verified 2026-07-23 |
+| [`scripts/AGENTS.md`](../scripts/AGENTS.md) | Scripts Instructions | canonical / active | agent-instructions / scripts | eng | 90d; verified 2026-07-23 |
+| [`shared-config/AGENTS.md`](../shared-config/AGENTS.md) | Shared Config Instructions | canonical / active | agent-instructions / shared-config | eng | 90d; verified 2026-07-23 |
+| [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-07-23 |
+| [`ui-dashboard/AGENTS.md`](../ui-dashboard/AGENTS.md) | Monitoring Dashboard Instructions | canonical / active | agent-instructions / ui-dashboard | eng | 90d; verified 2026-07-23 |
 
 ## operator-runbooks
 
@@ -64,14 +64,14 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md) | Codex Agent Skills | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md) | Codex Agent Skills | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md) | Codex Cloud Setup and Maintenance | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md) | Cross-Protocol Context | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/dashboard-verification.md`](notes/dashboard-verification.md) | Dashboard Local and Browser Verification | canonical / active | runbook / ui-dashboard | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md) | Documentation gardening | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/github-tooling-surfaces.md`](notes/github-tooling-surfaces.md) | GitHub Tooling Surfaces — gh CLI vs MCP | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md) | Hasura isolation trigger | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md) | PR Operating Card | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |

@@ -147,6 +147,62 @@ test.describe("dashboard browser flows", () => {
     });
   });
 
+  test("filters homepage pools by name and one chain at a time", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    const search = page.getByPlaceholder("Filter by pool name");
+    const chainFilters = page.getByRole("radiogroup", {
+      name: "Filter pools by chain",
+    });
+    await expect(search).toBeVisible();
+    await expect(
+      chainFilters.getByRole("radio", { name: "All" }),
+    ).toHaveAttribute("aria-checked", "true");
+
+    await search.fill("AUSD/USDm");
+    await expect(page.getByRole("link", { name: "AUSD/USDm" })).toHaveCount(1);
+    await expect(page.getByRole("link", { name: "USDC/USDm" })).toHaveCount(0);
+
+    await search.fill("");
+    await expect(
+      chainFilters.getByRole("radio", { name: "Monad" }),
+    ).toHaveAttribute("aria-checked", "false");
+    await chainFilters.getByRole("radio", { name: "Monad" }).click();
+    await expect(
+      chainFilters.getByRole("radio", { name: "Monad" }),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("link", { name: "USDC/USDm" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "AUSD/USDm" })).toHaveCount(1);
+
+    await expect(
+      chainFilters.getByRole("radio", { name: "All" }),
+    ).toHaveAttribute("aria-checked", "false");
+    await chainFilters.getByRole("radio", { name: "Celo" }).click();
+    await expect(
+      chainFilters.getByRole("radio", { name: "Monad" }),
+    ).toHaveAttribute("aria-checked", "false");
+    await expect(
+      chainFilters.getByRole("radio", { name: "Celo" }),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("link", { name: "USDC/USDm" })).toHaveCount(1);
+    await expect(page.getByRole("link", { name: "AUSD/USDm" })).toHaveCount(0);
+
+    await chainFilters.getByRole("radio", { name: "All" }).click();
+    await expect(
+      chainFilters.getByRole("radio", { name: "All" }),
+    ).toHaveAttribute("aria-checked", "true");
+
+    await chainFilters.getByRole("radio", { name: "All" }).press("ArrowRight");
+    await expect(
+      chainFilters.getByRole("radio", { name: "Celo" }),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect(
+      chainFilters.getByRole("radio", { name: "Celo" }),
+    ).toBeFocused();
+  });
+
   test("switches chain context through the pool list target", async ({
     page,
   }) => {

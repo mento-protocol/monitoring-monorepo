@@ -5,7 +5,7 @@ title: Monorepo Import Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-26
+last_verified: 2026-07-23
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -32,14 +32,17 @@ Inspect both the source system and this repo before proposing a layout:
   roots/backends, secrets, scheduled jobs, scripts, docs, and live endpoints
 - existing repo roots and ownership boundaries: `aegis/`, `alerts/`,
   `terraform/`, `metrics-bridge/`, `indexer-envio/`, `ui-dashboard/`,
-  `shared-config/`
+  `shared-config/`, `integration-probes/`, and `governance-watchdog/`
 - existing root scripts, package filters, CI path filters, dependency-cruiser
   boundaries, AGENTS files, README/docs/runbooks
 - current deploy owners: App Engine, Cloud Functions, Terraform, Vercel, Envio,
-  Grafana, QuickNode, Sentry, Slack/Discord
+  Grafana, QuickNode, Sentry, Slack, and the governance watchdog's
+  Discord/Telegram delivery
 
-Do not treat a directory name as authority. For example, `terraform/alerts` is
-the Grafana v3 rule plane, not a generic bucket for every alert-related system.
+Do not treat a directory name as authority. For example, `alerts/rules/` owns
+Grafana rules/routing while `alerts/infra/` owns event-driven delivery; neither
+is a generic bucket for every alert-related system. Use
+`terraform.stacks.json` for Terraform ownership.
 
 ## Phase 2: Choose The Smallest Layout
 

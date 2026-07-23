@@ -138,6 +138,19 @@ describe("route-level loading UIs", () => {
     });
   });
 
+  it("HomeLoading mirrors the responsive homepage pool-filter toolbar", () => {
+    render(<HomeLoading />);
+    const toolbar = container.querySelector(
+      '[data-testid="pool-filter-skeleton"]',
+    );
+    expect(toolbar).not.toBeNull();
+    expect(toolbar!.classList).toContain("flex-wrap");
+    expect(toolbar!.children).toHaveLength(2);
+    expect(toolbar!.children[0]?.classList).toContain("min-w-48");
+    expect(toolbar!.children[1]?.classList).toContain("flex-wrap");
+    expect(toolbar!.children[1]?.children).toHaveLength(5);
+  });
+
   it("PoolsLoading renders exactly one polite live region", () => {
     render(<PoolsLoading />);
     expect(countLiveRegions()).toBe(1);

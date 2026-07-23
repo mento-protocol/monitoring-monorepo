@@ -46,28 +46,46 @@ function liveRegion(
 
 export function PoolsTableSkeleton({
   presentational,
+  showFilters = false,
 }: {
   /** True when a parent already provides the live region (route fallback). */
   presentational?: boolean;
+  /** Reserves the homepage-only name and chain-filter toolbar. */
+  showFilters?: boolean;
 } = {}) {
   return (
-    <div
-      className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900/30"
-      {...liveRegion(presentational)}
-    >
-      <div
-        className="animate-pulse border-b border-slate-800 bg-slate-800/50"
-        style={{ height: POOLS_TABLE_HEADER_HEIGHT_PX }}
-      />
-      <div className="divide-y divide-slate-800/50">
-        {Array.from({ length: POOLS_TABLE_SKELETON_ROWS }, (_, i) => (
-          // react-doctor-disable-next-line react-doctor/no-array-index-as-key
-          <div
-            key={`skel-pool-row-${i}`}
-            className="animate-pulse bg-slate-800/30"
-            style={{ height: POOLS_TABLE_ROW_HEIGHT_PX }}
-          />
-        ))}
+    <div {...liveRegion(presentational)}>
+      {showFilters && (
+        <div
+          data-testid="pool-filter-skeleton"
+          aria-hidden="true"
+          className="mb-2 flex flex-wrap items-center gap-2 animate-pulse"
+        >
+          <div className="h-7 min-w-48 flex-1 rounded bg-slate-800/30 sm:max-w-xs" />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="mr-1 h-4 w-12 rounded bg-slate-800/30" />
+            <div className="h-[19px] w-[30px] rounded-full bg-slate-800/30" />
+            <div className="h-[19px] w-9 rounded-full bg-slate-800/30" />
+            <div className="h-[19px] w-12 rounded-full bg-slate-800/30" />
+            <div className="h-[19px] w-14 rounded-full bg-slate-800/30" />
+          </div>
+        </div>
+      )}
+      <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900/30">
+        <div
+          className="animate-pulse border-b border-slate-800 bg-slate-800/50"
+          style={{ height: POOLS_TABLE_HEADER_HEIGHT_PX }}
+        />
+        <div className="divide-y divide-slate-800/50">
+          {Array.from({ length: POOLS_TABLE_SKELETON_ROWS }, (_, i) => (
+            // react-doctor-disable-next-line react-doctor/no-array-index-as-key
+            <div
+              key={`skel-pool-row-${i}`}
+              className="animate-pulse bg-slate-800/30"
+              style={{ height: POOLS_TABLE_ROW_HEIGHT_PX }}
+            />
+          ))}
+        </div>
       </div>
       {!presentational && <span className="sr-only">Loading…</span>}
     </div>

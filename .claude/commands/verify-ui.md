@@ -2,9 +2,11 @@
 
 Verify the current UI state in the browser using chrome-devtools MCP.
 
-Default to the local dev server. Prefer <http://127.0.0.1:3210> when you started
-it yourself, otherwise use <http://localhost:3000> (or 3001 if 3000 is in use).
-When the user asks to verify against production, use <https://monitoring.mento.org>.
+Default to the canonical fixed local server at <http://127.0.0.1:3210> using
+`docs/notes/dashboard-verification.md`. Use another local port only when you
+have already confirmed that the same documented server command is running
+there, and report the exception. When the user asks to verify against
+production, use <https://monitoring.mento.org>.
 
 ## Pages to cover by default
 
@@ -15,10 +17,12 @@ When the user asks for a broad verify (no specific page), hit these in order and
 3. **Pool detail** `/pool/{id}` — pick any active pool from `/pools`. Verify TVL/volume charts, oracle freshness, rebalance history, swap table
 4. **Volume** `/volume` — global volume, flow insights, and chain filter
 5. **Stables** `/stables` — supply/custody across configured chains
-6. **Revenue** `/revenue` — KPI tiles + historical chart
-7. **Bridge Flows** `/bridge-flows` — Wormhole NTT transfers (see below)
+6. **Bridge Flows** `/bridge-flows` — Wormhole NTT transfers (see below)
+7. **CDPs** `/cdps` — CDP overview and current position health
 8. **Integrations** `/integrations` — auth-gated adapter coverage by chain
-9. **Address book** `/address-book` — auth-gated; verify logged-in when possible, otherwise verify the logged-out redirect/sign-in state
+9. **Revenue** `/revenue` — auth-gated KPI tiles + historical chart
+10. **Address book** `/address-book` — auth-gated; verify logged-in when possible, otherwise verify the logged-out redirect/sign-in state
+11. **Entities** `/entities` — auth-gated entity and address relationships
 
 For a narrow verify (specific page or feature), skip the list and go directly to the requested URL.
 

@@ -47,9 +47,13 @@ import {
 } from "./sentry-triage-ingest.mjs";
 import { isValidShortId } from "./sentry-triage-project-core.mjs";
 
-// The agent's diff may touch at most this many files — a scoped Sentry fix is
-// small by construction, and a large diff is a signal the agent over-reached.
-export const MAX_CHANGED_FILES = 3;
+// The agent's diff may touch at most this many files. A real fix commonly spans
+// the change plus its tests and a couple of related call sites, so the ceiling
+// is generous; but an unbounded diff is still a signal the agent over-reached,
+// so it stays capped and the guard refuses beyond this. Human review + required
+// CI on the fix PR are the substantive gates — this is a scope tripwire, not the
+// security control (forbidden-path/symlink/credential checks are separate).
+export const MAX_CHANGED_FILES = 20;
 
 // Sentry's release-linked auto-resolve keyword. `Fixes <SHORT-ID>` in a PR
 // title/description references the Sentry issue and resolves it in the release
@@ -451,8 +455,9 @@ export function buildAutofixRunRecordBody({
 // surface is to not publish it at all. Both the fix-PR body and the no-PR
 // analysis comment are therefore assembled from DETERMINISTIC text only; the
 // authoritative artifact is the reviewed diff (for a fix PR) or the
-// deterministic guard `reason` (for a refusal). The agent's working notes stay
-// in the run logs, which are not a public artifact.
+// deterministic guard `reason` (for a refusal). The agent's response may remain
+// in externally readable Actions run logs, so the prompt requires abstract,
+// redacted responses.
 // ---------------------------------------------------------------------------
 
 /**
@@ -469,7 +474,7 @@ export function buildAnalysisComment(reason) {
       String(reason ?? "").trim(),
       "",
       "_The agent's working notes are omitted by policy (untrusted-input " +
-        "surface); see the run logs for detail._",
+        "surface)._",
     ].join("\n") + "\n"
   );
 }

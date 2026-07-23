@@ -3,7 +3,7 @@ title: Codex Agent Skills
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -90,9 +90,11 @@ silent on no-op sessions.
 
 ## Status polling
 
-For Claude commands that watch a long-running external process, prefer the
-`Monitor` tool over `/loop` plus cron. Monitor can poll internally every 30–60
-seconds while emitting only meaningful state changes; `/loop` creates a full
-turn and notification at every interval. `babysit-indexer-deploy` is the
-canonical Monitor example. The repo-local `babysit-pr` skill instead provides a
-portable readiness-watch fallback when Monitor is unavailable.
+Use the owning skill's foreground watcher for a long-running external process
+instead of `/loop` plus cron, which creates a full turn and notification at
+every interval. The `deploy-indexer` skill's Phase 2 is the canonical example:
+`pnpm deploy:indexer:status --watch --compact` polls internally, while the active
+agent session or a surface-native Monitor enforces the wall-clock deadline.
+`babysit-indexer-deploy` is a compatibility command for that same contract.
+The repo-local `babysit-pr` skill provides the portable readiness-watch fallback
+for PRs.
