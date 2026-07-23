@@ -4088,74 +4088,236 @@ STUB
 )
 rm -rf "$command_interrupt_repo"
 
-# PR 1492 review: with --parallel greater than 1 the timed commands' pids live
-# only inside the worker subshells, so the parent's interrupt teardown must
-# signal the tracked worker pids (active_worker_pids) or a SIGTERM-ignoring
-# mapped command survives the gate's death. TERM targets ONLY the gate pid.
-parallel_interrupt_repo="$(mktemp -d)"
-(
-  cd "$parallel_interrupt_repo"
-  git init -q
-  git config user.email test@example.invalid
-  git config user.name "Quality Gate Test"
-  mkdir -p bin scripts tools
-  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
-  printf 'console.log("fixture");\n' > scripts/agent-context-budget.mjs
-  cat > tools/trunk <<'STUB'
+# GitHub issue #1522: every parallel mapped command must be registered as a
+# dedicated process group before INT/TERM teardown can run. Cover both sides of
+# the original race:
+# - registration: INT lands after launch but before the parent records the PGID;
+# - execution: the worker leader dies first, so only its still-live process
+#   group can reach the reparented TERM-ignoring descendants.
+run_parallel_interrupt_regression() {
+  local phase="$1"
+  local signal="$2"
+  local expected_exit="$3"
+  local parallel_interrupt_repo
+  parallel_interrupt_repo="$(mktemp -d)"
+  (
+    cd "$parallel_interrupt_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    mkdir -p bin scripts tools
+    printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+    printf 'console.log("fixture");\n' > scripts/agent-context-budget.mjs
+    cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
-exit 0
+if [[ "${QG_FAST_RUN:-0}" == "1" ]]; then
+  exit 0
+fi
+exec qg-par-victim
 STUB
-  cat > bin/qg-par-victim <<'STUB'
+    cat > bin/qg-par-descendant <<'STUB'
 #!/usr/bin/env bash
 trap '' TERM
+printf '%s\n' "$$" > "${QG_DESCENDANT_PID_FILE:?}"
 while :; do sleep 1; done
 STUB
-  cat > bin/pnpm <<'STUB'
+    cat > bin/qg-par-victim <<'STUB'
 #!/usr/bin/env bash
-if [[ "$*" == "agent:prewarm:test" ]]; then
-  exec qg-par-victim
-fi
-if [[ "$*" == "agent:context-budget:test" ]]; then
-  exec sleep 45
-fi
-exit 0
+trap '' TERM
+printf '%s\n' "$$" > "${QG_VICTIM_PID_FILE:?}"
+qg-par-descendant &
+wait
 STUB
-  chmod +x bin/pnpm bin/qg-par-victim tools/trunk
-  git add .
-  git commit -qm init
-  printf 'scripts/agent-prewarm.mjs\nscripts/agent-context-budget.mjs\n' > changed-paths.txt
-  set +e
-  PATH="$parallel_interrupt_repo/bin:$PATH" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
-      --changed-paths-file changed-paths.txt \
-      --base HEAD \
-      --run \
-      --parallel 2 \
-      > "$output_file" 2>&1 &
-  gate_pid=$!
-  waited=0
-  until pgrep -f "qg-par-victim" >/dev/null 2>&1; do
-    sleep 1
-    waited=$((waited + 1))
-    if [[ "$waited" -ge 20 ]]; then
-      kill -KILL "$gate_pid" 2>/dev/null
-      pkill -KILL -f "qg-par-victim" 2>/dev/null
-      fail "parallel interrupt fixture never started its victim"
+    cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${QG_FAST_RUN:-0}" == "1" ]]; then
+  exit 0
+fi
+exec sleep 45
+STUB
+    chmod +x bin/pnpm bin/qg-par-victim bin/qg-par-descendant tools/trunk
+    git add .
+    git commit -qm init
+    printf 'scripts/agent-prewarm.mjs\nscripts/agent-context-budget.mjs\n' > changed-paths.txt
+
+    local barrier="$parallel_interrupt_repo/registration"
+    local gate_output="$parallel_interrupt_repo/gate-output"
+    local next_gate_output="$parallel_interrupt_repo/next-gate-output"
+    local victim_pid_file="$parallel_interrupt_repo/victim.pid"
+    local descendant_pid_file="$parallel_interrupt_repo/descendant.pid"
+    local gate_pid=""
+    local next_gate_pid=""
+    local worker_pgid=""
+    local victim_pid=""
+    local descendant_pid=""
+    local launched=0
+    local settled=0
+    local attempt
+    local interrupt_exit
+    local next_gate_exit
+
+    # Invoked indirectly by the EXIT trap below.
+    # shellcheck disable=SC2329
+    cleanup_parallel_interrupt_fixture() {
+      if [[ "$worker_pgid" =~ ^[1-9][0-9]*$ ]]; then
+        kill -KILL -- "-$worker_pgid" 2>/dev/null || true
+      fi
+      if [[ "$gate_pid" =~ ^[1-9][0-9]*$ ]]; then
+        kill -CONT "$gate_pid" 2>/dev/null || true
+        kill -KILL "$gate_pid" 2>/dev/null || true
+        wait "$gate_pid" 2>/dev/null || true
+      fi
+      if [[ "$next_gate_pid" =~ ^[1-9][0-9]*$ ]]; then
+        kill -KILL "$next_gate_pid" 2>/dev/null || true
+        wait "$next_gate_pid" 2>/dev/null || true
+      fi
+    }
+    fail_parallel_interrupt_fixture() {
+      cp "$gate_output" "$output_file" 2>/dev/null || true
+      fail "$*"
+    }
+    trap cleanup_parallel_interrupt_fixture EXIT
+
+    if [[ "$phase" == "execution" ]]; then
+      : > "${barrier}.release"
     fi
-  done
-  kill -TERM "$gate_pid" 2>/dev/null
-  wait "$gate_pid"
-  parallel_interrupt_exit=$?
-  set -e
-  [[ "$parallel_interrupt_exit" -ne 0 ]] ||
-    fail "expected the gate to exit nonzero when interrupted during the parallel pool"
-  sleep 5
-  if pgrep -f "qg-par-victim" >/dev/null 2>&1; then
-    pkill -KILL -f "qg-par-victim" 2>/dev/null || true
-    fail "interrupted parallel gate left a SIGTERM-ignoring worker command running"
-  fi
-)
-rm -rf "$parallel_interrupt_repo"
+
+    QG_VICTIM_PID_FILE="$victim_pid_file" \
+      QG_DESCENDANT_PID_FILE="$descendant_pid_file" \
+      NODE_ENV=test \
+      AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER="$barrier" \
+      PATH="$parallel_interrupt_repo/bin:$PATH" \
+      /usr/bin/perl -e \
+        '$SIG{INT} = "DEFAULT"; $SIG{TERM} = "DEFAULT"; exec @ARGV; die "exec failed: $!\n";' \
+        /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+          --changed-paths-file changed-paths.txt \
+          --base HEAD \
+          --run \
+          --parallel 2 \
+          > "$gate_output" 2>&1 &
+    gate_pid=$!
+
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if [[
+        -s "${barrier}.ready" &&
+          -s "$victim_pid_file" &&
+          -s "$descendant_pid_file"
+      ]]; then
+        launched=1
+        break
+      fi
+      if ! kill -0 "$gate_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.05
+    done
+    [[ "$launched" -eq 1 ]] ||
+      fail_parallel_interrupt_fixture \
+        "parallel $phase interrupt fixture never reached its worker"
+
+    worker_pgid="$(cat "${barrier}.ready")"
+    victim_pid="$(cat "$victim_pid_file")"
+    descendant_pid="$(cat "$descendant_pid_file")"
+    [[ "$worker_pgid" =~ ^[1-9][0-9]*$ ]] ||
+      fail_parallel_interrupt_fixture \
+        "parallel $phase interrupt fixture recorded an invalid worker PGID"
+    kill -0 -- "-$worker_pgid" 2>/dev/null ||
+      fail_parallel_interrupt_fixture \
+        "parallel $phase worker did not launch in a dedicated process group"
+
+    if [[ "$phase" == "registration" ]]; then
+      # The gate is blocked after worker launch and before registry insertion.
+      # The signal must remain pending until the PGID is registered.
+      kill "-$signal" "$gate_pid"
+      sleep 0.2 || true
+      : > "${barrier}.release"
+    else
+      # Freeze the parent with the group registered, remove only the group
+      # leader, then interrupt the parent. A PID-tree snapshot rooted at the
+      # dead leader cannot find the surviving group members.
+      sleep 0.2
+      kill -STOP "$gate_pid"
+      kill -KILL "$worker_pgid"
+      sleep 0.1
+      kill "-$signal" "$gate_pid"
+      kill -CONT "$gate_pid"
+    fi
+
+    for ((attempt = 0; attempt < 300; attempt++)); do
+      if ! jobs -pr | grep -Fxq "$gate_pid"; then
+        settled=1
+        break
+      fi
+      sleep 0.05
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_parallel_interrupt_fixture \
+        "parallel $phase interrupt did not terminate the gate within 15s"
+
+    set +e
+    wait "$gate_pid"
+    interrupt_exit=$?
+    set -e
+    gate_pid=""
+    [[ "$interrupt_exit" -eq "$expected_exit" ]] ||
+      fail_parallel_interrupt_fixture \
+        "parallel $phase interrupt exited $interrupt_exit, expected $expected_exit"
+
+    for ((attempt = 0; attempt < 100; attempt++)); do
+      if ! kill -0 -- "-$worker_pgid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.05
+    done
+    if kill -0 -- "-$worker_pgid" 2>/dev/null; then
+      fail_parallel_interrupt_fixture \
+        "parallel $phase interrupt left the registered worker group running"
+    fi
+    if kill -0 "$victim_pid" 2>/dev/null ||
+      kill -0 "$descendant_pid" 2>/dev/null; then
+      fail_parallel_interrupt_fixture \
+        "parallel $phase interrupt left a TERM-ignoring descendant running"
+    fi
+    worker_pgid=""
+
+    # The interrupted run must leave no process that a later gate can inherit
+    # or join. Run the same plan with fast fixtures and bound its completion.
+    QG_FAST_RUN=1 \
+      PATH="$parallel_interrupt_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        --parallel 2 \
+        > "$next_gate_output" 2>&1 &
+    next_gate_pid=$!
+    settled=0
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if ! jobs -pr | grep -Fxq "$next_gate_pid"; then
+        settled=1
+        break
+      fi
+      sleep 0.05
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_parallel_interrupt_fixture \
+        "gate after parallel $phase interrupt did not finish cleanly within 10s"
+    set +e
+    wait "$next_gate_pid"
+    next_gate_exit=$?
+    set -e
+    next_gate_pid=""
+    [[ "$next_gate_exit" -eq 0 ]] ||
+      fail_parallel_interrupt_fixture \
+        "gate after parallel $phase interrupt exited $next_gate_exit"
+
+    trap - EXIT
+  )
+  rm -rf "$parallel_interrupt_repo"
+}
+
+run_parallel_interrupt_regression registration INT 130
+run_parallel_interrupt_regression execution TERM 143
 
 # PR 1492 review: prerequisite commands (install/codegen/setup) produce outputs
 # the source fingerprint cannot see, so they must never be stamped or reused —

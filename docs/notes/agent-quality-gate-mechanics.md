@@ -133,7 +133,15 @@ parallel pool because it temporarily mutates tracked fixture files; this keeps
 source-fingerprinting tests such as autoreview from observing synthetic drift.
 A browser setup failure still lets independent lint/typecheck/unit/knip
 feedback run. `--fail-fast` stays sequential so it still stops before starting
-the next mapped command.
+the next mapped command. Each parallel worker runs in a dedicated process group
+created with stock Bash job control, which works on both macOS Bash 3.2 and
+Linux without `setsid(1)`. The parent defers INT/TERM handling across worker
+launch and process-group registration. On interruption it signals every
+registered group with TERM, then KILL after the normal grace period, and reaps
+the group leaders. This still reaches descendants when a worker leader has
+already exited and the descendants have reparented. A mapped command that
+explicitly creates a new session or process group could escape this boundary;
+none of the mapped commands do so.
 
 Two manifest-class changes are narrowed away from the full workspace suite
 instead of escalating unconditionally (Refs #1414). Every ambiguity fails toward
@@ -660,7 +668,9 @@ self-daemonizing child that reparents away from the tree can escape — no
 mapped command does this) and
 is reported as an ordinary failure — `Command timed out after <n>s: <command>`,
 logged with status `fail` in the durations log. The timeout is strictly
-per command; it never bounds the whole run.
+per command; it never bounds the whole run. Parent interruption of the parallel
+pool uses the registered worker process groups described above, so that path
+does not depend on finding descendants below a still-live worker PID.
 
 Package-local gate tasks for `lint`, `typecheck`, `knip`, dashboard size-limit,
 local dashboard browser tests, and dashboard React Doctor checks run through
