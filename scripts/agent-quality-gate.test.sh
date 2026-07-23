@@ -376,6 +376,23 @@ assert_script_occurrences 1 "command -v shasum"
 assert_script_occurrences 0 "shasum -a 256 | awk"
 assert_script_occurrences 0 'shasum -a 256 "$1"'
 
+classifier_missing_helper_dir="$(mktemp -d)"
+cp scripts/agent-quality-gate.sh "$classifier_missing_helper_dir/agent-quality-gate.sh"
+printf 'ui-dashboard/src/app/page.tsx\n' > "$paths_file"
+classifier_missing_helper_exit=0
+if bash "$classifier_missing_helper_dir/agent-quality-gate.sh" \
+    --changed-paths-file "$paths_file" \
+    --base origin/test \
+    > "$output_file" 2>&1; then
+  classifier_missing_helper_exit=0
+else
+  classifier_missing_helper_exit=$?
+fi
+rm -rf "$classifier_missing_helper_dir"
+[[ "$classifier_missing_helper_exit" -eq 2 ]] ||
+  fail "missing routing classifier helper exited $classifier_missing_helper_exit instead of 2"
+assert_contains "error: failed to classify routing-sensitive changed paths"
+
 write_turbo_facts
 
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/src/**'
@@ -704,8 +721,11 @@ assert_not_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metric
 # supported opt-out or a restricted real HOME.
 : > "$paths_file"
 printf 'metrics-bridge/src/main.ts\n' >> "$paths_file"
+node_executable_dir="$(dirname "$(node -p 'process.execPath')")"
 turbo_cache_writable_home="$(mktemp -d)"
-env -u TURBO_CACHE_DIR -u AGENT_TURBO_SHARED_CACHE HOME="$turbo_cache_writable_home" \
+env -u TURBO_CACHE_DIR -u AGENT_TURBO_SHARED_CACHE \
+  HOME="$turbo_cache_writable_home" \
+  PATH="$node_executable_dir:$PATH" \
   AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
   scripts/agent-quality-gate.sh \
   --changed-paths-file "$paths_file" \
@@ -747,7 +767,9 @@ assert_not_contains "Turbo cache dir: "
 # environment whose writable allowlist excludes it.
 turbo_cache_unwritable_home="$(mktemp -d)"
 : > "$turbo_cache_unwritable_home/.cache"
-env -u TURBO_CACHE_DIR HOME="$turbo_cache_unwritable_home" \
+env -u TURBO_CACHE_DIR \
+  HOME="$turbo_cache_unwritable_home" \
+  PATH="$node_executable_dir:$PATH" \
   AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
   scripts/agent-quality-gate.sh \
   --changed-paths-file "$paths_file" \
@@ -2931,6 +2953,9 @@ printf '%s\n' "$((count + 1))" > "$counter_file"
 STUB
   cat > bin/node <<'STUB'
 #!/usr/bin/env bash
+if [[ "${1:-}" == "--input-type=module" ]]; then
+  exec "${REAL_NODE:?}" "$@"
+fi
 exit 0
 STUB
   cat > bin/pnpm <<'STUB'
@@ -2942,10 +2967,12 @@ STUB
   git commit -qm init
   base_ref="$(git rev-parse --verify HEAD)"
   printf '# changed\n' >> .github/workflows/metrics-bridge.yml
-  COUNTER_FILE="$workflow_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+  REAL_NODE="$(command -v node)" \
+    COUNTER_FILE="$workflow_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     PATH="$workflow_fresh_stamp_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run > "$output_file" 2>&1
-  COUNTER_FILE="$workflow_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+  REAL_NODE="$(command -v node)" \
+    COUNTER_FILE="$workflow_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     PATH="$workflow_fresh_stamp_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh >> "$output_file" 2>&1
   [[ "$(cat "$workflow_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
@@ -3115,6 +3142,7 @@ signature_stamp_repo="$(mktemp -d)"
   printf 'fixture\n' > fixture.txt
   printf 'second fixture\n' > second.txt
   printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
+  printf '# fixture routing classifier\n' > scripts/docs-navigation-eval-helpers.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 counter_file="${COUNTER_FILE:?}"
@@ -3170,6 +3198,17 @@ STUB
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "4" ]] ||
     fail "fresh gate stamp was reused after the gate implementation changed"
+
+  printf '# changed fixture routing classifier\n' >> scripts/docs-navigation-eval-helpers.mjs
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "5" ]] ||
+    fail "fresh gate stamp was reused after the routing classifier changed"
 )
 rm -rf "$signature_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
@@ -3690,30 +3729,49 @@ assert_contains "- pnpm docs:garden:test (documentation garden issue automation 
 run_gate "scripts/docs-navigation-eval.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
+assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation changed)"
 assert_contains "- pnpm docs:index --check (documentation navigation evaluation consumes the catalog)"
 
 run_gate "scripts/docs-navigation-eval-helpers.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
+assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 
 run_gate "scripts/docs-navigation-eval-result.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
+assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 
 run_gate "scripts/docs-navigation-eval.test.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
+assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 
 run_gate "docs/evals/documentation-navigation-fixtures.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation contract changed)"
+assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation contract changed)"
 
 run_gate "docs/evals/documentation-navigation-2026-08-post-garden.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation contract changed)"
+assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation contract changed)"
 
 run_gate "docs/evals/documentation-navigation-baseline.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation baseline changed)"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation baseline changed)"
+assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation baseline changed)"
+
+run_gate "docs/notes/agent-quality-gate-mechanics.md"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (routing-sensitive source changed)"
+assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
+
+run_gate "ui-dashboard/src/app/page.tsx"
+assert_not_contains_mapped "- pnpm docs:navigation-eval -- --check-fixtures"
 
 run_gate "scripts/agent-context-budget.mjs"
 assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"
