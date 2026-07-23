@@ -98,6 +98,8 @@ pnpm integrations:probe --write-upstash  # Publish latest snapshot for /integrat
 pnpm integrations:probe:test   # Unit tests for probe adapters/parsers
 
 # Agent issue workboard
+# (Claude cloud sessions without the capability gate: MCP fallback in
+# docs/notes/github-tooling-surfaces.md)
 pnpm issue:claim --count 3 --agent codex       # Claim ready issues and move them to In Progress
 pnpm issue:review --pr 123 --issue 901         # Move claimed issue to in-pr / review
 pnpm issue:release --issue 901                 # Release a mistaken claim back to agent-ready
