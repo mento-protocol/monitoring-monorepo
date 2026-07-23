@@ -224,6 +224,11 @@ function isExplicitlyCleanClaudeReview(comment, pr) {
   );
 }
 function isActionableReviewBotComment(comment, pr) {
+  const claudeReviewAttestation = claudeReview.classifyClaudeReviewAttestation(
+    comment,
+    pr,
+  );
+  if (claudeReviewAttestation !== null) return claudeReviewAttestation;
   if (!isReviewBotComment(comment)) return false;
   if (claudeReview.isClaudeLgtmReview(comment))
     return !isExplicitlyCleanClaudeReview(comment, pr);
