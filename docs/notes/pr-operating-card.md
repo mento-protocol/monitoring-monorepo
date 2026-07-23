@@ -70,7 +70,12 @@ authority.
 4. **Autoreview.** Freeze the scope baseline first — the initial request,
    target/owner, changed-file set, and non-test changed-line count — as the
    reference Babysit (step 6) checks new additions against. Then, for a
-   non-trivial completed batch:
+   non-trivial completed batch, run the closeout review. Outside an active
+   Codex session — the standalone helper or `--engine claude` — a bare
+   `pnpm agent:autoreview` is the closeout, matching the `ship` skill and root
+   [`AGENTS.md`](../../AGENTS.md). Inside an active Codex session, use the
+   prepared-bundle fresh-context flow so a separate reviewer inspects every
+   pass:
 
    ```bash
    pnpm agent:autoreview --prepare-bundle-dir <dir>  # publish the review bundle
@@ -127,11 +132,14 @@ Solution` (approach before implementation detail). PRs open **ready for
    [`agent-issue-workflow.md`](agent-issue-workflow.md) for the deferral and
    issue-lifecycle rules.
 
-7. **Ready-state.** Before signalling all-clear, run both projections:
+7. **Ready-state.** Before signalling all-clear, run both projections with
+   `<BASE_REPO>` resolved from the PR URL — as the `babysit-pr` skill does —
+   so a fork PR or a switched checkout cannot bind the query to the wrong
+   repository:
 
    ```bash
-   pnpm --silent pr:feedback-state --pr <number> --json
-   pnpm pr:ready-state --pr <number> --json
+   pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
+   pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
    ```
 
    Run them in that order and preserve the two-projection contract: the

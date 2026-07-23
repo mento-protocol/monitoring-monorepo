@@ -98,6 +98,11 @@ pnpm issue:board sync
 pnpm issue:board:test
 ```
 
+These helpers shell out to gh and cannot run in Claude cloud sessions absent
+the capability-gate exception; use
+the MCP fallback and gh-capable handoff in
+[`github-tooling-surfaces.md`](github-tooling-surfaces.md) there.
+
 `pnpm issue:claim` can claim from the live ready queue or claim explicit issue
 numbers. `pnpm issue:review` can infer same-repository issues from
 `closingIssuesReferences` when a PR uses closing keywords, but agents should

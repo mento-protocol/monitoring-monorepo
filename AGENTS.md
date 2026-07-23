@@ -71,6 +71,9 @@ storage only. Claim before substantive edits:
 pnpm issue:claim --count 3 --agent codex
 ```
 
+In Claude cloud sessions these helpers run only behind the capability gate;
+otherwise use the MCP workboard fallback in
+[`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
 Review linkage (`Closes` vs `Refs`), release, and post-merge sync are on the
 [operating card](docs/notes/pr-operating-card.md); label, workboard, and Claim
 ID depth lives in
@@ -146,14 +149,19 @@ Audit sibling surfaces after one instance of a hazard is found. Never
 force-push or amend while babysitting. Before all-clear, run:
 
 ```bash
-pnpm --silent pr:feedback-state --pr <number> --json
-pnpm pr:ready-state --pr <number> --json
+pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
+pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
 ```
 
 All-clear requires a clean feedback ledger plus ready-state's current-head
 required state, including the current-head
-`chatgpt-codex-connector[bot]` PR-description approval. The review-baseline
-discipline and full babysit → ready-state loop are on the
+`chatgpt-codex-connector[bot]` PR-description approval. Exception: in Claude
+cloud sessions the probes run only behind the capability gate; otherwise use
+the `babysit-pr` MCP emulation checklist, label any all-clear MCP-emulated
+rather than probe-verified, and leave the probe-verified all-clear to a
+gh-capable surface — see
+[`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
+The review-baseline discipline and full babysit → ready-state loop are on the
 [operating card](docs/notes/pr-operating-card.md); the projection contract,
 break-glass behavior, optional-bot treatment, and watch loop live in
 [`docs/notes/pr-ready-state.md`](docs/notes/pr-ready-state.md) and the
