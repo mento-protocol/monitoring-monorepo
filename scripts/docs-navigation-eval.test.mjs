@@ -883,7 +883,7 @@ test("issue scheduling rejects an invalid committed baseline before discovery", 
   assert.equal(listed, false);
 });
 
-test("generated result artifacts do not create routing-change reminders", () => {
+test("routing-sensitive path classification covers gate source families", () => {
   assert.equal(
     isRoutingSensitivePath("docs/evals/documentation-navigation-baseline.json"),
     false,
@@ -902,13 +902,26 @@ test("generated result artifacts do not create routing-change reminders", () => 
   );
   for (const pathname of [
     "AGENTS.md",
+    "ui-dashboard/AGENTS.md",
+    "package.json",
     "README.md",
+    "ui-dashboard/README.md",
     "docs/evals/documentation-navigation-fixtures.json",
     "docs/evals/documentation-navigation-result.schema.json",
     "docs/evals/documentation-navigation.md",
+    ".agents/skills/ship/SKILL.md",
+    ".claude/skills/ship/SKILL.md",
+    ".claude/commands/verify-ui.md",
     ".github/workflows/documentation-garden.yml",
   ]) {
     assert.equal(isRoutingSensitivePath(pathname), true, pathname);
+  }
+  for (const pathname of [
+    "ui-dashboard/src/app/page.tsx",
+    "scripts/agent-quality-gate.sh",
+    ".github/dependabot.yml",
+  ]) {
+    assert.equal(isRoutingSensitivePath(pathname), false, pathname);
   }
 });
 

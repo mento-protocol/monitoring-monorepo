@@ -78,15 +78,16 @@ Indexer changes additionally route the protected
 [`docs/pr-checklists/indexer-handler-invariants.md`](../pr-checklists/indexer-handler-invariants.md)
 policy into prepared autoreview bundles.
 
-The gate defaults to dry-run mode and maps changed paths to the package checks
-and PR checklists that apply. Review the checklist output, then run the mapped
-safe local commands with:
+The dry-run gate maps changed paths to package checks and PR checklists. For a
+routing-sensitive source, the shared classifier adds the offline
+`pnpm docs:navigation-eval -- --check-fixtures` check. It invokes no model or
+scheduled evaluation. Review the output, then run:
 
 ```bash
 pnpm agent:quality-gate --run
 ```
 
-The execution mode is intentionally local-only: lint, typecheck, tests, codegen,
+Execution stays local: lint, typecheck, tests, codegen,
 Trunk, and formatting/validation commands. It never runs deploy commands or
 Terraform apply. Terraform formatting receives an explicit Git-visible source
 list, so tracked and non-ignored untracked Terraform files are checked without

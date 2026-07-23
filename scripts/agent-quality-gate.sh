@@ -426,6 +426,37 @@ if [[ ! -s "$changed_paths_file" ]]; then
   exit 0
 fi
 
+routing_sensitive_paths_changed=""
+if ! routing_sensitive_paths_changed="$(
+  node --input-type=module - \
+    "$script_source_dir/docs-navigation-eval-helpers.mjs" \
+    "$changed_paths_file" <<'NODE'
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const [classifierPath, changedPathsPath] = process.argv.slice(2);
+const { isRoutingSensitivePath } = await import(
+  pathToFileURL(classifierPath).href
+);
+const changedPaths = readFileSync(changedPathsPath, "utf8")
+  .split(/\r?\n/)
+  .filter(Boolean);
+process.stdout.write(
+  changedPaths.some(isRoutingSensitivePath) ? "true" : "false",
+);
+NODE
+)"; then
+  echo "error: failed to classify routing-sensitive changed paths" >&2
+  exit 2
+fi
+case "$routing_sensitive_paths_changed" in
+  true|false) ;;
+  *)
+    echo "error: routing-sensitive path classifier returned an invalid result" >&2
+    exit 2
+    ;;
+esac
+
 preflight_commands=()
 codegen_commands=()
 post_codegen_commands=()
@@ -2371,6 +2402,10 @@ while IFS= read -r path; do
   esac
 done < "$changed_paths_file"
 
+if [[ "$routing_sensitive_paths_changed" == "true" ]]; then
+  add_command "pnpm docs:navigation-eval -- --check-fixtures" "routing-sensitive source changed"
+fi
+
 add_trunk_check_command
 sort_codegen_commands
 compact_turbo_quality_commands
@@ -2436,6 +2471,7 @@ implementation_signature() {
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
     scripts/check-agent-quality-gate-package-scripts.sh \
+    scripts/docs-navigation-eval-helpers.mjs \
     scripts/terraform-fmt-check.mjs \
     scripts/terraform-fmt-check.test.mjs \
     turbo.json \
