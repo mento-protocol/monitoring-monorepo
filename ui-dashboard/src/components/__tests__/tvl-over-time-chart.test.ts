@@ -931,10 +931,12 @@ describe("TvlOverTimeChart render", () => {
       name?: string;
       x: string[];
       y: number[];
+      line?: { color?: string };
     }>;
     expect(traces).toHaveLength(3);
     const [t0, t1, t2] = [traces[0]!, traces[1]!, traces[2]!];
     expect(t0.name).toBe("Total");
+    expect(t0.line?.color).toBe("#e2e8f0");
     expect(t0.x).toHaveLength(1);
     expect(t0.y).toEqual([300]);
     expect(t1.name).toBe(TVL_NETWORK.label);

@@ -46,7 +46,9 @@ vi.mock("next/link", () => ({
 
 import {
   GlobalPoolsTable,
+  filterGlobalPools,
   globalPoolKey,
+  resolveAvailableChainId,
   sortGlobalPools,
   type GlobalPoolEntry,
   type GlobalSortContext,
@@ -129,6 +131,46 @@ describe("globalPoolKey", () => {
   });
 });
 
+describe("filterGlobalPools", () => {
+  const polygonNetwork: Network = {
+    ...CELO_NETWORK,
+    id: "polygon-mainnet",
+    label: "Polygon",
+    chainId: 137,
+  };
+
+  const entries = [
+    makeEntry({ id: "celo-pool" }, CELO_NETWORK),
+    makeEntry({ id: "monad-pool" }, MONAD_NETWORK),
+    makeEntry({ id: "polygon-pool" }, polygonNetwork),
+  ];
+
+  it("matches pool names without changing case", () => {
+    expect(filterGlobalPools(entries, "kesm/usdm", null)).toEqual(entries);
+    expect(filterGlobalPools(entries, "does-not-exist", null)).toEqual([]);
+  });
+
+  it("keeps only the selected chain", () => {
+    expect(filterGlobalPools(entries, "", 143)).toEqual([entries[1]]);
+  });
+
+  it("keeps all chains when no chain is selected", () => {
+    expect(filterGlobalPools(entries, "", null)).toEqual(entries);
+  });
+});
+
+describe("resolveAvailableChainId", () => {
+  const chainOptions = [{ chainId: 42220 }, { chainId: 143 }];
+
+  it("keeps a selected chain while it remains available", () => {
+    expect(resolveAvailableChainId(143, chainOptions)).toBe(143);
+  });
+
+  it("resets to all when the selected chain is unavailable", () => {
+    expect(resolveAvailableChainId(137, chainOptions)).toBeNull();
+  });
+});
+
 // GlobalPoolsTable rendering
 
 describe("GlobalPoolsTable — FX weekend SSR banner", () => {
@@ -146,6 +188,35 @@ describe("GlobalPoolsTable — FX weekend SSR banner", () => {
     );
 
     expect(html).not.toContain("FX markets are closed this weekend.");
+  });
+});
+
+describe("GlobalPoolsTable filters", () => {
+  it("uses the bridge status filter pill design for chains", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[makeEntry({}, CELO_NETWORK), makeEntry({}, MONAD_NETWORK)]}
+        showFilters
+      />,
+    );
+
+    expect(html).toContain(
+      'role="radiogroup" aria-label="Filter pools by chain"',
+    );
+    expect(html).toContain('role="radio" aria-checked="true"');
+    expect(html).toContain(">All</button>");
+    expect(html).toContain(">Celo</button>");
+    expect(html).toContain(">Monad</button>");
+    expect(html).toContain('<span class="sr-only">Search pools</span>');
+  });
+
+  it("keeps the shared table free of homepage-only controls by default", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry({}, CELO_NETWORK)]} />,
+    );
+
+    expect(html).not.toContain('aria-label="Chains"');
+    expect(html).not.toContain("Filter by pool name");
   });
 });
 
