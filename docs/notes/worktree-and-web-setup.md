@@ -46,6 +46,17 @@ every fresh macOS worktree. Linux still requires a per-worktree successful
 Playwright installer marker because `--with-deps` also provisions host libraries
 there.
 
+To keep a fresh per-PR worktree from starting with a 100% cold Turbo cache,
+`setup.sh`, `bootstrap-worktree.sh`, and the agent quality gate export
+`TURBO_CACHE_DIR="$HOME/.cache/turbo-monitoring-monorepo"` (unless the caller
+already set `TURBO_CACHE_DIR`, or opted out with `AGENT_TURBO_SHARED_CACHE=0`),
+so every worktree reads and writes one shared local Turbo cache outside any
+worktree. Turbo 2.9.x writes each cache artifact through a temp file plus atomic
+rename with PID-namespaced temp names and only reaps orphaned `.tmp` files older
+than an hour, so concurrent gate runs in two worktrees share the dir safely.
+Remote caching stays disabled (`turbo.json` `remoteCache.enabled: false`); this
+is local sharing only. Refs GitHub issue 1411.
+
 ## Claude Code on the web setup
 
 Claude Code on the web sessions run in a hosted container that does not inherit

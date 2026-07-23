@@ -4,6 +4,18 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Shared Turbo cache across worktrees (GitHub issue #1411): keep the local Turbo
+# filesystem cache at one stable per-repo location outside any worktree so a
+# fresh per-PR worktree reuses warm entries instead of starting 100% cold.
+# Respect a caller-provided TURBO_CACHE_DIR; set AGENT_TURBO_SHARED_CACHE=0 to
+# opt out and fall back to Turbo's per-worktree default.
+if [[ -z "${TURBO_CACHE_DIR:-}" &&
+  "${AGENT_TURBO_SHARED_CACHE:-1}" != "0" &&
+  "${AGENT_TURBO_SHARED_CACHE:-1}" != "false" &&
+  -n "${HOME:-}" ]]; then
+  export TURBO_CACHE_DIR="${HOME}/.cache/turbo-monitoring-monorepo"
+fi
+
 echo "📦 Installing dependencies..."
 pnpm install --frozen-lockfile
 

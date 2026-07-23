@@ -690,6 +690,21 @@ instead of mapping a separate dashboard build command for size-limit checks.
 High-risk or cross-layer commands stay outside Turbo, including codegen,
 install, dep-cruiser, coverage floors, mutation baselines, and Terraform.
 
+The gate exports `TURBO_CACHE_DIR="$HOME/.cache/turbo-monitoring-monorepo"`
+before running any Turbo task (unless the caller already set `TURBO_CACHE_DIR`,
+or opted out with `AGENT_TURBO_SHARED_CACHE=0`), so every worktree shares one
+local Turbo cache outside any worktree and a fresh per-PR worktree reuses warm
+typecheck/lint/knip/build/size-limit entries instead of starting 100% cold. The
+cache location is deliberately absent from the gate's freshness stamp: Turbo
+restores a cache entry only when the entry's own content-addressed input hash
+matches, so the cache directory changes a command's speed, never its pass/fail
+outcome, and the `implementation_signature`/stamp machinery does not need to
+fingerprint it. Editing this script does re-hash `implementation_signature` and
+invalidate existing stamps once (expected). Turbo 2.9.x writes each cache
+artifact via temp file + atomic rename with PID-namespaced temp names, so two
+worktrees' gates writing the shared dir concurrently cannot corrupt it. Refs
+GitHub issue 1411.
+
 ## Common local-gate traps
 
 - `codespell` flags short variable names that match common abbreviations (e.g. a two-letter loop var that looks like a misspelling). Use descriptive names like `netData` to avoid this.
