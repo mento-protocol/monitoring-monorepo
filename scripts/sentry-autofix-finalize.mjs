@@ -98,6 +98,11 @@ const FORBIDDEN_BASENAMES = new Set([
   "package.json",
   "pnpm-lock.yaml",
   ".npmrc",
+  // Load-bearing for the autofix trust boundary: ui-dashboard/vercel.json
+  // carries `git.deploymentEnabled: { "sentry-autofix/*": false }` (issue
+  // #1452), which is what stops Vercel from building an autofix branch with
+  // production secrets in scope. If autofix could edit vercel.json it could
+  // re-enable its own deployment — do NOT remove this from the forbidden set.
   "vercel.json",
   "turbo.json",
 ]);
