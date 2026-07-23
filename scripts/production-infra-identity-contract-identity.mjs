@@ -9,8 +9,11 @@ import {
 import {
   attributeExpression,
   blockKey,
+  commentMaskedHcl,
+  escapeRegExp,
   expectExpression,
   expectMapEntry,
+  expectNoResourceMultiplicity,
   expectString,
   extractExpressionList,
   nestedBlocks,
@@ -19,7 +22,157 @@ import {
   requireBlock,
   sameSortedValues,
   stringAttribute,
+  topLevelBlockKey,
 } from "./production-infra-identity-contract-hcl.mjs";
+
+const EXPECTED_PROVIDER_BLOCKS = new Set([
+  "terraform/ci-wif.tf:google_iam_workload_identity_pool_provider.github",
+  "terraform/ci-wif.tf:google_iam_workload_identity_pool_provider.github_production_infra",
+]);
+
+const IDENTITY_REFERENCE_SPECIFICATIONS = [
+  {
+    label: "terraform: production applier",
+    terraformName: "production_infra_applier",
+    accountId: "production-infra-applier",
+    allowedBlocks: new Set([
+      "terraform/ci-wif.tf:resource.google_service_account.production_infra_applier",
+      "terraform/ci-wif.tf:resource.google_service_account_iam_member.production_infra_applier_wif_binding",
+      "terraform/ci-wif.tf:resource.google_service_account_iam_member.production_infra_applier_org_terraform_token_creator",
+      "terraform/github-variables.tf:resource.github_actions_variable.gcp_production_infra_service_account",
+      "terraform/outputs.tf:output.ci_production_infra_applier_email",
+    ]),
+  },
+  {
+    label: "terraform: refresh WIF identity",
+    terraformName: "terraform_refresh_readonly",
+    accountId: "terraform-refresh-readonly",
+    allowedBlocks: new Set([
+      "terraform/ci-wif.tf:resource.google_service_account.terraform_refresh_readonly",
+      "terraform/ci-wif.tf:resource.google_service_account_iam_member.terraform_refresh_readonly_wif_binding",
+      "terraform/ci-wif.tf:resource.google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator",
+      "terraform/github-variables.tf:resource.github_actions_variable.gcp_terraform_refresh_service_account",
+      "terraform/outputs.tf:output.ci_terraform_refresh_readonly_email",
+    ]),
+  },
+  {
+    label: "terraform: refresh target",
+    terraformName: "org_terraform_refresh_readonly",
+    accountId: "org-terraform-refresh-readonly",
+    allowedBlocks: new Set([
+      "terraform/ci-wif.tf:resource.google_service_account.org_terraform_refresh_readonly",
+      "terraform/ci-wif.tf:resource.google_storage_bucket_iam_member.state_bucket_refresh_readonly",
+      "terraform/ci-wif.tf:resource.google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator",
+      "alerts/infra/main.tf:resource.google_project_iam_member.terraform_refresh_readonly",
+      "alerts/infra/onchain-event-handler/main.tf:resource.google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
+      "alerts/infra/onchain-event-handler/main.tf:resource.google_secret_manager_secret_iam_member.terraform_refresh_readonly",
+      "alerts/infra/oncall-announcer/main.tf:resource.google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
+      "alerts/infra/oncall-announcer/main.tf:resource.google_secret_manager_secret_iam_member.terraform_refresh_readonly",
+      "governance-watchdog/infra/main.tf:resource.google_project_iam_member.terraform_refresh_readonly",
+      "governance-watchdog/infra/storage.tf:resource.google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
+      "governance-watchdog/infra/terraform-refresh.tf:resource.google_secret_manager_secret_iam_member.terraform_refresh_readonly",
+    ]),
+  },
+];
+
+export function validateProviderInventory(blocks, errors) {
+  const actual = blocks
+    .filter(
+      (block) => block.type === "google_iam_workload_identity_pool_provider",
+    )
+    .map(blockKey);
+  if (!sameSortedValues(actual, [...EXPECTED_PROVIDER_BLOCKS])) {
+    errors.push(
+      "terraform: workload identity provider inventory must contain exactly the generic and production providers in terraform/ci-wif.tf",
+    );
+  }
+}
+
+function decodeTerraformUnicodeEscapes(contents) {
+  const characters = contents.split("");
+  for (let index = 0; index < contents.length; index += 1) {
+    if (contents[index] !== "\\") continue;
+    let runEnd = index;
+    while (contents[runEnd] === "\\") runEnd += 1;
+    const slashCount = runEnd - index;
+    if (slashCount % 2 === 0) {
+      index = runEnd - 1;
+      continue;
+    }
+    const marker = contents[runEnd];
+    const digitCount = marker === "u" ? 4 : marker === "U" ? 8 : 0;
+    const digits = contents.slice(runEnd + 1, runEnd + 1 + digitCount);
+    if (
+      digitCount === 0 ||
+      digits.length !== digitCount ||
+      !/^[0-9A-Fa-f]+$/u.test(digits)
+    ) {
+      index = runEnd - 1;
+      continue;
+    }
+    const codePoint = Number.parseInt(digits, 16);
+    if (codePoint > 0x10ffff) continue;
+    const decoded = String.fromCodePoint(codePoint);
+    const escapeStart = runEnd - 1;
+    const escapeEnd = runEnd + 1 + digitCount;
+    for (let cursor = escapeStart; cursor < escapeEnd; cursor += 1) {
+      characters[cursor] = decoded[cursor - escapeStart] ?? "\0";
+    }
+    index = escapeEnd - 1;
+  }
+  return characters.join("");
+}
+
+function identityReferenceIndices(contents, terraformName, accountId) {
+  const searchContents = decodeTerraformUnicodeEscapes(contents);
+  const accountPattern = [...accountId]
+    .map((character) => `${escapeRegExp(character)}\\x00*`)
+    .join("");
+  const patterns = [
+    new RegExp(
+      `\\bgoogle_service_account\\s*\\.\\s*${escapeRegExp(terraformName)}\\b`,
+      "gu",
+    ),
+    new RegExp(`(?<![A-Za-z0-9-])${accountPattern}(?![A-Za-z0-9-])`, "gu"),
+  ];
+  return patterns.flatMap((pattern) =>
+    [...searchContents.matchAll(pattern)].map((match) => match.index),
+  );
+}
+
+export function validateIdentityReferenceInventory(
+  files,
+  topLevelBlocks,
+  errors,
+) {
+  const blocksByFile = Map.groupBy(topLevelBlocks, (block) => block.filePath);
+
+  for (const specification of IDENTITY_REFERENCE_SPECIFICATIONS) {
+    const unexpected = new Set();
+    for (const [filePath, contents] of Object.entries(files)) {
+      if (!filePath.endsWith(".tf")) continue;
+      const code = commentMaskedHcl(contents);
+      for (const index of identityReferenceIndices(
+        code,
+        specification.terraformName,
+        specification.accountId,
+      )) {
+        const containingBlock = (blocksByFile.get(filePath) ?? []).find(
+          (block) => block.start <= index && index < block.end,
+        );
+        const key = containingBlock
+          ? topLevelBlockKey(containingBlock)
+          : `${filePath}:outside-top-level-block`;
+        if (!specification.allowedBlocks.has(key)) unexpected.add(key);
+      }
+    }
+    if (unexpected.size > 0) {
+      errors.push(
+        `${specification.label}: identity references are allowed only in explicit Terraform blocks and outputs: ${[...unexpected].sort().join(", ")}`,
+      );
+    }
+  }
+}
 
 export function validateProvider(
   blocks,
@@ -45,6 +198,7 @@ export function validateProvider(
   );
 
   if (pool) {
+    expectNoResourceMultiplicity(pool, errors, conditionLabel);
     expectExpression(
       pool,
       "project",
@@ -62,6 +216,7 @@ export function validateProvider(
   }
 
   if (provider) {
+    expectNoResourceMultiplicity(provider, errors, conditionLabel);
     expectExpression(
       provider,
       "project",
@@ -206,6 +361,7 @@ export function validateGithubVariables(blocks, errors) {
       label,
     );
     if (!block) continue;
+    expectNoResourceMultiplicity(block, errors, label);
     expectString(block, "repository", "monitoring-monorepo", errors, label);
     expectString(block, "variable_name", specification.variable, errors, label);
     expectExpression(block, "value", specification.value, errors, label);
@@ -270,6 +426,43 @@ export function rejectUnexpectedIdentityGrants(
 }
 
 export function validateProductionIdentity(blocks, errors) {
+  const legacyTokenCreator = requireBlock(
+    blocks,
+    "terraform/ci-wif.tf",
+    "google_service_account_iam_member",
+    "ci_alerts_org_terraform_token_creator",
+    errors,
+    "terraform: bootstrap legacy deployer token creator",
+  );
+  if (legacyTokenCreator) {
+    expectNoResourceMultiplicity(
+      legacyTokenCreator,
+      errors,
+      "terraform: bootstrap legacy deployer token creator",
+    );
+    expectString(
+      legacyTokenCreator,
+      "service_account_id",
+      `projects/${SEED_PROJECT_ID}/serviceAccounts/\${var.terraform_service_account}`,
+      errors,
+      "terraform: bootstrap legacy deployer token creator",
+    );
+    expectString(
+      legacyTokenCreator,
+      "role",
+      "roles/iam.serviceAccountTokenCreator",
+      errors,
+      "terraform: bootstrap legacy deployer token creator",
+    );
+    expectString(
+      legacyTokenCreator,
+      "member",
+      "serviceAccount:${google_service_account.metrics_bridge_deployer.email}",
+      errors,
+      "terraform: bootstrap legacy deployer token creator",
+    );
+  }
+
   const serviceAccount = requireBlock(
     blocks,
     "terraform/ci-wif.tf",
@@ -279,6 +472,11 @@ export function validateProductionIdentity(blocks, errors) {
     "terraform: production applier",
   );
   if (serviceAccount) {
+    expectNoResourceMultiplicity(
+      serviceAccount,
+      errors,
+      "terraform: production applier",
+    );
     expectString(
       serviceAccount,
       "project",
@@ -304,6 +502,11 @@ export function validateProductionIdentity(blocks, errors) {
     "terraform: production applier WIF binding",
   );
   if (wifBinding) {
+    expectNoResourceMultiplicity(
+      wifBinding,
+      errors,
+      "terraform: production applier WIF binding",
+    );
     expectExpression(
       wifBinding,
       "service_account_id",
@@ -336,6 +539,11 @@ export function validateProductionIdentity(blocks, errors) {
     "terraform: production applier token creator",
   );
   if (tokenCreator) {
+    expectNoResourceMultiplicity(
+      tokenCreator,
+      errors,
+      "terraform: production applier token creator",
+    );
     expectString(
       tokenCreator,
       "service_account_id",

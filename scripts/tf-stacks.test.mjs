@@ -429,11 +429,10 @@ function extractHclBlock(source, marker) {
   throw new Error(`missing closing brace for HCL block: ${marker}`);
 }
 
-function assertMetricsBridgeScalingOwnership() {
-  const source = readFileSync(
-    path.join(repoRoot, "terraform/metrics-bridge.tf"),
-    "utf8",
-  );
+const metricsBridgeScalingOwnershipError =
+  "metrics_bridge must keep service scaling and scaling_mode Terraform-managed";
+
+function assertMetricsBridgeScalingOwnershipSource(source) {
   const service = extractHclBlock(
     source,
     'resource "google_cloud_run_v2_service" "metrics_bridge"',
@@ -453,9 +452,47 @@ function assertMetricsBridgeScalingOwnership() {
     "metrics_bridge must ignore the deploy-stamped service minimum instance count",
   );
   assert(
-    !/^ {6}scaling(?:\[0\]\.scaling_mode)?,$/mu.test(lifecycle),
-    "metrics_bridge must keep service scaling_mode Terraform-managed",
+    !/^ {6}(?:scaling|scaling\[0\]|scaling\[0\]\.scaling_mode),$/mu.test(
+      lifecycle,
+    ),
+    metricsBridgeScalingOwnershipError,
   );
+}
+
+function assertMetricsBridgeScalingOwnership() {
+  const source = readFileSync(
+    path.join(repoRoot, "terraform/metrics-bridge.tf"),
+    "utf8",
+  );
+  assertMetricsBridgeScalingOwnershipSource(source);
+
+  const fixtureAnchor = "      scaling[0].min_instance_count,\n";
+  assert(
+    source.includes(fixtureAnchor),
+    "metrics_bridge scaling ownership fixture anchor is missing",
+  );
+
+  for (const forbiddenIgnore of [
+    "scaling,",
+    "scaling[0],",
+    "scaling[0].scaling_mode,",
+  ]) {
+    const fixture = source.replace(
+      fixtureAnchor,
+      `${fixtureAnchor}      ${forbiddenIgnore}\n`,
+    );
+    let failure = null;
+    try {
+      assertMetricsBridgeScalingOwnershipSource(fixture);
+    } catch (error) {
+      failure = error;
+    }
+    assert(
+      failure instanceof Error &&
+        failure.message === metricsBridgeScalingOwnershipError,
+      `metrics_bridge ownership guard must reject ${forbiddenIgnore}`,
+    );
+  }
 }
 
 function terraformEnvNames(workflowPath) {

@@ -6,6 +6,7 @@ import {
 import {
   blockKey,
   expectExpression,
+  expectNoResourceMultiplicity,
   expectString,
   extractForEachMap,
   extractStringSet,
@@ -66,6 +67,7 @@ function validateBucketGrant(
     label,
   );
   if (block) {
+    expectNoResourceMultiplicity(block, errors, label);
     if (bucket.startsWith('"')) {
       expectString(block, "bucket", JSON.parse(bucket), errors, label);
     } else {
@@ -121,6 +123,11 @@ export function validateRefreshIdentity(files, blocks, errors) {
     "terraform: refresh WIF identity",
   );
   if (refreshWif) {
+    expectNoResourceMultiplicity(
+      refreshWif,
+      errors,
+      "terraform: refresh WIF identity",
+    );
     expectExpression(
       refreshWif,
       "project",
@@ -146,6 +153,11 @@ export function validateRefreshIdentity(files, blocks, errors) {
     "terraform: refresh target",
   );
   if (refreshTarget) {
+    expectNoResourceMultiplicity(
+      refreshTarget,
+      errors,
+      "terraform: refresh target",
+    );
     expectString(
       refreshTarget,
       "project",
@@ -171,6 +183,11 @@ export function validateRefreshIdentity(files, blocks, errors) {
     "terraform: refresh WIF binding",
   );
   if (wifBinding) {
+    expectNoResourceMultiplicity(
+      wifBinding,
+      errors,
+      "terraform: refresh WIF binding",
+    );
     expectExpression(
       wifBinding,
       "service_account_id",
@@ -203,6 +220,11 @@ export function validateRefreshIdentity(files, blocks, errors) {
     "terraform: refresh token creator",
   );
   if (tokenCreator) {
+    expectNoResourceMultiplicity(
+      tokenCreator,
+      errors,
+      "terraform: refresh token creator",
+    );
     expectExpression(
       tokenCreator,
       "service_account_id",

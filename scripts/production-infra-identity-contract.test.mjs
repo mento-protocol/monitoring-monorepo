@@ -8,6 +8,8 @@ import {
   assertProductionInfraIdentityContract,
   validateProductionInfraIdentityContract,
 } from "./production-infra-identity-contract.mjs";
+import "./production-infra-identity-contract-security.test.mjs";
+import "./production-infra-identity-contract-workflow.test.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -94,10 +96,178 @@ function testOidcProviders(validFiles) {
   }
 }
 
+function testHeredocParsing(validFiles) {
+  const realHeredocFiles = {
+    ...validFiles,
+    "terraform/heredoc.tf": `
+locals {
+  rendered = <<HCL
+resource "google_iam_workload_identity_pool_provider" "heredoc_text" {
+  workload_identity_pool_id = "not-a-resource"
+}
+HCL
+}
+`,
+  };
+  assert.deepEqual(
+    validateProductionInfraIdentityContract(realHeredocFiles),
+    [],
+  );
+
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/ci-wif.tf",
+      '  account_id = "production-infra-applier"',
+      `  description = <<EOF
+  account_id = "production-infra-applier"
+EOF`,
+    ),
+    "production applier: account_id must be exactly",
+  );
+
+  expectContractFailure(
+    {
+      ...validFiles,
+      "terraform/extra.tf": `
+locals {
+  quoted_marker = "literal <<NOT_A_HEREDOC"
+}
+resource "google_iam_workload_identity_pool_provider" "quoted_marker_bypass" {
+  workload_identity_pool_id = local.untrusted_pool_id
+}
+`,
+    },
+    "workload identity provider inventory must contain exactly",
+  );
+
+  expectContractFailure(
+    {
+      ...validFiles,
+      "terraform/extra.tf": `
+locals {
+  broken = <<UNTERMINATED
+body
+}
+`,
+    },
+    "unterminated HCL heredoc UNTERMINATED",
+  );
+}
+
+function testProviderInventory(validFiles) {
+  expectContractFailure(
+    {
+      ...validFiles,
+      "terraform/extra.tf": `
+resource "google_iam_workload_identity_pool_provider" "function_bypass" {
+  workload_identity_pool_id = try(google_iam_workload_identity_pool.github_production_infra.workload_identity_pool_id, "fallback")
+}
+`,
+    },
+    "workload identity provider inventory must contain exactly",
+  );
+
+  expectContractFailure(
+    {
+      ...validFiles,
+      "terraform/extra.tf": `
+locals {
+  aliased_pool_id = google_iam_workload_identity_pool.github_actions.workload_identity_pool_id
+}
+resource "google_iam_workload_identity_pool_provider" "local_alias_bypass" {
+  workload_identity_pool_id = local.aliased_pool_id
+}
+`,
+    },
+    "workload identity provider inventory must contain exactly",
+  );
+}
+
+function testIdentityReferenceInventory(validFiles) {
+  expectContractFailure(
+    {
+      ...validFiles,
+      "terraform/extra.tf": `
+locals {
+  production_applier_alias = google_service_account.production_infra_applier.email
+}
+`,
+    },
+    "production applier: identity references are allowed only",
+  );
+
+  expectContractFailure(
+    {
+      ...validFiles,
+      "terraform/extra.tf": `
+module "identity_sink" {
+  source                = "./identity-sink"
+  service_account_email = "org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+}
+`,
+    },
+    "refresh target: identity references are allowed only",
+  );
+}
+
+function testBootstrapLegacyBinding(validFiles) {
+  const binding = `resource "google_service_account_iam_member" "ci_alerts_org_terraform_token_creator" {
+  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/\${var.terraform_service_account}"
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:\${google_service_account.metrics_bridge_deployer.email}"
+}
+`;
+  expectContractFailure(
+    mutateFile(validFiles, "terraform/ci-wif.tf", binding, ""),
+    "bootstrap legacy deployer token creator: required resource",
+  );
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/ci-wif.tf",
+      binding,
+      binding.replace(
+        "${var.terraform_service_account}",
+        "org-terraform-wrong@example.invalid",
+      ),
+    ),
+    "bootstrap legacy deployer token creator: service_account_id must be exactly",
+  );
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/ci-wif.tf",
+      binding,
+      binding.replace(
+        "roles/iam.serviceAccountTokenCreator",
+        "roles/iam.serviceAccountUser",
+      ),
+    ),
+    "bootstrap legacy deployer token creator: role must be exactly",
+  );
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/ci-wif.tf",
+      binding,
+      binding.replace(
+        "google_service_account.metrics_bridge_deployer.email",
+        "google_service_account.production_infra_applier.email",
+      ),
+    ),
+    "bootstrap legacy deployer token creator: member must be exactly",
+  );
+}
+
 function runFixtureTests() {
   const validFiles = validFixtureFiles();
   assert.deepEqual(validateProductionInfraIdentityContract(validFiles), []);
   testOidcProviders(validFiles);
+  testHeredocParsing(validFiles);
+  testProviderInventory(validFiles);
+  testIdentityReferenceInventory(validFiles);
+  testBootstrapLegacyBinding(validFiles);
 
   for (const weakenedCondition of [
     'assertion.repository == \\"mento-protocol/monitoring-monorepo\\" || true',
@@ -343,7 +513,11 @@ function realRepositoryFiles() {
     "alerts/rules",
     "governance-watchdog/infra",
   ]) {
-    collectFiles(directory, files, (name) => name.endsWith(".tf"));
+    collectFiles(
+      directory,
+      files,
+      (name) => name.endsWith(".tf") || name.endsWith(".tf.json"),
+    );
   }
   collectFiles(
     ".github/workflows",

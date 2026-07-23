@@ -4,18 +4,22 @@ import {
   PRODUCTION_PROVIDER_CONDITION,
   SERVICE_AND_DRIFT_WORKFLOWS,
 } from "./production-infra-identity-contract-constants.mjs";
-import { terraformResourceBlocks } from "./production-infra-identity-contract-hcl.mjs";
+import { terraformTopLevelBlocks } from "./production-infra-identity-contract-hcl.mjs";
 import {
   validateGithubVariables,
+  validateIdentityReferenceInventory,
   validateProductionIdentity,
   validateProvider,
+  validateProviderInventory,
 } from "./production-infra-identity-contract-identity.mjs";
 import { validateRefreshIdentity } from "./production-infra-identity-contract-refresh.mjs";
 import { validateWorkflowContract } from "./production-infra-identity-contract-workflow.mjs";
 
 export function validateProductionInfraIdentityContract(files) {
   const errors = [];
-  const blocks = terraformResourceBlocks(files);
+  const topLevelBlocks = terraformTopLevelBlocks(files, errors);
+  const blocks = topLevelBlocks.filter((block) => block.kind === "resource");
+  validateProviderInventory(blocks, errors);
   validateProvider(
     blocks,
     {
@@ -41,6 +45,7 @@ export function validateProductionInfraIdentityContract(files) {
   validateProductionIdentity(blocks, errors);
   validateRefreshIdentity(files, blocks, errors);
   validateGithubVariables(blocks, errors);
+  validateIdentityReferenceInventory(files, topLevelBlocks, errors);
   validateWorkflowContract(files, errors);
   return errors;
 }
