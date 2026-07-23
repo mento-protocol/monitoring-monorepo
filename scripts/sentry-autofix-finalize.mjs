@@ -47,9 +47,13 @@ import {
 } from "./sentry-triage-ingest.mjs";
 import { isValidShortId } from "./sentry-triage-project-core.mjs";
 
-// The agent's diff may touch at most this many files — a scoped Sentry fix is
-// small by construction, and a large diff is a signal the agent over-reached.
-export const MAX_CHANGED_FILES = 3;
+// The agent's diff may touch at most this many files. A real fix commonly spans
+// the change plus its tests and a couple of related call sites, so the ceiling
+// is generous; but an unbounded diff is still a signal the agent over-reached,
+// so it stays capped and the guard refuses beyond this. Human review + required
+// CI on the fix PR are the substantive gates — this is a scope tripwire, not the
+// security control (forbidden-path/symlink/credential checks are separate).
+export const MAX_CHANGED_FILES = 20;
 
 // Sentry's release-linked auto-resolve keyword. `Fixes <SHORT-ID>` in a PR
 // title/description references the Sentry issue and resolves it in the release
