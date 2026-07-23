@@ -517,7 +517,7 @@ export function selectVerdictComment(comments) {
     .filter((comment) => comment.body.startsWith(VERDICT_MARKER))
     .sort(compareCreatedAt);
   if (verdicts.length === 0)
-    return { body: null, reason: "no-verdict-comment" };
+    return { body: null, reason: "no-verdict-comment", url: null };
   const newestVerdict = verdicts[verdicts.length - 1];
 
   const regressions = list
@@ -528,10 +528,30 @@ export function selectVerdictComment(comments) {
     if (
       !(String(newestVerdict.createdAt) > String(newestRegression.createdAt))
     ) {
-      return { body: null, reason: "stale-verdict" };
+      return { body: null, reason: "stale-verdict", url: null };
     }
   }
-  return { body: newestVerdict.body, reason: null };
+  // `url` identifies which verdict comment was selected — its numeric
+  // #issuecomment-<n> id is the autofix generation token (issue #1506): a
+  // re-triage APPENDS a fresh verdict comment (Stage A reopen sheds the label,
+  // triage re-posts), so a shed-then-re-added verdict changes this url even when
+  // the label is present again, which is what label-presence alone cannot see.
+  return {
+    body: newestVerdict.body,
+    reason: null,
+    url: typeof newestVerdict.url === "string" ? newestVerdict.url : null,
+  };
+}
+
+// Parse the numeric REST id from a GitHub issue-comment url
+// (`…#issuecomment-<n>`). gh's comment `.id` is an opaque GraphQL node id; the
+// numeric id from the url is stable, log-safe, and trivially validated
+// (`^[0-9]+$`) — the shape the autofix matrix threads as its generation token.
+// Returns the numeric string, or null if the url is missing/unparsable.
+export function verdictCommentIdFromUrl(url) {
+  if (typeof url !== "string") return null;
+  const match = url.match(/#issuecomment-(\d+)\s*$/);
+  return match ? match[1] : null;
 }
 
 // Blatant non-decision placeholders that defeat the point of a needs-human
@@ -626,6 +646,9 @@ export function resolveVerdict(issue, queueIssueNumber) {
     parsed,
     verdict: parsed.verdict,
     label: VERDICT_TO_LABEL[parsed.verdict],
+    // The url of the verdict comment this resolution is based on — the autofix
+    // generation token source (issue #1506).
+    verdictCommentUrl: selected.url,
   };
 }
 

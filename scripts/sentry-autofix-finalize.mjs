@@ -45,7 +45,11 @@ import {
   FIX_REFUSED_LABEL,
   LABEL_DEFINITIONS,
 } from "./sentry-triage-ingest.mjs";
-import { isValidShortId } from "./sentry-triage-project-core.mjs";
+import {
+  isValidShortId,
+  selectVerdictComment,
+  verdictCommentIdFromUrl,
+} from "./sentry-triage-project-core.mjs";
 
 // The agent's diff may touch at most this many files. A real fix commonly spans
 // the change plus its tests and a couple of related call sites, so the ceiling
@@ -568,6 +572,11 @@ Commands:
       Print "yes" if the stub's labels (newline-separated in the file) still
       include the code-fix verdict, else "no". Re-checked before the marker
       write to catch a mid-run regression re-queue.
+  selected-verdict-id --comments-file <path>
+      Print the numeric id of the currently-selected verdict comment (the #1506
+      generation token), or "none". The file holds the stub's comments JSON
+      (array, or an object with a .comments array). Fail-closed: prints "none"
+      on any parse/selection failure so the workflow withdraws on mismatch.
   stale-verdict-close-comment
       Print the comment posted when a fix PR opened this run is closed because
       the verdict was shed during the push/PR-create span.
@@ -652,6 +661,29 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
         "utf8",
       ).split("\n");
       stdout.write(markerWriteStillValid(labels) ? "yes\n" : "no\n");
+      return;
+    }
+    case "selected-verdict-id": {
+      // Prints the NUMERIC id of the currently-selected verdict comment (the
+      // #1506 generation token), or "none" when there is no usable verdict
+      // comment or the input can't be read/parsed. The workflow compares this
+      // against the id select captured at dispatch: a mismatch means a re-triage
+      // REPLACED the verdict (ABA) and the fix-pr-opened marker must not be
+      // written. Fail CLOSED — any parse/selection failure prints "none", which
+      // the workflow treats as a mismatch and withdraws.
+      let comments;
+      try {
+        const parsed = JSON.parse(
+          readFileMaybe(readFlag(args, "--comments-file")),
+        );
+        comments = Array.isArray(parsed) ? parsed : (parsed.comments ?? []);
+      } catch {
+        stdout.write("none\n");
+        return;
+      }
+      const selected = selectVerdictComment(comments);
+      const id = selected.url ? verdictCommentIdFromUrl(selected.url) : null;
+      stdout.write(id && /^\d+$/.test(id) ? `${id}\n` : "none\n");
       return;
     }
     case "stale-verdict-close-comment": {

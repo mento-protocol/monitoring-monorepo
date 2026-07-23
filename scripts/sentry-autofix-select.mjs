@@ -39,6 +39,7 @@ import {
   resolveVerdict,
   selectVerdictComment,
   validateAffectedRepo,
+  verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
 import {
   CODE_FIX_VERDICT_LABEL,
@@ -286,9 +287,10 @@ async function evaluateCandidate(runGh, repo, stub) {
   }
 
   let parsed;
+  let verdictCommentUrl;
   try {
     const full = await readStub(runGh, repo, stub.number);
-    ({ parsed } = resolveVerdict(full, stub.number));
+    ({ parsed, verdictCommentUrl } = resolveVerdict(full, stub.number));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`skip #${stub.number}: ${message}\n`);
@@ -331,7 +333,22 @@ async function evaluateCandidate(runGh, repo, stub) {
     return { issue: stub.number, shortId, reconcile: true };
   }
 
-  return { issue: stub.number, shortId };
+  // Generation token (issue #1506): the numeric id of the verdict comment this
+  // fix is based on, threaded through the matrix to finalize so it can refuse to
+  // mark the stub fixed if a re-triage REPLACED the verdict comment (ABA) during
+  // the run — a change label-presence cannot see. Reconcile entries above carry
+  // no token: they relink a PRIOR run's PR, whose originating verdict id select
+  // never captured. Emit without the token (finalize falls back to the #1389
+  // label-presence guard) only if the url is unparsable — which should not
+  // happen for a real, fence-selected verdict comment.
+  const verdictCommentId = verdictCommentIdFromUrl(verdictCommentUrl);
+  if (!verdictCommentId) {
+    process.stderr.write(
+      `warn #${stub.number}: could not derive a verdict-comment id (url=${verdictCommentUrl}); emitting without a generation token.\n`,
+    );
+    return { issue: stub.number, shortId };
+  }
+  return { issue: stub.number, shortId, verdictCommentId };
 }
 
 /**
