@@ -66,10 +66,9 @@ storage only. Claim before substantive edits:
 pnpm issue:claim --count 3 --agent codex
 ```
 
-In Claude cloud sessions without the REST + GraphQL + `--slurp` capability
-gate these helpers cannot run; use the MCP workboard fallback in
+In Claude cloud sessions these helpers run only behind the capability gate;
+otherwise use the MCP workboard fallback in
 [`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
-Capable variants run the helpers as written.
 When a PR opens, run `pnpm issue:review --pr <number> --issue <issue>`. Use
 `Closes #N` only when the issue's **Done means** is fully satisfied; otherwise
 use `Refs #N`. Release incomplete work with `pnpm issue:release` and choose
@@ -173,11 +172,8 @@ pnpm pr:ready-state --pr <number> --json
 All-clear requires a clean feedback ledger plus ready-state's current-head
 required state, including the current-head
 `chatgpt-codex-connector[bot]` PR-description approval. Exception: in Claude
-cloud sessions the probes cannot run (gh's repo API is platform-blocked)
-unless the variant passes the repo-scoped REST + GraphQL + `--slurp`
-capability gate, in which case use them as written; otherwise run the MCP
-emulation
-checklist from the `babysit-pr` skill, label any all-clear MCP-emulated
+cloud sessions the probes run only behind the capability gate; otherwise use
+the `babysit-pr` MCP emulation checklist, label any all-clear MCP-emulated
 rather than probe-verified, and leave the probe-verified all-clear to a
 gh-capable surface — see
 [`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
