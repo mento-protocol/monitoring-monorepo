@@ -356,7 +356,7 @@ jobs:
       # tainted checkout (clean/smudge filters + textconv from agent-controlled
       # .gitattributes/.git/config are arbitrary code execution hardened flags do NOT
       # disable). This step sets no `proceed` output — finalize re-derives and
-      # decides; benign refusals (zero / >3 / forbidden path) do NOT fail here, they
+      # decides; benign refusals (zero / too-many / forbidden path) do NOT fail here, they
       # upload so finalize can post the clean fix-refused outcome.
       - name: Diff tripwire (filter-free, live FS)
         if: ${{ matrix.entry.reconcile != true }}
@@ -388,20 +388,28 @@ jobs:
             --files-file "${RUNNER_TEMP}/changed.txt" \
             --work "${GITHUB_WORKSPACE}")"
 
-      # Hand the agent's WHOLE working tree to the trusted finalize job (not a diff or
-      # a file list) so finalize re-derives the changed set itself against its own
-      # pristine clone and trusts NO agent-provided metadata. include-hidden-files is
-      # MANDATORY: without it .github/, .node-version, .trunk/ etc. would be absent
-      # from the download and read as DELETED in finalize's diff, false-refusing every
-      # run. Do NOT add `pnpm install` to this job — it would pull node_modules into
-      # the tree (ballooning the artifact + making finalize's hashTree walk it).
+      # Package the agent's WHOLE working tree as a TARBALL so finalize re-derives
+      # the changed set itself against its own pristine clone, trusting NO
+      # agent-provided metadata. Why tar and not a raw upload: actions/upload-artifact
+      # DEREFERENCES symlinks into regular files, which would make finalize's diff see
+      # the repo's own tracked symlinks (the per-package CLAUDE.md -> AGENTS.md set)
+      # as phantom additions and refuse EVERY run. tar preserves symlinks (no -h/
+      # --dereference) AND hidden files, so the untarred tree in finalize matches the
+      # agent's actual tree. Exclude .git (agent-writable, and finalize's diff-trees
+      # skips it anyway). Do NOT add `pnpm install` to this job — node_modules would
+      # bloat the tarball and make finalize's hashTree walk it.
+      - name: Package working tree
+        if: ${{ matrix.entry.reconcile != true }}
+        run: |
+          set -euo pipefail
+          tar --exclude=./.git -czf "${RUNNER_TEMP}/worktree.tgz" \
+            -C "${GITHUB_WORKSPACE}" .
       - name: Hand off working tree to finalize
         if: ${{ matrix.entry.reconcile != true }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sentry-autofix-worktree-${{ matrix.entry.issue }}
-          path: ${{ github.workspace }}
-          include-hidden-files: true
+          path: ${{ runner.temp }}/worktree.tgz
           if-no-files-found: error
           retention-days: 1
 
@@ -465,7 +473,7 @@ jobs:
             echo "::error::matrix shortId '${SHORT_ID}' is not a valid Sentry SHORT-ID"; exit 1
           fi
 
-      # Download the agent's working tree (untrusted DATA — never executed). A
+      # Download the agent's working-tree TARBALL (untrusted DATA — never executed). A
       # missing artifact (the agent job failed pre-upload, e.g. the tripwire tripped)
       # makes this step fail, recording THIS entry incomplete without blocking the
       # other finalize entries.
@@ -474,7 +482,21 @@ jobs:
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sentry-autofix-worktree-${{ matrix.entry.issue }}
-          path: ${{ runner.temp }}/work
+          path: ${{ runner.temp }}/dl
+
+      # Unpack the tarball, restoring the agent's tree WITH symlinks intact (the
+      # tarball preserved them; a raw artifact upload would have dereferenced the
+      # repo's tracked symlinks into files and poisoned the diff). Plain extraction of
+      # DATA into a scratch dir — no git, no execution. The tarball only holds regular
+      # files (the agent has no symlink-creating tool) plus the repo's own tracked
+      # symlinks, whose targets are all in-tree; diff-trees skips symlinks and the
+      # byte-copy is `! -L`, so a hostile link could not reach the PR regardless.
+      - name: Unpack agent working tree
+        if: ${{ matrix.entry.reconcile != true }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/work"
+          tar -xzf "${RUNNER_TEMP}/dl/worktree.tgz" -C "${RUNNER_TEMP}/work"
 
       # Clone the repo at BASE_SHA into a PRISTINE location. Every post-download node
       # helper runs from here (never from the downloaded tree) AND it is the diff
@@ -495,7 +517,7 @@ jobs:
       # AUTHORITATIVE diff + guard (issue #1373). Re-derived here in the trusted job
       # against the DOWNLOADED tree, trusting no agent-provided list. Same code path
       # as before the split — diff-trees is pure filesystem reads (no git against the
-      # download), the guard refuses on zero / >3 files / forbidden path / symlink /
+      # download), the guard refuses on zero / too-many files / forbidden path / symlink /
       # credential-shaped content, all from the pristine clone with NO write token in
       # env, BEFORE the App token is ever minted. `--work` is lstat-only for the
       # symlink check (no dereference, no read, no git filter).
