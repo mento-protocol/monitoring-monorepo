@@ -53,6 +53,14 @@ export function extractTurboPrewarmCommands(gateOutput) {
   return commands;
 }
 
+export function extractTurboCacheDir(gateOutput) {
+  for (const line of gateOutput.split(/\r?\n/)) {
+    const match = line.match(/^Turbo cache dir: (.+)$/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
 export function isDashboardNextWorkspaceCommand(command) {
   const commandWithoutEnvironment = command.replace(
     /^(?:[A-Z0-9_]+=[^\s]+ )+/,
@@ -336,6 +344,19 @@ async function main() {
 
   const commands = extractTurboPrewarmCommands(gateResult.stdout ?? "");
   const packageScriptRisk = hasPackageScriptRisk(gateResult.stdout ?? "");
+
+  // The quality gate resolves the shared Turbo cache dir (issue #1411) inside
+  // its own shell, so that export never reaches this Node parent — the gate ran
+  // only as a child to produce the dry-run plan. Mirror the gate by reading the
+  // "Turbo cache dir:" line it printed and applying the same value to the Turbo
+  // commands we spawn, so prewarm writes the same cache the gate later reads.
+  // The line is absent when the gate fell back to Turbo's per-worktree default
+  // (caller opt-out or unwritable home); then we leave TURBO_CACHE_DIR unset and
+  // both sides fall back identically.
+  const turboCacheDir = extractTurboCacheDir(gateResult.stdout ?? "");
+  if (turboCacheDir) {
+    process.env.TURBO_CACHE_DIR = turboCacheDir;
+  }
 
   console.log("Agent prewarm");
   console.log();

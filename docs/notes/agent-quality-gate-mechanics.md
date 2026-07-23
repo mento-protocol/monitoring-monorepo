@@ -690,6 +690,21 @@ instead of mapping a separate dashboard build command for size-limit checks.
 High-risk or cross-layer commands stay outside Turbo, including codegen,
 install, dep-cruiser, coverage floors, mutation baselines, and Terraform.
 
+The gate exports `TURBO_CACHE_DIR="$HOME/.cache/turbo-monitoring-monorepo"`
+before running any Turbo task (unless the caller already set `TURBO_CACHE_DIR`,
+or opted out with `AGENT_TURBO_SHARED_CACHE=0`), so every worktree shares one
+Turbo cache and a fresh per-PR worktree reuses warm entries instead of starting
+cold. The location is deliberately absent from the freshness stamp: Turbo
+restores an entry only on a content-addressed input-hash match, so the
+directory changes speed, never pass/fail. Turbo 2.9.x writes artifacts via
+temp file + atomic rename with PID-namespaced temp names, so concurrent gates
+cannot corrupt the shared dir. When `HOME` is unset or the dir is unwritable
+(e.g. a sandbox allowlist excluding it), the gate leaves `TURBO_CACHE_DIR`
+unset and falls back to Turbo's per-worktree default; the `Turbo cache dir:`
+header prints only when sharing is active. The shared dir is pure cache and
+grows without bound — delete it any time to reclaim disk:
+`rm -rf "$HOME/.cache/turbo-monitoring-monorepo"`. Refs GitHub issue 1411.
+
 ## Common local-gate traps
 
 - `codespell` flags short variable names that match common abbreviations (e.g. a two-letter loop var that looks like a misspelling). Use descriptive names like `netData` to avoid this.
