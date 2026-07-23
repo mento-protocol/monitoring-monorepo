@@ -12,6 +12,7 @@
 //   - the top-level pools query failing
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { GraphQLClient } from "@/lib/graphql-fetch";
 
 const { mockDetectProbedStrategies } = vi.hoisted(() => ({
   mockDetectProbedStrategies: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock("@sentry/nextjs", () => ({
 
 vi.mock("@/lib/strategy-detection", () => ({
   detectProbedStrategies: mockDetectProbedStrategies,
+  RUNTIME_STRATEGY_PROBE_TIMEOUT_MS: 3000,
 }));
 
 vi.mock("@/lib/graphql-fetch", () => {
@@ -345,6 +347,95 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     expect(result.reservePoolIds).toEqual(new Set());
   });
 
+  it("Monad uses its indexed strategy registry without issuing fallback RPC probes", async () => {
+    const pool = makePool("143-0xstrategy-registry", {
+      chainId: 143,
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    });
+    installGraphQLMock({
+      AllPoolsWithHealth: { Pool: [pool] },
+      AllActivePoolLiquidityStrategies: {
+        PoolLiquidityStrategy: [
+          {
+            poolId: pool.id,
+            strategyAddress: pool.rebalancerAddress,
+            kind: "RESERVE",
+          },
+        ],
+      },
+    });
+
+    const result = await fetchNetworkData(MONAD_NETWORK, WINDOWS);
+
+    expect(result.strategyError).toBeNull();
+    expect(result.reservePoolIds).toEqual(new Set([pool.id]));
+    expect(mockDetectProbedStrategies).not.toHaveBeenCalled();
+  });
+
+  it("Monad does not issue fallback RPC probes when its strategy registry transport fails", async () => {
+    const pool = makePool("143-0xstrategy-transport-fail", {
+      chainId: 143,
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    });
+    const err = new Error("strategy registry transport down");
+    installGraphQLMock({
+      AllPoolsWithHealth: { Pool: [pool] },
+      AllActivePoolLiquidityStrategies: reject(err),
+    });
+
+    const result = await fetchNetworkData(MONAD_NETWORK, WINDOWS);
+
+    expect(result.strategyError).toBe(err);
+    expect(result.reservePoolIds).toEqual(new Set());
+    expect(mockDetectProbedStrategies).not.toHaveBeenCalled();
+  });
+
+  it("Monad skips the schema-lag fallback when the registry used its probe budget", async () => {
+    const pool = makePool("143-0xstrategy-schema-lag-budget", {
+      chainId: 143,
+      rebalancerAddress: "0x000000000000000000000000000000000000d0d0",
+    });
+    let rejectRegistry!: (reason: unknown) => void;
+    const delayedSchemaLag = new Promise<Record<string, unknown>>(
+      (_resolve, rejectPromise) => {
+        rejectRegistry = rejectPromise;
+      },
+    );
+    let nowMs = 0;
+    const dateNow = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    installGraphQLMock({
+      AllPoolsWithHealth: { Pool: [pool] },
+      AllActivePoolLiquidityStrategies: delayedSchemaLag,
+    });
+
+    const resultPromise = fetchNetworkData(MONAD_NETWORK, WINDOWS);
+    await vi.waitFor(() => {
+      const requests = (
+        GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      expect(
+        requests.some(([arg]) =>
+          JSON.stringify(arg).includes("AllActivePoolLiquidityStrategies"),
+        ),
+      ).toBe(true);
+    });
+    nowMs = 2001;
+    rejectRegistry(
+      new Error(
+        "field 'PoolLiquidityStrategy' not found in type: 'query_root'",
+      ),
+    );
+
+    const result = await resultPromise;
+    dateNow.mockRestore();
+
+    expect(result.strategyError?.message).toBe(
+      "strategy-detection: schema-lag fallback skipped because its source budget was exhausted",
+    );
+    expect(result.reservePoolIds).toEqual(new Set());
+    expect(mockDetectProbedStrategies).not.toHaveBeenCalled();
+  });
+
   it("missing strategy registry schema falls back to legacy OLS and CDP rows", async () => {
     const rebalancer = "0x000000000000000000000000000000000000d0d0";
     const pool = makePool("42220-0xstrategy-schema-lag", {
@@ -533,5 +624,6 @@ describe("fetchNetworkData characterization — each source failing alone", () =
     expect(result.strategyError).toBe(err);
     expect(result.reservePoolIds).toEqual(new Set());
     expect(result.cdpPoolIds).toEqual(new Set());
+    expect(mockDetectProbedStrategies).toHaveBeenCalledTimes(1);
   });
 });
