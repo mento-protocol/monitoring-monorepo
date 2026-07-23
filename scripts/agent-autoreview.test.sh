@@ -684,9 +684,87 @@ if [[ "${AUTOREVIEW_TEST_FOCUS:-all}" == "suite" ]]; then
   run_autoreview_test_suite "$@"
   exit $?
 fi
+if [[ "${AUTOREVIEW_TEST_SIGNAL_DISPOSITIONS_RESET:-}" != "1" ]]; then
+  export AUTOREVIEW_TEST_SIGNAL_DISPOSITIONS_RESET=1
+  exec /usr/bin/perl -e \
+    '$SIG{HUP} = "DEFAULT"; $SIG{INT} = "DEFAULT"; $SIG{TERM} = "DEFAULT"; exec @ARGV; die "exec failed: $!\n";' \
+    /bin/bash "$0" "$@"
+fi
 tmp_dir="$(/usr/bin/mktemp -d "$trusted_fixture_parent/agent-autoreview-test.XXXXXX")"
 tmp_dir="$(cd "$tmp_dir" && pwd -P)"
-trap 'rm -rf "$tmp_dir"' EXIT
+active_deadline_wrapper_pid=""
+active_deadline_state_dir=""
+deadline_fixture_registry_in_progress=0
+deadline_fixture_pending_exit=0
+
+handle_deadline_fixture_signal() {
+  local exit_code="$1"
+  if [[ "$deadline_fixture_registry_in_progress" -eq 1 ]]; then
+    deadline_fixture_pending_exit="$exit_code"
+    return 0
+  fi
+  trap '' HUP INT TERM
+  exit "$exit_code"
+}
+
+finish_deadline_fixture_registry_update() {
+  deadline_fixture_registry_in_progress=0
+  if [[ "$deadline_fixture_pending_exit" -ne 0 ]]; then
+    local exit_code="$deadline_fixture_pending_exit"
+    deadline_fixture_pending_exit=0
+    handle_deadline_fixture_signal "$exit_code"
+  fi
+}
+
+begin_deadline_fixture_registration() {
+  deadline_fixture_registry_in_progress=1
+}
+
+arm_deadline_fixture_cleanup() {
+  active_deadline_wrapper_pid="$1"
+  active_deadline_state_dir="$2"
+  printf '%s\n' "$active_deadline_wrapper_pid" \
+    >"$active_deadline_state_dir/wrapper.pid"
+  finish_deadline_fixture_registry_update
+}
+
+disarm_deadline_fixture_cleanup() {
+  local wrapper_pid="$1"
+  local state_dir="$2"
+  local status=0
+  deadline_fixture_registry_in_progress=1
+  if [[
+    "$active_deadline_wrapper_pid" == "$wrapper_pid" &&
+      "$active_deadline_state_dir" == "$state_dir"
+  ]]; then
+    active_deadline_wrapper_pid=""
+    active_deadline_state_dir=""
+  else
+    status=1
+  fi
+  finish_deadline_fixture_registry_update
+  return "$status"
+}
+
+cleanup_non_suite_autoreview_test() {
+  local status="$1"
+  trap - EXIT
+  trap '' HUP INT TERM
+  if [[
+    -n "$active_deadline_wrapper_pid" &&
+      -n "$active_deadline_state_dir"
+  ]] && declare -F cleanup_deadline_fixture_processes >/dev/null; then
+    cleanup_deadline_fixture_processes \
+      "$active_deadline_wrapper_pid" "$active_deadline_state_dir"
+  fi
+  rm -rf "$tmp_dir"
+  exit "$status"
+}
+
+trap 'cleanup_non_suite_autoreview_test "$?"' EXIT
+trap 'handle_deadline_fixture_signal 129' HUP
+trap 'handle_deadline_fixture_signal 130' INT
+trap 'handle_deadline_fixture_signal 143' TERM
 node_exec_path="$("$node_bin" -p 'process.execPath')"
 trusted_test_node_dir="$tmp_dir/trusted-test-node"
 mkdir "$trusted_test_node_dir"
@@ -3764,6 +3842,84 @@ GH
   expect_stderr_contains "gh pr list timed out after 1s"
 }
 
+assert_deadline_fixture_processes_stopped() {
+  local context="$1"
+  local leader_pid_file="$2"
+  local descendant_pid_file="$3"
+  local role
+  local pid_file
+  local pid
+  local failed=0
+
+  for role in leader descendant; do
+    if [[ "$role" == "leader" ]]; then
+      pid_file="$leader_pid_file"
+    else
+      pid_file="$descendant_pid_file"
+    fi
+    if [[ ! -s "$pid_file" ]]; then
+      printf '%s fake gh did not record its %s pid\n' "$context" "$role" >&2
+      failed=1
+      continue
+    fi
+    pid="$(cat "$pid_file")"
+    if ! wait_for_process_exit_or_zombie "$pid" 200; then
+      kill -KILL "$pid" 2>/dev/null || true
+      printf '%s left its fake gh %s alive: pid %s\n' \
+        "$context" "$role" "$pid" >&2
+      failed=1
+    fi
+  done
+
+  [[ "$failed" -eq 0 ]]
+}
+
+cleanup_deadline_fixture_processes() {
+  local wrapper_pid="$1"
+  local state_dir="$2"
+  local group_pid=""
+  local role
+  local pid_file
+  local pid
+
+  # run_with_deadline's signal trap deliberately grants its child one second
+  # before SIGKILL. Give that trap enough time to finish before forcing the
+  # wrapper group down, then sweep the independently-created lookup group as a
+  # fallback in case the trap itself was the failure under test.
+  if [[ "$wrapper_pid" =~ ^[1-9][0-9]*$ ]]; then
+    terminate_suite_process_group "$wrapper_pid" 30
+  fi
+  if [[ -s "$state_dir/group.pid" ]]; then
+    group_pid="$(cat "$state_dir/group.pid")"
+  fi
+  if [[ "$group_pid" =~ ^[1-9][0-9]*$ ]]; then
+    kill -TERM -- "-$group_pid" 2>/dev/null || true
+    sleep 0.1
+    kill -KILL -- "-$group_pid" 2>/dev/null || true
+  fi
+  for role in leader descendant; do
+    pid_file="$state_dir/$role.pid"
+    [[ -s "$pid_file" ]] || continue
+    pid="$(cat "$pid_file")"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    kill -KILL "$pid" 2>/dev/null || true
+    wait_for_process_exit_or_zombie "$pid" 200 || true
+  done
+}
+
+wait_for_deadline_wrapper_exit() {
+  local context="$1"
+  local wrapper_pid="$2"
+  local state_dir="$3"
+
+  if wait_for_process_exit_or_zombie "$wrapper_pid" 300; then
+    return 0
+  fi
+  cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+  printf '%s wrapper did not exit within 15s\n' "$context" >&2
+  return 1
+}
+
 run_deadline_gh_lookup_kill_regression() {
   # Exercise the wrapper's own run_with_deadline (not the helper's spawnSync
   # timeout) through its real caller. Branch-mode bundle prep with no explicit
@@ -3774,8 +3930,16 @@ run_deadline_gh_lookup_kill_regression() {
   # whose --dry-run path resolves entirely through the helper's own timeout.
   local review_repo="$tmp_dir/deadline-gh-lookup-kill"
   local fake_bin="$tmp_dir/deadline-gh-lookup-kill-bin"
-  local bundle_dir="$tmp_dir/deadline-gh-lookup-kill-bundle"
-  local pid_file="$tmp_dir/deadline-gh-lookup-kill.pid"
+  local state_dir="$tmp_dir/deadline-gh-lookup-kill-state"
+  local deadline_tmp="$state_dir/tmp"
+  local bundle_dir="$state_dir/bundle"
+  local pid_file="$state_dir/leader.pid"
+  local descendant_pid_file="$state_dir/descendant.pid"
+  local wrapper_pid
+  local wrapper_status
+  local had_monitor=0
+  local launched=0
+  local capture_file=""
   init_review_repo "$review_repo"
   git -C "$review_repo" remote add origin \
     https://github.com/mento-protocol/monitoring-monorepo.git
@@ -3793,6 +3957,12 @@ if [[ "$1" == "pr" && "$2" == "list" ]]; then
   # than blocking on the child until the fake one-hour sleep elapses.
   trap '' TERM
   printf '%s\n' "$$" >"$AUTOREVIEW_FAKE_GH_PID_FILE"
+  # run_with_deadline backgrounds run_trusted_external as the process-group
+  # leader; its external gh executable is this script, so our parent is the
+  # exact group id the wrapper later signals.
+  printf '%s\n' "$PPID" >"$AUTOREVIEW_FAKE_GH_GROUP_PID_FILE"
+  /bin/bash -c 'trap "" TERM; while true; do sleep 1; done' &
+  printf '%s\n' "$!" >"$AUTOREVIEW_FAKE_GH_DESCENDANT_PID_FILE"
   while true; do
     sleep 1
   done
@@ -3805,60 +3975,282 @@ exit 82
 GH
   chmod +x "$fake_bin/gh"
 
+  mkdir -p "$deadline_tmp"
   : >"$stdout"
   : >"$stderr"
   : >"$pid_file"
+  : >"$descendant_pid_file"
+  : >"$state_dir/group.pid"
   local started_at
   started_at="$(date +%s)"
-  local status=0
+  begin_deadline_fixture_registration
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
   (
     cd "$review_repo"
-    env -i \
+    exec /usr/bin/perl -e \
+      '$SIG{INT} = "DEFAULT"; $SIG{TERM} = "DEFAULT"; exec @ARGV; die "exec failed: $!\n";' \
+      /usr/bin/env -i \
       "PATH=$fake_bin:$PATH" \
       "HOME=$HOME" \
-      "TMPDIR=${TMPDIR:-/tmp}" \
+      "TMPDIR=$deadline_tmp" \
       "AUTOREVIEW_FAKE_GH_PID_FILE=$pid_file" \
+      "AUTOREVIEW_FAKE_GH_GROUP_PID_FILE=$state_dir/group.pid" \
+      "AUTOREVIEW_FAKE_GH_DESCENDANT_PID_FILE=$descendant_pid_file" \
       "AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS=2" \
       "$adapter_wrapper" \
       --prepare-bundle-dir "$bundle_dir" \
       --mode branch \
       --engine local >"$stdout" 2>"$stderr"
-  ) || status=$?
-  cleanup_retained_test_command_runtimes
+  ) &
+  wrapper_pid=$!
+  arm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"
+  if [[ "$had_monitor" -eq 0 ]]; then
+    set +m
+  fi
+  for _ in {1..200}; do
+    capture_file="$(
+      find "$deadline_tmp" -mindepth 1 -maxdepth 1 -type f \
+        -name 'autoreview-deadline.*' -print -quit
+    )"
+    if [[
+      -s "$pid_file" &&
+        -s "$descendant_pid_file" &&
+        -s "$state_dir/group.pid" &&
+        -n "$capture_file"
+    ]]; then
+      launched=1
+      break
+    fi
+    if ! process_is_runnable "$wrapper_pid"; then
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$launched" -ne 1 ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'deadline expiry fixture did not reach its polling state\n' >&2
+    cat "$stderr" >&2
+    exit 1
+  fi
+  if ! wait_for_deadline_wrapper_exit \
+    "deadline expiry" "$wrapper_pid" "$state_dir"; then
+    exit 1
+  fi
+  set +e
+  wait "$wrapper_pid" 2>/dev/null
+  wrapper_status=$?
+  set -e
   local elapsed=$(($(date +%s) - started_at))
 
-  if [[ "$status" -eq 0 ]]; then
+  if [[ "$wrapper_status" -eq 0 ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
     printf 'hung gh pr list during PR detection unexpectedly succeeded\n' >&2
     exit 1
   fi
-  expect_stderr_contains "gh pr list timed out after 2s"
-  expect_stderr_contains "failed to inspect PR metadata for head branch feature"
   if [[ "$elapsed" -ge 60 ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
     printf 'run_with_deadline did not bound the hung gh lookup: took %ss\n' \
       "$elapsed" >&2
     exit 1
   fi
 
-  # The escalation must reach the whole process group: the SIGTERM-ignoring gh
-  # child is gone, not orphaned. Poll briefly because the group SIGKILL and the
-  # reparented child's reaping race with the wrapper's own exit.
-  local gh_pid
-  gh_pid="$(cat "$pid_file")"
-  if [[ -z "$gh_pid" ]]; then
-    printf 'fake gh never recorded its pid; the lookup call site was not reached\n' >&2
+  # The escalation must reach the whole process group: both the
+  # SIGTERM-ignoring gh leader and its persistent descendant are gone.
+  if ! assert_deadline_fixture_processes_stopped \
+    "deadline expiry" "$pid_file" "$descendant_pid_file"; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
     exit 1
   fi
-  local waited=0
-  while [[ "$waited" -lt 10 ]] && kill -0 "$gh_pid" 2>/dev/null; do
+  if [[ -e "$capture_file" ]] ||
+    find "$deadline_tmp" -mindepth 1 -maxdepth 1 -type f \
+      -name 'autoreview-deadline.*' -print -quit | grep -q .; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'deadline expiry left a capture file in %s\n' "$deadline_tmp" >&2
+    exit 1
+  fi
+  expect_stderr_contains "gh pr list timed out after 2s"
+  expect_stderr_contains "failed to inspect PR metadata for head branch feature"
+  cleanup_retained_test_command_runtimes
+  if ! disarm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"; then
+    printf 'deadline expiry fixture cleanup registry drifted\n' >&2
+    exit 1
+  fi
+}
+
+run_deadline_wrapper_signal_cleanup_regression() {
+  # A terminal interrupt reaches the wrapper's foreground process group, while
+  # run_with_deadline's hung command is in its own group. Exercise both traps
+  # and prove they reap that separate tree and unlink the stdout capture.
+  local review_repo="$tmp_dir/deadline-wrapper-signal"
+  local fake_bin="$tmp_dir/deadline-wrapper-signal-bin"
+  local signal_name
+  local expected_status
+  local state_dir
+  local deadline_tmp
+  local bundle_dir
+  local wrapper_stdout
+  local wrapper_stderr
+  local wrapper_pid
+  local wrapper_status
+  local signal_started_at
+  local signal_elapsed
+  local had_monitor
+  local launched
+  local capture_file
+  init_review_repo "$review_repo"
+  git -C "$review_repo" remote add origin \
+    https://github.com/mento-protocol/monitoring-monorepo.git
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c feature >/dev/null 2>&1
+  printf 'feature\n' >"$review_repo/feature.txt"
+  commit_review_repo "$review_repo" feature
+  mkdir "$fake_bin"
+  cat >"$fake_bin/gh" <<'GH'
+#!/usr/bin/env bash
+if [[ "$1" == "pr" && "$2" == "list" ]]; then
+  trap '' TERM INT
+  printf '%s\n' "$$" >"$AUTOREVIEW_FAKE_GH_STATE_DIR/leader.pid"
+  # The parent is run_with_deadline's backgrounded run_trusted_external group
+  # leader, so it is also the group id used by the wrapper's negative kill.
+  printf '%s\n' "$PPID" >"$AUTOREVIEW_FAKE_GH_STATE_DIR/group.pid"
+  /bin/bash -c 'trap "" TERM INT; while true; do sleep 1; done' &
+  printf '%s\n' "$!" >"$AUTOREVIEW_FAKE_GH_STATE_DIR/descendant.pid"
+  while true; do
     sleep 1
-    waited=$((waited + 1))
   done
-  if kill -0 "$gh_pid" 2>/dev/null; then
-    kill -KILL "$gh_pid" 2>/dev/null || true
-    printf 'SIGTERM-ignoring gh child survived the deadline: pid %s still alive\n' \
-      "$gh_pid" >&2
-    exit 1
-  fi
+fi
+if [[ "$1" == "repo" && "$2" == "view" ]]; then
+  printf '%s\n' '{"owner":{"login":"mento-protocol"}}'
+  exit 0
+fi
+exit 82
+GH
+  chmod +x "$fake_bin/gh"
+
+  for signal_name in TERM INT; do
+    if [[ "$signal_name" == "TERM" ]]; then
+      expected_status=143
+    else
+      expected_status=130
+    fi
+    state_dir="$tmp_dir/deadline-wrapper-signal-$signal_name-state"
+    deadline_tmp="$state_dir/tmp"
+    bundle_dir="$state_dir/bundle"
+    wrapper_stdout="$state_dir/stdout"
+    wrapper_stderr="$state_dir/stderr"
+    mkdir -p "$deadline_tmp"
+
+    had_monitor=0
+    case "$-" in
+      *m*) had_monitor=1 ;;
+    esac
+    begin_deadline_fixture_registration
+    set -m
+    (
+      cd "$review_repo"
+      exec /usr/bin/perl -e \
+        '$SIG{INT} = "DEFAULT"; $SIG{TERM} = "DEFAULT"; exec @ARGV; die "exec failed: $!\n";' \
+        /usr/bin/env -i \
+        "PATH=$fake_bin:$PATH" \
+        "HOME=$HOME" \
+        "TMPDIR=$deadline_tmp" \
+        "AUTOREVIEW_FAKE_GH_STATE_DIR=$state_dir" \
+        "AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS=10" \
+        "$adapter_wrapper" \
+        --prepare-bundle-dir "$bundle_dir" \
+        --mode branch \
+        --engine local >"$wrapper_stdout" 2>"$wrapper_stderr"
+    ) &
+    wrapper_pid=$!
+    arm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"
+    if [[ "$had_monitor" -eq 0 ]]; then
+      set +m
+    fi
+
+    launched=0
+    capture_file=""
+    for _ in {1..200}; do
+      capture_file="$(
+        find "$deadline_tmp" -mindepth 1 -maxdepth 1 -type f \
+          -name 'autoreview-deadline.*' -print -quit
+      )"
+      if [[
+        -s "$state_dir/leader.pid" &&
+          -s "$state_dir/descendant.pid" &&
+          -s "$state_dir/group.pid" &&
+          -n "$capture_file"
+      ]]; then
+        launched=1
+        break
+      fi
+      if ! process_is_runnable "$wrapper_pid"; then
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$launched" -ne 1 ]]; then
+      cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+      printf '%s wrapper deadline fixture did not reach its polling state\n' \
+        "$signal_name" >&2
+      cat "$wrapper_stderr" >&2
+      exit 1
+    fi
+
+    signal_started_at="$(date +%s)"
+    if ! kill "-$signal_name" -- "-$wrapper_pid"; then
+      cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+      printf 'failed to interrupt wrapper group %s with %s\n' \
+      "$wrapper_pid" "$signal_name" >&2
+      exit 1
+    fi
+    if ! wait_for_deadline_wrapper_exit \
+      "$signal_name interruption" "$wrapper_pid" "$state_dir"; then
+      exit 1
+    fi
+    set +e
+    wait "$wrapper_pid" 2>/dev/null
+    wrapper_status=$?
+    set -e
+    signal_elapsed=$(($(date +%s) - signal_started_at))
+
+    if [[ "$signal_elapsed" -ge 8 ]]; then
+      cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+      printf '%s-interrupted wrapper deferred cleanup for %ss\n' \
+        "$signal_name" "$signal_elapsed" >&2
+      exit 1
+    fi
+    if [[ "$wrapper_status" -ne "$expected_status" ]]; then
+      cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+      printf '%s-interrupted wrapper exited %s instead of %s\n' \
+        "$signal_name" "$wrapper_status" "$expected_status" >&2
+      cat "$wrapper_stderr" >&2
+      exit 1
+    fi
+    if ! assert_deadline_fixture_processes_stopped \
+      "$signal_name interruption" \
+      "$state_dir/leader.pid" \
+      "$state_dir/descendant.pid"; then
+      cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+      exit 1
+    fi
+    if [[ -e "$capture_file" ]] ||
+      find "$deadline_tmp" -mindepth 1 -maxdepth 1 -type f \
+        -name 'autoreview-deadline.*' -print -quit | grep -q .; then
+      cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+      printf '%s interruption left a deadline capture file in %s\n' \
+        "$signal_name" "$deadline_tmp" >&2
+      exit 1
+    fi
+    cleanup_retained_test_command_runtimes "$wrapper_stderr"
+    if ! disarm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"; then
+      printf '%s fixture cleanup registry drifted\n' "$signal_name" >&2
+      exit 1
+    fi
+  done
 }
 
 run_target_selection_drift_regression() {
@@ -6025,6 +6417,7 @@ run_target_selection_family() {
   run_pr_base_detection_regression
   run_gh_lookup_timeout_regression
   run_deadline_gh_lookup_kill_regression
+  run_deadline_wrapper_signal_cleanup_regression
   run_target_selection_drift_regression
   run_dry_run_unresolved_ref_regression
   run_dirty_source_drift_regression
