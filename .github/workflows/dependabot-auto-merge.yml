@@ -14,7 +14,8 @@ name: Dependabot auto-merge
 # The job only runs `gh pr merge --auto` — no checkout, no execution against
 # the PR head — so `pull_request` is safe to use even though Dependabot PRs
 # carry external commits. The merge itself still waits for every required
-# status check in the branch ruleset (CI / Vercel / Code Quality).
+# status check in the branch ruleset (CI / Vercel / Vercel Preview Comments /
+# Code Quality).
 #
 # Workflow-injection hygiene: every PR-derived value is passed through env:
 # instead of interpolated into run: scripts (see

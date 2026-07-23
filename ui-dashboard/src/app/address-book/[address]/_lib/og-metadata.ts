@@ -70,9 +70,8 @@ export async function buildAddressOgMetadata(
   // Privacy gate: this runs without a session and the resulting
   // <title>/<meta> tags are visible to any crawler / shared-link
   // preview that sees this URL. Labels default to private (`isPublic !==
-  // true`) and reports are NEVER public per AGENTS.md, so include label
-  // info ONLY when the user explicitly flagged the entry as public, and
-  // never expose report titles.
+  // true`), so include label info ONLY when the user explicitly flagged the
+  // entry as public. Report content is outside this metadata surface.
   const label = await withTimeout(
     getLabel(address),
     METADATA_FETCH_TIMEOUT_MS,

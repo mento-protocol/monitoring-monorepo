@@ -3,7 +3,7 @@ title: Dynamic Route Metadata and Private Data Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: checklist
 scope: ui-dashboard
 review_interval_days: 90
@@ -47,7 +47,8 @@ export async function generateMetadata({ params }): Promise<Metadata> {
 }
 ```
 
-Reports are NEVER public per AGENTS rules — never include report content in metadata regardless of any flag. Labels default to private (`isPublic !== true`).
+Do not include report content in metadata. `isPublic` gates label fields only;
+return generic metadata unless the label is explicitly public.
 
 ## 2. `revalidate = 0` when data is access-controlled
 

@@ -3,7 +3,7 @@ title: CI Workflow Gates Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
