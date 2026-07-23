@@ -59,15 +59,17 @@ gh pr list --head <current-branch> --state open \
 ```
 
 Do not discard lookup errors. A failed GitHub query is not evidence that no PR
-exists. Verify the resolved PR URL belongs to this repository. For an existing
-PR, identify a git remote whose URL matches the PR's base repository and carry
-its name as `BASE_REMOTE`; identify the head repository separately as
-`HEAD_REMOTE` and carry `headRefName` as `HEAD_REF`.
+exists. Verify the resolved PR URL belongs to this repository and carry its
+base slug as `BASE_REPO`. For an existing PR, identify a git remote whose URL
+matches that base repository and carry its name as `BASE_REMOTE`; identify the
+head repository separately as `HEAD_REMOTE`, carry `baseRefName` as `BASE_REF`,
+and carry `headRefName` as `HEAD_REF`. With no existing PR, verify `origin`
+matches the current repository, then set `BASE_REMOTE=origin`,
+`HEAD_REMOTE=origin`, `BASE_REF=main`, and `HEAD_REF` to the current branch.
 
 3. Fetch the resolved base:
 
 ```bash
-BASE_REF=<baseRefName> # use main only when there is no existing PR
 git fetch "$BASE_REMOTE" "$BASE_REF:refs/remotes/$BASE_REMOTE/$BASE_REF"
 if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
   git fetch --unshallow "$BASE_REMOTE"
@@ -141,7 +143,7 @@ git status --short
 git add <intended-files>
 git commit -m "<prefix>: <summary>"
 # New PR branch:
-git push -u origin HEAD
+git push -u "$HEAD_REMOTE" HEAD:"$HEAD_REF"
 
 # Existing PR branch:
 git push "$HEAD_REMOTE" HEAD:"$HEAD_REF"
@@ -203,15 +205,16 @@ Include this marker when practical:
 
 ## Post-Push
 
-Run the shared readiness probe before calling the PR clean:
+Follow the operating card's Babysit and Ready-state steps. Before calling the PR
+clean, run the feedback projection first and the readiness projection second:
 
 ```bash
-pnpm pr:ready-state --pr <number> --repo <BASE_OWNER/REPO> --json
+pnpm --silent pr:feedback-state --pr <number> --repo "$BASE_REPO" --json
+pnpm pr:ready-state --pr <number> --repo "$BASE_REPO" --json
 ```
 
-Always pass `--repo` bound to the base repository: without it the probe infers
-the repo from the checkout, which inspects the wrong same-number PR on fork
-PRs or repo-bound checkouts.
+Always bind `--repo` to the base repository; checkout inference can inspect the
+wrong same-number PR on fork PRs or repo-bound checkouts.
 
 In a Claude cloud session without the Surface Detection capability exception,
 the probe cannot run; use the `babysit-pr` skill's cloud watch loop (MCP

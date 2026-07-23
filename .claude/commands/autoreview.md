@@ -22,7 +22,7 @@ third review-triggered patch cycle. A clean source review is not test, browser,
 generated-artifact, CLI/API, or runtime proof, so retain every applicable gate.
 If an autoreview runtime change triggers the owning adapter's self-review
 refusal, keep it intact and follow the trusted pre-change sequence in the owner
-note. For PR work, finish with
-`pnpm pr:ready-state --pr <number> --repo <owner/name> --json`. When a Claude
-cloud surface cannot run that probe, follow the MCP-emulation contract in the
-`babysit-pr` skill and `docs/notes/github-tooling-surfaces.md`.
+note. For PR work, finish the Babysit and Ready-state steps in
+`docs/notes/pr-operating-card.md`. When a Claude cloud surface cannot run the
+probes, follow the MCP-emulation contract in the `babysit-pr` skill and
+`docs/notes/github-tooling-surfaces.md`.
