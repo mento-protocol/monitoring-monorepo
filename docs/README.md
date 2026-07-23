@@ -29,7 +29,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md) | Forensic Report Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-06-15 |
 | [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md) | 0xADDRESS_CASE_PRESERVED — Display Name (persona/ENS if known) | unmanaged / unmanaged | skill / repo-wide | unowned | 90d |
 | [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md) | Monorepo Import Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-05-26 |
-| [`.agents/skills/ship/SKILL.md`](../.agents/skills/ship/SKILL.md) | Ship Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`.agents/skills/ship/SKILL.md`](../.agents/skills/ship/SKILL.md) | Ship Skill | canonical / active | skill / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`.claude/agents/dashboard-explorer.md`](../.claude/agents/dashboard-explorer.md) | Dashboard Explorer | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
 | [`.claude/agents/indexer-explorer.md`](../.claude/agents/indexer-explorer.md) | Indexer Explorer | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
 | [`.claude/agents/infra-reader.md`](../.claude/agents/infra-reader.md) | Infra Reader | unmanaged / unmanaged | role / repo-wide | unowned | 180d |
@@ -159,6 +159,8 @@ the rules in [`context-standards.md`](context-standards.md).
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
+| [`.claude/projects/-Users-chapati-code-mento-monitoring-monorepo/memory/f_redteam_workflow_hardens_validators.md`](../.claude/projects/-Users-chapati-code-mento-monitoring-monorepo/memory/f_redteam_workflow_hardens_validators.md) | f_redteam_workflow_hardens_validators.md | unmanaged / unmanaged | reference / repo-wide | unowned | 180d |
+| [`.claude/projects/-Users-chapati-code-mento-monitoring-monorepo/memory/p_sentry_autofix_activation_gates.md`](../.claude/projects/-Users-chapati-code-mento-monitoring-monorepo/memory/p_sentry_autofix_activation_gates.md) | p_sentry_autofix_activation_gates.md | unmanaged / unmanaged | reference / repo-wide | unowned | 180d |
 | [`aegis/README.md`](../aegis/README.md) | Aegis | canonical / active | reference / aegis | eng | 90d; verified 2026-07-17 |
 | [`alerts/infra/channels/slack-channels/README.md`](../alerts/infra/channels/slack-channels/README.md) | Slack Channels | canonical / active | reference / alerts/infra/channels/slack-channels | eng | 90d; verified 2026-07-17 |
 | [`alerts/infra/oncall-announcer/README.md`](../alerts/infra/oncall-announcer/README.md) | On-call Announcer | canonical / active | reference / alerts/infra/oncall-announcer | eng | 90d; verified 2026-07-17 |

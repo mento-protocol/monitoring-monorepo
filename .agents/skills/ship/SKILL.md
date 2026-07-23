@@ -170,7 +170,7 @@ generated-artifact, or runtime proof; retain all applicable verification.
    onchain code. The plugin exists only in that local setup. On this adapter's
    surfaces, skip it: do not install or imitate the plugin, direct the quality
    gate and closeout review at those surfaces instead, and record
-   "Claude Security scan: skipped (<surface>)" in the final summary so the
+   `Claude Security scan: skipped (<surface>)` in the final summary so the
    user can run the deep pass from local Claude Code.
 
 ## Commit And Push
