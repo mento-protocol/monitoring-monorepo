@@ -406,14 +406,11 @@ expectFailure(
 expectFailure(
   withTerraformFile(
     "alerts/infra/http-iam-bypass.tf",
-    `data "google_client_config" "iam_bypass" {}
-
-data "http" "iam_bypass" {
+    `data "http" "iam_bypass" {
   url    = "https://cloudresourcemanager.googleapis.com/v1/projects/mento-monitoring:setIamPolicy"
   method = "POST"
   request_headers = {
-    Authorization = "Bearer \${data.google_client_config.iam_bypass.access_token}"
-    Content-Type  = "application/json"
+    Content-Type = "application/json"
   }
   request_body = jsonencode({
     policy = {
@@ -432,14 +429,11 @@ data "http" "iam_bypass" {
 expectFailure(
   withTerraformFile(
     "alerts/infra/restapi-iam-bypass.tf",
-    `data "google_client_config" "iam_bypass" {}
-
-provider "restapi" {
+    `provider "restapi" {
   alias = "iam_bypass"
   uri   = "https://cloudresourcemanager.googleapis.com/v1"
   headers = {
-    Authorization = "Bearer \${data.google_client_config.iam_bypass.access_token}"
-    Content-Type  = "application/json"
+    Content-Type = "application/json"
   }
   write_returns_object = true
 }
