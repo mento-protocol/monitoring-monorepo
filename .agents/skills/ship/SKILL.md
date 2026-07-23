@@ -5,7 +5,7 @@ title: Ship Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -44,24 +44,43 @@ gh→MCP mapping lives in
 ## Preflight
 
 1. Read root `AGENTS.md` and the package `AGENTS.md` files for changed paths.
-2. Fetch the base branch:
-
-```bash
-git fetch origin main:refs/remotes/origin/main
-if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
-  git fetch --unshallow origin
-  git fetch origin main:refs/remotes/origin/main
-fi
-```
-
-3. Inspect branch, dirty state, commits, and PR state:
+2. Resolve the target before fetching or pushing. If the user supplied a PR
+   URL/number, pass that exact value to `gh pr view`; it overrides local branch
+   discovery. Otherwise query open PRs for the current branch and require zero
+   or one result:
 
 ```bash
 git branch --show-current
+gh pr view <explicit-pr-url-or-number> \
+  --json number,url,state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner
+# No explicit target:
+gh pr list --head <current-branch> --state open \
+  --json number,url,state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner
+```
+
+Do not discard lookup errors. A failed GitHub query is not evidence that no PR
+exists. Verify the resolved PR URL belongs to this repository. For an existing
+PR, identify a git remote whose URL matches the PR's base repository and carry
+its name as `BASE_REMOTE`; identify the head repository separately as
+`HEAD_REMOTE` and carry `headRefName` as `HEAD_REF`.
+
+3. Fetch the resolved base:
+
+```bash
+BASE_REF=<baseRefName> # use main only when there is no existing PR
+git fetch "$BASE_REMOTE" "$BASE_REF:refs/remotes/$BASE_REMOTE/$BASE_REF"
+if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+  git fetch --unshallow "$BASE_REMOTE"
+  git fetch "$BASE_REMOTE" "$BASE_REF:refs/remotes/$BASE_REMOTE/$BASE_REF"
+fi
+```
+
+4. Inspect dirty state, commits, and ancestry against that exact base:
+
+```bash
 git status --short
-git log origin/main..HEAD --oneline
-git merge-base --is-ancestor origin/main HEAD
-gh pr view --json number,url,state,isDraft,baseRefName 2>/dev/null
+git log "$BASE_REMOTE/$BASE_REF"..HEAD --oneline
+git merge-base --is-ancestor "$BASE_REMOTE/$BASE_REF" HEAD
 ```
 
 In a Claude cloud session, replace the `gh pr view` lookup with
@@ -69,12 +88,15 @@ In a Claude cloud session, replace the `gh pr view` lookup with
 PR number is known); the git commands run unchanged.
 
 Hard stop on `main` or `master`. The shallow-repository guard prevents hosted
-depth-1 checkouts from producing a false ancestry failure. If
-`git merge-base --is-ancestor origin/main HEAD` still fails, the branch is
-missing commits from current `origin/main`; merge or rebase before pushing
-unless you intentionally created a fresh branch from that same fetched base. If
-unrelated dirty changes are mixed with the intended scope, stop and ask before
-staging anything.
+depth-1 checkouts from producing a false ancestry failure. If an open PR exists,
+its repository, `headRefName`, and `headRefOid` are the push target and starting
+commit. Before creating the ship commit, verify local `HEAD` equals that OID.
+If intended commits already exist locally, require the PR OID to be their
+ancestor and inspect the intervening range. Never infer the target from the
+local branch name. If the branch is missing current base commits, merge
+`"$BASE_REMOTE/$BASE_REF"` into an already-published PR branch; rebase is only
+acceptable before first publication. If unrelated dirty changes are mixed with
+the intended scope, stop and ask before staging anything.
 
 ## Review And Validation
 
@@ -93,65 +115,11 @@ pnpm agent:quality-gate --run
 pnpm agent:autoreview
 ```
 
-The repo-local helper reviews the complete branch-local target without
-truncation. Direct semantic engines fail closed if the target needs more than
-one prompt; prepared bundles retain bounded lossless passes that one
-fresh-context reviewer must inspect completely.
-Semantic engines run from an isolated empty workspace with restricted project
-configuration and environment; sensitive inputs fail closed. Direct
-supplemental evidence must be repo-relative, except for adapter-generated PR
-feedback and protected-main checklist copies inside its trusted bundle
-directory. The owning-checkout default semantic helper and automatic feedback
-run Node modules pinned from that same `origin/main` object, not a PR-selected
-base, mutable worktree, or reviewed package scripts; wrapper-owned Node launches
-discard `NODE_OPTIONS` and `NODE_PATH`.
-Reviewer web search is off by default and requires explicit `--web-search`.
-A quiet reviewer emits a
-60-second heartbeat. Do not pass the removed `--parallel-tests` option; the
-quality gate owns test execution.
-
-If direct semantic execution refuses a multi-pass target, run
-`pnpm agent:autoreview --prepare-bundle-dir <dir>` with a directory outside the
-worktree whose parent already exists. Every canonical parent ancestor must be
-owned by the current user or root; group/other-writable ancestors require
-sticky-bit protection. On macOS, write-granting ACLs on parent ancestors or
-bundle entries fail preparation or verification. Have one fresh-context reviewer
-inspect every pass listed by the bundle index. Run
-`pnpm agent:autoreview --verify-bundle-dir <dir>` immediately before review and
-retain its printed digest outside the bundle. After review, rerun with
-`--expected-bundle-manifest <retained-digest>`; both checks must pass with the
-same digest.
-
-If the change edits the executable autoreview runtime and the owning checkout
-refuses with `executable autoreview runtime differs from its trusted pre-change
-snapshot`, keep that refusal intact. From the reviewed checkout, invoke a clean,
-detached, protocol-compatible wrapper/helper from the last independently
-reviewed pre-change commit (or protected main when it is compatible):
-
-```bash
-reviewed_checkout=/absolute/path/to/reviewed-checkout
-trusted_checkout=/absolute/path/to/trusted-pre-change-checkout
-bundle_parent=/tmp/autoreview-runtime-review
-mkdir -p "$bundle_parent"
-(
-  cd "$reviewed_checkout"
-  AUTOREVIEW_HELPER="$trusted_checkout/scripts/agent-autoreview.mjs" \
-    "$trusted_checkout/scripts/agent-autoreview.sh" \
-    --prepare-bundle-dir "$bundle_parent/context-bundle" \
-    --mode auto --base origin/main --feedback-pr <number>
-)
-"$trusted_checkout/scripts/agent-autoreview.sh" \
-  --verify-bundle-dir "$bundle_parent/context-bundle"
-```
-
-Use that same trusted wrapper for the bound post-review manifest check. Never
-point either path at the runtime-changing checkout, and never invoke that
-checkout's package scripts to bootstrap the review.
-
-Inside an active Codex sandbox, the adapter may choose the local deterministic
-engine only when no engine was explicitly selected. An explicitly selected
-unavailable semantic engine, or a missing repo helper, is a hard stop: report
-the blocker rather than silently substituting local or current-session review.
+`docs/notes/agent-quality-gate-mechanics.md` owns engine selection, trusted
+bundle preparation/verification, runtime-change refusal handling, and the
+source-review boundary. Follow that note instead of copying its volatile
+adapter internals into this skill. An explicitly selected unavailable engine or
+missing helper is a hard stop.
 
 Verify accepted findings before editing. Classify scope growth as in-scope,
 follow-up, or stop, create an issue before deferring valid follow-up work, warn
@@ -172,10 +140,17 @@ change (`fix:`, `feat:`, `docs:`, `chore:`, `test:`, or `refactor:`).
 git status --short
 git add <intended-files>
 git commit -m "<prefix>: <summary>"
+# New PR branch:
 git push -u origin HEAD
+
+# Existing PR branch:
+git push "$HEAD_REMOTE" HEAD:"$HEAD_REF"
 ```
 
-Never force-push or amend unless the user explicitly requests it.
+For an existing PR, the remote must resolve to the PR's `headRepositoryOwner`
+and `headRepository`; do not assume it is `origin`. Re-read the PR after the
+push and require `headRefOid == git rev-parse HEAD` before babysitting. Never
+force-push or amend unless the user explicitly requests it.
 
 ## PR
 
