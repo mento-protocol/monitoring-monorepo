@@ -3,7 +3,7 @@ title: Aegis Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-05-20
+last_verified: 2026-07-23
 doc_type: agent-instructions
 scope: aegis
 review_interval_days: 90
