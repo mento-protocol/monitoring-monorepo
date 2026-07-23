@@ -182,8 +182,8 @@ echo "==> Configuring GitHub integration mode"
 # (empirical map: docs/notes/github-tooling-surfaces.md). The GitHub MCP server
 # is the supported API path in these sessions. The token-gated gh install below
 # is kept as a best-effort for environment variants whose proxy does serve repo
-# API paths; the capability test that matters is a repo-scoped call like
-# `gh api repos/<owner>/<repo>`, never `gh auth status`.
+# API paths; the capability gate that matters is REST + GraphQL + --slurp
+# (see docs/notes/github-tooling-surfaces.md), never `gh auth status`.
 #
 # Install source is the official github.com release tarball, NOT apt: the default
 # Ubuntu build is gh 2.45.0, which lacks `gh api --slurp` that pr:ready-state
@@ -232,8 +232,10 @@ if [[ -n "$GH_API_TOKEN" ]]; then
     echo "WARN: pr:ready-state needs --slurp; using the GitHub MCP server for PR/API work meanwhile." >&2
   elif gh auth status >/dev/null 2>&1; then
     echo "gh is installed and 'gh auth status' passes — but that only proves /user is served."
-    echo "Before relying on gh-backed flows (pr:ready-state), verify a repo-scoped call works:"
+    echo "Before relying on gh-backed flows (pr:ready-state), verify the full capability gate:"
     echo "    gh api repos/<owner>/<repo> --jq .full_name"
+    echo "    gh api graphql -f query='query{viewer{login}}'"
+    echo "    gh api --help | grep -- --slurp"
     echo "In Claude cloud sessions the credential proxy 403s /repos/* and GraphQL regardless of"
     echo "GH_TOKEN; if that call fails, use the GitHub MCP server (docs/notes/github-tooling-surfaces.md)."
     echo "Reminder: pass --repo <owner/name> (or set GH_REPO) — the git remote is the local proxy, not a GitHub host."

@@ -31,7 +31,8 @@ list for review.
    `docs-garden-issue:v1` and `docs-garden-packet:v1` markers. Confirm all
    eight Agent Task sections and the complete generated planner packet exist.
 2. Claim the issue through `pnpm issue:claim` before semantic edits; in a
-   Claude cloud session use the MCP workboard fallback in
+   Claude cloud session without the capability gate use the MCP workboard
+   fallback in
    [`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)
    (label transition, claim comment, `issue:board sync` handoff). Do not
    overwrite a packet already labeled `needs-grooming`, `agent-active`, or
