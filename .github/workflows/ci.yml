@@ -10,12 +10,18 @@ name: CI
 # .github/workflows/claude.yml — update via Dependabot
 # (.github/dependabot.yml).
 #
-# autofix-ci-trust: the only repository secret here is CODECOV_TOKEN, and it
-# is step-scoped to the pinned codecov-action's `with: token` — it is never in
-# a job/workflow `env:` and never in the environment of a step that executes
-# PR-head code. Every checkout also sets `persist-credentials: false`, so no
-# checkout token sits in .git/config while PR code (incl. a machine-authored
-# sentry-autofix diff) builds or tests. See check-autofix-ci-trust.mjs.
+# autofix-ci-trust: the only repository secret here is CODECOV_TOKEN. It is
+# step-scoped to the pinned codecov-action's `with: token`, but each package
+# quality job runs the PR's build and tests EARLIER in the SAME job, and that
+# PR-head code can write $GITHUB_ENV/$GITHUB_PATH to influence the later upload
+# step — so step-scoping alone does not isolate the token from PR-controlled
+# code (issue #1453). Therefore every codecov upload step additionally carries
+# `if: !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')`: on a
+# machine-authored sentry-autofix/* PR the upload step never runs, so
+# CODECOV_TOKEN is never interpolated and never enters the runner while the
+# autofix diff builds or tests. Every checkout also sets
+# `persist-credentials: false`, so no checkout token sits in .git/config either.
+# See check-autofix-ci-trust.mjs.
 
 on:
   pull_request:
@@ -346,6 +352,7 @@ jobs:
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/config test:coverage
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: config
@@ -464,6 +471,7 @@ jobs:
           path: ui-dashboard/test-results/
           retention-days: 7
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: ui-dashboard
@@ -547,6 +555,7 @@ jobs:
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/indexer-envio test:coverage
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: indexer-envio
@@ -593,6 +602,7 @@ jobs:
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/metrics-bridge test:coverage
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: metrics-bridge
@@ -630,6 +640,7 @@ jobs:
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/integration-probes test:coverage
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: integration-probes
@@ -712,12 +723,14 @@ jobs:
           find alerts/infra -name '*.sh' -not -path '*/node_modules/*' -print0 \
             | xargs -0 -I {} bash -n {}
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: alerts-onchain-event-handler
           directory: alerts/infra/onchain-event-handler/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: alerts-oncall-announcer
@@ -777,6 +790,7 @@ jobs:
           find governance-watchdog/infra/quicknode-filter-functions -name '*.js' -print0 \
             | xargs -0 -I {} node --check {}
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: governance-watchdog
@@ -880,6 +894,7 @@ jobs:
         working-directory: aegis
         run: forge test -vvv
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: aegis
