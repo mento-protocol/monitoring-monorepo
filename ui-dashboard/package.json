@@ -34,7 +34,7 @@
     "@web3icons/react": "^4.1.17",
     "graphql": "^16.13.1",
     "next": "16.2.11",
-    "next-auth": "5.0.0-beta.30",
+    "next-auth": "5.0.0-beta.32",
     "plotly.js": "npm:plotly.js-basic-dist-min@3.7.0",
     "plotly.js-basic-dist-min": "^3.7.0",
     "react": "19.2.6",

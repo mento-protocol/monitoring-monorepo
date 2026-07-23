@@ -18,8 +18,8 @@ repo commands.
 
 ```bash
 # Install all deps (gated: pnpm refuses registry versions <3 days old via
-# minimumReleaseAge in pnpm-workspace.yaml; @mento-protocol/* is exempted.
-# Frozen-lockfile installs are unaffected.)
+# minimumReleaseAge in pnpm-workspace.yaml, including new frozen-lockfile
+# entries; @mento-protocol/* and reviewed security releases are exempted.)
 pnpm install
 
 # Indexer

@@ -162,11 +162,12 @@ pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentr
 
 > **Supply-chain gate:** `pnpm-workspace.yaml` sets `minimumReleaseAge: 4320`
 > (3 days), so pnpm refuses to resolve registry versions younger than 3
-> days. Frozen-lockfile installs (CI, `./scripts/setup.sh`) are unaffected.
-> If you hit `ERR_PNPM_PACKAGE_TOO_YOUNG` — during `pnpm add`, a
-> lockfile-updating `pnpm install`, or `pnpm update` — pin to a slightly
+> days. Frozen-lockfile installs also verify new lockfile entries against this
+> policy. If you hit `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` or
+> `ERR_PNPM_PACKAGE_TOO_YOUNG` during an install or update, pin to a slightly
 > older version or wait out the gate. For urgent CVE patches that need a
-> brand-new release immediately, override per-invocation by appending
+> brand-new release immediately, add a narrow, reviewed
+> `minimumReleaseAgeExclude` entry and override lockfile generation by appending
 > `--config.minimumReleaseAge=0` to the failing command (e.g.
 > `pnpm add --config.minimumReleaseAge=0 <pkg>` or
 > `pnpm update --config.minimumReleaseAge=0 <pkg>`). `@mento-protocol/*`
