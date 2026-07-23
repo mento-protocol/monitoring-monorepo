@@ -103,54 +103,37 @@ notification boundaries live in
 
 ## Terraform CI identities
 
-[ADR 0047](adr/0047-separated-terraform-ci-identities.md) defines four
-authentication lanes. The bootstrap creates replacement chains and routes
-production applies to selectors populated by its approved platform apply. A
-routing PR later switches trusted-main refresh and drift; a final PR removes
-the legacy impersonation grant after live proof, queue drain, and IAM audit.
-Both GitHub WIF providers require the repository slug plus immutable repository
-ID `1172025835`; a recycled slug cannot enter either pool.
+[ADR 0047](adr/0047-separated-terraform-ci-identities.md) defines four lanes.
+Bootstrap routes applies after its approved platform apply; routing later
+switches trusted-main refresh and drift; final removal follows live proof,
+queue drain, and IAM audit. Both WIF providers require the repository slug and
+immutable ID `1172025835`.
 
-- Routine service workflows retain the general repository WIF provider and
-  `metrics-bridge-deployer`. After final removal, it retains only direct
-  monitoring-project deploy roles and cannot impersonate `org-terraform`.
-- Same-repo PR plans retain `metrics-bridge-plan-readonly` →
-  `org-terraform-plan-readonly`, which reads unlocked state but has no
-  live-project roles.
-- The routing PR sends trusted-`main` plans and drift through
+- Routine deploy: general repository WIF → `metrics-bridge-deployer`. Final
+  removal leaves only monitoring-project deploy roles and no `org-terraform`
+  impersonation.
+- Same-repo PR plan: `metrics-bridge-plan-readonly` →
+  `org-terraform-plan-readonly`; unlocked state only, with no live-project
+  roles.
+- Trusted-main refresh: routing sends plans and drift through
   `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT` →
-  `org-terraform-refresh-readonly`. It reads unlocked state, required project
-  and service metadata, IAM policies, managed secret payloads, and required
-  function-source objects, but has no write roles and is unreachable from PR
-  refs. Bootstrap workflows must not use this selector.
-- Apply jobs use `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
-  `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. Its dedicated pool accepts only
-  repository ID `1172025835`, the expected repository slug,
-  `refs/heads/main`, and the `production-infra` environment subject; its
-  seed-project applier can impersonate `org-terraform`.
+  `org-terraform-refresh-readonly`; unlocked state, project/service metadata,
+  IAM policies, managed secrets, and function-source objects, with no writes or
+  PR access. Bootstrap workflows must not use this selector.
+- Apply: the two `GCP_PRODUCTION_INFRA_*` variables select a dedicated pool and
+  seed applier that can impersonate `org-terraform`. The pool requires ID
+  `1172025835`, repository slug, `refs/heads/main`, and the
+  `production-infra` environment subject.
 
-The identity contract guards enumerated Terraform identity and authority
-blocks, credential and secret-payload sinks, output and declassification sites,
-imperative execution, and protected-workflow shapes. It is a regression guard,
-not a sandbox for arbitrary HCL or application-source data flow, operator
-inputs, deliberate registry changes, or provider/toolchain compromise.
-Environment approval and live-plan review remain mandatory. ADR 0047 records
-the full boundary.
-
-Alerts-delivery and governance-watchdog grant only curated non-basic project
-read roles for services they refresh. The core is `roles/browser`,
-`roles/iam.securityReviewer`, and `roles/storage.bucketViewer`; each owning root
-lists additional service readers. Never use basic `roles/viewer`: on
-uniform-bucket-level-access buckets, its `projectViewer` convenience group also
-grants legacy object reads.
-
-Payload access stays separately scoped:
-`roles/secretmanager.secretAccessor` covers only Terraform-managed secrets, and
-`roles/storage.objectViewer` only function deployment-source buckets. Replay,
-rotation-state, and log bucket objects remain excluded. Service readers can
-still expose project-wide logs, metrics, and Artifact Registry contents. This
-accepted confidentiality cost lets trusted-main CI refresh accurately without
-mutation authority.
+Alerts-delivery and governance-watchdog grant curated non-basic readers (core:
+`roles/browser`, `roles/iam.securityReviewer`, and
+`roles/storage.bucketViewer`) plus exact Secret Accessor on managed secrets and
+Storage Object Viewer on function-source buckets. Never use basic
+`roles/viewer`: its `projectViewer` convenience group grants legacy object
+reads on uniform-bucket-level-access buckets. Replay, rotation-state, and log
+objects remain excluded. Service readers still expose project-wide logs,
+metrics, and Artifact Registry contents; this accepted confidentiality cost
+enables faithful refresh without mutation authority.
 
 Read-only plans pass `-lock=false`: state-bucket
 `roles/storage.objectViewer` cannot create or delete the GCS lock object.
