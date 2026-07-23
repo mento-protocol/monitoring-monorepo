@@ -48,7 +48,10 @@ const MAX_CACHE_ENTRIES = 256;
 // ~5s total, and detection runs alongside the other GraphQL queries there.
 // Viem's http() default timeout is 10s, which would blow the outer budget
 // on the first wedged RPC, so we cap each probe chain here to a fraction.
-const PROBE_TIMEOUT_MS = 3000;
+// Kept public for the source orchestrator, which needs to avoid starting a
+// fallback probe when a delayed schema-lag response has already used its
+// source-phase budget.
+export const RUNTIME_STRATEGY_PROBE_TIMEOUT_MS = 3000;
 
 // Sentry throttle: without this, a 30s poll loop × N rebalancers × M flaky
 // networks would fan out to the same captureException on every cycle and
@@ -189,7 +192,9 @@ export async function detectProbedStrategies(
 
   if (poolsByRebalancer.size === 0) return emptyStrategies();
 
-  const client = getViemClient(network.rpcUrl, { timeoutMs: PROBE_TIMEOUT_MS });
+  const client = getViemClient(network.rpcUrl, {
+    timeoutMs: RUNTIME_STRATEGY_PROBE_TIMEOUT_MS,
+  });
   const typeByRebalancer = new Map<string, StrategyType>();
 
   await Promise.all(
@@ -218,7 +223,7 @@ export async function detectProbedStrategies(
           new Promise<never>((_, reject) => {
             timeoutId = setTimeout(
               () => reject(new Error("strategy-detection: probe timed out")),
-              PROBE_TIMEOUT_MS,
+              RUNTIME_STRATEGY_PROBE_TIMEOUT_MS,
             );
           }),
         ]);

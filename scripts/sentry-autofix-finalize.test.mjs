@@ -18,11 +18,13 @@ import {
   buildAutofixComment,
   buildAutofixRunRecordBody,
   buildPrBody,
+  buildStaleVerdictCloseComment,
   diffTrees,
   evaluateDiffGuard,
   fixPrOpenedLabelDef,
   fixRefusedLabelDef,
   isForbiddenPath,
+  markerWriteStillValid,
   MAX_CHANGED_FILES,
   runCli,
 } from "./sentry-autofix-finalize.mjs";
@@ -482,6 +484,51 @@ await test("CLI autofix-comment / branch / label-def / refused-label-def / run-r
   assert(
     body.startsWith("## The Problem") && body.includes(`Fixes ${SHORT_ID}`),
     "CLI pr-body assembles",
+  );
+});
+
+await test("markerWriteStillValid tracks the code-fix verdict presence", () => {
+  assert(
+    markerWriteStillValid(["sentry:verdict-code-fix", "sentry:projected"]),
+    "verdict present → valid",
+  );
+  assert(
+    !markerWriteStillValid(["sentry:projected", "sentry:needs-triage"]),
+    "verdict shed → invalid",
+  );
+  assert(!markerWriteStillValid([]), "no labels → invalid");
+  assert(!markerWriteStillValid(null), "non-array → invalid");
+  assert(
+    markerWriteStillValid(["  sentry:verdict-code-fix  ", ""]),
+    "whitespace/empties tolerated",
+  );
+});
+
+await test("stale-verdict close comment names the regression re-queue reason", () => {
+  const body = buildStaleVerdictCloseComment();
+  assert(/verdict was removed/i.test(body), "explains the shed verdict");
+  assert(/regression re-queue/i.test(body), "names the cause");
+});
+
+await test("CLI marker-still-valid reads a labels file; stale-verdict-close-comment prints", () => {
+  const dir = mkdtempSync(join(tmpdir(), "autofix-marker-"));
+  const valid = join(dir, "valid.txt");
+  const shed = join(dir, "shed.txt");
+  writeFileSync(valid, "sentry:verdict-code-fix\nsentry:projected\n");
+  writeFileSync(shed, "sentry:projected\n");
+  assertEqual(
+    captureCli(["marker-still-valid", "--labels-file", valid]).trim(),
+    "yes",
+  );
+  assertEqual(
+    captureCli(["marker-still-valid", "--labels-file", shed]).trim(),
+    "no",
+  );
+  assert(
+    /^Autofix withdrew this PR/.test(
+      captureCli(["stale-verdict-close-comment"]),
+    ),
+    "close comment emitted",
   );
 });
 

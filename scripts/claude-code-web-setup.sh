@@ -173,18 +173,26 @@ pnpm agent:context-check
 echo "==> Configuring GitHub integration mode"
 # In Claude Code on the web, git transport is proxied through a local credential
 # proxy (origin is http://local_proxy@127.0.0.1:.../git/...) that authenticates
-# git only, so no GitHub token is exposed in the container and `gh` has no
-# credential by default. api.github.com itself IS reachable (it is in the default
-# Trusted allowlist), so GitHub API work flows two ways: the GitHub MCP server
-# (default, zero setup) or `gh` once a GH_TOKEN env var is set. We auto-install
-# `gh` ONLY when a token is present — no point paying the cost otherwise.
+# git only. GitHub API access is NOT generally available: the platform's GitHub
+# credential proxy intercepts github.com/api.github.com independently of the
+# environment network allowlist (GitHub-host allowlist entries are inert),
+# overrides any client Authorization header (a GH_TOKEN is ignored), serves
+# only /user and /rate_limit, and 403s every /repos/* path and GraphQL query —
+# so `gh auth status` succeeds while pr:ready-state still cannot work
+# (empirical map: docs/notes/github-tooling-surfaces.md). The GitHub MCP server
+# is the supported API path in these sessions. The token-gated gh install below
+# is kept as a best-effort for environment variants whose proxy does serve repo
+# API paths; the capability gate that matters is REST + GraphQL + --slurp
+# (see docs/notes/github-tooling-surfaces.md), never `gh auth status`.
 #
 # Install source is the official github.com release tarball, NOT apt: the default
 # Ubuntu build is gh 2.45.0, which lacks `gh api --slurp` that pr:ready-state
-# relies on, and the cli.github.com apt repo is not allowlisted. github.com
-# releases ARE reachable. We deliberately do NOT run `gh auth setup-git`: the
-# credential proxy already owns git auth and overriding it would break pushes.
-# `gh` is used purely for the API (pr:ready-state / ship / babysit).
+# relies on, and the cli.github.com apt repo is not allowlisted. Note the
+# credential proxy scopes github.com to session-attached repos, so the cli/cli
+# release download may 403 — the `|| gh_tag=""` guard below degrades to the MCP
+# fallback. We deliberately do NOT run `gh auth setup-git`: the credential proxy
+# already owns git auth and overriding it would break pushes. `gh` is used
+# purely for the API (pr:ready-state / ship / babysit).
 #
 # Remote caveat: the git origin is the proxy URL, which gh does not recognise as
 # a GitHub host, so gh cannot infer the repo. Pass `--repo <owner/name>` (the
@@ -223,16 +231,23 @@ if [[ -n "$GH_API_TOKEN" ]]; then
     echo "WARN: gh on PATH is too old (no 'gh api --slurp'); the release-tarball upgrade did not apply." >&2
     echo "WARN: pr:ready-state needs --slurp; using the GitHub MCP server for PR/API work meanwhile." >&2
   elif gh auth status >/dev/null 2>&1; then
-    echo "gh is installed and authenticated via GH_TOKEN; gh-backed PR flows (pr:ready-state) are available."
+    echo "gh is installed and 'gh auth status' passes — but that only proves /user is served."
+    echo "Before relying on gh-backed flows (pr:ready-state), verify the full capability gate:"
+    echo "    gh api repos/<owner>/<repo> --jq .full_name"
+    echo "    gh api graphql -f query='query{viewer{login}}'"
+    echo "    gh api --help | grep -- --slurp"
+    echo "In Claude cloud sessions the credential proxy 403s /repos/* and GraphQL regardless of"
+    echo "GH_TOKEN; if that call fails, use the GitHub MCP server (docs/notes/github-tooling-surfaces.md)."
     echo "Reminder: pass --repo <owner/name> (or set GH_REPO) — the git remote is the local proxy, not a GitHub host."
   else
     echo "WARN: gh is installed but not authenticated — check the GH_TOKEN scopes/org approval." >&2
     echo "WARN: using the GitHub MCP server for PR/API work meanwhile." >&2
   fi
 else
-  echo "No GH_TOKEN set: using the GitHub MCP server for PR/API work (default)."
-  echo "To enable gh-backed flows (pr:ready-state/ship/babysit), set a fine-grained GH_TOKEN"
-  echo "(and optionally GH_REPO=<owner/name>) in the environment settings; gh then auto-installs here."
+  echo "No GH_TOKEN set: using the GitHub MCP server for PR/API work (the supported path here)."
+  echo "Note: setting GH_TOKEN does NOT enable gh-backed flows in Claude cloud sessions — the"
+  echo "credential proxy overrides Authorization and blocks /repos/* and GraphQL either way."
+  echo "See docs/notes/github-tooling-surfaces.md for the gh->MCP mapping."
 fi
 
 echo "Claude Code on the web setup complete."

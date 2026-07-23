@@ -139,6 +139,7 @@ Thresholds in `alerts/rules/peg-thresholds.json`, read via
 change passes the `production-infra` gate, and the gated apply also
 publishes the same policy as an IaC-owned versioned runtime artifact
 that the bridge polls (never baked into the image;
+content-addressed version suffix verified by runtime and CI;
 `mento_peg_policy_version` asserted by the rules with two-phase
 rollover: previous + new version accepted until producer ack — never
 expired by wall-clock alone — with a rollover-stuck alert when ack
@@ -200,8 +201,11 @@ coverage), Bit2Me (stale). Structural: EURm/EUROP `SwapEvent` +
 1. **PR 1 (this PR):** ADRs 0042–0045, this plan, docs catalog.
 2. **PR 2:** bridge peg module — registry schema/fixtures, adapters
    (Kraken, Bitvavo), observation contract, structural queries, metrics,
-   integrity script into gate/CI.
-3. **PR 3:** alerts stack — `peg-thresholds.json`, rule group, routing,
+   integrity script into gate/CI. Seed the dormant `peg-thresholds.json` policy
+   source so the runtime and cross-plane validators share a real fixture; PR 2
+   does not publish that artifact, configure `PEG_POLICY_URL`, or create rules.
+3. **PR 3:** alerts stack — consume `peg-thresholds.json` through the protected
+   artifact plane, add the rule group and routing,
    runbook note; gated apply after producer telemetry is live (follow the
    no-data rollout discipline from `docs/notes/polygon-monitoring.md`).
 4. **PR 4:** dashboard decision-package panel + onboarding runbook doc +

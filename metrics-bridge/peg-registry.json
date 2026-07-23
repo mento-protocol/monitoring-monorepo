@@ -1,0 +1,74 @@
+{
+  "europ-schuman": {
+    "peg": "EUR",
+    "tokenRefs": [
+      {
+        "chainId": 137,
+        "address": "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51"
+      }
+    ],
+    "sources": [
+      {
+        "id": "bitvavo_eur",
+        "provider": "bitvavo",
+        "pair": "EUROP-EUR",
+        "baseCurrency": "EUROP",
+        "quoteCurrency": "EUR",
+        "role": "primary"
+      },
+      {
+        "id": "kraken_eur",
+        "provider": "kraken",
+        "pair": "EUROP/EUR",
+        "baseCurrency": "EUROP",
+        "quoteCurrency": "EUR",
+        "role": "secondary"
+      },
+      {
+        "id": "kraken_usd",
+        "provider": "kraken",
+        "pair": "EUROP/USD",
+        "baseCurrency": "EUROP",
+        "quoteCurrency": "USD",
+        "role": "display",
+        "convertVia": {
+          "chainId": 137,
+          "rateFeedId": "0xec57482aa55e3ad026c315a0e4a692b776c318ca",
+          "fromCurrency": "USD",
+          "toCurrency": "EUR"
+        }
+      }
+    ],
+    "monitors": [
+      {
+        "chainId": 137,
+        "poolAddress": "0xcd8c6811d975981f57e7fb32e59f0bee66af3201",
+        "rateFeedId": "0xc22418a83dfc262b10a1f57e25309db83e7ea79e",
+        "monitoredTokenAddress": "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51"
+      }
+    ],
+    "coverageClass": "cex-book+indexed-pool",
+    "rejectedSources": [
+      {
+        "provider": "bit2me",
+        "pair": "EUROP/EUR",
+        "reason": "Excluded because the book is tiny and frequently stale, so it does not provide dependable price discovery."
+      },
+      {
+        "provider": "curve",
+        "pair": "EUROP/EURC",
+        "reason": "Excluded because the pool has zero observed volume and does not provide live price discovery."
+      },
+      {
+        "provider": "xrpl",
+        "pair": "XRP/EUROP",
+        "reason": "Excluded because XRPL books are outside indexer coverage and no canonical non-EVM identity registry exists."
+      },
+      {
+        "provider": "xrpl",
+        "pair": "EUROP/RLUSD",
+        "reason": "Excluded because XRPL books are outside indexer coverage and no canonical non-EVM identity registry exists."
+      }
+    ]
+  }
+}

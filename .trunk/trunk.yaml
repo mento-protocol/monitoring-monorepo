@@ -81,6 +81,10 @@ lint:
         # data (MedianUpdated payloads) reads as high-entropy to checkov. No
         # secrets; it's a recorded public-chain event used by the unit tests.
         - governance-watchdog/src/events/fixtures/health-check.fixture.json
+        # Service-local peg topology contains only public token, pool, and
+        # rate-feed addresses. Checkov misclassifies the EUROP token address as
+        # a high-entropy secret; referential integrity is checked separately.
+        - metrics-bridge/peg-registry.json
   enabled:
     - checkov@3.2.506
     # eslint is run per-package via `pnpm --filter X lint`, wired into the

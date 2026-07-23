@@ -162,9 +162,44 @@ commit:
 
 ---
 
+## Metrics Bridge Peg-Policy Bootstrap
+
+`PEG_POLICY_URL` is optional raw runtime configuration for the protected,
+versioned peg-policy artifact. The platform Terraform stack will own the Cloud
+Run value when that artifact plane is provisioned; do not add or change it with
+an ad hoc `gcloud run services update --set-env-vars` command. Until then, an
+absent value intentionally leaves only the isolated peg poller dormant. Blank
+or malformed values are reported through that loop's bounded error channel and
+must not affect the primary Hasura polling loop or `/health`.
+
+Every policy version must end in `-<32 lowercase hex>` matching the first 32
+characters of the SHA-256 digest over its canonical content without the
+`version` field. Canonicalization recursively sorts object keys by Unicode code
+point, preserves array order, and hashes the compact JSON encoding. The runtime
+and repository checks reject stale or reused suffixes before the bridge
+acknowledges the version.
+
+On an active-version change, retain the exact active object from the current
+base branch as `previous`. The integrity check compares repository history and
+rejects an unrelated predecessor. After the producer acknowledges the new
+active version, a later change may remove `previous` without changing `active`;
+it may not reintroduce or mutate that predecessor in place. Complete that ACK
+cleanup before another active rollover; CI and the runtime reject chained
+rollovers while `previous` remains populated.
+
+The metrics-bridge image contains its service-local `peg-registry.json`
+identity/topology data at the compiled loader's expected path. It never bakes
+`alerts/rules/peg-thresholds.json` into the image: page-affecting thresholds are
+fetched from the gated runtime artifact under
+[ADR 0044](adr/0044-peg-thresholds-gated-rules-plane.md).
+
+---
+
 ## Dashboard Deployment (Vercel)
 
 **Vercel's native Git integration watches `main`** — every push that changes dashboard-affecting files triggers an automatic production deploy. Pushes that only touch unrelated directories (e.g. `terraform/`, `indexer-envio/`) are skipped by `ui-dashboard/scripts/vercel-ignore-build.sh`. PR preview deployments diff each push incrementally against that branch's previous preview deployment (falling back to the merge base with `origin/main` on a branch's first push). So a docs-only PR skips, and once a branch's dashboard change has been previewed, later non-dashboard commits on the same branch skip too instead of rebuilding the whole branch on every push.
+
+**Autofix branches never deploy.** `ui-dashboard/vercel.json` sets `git.deploymentEnabled` to deny `sentry-autofix/*`, so Vercel never _creates_ a deployment for a machine-authored autofix branch (ADR 0036 Phase 2b, issue #1452). This is a trust boundary, not an optimization: the skip script decides skip-vs-build for _eligible_ branches, but running an untrusted autofix diff through a preview build would expose it to the dashboard's production-linked secrets before human review. The denial is strictly earlier — the build never starts. See [ADR 0019](adr/0019-vercel-path-aware-deploys.md).
 
 The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](https://monitoring.mento.org).
 

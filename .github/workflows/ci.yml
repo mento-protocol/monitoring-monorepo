@@ -241,6 +241,7 @@ jobs:
               - alerts/rules/**
               - metrics-bridge/src/metrics.ts
               - metrics-bridge/src/cdp-metrics.ts
+              - metrics-bridge/src/peg/metrics.ts
               - terraform.stacks.json
               - eslint.config.mjs
               - .dependency-cruiser.cjs
@@ -568,7 +569,13 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          # Peg-policy lineage compares the candidate artifact with the actual
+          # PR base. A shallow checkout cannot resolve origin/<base> and must
+          # fail closed rather than waive the predecessor invariant.
+          fetch-depth: 0
       - uses: ./.github/actions/pnpm-install
+      - name: Peg registry integrity
+        run: node scripts/check-peg-registry-integrity.mjs
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
         uses: ./.github/actions/resolve-eslint-baseline
@@ -576,6 +583,8 @@ jobs:
           package-path: metrics-bridge
       - name: Typecheck
         run: pnpm --filter @mento-protocol/metrics-bridge typecheck
+      - name: Build
+        run: pnpm --filter @mento-protocol/metrics-bridge build
       - name: Lint
         # Diff-aware baseline check: prune-only, fails on any new or stale tuple.
         run: pnpm --filter @mento-protocol/metrics-bridge lint
@@ -899,6 +908,10 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: ESLint root scripts
         run: pnpm lint:scripts
+      - name: Peg registry integrity
+        run: node scripts/check-peg-registry-integrity.mjs
+      - name: Peg registry integrity checker suite
+        run: node scripts/check-peg-registry-integrity.test.mjs
       - name: Lighthouse config assertion suite
         # Exercises route matching, per-route threshold boundaries, and
         # multi-run aggregation through the installed LHCI CLI. Keep this in

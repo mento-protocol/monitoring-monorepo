@@ -24,6 +24,7 @@ vi.mock("@sentry/nextjs", () => ({
 
 vi.mock("@/lib/strategy-detection", () => ({
   detectProbedStrategies: mockDetectProbedStrategies,
+  RUNTIME_STRATEGY_PROBE_TIMEOUT_MS: 3000,
 }));
 
 vi.mock("@/lib/graphql-fetch", () => {

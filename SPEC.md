@@ -48,18 +48,20 @@ promotion.
                                 ▼
                       Envio HyperIndex (hosted)
                                 │
-                         Hasura GraphQL
-                           ┌────┴───────────┐
-                           ▼                ▼
-                  Next.js dashboard   metrics-bridge
-                                          │
- RPC view calls ──► Aegis ────────────────┤
-                                          ▼
-                                  Grafana Alloy
-                                          │
-                                     Grafana Cloud
-                                          │
-                                  Slack / Splunk On-Call
+                                ▼
+                         Hasura GraphQL ─────────────► Next.js dashboard
+                                │
+                                └───────────────────┐
+ CEX order books ──────────────────────────────────┤
+ RPC oracle conversion views ──────────────────────┴──► metrics-bridge
+                                                         │
+ RPC view calls ──► Aegis ───────────────────────────────┤
+                                                         ▼
+                                                 Grafana Alloy
+                                                         │
+                                                    Grafana Cloud
+                                                         │
+                                                 Slack / Splunk On-Call
 
  QuickNode webhooks ──► alert Cloud Functions ──► Slack
  Sentry events ───────► Sentry bridge ──────────► Slack
@@ -73,8 +75,11 @@ The system has four principal data paths:
    them directly to the dashboard and other readers. There is no bespoke read
    service between Hasura and its consumers.
 2. **Metric-alert path:** `metrics-bridge` converts indexed v3 state to
-   Prometheus gauges, while Aegis polls v2 contract views. Grafana Alloy sends
-   both metric streams to Grafana Cloud for evaluation and routing.
+   Prometheus gauges. When its protected policy artifact is configured, an
+   isolated peg lifecycle combines indexed structural state with direct CEX
+   order books and RPC oracle conversion views. Aegis polls v2 contract views.
+   Grafana Alloy sends both metric streams to Grafana Cloud for evaluation and
+   routing.
 3. **Event and incident path:** discrete events bypass the metric path.
    QuickNode and governance handlers deliver through their owning Cloud
    Functions. The Sentry-to-Slack bridge is configured directly through the
@@ -98,7 +103,7 @@ The governing decisions are
 | Shared config              | Chain, token, deployment, threshold, and ABI metadata   | Published TypeScript package | [`shared-config/AGENTS.md`](./shared-config/AGENTS.md)                       |
 | Indexer and GraphQL        | Event/RPC ingestion, entities, rollups, Hasura API      | Envio hosted                 | [`indexer-envio/AGENTS.md`](./indexer-envio/AGENTS.md)                       |
 | Dashboard                  | Human-facing monitoring and analysis                    | Vercel                       | [`ui-dashboard/AGENTS.md`](./ui-dashboard/AGENTS.md)                         |
-| Metrics bridge             | Indexed v3 state to bounded Prometheus gauges           | Cloud Run                    | [`metrics-bridge/AGENTS.md`](./metrics-bridge/AGENTS.md)                     |
+| Metrics bridge             | Indexed Hasura and direct CEX/RPC peg metrics           | Cloud Run                    | [`metrics-bridge/AGENTS.md`](./metrics-bridge/AGENTS.md)                     |
 | Aegis                      | v2 contract view calls to Prometheus metrics            | App Engine                   | [`aegis/AGENTS.md`](./aegis/AGENTS.md)                                       |
 | Collector                  | Aegis and bridge scrape jobs to Grafana Cloud           | Grafana Alloy on App Engine  | `aegis/grafana-agent/`                                                       |
 | Metric rules and routing   | Grafana rules, contact points, templates, mute timings  | Grafana Cloud                | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                                     |

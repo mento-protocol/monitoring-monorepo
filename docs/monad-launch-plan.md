@@ -1,3 +1,17 @@
+---
+title: "Monad Monitoring — Launch Runbook (archived)"
+status: archived
+owner: eng
+canonical: false
+last_verified: 2026-07-23
+archived: 2026-07-23
+archived_reason: "Monad indexing shipped (PR #62) and the Monad chains are live in the merged multichain indexer; retained as the historical launch record."
+doc_type: runbook
+scope: indexer
+review_interval_days: 365
+garden_lane: notes-plans-archive
+---
+
 # Monad Monitoring — Launch Runbook
 
 > **Status:** Code complete (PR #62 merged). Waiting on Envio hosted deployments.

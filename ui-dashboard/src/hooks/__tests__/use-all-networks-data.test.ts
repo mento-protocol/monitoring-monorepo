@@ -28,6 +28,7 @@ vi.mock("@sentry/nextjs", () => ({
 
 vi.mock("@/lib/strategy-detection", () => ({
   detectProbedStrategies: mockDetectProbedStrategies,
+  RUNTIME_STRATEGY_PROBE_TIMEOUT_MS: 3000,
 }));
 
 import * as Sentry from "@sentry/nextjs";
@@ -691,6 +692,11 @@ describe("fetchNetworkData — happy path", () => {
       reservePoolIds: new Set([reservePool.id]),
     });
     mockRequest((query) => {
+      if (query.includes("AllActivePoolLiquidityStrategies")) {
+        throw new Error(
+          "field 'PoolLiquidityStrategy' not found in type: 'query_root'",
+        );
+      }
       if (query.includes("OlsPool")) return { OlsPool: [] };
       if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
       if (query.includes("PoolDailyFeeSnapshotsPage"))

@@ -96,14 +96,17 @@ function queryNameOf(document: string): string {
   return /query\s+(\w+)/.exec(document)?.[1] ?? "";
 }
 
-type Reply = Record<string, unknown> | { reject: unknown };
+type Reply =
+  | Record<string, unknown>
+  | { reject: unknown }
+  | Promise<Record<string, unknown>>;
 
 export function reject(reason: unknown): Reply {
   return { reject: reason };
 }
 
 function isRejectReply(reply: Reply): reply is { reject: unknown } {
-  return "reject" in reply;
+  return !(reply instanceof Promise) && "reject" in reply;
 }
 
 /**

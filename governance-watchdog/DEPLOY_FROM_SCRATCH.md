@@ -1,224 +1,128 @@
-# Deployment from Scratch
+---
+title: Governance Watchdog Bootstrap
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-22
+doc_type: runbook
+scope: governance-watchdog
+review_interval_days: 90
+garden_lane: operator-runbooks
+---
 
-How to deploy the entire governance watchdog infrastructure from scratch.
+# Governance Watchdog Bootstrap
 
-- [Infra Deployment via Terraform](#infra-deployment-via-terraform)
-  - [Terraform State Management](#terraform-state-management)
-  - [Google Cloud Permission Requirements](#google-cloud-permission-requirements)
-    - [Using Service Account Impersonation (recommended)](#using-service-account-impersonation-recommended)
-    - [Using Your Own Gcloud User Account (not recommended)](#using-your-own-gcloud-user-account-not-recommended)
-  - [Deployment](#deployment)
-- [Debugging Problems](#debugging-problems)
-  - [View Logs](#view-logs)
-- [Teardown](#teardown)
+This is the exceptional first-deployment procedure for the watchdog's
+dedicated GCP project. For an existing deployment, use
+[`README.md`](README.md). Stack ownership, state, and apply policy come from the
+`governance-watchdog` entry in [`terraform.stacks.json`](../terraform.stacks.json).
 
-## Infra Deployment via Terraform
+## Safety contract
 
-### Terraform State Management
+- Never run an apply or destroy without an explicit human approval based on a
+  reviewed plan.
+- Use the root `pnpm tf` wrapper. Local applies for this CI-owned stack are
+  allowed only from a clean `main` checkout exactly at `origin/main`; do not
+  bypass that guard for routine bootstrap work.
+- Keep `infra/terraform.tfvars` local and gitignored. Obtain individual values
+  through their approved owners; never copy or share another operator's whole
+  file.
+- Terraform owns Google secrets and the repository secret mirrors. Do not
+  bootstrap or rotate them with `gh secret set`, `gcloud secrets versions add`,
+  or another ad hoc secret command. If an input has no IaC owner, stop and add
+  one before continuing.
 
-- The Terraform State for this project lives in our shared Terraform Seed Project with the ID `mento-terraform-seed-ffac`
-- Deploying the project for the first time should automatically create a subfolder in the [google storage bucket used for terraform state management in the seed project](https://console.cloud.google.com/storage/browser/mento-terraform-tfstate-6ed6;tab=objects?forceOnBucketsSortingFiltering=true&project=mento-terraform-seed-ffac&prefix=&forceOnObjectsSortingFiltering=false)
+The backend is the shared GCS bucket
+`mento-terraform-tfstate-6ed6`, prefix `governance-watchdog`, in the seed
+project `mento-terraform-seed-ffac`. The provider and backend impersonate the
+shared Terraform service account; the operator needs
+`roles/iam.serviceAccountTokenCreator` for that account.
 
-### Google Cloud Permission Requirements
+## 1. Prepare inputs
 
-#### Using Service Account Impersonation (recommended)
+Install Node/pnpm, Terraform, `gcloud`, and `jq`, authenticate `gcloud`, and
+work from the repository root on a clean, current `main` checkout.
 
-The project is preconfigured to impersonate our shared terraform service account (see `./infra/versions.tf`).
-The only permission you will need on your own gcloud user account is `roles/iam.serviceAccountTokenCreator` to allow you to impersonate our shared terraform service account.
+Copy [`infra/terraform.tfvars.example`](infra/terraform.tfvars.example) to the
+gitignored `infra/terraform.tfvars` and fill every required input. The file is
+the canonical input checklist; it covers org/billing, Discord and Telegram,
+QuickNode, test authentication, Splunk On-Call, and the GitHub provider token.
 
-#### Using Your Own Gcloud User Account (not recommended)
+Do not set `slack_notification_channel_id` on the first pass. The Google
+Monitoring Slack channel cannot exist until Terraform has created the project.
 
-If for whatever reason service account impersonation doesn't work, you'll need at least the following permissions on your personal gcloud account to deploy this project with terraform:
+## 2. Validate and plan
 
-- `roles/resourcemanager.folderViewer` on the folder that you want to create the project in
-- `roles/resourcemanager.organizationViewer` on the organization
-- `roles/resourcemanager.projectCreator` on the organization
-- `roles/billing.user` on the organization
-- `roles/storage.admin` to allow creation of new storage buckets
+```bash
+pnpm tf validate governance-watchdog
+pnpm tf plan governance-watchdog
+```
 
-### Deployment
+Review the complete plan. It should create the dedicated randomized GCP
+project, APIs and IAM, Cloud Function and source bucket, Secret Manager
+resources, two QuickNode webhooks, scheduler/monitoring resources, and the
+GitHub Actions secret mirrors. Investigate any replacement or destroy before
+requesting approval.
 
-The GCP project ID is `project_name` plus a random suffix chosen at create time
-(`random_project_id = true` in `infra/main.tf`). After the first
-`terraform apply`, read it with `terraform -chdir=infra output project_id`, then
-run `pnpm run cache:clear` so local scripts pick it up.
+QuickNode 429 and 522 responses can be transient. Re-run the plan after the
+provider settles; never turn a failed plan into a blind apply retry.
 
-<!-- markdown-link-check-disable -->
+## 3. Apply after approval
 
-1. Run `./bin/set-up-terraform.sh` to check required permissions and provision all required terraform providers and modules
+After a human approves that exact bootstrap plan:
 
-1. Create a `./infra/terraform.tfvars` file. This is like `.env` for Terraform:
+```bash
+pnpm tf apply governance-watchdog
+terraform -chdir=governance-watchdog/infra output project_id
+pnpm --dir governance-watchdog run cache:clear
+```
 
-   ```sh
-   touch ./infra/terraform.tfvars
-   # This file is `.gitignore`d to avoid accidentally leaking sensitive data
-   ```
+The apply wrapper re-initializes the registered stack and enforces the clean
+`main == origin/main` guard. If an apply partially fails, re-run the plan,
+review the remaining changes, and obtain approval for the retry.
 
-1. Add Google Cloud Org ID and Billing Account to your local `terraform.tfvars`
+## 4. Add the Slack notification channel
 
-   ```hcl
-   # Required for creating new GCP projects
-   # Get it via `gcloud organizations list`
-   org_id               = "<our-org-id>"
+Google Monitoring's Slack OAuth channel is the one manual external bootstrap
+step:
 
-   # Required for creating new GCP projects
-   # Get it via `gcloud billing accounts list` (pick the GmbH account)
-   billing_account      = "<our-billing-account-id>"
-   ```
+1. In the new GCP project, open **Monitoring → Alerting → Edit notification
+   channels** and authorize the intended Slack channel.
+2. Copy the resulting `notificationChannels/...` ID into
+   `slack_notification_channel_id` in `infra/terraform.tfvars`.
+3. Run `pnpm tf plan governance-watchdog` again.
+4. After explicit approval, run `pnpm tf apply governance-watchdog` again.
 
-1. Add a fine-grained GitHub PAT scoped to
-   `mento-protocol/monitoring-monorepo` with Secrets read/write permission.
-   This is the same value as `alerts/infra`'s `github_token` and lets
-   Terraform mirror the drift workflow's repo secrets.
+Terraform then creates the alert policy and mirrors
+`TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID` for subsequent CI
+and drift runs. Do not create a competing secret manually.
 
-   ```hcl
-   github_token = "<github-token>"
-   ```
+## 5. Verify the deployment
 
-1. [Create a Discord Webhook URL](https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks) for the channel you want to receive notifications in
+```bash
+pnpm --dir governance-watchdog run logs
+pnpm --dir governance-watchdog run test:prod:ProposalCreated
+```
 
-1. Add the Discord Webhook URL to your local `terraform.tfvars`:
-
-   ```sh
-   # This will be stored in Google Secret Manager upon deployment via Terraform
-   echo "discord_webhook_url = \"<discord-webhook-url>"" >> terraform.tfvars
-   ```
-
-1. [Create a Test Discord Webhook URL](https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks) for a test channel you want to receive test notifications in <!-- markdown-link-check-enable -->
-
-1. Add the Test Discord Webhook URL to your local `terraform.tfvars`:
-
-   ```sh
-   # This will be stored in Google Secret Manager upon deployment via Terraform
-   echo "discord_test_webhook_url = \"<discord-test-webhook-url>"" >> terraform.tfvars
-   ```
-
-1. Create a Telegram group and invite a new bot into it
-   - Open a new telegram chat with @BotFather
-   - Use the `/newbot` command to create a new bot
-   - Copy the API key printed out at the end of the prompt and store it in your `terraform.tfvars`
-
-     ```hcl
-     telegram_bot_token = "<bot-api-key>"
-     ```
-
-   - Get the Chat ID by inviting @MissRose_bot to the group and then using the `/id` command
-   - Add the Chat ID to your `terraform.tfvars`
-
-     ```hcl
-     telegram_chat_id = "<group-chat-id>"
-     ```
-
-   - Remove @MissRose_bot after you got the Chat ID
-
-1. Now also create a Test Telegram group and invite your newly created bot into it
-   - We will use this channel to test notifications without spamming the watchdog members
-   - Get the Chat ID by inviting @MissRose_bot to the group and then using the `/id` command
-   - Add the Chat ID to your `terraform.tfvars`
-
-     ```hcl
-     telegram_test_chat_id = "<test-chat-id>"
-     ```
-
-1. Get (or generate if non-existing) a QuickNode API key to enable Terraform to provision QuickNode Webhooks
-   - Grab the API key from our QuickNode dashboard: <https://dashboard.quicknode.com/api-keys>
-   - Add it to `terraform.tfvars`
-
-   ```hcl
-   quicknode_api_key = "<quicknode-api-key>"
-   ```
-
-1. Generate a QuickNode security token for secure communication between QuickNode Webhooks and our cloud function
-   - Generate a new random token via `openssl rand -base64 32`
-   - Add it to `terraform.tfvars`
-
-   ```hcl
-   quicknode_security_token = "<quicknode-security-token>"
-   ```
-
-1. Get a VictorOps webhook URL by copying the Service API Endpoint URL from the [VictorOps Stackdriver Integration](https://portal.victorops.com/dash/mento-labs-gmbh#/advanced/stackdriver). The routing key can be founder under the [`Settings`](https://portal.victorops.com/dash/mento-labs-gmbh#/routekeys) tab
-
-   ```hcl
-   # Required to send on-call alerts to VictorOps
-   victorops_webhook_url   = "<victorops-webhook-url>/<victorops-routing-key>"
-   ```
-
-1. Generate an auth key to allow us to test the deployed function from our local machines
-   - You can use your password manager to generate a long and secure (url-compatible) key
-   - Add it to `terraform.tfvars`
-
-   ```hcl
-   x_auth_token = "<x-auth-token>"
-   ```
-
-1. **Deploy the entire project via `terraform apply`**
-   - You will see an overview of all resources to be created. Review them if you like and then type "Yes" to confirm.
-   - This command can take up to 10 minutes because it does a lot of work creating and configuring all defined Google Cloud Resources
-   - ❌ Given the complexity of setting up an entire Google Cloud Project incl. service accounts, permissions, etc., you might run
-     into deployment errors with some components.
-
-     **Often a simple retry of `terraform apply` helps**. Sometimes a dependency of a resource has simply not finished creating when terraform already tried to deploy the next one, so waiting a few minutes for things to settle can help.
-
-1. Set your local `gcloud` project ID to our freshly created one and populate your local cache with frequently used project values:
-
-   ```sh
-   pnpm run cache:clear
-   ```
-
-1. Set up a Slack notification channel for error alerts
-
-   **Note:** This step must be done AFTER the initial `terraform apply` because the GCP project needs to exist first.
-
-   The Slack notification channel requires OAuth and must be created manually in the GCP Console:
-   - Get your project ID: `cd infra && terraform output project_id`
-   - Go to GCP Console → Monitoring → Alerting → [Edit Notification Channels](https://console.cloud.google.com/monitoring/alerting/notifications) (make sure you're in the correct project!)
-   - Scroll to **Slack** and click **Add New**
-   - Click **Authorize Slack** and complete the OAuth flow with your Slack workspace
-   - Select the channel you want error alerts to go to (e.g., `#gcp-alerts`)
-   - Give it a display name like "GCP Alerts"
-   - After creating, find the channel ID:
-     - Click on the newly created Slack channel in the list
-     - The channel ID is in the URL: `.../notificationChannels/<THIS_IS_THE_ID>`
-     - Or via CLI: `gcloud beta monitoring channels list --project=<YOUR_PROJECT_ID> --format='table(name,displayName,type)'`
-   - Add the channel ID to your `terraform.tfvars`:
-
-     ```hcl
-     slack_notification_channel_id = "<channel-id>"
-     ```
-
-     Bootstrap or rotate the matching
-     `TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID` repository
-     secret for plan jobs, and keep the production-infra Environment secret in
-     sync for gated applies. Do not reuse the alerts-owned
-     `TF_VAR_SLACK_NOTIFICATION_CHANNEL_ID` secret.
-
-   - Run `terraform apply` again to create the error alerting policy
-
-1. Check that everything worked as expected
-
-   ```sh
-   # 1. Call the deployed function via:
-   npm run test:prod
-
-   # 2. Monitor the configured Discord channel for a message to appear
-   open https://discord.com/channels/966739027782955068/1262714272476037212
-
-   # 3. Monitor the configured Telegram channel for a message to appear
-
-   # 4. Check the function logs via:
-   pnpm run logs # prints logs into your local terminal incl. a URL to the full logs in the google cloud console
-   ```
-
-## Debugging Problems
-
-### View Logs
-
-For most problems, you'll likely want to check the cloud function logs first.
-
-- `pnpm run logs` will print the latest 50 log entries into your local terminal for quick and easy access, followed by a URL leading to the full gcloud console logs
+The deployed test sends real messages to the configured test Discord and
+Telegram channels. Coordinate it with channel owners, confirm both messages,
+then inspect the function and QuickNode health logs. Also verify that future
+changes produce a PR plan and require the `production-infra` approval gate on
+`main`.
 
 ## Teardown
 
-1. Run `pnpm run destroy` to delete the entire production environment from google cloud
-   - You might run into permission issues here, especially around deleting the associated billing account resources
-   - I didn't have time to figure out the minimum set of permissions required to delete this project so the easiest would be to let an organization owner (i.e. Bogdan) run this with full permissions if you face any issues
+Teardown deletes a production GCP project and its integrations; it is never a
+routine debugging step. First produce and review a destroy plan:
+
+```bash
+pnpm tf plan governance-watchdog -destroy
+```
+
+Only after explicit teardown approval, from clean current `main`, run:
+
+```bash
+pnpm tf apply governance-watchdog -destroy
+```
+
+Record and verify any external cleanup that Terraform reports it cannot own.

@@ -8,6 +8,12 @@
 # shellcheck disable=SC2016
 set -euo pipefail
 
+# A set -e abort outside fail() would otherwise die with no message at all —
+# which is exactly how a CI-only failure stays undiagnosable. Name the dying
+# command on stdout (some CI captures drop stderr) and dump the in-flight
+# gate output, which usually holds the actual error.
+trap 'echo "agent-quality-gate test suite aborted: line $LINENO: $BASH_COMMAND (exit $?)"; echo "Last gate output (tail):"; tail -40 "$output_file" 2>/dev/null | sed "s/^/  /"' ERR
+
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
@@ -33,10 +39,14 @@ restore_hook_configs() {
 trap 'restore_hook_configs; rm -rf "$gate_cache_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$codex_hooks_backup" "$claude_settings_backup" "$codex_hooks_fixture" "$claude_settings_fixture"' EXIT
 
 fail() {
-  echo "agent-quality-gate test failed: $*" >&2
-  echo >&2
-  echo "Last gate output:" >&2
-  sed 's/^/  /' "$output_file" >&2
+  # Stdout AND stderr: some CI log captures drop the suite's stderr, which
+  # left failures reported only as a bare nonzero exit.
+  {
+    echo "agent-quality-gate test failed: $*"
+    echo
+    echo "Last gate output:"
+    sed 's/^/  /' "$output_file"
+  } | tee /dev/stderr
   exit 1
 }
 
@@ -680,10 +690,71 @@ assert_contains "- ./tools/trunk check metrics-bridge/src/main.ts (changed exist
 assert_not_contains "- ./tools/trunk check --all"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/metrics-bridge --cache=local:rw (metrics-bridge changed)"
+assert_contains "- pnpm --filter @mento-protocol/metrics-bridge build (metrics-bridge changed)"
 # `assert_contains` normalizes legacy package-task expectations to the Turbo
 # command shape; keep a direct negative assertion so the old command cannot be
 # emitted alongside the cached one unnoticed.
 assert_not_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (metrics-bridge changed)"
+
+# Shared Turbo cache across worktrees (GitHub issue #1411): with TURBO_CACHE_DIR
+# unset the gate exports the stable per-repo default so all worktrees share one
+# cache; a caller-provided TURBO_CACHE_DIR is preserved untouched.
+# Pin a temporary writable HOME and explicitly clear AGENT_TURBO_SHARED_CACHE so
+# this default-path case stays valid when the suite itself is invoked under the
+# supported opt-out or a restricted real HOME.
+: > "$paths_file"
+printf 'metrics-bridge/src/main.ts\n' >> "$paths_file"
+turbo_cache_writable_home="$(mktemp -d)"
+env -u TURBO_CACHE_DIR -u AGENT_TURBO_SHARED_CACHE HOME="$turbo_cache_writable_home" \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+  scripts/agent-quality-gate.sh \
+  --changed-paths-file "$paths_file" \
+  --base origin/test \
+  > "$output_file"
+assert_raw_contains "Turbo cache dir: "
+assert_raw_contains "/.cache/turbo-monitoring-monorepo"
+rm -rf "$turbo_cache_writable_home"
+
+TURBO_CACHE_DIR="/tmp/agentqg-caller-turbo-cache" \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+  scripts/agent-quality-gate.sh \
+  --changed-paths-file "$paths_file" \
+  --base origin/test \
+  > "$output_file"
+assert_raw_contains "Turbo cache dir: /tmp/agentqg-caller-turbo-cache"
+assert_not_contains "/.cache/turbo-monitoring-monorepo"
+
+# AGENT_TURBO_SHARED_CACHE=0/false is the documented operator escape hatch;
+# assert it actually suppresses the export, not just documented intent.
+env -u TURBO_CACHE_DIR AGENT_TURBO_SHARED_CACHE=0 \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+  scripts/agent-quality-gate.sh \
+  --changed-paths-file "$paths_file" \
+  --base origin/test \
+  > "$output_file"
+assert_not_contains "Turbo cache dir: "
+
+env -u TURBO_CACHE_DIR AGENT_TURBO_SHARED_CACHE=false \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+  scripts/agent-quality-gate.sh \
+  --changed-paths-file "$paths_file" \
+  --base origin/test \
+  > "$output_file"
+assert_not_contains "Turbo cache dir: "
+
+# Falls back to Turbo's per-worktree default (no TURBO_CACHE_DIR export) when
+# the shared-cache candidate cannot be created, e.g. a sandboxed agent
+# environment whose writable allowlist excludes it.
+turbo_cache_unwritable_home="$(mktemp -d)"
+: > "$turbo_cache_unwritable_home/.cache"
+env -u TURBO_CACHE_DIR HOME="$turbo_cache_unwritable_home" \
+  AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES=false \
+  scripts/agent-quality-gate.sh \
+  --changed-paths-file "$paths_file" \
+  --base origin/test \
+  > "$output_file"
+assert_not_contains "Turbo cache dir: "
+rm -rf "$turbo_cache_unwritable_home"
 
 run_gate_expect_failure "ui-dashboard/package.json"
 assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
@@ -1314,6 +1385,7 @@ packages:
 assert_contains "- pnpm skew:check (lockfile change scoped to importers)"
 assert_contains "- pnpm lockfile:lint (lockfile change scoped to importers)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (lockfile importer metrics-bridge changed (coverage floor))"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (root lockfile changed (peg registry authority dependency))"
 assert_not_contains "cd aegis && forge test"
 assert_not_contains "@mento-protocol/integration-probes test:coverage"
 assert_not_contains "workspace dependency/config changed (coverage floor)"
@@ -1585,8 +1657,15 @@ assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data f
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
 assert_contains "- pnpm alerts:rules:lint (metrics-bridge gauge registry changed (alerts cross-check))"
 
+run_gate "metrics-bridge/src/peg/metrics.ts"
+assert_contains "- pnpm alerts:rules:lint (metrics-bridge gauge registry changed (alerts cross-check))"
+
+run_gate "metrics-bridge/peg-registry.json"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry changed)"
+
 run_gate "metrics-bridge/src/rpc.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
+assert_not_contains "node scripts/check-peg-registry-integrity.mjs"
 
 run_gate "metrics-bridge/src/rebalance-probe.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
@@ -1795,6 +1874,14 @@ assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chd
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
+assert_not_contains "node scripts/check-peg-registry-integrity.mjs"
+
+run_gate "alerts/rules/peg-thresholds.json"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
+assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg threshold policy changed)"
 
 run_gate "alerts/rules/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
@@ -1919,6 +2006,7 @@ assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metri
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics bridge build context changed (coverage floor))"
 
 run_gate "shared-config/deployment-namespaces.json"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (shared-config vendored indexer fixture changed)" \
   "- pnpm indexer:testnet:codegen (shared-config vendored indexer fixture changed)"
@@ -1944,9 +2032,22 @@ assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the das
 run_gate "shared-config/src/chains.ts"
 assert_contains "- pnpm --filter @mento-protocol/config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (shared-config exports feed the dashboard bundle)"
+
+run_gate "shared-config/oracle-reporters.json"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+
+run_gate "shared-config/chain-metadata.json"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+
+run_gate "shared-config/src/oracle-reporters.ts"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+
+run_gate "shared-config/src/tokens.ts"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 
 run_gate "shared-config/src/thresholds.ts"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
@@ -2396,6 +2497,10 @@ for sequential_mode in parallel-one fail-fast; do
   fi
   (
     cd "$autoreview_progress_repo"
+    # This block re-runs the same unchanged fixture to exercise the progress
+    # monitor; per-command reuse (issue #1410) would otherwise skip the
+    # autoreview test on later runs, so drop the stamps to force re-execution.
+    rm -f "$autoreview_progress_repo/.tmp/agent-quality-gate/command-stamps.tsv"
     DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
       PATH="$autoreview_progress_repo/bin:$PATH" \
       "$repo_root/scripts/agent-quality-gate.sh" \
@@ -3507,6 +3612,14 @@ assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)
 run_gate "scripts/alert-rules-lint.test.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
 
+run_gate "scripts/check-peg-registry-integrity.mjs"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
+
+run_gate "scripts/check-peg-registry-integrity.test.mjs"
+assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
+
 run_gate "scripts/check-pr-description.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
 
@@ -3642,5 +3755,471 @@ assert_not_contains "(ESLint baseline wrapper changed)"
 # Root ESLint config changes trigger scripts lint.
 run_gate "eslint.config.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
+
+# GitHub issue #1410: a run that fails on one flaky command must, on rerun,
+# reuse the commands that already passed against unchanged content instead of
+# re-executing them. `pnpm lint:scripts` appends a side-effect line every time
+# it runs; it must run exactly once across a failing run plus a passing rerun.
+command_stamp_resume_repo="$(mktemp -d)"
+(
+  cd "$command_stamp_resume_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "lint:scripts")
+    printf 'ran\n' >> "${LINT_SIDE_EFFECT:?}"
+    ;;
+  "agent:prewarm:test")
+    if [[ -f "${PREWARM_FAIL_FLAG:?}" ]]; then
+      echo "prewarm intentional failure"
+      exit 1
+    fi
+    ;;
+esac
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  : > "$command_stamp_resume_repo/prewarm-fail"
+  set +e
+  LINT_SIDE_EFFECT="$command_stamp_resume_repo/lint-side-effect" \
+    PREWARM_FAIL_FLAG="$command_stamp_resume_repo/prewarm-fail" \
+    PATH="$command_stamp_resume_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$output_file" 2>&1
+  first_exit=$?
+  set -e
+  [[ "$first_exit" -ne 0 ]] ||
+    fail "expected the first resume run to fail on the flaky command"
+  [[ "$(wc -l < "$command_stamp_resume_repo/lint-side-effect" | tr -d ' ')" == "1" ]] ||
+    fail "expected lint:scripts to run once on the first resume run"
+
+  rm -f "$command_stamp_resume_repo/prewarm-fail"
+  LINT_SIDE_EFFECT="$command_stamp_resume_repo/lint-side-effect" \
+    PREWARM_FAIL_FLAG="$command_stamp_resume_repo/prewarm-fail" \
+    PATH="$command_stamp_resume_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$output_file" 2>&1
+  [[ "$(wc -l < "$command_stamp_resume_repo/lint-side-effect" | tr -d ' ')" == "1" ]] ||
+    fail "expected lint:scripts to be reused (not re-run) on the resume rerun"
+
+  # PR 1492 review: the resumed (partially reused) success must NOT write the
+  # whole-run fast-path stamp — re-dating reused work would let --skip-if-fresh
+  # extend validation reuse past the two-hour ceiling. A third run with
+  # --skip-if-fresh therefore still executes/reuses commands instead of
+  # whole-run skipping.
+  LINT_SIDE_EFFECT="$command_stamp_resume_repo/lint-side-effect" \
+    PREWARM_FAIL_FLAG="$command_stamp_resume_repo/prewarm-fail" \
+    PATH="$command_stamp_resume_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      --skip-if-fresh \
+      > "$command_stamp_resume_repo/third-run-output" 2>&1
+  if grep -q "skipping mapped commands" "$command_stamp_resume_repo/third-run-output"; then
+    fail "a resumed run's success must not enable the whole-run fast-path skip"
+  fi
+)
+rm -rf "$command_stamp_resume_repo"
+assert_raw_contains "↻ pnpm lint:scripts (fresh from previous run)"
+assert_raw_contains "- reused 0s pnpm lint:scripts"
+assert_contains "+ pnpm agent:prewarm:test"
+assert_contains "All mapped commands passed."
+
+# GitHub issue #1410: any content change to a validated file changes the whole-
+# run fingerprint, which must invalidate every per-command stamp so the command
+# re-executes. `pnpm lint:scripts` runs once on the first success, then again
+# after the changed file is edited.
+command_stamp_invalidation_repo="$(mktemp -d)"
+(
+  cd "$command_stamp_invalidation_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+[[ "$*" == "lint:scripts" ]] && printf 'ran\n' >> "${LINT_SIDE_EFFECT:?}"
+exit 0
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  LINT_SIDE_EFFECT="$command_stamp_invalidation_repo/lint-side-effect" \
+    PATH="$command_stamp_invalidation_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$output_file" 2>&1
+  [[ "$(wc -l < "$command_stamp_invalidation_repo/lint-side-effect" | tr -d ' ')" == "1" ]] ||
+    fail "expected lint:scripts to run once on the first invalidation run"
+
+  printf 'console.log("changed");\n' >> scripts/agent-prewarm.mjs
+  LINT_SIDE_EFFECT="$command_stamp_invalidation_repo/lint-side-effect" \
+    PATH="$command_stamp_invalidation_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$output_file" 2>&1
+  [[ "$(wc -l < "$command_stamp_invalidation_repo/lint-side-effect" | tr -d ' ')" == "2" ]] ||
+    fail "expected lint:scripts to re-execute after the changed file was edited"
+)
+rm -rf "$command_stamp_invalidation_repo"
+assert_not_contains "↻ pnpm lint:scripts (fresh from previous run)"
+
+# GitHub issue #1410: the Trunk check and the gate self-test validate repo/gate
+# state cheaply and self-referentially, so they must ALWAYS re-execute — never be
+# reused from a prior run's stamp — while ordinary commands still reuse.
+command_stamp_exempt_repo="$(mktemp -d)"
+(
+  cd "$command_stamp_exempt_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  printf '#!/usr/bin/env bash\nexit 0\n' > scripts/agent-quality-gate.sh
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+printf 'ran\n' >> "${TRUNK_COUNT:?}"
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "lint:scripts") printf 'ran\n' >> "${LINT_SIDE_EFFECT:?}" ;;
+  "agent:quality-gate:test") printf 'ran\n' >> "${SELFTEST_COUNT:?}" ;;
+esac
+exit 0
+STUB
+  chmod +x bin/pnpm scripts/agent-quality-gate.sh tools/trunk
+  git add .
+  git commit -qm init
+  printf '%s\n' scripts/agent-prewarm.mjs scripts/agent-quality-gate.sh > changed-paths.txt
+  for _ in 1 2; do
+    TRUNK_COUNT="$command_stamp_exempt_repo/trunk-count" \
+      SELFTEST_COUNT="$command_stamp_exempt_repo/selftest-count" \
+      LINT_SIDE_EFFECT="$command_stamp_exempt_repo/lint-side-effect" \
+      PATH="$command_stamp_exempt_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        --parallel 1 \
+        > "$output_file" 2>&1
+  done
+  [[ "$(wc -l < "$command_stamp_exempt_repo/trunk-count" | tr -d ' ')" == "2" ]] ||
+    fail "expected the Trunk check to re-run on every gate run (never reused)"
+  [[ "$(wc -l < "$command_stamp_exempt_repo/selftest-count" | tr -d ' ')" == "2" ]] ||
+    fail "expected the gate self-test to re-run on every gate run (never reused)"
+  [[ "$(wc -l < "$command_stamp_exempt_repo/lint-side-effect" | tr -d ' ')" == "1" ]] ||
+    fail "expected an ordinary command to be reused on the second run"
+)
+rm -rf "$command_stamp_exempt_repo"
+assert_raw_contains "↻ pnpm lint:scripts (fresh from previous run)"
+assert_not_contains "↻ pnpm agent:quality-gate:test"
+assert_not_contains "↻ ./tools/trunk check"
+
+# GitHub issue #1410: no mapped command may hang forever. A command that sleeps
+# past --command-timeout is killed (whole process tree) and reported as a normal
+# failure that names the command and the timeout, leaving no background process.
+command_timeout_repo="$(mktemp -d)"
+(
+  cd "$command_timeout_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  # A distinctively-named victim so pgrep can prove the tree was reaped. The
+  # parent exits on TERM while its child ignores TERM (PR 1492 review): the
+  # watchdog must snapshot the tree before TERM and KILL the saved list, or
+  # the reparented child survives the escalation.
+  cat > bin/qg-timeout-orphan <<'STUB'
+#!/usr/bin/env bash
+trap '' TERM
+while :; do sleep 1; done
+STUB
+  cat > bin/qg-timeout-victim <<'STUB'
+#!/usr/bin/env bash
+trap 'exit 0' TERM
+qg-timeout-orphan &
+sleep 45 &
+wait
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "agent:prewarm:test" ]]; then
+  exec qg-timeout-victim
+fi
+exit 0
+STUB
+  chmod +x bin/pnpm bin/qg-timeout-victim bin/qg-timeout-orphan tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  set +e
+  PATH="$command_timeout_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      --command-timeout 2 \
+      > "$output_file" 2>&1
+  timeout_exit=$?
+  set -e
+  [[ "$timeout_exit" -ne 0 ]] ||
+    fail "expected the gate to fail when a mapped command exceeded --command-timeout"
+  # TERM lands at ~2s; give the KILL backstop a moment, then assert no leak.
+  sleep 4
+  if pgrep -f "qg-timeout-victim" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-timeout-victim" 2>/dev/null || true
+    fail "timed-out command left a leaked background process"
+  fi
+  if pgrep -f "qg-timeout-orphan" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-timeout-orphan" 2>/dev/null || true
+    fail "timed-out command's TERM-ignoring child escaped the watchdog KILL pass"
+  fi
+)
+rm -rf "$command_timeout_repo"
+assert_raw_contains "Command timed out after 2s: pnpm agent:prewarm:test"
+
+# GitHub issue #1410: a manual interrupt (TERM sent to the gate process) must
+# escalate to KILL exactly like the timeout watchdog, so a SIGTERM-ignoring
+# mapped command cannot survive an interactive Ctrl-C/TERM teardown. The TERM
+# below targets ONLY the gate's pid — never a process group — so the test
+# suite itself is not signalled.
+command_interrupt_repo="$(mktemp -d)"
+(
+  cd "$command_interrupt_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  # Ignores TERM and respawns its sleep child each second, so only the KILL
+  # escalation can reap it.
+  cat > bin/qg-interrupt-victim <<'STUB'
+#!/usr/bin/env bash
+trap '' TERM
+while :; do sleep 1; done
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "agent:prewarm:test" ]]; then
+  exec qg-interrupt-victim
+fi
+exit 0
+STUB
+  chmod +x bin/pnpm bin/qg-interrupt-victim tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  set +e
+  PATH="$command_interrupt_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 1 \
+      > "$output_file" 2>&1 &
+  gate_pid=$!
+  waited=0
+  until pgrep -f "qg-interrupt-victim" >/dev/null 2>&1; do
+    sleep 1
+    waited=$((waited + 1))
+    if [[ "$waited" -ge 20 ]]; then
+      kill -KILL "$gate_pid" 2>/dev/null
+      pkill -KILL -f "qg-interrupt-victim" 2>/dev/null
+      fail "interrupt fixture never started its victim"
+    fi
+  done
+  kill -TERM "$gate_pid" 2>/dev/null
+  wait "$gate_pid"
+  interrupt_exit=$?
+  set -e
+  [[ "$interrupt_exit" -ne 0 ]] ||
+    fail "expected the gate to exit nonzero when interrupted by TERM"
+  # The trap teardown TERMs immediately, then KILLs after its 3s grace.
+  sleep 5
+  if pgrep -f "qg-interrupt-victim" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-interrupt-victim" 2>/dev/null || true
+    fail "interrupted gate left a SIGTERM-ignoring process running"
+  fi
+)
+rm -rf "$command_interrupt_repo"
+
+# PR 1492 review: with --parallel greater than 1 the timed commands' pids live
+# only inside the worker subshells, so the parent's interrupt teardown must
+# signal the tracked worker pids (active_worker_pids) or a SIGTERM-ignoring
+# mapped command survives the gate's death. TERM targets ONLY the gate pid.
+parallel_interrupt_repo="$(mktemp -d)"
+(
+  cd "$parallel_interrupt_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  printf 'console.log("fixture");\n' > scripts/agent-context-budget.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/qg-par-victim <<'STUB'
+#!/usr/bin/env bash
+trap '' TERM
+while :; do sleep 1; done
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "agent:prewarm:test" ]]; then
+  exec qg-par-victim
+fi
+if [[ "$*" == "agent:context-budget:test" ]]; then
+  exec sleep 45
+fi
+exit 0
+STUB
+  chmod +x bin/pnpm bin/qg-par-victim tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/agent-prewarm.mjs\nscripts/agent-context-budget.mjs\n' > changed-paths.txt
+  set +e
+  PATH="$parallel_interrupt_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths.txt \
+      --base HEAD \
+      --run \
+      --parallel 2 \
+      > "$output_file" 2>&1 &
+  gate_pid=$!
+  waited=0
+  until pgrep -f "qg-par-victim" >/dev/null 2>&1; do
+    sleep 1
+    waited=$((waited + 1))
+    if [[ "$waited" -ge 20 ]]; then
+      kill -KILL "$gate_pid" 2>/dev/null
+      pkill -KILL -f "qg-par-victim" 2>/dev/null
+      fail "parallel interrupt fixture never started its victim"
+    fi
+  done
+  kill -TERM "$gate_pid" 2>/dev/null
+  wait "$gate_pid"
+  parallel_interrupt_exit=$?
+  set -e
+  [[ "$parallel_interrupt_exit" -ne 0 ]] ||
+    fail "expected the gate to exit nonzero when interrupted during the parallel pool"
+  sleep 5
+  if pgrep -f "qg-par-victim" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-par-victim" 2>/dev/null || true
+    fail "interrupted parallel gate left a SIGTERM-ignoring worker command running"
+  fi
+)
+rm -rf "$parallel_interrupt_repo"
+
+# PR 1492 review: prerequisite commands (install/codegen/setup) produce outputs
+# the source fingerprint cannot see, so they must never be stamped or reused —
+# two identical successful runs execute the preflight install twice, while a
+# stampable quality command is reused on the second run.
+prereq_reuse_repo="$(mktemp -d)"
+(
+  cd "$prereq_reuse_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts shared-config/src sub tools
+  printf '{"name":"sub"}\n' > sub/package.json
+  printf 'export const x = 1;\n' > shared-config/src/x.ts
+  printf 'process.exit(0);\n' > scripts/check-adr-reminder.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "$*" == "install --frozen-lockfile" ]]; then
+  echo run >> "$INSTALL_SIDE_EFFECT"
+  exit 0
+fi
+if [[ "$*" == "--filter @mento-protocol/config build" ]]; then
+  echo run >> "$BUILD_SIDE_EFFECT"
+  exit 0
+fi
+if [[ "$*" == "skew:check" ]]; then
+  echo run >> "$SKEW_SIDE_EFFECT"
+  exit 0
+fi
+exit 0
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  printf 'sub/package.json\nshared-config/src/x.ts\n' > changed-paths.txt
+  for _ in 1 2; do
+    INSTALL_SIDE_EFFECT="$prereq_reuse_repo/install-side-effect" \
+      BUILD_SIDE_EFFECT="$prereq_reuse_repo/build-side-effect" \
+      SKEW_SIDE_EFFECT="$prereq_reuse_repo/skew-side-effect" \
+      PATH="$prereq_reuse_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        --parallel 1 \
+        --allow-package-script-changes \
+        > "$output_file" 2>&1 ||
+      fail "prerequisite-reuse fixture run failed unexpectedly"
+  done
+  [[ "$(wc -l < "$prereq_reuse_repo/install-side-effect" | tr -d ' ')" == "2" ]] ||
+    fail "expected the preflight install to run on BOTH runs (prerequisites are never reused)"
+  # PR 1492 review: the --parallel 1 sequential branch bypasses
+  # run_prerequisite_phase, so setup exemption must come from the command
+  # classification — the shared-config build (a quality-setup command whose
+  # dist/ output the fingerprint cannot see) must also run on BOTH runs.
+  [[ "$(wc -l < "$prereq_reuse_repo/build-side-effect" | tr -d ' ')" == "2" ]] ||
+    fail "expected the quality-setup config build to run on BOTH runs (setup commands are never reused)"
+  [[ "$(wc -l < "$prereq_reuse_repo/skew-side-effect" | tr -d ' ')" == "1" ]] ||
+    fail "expected the quality command to be reused on the second run"
+)
+rm -rf "$prereq_reuse_repo"
 
 echo "agent quality gate tests passed"

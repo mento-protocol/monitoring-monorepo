@@ -5,7 +5,7 @@ title: Ship Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-16
+last_verified: 2026-07-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -18,6 +18,28 @@ Use this repo-local adapter for shipping `monitoring-monorepo` work from Codex
 Cloud or any checkout that does not have the user's personal skills installed.
 It preserves the local `/ship` contract while relying only on repo-visible
 commands and GitHub tooling.
+
+## Surface Detection
+
+Policy is identical on every surface — ready-for-review default, PR body
+template, quality gate first. Only the GitHub transport branches; the full
+gh→MCP mapping lives in
+[`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md).
+
+- **Local session or Codex Cloud** (no `CLAUDE_CODE_REMOTE`): use the gh
+  commands below as written.
+- **Claude cloud session** (`CLAUDE_CODE_REMOTE` set): the platform's GitHub
+  credential proxy blocks gh's API paths regardless of tokens or allowlist
+  entries. Git commit/push work unchanged through the local git proxy;
+  replace each gh call with its MCP equivalent — `pull_request_read` for the
+  preflight PR lookup, `create_pull_request` / `update_pull_request` for the
+  PR step — and hand post-push readiness to the `babysit-pr` cloud watch
+  loop. Exception: in a cloud variant passing the full capability gate —
+  repo-scoped REST call, minimal GraphQL query, and `--slurp` support (the
+  same gate `babysit-pr` and `.claude/babysit-pr.sh` probe) — use the gh
+  commands and the readiness probe, passing `--repo <owner/name>` (or
+  setting `GH_REPO`) on PR-scoped calls: gh cannot infer a repository from
+  the proxy remote.
 
 ## Preflight
 
@@ -41,6 +63,10 @@ git log origin/main..HEAD --oneline
 git merge-base --is-ancestor origin/main HEAD
 gh pr view --json number,url,state,isDraft,baseRefName 2>/dev/null
 ```
+
+In a Claude cloud session, replace the `gh pr view` lookup with
+`list_pull_requests` filtered by head branch (or `pull_request_read` when the
+PR number is known); the git commands run unchanged.
 
 Hard stop on `main` or `master`. The shallow-repository guard prevents hosted
 depth-1 checkouts from producing a false ancestry failure. If
@@ -153,7 +179,9 @@ Never force-push or amend unless the user explicitly requests it.
 
 ## PR
 
-Create or update the PR with this body shape:
+Create or update the PR — `gh pr create` / `gh pr edit` locally,
+`create_pull_request` / `update_pull_request` in a Claude cloud session — with
+this body shape:
 
 ```markdown
 ## The Problem
@@ -203,8 +231,17 @@ Include this marker when practical:
 Run the shared readiness probe before calling the PR clean:
 
 ```bash
-pnpm pr:ready-state --pr <number> --json
+pnpm pr:ready-state --pr <number> --repo <BASE_OWNER/REPO> --json
 ```
+
+Always pass `--repo` bound to the base repository: without it the probe infers
+the repo from the checkout, which inspects the wrong same-number PR on fork
+PRs or repo-bound checkouts.
+
+In a Claude cloud session without the Surface Detection capability exception,
+the probe cannot run; use the `babysit-pr` skill's cloud watch loop (MCP
+emulation checklist) and label its result MCP-emulated rather than
+probe-verified.
 
 If the user asked for the complete ship loop, invoke the repo `babysit-pr`
 skill or follow its workflow until the PR reaches all-clear, merged, closed, or

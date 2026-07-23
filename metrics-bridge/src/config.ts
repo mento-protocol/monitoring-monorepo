@@ -8,6 +8,12 @@ export const HASURA_URL = env.HASURA_URL;
 export const POLL_INTERVAL_MS = env.POLL_INTERVAL_MS;
 export const PORT = env.PORT;
 
+// Undefined until the protected, IaC-owned policy artifact plane is
+// provisioned. Keep this as raw text: the isolated peg runtime validates it
+// and reports its own bounded error without affecting the primary pool loop.
+// Thresholds are fetched at runtime and are never baked into the image.
+export const PEG_POLICY_URL = env.PEG_POLICY_URL;
+
 // Rebalance-reason probe runs every Nth Hasura poll cycle. The
 // `Deviation Breach Critical` alert needs the breach to be sustained
 // for >1h before firing, so a few-minute probe cadence is well inside the

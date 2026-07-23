@@ -18,6 +18,27 @@ Use this repo-local adapter when the user's personal `babysit-pr` skill or
 Claude `Monitor` tool is not available. The readiness source of truth is the
 repo command, not a hand-rolled interpretation of green checks.
 
+## Surface Detection
+
+Pick the path before the first GitHub call; the full gh→MCP mapping and the
+reasoning live in
+[`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md).
+
+- **Local session or Codex Cloud** (no `CLAUDE_CODE_REMOTE`): gh works. Use
+  the sections below as written — `pnpm pr:ready-state` is the readiness
+  source of truth.
+- **Claude cloud session** (`CLAUDE_CODE_REMOTE` set): the platform's GitHub
+  credential proxy blocks gh's API paths regardless of tokens or allowlist
+  entries, and `pnpm pr:ready-state` cannot run. Follow
+  [Cloud Watch Loop](#cloud-watch-loop-claude-cloud-sessions) instead. Do not
+  trust `gh auth status` as a capability signal; only a successful
+  `gh api repos/<owner>/<repo>` call proves the gh path works. Exception: in
+  a cloud variant where that repo-scoped REST call succeeds, a minimal
+  GraphQL query (`gh api graphql -f query='query{viewer{login}}'`) succeeds,
+  **and** gh supports `gh api --slurp`, the gh-first path above is available
+  and preferred — the same capability gate `.claude/babysit-pr.sh` probes
+  before choosing gh mode.
+
 ## Resolve Target
 
 If no PR number is provided, resolve the current branch PR. For every target,
@@ -26,6 +47,22 @@ capture the PR URL, head repository, branch, and commit:
 ```bash
 gh pr view --json number,url,title,headRefName,headRefOid,baseRefName,headRepository,headRepositoryOwner,isCrossRepository
 ```
+
+In a Claude cloud session, resolve the same fields over MCP instead:
+`list_pull_requests` filtered by the current head branch when no number was
+given, or `pull_request_read` method `get` for a known number (it returns the
+head/base refs, head SHA, and repository slugs). The remote-name binding guard
+cannot run there — the checkout's `origin` is the platform's git credential
+proxy, not a repository URL — so bind by content instead: require the
+MCP-resolved PR to be same-repository (`headRepository.nameWithOwner` equals
+the session-attached repo), require local `git rev-parse HEAD` to equal the
+MCP-resolved `headRefOid` before editing, and use the verified proxy `origin`
+as `HEAD_REMOTE`. Cross-repository (fork) PRs stop on this surface: the proxy
+remote cannot be bound to a fork. The clean-tree guard below runs unchanged;
+for the post-push guard, re-resolve with `pull_request_read` method `get` in
+place of `gh pr view` and require the returned `headRefOid` to equal local
+`HEAD`. Base-branch fetches for conflict handling use the same verified proxy
+`origin` as `BASE_REMOTE` (same-repository PRs only).
 
 For an explicit target, accept a bare number or PR URL. Derive and preserve
 `BASE_REPO` (`owner/name`) from the resolved PR URL before changing checkouts.
@@ -87,6 +124,56 @@ required CI failure, merge conflict, unreplied review comment, unresolved
 thread, Codex approval missing after current-head review, all-clear, merged, or
 closed.
 
+## Cloud Watch Loop (Claude cloud sessions)
+
+Do not foreground-poll and never sleep-poll. Instead:
+
+1. Subscribe to PR events (`subscribe_pr_activity`) so comments, reviews, and
+   CI failures arrive as webhook activity.
+2. Arm a scheduled self check-in (for example `send_later`) before ending
+   the turn, at a cadence short enough to catch quiet transitions inside the
+   babysitting window — every 15–20 minutes against the default one-hour
+   deadline; webhook events do not cover CI success, new pushes, or
+   merge-conflict transitions, so a check-in that only fires at the deadline
+   would miss a mid-window green. Re-arming is bounded by the same
+   babysitting deadline as the local loop (one hour unless the user set a
+   different budget): at the deadline, report the current state and stop or
+   escalate instead of re-arming silently. Stop when the PR is merged or
+   closed.
+3. On every event or check-in, run the MCP emulation of the readiness sweep
+   (tool mapping in
+   [`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)):
+   - PR state via `pull_request_read` method `get`, including
+     `mergeable_state`, draft state, and current head SHA;
+   - head check runs via methods `get_check_runs` and `get_status`;
+   - unresolved review threads via method `get_review_comments` (page to the
+     end);
+   - unreplied root review comments and top-level comments via methods
+     `get_review_comments`, `get_reviews`, and `get_comments`;
+   - the latest per-reviewer review state from `get_reviews`: an outstanding
+     `CHANGES_REQUESTED` is a required blocker until approved or dismissed —
+     GitHub's aggregate review decision persists across new pushes, so do
+     not discard it for being on an older commit. Whether
+     an approval is required at all (`REVIEW_REQUIRED`) rides on branch
+     protection, which MCP cannot read — name it unverified;
+   - the Codex current-head signal from Codex's visible reviews/comments for
+     the current head. The reaction-backed PR-description approval gate is
+     not readable over MCP; report it as unverified rather than assumed.
+4. Blocker handling, reply shapes, and Codex-request discipline are identical
+   to the local path (see below); use the MCP write tools
+   (`add_reply_to_pull_request_comment` for inline review comments,
+   `add_issue_comment` for top-level PR conversation comments,
+   `resolve_review_thread`, `update_pull_request`) in place of `gh`
+   commands. Reply before resolving, always.
+5. Label any all-clear as **MCP-emulated readiness**, never as
+   probe-verified: `pnpm pr:ready-state` did not run, and the Codex approval
+   gate plus required-context classification are approximations. An
+   MCP-emulated all-clear is a status report, not a terminal state: keep the
+   step-2 loop armed, name the gates the sweep could not verify (for example
+   the Codex reaction approval) as unverified rather than clear, and hand
+   the final probe-verified readiness decision to a gh-capable surface
+   (local babysitter or CI).
+
 ## Act On Required Blockers
 
 Use `required.blockers` and required `gates` from `--json` as the action list.
@@ -134,3 +221,8 @@ current head. The Codex approval exception is only the exact head-scoped
 break-glass contract in `docs/notes/pr-ready-state.md`; it waives no other
 gate. Include the PR URL, head SHA, required blocker count, unresolved thread
 count, unreplied review-comment count, required-check state, and optional lag.
+
+In a Claude cloud session without the capability gate, rerun the full MCP
+emulation checklist from
+[Cloud Watch Loop](#cloud-watch-loop-claude-cloud-sessions) instead, report
+the same fields, and label the result MCP-emulated.

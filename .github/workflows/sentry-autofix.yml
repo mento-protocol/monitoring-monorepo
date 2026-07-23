@@ -487,6 +487,10 @@ jobs:
             --repo "${REPO}" --head "${branch}" --state open \
             --json url --jq '.[0].url // ""')
 
+          # Whether THIS run opened the PR — only a PR we opened here may be
+          # withdrawn by the final stale-verdict guard below; a pre-existing PR
+          # (possibly under review) is left untouched.
+          opened_new_pr=false
           if [ -n "${existing_pr}" ]; then
             echo "::notice::Branch ${branch} already has PR ${existing_pr}; marking the stub, no new PR."
             pr_url="${existing_pr}"
@@ -553,19 +557,96 @@ jobs:
               --title "fix: Sentry autofix ${SHORT_ID}" \
               --body-file "${RUNNER_TEMP}/pr-body.md")
             echo "Opened ${pr_url}"
+            opened_new_pr=true
           fi
 
-          # Record the outcome on the queue stub with the AMBIENT github.token
-          # (job env) so the comment is authored by github-actions (the digest's
-          # authorship fence) — NOT the App bot. All helpers still run from the
-          # pristine `base` clone. Idempotent: the selector's dedup (SHORT-ID in an
-          # open PR OR the fix-pr-opened label) stops the stub from being
-          # re-picked, so it does not re-comment on later runs. Self-heal the label
-          # from the ingest's single-source definition before applying it (the stub
-          # may predate a label bootstrap; gh errors on a missing repo label).
-          gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
-            --body "$(node "${fin}" autofix-comment --url "${pr_url}")"
+          # Stale-verdict guard (issue #1389). GitHub labels have no atomic
+          # compare-and-set, so the terminal marker is written under a re-read of
+          # sentry:verdict-code-fix taken immediately BEFORE the write and again
+          # AFTER it. Ingest (its own concurrency group) can shed the verdict on a
+          # regression re-queue anywhere in the push + gh pr create + marker-write
+          # span; writing — or leaving — the fix-pr-opened marker off a shed
+          # verdict would suppress the re-fix the regression must trigger. Because
+          # the selector also dedups on an OPEN autofix PR, withdrawing means
+          # CLOSING the PR we opened, not just skipping the label.
 
+          # Live verdict: prints "yes" only when it POSITIVELY confirms
+          # sentry:verdict-code-fix is still present; prints "no" both when the
+          # verdict was shed AND when the read itself fails. Fail CLOSED — an
+          # unverified verdict must not receive the terminal marker (that is the
+          # #1389 suppression bug), and a needlessly-withdrawn PR self-corrects when
+          # the stub is re-selected next run, whereas a wrongly-written marker does
+          # not.
+          verdict_live() {
+            local names
+            names=$(gh issue view "${QUEUE_ISSUE}" --repo "${REPO}" \
+              --json labels --jq '.labels[].name' 2>/dev/null) \
+              || { printf 'no'; return 0; }
+            printf '%s\n' "${names}" > "${RUNNER_TEMP}/labels-live.txt"
+            node "${fin}" marker-still-valid --labels-file "${RUNNER_TEMP}/labels-live.txt"
+          }
+
+          # Retry a gh mutation up to 3×; on the final failure emit ::error:: and
+          # return non-zero so the caller can fail the job. A mutation that never
+          # lands here — a stale PR left open, or a stale marker left applied —
+          # would suppress the re-fix the regression must trigger, so these MUST
+          # NOT be masked with `|| true` (issue #1389).
+          retry3() {
+            local what="$1"
+            shift
+            local n
+            for n in 1 2 3; do
+              "$@" && return 0
+              if [ "${n}" -eq 3 ]; then
+                echo "::error::${what} failed after ${n} attempts."
+                return 1
+              fi
+              echo "::warning::${what} attempt ${n} failed; retrying."
+              sleep $((n * 5))
+            done
+          }
+          close_stale_pr() {
+            GH_TOKEN="${APP_TOKEN}" gh pr close "${pr_url}" --repo "${REPO}" \
+              --delete-branch \
+              --comment "$(node "${fin}" stale-verdict-close-comment)"
+          }
+          remove_stale_marker() {
+            gh issue edit "${QUEUE_ISSUE}" --repo "${REPO}" \
+              --remove-label "$(jq -r '.name' <<<"${def}")"
+          }
+
+          # Withdraw the run when the verdict was shed: close the PR we opened, then
+          # comment the stub. Because the selector dedups on an OPEN autofix PR as
+          # well as the label, a close that never lands would reconcile a future
+          # fresh verdict onto THIS stale diff — so an unconfirmable close fails the
+          # job loudly rather than posting a misleading "withdrawn" comment.
+          withdraw_stale_verdict() {
+            echo "::notice::#${QUEUE_ISSUE} lost or could not re-confirm sentry:verdict-code-fix during finalize (regression re-queue or read failure); withdrawing rather than marking fix-pr-opened."
+            if [ "${opened_new_pr}" = "true" ]; then
+              retry3 "close stale-verdict PR ${pr_url}" close_stale_pr || exit 1
+            fi
+            gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
+              --body "Autofix: fix not finalized. The code-fix verdict was removed while the PR was being opened (most likely a regression re-queue) — the attempt was withdrawn rather than marking the stub fixed from a stale verdict. It will be reconsidered after re-triage."
+          }
+
+          # Marker write under a re-read of the verdict taken immediately BEFORE and
+          # AFTER applying the fix-pr-opened label (issue #1389). GitHub labels have
+          # no atomic compare-and-set, and ingest (its own concurrency group) can
+          # shed the verdict on a regression re-queue while the PR is opened;
+          # writing — or leaving — the marker off a shed verdict would suppress the
+          # re-fix. The `Autofixed by PR:` pointer the digest reads is posted LAST,
+          # only after the post-write guard confirms the verdict still stands, so a
+          # withdrawn run never leaves a stale "Autofixed" comment behind.
+
+          # Pre-write check.
+          if [ "$(verdict_live)" = "no" ]; then
+            withdraw_stale_verdict
+            exit 0
+          fi
+
+          # Apply the dedup marker. Self-heal the label from the ingest's
+          # single-source definition first (the stub may predate a bootstrap; gh
+          # errors on a missing repo label).
           def=$(node "${fin}" label-def)
           gh label create "$(jq -r '.name' <<<"${def}")" \
             --repo "${REPO}" \
@@ -574,6 +655,46 @@ jobs:
             --force
           gh issue edit "${QUEUE_ISSUE}" --repo "${REPO}" \
             --add-label "$(jq -r '.name' <<<"${def}")"
+
+          # Post-write compensating verification. If ingest shed the verdict in the
+          # window between the pre-write check and the label write, REMOVE the marker
+          # we just applied — failing the job loudly if that removal cannot be
+          # confirmed, since a stuck marker also suppresses the re-fix — and withdraw
+          # the PR, so the re-queued occurrence stays selectable. A regression
+          # arriving strictly after this check self-heals on ingest's next re-queue,
+          # which sheds the marker again (REOPEN_SHED_LABELS). This guards a SHED
+          # verdict, not a re-added one: an ABA where a re-triage restores the label
+          # inside the window is tracked for the deterministic finalize job (#1506).
+          if [ "$(verdict_live)" = "no" ]; then
+            retry3 "remove stale fix-pr-opened marker on #${QUEUE_ISSUE}" remove_stale_marker || exit 1
+            withdraw_stale_verdict
+            exit 0
+          fi
+
+          # Record the outcome on the queue stub with the AMBIENT github.token (job
+          # env) so the comment is authored by github-actions (the digest's
+          # authorship fence) — NOT the App bot. All helpers still run from the
+          # pristine `base` clone. Reached only after the post-write guard confirms
+          # the verdict still stands, so the pointer is never posted for a
+          # subsequently-withdrawn run. Idempotent: the selector's dedup (SHORT-ID in
+          # an open PR OR the fix-pr-opened label) stops the stub from being
+          # re-picked, so it does not re-comment on later runs.
+          #
+          # The marker is already applied, and the selector skips a marked stub —
+          # so a marker without this pointer would strand the stub as Routed (the
+          # digest's extractAutofixUrl finds no pointer) with no path to repair,
+          # since the marker also blocks the reconcile path. Retry the pointer; if
+          # it still fails, ROLL BACK the marker so the open PR routes to reconcile
+          # next run, which re-applies both the marker and this pointer. A rollback
+          # that itself cannot be confirmed fails the job loudly (issue #1389).
+          post_pointer() {
+            gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
+              --body "$(node "${fin}" autofix-comment --url "${pr_url}")"
+          }
+          if ! retry3 "post Autofixed pointer on #${QUEUE_ISSUE}" post_pointer; then
+            echo "::warning::pointer write failed after retries; rolling back the fix-pr-opened marker so the reconcile path re-applies both next run."
+            retry3 "roll back fix-pr-opened marker on #${QUEUE_ISSUE}" remove_stale_marker || exit 1
+          fi
 
       # Reconcile-only path (no agent, no push). The selector routes a stub here
       # when an OPEN fix PR already references its SHORT-ID but the stub never

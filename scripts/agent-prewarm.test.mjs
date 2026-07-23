@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  extractTurboCacheDir,
   extractTurboPrewarmCommands,
   hasPackageScriptRisk,
   parseParallelism,
@@ -107,5 +108,24 @@ assert.equal(
   parallelResults[1].command,
   'node -e "setTimeout(() => process.exit(0), 10)"',
 );
+
+// Prewarm must reuse the gate's resolved shared Turbo cache (issue #1411) so it
+// warms the same dir the gate later reads; parse it from the printed line.
+assert.equal(
+  extractTurboCacheDir(`Agent quality gate
+
+Base: origin/main
+Head: HEAD
+Mode: dry-run
+Turbo cache dir: /home/agent/.cache/turbo-monitoring-monorepo
+
+Changed paths:
+- ui-dashboard/src/app/page.tsx
+`),
+  "/home/agent/.cache/turbo-monitoring-monorepo",
+);
+
+// Absent line (caller opt-out or unwritable home) => no shared dir to apply.
+assert.equal(extractTurboCacheDir(gateOutput), null);
 
 console.log("agent prewarm tests passed");

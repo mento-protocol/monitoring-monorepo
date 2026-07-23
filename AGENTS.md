@@ -19,6 +19,11 @@ in [`SPEC.md`](SPEC.md).
 
 ## Operating Rule (read this before opening PRs)
 
+The full claim → implement → gate → autoreview → ship → babysit → ready-state →
+merge loop, with its non-negotiables, is one card:
+[`docs/notes/pr-operating-card.md`](docs/notes/pr-operating-card.md). Read it
+first; open the authority docs it names only when a step needs their depth.
+
 Read [`docs/context-standards.md`](docs/context-standards.md) before using or
 moving repository documentation. Canonical context is current operating truth;
 plans and non-canonical notes are historical input that must be verified.
@@ -66,11 +71,12 @@ storage only. Claim before substantive edits:
 pnpm issue:claim --count 3 --agent codex
 ```
 
-When a PR opens, run `pnpm issue:review --pr <number> --issue <issue>`. Use
-`Closes #N` only when the issue's **Done means** is fully satisfied; otherwise
-use `Refs #N`. Release incomplete work with `pnpm issue:release` and choose
-`agent-ready` versus `needs-grooming` from the remaining clarity. Label,
-workboard, Claim ID, and post-merge sync rules live in
+In Claude cloud sessions these helpers run only behind the capability gate;
+otherwise use the MCP workboard fallback in
+[`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
+Review linkage (`Closes` vs `Refs`), release, and post-merge sync are on the
+[operating card](docs/notes/pr-operating-card.md); label, workboard, and Claim
+ID depth lives in
 [`docs/notes/agent-issue-workflow.md`](docs/notes/agent-issue-workflow.md).
 
 ## Agent Quality Gate
@@ -79,30 +85,20 @@ Before opening or updating an agent-authored PR, inspect and run the mapped
 local-only checks:
 
 ```bash
-pnpm agent:quality-gate
-pnpm agent:quality-gate --run
-pnpm agent:autoreview # non-trivial completed batches
-pnpm agent:autoreview:test -- --jobs 1  # autoreview runtime changes only
-pnpm agent:autoreview --verify-bundle-dir <dir>  # pre-review check; retain the printed manifest
+pnpm agent:quality-gate          # inspect mapped commands and checklists
+pnpm agent:quality-gate --run    # execute the safe local mapped commands
+pnpm agent:autoreview            # non-trivial completed batches
 ```
 
-The gate never deploys or applies Terraform. It refuses package-script or
-package-manager changes until their lifecycle risk is explicitly acknowledged.
-Do not run a competing dashboard server/browser suite or second gate in the
-same worktree. Background `--run` gates and `git push`; a 600s foreground kill
-discards the freshness stamp. Invocation details, parallelism, caching, the
-server-side fallback, and common traps live in
-[`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md).
-
-Autoreview covers the complete branch-local target without truncation. One
-fresh-context reviewer must inspect every prepared-bundle pass, with manifest
-verification before and after review. Capture, bundle-integrity,
-sensitive-input, and runtime-trust failures are fail-closed; so is an explicitly
-selected unavailable semantic engine. Runtime-changing PRs use the compatible
-last-reviewed owning-checkout wrapper. Autoreview reviews source only: it runs
-no tests and proves no behavior, so mapped gate, browser, generated-artifact,
-and runtime checks still apply. Exact target, bundle, isolation, trust,
-engine-selection, and command contracts live in
+The gate never deploys or applies Terraform, and refuses package-script,
+package-manager, or lockfile changes until their lifecycle risk is explicitly
+acknowledged. Do not run a competing dashboard server/browser suite or second
+gate in the same worktree. Background `--run` gates and `git push`; a 600s
+foreground kill discards the freshness stamp. Autoreview is source review only —
+it runs no tests and proves no behavior, so mapped gate, browser, and runtime
+checks still apply. The full gate → autoreview loop is on the
+[operating card](docs/notes/pr-operating-card.md); invocation, parallelism,
+caching, isolation, trust, and engine contracts live in
 [`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md).
 
 ## Prose Style
@@ -149,28 +145,25 @@ comments/threads, annotations, and failing logs. Reply before resolving:
 - `Fixed in <commit> — <what changed>`
 - `Won't fix: <technical reason why>`
 
-Audit sibling surfaces after one instance of a hazard is found; review is a
-batch-boundary verifier, not the inner edit loop. Never force-push or amend
-while babysitting.
-
-Freeze the intended review baseline before the first pass: the user request,
-target/owner, changed files, and non-test changed lines. Classify additions as
-in-scope, follow-up, or stop; create an issue before deferring valid follow-up
-work, warn near twice the baseline, and pause for reclassification after two
-review-triggered patch cycles rather than starting a third automatically.
-
-Before all-clear, run:
+Audit sibling surfaces after one instance of a hazard is found. Never
+force-push or amend while babysitting. Before all-clear, run:
 
 ```bash
-pnpm --silent pr:feedback-state --pr <number> --json
-pnpm pr:ready-state --pr <number> --json
+pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
+pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
 ```
 
 All-clear requires a clean feedback ledger plus ready-state's current-head
 required state, including the current-head
-`chatgpt-codex-connector[bot]` PR-description approval. Do not post routine or
-duplicate `@codex review` requests. The projection contract, break-glass
-behavior, optional-bot treatment, and watch loop live in
+`chatgpt-codex-connector[bot]` PR-description approval. Exception: in Claude
+cloud sessions the probes run only behind the capability gate; otherwise use
+the `babysit-pr` MCP emulation checklist, label any all-clear MCP-emulated
+rather than probe-verified, and leave the probe-verified all-clear to a
+gh-capable surface — see
+[`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
+The review-baseline discipline and full babysit → ready-state loop are on the
+[operating card](docs/notes/pr-operating-card.md); the projection contract,
+break-glass behavior, optional-bot treatment, and watch loop live in
 [`docs/notes/pr-ready-state.md`](docs/notes/pr-ready-state.md) and the
 `babysit-pr` skill.
 

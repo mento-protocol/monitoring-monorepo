@@ -56,7 +56,12 @@ auto-resolves a live page whenever the threshold series blips.
   bridge polls — the bridge never bakes this JSON into its image, exports
   `mento_peg_policy_version`, and the rules assert version freshness, so
   an ordinary ungated bridge deploy cannot activate page-affecting policy
-  ahead of approval. Activation is two-phase because artifact publish and
+  ahead of approval. Each version ends with the first 32 hexadecimal
+  characters of the SHA-256 digest of its canonical content (excluding the
+  version field). Canonicalization recursively sorts object keys by Unicode
+  code point, preserves array order, and then hashes the compact JSON encoding;
+  runtime and CI verify that binding so a restarted replica
+  cannot reuse one metric label for changed semantics. Activation is two-phase because artifact publish and
   bridge pickup cannot be atomic: the generated rules accept both the
   previous and the new policy version until the producer ACKNOWLEDGES the
   new version — old-version acceptance is ack-terminated, never expired by
@@ -64,9 +69,13 @@ auto-resolves a live page whenever the threshold series blips.
   leave the rules without an accepted producer version. Deviation
   evaluation stays live on the previous policy throughout, and a distinct
   rollover-stuck alert fires when acknowledgment exceeds the expected
-  window — a policy apply never opens a critical-monitoring gap. There is no HCL
-  mirror, so the existing
-  mirror-drift check is unnecessary for this class; a sibling integrity
+  window — a policy apply never opens a critical-monitoring gap. CI also
+  compares the candidate artifact with the current base policy:
+  a changed active version must retain that exact prior active object as
+  `previous`; an unchanged active version may only preserve or remove its
+  retained predecessor after acknowledgment. A second active rollover is
+  rejected until that predecessor has been ACK-cleared. There is no HCL mirror,
+  so the existing mirror-drift check is unnecessary for this class; a sibling integrity
   check validates at source level: every threshold source key and the
   deep-venue designation must name an existing registry source id, every
   alert-authoritative source must carry complete policy (reference size,
