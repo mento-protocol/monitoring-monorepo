@@ -53,6 +53,12 @@ jobs:
         with:
           # Need full history to `git show` the base-ref schema.
           fetch-depth: 0
+          # The sticky-comment action authenticates via the API token it is
+          # handed directly; the write-scoped GITHUB_TOKEN must not persist into
+          # .git/config, where PR-head code (incl. a machine-authored autofix
+          # diff) could read it. autofix CI-trust boundary — see
+          # check-autofix-ci-trust.mjs, issue #1460.
+          persist-credentials: false
       - id: filter
         # `continue-on-error: true` keeps a failed path-detection step from
         # failing the job; the `decide` step below interprets a missing/failed
