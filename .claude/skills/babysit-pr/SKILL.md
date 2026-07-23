@@ -220,6 +220,7 @@ break-glass contract in `docs/notes/pr-ready-state.md`; it waives no other
 gate. Include the PR URL, head SHA, required blocker count, unresolved thread
 count, unreplied review-comment count, required-check state, and optional lag.
 
-In a Claude cloud session, rerun the full MCP emulation checklist from
+In a Claude cloud session without the capability gate, rerun the full MCP
+emulation checklist from
 [Cloud Watch Loop](#cloud-watch-loop-claude-cloud-sessions) instead, report
 the same fields, and label the result MCP-emulated.
