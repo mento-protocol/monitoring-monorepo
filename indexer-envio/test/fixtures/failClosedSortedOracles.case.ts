@@ -61,7 +61,7 @@ it(`fails closed before writes for tracked ${EVENT_NAME}`, async () => {
     EVENT_NAME === "OracleReported"
       ? SortedOracles.OracleReported.createMockEvent({
           token: FEED,
-          reporter: "0x00000000000000000000000000000000000000aa",
+          oracle: "0x00000000000000000000000000000000000000aa",
           value: 10n ** 24n,
           timestamp: 1_700_002_150n,
           mockEventData,

@@ -233,6 +233,29 @@ create an issue before deferring a valid follow-up, warn when non-test scope
 approaches twice the baseline, and pause for reclassification after two
 review-triggered patch cycles instead of starting a third automatically.
 
+**Stage timing and gh-lookup deadlines.** Both the wrapper and the helper
+append one best-effort JSON line per stage (`target-selection`, `bundle-prep`,
+`engine-invocation` from the helper; `prepare-bundle`, `verification` from the
+wrapper) to `.tmp/agent-autoreview/durations.jsonl` (gitignored), each shaped
+`{"ts","stage","seconds","mode"}`. `AGENT_AUTOREVIEW_DURATIONS_DIR` overrides
+that directory; `AGENT_AUTOREVIEW_STAGE_SUMMARY` (any non-empty value) also
+echoes a filterable `agent:autoreview: stage-timing ...` line per stage to
+stderr — off by default so it never violates the reviewer-cleanliness stderr
+contract. Logging failure never aborts or fails a run. Automatic `gh`-based PR
+lookups for base-branch detection and `--feedback-pr auto` resolution are
+bounded by `AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS` (default 60s); the separate
+multi-call PR feedback capture is bounded by its own
+`AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS` (default 120s, higher because it
+runs several GitHub calls in one pass). Either way a hung `gh` process cannot
+stall autoreview indefinitely; a lookup that exceeds its deadline fails closed
+like any other lookup error. The wrapper's
+own `gh`/subprocess deadlines (`run_with_deadline`) run the command in its own
+process group and escalate `SIGTERM` then `SIGKILL` on timeout or on the
+wrapper itself being interrupted; the helper's `gh` calls (`spawnSync`) use
+`SIGKILL` directly, since a synchronous child-process call blocks until the
+child actually exits and a `SIGTERM`-ignoring child would otherwise hang it
+despite the timeout.
+
 This adapter uses the repo-local helper at `scripts/agent-autoreview.mjs` and
 keeps the repo's branch-local target: merge-base-to-`HEAD` commits plus current
 tracked and untracked work. It includes deterministic Mento checks and selected
@@ -602,6 +625,42 @@ signature binds the fetched base object, mapped plan, gate implementation,
 changed paths and validated content, plus package-risk state; any bound-input
 change reruns the mapped commands immediately, and an unchanged stamp older
 than two hours expires instead of masking drift.
+
+Below the whole-run stamp, `--run` also keeps per-command success stamps
+(`.tmp/agent-quality-gate/command-stamps.tsv`) so a run that was killed
+mid-way, or that lost a single flaky check, resumes instead of restarting
+(GitHub issue #1410). Each stamp records the exact same whole-run fingerprint
+string, the command, and its completion time. When the whole-run fast-path skip
+does not fire and execution begins, each mapped command is skipped (printed as
+`↻ <command> (fresh from previous run)` and reported as `reused`, not executed)
+only when a stamp exists whose fingerprint matches this run exactly, whose
+command matches exactly, and whose age is within the same two-hour TTL. Every
+other outcome — parse error, missing file, fingerprint mismatch, TTL expiry —
+fails toward rerun. Because the fingerprint includes the content hash of every
+changed file, ANY edit to a validated file invalidates every per-command stamp,
+so reuse only helps the killed-run / single-flake case where content is
+unchanged; that same invalidation, plus a start-of-run prune that drops
+non-matching and expired entries, keeps the file bounded. Only
+quality/serialized/parallel commands are stamped. Prerequisite phases
+(install/codegen/quality-setup) always re-run: their outputs (node_modules,
+generated code, built packages) are invisible to the source fingerprint, so a
+stamp could skip them after their outputs were deleted. The Trunk check and
+the gate self-test are also exempt and always re-run: they validate repo/gate
+state cheaply and self-referentially. The ADR
+reminder also re-runs every time, for a mechanical reason rather than an
+exemption: its command string embeds the run's temporary changed-paths file
+path, so its stamp key never matches a prior run (fail-safe — an advisory,
+self-suppressing check that only ever over-runs).
+
+Every mapped command runs under a per-command watchdog so no single check can
+hang forever. A command that runs longer than the timeout (default 900 seconds,
+override with `--command-timeout <n>` or `AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS`)
+has its process tree signalled (TERM, then KILL after a short grace; a
+self-daemonizing child that reparents away from the tree can escape — no
+mapped command does this) and
+is reported as an ordinary failure — `Command timed out after <n>s: <command>`,
+logged with status `fail` in the durations log. The timeout is strictly
+per command; it never bounds the whole run.
 
 Package-local gate tasks for `lint`, `typecheck`, `knip`, dashboard size-limit,
 local dashboard browser tests, and dashboard React Doctor checks run through

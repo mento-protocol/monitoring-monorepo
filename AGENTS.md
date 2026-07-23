@@ -105,6 +105,22 @@ and runtime checks still apply. Exact target, bundle, isolation, trust,
 engine-selection, and command contracts live in
 [`docs/notes/agent-quality-gate-mechanics.md`](docs/notes/agent-quality-gate-mechanics.md).
 
+## Prose Style
+
+Applies to every prose surface an agent writes: PR descriptions, ADRs, docs,
+issue text, review replies, commit messages, and reports. These are a system;
+do not add one-off word or punctuation bans on top of it.
+
+- Prefer the short word. Cut every word that does no work.
+- Prefer active voice.
+- Plain words over jargon, but never swap a precise technical term for a
+  vaguer everyday one.
+- State points directly; avoid the "not X, it's Y" contrast shell except
+  when the misconception is the point, at most once per document.
+- Do not announce what you are about to say — say it.
+- Vary sentence shape. Do not pad lists or examples to three for rhythm.
+- Break any rule above sooner than writing something unclear or imprecise.
+
 ## PR description standard
 
 Every PR description starts with `## The Problem` followed by

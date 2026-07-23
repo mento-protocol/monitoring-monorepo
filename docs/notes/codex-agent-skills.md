@@ -69,6 +69,14 @@ bounded packet into evidence-backed dispositions, guarded semantic edits,
 link/catalog repair, and normal PR closeout. The cadence and queue contract live
 in [`documentation-gardening.md`](documentation-gardening.md).
 
+The `.agents/skills/` ↔ `.claude/skills/` mirror is enforced, not just
+documented: `scripts/check-skills-mirror.sh` byte-compares the two trees and
+fails on any drift, and the Agent Quality Gate runs it automatically whenever
+either tree changes. Symlinking the trees was rejected — repo files pushed via
+the GitHub Contents API and hosted/web checkouts are not guaranteed to
+preserve symlinks, so a check script is the safer default. Run
+`bash scripts/check-skills-mirror.sh` after editing either copy.
+
 ## SessionEnd hook
 
 `scripts/agent-session-end-hook.sh` runs on SessionEnd for Claude Code and Codex.

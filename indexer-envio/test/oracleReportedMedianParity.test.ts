@@ -14,8 +14,8 @@ import {
   _setMockBreakerFeedState,
   _setMockBreakerKind,
   _setMockBreakerList,
-  _setMockMedianTimestamp,
-  _setMockReportExpiry,
+  _setMockOracleReportTimestamps,
+  _setMockReportExpiryConfig,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 import { makePool } from "./helpers/makePool.js";
@@ -40,6 +40,15 @@ const MD_BREAKER = "0x49349f92d2b17d491e42c8fdb02d19f072f9b5d9";
 const FEED = "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
 const SORTED_ORACLES = "0xefb84935239dacdecf7c5ba76d8de40b077b7b33";
 const ONE = 10n ** 24n;
+const DEFAULT_ORACLE_EXPIRY = 1_700_010_000n;
+
+function setReportExpiryConfig(reportExpiry: bigint): void {
+  _setMockReportExpiryConfig(CHAIN_ID, FEED, {
+    globalReportExpiry: reportExpiry,
+    tokenReportExpiry: 0n,
+    reportExpiry,
+  });
+}
 
 describe("SortedOracles.OracleReported median parity", () => {
   beforeEach(() => {
@@ -62,6 +71,7 @@ describe("SortedOracles.OracleReported median parity", () => {
       medianRatesEMA: ONE,
       referenceValue: null,
     });
+    setReportExpiryConfig(DEFAULT_ORACLE_EXPIRY);
   });
 
   afterEach(() => {
@@ -74,7 +84,7 @@ describe("SortedOracles.OracleReported median parity", () => {
     lastMedianPrice,
     lastOracleReportAt = 1_700_000_000n,
     medianLive = true,
-    oracleExpiry = 1_700_010_000n,
+    oracleExpiry = DEFAULT_ORACLE_EXPIRY,
     existingPriceDifference = 0n,
     value,
     blockTimestamp = 1_700_002_000,
@@ -90,7 +100,30 @@ describe("SortedOracles.OracleReported median parity", () => {
     medianTimestamp?: bigint | null;
   }) {
     registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, []);
-    _setMockMedianTimestamp(CHAIN_ID, FEED, medianTimestamp);
+    if (medianTimestamp !== null) {
+      _setMockOracleReportTimestamps(CHAIN_ID, FEED, {
+        reporters: [
+          "0x00000000000000000000000000000000000000aa",
+          "0x00000000000000000000000000000000000000b1",
+          "0x00000000000000000000000000000000000000b2",
+          "0x00000000000000000000000000000000000000b3",
+          "0x00000000000000000000000000000000000000b4",
+        ],
+        // Four non-reporting oracles pin the upper median to the requested
+        // value regardless of whether this reporter's new timestamp is older
+        // or newer. This mirrors the contract's full timestamp list instead
+        // of treating one reporter timestamp as the median.
+        timestamps: [
+          medianTimestamp,
+          medianTimestamp - 1n,
+          medianTimestamp,
+          medianTimestamp,
+          medianTimestamp + 1n,
+        ],
+      });
+    } else {
+      _setMockOracleReportTimestamps(CHAIN_ID, FEED, null);
+    }
 
     let mockDb = MockDb.createMockDb();
     const poolId = makePoolId(
@@ -118,7 +151,7 @@ describe("SortedOracles.OracleReported median parity", () => {
     mockDb = await SortedOracles.OracleReported.processEvent({
       event: SortedOracles.OracleReported.createMockEvent({
         token: FEED,
-        reporter: "0x00000000000000000000000000000000000000aa",
+        oracle: "0x00000000000000000000000000000000000000aa",
         value,
         timestamp: BigInt(blockTimestamp - 100),
         mockEventData: {
@@ -169,30 +202,8 @@ describe("SortedOracles.OracleReported median parity", () => {
     assert.equal(pool.lastOracleReportAt, medianTimestamp);
   });
 
-  it("skips the median timestamp RPC when preload sees no tracked pools", async () => {
-    registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED, []);
-    const blockTimestamp = 1_700_002_000;
-    const mockDb = await SortedOracles.OracleReported.processEvent({
-      event: SortedOracles.OracleReported.createMockEvent({
-        token: FEED,
-        reporter: "0x00000000000000000000000000000000000000aa",
-        value: ONE,
-        timestamp: BigInt(blockTimestamp - 100),
-        mockEventData: {
-          chainId: CHAIN_ID,
-          logIndex: 7,
-          srcAddress: SORTED_ORACLES,
-          block: { number: 60_664_501, timestamp: blockTimestamp },
-        },
-      }),
-      mockDb: MockDb.createMockDb(),
-    });
-
-    assert.deepEqual(mockDb.entities.Pool.getAll(), []);
-  });
-
-  it("preloads a report-expiry retry before healing an unseeded pool", async () => {
-    _setMockReportExpiry(CHAIN_ID, FEED, 31_536_000n);
+  it("bootstraps report expiry before healing an unseeded pool", async () => {
+    setReportExpiryConfig(31_536_000n);
     const { mockDb, poolId } = await processReport({
       lastMedianPrice: ONE,
       oracleExpiry: 0n,
@@ -209,7 +220,6 @@ describe("SortedOracles.OracleReported median parity", () => {
     });
 
     const pool = mockDb.entities.Pool.get(poolId)!;
-
     assert.equal(pool.deviationBreachStartedAt, blockTimestamp);
     assert.equal(pool.healthStatus, "WARN");
   });
@@ -223,12 +233,12 @@ describe("SortedOracles.OracleReported median parity", () => {
     });
 
     const pool = mockDb.entities.Pool.get(poolId)!;
-
     assert.equal(pool.priceDifference, 123n);
     assert.equal(pool.deviationBreachStartedAt, 0n);
   });
 
   it("freezes when a non-median report arrives after the median anchor expired", async () => {
+    setReportExpiryConfig(100n);
     const { mockDb, poolId, snapshotId } = await processReport({
       lastMedianPrice: 3n * ONE,
       lastOracleReportAt: 1_700_000_000n,
@@ -239,7 +249,6 @@ describe("SortedOracles.OracleReported median parity", () => {
     });
 
     const pool = mockDb.entities.Pool.get(poolId)!;
-
     assert.equal(pool.priceDifference, 123n);
     assert.equal(pool.deviationBreachStartedAt, 0n);
     assert.equal(pool.oracleTimestamp, 1_700_000_000n);

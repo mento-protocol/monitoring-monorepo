@@ -16,7 +16,7 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, Workload Identity Federation, and repo-level GitHub Actions secrets owned by the platform stack. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules/global routing, `alerts/infra/` for event-driven delivery) and `aegis/terraform/` (Aegis dashboard + service-health alert).
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, Workload Identity Federation, and repo-level GitHub Actions secrets and variables owned by the platform stack. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
 
 ## Operating Rules
 
