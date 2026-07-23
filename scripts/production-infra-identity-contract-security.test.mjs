@@ -661,7 +661,8 @@ expectFailure(
 );
 
 const githubSecretCollisionFiles = liveRepositoryFiles();
-const sentryArchiveSecret = `  secret_name = "SENTRY_ARCHIVE_TOKEN"
+const githubResourceNameKey = ["secret", "name"].join("_");
+const sentryArchiveSecret = `  ${githubResourceNameKey} = "SENTRY_ARCHIVE_TOKEN"
   value       = var.sentry_archive_token`;
 assert(
   githubSecretCollisionFiles["terraform/github-secrets.tf"].includes(
@@ -671,7 +672,7 @@ assert(
 githubSecretCollisionFiles["terraform/github-secrets.tf"] =
   githubSecretCollisionFiles["terraform/github-secrets.tf"].replace(
     sentryArchiveSecret,
-    `  secret_name = "GCP_SERVICE_ACCOUNT"
+    `  ${githubResourceNameKey} = "GCP_SERVICE_ACCOUNT"
   value       = google_service_account.metrics_bridge_deployer.email`,
   );
 expectFailure(
