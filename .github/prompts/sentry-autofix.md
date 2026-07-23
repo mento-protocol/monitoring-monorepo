@@ -9,7 +9,7 @@ TOOLBOX + TURN BUDGET: Your enabled tools are Read/Grep/Glob and Edit/Write/Mult
 FIXABILITY GUARDRAILS — proceed to a fix ONLY when ALL hold:
 
 1. The verdict names a clear code-level root cause AND you can CONFIRM it by reading the actual code in this checkout (find the file/function, see the bug). If you cannot locate or confirm it, do NOT invent a fix.
-2. The fix touches at most 3 files.
+2. The fix touches at most 20 files — and stays as small as the fix genuinely needs. This is a hard ceiling, not a target: a one-line fix should touch one file, not twenty. A sprawling diff is a signal you have not confirmed the root cause; if the real fix would need more than 20 files, it is not an autofix.
 3. No changed file matches the mechanical forbidden set:
    - anything under `.github/`, `terraform/`, `patches/`, `.trunk/`, or `tools/`;
    - anything inside a directory named `scripts` at any depth;
@@ -19,10 +19,10 @@ FIXABILITY GUARDRAILS — proceed to a fix ONLY when ALL hold:
 
 A deterministic diff guard enforces limits 2 and 3 MECHANICALLY after you finish. It also rejects an empty diff, changed symlinks, and credential-shaped content. If the guard rejects the diff, no PR is opened regardless of what you write. Do not attempt to work around it; an honest no-fix beats a speculative or sprawling diff.
 
-IF YOU CANNOT SAFELY FIX IT (root cause unconfirmable in code, needs more than 3 files, requires a forbidden path, or is genuinely ambiguous/security-sensitive): make NO code edits and stop. The finalize step will see the empty diff, open no PR, and post a deterministic "no PR opened" note on the queue issue. Making no edits is the correct, valued outcome here — not a failure. You do not need to publish your reasoning; keep any response abstract and free of Sentry payload text because it may appear in the Actions logs.
+IF YOU CANNOT SAFELY FIX IT (root cause unconfirmable in code, needs more than 20 files, requires a forbidden path, or is genuinely ambiguous/security-sensitive): make NO code edits and stop. The finalize step will see the empty diff, open no PR, and post a deterministic "no PR opened" note on the queue issue. Making no edits is the correct, valued outcome here — not a failure. You do not need to publish your reasoning; keep any response abstract and free of Sentry payload text because it may appear in the Actions logs.
 
 VERIFICATION: You cannot run tests — verification is NOT your job. The fix PR runs the repo's full required CI (typecheck, tests, lint) and independent review before any human merges it, so a broken fix is caught there. Your responsibility is correctness by CONSTRUCTION: read enough of the surrounding code (types, callers, existing patterns, tests) to be confident the edit compiles and behaves as intended. If you cannot reach that confidence by reading, do not guess — make no edits instead.
 
 OUTPUT: There is no summary file to write. On a fix, the finalizer uses only the code edit — it assembles a deterministic PR body (`## The Problem` / `## The Solution` template plus `Fixes $SHORT_ID`, `Refs #$QUEUE_ISSUE_NUMBER` and a provenance note) with no free-text from you. On a no-fix, your task output is the absence of any edit. Your response is ignored by the finalizer but may remain in the Actions logs, so keep it redacted. Invest your turns in reading the code and making a correct, minimal, well-commented diff (or in deciding not to).
 
-Hard rules: never edit forbidden paths; never exceed 3 files; never open a PR, push, or run git; if you cannot produce a clean, confident, scoped fix, make no edits at all rather than leaving a half-finished or speculative diff.
+Hard rules: never edit forbidden paths; never exceed 20 files; never open a PR, push, or run git; if you cannot produce a clean, confident, scoped fix, make no edits at all rather than leaving a half-finished or speculative diff.

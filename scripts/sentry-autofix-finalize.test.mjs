@@ -304,7 +304,7 @@ await test("PR body is fully deterministic (no agent free-text accepted or publi
 await test("analysis comment is deterministic — no summary channel to smuggle text through", () => {
   // buildAnalysisComment takes ONLY the machine-generated guard reason. Even if
   // a caller tried to pass extra args, the signature ignores them.
-  const reason = "The autofix diff touches 5 files (limit 3).";
+  const reason = "The autofix diff touches 25 files (limit 20).";
   const c = buildAnalysisComment(
     reason,
     "ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345 leak attempt",
