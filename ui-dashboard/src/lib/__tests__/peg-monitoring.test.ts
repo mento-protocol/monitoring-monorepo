@@ -96,39 +96,102 @@ describe("PegMonitoringResponseSchema", () => {
       }).success,
     ).toBe(false);
   });
-  it("rejects non-null v1 listing evidence and source cadence beyond freshness grace", () => {
+  it("accepts the producer's paired listing evidence, including legacy nulls", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
     const source = item.sources[0]!;
-    const invalid = (next: unknown) =>
-      PegMonitoringResponseSchema.safeParse({ ...response, packages: [next] })
-        .success;
-    expect(
-      invalid({
-        ...item,
-        sources: [
-          { ...source, listingState: "listed" },
-          ...item.sources.slice(1),
-        ],
-      }),
-    ).toBe(false);
-    expect(
-      invalid({
-        ...item,
-        sources: [
+    const valid = (
+      listingState: "listed" | "halted" | "absent" | null,
+      healthy: boolean,
+    ) =>
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
           {
-            ...source,
-            listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
+            ...item,
+            sources: [
+              {
+                ...source,
+                listingState,
+                listingCheckedAt:
+                  listingState === null ? null : PEG_FIXTURE_PRODUCED_AT - 5,
+                healthy,
+              },
+              ...item.sources.slice(1),
+            ],
           },
-          ...item.sources.slice(1),
         ],
+      }).success;
+
+    expect(valid(null, true)).toBe(true);
+    expect(valid("listed", true)).toBe(true);
+    expect(valid("halted", false)).toBe(true);
+    expect(valid("absent", false)).toBe(true);
+  });
+  it("rejects incomplete, unsupported, and contradictory listing evidence", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const valid = (sourceOverride: Record<string, unknown>) =>
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: [{ ...source, ...sourceOverride }],
+          },
+        ],
+      }).success;
+
+    expect(valid({ listingState: "listed", listingCheckedAt: null })).toBe(
+      false,
+    );
+    expect(
+      valid({
+        listingState: null,
+        listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
       }),
     ).toBe(false);
     expect(
-      invalid({
-        ...item,
-        policy: { ...item.policy, freshnessGraceSeconds: 60 },
+      valid({
+        listingState: "unsupported",
+        listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
       }),
+    ).toBe(false);
+    expect(
+      valid({
+        listingState: "listed",
+        listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 0.5,
+      }),
+    ).toBe(false);
+    expect(
+      valid({
+        listingState: "halted",
+        listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
+        healthy: true,
+      }),
+    ).toBe(false);
+    expect(
+      valid({
+        listingState: "absent",
+        listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
+        healthy: true,
+      }),
+    ).toBe(false);
+  });
+  it("rejects source cadence beyond freshness grace", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    expect(
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            policy: { ...item.policy, freshnessGraceSeconds: 60 },
+          },
+        ],
+      }).success,
     ).toBe(false);
   });
   it("requires the producer's complete observation subset for healthy sources", () => {

@@ -159,6 +159,34 @@ describe("PegMonitoringPageClient", () => {
     expect(disabled?.className).toContain("text-red-300");
     expect(container.textContent).toContain("Breaker unavailable");
   });
+  it("renders non-null listing evidence from a schema-version-1 package", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: [
+              {
+                ...item.sources[0]!,
+                listingState: "halted",
+                listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
+                healthy: false,
+              },
+            ],
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+    render();
+    expect(container.textContent).toContain("Listing: halted");
+    expect(container.textContent).toContain("Listing checked");
+    expect(container.textContent).toContain("2027-01-15T07:59:55 UTC");
+  });
   it("renders conversion provenance only for converted sources and distinguishes monitor query saturation", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;

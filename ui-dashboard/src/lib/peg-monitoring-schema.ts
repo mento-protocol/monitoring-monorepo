@@ -116,6 +116,34 @@ const sourcePolicy = z
         message: "must allow two poll intervals",
       });
   });
+
+function validateListingEvidence(
+  value: {
+    listingState: "listed" | "halted" | "absent" | null;
+    listingCheckedAt: number | null;
+    healthy: boolean;
+  },
+  context: z.RefinementCtx,
+): void {
+  if ((value.listingState === null) !== (value.listingCheckedAt === null))
+    context.addIssue({
+      code: "custom",
+      path: ["listingCheckedAt"],
+      message: "listing state and checked time must both be present or null",
+    });
+  // The producer records halted and absent listings as non-healthy source
+  // evidence. Legacy packages retain the null/null pair, so this does not
+  // constrain the pre-listing producer during the staged rollout.
+  if (
+    value.healthy &&
+    (value.listingState === "halted" || value.listingState === "absent")
+  )
+    context.addIssue({
+      code: "custom",
+      path: ["listingState"],
+      message: "healthy source cannot report a halted or absent listing",
+    });
+}
 const source = z
   .object({
     id,
@@ -135,8 +163,8 @@ const source = z
       .strict()
       .nullable(),
     policy: sourcePolicy,
-    listingState: z.null(),
-    listingCheckedAt: z.null(),
+    listingState: z.enum(["listed", "halted", "absent"]).nullable(),
+    listingCheckedAt: timestamp.nullable(),
     healthy: z.boolean(),
     venueState: z
       .enum([
@@ -163,6 +191,7 @@ const source = z
   })
   .strict()
   .superRefine((value, context) => {
+    validateListingEvidence(value, context);
     if (
       !value.healthy &&
       value.observationAt !== null &&
