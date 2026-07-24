@@ -100,10 +100,14 @@ describe("Kraken response parsing", () => {
       jsonResponse(preTrade()),
       jsonResponse(postTrade()),
     ]);
-    const observation = await fetchKrakenObservation(request, {
-      fetch,
-      now: () => 1_800_000_000_000,
-    });
+    const onListingChecked = vi.fn();
+    const observation = await fetchKrakenObservation(
+      { ...request, onListingChecked },
+      {
+        fetch,
+        now: () => 1_800_000_000_000,
+      },
+    );
 
     expect(observation).toMatchObject({
       bid: 1,
@@ -126,6 +130,10 @@ describe("Kraken response parsing", () => {
     expect(String(fetch.mock.calls[2]?.[0])).toContain(
       "PostTrade?symbol=EUROP%2FEUR&count=1",
     );
+    expect(onListingChecked).toHaveBeenCalledWith({
+      state: "listed",
+      checkedAt: 1_800_000_000_000,
+    });
   });
 
   it("keeps sequence and observationAt stable for a frozen provider payload", async () => {
@@ -269,11 +277,19 @@ describe("Kraken response parsing", () => {
 
   it("rejects a market absent from the provider listing", async () => {
     const fetch = queuedFetch([jsonResponse(assetPairs("online", false))]);
-    await expect(fetchKrakenObservation(request, { fetch })).rejects.toThrow(
-      /absent/,
-    );
+    const onListingChecked = vi.fn();
+    await expect(
+      fetchKrakenObservation(
+        { ...request, onListingChecked },
+        { fetch, now: () => 1_800_000_000_999 },
+      ),
+    ).rejects.toThrow(/absent/);
     expect(fetch).toHaveBeenCalledOnce();
     expect(parseKrakenMarketState(assetPairs(), SYMBOL)).toBe("listed");
+    expect(onListingChecked).toHaveBeenCalledWith({
+      state: "absent",
+      checkedAt: 1_800_000_000_999,
+    });
   });
 });
 

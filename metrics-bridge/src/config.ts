@@ -14,6 +14,11 @@ export const PORT = env.PORT;
 // Thresholds are fetched at runtime and are never baked into the image.
 export const PEG_POLICY_URL = env.PEG_POLICY_URL;
 
+// Production policy fetches use short-lived GCP metadata credentials. Keep the
+// selector raw so invalid or unpaired values stay inside the isolated peg
+// runtime's error channel.
+export const PEG_POLICY_AUTH_MODE = env.PEG_POLICY_AUTH_MODE;
+
 // Rebalance-reason probe runs every Nth Hasura poll cycle. The
 // `Deviation Breach Critical` alert needs the breach to be sustained
 // for >1h before firing, so a few-minute probe cadence is well inside the

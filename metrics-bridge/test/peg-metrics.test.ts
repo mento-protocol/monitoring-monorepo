@@ -27,6 +27,8 @@ function snapshot(
         policyVersion: "europ-v1",
         healthy: true,
         referenceSize: 50_000,
+        listingState: "listed",
+        listingCheckedAt: 1_784_734_422_000,
         deviationBps: 4,
         premiumBps: 0,
         spreadBps: 9,
@@ -73,6 +75,18 @@ describe("Peg metrics", () => {
       'mento_peg_venue_state{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1",state="ok"} 1',
     );
     expect(metrics).toContain(
+      'mento_peg_listing_state{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1",state="listed"} 1',
+    );
+    expect(metrics).toContain(
+      'mento_peg_listing_state{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1",state="halted"} 0',
+    );
+    expect(metrics).toContain(
+      'mento_peg_listing_state{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1",state="absent"} 0',
+    );
+    expect(metrics).toContain(
+      'mento_peg_listing_checked_at{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1784734422',
+    );
+    expect(metrics).toContain(
       'mento_peg_policy_version{policy_version="europ-v1"} 1',
     );
     expect(metrics).toContain(
@@ -83,6 +97,15 @@ describe("Peg metrics", () => {
     );
     expect(metrics).toContain(
       'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+  });
+
+  it("requires paired listing evidence", () => {
+    const invalid = snapshot();
+    invalid.sources[0]!.listingCheckedAt = null;
+
+    expect(() => publishPegMetrics([invalid])).toThrow(
+      "listingState and listingCheckedAt must both be present or null",
     );
   });
 

@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { register } from "../src/metrics.js";
+import { _resetPegDecisionPackagesForTests } from "../src/peg/decision-packages.js";
 import type { PegStructuralContextResult } from "../src/peg/graphql.js";
-import type { PegAssetMetricSnapshot } from "../src/peg/metrics.js";
+import {
+  _resetPegMetricsForTests,
+  type PegAssetMetricSnapshot,
+} from "../src/peg/metrics.js";
 import {
   PegPolicyVersionSchema,
   pegPolicyVersionForContent,
@@ -11,6 +16,7 @@ import {
   type PegPollCycleInput,
   type PegPollErrorEvent,
 } from "../src/peg/poller.js";
+import { publishPegPollSnapshot } from "../src/peg/publisher.js";
 import { parsePegRegistry } from "../src/peg/registry.js";
 import type { PegObservation } from "../src/peg/types.js";
 
@@ -219,7 +225,134 @@ const source = (snapshot: PegAssetMetricSnapshot, sourceId = "deep_eur") => {
   return found;
 };
 
+afterEach(() => {
+  _resetPegDecisionPackagesForTests();
+  _resetPegMetricsForTests();
+});
+
 describe("peg poll cycle freshness and measurements", () => {
+  it("commits a successful listing lookup even when the book fetch fails", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    let listingAvailable = true;
+    const fetchBitvavo = vi.fn(async (request) => {
+      if (listingAvailable) {
+        request.onListingChecked?.({
+          state: "listed",
+          checkedAt: nowMs,
+        });
+      }
+      throw new Error("book unavailable");
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo,
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    expect(source(first)).toMatchObject({
+      listingState: "listed",
+      listingCheckedAt: nowMs,
+      healthy: false,
+    });
+
+    nowMs += 30_000;
+    listingAvailable = false;
+    const failedLookup = (await poller.pollCycle(input))[0]!;
+    expect(source(failedLookup)).toMatchObject({
+      listingState: "listed",
+      listingCheckedAt: first.sources[0]!.listingCheckedAt,
+      healthy: false,
+    });
+  });
+
+  it("captures listing completion regardless of book order and keeps its timestamp monotonic", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    let completionOrder: "before" | "after" = "before";
+    const errors: PegPollErrorEvent[] = [];
+    const fetchBitvavo = vi.fn(async (request) => {
+      if (completionOrder === "before") {
+        request.onListingChecked?.({ state: "listed", checkedAt: 2_000 });
+      }
+      const book = observation(nowMs);
+      if (completionOrder === "after") {
+        request.onListingChecked?.({ state: "absent", checkedAt: 1_000 });
+      }
+      return book;
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo,
+      publish: vi.fn(),
+      onError: (event) => errors.push(event),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    nowMs += 30_000;
+    completionOrder = "after";
+    const second = (await poller.pollCycle(input))[0]!;
+
+    expect(source(first)).toMatchObject({
+      listingState: "listed",
+      listingCheckedAt: 2_000,
+    });
+    expect(source(second)).toMatchObject({
+      listingState: "listed",
+      listingCheckedAt: 2_000,
+      healthy: false,
+      observation: null,
+      newSuccess: false,
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ kind: "source_fetch" });
+    expect(errors[0]?.cause).toEqual(
+      new Error("listing check timestamp regressed"),
+    );
+  });
+
+  it("ignores a listing callback that arrives after its staged poll completed", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const nowMs = 1_800_000_000_000;
+    let lateCallback:
+      | ((check: { state: "absent"; checkedAt: number }) => void)
+      | undefined;
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo: vi.fn(async (request) => {
+        lateCallback = request.onListingChecked;
+        return observation(nowMs);
+      }),
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    lateCallback?.({ state: "absent", checkedAt: nowMs });
+    const cached = (await poller.pollCycle(input))[0]!;
+
+    expect(source(first)).toMatchObject({
+      listingState: null,
+      listingCheckedAt: null,
+    });
+    expect(source(cached)).toMatchObject({
+      listingState: null,
+      listingCheckedAt: null,
+    });
+  });
+
   it("does not count a frozen at-par book and fails it stale", async () => {
     const spec = primaryAsset({
       sources: [primarySource({ staleAfterSeconds: 60 })],
@@ -1100,7 +1233,7 @@ describe("peg poll cycle isolation", () => {
 
     await expect(poller.pollCycle(cycle)).resolves.toEqual([]);
     expect(publish).toHaveBeenCalledOnce();
-    expect(publish).toHaveBeenCalledWith([]);
+    expect(publish).toHaveBeenCalledWith([], null, []);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatchObject({ kind: "cycle" });
     expect(errors[0]?.cause).toEqual(
@@ -1251,10 +1384,16 @@ describe("peg poll cycle conversion and cadence", () => {
     expect(fetchBitvavo).toHaveBeenCalledTimes(2);
     expect(fetchKraken).toHaveBeenCalledOnce();
     expect(publish).toHaveBeenCalledOnce();
-    expect(publish).toHaveBeenCalledWith(snapshots);
+    expect(publish).toHaveBeenCalledWith(
+      snapshots,
+      expect.any(Object),
+      snapshots,
+    );
   });
 
-  it("clears metrics and rolls back state when one policy build is incomplete", async () => {
+  it("clears metrics while committing selected-policy state when one policy build is incomplete", async () => {
+    _resetPegDecisionPackagesForTests();
+    _resetPegMetricsForTests();
     const spec = primaryAsset();
     const input = makeInput([spec]);
     const retainedCandidate = {
@@ -1266,8 +1405,9 @@ describe("peg poll cycle conversion and cadence", () => {
       version: pegPolicyVersionForContent("test-v0", retainedCandidate),
     });
     let nowMs = 1_800_000_000_000;
-    const fetchBitvavo = vi.fn(async () => observation(nowMs));
-    const publish = vi.fn<(snapshots: PegAssetMetricSnapshot[]) => void>();
+    let providerObservationMs = nowMs;
+    const fetchBitvavo = vi.fn(async () => observation(providerObservationMs));
+    const publish = vi.fn(publishPegPollSnapshot);
     const errors: PegPollErrorEvent[] = [];
     const poller = createPegPoller({
       nowMs: () => nowMs,
@@ -1285,6 +1425,7 @@ describe("peg poll cycle conversion and cadence", () => {
     await poller.pollCycle(rollover);
 
     nowMs += 30_000;
+    providerObservationMs = nowMs;
     const retainedAsset = retained.assets[spec.id]!;
     const brokenAsset = new Proxy(retainedAsset, {
       get(target, property, receiver) {
@@ -1304,16 +1445,64 @@ describe("peg poll cycle conversion and cadence", () => {
     });
 
     expect(failed).toEqual([]);
-    expect(publish).toHaveBeenNthCalledWith(2, []);
+    expect(publish).toHaveBeenNthCalledWith(2, [], expect.any(Object), [
+      expect.objectContaining({ policyVersion: input.policy.version }),
+    ]);
     expect(errors.map(({ kind }) => kind)).toEqual(["cycle"]);
+    const partialMetrics = await register.metrics();
+    expect(partialMetrics).not.toContain("mento_peg_policy_version{");
+    expect(partialMetrics).toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 2`,
+    );
+    expect(partialMetrics).toContain(
+      `mento_peg_usable_decision_total{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 2`,
+    );
+    expect(partialMetrics).toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${retained.version}"} 1`,
+    );
+    expect(partialMetrics).toContain(
+      `mento_peg_usable_decision_total{asset="asset-one",source="deep_eur",policy_version="${retained.version}"} 1`,
+    );
 
     const recovered = await poller.pollCycle(rollover);
+    // The active policy supplied the visible partial decision on the failed
+    // cycle, so its committed cache is reused inside cadence. The previously
+    // failed retained policy still needs a provider request.
     expect(recovered.map((snapshot) => source(snapshot).newSuccess)).toEqual([
-      true,
+      false,
       true,
     ]);
-    expect(fetchBitvavo).toHaveBeenCalledTimes(6);
-    expect(publish).toHaveBeenNthCalledWith(3, recovered);
+    expect(fetchBitvavo).toHaveBeenCalledTimes(5);
+    expect(publish).toHaveBeenNthCalledWith(
+      3,
+      recovered,
+      expect.any(Object),
+      recovered,
+    );
+
+    const cached = await poller.pollCycle(rollover);
+    expect(cached.map((snapshot) => source(snapshot).newSuccess)).toEqual([
+      false,
+      false,
+    ]);
+    expect(fetchBitvavo).toHaveBeenCalledTimes(5);
+
+    nowMs += 30_000;
+    const replayed = await poller.pollCycle(rollover);
+    expect(replayed.map((snapshot) => source(snapshot).newSuccess)).toEqual([
+      false,
+      false,
+    ]);
+    expect(fetchBitvavo).toHaveBeenCalledTimes(7);
+    const replayMetrics = await register.metrics();
+    for (const policyVersion of [input.policy.version, retained.version]) {
+      expect(replayMetrics).toContain(
+        `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${policyVersion}"} 2`,
+      );
+      expect(replayMetrics).toContain(
+        `mento_peg_usable_decision_total{asset="asset-one",source="deep_eur",policy_version="${policyVersion}"} 2`,
+      );
+    }
   });
 
   it("publishes two exact-version snapshots atomically and evicts retained state", async () => {
@@ -1356,7 +1545,7 @@ describe("peg poll cycle conversion and cadence", () => {
     );
     expect(now).toHaveBeenCalledOnce();
     expect(publish).toHaveBeenCalledOnce();
-    expect(publish).toHaveBeenLastCalledWith(first);
+    expect(publish).toHaveBeenLastCalledWith(first, expect.any(Object), first);
 
     nowMs += 10_000;
     const cached = await poller.pollCycle(rollover);
@@ -1389,7 +1578,11 @@ describe("peg poll cycle conversion and cadence", () => {
     expect(fetchBitvavo).toHaveBeenCalledTimes(3);
     expect(now).toHaveBeenCalledTimes(4);
     expect(publish).toHaveBeenCalledTimes(4);
-    expect(publish).toHaveBeenLastCalledWith(reintroduced);
+    expect(publish).toHaveBeenLastCalledWith(
+      reintroduced,
+      expect.any(Object),
+      reintroduced,
+    );
   });
 
   it("isolates blind streak state by policy version and resets it after cleanup", async () => {

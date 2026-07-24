@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   fetchPegStructuralContext,
+  PEG_BREAKER_CONFIG_LIMIT,
   PEG_STRUCTURAL_PAGE_LIMIT,
   PEG_STRUCTURAL_QUERY,
   type PegStructuralQueryResponse,
@@ -10,6 +11,7 @@ import {
 
 const POOL_ID = "137-0x0000000000000000000000000000000000000001";
 const MONITORED_ASSET = "0x0000000000000000000000000000000000000002";
+const RATE_FEED_ID = "0x0000000000000000000000000000000000000004";
 
 const pool = {
   id: POOL_ID,
@@ -21,7 +23,26 @@ const pool = {
   token1Decimals: 18,
   reserves0: "1000000",
   reserves1: "2000000000000000000",
-  referenceRateFeedID: "0x0000000000000000000000000000000000000004",
+  referenceRateFeedID: RATE_FEED_ID,
+};
+
+const breakerConfig = {
+  id: "137-breaker-feed",
+  enabled: true,
+  rateChangeThreshold: "0",
+  referenceValue: "1000000000000000000000000",
+  lastMedianRate: "999000000000000000000000",
+  lastUpdatedAt: "1784734420",
+  status: "OK" as const,
+  tradingMode: 0,
+  lastStatusUpdatedAt: "1784734400",
+  breaker: {
+    id: "137-breaker",
+    address: "0x0000000000000000000000000000000000000006",
+    kind: "VALUE_DELTA" as const,
+    defaultRateChangeThreshold: "50000000000000000000000",
+    removed: false,
+  },
 };
 
 const tradingLimit = {
@@ -58,10 +79,19 @@ function response(
   return {
     Pool: [pool],
     TradingLimit: [tradingLimit],
+    BreakerConfig: [],
     SwapEvent: [],
     ...overrides,
   };
 }
+
+const structuralInput = (since: bigint) => ({
+  poolId: POOL_ID,
+  monitoredToken: MONITORED_ASSET,
+  chainId: 137,
+  rateFeedId: RATE_FEED_ID,
+  since,
+});
 
 function requestReturning(data: PegStructuralQueryResponse) {
   return vi.fn<PegStructuralRequest>().mockResolvedValue(data);
@@ -71,10 +101,7 @@ describe("fetchPegStructuralContext", () => {
   it("sends the bounded pool, token, and time variables through the injected request", async () => {
     const request = requestReturning(response());
 
-    await fetchPegStructuralContext(
-      { poolId: POOL_ID, monitoredToken: MONITORED_ASSET, since: 1234n },
-      request,
-    );
+    await fetchPegStructuralContext(structuralInput(1234n), request);
 
     expect(request).toHaveBeenCalledOnce();
     expect(request.mock.calls[0]?.[0]).toMatchObject({
@@ -82,6 +109,8 @@ describe("fetchPegStructuralContext", () => {
       variables: {
         poolId: POOL_ID,
         monitoredToken: MONITORED_ASSET,
+        chainId: 137,
+        rateFeedId: RATE_FEED_ID,
         since: "1234",
       },
       signal: expect.any(AbortSignal),
@@ -95,7 +124,33 @@ describe("fetchPegStructuralContext", () => {
       "order_by: [{ blockTimestamp: desc }, { id: desc }]",
     );
     expect(compact).toContain("limit: 1000");
+    expect(compact).toContain("BreakerConfig(");
+    expect(compact).toContain("order_by: { id: asc }");
+    expect(compact).toContain(`limit: ${PEG_BREAKER_CONFIG_LIMIT}`);
+    for (const field of [
+      "rateChangeThreshold",
+      "referenceValue",
+      "lastMedianRate",
+      "lastUpdatedAt",
+      "lastStatusUpdatedAt",
+      "defaultRateChangeThreshold",
+      "removed",
+    ]) {
+      expect(compact).toContain(field);
+    }
     expect(compact).not.toContain("_aggregate");
+  });
+
+  it("returns bounded breaker rows with the structural context", async () => {
+    const result = await fetchPegStructuralContext(
+      structuralInput(0n),
+      requestReturning(response({ BreakerConfig: [breakerConfig] })),
+    );
+
+    expect(result).toMatchObject({
+      status: "ok",
+      breakerConfigs: [breakerConfig],
+    });
   });
 
   it("does not mark a 999-row page saturated", async () => {
@@ -106,7 +161,7 @@ describe("fetchPegStructuralContext", () => {
     );
 
     const result = await fetchPegStructuralContext(
-      { poolId: POOL_ID, monitoredToken: MONITORED_ASSET, since: 0n },
+      structuralInput(0n),
       request,
     );
 
@@ -124,7 +179,7 @@ describe("fetchPegStructuralContext", () => {
     );
 
     const result = await fetchPegStructuralContext(
-      { poolId: POOL_ID, monitoredToken: MONITORED_ASSET, since: 0n },
+      structuralInput(0n),
       request,
     );
 
@@ -135,7 +190,7 @@ describe("fetchPegStructuralContext", () => {
     const request = requestReturning(response({ Pool: [] }));
 
     const result = await fetchPegStructuralContext(
-      { poolId: POOL_ID, monitoredToken: MONITORED_ASSET, since: 0n },
+      structuralInput(0n),
       request,
     );
 
@@ -150,7 +205,7 @@ describe("fetchPegStructuralContext", () => {
     const request = requestReturning(response({ TradingLimit: [] }));
 
     const result = await fetchPegStructuralContext(
-      { poolId: POOL_ID, monitoredToken: MONITORED_ASSET, since: 0n },
+      structuralInput(0n),
       request,
     );
 

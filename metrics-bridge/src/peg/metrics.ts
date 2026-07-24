@@ -1,10 +1,15 @@
 import { Counter, Gauge } from "prom-client";
 import { register } from "../metrics.js";
 import { PEG_POLICY_MAX_BLIND_CONSECUTIVE_POLLS } from "./policy.js";
-import type { PegObservation } from "./types.js";
+import {
+  MARKET_STATES,
+  type MarketState,
+  type PegObservation,
+} from "./types.js";
 
 const sourceLabels = ["asset", "source", "policy_version"] as const;
 const venueStateLabels = [...sourceLabels, "state"] as const;
+const listingStateLabels = [...sourceLabels, "state"] as const;
 const assetLabels = ["asset", "policy_version"] as const;
 const policyLabels = ["policy_version"] as const;
 const errorLabels = ["kind"] as const;
@@ -22,11 +27,39 @@ export interface PegSourceMetricSnapshot {
   healthy: boolean;
   observation: PegObservation | null;
   referenceSize: number;
+  listingState: MarketState | null;
+  listingCheckedAt: number | null;
   deviationBps: number | null;
   premiumBps: number | null;
   spreadBps: number | null;
   newSuccess: boolean;
   newUsableDecision: boolean;
+}
+
+export interface PegBreakerMetricSnapshot {
+  id: string;
+  address: string;
+  enabled: boolean;
+  kind: "MEDIAN_DELTA" | "VALUE_DELTA";
+  status: "OK" | "TRIPPED";
+  tradingMode: number;
+  effectiveRateChangeThreshold: string;
+  referenceValue: string | null;
+  lastMedianRate: string | null;
+  lastUpdatedAt: number | null;
+  lastStatusUpdatedAt: number;
+}
+
+export interface PegMonitorMetricSnapshot {
+  chainId: number;
+  poolAddress: string;
+  rateFeedId: string;
+  monitoredTokenAddress: string;
+  indexedPoolReachable: boolean;
+  structuralSaturation: number | null;
+  structuralQuerySaturated: boolean;
+  counterpartyCount: number;
+  breaker: PegBreakerMetricSnapshot | null;
 }
 
 export interface PegAssetMetricSnapshot {
@@ -39,6 +72,7 @@ export interface PegAssetMetricSnapshot {
   structuralQuerySaturated: boolean;
   indexedPoolReachable: boolean;
   counterpartyCount: number;
+  monitors: PegMonitorMetricSnapshot[];
   sources: PegSourceMetricSnapshot[];
 }
 
@@ -101,6 +135,18 @@ export const pegGauges = {
     name: "mento_peg_venue_state",
     help: "One-hot current bounded venue state.",
     labelNames: venueStateLabels,
+    registers: [register],
+  }),
+  listingState: new Gauge({
+    name: "mento_peg_listing_state",
+    help: "One-hot last authoritative exact-pair provider listing state.",
+    labelNames: listingStateLabels,
+    registers: [register],
+  }),
+  listingCheckedAt: new Gauge({
+    name: "mento_peg_listing_checked_at",
+    help: "Unix timestamp of the last successful authoritative exact-pair listing response; transport and schema failures do not advance it.",
+    labelNames: sourceLabels,
     registers: [register],
   }),
   sourceHealthy: new Gauge({
@@ -295,6 +341,14 @@ function validateSourceSnapshot(
   if (source.referenceSize === 0) {
     throw new Error("referenceSize must be positive");
   }
+  if ((source.listingState == null) !== (source.listingCheckedAt == null)) {
+    throw new Error(
+      "listingState and listingCheckedAt must both be present or null",
+    );
+  }
+  if (source.listingCheckedAt !== null) {
+    assertFiniteNonnegative(source.listingCheckedAt, "listingCheckedAt");
+  }
   if (source.deviationBps !== null) {
     assertFiniteNonnegative(source.deviationBps, "deviationBps");
   }
@@ -358,6 +412,19 @@ function sourceCounterKey(labels: SourceLabels): string {
   return `${labels.policy_version}\u0000${labels.asset}\u0000${labels.source}`;
 }
 
+function trackSourceCounterLabels(snapshots: PegAssetMetricSnapshot[]): void {
+  for (const snapshot of snapshots) {
+    for (const source of snapshot.sources) {
+      const labels = {
+        asset: source.asset,
+        source: source.source,
+        policy_version: source.policyVersion,
+      };
+      activeSourceCounterLabels.set(sourceCounterKey(labels), labels);
+    }
+  }
+}
+
 function pruneSourceCounters(snapshots: PegAssetMetricSnapshot[]): void {
   // Empty batches are failed cycles: clear gauges below, but keep historical
   // counters. A non-empty batch retires only absent content-addressed versions;
@@ -373,17 +440,6 @@ function pruneSourceCounters(snapshots: PegAssetMetricSnapshot[]): void {
     pegCounters.pollSuccess.remove(labels);
     pegCounters.usableDecision.remove(labels);
     activeSourceCounterLabels.delete(key);
-  }
-
-  for (const snapshot of snapshots) {
-    for (const source of snapshot.sources) {
-      const labels = {
-        asset: source.asset,
-        source: source.source,
-        policy_version: source.policyVersion,
-      };
-      activeSourceCounterLabels.set(sourceCounterKey(labels), labels);
-    }
   }
 }
 
@@ -417,13 +473,25 @@ function publishObservation(
   }
 }
 
-function publishSource(source: PegSourceMetricSnapshot): void {
+function publishSourceGauges(source: PegSourceMetricSnapshot): void {
   const labels = {
     asset: source.asset,
     source: source.source,
     policy_version: source.policyVersion,
   };
   pegGauges.sourceHealthy.set(labels, source.healthy ? 1 : 0);
+  if (source.listingState !== null && source.listingCheckedAt !== null) {
+    for (const state of MARKET_STATES) {
+      pegGauges.listingState.set(
+        { ...labels, state },
+        state === source.listingState ? 1 : 0,
+      );
+    }
+    pegGauges.listingCheckedAt.set(
+      labels,
+      unixMillisecondsToSeconds(source.listingCheckedAt),
+    );
+  }
   pegGauges.referenceSize.set(labels, source.referenceSize);
   if (source.deviationBps !== null) {
     pegGauges.deviationBps.set(labels, source.deviationBps);
@@ -436,6 +504,14 @@ function publishSource(source: PegSourceMetricSnapshot): void {
   }
   if (source.observation !== null)
     publishObservation(labels, source.observation);
+}
+
+function publishSourceCounters(source: PegSourceMetricSnapshot): void {
+  const labels = {
+    asset: source.asset,
+    source: source.source,
+    policy_version: source.policyVersion,
+  };
   if (source.newSuccess) pegCounters.pollSuccess.inc(labels);
   if (source.newUsableDecision) pegCounters.usableDecision.inc(labels);
 }
@@ -460,12 +536,17 @@ function publishAsset(snapshot: PegAssetMetricSnapshot): void {
   if (snapshot.structuralSaturation !== null) {
     pegGauges.structuralSaturation.set(labels, snapshot.structuralSaturation);
   }
-  snapshot.sources.forEach(publishSource);
+  snapshot.sources.forEach(publishSourceGauges);
 }
 
-export function publishPegMetrics(snapshots: PegAssetMetricSnapshot[]): void {
+export function publishPegMetrics(
+  snapshots: PegAssetMetricSnapshot[],
+  counterSnapshots: PegAssetMetricSnapshot[] = snapshots,
+): void {
   validateSnapshots(snapshots);
+  if (counterSnapshots !== snapshots) validateSnapshots(counterSnapshots);
   pruneSourceCounters(snapshots);
+  trackSourceCounterLabels(counterSnapshots);
   resetPegGauges();
   const versions = new Set<string>();
   for (const snapshot of snapshots) {
@@ -474,6 +555,9 @@ export function publishPegMetrics(snapshots: PegAssetMetricSnapshot[]): void {
   }
   for (const policyVersion of versions) {
     pegGauges.policyVersion.set({ policy_version: policyVersion }, 1);
+  }
+  for (const snapshot of counterSnapshots) {
+    snapshot.sources.forEach(publishSourceCounters);
   }
 }
 

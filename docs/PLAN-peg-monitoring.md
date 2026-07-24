@@ -14,7 +14,8 @@ review_interval_days: 365
 > [0042](adr/0042-metrics-bridge-external-price-poller.md),
 > [0043](adr/0043-peg-registry-service-local.md),
 > [0044](adr/0044-peg-thresholds-gated-rules-plane.md),
-> [0045](adr/0045-peg-paging-semantics.md). Market figures below are a
+> [0045](adr/0045-peg-paging-semantics.md), and
+> [0048](adr/0048-private-gcs-peg-policy-artifact.md). Market figures below are a
 > 2026-07-22 snapshot — re-verify before relying on them.
 
 ## Problem
@@ -211,11 +212,20 @@ coverage), Bit2Me (stale). Structural: EURm/EUROP `SwapEvent` +
    integrity script into gate/CI. Seed the dormant `peg-thresholds.json` policy
    source so the runtime and cross-plane validators share a real fixture; PR 2
    does not publish that artifact, configure `PEG_POLICY_URL`, or create rules.
-3. **PR 3:** alerts stack — consume `peg-thresholds.json` through the protected
-   artifact plane, add the rule group and routing,
-   runbook note; gated apply after producer telemetry is live (follow the
-   no-data rollout discipline from `docs/notes/polygon-monitoring.md`).
-4. **PR 4:** dashboard decision-package panel + onboarding runbook doc +
+3. **PR 3A:** land dormant generation-pinned private-GCS authentication in
+   Metrics Bridge. It adds no production runtime configuration or
+   infrastructure.
+4. **Identity prerequisite:** complete #1566's bootstrap apply, refresh cutover
+   and live proof, legacy-authority removal apply, queue drain, and final IAM
+   audit.
+5. **PR 3B:** after that prerequisite, create the private policy bucket,
+   runtime identity, object publisher, and pinned Cloud Run configuration
+   through their owning Terraform stacks.
+6. **PR 3C:** deploy the version-bound producer, verify complete live telemetry,
+   then add the rule group and routing through the protected alerts-rules
+   apply. Follow the no-data rollout discipline from
+   `docs/notes/polygon-monitoring.md`.
+7. **PR 4:** dashboard decision-package panel + onboarding runbook doc +
    re-census job.
 
 ## Residual risks (accepted, documented)
