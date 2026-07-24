@@ -52,6 +52,11 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+// The archive leg's approval-label name is owned by the ingest module (it
+// defines the label); import it rather than duplicating the string literal so
+// the two can never drift apart.
+import { APPROVED_ARCHIVE_LABEL } from "./sentry-triage-ingest.mjs";
+
 // Verdict-comment parsing is delegated to the pipeline's single authoritative
 // parser (the same one the label/projection steps run) so the digest can never
 // diverge from what the pipeline decided. The permalink extractor + the
@@ -500,7 +505,7 @@ function renderWontfixLine(entry) {
   // Archiving stays human-gated (ADR 0036 trust boundary): this is a nudge
   // toward the existing `sentry:approved-archive` label flow on the queue
   // issue, never an automatic Sentry mutation from the digest.
-  return `${line}\n    ◦ To archive in Sentry: add \`sentry:approved-archive\` to the queue issue above.`;
+  return `${line}\n    ◦ To archive in Sentry: add \`${APPROVED_ARCHIVE_LABEL}\` to the queue issue above.`;
 }
 
 function renderFailedLine(entry) {

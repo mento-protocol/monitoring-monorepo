@@ -819,6 +819,51 @@ await test("autofixed section renders only when fix-PR data exists, linking the 
   assert(!text.includes("📮 Routed"), "expected it not to also route");
 });
 
+await test("section header count reflects multiple entries in the same bucket", () => {
+  // Regression coverage for the counts-header removal: each section header's
+  // "(N)" is now the ONLY place a bucket's count renders, so it must still
+  // count correctly across more than one entry in the same bucket.
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 20,
+        shortId: "CF-20",
+        labels: ["sentry:verdict-code-fix"],
+      }),
+      issueFixture({
+        number: 21,
+        shortId: "CF-21",
+        labels: ["sentry:verdict-code-fix"],
+      }),
+      issueFixture({
+        number: 22,
+        shortId: "UP-22",
+        labels: ["sentry:verdict-upstream"],
+      }),
+      issueFixture({
+        number: 23,
+        shortId: "UP-23",
+        labels: ["sentry:verdict-upstream"],
+      }),
+      issueFixture({
+        number: 24,
+        shortId: "UP-24",
+        labels: ["sentry:verdict-upstream"],
+      }),
+    ],
+    { channel: "#engineering", now: NOW },
+  );
+  const text = allText(payload);
+  assert(
+    text.includes("📮 Routed to owning repo (2)"),
+    "expected the routed header to count both code-fix entries",
+  );
+  assert(
+    text.includes("🙅 Wontfix / transient (3)"),
+    "expected the wontfix header to count all three upstream entries",
+  );
+});
+
 await test("buildDigest renders a decision-ready needs-human brief with all fields + links", () => {
   const payload = buildDigest(
     [
