@@ -138,7 +138,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0044](0044-peg-thresholds-gated-rules-plane.md)  | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON               |
 | [0045](0045-peg-paging-semantics.md)              | Peg paging measures executable sell price; the deep venue pages alone                       |
 | [0047](0047-separated-terraform-ci-identities.md) | Routine deploy, PR plan, trusted-main refresh, and production apply use separate identities |
-| [0048](0048-private-gcs-peg-policy-artifact.md)  | Peg policy uses private GCS after identity bootstrap and pins one immutable generation      |
+| [0048](0048-private-gcs-peg-policy-artifact.md)   | Peg policy uses private GCS after identity bootstrap and pins one immutable generation      |
 
 ### governance-watchdog
 
