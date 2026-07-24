@@ -63,8 +63,9 @@ characters must match the canonical policy-content SHA-256 prefix. Canonical
 JSON recursively sorts object keys by Unicode code point and preserves array
 order. Do not reuse a version prefix or hand-edit its suffix; runtime and CI
 verify the binding and require a rollover to retain the exact base-branch
-active policy as `previous`. ACK-clear `previous` before a second active
-rollover; CI and the runtime reject chained rollovers.
+active policy as `previous`. After producer ACK, land a reviewed
+`previous=null` artifact update before a second active rollover; CI and the
+runtime reject chained rollovers.
 
 The service validates and fetches thresholds at runtime. The Docker image
 contains `metrics-bridge/peg-registry.json` at the path resolved by the

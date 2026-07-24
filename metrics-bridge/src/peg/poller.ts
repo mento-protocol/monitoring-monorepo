@@ -22,10 +22,20 @@ import {
   type PegAssetMetricSnapshot,
   type PegSourceMetricSnapshot,
 } from "./metrics.js";
+import {
+  runPegPollCycle,
+  type PegPollCycleContext,
+  type PegPollCycleInput,
+  type PegPollSourceState,
+} from "./poll-cycle.js";
 import type {
   PegAssetPolicy,
   PegPolicyVersion,
   PegSourcePolicy,
+} from "./policy.js";
+import {
+  PEG_POLICY_MAX_ASSETS,
+  PEG_POLICY_MAX_SOURCES_PER_ASSET,
 } from "./policy.js";
 import type {
   PegAsset,
@@ -34,11 +44,7 @@ import type {
   PegRegistry,
   PegSource,
 } from "./registry.js";
-import {
-  PEG_REGISTRY_MAX_ASSETS,
-  PEG_REGISTRY_MAX_MONITORS_PER_ASSET,
-  PEG_REGISTRY_MAX_SOURCES_PER_ASSET,
-} from "./registry.js";
+import { PEG_REGISTRY_MAX_MONITORS_PER_ASSET } from "./registry.js";
 import {
   computeStructuralSaturation,
   deriveReferenceSize,
@@ -77,10 +83,7 @@ export interface PegPollErrorEvent {
   cause: unknown;
 }
 
-export interface PegPollCycleInput {
-  registry: PegRegistry;
-  policy: PegPolicyVersion;
-}
+export type { PegPollCycleInput, PegPollCyclePolicies } from "./poll-cycle.js";
 
 export interface PegPollerDependencies {
   nowMs?: () => number;
@@ -126,15 +129,6 @@ interface Dependencies {
   report: ReportError;
 }
 
-interface SourceState {
-  lastAttemptAt: number | null;
-  lastObservationAt: number | null;
-  identitiesAtLastObservationAt: Set<string>;
-  observation: PegObservation | null;
-  referenceSize: number | null;
-  conversionValidUntil: number | null;
-}
-
 interface StructuralContext {
   reachable: boolean;
   querySaturated: boolean;
@@ -143,14 +137,8 @@ interface StructuralContext {
   limits: PegTradingLimitRow[];
 }
 
-interface CycleContext {
-  nowMs: number;
-  nowSeconds: number;
-  policyVersion: string;
-  dependencies: Dependencies;
-  sourceStates: Map<string, SourceState>;
-  activeStateKeys: Set<string>;
-}
+type SourceState = PegPollSourceState;
+type CycleContext = PegPollCycleContext<Dependencies>;
 
 const sortedEntries = <Value>(record: Record<string, Value>) =>
   Object.entries(record).sort(([left], [right]) => left.localeCompare(right));
@@ -162,6 +150,7 @@ const defaultSourceState = (): SourceState => ({
   observation: null,
   referenceSize: null,
   conversionValidUntil: null,
+  blindConsecutivePolls: 0,
 });
 
 const defaultReadConversionLeg = async (
@@ -445,6 +434,7 @@ type PollSourceInput = {
   target: number;
   source: PegSource;
   policy: PegSourcePolicy;
+  blindConsecutivePollLimit: number | null;
   structural: StructuralContext;
   context: CycleContext;
 };
@@ -455,6 +445,7 @@ function sourceSnapshot(
   observation: PegObservation | null,
   newSuccess: boolean,
 ): PegSourceMetricSnapshot {
+  const movement = priceMovement(observation, input.target);
   return {
     asset: input.assetId,
     source: input.source.id,
@@ -466,9 +457,13 @@ function sourceSnapshot(
       observation.sequence !== null,
     observation,
     referenceSize,
-    ...priceMovement(observation, input.target),
+    ...movement,
     spreadBps: spreadBps(observation),
     newSuccess,
+    newUsableDecision:
+      newSuccess &&
+      movement.deviationBps !== null &&
+      movement.premiumBps !== null,
   };
 }
 
@@ -722,7 +717,11 @@ async function pollDueSource(
 async function pollSource(
   input: PollSourceInput,
 ): Promise<PegSourceMetricSnapshot | null> {
-  const stateKey = `${input.context.policyVersion}:${input.assetId}:${input.source.id}`;
+  const stateKey = sourceStateKey(
+    input.context.policyVersion,
+    input.assetId,
+    input.source.id,
+  );
   input.context.activeStateKeys.add(stateKey);
   const state =
     input.context.sourceStates.get(stateKey) ?? defaultSourceState();
@@ -731,16 +730,27 @@ async function pollSource(
     input.structural,
     input.policy.referenceSizeCap,
   );
-  if (refSize === null) {
-    clearSource(state, null);
-    return null;
-  }
-  const due =
+  const cadenceDue =
     state.lastAttemptAt === null ||
-    state.referenceSize !== refSize ||
     input.context.nowSeconds - state.lastAttemptAt >=
       input.policy.pollIntervalSeconds;
-  if (due) return pollDueSource(input, state, refSize);
+  if (refSize === null) {
+    return snapshotWithoutReferenceSize(input, state, cadenceDue);
+  }
+  // A changed binding reference size requires an immediate new decision even
+  // inside the ordinary cadence window.
+  const due = cadenceDue || state.referenceSize !== refSize;
+  if (due) {
+    const snapshot = await pollDueSource(input, state, refSize);
+    if (input.blindConsecutivePollLimit !== null) {
+      updateBlindConsecutivePolls(
+        state,
+        input.blindConsecutivePollLimit,
+        snapshot.newUsableDecision,
+      );
+    }
+    return snapshot;
+  }
 
   const observation = cachedObservation(
     state,
@@ -749,6 +759,46 @@ async function pollSource(
     input.context,
   );
   return sourceSnapshot(input, refSize, observation, false);
+}
+
+function snapshotWithoutReferenceSize(
+  input: PollSourceInput,
+  state: SourceState,
+  cadenceDue: boolean,
+): PegSourceMetricSnapshot | null {
+  if (input.blindConsecutivePollLimit !== null && cadenceDue) {
+    state.lastAttemptAt = input.context.nowSeconds;
+    updateBlindConsecutivePolls(state, input.blindConsecutivePollLimit, false);
+  }
+  if (state.referenceSize === null) {
+    clearSource(state, null);
+    return null;
+  }
+  const observation = cachedObservation(
+    state,
+    input.source,
+    input.policy,
+    input.context,
+  );
+  return sourceSnapshot(input, state.referenceSize, observation, false);
+}
+
+function updateBlindConsecutivePolls(
+  state: SourceState,
+  limit: number,
+  usableDecision: boolean,
+): void {
+  state.blindConsecutivePolls = usableDecision
+    ? 0
+    : Math.min(state.blindConsecutivePolls + 1, limit);
+}
+
+function sourceStateKey(
+  policyVersion: string,
+  assetId: string,
+  sourceId: string,
+): string {
+  return `${policyVersion}:${assetId}:${sourceId}`;
 }
 
 function deepVenueIsBlind(
@@ -768,6 +818,54 @@ function deepVenueIsBlind(
   );
 }
 
+type PollPolicySourceInput = {
+  assetId: string;
+  asset: PegAsset;
+  policy: PegAssetPolicy;
+  sourceId: string;
+  sourcePolicy: PegSourcePolicy;
+  structural: StructuralContext;
+  context: CycleContext;
+};
+
+async function pollPolicySource({
+  assetId,
+  asset,
+  policy,
+  sourceId,
+  sourcePolicy,
+  structural,
+  context,
+}: PollPolicySourceInput): Promise<PegSourceMetricSnapshot | null> {
+  const source = asset.sources.find(({ id }) => id === sourceId);
+  if (source === undefined) {
+    context.dependencies.report(
+      "join",
+      new Error("policy source is absent from registry"),
+      { asset: assetId, source: sourceId },
+    );
+    throw new Error(`peg source ${assetId}/${sourceId} is unsupported`);
+  }
+  try {
+    return await pollSource({
+      assetId,
+      target: policy.target,
+      source,
+      policy: sourcePolicy,
+      blindConsecutivePollLimit:
+        sourcePolicy.authority === "deep" ? policy.blindConsecutivePolls : null,
+      structural,
+      context,
+    });
+  } catch (error) {
+    context.dependencies.report("source_fetch", error, {
+      asset: assetId,
+      source: source.id,
+    });
+    return null;
+  }
+}
+
 async function pollAsset(
   assetId: string,
   asset: PegAsset,
@@ -775,51 +873,38 @@ async function pollAsset(
   context: CycleContext,
 ): Promise<PegAssetMetricSnapshot> {
   const structural = await pollStructural(assetId, asset.monitors, context);
-  const registrySources = takeBounded(
-    [...asset.sources].sort((left, right) => left.id.localeCompare(right.id)),
-    PEG_REGISTRY_MAX_SOURCES_PER_ASSET,
+  const policySources = takeBounded(
+    sortedEntries(policy.sources),
+    PEG_POLICY_MAX_SOURCES_PER_ASSET,
     context,
-    "asset sources",
+    "policy asset sources",
   );
   const joined = await Promise.all(
-    registrySources.map(async (source) => {
-      const sourcePolicy = policy.sources[source.id];
-      if (sourcePolicy === undefined) {
-        context.dependencies.report(
-          "join",
-          new Error("registry source is absent from policy"),
-          { asset: assetId, source: source.id },
-        );
-        return null;
-      }
-      try {
-        return await pollSource({
-          assetId,
-          target: policy.target,
-          source,
-          policy: sourcePolicy,
-          structural,
-          context,
-        });
-      } catch (error) {
-        context.dependencies.report("source_fetch", error, {
-          asset: assetId,
-          source: source.id,
-        });
-        return null;
-      }
-    }),
+    policySources.map(([sourceId, sourcePolicy]) =>
+      pollPolicySource({
+        assetId,
+        asset,
+        policy,
+        sourceId,
+        sourcePolicy,
+        structural,
+        context,
+      }),
+    ),
   );
   const sources = joined.filter(
     (snapshot): snapshot is PegSourceMetricSnapshot => snapshot !== null,
+  );
+  const deepVenueSource = policy.deepVenueSource;
+  const deepSourceState = context.sourceStates.get(
+    sourceStateKey(context.policyVersion, assetId, deepVenueSource),
   );
   return {
     asset: assetId,
     policyVersion: context.policyVersion,
     lastPollAt: context.nowSeconds,
-    blind:
-      !structural.reachable ||
-      deepVenueIsBlind(sources, policy.deepVenueSource),
+    blind: deepVenueIsBlind(sources, deepVenueSource),
+    blindConsecutivePolls: deepSourceState?.blindConsecutivePolls ?? 0,
     structuralSaturation: structural.saturation,
     structuralQuerySaturated: structural.querySaturated,
     indexedPoolReachable: structural.reachable,
@@ -829,27 +914,28 @@ async function pollAsset(
 }
 
 async function buildSnapshots(
-  input: PegPollCycleInput,
+  registry: PegRegistry,
+  policy: PegPolicyVersion,
   context: CycleContext,
 ): Promise<PegAssetMetricSnapshot[]> {
-  const registryAssets = takeBounded(
-    sortedEntries(input.registry),
-    PEG_REGISTRY_MAX_ASSETS,
+  const policyAssets = takeBounded(
+    sortedEntries(policy.assets),
+    PEG_POLICY_MAX_ASSETS,
     context,
-    "registry assets",
+    "policy assets",
   );
   const joined = await Promise.all(
-    registryAssets.map(async ([assetId, asset]) => {
-      const policy = input.policy.assets[assetId];
-      if (policy === undefined) {
+    policyAssets.map(async ([assetId, assetPolicy]) => {
+      const asset = registry[assetId];
+      if (asset === undefined) {
         context.dependencies.report(
           "join",
-          new Error("registry asset is absent from policy"),
+          new Error("policy asset is absent from registry"),
           { asset: assetId },
         );
-        return null;
+        throw new Error(`peg asset ${assetId} is unsupported`);
       }
-      return pollAsset(assetId, asset, policy, context);
+      return pollAsset(assetId, asset, assetPolicy, context);
     }),
   );
   return joined.filter(
@@ -857,49 +943,11 @@ async function buildSnapshots(
   );
 }
 
-function pruneState(context: CycleContext): void {
-  for (const key of context.sourceStates.keys()) {
-    if (!context.activeStateKeys.has(key)) context.sourceStates.delete(key);
-  }
-}
-
-async function runCycle(
-  input: PegPollCycleInput,
-  dependencies: Dependencies,
-  sourceStates: Map<string, SourceState>,
-): Promise<PegAssetMetricSnapshot[]> {
-  let snapshots: PegAssetMetricSnapshot[] = [];
-  try {
-    const nowMs = dependencies.nowMs();
-    if (!Number.isFinite(nowMs) || nowMs < 0) {
-      throw new Error("peg poll clock must return finite Unix milliseconds");
-    }
-    const context: CycleContext = {
-      nowMs,
-      nowSeconds: Math.floor(nowMs / 1_000),
-      policyVersion: input.policy.version,
-      dependencies,
-      sourceStates,
-      activeStateKeys: new Set(),
-    };
-    snapshots = await buildSnapshots(input, context);
-    pruneState(context);
-  } catch (error) {
-    dependencies.report("cycle", error);
-  }
-
-  try {
-    await dependencies.publish(snapshots);
-  } catch (error) {
-    dependencies.report("publish", error);
-  }
-  return snapshots;
-}
-
 export function createPegPoller(input: PegPollerDependencies = {}): PegPoller {
   const dependencies = resolveDependencies(input);
   const sourceStates = new Map<string, SourceState>();
   return {
-    pollCycle: (cycle) => runCycle(cycle, dependencies, sourceStates),
+    pollCycle: (cycle) =>
+      runPegPollCycle(cycle, dependencies, sourceStates, buildSnapshots),
   };
 }

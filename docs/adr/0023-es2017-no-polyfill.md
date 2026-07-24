@@ -3,7 +3,7 @@ title: Ship ES2017 with no polyfill; ban immutable-array methods via lint and so
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-24
 scope: ui-dashboard
 date: 2026-05
 doc_type: adr
@@ -25,13 +25,18 @@ Firefox. This bit PR #371 five times on `toSorted()` sites.
 
 ## Decision
 
-Keep the **ES2017 target with no polyfill** and forbid the ES2023+ immutable-array
-methods (`toSorted`, `toReversed`, `toSpliced`, etc.) in client-shipped code. An
-ESLint `no-restricted-properties` rule bans them in `src/**`; the sanctioned
-immutable sort is `sortedCopy(arr, cmp)` from `@/lib/immutable-sort`, which
-centralizes the `[...arr].sort()` workaround and its lint disable in one place.
-Server-only paths (`app/api/**`, OG helpers, tests) run on Node ≥20 and may use
-ES2023+.
+Keep the **ES2017 target with no polyfill** and forbid newer runtime APIs in
+client-shipped code. Package instructions list the unsafe API set. The
+sanctioned reusable immutable sort is `sortedCopy(arr, cmp)` from
+`@/lib/immutable-sort`, which centralizes the `[...arr].sort()` workaround and
+its lint disable.
+
+Current automated enforcement is narrower than that accepted policy: ESLint's
+`no-restricted-properties` backstop bans `toSorted`, `toReversed`, and
+`toSpliced` outside its explicit server/test allowlist. Aligning the wider
+policy, lint rule, exception surface, and helper guidance is tracked in
+[#1570](https://github.com/mento-protocol/monitoring-monorepo/issues/1570);
+until then, review enforces the remaining package rule.
 
 ## Alternatives considered
 
@@ -43,11 +48,15 @@ ES2023+.
 
 ## Consequences
 
-- New immutable-sort call sites use `sortedCopy`, not hand-rolled `[...arr].sort()`.
+- Reusable immutable-sort call sites should prefer `sortedCopy`; specialized
+  copy-and-sort logic may stay local.
 - If the target is ever raised, the ESLint restriction and the helper's react-doctor
   disable become cleanup candidates.
 
 ## Evidence
 
 - `toSorted` flag origin PR #371; single immutable-sort helper PR #1092 (2026-07-05).
-- Rule + safe/unsafe path list in [`ui-dashboard/AGENTS.md`](../../ui-dashboard/AGENTS.md) §Browser target.
+- Rule and exact lint allowlist in
+  [`ui-dashboard/eslint.config.mjs`](../../ui-dashboard/eslint.config.mjs);
+  wider safe/unsafe API policy in
+  [`ui-dashboard/AGENTS.md`](../../ui-dashboard/AGENTS.md) §Browser target.

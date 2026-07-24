@@ -310,10 +310,11 @@ export function aggregatorDailyTopQuery(
 
 /**
  * Top legacy-v2 producer-day rows by volume. Source: BrokerTraderDailySnapshot,
- * which the broker handler only writes when `routedViaV3Router=false` — so
- * these are *broker-direct* swaps (Mento UI/SDK + third-party aggregators
- * still routing through the legacy Broker). The volume page's `venue=v2`
- * tab uses this to surface migration-outreach targets: who's still on v2.
+ * which the broker handler writes only when the immediate Broker caller is not
+ * a VirtualPool. These are *broker-direct* swaps (Mento UI/SDK + third-party
+ * aggregators still routing through the legacy Broker); `routedViaV3Router` is
+ * false by construction. The volume page's `venue=v2` tab uses this to surface
+ * migration-outreach targets: who's still on v2.
  *
  * The entity is keyed by `caller` (tx.from / signer EOA) — aliased to
  * `trader` in the response so the dashboard's row shape stays uniform with

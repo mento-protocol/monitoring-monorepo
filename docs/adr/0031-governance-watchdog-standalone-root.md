@@ -1,9 +1,9 @@
 ---
-title: governance-watchdog stays a standalone source root in its own GCP project
+title: governance-watchdog deploys as a standalone source root in its own GCP project
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 scope: governance-watchdog
 date: 2026-06
 doc_type: adr
@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0031 — governance-watchdog stays a standalone source root in its own GCP project
+# ADR 0031 — governance-watchdog deploys as a standalone source root in its own GCP project
 
 **Status:** Accepted (Jun 2026), in force.
 **Scope:** governance-watchdog
@@ -25,10 +25,12 @@ project, distinct from the monitoring project.
 
 ## Decision
 
-Integrate it as a **standalone source root**: it keeps its **own `pnpm-lock.yaml`**,
-its own Cloud Build deploy, and a **dedicated GCP project** (project-factory Terraform
-in `governance-watchdog/infra/`). It is not wired into the root workspace build the
-way the first-party packages are.
+Keep the deployment artifact as a **standalone source root**: it retains its own
+`pnpm-lock.yaml` and nested workspace file, its own Cloud Build deploy, and a
+**dedicated GCP project** (project-factory Terraform in
+`governance-watchdog/infra/`). The package also participates in the root pnpm
+workspace for local development and monorepo quality gates; that does not change
+the package-local dependency resolution used by the deployed source archive.
 
 ## Alternatives considered
 

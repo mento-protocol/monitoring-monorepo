@@ -7,11 +7,12 @@ export type BrokerExchangeDailySnapshots24hResponse = {
   BrokerExchangeDailySnapshot: BrokerExchangeDailySnapshotRow[];
 };
 
-// Daily rollup of legacy v2 (Broker -> BiPoolManager) volume on a chain.
-// Filters out router-driven Broker.Swap events (the sibling-of-VirtualPool
-// case where the v3 Router transitively invokes the Broker — counted as v3
-// already via VirtualPool.Swap). chainId is filtered server-side because only
-// Celo has a Broker today; Monad returns 0 rows.
+// Daily rollup of legacy v2 (Broker -> BiPoolManager) volume on a chain. The
+// indexer omits every VirtualPool-routed Broker.Swap at write time, including
+// third-party aggregator entry points, because VirtualPool.Swap already counts
+// that volume as v3. The false predicate also excludes historical router-routed
+// rows written before that invariant moved to the writer. chainId is filtered
+// server-side because only Celo has a configured Broker.
 //
 // `id` is selected so the paginated fetcher can dedup on the canonical key
 // (offset pagination over an append-only table is not stable under concurrent

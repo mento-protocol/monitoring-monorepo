@@ -3,7 +3,7 @@ title: Peg paging measures executable sell price; the deep venue pages alone
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 scope: metrics-bridge / alerts
 date: 2026-07
 doc_type: adr
@@ -54,7 +54,17 @@ or structurally missing (thin second venue).
   leg that is not the capped condition itself (structural saturation,
   envelope-excess spread, or a partial-fill VWAP shortfall at or beyond
   the critical threshold). A capped book still quoting par — benign depth
-  thinning — stays warn-tier.
+  thinning — stays warn-tier. Indexed-pool reachability never forces
+  `mento_peg_blind`; a still-fresh usable deep-venue decision remains usable
+  while the independent structural plane is unavailable. The version-bound
+  `mento_peg_blind_consecutive_polls` gauge advances once per due deep-source
+  cadence slot that produces no new usable uncapped decision, including a due
+  slot where no structural reference size can be derived. It resets to zero
+  on a usable decision, saturates at the approved `blindConsecutivePolls`
+  threshold, and never advances on non-deep polls or intermediate loop ticks.
+  A changed binding reference size also makes the deep source immediately due
+  under the scheduler's existing semantics. This producer-side streak
+  preserves a usable reset that occurs between Grafana evaluations.
 - **The deep venue pages alone.** Sustained executable deviation beyond the
   critical threshold on the policy-designated deep venue (designated in
   the gated thresholds artifact, ADR 0044 — not in the registry) pages by

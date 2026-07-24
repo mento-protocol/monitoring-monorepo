@@ -3,7 +3,7 @@ title: Peg alert thresholds stay in the gated alerts-rules plane, read from one 
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 scope: alerts
 date: 2026-07
 doc_type: adr
@@ -63,8 +63,11 @@ auto-resolves a live page whenever the threshold series blips.
   runtime and CI verify that binding so a restarted replica
   cannot reuse one metric label for changed semantics. Activation is two-phase because artifact publish and
   bridge pickup cannot be atomic: the generated rules accept both the
-  previous and the new policy version until the producer ACKNOWLEDGES the
-  new version — old-version acceptance is ack-terminated, never expired by
+  previous and the new exact policy versions until a reviewed follow-up
+  artifact sets `previous=null` after the producer ACKNOWLEDGES the new
+  version. Acknowledgment resolves only the rollover-stuck condition; it
+  never auto-terminates retained rule acceptance. Old-version acceptance is
+  removed only by that reviewed artifact change and never expires by
   wall-clock alone, so a delayed or unavailable artifact poll can never
   leave the rules without an accepted producer version. Deviation
   evaluation stays live on the previous policy throughout, and a distinct
@@ -74,7 +77,8 @@ auto-resolves a live page whenever the threshold series blips.
   a changed active version must retain that exact prior active object as
   `previous`; an unchanged active version may only preserve or remove its
   retained predecessor after acknowledgment. A second active rollover is
-  rejected until that predecessor has been ACK-cleared. There is no HCL mirror,
+  rejected until that predecessor has been cleared by the reviewed
+  `previous=null` update. There is no HCL mirror,
   so the existing mirror-drift check is unnecessary for this class; a sibling integrity
   check validates at source level: every threshold source key and the
   deep-venue designation must name an existing registry source id, every

@@ -3,7 +3,7 @@ title: The indexer vendors a mirror of shared-config because Envio builds outsid
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-23
 scope: indexer-envio
 date: 2026-03
 doc_type: adr
@@ -28,11 +28,14 @@ of the package rename.
 
 ## Decision
 
-The indexer **vendors a copy** of the pieces it needs —
-`config/deployment-namespaces.json` and the token-filter logic mirrored in
-`src/feeToken.ts` (`buildKnownTokenMeta`) — rather than importing the workspace
-package. This is a deliberate, documented mirror: when the source policy changes
-in `shared-config`, both copies are updated in the same change.
+The indexer **vendors a copy** of the pieces it needs rather than importing the
+workspace package. The checked-in JSON mirrors are
+`config/aggregators.json`, `config/deployment-namespaces.json`,
+`config/fx-calendar.json`, and `config/oracle-reporters.json`; the selected
+token-filter policy is mirrored in
+`src/feeToken.ts` (`buildKnownTokenMeta`). These are deliberate, documented
+mirrors: when a source changes in `shared-config`, its indexer copy changes in
+the same PR.
 
 ## Alternatives considered
 
@@ -48,10 +51,13 @@ in `shared-config`, both copies are updated in the same change.
 
 - This is the **one** sanctioned violation of "no duplication" (ADR 0011); it is
   called out as a mirror-not-debt so reviewers don't try to "DRY" it away.
-- The indexer layers a stricter fee-token policy at its call site on top of the
-  mirror; drift is a review hazard, so both sides move together.
+- JSON parity tests fail when a checked-in mirror diverges. The indexer layers
+  a stricter fee-token policy at its call site; drift is a review hazard, so
+  both sides move together.
 
 ## Evidence
 
-- `indexer-envio/config/deployment-namespaces.json`, `src/feeToken.ts`, and the workspace-boundary note at `src/contractAddresses.ts:14-18`.
+- `indexer-envio/config/{aggregators,deployment-namespaces,fx-calendar,oracle-reporters}.json`,
+  their parity tests, `src/feeToken.ts`, and the workspace-boundary note in
+  `src/contractAddresses.ts`.
 - [`indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md) §Dependencies.

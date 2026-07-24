@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -104,8 +104,11 @@ terminal state so late feedback is not missed.
 
 ### Bounded clean-Claude protocol
 
-`pr:feedback-state` treats a current-head Claude `Verdict: LGTM` review as clean
-only when the complete comment matches this bounded protocol:
+`pr:feedback-state` accepts one bounded clean-Claude grammar plus one exact
+observed-payload compatibility exception. A Claude comment that makes a
+clean-verdict claim fails closed unless its complete protocol matches.
+
+The legacy `Verdict: LGTM` plus `Findings` and `Roll-up` protocol requires:
 
 - The optional Claude completion line may include only its fixed GitHub Actions
   `View job` suffix; other suffixes fail closed.
@@ -128,6 +131,33 @@ only when the complete comment matches this bounded protocol:
 The parser validates title, checklist, Findings, and Roll-up as separate
 structural regions. Do not broaden the Findings/Roll-up positive-evidence
 allowlist merely to accept a new title or checklist subject.
+
+`Overall verdict: LGTM` is an observed-payload compatibility registry, not a
+reusable prose grammar. A registered payload must first match this structural
+envelope:
+
+- The fixed Claude completion line with its GitHub Actions `View job` suffix,
+  followed by `Code Review — PR #<current-number>`.
+- A fully checked checklist in exact order: gather context, understand the
+  request, one or more ``Review `<repo-relative-path>` changes`` entries,
+  then post findings. Review targets cannot be absolute paths or contain
+  traversal.
+- The exact clean verdict, a non-empty `Summary`, then
+  `Verification notes (no issues found)` with sequential numbered notes. Each
+  note needs a bold label and non-empty evidence.
+- A final `No P1/P2/P3 findings` conclusion with nothing after it.
+
+After structural validation, the parser hashes the raw UTF-8 body without
+trimming, newline conversion, or other normalization. It accepts a match only
+when the digest is registered for the same Claude author, PR number, comment
+ID, and current head SHA. The registry currently contains
+[PR #1544 comment 5060594122](https://github.com/mento-protocol/monitoring-monorepo/pull/1544#issuecomment-5060594122):
+digest `039923882eee9f880165543ef85e1ca251d84b995a78647b41c2b788d02a4885`,
+comment ID `5060594122`, and head
+`aab83bc74ae0585147a058d92f1f13afac7be109`.
+
+Unseen `Overall verdict` payloads fail closed pending deliberate registration.
+Any body or binding change, including line-ending changes, remains blocking.
 
 ## Expected CLI contract
 

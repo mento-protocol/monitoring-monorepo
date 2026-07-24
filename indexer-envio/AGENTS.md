@@ -46,8 +46,9 @@ types, rollout behavior, and representative browser/query tests agree.
 - `schema.graphql` — entity contract exposed by Hasura.
 - `src/EventHandlers.ts` — required handler entry point; every handler module
   must be reachable through a side-effect import here.
-- `src/contractAddresses.ts` and `config/deployment-namespaces.json` — contract
-  resolution plus the hosted-build namespace mirror.
+- `config/{aggregators,deployment-namespaces,fx-calendar,oracle-reporters}.json`
+  — checked-in shared-config mirrors for hosted builds.
+- `src/contractAddresses.ts` — namespace-aware contract resolution.
 - `config/protocolActors.json` — only protocol actors not derivable from pool
   state, `PoolLiquidityStrategy`, contract, or NTT metadata. The populated
   `Pool.rebalancerAddress` remains a compatibility/swap fast path, not the
@@ -74,19 +75,23 @@ Postgres healthcheck is re-applied.
 ## Contract Types
 
 The production config and README enumerate indexed contracts. The load-bearing
-Broker rule is: Celo v2 `Swap` rows carry `routedViaV3Router` based on
-`tx.to == Routerv300`, allowing dashboard volume to exclude sibling rows already
-counted through `VirtualPool.Swap`. Preserve that denormalization when changing
-the v2/v3 volume path; see
+Broker rule is: `BrokerSwapEvent.routedViaV3Router` requires both a
+`Routerv300` transaction target and a registered VirtualPool as the immediate
+Broker caller. Legacy-v2 daily and producer rollups exclude every VirtualPool
+caller, including third-party aggregator entry points, because the sibling
+`VirtualPool.Swap` already carries that volume. Preserve that denormalization
+when changing the v2/v3 volume path; see
 [ADR 0017](../docs/adr/0017-broker-denormalization-volume-dedup.md).
 
 ## Dependencies
 
-`@mento-protocol/contracts` owns published addresses and ABIs. Two mirrors are
-deliberate because Envio hosted builds can run outside the pnpm workspace:
+`@mento-protocol/contracts` owns published addresses and ABIs. Shared-config
+mirrors are deliberate because Envio hosted builds can run outside the pnpm
+workspace:
 
-- Keep `config/deployment-namespaces.json` synchronized with
-  `../shared-config/deployment-namespaces.json`.
+- Keep `config/aggregators.json`, `config/deployment-namespaces.json`,
+  `config/fx-calendar.json`, and `config/oracle-reporters.json` synchronized
+  with their files under `../shared-config/`; parity tests enforce equality.
 - Keep `src/feeToken.ts:buildKnownTokenMeta` synchronized with the applicable
   policy in `../shared-config/src/tokens.ts`; the indexer additionally excludes
   mocks and requires decimals at its call site.
@@ -107,6 +112,10 @@ bounded caches, median freshness, partial-heal retry coordination, downstream
 predicate/query audit, phase-local preload state (including imported
 handler-helper call graphs), Vitest RPC mocks, and env parsing.
 
+Keep RPC reads in focused effect modules and test value-returning heal stages
+with hermetic effect doubles; see
+[ADR 0016](../docs/adr/0016-effect-rpc-split-and-heal-stages.md).
+
 Also apply the shared recurring-review rules for file-size limits, multichain
 enumeration, Hasura row caps, and effect-layer boundaries:
 [`../docs/pr-checklists/recurring-review-patterns.md`](../docs/pr-checklists/recurring-review-patterns.md).
@@ -125,6 +134,10 @@ event type.
 ## Observability
 
 Indexer failures use structured `context.log.error` events with the
-`<area>.<event>` convention and flow through Envio logs to Loki/Grafana. Do not
-add Sentry to handlers; see
-[ADR 0018](../docs/adr/0018-indexer-observability-loki.md).
+`<area>.<event>` convention. Do not add Sentry to handlers. Use the
+commit-scoped `pnpm deploy:indexer:logs`, `:status`, and `:metrics` commands for
+the current operator surface. [ADR 0018](../docs/adr/0018-indexer-observability-loki.md)
+records the intended Loki/Grafana plane, but
+[#1561](https://github.com/mento-protocol/monitoring-monorepo/issues/1561)
+tracks missing repository and live evidence; do not assume Grafana alert
+coverage until that issue is resolved.

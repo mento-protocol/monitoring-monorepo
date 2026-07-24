@@ -199,7 +199,12 @@ fetched from the gated runtime artifact under
 
 **Vercel's native Git integration watches `main`** — every push that changes dashboard-affecting files triggers an automatic production deploy. Pushes that only touch unrelated directories (e.g. `terraform/`, `indexer-envio/`) are skipped by `ui-dashboard/scripts/vercel-ignore-build.sh`. PR preview deployments diff each push incrementally against that branch's previous preview deployment (falling back to the merge base with `origin/main` on a branch's first push). So a docs-only PR skips, and once a branch's dashboard change has been previewed, later non-dashboard commits on the same branch skip too instead of rebuilding the whole branch on every push.
 
-**Autofix branches never deploy.** `ui-dashboard/vercel.json` sets `git.deploymentEnabled` to deny `sentry-autofix/*`, so Vercel never _creates_ a deployment for a machine-authored autofix branch (ADR 0036 Phase 2b, issue #1452). This is a trust boundary, not an optimization: the skip script decides skip-vs-build for _eligible_ branches, but running an untrusted autofix diff through a preview build would expose it to the dashboard's production-linked secrets before human review. The denial is strictly earlier — the build never starts. See [ADR 0019](adr/0019-vercel-path-aware-deploys.md).
+`ui-dashboard/vercel.json` suppresses ordinary deployments for
+`sentry-autofix/*` through `git.deploymentEnabled` (ADR 0036 Phase 2b, issue
+#1452). Treat this source-controlled rule as workflow hygiene, not a secret
+boundary: branch code can change it. Provider-owned deployment eligibility and
+protection must reject untrusted code, and operators must not manually deploy
+autofix branches. See [ADR 0019](adr/0019-vercel-path-aware-deploys.md).
 
 The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](https://monitoring.mento.org).
 
@@ -210,7 +215,8 @@ Terraform stack ownership is registered in [`terraform.stacks.json`](../terrafor
 - Vercel project creation and configuration (`root_directory`, Git integration)
 - All Terraform-managed environment variables (Hasura URLs, Upstash Redis credentials)
 - Custom domain (`monitoring.mento.org`)
-- Upstash Redis database (address labels storage)
+- Upstash Redis database (dashboard-managed labels, reports, intelligence, and
+  integration state)
 - Monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, and CI WIF/IAM
 
 The path-aware Vercel ignore command lives in
@@ -249,8 +255,8 @@ document the source of truth here, and wait for a human-approved plan/apply.
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                                 |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                                  |
 | `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks             |
-| `UPSTASH_REDIS_REST_URL`              | Terraform output         | Address labels Redis — auto-set from DB                               |
-| `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Address labels Redis token — auto-set                                 |
+| `UPSTASH_REDIS_REST_URL`              | Terraform output         | Dashboard-managed Redis — auto-set from DB                            |
+| `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Dashboard-managed Redis token — auto-set                              |
 | `BLOB_STORE_ID`                       | Vercel store integration | Blob OIDC store id for backup and restore routes                      |
 | `BLOB_WEBHOOK_PUBLIC_KEY`             | Vercel store integration | Blob OIDC public key for the connected store                          |
 
@@ -314,20 +320,43 @@ they do not borrow Fly evidence for a chain where LI.FI has not exposed Fly.
 
 ### Address Book & Backup Cron
 
-The dashboard includes a private address book at `/address-book` for labeling wallet addresses with company or entity names. Labels are stored in Upstash Redis and displayed inline throughout the UI. Forensic reports (long-form markdown investigations attached to an address) live in the same Upstash instance under the `reports` hash.
+The dashboard includes a private address book at `/address-book` for labeling
+wallet addresses with company or entity names. Labels, forensic reports, and
+managed address/entity intelligence records live in the same Upstash instance.
 
-A daily cron job at `03:00 UTC` (defined in `ui-dashboard/vercel.json`) snapshots BOTH the labels hash AND the forensic-reports hash to Vercel Blob storage as a backup. The backup and restore routes use Vercel Blob OIDC through the project-linked `address-labels` store; do not configure a static `BLOB_READ_WRITE_TOKEN` for the dashboard project. The snapshot JSON has `addresses` (labels) and `reports` (forensic reports) keys side by side; the `/api/address-labels/import` route accepts the same shape for user-uploaded restores. For snapshots too large to upload through Vercel's request body limit, call `POST /api/address-labels/restore?pathname=<blob-pathname>` with either a workspace session or `Authorization: Bearer $CRON_SECRET`; this server-side Blob restore preserves report `authorEmail`, `createdAt`, `updatedAt`, `source`, and `version` metadata from trusted first-party backups. The Blob store (`address-labels`) is a team-level resource — it survives project recreation.
+A daily cron job at `03:00 UTC` (defined in `ui-dashboard/vercel.json`) backs up
+seven managed hashes: labels, reports, and five intelligence hashes. It writes a
+private v2 manifest plus one Vercel Blob per hash. Legacy v1 monolithic snapshots
+remain restore-only. The user-facing `/api/address-labels/export` and
+`/api/address-labels/import` routes use the separate `addresses` + `reports`
+shape; they are not the v2 Blob format. This is not a whole-Redis backup:
+Minipay sync state and TTL integration-probe snapshots remain outside it.
+
+Backup and restore use Vercel Blob OIDC through the project-linked
+`address-labels` store; do not configure a static `BLOB_READ_WRITE_TOKEN`. To
+restore a private backup, call
+`POST /api/address-labels/restore?pathname=<manifest-pathname>` with either a
+workspace session or the `CRON_SECRET` bearer credential. The server-side
+restore preserves trusted report provenance metadata. The team-level Blob store
+survives project recreation.
 
 ### Security Posture — Preview Deployments
 
 Preview deployments receive the **same** `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and `AUTH_SECRET` values as production. This is required by the Auth.js `redirectProxyUrl` flow (see [`terraform/dashboard.tf`](../terraform/dashboard.tf) auth block for the full rationale): Google OAuth callbacks land on the prod domain, and the signed state JWE must verify against the same `AUTH_SECRET` on both ends.
 
-To make this safe, two controls must hold:
+To make this safe, these controls must hold:
 
-1. **Vercel Deployment Protection** is enabled on the `monitoring-dashboard` project — only `mentolabs` team members can reach a preview URL (Project Settings → Deployment Protection → "All Deployments (except production)" → Standard Protection).
-2. **Fork PRs do not produce preview deployments** — on by default for team accounts; verify under Project Settings → Git → "Deploy for Fork Pull Requests" is off.
+1. **Vercel SSO Deployment Protection** covers all previews and production
+   deployment URLs. The protected Lighthouse path uses the project-scoped
+   automation-bypass secret managed by Terraform.
+2. **Git fork protection** prevents fork PRs from producing preview deployments.
 
-If either control is ever loosened, treat all three shared secrets as exposed:
+The `sentry-autofix/*` rule in `ui-dashboard/vercel.json` also suppresses
+ordinary machine-authored previews, but it is branch-controlled defense in
+depth, not one of these trust-boundary controls.
+
+If SSO or fork protection is loosened, or another untrusted branch class becomes
+deployment-eligible, treat all three shared secrets as exposed:
 
 - Rotate `AUTH_GOOGLE_SECRET` in GCP (OAuth consent screen) and update `terraform/terraform.tfvars`.
 - Regenerate `AUTH_SECRET` (`openssl rand -base64 32`), update `terraform/terraform.tfvars`.
@@ -436,7 +465,8 @@ envio
 
 The dashboard project intentionally skips builds when no dashboard-affecting
 files changed. The skip script is `ui-dashboard/scripts/vercel-ignore-build.sh`;
-it watches `ui-dashboard/`, `shared-config/`, and workspace dependency metadata.
+it watches `ui-dashboard/`, `shared-config/`, workspace dependency metadata,
+and `.lighthouserc.cjs` so Lighthouse-required PRs receive a preview.
 The script uses local Git metadata when available, then falls back to GitHub's
 API when Vercel has stripped `.git` from the uploaded source. It tries three
 anchors in order:

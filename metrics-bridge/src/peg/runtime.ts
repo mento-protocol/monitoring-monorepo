@@ -1,6 +1,6 @@
 import { PEG_POLICY_URL } from "../config.js";
 import {
-  assertPegPolicyRegistryCompatibility,
+  assertPegPolicyRegistrySupportsPolicy,
   PegPolicyCompatibilityError,
 } from "./compatibility.js";
 import { pegCounters } from "./metrics.js";
@@ -11,6 +11,7 @@ import {
 import {
   createPegPoller,
   type PegPollErrorEvent,
+  type PegPollCyclePolicies,
   type PegPoller,
 } from "./poller.js";
 import type { PegPolicyBundle, PegPolicyVersion } from "./policy.js";
@@ -105,27 +106,59 @@ function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-function selectCompatiblePolicy(
+function compatiblePolicy(
+  registry: PegRegistry,
+  policy: PegPolicyVersion,
+  assertCompatibility: (
+    registry: PegRegistry,
+    policy: PegPolicyVersion,
+  ) => void,
+): PegPolicyCompatibilityError | null {
+  try {
+    assertCompatibility(registry, policy);
+    return null;
+  } catch (error) {
+    if (error instanceof PegPolicyCompatibilityError) return error;
+    throw error;
+  }
+}
+
+function selectCompatiblePolicies(
   registry: PegRegistry,
   bundle: PegPolicyBundle,
-): PegPolicyVersion {
-  try {
-    assertPegPolicyRegistryCompatibility(registry, bundle.active);
-    return bundle.active;
-  } catch (error) {
-    if (
-      !(error instanceof PegPolicyCompatibilityError) ||
-      bundle.previous === null
-    ) {
-      throw error;
-    }
-  }
+): PegPollCyclePolicies {
+  const activeError = compatiblePolicy(
+    registry,
+    bundle.active,
+    assertPegPolicyRegistrySupportsPolicy,
+  );
+  const previousError =
+    bundle.previous === null
+      ? null
+      : compatiblePolicy(
+          registry,
+          bundle.previous,
+          assertPegPolicyRegistrySupportsPolicy,
+        );
 
-  // Old replicas keep producing the retained version until their baked
-  // registry can serve the active topology. Compatible replicas select active
-  // first and therefore acknowledge the rollover through their metric labels.
-  assertPegPolicyRegistryCompatibility(registry, bundle.previous);
-  return bundle.previous;
+  if (
+    activeError === null &&
+    bundle.previous !== null &&
+    previousError === null
+  ) {
+    return [bundle.active, bundle.previous];
+  }
+  if (bundle.previous === null) {
+    if (activeError !== null) throw activeError;
+    return [bundle.active];
+  }
+  if (activeError === null) throw previousError;
+  if (previousError === null) {
+    // Old replicas keep producing the retained version until their baked
+    // registry can serve the active topology.
+    return [bundle.previous];
+  }
+  throw activeError;
 }
 
 function defaultErrorReporter(event: PegRuntimeErrorEvent): void {
@@ -194,7 +227,7 @@ class DefaultPegRuntime implements PegRuntime {
         this.options.policyUrl.url,
         this.options.policyClientOptions,
         (bundle) => {
-          selectCompatiblePolicy(registry, bundle);
+          selectCompatiblePolicies(registry, bundle);
         },
       );
     } catch (error) {
@@ -230,8 +263,8 @@ class DefaultPegRuntime implements PegRuntime {
       return;
     }
     try {
-      const policy = selectCompatiblePolicy(registry, bundle);
-      await this.options.poller.pollCycle({ registry, policy });
+      const policies = selectCompatiblePolicies(registry, bundle);
+      await this.options.poller.pollCycle({ registry, policies });
       this.#status = "active";
     } catch (error) {
       const kind =

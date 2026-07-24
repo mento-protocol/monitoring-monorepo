@@ -170,7 +170,8 @@ When a new `@mento-protocol/contracts` version is published:
 3. Run `pnpm install` from the repository root.
 4. From `indexer-envio/`, run `pnpm generate:abis` and commit any vendored ABI
    changes.
-5. Run the dashboard and indexer typechecks selected by the root quality gate.
+5. Run `pnpm check:yaml-addresses`, then run codegen and the dashboard and
+   indexer typechecks selected by the root quality gate.
 
 ### Adding a contract to the index
 

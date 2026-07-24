@@ -3,7 +3,7 @@ title: Aegis is a NestJS App Engine service polling view calls into Prometheus
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-24
 scope: aegis
 date: 2026-05
 doc_type: adr
@@ -46,4 +46,7 @@ polled on a schedule; backoff would silently extend stale windows).
 
 ## Evidence
 
-- Aegis monorepo migration PR #443 (2026-05-19); RPC posture + label discipline in [`aegis/AGENTS.md`](../../aegis/AGENTS.md).
+- Aegis monorepo migration PR #443 (2026-05-19); current service wiring in
+  [`aegis/src/app.module.ts`](../../aegis/src/app.module.ts), App Engine shape
+  in [`aegis/app.yaml`](../../aegis/app.yaml), and RPC posture + label
+  discipline in [`aegis/AGENTS.md`](../../aegis/AGENTS.md).
