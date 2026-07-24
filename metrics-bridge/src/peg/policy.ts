@@ -51,6 +51,7 @@ export function pegPolicyVersionForContent(
 
 export const PEG_POLICY_MAX_ASSETS = 32;
 export const PEG_POLICY_MAX_SOURCES_PER_ASSET = 16;
+export const PEG_POLICY_MAX_BLIND_CONSECUTIVE_POLLS = 1_000;
 
 export const PegSourcePolicySchema = z
   .object({
@@ -82,7 +83,11 @@ const PegAssetPolicyBaseSchema = z
     criticalSustainSeconds: z.number().int().min(60).max(86_400),
     durationQuantile: z.number().finite().gt(0).lt(1),
     minimumCoverageFraction: z.number().finite().gt(0).max(1),
-    blindConsecutivePolls: z.number().int().positive().max(1_000),
+    blindConsecutivePolls: z
+      .number()
+      .int()
+      .positive()
+      .max(PEG_POLICY_MAX_BLIND_CONSECUTIVE_POLLS),
     permanentlyDeadSeconds: z.number().int().min(86_400).max(31_536_000),
     structuralWarnFraction: z.number().finite().gt(0).max(1),
     freshnessGraceSeconds: z.number().int().min(60).max(3_600),

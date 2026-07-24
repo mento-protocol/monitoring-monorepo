@@ -1,76 +1,87 @@
 import type { PegPolicyVersion } from "./policy.js";
 import type { PegRegistry, PegSourceRole } from "./registry.js";
 
-const authorityByRole = {
-  primary: "deep",
-  secondary: "secondary",
-  display: "display",
-} as const satisfies Record<PegSourceRole, string>;
-
 export class PegPolicyCompatibilityError extends Error {}
 
 function sorted(values: Iterable<string>): string[] {
   return [...values].sort((left, right) => left.localeCompare(right));
 }
 
-function assertSameKeys(
+function assertSupportedKeys(
   registryKeys: Iterable<string>,
   policyKeys: Iterable<string>,
   location: string,
 ): void {
-  const registry = sorted(registryKeys);
-  const policy = sorted(policyKeys);
-  if (
-    registry.length !== policy.length ||
-    registry.some((value, index) => value !== policy[index])
-  ) {
+  const registry = new Set(registryKeys);
+  const unsupported = sorted(policyKeys).filter((key) => !registry.has(key));
+  if (unsupported.length > 0) {
     throw new PegPolicyCompatibilityError(
-      `${location} registry/policy mismatch: registry=[${registry.join(",")}] policy=[${policy.join(",")}]`,
+      `${location} policy topology is absent from registry: [${unsupported.join(",")}]`,
     );
   }
 }
 
-/**
- * Prevent an old producer from acknowledging policy for topology it cannot
- * serve. The protected artifact and baked registry must describe the exact
- * same active asset/source set before any version-labeled metrics are emitted.
- */
-export function assertPegPolicyRegistryCompatibility(
+function assertSourceAuthority(
+  assetId: string,
+  sourceId: string,
+  role: PegSourceRole,
+  authority: string,
+): void {
+  if (authority === "deep" && role !== "primary") {
+    throw new PegPolicyCompatibilityError(
+      `peg source ${assetId}/${sourceId} deep authority requires primary topology`,
+    );
+  }
+  if (role === "display" && authority !== "display") {
+    throw new PegPolicyCompatibilityError(
+      `peg source ${assetId}/${sourceId} display topology cannot carry alert authority`,
+    );
+  }
+}
+
+function assertPolicySourceAuthorities(
   registry: PegRegistry,
   policy: PegPolicyVersion,
 ): void {
-  assertSameKeys(
+  for (const [assetId, assetPolicy] of Object.entries(policy.assets)) {
+    const asset = registry[assetId];
+    if (asset === undefined) continue;
+    for (const [sourceId, sourcePolicy] of Object.entries(
+      assetPolicy.sources,
+    )) {
+      const source = asset.sources.find(({ id }) => id === sourceId);
+      if (source === undefined) continue;
+      assertSourceAuthority(
+        assetId,
+        sourceId,
+        source.role,
+        sourcePolicy.authority,
+      );
+    }
+  }
+}
+
+/**
+ * Allow a replica whose baked registry is a topology superset to keep serving
+ * a version during additive, removal, and cleanup rolling transitions.
+ */
+export function assertPegPolicyRegistrySupportsPolicy(
+  registry: PegRegistry,
+  policy: PegPolicyVersion,
+): void {
+  assertSupportedKeys(
     Object.keys(registry),
     Object.keys(policy.assets),
     "peg assets",
   );
-
-  for (const [assetId, asset] of Object.entries(registry)) {
-    const assetPolicy = policy.assets[assetId];
-    if (assetPolicy === undefined) {
-      throw new PegPolicyCompatibilityError(
-        `peg asset ${assetId} is absent from active policy`,
-      );
-    }
-    assertSameKeys(
+  for (const [assetId, assetPolicy] of Object.entries(policy.assets)) {
+    const asset = registry[assetId];
+    if (asset === undefined) continue;
+    assertSupportedKeys(
       asset.sources.map(({ id }) => id),
       Object.keys(assetPolicy.sources),
       `peg asset ${assetId} sources`,
     );
-
-    for (const source of asset.sources) {
-      const sourcePolicy = assetPolicy.sources[source.id];
-      if (sourcePolicy === undefined) {
-        throw new PegPolicyCompatibilityError(
-          `peg source ${assetId}/${source.id} is absent from active policy`,
-        );
-      }
-      const expectedAuthority = authorityByRole[source.role];
-      if (sourcePolicy.authority !== expectedAuthority) {
-        throw new PegPolicyCompatibilityError(
-          `peg source ${assetId}/${source.id} requires ${expectedAuthority} authority for ${source.role} topology`,
-        );
-      }
-    }
   }
+  assertPolicySourceAuthorities(registry, policy);
 }
