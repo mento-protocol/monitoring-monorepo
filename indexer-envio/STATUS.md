@@ -1,12 +1,23 @@
+---
+title: Indexer Deployment Reference
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-07-24
+doc_type: reference
+scope: indexer-envio
+review_interval_days: 90
+garden_lane: package-readmes-reference
+---
+
 # Indexer Deployment Reference
 
 ## Deployment Model
 
 Single multichain mainnet indexer (Ethereum reserve-yield `1`, Celo Mainnet
 `42220`, Monad `143`, and Polygon `137`) on the Envio Cloud `mento` project (org
-`mento-protocol`), Production Medium tier. Ethereum reserve-yield handlers are
-event-only; the historical sUSDS onBlock heartbeat is not registered in the
-hosted indexer.
+`mento-protocol`). Ethereum reserve-yield handlers are event-only; the
+historical sUSDS onBlock heartbeat is not registered in the hosted indexer.
 
 This file documents only facts that stay true across redeployments. For live
 sync state and the latest deployment currently visible to Envio, run:
@@ -15,6 +26,9 @@ sync state and the latest deployment currently visible to Envio, run:
 pnpm deploy:indexer:status          # latest visible deployment status
 pnpm deploy:indexer:status --json   # machine-readable
 ```
+
+Use these commands or the Envio console for provider-owned details such as the
+current deployment, sync state, and service tier.
 
 ## GraphQL Endpoint
 
@@ -43,17 +57,6 @@ still require the normal deploy, sync verification, semantic verification, and
 promotion workflow.
 
 Git release branch: `envio` — push to this branch to trigger a redeployment.
-
-## Legacy Projects
-
-The old single-network Envio projects still exist as project records but have no active deployments:
-
-| Project                  | Current role                         |
-| ------------------------ | ------------------------------------ |
-| `mento-v3-celo-mainnet`  | Legacy project record, no deployment |
-| `mento-v3-monad-mainnet` | Legacy project record, no deployment |
-| `mento-v3-celo-sepolia`  | Legacy project record, no deployment |
-| `mento-v3-monad-testnet` | Legacy project record, no deployment |
 
 ## Schema
 

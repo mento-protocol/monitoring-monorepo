@@ -1,4 +1,4 @@
-<!-- agent-context: title="On-call Announcer" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=alerts/infra/oncall-announcer review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="On-call Announcer" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=reference scope=alerts/infra/oncall-announcer review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # On-call Announcer
 
@@ -11,10 +11,11 @@ Slack.
 
 1. Fetches the current Splunk On-Call engineer from
    `/api-public/v1/oncall/current`.
-2. Reads the last announced username from a private GCS state object.
+2. Reads the last announced username from a dedicated GCS state object.
 3. If the username changed, resolves the Splunk On-Call email to a Slack user
-   with `users.lookupByEmail`, posts a message to `#eng` with a stable Slack
-   `client_msg_id` for that transition, and writes the new state.
+   with `users.lookupByEmail`, posts to the configured `SLACK_CHANNEL_ID`
+   (normally `#eng`) with a stable Slack `client_msg_id` for that transition,
+   and writes the new state.
 4. Reconciles the `@support-engineer` Slack usergroup to exactly one member on
    every run.
 

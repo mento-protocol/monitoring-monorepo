@@ -49,7 +49,7 @@ export interface PegPollCycleCoordinatorDependencies {
     snapshots: PegAssetMetricSnapshot[],
     context: PegDecisionPackagePublicationContext | null,
     decisionSnapshots: PegAssetMetricSnapshot[],
-  ) => void | Promise<void>;
+  ) => void | Error | Promise<void | Error>;
   report: (kind: "cycle" | "publish", cause: unknown) => void;
 }
 
@@ -223,7 +223,15 @@ async function publishCycle(
   decisionSnapshots: PegAssetMetricSnapshot[],
 ): Promise<boolean> {
   try {
-    await dependencies.publish(snapshots, context, decisionSnapshots);
+    const decisionPackageError = await dependencies.publish(
+      snapshots,
+      context,
+      decisionSnapshots,
+    );
+    if (decisionPackageError instanceof Error) {
+      dependencies.report("publish", decisionPackageError);
+      return false;
+    }
     return true;
   } catch (error) {
     dependencies.report("publish", error);

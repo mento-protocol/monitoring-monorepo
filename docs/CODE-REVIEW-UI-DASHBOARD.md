@@ -5,6 +5,10 @@ owner: eng
 canonical: false
 archived: 2026-07-05
 archived_reason: "One-off review snapshot of ui-dashboard from 2026-03-05; applied refactors already landed and the codebase has moved on since. Not a standing checklist."
+doc_type: report
+scope: ui-dashboard
+review_interval_days: 365
+garden_lane: notes-plans-archive
 ---
 
 > **ARCHIVED** — Point-in-time review artifact, not a standing checklist. Applied refactors already landed; the codebase has moved on since 2026-03-05.

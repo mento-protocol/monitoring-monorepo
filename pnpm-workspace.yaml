@@ -51,6 +51,8 @@ minimumReleaseAgeExclude:
   - "@next/swc-win32-x64-msvc@16.2.11"
   - next-auth@5.0.0-beta.32
   - "@auth/core@0.41.3"
+  # GHSA-r28c-9q8g-f849: first patched PostCSS release (2026-07-24).
+  - postcss@8.5.18
   - protobufjs
   - tar
   - undici@7.28.0
@@ -83,7 +85,8 @@ overrides:
   "flatted@<3.4.2": 3.4.2
   "brace-expansion@>=2.0.0 <3": 2.1.2
   "brace-expansion@>=5.0.0 <6": 5.0.7
-  "postcss@<8.5.10": 8.5.12
+  # GHSA-r28c-9q8g-f849: <=8.5.17 can disclose arbitrary source-map files.
+  "postcss@<8.5.18": 8.5.18
   "picomatch@>=4.0.0 <4.0.4": 4.0.4
   "vite@>=8.0.0 <8.0.16": 8.0.16
   "@grpc/grpc-js": 1.14.4

@@ -1,4 +1,4 @@
-<!-- agent-context: title="Slack Channels" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=alerts/infra/channels/slack-channels review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Slack Channels" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=reference scope=alerts/infra/channels/slack-channels review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Slack Channels
 

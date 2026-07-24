@@ -1,18 +1,9 @@
 # ── CI Deploy via Workload Identity Federation ───────────────────────────────
-# GitHub Actions workflows from mento-protocol/monitoring-monorepo impersonate
-# `metrics-bridge-deployer` (write-capable) for apply jobs and the new
-# `metrics-bridge-plan-readonly` SA for plan jobs. Both via OIDC — no
-# long-lived JSON keys required. The plan/apply split limits the blast
-# radius of a malicious PR adding a plan-time `external` or `local-exec`
-# data source to exfiltrate context.
-#
-# After apply, set three GitHub repo secrets (run from repo root):
-#   gh secret set GCP_WORKLOAD_IDENTITY_PROVIDER \
-#     --body="$(terraform -chdir=terraform output -raw ci_wif_provider)"
-#   gh secret set GCP_SERVICE_ACCOUNT \
-#     --body="$(terraform -chdir=terraform output -raw ci_deployer_email)"
-#   gh secret set GCP_SERVICE_ACCOUNT_PLAN \
-#     --body="$(terraform -chdir=terraform output -raw ci_plan_readonly_email)"
+# GitHub Actions workflows from mento-protocol/monitoring-monorepo use distinct
+# OIDC chains for service deploys, environment-gated Terraform applies, trusted
+# main refreshes, and PR plans. No long-lived JSON keys are required. The
+# platform stack publishes the non-secret provider and service-account
+# identifiers as GitHub Actions repository variables.
 #
 # The seed-project `org-terraform-plan-readonly@` SA is now managed by
 # terraform (see `org_terraform_plan_readonly` resource below) — no manual
@@ -35,8 +26,8 @@
 #   create/delete the lock object that the GCS backend acquires by
 #   default. PR plan jobs therefore pass `-lock=false`; the owning workflow
 #   files and their regression tests are the current source of truth. Apply
-#   jobs stay on
-#   the write-capable deployer SA which keeps locking on. This trade-off
+#   jobs reach the write-capable `org-terraform` identity through the
+#   environment-gated applier and keep locking on. This trade-off
 #   intentionally chooses strict-least-privilege for plan over speculative
 #   lock contention — plan jobs are short and re-run on each push, so a
 #   skipped lock can't drop work the way a missed apply could.
@@ -56,20 +47,126 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   workload_identity_pool_provider_id = "github"
   display_name                       = "GitHub"
 
-  # Attribute condition gates which OIDC tokens are accepted. Restrict to the
-  # monitoring-monorepo repo so other mento-protocol repos can't use this pool
-  # to impersonate our deployer SA.
-  attribute_condition = "attribute.repository == \"mento-protocol/monitoring-monorepo\""
+  # Attribute condition gates which OIDC tokens are accepted. Require both the
+  # current repository slug and GitHub's immutable numeric repository ID so a
+  # renamed or deleted repository's old name cannot be reused to enter this
+  # pool.
+  attribute_condition = "attribute.repository == \"mento-protocol/monitoring-monorepo\" && attribute.repository_id == \"1172025835\""
 
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject"          = "assertion.sub"
+    "attribute.repository"    = "assertion.repository"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
   }
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
+}
+
+# ── Environment-gated production Terraform apply ─────────────────────────────
+# Keep this provider in its own pool. IAM subjects are pool-scoped rather than
+# provider-scoped, so putting a second GitHub provider in `github-actions`
+# would let the generic provider produce the same environment subject and
+# bypass this provider's stricter condition.
+resource "google_iam_workload_identity_pool" "github_production_infra" {
+  project                   = google_project.monitoring.project_id
+  workload_identity_pool_id = "github-production-infra"
+  display_name              = "GitHub production infra"
+  description               = "Federation pool restricted to main-branch jobs gated by the production-infra environment"
+
+  depends_on = [google_project_service.iam]
+}
+
+resource "google_iam_workload_identity_pool_provider" "github_production_infra" {
+  project                            = google_project.monitoring.project_id
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github_production_infra.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  display_name                       = "GitHub production infra"
+
+  # `sub` is signed by GitHub and includes the job's environment when one is
+  # attached. Check it together with the independently signed repository ID,
+  # repository slug, and ref claims so only protected-main production-infra
+  # jobs from this immutable repository identity can exchange a token.
+  attribute_condition = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && assertion.sub == \"repo:mento-protocol/monitoring-monorepo:environment:production-infra\""
+
+  attribute_mapping = {
+    "google.subject"          = "assertion.sub"
+    "attribute.repository"    = "assertion.repository"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
+  }
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
+# ── Trusted-main Terraform refresh ────────────────────────────────────────────
+# Keep refresh federation in its own pool. IAM subjects are pool-scoped, so a
+# binding to the generic `github-actions` pool would let any accepted main-ref
+# workflow select the refresh service account directly. This provider accepts
+# only the five reviewed Terraform workflow files on main.
+resource "google_iam_workload_identity_pool" "github_terraform_refresh" {
+  project                   = google_project.monitoring.project_id
+  workload_identity_pool_id = "github-terraform-refresh"
+  display_name              = "GitHub Terraform refresh"
+  description               = "Federation pool restricted to trusted-main Terraform refresh and drift workflows"
+
+  depends_on = [google_project_service.iam]
+}
+
+resource "google_iam_workload_identity_pool_provider" "github_terraform_refresh" {
+  project                            = google_project.monitoring.project_id
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github_terraform_refresh.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  display_name                       = "GitHub Terraform refresh"
+
+  # `workflow_ref` is signed by GitHub and identifies the workflow file plus
+  # the ref that supplied it. Keep the repository ID, slug, and ref checks
+  # explicit so renames, forks, and non-main workflow definitions fail closed.
+  attribute_condition = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\")"
+
+  attribute_mapping = {
+    "google.subject"          = "assertion.sub"
+    "attribute.repository"    = "assertion.repository"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
+    "attribute.workflow_ref"  = "assertion.workflow_ref"
+  }
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
+# The apply-facing identity lives in the seed project rather than the
+# monitoring project. It has no project role of its own; its only write path is
+# the service-account-scoped Token Creator grant on `org-terraform` below.
+resource "google_service_account" "production_infra_applier" {
+  project      = "mento-terraform-seed-ffac"
+  account_id   = "production-infra-applier"
+  display_name = "Production infra applier"
+  description  = "Environment-gated GitHub Actions identity for production Terraform applies."
+}
+
+# Exact subject binding: a main-branch job without the production-infra
+# environment has a different GitHub OIDC subject and cannot impersonate the
+# applier, even though it belongs to the same repository.
+resource "google_service_account_iam_member" "production_infra_applier_wif_binding" {
+  service_account_id = google_service_account.production_infra_applier.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github_production_infra.name}/subject/repo:mento-protocol/monitoring-monorepo:environment:production-infra"
+}
+
+# The production applier can mint short-lived credentials for the existing
+# write-capable seed identity. Keep this separate from the legacy deployer
+# binding so the old path can remain available during the staged cutover.
+resource "google_service_account_iam_member" "production_infra_applier_org_terraform_token_creator" {
+  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/${var.terraform_service_account}"
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.production_infra_applier.email}"
 }
 
 resource "google_service_account" "metrics_bridge_deployer" {
@@ -82,13 +179,13 @@ resource "google_service_account" "metrics_bridge_deployer" {
 }
 
 # Ref-gated: only workflow runs whose OIDC `ref` claim is `refs/heads/main`
-# can impersonate the write-capable deployer SA: push-to-main deploys,
-# scheduled drift runs, and `workflow_dispatch` from main. The repo gate is
-# enforced upstream by the provider's `attribute_condition` above
-# (repository == mento-protocol/monitoring-monorepo); binding + condition
-# together enforce repo and ref. Dispatching a deployer-consuming workflow
-# from a non-main ref now fails at the auth step by design; PR jobs use the
-# read-only plan SA below.
+# can impersonate the write-capable deployer SA: routine service deploys plus
+# the transitional trusted-main Terraform plan and scheduled-drift consumers.
+# The repository gate is enforced upstream by the provider's
+# `attribute_condition` above (slug plus immutable repository ID); binding +
+# condition together enforce repository identity and ref. Dispatching a
+# deployer-consuming workflow from a non-main ref now fails at the auth step by
+# design; PR jobs use the read-only plan SA below.
 # Invariant: repo scope relies on the provider's `attribute_condition` above.
 # If that condition ever allows another repo, that repo's refs/heads/main
 # workflows would also match this binding. Review both resources together.
@@ -163,20 +260,21 @@ resource "google_service_account_iam_member" "ci_appengine_default_service_accou
   ]
 }
 
-# Allows the CI deployer SA to mint short-lived tokens for `org-terraform`,
-# the seed-project SA used by `alerts/infra/`, `alerts/rules/`, AND
-# `aegis/terraform/` for their GCS backend impersonation (and, for
-# `alerts/infra/`, also its google provider). Without this grant,
-# `alerts-infra.yml` / `alerts-rules.yml` / `aegis-terraform.yml` fail at
-# `terraform init` with a 403 from STS — the deployer SA is authorized via
-# WIF but can't impersonate `org-terraform`.
+# Transition-only: allows the generic CI deployer SA to mint short-lived tokens
+# for `org-terraform`. Production apply jobs already use the dedicated applier,
+# and the state-only PR/Aegis/alerts-rules plans use their read-only chain. The
+# remaining consumers are the trusted-main pre-gate plans in
+# `alerts-infra.yml` and `governance-watchdog.yml` plus those Google-provider
+# legs in `terraform-drift.yml`. Removing this grant before the later refresh
+# cutover would make those consumers fail while impersonating `org-terraform`.
 #
 # `google_service_account_iam_member` is keyed on the (service_account_id,
 # role, member) triple — one Terraform resource per triple, not per
 # consumer. A second resource with the same triple wouldn't create a second
 # binding; it would shadow this one, and removing either would revoke the
 # underlying grant and break BOTH stacks until the next apply. So this
-# single resource covers every CI stack that impersonates `org-terraform`.
+# single resource covers every transitional consumer that still impersonates
+# `org-terraform` through the generic deployer.
 #
 # The binding lives on `org-terraform` in the seed project, NOT in
 # `mento-monitoring`. `google_service_account_iam_member` makes the target
@@ -194,11 +292,11 @@ resource "google_service_account_iam_member" "ci_alerts_org_terraform_token_crea
   member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
 }
 
-# Rename from `ci_alerts_infra_...` once `alerts/rules/` joined `alerts/infra/`
-# as a second consumer of the same impersonation grant. `moved` lets `apply`
+# Historical rename from `ci_alerts_infra_...`, made when `alerts/rules/`
+# joined `alerts/infra/` as a consumer of the same impersonation grant. The
+# current transitional consumer set is documented above. `moved` lets `apply`
 # pick up the rename without destroying and re-creating the underlying IAM
-# binding (which would leave a brief window where both stacks 403). Safe to
-# remove this block after one full apply cycle has propagated the move.
+# binding. Safe to remove after one full apply cycle has propagated the move.
 moved {
   from = google_service_account_iam_member.ci_alerts_infra_org_terraform_token_creator
   to   = google_service_account_iam_member.ci_alerts_org_terraform_token_creator
@@ -208,8 +306,8 @@ moved {
 # Plan-time hardening: PR plan jobs use a separate, read-only identity so a
 # malicious PR adding a plan-time data source (e.g. `external`, `local-exec`,
 # or a custom data source that shells out) can't mint tokens for the write-
-# capable `metrics-bridge-deployer` SA. Apply jobs continue to use the
-# deployer SA on main pushes.
+# capable `metrics-bridge-deployer` SA. Apply jobs use the separate
+# environment-gated production applier.
 #
 # This hardening reduces SA-chain blast radius. It does NOT mitigate
 # `TF_VAR_*` cleartext exposure at plan time — providers still need those
@@ -226,8 +324,9 @@ resource "google_service_account" "metrics_bridge_plan_readonly" {
 
 # Repo-scoped: deliberately not ref-gated like `deployer_wif_binding` above.
 # PR plan jobs run from PR merge refs (`refs/pull/<n>/merge`), so this binding
-# must stay on `attribute.repository`. The SA is read-only; worst case a rogue
-# repo workflow reads Terraform state, not write infra.
+# must stay on `attribute.repository`; the provider separately requires the
+# immutable repository ID. The SA is read-only; worst case a rogue workflow in
+# the trusted repository reads Terraform state, not write infra.
 resource "google_service_account_iam_member" "plan_readonly_wif_binding" {
   service_account_id = google_service_account.metrics_bridge_plan_readonly.name
   role               = "roles/iam.workloadIdentityUser"
@@ -262,4 +361,45 @@ resource "google_service_account_iam_member" "ci_plan_readonly_org_terraform_pla
   service_account_id = google_service_account.org_terraform_plan_readonly.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.metrics_bridge_plan_readonly.email}"
+}
+
+# ── Read-only trusted-main refresh chain ──────────────────────────────────────
+# Main push/dispatch plans and scheduled drift need live GCP reads, but they do
+# not need the production apply identity. Keep this WIF-facing SA in the seed
+# project, outside the routine deployer's monitoring-project actAs scope.
+resource "google_service_account" "terraform_refresh_readonly" {
+  project      = "mento-terraform-seed-ffac"
+  account_id   = "terraform-refresh-readonly"
+  display_name = "Terraform CI refresh (read-only)"
+  description  = "Main-ref GitHub Actions identity for full-refresh Terraform plans; has no write roles."
+}
+
+# The dedicated provider admits only the intended Terraform workflow files on
+# main. A generic service deploy or another main-ref workflow cannot select
+# this identity.
+resource "google_service_account_iam_member" "terraform_refresh_readonly_wif_binding" {
+  service_account_id = google_service_account.terraform_refresh_readonly.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.ref/refs/heads/main"
+}
+
+resource "google_service_account" "org_terraform_refresh_readonly" {
+  project      = "mento-terraform-seed-ffac"
+  account_id   = "org-terraform-refresh-readonly"
+  display_name = "Org Terraform (refresh-readonly)"
+  description  = "Read-only impersonation target for trusted-main refresh and drift plans."
+}
+
+# Read-only refresh plans pass `-lock=false`; this role deliberately cannot
+# create or delete the GCS backend lock object.
+resource "google_storage_bucket_iam_member" "state_bucket_refresh_readonly" {
+  bucket = "mento-terraform-tfstate-6ed6"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.org_terraform_refresh_readonly.email}"
+}
+
+resource "google_service_account_iam_member" "ci_refresh_readonly_org_terraform_refresh_readonly_token_creator" {
+  service_account_id = google_service_account.org_terraform_refresh_readonly.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.terraform_refresh_readonly.email}"
 }
