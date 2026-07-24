@@ -15,6 +15,8 @@ import { parsePegRegistry } from "../src/peg/registry.js";
 const token = "0x1111111111111111111111111111111111111111";
 const pool = "0x2222222222222222222222222222222222222222";
 const feed = "0x3333333333333333333333333333333333333333";
+const secondPool = "0x5555555555555555555555555555555555555555";
+const secondFeed = "0x6666666666666666666666666666666666666666";
 
 const registry = parsePegRegistry({
   "asset-one": {
@@ -79,6 +81,14 @@ function policy(version: string): PegPolicyVersion {
 
 const active = policy("active-v1");
 const previous = policy("previous-v1");
+
+const twoMonitorRegistry = structuredClone(registry);
+twoMonitorRegistry["asset-one"]!.monitors.push({
+  chainId: 137,
+  poolAddress: secondPool,
+  rateFeedId: secondFeed,
+  monitoredTokenAddress: token,
+});
 
 function snapshot(
   policyVersion: string,
@@ -153,9 +163,10 @@ function context(
   policies: readonly PegPolicyVersion[],
   approvedActivePolicyVersion: string,
   retainedPreviousPolicyVersion: string | null,
+  selectedRegistry: typeof registry = registry,
 ): PegDecisionPackagePublicationContext {
   return {
-    registry,
+    registry: selectedRegistry,
     policies,
     approvedActivePolicyVersion,
     retainedPreviousPolicyVersion,
@@ -167,8 +178,14 @@ afterEach(_resetPegDecisionPackagesForTests);
 
 describe("peg decision-package producer", () => {
   it("selects one complete active version and serializes bounded breaker and blind evidence", () => {
+    const retained = snapshot(previous.version);
+    retained.blind = true;
+    retained.sources[0]!.observation = {
+      ...retained.sources[0]!.observation!,
+      vwap: 0.5,
+    };
     const prepared = preparePegDecisionPackages(
-      [snapshot(previous.version), snapshot(active.version)],
+      [retained, snapshot(active.version)],
       context([active, previous], active.version, previous.version),
     )!;
     expect(prepared.model).toMatchObject({
@@ -190,7 +207,9 @@ describe("peg decision-package producer", () => {
       listingState: null,
       listingCheckedAt: null,
       referenceSize: 50,
+      executablePrice: 0.99,
     });
+    expect(prepared.model.packages[0]?.structural.blind).toBe(false);
     expect(Buffer.byteLength(prepared.json)).toBeLessThanOrEqual(
       PEG_DECISION_PACKAGE_MAX_BYTES,
     );
@@ -227,6 +246,80 @@ describe("peg decision-package producer", () => {
       referenceSize: null,
       executablePrice: null,
     });
+  });
+
+  it("keeps distinct monitor evidence and distinguishes disabled from unavailable breakers", () => {
+    const measured = snapshot(active.version);
+    measured.monitors[0]!.breaker = {
+      ...measured.monitors[0]!.breaker!,
+      enabled: false,
+      referenceValue: "0",
+      lastMedianRate: "0",
+      lastUpdatedAt: null,
+    };
+    measured.monitors.push({
+      ...measured.monitors[0]!,
+      poolAddress: secondPool,
+      rateFeedId: secondFeed,
+      structuralSaturation: 0.75,
+      counterpartyCount: 7,
+      breaker: null,
+    });
+
+    const prepared = preparePegDecisionPackages(
+      [measured],
+      context([active], active.version, null, twoMonitorRegistry),
+    )!;
+    expect(prepared.model.packages[0]?.monitors).toEqual([
+      expect.objectContaining({
+        poolAddress: pool,
+        structuralSaturation: 0.4,
+        breaker: expect.objectContaining({
+          enabled: false,
+          referenceValue: "0",
+          lastMedianRate: "0",
+          lastUpdatedAt: null,
+        }),
+      }),
+      expect.objectContaining({
+        poolAddress: secondPool,
+        structuralSaturation: 0.75,
+        counterpartyCount: 7,
+        breaker: null,
+      }),
+    ]);
+  });
+
+  it("rejects duplicate assets and inconsistent production times", () => {
+    expect(() =>
+      preparePegDecisionPackages(
+        [snapshot(active.version), snapshot(active.version)],
+        context([active], active.version, null),
+      ),
+    ).toThrow(/complete decision-package asset set/);
+
+    const twoAssetPolicy: PegPolicyVersion = {
+      ...active,
+      assets: {
+        ...active.assets,
+        "asset-two": structuredClone(active.assets["asset-one"]!),
+      },
+    };
+    const twoAssetRegistry = structuredClone(registry);
+    twoAssetRegistry["asset-two"] = structuredClone(
+      twoAssetRegistry["asset-one"]!,
+    );
+    const second = snapshot(active.version, {
+      asset: "asset-two",
+      lastPollAt: 1_800_000_001,
+    });
+    second.sources[0]!.asset = "asset-two";
+    expect(() =>
+      preparePegDecisionPackages(
+        [snapshot(active.version), second],
+        context([twoAssetPolicy], active.version, null, twoAssetRegistry),
+      ),
+    ).toThrow(/production time is invalid/);
   });
 
   it("preserves the last confirmed body through empty and failed publication preparation", () => {

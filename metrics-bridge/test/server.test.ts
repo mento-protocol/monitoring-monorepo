@@ -4,6 +4,7 @@ import { handleRequest, markHealthy } from "../src/server.js";
 import {
   _resetPegDecisionPackagesForTests,
   commitPegDecisionPackages,
+  type PegDecisionPackages,
 } from "../src/peg/decision-packages.js";
 import { makePool, tick } from "./fixtures.js";
 
@@ -108,8 +109,101 @@ describe("handleRequest", () => {
   });
 
   it("serves the last atomically committed peg decision-package body", () => {
-    const json = JSON.stringify({ schemaVersion: 1, packages: [] });
-    commitPegDecisionPackages({ model: JSON.parse(json), json });
+    const model = {
+      schemaVersion: 1,
+      approvedActivePolicyVersion: "active-v1",
+      producedPolicyVersion: "active-v1",
+      policySlot: "active",
+      producedAt: 1_800_000_000,
+      rolloverAckExpectedSeconds: 300,
+      packages: [
+        {
+          asset: "asset-one",
+          peg: "EUR",
+          coverageClass: "cex-book+indexed-pool",
+          tokenRefs: [
+            {
+              chainId: 137,
+              address: "0x1111111111111111111111111111111111111111",
+            },
+          ],
+          policy: {
+            target: 1,
+            warnDeviationBps: 25,
+            criticalDeviationBps: 50,
+            premiumWarnBps: 25,
+            warnSustainSeconds: 60,
+            criticalSustainSeconds: 120,
+            durationQuantile: 0.2,
+            minimumCoverageFraction: 0.8,
+            blindConsecutivePolls: 3,
+            permanentlyDeadSeconds: 86_400,
+            structuralWarnFraction: 0.8,
+            freshnessGraceSeconds: 60,
+            deepVenueSource: "deep_eur",
+          },
+          structural: {
+            blind: true,
+            blindConsecutivePolls: 3,
+            structuralSaturation: null,
+            structuralQuerySaturated: false,
+            indexedPoolReachable: false,
+            counterpartyCount: 0,
+          },
+          monitors: [
+            {
+              chainId: 137,
+              poolAddress: "0x2222222222222222222222222222222222222222",
+              rateFeedId: "0x3333333333333333333333333333333333333333",
+              monitoredTokenAddress:
+                "0x1111111111111111111111111111111111111111",
+              indexedPoolReachable: false,
+              structuralSaturation: null,
+              structuralQuerySaturated: false,
+              counterpartyCount: 0,
+              breaker: null,
+            },
+          ],
+          sources: [
+            {
+              id: "deep_eur",
+              provider: "bitvavo",
+              pair: "PEG-EUR",
+              baseCurrency: "PEG",
+              quoteCurrency: "EUR",
+              registryRole: "primary",
+              authority: "deep",
+              convertVia: null,
+              policy: {
+                referenceSizeCap: 50,
+                pollIntervalSeconds: 30,
+                staleAfterSeconds: 60,
+                spreadEnvelopeBps: 50,
+                conversionErrorBps: 0,
+              },
+              listingState: null,
+              listingCheckedAt: null,
+              healthy: false,
+              venueState: null,
+              observationAt: null,
+              fetchedAt: null,
+              lastTradeAt: null,
+              executablePrice: null,
+              filledFraction: null,
+              capped: null,
+              referenceSize: null,
+              bid: null,
+              ask: null,
+              spreadBps: null,
+              deviationBps: null,
+              premiumBps: null,
+            },
+          ],
+        },
+      ],
+    } satisfies PegDecisionPackages;
+    const json = JSON.stringify(model);
+    commitPegDecisionPackages({ model, json });
     const res = makeRes();
     handleRequest(
       { url: "/peg/decision-packages?latest=1", method: "GET" },

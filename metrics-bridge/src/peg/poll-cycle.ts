@@ -151,7 +151,7 @@ async function publishCycle(
   }
 }
 
-// eslint-disable-next-line complexity
+// eslint-disable-next-line complexity, max-lines-per-function
 export async function runPegPollCycle<
   Dependencies extends PegPollCycleCoordinatorDependencies,
 >(
