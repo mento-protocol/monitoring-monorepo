@@ -110,18 +110,17 @@ async function fetchOnce(
   if (bearerTokenProvider !== undefined) {
     assertPinnedGcsJsonMediaUrl(url);
   }
-  const accessToken = await bearerTokenProvider?.getToken(url);
+  const bearerValue = await bearerTokenProvider?.getToken(url);
+  const headers = new Headers({ accept: "application/json" });
+  if (bearerValue !== undefined) {
+    headers.set("authorization", `Bearer ${bearerValue}`);
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, {
       method: "GET",
-      headers: {
-        accept: "application/json",
-        ...(accessToken === undefined
-          ? {}
-          : { authorization: `Bearer ${accessToken}` }),
-      },
+      headers,
       cache: "no-store",
       redirect: "error",
       signal: controller.signal,
