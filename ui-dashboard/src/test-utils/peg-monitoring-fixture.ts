@@ -1,0 +1,113 @@
+import type { PegMonitoringResponse } from "@/lib/peg-monitoring";
+
+export const PEG_FIXTURE_PRODUCED_AT = 1_800_000_000;
+const fixture: PegMonitoringResponse = {
+  schemaVersion: 1,
+  approvedActivePolicyVersion: "peg-policy-2026-07-01",
+  producedPolicyVersion: "peg-policy-2026-07-01",
+  policySlot: "active",
+  producedAt: PEG_FIXTURE_PRODUCED_AT,
+  rolloverAckExpectedSeconds: 300,
+  packages: [
+    {
+      asset: "europ-schuman",
+      peg: "EUR",
+      coverageClass: "cex-book+indexed-pool",
+      tokenRefs: [
+        {
+          chainId: 42220,
+          address: "0x3333333333333333333333333333333333333333",
+        },
+      ],
+      policy: {
+        target: 1,
+        warnDeviationBps: 75,
+        criticalDeviationBps: 150,
+        premiumWarnBps: 100,
+        warnSustainSeconds: 600,
+        criticalSustainSeconds: 1200,
+        durationQuantile: 0.75,
+        minimumCoverageFraction: 0.8,
+        blindConsecutivePolls: 3,
+        permanentlyDeadSeconds: 259200,
+        structuralWarnFraction: 0.75,
+        freshnessGraceSeconds: 90,
+        deepVenueSource: "kraken_eur",
+      },
+      structural: {
+        blind: false,
+        blindConsecutivePolls: 0,
+        structuralSaturation: 0.42,
+        structuralQuerySaturated: false,
+        indexedPoolReachable: true,
+        counterpartyCount: 7,
+      },
+      monitors: [
+        {
+          chainId: 42220,
+          poolAddress: "0x1111111111111111111111111111111111111111",
+          rateFeedId: "0x2222222222222222222222222222222222222222",
+          monitoredTokenAddress: "0x3333333333333333333333333333333333333333",
+          indexedPoolReachable: true,
+          structuralSaturation: 0.42,
+          structuralQuerySaturated: false,
+          counterpartyCount: 7,
+          breaker: {
+            id: "eurm-value-delta",
+            address: "0x4444444444444444444444444444444444444444",
+            enabled: true,
+            kind: "VALUE_DELTA",
+            status: "OK",
+            tradingMode: 0,
+            effectiveRateChangeThreshold: "5000000000000000000000",
+            referenceValue: "1000000000000000000000000",
+            lastMedianRate: "998000000000000000000000",
+            thresholdScale: "fixidity-1e24",
+            lastUpdatedAt: PEG_FIXTURE_PRODUCED_AT - 20,
+            lastStatusUpdatedAt: PEG_FIXTURE_PRODUCED_AT - 20,
+          },
+        },
+      ],
+      sources: [
+        {
+          id: "kraken_eur",
+          provider: "kraken",
+          pair: "EUROP/EUR",
+          baseCurrency: "EUROP",
+          quoteCurrency: "EUR",
+          registryRole: "primary",
+          authority: "deep",
+          convertVia: null,
+          policy: {
+            referenceSizeCap: 1000000,
+            pollIntervalSeconds: 30,
+            staleAfterSeconds: 90,
+            spreadEnvelopeBps: 50,
+            conversionErrorBps: 0,
+          },
+          listingState: "listed",
+          listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
+          healthy: true,
+          venueState: "ok",
+          observationAt: PEG_FIXTURE_PRODUCED_AT - 5,
+          fetchedAt: PEG_FIXTURE_PRODUCED_AT - 4,
+          lastTradeAt: PEG_FIXTURE_PRODUCED_AT - 12,
+          executablePrice: 0.9965,
+          filledFraction: 1,
+          capped: false,
+          referenceSize: 250000,
+          bid: 0.996,
+          ask: 0.997,
+          spreadBps: 10.04,
+          deviationBps: 35,
+          premiumBps: 0,
+        },
+      ],
+    },
+  ],
+};
+export function makePegMonitoringResponse(
+  overrides: Partial<PegMonitoringResponse> = {},
+): PegMonitoringResponse {
+  return { ...fixture, ...overrides };
+}

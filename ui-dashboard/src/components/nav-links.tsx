@@ -22,6 +22,7 @@ const PUBLIC_NAV_LINKS: readonly NavLinkItem[] = [
   { href: "/stables", label: "Stables", kind: "section" },
   { href: "/bridge-flows", label: "Bridges", kind: "section" },
   { href: "/cdps", label: "CDPs", kind: "section" },
+  { href: "/peg-monitoring", label: "Peg monitoring", kind: "section" },
 ];
 
 const AUTH_NAV_LINKS: readonly NavLinkItem[] = [
