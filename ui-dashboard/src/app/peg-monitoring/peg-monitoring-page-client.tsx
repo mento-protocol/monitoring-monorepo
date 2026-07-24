@@ -78,15 +78,17 @@ function Loading(): React.JSX.Element {
       >
         <div
           data-testid="peg-skeleton-package-header"
-          className="h-12 w-1/3 animate-pulse rounded bg-slate-800"
-        />
+          className="flex flex-wrap items-start justify-between gap-4"
+        >
+          <div className="h-12 w-1/3 animate-pulse rounded bg-slate-800" />
+        </div>
         <section data-testid="peg-skeleton-structural" className="space-y-3">
           <div className="h-5 w-40 animate-pulse rounded bg-slate-800" />
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
             {["f", "g", "h", "i", "j", "k"].map((key) => (
               <div
                 key={key}
-                className="h-16 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
+                className="h-20 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
               />
             ))}
           </div>
@@ -97,7 +99,7 @@ function Loading(): React.JSX.Element {
             {["l", "m", "n", "o", "p", "q", "r", "s"].map((key) => (
               <div
                 key={key}
-                className="h-16 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
+                className="h-20 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
               />
             ))}
           </div>
@@ -116,7 +118,7 @@ function Loading(): React.JSX.Element {
               {["t", "u", "v", "w"].map((key) => (
                 <div
                   key={key}
-                  className="h-16 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
+                  className="h-24 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
                 />
               ))}
             </div>
@@ -137,7 +139,7 @@ function Loading(): React.JSX.Element {
                 (key) => (
                   <div
                     key={key}
-                    className="h-16 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
+                    className="h-20 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
                   />
                 ),
               )}
