@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PegMonitoringResult } from "@/hooks/use-peg-monitoring";
 import {
   makePegMonitoringResponse,
+  PEG_FIXTURE_CHAIN_ID,
+  PEG_FIXTURE_POOL_ADDRESS,
   PEG_FIXTURE_PRODUCED_AT,
 } from "@/test-utils/peg-monitoring-fixture";
 const state = vi.hoisted(() => ({
@@ -65,7 +67,7 @@ describe("PegMonitoringPageClient", () => {
     expect(container.textContent).toContain("Current package");
     expect(
       container.querySelector(
-        'a[href="/pool/42220-0x1111111111111111111111111111111111111111?tab=oracle"]',
+        `a[href="/pool/${PEG_FIXTURE_CHAIN_ID}-${PEG_FIXTURE_POOL_ADDRESS}?tab=oracle"]`,
       ),
     ).not.toBeNull();
     const grafana = container.querySelector(

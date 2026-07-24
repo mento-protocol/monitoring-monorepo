@@ -134,8 +134,8 @@ const source = z
       .strict()
       .nullable(),
     policy: sourcePolicy,
-    listingState: z.enum(["listed", "halted", "absent"]).nullable(),
-    listingCheckedAt: timestamp.nullable(),
+    listingState: z.null(),
+    listingCheckedAt: z.null(),
     healthy: z.boolean(),
     venueState: z
       .enum([
@@ -162,12 +162,6 @@ const source = z
   })
   .strict()
   .superRefine((value, context) => {
-    if ((value.listingState === null) !== (value.listingCheckedAt === null))
-      context.addIssue({
-        code: "custom",
-        path: ["listingCheckedAt"],
-        message: "must pair with listingState",
-      });
     if (
       !value.healthy &&
       value.observationAt !== null &&
@@ -228,6 +222,15 @@ function validatePolicyRelationships(
       code: "custom",
       path: ["policy", "permanentlyDeadSeconds"],
       message: "must exceed freshness grace",
+    });
+  const maximumPollInterval = Math.max(
+    ...value.sources.map((source) => source.policy.pollIntervalSeconds),
+  );
+  if (value.policy.freshnessGraceSeconds < maximumPollInterval)
+    context.addIssue({
+      code: "custom",
+      path: ["policy", "freshnessGraceSeconds"],
+      message: "must cover the slowest source poll interval",
     });
   const deep = value.sources.filter((item) => item.authority === "deep");
   if (deep.length !== 1 || deep[0]?.id !== value.policy.deepVenueSource)

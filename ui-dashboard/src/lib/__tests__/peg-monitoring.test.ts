@@ -15,12 +15,11 @@ describe("PegMonitoringResponseSchema", () => {
       makePegMonitoringResponse(),
     );
     expect(parsed.packages[0]?.structural.blindConsecutivePolls).toBe(0);
-    expect(parsed.packages[0]?.policy.blindConsecutivePolls).toBe(3);
+    expect(parsed.packages[0]?.policy.blindConsecutivePolls).toBe(10);
   });
-  it("rejects topology holes, policy-slot drift, unpaired listing evidence, and bad uint256", () => {
+  it("rejects topology holes, policy-slot drift, and bad uint256", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
-    const source = item.sources[0]!;
     const monitor = item.monitors[0]!;
     expect(
       PegMonitoringResponseSchema.safeParse({
@@ -32,14 +31,6 @@ describe("PegMonitoringResponseSchema", () => {
       PegMonitoringResponseSchema.safeParse({
         ...response,
         packages: [{ ...item, monitors: [] }],
-      }).success,
-    ).toBe(false);
-    expect(
-      PegMonitoringResponseSchema.safeParse({
-        ...response,
-        packages: [
-          { ...item, sources: [{ ...source, listingCheckedAt: null }] },
-        ],
       }).success,
     ).toBe(false);
     expect(
@@ -61,6 +52,41 @@ describe("PegMonitoringResponseSchema", () => {
           },
         ],
       }).success,
+    ).toBe(false);
+  });
+  it("rejects non-null v1 listing evidence and source cadence beyond freshness grace", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const invalid = (next: unknown) =>
+      PegMonitoringResponseSchema.safeParse({ ...response, packages: [next] })
+        .success;
+    expect(
+      invalid({
+        ...item,
+        sources: [
+          { ...source, listingState: "listed" },
+          ...item.sources.slice(1),
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      invalid({
+        ...item,
+        sources: [
+          {
+            ...source,
+            listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
+          },
+          ...item.sources.slice(1),
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      invalid({
+        ...item,
+        policy: { ...item.policy, freshnessGraceSeconds: 60 },
+      }),
     ).toBe(false);
   });
   it("accepts disabled breakers and neutral null breakers", () => {
@@ -88,32 +114,13 @@ describe("PegMonitoringResponseSchema", () => {
     ).toBe(true);
   });
   it("accepts a producer-valid non-peg conversion", () => {
-    const response = makePegMonitoringResponse();
-    const item = response.packages[0]!;
-    const source = item.sources[0]!;
-    const monitor = item.monitors[0]!;
+    const parsed = PegMonitoringResponseSchema.parse(
+      makePegMonitoringResponse(),
+    );
     expect(
-      PegMonitoringResponseSchema.safeParse({
-        ...response,
-        packages: [
-          {
-            ...item,
-            sources: [
-              {
-                ...source,
-                quoteCurrency: "USD",
-                convertVia: {
-                  chainId: monitor.chainId,
-                  rateFeedId: monitor.rateFeedId,
-                  fromCurrency: "USD",
-                  toCurrency: "EUR",
-                },
-              },
-            ],
-          },
-        ],
-      }).success,
-    ).toBe(true);
+      parsed.packages[0]?.sources.find(({ id }) => id === "kraken_usd")
+        ?.convertVia,
+    ).toMatchObject({ fromCurrency: "USD", toCurrency: "EUR" });
   });
   it("rejects duplicate and incompatible producer topology", () => {
     const response = makePegMonitoringResponse();

@@ -86,7 +86,19 @@ describe("GET /api/peg-monitoring", () => {
             },
           ],
         }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          ...response,
+          packages: [
+            {
+              ...item,
+              policy: { ...item.policy, freshnessGraceSeconds: 60 },
+            },
+          ],
+        }),
       );
+    expect((await GET()).status).toBe(502);
     expect((await GET()).status).toBe(502);
     expect((await GET()).status).toBe(502);
     expect((await GET()).status).toBe(502);
