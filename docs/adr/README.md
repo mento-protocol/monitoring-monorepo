@@ -98,17 +98,17 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### ui-dashboard
 
-| ADR                                                      | Decision                                                                          |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| [0019](0019-vercel-path-aware-deploys.md)                | Dashboard deploys on Vercel Git integration with a path-aware skip script         |
-| [0020](0020-swr-polling-read-model.md)                   | Read model is SWR polling + bounded snapshot composition at current scale         |
-| [0021](0021-dashboard-state-upstash-blob.md)             | Dashboard state lives in Upstash Redis with Vercel Blob backups, not a DB         |
-| [0022](0022-authjs-google-shared-preview-secrets.md)     | Auth.js + Google; preview shares prod auth secrets behind Deployment Protection   |
-| [0023](0023-es2017-no-polyfill.md)                       | Ship ES2017 with no polyfill; ban immutable-array methods via lint + `sortedCopy` |
-| [0024](0024-plotly-basic-dist-bundle-budgets.md)         | Plotly.js `basic-dist` + enforced bundle-size budgets                             |
-| [0025](0025-fixture-browser-tests-react-doctor.md)       | Fixture-driven browser tests + visual snapshots + a react-doctor score gate       |
-| [0037](0037-dashboard-graphql-zod-mini.md)               | Native GraphQL transport + Zod Mini for browser-reachable validation              |
-| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool detail renders every active strategy from the indexed many-to-many registry  |
+| ADR                                                      | Decision                                                                              |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [0019](0019-vercel-path-aware-deploys.md)                | Dashboard deploys on Vercel Git integration with a path-aware skip script             |
+| [0020](0020-swr-polling-read-model.md)                   | Read model is SWR polling + bounded snapshot composition at current scale             |
+| [0021](0021-dashboard-state-upstash-blob.md)             | Dashboard state lives in Upstash Redis with Vercel Blob backups, not a DB             |
+| [0022](0022-authjs-google-shared-preview-secrets.md)     | Auth.js + Google; preview shares prod auth secrets behind SSO and Git fork protection |
+| [0023](0023-es2017-no-polyfill.md)                       | Ship ES2017 with no polyfill; ban immutable-array methods via lint + `sortedCopy`     |
+| [0024](0024-plotly-basic-dist-bundle-budgets.md)         | Plotly.js `basic-dist-min` + enforced bundle-size budgets                             |
+| [0025](0025-fixture-browser-tests-react-doctor.md)       | Fixture-driven browser tests + visual snapshots + a react-doctor score gate           |
+| [0037](0037-dashboard-graphql-zod-mini.md)               | Native GraphQL transport + Zod Mini for browser-reachable validation                  |
+| [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool detail renders every active strategy from the indexed many-to-many registry      |
 
 ### aegis
 

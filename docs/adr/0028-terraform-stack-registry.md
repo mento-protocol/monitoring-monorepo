@@ -3,7 +3,7 @@ title: Terraform ownership is a registry with roots split by cadence and blast r
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-24
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
@@ -44,9 +44,14 @@ names.
 
 - Cross-stack resource moves are import-then-`state rm` (state can't cross backends),
   as done for the Aegis service-health rule group move into `alerts-rules`.
-- Terraform path routing lives in the registry, consumed by the required CI sentinel
-  (ADR 0010), not duplicated in workflow YAML.
+- The registry is authoritative for ownership and changed-stack
+  classification. Coarse workflow admission filters and the required CI
+  sentinel still duplicate path coverage until issue #1501 replaces that
+  duplication with enforced parity.
 
 ## Evidence
 
-- Stack ownership refactor PR #603 (2026-05-27); registry table in [`docs/terraform.md`](../terraform.md); [`terraform/AGENTS.md`](../../terraform/AGENTS.md), [`alerts/AGENTS.md`](../../alerts/AGENTS.md).
+- Stack ownership refactor PR #603 (2026-05-27); current registry in
+  [`terraform.stacks.json`](../../terraform.stacks.json), classifier in
+  [`scripts/tf-stacks.mjs`](../../scripts/tf-stacks.mjs), and routing limits in
+  [`docs/terraform.md`](../terraform.md).

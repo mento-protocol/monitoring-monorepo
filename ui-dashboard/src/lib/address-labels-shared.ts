@@ -37,7 +37,7 @@ export type AddressEntryRecord = AddressEntry & {
   address: string;
 };
 
-/** Shape of a full export/backup snapshot.
+/** Shape of a user export/import or assembled restore snapshot.
  *
  * The `chains` field is retained as an OPTIONAL READ for backward compat
  * with older snapshots that predate the global-only refactor — old backups
@@ -47,8 +47,8 @@ export type AddressEntryRecord = AddressEntry & {
  * `reports` is the forensic-report payload (markdown bodies up to 50KB
  * each, keyed by lowercase address). Optional so older snapshots that
  * predate the parity backfill still parse without error. The daily backup
- * cron emits both `addresses` and `reports` so a Redis flush has a single
- * snapshot to restore from. */
+ * stores each managed hash separately behind a v2 manifest; the restore path
+ * assembles those blobs into this shape before applying them. */
 export type AddressLabelsSnapshot = {
   exportedAt: string;
   /** Flat per-address entries — current shape. */
@@ -58,8 +58,8 @@ export type AddressLabelsSnapshot = {
   /** Legacy: chainId → address → entry. Read-only; merged into addresses on import. */
   chains?: Record<string, Record<string, AddressEntry>>;
   /** Forensic reports keyed by lowercase address. Optional for back-compat
-   * with snapshots predating PR #339; new daily backups always include it
-   * (possibly as an empty record when no reports exist yet). */
+   * with snapshots predating PR #339; v2 backup manifests always include a
+   * reports blob, even when the hash is empty. */
   reports?: Record<string, AddressReport>;
   // 5 intel marathon hashes (canonical names) — see scripts/intel-marathon/
   intelDeep?: Record<string, IntelDeepRecord>;

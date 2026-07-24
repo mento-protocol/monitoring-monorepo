@@ -397,8 +397,9 @@ async function main() {
     console.log(`+ ${command}`);
   }
 
-  // Keep dashboard .next writers/readers out of the prewarm parallel pool:
-  // test:browser starts a dev server, while size-limit runs build first.
+  // Keep dashboard build writers/readers out of the prewarm parallel pool:
+  // test:browser serves a cached `.next-fixture` production build, while
+  // size-limit builds and reads `.next`.
   const { serialCommands, parallelCommands } = splitPrewarmCommands(commands);
   let failures = 0;
   const serialResults = await runCommandsParallel(serialCommands, 1);

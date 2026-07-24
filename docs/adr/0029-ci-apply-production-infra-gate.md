@@ -3,7 +3,7 @@ title: Infra applies on merge to main behind the production-infra environment ga
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-24
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
@@ -63,5 +63,11 @@ history but doesn't require manual approval.
 
 ## Evidence
 
-- Alerts-infra CI plan/apply PR #558 (2026-05-26); governance-watchdog CI apply PR #1001; environment split issue #762.
-- CI model + environment setup in [`docs/terraform.md`](../terraform.md).
+- Alerts-infra CI plan/apply PR #558 (2026-05-26);
+  governance-watchdog CI apply PR #1001; environment split issue #762.
+- Registry policies in [`terraform.stacks.json`](../../terraform.stacks.json)
+  and the fail-closed protection verifier in
+  [`scripts/verify-github-environment-protection.mjs`](../../scripts/verify-github-environment-protection.mjs).
+- Live `production-infra` settings verified through the GitHub API on
+  2026-07-24: one required reviewer, self-review allowed, admin bypass
+  disabled, and deployment limited to protected branches.

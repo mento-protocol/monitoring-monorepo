@@ -163,7 +163,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // the Google OAuth callback always lands on the whitelisted prod domain.
   // AUTH_REDIRECT_PROXY_URL tells NextAuth to forward the session back to the
   // actual preview URL after a successful sign-in.
-  // In production both env vars are unset and NextAuth resolves URLs normally.
+  // Terraform sets AUTH_REDIRECT_PROXY_URL on both targets so the handshake
+  // configuration stays identical; VERCEL_ENV keeps the state-only provider
+  // check preview-specific, so direct production sign-in retains PKCE.
   ...(process.env.AUTH_REDIRECT_PROXY_URL
     ? { redirectProxyUrl: process.env.AUTH_REDIRECT_PROXY_URL }
     : {}),

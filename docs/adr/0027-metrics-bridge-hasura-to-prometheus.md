@@ -3,7 +3,7 @@ title: A Hasura to Prometheus bridge exists so v3 DB data can drive Grafana aler
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 scope: metrics-bridge
 date: 2026-04
 doc_type: adr
@@ -28,10 +28,12 @@ threshold data it can't scrape.
 
 ## Decision
 
-Run a small **`metrics-bridge`** service that reads Hasura/Envio data (and a few RPC
-rebalance probes) and exposes them as **Prometheus gauges** for Grafana alert rules.
-Prometheus labels must have **bounded cardinality** — never tx hashes, user
-addresses, or pool-specific free text.
+Run a small **`metrics-bridge`** service with two isolated polling lifecycles:
+the primary loop reads Hasura/Envio data plus bounded RPC rebalance probes; the
+peg loop reads protected policy plus external market sources. Both expose
+**Prometheus gauges** for Grafana alert rules. Prometheus labels must have
+**bounded cardinality** — never tx hashes, user addresses, or pool-specific
+free text.
 
 ## Alternatives considered
 
@@ -44,9 +46,16 @@ addresses, or pool-specific free text.
 
 - New gauges must justify their labels; one narrow exception (`last_oracle_update_url`
   on oracle timestamp gauges) is documented and must not be generalized.
-- GraphQL failures and RPC probe failures are separate error channels — never
-  collapsed into one boolean. Runs on Cloud Run (`/health`, not `/healthz`).
+- GraphQL failures, RPC probe failures, and peg-loop failures remain separate
+  error channels. The peg lifecycle cannot gate the primary loop or `/health`.
+  The service runs on Cloud Run (`/health`, not `/healthz`).
 
 ## Evidence
 
-- metrics-bridge introduced PR #153 (2026-04-17); label + error-channel rules in [`metrics-bridge/AGENTS.md`](../../metrics-bridge/AGENTS.md).
+- metrics-bridge introduced PR #153 (2026-04-17); isolated peg loop PR #1497
+  (2026-07-23).
+- Current startup in
+  [`metrics-bridge/src/main.ts`](../../metrics-bridge/src/main.ts), primary
+  error channels in
+  [`metrics-bridge/src/poller.ts`](../../metrics-bridge/src/poller.ts), and
+  package rules in [`metrics-bridge/AGENTS.md`](../../metrics-bridge/AGENTS.md).
