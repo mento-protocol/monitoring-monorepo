@@ -4,7 +4,7 @@ const MAX_PACKAGES = 32;
 const MAX_SOURCES = 16;
 const MAX_MONITORS = 8;
 const MAX_TOKENS = 8;
-export const MAX_RENDERABLE_UNIX_SECONDS = 8_640_000_000_000;
+const MAX_RENDERABLE_UNIX_SECONDS = 8_640_000_000_000;
 
 const policyVersion = z
   .string()
@@ -180,13 +180,21 @@ const source = z
       });
     if (
       value.convertVia !== null &&
-      (value.convertVia.fromCurrency !== value.quoteCurrency ||
-        value.convertVia.toCurrency === value.convertVia.fromCurrency)
+      value.convertVia.fromCurrency !== value.quoteCurrency
     )
       context.addIssue({
         code: "custom",
         path: ["convertVia"],
-        message: "must match source quote and differ",
+        message: "must match source quote",
+      });
+    if (
+      value.convertVia !== null &&
+      value.convertVia.toCurrency === value.convertVia.fromCurrency
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["convertVia", "toCurrency"],
+        message: "conversion currencies must differ",
       });
   });
 const assetPackage = z
@@ -243,6 +251,85 @@ const assetPackage = z
         path: ["structural", "blindConsecutivePolls"],
         message: "must not exceed policy threshold",
       });
+    const tokenRefs = new Set<string>();
+    value.tokenRefs.forEach((tokenRef, index) => {
+      const identity = `${tokenRef.chainId}:${tokenRef.address}`;
+      if (tokenRefs.has(identity))
+        context.addIssue({
+          code: "custom",
+          path: ["tokenRefs", index],
+          message: "duplicate token reference",
+        });
+      tokenRefs.add(identity);
+    });
+    const sourceIds = new Set<string>();
+    value.sources.forEach((source, index) => {
+      if (sourceIds.has(source.id))
+        context.addIssue({
+          code: "custom",
+          path: ["sources", index, "id"],
+          message: "duplicate source id",
+        });
+      sourceIds.add(source.id);
+      if (source.authority === "deep" && source.registryRole !== "primary")
+        context.addIssue({
+          code: "custom",
+          path: ["sources", index, "registryRole"],
+          message: "deep authority requires primary topology",
+        });
+      if (source.registryRole === "display" && source.authority !== "display")
+        context.addIssue({
+          code: "custom",
+          path: ["sources", index, "authority"],
+          message: "display topology requires display authority",
+        });
+      if (source.convertVia !== null) {
+        if (source.convertVia.toCurrency !== value.peg)
+          context.addIssue({
+            code: "custom",
+            path: ["sources", index, "convertVia", "toCurrency"],
+            message: "conversion must end in asset peg",
+          });
+        if (
+          !value.tokenRefs.some(
+            ({ chainId }) => chainId === source.convertVia!.chainId,
+          )
+        )
+          context.addIssue({
+            code: "custom",
+            path: ["sources", index, "convertVia", "chainId"],
+            message: "conversion chain must match token reference",
+          });
+      } else if (source.quoteCurrency !== value.peg)
+        context.addIssue({
+          code: "custom",
+          path: ["sources", index, "convertVia"],
+          message: "non-peg quote requires conversion",
+        });
+    });
+    const monitorIds = new Set<string>();
+    value.monitors.forEach((monitor, index) => {
+      const identity = `${monitor.chainId}:${monitor.poolAddress}:${monitor.rateFeedId}:${monitor.monitoredTokenAddress}`;
+      if (monitorIds.has(identity))
+        context.addIssue({
+          code: "custom",
+          path: ["monitors", index],
+          message: "duplicate monitor identity",
+        });
+      monitorIds.add(identity);
+      if (
+        !value.tokenRefs.some(
+          (token) =>
+            token.chainId === monitor.chainId &&
+            token.address === monitor.monitoredTokenAddress,
+        )
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["monitors", index, "monitoredTokenAddress"],
+          message: "monitor token must match token reference on its chain",
+        });
+    });
   });
 
 export const PegMonitoringResponseSchema = z
@@ -265,6 +352,16 @@ export const PegMonitoringResponseSchema = z
         path: ["policySlot"],
         message: "must match policy version equality",
       });
+    const assets = new Set<string>();
+    value.packages.forEach((item, index) => {
+      if (assets.has(item.asset))
+        context.addIssue({
+          code: "custom",
+          path: ["packages", index, "asset"],
+          message: "duplicate asset package",
+        });
+      assets.add(item.asset);
+    });
   });
 
 export type PegMonitoringResponse = z.infer<typeof PegMonitoringResponseSchema>;

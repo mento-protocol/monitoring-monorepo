@@ -32,21 +32,24 @@ describe("GET /api/peg-monitoring", () => {
   });
   it("rejects insecure, credentialed, path-bearing origins and maps start/timeout failures", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    for (const origin of [
-      "",
-      "http://remote.example",
-      "https://user:x@bridge.example",
-      "https://bridge.example/x",
-    ]) {
+    const expectInvalidOrigin = async (origin: string) => {
       vi.stubEnv("METRICS_BRIDGE_URL", origin);
       expect((await GET()).status).toBe(503);
-    }
+    };
+    await expectInvalidOrigin("");
+    await expectInvalidOrigin("http://remote.example");
+    await expectInvalidOrigin("https://user:x@bridge.example");
+    await expectInvalidOrigin("https://bridge.example/x");
     expect(fetchMock).not.toHaveBeenCalled();
     vi.stubEnv("METRICS_BRIDGE_URL", "https://metrics-bridge.example");
     fetchMock.mockRejectedValueOnce(new DOMException("secret", "TimeoutError"));
     expect((await GET()).status).toBe(504);
   });
-  it("fails closed for oversized, non-json, malformed, and schema-drift bodies", async () => {
+  it("fails closed for oversized, non-json, malformed, and invalid topology bodies", async () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const monitor = item.monitors[0]!;
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
         new Response("{}", {
@@ -62,7 +65,29 @@ describe("GET /api/peg-monitoring", () => {
       )
       .mockResolvedValueOnce(
         json({ ...makePegMonitoringResponse(), schemaVersion: 2 }),
+      )
+      .mockResolvedValueOnce(
+        json({
+          ...response,
+          packages: [
+            {
+              ...item,
+              sources: [
+                {
+                  ...source,
+                  convertVia: {
+                    chainId: monitor.chainId,
+                    rateFeedId: monitor.rateFeedId,
+                    fromCurrency: "EUR",
+                    toCurrency: "EUR",
+                  },
+                },
+              ],
+            },
+          ],
+        }),
       );
+    expect((await GET()).status).toBe(502);
     expect((await GET()).status).toBe(502);
     expect((await GET()).status).toBe(502);
     expect((await GET()).status).toBe(502);

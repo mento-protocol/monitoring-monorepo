@@ -87,6 +87,137 @@ describe("PegMonitoringResponseSchema", () => {
       }).success,
     ).toBe(true);
   });
+  it("accepts a producer-valid non-peg conversion", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const monitor = item.monitors[0]!;
+    expect(
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: [
+              {
+                ...source,
+                quoteCurrency: "USD",
+                convertVia: {
+                  chainId: monitor.chainId,
+                  rateFeedId: monitor.rateFeedId,
+                  fromCurrency: "USD",
+                  toCurrency: "EUR",
+                },
+              },
+            ],
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+  it("rejects duplicate and incompatible producer topology", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const monitor = item.monitors[0]!;
+    const invalid = (next: typeof item) =>
+      PegMonitoringResponseSchema.safeParse({ ...response, packages: [next] })
+        .success;
+    expect(
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [item, item],
+      }).success,
+    ).toBe(false);
+    expect(
+      invalid({
+        ...item,
+        tokenRefs: [...item.tokenRefs, item.tokenRefs[0]!],
+      }),
+    ).toBe(false);
+    expect(invalid({ ...item, sources: [source, source] })).toBe(false);
+    expect(invalid({ ...item, monitors: [monitor, monitor] })).toBe(false);
+    expect(
+      invalid({
+        ...item,
+        monitors: [
+          {
+            ...monitor,
+            monitoredTokenAddress: "0x5555555555555555555555555555555555555555",
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      invalid({
+        ...item,
+        sources: [{ ...source, registryRole: "secondary", authority: "deep" }],
+      }),
+    ).toBe(false);
+    expect(
+      invalid({
+        ...item,
+        sources: [
+          { ...source, registryRole: "display", authority: "secondary" },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      invalid({
+        ...item,
+        sources: [{ ...source, quoteCurrency: "USD", convertVia: null }],
+      }),
+    ).toBe(false);
+    expect(
+      invalid({
+        ...item,
+        sources: [
+          {
+            ...source,
+            convertVia: {
+              chainId: monitor.chainId,
+              rateFeedId: monitor.rateFeedId,
+              fromCurrency: "USD",
+              toCurrency: "EUR",
+            },
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      invalid({
+        ...item,
+        sources: [
+          {
+            ...source,
+            convertVia: {
+              chainId: monitor.chainId,
+              rateFeedId: monitor.rateFeedId,
+              fromCurrency: "EUR",
+              toCurrency: "EUR",
+            },
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      invalid({
+        ...item,
+        sources: [
+          {
+            ...source,
+            quoteCurrency: "USD",
+            convertVia: {
+              chainId: 1,
+              rateFeedId: monitor.rateFeedId,
+              fromCurrency: "USD",
+              toCurrency: "EUR",
+            },
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
 });
 describe("classifyPegMonitoringState", () => {
   const data = makePegMonitoringResponse();
