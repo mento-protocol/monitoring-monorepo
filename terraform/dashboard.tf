@@ -138,21 +138,25 @@ removed {
 # them would break preview sign-in.
 #
 # Mitigating controls that make this acceptable:
-#   1. Vercel Deployment Protection gates preview URLs to `mentolabs` team
-#      SSO — only authorised team members can reach a preview in the first
-#      place. (Verify in Vercel UI → Project Settings → Deployment Protection.)
-#   2. Public PRs from forks are NOT deployed to preview by default for this
-#      team (Vercel setting: Git → "Deploy for Fork Pull Requests" off).
-#      If that setting is ever flipped on, these secrets become reachable to
-#      untrusted contributors and MUST be rotated + scoped to production-only.
+#   1. Vercel SSO Deployment Protection gates all previews and production
+#      deployment URLs. Authorized Lighthouse automation uses the project-scoped
+#      bypass secret mirrored to GitHub below.
+#   2. Git fork protection prevents fork PR preview deployments.
 #   3. CRON_SECRET is explicitly scoped to production (see below).
 #
-# If the above controls are ever loosened, treat all three shared values as
-# potentially exposed: rotate AUTH_GOOGLE_SECRET in GCP, regenerate AUTH_SECRET,
-# then either (a) adopt a split-secret preview auth architecture (different
-# OAuth client + domain-local state) or (b) drop preview app-auth entirely and
-# rely on Vercel Deployment Protection alone (see commit 74e533f for the
-# prior bypass pattern).
+# ui-dashboard/vercel.json also suppresses ordinary sentry-autofix/* previews.
+# That branch-controlled rule is workflow hygiene and defense in depth, not a
+# trust boundary; provider-owned controls must reject untrusted code.
+#
+# Verify the first two provider-owned controls with:
+#   vercel project protection monitoring-dashboard --scope mentolabs --format json
+#
+# If SSO or fork protection is loosened, or another untrusted branch class
+# becomes deployment-eligible, treat all three shared values as potentially
+# exposed: rotate AUTH_GOOGLE_SECRET in GCP, regenerate AUTH_SECRET, then either
+# (a) adopt a split-secret preview auth architecture (different OAuth client +
+# domain-local state) or (b) drop preview app-auth entirely and rely on Vercel
+# Deployment Protection alone (see commit 74e533f for the prior bypass pattern).
 #
 # Tracked: Codex finding 75f2920d (2026-04). Fix partial — CRON_SECRET has
 # been scoped to production; AUTH_* sharing retained for the architectural

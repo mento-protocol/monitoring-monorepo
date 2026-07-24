@@ -3,7 +3,7 @@ title: All secrets are managed by IaC; agents never touch them with CLI commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-24
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
@@ -41,11 +41,15 @@ stop and add the IaC path (or ask), rather than using a CLI workaround.
 
 ## Consequences
 
-- Secret changes ship as a Terraform diff + docs update in the same PR, reviewable
-  and applied through `production-infra` (ADR 0029).
+- Secret changes ship as a Terraform diff + docs update in the same PR. Use
+  `production-infra` for CI-applied stacks, a human-approved manual plan/apply
+  for the `platform` stack, or the documented owning integration path.
 - The Vercel Blob OIDC variables are the one integration-owned exception, documented
   as such.
 
 ## Evidence
 
-- Secrets Rule in [`AGENTS.md`](../../AGENTS.md) and [`terraform/AGENTS.md`](../../terraform/AGENTS.md); env-var ownership table in [`docs/deployment.md`](../deployment.md).
+- Secrets Rule in [`AGENTS.md`](../../AGENTS.md) and
+  [`terraform/AGENTS.md`](../../terraform/AGENTS.md); stack policies in
+  [`terraform.stacks.json`](../../terraform.stacks.json); env-var ownership
+  table in [`docs/deployment.md`](../deployment.md).

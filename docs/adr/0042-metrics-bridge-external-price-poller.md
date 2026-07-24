@@ -13,8 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0042 — metrics-bridge hosts the external market-price peg poller
 
-**Status:** Accepted (Jul 2026), in force. Decided ahead of implementation;
-the poller lands in a follow-up PR per the phasing in
+**Status:** Accepted (Jul 2026), in force. The isolated poller landed in
+PR #1497; protected policy publication and alert activation remain separate
+rollout phases in
 [`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
 **Scope:** metrics-bridge
 
@@ -130,11 +131,12 @@ monitoring, extending — not replacing — ADR 0027's scope:
 - The bridge's egress allowlist must include the market-data hosts; a venue
   API change is a bridge deploy, not an alerts-plane change.
 - Peg-loop failures are contained at the gauge-lifecycle and error-channel
-  level, and each loop pages through its own liveness rules — but both
-  loops share one Node process, so this is containment, not process
-  isolation. The peg loop must catch at top level and bound response
-  sizes, timeouts, and per-poll work; a separate service is the escalation
-  if shared event-loop interference is ever observed.
+  level and do not gate the bridge's primary `/health` signal. Both loops
+  share one Node process, so this is containment, not process isolation.
+  Peg-specific liveness/page rules must land before the new gauges become
+  alert-authoritative. The peg loop must catch at top level and bound response
+  sizes, timeouts, and per-poll work; a separate service is the escalation if
+  shared event-loop interference is ever observed.
 - Adding a monitored asset whose venues are already supported is a registry
   change ([ADR 0043](0043-peg-registry-service-local.md)); adding a venue is
   one adapter plus fixtures.
@@ -144,5 +146,7 @@ monitoring, extending — not replacing — ADR 0027's scope:
 - `docs/PLAN-peg-monitoring.md` (design, venue evidence, phasing)
 - `metrics-bridge/src/poller.ts`, `metrics-bridge/src/cdp-metrics.ts`
   (isolated-loop and gauge-lifecycle precedents)
+- `metrics-bridge/src/main.ts`, `metrics-bridge/src/peg/runtime.ts`
+  (implemented isolated peg lifecycle)
 - `indexer-envio/schema.graphql` (`SwapEvent`, pool reserves)
 - ADRs 0004, 0014, 0027, 0030

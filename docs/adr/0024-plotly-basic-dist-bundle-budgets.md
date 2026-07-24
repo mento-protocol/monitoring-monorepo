@@ -1,9 +1,9 @@
 ---
-title: Plotly.js basic-dist plus enforced bundle-size budgets
+title: Plotly.js basic-dist-min plus enforced bundle-size budgets
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-24
 scope: ui-dashboard
 date: 2026-03
 doc_type: adr
@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0024 — Plotly.js `basic-dist` + enforced bundle-size budgets
+# ADR 0024 — Plotly.js `basic-dist-min` + enforced bundle-size budgets
 
 **Status:** Accepted (2026), in force.
 **Scope:** ui-dashboard
@@ -24,10 +24,11 @@ the dashboard doesn't use. Unbudgeted, the chart layer silently bloats the bundl
 
 ## Decision
 
-Use Plotly's **`basic-dist`** build (no `scattergl`/WebGL traces) and enforce
-**bundle-size budgets** via `pnpm dashboard:size-limit` after build. Charts render
-through `react-plotly`, and observed chart lag is treated as JS/main-thread work,
-not GPU paint.
+Use Plotly's minified **`basic-dist-min`** build (no `scattergl`/WebGL traces)
+and enforce **bundle-size budgets** with `pnpm dashboard:size-limit`. The
+quality gate runs the size task through Turbo, where it depends on the
+dashboard build. Charts render through the shared
+`@/lib/react-plotly-basic` factory.
 
 The dashboard intentionally satisfies `react-plotly.js`'s `plotly.js` peer with
 the package alias `plotly.js@npm:plotly.js-basic-dist-min`. Do not replace that
@@ -46,9 +47,13 @@ imports the lean bundle through `react-plotly.js/factory`.
 
 - Anything needing a WebGL trace type would require reconsidering the dist and its
   size impact — not a silent import.
-- `size-limit` runs against the built `.next`, so per-PR worktrees must build before
-  the size check can find output.
+- `size-limit` reads the built `.next`; direct invocations need a fresh
+  `pnpm dashboard:build`, while the quality-gate Turbo task builds first.
 
 ## Evidence
 
-- Plotly present since initial setup `6e001aac`; `basic-dist` + `size-limit` budgets in `ui-dashboard/.size-limit.cjs` and the root command reference.
+- Plotly present since initial setup `6e001aac`; current package alias in
+  [`ui-dashboard/package.json`](../../ui-dashboard/package.json), factory in
+  [`ui-dashboard/src/lib/react-plotly-basic.tsx`](../../ui-dashboard/src/lib/react-plotly-basic.tsx),
+  and manifest-backed budgets in
+  [`ui-dashboard/.size-limit.cjs`](../../ui-dashboard/.size-limit.cjs).
