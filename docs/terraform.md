@@ -94,7 +94,10 @@ its reconciliation finish. Approval given before the apply job existed may need
 repeating after the plan creates that job. Follow every queued `main` run to a
 terminal state because later runs can pass the gate without an obvious second
 prompt. Never close drift from the first successful apply alone: verify the live
-resource and dispatch `terraform-drift.yml` from `main`. Channel routing and
+resource and dispatch `terraform-drift.yml` from `main`. That workflow does not
+cover the manual-apply `platform` stack; recheck a `stack:platform` repo-setting
+drift issue (e.g. the default workflow-token permission) by dispatching
+`platform-settings-drift.yml` from `main` instead. Channel routing and
 notification boundaries live in
 [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md).
 
