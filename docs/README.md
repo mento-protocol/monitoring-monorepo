@@ -190,6 +190,4 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) | Terraform CI/CD hardening — declined alternatives | non-canonical / archived | note / terraform/infra | eng | 365d; verified 2026-07-23 |
 | [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) | UI Dashboard Performance Plan (archived) | non-canonical / archived | plan / ui-dashboard | eng | 365d; verified 2026-07-23 |
 | [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) | AI Review Process Integration Plan | non-canonical / archived | plan / ci/process | eng | 365d; verified 2026-07-17 |
-| [`docs/PLAN-cdps-monitoring.md`](PLAN-cdps-monitoring.md) | ROADMAP refresh + CDPs monitoring plan (archived) | non-canonical / archived | plan / repo-wide | eng | 365d; verified 2026-07-23 |
-| [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Oracle health-state decision retrospective | non-canonical / archived | plan / repo-wide | eng | 365d |
 | [`docs/PLAN-peg-monitoring.md`](PLAN-peg-monitoring.md) | Peg monitoring for oracle-less stablecoins (EUROP first) | non-canonical / active | plan / repo-wide | eng | 365d |
