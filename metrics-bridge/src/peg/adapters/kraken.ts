@@ -12,6 +12,7 @@ import type {
   ObservationPolicy,
   ParsedOrderBook,
   PegObservation,
+  RecordListingCheck,
 } from "../types.js";
 
 export const KRAKEN_TIMEOUT_MS = 5_000;
@@ -26,6 +27,7 @@ type JsonRecord = Record<string, unknown>;
 
 export interface KrakenObservationRequest extends ObservationPolicy {
   symbol: string;
+  onListingChecked?: RecordListingCheck;
 }
 
 interface ParsedKrakenTrades {
@@ -270,14 +272,15 @@ export const fetchKrakenObservation = async (
       maxResponseBytes: KRAKEN_MAX_RESPONSE_BYTES,
     });
 
+  const now = runtime.now ?? Date.now;
   const marketState = parseKrakenMarketState(
     await boundedRequest(marketUrl(request.symbol)),
     request.symbol,
   );
+  request.onListingChecked?.({ state: marketState, checkedAt: now() });
   if (marketState === "absent") {
     throw new Error("Kraken market is absent from the provider listing");
   }
-  const now = runtime.now ?? Date.now;
   // AssetPairs is authoritative for halts. Return before scheduling the
   // PreTrade and PostTrade requests, which do not supply executable identity
   // for a halted market.

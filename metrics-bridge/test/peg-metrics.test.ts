@@ -27,6 +27,9 @@ function snapshot(
         policyVersion: "europ-v1",
         healthy: true,
         referenceSize: 50_000,
+        listingState: "listed",
+        listingCheckedAt: 1_784_734_422_000,
+        listingAbsentConsecutiveChecks: 0,
         deviationBps: 4,
         premiumBps: 0,
         spreadBps: 9,
@@ -73,6 +76,21 @@ describe("Peg metrics", () => {
       'mento_peg_venue_state{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1",state="ok"} 1',
     );
     expect(metrics).toContain(
+      'mento_peg_listing_state{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1",state="listed"} 1',
+    );
+    expect(metrics).toContain(
+      'mento_peg_listing_state{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1",state="halted"} 0',
+    );
+    expect(metrics).toContain(
+      'mento_peg_listing_state{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1",state="absent"} 0',
+    );
+    expect(metrics).toContain(
+      'mento_peg_listing_checked_at{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1784734422',
+    );
+    expect(metrics).toContain(
+      'mento_peg_listing_absent_consecutive_checks{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 0',
+    );
+    expect(metrics).toContain(
       'mento_peg_policy_version{policy_version="europ-v1"} 1',
     );
     expect(metrics).toContain(
@@ -83,6 +101,42 @@ describe("Peg metrics", () => {
     );
     expect(metrics).toContain(
       'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+  });
+
+  it("requires paired listing evidence", () => {
+    const invalid = snapshot();
+    invalid.sources[0]!.listingCheckedAt = null;
+
+    expect(() => publishPegMetrics([invalid])).toThrow(
+      "listingState and listingCheckedAt must both be present or null",
+    );
+  });
+
+  it("requires listing absence streak state to match paired listing evidence", () => {
+    const absent = snapshot();
+    absent.sources[0]!.listingState = "absent";
+    absent.sources[0]!.listingAbsentConsecutiveChecks = 2;
+    publishPegMetrics([absent]);
+
+    const nullWithStreak = snapshot();
+    nullWithStreak.sources[0]!.listingState = null;
+    nullWithStreak.sources[0]!.listingCheckedAt = null;
+    nullWithStreak.sources[0]!.listingAbsentConsecutiveChecks = 1;
+    expect(() => publishPegMetrics([nullWithStreak])).toThrow(
+      "listingAbsentConsecutiveChecks must match the paired listing state",
+    );
+
+    const absentWithoutStreak = snapshot();
+    absentWithoutStreak.sources[0]!.listingState = "absent";
+    expect(() => publishPegMetrics([absentWithoutStreak])).toThrow(
+      "listingAbsentConsecutiveChecks must match the paired listing state",
+    );
+
+    const unbounded = snapshot();
+    unbounded.sources[0]!.listingAbsentConsecutiveChecks = 1_001;
+    expect(() => publishPegMetrics([unbounded])).toThrow(
+      /listingAbsentConsecutiveChecks/,
     );
   });
 

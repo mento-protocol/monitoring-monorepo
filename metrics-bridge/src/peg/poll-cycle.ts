@@ -5,7 +5,7 @@ import {
 } from "./decision-packages.js";
 import type { PegPolicyVersion } from "./policy.js";
 import type { PegRegistry } from "./registry.js";
-import type { PegObservation } from "./types.js";
+import type { MarketState, PegObservation } from "./types.js";
 
 interface SinglePolicyPegPollCycleInput {
   registry: PegRegistry;
@@ -40,6 +40,9 @@ export interface PegPollSourceState {
   observation: PegObservation | null;
   referenceSize: number | null;
   conversionValidUntil: number | null;
+  listingState: MarketState | null;
+  listingCheckedAt: number | null;
+  listingAbsentConsecutiveChecks: number;
   blindConsecutivePolls: number;
 }
 

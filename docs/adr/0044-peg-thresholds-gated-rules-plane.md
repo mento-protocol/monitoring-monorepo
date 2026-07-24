@@ -127,6 +127,14 @@ Phase 3 must implement the following protected artifact and rules contract:
     drop or stale the per-source series instead of holding last-good
     values — after an API outage a sparse window with one fresh deviated
     sample must not read as a sustained breach.
+  - Listing absence confirmation uses a producer-side bounded consecutive-check
+    gauge. Inferring it from a timestamp gauge with `changes()` is
+    forbidden: a listed or halted reset can occur between 30-second scrapes
+    and never appear in the sampled range.
+    During this field's first rollover only, the exact retained
+    predecessor omits the field and the producer uses the initial value `2`.
+    Remove that compatibility default after the reviewed `previous=null`
+    cleanup; every active policy must declare its own bounded threshold.
   - Severity and routing stay per-rule: warn → Slack, critical → page, each
     with its own contact-point wiring.
 

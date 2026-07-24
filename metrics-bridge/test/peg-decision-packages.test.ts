@@ -79,6 +79,7 @@ function policy(version: string): PegPolicyVersion {
             referenceSizeCap: 50,
             pollIntervalSeconds: 30,
             staleAfterSeconds: 60,
+            listingAbsentConsecutiveChecks: 2,
             spreadEnvelopeBps: 50,
             conversionErrorBps: 0,
           },
@@ -145,6 +146,9 @@ function snapshot(
         policyVersion,
         healthy: true,
         referenceSize: 50,
+        listingState: "listed",
+        listingCheckedAt: 1_800_000_000_000,
+        listingAbsentConsecutiveChecks: 0,
         observation: {
           vwap: 0.99,
           filledFraction: 1,
@@ -190,6 +194,9 @@ function sourceState(lastAttemptAt: number): PegPollSourceState {
     observation: null,
     referenceSize: null,
     conversionValidUntil: null,
+    listingState: null,
+    listingCheckedAt: null,
+    listingAbsentConsecutiveChecks: 0,
     blindConsecutivePolls: 0,
   };
 }
@@ -268,8 +275,9 @@ describe("peg decision-package producer", () => {
       ],
     });
     expect(prepared.model.packages[0]?.sources[0]).toMatchObject({
-      listingState: null,
-      listingCheckedAt: null,
+      listingState: "listed",
+      listingCheckedAt: 1_800_000_000,
+      policy: { listingAbsentConsecutiveChecks: 2 },
       referenceSize: 50,
       executablePrice: 0.99,
     });
@@ -280,12 +288,35 @@ describe("peg decision-package producer", () => {
   });
 
   it("selects retained previous only as the explicit active-incomplete fallback", () => {
+    const legacyPrevious = structuredClone(previous);
+    delete legacyPrevious.assets["asset-one"]!.sources.deep_eur!
+      .listingAbsentConsecutiveChecks;
     const prepared = preparePegDecisionPackages(
-      [snapshot(previous.version)],
-      context([active, previous], active.version, previous.version),
+      [snapshot(legacyPrevious.version)],
+      context([active, legacyPrevious], active.version, legacyPrevious.version),
     )!;
-    expect(prepared.model.producedPolicyVersion).toBe(previous.version);
+    expect(prepared.model.producedPolicyVersion).toBe(legacyPrevious.version);
     expect(prepared.model.policySlot).toBe("previous");
+    expect(
+      prepared.model.packages[0]?.sources[0]?.policy
+        .listingAbsentConsecutiveChecks,
+    ).toBe(2);
+  });
+
+  it("keeps unobserved listing evidence paired null", () => {
+    const unobserved = snapshot(active.version);
+    unobserved.sources[0]!.listingState = null;
+    unobserved.sources[0]!.listingCheckedAt = null;
+
+    const prepared = preparePegDecisionPackages(
+      [unobserved],
+      context([active], active.version, null),
+    )!;
+
+    expect(prepared.model.packages[0]?.sources[0]).toMatchObject({
+      listingState: null,
+      listingCheckedAt: null,
+    });
   });
 
   it("treats previous=null as an active-only version selection", () => {
@@ -537,6 +568,9 @@ describe("peg poll-cycle decision publication", () => {
       const failedStaleKey = sourceStateKey(failedVersion, "stale");
       const failedOriginal = sourceState(20);
       const failedStaleOriginal = sourceState(21);
+      failedOriginal.listingState = "listed";
+      failedOriginal.listingCheckedAt = 20_000;
+      failedOriginal.listingAbsentConsecutiveChecks = 0;
       const sourceStates = new Map([
         [visibleKey, sourceState(10)],
         [visibleStaleKey, sourceState(11)],
@@ -553,6 +587,11 @@ describe("peg poll-cycle decision publication", () => {
           const key = sourceStateKey(selectedPolicy.version);
           const state = cycle.sourceStates.get(key)!;
           state.lastAttemptAt += 100;
+          state.listingState =
+            selectedPolicy.version === visibleVersion ? "absent" : "halted";
+          state.listingCheckedAt = 200_000;
+          state.listingAbsentConsecutiveChecks =
+            selectedPolicy.version === visibleVersion ? 1 : 0;
           cycle.activeStateKeys.add(key);
           if (selectedPolicy.version === failedVersion) {
             throw new Error("policy build failed");
@@ -562,8 +601,18 @@ describe("peg poll-cycle decision publication", () => {
       );
 
       expect(sourceStates.get(visibleKey)?.lastAttemptAt).toBe(110);
+      expect(sourceStates.get(visibleKey)).toMatchObject({
+        listingState: "absent",
+        listingCheckedAt: 200_000,
+        listingAbsentConsecutiveChecks: 1,
+      });
       expect(sourceStates.has(visibleStaleKey)).toBe(false);
       expect(sourceStates.get(failedKey)).toBe(failedOriginal);
+      expect(sourceStates.get(failedKey)).toMatchObject({
+        listingState: "listed",
+        listingCheckedAt: 20_000,
+        listingAbsentConsecutiveChecks: 0,
+      });
       expect(sourceStates.get(failedStaleKey)).toBe(failedStaleOriginal);
       expect(currentDecisionPackages()).toMatchObject({
         producedPolicyVersion: visibleVersion,

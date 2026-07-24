@@ -126,6 +126,7 @@ const makeInput = (specs: AssetSpec[]) => {
             referenceSizeCap: 50,
             pollIntervalSeconds: source.pollIntervalSeconds ?? 30,
             staleAfterSeconds: source.staleAfterSeconds ?? 120,
+            listingAbsentConsecutiveChecks: 2,
             spreadEnvelopeBps: 50,
             conversionErrorBps: source.converted ? 30 : 0,
           },
@@ -231,6 +232,201 @@ afterEach(() => {
 });
 
 describe("peg poll cycle freshness and measurements", () => {
+  it("commits a successful listing lookup even when the book fetch fails", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    let listingAvailable = true;
+    const fetchBitvavo = vi.fn(async (request) => {
+      if (listingAvailable) {
+        request.onListingChecked?.({
+          state: "absent",
+          checkedAt: nowMs,
+        });
+      }
+      throw new Error("book unavailable");
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo,
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    expect(source(first)).toMatchObject({
+      listingState: "absent",
+      listingCheckedAt: nowMs,
+      listingAbsentConsecutiveChecks: 1,
+      healthy: false,
+    });
+
+    nowMs += 30_000;
+    listingAvailable = false;
+    const failedLookup = (await poller.pollCycle(input))[0]!;
+    expect(source(failedLookup)).toMatchObject({
+      listingState: "absent",
+      listingCheckedAt: first.sources[0]!.listingCheckedAt,
+      listingAbsentConsecutiveChecks: 1,
+      healthy: false,
+    });
+  });
+
+  it("captures listing completion regardless of book order and keeps its timestamp monotonic", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    let completionOrder: "before" | "after" = "before";
+    const errors: PegPollErrorEvent[] = [];
+    const fetchBitvavo = vi.fn(async (request) => {
+      if (completionOrder === "before") {
+        request.onListingChecked?.({ state: "listed", checkedAt: 2_000 });
+      }
+      const book = observation(nowMs);
+      if (completionOrder === "after") {
+        request.onListingChecked?.({ state: "absent", checkedAt: 1_000 });
+      }
+      return book;
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo,
+      publish: vi.fn(),
+      onError: (event) => errors.push(event),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    nowMs += 30_000;
+    completionOrder = "after";
+    const second = (await poller.pollCycle(input))[0]!;
+
+    expect(source(first)).toMatchObject({
+      listingState: "listed",
+      listingCheckedAt: 2_000,
+      listingAbsentConsecutiveChecks: 0,
+    });
+    expect(source(second)).toMatchObject({
+      listingState: "listed",
+      listingCheckedAt: 2_000,
+      listingAbsentConsecutiveChecks: 0,
+      healthy: false,
+      observation: null,
+      newSuccess: false,
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ kind: "source_fetch" });
+    expect(errors[0]?.cause).toEqual(
+      new Error("listing check timestamp regressed"),
+    );
+  });
+
+  it("ignores a listing callback that arrives after its staged poll completed", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const nowMs = 1_800_000_000_000;
+    let lateCallback:
+      | ((check: { state: "absent"; checkedAt: number }) => void)
+      | undefined;
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo: vi.fn(async (request) => {
+        lateCallback = request.onListingChecked;
+        return observation(nowMs);
+      }),
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    lateCallback?.({ state: "absent", checkedAt: nowMs });
+    const cached = (await poller.pollCycle(input))[0]!;
+
+    expect(source(first)).toMatchObject({
+      listingState: null,
+      listingCheckedAt: null,
+      listingAbsentConsecutiveChecks: 0,
+    });
+    expect(source(cached)).toMatchObject({
+      listingState: null,
+      listingCheckedAt: null,
+      listingAbsentConsecutiveChecks: 0,
+    });
+  });
+
+  it("counts cadence-due absent checks, preserves the streak on forced refreshes, and resets on listing evidence", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const baseMs = 1_800_000_000_000;
+    let nowMs = baseMs;
+    let limit0 = fixed15(50);
+    const listingStates: Array<"absent" | "listed" | "halted"> = [
+      "absent",
+      "absent",
+      "absent",
+      "absent",
+      "listed",
+      "halted",
+    ];
+    const fetchBitvavo = vi.fn(async (request) => {
+      const state = listingStates.shift();
+      if (state === undefined) throw new Error("unexpected listing request");
+      request.onListingChecked?.({ state, checkedAt: nowMs });
+      return observation(nowMs, { sequence: `listing-${nowMs}` });
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000), { limit0 }),
+      ),
+      fetchBitvavo,
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    expect(source(first)).toMatchObject({
+      listingState: "absent",
+      listingAbsentConsecutiveChecks: 1,
+    });
+
+    nowMs += 10_000;
+    limit0 = fixed15(40);
+    const forced = (await poller.pollCycle(input))[0]!;
+    expect(source(forced)).toMatchObject({
+      listingState: "absent",
+      listingCheckedAt: nowMs,
+      listingAbsentConsecutiveChecks: 1,
+    });
+
+    nowMs += 30_000;
+    const confirmed = (await poller.pollCycle(input))[0]!;
+    expect(source(confirmed).listingAbsentConsecutiveChecks).toBe(2);
+
+    nowMs += 30_000;
+    const saturated = (await poller.pollCycle(input))[0]!;
+    expect(source(saturated).listingAbsentConsecutiveChecks).toBe(2);
+
+    nowMs += 30_000;
+    const listed = (await poller.pollCycle(input))[0]!;
+    expect(source(listed)).toMatchObject({
+      listingState: "listed",
+      listingAbsentConsecutiveChecks: 0,
+    });
+
+    nowMs += 30_000;
+    const halted = (await poller.pollCycle(input))[0]!;
+    expect(source(halted)).toMatchObject({
+      listingState: "halted",
+      listingAbsentConsecutiveChecks: 0,
+    });
+  });
+
   it("does not count a frozen at-par book and fails it stale", async () => {
     const spec = primaryAsset({
       sources: [primarySource({ staleAfterSeconds: 60 })],

@@ -402,11 +402,12 @@ test("peg policy requires exactly one registry-aligned deep venue", () => {
   );
 });
 
-test("peg policy requires positive cadence and two-poll staleness", () => {
+test("peg policy requires bounded listing confirmation and matching staleness", () => {
   const policy = freshPegPolicy();
   const source = policy.active.assets["europ-schuman"].sources.bitvavo_eur;
   source.pollIntervalSeconds = 30;
   source.staleAfterSeconds = 59;
+  source.listingAbsentConsecutiveChecks = 2;
   source.referenceSizeCap = 0;
 
   const failures = pegPolicyFailures(policy);
@@ -415,8 +416,17 @@ test("peg policy requires positive cadence and two-poll staleness", () => {
     "expected positive reference-size cap",
   );
   assert(
-    /staleAfterSeconds: must cover at least 2 poll intervals/.test(failures),
-    "expected staleness to cover two polls",
+    /staleAfterSeconds: must cover pollIntervalSeconds \* listingAbsentConsecutiveChecks/.test(
+      failures,
+    ),
+    "expected staleness to cover listing confirmation",
+  );
+  source.staleAfterSeconds = 60;
+  source.listingAbsentConsecutiveChecks = 1_001;
+  const boundedFailures = pegPolicyFailures(policy);
+  assert(
+    /listingAbsentConsecutiveChecks: must be <= 1000/.test(boundedFailures),
+    "expected bounded listing confirmation",
   );
 });
 

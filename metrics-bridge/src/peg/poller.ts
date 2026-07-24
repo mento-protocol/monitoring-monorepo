@@ -32,6 +32,7 @@ import type {
 } from "./policy.js";
 import {
   PEG_POLICY_MAX_ASSETS,
+  effectiveListingAbsentConsecutiveChecks,
   PEG_POLICY_MAX_SOURCES_PER_ASSET,
 } from "./policy.js";
 import type {
@@ -45,7 +46,12 @@ import {
   type PegPolledStructuralContext,
 } from "./structural-poller.js";
 import { deriveReferenceSize } from "./structural.js";
-import type { PegObservation } from "./types.js";
+import type {
+  AuthoritativeListingCheck,
+  PegObservation,
+  RecordListingCheck,
+} from "./types.js";
+import { MARKET_STATES } from "./types.js";
 
 export const MAX_PROVIDER_CLOCK_SKEW_MS = 60_000;
 
@@ -144,6 +150,9 @@ const defaultSourceState = (): SourceState => ({
   observation: null,
   referenceSize: null,
   conversionValidUntil: null,
+  listingState: null,
+  listingCheckedAt: null,
+  listingAbsentConsecutiveChecks: 0,
   blindConsecutivePolls: 0,
 });
 
@@ -280,12 +289,18 @@ type PollSourceInput = {
   context: CycleContext;
 };
 
+type SourceSnapshotContent = {
+  referenceSize: number;
+  observation: PegObservation | null;
+  newSuccess: boolean;
+};
+
 function sourceSnapshot(
   input: PollSourceInput,
-  referenceSize: number,
-  observation: PegObservation | null,
-  newSuccess: boolean,
+  state: SourceState,
+  content: SourceSnapshotContent,
 ): PegSourceMetricSnapshot {
+  const { referenceSize, observation, newSuccess } = content;
   const movement = priceMovement(observation, input.target);
   return {
     asset: input.assetId,
@@ -298,6 +313,9 @@ function sourceSnapshot(
       observation.sequence !== null,
     observation,
     referenceSize,
+    listingState: state.listingState,
+    listingCheckedAt: state.listingCheckedAt,
+    listingAbsentConsecutiveChecks: state.listingAbsentConsecutiveChecks,
     ...movement,
     spreadBps: spreadBps(observation),
     newSuccess,
@@ -323,28 +341,29 @@ function referenceSize(
 }
 
 function fetchSource(
-  source: PegSource,
-  policy: PegSourcePolicy,
+  input: PollSourceInput,
   refSize: number,
-  dependencies: Dependencies,
+  onListingChecked: RecordListingCheck,
 ): Promise<PegObservation> {
   const observationPolicy = {
     refSize,
-    spreadEnvelopeBps: policy.spreadEnvelopeBps,
+    spreadEnvelopeBps: input.policy.spreadEnvelopeBps,
   };
-  if (source.provider === "bitvavo") {
-    return dependencies.fetchBitvavo({
+  if (input.source.provider === "bitvavo") {
+    return input.context.dependencies.fetchBitvavo({
       ...observationPolicy,
-      market: source.pair,
+      market: input.source.pair,
+      onListingChecked,
     });
   }
-  if (source.provider === "kraken") {
-    return dependencies.fetchKraken({
+  if (input.source.provider === "kraken") {
+    return input.context.dependencies.fetchKraken({
       ...observationPolicy,
-      symbol: source.pair,
+      symbol: input.source.pair,
+      onListingChecked,
     });
   }
-  throw new Error(`Unsupported peg provider: ${source.provider}`);
+  throw new Error(`Unsupported peg provider: ${input.source.provider}`);
 }
 
 function clearSource(state: SourceState, refSize: number | null): void {
@@ -410,7 +429,11 @@ function unavailableSourceSnapshot(
   refSize: number,
 ): PegSourceMetricSnapshot {
   clearSource(state, refSize);
-  return sourceSnapshot(input, refSize, null, false);
+  return sourceSnapshot(input, state, {
+    referenceSize: refSize,
+    observation: null,
+    newSuccess: false,
+  });
 }
 
 function recordProviderAdvancement(
@@ -481,7 +504,11 @@ function acceptDueObservation(
     state.observation = observation;
     state.referenceSize = refSize;
     state.conversionValidUntil = null;
-    return sourceSnapshot(input, refSize, observation, false);
+    return sourceSnapshot(input, state, {
+      referenceSize: refSize,
+      observation,
+      newSuccess: false,
+    });
   }
   if (observation.observationAt === null || observation.sequence === null) {
     return failSource(input, state, refSize, {
@@ -514,29 +541,117 @@ function acceptDueObservation(
   state.observation = observation;
   state.referenceSize = refSize;
   state.conversionValidUntil = converted.validUntil;
-  return sourceSnapshot(input, refSize, observation, true);
+  return sourceSnapshot(input, state, {
+    referenceSize: refSize,
+    observation,
+    newSuccess: true,
+  });
+}
+
+function acceptListingCheck(
+  state: SourceState,
+  check: AuthoritativeListingCheck | undefined,
+  listingAbsentConsecutiveCheckLimit: number,
+  cadenceDue: boolean,
+): Error | null {
+  if (check === undefined) return null;
+  if (!Number.isFinite(check.checkedAt) || check.checkedAt < 0) {
+    return new Error("listing check time must be finite and non-negative");
+  }
+  if (!MARKET_STATES.includes(check.state)) {
+    return new Error("listing check state is unsupported");
+  }
+  if (
+    state.listingCheckedAt !== null &&
+    check.checkedAt < state.listingCheckedAt
+  ) {
+    return new Error("listing check timestamp regressed");
+  }
+  const listingAbsentConsecutiveChecks =
+    check.state !== "absent"
+      ? 0
+      : state.listingState !== "absent"
+        ? 1
+        : cadenceDue
+          ? Math.min(
+              state.listingAbsentConsecutiveChecks + 1,
+              listingAbsentConsecutiveCheckLimit,
+            )
+          : state.listingAbsentConsecutiveChecks;
+  state.listingState = check.state;
+  state.listingCheckedAt = check.checkedAt;
+  state.listingAbsentConsecutiveChecks = listingAbsentConsecutiveChecks;
+  return null;
+}
+
+function acceptRecordedListingCheck(
+  input: PollSourceInput,
+  state: SourceState,
+  listingChecks: AuthoritativeListingCheck[],
+  cadenceDue: boolean,
+): Error | null {
+  return acceptListingCheck(
+    state,
+    listingChecks[0],
+    effectiveListingAbsentConsecutiveChecks(input.policy),
+    cadenceDue,
+  );
+}
+
+function listingCheckRecorder(): {
+  listingChecks: AuthoritativeListingCheck[];
+  onListingChecked: RecordListingCheck;
+} {
+  const listingChecks: AuthoritativeListingCheck[] = [];
+  return {
+    listingChecks,
+    onListingChecked: (check) => {
+      if (listingChecks.length !== 0) {
+        throw new Error("provider emitted more than one listing check");
+      }
+      if (!Number.isFinite(check.checkedAt) || check.checkedAt < 0) {
+        throw new Error("listing check time must be finite and non-negative");
+      }
+      listingChecks.push({ ...check });
+    },
+  };
 }
 
 async function pollDueSource(
   input: PollSourceInput,
   state: SourceState,
   refSize: number,
+  cadenceDue: boolean,
 ): Promise<PegSourceMetricSnapshot> {
   state.lastAttemptAt = input.context.nowSeconds;
+  const { listingChecks, onListingChecked } = listingCheckRecorder();
   let rawObservation: PegObservation;
   try {
-    rawObservation = await fetchSource(
-      input.source,
-      input.policy,
-      refSize,
-      input.context.dependencies,
-    );
+    rawObservation = await fetchSource(input, refSize, onListingChecked);
   } catch (cause) {
+    const listingError = acceptRecordedListingCheck(
+      input,
+      state,
+      listingChecks,
+      cadenceDue,
+    );
     const supported =
       input.source.provider === "bitvavo" || input.source.provider === "kraken";
     return failSource(input, state, refSize, {
       kind: supported ? "source_fetch" : "source_provider",
-      cause,
+      cause: listingError ?? cause,
+    });
+  }
+  const listingError = acceptRecordedListingCheck(
+    input,
+    state,
+    listingChecks,
+    cadenceDue,
+  );
+  if (listingError !== null) {
+    return failSource(input, state, refSize, {
+      kind: "source_fetch",
+      cause: listingError,
     });
   }
   let converted: Awaited<ReturnType<typeof convertSourceObservation>>;
@@ -582,7 +697,7 @@ async function pollSource(
   // inside the ordinary cadence window.
   const due = cadenceDue || state.referenceSize !== refSize;
   if (due) {
-    const snapshot = await pollDueSource(input, state, refSize);
+    const snapshot = await pollDueSource(input, state, refSize, cadenceDue);
     if (input.blindConsecutivePollLimit !== null) {
       updateBlindConsecutivePolls(
         state,
@@ -599,7 +714,11 @@ async function pollSource(
     input.policy,
     input.context,
   );
-  return sourceSnapshot(input, refSize, observation, false);
+  return sourceSnapshot(input, state, {
+    referenceSize: refSize,
+    observation,
+    newSuccess: false,
+  });
 }
 
 function snapshotWithoutReferenceSize(
@@ -621,7 +740,11 @@ function snapshotWithoutReferenceSize(
     input.policy,
     input.context,
   );
-  return sourceSnapshot(input, state.referenceSize, observation, false);
+  return sourceSnapshot(input, state, {
+    referenceSize: state.referenceSize,
+    observation,
+    newSuccess: false,
+  });
 }
 
 function updateBlindConsecutivePolls(
