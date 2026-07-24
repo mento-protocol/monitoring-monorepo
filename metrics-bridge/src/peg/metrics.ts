@@ -29,6 +29,32 @@ export interface PegSourceMetricSnapshot {
   newUsableDecision: boolean;
 }
 
+export interface PegBreakerMetricSnapshot {
+  id: string;
+  address: string;
+  enabled: boolean;
+  kind: "MEDIAN_DELTA" | "VALUE_DELTA";
+  status: "OK" | "TRIPPED";
+  tradingMode: number;
+  effectiveRateChangeThreshold: string;
+  referenceValue: string | null;
+  lastMedianRate: string | null;
+  lastUpdatedAt: number | null;
+  lastStatusUpdatedAt: number;
+}
+
+export interface PegMonitorMetricSnapshot {
+  chainId: number;
+  poolAddress: string;
+  rateFeedId: string;
+  monitoredTokenAddress: string;
+  indexedPoolReachable: boolean;
+  structuralSaturation: number | null;
+  structuralQuerySaturated: boolean;
+  counterpartyCount: number;
+  breaker: PegBreakerMetricSnapshot | null;
+}
+
 export interface PegAssetMetricSnapshot {
   asset: string;
   policyVersion: string;
@@ -39,6 +65,7 @@ export interface PegAssetMetricSnapshot {
   structuralQuerySaturated: boolean;
   indexedPoolReachable: boolean;
   counterpartyCount: number;
+  monitors: PegMonitorMetricSnapshot[];
   sources: PegSourceMetricSnapshot[];
 }
 
@@ -358,6 +385,19 @@ function sourceCounterKey(labels: SourceLabels): string {
   return `${labels.policy_version}\u0000${labels.asset}\u0000${labels.source}`;
 }
 
+function trackSourceCounterLabels(snapshots: PegAssetMetricSnapshot[]): void {
+  for (const snapshot of snapshots) {
+    for (const source of snapshot.sources) {
+      const labels = {
+        asset: source.asset,
+        source: source.source,
+        policy_version: source.policyVersion,
+      };
+      activeSourceCounterLabels.set(sourceCounterKey(labels), labels);
+    }
+  }
+}
+
 function pruneSourceCounters(snapshots: PegAssetMetricSnapshot[]): void {
   // Empty batches are failed cycles: clear gauges below, but keep historical
   // counters. A non-empty batch retires only absent content-addressed versions;
@@ -373,17 +413,6 @@ function pruneSourceCounters(snapshots: PegAssetMetricSnapshot[]): void {
     pegCounters.pollSuccess.remove(labels);
     pegCounters.usableDecision.remove(labels);
     activeSourceCounterLabels.delete(key);
-  }
-
-  for (const snapshot of snapshots) {
-    for (const source of snapshot.sources) {
-      const labels = {
-        asset: source.asset,
-        source: source.source,
-        policy_version: source.policyVersion,
-      };
-      activeSourceCounterLabels.set(sourceCounterKey(labels), labels);
-    }
   }
 }
 
@@ -417,7 +446,7 @@ function publishObservation(
   }
 }
 
-function publishSource(source: PegSourceMetricSnapshot): void {
+function publishSourceGauges(source: PegSourceMetricSnapshot): void {
   const labels = {
     asset: source.asset,
     source: source.source,
@@ -436,6 +465,14 @@ function publishSource(source: PegSourceMetricSnapshot): void {
   }
   if (source.observation !== null)
     publishObservation(labels, source.observation);
+}
+
+function publishSourceCounters(source: PegSourceMetricSnapshot): void {
+  const labels = {
+    asset: source.asset,
+    source: source.source,
+    policy_version: source.policyVersion,
+  };
   if (source.newSuccess) pegCounters.pollSuccess.inc(labels);
   if (source.newUsableDecision) pegCounters.usableDecision.inc(labels);
 }
@@ -460,12 +497,10 @@ function publishAsset(snapshot: PegAssetMetricSnapshot): void {
   if (snapshot.structuralSaturation !== null) {
     pegGauges.structuralSaturation.set(labels, snapshot.structuralSaturation);
   }
-  snapshot.sources.forEach(publishSource);
+  snapshot.sources.forEach(publishSourceGauges);
 }
 
-export function publishPegMetrics(snapshots: PegAssetMetricSnapshot[]): void {
-  validateSnapshots(snapshots);
-  pruneSourceCounters(snapshots);
+function publishValidatedPegGauges(snapshots: PegAssetMetricSnapshot[]): void {
   resetPegGauges();
   const versions = new Set<string>();
   for (const snapshot of snapshots) {
@@ -474,6 +509,26 @@ export function publishPegMetrics(snapshots: PegAssetMetricSnapshot[]): void {
   }
   for (const policyVersion of versions) {
     pegGauges.policyVersion.set({ policy_version: policyVersion }, 1);
+  }
+}
+
+/** Publish validated peg gauges without changing counter labels or values. */
+export function publishPegGauges(snapshots: PegAssetMetricSnapshot[]): void {
+  validateSnapshots(snapshots);
+  publishValidatedPegGauges(snapshots);
+}
+
+export function publishPegMetrics(
+  snapshots: PegAssetMetricSnapshot[],
+  counterSnapshots: PegAssetMetricSnapshot[] = snapshots,
+): void {
+  validateSnapshots(snapshots);
+  if (counterSnapshots !== snapshots) validateSnapshots(counterSnapshots);
+  pruneSourceCounters(snapshots);
+  trackSourceCounterLabels(counterSnapshots);
+  publishValidatedPegGauges(snapshots);
+  for (const snapshot of counterSnapshots) {
+    snapshot.sources.forEach(publishSourceCounters);
   }
 }
 
