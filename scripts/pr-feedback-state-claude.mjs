@@ -14,7 +14,7 @@ const OVERALL_VERIFICATION_HEADING =
   /^###\s+Verification notes \(no issues found\)$/;
 const OVERALL_NOTE = /^([1-9]\d*)\.\s+\*\*(.{1,200})\*\*(?:\s+(.{1,4000}))?$/;
 const OVERALL_TERMINAL_CLEAN = /^No P1\/P2\/P3 findings\s+—\s+(.{1,500})$/;
-const OVERALL_CLEAN_REVIEW_COMPATIBILITY = new Map([
+const CLEAN_REVIEW_COMPATIBILITY = new Map([
   [
     "039923882eee9f880165543ef85e1ca251d84b995a78647b41c2b788d02a4885",
     {
@@ -22,6 +22,24 @@ const OVERALL_CLEAN_REVIEW_COMPATIBILITY = new Map([
       prNumber: "1544",
       commentId: "5060594122",
       headRefOid: "aab83bc74ae0585147a058d92f1f13afac7be109",
+    },
+  ],
+  [
+    "5d4832d96803f81363bc0842a4c1aed89e8fb526cb83834d3373aacd30c5be34",
+    {
+      author: "claude[bot]",
+      prNumber: "1595",
+      commentId: "5069799124",
+      headRefOid: "d4bb77845e635c72b61fa56b375ec3f44b05702e",
+    },
+  ],
+  [
+    "e0394033c85a77330e2ee53cab690a2069263c7e792ab3e443c17949bb728db4",
+    {
+      author: "claude[bot]",
+      prNumber: "1600",
+      commentId: "5073384440",
+      headRefOid: "0ff2700ecbec8d2877caeeaa91bf423cf8fdc2f0",
     },
   ],
 ]);
@@ -99,9 +117,9 @@ function hasStructuralMarkdown(value) {
   );
 }
 
-function matchesOverallCompatibilityRegistry(comment, pr, rawBody) {
+export function matchesCleanReviewCompatibilityRegistry(comment, pr, rawBody) {
   const digest = createHash("sha256").update(rawBody, "utf8").digest("hex");
-  const registered = OVERALL_CLEAN_REVIEW_COMPATIBILITY.get(digest);
+  const registered = CLEAN_REVIEW_COMPATIBILITY.get(digest);
   return (
     registered !== undefined &&
     String(comment?.author ?? "").toLowerCase() === registered.author &&
@@ -196,7 +214,7 @@ export function isExplicitlyCleanOverallClaudeReview(comment, pr) {
     hasStructuralMarkdown(terminal[1])
   )
     return false;
-  return matchesOverallCompatibilityRegistry(comment, pr, body);
+  return matchesCleanReviewCompatibilityRegistry(comment, pr, body);
 }
 
 export function classifyOverallClaudeReview(comment, pr) {
