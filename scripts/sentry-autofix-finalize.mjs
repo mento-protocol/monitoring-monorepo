@@ -227,6 +227,77 @@ const DIFF_CREDENTIAL_PATTERNS = [
   /\bAKIA[A-Z0-9]{16}\b/,
 ];
 
+// For FILENAMES the agent controls the exact bytes, so unlike the CONTENT scan
+// (DIFF_CREDENTIAL_PATTERNS keeps \b to avoid false positives on code hashes) the
+// filename match must survive obfuscation: padding before the prefix (`xghs_…`
+// kills a leading \b) and splitting the prefix/body with a separator (`ghs_a1b2/
+// c3d4…`, `g/hs_…`). Two families, matched differently (#1551):
+//
+//  • GitHub/AWS prefixes carry NO literal separator, so they are matched on a
+//    SEPARATOR-COLLAPSED form of the path (`/`·`.`·`-`·whitespace removed, `_`
+//    kept) with the content scan's {16,}/{16} body floor. The collapse rejoins an
+//    attacker's split; the floor still holds because a split token rejoins to full
+//    length — and it simultaneously kills the cross-segment false positive (two
+//    unrelated path segments joining to spell a prefix leave only a short body).
+//  • The Anthropic/Slack prefixes carry literal `-`, which the collapse would
+//    strip along with an attacker separator, so they are matched SEPARATOR-
+//    TOLERANT on the raw path: the internal dashes may be any separator or absent
+//    (`sk.ant-…` still trips), with the content scan's body floor.
+// Filenames are agent-controlled. The GitHub/AWS credential prefixes are
+// distinctive (a literal `_`, or `AKIA`+caps), so they are matched on a FULLY
+// collapsed form of the path — every byte outside the token alphabet
+// `[A-Za-z0-9_]` removed — which rejoins ANY separator an attacker inserts to
+// split the prefix or body (`/`·`.`·`-`·`@`·`+`·whitespace·…). The {16,}/{16}
+// body floors then catch the rejoined token while leaving cross-segment joins too
+// short to match, and the literal prefix keeps it false-positive-free (no source
+// path is named after a token; a github_pat suffix and a `_`-split ghs body both
+// keep their underscores). (#1551)
+const FILENAME_CREDENTIAL_COLLAPSED = [
+  /(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9_]{16,}/,
+  /github_pat_[A-Za-z0-9_]{16,}/,
+  /AKIA[A-Z0-9]{16}/,
+];
+// The Anthropic/Slack prefixes are SHORT and their collapsed forms (`skant`,
+// `xox`) collide with ordinary words ("riskantenna", camelCase "TaskAntenna"),
+// so they are matched only in CANONICAL dashed form on the raw path — no false
+// positive on normal code. Heavy filename-obfuscation of these lower-value tokens
+// is a documented residual: the Anthropic inference token is an accepted #1373
+// residual (worst case quota abuse, not repo/queue compromise) and Slack is not
+// an autofix runner credential; the content scan still catches a real token
+// written into a file body.
+const FILENAME_CREDENTIAL_CANONICAL = [
+  /sk-ant-[A-Za-z0-9-]{8,}/i,
+  /xox[a-z]-[A-Za-z0-9-]{8,}/i,
+];
+
+// Full-token patterns (no \b, global) for MASKING a credential wherever it
+// appears in a public refusal reason — masks the maximal run, not just the
+// prefix. filesWithCredentialShapedName refuses a credential-bearing path
+// count-only BEFORE any path-echoing reason, so this is an aligned backstop that
+// deliberately does not share the \b-anchored content patterns (#1551).
+const REDACTION_PATTERNS = [
+  /(?:ghs|ghp|gho|ghu|ghr)_[A-Za-z0-9]{16,}/g,
+  /github_pat_[A-Za-z0-9_]{16,}/g,
+  /sk-ant-[A-Za-z0-9-]{8,}/g,
+  /xox[a-z]-[A-Za-z0-9-]{8,}/g,
+  /AKIA[A-Z0-9]{16}/g,
+];
+
+/** Mask any credential-shaped substring before a path is echoed into a public
+ * refusal reason. Changed-path NAMES are agent-controlled and can embed a token
+ * the agent read from process-env (the documented residual); a refusal reason
+ * lands on a public queue issue, so a raw echo would itself be an exfil channel
+ * (#1551). Belt-and-suspenders: filesWithCredentialShapedName already refuses a
+ * credential-bearing path before any of these reasons is reached. Exported for
+ * tests. */
+export function redactCredentialShaped(text) {
+  let out = String(text);
+  for (const re of REDACTION_PATTERNS) {
+    out = out.replace(re, "[redacted]");
+  }
+  return out;
+}
+
 /** Changed paths (present in the work tree as regular files) whose CONTENT
  * contains a credential-shaped string. Pure fs reads from the tainted tree —
  * no git, no execution; the guard runs credential-free from the pristine
@@ -253,6 +324,26 @@ export function filesWithCredentialShapedContent(workRoot, files) {
     }
   }
   return hits;
+}
+
+/** Changed paths whose NAME (not content) carries a runner-credential prefix.
+ * filesWithCredentialShapedContent reads file BODIES, so a token placed in a
+ * clean-content file's PATH would pass it and be published in the public PR's
+ * file tree (and echoed by the forbidden/credential reasons). This scans the
+ * path bytes — see FILENAME_CREDENTIAL_PREFIXES for why it does NOT reuse the
+ * content scan's \b-anchored patterns (agent-controlled names defeat them). Pure
+ * string check — no workRoot needed. (#1551) */
+export function filesWithCredentialShapedName(files) {
+  return (Array.isArray(files) ? files : []).filter((f) => {
+    const p = String(f ?? "");
+    // Strip EVERY byte outside the token alphabet (not a fixed separator list),
+    // so any separator an attacker inserts to split a GitHub/AWS token rejoins.
+    const collapsed = p.replace(/[^A-Za-z0-9_]/g, "");
+    return (
+      FILENAME_CREDENTIAL_COLLAPSED.some((re) => re.test(collapsed)) ||
+      FILENAME_CREDENTIAL_CANONICAL.some((re) => re.test(p))
+    );
+  });
 }
 
 /** True when `path` under `workRoot` is a symlink (lstat, so it never
@@ -328,13 +419,26 @@ export function evaluateDiffGuard(files, { workRoot = null } = {}) {
   // after a runner token the agent read from process-env (the documented
   // residual), so publishing them onto the public queue issue would itself be an
   // exfil channel — omission is the module's standing policy for agent-controlled
-  // text (see the note above buildAnalysisComment). The path-echo hardening for
-  // the other guard reasons (forbidden/credential) is tracked separately (#1551).
+  // text (see the note above buildAnalysisComment). The forbidden/symlink/
+  // credential reasons below redact credential-shaped substrings before echoing a
+  // path, and a credential-shaped NAME is refused outright just below (#1551).
   const malformed = changed.filter(hasUnsafePathBytes);
   if (malformed.length > 0) {
     return {
       ok: false,
       reason: `The autofix diff contains ${malformed.length} path(s) with leading/trailing whitespace or control characters, which are refused: such bytes make the guard's scans disagree with the byte-for-byte copy that publishes the branch, and a legitimate source path never contains them. No PR opened.`,
+    };
+  }
+  // Refuse any changed path whose NAME is credential-shaped. The content scan
+  // (filesWithCredentialShapedContent) reads file BODIES; a token placed in a
+  // clean-content file's PATH would pass it and be published in the public PR's
+  // file tree (#1551). Count-only reason — echoing the offending path would
+  // republish the token.
+  const nameHits = filesWithCredentialShapedName(changed);
+  if (nameHits.length > 0) {
+    return {
+      ok: false,
+      reason: `The autofix diff has ${nameHits.length} changed path(s) whose name is credential-shaped; such paths are refused wholesale (a token in a filename would be published in the public PR file tree). No PR opened.`,
     };
   }
   if (changed.length > MAX_CHANGED_FILES) {
@@ -347,7 +451,7 @@ export function evaluateDiffGuard(files, { workRoot = null } = {}) {
   if (forbidden.length > 0) {
     return {
       ok: false,
-      reason: `The autofix diff touches forbidden path(s): ${forbidden.join(", ")}. Deploy/CI/infra, dependency-manager, and toolchain surfaces are out of scope for autofix. No PR opened.`,
+      reason: `The autofix diff touches forbidden path(s): ${redactCredentialShaped(forbidden.join(", "))}. Deploy/CI/infra, dependency-manager, and toolchain surfaces are out of scope for autofix. No PR opened.`,
     };
   }
   if (workRoot) {
@@ -355,16 +459,17 @@ export function evaluateDiffGuard(files, { workRoot = null } = {}) {
     if (symlinks.length > 0) {
       return {
         ok: false,
-        reason: `The autofix diff replaces path(s) with a symlink: ${symlinks.join(", ")}. Symlinked paths are refused — a symlink would be dereferenced by the credentialed byte-copy and could exfiltrate runner secrets. No PR opened.`,
+        reason: `The autofix diff replaces path(s) with a symlink: ${redactCredentialShaped(symlinks.join(", "))}. Symlinked paths are refused — a symlink would be dereferenced by the credentialed byte-copy and could exfiltrate runner secrets. No PR opened.`,
       };
     }
     const credentialHits = filesWithCredentialShapedContent(workRoot, changed);
     if (credentialHits.length > 0) {
       return {
         ok: false,
-        // Names the FILES, never the matched content — the reason lands on a
-        // public queue issue.
-        reason: `The autofix diff contains credential-shaped content in: ${credentialHits.join(", ")}. Changed files are scanned before any push because a pushed branch is public immediately — a diff carrying anything token-shaped is refused wholesale. No PR opened.`,
+        // Names the FILES, never the matched content — and redacts any
+        // credential-shaped substring in a filename (#1551). The reason lands on
+        // a public queue issue.
+        reason: `The autofix diff contains credential-shaped content in: ${redactCredentialShaped(credentialHits.join(", "))}. Changed files are scanned before any push because a pushed branch is public immediately — a diff carrying anything token-shaped is refused wholesale. No PR opened.`,
       };
     }
   }
