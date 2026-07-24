@@ -186,6 +186,8 @@ describe("PegMonitoringPageClient", () => {
     expect(container.textContent).toContain("Listing: halted");
     expect(container.textContent).toContain("Listing checked");
     expect(container.textContent).toContain("2027-01-15T07:59:55 UTC");
+    expect(container.textContent).toContain("missing after 2 checks");
+    expect(container.textContent).not.toMatch(/current .*streak/i);
   });
   it("renders conversion provenance only for converted sources and distinguishes monitor query saturation", () => {
     const response = makePegMonitoringResponse();

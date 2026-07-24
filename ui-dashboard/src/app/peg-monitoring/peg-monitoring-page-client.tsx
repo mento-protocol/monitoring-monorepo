@@ -393,7 +393,7 @@ function Source({ source }: { source: PegSource }): React.JSX.Element {
         />
         <EvidenceItem
           label="Source policy"
-          value={`${source.policy.pollIntervalSeconds}s poll · ${source.policy.staleAfterSeconds}s stale`}
+          value={`${source.policy.pollIntervalSeconds}s poll · ${source.policy.staleAfterSeconds}s stale · missing after ${source.policy.listingAbsentConsecutiveChecks} checks`}
           detail={
             source.convertVia
               ? `Price conversion: ${source.convertVia.fromCurrency} → ${source.convertVia.toCurrency} via feed ${shortAddress(source.convertVia.rateFeedId)} · chain ${source.convertVia.chainId}`
