@@ -5,8 +5,9 @@ import { validFixtureFiles } from "./production-infra-identity-contract-fixtures
 import { validateWorkflowContract } from "./production-infra-identity-contract-workflow.mjs";
 
 const workflowPath = ".github/workflows/alerts-rules.yml";
-const validCheckoutStep =
-  "      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0";
+const validCheckoutStep = `      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false`;
 const automaticGithubCredential = ["${{ github.", "token }}"].join("");
 const validProtectionStep = `      - name: Verify production-infra environment protection
         env:
@@ -26,6 +27,8 @@ const escapedProductionServiceAccountBracket =
   '"${{ vars[\\"GCP_PRODUCTION_INFRA_SERVICE_\\u0041CCOUNT\\"] }}"';
 const escapedRefreshServiceAccountDot =
   '"${{ vars.GCP_TERRAFORM_REFRESH_SERVICE_\\u0041CCOUNT }}"';
+const escapedRefreshProviderDot =
+  '"${{ vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROV\\u0049DER }}"';
 const validProductionEnvironment = `    environment:
       name: production-infra
       url: https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac`;
@@ -167,9 +170,34 @@ expectFailure(
   replaceWorkflow(
     validFiles,
     validCheckoutStep,
-    `${validCheckoutStep}
-        with:
-          path: decoy`,
+    validCheckoutStep.replace(
+      "          persist-credentials: false",
+      "          path: decoy",
+    ),
+  ),
+  "must verify environment protection exactly once before Google authentication",
+);
+
+expectFailure(
+  replaceWorkflow(
+    validFiles,
+    validCheckoutStep,
+    validCheckoutStep.replace(
+      "        with:\n          persist-credentials: false",
+      "",
+    ),
+  ),
+  "must verify environment protection exactly once before Google authentication",
+);
+
+expectFailure(
+  replaceWorkflow(
+    validFiles,
+    validCheckoutStep,
+    validCheckoutStep.replace(
+      "          persist-credentials: false",
+      "          persist-credentials: true",
+    ),
   ),
   "must verify environment protection exactly once before Google authentication",
 );
@@ -485,6 +513,19 @@ expectFailure(
     runs-on: ubuntu-latest
     env:
       BAD: ${escapedRefreshServiceAccountDot}
+`,
+  },
+  "must not be used during bootstrap",
+);
+
+expectFailure(
+  {
+    ...validFiles,
+    ".github/workflows/unlisted-escaped-refresh-provider.yml": `jobs:
+  consume:
+    runs-on: ubuntu-latest
+    env:
+      BAD: ${escapedRefreshProviderDot}
 `,
   },
   "must not be used during bootstrap",

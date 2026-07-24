@@ -80,7 +80,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md) | GitHub-to-Slack notifications for Terraform-applying workflows | canonical / active | runbook / terraform/infra | eng | 30d; verified 2026-07-22 |
 | [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md) | Spoken Attention Nudge | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md) | New Worktree / Clone Setup and Claude Code on the Web Setup | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-24 |
 | [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md) | Adding Governance Watchdog Events | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md) | Governance Watchdog Bootstrap | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/README.md`](../governance-watchdog/README.md) | Governance Watchdog | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
@@ -153,7 +153,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0044-peg-thresholds-gated-rules-plane.md`](adr/0044-peg-thresholds-gated-rules-plane.md) | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON | canonical / active | adr / alerts | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) | Peg paging measures executable sell price; the deep venue pages alone | canonical / active | adr / metrics-bridge / alerts | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) | Oracle freshness is reconstructed from persisted report events | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-24 |
-| [`docs/adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) | Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) | Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
 ## package-readmes-reference

@@ -53,7 +53,9 @@ on separate identities:
 - PR plans use the state-only plan chain. It receives neither project/service
   read roles nor live secret/object access.
 - The separate cutover-routing PR routes trusted-main plans and scheduled drift
-  through `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The downstream
+  through `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER` and
+  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. Its dedicated pool accepts
+  only the five named Terraform workflows on `main`. The downstream
   `org-terraform-refresh-readonly` identity has state Object Viewer, a curated
   non-basic project read-role set, Secret Accessor on only Terraform-managed
   secrets, and Storage Object Viewer on only Cloud Function deployment-source

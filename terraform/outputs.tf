@@ -58,6 +58,11 @@ output "ci_production_infra_wif_provider" {
   value       = google_iam_workload_identity_pool_provider.github_production_infra.name
 }
 
+output "ci_terraform_refresh_wif_provider" {
+  description = "Full resource name of the trusted-main Terraform refresh GitHub Actions WIF provider."
+  value       = google_iam_workload_identity_pool_provider.github_terraform_refresh.name
+}
+
 output "ci_deployer_email" {
   description = "Generic CI deployer SA email — used by service deploys and transitional trusted-main Terraform plans. Set as GH repo secret GCP_SERVICE_ACCOUNT."
   value       = google_service_account.metrics_bridge_deployer.email

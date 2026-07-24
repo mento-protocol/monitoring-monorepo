@@ -63,14 +63,17 @@ refresh-only plan, not configuration validation alone, must prove the curated
 permissions through the checked-in routing cutover before final authority
 removal.
 
-## Declined: saved-plan binding via KMS
+## Superseded: saved-plan artifact binding via KMS
 
 The hardening audit considered encrypting a binary `tfplan` with KMS to recover
 byte-for-byte binding between the reviewed plan and apply. It was declined
 because these alerting stacks change infrequently, their blast radius is
 recoverable, and the environment-gated apply path re-plans before mutation.
 
-The prerequisite for reconsidering saved-plan binding is a higher-blast-radius
-stack moving to auto-apply, or loss of healthy scheduled drift detection for an
-auto-applied stack. Without one of those changes, the added artifact, key, and
-decryption machinery is not justified.
+ADR 0047 superseded that final-state choice in July 2026 after the approval
+timing was re-audited. The Environment gate runs before the apply job, so it
+cannot support human review of that job's plan. The selected replacement keeps
+the no-artifact boundary: one post-approval job creates a private saved plan,
+runs fail-closed policy over its JSON, and applies those exact bytes. Binary
+plan and JSON files never leave the job. This does not revive the declined KMS
+artifact handoff or claim that the operator reviewed the exact applied plan.

@@ -20,9 +20,9 @@ name: Terraform Drift Detection
 # state-only plan chain and Google-provider stacks (`alerts-delivery`,
 # `governance-watchdog`) on the generic write-capable deployer. The workflow
 # never applies, but those latter legs still carry legacy apply authority.
-# Before removing that legacy path, route every drift leg through
-# `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT` and prove a live full refresh
-# with the curated non-basic read-role set described in ADR 0047.
+# Before removing that legacy path, route every drift leg through both
+# `GCP_TERRAFORM_REFRESH_*` variables and prove a live full refresh with the
+# curated non-basic read-role set described in ADR 0047.
 
 on:
   schedule:

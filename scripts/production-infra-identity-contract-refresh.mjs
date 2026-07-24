@@ -128,10 +128,10 @@ export function validateRefreshIdentity(files, blocks, errors) {
       errors,
       "terraform: refresh WIF identity",
     );
-    expectExpression(
+    expectString(
       refreshWif,
       "project",
-      "google_project.monitoring.project_id",
+      SEED_PROJECT_ID,
       errors,
       "terraform: refresh WIF identity",
     );
@@ -205,7 +205,7 @@ export function validateRefreshIdentity(files, blocks, errors) {
     expectString(
       wifBinding,
       "member",
-      "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.ref/refs/heads/main",
+      "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.ref/refs/heads/main",
       errors,
       "terraform: refresh WIF binding",
     );

@@ -2,6 +2,7 @@ import {
   APPLY_WORKFLOWS,
   GENERIC_PROVIDER_CONDITION,
   PRODUCTION_PROVIDER_CONDITION,
+  REFRESH_PROVIDER_CONDITION,
   SERVICE_AND_DRIFT_WORKFLOWS,
 } from "./production-infra-identity-contract-constants.mjs";
 import { terraformTopLevelBlocks } from "./production-infra-identity-contract-hcl.mjs";
@@ -46,6 +47,24 @@ function validateIdentityContract(files, completeInventory) {
       providerName: "github_production_infra",
       providerCondition: PRODUCTION_PROVIDER_CONDITION,
       conditionLabel: "terraform: production WIF provider",
+    },
+    errors,
+  );
+  validateProvider(
+    blocks,
+    {
+      poolName: "github_terraform_refresh",
+      poolId: "github-terraform-refresh",
+      providerName: "github_terraform_refresh",
+      providerCondition: REFRESH_PROVIDER_CONDITION,
+      conditionLabel: "terraform: refresh WIF provider",
+      attributeMapping: {
+        "google.subject": "assertion.sub",
+        "attribute.repository": "assertion.repository",
+        "attribute.repository_id": "assertion.repository_id",
+        "attribute.ref": "assertion.ref",
+        "attribute.workflow_ref": "assertion.workflow_ref",
+      },
     },
     errors,
   );

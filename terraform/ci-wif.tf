@@ -103,6 +103,44 @@ resource "google_iam_workload_identity_pool_provider" "github_production_infra" 
   }
 }
 
+# ── Trusted-main Terraform refresh ────────────────────────────────────────────
+# Keep refresh federation in its own pool. IAM subjects are pool-scoped, so a
+# binding to the generic `github-actions` pool would let any accepted main-ref
+# workflow select the refresh service account directly. This provider accepts
+# only the five reviewed Terraform workflow files on main.
+resource "google_iam_workload_identity_pool" "github_terraform_refresh" {
+  project                   = google_project.monitoring.project_id
+  workload_identity_pool_id = "github-terraform-refresh"
+  display_name              = "GitHub Terraform refresh"
+  description               = "Federation pool restricted to trusted-main Terraform refresh and drift workflows"
+
+  depends_on = [google_project_service.iam]
+}
+
+resource "google_iam_workload_identity_pool_provider" "github_terraform_refresh" {
+  project                            = google_project.monitoring.project_id
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github_terraform_refresh.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  display_name                       = "GitHub Terraform refresh"
+
+  # `workflow_ref` is signed by GitHub and identifies the workflow file plus
+  # the ref that supplied it. Keep the repository ID, slug, and ref checks
+  # explicit so renames, forks, and non-main workflow definitions fail closed.
+  attribute_condition = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\")"
+
+  attribute_mapping = {
+    "google.subject"          = "assertion.sub"
+    "attribute.repository"    = "assertion.repository"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
+    "attribute.workflow_ref"  = "assertion.workflow_ref"
+  }
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
 # The apply-facing identity lives in the seed project rather than the
 # monitoring project. It has no project role of its own; its only write path is
 # the service-account-scoped Token Creator grant on `org-terraform` below.
@@ -327,24 +365,22 @@ resource "google_service_account_iam_member" "ci_plan_readonly_org_terraform_pla
 
 # ── Read-only trusted-main refresh chain ──────────────────────────────────────
 # Main push/dispatch plans and scheduled drift need live GCP reads, but they do
-# not need the production apply identity. This WIF-facing SA stays in the
-# monitoring project and can only impersonate the read-only seed SA below.
+# not need the production apply identity. Keep this WIF-facing SA in the seed
+# project, outside the routine deployer's monitoring-project actAs scope.
 resource "google_service_account" "terraform_refresh_readonly" {
-  project      = google_project.monitoring.project_id
+  project      = "mento-terraform-seed-ffac"
   account_id   = "terraform-refresh-readonly"
   display_name = "Terraform CI refresh (read-only)"
   description  = "Main-ref GitHub Actions identity for full-refresh Terraform plans; has no write roles."
-
-  depends_on = [google_project_service.iam]
 }
 
-# The generic provider already enforces the repository slug and immutable ID.
-# This binding adds the trusted-main restriction while leaving PR plans on
-# their separate identity.
+# The dedicated provider admits only the intended Terraform workflow files on
+# main. A generic service deploy or another main-ref workflow cannot select
+# this identity.
 resource "google_service_account_iam_member" "terraform_refresh_readonly_wif_binding" {
   service_account_id = google_service_account.terraform_refresh_readonly.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.ref/refs/heads/main"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.ref/refs/heads/main"
 }
 
 resource "google_service_account" "org_terraform_refresh_readonly" {

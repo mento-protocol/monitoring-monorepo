@@ -56,10 +56,9 @@ name: Governance Watchdog Infra
 # TF_VAR_* env block here carries production Discord/Telegram/QuickNode/GitHub
 # credentials on push/dispatch and apply runs. Uploading the binary plan as a
 # workflow artifact would expose those secrets to anyone with `actions:read`.
-# Instead the apply job re-plans at gate-approval time — the trade-off
-# is the brief "between approval and apply" drift window, which the
-# reviewer can detect by checking the apply-job's plan output before
-# approving.
+# The Environment gate approves the commit and the earlier plan. The apply job
+# starts only after approval, then creates and applies a later plan, so the
+# current path has a documented drift window.
 #
 # Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
 # (matrix stack `governance-watchdog`). This workflow adds the plan diff comment +
@@ -314,7 +313,7 @@ jobs:
         # can print provider state such as webhook URLs/tokens, so never tee raw
         # Terraform output to GitHub logs.
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
-        # (HashiCorp docs); apply re-plans at gate-approval time instead.
+        # (HashiCorp docs); apply creates a later plan after approval instead.
         # PR plans run read-only: `-lock=false` (the read-only plan SA, objectViewer
         # only, can't write the GCS lock object) + `-refresh=false` (this stack's
         # google provider would otherwise refresh GCP resources the read-only seed
@@ -581,6 +580,8 @@ jobs:
       TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Verify production-infra environment protection
         env:
@@ -607,9 +608,8 @@ jobs:
 
       - name: Apply
         id: apply
-        # Re-plans + applies in a single step. The reviewer at the
-        # production-infra environment gate should read this job's plan output
-        # before approving — it's the ground truth for what lands.
+        # The Environment gate has already approved the commit and earlier plan.
+        # This step creates and applies a later plan, then records what landed.
         # `-lock-timeout=10m`: apply must wait for any in-progress state
         # lock rather than failing the deploy.
         # `-no-color`: keep the output free of ANSI escapes so the apply

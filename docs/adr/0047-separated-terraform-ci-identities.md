@@ -3,7 +3,7 @@ title: Terraform CI separates routine deploy, PR plan, trusted-main refresh, and
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 scope: terraform/infra
 date: 2026-07
 doc_type: adr
@@ -42,14 +42,14 @@ produce a principal in the same pool namespace.
 
 Keep four separate authentication chains:
 
-| Lane                             | GitHub selector                                                                                        | WIF-facing identity                     | Downstream authority                                                                                             |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Routine service deploy           | Existing `secrets.GCP_WORKLOAD_IDENTITY_PROVIDER` and `secrets.GCP_SERVICE_ACCOUNT`                    | `metrics-bridge-deployer`               | Direct service-deploy roles in the monitoring project; no `org-terraform` impersonation after cutover            |
-| Same-repo PR plan                | Existing plan selector                                                                                 | `metrics-bridge-plan-readonly`          | `org-terraform-plan-readonly` with read-only state access; no live-project roles                                 |
-| Trusted-`main` refresh and drift | `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`                                                           | `terraform-refresh-readonly`            | `org-terraform-refresh-readonly` with read-only state and explicitly granted live-resource reads; no write roles |
-| Production Terraform apply       | `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT` | Seed-project `production-infra-applier` | Service-account-scoped Token Creator on `org-terraform`, reachable only through the dedicated production pool    |
+| Lane                             | GitHub selector                                                                                          | WIF-facing identity                       | Downstream authority                                                                                             |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Routine service deploy           | Existing `secrets.GCP_WORKLOAD_IDENTITY_PROVIDER` and `secrets.GCP_SERVICE_ACCOUNT`                      | `metrics-bridge-deployer`                 | Direct service-deploy roles in the monitoring project; no `org-terraform` impersonation after cutover            |
+| Same-repo PR plan                | Existing plan selector                                                                                   | `metrics-bridge-plan-readonly`            | `org-terraform-plan-readonly` with read-only state access; no live-project roles                                 |
+| Trusted-`main` refresh and drift | `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER` and `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT` | Seed-project `terraform-refresh-readonly` | `org-terraform-refresh-readonly` with read-only state and explicitly granted live-resource reads; no write roles |
+| Production Terraform apply       | `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`   | Seed-project `production-infra-applier`   | Service-account-scoped Token Creator on `org-terraform`, reachable only through the dedicated production pool    |
 
-Both GitHub providers require the repository slug and GitHub's immutable
+All three GitHub providers require the repository slug and GitHub's immutable
 repository ID `1172025835`. The numeric ID prevents a renamed or deleted
 repository's old name from becoming a new trusted principal. Keeping the slug
 check as well ensures a transferred or renamed repository does not retain
@@ -65,9 +65,14 @@ four signed GitHub claims:
 - subject
   `repo:mento-protocol/monitoring-monorepo:environment:production-infra`.
 
-The apply-facing service account lives in the seed project. This prevents the
-routine deployer's monitoring-project `roles/iam.serviceAccountUser` grant
-from becoming another path to the production applier.
+The apply and refresh WIF-facing accounts live in the seed project. This keeps
+both outside the routine deployer's monitoring-project
+`roles/iam.serviceAccountUser` scope.
+
+The refresh provider also has its own `github-terraform-refresh` pool and
+accepts only protected-`main` tokens whose signed `workflow_ref` names one of
+the four Terraform apply workflows or `terraform-drift.yml`. Other `main`
+workflows cannot select the refresh identity through the generic pool.
 
 The trusted-`main` refresh chain remains read-only. Its backend plans use
 `-lock=false` because state-bucket `roles/storage.objectViewer` cannot create
@@ -107,15 +112,15 @@ separate PRs:
    variable context may predate the identity bootstrap.
 2. Run an explicitly approved local platform plan and apply. This creates the
    dedicated pool/provider, production applier, trusted-main refresh chain,
-   state access, and the three repository variables named above.
+   state access, and the four repository variables named above.
 3. Re-run the alerts-delivery and governance-watchdog `main` workflows, review
    their plans, and approve the live-read grant applies.
 4. Verify those runs and the new production apply authentication path. Keep
    the old routine-deployer Token Creator grant only as a temporary rollback
    path.
 5. Land a cutover-routing PR that routes trusted-`main` plans and scheduled
-   drift through `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. That PR retains
-   the old routine-deployer Token Creator rollback grant.
+   drift through both refresh variables. That PR retains the old
+   routine-deployer Token Creator rollback grant.
 6. Prove the curated role set through the checked-in `main` route. Complete a
    live full-refresh, unlocked plan (`-lock=false`, without `-refresh=false`)
    for every CI-managed Google-provider stack; the current set is
@@ -142,6 +147,40 @@ old routine-deployer impersonation path is gone, that deployer can still reach
 later reviewed change may create the project and bucket only after those gates
 pass.
 
+### Final apply-plan contract
+
+The current bootstrap keeps the existing apply mechanics: GitHub approves the
+`production-infra` Environment before the apply job starts, then
+`terraform apply -auto-approve` creates and applies a later plan. The operator
+can inspect the commit and earlier plan job before approval, but cannot inspect
+the blocked apply job's plan. This leaves a drift window between the earlier
+plan and the apply-time plan.
+
+The final contract will use one post-approval job for each protected stack:
+
+1. Run `terraform plan -out=<job-private path>` after authentication and
+   initialization.
+2. Evaluate `terraform show -json <plan>` with a fail-closed, pinned policy
+   engine. Emit only bounded policy decisions and sanitized Terraform output.
+3. Run `terraform apply <plan>` so Terraform applies the exact bytes that the
+   policy evaluated.
+4. Delete the binary plan and plan JSON in the job cleanup path. Never upload,
+   cache, or print either file.
+
+This gives machine evaluation of the exact applied plan without putting
+secret-bearing plan data in a broadly readable artifact. It does not claim
+human review of that exact plan: the one Environment approval still happens
+before the job starts. The smaller checker work in issue #1576 must implement
+this contract only after its plan policy has dual-run against every retained
+mutation and representative real plans for each managed root. Until then, keep
+the current apply path and its documented drift window.
+
+The alternative HCP Terraform or restricted saved-plan handoff plus a second
+approval would support human review of the exact applied plan. We are not
+choosing it while the repository has one maintainer because its second-person
+control is unavailable and its remote plan custody adds an operating system
+that the current stacks do not otherwise need.
+
 ## Alternatives considered
 
 - **Keep one write-capable deployer for service deploys, plans, and applies** —
@@ -155,6 +194,12 @@ pass.
 - **Create the peg-policy project in the bootstrap PR** — rejected because the
   legacy routine-deployer impersonation path would make the apparent project
   separation ineffective.
+- **Transfer saved plans through an artifact or KMS wrapper** — rejected because
+  plan files can contain sensitive values and a same-job policy/apply sequence
+  gives exact machine binding without a plan handoff.
+- **Use HCP Terraform for exact human plan review now** — rejected while there
+  is no second maintainer to provide the second approval and no other need for
+  a remote Terraform execution plane.
 
 ## Consequences
 
@@ -175,8 +220,13 @@ pass.
   protected-workflow shapes. It is not a sandbox against arbitrary HCL or
   application-source data flow, operator-supplied `-var`/`TF_VAR_*` values,
   deliberate registry changes, or a compromised provider/toolchain.
-  Protected-environment approval and review of the live Terraform plan remain
-  required.
+  Protected-environment approval acknowledges the commit and earlier plan; it
+  does not review the later apply-time plan. The final same-job contract adds
+  fail-closed machine policy over the exact plan before applying it.
+- [ADR 0029](0029-ci-apply-production-infra-gate.md) records the explicit
+  one-operator change-control risk acceptance. `CODEOWNERS`, independent PR
+  approval, latest-push approval, and disabled Environment self-review remain
+  deferred until a second active maintainer can satisfy those controls.
 - Adding a Terraform-managed project with a stricter data boundary remains a
   separate post-cutover decision and change.
 

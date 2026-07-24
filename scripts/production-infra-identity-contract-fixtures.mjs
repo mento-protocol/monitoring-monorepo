@@ -69,6 +69,28 @@ resource "google_iam_workload_identity_pool_provider" "github_production_infra" 
   }
 }
 
+resource "google_iam_workload_identity_pool" "github_terraform_refresh" {
+  project                   = google_project.monitoring.project_id
+  workload_identity_pool_id = "github-terraform-refresh"
+}
+
+resource "google_iam_workload_identity_pool_provider" "github_terraform_refresh" {
+  project                            = google_project.monitoring.project_id
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github_terraform_refresh.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  attribute_condition                = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\")"
+  attribute_mapping = {
+    "google.subject"          = "assertion.sub"
+    "attribute.repository"    = "assertion.repository"
+    "attribute.repository_id" = "assertion.repository_id"
+    "attribute.ref"           = "assertion.ref"
+    "attribute.workflow_ref"  = "assertion.workflow_ref"
+  }
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
 resource "google_service_account" "production_infra_applier" {
   project    = "mento-terraform-seed-ffac"
   account_id = "production-infra-applier"
@@ -93,14 +115,14 @@ resource "google_service_account_iam_member" "ci_alerts_org_terraform_token_crea
 }
 
 resource "google_service_account" "terraform_refresh_readonly" {
-  project    = google_project.monitoring.project_id
+  project    = "mento-terraform-seed-ffac"
   account_id = "terraform-refresh-readonly"
 }
 
 resource "google_service_account_iam_member" "terraform_refresh_readonly_wif_binding" {
   service_account_id = google_service_account.terraform_refresh_readonly.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/$\{google_iam_workload_identity_pool.github_actions.name}/attribute.ref/refs/heads/main"
+  member             = "principalSet://iam.googleapis.com/$\{google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.ref/refs/heads/main"
 }
 
 resource "google_service_account" "org_terraform_refresh_readonly" {
@@ -146,6 +168,17 @@ resource "github_actions_variable" "gcp_terraform_refresh_service_account" {
   repository    = "monitoring-monorepo"
   variable_name = "GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT"
   value         = google_service_account.terraform_refresh_readonly.email
+
+  depends_on = [
+    google_service_account_iam_member.terraform_refresh_readonly_wif_binding,
+    google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator,
+    google_storage_bucket_iam_member.state_bucket_refresh_readonly,
+  ]
+}
+resource "github_actions_variable" "gcp_terraform_refresh_workload_identity_provider" {
+  repository    = "monitoring-monorepo"
+  variable_name = "GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER"
+  value         = google_iam_workload_identity_pool_provider.github_terraform_refresh.name
 
   depends_on = [
     google_service_account_iam_member.terraform_refresh_readonly_wif_binding,

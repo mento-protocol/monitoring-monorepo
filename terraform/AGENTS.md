@@ -43,9 +43,10 @@ garden_lane: agent-entry-points
   [`ADR 0047`](../docs/adr/0047-separated-terraform-ci-identities.md). The
   IaC-owned workflow selectors are
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER`,
-  `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`, and
+  `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
+  `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
   `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The bootstrap must not route
-  workflows through the refresh selector; a separate cutover-routing PR owns
+  workflows through the refresh selectors; a separate cutover-routing PR owns
   that change while retaining the legacy Token Creator rollback grant.
 - Build trusted-main refresh access from curated non-basic project read roles;
   never use basic `roles/viewer`. Keep Secret Accessor limited to the exact

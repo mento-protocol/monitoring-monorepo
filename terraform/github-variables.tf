@@ -41,6 +41,18 @@ resource "github_actions_variable" "gcp_terraform_refresh_service_account" {
   ]
 }
 
+resource "github_actions_variable" "gcp_terraform_refresh_workload_identity_provider" {
+  repository    = "monitoring-monorepo"
+  variable_name = "GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER"
+  value         = google_iam_workload_identity_pool_provider.github_terraform_refresh.name
+
+  depends_on = [
+    google_service_account_iam_member.terraform_refresh_readonly_wif_binding,
+    google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator,
+    google_storage_bucket_iam_member.state_bucket_refresh_readonly,
+  ]
+}
+
 # Terraform-apply Slack channel routing
 # ───────────────────────────────────────
 #

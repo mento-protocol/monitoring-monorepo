@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validFixtureFiles } from "./production-infra-identity-contract-fixtures.mjs";
+import { REFRESH_PROVIDER_CONDITION } from "./production-infra-identity-contract-constants.mjs";
 import {
   assertProductionInfraIdentityContract,
   validateProductionInfraIdentityContract,
@@ -278,6 +279,10 @@ function runFixtureTests() {
     'attribute.repository == \\"mento-protocol/monitoring-monorepo\\" && attribute.repository_id == \\"1172025835\\"';
   const productionProviderCondition =
     'assertion.repository_id == \\"1172025835\\" && assertion.repository == \\"mento-protocol/monitoring-monorepo\\" && assertion.ref == \\"refs/heads/main\\" && assertion.sub == \\"repo:mento-protocol/monitoring-monorepo:environment:production-infra\\"';
+  const refreshProviderCondition = REFRESH_PROVIDER_CONDITION.replaceAll(
+    '"',
+    '\\"',
+  );
   assert.deepEqual(validateProductionInfraIdentityContract(validFiles), []);
   testOidcProviders(validFiles);
   testHeredocParsing(validFiles);
@@ -300,6 +305,19 @@ function runFixtureTests() {
     );
   }
 
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/ci-wif.tf",
+      refreshProviderCondition,
+      refreshProviderCondition.replace(
+        ' || assertion.workflow_ref == \\"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\\"',
+        "",
+      ),
+    ),
+    "refresh WIF provider: attribute_condition",
+  );
+
   for (const { condition, withoutRepositoryId, wrongRepositoryId, label } of [
     {
       condition: genericProviderCondition,
@@ -316,6 +334,18 @@ function runFixtureTests() {
       wrongRepositoryId:
         'assertion.repository_id == \\"999999999\\" && assertion.repository == \\"mento-protocol/monitoring-monorepo\\" && assertion.ref == \\"refs/heads/main\\" && assertion.sub == \\"repo:mento-protocol/monitoring-monorepo:environment:production-infra\\"',
       label: "production WIF provider",
+    },
+    {
+      condition: refreshProviderCondition,
+      withoutRepositoryId: refreshProviderCondition.replace(
+        'assertion.repository_id == \\"1172025835\\" && ',
+        "",
+      ),
+      wrongRepositoryId: refreshProviderCondition.replace(
+        'assertion.repository_id == \\"1172025835\\"',
+        'assertion.repository_id == \\"999999999\\"',
+      ),
+      label: "refresh WIF provider",
     },
   ]) {
     for (const weakenedCondition of [withoutRepositoryId, wrongRepositoryId]) {
@@ -336,6 +366,7 @@ function runFixtureTests() {
   for (const [occurrence, label] of [
     [0, "generic GitHub WIF provider"],
     [1, "production WIF provider"],
+    [2, "refresh WIF provider"],
   ]) {
     expectContractFailure(
       mutateFileOccurrence(
@@ -372,6 +403,15 @@ function runFixtureTests() {
     ),
     "generic GitHub WIF provider: attribute_mapping must be exactly",
   );
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/ci-wif.tf",
+      '    "attribute.workflow_ref"  = "assertion.workflow_ref"',
+      "",
+    ),
+    "refresh WIF provider: attribute_mapping must be exactly",
+  );
 
   expectContractFailure(
     {
@@ -395,6 +435,18 @@ resource "google_iam_workload_identity_pool_provider" "generic_bypass" {
 `,
     },
     "exactly one provider in the github-actions pool",
+  );
+
+  expectContractFailure(
+    {
+      ...validFiles,
+      "terraform/extra.tf": `
+resource "google_iam_workload_identity_pool_provider" "refresh_bypass" {
+  workload_identity_pool_id = google_iam_workload_identity_pool.github_terraform_refresh.workload_identity_pool_id
+}
+`,
+    },
+    "exactly one provider in the github-terraform-refresh pool",
   );
 
   expectContractFailure(
@@ -442,6 +494,22 @@ resource "google_service_account_iam_member" "refresh_can_write" {
   expectContractFailure(
     mutateFile(
       validFiles,
+      "terraform/ci-wif.tf",
+      `resource "google_service_account" "terraform_refresh_readonly" {
+  project    = "mento-terraform-seed-ffac"
+  account_id = "terraform-refresh-readonly"
+}`,
+      `resource "google_service_account" "terraform_refresh_readonly" {
+  project    = google_project.monitoring.project_id
+  account_id = "terraform-refresh-readonly"
+}`,
+    ),
+    "refresh WIF identity: project must be exactly",
+  );
+
+  expectContractFailure(
+    mutateFile(
+      validFiles,
       ".github/workflows/alerts-rules.yml",
       "      - name: Authenticate to Google Cloud\n        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093\n        with:\n          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}\n          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}",
       "      - name: Authenticate to Google Cloud\n        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093\n        with:\n          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}\n          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}\n      - uses: google-github-actions/auth@second",
@@ -473,6 +541,15 @@ resource "google_service_account_iam_member" "refresh_can_write" {
       ...validFiles,
       ".github/workflows/unlisted.yaml":
         "env:\n  BAD: ${{ vars['GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT'] }}\n",
+    },
+    "must not be used during bootstrap",
+  );
+
+  expectContractFailure(
+    {
+      ...validFiles,
+      ".github/workflows/unlisted-refresh-provider.yml":
+        "env:\n  BAD: ${{ vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER }}\n",
     },
     "must not be used during bootstrap",
   );

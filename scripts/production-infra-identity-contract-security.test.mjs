@@ -303,7 +303,7 @@ expectFailure(
     `resource "google_project_iam_member" "composed_refresh_admin" {
   project = google_project.monitoring.project_id
   role    = "roles/owner"
-  member  = format("serviceAccount:%s%s", "terraform-refresh-", "readonly@mento-monitoring.iam.gserviceaccount.com")
+  member  = format("serviceAccount:%s%s", "terraform-refresh-", "readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com")
 }
 `,
   ),
@@ -706,6 +706,26 @@ githubSecretCollisionFiles["terraform/github-secrets.tf"] =
   );
 expectFailure(
   githubSecretCollisionFiles,
+  "identity-bearing resource blocks must match its exact audited shape",
+);
+
+const defaultWorkflowPermissionWeakeningFiles = liveRepositoryFiles();
+const defaultWorkflowPermission = '  default_workflow_permissions     = "read"';
+assert(
+  defaultWorkflowPermissionWeakeningFiles[
+    "terraform/github-actions-permissions.tf"
+  ].includes(defaultWorkflowPermission),
+);
+defaultWorkflowPermissionWeakeningFiles[
+  "terraform/github-actions-permissions.tf"
+] = defaultWorkflowPermissionWeakeningFiles[
+  "terraform/github-actions-permissions.tf"
+].replace(
+  defaultWorkflowPermission,
+  '  default_workflow_permissions     = "write"',
+);
+expectFailure(
+  defaultWorkflowPermissionWeakeningFiles,
   "identity-bearing resource blocks must match its exact audited shape",
 );
 

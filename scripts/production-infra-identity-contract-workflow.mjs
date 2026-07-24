@@ -4,6 +4,7 @@ import {
   APPLY_WORKFLOWS,
   PRODUCTION_PROVIDER_VARIABLE,
   PRODUCTION_SERVICE_ACCOUNT_VARIABLE,
+  REFRESH_PROVIDER_VARIABLE,
   REFRESH_SERVICE_ACCOUNT_VARIABLE,
   SERVICE_AND_DRIFT_WORKFLOWS,
 } from "./production-infra-identity-contract-constants.mjs";
@@ -210,7 +211,7 @@ const PROTECTION_ENVIRONMENT = new Map([
   ["GITHUB_ENVIRONMENT_NAME", "production-infra"],
 ]);
 const CHECKOUT_ACTION_PATTERN = /^actions\/checkout@[0-9a-f]{40}$/u;
-const CHECKOUT_STEP_KEYS = new Set(["uses"]);
+const CHECKOUT_STEP_KEYS = new Set(["uses", "with"]);
 const PROTECTION_STEP_KEYS = new Set(["env", "name", "run"]);
 const AUTH_STEP_KEYS = new Set(["name", "uses", "with"]);
 
@@ -282,16 +283,27 @@ function hasExactSemanticAuthStep(step) {
 }
 
 function hasExactSourceCheckoutStep(parsedStep) {
-  if (parsedStep.malformed || parsedStep.properties.length !== 1) return false;
+  if (parsedStep.malformed || parsedStep.properties.length !== 2) return false;
   const [uses] = propertiesNamed(parsedStep, "uses");
-  return Boolean(uses && CHECKOUT_ACTION_PATTERN.test(uses.value));
+  const inputs = parseExactChildMapping(parsedStep, "with");
+  return Boolean(
+    uses &&
+    CHECKOUT_ACTION_PATTERN.test(uses.value) &&
+    inputs.valid &&
+    inputs.entries.length === 1 &&
+    inputs.entries[0].key === "persist-credentials" &&
+    inputs.entries[0].value === "false",
+  );
 }
 
 function hasExactSemanticCheckoutStep(step) {
   return (
     hasOnlyKeys(step, CHECKOUT_STEP_KEYS) &&
     typeof step.uses === "string" &&
-    CHECKOUT_ACTION_PATTERN.test(step.uses)
+    CHECKOUT_ACTION_PATTERN.test(step.uses) &&
+    isMapping(step.with) &&
+    Object.keys(step.with).length === 1 &&
+    step.with["persist-credentials"] === false
   );
 }
 
@@ -393,17 +405,22 @@ export function validateWorkflowContract(files, errors) {
     validateWorkflowInventory(workflowPath, parsedWorkflow, errors);
 
     const code = stripYamlComments(files[workflowPath]);
-    const decodedRefreshUses = decodedVariableOccurrenceCount(
-      parsedWorkflow,
+    for (const refreshVariable of [
+      REFRESH_PROVIDER_VARIABLE,
       REFRESH_SERVICE_ACCOUNT_VARIABLE,
-    );
-    if (
-      variableOccurrences(code, REFRESH_SERVICE_ACCOUNT_VARIABLE).length > 0 ||
-      decodedRefreshUses > 0
-    ) {
-      errors.push(
-        `${workflowPath}: vars.${REFRESH_SERVICE_ACCOUNT_VARIABLE} must not be used during bootstrap`,
+    ]) {
+      const decodedRefreshUses = decodedVariableOccurrenceCount(
+        parsedWorkflow,
+        refreshVariable,
       );
+      if (
+        variableOccurrences(code, refreshVariable).length > 0 ||
+        decodedRefreshUses > 0
+      ) {
+        errors.push(
+          `${workflowPath}: vars.${refreshVariable} must not be used during bootstrap`,
+        );
+      }
     }
 
     const providerUses = variableOccurrences(

@@ -47,10 +47,10 @@ name: Alerts Rules
 # TF_VAR_* env block here carries production Grafana/Slack/Splunk credentials
 # on push/dispatch and apply runs. PR plans intentionally use placeholders
 # instead. Uploading the binary plan as a workflow artifact would expose those
-# secrets to anyone with `actions:read`. Instead the apply job re-plans at
-# gate-approval time — the trade-off is the brief "between approval and apply"
-# drift window, which the reviewer can detect by checking the apply-job's plan
-# output before approving.
+# secrets to anyone with `actions:read`. The Environment gate approves the
+# commit and the earlier plan. The apply job starts only after approval, then
+# creates and applies a later plan, so the current path has a documented drift
+# window.
 #
 # Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
 # (matrix module `alerts-rules`). This workflow adds the plan diff comment +
@@ -246,7 +246,7 @@ jobs:
         # contact points can print provider state such as webhook URLs, so never
         # tee raw Terraform output to GitHub logs.
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
-        # (HashiCorp docs); apply re-plans at gate-approval time instead.
+        # (HashiCorp docs); apply creates a later plan after approval instead.
         # `-lock=false`: the read-only plan SA (objectViewer only) can't
         # create/delete the GCS lock object, so plan must skip locking. Safe
         # because plan only reads state and re-runs on every push; a skipped
@@ -546,6 +546,8 @@ jobs:
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Verify production-infra environment protection
         env:
@@ -572,9 +574,8 @@ jobs:
 
       - name: Apply
         id: apply
-        # Re-plans + applies in a single step. The reviewer at the
-        # production-infra environment gate should read this job's plan output
-        # before approving — it's the ground truth for what lands.
+        # The Environment gate has already approved the commit and earlier plan.
+        # This step creates and applies a later plan, then records what landed.
         # `-lock-timeout=10m`: apply must wait for any in-progress state
         # lock rather than failing the deploy.
         # `-no-color`: keep the output free of ANSI escapes so the apply

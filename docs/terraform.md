@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -89,145 +89,91 @@ See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-s
 for the exact placeholder and target boundaries.
 
 For a real `main` plan, the workflow posts a secretless Slack action summary
-before its apply waits for approval. `Terraform Deploy Queue Watch` warns when
-a production Terraform workflow has had no job start for at least 60 minutes;
-it observes only and never cancels or approves runs. Inspect the whole workflow
-queue: cancel a predecessor only after confirming it is obsolete; otherwise let
-its reconciliation finish. Approval given before the apply job existed may need
-repeating after the plan creates that job. Follow every queued `main` run to a
-terminal state because later runs can pass the gate without an obvious second
-prompt. Never close drift from the first successful apply alone: verify the live
-resource and dispatch `terraform-drift.yml` from `main`. Channel routing and
-notification boundaries live in
+before its apply waits for approval. GitHub evaluates Environment protection
+before starting the apply job, so the operator approves the commit and this
+earlier plan. The current apply job then creates and applies a later plan; its
+output was not available at approval time. Treat the gap as an explicit drift
+window.
+
+`Terraform Deploy Queue Watch` warns when a production Terraform workflow has
+had no job start for at least 60 minutes; it observes only and never cancels or
+approves runs. Inspect the whole workflow queue: cancel a predecessor only
+after confirming it is obsolete; otherwise let its reconciliation finish.
+Approval given before the apply job existed may need repeating after the plan
+creates that job. Follow every queued `main` run to a terminal state because
+later runs can pass the gate without an obvious second prompt. Never close
+drift from the first successful apply alone: verify the live resource and
+dispatch `terraform-drift.yml` from `main`. Channel routing and notification
+boundaries live in
 [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md).
 
 ## Terraform CI identities
 
-[ADR 0047](adr/0047-separated-terraform-ci-identities.md) defines four lanes.
-Bootstrap routes applies after its approved platform apply; routing later
-switches trusted-main refresh and drift; final removal follows live proof,
-queue drain, and IAM audit. Both WIF providers require the repository slug and
-immutable ID `1172025835`.
+[ADR 0047](adr/0047-separated-terraform-ci-identities.md) owns the four lanes:
+routine deploy, state-only same-repo PR plan, read-only trusted-`main` refresh,
+and Environment-bound production apply. All three WIF providers bind repository
+slug plus immutable ID `1172025835`; apply also binds protected `main` and the
+`production-infra` subject, while refresh binds an exact `workflow_ref`
+allowlist. The bootstrap must not route workflows through either refresh
+variable.
 
-- Routine deploy: general repository WIF → `metrics-bridge-deployer`. Final
-  removal leaves only monitoring-project deploy roles and no `org-terraform`
-  impersonation.
-- Same-repo PR plan: `metrics-bridge-plan-readonly` →
-  `org-terraform-plan-readonly`; unlocked state only, with no live-project
-  roles.
-- Trusted-main refresh: routing sends plans and drift through
-  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT` →
-  `org-terraform-refresh-readonly`; unlocked state, project/service metadata,
-  IAM policies, managed secrets, and function-source objects, with no writes or
-  PR access. Bootstrap workflows must not use this selector.
-- Apply: the two `GCP_PRODUCTION_INFRA_*` variables select a dedicated pool and
-  seed applier that can impersonate `org-terraform`. The pool requires ID
-  `1172025835`, repository slug, `refs/heads/main`, and the
-  `production-infra` environment subject.
+Trusted-main plans use `-lock=false` and curated non-basic readers. Never add
+basic `roles/viewer`; keep object and secret payload access limited to state,
+deployment-source objects, and managed secrets. After routing, prove
+alerts-delivery and governance-watchdog with live full-refresh plans and add
+only permissions named by provider failures.
 
-Alerts-delivery and governance-watchdog grant curated non-basic readers (core:
-`roles/browser`, `roles/iam.securityReviewer`, and
-`roles/storage.bucketViewer`) plus exact Secret Accessor on managed secrets and
-Storage Object Viewer on function-source buckets. Never use basic
-`roles/viewer`: its `projectViewer` convenience group grants legacy object
-reads on uniform-bucket-level-access buckets. Replay, rotation-state, and log
-objects remain excluded. Service readers still expose project-wide logs,
-metrics, and Artifact Registry contents; this accepted confidentiality cost
-enables faithful refresh without mutation authority.
-
-Read-only plans pass `-lock=false`: state-bucket
-`roles/storage.objectViewer` cannot create or delete the GCS lock object.
-
-Validation cannot prove live refresh. After routing lands, use its checked-in
-trusted-main path for a live full-refresh, unlocked plan (`-lock=false`, without
-`-refresh=false`) of every CI-managed Google-provider stack: currently
-`alerts-delivery` and `governance-watchdog`. Add only the permission named by a
-provider denial, never a basic role. Confirm that object-payload access remains
-limited to state and deployment-source buckets and managed secrets.
+ADR 0047 also selects the final no-artifact apply contract: make a private plan
+after approval, run fail-closed policy over its JSON, then apply those exact
+bytes. Issue #1576 owns the dual-run migration. Until it lands, the current
+apply-time re-plan and drift window remain in force.
 
 ## Identity bootstrap, routing cutover, and authority removal
 
-Use this order for the identity bootstrap, routing cutover, and final authority
-removal:
+Follow ADR 0047's full procedure:
 
-1. Merge the PR, then cancel every infrastructure apply queued by that merge.
-   Do not approve or reuse runs whose variable context may predate bootstrap.
-2. From clean current `main`, review `pnpm infra:plan`, obtain explicit
-   approval, and apply locally. This creates the dedicated production
-   pool/provider, seed-project applier, refresh chain, state access, and three
-   repository variables below.
-3. Re-run alerts-delivery and governance-watchdog on `main`; review and approve
-   their live-read-grant applies.
-4. Verify the new apply-auth path and bootstrap grants. Keep the routine
-   deployer's Token Creator binding temporarily for rollback.
-5. Land a separate routing PR for trusted-main plans and scheduled drift using
-   `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`; retain the rollback grant.
-6. Run the live unlocked proof above through that checked-in `main` route for
-   every CI-managed Google-provider stack. Cancel superseded runs, drain all
-   pre-routing and proof runs, and audit refresh grants and both apply paths.
-7. After step 6 succeeds, land a final PR deleting the routine deployer's
-   `org-terraform` Token Creator grant. Cancel superseded runs and drain all
-   infrastructure runs. From clean current `main`, review `pnpm infra:plan`,
-   obtain explicit approval, and apply locally. Audit final WIF and
-   service-account IAM bindings.
+1. Merge the bootstrap, cancel its queued infrastructure applies, then review
+   and explicitly approve a local platform plan/apply from clean current
+   `main`.
+2. Re-run alerts-delivery and governance-watchdog, verify the new apply path,
+   and retain the routine-deployer Token Creator grant for rollback.
+3. Land the separate refresh-routing PR, run the live plans above, drain every
+   old/proof run, and audit both paths.
+4. Only then land and explicitly apply the final legacy-authority removal.
 
-Do not create a peg-policy GCP project or bucket until step 7 is applied, all
-runs drain, and the IAM audit confirms the legacy path is gone. Until then, the
-routine deployer can inherit `org-terraform` authority in a new project and
-defeat its isolation. Create those resources only in a later reviewed change.
+Do not create the peg-policy project or bucket until step 4 is applied, all
+runs drain, and the IAM audit proves the legacy path is gone.
 
 ## Platform GitHub Actions secrets and variables
 
 The manual-apply platform stack owns repository Actions mirrors in
-`terraform/github-secrets.tf` and `terraform/github-variables.tf`; values come
-from platform resources or operator-held tfvars. Optional mirrors are
-`count`-gated, so clearing an input can plan deletion. Review every planned
-secret deletion: only `CLAUDE_CODE_OAUTH_TOKEN` currently has
-`prevent_destroy`.
-
-The platform stack owns these non-secret Terraform identity selectors:
-
-- `GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER`;
-- `GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`;
-- `GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`.
-
-Workflows read them through the `vars` context. Do not replace them with
-manually populated secrets or rename one side without updating every workflow,
-Terraform resource, output, regression check, and this runbook in the same PR.
-Bootstrap writes `GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`, but only the later
-routing PR may use it for trusted-main plans and scheduled drift.
-
-The Sentry triage, projection, autofix, and archive credentials and their three
-kill switches are routed by
-[`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md). Keep
-that runbook and the Terraform resources aligned rather than duplicating the
-full inventory here.
+`terraform/github-secrets.tf` and `terraform/github-variables.tf`. Clearing an
+optional input can plan deletion; inspect each one. It also owns
+`GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER`,
+`GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
+`GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
+`GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. Workflows read these as `vars`; never
+replace them with manual secrets or use the refresh selectors before routing.
+Only `CLAUDE_CODE_OAUTH_TOKEN` currently has `prevent_destroy`; inspect every
+planned mirror deletion.
+Sentry credential routing lives in
+[`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md).
 
 ## GitHub Environments
 
-Keep exactly two production GitHub Environments for this repository:
+Keep two production Environments. `production-infra` has a required reviewer,
+self-review allowed, admin bypass disabled, and protected-branch deployment; its
+workflows verify that state before cloud auth. With one maintainer this is
+operator acknowledgement, not independent or exact-plan review. [ADR
+0029](adr/0029-ci-apply-production-infra-gate.md) records the decision against a
+same-owner `CODEOWNERS` gate; revisit PR approval, latest-push approval, and
+disabled Environment self-review when a second active maintainer exists.
 
-- `production-infra`: used by Terraform apply jobs in `alerts-infra.yml`,
-  `alerts-rules.yml`, `aegis-terraform.yml`, and `governance-watchdog.yml`.
-  It must have required reviewers, self-review allowed for the required
-  reviewer, administrator bypass disabled, and deployment branches limited to
-  protected `main`. Terraform apply workflows verify this before cloud
-  authentication and fail closed if protection drifts. Their dedicated WIF
-  provider also requires the signed `production-infra` environment subject,
-  immutable repository ID `1172025835`, expected repository slug, and protected
-  `main` ref.
-- `production-services`: used by routine service deploy jobs such as
-  `metrics-bridge.yml` and `aegis-app-engine.yml`. Limit deployment branches to
-  protected `main`, but leave required reviewers unset by default so green
-  `main` deploys do not require an extra human approval.
-
-Do not recreate the retired `Production`/`production` environments. GitHub can
-auto-create an unprotected environment for a new workflow reference, so review
-and create any future environment protection before merging that reference.
-
-Never move or recreate environment secrets with CLI commands. Use the owning
-IaC or documented owning integration; if neither exists, stop and establish an
-IaC path before changing the secret.
+`production-services` records routine deploys from protected `main` without a
+reviewer. Never recreate retired `Production`/`production` names or manage
+Environment secrets outside their owning IaC/integration path. A new workflow
+reference can auto-create an unprotected Environment, so establish its
+protection before merging the reference.
 
 ## Grafana Alert Ownership
 

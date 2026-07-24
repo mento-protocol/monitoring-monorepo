@@ -30,6 +30,12 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       '"principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.ref/refs/heads/main"',
     blocks: [
       "terraform/ci-wif.tf:google_service_account_iam_member.deployer_wif_binding",
+    ],
+  },
+  {
+    expression:
+      '"principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.ref/refs/heads/main"',
+    blocks: [
       "terraform/ci-wif.tf:google_service_account_iam_member.terraform_refresh_readonly_wif_binding",
     ],
   },
@@ -260,7 +266,7 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/ci-wif.tf:google_service_account_iam_member.plan_readonly_wif_binding|c9a6cbe51dba7d93657c8452632749d9565d1b1c6a17eee214ea936b4ef66c63",
   "terraform/ci-wif.tf:google_service_account_iam_member.production_infra_applier_org_terraform_token_creator|9e881005142ca12c27f535de78917f7d6adf29adcf693bf1791a5a71b628a0a6",
   "terraform/ci-wif.tf:google_service_account_iam_member.production_infra_applier_wif_binding|579a866f0b22a52d882c5a4b5782d3f4777e5ed3da4447632e531eee1bc9a446",
-  "terraform/ci-wif.tf:google_service_account_iam_member.terraform_refresh_readonly_wif_binding|295363490279531f19cd64a7433778e3a9d3d98fcb3e74755441891b24e534f3",
+  "terraform/ci-wif.tf:google_service_account_iam_member.terraform_refresh_readonly_wif_binding|a10d7bdebc3992fb450224b6850e35b442c174bc629d63826a39c89d29ebcb09",
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_plan_readonly|14bfbae95fdd8cf89f98a71d6b0ff755e291f25ed5d946d633614813734e4ac5",
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_refresh_readonly|f6756d526277862e2378cd24b6605b16725030c636d67e8a483411435ad6998f",
   "terraform/gcp-project.tf:google_project_iam_member.terraform_owner|3280f80f6f5a6293d453a3d550eeeab7a818dbb8d313160fac41df4753012d4a",
@@ -297,7 +303,7 @@ const IDENTITY_SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/ci-wif.tf:google_service_account.org_terraform_plan_readonly|f8085c49ff045f8b86710a39f32df57a597725a83997c589e3bd48e6ce406dc1",
   "terraform/ci-wif.tf:google_service_account.org_terraform_refresh_readonly|67d108a7649109cdeb3cd63eabd144d5623049b5e848543d611b694c1efb3684,8a129ed148c03bbf7a5b1c2e1e81b977e3a37bd0e09124d9e24c9e51c1a1894a",
   "terraform/ci-wif.tf:google_service_account.production_infra_applier|02bb20c0c7f7c5550ff341f77f85dcfa00cd0b4615936eb6a1e18ea6923c11d5,53ab416891c6eeba7ad063fd45341139fba6a8e7d341a5e45242b7be76f08e1f",
-  "terraform/ci-wif.tf:google_service_account.terraform_refresh_readonly|377a86d9eb82f0b07d33dec55c18617ba5ba25ad70f98fa55969f0c4ce5531a9,722c60b5aabf75141b6974fd3f2404166da2d76b6ba36ab87b410bba6447a9fe",
+  "terraform/ci-wif.tf:google_service_account.terraform_refresh_readonly|c51792f5180d455dd87e9acbea26fa08a50b24a91bc4e4a93e01149f80007b66,73b3810af667664ebddf1aa217846be5cffe9340970a7d0a53d3d4e7a4fb2b05",
 ];
 
 function buildExpectedMemberExpressions() {

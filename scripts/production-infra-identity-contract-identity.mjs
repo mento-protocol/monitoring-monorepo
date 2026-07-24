@@ -3,6 +3,7 @@ import {
   PRODUCTION_PROVIDER_VARIABLE,
   PRODUCTION_SERVICE_ACCOUNT_VARIABLE,
   PRODUCTION_SUBJECT,
+  REFRESH_PROVIDER_VARIABLE,
   REFRESH_SERVICE_ACCOUNT_VARIABLE,
   SEED_PROJECT_ID,
 } from "./production-infra-identity-contract-constants.mjs";
@@ -28,6 +29,7 @@ import {
 const EXPECTED_PROVIDER_BLOCKS = new Set([
   "terraform/ci-wif.tf:google_iam_workload_identity_pool_provider.github",
   "terraform/ci-wif.tf:google_iam_workload_identity_pool_provider.github_production_infra",
+  "terraform/ci-wif.tf:google_iam_workload_identity_pool_provider.github_terraform_refresh",
 ]);
 
 const IDENTITY_REFERENCE_SPECIFICATIONS = [
@@ -83,7 +85,7 @@ export function validateProviderInventory(blocks, errors) {
     .map(blockKey);
   if (!sameSortedValues(actual, [...EXPECTED_PROVIDER_BLOCKS])) {
     errors.push(
-      "terraform: workload identity provider inventory must contain exactly the generic and production providers in terraform/ci-wif.tf",
+      "terraform: workload identity provider inventory must contain exactly the generic, production, and refresh providers in terraform/ci-wif.tf",
     );
   }
 }
@@ -176,7 +178,19 @@ export function validateIdentityReferenceInventory(
 
 export function validateProvider(
   blocks,
-  { poolName, poolId, providerName, providerCondition, conditionLabel },
+  {
+    poolName,
+    poolId,
+    providerName,
+    providerCondition,
+    conditionLabel,
+    attributeMapping = {
+      "google.subject": "assertion.sub",
+      "attribute.repository": "assertion.repository",
+      "attribute.repository_id": "assertion.repository_id",
+      "attribute.ref": "assertion.ref",
+    },
+  },
   errors,
 ) {
   const filePath = "terraform/ci-wif.tf";
@@ -250,12 +264,7 @@ export function validateProvider(
     expectExactStringMap(
       provider,
       "attribute_mapping",
-      {
-        "google.subject": "assertion.sub",
-        "attribute.repository": "assertion.repository",
-        "attribute.repository_id": "assertion.repository_id",
-        "attribute.ref": "assertion.ref",
-      },
+      attributeMapping,
       errors,
       conditionLabel,
     );
@@ -327,6 +336,17 @@ export function validateGithubVariables(blocks, errors) {
       dependencies: [
         "google_service_account_iam_member.production_infra_applier_wif_binding",
         "google_service_account_iam_member.production_infra_applier_org_terraform_token_creator",
+      ],
+    },
+    {
+      name: "gcp_terraform_refresh_workload_identity_provider",
+      variable: REFRESH_PROVIDER_VARIABLE,
+      value:
+        "google_iam_workload_identity_pool_provider.github_terraform_refresh.name",
+      dependencies: [
+        "google_service_account_iam_member.terraform_refresh_readonly_wif_binding",
+        "google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator",
+        "google_storage_bucket_iam_member.state_bucket_refresh_readonly",
       ],
     },
     {
