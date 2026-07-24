@@ -69,8 +69,9 @@ function LoadingSources(): React.JSX.Element {
             {LOADING_SOURCE_EVIDENCE_KEYS.map((key) => (
               <div
                 key={`${sourceKey}-${key}`}
-                // Converted source policy can wrap its provenance detail to an extra line.
-                className={`${sourceKey === "kraken-usd" && key === "al" ? "h-26" : "h-20"} animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40`}
+                // The converted source policy carries both the listing threshold
+                // and conversion provenance, which occupy two extra lines.
+                className={`${sourceKey === "kraken-usd" && key === "al" ? "h-32" : "h-20"} animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40`}
               />
             ))}
           </div>
