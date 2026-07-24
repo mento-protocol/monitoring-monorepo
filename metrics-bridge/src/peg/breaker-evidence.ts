@@ -38,10 +38,16 @@ function selectedConfig(
       !config.breaker.removed && config.breaker.kind !== "MARKET_HOURS",
   );
   if (available.length === 0) return null;
-  if (available.length !== 1) {
+
+  const enabled = available.filter((config) => config.enabled);
+  if (enabled.length === 1) return enabled[0]!;
+  if (enabled.length > 1) {
     throw new Error("breaker state is ambiguous for the monitored rate feed");
   }
-  return available[0]!;
+
+  const disabled = available.filter((config) => !config.enabled);
+  if (disabled.length === 1) return disabled[0]!;
+  throw new Error("breaker state is ambiguous for the monitored rate feed");
 }
 
 export function resolvePegBreakerEvidence(

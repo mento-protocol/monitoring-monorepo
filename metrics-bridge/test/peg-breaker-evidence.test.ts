@@ -43,7 +43,42 @@ describe("peg breaker evidence", () => {
     ).toBe("25000000000000000000000");
   });
 
-  it("keeps absent, ambiguous, and saturated breaker evidence unavailable", () => {
+  it("prefers one enabled breaker over disabled rows", () => {
+    const result = resolvePegBreakerEvidence([
+      config({
+        id: "disabled",
+        enabled: false,
+        status: "OK",
+      }),
+      config({
+        id: "enabled-tripped",
+        enabled: true,
+        status: "TRIPPED",
+      }),
+    ]);
+
+    expect(result).toEqual({
+      breaker: expect.objectContaining({
+        id: "enabled-tripped",
+        enabled: true,
+        status: "TRIPPED",
+      }),
+      error: null,
+    });
+  });
+
+  it("keeps a sole disabled breaker distinct from absent evidence", () => {
+    expect(resolvePegBreakerEvidence([])).toEqual({
+      breaker: null,
+      error: null,
+    });
+    expect(resolvePegBreakerEvidence([config({ enabled: false })])).toEqual({
+      breaker: expect.objectContaining({ enabled: false }),
+      error: null,
+    });
+  });
+
+  it("keeps ambiguous and saturated breaker evidence unavailable", () => {
     expect(resolvePegBreakerEvidence([])).toEqual({
       breaker: null,
       error: null,
@@ -51,6 +86,12 @@ describe("peg breaker evidence", () => {
     expect(
       resolvePegBreakerEvidence([config(), config({ id: "other" })]).error
         ?.message,
+    ).toMatch(/ambiguous/);
+    expect(
+      resolvePegBreakerEvidence([
+        config({ id: "disabled-one", enabled: false }),
+        config({ id: "disabled-two", enabled: false }),
+      ]).error?.message,
     ).toMatch(/ambiguous/);
     expect(
       resolvePegBreakerEvidence(
