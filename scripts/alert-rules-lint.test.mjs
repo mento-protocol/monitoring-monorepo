@@ -259,6 +259,31 @@ EOT
   );
 });
 
+test("extractExpressions parses scoped map-comprehension format templates", () => {
+  const fixture = stripComments(`
+locals {
+  peg_active_deviation_promql = {
+    for source_id, source in local.sources : source_id => format(
+      "mento_peg_deviation_bps > %g",
+      source.threshold,
+    )
+  }
+}
+`);
+  const [expression] = extractExpressions("rules-peg.tf", fixture);
+  assert(expression !== undefined, "expected map format expression");
+  assert(
+    expression.kind === "map-format" &&
+      expression.pegRule?.kind === "decision" &&
+      expression.pegRule.policy === "active",
+    `expected active map scope, got ${JSON.stringify(expression)}`,
+  );
+  assert(
+    lintPromql(neutralize(expression.expr)) === null,
+    `expected extracted map expression to parse: ${expression.expr}`,
+  );
+});
+
 test("extractExpressions parses rendered join() syntax", () => {
   const fixture = stripComments(`
 data {
@@ -735,6 +760,235 @@ test("peg PromQL accepts only the approved policy-derived interpolation", () => 
   );
 });
 
+test("peg PromQL requires exact dormant previous selectors before rollover", () => {
+  const dormantPrevious = (expr) => [
+    {
+      file: "rules-peg.tf",
+      kind: "format",
+      expr,
+      pegRule: { kind: "decision", policy: "previous" },
+    },
+  ];
+  const versions = { active: "europ-v2", previous: null };
+  const failures = validatePegPromqlExpressions(
+    dormantPrevious(
+      'mento_peg_deviation_bps{policy_version="${local.peg_previous_policy_version}"} > 25',
+    ),
+    versions,
+  );
+  assert(
+    failures.length === 0,
+    `expected dormant previous template to pass: ${failures.join("\n")}`,
+  );
+
+  for (const [name, expr, expectedFailure] of [
+    [
+      "missing selector",
+      "mento_peg_deviation_bps > 25",
+      "missing a policy_version selector",
+    ],
+    [
+      "missing matcher",
+      'mento_peg_deviation_bps{asset="europ"} > 25',
+      "missing a policy_version matcher",
+    ],
+    [
+      "negative matcher",
+      'mento_peg_deviation_bps{policy_version!="${local.peg_previous_policy_version}"} > 25',
+      "negative matcher",
+    ],
+    [
+      "wildcard matcher",
+      'mento_peg_deviation_bps{policy_version=~".*"} > 25',
+      "must equal previous policy local",
+    ],
+    [
+      "regex local matcher",
+      'mento_peg_deviation_bps{policy_version=~"${local.peg_previous_policy_version}"} > 25',
+      "must equal previous policy local",
+    ],
+    [
+      "literal matcher",
+      'mento_peg_deviation_bps{policy_version="europ-v1"} > 25',
+      "must equal previous policy local",
+    ],
+  ]) {
+    const rejected = validatePegPromqlExpressions(
+      dormantPrevious(expr),
+      versions,
+    );
+    assert(
+      rejected.some((failure) => failure.includes(expectedFailure)),
+      `expected dormant previous ${name} to fail: ${rejected.join("\n")}`,
+    );
+  }
+});
+
+test("committed peg rules preserve coverage, rollover, and routing invariants", () => {
+  const source = [
+    "peg-policy-locals.tf",
+    "peg-promql-active.tf",
+    "peg-promql-previous.tf",
+    "peg-rule-definitions.tf",
+    "rules-peg.tf",
+  ]
+    .map((file) =>
+      readFileSync(path.resolve(__dirname, "..", "alerts/rules", file), "utf8"),
+    )
+    .join("\n");
+  const contacts = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/peg-contact-points.tf"),
+    "utf8",
+  );
+  const templates = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/peg-message-templates.tf"),
+    "utf8",
+  );
+
+  assert(
+    source.includes("increase(mento_peg_poll_success_total") &&
+      source.includes("increase(mento_peg_usable_decision_total") &&
+      source.includes("ceil(item.asset.warnSustainSeconds") &&
+      source.includes("ceil(item.asset.criticalSustainSeconds") &&
+      !source.includes("count_over_time(mento_peg_deviation_bps") &&
+      !source.includes("count_over_time(mento_peg_source_healthy"),
+    "duration rules must require both counters at a whole-decision coverage floor",
+  );
+  assert(
+    source.includes("== bool 0 or absent(mento_peg_source_healthy") &&
+      source.includes(
+        "item.asset.criticalDeviationBps + item.source.conversionErrorBps",
+      ) &&
+      source.includes(
+        "item.asset.premiumWarnBps + item.source.conversionErrorBps",
+      ) &&
+      !source.includes("Critical Path Unreachable"),
+    "health comparisons, conversion error bands, and the Phase 4 boundary must stay explicit",
+  );
+  for (const policy of ["active", "previous"]) {
+    const policyVersion = `\${local.peg_${policy}_policy_version}`;
+    const sourceUnhealthy =
+      `(mento_peg_source_healthy{asset=\\"%s\\",source=\\"%s\\",policy_version=\\"${policyVersion}\\"} == bool 0 ` +
+      `or absent(mento_peg_source_healthy{asset=\\"%s\\",source=\\"%s\\",policy_version=\\"${policyVersion}\\"})) ` +
+      `and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${policyVersion}\\"} <= %d)`;
+    assert(
+      source.includes(sourceUnhealthy),
+      `${policy} source health must fail closed for an absent exact source while the exact asset heartbeat is fresh`,
+    );
+
+    const failures = validatePegPromqlExpressions(
+      [
+        {
+          file: `peg-promql-${policy}.tf`,
+          kind: "format",
+          expr: sourceUnhealthy.replaceAll('\\"', '"'),
+          pegRule: { kind: "decision", policy },
+        },
+      ],
+      { active: "europ-v2", previous: "europ-v1" },
+    );
+    assert(
+      failures.length === 0,
+      `${policy} absent source-health fallback must retain exact policy scoping: ${failures.join("\\n")}`,
+    );
+  }
+  assert(
+    source.includes(
+      'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} <= %d)',
+    ) &&
+      source.includes(
+        'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} <= %d)',
+      ) &&
+      source.includes("asset.blindConsecutivePolls") &&
+      !source.includes(
+        "blindConsecutivePolls * asset.sources[asset.deepVenueSource].pollIntervalSeconds",
+      ) &&
+      source.includes(
+        'max_over_time(mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"}[%ds]) > bool %d',
+      ) &&
+      source.includes(
+        'max_over_time(mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"}[%ds]) > bool %d',
+      ),
+    "blindness must use the producer-side consecutive-poll count while heartbeat remains fail-closed",
+  );
+  assert(
+    source.includes(
+      'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} <= %d) and on(asset,policy_version) ((mento_peg_structural_saturation{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= %g and on(asset,policy_version) mento_peg_indexed_pool_reachable{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} == 1) or (mento_peg_spread_bps',
+    ) &&
+      source.includes(
+        'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} <= %d) and on(asset,policy_version) ((mento_peg_structural_saturation{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} >= %g and on(asset,policy_version) mento_peg_indexed_pool_reachable{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} == 1) or (mento_peg_spread_bps',
+      ) &&
+      !source.includes("mento_peg_blind{"),
+    "blind-while-stressed must gate only structural saturation on pool reachability so market stress remains independently page-capable",
+  );
+  assert(
+    source.includes("mento_peg_filled_fraction") &&
+      (source.match(/\} \* 100 or on\(\) vector\(-1\)/g) ?? []).length === 4 &&
+      !source.includes("(mul $values.Fill.Value") &&
+      !source.includes("(mul $values.Structural.Value"),
+    "annotation percentages must be scaled in PromQL because Grafana annotation templates do not expose Sprig math",
+  );
+  assert(
+    source.includes(
+      'name               = "Peg Blind Warning [${asset_id} · active]"',
+    ) &&
+      /active-blind-\$\{asset_id\}[\s\S]{0,400}no_data_state\s+=\s+"Alerting"/.test(
+        source,
+      ) &&
+      /active-blind-stressed-\$\{asset_id\}[\s\S]{0,400}no_data_state\s+=\s+"OK"/.test(
+        source,
+      ) &&
+      /previous-blind-\$\{asset_id\}[\s\S]{0,400}no_data_state\s+=\s+"OK"/.test(
+        source,
+      ),
+    "only active blind producer absence should fail closed through NoData",
+  );
+  assert(
+    source.includes(
+      "peg_rollover_rule_definitions = local.peg_previous_policy == null ? {} : {",
+    ),
+    "rollover-stuck rule must exist only while a previous policy is retained",
+  );
+  assert(
+    !/peg_previous_[a-z0-9_]+_(?:promql|expr)[\s\S]{0,300}unless\s+mento_peg_policy_version/.test(
+      source,
+    ),
+    "previous decisions must not stop at the first active-policy ACK",
+  );
+  assert(
+    source.includes("for_each = local.peg_rule_definitions") &&
+      source.includes('name             = "Peg Monitoring"') &&
+      source.includes("notification_settings {") &&
+      contacts.includes("grafana_contact_point.peg_page.name") &&
+      contacts.includes("victorops {") &&
+      contacts.includes("var.slack_channel_critical") &&
+      contacts.includes(
+        '["alertname", "grafana_folder", "asset", "source", "policy_version"]',
+      ) &&
+      templates.includes('{{ define "peg.slack.title"') &&
+      templates.includes('{{ define "peg.slack.message"') &&
+      templates.includes('{{ define "peg.victorops.title"') &&
+      templates.includes('{{ define "peg.victorops.message"') &&
+      templates.includes("range .Alerts.Firing") &&
+      templates.includes("range .Alerts.Resolved") &&
+      templates.includes("EXECUTABLE PRICE:") &&
+      templates.includes("DOWNSIDE DEVIATION:") &&
+      templates.includes("EXECUTABLE FILL:") &&
+      templates.includes("SPREAD:") &&
+      templates.includes("STRUCTURAL SATURATION:") &&
+      source.includes('ref_id         = "Spread"') &&
+      source.includes(
+        "try(coalesce(rule.value.spread_expr, local.peg_empty_context_promql), local.peg_empty_context_promql)",
+      ) &&
+      contacts.includes("grafana_message_template.peg_victorops_message"),
+    "peg rules must route a complete decision package with a safe spread fallback for absent or null expressions",
+  );
+  assert(
+    !source.includes("mute_timing") && !contacts.includes("mute_timing"),
+    "peg decisions must not inherit the FX weekend mute",
+  );
+});
+
 test("peg PromQL ACK and rollover-stuck rules bind only exact active", () => {
   const failures = validatePegPromqlExpressions(
     [
@@ -771,22 +1025,31 @@ test("peg PromQL ACK and rollover-stuck rules bind only exact active", () => {
   }
 });
 
-test("previous decision may gate on exact active ACK", () => {
-  const failures = validatePegPromqlExpressions(
-    [
-      {
-        file: "rules-peg.tf",
-        kind: "single",
-        expr: 'mento_peg_deviation_bps{policy_version="europ-v1"} > 25 unless mento_peg_policy_version{policy_version="europ-v2"}',
-        pegRule: { kind: "decision", policy: "previous" },
-      },
-    ],
+test("previous decisions cannot terminate on the active ACK", () => {
+  for (const versions of [
     { active: "europ-v2", previous: "europ-v1" },
-  );
-  assert(
-    failures.length === 0,
-    `expected previous decision plus active ACK gate to pass: ${failures.join("\n")}`,
-  );
+    { active: "europ-v2", previous: null },
+  ]) {
+    const failures = validatePegPromqlExpressions(
+      [
+        {
+          file: "rules-peg.tf",
+          kind: "single",
+          expr: 'mento_peg_deviation_bps{policy_version="${local.peg_previous_policy_version}"} > 25 unless mento_peg_policy_version{policy_version="${local.peg_active_policy_version}"}',
+          pegRule: { kind: "decision", policy: "previous" },
+        },
+      ],
+      versions,
+    );
+    assert(
+      failures.some((failure) =>
+        failure.includes(
+          "previous decision rules must not depend on mento_peg_policy_version",
+        ),
+      ),
+      `expected previous decision plus active ACK gate to fail: ${failures.join("\n")}`,
+    );
+  }
 });
 
 test("CLI passes against the real repository", () => {
