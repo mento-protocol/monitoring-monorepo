@@ -145,7 +145,7 @@ test("intercepts peg monitoring, retains stale evidence, and keeps loading geome
     page.getByRole("link", { name: /Open Peg Monitoring/ }),
   ).toHaveAttribute("rel", /noopener/);
   await expect(
-    page.getByRole("link", { name: "Peg monitoring" }),
+    page.getByRole("link", { name: "Peg monitoring", exact: true }),
   ).toBeVisible();
   await page.clock.runFor(30_000);
   await expect(page.getByText("Stale — last confirmed package.")).toBeVisible();
