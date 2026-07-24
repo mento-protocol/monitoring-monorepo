@@ -54,6 +54,73 @@ function Header(): React.JSX.Element {
     </header>
   );
 }
+const LOADING_MONITOR_KEYS = ["t", "u", "v", "w", "x", "y", "z", "aa", "ab"];
+const LOADING_SOURCE_KEYS = ["bitvavo-eur", "kraken-eur", "kraken-usd"];
+const LOADING_SOURCE_EVIDENCE_KEYS = [
+  "ac",
+  "ad",
+  "ae",
+  "af",
+  "ag",
+  "ah",
+  "ai",
+  "aj",
+  "ak",
+  "al",
+];
+function LoadingMonitors(): React.JSX.Element {
+  return (
+    <section data-testid="peg-skeleton-monitors" className="space-y-3">
+      <div className="h-5 w-48 animate-pulse rounded bg-slate-800" />
+      <article className="space-y-4 rounded-lg border border-slate-800 bg-slate-950/35 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-2">
+            <div className="h-4 w-16 animate-pulse rounded bg-slate-800" />
+            <div className="h-5 w-36 animate-pulse rounded bg-slate-800" />
+          </div>
+          <div className="h-7 w-24 animate-pulse rounded-full bg-slate-800" />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {LOADING_MONITOR_KEYS.map((key) => (
+            <div
+              key={key}
+              className={`${key === "ab" ? "h-16" : "h-24"} animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40`}
+            />
+          ))}
+        </div>
+      </article>
+    </section>
+  );
+}
+function LoadingSources(): React.JSX.Element {
+  return (
+    <section data-testid="peg-skeleton-sources" className="space-y-3">
+      <div className="h-5 w-44 animate-pulse rounded bg-slate-800" />
+      {LOADING_SOURCE_KEYS.map((sourceKey) => (
+        <article
+          key={sourceKey}
+          className="space-y-4 rounded-lg border border-slate-800 bg-slate-950/35 p-4"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-2">
+              <div className="h-5 w-40 animate-pulse rounded bg-slate-800" />
+              <div className="h-4 w-52 animate-pulse rounded bg-slate-800" />
+            </div>
+            <div className="h-7 w-44 animate-pulse rounded-full bg-slate-800" />
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {LOADING_SOURCE_EVIDENCE_KEYS.map((key) => (
+              <div
+                key={`${sourceKey}-${key}`}
+                className="h-20 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
+              />
+            ))}
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
 function Loading(): React.JSX.Element {
   return (
     <section aria-label="Loading peg monitoring" className="space-y-6">
@@ -104,62 +171,8 @@ function Loading(): React.JSX.Element {
             ))}
           </div>
         </section>
-        <section data-testid="peg-skeleton-monitors" className="space-y-3">
-          <div className="h-5 w-48 animate-pulse rounded bg-slate-800" />
-          <article className="space-y-4 rounded-lg border border-slate-800 bg-slate-950/35 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-2">
-                <div className="h-4 w-16 animate-pulse rounded bg-slate-800" />
-                <div className="h-5 w-36 animate-pulse rounded bg-slate-800" />
-              </div>
-              <div className="h-7 w-24 animate-pulse rounded-full bg-slate-800" />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {["t", "u", "v", "w", "x", "y", "z", "aa", "ab"].map((key) => (
-                <div
-                  key={key}
-                  className={`${key === "ab" ? "h-16" : "h-24"} animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40`}
-                />
-              ))}
-            </div>
-          </article>
-        </section>
-        <section data-testid="peg-skeleton-sources" className="space-y-3">
-          <div className="h-5 w-44 animate-pulse rounded bg-slate-800" />
-          {["bitvavo-eur", "kraken-eur", "kraken-usd"].map((sourceKey) => (
-            <article
-              key={sourceKey}
-              className="space-y-4 rounded-lg border border-slate-800 bg-slate-950/35 p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-2">
-                  <div className="h-5 w-40 animate-pulse rounded bg-slate-800" />
-                  <div className="h-4 w-52 animate-pulse rounded bg-slate-800" />
-                </div>
-                <div className="h-7 w-44 animate-pulse rounded-full bg-slate-800" />
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-                {[
-                  "ac",
-                  "ad",
-                  "ae",
-                  "af",
-                  "ag",
-                  "ah",
-                  "ai",
-                  "aj",
-                  "ak",
-                  "al",
-                ].map((key) => (
-                  <div
-                    key={`${sourceKey}-${key}`}
-                    className="h-20 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
-                  />
-                ))}
-              </div>
-            </article>
-          ))}
-        </section>
+        <LoadingMonitors />
+        <LoadingSources />
       </div>
     </section>
   );
