@@ -133,7 +133,9 @@ locals {
   }
   peg_active_source_unhealthy_promql = {
     for key, item in local.peg_active_sources : key => format(
-      "mento_peg_source_healthy{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} == bool 0 and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)",
+      "(mento_peg_source_healthy{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} == bool 0 or absent(mento_peg_source_healthy{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"})) and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)",
+      item.asset_id,
+      item.source_id,
       item.asset_id,
       item.source_id,
       item.asset_id,

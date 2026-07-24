@@ -855,7 +855,7 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
     "duration rules must require both counters at a whole-decision coverage floor",
   );
   assert(
-    source.includes("== bool 0 and on(asset,policy_version)") &&
+    source.includes("== bool 0 or absent(mento_peg_source_healthy") &&
       source.includes(
         "item.asset.criticalDeviationBps + item.source.conversionErrorBps",
       ) &&
@@ -865,6 +865,33 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
       !source.includes("Critical Path Unreachable"),
     "health comparisons, conversion error bands, and the Phase 4 boundary must stay explicit",
   );
+  for (const policy of ["active", "previous"]) {
+    const policyVersion = `\${local.peg_${policy}_policy_version}`;
+    const sourceUnhealthy =
+      `(mento_peg_source_healthy{asset=\\"%s\\",source=\\"%s\\",policy_version=\\"${policyVersion}\\"} == bool 0 ` +
+      `or absent(mento_peg_source_healthy{asset=\\"%s\\",source=\\"%s\\",policy_version=\\"${policyVersion}\\"})) ` +
+      `and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${policyVersion}\\"} <= %d)`;
+    assert(
+      source.includes(sourceUnhealthy),
+      `${policy} source health must fail closed for an absent exact source while the exact asset heartbeat is fresh`,
+    );
+
+    const failures = validatePegPromqlExpressions(
+      [
+        {
+          file: `peg-promql-${policy}.tf`,
+          kind: "format",
+          expr: sourceUnhealthy.replaceAll('\\"', '"'),
+          pegRule: { kind: "decision", policy },
+        },
+      ],
+      { active: "europ-v2", previous: "europ-v1" },
+    );
+    assert(
+      failures.length === 0,
+      `${policy} absent source-health fallback must retain exact policy scoping: ${failures.join("\\n")}`,
+    );
+  }
   assert(
     source.includes(
       'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} <= %d)',
