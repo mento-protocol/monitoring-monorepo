@@ -16,6 +16,9 @@ const POLICY_PATH = new URL(
   "../../alerts/rules/peg-thresholds.json",
   import.meta.url,
 );
+const PINNED_POLICY_URL = new URL(
+  "https://storage.googleapis.com/download/storage/v1/b/mento-monitoring-peg-policy/o/peg-policy%2Fcurrent.json?alt=media&generation=1750000000000000",
+);
 
 async function policy(): Promise<PegPolicyBundle> {
   return parsePegPolicyBundle(
@@ -213,6 +216,84 @@ describe("PegPolicyStore", () => {
     expect(retryable.cancel).toHaveBeenCalledOnce();
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds a bearer token only to a validated pinned policy request", async () => {
+    const bundle = await policy();
+    const getToken = vi.fn().mockResolvedValue("test-token");
+    const fetch = vi.fn().mockResolvedValue(response(bundle));
+    const store = new PegPolicyStore();
+
+    await store.refresh(PINNED_POLICY_URL, {
+      fetch,
+      bearerTokenProvider: { getToken },
+    });
+
+    expect(getToken).toHaveBeenCalledOnce();
+    expect(getToken).toHaveBeenCalledWith(PINNED_POLICY_URL);
+    const request = fetch.mock.calls[0]?.[1];
+    expect(new Headers(request?.headers).get("authorization")).toBe(
+      "Bearer test-token",
+    );
+    expect(new Headers(request?.headers).get("Metadata-Flavor")).toBeNull();
+    expect(request?.redirect).toBe("error");
+  });
+
+  it("rejects an unvalidated bearer target before token or policy fetch", async () => {
+    const getToken = vi.fn().mockResolvedValue("test-token");
+    const fetch = vi.fn();
+    const store = new PegPolicyStore();
+
+    await expect(
+      store.refresh(new URL("https://attacker.invalid/policy.json"), {
+        fetch,
+        bearerTokenProvider: { getToken },
+      }),
+    ).rejects.toThrow(/generation-pinned GCS JSON media URL/);
+
+    expect(getToken).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not retry anonymously when token acquisition fails", async () => {
+    const getToken = vi
+      .fn()
+      .mockRejectedValue(new Error("metadata unavailable"));
+    const fetch = vi.fn();
+    const store = new PegPolicyStore();
+
+    await expect(
+      store.refresh(PINNED_POLICY_URL, {
+        fetch,
+        bearerTokenProvider: { getToken },
+      }),
+    ).rejects.toThrow(/metadata unavailable/);
+
+    expect(getToken).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(store.current).toBeNull();
+  });
+
+  it("retains last-good policy when a later token acquisition fails", async () => {
+    const bundle = await policy();
+    const getToken = vi
+      .fn()
+      .mockResolvedValueOnce("test-token")
+      .mockRejectedValueOnce(new Error("metadata unavailable"));
+    const fetch = vi.fn().mockResolvedValue(response(bundle));
+    const store = new PegPolicyStore();
+    const options = {
+      fetch,
+      bearerTokenProvider: { getToken },
+    };
+
+    await store.refresh(PINNED_POLICY_URL, options);
+    await expect(store.refresh(PINNED_POLICY_URL, options)).rejects.toThrow(
+      /metadata unavailable/,
+    );
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(store.current).toEqual(bundle);
   });
 
   it("cancels a terminal HTTP response body before throwing", async () => {

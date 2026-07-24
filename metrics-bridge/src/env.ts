@@ -15,6 +15,9 @@ const schema = z.object({
   // policy fetch errors, and its dormant-without-artifact state; a blank or
   // malformed value must never abort startup of the primary Hasura loop.
   PEG_POLICY_URL: z.string().optional().catch(undefined),
+  // Deliberately raw and optional with PEG_POLICY_URL. The isolated runtime
+  // validates the pair without affecting service startup.
+  PEG_POLICY_AUTH_MODE: z.string().optional().catch(undefined),
   REBALANCE_PROBE_EVERY_N_POLLS: z.coerce.number().min(1).catch(5),
   REBALANCE_PROBE_CONCURRENCY: z.coerce.number().min(1).catch(5),
   REBALANCE_PROBE_TIMEOUT_MS: z.coerce.number().min(1000).catch(8_000),
@@ -25,6 +28,7 @@ export const env = schema.parse({
   POLL_INTERVAL_MS: process.env.POLL_INTERVAL_MS,
   PORT: process.env.PORT,
   PEG_POLICY_URL: process.env.PEG_POLICY_URL,
+  PEG_POLICY_AUTH_MODE: process.env.PEG_POLICY_AUTH_MODE,
   REBALANCE_PROBE_EVERY_N_POLLS: process.env.REBALANCE_PROBE_EVERY_N_POLLS,
   REBALANCE_PROBE_CONCURRENCY: process.env.REBALANCE_PROBE_CONCURRENCY,
   REBALANCE_PROBE_TIMEOUT_MS: process.env.REBALANCE_PROBE_TIMEOUT_MS,
