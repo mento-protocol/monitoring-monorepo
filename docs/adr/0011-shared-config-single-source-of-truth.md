@@ -3,7 +3,7 @@ title: shared-config is the single source of truth for chain and token metadata
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-08
+last_verified: 2026-07-23
 scope: shared-config
 date: 2026-03
 doc_type: adr
@@ -28,8 +28,10 @@ had to be fixed in several places, and some were missed.
 `@mento-protocol/config` (`shared-config/`) is the **single source of
 truth** for chain metadata, deployment namespaces, token/pool label derivation,
 the FX calendar, thresholds, and shared ABIs. In-repo consumers resolve it
-through `workspace:*`; external consumers use the public npm package. No package
-duplicates chain slugs, explorer URLs, or token labels.
+through `workspace:*`; external consumers use the public npm package. Consumer
+runtime network entries may carry endpoint, local-routing, and availability
+overrides; namespaces, explorer metadata, and token/pool label maps come from
+this package.
 
 ## Alternatives considered
 
@@ -48,5 +50,7 @@ duplicates chain slugs, explorer URLs, or token labels.
 
 ## Evidence
 
-- Namespace extraction `204dd1ab` and contracts-package adoption `a77979d0` (2026-03); no-duplication rule PR #209.
+- Namespace extraction `204dd1ab` and contracts-package adoption `a77979d0`
+  (2026-03); current consumer routing in
+  [`ui-dashboard/src/lib/networks.ts`](../../ui-dashboard/src/lib/networks.ts).
 - [`shared-config/AGENTS.md`](../../shared-config/AGENTS.md).

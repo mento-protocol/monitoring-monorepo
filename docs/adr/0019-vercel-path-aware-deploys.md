@@ -3,7 +3,7 @@ title: Dashboard deploys on Vercel Git integration with a path-aware skip script
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-23
 scope: ui-dashboard
 date: 2026-03
 doc_type: adr
@@ -30,7 +30,8 @@ a **path-aware ignore-build script** (`ui-dashboard/scripts/vercel-ignore-build.
 wired via `ui-dashboard/vercel.json`). The script decides skip-vs-build by diffing
 against the right anchor (previous preview SHA, merge-base, or GitHub compare when
 Vercel strips `.git`), watching `ui-dashboard/`, `shared-config/`, and workspace
-dependency metadata.
+dependency metadata, plus `.lighthouserc.cjs`. The Lighthouse configuration
+forces a preview build because the required browser audit targets that preview.
 
 ## Alternatives considered
 
@@ -44,7 +45,9 @@ dependency metadata.
 - The skip script has several fallback anchors because Vercel's env is inconsistent
   (first push before `gh pr create` lacks PR id/previous SHA); it fails **open**
   (builds) when it can't prove a deploy is dashboard-clean.
-- Env-only production changes need a manual `vercel deploy --prod` from the repo root.
+- Env-only production changes use the guarded `pnpm deploy:dashboard` wrapper
+  from the repository root. It checks the worktree, authentication, and
+  Terraform-written project link before calling Vercel.
 - The skip script governs which _eligible_ branches build; it does not gate the
   Sentry-autofix trust boundary. `vercel.json` additionally sets
   `git.deploymentEnabled: { "sentry-autofix/*": false }` (issue #1452) so Vercel

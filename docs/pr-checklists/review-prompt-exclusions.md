@@ -74,15 +74,16 @@ flag the concrete regression and cite the evidence.
 
 ## Repo-Specific False Positives
 
-- Do not flag the current dashboard snapshot-query aggregation path as a
-  scalability issue while expected scale remains roughly 30-50 pools and the
-  current polling setup has no observed latency or cost regression. Re-open the
-  issue only if pool count, polling frequency, data volume, or production
-  performance changes materially.
-- Do not flag client-side aggregation for the existing 24h volume tiles/table on
-  scale grounds under the same assumptions. If the query shape changes to cross
-  Hasura row caps or starts mixing deploy-window-sensitive schema fields into a
-  primary page query, use the SWR/Hasura checklist instead.
+- Do not flag the current pool-level snapshot aggregation path as a scalability
+  issue while expected scale remains roughly 30-50 pools and the current
+  polling setup has no observed latency or cost regression. Re-open the issue
+  if pool count, polling frequency, row volume, or production performance
+  changes materially.
+- This exclusion does not waive Hasura row caps for hero or table queries.
+  Those surfaces use separate pre-rolled and bounded daily-row paths and must
+  still expose truncation or degraded state where required. If a query shape
+  approaches a cap or mixes deploy-window-sensitive schema fields into a
+  primary page query, use the SWR/Hasura checklist.
 
 ## Reviewer Workflow
 
