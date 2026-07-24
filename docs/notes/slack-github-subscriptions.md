@@ -118,10 +118,13 @@ feeds
 .terraform_apply_slack_channel`. To reroute the notification, set the tfvar
 and run `pnpm tf apply platform` (manual-apply stack, human-approved local
 apply — see `docs/terraform.md`); if the new channel is private, `/invite`
-the bot as above. The platform PAT needs **both** `Secrets: Read/write` and
-`Variables: Read/write` — GitHub scopes repo Secrets and repo Variables
-independently, so a Secrets-only PAT makes the
-`github_actions_variable` resource fail with HTTP 403.
+the bot as above. The platform PAT needs `Secrets: Read/write`,
+`Variables: Read/write`, and `Administration: Read/write` — GitHub scopes repo
+Secrets and repo Variables independently (a Secrets-only PAT makes the
+`github_actions_variable` resource fail with HTTP 403), and `Administration`
+is required by `github_workflow_repository_permissions`
+(`terraform/github-actions-permissions.tf`, issue #1557), which pins the
+default workflow-token permission to read-only.
 
 ## 3. `Terraform Deploy Queue Watch`
 
