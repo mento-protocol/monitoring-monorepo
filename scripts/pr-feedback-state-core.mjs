@@ -201,6 +201,8 @@ function isExplicitlyCleanClaudeReview(comment, pr) {
   const author = String(comment.author ?? "").toLowerCase();
   if (author !== "claude" && author !== "claude[bot]") return false;
   const body = String(comment.body ?? "");
+  if (claudeReview.matchesCleanReviewCompatibilityRegistry(comment, pr, body))
+    return true;
   const lines = body.split(/\r?\n/);
   if (claudeReview.hasMarkdownCodeBlockIndentation(lines)) return false;
   if (!/^\s*(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?\s*$/im.test(body)) return false;

@@ -177,16 +177,11 @@ the rules in [`context-standards.md`](context-standards.md).
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
-| [`BACKLOG.md`](../BACKLOG.md) | Backlog | unmanaged / unmanaged | tracker / repo-wide | unowned | 365d |
-| [`docs/BACKLOG.md`](BACKLOG.md) | Monitoring Monorepo — Task Backlog (retired) | non-canonical / archived | tracker / repo-wide | eng | 365d; verified 2026-07-23 |
-| [`docs/CODE-REVIEW-UI-DASHBOARD.md`](CODE-REVIEW-UI-DASHBOARD.md) | Code Review — ui-dashboard | non-canonical / archived | report / ui-dashboard | eng | 365d |
+| [`BACKLOG.md`](../BACKLOG.md) | Backlog transition storage | non-canonical / active | tracker / repo-wide | eng | 90d; verified 2026-07-24 |
 | [`docs/metrics/review-process-after-1045-comparison-2026-07-07.md`](metrics/review-process-after-1045-comparison-2026-07-07.md) | Review Process Metrics After PR 1045 | non-canonical / archived | report / ci/process | eng | 365d; verified 2026-07-07 |
-| [`docs/monad-launch-plan.md`](monad-launch-plan.md) | Monad Monitoring — Launch Runbook (archived) | non-canonical / archived | runbook / indexer | eng | 365d; verified 2026-07-23 |
-| [`docs/multichain-indexer-analysis.md`](multichain-indexer-analysis.md) | Multichain Indexer Analysis — Celo + Monad merge (archived) | non-canonical / archived | report / indexer | eng | 365d; verified 2026-07-23 |
-| [`docs/notes/file-size-watch.md`](notes/file-size-watch.md) | File-size and lint-hygiene watch list | canonical / active | report / repo-wide | eng | 30d; verified 2026-07-17 |
-| [`docs/notes/indexer-spec-followups.md`](notes/indexer-spec-followups.md) | Indexer SPEC §2 follow-up metrics (archived) | non-canonical / archived | note / indexer-envio | eng | 365d; verified 2026-07-17 |
-| [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) | React Compiler annotation-mode pilot (archived) | non-canonical / archived | note / ui-dashboard | eng | 365d; verified 2026-07-23 |
-| [`docs/notes/review-process-metrics.md`](notes/review-process-metrics.md) | Review process metrics evaluation | non-canonical / archived | report / ci/process | eng | 365d; verified 2026-07-17 |
+| [`docs/notes/file-size-watch.md`](notes/file-size-watch.md) | File-size and lint-hygiene watch list | canonical / active | report / repo-wide | eng | 30d; verified 2026-07-24 |
+| [`docs/notes/indexer-spec-followups.md`](notes/indexer-spec-followups.md) | Parked indexer metric ideas | non-canonical / archived | note / indexer-envio | eng | 365d; verified 2026-07-24 |
+| [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) | React Compiler annotation-mode pilot (archived) | non-canonical / archived | note / ui-dashboard | eng | 365d; verified 2026-07-24 |
 | [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) | Terraform CI/CD hardening — declined alternatives | non-canonical / archived | note / terraform/infra | eng | 365d; verified 2026-07-23 |
 | [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) | UI Dashboard Performance Plan (archived) | non-canonical / archived | plan / ui-dashboard | eng | 365d; verified 2026-07-23 |
 | [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) | AI Review Process Integration Plan | non-canonical / archived | plan / ci/process | eng | 365d; verified 2026-07-17 |

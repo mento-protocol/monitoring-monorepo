@@ -1,3 +1,15 @@
+---
+title: Backlog transition storage
+status: active
+owner: eng
+canonical: false
+last_verified: 2026-07-24
+doc_type: tracker
+scope: repo-wide
+review_interval_days: 90
+garden_lane: notes-plans-archive
+---
+
 # Backlog
 
 GitHub Issues are the canonical active-work queue for agent-addressable work.
