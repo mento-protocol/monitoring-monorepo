@@ -3642,6 +3642,12 @@ run_gate "scripts/check-github-action-pins.mjs"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions pin checker changed)"
 assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker changed)"
 
+run_gate "scripts/check-workflow-permissions-drift.mjs"
+assert_contains "- node scripts/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"
+
+run_gate "scripts/check-workflow-permissions-drift.test.mjs"
+assert_contains "- node scripts/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"
+
 run_gate "scripts/check-github-action-pins.test.mjs"
 assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker test changed)"
 
@@ -4376,6 +4382,10 @@ STUB
 
 run_parallel_interrupt_regression registration INT 130
 run_parallel_interrupt_regression execution TERM 143
+
+# Keep the production identity contract reachable from every protected source
+# in CI and from the local changed-path router.
+node scripts/production-infra-identity-contract/routing.test.mjs
 
 # PR 1492 review: prerequisite commands (install/codegen/setup) produce outputs
 # the source fingerprint cannot see, so they must never be stamped or reused —

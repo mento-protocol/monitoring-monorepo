@@ -32,6 +32,19 @@ github_token = "ghp_..."
 # different org from this stack (unlikely).
 # github_owner = "mento-protocol"
 
+# Dedicated READ-ONLY audit PAT for the daily platform-settings drift check
+# (.github/workflows/platform-settings-drift.yml, issue #1564). Separate from
+# github_token above: it is a CI secret (mirrored to PLATFORM_SETTINGS_AUDIT_TOKEN),
+# so it must NEVER hold write scope. It only reads
+# GET /repos/{owner}/{repo}/actions/permissions/workflow to confirm the default
+# workflow-token permission is still read-only.
+#   Create at: https://github.com/settings/personal-access-tokens/new
+#     Resource owner: mento-protocol
+#     Repository access: mento-protocol/monitoring-monorepo
+#     Permissions: Repository → Administration: Read-only (nothing else)
+# Leave unset to keep the drift check inert (it no-ops until the secret exists).
+# platform_settings_audit_token = "<administration-read-only-fine-grained-PAT>"
+
 # Slack channel that receives the Terraform apply-pending prompt for
 # alerts-rules / alerts-delivery / aegis / governance-watchdog (mirrored to
 # the TERRAFORM_APPLY_SLACK_CHANNEL GitHub Actions variable). Default matches

@@ -231,6 +231,27 @@ resource "github_actions_secret" "sentry_archive_token" {
   value       = var.sentry_archive_token
 }
 
+# PLATFORM_SETTINGS_AUDIT_TOKEN is brand-new (issue #1564): a fine-grained GitHub
+# PAT with Administration: Read on this repo only. Its ONLY consumer is
+# `.github/workflows/platform-settings-drift.yml`, the daily check that the repo
+# default workflow-token permission (pinned to `read` by
+# `github_workflow_repository_permissions.default_read`, #1557) has not been
+# reverted out-of-band. Read-only by design — it can never change a setting, and
+# it is deliberately NOT the Administration:Read/Write `github_token` (which
+# stays local-only, never a CI secret). Like `sentry_triage_token` above — and
+# UNLIKE `claude_code_oauth_token` below — no live secret of this name exists and
+# no external consumer depends on it, so plain `count` gating is enough and it
+# carries NO `prevent_destroy`: destroying it while unused breaks nothing.
+resource "github_actions_secret" "platform_settings_audit_token" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.platform_settings_audit_token == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "PLATFORM_SETTINGS_AUDIT_TOKEN"
+  value       = var.platform_settings_audit_token
+}
+
 resource "github_actions_secret" "claude_code_oauth_token" {
   # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
   # `vercel_automation_bypass`; see the comment above for the threat model.
