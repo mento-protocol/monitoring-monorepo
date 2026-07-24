@@ -3642,6 +3642,12 @@ run_gate "scripts/check-github-action-pins.mjs"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions pin checker changed)"
 assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker changed)"
 
+run_gate "scripts/check-workflow-permissions-drift.mjs"
+assert_contains "- node scripts/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"
+
+run_gate "scripts/check-workflow-permissions-drift.test.mjs"
+assert_contains "- node scripts/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"
+
 run_gate "scripts/check-github-action-pins.test.mjs"
 assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker test changed)"
 

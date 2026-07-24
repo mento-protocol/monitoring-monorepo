@@ -168,11 +168,10 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md) | Liquity Monitoring Invariants | canonical / active | reference / indexer-envio/ui-dashboard | eng | 90d; verified 2026-07-24 |
 | [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md) | Terraform secret strategy hardening | canonical / active | reference / terraform/infra | eng | 90d; verified 2026-07-24 |
 | [`docs/README.md`](README.md) | Documentation Catalog | canonical / active | index / repo-wide | eng | 90d; verified 2026-07-24 |
-| [`docs/vp-oracle-staleness-alerting-spec.md`](vp-oracle-staleness-alerting-spec.md) | Virtual Pool Oracle Staleness Alerting Spec | non-canonical / draft | reference / repo-wide | eng | 180d; verified 2026-06-16 |
-| [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-22 |
-| [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | unmanaged / unmanaged | reference / indexer-envio | unowned | 180d |
-| [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`SPEC.md`](../SPEC.md) | Mento Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-24 |
+| [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-24 |
+| [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-24 |
+| [`SPEC.md`](../SPEC.md) | Mento Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-24 |
 
 ## notes-plans-archive
 

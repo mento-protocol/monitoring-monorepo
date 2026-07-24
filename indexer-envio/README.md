@@ -1,4 +1,4 @@
-<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Mento v3 Envio HyperIndex Indexer
 
@@ -35,7 +35,9 @@ event list; the table highlights the main monitoring surfaces.
 | WormholeNttManager    | `TransferSent`, `TransferRedeemed`, `MessageAttestedTo`, `InboundTransferQueued`                                                                                                                                         |
 | WormholeTransceiver   | `ReceivedMessage`                                                                                                                                                                                                        |
 
-### Entities Written
+### Selected Entity Groups Written
+
+The schema is the source of truth for the complete entity list.
 
 | Entity group            | Description                                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -52,6 +54,8 @@ event list; the table highlights the main monitoring surfaces.
 | Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                            |
 | Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending` |
 | Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                             |
+| Liquity / CDP           | Instance, collateral, trove, stability-pool, reserve-trove, and daily-snapshot entities                                                                                         |
+| Stable supply           | Token supply, custody state, and daily-snapshot entities                                                                                                                        |
 | Reserve yield           | Ethereum sUSDS/stETH movement, cost-basis, position, summary, and daily-snapshot entities; stETH also records `StethWalletLaunchBaseline` for the balance sampler               |
 
 ### Pool ID Format
@@ -165,8 +169,9 @@ When a new `@mento-protocol/contracts` version is published:
 
 1. Update the version in `indexer-envio/package.json` and
    `ui-dashboard/package.json`.
-2. Update the affected namespace in
-   `shared-config/deployment-namespaces.json`.
+2. Update the affected namespace in both
+   `shared-config/deployment-namespaces.json` and
+   `indexer-envio/config/deployment-namespaces.json`.
 3. Run `pnpm install` from the repository root.
 4. From `indexer-envio/`, run `pnpm generate:abis` and commit any vendored ABI
    changes.
