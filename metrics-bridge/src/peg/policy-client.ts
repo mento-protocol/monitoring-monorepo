@@ -3,6 +3,11 @@ import {
   type PegPolicyBundle,
   type PegPolicyVersion,
 } from "./policy.js";
+import {
+  assertPinnedGcsJsonMediaUrl,
+  type BearerTokenProvider,
+} from "./gcp-metadata-auth.js";
+import { readBoundedUtf8Response } from "./bounded-response.js";
 import type { FetchLike, Sleep } from "./types.js";
 
 export const PEG_POLICY_MAX_RESPONSE_BYTES = 256 * 1024;
@@ -16,6 +21,7 @@ export interface PegPolicyClientOptions {
   fetch?: FetchLike;
   sleep?: Sleep;
   timeoutMs?: number;
+  bearerTokenProvider?: BearerTokenProvider;
 }
 
 function validateRetainedPrevious(
@@ -92,62 +98,43 @@ export function validatePolicyTransition(
   }
 }
 
-async function readBoundedResponse(response: Response): Promise<string> {
-  const contentLength = response.headers.get("content-length");
-  if (
-    contentLength !== null &&
-    Number(contentLength) > PEG_POLICY_MAX_RESPONSE_BYTES
-  ) {
-    await response.body?.cancel();
-    throw new Error("Peg policy response exceeds the byte budget");
-  }
-  if (response.body === null) return "";
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    if (received > PEG_POLICY_MAX_RESPONSE_BYTES) {
-      await reader.cancel();
-      throw new Error("Peg policy response exceeds the byte budget");
-    }
-    chunks.push(value);
-  }
-
-  const body = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder("utf-8", { fatal: true }).decode(body);
-}
-
 async function fetchOnce(
   url: URL,
   fetchImpl: FetchLike,
   timeoutMs: number,
+  bearerTokenProvider: BearerTokenProvider | undefined,
 ): Promise<
   | { kind: "success"; bundle: PegPolicyBundle }
   | { kind: "http-error"; status: number }
 > {
+  if (bearerTokenProvider !== undefined) {
+    assertPinnedGcsJsonMediaUrl(url);
+  }
+  const accessToken = await bearerTokenProvider?.getToken(url);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, {
       method: "GET",
-      headers: { accept: "application/json" },
+      headers: {
+        accept: "application/json",
+        ...(accessToken === undefined
+          ? {}
+          : { authorization: `Bearer ${accessToken}` }),
+      },
       cache: "no-store",
+      redirect: "error",
       signal: controller.signal,
     });
     if (!response.ok) {
       await response.body?.cancel();
       return { kind: "http-error", status: response.status };
     }
-    const body = await readBoundedResponse(response);
+    const body = await readBoundedUtf8Response(
+      response,
+      PEG_POLICY_MAX_RESPONSE_BYTES,
+      "Peg policy response exceeds the byte budget",
+    );
     return {
       kind: "success",
       bundle: parsePegPolicyBundle(JSON.parse(body) as unknown),
@@ -166,7 +153,12 @@ export async function fetchPegPolicyBundle(
   const timeoutMs = options.timeoutMs ?? PEG_POLICY_REQUEST_TIMEOUT_MS;
 
   for (let attempt = 0; attempt <= PEG_POLICY_MAX_RETRIES; attempt += 1) {
-    const result = await fetchOnce(url, fetchImpl, timeoutMs);
+    const result = await fetchOnce(
+      url,
+      fetchImpl,
+      timeoutMs,
+      options.bearerTokenProvider,
+    );
     if (result.kind === "success") {
       return result.bundle;
     }

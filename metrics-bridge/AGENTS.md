@@ -37,6 +37,7 @@ downstream alerts/dashboard.
 - The image carries `peg-registry.json` because it is service-local source
   identity and topology. Never bake `alerts/rules/peg-thresholds.json` into the
   image: page-affecting policy comes only from the protected runtime artifact.
+  Never log or expose its bearer token.
 - Rebalance probe changes must update unit tests and the mutation baseline when the changed branch is part of the current mutation target.
 - `PoolLiquidityStrategy` is authoritative for rebalance-probe cardinality.
   Use `Pool.rebalancerAddress` only for the explicit missing-schema rollout
@@ -52,11 +53,16 @@ and `build`. For Cloud Run/runtime changes, apply
 
 ## Peg policy bootstrap
 
-`PEG_POLICY_URL` is optional raw configuration for the IaC-published,
-versioned peg-policy artifact. When it is absent, the peg loop remains
-intentionally dormant until the protected artifact plane is provisioned. A
-blank or malformed value belongs to the peg loop's bounded error channel; it
-must not abort startup or affect the primary Hasura poller.
+`PEG_POLICY_URL` and `PEG_POLICY_AUTH_MODE` are paired raw configuration for
+the IaC-published, versioned peg-policy artifact. When both are absent, the peg
+loop remains intentionally dormant until the protected artifact plane is
+provisioned. Production mode is `gcp-metadata` and accepts only the canonical,
+generation-pinned GCS JSON download endpoint. `none` is limited to deliberate
+local or test HTTPS artifacts and requires the code-only
+`allowUnauthenticatedPolicy` option; environment configuration cannot enable
+it. A blank, malformed, missing, or mismatched pair belongs to the peg loop's
+bounded error channel and must not abort startup or affect the primary Hasura
+poller.
 
 Policy versions are content-addressed: the final 32 lowercase hexadecimal
 characters must match the canonical policy-content SHA-256 prefix. Canonical
@@ -72,6 +78,8 @@ contains `metrics-bridge/peg-registry.json` at the path resolved by the
 compiled registry loader, but it never contains `peg-thresholds.json`. Policy
 publication and activation remain behind the alerts-rules production-infra
 gate described by [ADR 0044](../docs/adr/0044-peg-thresholds-gated-rules-plane.md).
+Private transport, generation pinning, and the dormant activation boundary are
+fixed by [ADR 0048](../docs/adr/0048-private-gcs-peg-policy-artifact.md).
 
 ## RPC overrides
 
