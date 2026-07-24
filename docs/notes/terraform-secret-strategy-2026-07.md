@@ -52,17 +52,18 @@ on separate identities:
   and immutable repository ID `1172025835`.
 - PR plans use the state-only plan chain. It receives neither project/service
   read roles nor live secret/object access.
-- The separate cutover-routing PR routes trusted-main plans and scheduled drift
-  through `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER` and
-  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. Its dedicated pool accepts
-  only the five named Terraform workflows on `main`. The downstream
+- The checked-in workflows route trusted-main plans and scheduled drift through
+  `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER` and
+  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The dedicated pool accepts only
+  the five named Terraform workflows on `main`. The downstream
   `org-terraform-refresh-readonly` identity has state Object Viewer, a curated
   non-basic project read-role set, Secret Accessor on only Terraform-managed
   secrets, and Storage Object Viewer on only Cloud Function deployment-source
   buckets. The project-read core includes Browser, IAM Security Reviewer, and
   Storage Bucket Viewer; each owning stack enumerates its additional
-  service-specific readers. That routing PR retains the legacy routine-deployer
-  Token Creator grant until live proof and drain checks complete.
+  service-specific readers. The routing change retains the legacy
+  routine-deployer Token Creator grant until live proof and drain checks
+  complete.
 - Production applies select
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. The dedicated pool accepts only
@@ -81,15 +82,16 @@ service readers can still expose project-wide Cloud Logging entries, Monitoring
 time series, and Artifact Registry contents. The complete bundle confers no
 mutation permissions and is unreachable from PR refs.
 
-After the cutover-routing PR lands, use its checked-in `main` route to run a
-live full-refresh, unlocked plan (`-lock=false`, without `-refresh=false`) for
-every CI-managed Google-provider stack; the current set is `alerts-delivery`
-and `governance-watchdog`. Treat a provider 403 as a request to review one exact
-read permission, not as justification for a basic role. Validation and an
-IAM-grants-only plan do not prove the full resource graph can refresh or that
-payload boundaries remain intact. Drain the pre-routing and proof runs and
-audit the read boundary before a separate final removal PR deletes the legacy
-Token Creator grant through an explicitly approved platform apply.
+The routing is checked in, but live proof remains pending. After it reaches
+`main`, run a live full-refresh, unlocked plan (`-lock=false`, without
+`-refresh=false`) for every CI-managed Google-provider stack; the current set
+is `alerts-delivery` and `governance-watchdog`. Treat a provider 403 as a
+request to review one exact read permission, not as justification for a basic
+role. Validation and an IAM-grants-only plan do not prove the full resource
+graph can refresh or that payload boundaries remain intact. Drain the
+pre-routing and proof runs and audit the read boundary before a separate final
+removal PR deletes the legacy Token Creator grant through an explicitly
+approved platform apply.
 
 ## Stack inventory
 

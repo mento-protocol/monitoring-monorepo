@@ -13,7 +13,8 @@ garden_lane: adrs-architecture
 
 # ADR 0047 — Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities
 
-**Status:** Accepted (Jul 2026), staged cutover in progress.
+**Status:** Accepted (Jul 2026), refresh routing checked in; live proof and
+authority removal pending.
 **Scope:** terraform/infra
 
 ## Context
@@ -105,7 +106,10 @@ pinned Google providers read them during refresh. It still cannot mutate them,
 and PR workflows cannot impersonate it.
 
 The identity bootstrap, refresh routing, and authority removal land in three
-separate PRs:
+separate PRs. The repository now contains the refresh-routing configuration,
+but that checked-in state is not evidence that the merged workflows can refresh
+the full live resource graph. The legacy rollback grant remains until the proof
+and drain gates below complete:
 
 1. Merge the identity-bootstrap PR. Cancel every infrastructure apply queued
    by that merge; do not approve or reuse those runs because their repository
@@ -118,9 +122,9 @@ separate PRs:
 4. Verify those runs and the new production apply authentication path. Keep
    the old routine-deployer Token Creator grant only as a temporary rollback
    path.
-5. Land a cutover-routing PR that routes trusted-`main` plans and scheduled
-   drift through both refresh variables. That PR retains the old
-   routine-deployer Token Creator rollback grant.
+5. Merge the checked-in cutover routing that sends all four trusted-`main`
+   plans and every scheduled-drift leg through both refresh variables. The
+   change retains the old routine-deployer Token Creator rollback grant.
 6. Prove the curated role set through the checked-in `main` route. Complete a
    live full-refresh, unlocked plan (`-lock=false`, without `-refresh=false`)
    for every CI-managed Google-provider stack; the current set is

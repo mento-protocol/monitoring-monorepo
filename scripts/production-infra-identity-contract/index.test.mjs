@@ -22,6 +22,7 @@ import {
   validateProductionInfraIdentityContract,
 } from "./index.mjs";
 import "./routing.test.mjs";
+import "./refresh-routing.test.mjs";
 import "./security.test.mjs";
 import "./workflow.test.mjs";
 
@@ -543,7 +544,7 @@ resource "google_service_account_iam_member" "refresh_can_write" {
       ".github/workflows/unlisted.yaml":
         "env:\n  BAD: ${{ vars['GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT'] }}\n",
     },
-    "must not be used during bootstrap",
+    "refresh identity variables are allowed only in exact trusted-main refresh routes",
   );
 
   expectContractFailure(
@@ -552,15 +553,15 @@ resource "google_service_account_iam_member" "refresh_can_write" {
       ".github/workflows/unlisted-refresh-provider.yml":
         "env:\n  BAD: ${{ vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER }}\n",
     },
-    "must not be used during bootstrap",
+    "refresh identity variables are allowed only in exact trusted-main refresh routes",
   );
 
   expectContractFailure(
     mutateFile(
       validFiles,
       ".github/workflows/alerts-infra.yml",
-      "  plan:\n    runs-on: ubuntu-latest",
-      "  plan:\n    env:\n      BAD: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}\n    runs-on: ubuntu-latest",
+      "    env:\n      TF_VAR_terraform_service_account:",
+      "    env:\n      BAD: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}\n      TF_VAR_terraform_service_account:",
     ),
     "must appear exactly once and only in the apply auth step",
   );
