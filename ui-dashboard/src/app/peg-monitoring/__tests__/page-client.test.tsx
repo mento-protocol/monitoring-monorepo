@@ -46,6 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 const render = () => act(() => root.render(<PegMonitoringPageClient />));
@@ -129,5 +130,46 @@ describe("PegMonitoringPageClient", () => {
     );
     expect(disabled?.className).toContain("text-red-300");
     expect(container.textContent).toContain("Breaker unavailable");
+  });
+  it("renders two monitors for one pool without duplicate React keys", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const monitor = item.monitors[0]!;
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            monitors: [
+              monitor,
+              {
+                ...monitor,
+                rateFeedId: "0x6666666666666666666666666666666666666666",
+              },
+            ],
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+    render();
+    expect(container.querySelectorAll('a[href*="?tab=oracle"]')).toHaveLength(
+      2,
+    );
+    const errors = error.mock.calls.map((call) => call.map(String).join(" "));
+    try {
+      expect(
+        errors.some((message) =>
+          message.includes("Encountered two children with the same key"),
+        ),
+      ).toBe(false);
+    } finally {
+      error.mockRestore();
+    }
   });
 });

@@ -59,33 +59,91 @@ function Loading(): React.JSX.Element {
     <section aria-label="Loading peg monitoring" className="space-y-6">
       <div
         data-testid="peg-skeleton-status"
-        className="h-14 animate-pulse rounded-lg border border-slate-800 bg-slate-900/45"
+        className="h-12 animate-pulse rounded-lg border border-slate-800 bg-slate-900/45"
       />
-      <div
-        data-testid="peg-skeleton-snapshot"
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
-      >
-        {["a", "b", "c", "d", "e"].map((key) => (
-          <div
-            key={key}
-            className="h-20 animate-pulse rounded-md border border-slate-800 bg-slate-950/40"
-          />
-        ))}
-      </div>
-      <div
-        data-testid="peg-skeleton-package"
-        className="min-h-[1000px] space-y-6 rounded-xl border border-slate-800 bg-slate-900/45 p-4 sm:p-6"
-      >
-        <div className="h-8 w-1/4 animate-pulse rounded bg-slate-800" />
-        <div className="grid gap-2 lg:grid-cols-4">
-          {["f", "g", "h", "i"].map((key) => (
+      <div data-testid="peg-skeleton-snapshot" className="space-y-3">
+        <div className="h-7 w-28 animate-pulse rounded bg-slate-800" />
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {["a", "b", "c", "d", "e"].map((key) => (
             <div
               key={key}
-              className="h-20 animate-pulse rounded-md bg-slate-800/60"
+              className="h-20 animate-pulse rounded-md border border-slate-800 bg-slate-950/40"
             />
           ))}
         </div>
-        <div className="h-56 animate-pulse rounded-lg border border-slate-800 bg-slate-950/35" />
+      </div>
+      <div
+        data-testid="peg-skeleton-package"
+        className="space-y-6 rounded-xl border border-slate-800 bg-slate-900/45 p-4 sm:p-6"
+      >
+        <div
+          data-testid="peg-skeleton-package-header"
+          className="h-12 w-1/3 animate-pulse rounded bg-slate-800"
+        />
+        <section data-testid="peg-skeleton-structural" className="space-y-3">
+          <div className="h-5 w-40 animate-pulse rounded bg-slate-800" />
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+            {["f", "g", "h", "i", "j", "k"].map((key) => (
+              <div
+                key={key}
+                className="h-16 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
+              />
+            ))}
+          </div>
+        </section>
+        <section data-testid="peg-skeleton-policy" className="space-y-3">
+          <div className="h-5 w-48 animate-pulse rounded bg-slate-800" />
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {["l", "m", "n", "o", "p", "q", "r", "s"].map((key) => (
+              <div
+                key={key}
+                className="h-16 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
+              />
+            ))}
+          </div>
+        </section>
+        <section data-testid="peg-skeleton-monitors" className="space-y-3">
+          <div className="h-5 w-48 animate-pulse rounded bg-slate-800" />
+          <article className="space-y-4 rounded-lg border border-slate-800 bg-slate-950/35 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-2">
+                <div className="h-4 w-16 animate-pulse rounded bg-slate-800" />
+                <div className="h-5 w-36 animate-pulse rounded bg-slate-800" />
+              </div>
+              <div className="h-7 w-24 animate-pulse rounded-full bg-slate-800" />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              {["t", "u", "v", "w"].map((key) => (
+                <div
+                  key={key}
+                  className="h-16 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
+                />
+              ))}
+            </div>
+          </article>
+        </section>
+        <section data-testid="peg-skeleton-sources" className="space-y-3">
+          <div className="h-5 w-44 animate-pulse rounded bg-slate-800" />
+          <article className="space-y-4 rounded-lg border border-slate-800 bg-slate-950/35 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-2">
+                <div className="h-5 w-40 animate-pulse rounded bg-slate-800" />
+                <div className="h-4 w-52 animate-pulse rounded bg-slate-800" />
+              </div>
+              <div className="h-7 w-44 animate-pulse rounded-full bg-slate-800" />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+              {["x", "y", "z", "aa", "ab", "ac", "ad", "ae", "af", "ag"].map(
+                (key) => (
+                  <div
+                    key={key}
+                    className="h-16 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
+                  />
+                ),
+              )}
+            </div>
+          </article>
+        </section>
       </div>
     </section>
   );
@@ -427,7 +485,10 @@ function Package({
       aria-labelledby={heading}
       className="space-y-6 rounded-xl border border-slate-800 bg-slate-900/45 p-4 sm:p-6"
     >
-      <header className="flex flex-wrap items-start justify-between gap-4">
+      <header
+        data-testid={`peg-package-${index}-header`}
+        className="flex flex-wrap items-start justify-between gap-4"
+      >
         <div>
           <h2 id={heading} className="text-xl font-semibold text-white">
             {item.asset} / {item.peg}
@@ -438,20 +499,30 @@ function Package({
           </p>
         </div>
       </header>
-      <Structural item={item} />
-      <Policy item={item} />
-      <section className="space-y-3">
+      <div data-testid={`peg-package-${index}-structural`}>
+        <Structural item={item} />
+      </div>
+      <div data-testid={`peg-package-${index}-policy`}>
+        <Policy item={item} />
+      </div>
+      <section
+        data-testid={`peg-package-${index}-monitors`}
+        className="space-y-3"
+      >
         <h3 className="text-sm font-semibold text-slate-200">
           Pool and breaker evidence
         </h3>
         {item.monitors.map((monitor) => (
           <Monitor
-            key={`${monitor.chainId}-${monitor.poolAddress}`}
+            key={`${monitor.chainId}-${monitor.poolAddress}-${monitor.rateFeedId}-${monitor.monitoredTokenAddress}`}
             monitor={monitor}
           />
         ))}
       </section>
-      <section className="space-y-3">
+      <section
+        data-testid={`peg-package-${index}-sources`}
+        className="space-y-3"
+      >
         <h3 className="text-sm font-semibold text-slate-200">
           Market-source evidence
         </h3>
