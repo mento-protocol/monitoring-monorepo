@@ -1,6 +1,9 @@
 import { Counter, Gauge } from "prom-client";
 import { register } from "../metrics.js";
-import { PEG_POLICY_MAX_BLIND_CONSECUTIVE_POLLS } from "./policy.js";
+import {
+  PEG_POLICY_MAX_BLIND_CONSECUTIVE_POLLS,
+  PEG_POLICY_MAX_LISTING_ABSENT_CONSECUTIVE_CHECKS,
+} from "./policy.js";
 import {
   MARKET_STATES,
   type MarketState,
@@ -29,6 +32,7 @@ export interface PegSourceMetricSnapshot {
   referenceSize: number;
   listingState: MarketState | null;
   listingCheckedAt: number | null;
+  listingAbsentConsecutiveChecks: number;
   deviationBps: number | null;
   premiumBps: number | null;
   spreadBps: number | null;
@@ -146,6 +150,12 @@ export const pegGauges = {
   listingCheckedAt: new Gauge({
     name: "mento_peg_listing_checked_at",
     help: "Unix timestamp of the last successful authoritative exact-pair listing response; transport and schema failures do not advance it.",
+    labelNames: sourceLabels,
+    registers: [register],
+  }),
+  listingAbsentConsecutiveChecks: new Gauge({
+    name: "mento_peg_listing_absent_consecutive_checks",
+    help: "Consecutive accepted authoritative exact-pair absent listing checks, reset by listed or halted evidence and saturated at the approved policy threshold.",
     labelNames: sourceLabels,
     registers: [register],
   }),
@@ -327,6 +337,46 @@ function validateUsableDecision(source: PegSourceMetricSnapshot): void {
   }
 }
 
+function validateListingEvidence(source: PegSourceMetricSnapshot): void {
+  if ((source.listingState == null) !== (source.listingCheckedAt == null)) {
+    throw new Error(
+      "listingState and listingCheckedAt must both be present or null",
+    );
+  }
+  if (source.listingCheckedAt !== null) {
+    assertFiniteNonnegative(source.listingCheckedAt, "listingCheckedAt");
+  }
+  validateListingAbsenceStreak(source);
+}
+
+function validateListingAbsenceStreak(source: PegSourceMetricSnapshot): void {
+  assertFiniteNonnegative(
+    source.listingAbsentConsecutiveChecks,
+    "listingAbsentConsecutiveChecks",
+  );
+  if (
+    !Number.isInteger(source.listingAbsentConsecutiveChecks) ||
+    source.listingAbsentConsecutiveChecks >
+      PEG_POLICY_MAX_LISTING_ABSENT_CONSECUTIVE_CHECKS
+  ) {
+    throw new Error(
+      `listingAbsentConsecutiveChecks must be an integer no greater than ${PEG_POLICY_MAX_LISTING_ABSENT_CONSECUTIVE_CHECKS}`,
+    );
+  }
+  if (
+    (source.listingState === null &&
+      source.listingAbsentConsecutiveChecks !== 0) ||
+    ((source.listingState === "listed" || source.listingState === "halted") &&
+      source.listingAbsentConsecutiveChecks !== 0) ||
+    (source.listingState === "absent" &&
+      source.listingAbsentConsecutiveChecks < 1)
+  ) {
+    throw new Error(
+      "listingAbsentConsecutiveChecks must match the paired listing state",
+    );
+  }
+}
+
 function validateSourceSnapshot(
   snapshot: PegAssetMetricSnapshot,
   source: PegSourceMetricSnapshot,
@@ -341,14 +391,7 @@ function validateSourceSnapshot(
   if (source.referenceSize === 0) {
     throw new Error("referenceSize must be positive");
   }
-  if ((source.listingState == null) !== (source.listingCheckedAt == null)) {
-    throw new Error(
-      "listingState and listingCheckedAt must both be present or null",
-    );
-  }
-  if (source.listingCheckedAt !== null) {
-    assertFiniteNonnegative(source.listingCheckedAt, "listingCheckedAt");
-  }
+  validateListingEvidence(source);
   if (source.deviationBps !== null) {
     assertFiniteNonnegative(source.deviationBps, "deviationBps");
   }
@@ -490,6 +533,10 @@ function publishSourceGauges(source: PegSourceMetricSnapshot): void {
     pegGauges.listingCheckedAt.set(
       labels,
       unixMillisecondsToSeconds(source.listingCheckedAt),
+    );
+    pegGauges.listingAbsentConsecutiveChecks.set(
+      labels,
+      source.listingAbsentConsecutiveChecks,
     );
   }
   pegGauges.referenceSize.set(labels, source.referenceSize);

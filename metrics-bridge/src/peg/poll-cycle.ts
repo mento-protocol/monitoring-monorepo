@@ -42,6 +42,7 @@ export interface PegPollSourceState {
   conversionValidUntil: number | null;
   listingState: MarketState | null;
   listingCheckedAt: number | null;
+  listingAbsentConsecutiveChecks: number;
   blindConsecutivePolls: number;
 }
 
