@@ -178,6 +178,7 @@ describe("handleRequest", () => {
                 referenceSizeCap: 50,
                 pollIntervalSeconds: 30,
                 staleAfterSeconds: 60,
+                listingAbsentConsecutiveChecks: 2,
                 spreadEnvelopeBps: 50,
                 conversionErrorBps: 0,
               },

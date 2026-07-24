@@ -32,6 +32,7 @@ import type {
 } from "./policy.js";
 import {
   PEG_POLICY_MAX_ASSETS,
+  effectiveListingAbsentConsecutiveChecks,
   PEG_POLICY_MAX_SOURCES_PER_ASSET,
 } from "./policy.js";
 import type {
@@ -151,6 +152,7 @@ const defaultSourceState = (): SourceState => ({
   conversionValidUntil: null,
   listingState: null,
   listingCheckedAt: null,
+  listingAbsentConsecutiveChecks: 0,
   blindConsecutivePolls: 0,
 });
 
@@ -313,6 +315,7 @@ function sourceSnapshot(
     referenceSize,
     listingState: state.listingState,
     listingCheckedAt: state.listingCheckedAt,
+    listingAbsentConsecutiveChecks: state.listingAbsentConsecutiveChecks,
     ...movement,
     spreadBps: spreadBps(observation),
     newSuccess,
@@ -548,6 +551,8 @@ function acceptDueObservation(
 function acceptListingCheck(
   state: SourceState,
   check: AuthoritativeListingCheck | undefined,
+  listingAbsentConsecutiveCheckLimit: number,
+  cadenceDue: boolean,
 ): Error | null {
   if (check === undefined) return null;
   if (!Number.isFinite(check.checkedAt) || check.checkedAt < 0) {
@@ -562,32 +567,74 @@ function acceptListingCheck(
   ) {
     return new Error("listing check timestamp regressed");
   }
+  const listingAbsentConsecutiveChecks =
+    check.state !== "absent"
+      ? 0
+      : state.listingState !== "absent"
+        ? 1
+        : cadenceDue
+          ? Math.min(
+              state.listingAbsentConsecutiveChecks + 1,
+              listingAbsentConsecutiveCheckLimit,
+            )
+          : state.listingAbsentConsecutiveChecks;
   state.listingState = check.state;
   state.listingCheckedAt = check.checkedAt;
+  state.listingAbsentConsecutiveChecks = listingAbsentConsecutiveChecks;
   return null;
+}
+
+function acceptRecordedListingCheck(
+  input: PollSourceInput,
+  state: SourceState,
+  listingChecks: AuthoritativeListingCheck[],
+  cadenceDue: boolean,
+): Error | null {
+  return acceptListingCheck(
+    state,
+    listingChecks[0],
+    effectiveListingAbsentConsecutiveChecks(input.policy),
+    cadenceDue,
+  );
+}
+
+function listingCheckRecorder(): {
+  listingChecks: AuthoritativeListingCheck[];
+  onListingChecked: RecordListingCheck;
+} {
+  const listingChecks: AuthoritativeListingCheck[] = [];
+  return {
+    listingChecks,
+    onListingChecked: (check) => {
+      if (listingChecks.length !== 0) {
+        throw new Error("provider emitted more than one listing check");
+      }
+      if (!Number.isFinite(check.checkedAt) || check.checkedAt < 0) {
+        throw new Error("listing check time must be finite and non-negative");
+      }
+      listingChecks.push({ ...check });
+    },
+  };
 }
 
 async function pollDueSource(
   input: PollSourceInput,
   state: SourceState,
   refSize: number,
+  cadenceDue: boolean,
 ): Promise<PegSourceMetricSnapshot> {
   state.lastAttemptAt = input.context.nowSeconds;
-  const listingChecks: AuthoritativeListingCheck[] = [];
-  const onListingChecked: RecordListingCheck = (check) => {
-    if (listingChecks.length !== 0) {
-      throw new Error("provider emitted more than one listing check");
-    }
-    if (!Number.isFinite(check.checkedAt) || check.checkedAt < 0) {
-      throw new Error("listing check time must be finite and non-negative");
-    }
-    listingChecks.push({ ...check });
-  };
+  const { listingChecks, onListingChecked } = listingCheckRecorder();
   let rawObservation: PegObservation;
   try {
     rawObservation = await fetchSource(input, refSize, onListingChecked);
   } catch (cause) {
-    const listingError = acceptListingCheck(state, listingChecks[0]);
+    const listingError = acceptRecordedListingCheck(
+      input,
+      state,
+      listingChecks,
+      cadenceDue,
+    );
     const supported =
       input.source.provider === "bitvavo" || input.source.provider === "kraken";
     return failSource(input, state, refSize, {
@@ -595,7 +642,12 @@ async function pollDueSource(
       cause: listingError ?? cause,
     });
   }
-  const listingError = acceptListingCheck(state, listingChecks[0]);
+  const listingError = acceptRecordedListingCheck(
+    input,
+    state,
+    listingChecks,
+    cadenceDue,
+  );
   if (listingError !== null) {
     return failSource(input, state, refSize, {
       kind: "source_fetch",
@@ -645,7 +697,7 @@ async function pollSource(
   // inside the ordinary cadence window.
   const due = cadenceDue || state.referenceSize !== refSize;
   if (due) {
-    const snapshot = await pollDueSource(input, state, refSize);
+    const snapshot = await pollDueSource(input, state, refSize, cadenceDue);
     if (input.blindConsecutivePollLimit !== null) {
       updateBlindConsecutivePolls(
         state,
