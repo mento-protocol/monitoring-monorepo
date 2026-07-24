@@ -66,8 +66,7 @@ pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, ev
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
-node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
-node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics
+node scripts/review-process-metrics.mjs --help  # Start a newly scoped evaluation with a new boundary, cohort, and tracking issue
 pnpm lockfile:lint                 # Fail-closed integrity + registry + override-floor check; no install needed
 pnpm skew:check                    # Fail on dependency version skew vs the pnpm catalog; no install needed
 pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
