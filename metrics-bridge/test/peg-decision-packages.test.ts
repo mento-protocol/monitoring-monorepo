@@ -386,19 +386,100 @@ describe("peg decision-package producer", () => {
     ).toThrow(/production time is invalid/);
   });
 
-  it("preserves the last confirmed body through empty and failed publication preparation", () => {
+  it("preserves the last confirmed body through empty and failed publication preparation", async () => {
     const publication = context([active], active.version, null);
     publishPegPollSnapshot([snapshot(active.version)], publication);
     const first = currentPegDecisionPackagesJson();
     publishPegPollSnapshot([], null);
     expect(currentPegDecisionPackagesJson()).toBe(first);
-    expect(() =>
-      publishPegPollSnapshot(
-        [{ ...snapshot(active.version), asset: "other-asset" }],
-        publication,
-      ),
-    ).toThrow(/complete decision-package asset set/);
+    _resetPegMetricsForTests();
+    const byteLength = vi
+      .spyOn(Buffer, "byteLength")
+      .mockReturnValue(PEG_DECISION_PACKAGE_MAX_BYTES + 1);
+    const result = publishPegPollSnapshot(
+      [snapshot(active.version)],
+      publication,
+    );
+    byteLength.mockRestore();
+    expect(result).toEqual(
+      expect.objectContaining({
+        message: "decision-package response exceeds its byte bound",
+      }),
+    );
     expect(currentPegDecisionPackagesJson()).toBe(first);
+    const metrics = await register.metrics();
+    expect(metrics).toContain(
+      `mento_peg_policy_version{policy_version="${active.version}"} 1`,
+    );
+    expect(metrics).not.toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${active.version}"} 1`,
+    );
+  });
+
+  it("withholds partial counters and staged state when decision preparation fails", async () => {
+    const publication = context(
+      [active, previous],
+      active.version,
+      previous.version,
+    );
+    publishPegPollSnapshot([snapshot(active.version)], publication);
+    const first = currentPegDecisionPackagesJson();
+    _resetPegMetricsForTests();
+    const { dependencies, report } = cycleDependencies();
+    const activeKey = sourceStateKey(active.version);
+    const original = sourceState(1);
+    const sourceStates = new Map([[activeKey, original]]);
+    const byteLength = vi
+      .spyOn(Buffer, "byteLength")
+      .mockReturnValue(PEG_DECISION_PACKAGE_MAX_BYTES + 1);
+
+    await expect(
+      runPegPollCycle(
+        rolloverInput,
+        dependencies,
+        sourceStates,
+        async (_registry, selectedPolicy, cycle) => {
+          if (selectedPolicy.version === previous.version) {
+            throw new Error("previous build failed");
+          }
+          cycle.sourceStates.get(activeKey)!.lastAttemptAt += 100;
+          cycle.activeStateKeys.add(activeKey);
+          return [snapshot(active.version)];
+        },
+      ),
+    ).resolves.toEqual([]);
+    byteLength.mockRestore();
+
+    expect(report).toHaveBeenCalledWith(
+      "publish",
+      expect.objectContaining({
+        message: "decision-package response exceeds its byte bound",
+      }),
+    );
+    expect(currentPegDecisionPackagesJson()).toBe(first);
+    expect(sourceStates.get(activeKey)).toBe(original);
+    expect(await register.metrics()).not.toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${active.version}"} 1`,
+    );
+
+    await runPegPollCycle(
+      rolloverInput,
+      dependencies,
+      sourceStates,
+      async (_registry, selectedPolicy, cycle) => {
+        if (selectedPolicy.version === previous.version) {
+          throw new Error("previous build failed");
+        }
+        cycle.sourceStates.get(activeKey)!.lastAttemptAt += 100;
+        cycle.activeStateKeys.add(activeKey);
+        return [snapshot(active.version)];
+      },
+    );
+
+    expect(sourceStates.get(activeKey)?.lastAttemptAt).toBe(101);
+    expect(await register.metrics()).toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${active.version}"} 1`,
+    );
   });
 
   it("rejects oversized or mixed-version snapshot input", () => {
