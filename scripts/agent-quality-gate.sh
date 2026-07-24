@@ -192,6 +192,49 @@ script_source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+terraform_stack_paths=()
+terraform_stack_paths_count=0
+if [[ -r "$repo_root/terraform.stacks.json" ]]; then
+  if ! terraform_stack_paths_output="$(
+    node --input-type=module - "$repo_root/terraform.stacks.json" <<'NODE'
+import { readFileSync } from "node:fs";
+
+const registryPath = process.argv[2];
+const registry = JSON.parse(readFileSync(registryPath, "utf8"));
+if (registry.version !== 1 || !Array.isArray(registry.stacks)) {
+  throw new Error("terraform.stacks.json must contain version=1 and a stacks array");
+}
+const paths = registry.stacks.map((stack) => stack.path);
+if (
+  paths.length === 0 ||
+  paths.some(
+    (stackPath) =>
+      typeof stackPath !== "string" ||
+      !/^[A-Za-z0-9._/-]+$/u.test(stackPath) ||
+      stackPath.startsWith("/") ||
+      stackPath
+        .split("/")
+        .some((segment) => ["", ".", ".."].includes(segment)),
+  ) ||
+  new Set(paths).size !== paths.length
+) {
+  throw new Error(
+    "terraform.stacks.json stack paths must be unique safe repo-relative directories",
+  );
+}
+process.stdout.write(paths.join("\n"));
+NODE
+  )"; then
+    echo "error: failed to load Terraform stack paths" >&2
+    exit 2
+  fi
+  while IFS= read -r terraform_stack_path; do
+    [[ -n "$terraform_stack_path" ]] || continue
+    terraform_stack_paths+=("$terraform_stack_path")
+    terraform_stack_paths_count=$((terraform_stack_paths_count + 1))
+  done <<< "$terraform_stack_paths_output"
+fi
+
 # Use a repo-local scratch dir for tmpfiles so we don't depend on TMPDIR
 # being writable — pre-push hooks fork off trunk's daemon, which may carry
 # a TMPDIR that's outside a host sandbox's writable allowlist. Also export
@@ -1312,6 +1355,15 @@ add_terraform_validate_commands() {
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} validate -no-color" "$reason"
 }
 
+add_registered_terraform_validate_commands() {
+  local reason="$1"
+  local terraform_stack_path
+  [[ "$terraform_stack_paths_count" -gt 0 ]] || return 0
+  for terraform_stack_path in "${terraform_stack_paths[@]}"; do
+    add_terraform_validate_commands "$terraform_stack_path" "$reason"
+  done
+}
+
 trunk_requires_full_scan() {
   local path
   while IFS= read -r path; do
@@ -1883,6 +1935,7 @@ while IFS= read -r path; do
           add_terraform_validate_commands "alerts/rules" "Terraform registry-backed CI workflow changed"
           add_terraform_validate_commands "alerts/infra" "Terraform registry-backed CI workflow changed"
           add_terraform_validate_commands "aegis/terraform" "Terraform registry-backed CI workflow changed"
+          add_registered_terraform_validate_commands "Terraform registry-backed CI workflow changed"
           ;;
         .github/workflows/documentation-garden.yml)
           add_command "pnpm docs:garden:test" "documentation garden workflow changed"
@@ -1894,6 +1947,7 @@ while IFS= read -r path; do
           add_terraform_validate_commands "alerts/rules" "Terraform registry workflow changed"
           add_terraform_validate_commands "alerts/infra" "Terraform registry workflow changed"
           add_terraform_validate_commands "aegis/terraform" "Terraform registry workflow changed"
+          add_registered_terraform_validate_commands "Terraform registry workflow changed"
           ;;
         .github/workflows/metrics-bridge.yml)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "metrics bridge Cloud Run workflow changed"
@@ -2130,6 +2184,9 @@ while IFS= read -r path; do
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in
+        scripts/production-infra-identity-contract/routing.test.mjs)
+          add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
+          ;;
         scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs|scripts/agent-autoreview-target-guard.test.mjs)
           add_command "pnpm agent:autoreview:test" "agent autoreview helper changed"
           ;;
@@ -2214,6 +2271,7 @@ while IFS= read -r path; do
           add_terraform_validate_commands "alerts/infra" "Terraform stack wrapper changed"
           add_terraform_validate_commands "aegis/terraform" "Terraform stack wrapper changed"
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack wrapper changed"
+          add_registered_terraform_validate_commands "Terraform stack wrapper changed"
           ;;
         scripts/terraform-fmt-check.mjs)
           add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper changed"
@@ -2223,6 +2281,7 @@ while IFS= read -r path; do
           add_terraform_validate_commands "alerts/infra" "Terraform format helper changed"
           add_terraform_validate_commands "aegis/terraform" "Terraform format helper changed"
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform format helper changed"
+          add_registered_terraform_validate_commands "Terraform format helper changed"
           ;;
         scripts/terraform-fmt-check.test.mjs)
           add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper test changed"
@@ -2256,6 +2315,9 @@ while IFS= read -r path; do
         scripts/check-autofix-ci-trust.mjs|scripts/check-autofix-ci-trust.test.mjs)
           add_command "node scripts/check-autofix-ci-trust.mjs" "autofix CI trust checker changed"
           add_command "node scripts/check-autofix-ci-trust.test.mjs" "autofix CI trust checker changed"
+          ;;
+        scripts/check-workflow-permissions-drift.mjs|scripts/check-workflow-permissions-drift.test.mjs)
+          add_command "node scripts/check-workflow-permissions-drift.test.mjs" "platform-settings workflow-permissions drift checker changed"
           ;;
         scripts/check-github-action-pins.test.mjs)
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
@@ -2336,6 +2398,7 @@ while IFS= read -r path; do
       add_terraform_validate_commands "alerts/infra" "Terraform stack registry changed"
       add_terraform_validate_commands "aegis/terraform" "Terraform stack registry changed"
       add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack registry changed"
+      add_registered_terraform_validate_commands "Terraform stack registry changed"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "Terraform stack registry changed"
       add_checklist "docs/pr-checklists/architecture-decisions.md" "Terraform stack registry changed — a new stack likely needs an ADR"
       add_adr_reminder "Terraform stack registry changed — ADR reminder"
@@ -2400,6 +2463,27 @@ while IFS= read -r path; do
       esac
       ;;
   esac
+  # `pnpm tf:test` owns the fail-closed production identity contract. Route
+  # every complete-inventory input plus the contract implementation itself.
+  # Keep this after the specialized cases so ci.yml/infra.yml retain their
+  # more specific command reasons while `add_command` deduplicates the run.
+  case "$path" in
+    terraform/*|aegis/terraform/*|alerts/infra/*|alerts/rules/*|governance-watchdog/infra/*|.github/workflows/*|scripts/production-infra-identity-contract/*.mjs|scripts/sanitize-terraform-output.sh|scripts/verify-github-environment-protection.mjs)
+      add_command "pnpm tf:test" "production infrastructure identity contract surface changed"
+      ;;
+  esac
+  if [[ "$terraform_stack_paths_count" -gt 0 ]]; then
+    for terraform_stack_path in "${terraform_stack_paths[@]}"; do
+      case "$path" in
+        "$terraform_stack_path"/*)
+          add_surface "terraform"
+          add_terraform_validate_commands "$terraform_stack_path" "registered Terraform stack changed"
+          add_command "pnpm tf:test" "registered Terraform stack changed"
+          break
+          ;;
+      esac
+    done
+  fi
 done < "$changed_paths_file"
 
 if [[ "$routing_sensitive_paths_changed" == "true" ]]; then

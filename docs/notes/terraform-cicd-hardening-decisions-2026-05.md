@@ -3,7 +3,7 @@ title: Terraform CI/CD hardening — declined alternatives
 status: archived
 owner: eng
 canonical: false
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 doc_type: note
 scope: terraform/infra
 review_interval_days: 365
@@ -19,11 +19,11 @@ apply behavior belongs in
 [`docs/terraform.md`](../terraform.md), and
 [`terraform-secret-strategy-2026-07.md`](terraform-secret-strategy-2026-07.md).
 
-The two alternatives below were deliberately declined. They remain here so a
-future change in constraints can reopen the decision without treating it as
-forgotten work.
+The alternatives below were deliberately declined. The first was reopened in
+July 2026 under a stricter identity invariant; the historical rejection remains
+here to show why the replacement does not broaden the PR trust boundary.
 
-## Declined: full-refresh read-only planning for alerts delivery
+## Reopened for trusted main only: full-refresh read-only planning
 
 The alerts-delivery stack could not use the state-only plan identity for a
 full-refresh plan: refreshing its Google-provider resources requires project
@@ -39,18 +39,41 @@ Terraform state object.
   track the stack's resource set, while apply jobs would still require the
   write deployer and pinned shared actions.
 
-Reopen this only under a stated invariant that no unattended CI job may hold
-write credentials, such as a new audit requirement or a material expansion in
-what auto-applies.
+That invariant changed in July 2026. [ADR 0047](../adr/0047-separated-terraform-ci-identities.md)
+requires unattended trusted-`main` plans and scheduled drift to carry no write
+credentials, while production apply authentication must prove immutable
+repository ID `1172025835`, the expected repository slug, protected `main` ref,
+and the `production-infra` environment through a dedicated WIF pool.
 
-## Declined: saved-plan binding via KMS
+The reopened design creates a separate main-ref refresh chain rather than
+broadening the PR identity. Its downstream seed service account receives a
+curated non-basic project read-role set in the target projects. The guaranteed
+core includes Browser, IAM Security Reviewer, and Storage Bucket Viewer, with
+additional service-specific readers enumerated by each owning stack. Secret
+Accessor remains limited to Terraform-managed secrets, and Storage Object
+Viewer remains limited to the Cloud Function deployment-source buckets. Basic
+Viewer is deliberately absent because its convenience-group behavior would
+grant object reads on uniform-bucket-level-access buckets. The result supports
+faithful provider refresh at an explicit confidentiality cost: trusted-main CI
+can see IAM policy, service data such as logs, metrics, and Artifact Registry
+contents, managed secret payloads, and deployment source. It cannot mutate
+those resources, cannot read replay/rotation-state/log bucket objects through
+the targeted GCS grants, and cannot be impersonated by PR refs. A live full
+refresh-only plan, not configuration validation alone, must prove the curated
+permissions through the checked-in routing cutover before final authority
+removal.
+
+## Superseded: saved-plan artifact binding via KMS
 
 The hardening audit considered encrypting a binary `tfplan` with KMS to recover
 byte-for-byte binding between the reviewed plan and apply. It was declined
 because these alerting stacks change infrequently, their blast radius is
 recoverable, and the environment-gated apply path re-plans before mutation.
 
-The prerequisite for reconsidering saved-plan binding is a higher-blast-radius
-stack moving to auto-apply, or loss of healthy scheduled drift detection for an
-auto-applied stack. Without one of those changes, the added artifact, key, and
-decryption machinery is not justified.
+ADR 0047 superseded that final-state choice in July 2026 after the approval
+timing was re-audited. The Environment gate runs before the apply job, so it
+cannot support human review of that job's plan. The selected replacement keeps
+the no-artifact boundary: one post-approval job creates a private saved plan,
+runs fail-closed policy over its JSON, and applies those exact bytes. Binary
+plan and JSON files never leave the job. This does not revive the declined KMS
+artifact handoff or claim that the operator reviewed the exact applied plan.

@@ -47,6 +47,7 @@ on:
       - Supply Chain
       - Integration Probes
       - Terraform Drift Detection
+      - Platform Settings Drift Detection
       - Terraform Deploy Queue Watch
       - Sentry Triage Agent
       - Sentry Triage Ingest

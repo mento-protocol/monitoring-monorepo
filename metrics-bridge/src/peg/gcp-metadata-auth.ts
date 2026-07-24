@@ -251,22 +251,22 @@ export class GcpMetadataBearerTokenProvider implements BearerTokenProvider {
           `GCP metadata token request failed with HTTP ${response.status}`,
         );
       }
-      const token = parseTokenResponse(
+      const tokenRecord = parseTokenResponse(
         await readBoundedUtf8Response(
           response,
           GCP_METADATA_TOKEN_MAX_RESPONSE_BYTES,
           "GCP metadata token response exceeds the byte budget",
         ),
       );
-      const expiresAtMs = now + token.expiresInSeconds * 1_000;
+      const expiresAtMs = now + tokenRecord.expiresInSeconds * 1_000;
       if (!Number.isSafeInteger(expiresAtMs)) {
         throw new Error("GCP metadata token response has an invalid lifetime");
       }
       this.#cached = {
-        value: token.accessToken,
+        value: tokenRecord.accessToken,
         expiresAtMs,
       };
-      return token.accessToken;
+      return tokenRecord.accessToken;
     } finally {
       clearTimeout(timeout);
     }

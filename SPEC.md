@@ -3,7 +3,7 @@ title: Mento Monitoring Technical Specification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 doc_type: reference
 scope: repo-wide
 review_interval_days: 90

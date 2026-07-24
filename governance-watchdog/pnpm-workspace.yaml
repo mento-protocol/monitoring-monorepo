@@ -16,6 +16,8 @@ minimumReleaseAgeExclude:
   - brace-expansion
   - fast-uri
   - js-yaml
+  # GHSA-r28c-9q8g-f849: first patched PostCSS release (2026-07-24).
+  - postcss@8.5.18
   - protobufjs
 
 overrides:
@@ -31,6 +33,8 @@ overrides:
   # Google Cloud deps still resolve vulnerable qs/uuid ranges. Pin the
   # vulnerable ranges narrowly instead of overriding whole packages.
   "fast-uri@<3.1.4": 3.1.4
+  # GHSA-r28c-9q8g-f849: <=8.5.17 can disclose arbitrary source-map files.
+  "postcss@<8.5.18": 8.5.18
   "qs@<6.15.2": 6.15.2
   "uuid@<11.1.1": 11.1.1
   "protobufjs@>=7.0.0 <7.6.5": 7.6.5
