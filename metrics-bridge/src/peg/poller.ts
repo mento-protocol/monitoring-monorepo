@@ -102,6 +102,7 @@ export interface PegPollerDependencies {
   publish?: (
     snapshots: PegAssetMetricSnapshot[],
     context: PegDecisionPackagePublicationContext | null,
+    decisionSnapshots: PegAssetMetricSnapshot[],
   ) => void | Promise<void>;
   onError?: (event: PegPollErrorEvent) => void;
 }
@@ -134,6 +135,7 @@ interface Dependencies {
   publish: (
     snapshots: PegAssetMetricSnapshot[],
     context: PegDecisionPackagePublicationContext | null,
+    decisionSnapshots: PegAssetMetricSnapshot[],
   ) => void | Promise<void>;
   report: ReportError;
 }

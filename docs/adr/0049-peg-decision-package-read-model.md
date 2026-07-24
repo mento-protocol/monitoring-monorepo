@@ -25,11 +25,14 @@ with different timing and semantics.
 ## Decision
 
 Metrics Bridge owns a versioned, bounded in-memory read model at read-only
-`GET /peg/decision-packages`. It commits one pre-serialized body only after a
-successful complete peg publish. Readers receive that body atomically; before
-the first body the endpoint returns `503`, and a later failed cycle preserves
-the original body and immutable `producedAt` so clients can show stale
-last-confirmed evidence.
+`GET /peg/decision-packages`. It commits one pre-serialized body from a
+complete selected-policy snapshot after the metrics publication succeeds.
+During policy rollover, a complete active or retained-previous snapshot may
+replace the body even when a failed sibling forces the Prometheus batch empty
+and rolls back source state. Readers receive the body atomically; before the
+first body the endpoint returns `503`, and a cycle with no complete selected
+policy preserves the original body and immutable `producedAt` so clients can
+show stale last-confirmed evidence.
 
 One response selects exactly one compatible policy version. It prefers a
 complete active asset set and may fall back only to the explicitly retained

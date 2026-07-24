@@ -45,6 +45,7 @@ export interface PegPollCycleCoordinatorDependencies {
   publish: (
     snapshots: PegAssetMetricSnapshot[],
     context: PegDecisionPackagePublicationContext | null,
+    decisionSnapshots: PegAssetMetricSnapshot[],
   ) => void | Promise<void>;
   report: (kind: "cycle" | "publish", cause: unknown) => void;
 }
@@ -139,15 +140,35 @@ export function publicationContextForPegCycle(
 async function publishCycle(
   dependencies: PegPollCycleCoordinatorDependencies,
   snapshots: PegAssetMetricSnapshot[],
-  complete: boolean,
   context: PegDecisionPackagePublicationContext | null,
+  decisionSnapshots: PegAssetMetricSnapshot[],
 ): Promise<boolean> {
   try {
-    await dependencies.publish(snapshots, complete ? context : null);
+    await dependencies.publish(snapshots, context, decisionSnapshots);
     return true;
   } catch (error) {
     dependencies.report("publish", error);
     return false;
+  }
+}
+
+function assertCompletePolicySnapshots(
+  policy: PegPolicyVersion,
+  snapshots: PegAssetMetricSnapshot[],
+): void {
+  const expectedAssets = Object.keys(policy.assets);
+  const producedAssets = new Set(snapshots.map(({ asset }) => asset));
+  const complete =
+    snapshots.length === expectedAssets.length &&
+    producedAssets.size === snapshots.length &&
+    snapshots.every(
+      ({ asset, policyVersion }) =>
+        policyVersion === policy.version && expectedAssets.includes(asset),
+    );
+  if (!complete) {
+    throw new Error(
+      `peg policy ${policy.version} produced an incomplete snapshot set`,
+    );
   }
 }
 
@@ -161,6 +182,7 @@ export async function runPegPollCycle<
   buildSnapshots: PegPollCycleSnapshotBuilder<Dependencies>,
 ): Promise<PegAssetMetricSnapshot[]> {
   const snapshots: PegAssetMetricSnapshot[] = [];
+  const decisionSnapshots: PegAssetMetricSnapshot[] = [];
   const cycleSourceStates = cloneSourceStates(sourceStates);
   let publicationContext: PegDecisionPackagePublicationContext | null = null;
   let cycleComplete = false;
@@ -184,9 +206,14 @@ export async function runPegPollCycle<
         activeStateKeys,
       };
       try {
-        snapshots.push(
-          ...(await buildSnapshots(input.registry, policy, context)),
+        const policySnapshots = await buildSnapshots(
+          input.registry,
+          policy,
+          context,
         );
+        assertCompletePolicySnapshots(policy, policySnapshots);
+        snapshots.push(...policySnapshots);
+        decisionSnapshots.push(...policySnapshots);
       } catch (error) {
         dependencies.report("cycle", error);
         policyFailed = true;
@@ -205,8 +232,8 @@ export async function runPegPollCycle<
     !(await publishCycle(
       dependencies,
       snapshots,
-      cycleComplete,
       publicationContext,
+      decisionSnapshots,
     ))
   )
     return [];

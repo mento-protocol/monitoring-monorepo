@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _resetPegDecisionPackagesForTests,
   currentPegDecisionPackagesJson,
@@ -7,7 +7,14 @@ import {
   preparePegDecisionPackages,
   type PegDecisionPackagePublicationContext,
 } from "../src/peg/decision-packages.js";
-import type { PegAssetMetricSnapshot } from "../src/peg/metrics.js";
+import {
+  _resetPegMetricsForTests,
+  type PegAssetMetricSnapshot,
+} from "../src/peg/metrics.js";
+import {
+  runPegPollCycle,
+  type PegPollSourceState,
+} from "../src/peg/poll-cycle.js";
 import type { PegPolicyVersion } from "../src/peg/policy.js";
 import { publishPegPollSnapshot } from "../src/peg/publisher.js";
 import { parsePegRegistry } from "../src/peg/registry.js";
@@ -173,8 +180,57 @@ function context(
   };
 }
 
-beforeEach(_resetPegDecisionPackagesForTests);
-afterEach(_resetPegDecisionPackagesForTests);
+function sourceState(lastAttemptAt: number): PegPollSourceState {
+  return {
+    lastAttemptAt,
+    lastObservationAt: null,
+    identitiesAtLastObservationAt: new Set(),
+    observation: null,
+    referenceSize: null,
+    conversionValidUntil: null,
+    blindConsecutivePolls: 0,
+  };
+}
+
+const rolloverInput = {
+  registry,
+  policies: [active, previous] as const,
+  approvedActivePolicyVersion: active.version,
+  retainedPreviousPolicyVersion: previous.version,
+};
+
+function cycleDependencies() {
+  const publish = vi.fn(publishPegPollSnapshot);
+  const report = vi.fn();
+  return {
+    dependencies: {
+      nowMs: () => 1_800_000_000_000,
+      publish,
+      report,
+    },
+    publish,
+    report,
+  };
+}
+
+function currentDecisionPackages() {
+  const json = currentPegDecisionPackagesJson();
+  if (json === null) throw new Error("expected a decision-package body");
+  return JSON.parse(json) as {
+    producedPolicyVersion: string;
+    policySlot: "active" | "previous";
+    packages: Array<{ asset: string }>;
+  };
+}
+
+beforeEach(() => {
+  _resetPegDecisionPackagesForTests();
+  _resetPegMetricsForTests();
+});
+afterEach(() => {
+  _resetPegDecisionPackagesForTests();
+  _resetPegMetricsForTests();
+});
 
 describe("peg decision-package producer", () => {
   it("selects one complete active version and serializes bounded breaker and blind evidence", () => {
@@ -354,5 +410,137 @@ describe("peg decision-package producer", () => {
         context([active], active.version, null),
       ),
     ).toThrow(/unselected policy version/);
+  });
+});
+
+describe("peg poll-cycle decision publication", () => {
+  it("publishes a complete previous decision when the active build fails", async () => {
+    const { dependencies, publish } = cycleDependencies();
+
+    await expect(
+      runPegPollCycle(
+        rolloverInput,
+        dependencies,
+        new Map(),
+        async (_registry, selectedPolicy) => {
+          if (selectedPolicy.version === active.version) {
+            throw new Error("active build failed");
+          }
+          return [snapshot(selectedPolicy.version)];
+        },
+      ),
+    ).resolves.toEqual([]);
+
+    expect(publish).toHaveBeenCalledWith([], expect.any(Object), [
+      expect.objectContaining({ policyVersion: previous.version }),
+    ]);
+    expect(currentDecisionPackages()).toMatchObject({
+      producedPolicyVersion: previous.version,
+      policySlot: "previous",
+    });
+  });
+
+  it("publishes a complete active decision when the previous build fails", async () => {
+    const { dependencies, publish } = cycleDependencies();
+
+    await expect(
+      runPegPollCycle(
+        rolloverInput,
+        dependencies,
+        new Map(),
+        async (_registry, selectedPolicy) => {
+          if (selectedPolicy.version === previous.version) {
+            throw new Error("previous build failed");
+          }
+          return [snapshot(selectedPolicy.version)];
+        },
+      ),
+    ).resolves.toEqual([]);
+
+    expect(publish).toHaveBeenCalledWith([], expect.any(Object), [
+      expect.objectContaining({ policyVersion: active.version }),
+    ]);
+    expect(currentDecisionPackages()).toMatchObject({
+      producedPolicyVersion: active.version,
+      policySlot: "active",
+    });
+  });
+
+  it("retains the prior decision body when both policy builds fail", async () => {
+    publishPegPollSnapshot(
+      [snapshot(active.version)],
+      context([active, previous], active.version, previous.version),
+    );
+    const prior = currentPegDecisionPackagesJson();
+    const { dependencies, publish } = cycleDependencies();
+
+    await expect(
+      runPegPollCycle(rolloverInput, dependencies, new Map(), async () => {
+        throw new Error("policy build failed");
+      }),
+    ).resolves.toEqual([]);
+
+    expect(publish).toHaveBeenCalledWith([], expect.any(Object), []);
+    expect(currentPegDecisionPackagesJson()).toBe(prior);
+  });
+
+  it("excludes incomplete policy snapshots from decision preparation", async () => {
+    publishPegPollSnapshot(
+      [snapshot(active.version)],
+      context([active, previous], active.version, previous.version),
+    );
+    const prior = currentPegDecisionPackagesJson();
+    const { dependencies, publish, report } = cycleDependencies();
+
+    await runPegPollCycle(
+      rolloverInput,
+      dependencies,
+      new Map(),
+      async (_registry, selectedPolicy) => {
+        if (selectedPolicy.version === previous.version) {
+          throw new Error("previous build failed");
+        }
+        return [snapshot(selectedPolicy.version, { asset: "unexpected" })];
+      },
+    );
+
+    expect(publish).toHaveBeenCalledWith([], expect.any(Object), []);
+    expect(report).toHaveBeenCalledWith(
+      "cycle",
+      expect.objectContaining({
+        message: expect.stringContaining("incomplete snapshot set"),
+      }),
+    );
+    expect(currentPegDecisionPackagesJson()).toBe(prior);
+    expect(currentDecisionPackages().packages).toEqual([
+      expect.objectContaining({ asset: "asset-one" }),
+    ]);
+  });
+
+  it("rolls back source state while publishing a complete decision fallback", async () => {
+    const original = sourceState(1);
+    const sourceStates = new Map([["source", original]]);
+    const { dependencies } = cycleDependencies();
+
+    await runPegPollCycle(
+      rolloverInput,
+      dependencies,
+      sourceStates,
+      async (_registry, selectedPolicy, cycle) => {
+        cycle.sourceStates.get("source")!.lastAttemptAt = 2;
+        cycle.activeStateKeys.add("source");
+        if (selectedPolicy.version === previous.version) {
+          throw new Error("previous build failed");
+        }
+        return [snapshot(selectedPolicy.version)];
+      },
+    );
+
+    expect(sourceStates.get("source")).toBe(original);
+    expect(sourceStates.get("source")?.lastAttemptAt).toBe(1);
+    expect(currentDecisionPackages()).toMatchObject({
+      producedPolicyVersion: active.version,
+      policySlot: "active",
+    });
   });
 });

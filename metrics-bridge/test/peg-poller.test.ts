@@ -1100,7 +1100,7 @@ describe("peg poll cycle isolation", () => {
 
     await expect(poller.pollCycle(cycle)).resolves.toEqual([]);
     expect(publish).toHaveBeenCalledOnce();
-    expect(publish).toHaveBeenCalledWith([], null);
+    expect(publish).toHaveBeenCalledWith([], null, []);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatchObject({ kind: "cycle" });
     expect(errors[0]?.cause).toEqual(
@@ -1251,7 +1251,11 @@ describe("peg poll cycle conversion and cadence", () => {
     expect(fetchBitvavo).toHaveBeenCalledTimes(2);
     expect(fetchKraken).toHaveBeenCalledOnce();
     expect(publish).toHaveBeenCalledOnce();
-    expect(publish).toHaveBeenCalledWith(snapshots, expect.any(Object));
+    expect(publish).toHaveBeenCalledWith(
+      snapshots,
+      expect.any(Object),
+      snapshots,
+    );
   });
 
   it("clears metrics and rolls back state when one policy build is incomplete", async () => {
@@ -1304,7 +1308,9 @@ describe("peg poll cycle conversion and cadence", () => {
     });
 
     expect(failed).toEqual([]);
-    expect(publish).toHaveBeenNthCalledWith(2, [], null);
+    expect(publish).toHaveBeenNthCalledWith(2, [], expect.any(Object), [
+      expect.objectContaining({ policyVersion: input.policy.version }),
+    ]);
     expect(errors.map(({ kind }) => kind)).toEqual(["cycle"]);
 
     const recovered = await poller.pollCycle(rollover);
@@ -1313,7 +1319,12 @@ describe("peg poll cycle conversion and cadence", () => {
       true,
     ]);
     expect(fetchBitvavo).toHaveBeenCalledTimes(6);
-    expect(publish).toHaveBeenNthCalledWith(3, recovered, expect.any(Object));
+    expect(publish).toHaveBeenNthCalledWith(
+      3,
+      recovered,
+      expect.any(Object),
+      recovered,
+    );
   });
 
   it("publishes two exact-version snapshots atomically and evicts retained state", async () => {
@@ -1356,7 +1367,7 @@ describe("peg poll cycle conversion and cadence", () => {
     );
     expect(now).toHaveBeenCalledOnce();
     expect(publish).toHaveBeenCalledOnce();
-    expect(publish).toHaveBeenLastCalledWith(first, expect.any(Object));
+    expect(publish).toHaveBeenLastCalledWith(first, expect.any(Object), first);
 
     nowMs += 10_000;
     const cached = await poller.pollCycle(rollover);
@@ -1389,7 +1400,11 @@ describe("peg poll cycle conversion and cadence", () => {
     expect(fetchBitvavo).toHaveBeenCalledTimes(3);
     expect(now).toHaveBeenCalledTimes(4);
     expect(publish).toHaveBeenCalledTimes(4);
-    expect(publish).toHaveBeenLastCalledWith(reintroduced, expect.any(Object));
+    expect(publish).toHaveBeenLastCalledWith(
+      reintroduced,
+      expect.any(Object),
+      reintroduced,
+    );
   });
 
   it("isolates blind streak state by policy version and resets it after cleanup", async () => {
