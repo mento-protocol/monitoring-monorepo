@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { register } from "../src/metrics.js";
 import {
   _resetPegDecisionPackagesForTests,
   currentPegDecisionPackagesJson,
@@ -605,6 +606,51 @@ describe("peg poll-cycle decision publication", () => {
       blind: true,
       blindConsecutivePolls: 2,
     });
+  });
+
+  it("commits no counters, decision body, or source state when partial counter validation fails", async () => {
+    const activeKey = sourceStateKey(active.version);
+    const activeOriginal = sourceState(1);
+    const sourceStates = new Map([[activeKey, activeOriginal]]);
+    const { dependencies, report } = cycleDependencies();
+    const invalid = snapshot(active.version);
+    invalid.sources[0]!.newUsableDecision = false;
+
+    await expect(
+      runPegPollCycle(
+        rolloverInput,
+        dependencies,
+        sourceStates,
+        async (_registry, selectedPolicy, cycle) => {
+          if (selectedPolicy.version === previous.version) {
+            throw new Error("previous build failed");
+          }
+          const state = cycle.sourceStates.get(activeKey)!;
+          state.lastAttemptAt += 100;
+          cycle.activeStateKeys.add(activeKey);
+          return [invalid];
+        },
+      ),
+    ).resolves.toEqual([]);
+
+    expect(sourceStates.get(activeKey)).toBe(activeOriginal);
+    expect(activeOriginal.lastAttemptAt).toBe(1);
+    expect(currentPegDecisionPackagesJson()).toBeNull();
+    const metrics = await register.metrics();
+    expect(metrics).not.toContain(
+      'mento_peg_poll_success_total{asset="asset-one"',
+    );
+    expect(metrics).not.toContain(
+      'mento_peg_usable_decision_total{asset="asset-one"',
+    );
+    expect(report).toHaveBeenCalledWith(
+      "publish",
+      expect.objectContaining({
+        message: expect.stringContaining(
+          "newUsableDecision must match a newly accepted",
+        ),
+      }),
+    );
   });
 
   it("commits neither policy state or decision body when publication fails", async () => {

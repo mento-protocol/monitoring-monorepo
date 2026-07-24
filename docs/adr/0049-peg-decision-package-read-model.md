@@ -28,14 +28,17 @@ Metrics Bridge owns a versioned, bounded in-memory read model at read-only
 `GET /peg/decision-packages`. It commits one pre-serialized body from a
 complete selected-policy snapshot after the metrics publication succeeds.
 During policy rollover, a complete active or retained-previous snapshot may
-replace the body even when a failed sibling forces the Prometheus batch empty.
-After that successful publication, the bridge atomically merges and prunes
-only the selected policy version's staged source state; failed and unselected
-policy versions remain unchanged. A fully successful cycle still atomically
-commits and prunes the whole source-state map. Readers receive the body
-atomically; before the first body the endpoint returns `503`, and a cycle with
-no complete selected policy preserves the original body and immutable
-`producedAt` so clients can show stale last-confirmed evidence.
+replace the body even when a failed sibling forces the current-state gauge
+batch empty. The selected complete policy's monotonic poll-success and
+usable-decision deltas still publish before its source state commits, so a
+cached or replayed observation cannot lose or repeat an accepted event. After
+that successful publication, the bridge atomically merges and prunes only the
+selected policy version's staged source state; failed and unselected policy
+versions remain unchanged. A fully successful cycle still atomically commits
+and prunes the whole source-state map. Readers receive the body atomically;
+before the first body the endpoint returns `503`, and a cycle with no complete
+selected policy preserves the original body and immutable `producedAt` so
+clients can show stale last-confirmed evidence.
 
 One response selects exactly one compatible policy version. It prefers a
 complete active asset set and may fall back only to the explicitly retained

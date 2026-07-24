@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { register } from "../src/metrics.js";
+import { _resetPegDecisionPackagesForTests } from "../src/peg/decision-packages.js";
 import type { PegStructuralContextResult } from "../src/peg/graphql.js";
-import type { PegAssetMetricSnapshot } from "../src/peg/metrics.js";
+import {
+  _resetPegMetricsForTests,
+  type PegAssetMetricSnapshot,
+} from "../src/peg/metrics.js";
 import {
   PegPolicyVersionSchema,
   pegPolicyVersionForContent,
@@ -11,6 +16,7 @@ import {
   type PegPollCycleInput,
   type PegPollErrorEvent,
 } from "../src/peg/poller.js";
+import { publishPegPollSnapshot } from "../src/peg/publisher.js";
 import { parsePegRegistry } from "../src/peg/registry.js";
 import type { PegObservation } from "../src/peg/types.js";
 
@@ -218,6 +224,11 @@ const source = (snapshot: PegAssetMetricSnapshot, sourceId = "deep_eur") => {
   if (found === undefined) throw new Error(`missing source ${sourceId}`);
   return found;
 };
+
+afterEach(() => {
+  _resetPegDecisionPackagesForTests();
+  _resetPegMetricsForTests();
+});
 
 describe("peg poll cycle freshness and measurements", () => {
   it("does not count a frozen at-par book and fails it stale", async () => {
@@ -1259,6 +1270,8 @@ describe("peg poll cycle conversion and cadence", () => {
   });
 
   it("clears metrics while committing selected-policy state when one policy build is incomplete", async () => {
+    _resetPegDecisionPackagesForTests();
+    _resetPegMetricsForTests();
     const spec = primaryAsset();
     const input = makeInput([spec]);
     const retainedCandidate = {
@@ -1270,8 +1283,9 @@ describe("peg poll cycle conversion and cadence", () => {
       version: pegPolicyVersionForContent("test-v0", retainedCandidate),
     });
     let nowMs = 1_800_000_000_000;
-    const fetchBitvavo = vi.fn(async () => observation(nowMs));
-    const publish = vi.fn<(snapshots: PegAssetMetricSnapshot[]) => void>();
+    let providerObservationMs = nowMs;
+    const fetchBitvavo = vi.fn(async () => observation(providerObservationMs));
+    const publish = vi.fn(publishPegPollSnapshot);
     const errors: PegPollErrorEvent[] = [];
     const poller = createPegPoller({
       nowMs: () => nowMs,
@@ -1289,6 +1303,7 @@ describe("peg poll cycle conversion and cadence", () => {
     await poller.pollCycle(rollover);
 
     nowMs += 30_000;
+    providerObservationMs = nowMs;
     const retainedAsset = retained.assets[spec.id]!;
     const brokenAsset = new Proxy(retainedAsset, {
       get(target, property, receiver) {
@@ -1312,6 +1327,20 @@ describe("peg poll cycle conversion and cadence", () => {
       expect.objectContaining({ policyVersion: input.policy.version }),
     ]);
     expect(errors.map(({ kind }) => kind)).toEqual(["cycle"]);
+    const partialMetrics = await register.metrics();
+    expect(partialMetrics).not.toContain("mento_peg_policy_version{");
+    expect(partialMetrics).toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 2`,
+    );
+    expect(partialMetrics).toContain(
+      `mento_peg_usable_decision_total{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 2`,
+    );
+    expect(partialMetrics).toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${retained.version}"} 1`,
+    );
+    expect(partialMetrics).toContain(
+      `mento_peg_usable_decision_total{asset="asset-one",source="deep_eur",policy_version="${retained.version}"} 1`,
+    );
 
     const recovered = await poller.pollCycle(rollover);
     // The active policy supplied the visible partial decision on the failed
@@ -1328,6 +1357,30 @@ describe("peg poll cycle conversion and cadence", () => {
       expect.any(Object),
       recovered,
     );
+
+    const cached = await poller.pollCycle(rollover);
+    expect(cached.map((snapshot) => source(snapshot).newSuccess)).toEqual([
+      false,
+      false,
+    ]);
+    expect(fetchBitvavo).toHaveBeenCalledTimes(5);
+
+    nowMs += 30_000;
+    const replayed = await poller.pollCycle(rollover);
+    expect(replayed.map((snapshot) => source(snapshot).newSuccess)).toEqual([
+      false,
+      false,
+    ]);
+    expect(fetchBitvavo).toHaveBeenCalledTimes(7);
+    const replayMetrics = await register.metrics();
+    for (const policyVersion of [input.policy.version, retained.version]) {
+      expect(replayMetrics).toContain(
+        `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${policyVersion}"} 2`,
+      );
+      expect(replayMetrics).toContain(
+        `mento_peg_usable_decision_total{asset="asset-one",source="deep_eur",policy_version="${policyVersion}"} 2`,
+      );
+    }
   });
 
   it("publishes two exact-version snapshots atomically and evicts retained state", async () => {

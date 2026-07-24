@@ -7,9 +7,9 @@ import { publishPegMetrics, type PegAssetMetricSnapshot } from "./metrics.js";
 
 /**
  * Prepare the read model from complete per-policy candidates before mutating
- * metrics, then commit it only after the current metrics batch succeeds. The
- * metrics batch may be empty when a sibling policy failed while one complete
- * policy remains eligible for the decision package.
+ * metrics, then commit it only after the current metric publication succeeds.
+ * A sibling-policy failure clears the current-state gauges while the selected
+ * complete policy's monotonic counter deltas still publish exactly once.
  */
 export function publishPegPollSnapshot(
   snapshots: PegAssetMetricSnapshot[],
@@ -26,6 +26,13 @@ export function publishPegPollSnapshot(
     context === null
       ? null
       : preparePegDecisionPackages(decisionSnapshots, context);
-  publishPegMetrics(snapshots);
+  const counterSnapshots =
+    snapshots.length > 0 || prepared === null
+      ? snapshots
+      : decisionSnapshots.filter(
+          ({ policyVersion }) =>
+            policyVersion === prepared.model.producedPolicyVersion,
+        );
+  publishPegMetrics(snapshots, counterSnapshots);
   if (prepared !== null) commitPegDecisionPackages(prepared);
 }
