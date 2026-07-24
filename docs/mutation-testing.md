@@ -3,7 +3,7 @@ title: "Mutation Testing"
 status: active
 owner: eng
 canonical: false
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 doc_type: reference
 scope: repo-wide
 review_interval_days: 180
@@ -71,16 +71,13 @@ Latest dashboard result:
   classified as equivalent mutants or accepted noise — see the
   Survivor Classification section below.
 
-Latest metrics-bridge result after narrowing to the probe runner:
+Latest metrics-bridge result:
 
-- Runtime: 22s on the 2026-05-18 CI run / 8-9s locally
-- Mutation score: **86.01% total / covered**. PR 436 had landed at 88.32%;
-  the strict-TS PR added defensive null-checks for `noUncheckedIndexedAccess`
-  (extra mutants in the `if (!pool || !result) continue` /
-  `if (item === undefined) return` guards). The 2.3-pt drop is from new
-  equivalent mutants (see taxonomy below). The gate is `break: 84` to keep
-  the 2-pt margin for measurement noise.
-- Mutants: 121 killed, 2 timed out, 20 survived, 0 no coverage
+- Runtime: 9s locally on 2026-07-24
+- Mutation score: **87.65% total / covered**
+- Mutants: 139 killed, 3 timed out, 20 survived, 0 no coverage
+- `metrics-bridge/stryker.config.mjs` sets `break: 84`, leaving a 3.65-point
+  margin below the verified score.
 
 The first dashboard run was worth doing: it found real assertion gaps in the
 default `Date.now()` path, reversed weekend-overlap ranges, and the exact/future
@@ -122,78 +119,69 @@ Remaining dashboard survivors are accepted noise:
   `slice(1)`, the namespaced format leaves a single address segment, so
   `join("")` and `join("-")` return the same value.
 
-Remaining 16 metrics-bridge survivors after the PR 436 triage — all are
-classified as accepted noise or equivalent mutants. Counts in parentheses
-indicate how many mutation variants on the same line collapse to the same
-category.
+The 20 metrics-bridge survivors from the 2026-07-24 run are classified as
+accepted noise or equivalent mutants:
 
 **Test scaffolding (3)** — affect test cleanup, not production behavior:
 
-- `_resetProbeInProgressForTests()` body emptied (line 53).
-- Module-scope `let probeInProgress = false` flipped to `true` (line 44);
+- `_resetProbeInProgressForTests()` body emptied.
+- Module-scope `let probeInProgress = false` flipped to `true`;
   `runRebalanceProbes()` re-sets it every cycle before reading.
 - Module-scope `let reentryWarnedThisWindow = false` flipped to `true`
-  (line 49); reset in the `finally` block.
+  and then reset in the `finally` block.
 
 **`eligibleForProbe` optimization branches (5)** — equivalent mutants
 because NaN-comparison semantics naturally short-circuit downstream:
 
-- `if (!Number.isFinite(ratio)) return false` (line 72): removing the
-  early-return still excludes the pool — `NaN <= TOLERANCE` is false,
+- Removing the `if (!Number.isFinite(ratio)) return false` early return still
+  excludes the pool: `NaN <= TOLERANCE` is false,
   `NaN > 1.05` is false, so `crossedCritical` is false → excluded anyway.
 - `Number.isFinite(openBreachPeak) && openBreachPeak > 0` mutated to
-  `true` / `&&` → `||` / `> 0` → `>= 0` (lines 80, 80:42): when peak is 0
-  or NaN, every variant yields `openBreachPeakRatio = 0` (either via the
-  guard or via 0/threshold). The boundary tests added in PR 436 lock the
-  threshold-divisor selection, but these guard-removal mutants flatten
-  to the same ratio.
+  `true` / `&&` → `||` / `> 0` → `>= 0`: when the peak is 0 or NaN, every
+  variant yields `openBreachPeakRatio = 0` either through the guard or through
+  `0 / threshold`.
+
+**Registry normalization and dedupe (4)** — equivalent for the current
+case-insensitive address contract:
+
+- Lowercase-to-uppercase mutants on the dedupe key and sort operands preserve
+  normalized equality and ordering.
+- Replacing the first-row guard with an unconditional map write is equivalent
+  because the downstream probe consumes only the deduplicated strategy
+  address.
 
 **`probeOne` timeout-error branch (3)** — equivalent because the
 unexpected-error fallback returns the same `transport_error` message:
 
-- `timeoutErr.name = "AbortError"` mutated to `""` (line 124): with an
-  empty name, `isAbortError(err)` returns false and the catch falls to
+- `timeoutErr.name = "AbortError"` mutated to `""`: with an empty name,
+  `isAbortError(err)` returns false and the catch falls to
   the fallback path which builds `transport_error` from the same
   `scrubUrls(timeoutErr.message)` — the message is the literal
   `timeoutMessage` with no URLs to scrub, so the observable error string
   is unchanged.
 - `if (isAbortError(err)) { ... }` mutated to `if (false)` / `{}`
-  (line 138): same fallback collapse — the body returned
-  `transport_error: timeoutMessage` and the fallback now returns
+  has the same fallback collapse: the body returned `transport_error:
+timeoutMessage` and the fallback now returns
   `transport_error: scrubUrls(timeoutMessage)`, which for our timeout
   string is the same value.
 
-**`runWithConcurrency` array pre-sizing (1)** — equivalent:
+**`runWithConcurrency` defensive operations (3)** — equivalent:
 
-- `new Array(items.length)` mutated to `new Array()` (line 170):
+- `new Array(items.length)` mutated to `new Array()`:
   JavaScript arrays grow dynamically on `arr[idx] = ...` assignment, and
   the runner only reads results AFTER the workers finish. Final array
   shape is identical.
+- The `idx >= items.length` boundary mutated to `>` and the secondary
+  `item === undefined` guard mutated to false. Both are equivalent under the
+  preceding monotonic index allocation and array-length bound.
 
-**`runRebalanceProbes` + `runWithConcurrency` defensive guards (~7)** —
-equivalent under the current callgraph. Several of these guards were
-added by the strict-TS PR to satisfy `noUncheckedIndexedAccess`; mutants
-on them survive because the bounds checks above prove the indexes are
-valid:
+**Empty eligible-set guard (2)** — equivalent under the current callgraph:
 
 - `if (eligible.length === 0) { ...; return; }` mutated to
   `if (false)` / `{}`: with an empty list,
   `runWithConcurrency([], ..., ...)` returns `[]`, the for-loop runs
   zero iterations, and the function still reaches the same final
   `rebalanceProbeLastRun` gauge update at the end of the `try` block.
-- `for (let i = 0; i < eligible.length; i++)` mutated to `i <=`:
-  accessing `eligible[eligible.length]` returns `undefined`, the
-  `if (!pool || !result) continue` line skips, no observable change.
-- `if (!pool || !result) continue` mutated to `if (false) continue` /
-  flipped to `&&`: `pool` and `result` are always defined when the loop
-  body runs (`runWithConcurrency` writes every slot, `eligible[i]` is
-  in-range). The guard is defensive against the
-  `noUncheckedIndexedAccess` TS rule, not a runtime case.
-- `if (item === undefined) return` inside `runWithConcurrency` workers:
-  same pattern — `items[idx]` is provably defined after the
-  `idx >= items.length` bound check above, so the secondary guard is
-  unreachable. The guard exists because the TS compiler can't prove the
-  invariant under `noUncheckedIndexedAccess`.
 
 Remaining indexer survivors are accepted noise for this baseline:
 

@@ -3,7 +3,7 @@ title: Terraform secret strategy hardening
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-24
 doc_type: reference
 scope: terraform/infra
 review_interval_days: 90
