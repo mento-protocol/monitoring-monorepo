@@ -38,9 +38,11 @@ The production identity bootstrap in
 [#1566](https://github.com/mento-protocol/monitoring-monorepo/pull/1566) must be
 merged and its separately reviewed Terraform apply must complete before this
 alert stack is eligible for a trusted-main apply. The producer changes in
-[#1568](https://github.com/mento-protocol/monitoring-monorepo/pull/1568) must be
-merged and deployed before the duration rules have their required
-`mento_peg_usable_decision_total` input.
+[#1568](https://github.com/mento-protocol/monitoring-monorepo/pull/1568) are
+merged and deployed. They remain intentionally dormant until authenticated
+policy delivery is live, so this milestone alone does not provide the required
+`mento_peg_usable_decision_total` input or satisfy activation precondition 3
+below.
 
 Registry-rot and critical-path-unreachable rules are intentionally absent.
 Those rules require authoritative `mento_peg_listing_state` and
