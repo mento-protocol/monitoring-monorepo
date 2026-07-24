@@ -3,7 +3,7 @@ title: Liquity Monitoring Invariants
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-24
 doc_type: reference
 scope: indexer-envio/ui-dashboard
 review_interval_days: 90
