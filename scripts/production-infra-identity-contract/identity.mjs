@@ -6,7 +6,7 @@ import {
   REFRESH_PROVIDER_VARIABLE,
   REFRESH_SERVICE_ACCOUNT_VARIABLE,
   SEED_PROJECT_ID,
-} from "./production-infra-identity-contract-constants.mjs";
+} from "./constants.mjs";
 import {
   attributeExpression,
   blockKey,
@@ -24,7 +24,7 @@ import {
   sameSortedValues,
   stringAttribute,
   topLevelBlockKey,
-} from "./production-infra-identity-contract-hcl.mjs";
+} from "./hcl.mjs";
 
 const EXPECTED_PROVIDER_BLOCKS = new Set([
   "terraform/ci-wif.tf:google_iam_workload_identity_pool_provider.github",

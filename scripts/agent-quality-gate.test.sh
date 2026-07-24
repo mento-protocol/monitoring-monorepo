@@ -4379,7 +4379,7 @@ run_parallel_interrupt_regression execution TERM 143
 
 # Keep the production identity contract reachable from every protected source
 # in CI and from the local changed-path router.
-node scripts/production-infra-identity-contract-routing.test.mjs
+node scripts/production-infra-identity-contract/routing.test.mjs
 
 # PR 1492 review: prerequisite commands (install/codegen/setup) produce outputs
 # the source fingerprint cannot see, so they must never be stamped or reused —

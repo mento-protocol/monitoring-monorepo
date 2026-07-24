@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dump as dumpYaml } from "js-yaml";
-import { protectedApplyJobInventory } from "./production-infra-identity-contract-workflow-inventory.mjs";
+import { protectedApplyJobInventory } from "./workflow-inventory.mjs";
 
 const commonRoles = [
   "roles/artifactregistry.viewer",
@@ -258,11 +258,11 @@ function applyWorkflowFixture(workflowPath) {
 export function validFixtureFiles() {
   return {
     "scripts/sanitize-terraform-output.sh": readFileSync(
-      new URL("./sanitize-terraform-output.sh", import.meta.url),
+      new URL("../sanitize-terraform-output.sh", import.meta.url),
       "utf8",
     ),
     "scripts/verify-github-environment-protection.mjs": readFileSync(
-      new URL("./verify-github-environment-protection.mjs", import.meta.url),
+      new URL("../verify-github-environment-protection.mjs", import.meta.url),
       "utf8",
     ),
     "terraform/ci-wif.tf": productionTerraformFixture,

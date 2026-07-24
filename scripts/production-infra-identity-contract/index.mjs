@@ -4,18 +4,18 @@ import {
   PRODUCTION_PROVIDER_CONDITION,
   REFRESH_PROVIDER_CONDITION,
   SERVICE_AND_DRIFT_WORKFLOWS,
-} from "./production-infra-identity-contract-constants.mjs";
-import { terraformTopLevelBlocks } from "./production-infra-identity-contract-hcl.mjs";
+} from "./constants.mjs";
+import { terraformTopLevelBlocks } from "./hcl.mjs";
 import {
   validateGithubVariables,
   validateIdentityReferenceInventory,
   validateProductionIdentity,
   validateProvider,
   validateProviderInventory,
-} from "./production-infra-identity-contract-identity.mjs";
-import { validateIamGrantSinkInventory } from "./production-infra-identity-contract-iam.mjs";
-import { validateRefreshIdentity } from "./production-infra-identity-contract-refresh.mjs";
-import { validateWorkflowContract } from "./production-infra-identity-contract-workflow.mjs";
+} from "./identity.mjs";
+import { validateIamGrantSinkInventory } from "./iam.mjs";
+import { validateRefreshIdentity } from "./refresh.mjs";
+import { validateWorkflowContract } from "./workflow.mjs";
 
 function validateIdentityContract(files, completeInventory) {
   const errors = [];

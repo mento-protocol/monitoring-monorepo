@@ -1,11 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import {
-  blockKey,
-  stringAttribute,
-  topLevelBlockKey,
-} from "./production-infra-identity-contract-hcl.mjs";
-import { validateTerraformSourceSurfaces } from "./production-infra-identity-contract-surfaces.mjs";
+import { blockKey, stringAttribute, topLevelBlockKey } from "./hcl.mjs";
+import { validateTerraformSourceSurfaces } from "./surfaces.mjs";
 
 const EXECUTION_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/onchain-event-handler/local-dotenv-file.tf:terraform_data.env_file|22f732bd0222adbcdc2ede7f02062c342ac8e5702f9384f4550cef142848d0fd",

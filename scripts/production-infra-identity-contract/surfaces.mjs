@@ -1,9 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  blockKey,
-  stringAttribute,
-  topLevelBlockKey,
-} from "./production-infra-identity-contract-hcl.mjs";
+import { blockKey, stringAttribute, topLevelBlockKey } from "./hcl.mjs";
 
 const TERRAFORM_BLOCK_SHAPE_SPECIFICATIONS = [
   "aegis/terraform/grafana-dashboard/main.tf:terraform|18142bd9f1ae471c542fff07d95ae9d94bc410cf2f81904e20c93d1a9f23b840",

@@ -7,15 +7,12 @@ import {
   REFRESH_PROVIDER_VARIABLE,
   REFRESH_SERVICE_ACCOUNT_VARIABLE,
   SERVICE_AND_DRIFT_WORKFLOWS,
-} from "./production-infra-identity-contract-constants.mjs";
-import {
-  escapeRegExp,
-  requireFile,
-} from "./production-infra-identity-contract-hcl.mjs";
+} from "./constants.mjs";
+import { escapeRegExp, requireFile } from "./hcl.mjs";
 import {
   validateWorkflowDependencyInventory,
   validateWorkflowInventory,
-} from "./production-infra-identity-contract-workflow-inventory.mjs";
+} from "./workflow-inventory.mjs";
 
 function stripYamlComments(contents) {
   return contents

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { validFixtureFiles } from "./production-infra-identity-contract-fixtures.mjs";
-import { validateWorkflowContract } from "./production-infra-identity-contract-workflow.mjs";
+import { validFixtureFiles } from "./fixtures.mjs";
+import { validateWorkflowContract } from "./workflow.mjs";
 
 const workflowPath = ".github/workflows/alerts-rules.yml";
 const validCheckoutStep = `      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
@@ -66,7 +66,10 @@ function replaceWorkflow(files, from, to) {
 }
 
 function liveWorkflowFiles() {
-  const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
+  const workflowDirectory = new URL(
+    "../../.github/workflows/",
+    import.meta.url,
+  );
   const workflowFiles = Object.fromEntries(
     readdirSync(workflowDirectory)
       .filter((fileName) => /\.ya?ml$/u.test(fileName))
@@ -78,11 +81,11 @@ function liveWorkflowFiles() {
   return {
     ...workflowFiles,
     "scripts/sanitize-terraform-output.sh": readFileSync(
-      new URL("./sanitize-terraform-output.sh", import.meta.url),
+      new URL("../sanitize-terraform-output.sh", import.meta.url),
       "utf8",
     ),
     "scripts/verify-github-environment-protection.mjs": readFileSync(
-      new URL("./verify-github-environment-protection.mjs", import.meta.url),
+      new URL("../verify-github-environment-protection.mjs", import.meta.url),
       "utf8",
     ),
   };

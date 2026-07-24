@@ -2,7 +2,7 @@ import {
   COMMON_REFRESH_PROJECT_ROLES,
   REFRESH_TARGET_EMAIL,
   SEED_PROJECT_ID,
-} from "./production-infra-identity-contract-constants.mjs";
+} from "./constants.mjs";
 import {
   blockKey,
   expectExpression,
@@ -14,12 +14,12 @@ import {
   requireFile,
   sameMap,
   sameSortedValues,
-} from "./production-infra-identity-contract-hcl.mjs";
+} from "./hcl.mjs";
 import {
   referencesRefreshTarget,
   referencesRefreshWif,
   rejectUnexpectedIdentityGrants,
-} from "./production-infra-identity-contract-identity.mjs";
+} from "./identity.mjs";
 
 function validateProjectGrant(
   files,

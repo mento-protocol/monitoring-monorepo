@@ -15,18 +15,18 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validFixtureFiles } from "./production-infra-identity-contract-fixtures.mjs";
-import { REFRESH_PROVIDER_CONDITION } from "./production-infra-identity-contract-constants.mjs";
+import { validFixtureFiles } from "./fixtures.mjs";
+import { REFRESH_PROVIDER_CONDITION } from "./constants.mjs";
 import {
   assertProductionInfraIdentityContract,
   validateProductionInfraIdentityContract,
-} from "./production-infra-identity-contract.mjs";
-import "./production-infra-identity-contract-security.test.mjs";
-import "./production-infra-identity-contract-workflow.test.mjs";
+} from "./index.mjs";
+import "./security.test.mjs";
+import "./workflow.test.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "..",
+  "../..",
 );
 
 function expectContractFailure(files, expectedMessage) {

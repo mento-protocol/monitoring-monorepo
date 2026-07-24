@@ -4,16 +4,16 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validFixtureFiles } from "./production-infra-identity-contract-fixtures.mjs";
-import { terraformTopLevelBlocks } from "./production-infra-identity-contract-hcl.mjs";
+import { validFixtureFiles } from "./fixtures.mjs";
+import { terraformTopLevelBlocks } from "./hcl.mjs";
 import {
   assertProductionInfraIdentityContract,
   validateProductionInfraIdentityContract,
-} from "./production-infra-identity-contract.mjs";
+} from "./index.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "..",
+  "../..",
 );
 
 function expectFailure(files, expectedMessage) {

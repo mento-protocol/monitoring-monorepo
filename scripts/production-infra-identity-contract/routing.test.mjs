@@ -6,14 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
-import {
-  APPLY_WORKFLOWS,
-  SERVICE_AND_DRIFT_WORKFLOWS,
-} from "./production-infra-identity-contract-constants.mjs";
+import { APPLY_WORKFLOWS, SERVICE_AND_DRIFT_WORKFLOWS } from "./constants.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "..",
+  "../..",
 );
 const gatePath = path.join(repositoryRoot, "scripts/agent-quality-gate.sh");
 const scratchDirectory = mkdtempSync(
@@ -109,14 +106,14 @@ try {
     ...APPLY_WORKFLOWS,
     ...SERVICE_AND_DRIFT_WORKFLOWS,
     ".github/workflows/future-production-infra.yml",
-    "scripts/production-infra-identity-contract-identity.mjs",
+    "scripts/production-infra-identity-contract/identity.mjs",
     "scripts/sanitize-terraform-output.sh",
     "scripts/verify-github-environment-protection.mjs",
   ]) {
     assertRoutesIdentityContract(changedPath);
   }
   assertRoutesAgentGateSelfTest(
-    "scripts/production-infra-identity-contract-routing.test.mjs",
+    "scripts/production-infra-identity-contract/routing.test.mjs",
   );
 } finally {
   rmSync(scratchDirectory, { recursive: true, force: true });

@@ -4,9 +4,9 @@ import {
   expectExpression,
   normalizeExpression,
   topLevelBlockKey,
-} from "./production-infra-identity-contract-hcl.mjs";
-import { validateTerraformExecutionSurfaces } from "./production-infra-identity-contract-execution.mjs";
-import { validateIamSourceProvenance } from "./production-infra-identity-contract-provenance.mjs";
+} from "./hcl.mjs";
+import { validateTerraformExecutionSurfaces } from "./execution.mjs";
+import { validateIamSourceProvenance } from "./provenance.mjs";
 
 const IAM_MEMBER_EXPRESSION_GROUPS = [
   {
