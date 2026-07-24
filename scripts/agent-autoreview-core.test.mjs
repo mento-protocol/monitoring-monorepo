@@ -648,6 +648,18 @@ assert.equal(
   null,
   "HCL data.* references are placeholders, not literal credentials",
 );
+// The legacy `${…}` interpolation wrapper must recognize the same HCL scopes as
+// the bare form, or `some_token = ${local.x}` would still trip the scanner.
+assert.equal(
+  secretLikeReason("some_token = ${local.audit_token}"),
+  null,
+  "legacy ${local.*} interpolation is a reference, not a literal token",
+);
+assert.match(
+  secretLikeReason(`some_token = \${local.x}${genericTokenCredential}`),
+  /literal generic token assignment/,
+  "a real literal fused to a ${local.*} interpolation still flags (anchor holds)",
+);
 // Regression: a github_actions_secret block that mirrors a variable into a repo
 // secret carries only references plus the secret's public NAME literal — never a
 // committed secret value.
