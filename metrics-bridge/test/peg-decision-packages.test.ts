@@ -10,6 +10,7 @@ import {
 } from "../src/peg/decision-packages.js";
 import {
   _resetPegMetricsForTests,
+  publishPegMetrics,
   type PegAssetMetricSnapshot,
 } from "../src/peg/metrics.js";
 import {
@@ -393,6 +394,7 @@ describe("peg decision-package producer", () => {
     publishPegPollSnapshot([], null);
     expect(currentPegDecisionPackagesJson()).toBe(first);
     _resetPegMetricsForTests();
+    publishPegMetrics([snapshot(previous.version)]);
     const byteLength = vi
       .spyOn(Buffer, "byteLength")
       .mockReturnValue(PEG_DECISION_PACKAGE_MAX_BYTES + 1);
@@ -412,6 +414,14 @@ describe("peg decision-package producer", () => {
       `mento_peg_policy_version{policy_version="${active.version}"} 1`,
     );
     expect(metrics).not.toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${active.version}"} 1`,
+    );
+    expect(metrics).toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${previous.version}"} 1`,
+    );
+
+    publishPegPollSnapshot([snapshot(active.version)], publication);
+    expect(await register.metrics()).toContain(
       `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${active.version}"} 1`,
     );
   });

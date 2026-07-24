@@ -4,7 +4,11 @@ import {
   type PegDecisionPackagePublicationContext,
   type PreparedPegDecisionPackages,
 } from "./decision-packages.js";
-import { publishPegMetrics, type PegAssetMetricSnapshot } from "./metrics.js";
+import {
+  publishPegGauges,
+  publishPegMetrics,
+  type PegAssetMetricSnapshot,
+} from "./metrics.js";
 
 function prepareDecisionPackages(
   snapshots: PegAssetMetricSnapshot[],
@@ -50,7 +54,7 @@ export function publishPegPollSnapshot(
   try {
     prepared = prepareDecisionPackages(decisionSnapshots, context);
   } catch (error) {
-    publishPegMetrics(snapshots, []);
+    publishPegGauges(snapshots);
     return error instanceof Error ? error : new Error(String(error));
   }
   const counterSnapshots = counterSnapshotsFor(

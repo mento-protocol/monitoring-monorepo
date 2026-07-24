@@ -500,14 +500,7 @@ function publishAsset(snapshot: PegAssetMetricSnapshot): void {
   snapshot.sources.forEach(publishSourceGauges);
 }
 
-export function publishPegMetrics(
-  snapshots: PegAssetMetricSnapshot[],
-  counterSnapshots: PegAssetMetricSnapshot[] = snapshots,
-): void {
-  validateSnapshots(snapshots);
-  if (counterSnapshots !== snapshots) validateSnapshots(counterSnapshots);
-  pruneSourceCounters(snapshots);
-  trackSourceCounterLabels(counterSnapshots);
+function publishValidatedPegGauges(snapshots: PegAssetMetricSnapshot[]): void {
   resetPegGauges();
   const versions = new Set<string>();
   for (const snapshot of snapshots) {
@@ -517,6 +510,23 @@ export function publishPegMetrics(
   for (const policyVersion of versions) {
     pegGauges.policyVersion.set({ policy_version: policyVersion }, 1);
   }
+}
+
+/** Publish validated peg gauges without changing counter labels or values. */
+export function publishPegGauges(snapshots: PegAssetMetricSnapshot[]): void {
+  validateSnapshots(snapshots);
+  publishValidatedPegGauges(snapshots);
+}
+
+export function publishPegMetrics(
+  snapshots: PegAssetMetricSnapshot[],
+  counterSnapshots: PegAssetMetricSnapshot[] = snapshots,
+): void {
+  validateSnapshots(snapshots);
+  if (counterSnapshots !== snapshots) validateSnapshots(counterSnapshots);
+  pruneSourceCounters(snapshots);
+  trackSourceCounterLabels(counterSnapshots);
+  publishValidatedPegGauges(snapshots);
   for (const snapshot of counterSnapshots) {
     snapshot.sources.forEach(publishSourceCounters);
   }
