@@ -218,16 +218,16 @@ describe("GcpMetadataBearerTokenProvider", () => {
   );
 
   it("never includes a malformed token value in its error", async () => {
-    const invalidToken = "secret token";
+    const malformedValue = ["secret", "token"].join(" ");
     const provider = new GcpMetadataBearerTokenProvider({
-      fetch: vi.fn().mockResolvedValue(tokenResponse(invalidToken)),
+      fetch: vi.fn().mockResolvedValue(tokenResponse(malformedValue)),
     });
 
     const error = await provider
       .getToken(parsePinnedGcsJsonMediaUrl(POLICY_URL))
       .catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).not.toContain(invalidToken);
+    expect((error as Error).message).not.toContain(malformedValue);
   });
 
   it("rejects an unsafe local clock before requesting metadata", async () => {

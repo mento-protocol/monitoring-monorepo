@@ -256,35 +256,35 @@ describe("PegPolicyStore", () => {
   });
 
   it("does not retry anonymously when token acquisition fails", async () => {
-    const getToken = vi
-      .fn()
-      .mockRejectedValue(new Error("metadata unavailable"));
+    const acquisitionFailure = new Error("metadata unavailable");
+    const providerFn = vi.fn().mockRejectedValue(acquisitionFailure);
     const fetch = vi.fn();
     const store = new PegPolicyStore();
 
     await expect(
       store.refresh(PINNED_POLICY_URL, {
         fetch,
-        bearerTokenProvider: { getToken },
+        bearerTokenProvider: { getToken: providerFn },
       }),
     ).rejects.toThrow(/metadata unavailable/);
 
-    expect(getToken).toHaveBeenCalledOnce();
+    expect(providerFn).toHaveBeenCalledOnce();
     expect(fetch).not.toHaveBeenCalled();
     expect(store.current).toBeNull();
   });
 
   it("retains last-good policy when a later token acquisition fails", async () => {
     const bundle = await policy();
-    const getToken = vi
+    const acquisitionFailure = new Error("metadata unavailable");
+    const providerFn = vi
       .fn()
       .mockResolvedValueOnce("test-token")
-      .mockRejectedValueOnce(new Error("metadata unavailable"));
+      .mockRejectedValueOnce(acquisitionFailure);
     const fetch = vi.fn().mockResolvedValue(response(bundle));
     const store = new PegPolicyStore();
     const options = {
       fetch,
-      bearerTokenProvider: { getToken },
+      bearerTokenProvider: { getToken: providerFn },
     };
 
     await store.refresh(PINNED_POLICY_URL, options);
