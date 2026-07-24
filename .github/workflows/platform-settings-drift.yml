@@ -46,6 +46,13 @@ jobs:
     name: Assert read-only default workflow-token permission
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
+    # workflow_dispatch can target any ref; without this a manual dispatch from a
+    # feature branch would check out that branch and run its code with the
+    # Administration-scoped PLATFORM_SETTINGS_AUDIT_TOKEN in scope. Restrict the
+    # secret-bearing job to main. Matches sentry-triage-ingest.yml /
+    # sentry-triage-archive.yml. (Scheduled runs are always on the default
+    # branch, so this only ever narrows manual dispatch.)
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       issues: write
@@ -167,19 +174,23 @@ jobs:
 
             const labels = ["drift-detection", "stack:platform"];
 
+            // Dedup on the immutable marker, NOT on the labels: a human removing
+            // either label from the open issue must not make the next run miss it
+            // and open a duplicate. Scan all open issues (this step only runs on
+            // the rare drift event, so the full walk is cheap) and skip PRs,
+            // which listForRepo also returns.
             const issues = await github.paginate(
               github.rest.issues.listForRepo,
               {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 state: "open",
-                labels: labels.join(","),
                 per_page: 100,
               },
             );
 
             const existing = issues.find(
-              (i) => i.body && i.body.includes(marker),
+              (i) => !i.pull_request && i.body && i.body.includes(marker),
             );
 
             if (existing) {
@@ -188,6 +199,15 @@ jobs:
                 repo: context.repo.repo,
                 issue_number: existing.number,
                 body,
+              });
+              // Re-assert the drift labels additively (addLabels, not update's
+              // replacing `labels`) so a stripped label is restored without
+              // clobbering any triage labels a human added.
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                labels,
               });
               console.log(`Updated existing drift issue #${existing.number}`);
             } else {

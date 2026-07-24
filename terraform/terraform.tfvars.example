@@ -43,7 +43,7 @@ github_token = "ghp_..."
 #     Repository access: mento-protocol/monitoring-monorepo
 #     Permissions: Repository → Administration: Read-only (nothing else)
 # Leave unset to keep the drift check inert (it no-ops until the secret exists).
-# platform_settings_audit_token = "github_pat_...-administration-read-only-..."
+# platform_settings_audit_token = "<administration-read-only-fine-grained-PAT>"
 
 # Slack channel that receives the Terraform apply-pending prompt for
 # alerts-rules / alerts-delivery / aegis / governance-watchdog (mirrored to
