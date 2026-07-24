@@ -13,9 +13,12 @@ garden_lane: adrs-architecture
 
 # ADR 0044 — Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON
 
-**Status:** Accepted (Jul 2026), in force. Decided ahead of implementation;
-the rule group lands in the alerts phase of
-[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
+**Status:** Accepted (Jul 2026), in force. PRs #1497 and #1568 landed
+bridge-side policy validation, version-bound decision metrics, and producer
+acknowledgment state. Protected policy publication, Grafana rules, routing, and
+activation remain the Phase 3 rollout in
+[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md); they are not
+implemented on `main`.
 **Scope:** alerts
 
 ## Context
@@ -38,6 +41,8 @@ are deliberately per-rule in this stack, and a single series-join rule
 auto-resolves a live page whenever the threshold series blips.
 
 ## Decision
+
+Phase 3 must implement the following protected artifact and rules contract:
 
 - Peg thresholds — and every declared parameter that changes whether a
   page can fire: warn/critical bps, sustain windows, per-source reference
@@ -155,6 +160,16 @@ auto-resolves a live page whenever the threshold series blips.
 
 - `docs/PLAN-peg-monitoring.md` (review findings that reversed the
   thresholds-as-metrics lean)
+- `alerts/rules/peg-thresholds.json` (dormant source policy)
+- `metrics-bridge/src/peg/policy.ts`,
+  `metrics-bridge/src/peg/compatibility.ts`, and
+  `metrics-bridge/src/peg/runtime.ts` (implemented bridge-side policy
+  validation and activation path)
+- `metrics-bridge/src/peg/poll-cycle.ts` and
+  `metrics-bridge/src/peg/metrics.ts` (version-bound producer decisions and
+  acknowledgment telemetry)
+- `metrics-bridge/Dockerfile` (gated policy excluded from the service image)
+- `scripts/check-peg-registry-integrity.mjs` (cross-plane source contract)
 - `alerts/rules/rules-reserve-balances.tf`, `rules-oracle-relayers.tf`
   (per-key `for_each` threshold precedents)
 - `alerts/rules/rules-metrics-bridge.tf` (deliberate `no_data_state =

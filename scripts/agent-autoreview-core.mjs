@@ -769,10 +769,19 @@ export function sensitivePathReason(rawPath) {
   return null;
 }
 
+// A value is a placeholder (never a committed literal secret) when it is an
+// env/context REFERENCE rather than an inline value. The `${{ <context>.path }}`
+// clause covers GitHub Actions expressions: their contents resolve at runtime,
+// so `${{ github.token }}` or `${{ steps.app-token.outputs.token }}` are as safe
+// to bundle as `${{ secrets.X }}` — a real literal secret cannot take that form.
+// The context set is the fixed GHA list (github, env, inputs, matrix, needs,
+// steps, job(s), runner, strategy, secrets, vars); the trailing path only allows
+// [A-Z0-9_.-], so a trailing inline secret (`"${{ secrets.X }}ghp_real"`) still
+// fails the `^…$` anchor and is caught.
 function placeholderValue(value) {
   const trimmed = value.trim();
   return (
-    /^(?:\$\{(?:[A-Z_][A-Z0-9_]*|(?:secrets|vars|var)\.[A-Z0-9_.-]+|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\]))\}|\$\{\{\s*(?:secrets|vars)\.[A-Z0-9_.-]+\s*\}\}|\$[A-Z_][A-Z0-9_]*|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\])|(?:secrets|vars|var)\.[A-Z0-9_.-]+)$/i.test(
+    /^(?:\$\{(?:[A-Z_][A-Z0-9_]*|(?:secrets|vars|var)\.[A-Z0-9_.-]+|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\]))\}|\$\{\{\s*(?:secrets|vars|github|env|inputs|matrix|needs|steps|job|jobs|runner|strategy)\.[A-Z0-9_.-]+\s*\}\}|\$[A-Z_][A-Z0-9_]*|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\])|(?:secrets|vars|var)\.[A-Z0-9_.-]+)$/i.test(
       trimmed,
     ) ||
     /^(?:process(?:\.|\?\.)env(?:(?:\.|\?\.)[A-Z_][A-Z0-9_]*|(?:\?\.)?\[["'][A-Z_][A-Z0-9_]*["']\])|\$\{process(?:\.|\?\.)env(?:(?:\.|\?\.)[A-Z_][A-Z0-9_]*|(?:\?\.)?\[["'][A-Z_][A-Z0-9_]*["']\])\})$/i.test(

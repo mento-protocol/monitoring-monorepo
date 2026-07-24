@@ -13,8 +13,11 @@ garden_lane: adrs-architecture
 
 # ADR 0045 — Peg paging measures executable sell price; the deep venue pages alone
 
-**Status:** Accepted (Jul 2026), in force. Decided ahead of implementation;
-mechanics land per [`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
+**Status:** Accepted (Jul 2026), in force. PRs #1497 and #1568 landed the
+measurement and version-bound decision producer. Grafana paging rules, routing,
+and activation remain the Phase 3 rollout in
+[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md); they are not
+implemented on `main`.
 **Scope:** metrics-bridge / alerts
 
 ## Context
@@ -32,6 +35,10 @@ corroborating signal is throttled (trading limits), absent (pool paused),
 or structurally missing (thin second venue).
 
 ## Decision
+
+The bridge producer implements the measurement clauses below. Phase 3 rules
+must enforce the paging, blindness, and routing clauses before the producer
+becomes alert-authoritative.
 
 - **Measurand.** Deviation is computed from the executable _sell_ price at
   a per-asset reference size tied to real exposure: the binding bound is
@@ -131,9 +138,10 @@ or structurally missing (thin second venue).
   price discovery) remain undetectable by construction; issuer-side
   signals (redemption status, attestations) are runbook inputs, not
   automated sources — this residual risk is documented, not hidden.
-- Alert expressions, states, and the coverage-class gate are specified
-  before implementation; changes to paging semantics are ADR-level, not
-  tuning.
+- The bridge metric producer implements the executable-price, capped-depth,
+  blindness, and coverage-class semantics. Phase 3 must implement the alert
+  expressions, states, and routing before activation. Changes to paging
+  semantics remain ADR-level, not tuning.
 
 ## Evidence
 
@@ -142,4 +150,13 @@ or structurally missing (thin second venue).
   volume figures, 2026-07-22)
 - `docs/notes/polygon-monitoring.md` (EURm/EUROP pool, MANUAL feed,
   migration-multisig breaker path)
+- `metrics-bridge/src/peg/order-book.ts`,
+  `metrics-bridge/src/peg/poller.ts`, and
+  `metrics-bridge/src/peg/metrics.ts` (implemented measurement semantics)
+- `metrics-bridge/src/peg/poll-cycle.ts` (version-bound decision scheduling
+  and blind-streak state)
+- `metrics-bridge/test/peg-order-book.test.ts`,
+  `metrics-bridge/test/peg-poller.test.ts`, and
+  `metrics-bridge/test/peg-metrics.test.ts`
+- `alerts/rules/peg-thresholds.json` (dormant deep-venue and threshold policy)
 - ADRs 0042, 0043, 0044

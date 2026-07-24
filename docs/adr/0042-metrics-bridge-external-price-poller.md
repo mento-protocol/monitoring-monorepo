@@ -3,7 +3,7 @@ title: metrics-bridge hosts the external market-price peg poller
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 scope: metrics-bridge
 date: 2026-07
 doc_type: adr
@@ -67,12 +67,12 @@ monitoring, extending — not replacing — ADR 0027's scope:
   exposed by neither the indexed `TradingLimit` entity nor the FPMM's
   current RPC surface — `getTradingLimits` returns limits, decimals, and
   netflow state only, and the timestep-bearing `tradingLimitsConfig`
-  getter belongs to the legacy Broker. Phase 2 must establish the
-  authoritative duration source (indexed configuration events, an FPMM
-  getter verified against the deployed ABI, or constants vendored from
-  `@mento-protocol/contracts`) and the structural saturation signal fails
-  closed as unavailable until that source is verified; a window's retained
-  netflow counts only while `now − lastUpdated < timestep`
+  getter belongs to the legacy Broker. The implementation therefore vendors
+  the FPMM's private L0/L1 constants (300 and 86,400 seconds) from the exact
+  reviewed `mento-core` commit recorded in
+  `metrics-bridge/src/peg/structural.ts`. The structural signal must fail
+  closed if that provenance can no longer be verified. A window's retained
+  netflow counts only while it remains inside the vendored timestep
   (TradingLimitsV2's lazy reset) — stale flow must never feed saturation
   after its window has ended. Swap amounts are normalized from raw token units
   into TradingLimitsV2's fixed 15-decimal limit scale (using each token's
@@ -128,8 +128,8 @@ monitoring, extending — not replacing — ADR 0027's scope:
 - metrics-bridge becomes the repo's single Prometheus producer for both
   on-chain-derived and external-market peg data; ADR 0027's "deliberate
   metric surface" rule now covers the `mento_peg_*` family too.
-- The bridge's egress allowlist must include the market-data hosts; a venue
-  API change is a bridge deploy, not an alerts-plane change.
+- Any deployment egress restriction must allow the configured market-data
+  hosts; a venue API change is a bridge deploy, not an alerts-plane change.
 - Peg-loop failures are contained at the gauge-lifecycle and error-channel
   level and do not gate the bridge's primary `/health` signal. Both loops
   share one Node process, so this is containment, not process isolation.
@@ -138,8 +138,9 @@ monitoring, extending — not replacing — ADR 0027's scope:
   sizes, timeouts, and per-poll work; a separate service is the escalation if
   shared event-loop interference is ever observed.
 - Adding a monitored asset whose venues are already supported is a registry
-  change ([ADR 0043](0043-peg-registry-service-local.md)); adding a venue is
-  one adapter plus fixtures.
+  and gated-policy change ([ADR 0043](0043-peg-registry-service-local.md));
+  adding a venue also requires an adapter, fixtures, and support in the
+  registry integrity gate, plus deployment egress configuration if restricted.
 
 ## Evidence
 
@@ -148,5 +149,12 @@ monitoring, extending — not replacing — ADR 0027's scope:
   (isolated-loop and gauge-lifecycle precedents)
 - `metrics-bridge/src/main.ts`, `metrics-bridge/src/peg/runtime.ts`
   (implemented isolated peg lifecycle)
+- `metrics-bridge/src/peg/poller.ts`,
+  `metrics-bridge/src/peg/structural.ts`, and
+  `metrics-bridge/src/peg/metrics.ts` (bounded polling, structural inputs,
+  and isolated metric publication)
+- `metrics-bridge/test/peg-poller.test.ts` and
+  `metrics-bridge/test/peg-structural.test.ts`
+- `scripts/check-peg-registry-integrity.mjs`
 - `indexer-envio/schema.graphql` (`SwapEvent`, pool reserves)
 - ADRs 0004, 0014, 0027, 0030

@@ -1,9 +1,15 @@
 ---
 title: Review Process Metrics After PR 1045
-status: active
+status: archived
 owner: eng
 canonical: false
 last_verified: 2026-07-07
+archived: 2026-07-24
+archived_reason: "The first-10 and first-20 cohorts are complete; retain this report as evidence for the concluded review-process evaluation."
+doc_type: report
+scope: ci/process
+review_interval_days: 365
+garden_lane: notes-plans-archive
 ---
 
 # Review Process Metrics After PR 1045

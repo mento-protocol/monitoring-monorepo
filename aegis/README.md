@@ -1,4 +1,4 @@
-<!-- agent-context: title="Aegis" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=reference scope=aegis review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Aegis" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=reference scope=aegis review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Aegis
 
@@ -145,19 +145,25 @@ pnpm aegis:logs
 
 ## Configuration
 
-The `config.yaml` has three immediate children:
+The `config.yaml` has four immediate children:
 
 ```typescript
 interface Config {
   global: Global; // Global definitions
+  tokens?: Record<string, { decimals: number }>; // ERC-20 metadata for totalSupply metrics
   chains: Chain[]; // Chain definitions
   metrics: Metric[]; // Metric definitions
 }
 ```
 
+`tokens` supplies decimals for configured ERC-20 `totalSupply()` metrics. It
+defaults to an empty map.
+
 ### Global Config
 
-The `global` section hosts variables that can be referenced in the `metrics` section as arguments passed to view calls. Global variables can also be extended or overridden by `chain '-specific variables.
+The `global` section hosts variables that can be referenced in the `metrics`
+section as arguments passed to view calls. Chain-specific variables can extend
+or override them.
 
 ```typescript
 interface Global {
@@ -260,9 +266,10 @@ SortedOracles_isOldestReportExpired{rateFeed="CELOBRL",rateFeedValue="0xe8537a3d
 1. Add the contract you want to run a view call on to the `chains[id].contracts` section in `config.yaml` and make sure to add the correct address for each chain
 1. Add your new view call to the bottom of the `metrics` section
    1. If your view call needs any input parameters, make sure to define these either in `global.vars` or `chains[id].vars`, and reference them as `variants` in your metric
-1. Extend the `switch` statement in the [Metric.parse()](./src/metric.ts) function with the appropriate logic for your view call's contract & function name.
-   1. If you already see another `case` for an existing view call using the same logic (i.e. another call returning a simple `uint256`), you can add the function name of your view call to that `case`
-   1. If your view call requires new or adjusted logic, add a new `case` for your function name with the appropriate logic
+1. Add the contract and function name to `Metric.metricParsers` in
+   [`src/metric.ts`](./src/metric.ts) with the appropriate output conversion.
+   A `totalSupply()` metric instead needs the token and its decimals in the
+   top-level `tokens` map; its parser is shared.
 1. Try out your changes locally by running `pnpm aegis:dev` and see if the logs output the values you expect
 1. If everything works locally, deploy your changes via `pnpm aegis:deploy` (this rebuilds and stages the service before upload)
 1. After successful deployment, check if everything works as expected by monitoring the logs via `pnpm aegis:logs`

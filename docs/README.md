@@ -3,7 +3,7 @@ title: Documentation Catalog
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-24
 doc_type: index
 scope: repo-wide
 review_interval_days: 90
@@ -147,12 +147,12 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0038-sentry-central-plane-verdict-projection.md`](adr/0038-sentry-central-plane-verdict-projection.md) | Central Sentry triage plane with owning-repo verdict projection | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0039-multistrategy-pools-historical-fx-volume.md`](adr/0039-multistrategy-pools-historical-fx-volume.md) | Model pool strategies many-to-many and price same-currency swaps from historical FX crosses | canonical / active | adr / indexer-envio, ui-dashboard, metrics-bridge | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0040-bounded-documentation-garden-queue.md`](adr/0040-bounded-documentation-garden-queue.md) | Documentation gardening runs through one bounded issue queue | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-24 |
-| [`docs/adr/0041-offline-documentation-navigation-evaluation.md`](adr/0041-offline-documentation-navigation-evaluation.md) | Documentation navigation is evaluated offline with deterministic scoring | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-21 |
-| [`docs/adr/0042-metrics-bridge-external-price-poller.md`](adr/0042-metrics-bridge-external-price-poller.md) | metrics-bridge hosts the external market-price peg poller | canonical / active | adr / metrics-bridge | eng | 90d; verified 2026-07-22 |
-| [`docs/adr/0043-peg-registry-service-local.md`](adr/0043-peg-registry-service-local.md) | The peg-monitor registry is service-local config, not published shared-config | canonical / active | adr / metrics-bridge / shared-config | eng | 90d; verified 2026-07-22 |
+| [`docs/adr/0041-offline-documentation-navigation-evaluation.md`](adr/0041-offline-documentation-navigation-evaluation.md) | Documentation navigation is evaluated offline with deterministic scoring | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-24 |
+| [`docs/adr/0042-metrics-bridge-external-price-poller.md`](adr/0042-metrics-bridge-external-price-poller.md) | metrics-bridge hosts the external market-price peg poller | canonical / active | adr / metrics-bridge | eng | 90d; verified 2026-07-24 |
+| [`docs/adr/0043-peg-registry-service-local.md`](adr/0043-peg-registry-service-local.md) | The peg-monitor registry is service-local config, not published shared-config | canonical / active | adr / metrics-bridge / shared-config | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0044-peg-thresholds-gated-rules-plane.md`](adr/0044-peg-thresholds-gated-rules-plane.md) | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON | canonical / active | adr / alerts | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) | Peg paging measures executable sell price; the deep venue pages alone | canonical / active | adr / metrics-bridge / alerts | eng | 90d; verified 2026-07-24 |
-| [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) | Oracle freshness is reconstructed from persisted report events | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-22 |
+| [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) | Oracle freshness is reconstructed from persisted report events | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) | Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-23 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
@@ -160,16 +160,14 @@ the rules in [`context-standards.md`](context-standards.md).
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
-| [`aegis/README.md`](../aegis/README.md) | Aegis | canonical / active | reference / aegis | eng | 90d; verified 2026-07-17 |
-| [`alerts/infra/channels/slack-channels/README.md`](../alerts/infra/channels/slack-channels/README.md) | Slack Channels | canonical / active | reference / alerts/infra/channels/slack-channels | eng | 90d; verified 2026-07-17 |
-| [`alerts/infra/oncall-announcer/README.md`](../alerts/infra/oncall-announcer/README.md) | On-call Announcer | canonical / active | reference / alerts/infra/oncall-announcer | eng | 90d; verified 2026-07-17 |
-| [`docs/CODE-REVIEW-UI-DASHBOARD.md`](CODE-REVIEW-UI-DASHBOARD.md) | Code Review — ui-dashboard | non-canonical / archived | reference / repo-wide | eng | 180d |
-| [`docs/context-standards.md`](context-standards.md) | Agent Context Standards | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`docs/metrics/review-process-after-1045-comparison-2026-07-07.md`](metrics/review-process-after-1045-comparison-2026-07-07.md) | Review Process Metrics After PR 1045 | non-canonical / active | reference / repo-wide | eng | 180d; verified 2026-07-07 |
-| [`docs/mutation-testing.md`](mutation-testing.md) | Mutation Testing | non-canonical / active | reference / repo-wide | eng | 180d; verified 2026-07-23 |
-| [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md) | Liquity Monitoring Invariants | canonical / active | reference / indexer-envio/ui-dashboard | eng | 90d; verified 2026-07-17 |
-| [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md) | Terraform secret strategy hardening | canonical / active | reference / terraform/infra | eng | 90d; verified 2026-07-23 |
-| [`docs/README.md`](README.md) | Documentation Catalog | canonical / active | index / repo-wide | eng | 90d; verified 2026-07-17 |
+| [`aegis/README.md`](../aegis/README.md) | Aegis | canonical / active | reference / aegis | eng | 90d; verified 2026-07-24 |
+| [`alerts/infra/channels/slack-channels/README.md`](../alerts/infra/channels/slack-channels/README.md) | Slack Channels | canonical / active | reference / alerts/infra/channels/slack-channels | eng | 90d; verified 2026-07-24 |
+| [`alerts/infra/oncall-announcer/README.md`](../alerts/infra/oncall-announcer/README.md) | On-call Announcer | canonical / active | reference / alerts/infra/oncall-announcer | eng | 90d; verified 2026-07-24 |
+| [`docs/context-standards.md`](context-standards.md) | Agent Context Standards | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-24 |
+| [`docs/mutation-testing.md`](mutation-testing.md) | Mutation Testing | non-canonical / active | reference / repo-wide | eng | 180d; verified 2026-07-24 |
+| [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md) | Liquity Monitoring Invariants | canonical / active | reference / indexer-envio/ui-dashboard | eng | 90d; verified 2026-07-24 |
+| [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md) | Terraform secret strategy hardening | canonical / active | reference / terraform/infra | eng | 90d; verified 2026-07-24 |
+| [`docs/README.md`](README.md) | Documentation Catalog | canonical / active | index / repo-wide | eng | 90d; verified 2026-07-24 |
 | [`docs/vp-oracle-staleness-alerting-spec.md`](vp-oracle-staleness-alerting-spec.md) | Virtual Pool Oracle Staleness Alerting Spec | non-canonical / draft | reference / repo-wide | eng | 180d; verified 2026-06-16 |
 | [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-22 |
 | [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | unmanaged / unmanaged | reference / indexer-envio | unowned | 180d |
@@ -182,6 +180,8 @@ the rules in [`context-standards.md`](context-standards.md).
 | --- | --- | --- | --- | --- | --- |
 | [`BACKLOG.md`](../BACKLOG.md) | Backlog | unmanaged / unmanaged | tracker / repo-wide | unowned | 365d |
 | [`docs/BACKLOG.md`](BACKLOG.md) | Monitoring Monorepo — Task Backlog (retired) | non-canonical / archived | tracker / repo-wide | eng | 365d; verified 2026-07-23 |
+| [`docs/CODE-REVIEW-UI-DASHBOARD.md`](CODE-REVIEW-UI-DASHBOARD.md) | Code Review — ui-dashboard | non-canonical / archived | report / ui-dashboard | eng | 365d |
+| [`docs/metrics/review-process-after-1045-comparison-2026-07-07.md`](metrics/review-process-after-1045-comparison-2026-07-07.md) | Review Process Metrics After PR 1045 | non-canonical / archived | report / ci/process | eng | 365d; verified 2026-07-07 |
 | [`docs/monad-launch-plan.md`](monad-launch-plan.md) | Monad Monitoring — Launch Runbook (archived) | non-canonical / archived | runbook / indexer | eng | 365d; verified 2026-07-23 |
 | [`docs/multichain-indexer-analysis.md`](multichain-indexer-analysis.md) | Multichain Indexer Analysis — Celo + Monad merge (archived) | non-canonical / archived | report / indexer | eng | 365d; verified 2026-07-23 |
 | [`docs/notes/file-size-watch.md`](notes/file-size-watch.md) | File-size and lint-hygiene watch list | canonical / active | report / repo-wide | eng | 30d; verified 2026-07-17 |
