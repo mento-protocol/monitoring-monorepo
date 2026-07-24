@@ -5,7 +5,7 @@
  * that turns one triage-agent run's batch into a single Slack digest payload.
  * The digest is OUTCOME-oriented (issue #1355): a reader must know in two
  * seconds what was handled and what needs them. Sections render in this order,
- * empty ones omitted, with the counts header kept:
+ * empty ones omitted, each header carrying its own count:
  *
  *   1. ⚠️  Needs human — decisions required   (FIRST + visually distinct: each
  *      item is a decision-ready brief — the exact question, the agent's
@@ -16,7 +16,8 @@
  *      linking the PROJECTED owning-repo issue; falls back to the queue-issue
  *      verdict when projection was skipped).
  *   4. 🙅 Wontfix / transient                  (upstream-transient verdicts,
- *      each linking the rationale on the queue issue).
+ *      each linking the rationale on the queue issue, with a nudge toward the
+ *      existing `sentry:approved-archive` label flow for that stub).
  *   5. 🛑 Failed triage                        (batch issues still carrying
  *      sentry:needs-triage — their matrix job died; kept visible, never hidden).
  *
@@ -50,6 +51,11 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
+// The archive leg's approval-label name is owned by the ingest module (it
+// defines the label); import it rather than duplicating the string literal so
+// the two can never drift apart.
+import { APPROVED_ARCHIVE_LABEL } from "./sentry-triage-ingest.mjs";
 
 // Verdict-comment parsing is delegated to the pipeline's single authoritative
 // parser (the same one the label/projection steps run) so the digest can never
@@ -104,26 +110,6 @@ export const LABEL_TO_VERDICT = {
 // `sentry:needs-triage` (their triage job died before a verdict landed). It
 // must stay visible, never hidden.
 export const FAILED_BUCKET = "failed";
-
-// Counts header order — matches the verdict contract's parenthetical
-// (`code-fix / config-fix / upstream-transient / needs-human`) plus the
-// failed-triage bucket. Kept as-is (issue #1355: "keep the counts header
-// line"); the per-section headers carry the outcome-oriented counts.
-export const COUNTS_ORDER = [
-  "code-fix",
-  "config-fix",
-  "upstream-transient",
-  "needs-human",
-  FAILED_BUCKET,
-];
-
-const BUCKET_LABELS = {
-  "code-fix": "code-fix",
-  "config-fix": "config-fix",
-  "upstream-transient": "upstream-transient",
-  "needs-human": "needs-human",
-  [FAILED_BUCKET]: "failed triage",
-};
 
 // Outcome sections, in RENDER order — needs-human FIRST (decisions required),
 // then autofixed, routed, wontfix, and failed last. Empty sections are omitted.
@@ -427,6 +413,10 @@ function formatUtcTimestamp(date) {
   return `${iso.slice(0, 16).replace("T", " ")} UTC`;
 }
 
+function issueCountText(total) {
+  return `${total} issue${total === 1 ? "" : "s"} triaged`;
+}
+
 function isHttpsUrl(value) {
   try {
     return new URL(String(value)).protocol === "https:";
@@ -440,36 +430,45 @@ function link(url, text) {
   return isHttpsUrl(url) ? `<${url}|${text}>` : text;
 }
 
-/** The linked, escaped SHORT-ID (links to the queue issue) + escaped project,
- * shared by every per-issue line. */
-function idAndProject(entry) {
+/** The linked, escaped SHORT-ID + escaped project, shared by every per-issue
+ * line. Links to the queue issue by default; needs-human overrides the link
+ * target to the Sentry permalink (via `linkUrl`, falling back to the queue
+ * issue when no permalink was recorded). */
+function idAndProject(entry, { linkUrl } = {}) {
   const idText = escapeSlackText(entry.shortId);
-  const linked = isHttpsUrl(entry.url) ? `<${entry.url}|${idText}>` : idText;
+  const url = linkUrl ?? entry.url;
+  const linked = isHttpsUrl(url) ? `<${url}|${idText}>` : idText;
   return { linked, project: escapeSlackText(entry.project) };
 }
 
-/** A needs-human decision-ready brief: multiple indented lines. Decision is
- * always shown (placeholder if somehow absent — the label step requires it);
- * hypotheses / investigated / why-escalated render only when present. */
+/** A needs-human decision-ready brief: a level-1 bullet for the issue, then
+ * level-2 sub-bullets for whatever context is present. Decision is always
+ * shown (placeholder if somehow absent — the label step requires it);
+ * hypotheses / investigated / why-escalated render only when present. The id
+ * links straight to the Sentry issue (falling back to the queue issue when no
+ * permalink was recorded) — the queue issue stays reachable via the Links
+ * sub-bullet. */
 function renderNeedsHumanBrief(entry) {
-  const { linked, project } = idAndProject(entry);
+  const { linked } = idAndProject(entry, {
+    linkUrl: entry.sentryPermalink || entry.url,
+  });
   const confidence = entry.confidence ?? "unknown";
-  const lines = [`⚠️ *${linked}* (${project}) · confidence: ${confidence}`];
+  const lines = [`• *${linked}* · confidence: ${confidence}`];
 
   const decision = entry.humanQuestion
     ? formatBriefText(entry.humanQuestion)
     : "_(no decision recorded — re-triage)_";
-  lines.push(`    *Decision needed:* ${decision}`);
+  lines.push(`    ◦ *Decision needed:* ${decision}`);
 
   const hypotheses = formatBriefList(entry.hypotheses);
-  if (hypotheses) lines.push(`    *Hypotheses:* ${hypotheses}`);
+  if (hypotheses) lines.push(`    ◦ *Hypotheses:* ${hypotheses}`);
 
   const investigated = formatBriefList(entry.investigated);
-  if (investigated) lines.push(`    *Already investigated:* ${investigated}`);
+  if (investigated) lines.push(`    ◦ *Already investigated:* ${investigated}`);
 
   if (entry.escalationReason) {
     lines.push(
-      `    *Why escalated:* ${formatBriefText(entry.escalationReason)}`,
+      `    ◦ *Why escalated:* ${formatBriefText(entry.escalationReason)}`,
     );
   }
 
@@ -478,7 +477,7 @@ function renderNeedsHumanBrief(entry) {
   if (entry.sentryPermalink) {
     linkParts.push(link(entry.sentryPermalink, "Sentry"));
   }
-  if (linkParts.length) lines.push(`    *Links:* ${linkParts.join(" · ")}`);
+  if (linkParts.length) lines.push(`    ◦ *Links:* ${linkParts.join(" · ")}`);
   return lines;
 }
 
@@ -501,7 +500,12 @@ function renderWontfixLine(entry) {
     : "_(no summary)_";
   // The SHORT-ID links the queue issue, which holds the verdict comment (the
   // rationale). Confidence rides along.
-  return `• ${linked} (${project}) — ${summary} (${confidence})`;
+  const line = `• ${linked} (${project}) — ${summary} (${confidence})`;
+  if (!isHttpsUrl(entry.url)) return line;
+  // Archiving stays human-gated (ADR 0036 trust boundary): this is a nudge
+  // toward the existing `sentry:approved-archive` label flow on the queue
+  // issue, never an automatic Sentry mutation from the digest.
+  return `${line}\n    ◦ To archive in Sentry: add \`${APPROVED_ARCHIVE_LABEL}\` to the queue issue above.`;
 }
 
 function renderFailedLine(entry) {
@@ -621,18 +625,10 @@ export function chunkBriefs(headerLine, briefs, maxLen = MAX_SECTION_TEXT_LEN) {
 export function buildDigest(issues, { channel, now = new Date() } = {}) {
   const entries = (issues ?? []).map(classifyIssue);
 
-  const counts = Object.fromEntries(COUNTS_ORDER.map((key) => [key, 0]));
-  for (const entry of entries) {
-    counts[entry.bucket] = (counts[entry.bucket] ?? 0) + 1;
-  }
-
   const total = entries.length;
-  const headerText = `*Sentry triage — ${total} issue(s) triaged*\n${formatUtcTimestamp(now)}`;
-  const countsText = COUNTS_ORDER.map(
-    (key) => `${BUCKET_LABELS[key]}: ${counts[key] ?? 0}`,
-  ).join(" · ");
+  const headerText = `*Sentry triage — ${issueCountText(total)}*\n${formatUtcTimestamp(now)}`;
 
-  const blocks = [mrkdwnSection(headerText), mrkdwnSection(countsText)];
+  const blocks = [mrkdwnSection(headerText)];
 
   const bySection = new Map(SECTION_ORDER.map((key) => [key, []]));
   for (const entry of entries) bySection.get(entry.section).push(entry);
@@ -661,7 +657,7 @@ export function buildDigest(issues, { channel, now = new Date() } = {}) {
   return {
     channel,
     // Plain-text fallback for notifications/screen readers (no untrusted text).
-    text: `Sentry triage — ${total} issue(s) triaged`,
+    text: `Sentry triage — ${issueCountText(total)}`,
     blocks,
   };
 }
