@@ -12,6 +12,9 @@ const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
+const terraformStackPaths = JSON.parse(
+  readFileSync(path.join(repositoryRoot, "terraform.stacks.json"), "utf8"),
+).stacks.map((stack) => stack.path);
 const gatePath = path.join(repositoryRoot, "scripts/agent-quality-gate.sh");
 const scratchDirectory = mkdtempSync(
   path.join(os.tmpdir(), "production-identity-routing-"),
@@ -69,11 +72,7 @@ try {
   assert(Array.isArray(rootScripts), "ci.yml must define rootScripts paths");
 
   for (const requiredPattern of [
-    "terraform/**",
-    "aegis/terraform/**",
-    "alerts/infra/**",
-    "alerts/rules/**",
-    "governance-watchdog/infra/**",
+    ...terraformStackPaths.map((stackPath) => `${stackPath}/**`),
     ".github/workflows/**",
     "scripts/**/*.mjs",
     "scripts/**/*.sh",
@@ -97,12 +96,9 @@ try {
   );
 
   for (const changedPath of [
-    "terraform/ci-wif.tf",
-    "aegis/terraform/main.tf",
-    "alerts/infra/main.tf",
+    ...terraformStackPaths.map((stackPath) => `${stackPath}/contract-probe.tf`),
     "alerts/infra/scripts/common.sh",
-    "alerts/rules/main.tf",
-    "governance-watchdog/infra/main.tf",
+    "terraform.stacks.json",
     ...APPLY_WORKFLOWS,
     ...SERVICE_AND_DRIFT_WORKFLOWS,
     ".github/workflows/future-production-infra.yml",

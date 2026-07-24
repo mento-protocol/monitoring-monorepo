@@ -21,6 +21,7 @@ import {
   assertProductionInfraIdentityContract,
   validateProductionInfraIdentityContract,
 } from "./index.mjs";
+import "./routing.test.mjs";
 import "./security.test.mjs";
 import "./workflow.test.mjs";
 
@@ -687,19 +688,54 @@ function collectFiles(directory, files, predicate) {
   collectFilesFromRoot(repoRoot, directory, files, predicate);
 }
 
-function collectTrackedAutomaticVariableFiles(files, root = repoRoot) {
+function terraformStackDirectories(root = repoRoot) {
+  const registry = JSON.parse(
+    readFileSync(path.join(root, "terraform.stacks.json"), "utf8"),
+  );
+  assert.equal(registry.version, 1);
+  assert(Array.isArray(registry.stacks));
+  const directories = registry.stacks.map((stack) => stack.path);
+  assert(
+    directories.every(
+      (directory) =>
+        typeof directory === "string" &&
+        /^[A-Za-z0-9._/-]+$/u.test(directory) &&
+        !directory.startsWith("/") &&
+        directory
+          .split("/")
+          .every((segment) => !["", ".", ".."].includes(segment)),
+    ),
+    "Terraform stack paths must be safe repo-relative directories",
+  );
+  assert.equal(
+    new Set(directories).size,
+    directories.length,
+    "Terraform stack paths must be unique",
+  );
+  return directories;
+}
+
+function collectTerraformFilesFromRegistry(root, files) {
+  const directories = terraformStackDirectories(root);
+  for (const directory of directories) {
+    collectFilesFromRoot(
+      root,
+      directory,
+      files,
+      (name) => name.endsWith(".tf") || name.endsWith(".tf.json"),
+    );
+  }
+  return directories;
+}
+
+function collectTrackedAutomaticVariableFiles(
+  files,
+  root = repoRoot,
+  directories = terraformStackDirectories(root),
+) {
   const filePaths = execFileSync(
     "git",
-    [
-      "ls-files",
-      "-z",
-      "--",
-      "terraform",
-      "aegis/terraform",
-      "alerts/infra",
-      "alerts/rules",
-      "governance-watchdog/infra",
-    ],
+    ["ls-files", "-z", "--", ...directories],
     { cwd: root, encoding: "utf8" },
   )
     .split("\0")
@@ -778,7 +814,10 @@ function testCollectorIncludesDotAutomaticVariableFiles() {
       cwd: temporaryRoot,
     });
     const files = {};
-    collectTrackedAutomaticVariableFiles(files, temporaryRoot);
+    collectTrackedAutomaticVariableFiles(files, temporaryRoot, [
+      "terraform",
+      "alerts/rules",
+    ]);
     assert.deepEqual(Object.keys(files).sort(), [
       "alerts/rules/.auto.tfvars",
       "terraform/.auto.tfvars",
@@ -793,21 +832,48 @@ function testCollectorIncludesDotAutomaticVariableFiles() {
   }
 }
 
+function testCollectorUsesTerraformRegistry() {
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), "identity-contract-stack-registry-"),
+  );
+  try {
+    mkdirSync(path.join(temporaryRoot, "terraform"));
+    mkdirSync(path.join(temporaryRoot, "future", "infra"), {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(temporaryRoot, "terraform.stacks.json"),
+      JSON.stringify({
+        version: 1,
+        stacks: [{ path: "terraform" }, { path: "future/infra" }],
+      }),
+    );
+    writeFileSync(
+      path.join(temporaryRoot, "terraform", "main.tf"),
+      'resource "terraform_data" "existing" {}\n',
+    );
+    writeFileSync(
+      path.join(temporaryRoot, "future", "infra", "main.tf"),
+      'resource "terraform_data" "future" {}\n',
+    );
+    const files = {};
+    const directories = collectTerraformFilesFromRegistry(temporaryRoot, files);
+    assert.deepEqual(directories, ["terraform", "future/infra"]);
+    assert.deepEqual(Object.keys(files).sort(), [
+      "future/infra/main.tf",
+      "terraform/main.tf",
+    ]);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
 function realRepositoryFiles() {
   const files = {};
-  for (const directory of [
-    "terraform",
-    "aegis/terraform",
-    "alerts/infra",
-    "alerts/rules",
-    "governance-watchdog/infra",
-  ]) {
-    collectFiles(
-      directory,
-      files,
-      (name) => name.endsWith(".tf") || name.endsWith(".tf.json"),
-    );
-  }
+  const terraformDirectories = collectTerraformFilesFromRegistry(
+    repoRoot,
+    files,
+  );
   collectFiles("alerts/infra/scripts", files, (name) => name.endsWith(".sh"));
   for (const filePath of [
     "scripts/sanitize-terraform-output.sh",
@@ -815,7 +881,7 @@ function realRepositoryFiles() {
   ]) {
     files[filePath] = readFileSync(path.join(repoRoot, filePath), "utf8");
   }
-  collectTrackedAutomaticVariableFiles(files);
+  collectTrackedAutomaticVariableFiles(files, repoRoot, terraformDirectories);
   collectFiles(
     ".github/workflows",
     files,
@@ -826,6 +892,7 @@ function realRepositoryFiles() {
 
 testCollectorRejectsSymlink();
 testCollectorIncludesDotAutomaticVariableFiles();
+testCollectorUsesTerraformRegistry();
 runFixtureTests();
 
 if (process.argv.includes("--fixtures-only")) {
