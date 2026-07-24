@@ -231,6 +231,128 @@ afterEach(() => {
 });
 
 describe("peg poll cycle freshness and measurements", () => {
+  it("commits a successful listing lookup even when the book fetch fails", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    let listingAvailable = true;
+    const fetchBitvavo = vi.fn(async (request) => {
+      if (listingAvailable) {
+        request.onListingChecked?.({
+          state: "listed",
+          checkedAt: nowMs,
+        });
+      }
+      throw new Error("book unavailable");
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo,
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    expect(source(first)).toMatchObject({
+      listingState: "listed",
+      listingCheckedAt: nowMs,
+      healthy: false,
+    });
+
+    nowMs += 30_000;
+    listingAvailable = false;
+    const failedLookup = (await poller.pollCycle(input))[0]!;
+    expect(source(failedLookup)).toMatchObject({
+      listingState: "listed",
+      listingCheckedAt: first.sources[0]!.listingCheckedAt,
+      healthy: false,
+    });
+  });
+
+  it("captures listing completion regardless of book order and keeps its timestamp monotonic", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    let completionOrder: "before" | "after" = "before";
+    const errors: PegPollErrorEvent[] = [];
+    const fetchBitvavo = vi.fn(async (request) => {
+      if (completionOrder === "before") {
+        request.onListingChecked?.({ state: "listed", checkedAt: 2_000 });
+      }
+      const book = observation(nowMs);
+      if (completionOrder === "after") {
+        request.onListingChecked?.({ state: "absent", checkedAt: 1_000 });
+      }
+      return book;
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo,
+      publish: vi.fn(),
+      onError: (event) => errors.push(event),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    nowMs += 30_000;
+    completionOrder = "after";
+    const second = (await poller.pollCycle(input))[0]!;
+
+    expect(source(first)).toMatchObject({
+      listingState: "listed",
+      listingCheckedAt: 2_000,
+    });
+    expect(source(second)).toMatchObject({
+      listingState: "listed",
+      listingCheckedAt: 2_000,
+      healthy: false,
+      observation: null,
+      newSuccess: false,
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ kind: "source_fetch" });
+    expect(errors[0]?.cause).toEqual(
+      new Error("listing check timestamp regressed"),
+    );
+  });
+
+  it("ignores a listing callback that arrives after its staged poll completed", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const nowMs = 1_800_000_000_000;
+    let lateCallback:
+      | ((check: { state: "absent"; checkedAt: number }) => void)
+      | undefined;
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo: vi.fn(async (request) => {
+        lateCallback = request.onListingChecked;
+        return observation(nowMs);
+      }),
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    lateCallback?.({ state: "absent", checkedAt: nowMs });
+    const cached = (await poller.pollCycle(input))[0]!;
+
+    expect(source(first)).toMatchObject({
+      listingState: null,
+      listingCheckedAt: null,
+    });
+    expect(source(cached)).toMatchObject({
+      listingState: null,
+      listingCheckedAt: null,
+    });
+  });
+
   it("does not count a frozen at-par book and fails it stale", async () => {
     const spec = primaryAsset({
       sources: [primarySource({ staleAfterSeconds: 60 })],

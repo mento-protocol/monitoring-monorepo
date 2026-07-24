@@ -13,6 +13,14 @@ export const MARKET_STATES = ["listed", "halted", "absent"] as const;
 
 export type MarketState = (typeof MARKET_STATES)[number];
 
+export interface AuthoritativeListingCheck {
+  state: MarketState;
+  /** Local completion time of the authoritative exact-pair listing lookup. */
+  checkedAt: number;
+}
+
+export type RecordListingCheck = (check: AuthoritativeListingCheck) => void;
+
 export interface BookLevel {
   price: number;
   size: number;

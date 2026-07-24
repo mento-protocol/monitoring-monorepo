@@ -80,10 +80,14 @@ describe("Bitvavo response parsing", () => {
       jsonResponse(book()),
       jsonResponse(trades()),
     ]);
-    const observation = await fetchBitvavoObservation(request, {
-      fetch,
-      now: () => 1_900_000_000_000,
-    });
+    const onListingChecked = vi.fn();
+    const observation = await fetchBitvavoObservation(
+      { ...request, onListingChecked },
+      {
+        fetch,
+        now: () => 1_900_000_000_000,
+      },
+    );
 
     expect(observation).toMatchObject({
       bid: 1,
@@ -106,6 +110,10 @@ describe("Bitvavo response parsing", () => {
     expect(String(fetch.mock.calls[2]?.[0])).toContain(
       "EUROP-EUR/trades?limit=1",
     );
+    expect(onListingChecked).toHaveBeenCalledWith({
+      state: "listed",
+      checkedAt: 1_900_000_000_000,
+    });
   });
 
   it("keeps sequence and observationAt stable for a frozen nonce", async () => {
@@ -227,10 +235,18 @@ describe("Bitvavo response parsing", () => {
 
   it("rejects an absent provider listing before reading its book", async () => {
     const fetch = queuedFetch([jsonResponse([])]);
-    await expect(fetchBitvavoObservation(request, { fetch })).rejects.toThrow(
-      /absent/,
-    );
+    const onListingChecked = vi.fn();
+    await expect(
+      fetchBitvavoObservation(
+        { ...request, onListingChecked },
+        { fetch, now: () => 1_900_000_000_123 },
+      ),
+    ).rejects.toThrow(/absent/);
     expect(fetch).toHaveBeenCalledOnce();
+    expect(onListingChecked).toHaveBeenCalledWith({
+      state: "absent",
+      checkedAt: 1_900_000_000_123,
+    });
   });
 
   it("parses every documented non-trading status as halted", () => {
