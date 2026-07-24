@@ -290,6 +290,19 @@ export function extractExpressions(file, text) {
     out.push(extractedExpression(file, "format", name, unescapeHcl(match[2])));
   }
 
+  // Pass B2: map comprehensions whose value is a format() template. Peg rules
+  // use these to materialize one version-bound expression per asset/source;
+  // missing this shape would leave the generated decision plane unparsed.
+  const mapFmt = new RegExp(
+    String.raw`^\s*([A-Za-z0-9_]+_(?:promql|expr))\s*=\s*\{[\s\S]*?^\s*for\b[^\n]*=>\s*format\(\s*\n?\s*${QUOTED}`,
+    "gm",
+  );
+  for (const match of text.matchAll(mapFmt)) {
+    out.push(
+      extractedExpression(file, "map-format", match[1], unescapeHcl(match[2])),
+    );
+  }
+
   // Pass C: heredocs assigned to expr / *_promql / *_expr.
   const heredoc = new RegExp(
     String.raw`^\s*(expr|[A-Za-z0-9_]*_(?:promql|expr))\s*=\s*<<-?EOT\n([\s\S]*?)^\s*EOT$`,
@@ -754,6 +767,11 @@ function isExactVersionMatcher(operator, value, expectedVersion, policySlot) {
   if (value === APPROVED_POLICY_VERSION_INTERPOLATION[policySlot]) {
     return operator === "=";
   }
+  // Before a rollover, previous-policy templates are dormant and there is no
+  // literal previous version to compare. Keep validating their selector shape
+  // so a later JSON-only rollover cannot activate a wildcard, negative, or
+  // unscoped matcher that was accepted while previous=null.
+  if (typeof expectedVersion !== "string") return false;
   if (operator === "=") {
     return expectedVersion === value;
   }
@@ -803,8 +821,12 @@ function validatePegSelector(
     return;
   }
   if (!isExactVersionMatcher(operator, value, expectedVersion, policySlot)) {
+    const expectedDescription =
+      typeof expectedVersion === "string"
+        ? `${policySlot} version ${expectedVersion}`
+        : `${policySlot} policy local ${APPROVED_POLICY_VERSION_INTERPOLATION[policySlot]}`;
     failures.push(
-      `${location}: ${metric} policy_version matcher must equal ${policySlot} version ${expectedVersion}`,
+      `${location}: ${metric} policy_version matcher must equal ${expectedDescription}`,
     );
   }
 }
@@ -843,11 +865,10 @@ function validatePegRuleScope(expression, policyVersions, selectors, failures) {
     );
     return { kind: "decision", policy: "active" };
   }
-  if (scope.policy === "previous" && policyVersions.previous === null) {
-    failures.push(
-      `${location}: previous decision rule is invalid without a retained previous policy`,
-    );
-  }
+  // Previous-policy templates must exist before a rollover so a JSON-only
+  // policy change can instantiate the full retained rule set. Even while
+  // previous=null keeps those templates dormant, each selector must use exact
+  // equality to the reserved previous-policy local.
   return scope;
 }
 
@@ -881,7 +902,6 @@ export function validatePegPromqlExpressions(expressions, policyVersions) {
           ? "active"
           : scope.policy;
       const expectedVersion = policyVersions[policySlot];
-      if (typeof expectedVersion !== "string") continue;
       validatePegSelector(
         selector,
         metric,
@@ -914,7 +934,7 @@ function policyVersions(bundle) {
 }
 
 function main() {
-  const minExpressions = intEnv("ALERT_RULES_LINT_MIN_EXPRESSIONS", 100);
+  const minExpressions = intEnv("ALERT_RULES_LINT_MIN_EXPRESSIONS", 170);
   const minRegistered = intEnv("ALERT_RULES_LINT_MIN_REGISTERED", 30);
   const minReferenced = intEnv("ALERT_RULES_LINT_MIN_REFERENCED", 25);
 

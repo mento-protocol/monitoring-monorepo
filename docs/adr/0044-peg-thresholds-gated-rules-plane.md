@@ -15,10 +15,10 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (Jul 2026), in force. PRs #1497 and #1568 landed
 bridge-side policy validation, version-bound decision metrics, and producer
-acknowledgment state. Protected policy publication, Grafana rules, routing, and
-activation remain the Phase 3 rollout in
-[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md); they are not
-implemented on `main`.
+acknowledgment state. This change implements the source rule ladder and routing.
+Protected policy publication and authentication, producer activation,
+human-approved Grafana application, and live proof remain separate rollout
+gates tracked by [`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
 **Scope:** alerts
 
 ## Context
@@ -118,15 +118,15 @@ Phase 3 must implement the following protected artifact and rules contract:
     breach; this is a new idiom in the stack, adopted deliberately for
     thin-market series and documented in the rule file banner. Range
     functions ignore gaps, so the quantile counts as a duration fraction
-    only when a sample-coverage predicate also passes — `increase` over a
+    only when two sample-coverage predicates also pass: `increase` over the
     monotonic per-source poll-success counter
-    (`mento_peg_poll_success_total`) compared against the expected poll
-    cadence. A timestamp-gauge `changes` undercounts polls that land
-    between scrapes, and raw `count_over_time` counts scrapes of a
-    retained gauge; only producer-side successes qualify, and failed polls
-    drop or stale the per-source series instead of holding last-good
-    values — after an API outage a sparse window with one fresh deviated
-    sample must not read as a sustained breach.
+    (`mento_peg_poll_success_total`) and over the monotonic uncapped
+    decision counter (`mento_peg_usable_decision_total`), each compared
+    against the expected poll cadence. A timestamp-gauge `changes`
+    undercounts polls that land between scrapes, and raw `count_over_time`
+    counts scrapes of a retained gauge. Requiring both counters prevents
+    capped or unchanged successes plus one deviated sample from being read
+    as a sustained breach.
   - Severity and routing stay per-rule: warn → Slack, critical → page, each
     with its own contact-point wiring.
 
