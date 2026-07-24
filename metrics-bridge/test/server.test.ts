@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { register, updateMetrics } from "../src/metrics.js";
 import { handleRequest, markHealthy } from "../src/server.js";
+import {
+  _resetPegDecisionPackagesForTests,
+  commitPegDecisionPackages,
+} from "../src/peg/decision-packages.js";
 import { makePool, tick } from "./fixtures.js";
 
 function makeRes() {
@@ -30,6 +34,7 @@ function makeRes() {
 describe("handleRequest", () => {
   beforeEach(() => {
     register.resetMetrics();
+    _resetPegDecisionPackagesForTests();
   });
 
   it("GET /metrics returns 200 with Prometheus content type", async () => {
@@ -86,6 +91,32 @@ describe("handleRequest", () => {
     const res = makeRes();
     handleRequest({ url: "/health?ts=1", method: "GET" }, res);
     expect(res.status).toBe(200);
+  });
+
+  it("keeps peg decision-package unavailability isolated from health", () => {
+    markHealthy();
+    const decision = makeRes();
+    handleRequest({ url: "/peg/decision-packages", method: "GET" }, decision);
+    expect(decision.status).toBe(503);
+    expect(decision.headers).toEqual({
+      "Cache-Control": "no-store",
+      "Content-Type": "application/json; charset=utf-8",
+    });
+    const health = makeRes();
+    handleRequest({ url: "/health", method: "GET" }, health);
+    expect(health.status).toBe(200);
+  });
+
+  it("serves the last atomically committed peg decision-package body", () => {
+    const json = JSON.stringify({ schemaVersion: 1, packages: [] });
+    commitPegDecisionPackages({ model: JSON.parse(json), json });
+    const res = makeRes();
+    handleRequest(
+      { url: "/peg/decision-packages?latest=1", method: "GET" },
+      res,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toBe(json);
   });
 
   it("unknown path returns 404", () => {

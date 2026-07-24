@@ -29,6 +29,32 @@ export interface PegSourceMetricSnapshot {
   newUsableDecision: boolean;
 }
 
+export interface PegBreakerMetricSnapshot {
+  id: string;
+  address: string;
+  enabled: boolean;
+  kind: "MEDIAN_DELTA" | "VALUE_DELTA";
+  status: "OK" | "TRIPPED";
+  tradingMode: number;
+  effectiveRateChangeThreshold: string;
+  referenceValue: string | null;
+  lastMedianRate: string | null;
+  lastUpdatedAt: number | null;
+  lastStatusUpdatedAt: number;
+}
+
+export interface PegMonitorMetricSnapshot {
+  chainId: number;
+  poolAddress: string;
+  rateFeedId: string;
+  monitoredTokenAddress: string;
+  indexedPoolReachable: boolean;
+  structuralSaturation: number | null;
+  structuralQuerySaturated: boolean;
+  counterpartyCount: number;
+  breaker: PegBreakerMetricSnapshot | null;
+}
+
 export interface PegAssetMetricSnapshot {
   asset: string;
   policyVersion: string;
@@ -39,6 +65,7 @@ export interface PegAssetMetricSnapshot {
   structuralQuerySaturated: boolean;
   indexedPoolReachable: boolean;
   counterpartyCount: number;
+  monitors: PegMonitorMetricSnapshot[];
   sources: PegSourceMetricSnapshot[];
 }
 

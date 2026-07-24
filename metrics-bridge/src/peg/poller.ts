@@ -18,16 +18,19 @@ import {
   type PegTradingLimitRow,
 } from "./graphql.js";
 import {
-  publishPegMetrics,
   type PegAssetMetricSnapshot,
+  type PegMonitorMetricSnapshot,
   type PegSourceMetricSnapshot,
 } from "./metrics.js";
+import { resolvePegBreakerEvidence } from "./breaker-evidence.js";
 import {
   runPegPollCycle,
   type PegPollCycleContext,
   type PegPollCycleInput,
   type PegPollSourceState,
 } from "./poll-cycle.js";
+import { publishPegPollSnapshot } from "./publisher.js";
+import type { PegDecisionPackagePublicationContext } from "./decision-packages.js";
 import type {
   PegAssetPolicy,
   PegPolicyVersion,
@@ -96,7 +99,10 @@ export interface PegPollerDependencies {
     conversion: PegConversion,
     nowSeconds: number,
   ) => Promise<PegConversionLeg>;
-  publish?: (snapshots: PegAssetMetricSnapshot[]) => void | Promise<void>;
+  publish?: (
+    snapshots: PegAssetMetricSnapshot[],
+    context: PegDecisionPackagePublicationContext | null,
+  ) => void | Promise<void>;
   onError?: (event: PegPollErrorEvent) => void;
 }
 
@@ -125,7 +131,10 @@ interface Dependencies {
     conversion: PegConversion,
     nowSeconds: number,
   ) => Promise<PegConversionLeg>;
-  publish: (snapshots: PegAssetMetricSnapshot[]) => void | Promise<void>;
+  publish: (
+    snapshots: PegAssetMetricSnapshot[],
+    context: PegDecisionPackagePublicationContext | null,
+  ) => void | Promise<void>;
   report: ReportError;
 }
 
@@ -135,6 +144,7 @@ interface StructuralContext {
   saturation: number | null;
   counterpartyCount: number;
   limits: PegTradingLimitRow[];
+  monitors: PegMonitorMetricSnapshot[];
 }
 
 type SourceState = PegPollSourceState;
@@ -185,7 +195,7 @@ const resolveDependencies = (input: PegPollerDependencies): Dependencies => {
     fetchBitvavo: input.fetchBitvavo ?? fetchBitvavoObservation,
     fetchKraken: input.fetchKraken ?? fetchKrakenObservation,
     readConversionLeg: input.readConversionLeg ?? defaultReadConversionLeg,
-    publish: input.publish ?? publishPegMetrics,
+    publish: input.publish ?? publishPegPollSnapshot,
     report,
   };
 };
@@ -248,21 +258,33 @@ function structuralBindingIssue(
 }
 
 type MonitorResult = {
-  reachable: boolean;
-  querySaturated: boolean;
-  saturation: number | null;
-  counterpartyCount: number;
+  snapshot: PegMonitorMetricSnapshot;
   limit: PegTradingLimitRow | null;
 };
 
-const failedMonitor = (querySaturated = false): MonitorResult => ({
-  reachable: false,
-  querySaturated,
-  saturation: null,
-  counterpartyCount: 0,
+const monitorIdentity = (monitor: PegMonitor) => ({
+  chainId: monitor.chainId,
+  poolAddress: monitor.poolAddress,
+  rateFeedId: monitor.rateFeedId,
+  monitoredTokenAddress: monitor.monitoredTokenAddress,
+});
+
+const failedMonitor = (
+  monitor: PegMonitor,
+  querySaturated = false,
+): MonitorResult => ({
+  snapshot: {
+    ...monitorIdentity(monitor),
+    indexedPoolReachable: false,
+    structuralSaturation: null,
+    structuralQuerySaturated: querySaturated,
+    counterpartyCount: 0,
+    breaker: null,
+  },
   limit: null,
 });
 
+// eslint-disable-next-line max-lines-per-function
 async function pollMonitor(
   assetId: string,
   monitor: PegMonitor,
@@ -275,11 +297,13 @@ async function pollMonitor(
     result = await context.dependencies.fetchStructuralContext({
       poolId: poolIdFor(monitor),
       monitoredToken: monitor.monitoredTokenAddress,
+      chainId: monitor.chainId,
+      rateFeedId: monitor.rateFeedId,
       since: BigInt(Math.max(0, context.nowSeconds - FPMM_L1_WINDOW_SECONDS)),
     });
   } catch (error) {
     context.dependencies.report("structural_query", error, location);
-    return failedMonitor();
+    return failedMonitor(monitor);
   }
 
   if (result.status !== "ok") {
@@ -288,7 +312,7 @@ async function pollMonitor(
       new Error(`structural context status: ${result.status}`),
       location,
     );
-    return failedMonitor(result.pageSaturated);
+    return failedMonitor(monitor, result.pageSaturated);
   }
   const bindingIssue = structuralBindingIssue(monitor, result);
   if (bindingIssue !== null) {
@@ -297,7 +321,7 @@ async function pollMonitor(
       new Error(bindingIssue),
       location,
     );
-    return failedMonitor(result.pageSaturated);
+    return failedMonitor(monitor, result.pageSaturated);
   }
 
   try {
@@ -307,18 +331,26 @@ async function pollMonitor(
     );
     // Validate the fixed-15 limits once. Source-specific caps are applied later.
     deriveReferenceSize(result.tradingLimit, Number.MAX_VALUE);
+    const breaker = resolvePegBreakerEvidence(result.breakerConfigs ?? []);
+    if (breaker.error !== null) {
+      context.dependencies.report("structural_data", breaker.error, location);
+    }
     return {
-      reachable: true,
-      querySaturated: result.pageSaturated,
-      saturation: saturationFraction,
-      counterpartyCount: new Set(
-        result.swaps.map(({ caller }) => caller.toLowerCase()),
-      ).size,
+      snapshot: {
+        ...monitorIdentity(monitor),
+        indexedPoolReachable: true,
+        structuralSaturation: saturationFraction,
+        structuralQuerySaturated: result.pageSaturated,
+        counterpartyCount: new Set(
+          result.swaps.map(({ caller }) => caller.toLowerCase()),
+        ).size,
+        breaker: breaker.breaker,
+      },
       limit: result.tradingLimit,
     };
   } catch (error) {
     context.dependencies.report("structural_data", error, location);
-    return failedMonitor(result.pageSaturated);
+    return failedMonitor(monitor, result.pageSaturated);
   }
 }
 
@@ -339,22 +371,28 @@ async function pollStructural(
     ),
   );
   const reachable =
-    results.length > 0 && results.every((result) => result.reachable);
-  const saturations = results.flatMap(({ saturation }) =>
-    saturation === null ? [] : [saturation],
+    results.length > 0 &&
+    results.every(({ snapshot }) => snapshot.indexedPoolReachable);
+  const saturations = results.flatMap(({ snapshot }) =>
+    snapshot.structuralSaturation === null
+      ? []
+      : [snapshot.structuralSaturation],
   );
   return {
     reachable,
-    querySaturated: results.some((result) => result.querySaturated),
+    querySaturated: results.some(
+      ({ snapshot }) => snapshot.structuralQuerySaturated,
+    ),
     saturation:
       reachable && saturations.length > 0 ? Math.max(...saturations) : null,
     counterpartyCount: results.reduce(
-      (total, result) => total + result.counterpartyCount,
+      (total, { snapshot }) => total + snapshot.counterpartyCount,
       0,
     ),
     limits: reachable
       ? results.flatMap(({ limit }) => (limit === null ? [] : [limit]))
       : [],
+    monitors: results.map(({ snapshot }) => snapshot),
   };
 }
 
@@ -909,6 +947,7 @@ async function pollAsset(
     structuralQuerySaturated: structural.querySaturated,
     indexedPoolReachable: structural.reachable,
     counterpartyCount: structural.counterpartyCount,
+    monitors: structural.monitors,
     sources,
   };
 }

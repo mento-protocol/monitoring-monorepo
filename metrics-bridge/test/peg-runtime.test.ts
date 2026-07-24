@@ -115,10 +115,14 @@ describe("Peg runtime isolation", () => {
     expect(loadRegistry).toHaveBeenCalledOnce();
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(pegPoller.pollCycle).toHaveBeenCalledTimes(2);
-    expect(pegPoller.pollCycle).toHaveBeenLastCalledWith({
-      registry,
-      policies: [bundle.active],
-    });
+    expect(pegPoller.pollCycle).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        registry,
+        policies: [bundle.active],
+        approvedActivePolicyVersion: bundle.active.version,
+        retainedPreviousPolicyVersion: null,
+      }),
+    );
   });
 
   it("retains and polls the last-good policy after a refresh outage", async () => {
@@ -274,10 +278,12 @@ describe("Peg runtime isolation", () => {
       await runtime.runCycle();
 
       expect(runtime.status).toBe("active");
-      expect(pegPoller.pollCycle).toHaveBeenCalledWith({
-        registry,
-        policies: [rollover.active, rollover.previous],
-      });
+      expect(pegPoller.pollCycle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          registry,
+          policies: [rollover.active, rollover.previous],
+        }),
+      );
     },
   );
 
@@ -316,10 +322,12 @@ describe("Peg runtime isolation", () => {
 
       if (versionName === "active") {
         expect(runtime.status).toBe("active");
-        expect(pegPoller.pollCycle).toHaveBeenCalledWith({
-          registry,
-          policies: [bundle.active],
-        });
+        expect(pegPoller.pollCycle).toHaveBeenCalledWith(
+          expect.objectContaining({
+            registry,
+            policies: [bundle.active],
+          }),
+        );
         expect(errors).toEqual([]);
       } else {
         expect(runtime.status).toBe("waiting");
@@ -418,10 +426,12 @@ describe("Peg runtime isolation", () => {
 
     expect(runtime.status).toBe("active");
     expect(pegPoller.pollCycle).toHaveBeenCalledTimes(2);
-    expect(pegPoller.pollCycle).toHaveBeenLastCalledWith({
-      registry,
-      policies: [bundle.active],
-    });
+    expect(pegPoller.pollCycle).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        registry,
+        policies: [bundle.active],
+      }),
+    );
     expect(pegPoller.pollCycle).not.toHaveBeenCalledWith(
       expect.objectContaining({
         policies: expect.arrayContaining([incompatibleActive]),
@@ -471,10 +481,12 @@ describe("Peg runtime isolation", () => {
 
     expect(runtime.status).toBe("active");
     expect(pegPoller.pollCycle).toHaveBeenCalledOnce();
-    expect(pegPoller.pollCycle).toHaveBeenCalledWith({
-      registry,
-      policies: [bundle.active],
-    });
+    expect(pegPoller.pollCycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registry,
+        policies: [bundle.active],
+      }),
+    );
     expect(pegPoller.pollCycle).not.toHaveBeenCalledWith(
       expect.objectContaining({
         policies: expect.arrayContaining([incompatibleActive]),
@@ -509,10 +521,12 @@ describe("Peg runtime isolation", () => {
 
     expect(runtime.status).toBe("active");
     expect(pegPoller.pollCycle).toHaveBeenCalledOnce();
-    expect(pegPoller.pollCycle).toHaveBeenCalledWith({
-      registry,
-      policies: [compatibleActive, bundle.active],
-    });
+    expect(pegPoller.pollCycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registry,
+        policies: [compatibleActive, bundle.active],
+      }),
+    );
   });
 
   it("rejects active-only production while retained topology is unsupported", async () => {
@@ -604,10 +618,12 @@ describe("Peg runtime isolation", () => {
     await runtime.runCycle();
 
     expect(runtime.status).toBe("active");
-    expect(pegPoller.pollCycle).toHaveBeenCalledWith({
-      registry,
-      policies: [compatibleActive, bundle.active],
-    });
+    expect(pegPoller.pollCycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registry,
+        policies: [compatibleActive, bundle.active],
+      }),
+    );
   });
 
   it("keeps serving cleaned active policy from an old superset registry", async () => {
@@ -634,10 +650,12 @@ describe("Peg runtime isolation", () => {
     await runtime.runCycle();
 
     expect(runtime.status).toBe("active");
-    expect(pegPoller.pollCycle).toHaveBeenCalledWith({
-      registry,
-      policies: [bundle.active],
-    });
+    expect(pegPoller.pollCycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registry,
+        policies: [bundle.active],
+      }),
+    );
   });
 
   it("drops the retained policy from the next cycle after ACK cleanup", async () => {
@@ -673,13 +691,19 @@ describe("Peg runtime isolation", () => {
     await runtime.runCycle();
 
     expect(runtime.status).toBe("active");
-    expect(pegPoller.pollCycle).toHaveBeenNthCalledWith(1, {
-      registry,
-      policies: [compatibleActive, bundle.active],
-    });
-    expect(pegPoller.pollCycle).toHaveBeenNthCalledWith(2, {
-      registry,
-      policies: [compatibleActive],
-    });
+    expect(pegPoller.pollCycle).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        registry,
+        policies: [compatibleActive, bundle.active],
+      }),
+    );
+    expect(pegPoller.pollCycle).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        registry,
+        policies: [compatibleActive],
+      }),
+    );
   });
 });
