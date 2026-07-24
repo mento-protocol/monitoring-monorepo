@@ -98,11 +98,12 @@ test("intercepts peg monitoring, retains stale evidence, and keeps loading geome
   page,
 }) => {
   await page.clock.install({ time: new Date(now * 1000 + 20_000) });
+  await page.setViewportSize({ width: 1280, height: 900 });
   let request = 0;
   await page.route("**/api/peg-monitoring", async (route) => {
     request += 1;
     if (request === 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 500));
       await route.fulfill({ json: payload });
       return;
     }
@@ -115,11 +116,31 @@ test("intercepts peg monitoring, retains stale evidence, and keeps loading geome
   await page.goto("/peg-monitoring");
   const skeleton = page.locator('[aria-label="Loading peg monitoring"]');
   await expect(skeleton).toBeVisible();
-  const skeletonRect = await skeleton.boundingBox();
+  const skeletonRects = await Promise.all([
+    page.getByTestId("peg-skeleton-status").boundingBox(),
+    page.getByTestId("peg-skeleton-snapshot").boundingBox(),
+    page.getByTestId("peg-skeleton-package").boundingBox(),
+  ]);
   await expect(page.getByText(/^Current package ·/)).toBeVisible();
-  const contentRect = await page.locator("main").boundingBox();
-  expect(skeletonRect?.width).toBeGreaterThan(0);
-  expect(contentRect?.width).toBeGreaterThan(0);
+  const loadedRects = await Promise.all([
+    page.getByTestId("peg-status").boundingBox(),
+    page.getByTestId("peg-snapshot").boundingBox(),
+    page.getByTestId("peg-package-0").boundingBox(),
+  ]);
+  for (const [skeletonRect, loadedRect] of skeletonRects.map(
+    (rect, index) => [rect, loadedRects[index]] as const,
+  )) {
+    expect(skeletonRect).not.toBeNull();
+    expect(loadedRect).not.toBeNull();
+    expect(Math.abs(skeletonRect!.x - loadedRect!.x)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(skeletonRect!.width - loadedRect!.width),
+    ).toBeLessThanOrEqual(1);
+    expect(Math.abs(skeletonRect!.y - loadedRect!.y)).toBeLessThanOrEqual(48);
+    expect(
+      Math.abs(skeletonRect!.height - loadedRect!.height),
+    ).toBeLessThanOrEqual(320);
+  }
   await expect(
     page.getByRole("link", { name: /Open Peg Monitoring/ }),
   ).toHaveAttribute("rel", /noopener/);

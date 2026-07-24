@@ -57,8 +57,14 @@ function Header(): React.JSX.Element {
 function Loading(): React.JSX.Element {
   return (
     <section aria-label="Loading peg monitoring" className="space-y-6">
-      <div className="h-16 animate-pulse rounded-lg border border-slate-800 bg-slate-900/45" />
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div
+        data-testid="peg-skeleton-status"
+        className="h-14 animate-pulse rounded-lg border border-slate-800 bg-slate-900/45"
+      />
+      <div
+        data-testid="peg-skeleton-snapshot"
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
+      >
         {["a", "b", "c", "d", "e"].map((key) => (
           <div
             key={key}
@@ -66,7 +72,10 @@ function Loading(): React.JSX.Element {
           />
         ))}
       </div>
-      <div className="space-y-6 rounded-xl border border-slate-800 bg-slate-900/45 p-4 sm:p-6">
+      <div
+        data-testid="peg-skeleton-package"
+        className="min-h-[1000px] space-y-6 rounded-xl border border-slate-800 bg-slate-900/45 p-4 sm:p-6"
+      >
         <div className="h-8 w-1/4 animate-pulse rounded bg-slate-800" />
         <div className="grid gap-2 lg:grid-cols-4">
           {["f", "g", "h", "i"].map((key) => (
@@ -89,6 +98,7 @@ function SnapshotStatus({
   if (state.kind === "current")
     return (
       <div
+        data-testid="peg-status"
         role="status"
         className="rounded-lg border border-emerald-500/20 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200"
       >
@@ -102,6 +112,7 @@ function SnapshotStatus({
   }[state.reason];
   return (
     <div
+      data-testid="peg-status"
       role="status"
       className="rounded-lg border border-amber-500/30 bg-amber-950/40 px-4 py-3 text-sm text-amber-100"
     >
@@ -120,7 +131,11 @@ function Snapshot({
     data.policySlot === "previous" ||
     data.producedPolicyVersion !== data.approvedActivePolicyVersion;
   return (
-    <section aria-labelledby="snapshot-heading" className="space-y-3">
+    <section
+      data-testid="peg-snapshot"
+      aria-labelledby="snapshot-heading"
+      className="space-y-3"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="snapshot-heading" className="text-lg font-semibold text-white">
           Snapshot
@@ -408,6 +423,7 @@ function Package({
   const heading = `peg-asset-${index}`;
   return (
     <article
+      data-testid={`peg-package-${index}`}
       aria-labelledby={heading}
       className="space-y-6 rounded-xl border border-slate-800 bg-slate-900/45 p-4 sm:p-6"
     >
@@ -458,7 +474,7 @@ export function PegMonitoringPageClient(): React.JSX.Element {
     nowMs: Math.max(now, Date.now()),
   });
   return (
-    <div className="space-y-8">
+    <div data-testid="peg-monitoring-page" className="space-y-8">
       <Header />
       {state.kind === "loading" ? (
         <Loading />
