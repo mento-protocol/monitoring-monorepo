@@ -3,7 +3,7 @@ title: Documentation gardening runs through one bounded issue queue
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-19
+last_verified: 2026-07-24
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -38,9 +38,9 @@ Run the documentation garden through a deterministic, issue-only scheduler:
 - The existing read-only planner supplies one packet of at most 10 documents or
   15,000 source words. No LLM or credential is involved in selection.
 - The scheduler creates at most one live Agent Task issue. Two leading
-  structural markers identify the queue item and its week serial plus
-  lane/shard fingerprint; queue labels are never used as the identity because
-  claiming deliberately changes them.
+  structural markers plus the durable `source:audit` ownership label identify
+  garden issues and their week serial plus lane/shard fingerprint. Lifecycle
+  labels do not identify occurrences because claiming deliberately changes them.
 - A published issue is immutable whether it is `agent-ready`, `agent-active`,
   `in-pr`, or `needs-grooming`. Reruns retain it without changing its body,
   title, or labels; this removes the otherwise unavoidable race between a
@@ -52,9 +52,11 @@ Run the documentation garden through a deterministic, issue-only scheduler:
 - Every generated issue contains all Agent Task sections, the complete planner
   packet, epic #1341, exact routing/risk/priority labels, and the verification
   and non-goal contract needed for independent execution.
-- The workflow has only `contents: read` and `issues: write`, a default-branch
-  guard, pinned actions, one non-cancelling concurrency group, and Slack failure
-  notification coverage. Before a live create, the job requests a short-lived
+- The workflow's resource permissions are limited to `contents: read` and
+  `issues: write`, with `id-token: write` used only for OIDC issuance. It has a
+  default-branch guard, pinned actions, one non-cancelling concurrency group,
+  and Slack failure notification coverage. Before a live create, the job
+  requests a short-lived
   GitHub Actions OIDC identity from the runner-only HTTPS endpoint and validates
   its repository, workflow ref and SHA, event, ref, run ID, attempt, audience,
   issuer, and lifetime claims. This proves the create originates in the exact
@@ -66,6 +68,9 @@ Run the documentation garden through a deterministic, issue-only scheduler:
 - The repo-tracked `doc-garden` skill defines the human/agent semantic-review
   procedure. Evidence, a claimed issue, a normal reviewed PR, link repair, and
   catalog verification remain required before documentation changes land.
+- ADR 0041 adds a separate monthly documentation-navigation evaluation issue
+  sync to the same workflow. That issue has its own identity and lifecycle and
+  does not participate in this ADR's one-live-garden-packet queue.
 
 ## Alternatives considered
 

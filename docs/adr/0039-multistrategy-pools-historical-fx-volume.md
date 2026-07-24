@@ -3,7 +3,7 @@ title: Model pool strategies many-to-many and price same-currency swaps from his
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-24
 scope: indexer-envio, ui-dashboard, metrics-bridge
 doc_type: adr
 review_interval_days: 90

@@ -138,9 +138,9 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### governance-watchdog
 
-| ADR                                                 | Decision                                                                  |
-| --------------------------------------------------- | ------------------------------------------------------------------------- |
-| [0031](0031-governance-watchdog-standalone-root.md) | governance-watchdog stays a standalone source root in its own GCP project |
+| ADR                                                 | Decision                                                                       |
+| --------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [0031](0031-governance-watchdog-standalone-root.md) | governance-watchdog deploys as a standalone source root in its own GCP project |
 
 ### integration-probes
 
