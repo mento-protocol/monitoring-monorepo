@@ -5,13 +5,10 @@ name: Aegis Terraform
 # backend impersonates a seed-project SA (see `aegis/terraform/main.tf`).
 # The plan and apply jobs use a read/write split for plan-time blast-radius
 # reduction:
-#   - apply (on merge) authenticates as the write-capable CI deployer SA
-#     (`GCP_SERVICE_ACCOUNT`) and impersonates `org-terraform@…seed` for the
-#     backend (state writes + locking). The deployer SA's
-#     `roles/iam.serviceAccountTokenCreator` grant on `org-terraform` lives in
-#     `terraform/ci-wif.tf` (`ci_alerts_org_terraform_token_creator`, shared
-#     with `alerts/rules/` and `alerts/infra/` — aegis is a third consumer of
-#     the same one-triple binding, no new resource needed).
+#   - apply (on merge) authenticates through the production-infra-only WIF
+#     provider as `production-infra-applier@…seed`, then impersonates
+#     `org-terraform@…seed` for backend state writes + locking. The applier's
+#     service-account-scoped Token Creator grant lives in `terraform/ci-wif.tf`.
 #   - plan (on PR) authenticates as the read-only CI SA
 #     (`GCP_SERVICE_ACCOUNT_PLAN`) and overrides the backend impersonation to
 #     `org-terraform-plan-readonly@…seed` via `-backend-config`. That seed SA
@@ -37,11 +34,10 @@ name: Aegis Terraform
 # (https://developer.hashicorp.com/terraform/cli/commands/plan), and the
 # TF_VAR_* env block here carries the production Grafana SA token on
 # push/dispatch; PR plans intentionally use a placeholder instead.
-# Uploading the binary plan as a workflow artifact would expose that
-# secret to anyone with `actions:read`. Instead the apply job re-plans at
-# gate-approval time — the trade-off is the brief "between approval and
-# apply" drift window, which the reviewer can detect by checking the
-# apply-job's plan output before approving.
+# Uploading the binary plan as a workflow artifact would expose that secret to
+# anyone with `actions:read`. The Environment gate approves the commit and the
+# earlier plan. The apply job starts only after approval, then creates and
+# applies a later plan, so the current path has a documented drift window.
 #
 # Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
 # (matrix module `aegis`). This workflow adds the plan diff comment +
@@ -164,8 +160,9 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           # Read-only plan SA: PR plan jobs authenticate as the plan-readonly
           # CI SA so a malicious PR's plan-time data source can't mint tokens
-          # for the write-capable deployer. The apply job below keeps
-          # `GCP_SERVICE_ACCOUNT`. See file header + `terraform/ci-wif.tf`.
+          # for the write-capable deployer. The apply job below uses the
+          # production-infra-only provider and applier. See file header +
+          # `terraform/ci-wif.tf`.
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_PLAN }}
 
       - name: Set up Cloud SDK
@@ -210,7 +207,7 @@ jobs:
         # Plan output is captured raw, sanitized, then written to
         # `/tmp/tf-plan.txt` for logs, the sticky comment, and Slack.
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
-        # (HashiCorp docs); apply re-plans at gate-approval time instead.
+        # (HashiCorp docs); apply creates a later plan after approval instead.
         # `-lock=false`: the read-only plan SA (objectViewer only) can't
         # create/delete the GCS lock object, so plan must skip locking. Safe
         # because plan only reads state and re-runs on every push; a skipped
@@ -402,6 +399,8 @@ jobs:
       TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Verify production-infra environment protection
         env:
@@ -412,8 +411,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
@@ -427,9 +426,8 @@ jobs:
         run: terraform init -input=false
 
       - name: Apply
-        # Re-plans + applies in a single step. The reviewer at the
-        # production-infra environment gate should read this job's plan output
-        # before approving — it's the ground truth for what lands.
+        # The Environment gate has already approved the commit and earlier plan.
+        # This step creates and applies a later plan, then records what landed.
         # `-lock-timeout=10m`: apply must wait for any in-progress state
         # lock rather than failing the deploy.
         run: terraform apply -auto-approve -input=false -lock-timeout=10m

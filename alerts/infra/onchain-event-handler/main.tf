@@ -332,6 +332,15 @@ resource "google_storage_bucket_iam_member" "cloud_build_storage_access" {
   member = "serviceAccount:${var.project_service_account_email}"
 }
 
+# Terraform's storage-object Read path fetches the managed source object.
+# Scope refresh access to this source bucket; the replay/dead-letter bucket has
+# no Terraform-managed objects and does not need payload read access.
+resource "google_storage_bucket_iam_member" "terraform_refresh_readonly_function_source" {
+  bucket = google_storage_bucket.function_bucket.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+}
+
 ##################
 # Secret Manager #
 ##################
@@ -408,6 +417,21 @@ resource "google_secret_manager_secret_iam_member" "runtime_slack_bot_token" {
   secret_id = google_secret_manager_secret.slack_bot_token.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.function_runtime.email}"
+}
+
+# Secret-version refresh calls access the managed payload to compare it with
+# state. Grant only these two secrets; do not grant project-wide secret access
+# to the refresh identity.
+resource "google_secret_manager_secret_iam_member" "terraform_refresh_readonly" {
+  for_each = {
+    quicknode_signing = google_secret_manager_secret.quicknode_signing_secret.secret_id
+    slack_bot         = google_secret_manager_secret.slack_bot_token.secret_id
+  }
+
+  project   = var.project_id
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
 }
 
 resource "google_storage_bucket_iam_member" "runtime_replay_nonce_creator" {

@@ -44,8 +44,9 @@ the package-local dependency resolution used by the deployed source archive.
 
 - Its lockfile is maintained independently (a range once bumped undici and broke
   Discord delivery; it's pinned exact — see the supply-chain override discipline).
-- Its Terraform is a registered stack with CI apply-on-merge + daily drift detection
-  under `org-terraform` impersonation (ADR 0028/0029).
+- Its Terraform is a registered stack with CI apply-on-merge and daily drift
+  detection. Production apply and trusted-main refresh use separate
+  impersonation chains (ADRs 0028, 0029, and 0047).
 
 ## Evidence
 

@@ -104,6 +104,15 @@ resource "google_storage_bucket_object" "source_code" {
   source = data.archive_file.function_source.output_path
 }
 
+# Terraform's storage-object Read path fetches the managed source object.
+# Scope refresh access to this source bucket; the logging and replay buckets
+# have no Terraform-managed objects and do not need payload read access.
+resource "google_storage_bucket_iam_member" "terraform_refresh_readonly_function_source" {
+  bucket = google_storage_bucket.watchdog_notifications_function.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+}
+
 # Create the Storage Bucket for access logs
 resource "google_storage_bucket" "logging" {
   #checkov:skip=CKV_GCP_62:The logging bucket can't log to itself (circular dependency)

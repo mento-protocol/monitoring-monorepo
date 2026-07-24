@@ -155,7 +155,8 @@ pnpm alerts:rules:init
 pnpm alerts:rules:plan
 # Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
 # The production-infra gate enforces required-reviewer approval and allows
-# self-review for the sole-maintainer workflow.
+# self-review for the sole-maintainer workflow. This is operator acknowledgement
+# of the commit and earlier plan, not independent or exact apply-plan review.
 
 # Dev janitor
 bash scripts/dev-janitor.sh            # Dry-run: report stale trunk repo caches, pnpm store, git worktrees, /private/tmp trees

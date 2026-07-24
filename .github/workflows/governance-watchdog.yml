@@ -7,11 +7,11 @@ name: Governance Watchdog Infra
 # matching the alerts/infra + aegis stacks. The GCS backend and google provider both
 # impersonate a seed-project SA (see versions.tf). The plan and apply jobs use a
 # read/write split for plan-time blast-radius reduction:
-#   - apply (on merge) authenticates as the write-capable CI deployer SA
-#     (`GCP_SERVICE_ACCOUNT`); the backend AND the google provider impersonate
-#     `org-terraform@…seed` (state writes + locking + full GCP resource ops).
-#     The deployer SA's `roles/iam.serviceAccountTokenCreator` grant on
-#     `org-terraform` lives in `terraform/ci-wif.tf` (shared across CI stacks).
+#   - apply (on merge) authenticates through the production-infra-only WIF
+#     provider as `production-infra-applier@…seed`; the backend AND the google
+#     provider then impersonate `org-terraform@…seed` for state writes, locking,
+#     and full GCP resource operations. The applier's service-account-scoped
+#     Token Creator grant lives in `terraform/ci-wif.tf`.
 #   - plan (on PR) authenticates as the read-only CI SA
 #     (`GCP_SERVICE_ACCOUNT_PLAN`), overrides the backend impersonation to
 #     `org-terraform-plan-readonly@…seed` via `-backend-config`, points the
@@ -23,10 +23,12 @@ name: Governance Watchdog Infra
 #     Skipping refresh keeps the PR plan to a config-vs-last-state diff needing
 #     only state read + the token the read-only CI SA already holds — zero new
 #     IAM. Tradeoff: the PR plan won't surface out-of-band drift; that's
-#     `terraform-drift.yml`'s job (full refresh, write SA) and the apply-time
-#     re-plan's. The read-only + `-refresh=false` treatment is gated on
+#     `terraform-drift.yml`'s job (full refresh, transitionally using the write
+#     SA) and the apply-time re-plan's. The read-only + `-refresh=false`
+#     treatment is gated on
 #     `github.event_name == 'pull_request'`: the same plan job on push /
-#     workflow_dispatch keeps the write deployer SA + full refresh + locking.
+#     workflow_dispatch keeps the write deployer SA + full refresh + locking
+#     until the follow-up trusted-main refresh-identity cutover.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
@@ -54,10 +56,9 @@ name: Governance Watchdog Infra
 # TF_VAR_* env block here carries production Discord/Telegram/QuickNode/GitHub
 # credentials on push/dispatch and apply runs. Uploading the binary plan as a
 # workflow artifact would expose those secrets to anyone with `actions:read`.
-# Instead the apply job re-plans at gate-approval time — the trade-off
-# is the brief "between approval and apply" drift window, which the
-# reviewer can detect by checking the apply-job's plan output before
-# approving.
+# The Environment gate approves the commit and the earlier plan. The apply job
+# starts only after approval, then creates and applies a later plan, so the
+# current path has a documented drift window.
 #
 # Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
 # (matrix stack `governance-watchdog`). This workflow adds the plan diff comment +
@@ -213,9 +214,11 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           # On PRs, authenticate as the read-only plan SA so a malicious PR's
           # plan-time data source can't mint tokens for the write-capable
-          # deployer. push / workflow_dispatch (the apply-gating path, incl.
-          # drift reconcile) and the apply job keep `GCP_SERVICE_ACCOUNT`.
-          # See file header + `terraform/ci-wif.tf`.
+          # deployer. Until the follow-up refresh-identity cutover, push /
+          # workflow_dispatch (the pre-gate planning path, including drift
+          # reconcile) keeps `GCP_SERVICE_ACCOUNT`; the apply job uses the
+          # production-infra-only identity. See file header +
+          # `terraform/ci-wif.tf`.
           service_account: ${{ github.event_name == 'pull_request' && secrets.GCP_SERVICE_ACCOUNT_PLAN || secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
@@ -310,7 +313,7 @@ jobs:
         # can print provider state such as webhook URLs/tokens, so never tee raw
         # Terraform output to GitHub logs.
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
-        # (HashiCorp docs); apply re-plans at gate-approval time instead.
+        # (HashiCorp docs); apply creates a later plan after approval instead.
         # PR plans run read-only: `-lock=false` (the read-only plan SA, objectViewer
         # only, can't write the GCS lock object) + `-refresh=false` (this stack's
         # google provider would otherwise refresh GCP resources the read-only seed
@@ -577,6 +580,8 @@ jobs:
       TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Verify production-infra environment protection
         env:
@@ -587,8 +592,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
@@ -603,9 +608,8 @@ jobs:
 
       - name: Apply
         id: apply
-        # Re-plans + applies in a single step. The reviewer at the
-        # production-infra environment gate should read this job's plan output
-        # before approving — it's the ground truth for what lands.
+        # The Environment gate has already approved the commit and earlier plan.
+        # This step creates and applies a later plan, then records what landed.
         # `-lock-timeout=10m`: apply must wait for any in-progress state
         # lock rather than failing the deploy.
         # `-no-color`: keep the output free of ANSI escapes so the apply

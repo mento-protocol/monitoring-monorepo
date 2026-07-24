@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import "./production-infra-identity-contract/index.test.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -406,6 +407,94 @@ function assert(condition, message) {
   }
 }
 
+function extractHclBlock(source, marker) {
+  const markerIndex = source.indexOf(marker);
+  assert(markerIndex !== -1, `missing HCL block: ${marker}`);
+
+  const openingBrace = source.indexOf("{", markerIndex + marker.length);
+  assert(openingBrace !== -1, `missing opening brace for HCL block: ${marker}`);
+
+  let depth = 0;
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === "{") {
+      depth += 1;
+    } else if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(openingBrace + 1, index);
+      }
+    }
+  }
+
+  throw new Error(`missing closing brace for HCL block: ${marker}`);
+}
+
+const metricsBridgeScalingOwnershipError =
+  "metrics_bridge must keep service scaling and scaling_mode Terraform-managed";
+
+function assertMetricsBridgeScalingOwnershipSource(source) {
+  const service = extractHclBlock(
+    source,
+    'resource "google_cloud_run_v2_service" "metrics_bridge"',
+  );
+  const lifecycle = extractHclBlock(service, "lifecycle");
+
+  assert(
+    /^ {2}scaling \{\}$/mu.test(service),
+    "metrics_bridge must keep an explicit empty service-level scaling block so child ignore paths remain addressable",
+  );
+  assert(
+    /^ {6}scaling\[0\]\.manual_instance_count,$/mu.test(lifecycle),
+    "metrics_bridge must ignore the deploy-stamped service manual instance count",
+  );
+  assert(
+    /^ {6}scaling\[0\]\.min_instance_count,$/mu.test(lifecycle),
+    "metrics_bridge must ignore the deploy-stamped service minimum instance count",
+  );
+  assert(
+    !/^ {6}(?:scaling|scaling\[0\]|scaling\[0\]\.scaling_mode),$/mu.test(
+      lifecycle,
+    ),
+    metricsBridgeScalingOwnershipError,
+  );
+}
+
+function assertMetricsBridgeScalingOwnership() {
+  const source = readFileSync(
+    path.join(repoRoot, "terraform/metrics-bridge.tf"),
+    "utf8",
+  );
+  assertMetricsBridgeScalingOwnershipSource(source);
+
+  const fixtureAnchor = "      scaling[0].min_instance_count,\n";
+  assert(
+    source.includes(fixtureAnchor),
+    "metrics_bridge scaling ownership fixture anchor is missing",
+  );
+
+  for (const forbiddenIgnore of [
+    "scaling,",
+    "scaling[0],",
+    "scaling[0].scaling_mode,",
+  ]) {
+    const fixture = source.replace(
+      fixtureAnchor,
+      `${fixtureAnchor}      ${forbiddenIgnore}\n`,
+    );
+    let failure = null;
+    try {
+      assertMetricsBridgeScalingOwnershipSource(fixture);
+    } catch (error) {
+      failure = error;
+    }
+    assert(
+      failure instanceof Error &&
+        failure.message === metricsBridgeScalingOwnershipError,
+      `metrics_bridge ownership guard must reject ${forbiddenIgnore}`,
+    );
+  }
+}
+
 function terraformEnvNames(workflowPath) {
   const contents = readFileSync(path.join(repoRoot, workflowPath), "utf8");
   const names = new Set();
@@ -491,6 +580,7 @@ for (const stack of registry.stacks) {
 }
 
 assertDriftWorkflowEnvCoversAutoAppliedStackVars(registry.stacks);
+assertMetricsBridgeScalingOwnership();
 
 const tempDir = mkdtempSync(path.join(tmpdir(), "tf-stacks-test-"));
 try {
