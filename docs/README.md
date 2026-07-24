@@ -3,7 +3,7 @@ title: Documentation Catalog
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-24
 doc_type: index
 scope: repo-wide
 review_interval_days: 90
@@ -80,7 +80,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md) | GitHub-to-Slack notifications for Terraform-applying workflows | canonical / active | runbook / terraform/infra | eng | 30d; verified 2026-07-22 |
 | [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md) | Spoken Attention Nudge | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md) | New Worktree / Clone Setup and Claude Code on the Web Setup | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-24 |
 | [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md) | Adding Governance Watchdog Events | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md) | Governance Watchdog Bootstrap | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/README.md`](../governance-watchdog/README.md) | Governance Watchdog | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
@@ -153,6 +153,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0044-peg-thresholds-gated-rules-plane.md`](adr/0044-peg-thresholds-gated-rules-plane.md) | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON | canonical / active | adr / alerts | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) | Peg paging measures executable sell price; the deep venue pages alone | canonical / active | adr / metrics-bridge / alerts | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) | Oracle freshness is reconstructed from persisted report events | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-24 |
+| [`docs/adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) | Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0049-peg-decision-package-read-model.md`](adr/0049-peg-decision-package-read-model.md) | Peg decisions use a bounded Metrics Bridge read model | canonical / active | adr / metrics-bridge / ui-dashboard | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
@@ -160,21 +161,18 @@ the rules in [`context-standards.md`](context-standards.md).
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
-| [`aegis/README.md`](../aegis/README.md) | Aegis | canonical / active | reference / aegis | eng | 90d; verified 2026-07-17 |
-| [`alerts/infra/channels/slack-channels/README.md`](../alerts/infra/channels/slack-channels/README.md) | Slack Channels | canonical / active | reference / alerts/infra/channels/slack-channels | eng | 90d; verified 2026-07-17 |
-| [`alerts/infra/oncall-announcer/README.md`](../alerts/infra/oncall-announcer/README.md) | On-call Announcer | canonical / active | reference / alerts/infra/oncall-announcer | eng | 90d; verified 2026-07-17 |
-| [`docs/CODE-REVIEW-UI-DASHBOARD.md`](CODE-REVIEW-UI-DASHBOARD.md) | Code Review — ui-dashboard | non-canonical / archived | reference / repo-wide | eng | 180d |
-| [`docs/context-standards.md`](context-standards.md) | Agent Context Standards | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`docs/metrics/review-process-after-1045-comparison-2026-07-07.md`](metrics/review-process-after-1045-comparison-2026-07-07.md) | Review Process Metrics After PR 1045 | non-canonical / active | reference / repo-wide | eng | 180d; verified 2026-07-07 |
-| [`docs/mutation-testing.md`](mutation-testing.md) | Mutation Testing | non-canonical / active | reference / repo-wide | eng | 180d; verified 2026-07-23 |
-| [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md) | Liquity Monitoring Invariants | canonical / active | reference / indexer-envio/ui-dashboard | eng | 90d; verified 2026-07-17 |
-| [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md) | Terraform secret strategy hardening | canonical / active | reference / terraform/infra | eng | 90d; verified 2026-07-17 |
-| [`docs/README.md`](README.md) | Documentation Catalog | canonical / active | index / repo-wide | eng | 90d; verified 2026-07-17 |
-| [`docs/vp-oracle-staleness-alerting-spec.md`](vp-oracle-staleness-alerting-spec.md) | Virtual Pool Oracle Staleness Alerting Spec | non-canonical / draft | reference / repo-wide | eng | 180d; verified 2026-06-16 |
-| [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-22 |
-| [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | unmanaged / unmanaged | reference / indexer-envio | unowned | 180d |
-| [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`SPEC.md`](../SPEC.md) | Mento Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`aegis/README.md`](../aegis/README.md) | Aegis | canonical / active | reference / aegis | eng | 90d; verified 2026-07-24 |
+| [`alerts/infra/channels/slack-channels/README.md`](../alerts/infra/channels/slack-channels/README.md) | Slack Channels | canonical / active | reference / alerts/infra/channels/slack-channels | eng | 90d; verified 2026-07-24 |
+| [`alerts/infra/oncall-announcer/README.md`](../alerts/infra/oncall-announcer/README.md) | On-call Announcer | canonical / active | reference / alerts/infra/oncall-announcer | eng | 90d; verified 2026-07-24 |
+| [`docs/context-standards.md`](context-standards.md) | Agent Context Standards | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-24 |
+| [`docs/mutation-testing.md`](mutation-testing.md) | Mutation Testing | non-canonical / active | reference / repo-wide | eng | 180d; verified 2026-07-24 |
+| [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md) | Liquity Monitoring Invariants | canonical / active | reference / indexer-envio/ui-dashboard | eng | 90d; verified 2026-07-24 |
+| [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md) | Terraform secret strategy hardening | canonical / active | reference / terraform/infra | eng | 90d; verified 2026-07-24 |
+| [`docs/README.md`](README.md) | Documentation Catalog | canonical / active | index / repo-wide | eng | 90d; verified 2026-07-24 |
+| [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-24 |
+| [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-24 |
+| [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-24 |
+| [`SPEC.md`](../SPEC.md) | Mento Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-24 |
 
 ## notes-plans-archive
 
@@ -182,15 +180,15 @@ the rules in [`context-standards.md`](context-standards.md).
 | --- | --- | --- | --- | --- | --- |
 | [`BACKLOG.md`](../BACKLOG.md) | Backlog | unmanaged / unmanaged | tracker / repo-wide | unowned | 365d |
 | [`docs/BACKLOG.md`](BACKLOG.md) | Monitoring Monorepo — Task Backlog (retired) | non-canonical / archived | tracker / repo-wide | eng | 365d; verified 2026-07-23 |
+| [`docs/CODE-REVIEW-UI-DASHBOARD.md`](CODE-REVIEW-UI-DASHBOARD.md) | Code Review — ui-dashboard | non-canonical / archived | report / ui-dashboard | eng | 365d |
+| [`docs/metrics/review-process-after-1045-comparison-2026-07-07.md`](metrics/review-process-after-1045-comparison-2026-07-07.md) | Review Process Metrics After PR 1045 | non-canonical / archived | report / ci/process | eng | 365d; verified 2026-07-07 |
 | [`docs/monad-launch-plan.md`](monad-launch-plan.md) | Monad Monitoring — Launch Runbook (archived) | non-canonical / archived | runbook / indexer | eng | 365d; verified 2026-07-23 |
 | [`docs/multichain-indexer-analysis.md`](multichain-indexer-analysis.md) | Multichain Indexer Analysis — Celo + Monad merge (archived) | non-canonical / archived | report / indexer | eng | 365d; verified 2026-07-23 |
 | [`docs/notes/file-size-watch.md`](notes/file-size-watch.md) | File-size and lint-hygiene watch list | canonical / active | report / repo-wide | eng | 30d; verified 2026-07-17 |
 | [`docs/notes/indexer-spec-followups.md`](notes/indexer-spec-followups.md) | Indexer SPEC §2 follow-up metrics (archived) | non-canonical / archived | note / indexer-envio | eng | 365d; verified 2026-07-17 |
 | [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) | React Compiler annotation-mode pilot (archived) | non-canonical / archived | note / ui-dashboard | eng | 365d; verified 2026-07-23 |
 | [`docs/notes/review-process-metrics.md`](notes/review-process-metrics.md) | Review process metrics evaluation | non-canonical / archived | report / ci/process | eng | 365d; verified 2026-07-17 |
-| [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) | Terraform CI/CD hardening — declined alternatives | non-canonical / archived | note / terraform/infra | eng | 365d; verified 2026-07-17 |
+| [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) | Terraform CI/CD hardening — declined alternatives | non-canonical / archived | note / terraform/infra | eng | 365d; verified 2026-07-23 |
 | [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) | UI Dashboard Performance Plan (archived) | non-canonical / archived | plan / ui-dashboard | eng | 365d; verified 2026-07-23 |
 | [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) | AI Review Process Integration Plan | non-canonical / archived | plan / ci/process | eng | 365d; verified 2026-07-17 |
-| [`docs/PLAN-cdps-monitoring.md`](PLAN-cdps-monitoring.md) | ROADMAP refresh + CDPs monitoring plan (archived) | non-canonical / archived | plan / repo-wide | eng | 365d; verified 2026-07-23 |
-| [`docs/PLAN-oracle-health-state.md`](PLAN-oracle-health-state.md) | Oracle health-state decision retrospective | non-canonical / archived | plan / repo-wide | eng | 365d |
 | [`docs/PLAN-peg-monitoring.md`](PLAN-peg-monitoring.md) | Peg monitoring for oracle-less stablecoins (EUROP first) | non-canonical / active | plan / repo-wide | eng | 365d |

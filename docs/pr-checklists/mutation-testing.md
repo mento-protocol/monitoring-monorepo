@@ -42,7 +42,7 @@ one of the current mutation targets.
 
   | Package          | Config                              | `break` | Job                               |
   | ---------------- | ----------------------------------- | ------: | --------------------------------- |
-  | `metrics-bridge` | `metrics-bridge/stryker.config.mjs` |      84 | `bridge-rebalance-probe-baseline` |
+  | `metrics-bridge` | `metrics-bridge/stryker.config.mjs` |      85 | `bridge-rebalance-probe-baseline` |
   | `ui-dashboard`   | `ui-dashboard/stryker.config.mjs`   |      86 | `dashboard-logic-baseline`        |
   | `indexer-envio`  | `indexer-envio/stryker.config.mjs`  |      92 | `indexer-logic-baseline`          |
 

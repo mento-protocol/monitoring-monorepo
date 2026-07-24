@@ -129,13 +129,14 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### terraform / infra
 
-| ADR                                              | Decision                                                                                |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| [0028](0028-terraform-stack-registry.md)         | Terraform ownership is a registry (`terraform.stacks.json`) with roots split by cadence |
-| [0029](0029-ci-apply-production-infra-gate.md)   | Infra applies on merge to `main` behind the `production-infra` environment gate         |
-| [0030](0030-iac-before-cli-secrets.md)           | All secrets are managed by IaC; agents never touch them with CLI commands               |
-| [0044](0044-peg-thresholds-gated-rules-plane.md) | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON           |
-| [0045](0045-peg-paging-semantics.md)             | Peg paging measures executable sell price; the deep venue pages alone                   |
+| ADR                                               | Decision                                                                                    |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [0028](0028-terraform-stack-registry.md)          | Terraform ownership is a registry (`terraform.stacks.json`) with roots split by cadence     |
+| [0029](0029-ci-apply-production-infra-gate.md)    | Infra applies on merge to `main` behind the `production-infra` environment gate             |
+| [0030](0030-iac-before-cli-secrets.md)            | All secrets are managed by IaC; agents never touch them with CLI commands                   |
+| [0044](0044-peg-thresholds-gated-rules-plane.md)  | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON               |
+| [0045](0045-peg-paging-semantics.md)              | Peg paging measures executable sell price; the deep venue pages alone                       |
+| [0047](0047-separated-terraform-ci-identities.md) | Routine deploy, PR plan, trusted-main refresh, and production apply use separate identities |
 
 ### governance-watchdog
 

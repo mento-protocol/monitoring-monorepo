@@ -275,6 +275,7 @@ stack:
 | Projection      | `sentry_projection_token`                                                 | `SENTRY_PROJECTION_TOKEN`                                                        | GitHub Issues read/write on the allowlisted owning repos only      |
 | Autofix         | `autofix_app_id`, `autofix_app_private_key`, `sentry_autofix_enabled`     | `AUTOFIX_APP_ID`, `AUTOFIX_APP_PRIVATE_KEY`, `SENTRY_AUTOFIX_ENABLED`            | GitHub App Contents and Pull requests read/write on this repo only |
 | Archive         | `sentry_archive_token`, `sentry_archive_enabled`                          | `SENTRY_ARCHIVE_TOKEN`, `SENTRY_ARCHIVE_ENABLED`                                 | Separate Sentry Issue/Event read/write token                       |
+| Settings audit  | `platform_settings_audit_token`                                           | `PLATFORM_SETTINGS_AUDIT_TOKEN`                                                  | GitHub Administration **read-only** on this repo only              |
 
 To change a stage:
 
@@ -292,6 +293,20 @@ visible projection-skipped outcome instead of creating owning-repo issues.
 Never widen the read-only token or reuse it for archive. Treat
 `CLAUDE_CODE_OAUTH_TOKEN` replacement as a shared-secret rotation and verify
 the existing Claude PR workflow after applying it.
+
+The **settings audit** row is not a pipeline stage — it powers
+`.github/workflows/platform-settings-drift.yml`, a daily read-only check
+(issue #1564) that the repo default workflow-token permission stays `read`
+(pinned by `github_workflow_repository_permissions.default_read`, #1557). It is
+the ONLY platform credential deliberately given a CI surface with Administration
+scope, and it is **read-only** — it can never change a setting. Provision
+`platform_settings_audit_token` as a fine-grained PAT with **Administration:
+Read** (nothing else) on this repo, then apply the platform stack. Until it is
+set the check no-ops; on drift it opens a `drift-detection` + `stack:platform`
+issue. Do not point this at the write-capable `github_token` (which stays
+local-only) or grant Administration to the autofix App. Fine-grained PATs
+expire (≤1 year); when it lapses the check fails loudly ("rotate the audit
+token") rather than reporting false drift, so rotate it on that signal.
 
 ### Backfill or retry
 

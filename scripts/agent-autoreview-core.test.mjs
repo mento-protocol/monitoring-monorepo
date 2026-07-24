@@ -604,6 +604,100 @@ assert.equal(
   null,
   "service token placeholders remain allowed",
 );
+assert.equal(
+  secretLikeReason("GH_TOKEN: ${{ github.token }}"),
+  null,
+  "GitHub Actions github.* context expressions are references, not literal tokens",
+);
+assert.equal(
+  secretLikeReason("APP_TOKEN: ${{ steps.app-token.outputs.token }}"),
+  null,
+  "steps.*.outputs.* expressions are references, not literal tokens",
+);
+assert.equal(
+  secretLikeReason("PROBE_TOKEN: ${{ needs.build.outputs.token }}"),
+  null,
+  "needs.*.outputs.* expressions are references, not literal tokens",
+);
+assert.match(
+  secretLikeReason(
+    `service_token: "\${{ github.token }}${genericTokenCredential}"`,
+  ),
+  /literal generic token assignment/,
+  "a real literal trailing a github.* expression is still rejected (anchor holds)",
+);
+// Terraform/HCL traversal references (var/local/module/data) name a value
+// resolved at plan/apply time, never an inline secret — the same reference
+// class as the ${{ … }} contexts above. `var.*` was already recognized;
+// local/module/data were not, so a credential-named attribute or local set from
+// one tripped the scanner even though the diff carried no literal.
+assert.equal(
+  secretLikeReason("  audit_token = local.platform_settings_audit_token"),
+  null,
+  "HCL local.* references are placeholders, not literal tokens",
+);
+assert.equal(
+  secretLikeReason("  client_secret = module.github_app.private_key"),
+  null,
+  "HCL module.*.output references are placeholders, not literal credentials",
+);
+assert.equal(
+  secretLikeReason(
+    "  api_key = data.terraform_remote_state.platform.outputs.audit_token",
+  ),
+  null,
+  "HCL data.* references are placeholders, not literal credentials",
+);
+// The legacy `${…}` interpolation wrapper must recognize the same HCL scopes as
+// the bare form, or `some_token = ${local.x}` would still trip the scanner.
+assert.equal(
+  secretLikeReason("some_token = ${local.audit_token}"),
+  null,
+  "legacy ${local.*} interpolation is a reference, not a literal token",
+);
+assert.match(
+  secretLikeReason(`some_token = \${local.x}${genericTokenCredential}`),
+  /literal generic token assignment/,
+  "a real literal fused to a ${local.*} interpolation still flags (anchor holds)",
+);
+// Regression: a github_actions_secret block that mirrors a variable into a repo
+// secret carries only references plus the secret's public NAME literal — never a
+// committed secret value.
+const githubActionsSecretBlock = [
+  'resource "github_actions_secret" "platform_settings_audit_token" {',
+  '  count       = var.platform_settings_audit_token == "" ? 0 : 1',
+  '  repository  = "monitoring-monorepo"',
+  '  secret_name = "PLATFORM_SETTINGS_AUDIT_TOKEN"',
+  "  value       = var.platform_settings_audit_token",
+  "}",
+].join("\n");
+assert.equal(
+  secretLikeReason(githubActionsSecretBlock),
+  null,
+  "a github_actions_secret block of var references + a secret NAME literal is not a secret",
+);
+assert.equal(
+  secretLikeReason(
+    githubActionsSecretBlock.replace(
+      "value       = var.platform_settings_audit_token",
+      "value       = local.platform_settings_audit_token",
+    ),
+  ),
+  null,
+  "the same block mirroring a local.* reference is likewise reference-only",
+);
+// Anti-bypass: the reference clause is anchored, so a real literal in the same
+// HCL `key = "…"` form — or one trailing an HCL reference — is still rejected.
+assert.match(
+  secretLikeReason(`  auth_token = "${genericTokenCredential}"`),
+  /literal (?:generic token|credential) assignment/,
+  'a real literal credential in HCL key = "…" form is still rejected',
+);
+assert.match(
+  secretLikeReason(`  auth_token = local.x ${genericTokenCredential}`),
+  /literal generic token assignment/,
+  "a real literal trailing an HCL reference fails the ^…$ anchor and is rejected",
+);
 const publicEvmTokenAddress = ["0x", "0".repeat(39), "1"].join("");
 assert.match(
   secretLikeReason(`USDC_TOKEN="${publicEvmTokenAddress}"`),

@@ -3,7 +3,7 @@ title: Liquity Monitoring Invariants
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-24
 doc_type: reference
 scope: indexer-envio/ui-dashboard
 review_interval_days: 90
@@ -12,10 +12,9 @@ garden_lane: package-readmes-reference
 
 # Liquity Monitoring Invariants
 
-This is the current cross-layer contract for Mento's Liquity v2/Bold fork. The
-historical [`PLAN-cdps-monitoring.md`](../PLAN-cdps-monitoring.md) is
-non-canonical and contains superseded debt-accounting proposals; do not use it
-as an implementation source without verifying current handlers and schema.
+This is the current cross-layer contract for Mento's Liquity v2/Bold fork.
+Use `CDP` or `CDPs` in user-facing product copy and `Liquity` in internal
+protocol, schema, and handler names.
 
 The fork is at <https://github.com/mento-protocol/bold>. Glue contracts live in
 other repositories: `CDPLiquidityStrategy.sol` is in
