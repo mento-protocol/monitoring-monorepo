@@ -27,7 +27,17 @@ resource "grafana_rule_group" "peg_monitoring" {
           ? "{{ if and $values.Spread (ge $values.Spread.Value 0.0) }}{{ printf \"%.1f\" $values.Spread.Value }}{{ end }}"
           : ""
         )
-        fill                  = "{{ if and $values.Fill (ge $values.Fill.Value 0.0) }}{{ printf \"%.1f%%\" $values.Fill.Value }}{{ else }}unavailable{{ end }}"
+        fill = "{{ if and $values.Fill (ge $values.Fill.Value 0.0) }}{{ printf \"%.1f%%\" $values.Fill.Value }}{{ else }}unavailable{{ end }}"
+        listing_state = (
+          startswith(rule.value.name, "Peg Registry Rot") || startswith(rule.value.name, "Peg Critical Path Unreachable")
+          ? "absent"
+          : ""
+        )
+        listing_check_age = (
+          startswith(rule.value.name, "Peg Registry Rot") || startswith(rule.value.name, "Peg Critical Path Unreachable")
+          ? "{{ if and $values.ListingAge (ge $values.ListingAge.Value 0.0) }}{{ printf \"%.0fs ago\" $values.ListingAge.Value }}{{ else }}unavailable{{ end }}"
+          : ""
+        )
         structural_saturation = "{{ if and $values.Structural (ge $values.Structural.Value 0.0) }}{{ printf \"%.1f%%\" $values.Structural.Value }}{{ else }}unavailable{{ end }}"
         corroboration = startswith(rule.value.name, "Peg Blind While Stressed Critical") ? "blindness plus structural saturation, spread, or partial-price shortfall" : (
           startswith(rule.value.name, "Peg Deep-Venue Downside Critical")
@@ -83,6 +93,20 @@ resource "grafana_rule_group" "peg_monitoring" {
         model = jsonencode({
           refId   = "Fill"
           expr    = rule.value.fill_expr
+          instant = true
+        })
+      }
+
+      data {
+        ref_id         = "ListingAge"
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = max(rule.value.query_range, 60)
+          to   = 0
+        }
+        model = jsonencode({
+          refId   = "ListingAge"
+          expr    = try(coalesce(rule.value.listing_age_expr, local.peg_empty_context_promql), local.peg_empty_context_promql)
           instant = true
         })
       }

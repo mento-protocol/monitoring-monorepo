@@ -44,10 +44,13 @@ policy delivery is live, so this milestone alone does not provide the required
 `mento_peg_usable_decision_total` input or satisfy activation precondition 3
 below.
 
-Registry-rot and critical-path-unreachable rules are intentionally absent.
-Those rules require authoritative `mento_peg_listing_state` and
-`mento_peg_listing_checked_at` producer series, which are not part of #1568.
-Do not add placeholder selectors or infer listing state from source health.
+The listing-confirmation producer and consumer source now includes
+`mento_peg_listing_state`, `mento_peg_listing_checked_at`, and the bounded
+`mento_peg_listing_absent_consecutive_checks` gauge. This does not prove those
+series are deployed. Keep the protected rules apply blocked until all exact
+active and retained-previous queries below are live. Listing state must never
+be inferred from source health, observation timestamps, scrape counts, or
+timestamp changes.
 
 ## Rule inventory
 
@@ -64,12 +67,18 @@ For each active policy, the generated source defines:
 | Blind while stressed critical | Confirmed consecutive blindness plus reachable structural stress, spread stress, or partial-price shortfall | Splunk On-Call and `#alerts-critical` |
 | Source unhealthy              | Expected source unhealthy while the asset heartbeat is fresh                                                | `#alerts-infra`                       |
 | Source permanently dead       | Source unhealthy for `permanentlyDeadSeconds`                                                               | `#alerts-infra`                       |
+| Registry rot                  | A non-deep source, including display-only, is `absent` at its producer-side consecutive-check threshold     | `#alerts-infra`                       |
+| Critical path unreachable     | The policy-designated deep source is `absent` at its producer-side consecutive-check threshold              | `#alerts-infra`                       |
+| Indexed pool unreachable      | The registry-bound indexed pool is zero or absent while the exact-version asset poll remains fresh          | `#alerts-infra`                       |
 | Heartbeat missing             | The isolated asset poll no longer advances                                                                  | `#alerts-infra`                       |
 | Policy rollover stuck         | A retained previous policy exists and the active version is not acknowledged in time                        | `#alerts-infra`                       |
 
-When `previous` is retained, the same decision ladder remains generated for
-that exact previous version. Previous-version rules do not stop at the first
-active-version acknowledgement; cleanup is a later reviewed policy change.
+When `previous` is retained, the same rule ladder remains generated for that
+exact previous version. Previous-version rules do not stop at the first active-
+version acknowledgement; cleanup is a later reviewed policy change. The exact
+legacy predecessor
+`europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f` has an effective listing
+threshold of `2`; every newer policy must declare its threshold.
 
 Display sources never create deviation or premium rules. Structural saturation
 never pages alone. Blindness does not depend on indexed-pool reachability:
@@ -79,6 +88,17 @@ producer updates `mento_peg_blind_consecutive_polls` at deep-venue poll cadence
 and resets it on each usable uncapped decision. Grafana compares that exact
 count with policy; its 60-second evaluation clock never approximates 30-second
 polls.
+
+Listing rules follow the same producer-owned discipline. The bridge increments
+the bounded absence streak only on an authoritative exact-pair `absent`
+response and resets it on authoritative `listed` or `halted`. Grafana reads the
+instant state, streak, and fresh listing timestamp; it never reconstructs the
+streak from scrapes. Unknown, missing, or stale listing evidence is not
+delisting. `Peg Registry Rot`, `Peg Critical Path Unreachable`, and
+`Peg Indexed Pool Unreachable` use `for = "0s"`, `no_data_state = "OK"`,
+warning severity, and the direct `#alerts-infra` contact point. They never
+page. The [onboarding and re-census runbook](peg-monitoring-onboarding.md)
+owns admission, scheduled exact-pair checks, operator response, and cleanup.
 
 ## Local source validation
 
@@ -115,6 +135,9 @@ are true:
 4. `mento_peg_last_poll`, `mento_peg_source_healthy`,
    `mento_peg_observation_at`, `mento_peg_indexed_pool_reachable`, and
    `mento_peg_blind_consecutive_polls` return the expected labelled series.
+   Every configured source also exposes one-hot `mento_peg_listing_state`, a
+   positive `mento_peg_listing_checked_at`, and
+   `mento_peg_listing_absent_consecutive_checks` for the exact policy version.
 5. The full critical window has accumulated. For the current 20-minute deep
    venue window, both counters satisfy the policy-derived floor:
 
@@ -133,13 +156,16 @@ are true:
 
 Active blindness and heartbeat rules use `no_data_state = "Alerting"`.
 Applying while production peg samples are absent can create incidents by
-design. All price, spread, structural, source-health, retained-previous, and
-rollover rules use their documented non-paging no-data behavior.
+design. Price, spread, structural, source-health, listing, indexed-pool,
+retained-previous, and rollover rules use their documented non-paging no-data
+behavior.
 
 After apply, verify every rule exists in the `Peg Monitoring` folder, reports
 `Normal`, `Pending`, or an explained real firing state, and has the expected
-direct contact point. Delivery testing changes production alerting and requires
-its own explicit approval.
+direct contact point. Listing alerts must show the exact asset/source/policy
+identity and either a non-negative listing-check age or the safe `unavailable`
+fallback. Delivery testing changes production alerting and requires its own
+explicit approval.
 
 ## Rollback
 
@@ -147,3 +173,5 @@ Remove or disable the Grafana consumers first through a reviewed,
 human-approved alerts-rules change. Confirm the rules are absent before
 withdrawing any producer series they require. Never remove the producer first:
 active blindness and heartbeat intentionally fail closed on missing data.
+Consumer removal and any later policy cleanup stay behind the protected apply;
+do not use a local apply or provider CLI mutation.

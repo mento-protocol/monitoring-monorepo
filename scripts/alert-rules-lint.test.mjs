@@ -455,6 +455,41 @@ test("peg policy requires bounded listing confirmation and matching staleness", 
   );
 });
 
+test("peg policy defaults listing confirmation only for the exact retained legacy version", () => {
+  const policy = freshPegPolicy();
+  const legacyVersion = "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f";
+  assert(
+    policy.previous.version === legacyVersion,
+    "expected the committed retained predecessor to be the exact legacy version",
+  );
+  assert(
+    Object.values(policy.previous.assets["europ-schuman"].sources).every(
+      (source) => source.listingAbsentConsecutiveChecks === undefined,
+    ),
+    "expected the exact legacy predecessor to exercise the default",
+  );
+  assert(
+    pegPolicyFailures(policy) === "",
+    "expected the exact retained legacy predecessor to default to two checks",
+  );
+
+  policy.previous.version = "europ-future-policy";
+  assert(
+    /listingAbsentConsecutiveChecks/.test(pegPolicyFailures(policy)),
+    "expected any other retained version to require an explicit threshold",
+  );
+
+  const activeWithoutThreshold = freshPegPolicy();
+  delete activeWithoutThreshold.active.assets["europ-schuman"].sources
+    .bitvavo_eur.listingAbsentConsecutiveChecks;
+  assert(
+    /listingAbsentConsecutiveChecks/.test(
+      pegPolicyFailures(activeWithoutThreshold),
+    ),
+    "expected active policy to require an explicit threshold",
+  );
+});
+
 test("peg policy enforces warning, critical, and sustain ordering", () => {
   const policy = freshPegPolicy();
   const asset = policy.active.assets["europ-schuman"];
@@ -835,6 +870,10 @@ test("peg PromQL requires exact dormant previous selectors before rollover", () 
 });
 
 test("committed peg rules preserve coverage, rollover, and routing invariants", () => {
+  const ruleDefinitions = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/peg-rule-definitions.tf"),
+    "utf8",
+  );
   const source = [
     "peg-policy-locals.tf",
     "peg-promql-active.tf",
@@ -854,6 +893,10 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
     path.resolve(__dirname, "..", "alerts/rules/peg-message-templates.tf"),
     "utf8",
   );
+  const europPolicies = [
+    pegPolicyFixture.active.assets["europ-schuman"],
+    pegPolicyFixture.previous.assets["europ-schuman"],
+  ];
 
   assert(
     source.includes("increase(mento_peg_poll_success_total") &&
@@ -871,9 +914,8 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
       ) &&
       source.includes(
         "item.asset.premiumWarnBps + item.source.conversionErrorBps",
-      ) &&
-      !source.includes("Critical Path Unreachable"),
-    "health comparisons, conversion error bands, and the Phase 4 boundary must stay explicit",
+      ),
+    "health comparisons and conversion error bands must stay explicit",
   );
   for (const policy of ["active", "previous"]) {
     const policyVersion = `\${local.peg_${policy}_policy_version}`;
@@ -996,6 +1038,97 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
   assert(
     !source.includes("mute_timing") && !contacts.includes("mute_timing"),
     "peg decisions must not inherit the FX weekend mute",
+  );
+  assert(
+    source.includes(
+      'mento_peg_listing_state{asset=\\"%s\\",source=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\",state=\\"absent\\"} == 1',
+    ) &&
+      source.includes(
+        'mento_peg_listing_absent_consecutive_checks{asset=\\"%s\\",source=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= %d',
+      ) &&
+      source.includes(
+        'mento_peg_listing_state{asset=\\"%s\\",source=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\",state=\\"absent\\"} == 1',
+      ) &&
+      source.includes(
+        'mento_peg_listing_absent_consecutive_checks{asset=\\"%s\\",source=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} >= %d',
+      ) &&
+      source.includes("time() - mento_peg_listing_checked_at") &&
+      !source.includes("changes(mento_peg_listing") &&
+      !source.includes("min_over_time(mento_peg_listing") &&
+      !source.includes("count_over_time(mento_peg_listing"),
+    "listing alerts must use instant exact-version producer state, bounded streak, and fresh authoritative check time",
+  );
+  assert(
+    /peg_legacy_listing_absent_consecutive_checks_policy_version\s*=\s*"europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f"/.test(
+      source,
+    ) &&
+      source.includes(
+        "local.peg_previous_policy.version == local.peg_legacy_listing_absent_consecutive_checks_policy_version ? 2 : source.listingAbsentConsecutiveChecks",
+      ),
+    "only the exact retained legacy policy may default listing confirmation to two checks",
+  );
+  assert(
+    source.includes(
+      'for key, item in local.peg_active_non_deep_sources : "active-registry-rot-${key}"',
+    ) &&
+      source.includes(
+        'for key, item in local.peg_previous_non_deep_sources : "previous-registry-rot-${key}"',
+      ) &&
+      source.includes(
+        'for key, item in local.peg_active_deep_sources : "active-critical-path-unreachable-${key}"',
+      ) &&
+      source.includes(
+        'for key, item in local.peg_previous_deep_sources : "previous-critical-path-unreachable-${key}"',
+      ) &&
+      europPolicies.every(
+        (asset) =>
+          asset.deepVenueSource === "bitvavo_eur" &&
+          asset.sources.bitvavo_eur.authority === "deep" &&
+          asset.sources.kraken_eur.authority === "secondary" &&
+          asset.sources.kraken_usd.authority === "display",
+      ),
+    "registry rot must cover all non-deep sources including display while critical-path loss stays deep-only",
+  );
+  for (const rulePrefix of [
+    "active-registry-rot",
+    "previous-registry-rot",
+    "active-critical-path-unreachable",
+    "previous-critical-path-unreachable",
+    "active-indexed-pool-unreachable",
+    "previous-indexed-pool-unreachable",
+  ]) {
+    const ruleStart = ruleDefinitions.indexOf(rulePrefix);
+    assert(ruleStart >= 0, `expected ${rulePrefix} definition`);
+    const mapStart = ruleDefinitions.lastIndexOf("\n    {", ruleStart);
+    assert(mapStart >= 0, `expected ${rulePrefix} map block`);
+    const ruleBlock = extractBlockAt(ruleDefinitions, mapStart);
+    assert(
+      /for_duration\s+=\s+"0s"/.test(ruleBlock) &&
+        /no_data_state\s+=\s+"OK"/.test(ruleBlock) &&
+        /severity\s+=\s+"warning"/.test(ruleBlock) &&
+        /route\s+=\s+"ops"/.test(ruleBlock) &&
+        /notification\s+=\s+local\.peg_notify_ops_warning/.test(ruleBlock) &&
+        !ruleBlock.includes("local.peg_notify_page"),
+      `${rulePrefix} must be an immediate no-data-safe ops warning and never page`,
+    );
+  }
+  assert(
+    source.includes(
+      '(mento_peg_indexed_pool_reachable{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} == bool 0 or absent(mento_peg_indexed_pool_reachable{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"})) and on(asset,policy_version) (time() - mento_peg_last_poll',
+    ) &&
+      source.includes(
+        '(mento_peg_indexed_pool_reachable{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} == bool 0 or absent(mento_peg_indexed_pool_reachable{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"})) and on(asset,policy_version) (time() - mento_peg_last_poll',
+      ),
+    "indexed-pool reachability must fail closed only while the exact-version asset heartbeat is fresh",
+  );
+  assert(
+    source.includes('ref_id         = "ListingAge"') &&
+      source.includes(
+        "try(coalesce(rule.value.listing_age_expr, local.peg_empty_context_promql), local.peg_empty_context_promql)",
+      ) &&
+      templates.includes("LISTING STATE:") &&
+      templates.includes("LISTING CHECKED:"),
+    "listing messages must include state and age with an evaluable sentinel fallback",
   );
 });
 

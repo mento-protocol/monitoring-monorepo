@@ -45,6 +45,12 @@ routing.
   `peg_previous_*_(promql|expr)`, or
   `peg_rollover_ack_*_(promql|expr)`. The alert-rule linter extracts this scope
   and rejects unscoped or cross-version selectors while `previous` is retained.
+- **Peg listing confirmation is producer-owned.** Registry-rot rules consume
+  the exact-version one-hot listing state, bounded consecutive-absence gauge,
+  and fresh authoritative-check timestamp as instant vectors. Never infer a
+  listing streak with range functions, scrape counts, or timestamp changes.
+  Listing and indexed-pool reachability are warning-only operations signals
+  with `no_data_state = "OK"`; the heartbeat rule owns total loop outage.
 
 ## Verification
 

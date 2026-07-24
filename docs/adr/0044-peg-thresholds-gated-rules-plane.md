@@ -15,10 +15,12 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (Jul 2026), in force. PRs #1497 and #1568 landed
 bridge-side policy validation, version-bound decision metrics, and producer
-acknowledgment state. This change implements the source rule ladder and routing.
-Protected policy publication and authentication, producer activation,
+acknowledgment state. Source now implements the bounded listing-confirmation
+producer, exact-version listing and indexed-pool rules, and direct operations
+routing. Protected policy publication and authentication, producer activation,
 human-approved Grafana application, and live proof remain separate rollout
-gates tracked by [`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
+gates tracked by
+[`docs/notes/peg-monitoring.md`](../notes/peg-monitoring.md).
 **Scope:** alerts
 
 ## Context
@@ -127,14 +129,14 @@ Phase 3 must implement the following protected artifact and rules contract:
     counts scrapes of a retained gauge. Requiring both counters prevents
     capped or unchanged successes plus one deviated sample from being read
     as a sustained breach.
-   - Listing absence confirmation uses a producer-side bounded consecutive-check
-     gauge. Inferring it from a timestamp gauge with `changes()` is
-     forbidden: a listed or halted reset can occur between 30-second scrapes
-    and never appear in the sampled range.
-    During this field's first rollover only, the exact retained
-     predecessor omits the field and the producer uses the initial value `2`.
-     Remove that compatibility default after the reviewed `previous=null`
-     cleanup; every active policy must declare its own bounded threshold.
+  - Listing absence confirmation uses a producer-side bounded
+    consecutive-check gauge. Inferring it from a timestamp gauge with
+    `changes()` is forbidden: a listed or halted reset can occur between
+    30-second scrapes and never appear in the sampled range. During this
+    field's first rollover only, the exact retained predecessor omits the
+    field and the producer uses the initial value `2`. Remove that
+    compatibility default after the reviewed `previous=null` cleanup; every
+    active policy must declare its own bounded threshold.
   - Severity and routing stay per-rule: warn → Slack, critical → page, each
     with its own contact-point wiring.
 
@@ -175,13 +177,20 @@ Phase 3 must implement the following protected artifact and rules contract:
   validation and activation path)
 - `metrics-bridge/src/peg/poll-cycle.ts` and
   `metrics-bridge/src/peg/metrics.ts` (version-bound producer decisions and
-  acknowledgment telemetry)
+  acknowledgment telemetry, including authoritative listing state and bounded
+  consecutive-absence confirmation)
 - `metrics-bridge/Dockerfile` (gated policy excluded from the service image)
 - `scripts/check-peg-registry-integrity.mjs` (cross-plane source contract)
 - `alerts/rules/rules-reserve-balances.tf`, `rules-oracle-relayers.tf`
   (per-key `for_each` threshold precedents)
 - `alerts/rules/rules-metrics-bridge.tf` (deliberate `no_data_state =
 "Alerting"` precedent)
+- `alerts/rules/peg-promql-active.tf`,
+  `alerts/rules/peg-promql-previous.tf`, and
+  `alerts/rules/peg-rule-definitions.tf` (exact-version listing confirmation,
+  structural reachability, and warning-only operations routing)
+- `docs/notes/peg-monitoring-onboarding.md` (onboarding, scheduled exact-pair
+  re-census, rollout, response, and rollback)
 - `scripts/check-deviation-threshold-drift.mjs` (the mirror-drift pattern
   this class deliberately avoids needing)
 - ADRs 0029, 0043, 0045

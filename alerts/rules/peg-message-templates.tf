@@ -24,6 +24,8 @@ resource "grafana_message_template" "peg_slack_message" {
 {{ with .Annotations.premium_bps }}*Premium:* {{ . }} bps{{ end }}
 {{ with .Annotations.spread_bps }}*Spread:* {{ . }} bps{{ end }}
 {{ with .Annotations.fill }}*Executable fill:* {{ . }}{{ end }}
+{{ with .Annotations.listing_state }}*Listing state:* {{ . }}{{ end }}
+{{ with .Annotations.listing_check_age }}*Listing checked:* {{ . }}{{ end }}
 {{ with .Annotations.structural_saturation }}*Structural saturation:* {{ . }}{{ end }}
 {{ with .Annotations.corroboration }}*Corroboration:* {{ . }}{{ end }}
 *Policy:* `{{ with .Labels.policy_version }}{{ . }}{{ else }}unknown{{ end }}`
@@ -70,6 +72,8 @@ POLICY: {{ with .Labels.policy_version }}{{ . }}{{ else }}unknown{{ end }}{{ wit
 {{ with .Annotations.premium_bps }}PREMIUM: {{ . }} bps{{ end }}
 {{ with .Annotations.spread_bps }}SPREAD: {{ . }} bps{{ end }}
 {{ with .Annotations.fill }}EXECUTABLE FILL: {{ . }}{{ end }}
+{{ with .Annotations.listing_state }}LISTING STATE: {{ . }}{{ end }}
+{{ with .Annotations.listing_check_age }}LISTING CHECKED: {{ . }}{{ end }}
 {{ with .Annotations.structural_saturation }}STRUCTURAL SATURATION: {{ . }}{{ end }}
 {{ with .Annotations.corroboration }}CORROBORATION: {{ . }}{{ end }}
 {{ with .Annotations.action }}ACTION: {{ . }}{{ end }}

@@ -77,9 +77,14 @@ The system has four principal data paths:
 2. **Metric-alert path:** `metrics-bridge` converts indexed v3 state to
    Prometheus gauges. When its protected policy artifact is configured, an
    isolated peg lifecycle combines indexed structural state with direct CEX
-   order books and RPC oracle conversion views. Aegis polls v2 contract views.
-   Grafana Alloy sends both metric streams to Grafana Cloud for evaluation and
-   routing.
+   order books and RPC oracle conversion views. Every due configured-source
+   poll performs an authoritative exact-pair listing check and maintains a
+   bounded policy-versioned absence streak; it validates configured topology
+   and never mutates it. Aegis polls v2 contract views. Grafana Alloy sends both
+   metric streams to Grafana Cloud for evaluation and routing. The Grafana
+   rule source defines warning-only operations consumers for listing and
+   indexed-pool reachability; protected activation remains separate, and
+   missing or stale listing evidence cannot fabricate delisting.
 3. **Event and incident path:** discrete events bypass the metric path.
    QuickNode and governance handlers deliver through their owning Cloud
    Functions. The Sentry-to-Slack bridge is configured directly through the

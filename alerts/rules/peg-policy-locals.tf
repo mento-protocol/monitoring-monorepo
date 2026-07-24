@@ -9,11 +9,12 @@
 # poll_success while intentionally omitting deviation_bps.
 
 locals {
-  peg_policy_bundle           = jsondecode(file("${path.module}/peg-thresholds.json"))
-  peg_active_policy           = local.peg_policy_bundle.active
-  peg_previous_policy         = local.peg_policy_bundle.previous
-  peg_active_policy_version   = local.peg_active_policy.version
-  peg_previous_policy_version = try(local.peg_previous_policy.version, "no-retained-previous-policy")
+  peg_policy_bundle                                           = jsondecode(file("${path.module}/peg-thresholds.json"))
+  peg_active_policy                                           = local.peg_policy_bundle.active
+  peg_previous_policy                                         = local.peg_policy_bundle.previous
+  peg_active_policy_version                                   = local.peg_active_policy.version
+  peg_previous_policy_version                                 = try(local.peg_previous_policy.version, "no-retained-previous-policy")
+  peg_legacy_listing_absent_consecutive_checks_policy_version = "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f"
 
   peg_active_assets   = local.peg_active_policy.assets
   peg_previous_assets = local.peg_previous_policy == null ? {} : local.peg_previous_policy.assets
@@ -22,12 +23,13 @@ locals {
     for item in flatten([
       for asset_id, asset in local.peg_active_assets : [
         for source_id, source in asset.sources : {
-          asset_id    = asset_id
-          asset       = asset
-          source_id   = source_id
-          source      = source
-          policy      = local.peg_active_policy
-          policy_slot = "active"
+          asset_id                          = asset_id
+          asset                             = asset
+          source_id                         = source_id
+          source                            = source
+          policy                            = local.peg_active_policy
+          policy_slot                       = "active"
+          listing_absent_consecutive_checks = source.listingAbsentConsecutiveChecks
         }
       ]
     ]) : "${item.asset_id}/${item.source_id}" => item
@@ -55,6 +57,10 @@ locals {
           source      = source
           policy      = local.peg_previous_policy
           policy_slot = "previous"
+          listing_absent_consecutive_checks = try(
+            source.listingAbsentConsecutiveChecks,
+            local.peg_previous_policy.version == local.peg_legacy_listing_absent_consecutive_checks_policy_version ? 2 : source.listingAbsentConsecutiveChecks,
+          )
         }
       ]
     ]) : "${item.asset_id}/${item.source_id}" => item

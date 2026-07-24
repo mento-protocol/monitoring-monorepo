@@ -151,6 +151,71 @@ locals {
       }
     },
     {
+      for key, item in local.peg_active_non_deep_sources : "active-registry-rot-${key}" => {
+        name               = "Peg Registry Rot [${item.asset_id}/${item.source_id} · active]"
+        expr               = local.peg_active_listing_absent_promql[key]
+        for_duration       = "0s"
+        no_data_state      = "OK"
+        severity           = "warning"
+        route              = "ops"
+        asset              = item.asset_id
+        source             = item.source_id
+        policy_version     = local.peg_active_policy_version
+        query_range        = item.source.staleAfterSeconds
+        price_expr         = local.peg_active_price_promql[key]
+        fill_expr          = local.peg_active_fill_promql[key]
+        listing_age_expr   = local.peg_active_listing_age_promql[key]
+        structural_expr    = local.peg_active_structural_context_promql[item.asset_id]
+        corroboration_expr = local.peg_no_corroboration_promql
+        summary            = "The producer confirms that this non-deep policy source's exact pair is absent."
+        action             = "Verify the provider listing, then replace or remove the source through reviewed registry and policy cleanup."
+        notification       = local.peg_notify_ops_warning
+      }
+    },
+    {
+      for key, item in local.peg_active_deep_sources : "active-critical-path-unreachable-${key}" => {
+        name               = "Peg Critical Path Unreachable [${item.asset_id} · active]"
+        expr               = local.peg_active_listing_absent_promql[key]
+        for_duration       = "0s"
+        no_data_state      = "OK"
+        severity           = "warning"
+        route              = "ops"
+        asset              = item.asset_id
+        source             = item.source_id
+        policy_version     = local.peg_active_policy_version
+        query_range        = item.source.staleAfterSeconds
+        price_expr         = local.peg_active_price_promql[key]
+        fill_expr          = local.peg_active_fill_promql[key]
+        listing_age_expr   = local.peg_active_listing_age_promql[key]
+        structural_expr    = local.peg_active_structural_context_promql[item.asset_id]
+        corroboration_expr = local.peg_no_corroboration_promql
+        summary            = "The producer confirms that the policy-designated deep pair is absent."
+        action             = "Treat the critical path as unreachable and re-onboard a replacement deep source through reviewed policy."
+        notification       = local.peg_notify_ops_warning
+      }
+    },
+    {
+      for asset_id, asset in local.peg_active_assets : "active-indexed-pool-unreachable-${asset_id}" => {
+        name               = "Peg Indexed Pool Unreachable [${asset_id} · active]"
+        expr               = local.peg_active_indexed_pool_unreachable_promql[asset_id]
+        for_duration       = "0s"
+        no_data_state      = "OK"
+        severity           = "warning"
+        route              = "ops"
+        asset              = asset_id
+        source             = ""
+        policy_version     = local.peg_active_policy_version
+        query_range        = asset.freshnessGraceSeconds
+        price_expr         = local.peg_empty_context_promql
+        fill_expr          = local.peg_empty_context_promql
+        structural_expr    = local.peg_active_structural_context_promql[asset_id]
+        corroboration_expr = local.peg_no_corroboration_promql
+        summary            = "The registry-bound indexed pool is unreachable while the exact-version peg loop remains fresh."
+        action             = "Inspect Hasura pool resolution and indexer coverage; use the heartbeat alert for a complete loop outage."
+        notification       = local.peg_notify_ops_warning
+      }
+    },
+    {
       for key, item in local.peg_active_sources : "active-unhealthy-${key}" => {
         name               = "Peg Source Unhealthy [${item.asset_id}/${item.source_id} · active]"
         expr               = local.peg_active_source_unhealthy_promql[key]
@@ -365,6 +430,71 @@ locals {
         summary            = "The retained policy is blind while an independent stress leg is active."
         action             = "Verify partial-price shortfall, spread, and structural flow before breaker action."
         notification       = local.peg_notify_page
+      }
+    },
+    {
+      for key, item in local.peg_previous_non_deep_sources : "previous-registry-rot-${key}" => {
+        name               = "Peg Registry Rot [${item.asset_id}/${item.source_id} · previous]"
+        expr               = local.peg_previous_listing_absent_promql[key]
+        for_duration       = "0s"
+        no_data_state      = "OK"
+        severity           = "warning"
+        route              = "ops"
+        asset              = item.asset_id
+        source             = item.source_id
+        policy_version     = local.peg_previous_policy_version
+        query_range        = item.source.staleAfterSeconds
+        price_expr         = local.peg_previous_price_promql[key]
+        fill_expr          = local.peg_previous_fill_promql[key]
+        listing_age_expr   = local.peg_previous_listing_age_promql[key]
+        structural_expr    = local.peg_previous_structural_context_promql[item.asset_id]
+        corroboration_expr = local.peg_no_corroboration_promql
+        summary            = "The producer confirms that this retained non-deep policy source's exact pair is absent."
+        action             = "Verify the retained version independently; remove or replace its source only through reviewed cleanup."
+        notification       = local.peg_notify_ops_warning
+      }
+    },
+    {
+      for key, item in local.peg_previous_deep_sources : "previous-critical-path-unreachable-${key}" => {
+        name               = "Peg Critical Path Unreachable [${item.asset_id} · previous]"
+        expr               = local.peg_previous_listing_absent_promql[key]
+        for_duration       = "0s"
+        no_data_state      = "OK"
+        severity           = "warning"
+        route              = "ops"
+        asset              = item.asset_id
+        source             = item.source_id
+        policy_version     = local.peg_previous_policy_version
+        query_range        = item.source.staleAfterSeconds
+        price_expr         = local.peg_previous_price_promql[key]
+        fill_expr          = local.peg_previous_fill_promql[key]
+        listing_age_expr   = local.peg_previous_listing_age_promql[key]
+        structural_expr    = local.peg_previous_structural_context_promql[item.asset_id]
+        corroboration_expr = local.peg_no_corroboration_promql
+        summary            = "The producer confirms that the retained policy's deep pair is absent."
+        action             = "Treat this retained critical path as unreachable until reviewed policy cleanup removes or replaces it."
+        notification       = local.peg_notify_ops_warning
+      }
+    },
+    {
+      for asset_id, asset in local.peg_previous_assets : "previous-indexed-pool-unreachable-${asset_id}" => {
+        name               = "Peg Indexed Pool Unreachable [${asset_id} · previous]"
+        expr               = local.peg_previous_indexed_pool_unreachable_promql[asset_id]
+        for_duration       = "0s"
+        no_data_state      = "OK"
+        severity           = "warning"
+        route              = "ops"
+        asset              = asset_id
+        source             = ""
+        policy_version     = local.peg_previous_policy_version
+        query_range        = asset.freshnessGraceSeconds
+        price_expr         = local.peg_empty_context_promql
+        fill_expr          = local.peg_empty_context_promql
+        structural_expr    = local.peg_previous_structural_context_promql[asset_id]
+        corroboration_expr = local.peg_no_corroboration_promql
+        summary            = "The retained policy's registry-bound indexed pool is unreachable while its peg loop remains fresh."
+        action             = "Inspect Hasura pool resolution and retain this rule until reviewed policy cleanup removes the version."
+        notification       = local.peg_notify_ops_warning
       }
     },
     {

@@ -66,7 +66,10 @@ evidence: `listingState` is `listed`, `halted`, or `absent`, and
 both remain null before the first successful check, then advance together.
 Failed listing lookups preserve the last committed pair. `absent` is registry
 rot evidence; `halted` is a known listed market state; a listed empty book is
-not registry rot.
+not registry rot. The source also carries the effective policy confirmation
+threshold and the producer's bounded consecutive-absence streak. The streak
+increments only on authoritative `absent`, resets on authoritative `listed` or
+`halted`, and is never reconstructed from dashboard or Grafana scrape history.
 
 ## Alternatives considered
 
@@ -83,12 +86,19 @@ not registry rot.
   primary Hasura bridge.
 - The dashboard gets one validated current-state input but must not recreate
   Grafana alert evaluation.
-- Alert rules, UI routes, infrastructure, and deployment stay separate
-  follow-up work.
+- Source now defines the decision read model and exact-version Grafana listing
+  consumers. The UI route, infrastructure activation, and production proof
+  remain separate rollout work.
 
 ## Evidence
 
 - `metrics-bridge/src/peg/poll-cycle.ts`
+- `metrics-bridge/src/peg/poller.ts`
+- `metrics-bridge/src/peg/metrics.ts`
 - `metrics-bridge/src/peg/decision-packages.ts`
 - `metrics-bridge/src/peg/breaker-evidence.ts`
+- `alerts/rules/peg-promql-active.tf`,
+  `alerts/rules/peg-promql-previous.tf`, and
+  `alerts/rules/peg-rule-definitions.tf`
+- `docs/notes/peg-monitoring-onboarding.md`
 - ADRs 0042–0045
