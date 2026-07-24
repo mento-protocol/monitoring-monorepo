@@ -42,6 +42,26 @@ variable "github_token" {
   sensitive   = true
 }
 
+variable "platform_settings_audit_token" {
+  description = <<-EOT
+    Fine-grained GitHub PAT with Administration: Read on
+    `mento-protocol/monitoring-monorepo` ONLY (no other scope), consumed solely
+    by `.github/workflows/platform-settings-drift.yml` to read
+    `GET /repos/{owner}/{repo}/actions/permissions/workflow` and assert the repo
+    default workflow-token permission stays read-only (issues #1564, #1557).
+    Mirrors into the repo-level Actions secret `PLATFORM_SETTINGS_AUDIT_TOKEN`
+    (`github-secrets.tf`), count-gated so `terraform apply` succeeds while unset
+    and the drift check no-ops. Read-only by design: it can never CHANGE a
+    setting. Deliberately SEPARATE from `github_token` (Administration:
+    Read/write, kept local-only, never a CI secret) and from the autofix App
+    (whose minimal Contents+Pull-requests trust boundary we do not widen). Leave
+    empty until provisioned; see docs/notes/sentry-triage-pipeline.md.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "terraform_apply_slack_channel" {
   description = <<-EOT
     Slack channel that receives the Terraform apply-pending prompt posted

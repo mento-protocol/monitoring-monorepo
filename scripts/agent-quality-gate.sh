@@ -2257,6 +2257,9 @@ while IFS= read -r path; do
           add_command "node scripts/check-autofix-ci-trust.mjs" "autofix CI trust checker changed"
           add_command "node scripts/check-autofix-ci-trust.test.mjs" "autofix CI trust checker changed"
           ;;
+        scripts/check-workflow-permissions-drift.mjs|scripts/check-workflow-permissions-drift.test.mjs)
+          add_command "node scripts/check-workflow-permissions-drift.test.mjs" "platform-settings workflow-permissions drift checker changed"
+          ;;
         scripts/check-github-action-pins.test.mjs)
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
           ;;

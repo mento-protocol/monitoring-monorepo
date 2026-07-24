@@ -1026,6 +1026,12 @@ jobs:
         # secrets are unreachable from PR-head code. Issue #1388 — an
         # activation gate for the autofix leg.
         run: node scripts/check-autofix-ci-trust.mjs
+      - name: Platform settings drift unit tests
+        # Behavioral coverage of scripts/check-workflow-permissions-drift.mjs —
+        # the decision layer for .github/workflows/platform-settings-drift.yml
+        # (issue #1564): ok/drift/malformed classification + CLI exit codes for
+        # the daily "default workflow-token permission stays read-only" check.
+        run: node scripts/check-workflow-permissions-drift.test.mjs
       - name: Override prune report self-tests
         # Behavioral coverage of scripts/override-prune-report.mjs (verdict
         # heuristic, lockfile parsing, git-blame age check). The report
