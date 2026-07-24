@@ -25,6 +25,7 @@ export interface PegSourceMetricSnapshot {
   premiumBps: number | null;
   spreadBps: number | null;
   newSuccess: boolean;
+  newUsableDecision: boolean;
 }
 
 export interface PegAssetMetricSnapshot {
@@ -102,7 +103,7 @@ export const pegGauges = {
   }),
   sourceHealthy: new Gauge({
     name: "mento_peg_source_healthy",
-    help: "1 when the source returned fresh usable venue data under the active policy, 0 otherwise.",
+    help: "1 when the source returned fresh usable venue data under the labeled policy version, 0 otherwise.",
     labelNames: sourceLabels,
     registers: [register],
   }),
@@ -169,6 +170,12 @@ export const pegCounters = {
     labelNames: sourceLabels,
     registers: [register],
   }),
+  usableDecision: new Counter({
+    name: "mento_peg_usable_decision_total",
+    help: "Monotonic count of newly accepted uncapped executable price decisions.",
+    labelNames: sourceLabels,
+    registers: [register],
+  }),
   pollErrors: new Counter({
     name: "mento_peg_poll_errors_total",
     help: "Bounded peg-loop failures by stable error channel; peg failures never affect the primary bridge health signal.",
@@ -177,7 +184,7 @@ export const pegCounters = {
   }),
 } as const;
 
-const activePollCounterLabels = new Map<string, SourceLabels>();
+const activeSourceCounterLabels = new Map<string, SourceLabels>();
 
 function assertFiniteNonnegative(value: number, field: string): void {
   if (!Number.isFinite(value) || value < 0) {
@@ -245,6 +252,27 @@ function validateStatusOnlyHalt(source: PegSourceMetricSnapshot): void {
   }
 }
 
+function validateUsableDecision(source: PegSourceMetricSnapshot): void {
+  const observation = source.observation;
+  const vwap = observation?.vwap ?? Number.NaN;
+  const acceptedUsableDecision = [
+    source.newSuccess,
+    source.healthy,
+    source.deviationBps !== null,
+    source.premiumBps !== null,
+    observation !== null,
+    observation?.venueState !== "halted",
+    observation?.capped === false,
+    Number.isFinite(vwap),
+    vwap > 0,
+  ].every(Boolean);
+  if (source.newUsableDecision !== acceptedUsableDecision) {
+    throw new Error(
+      "newUsableDecision must match a newly accepted uncapped executable observation",
+    );
+  }
+}
+
 function validateSourceSnapshot(
   snapshot: PegAssetMetricSnapshot,
   source: PegSourceMetricSnapshot,
@@ -272,6 +300,7 @@ function validateSourceSnapshot(
     validateObservation(source.observation);
     validateStatusOnlyHalt(source);
   }
+  validateUsableDecision(source);
 }
 
 function validateSnapshots(snapshots: PegAssetMetricSnapshot[]): void {
@@ -305,12 +334,27 @@ function resetPegGauges(): void {
   for (const gauge of Object.values(pegGauges)) gauge.reset();
 }
 
-function pollCounterKey(labels: SourceLabels): string {
+function sourceCounterKey(labels: SourceLabels): string {
   return `${labels.policy_version}\u0000${labels.asset}\u0000${labels.source}`;
 }
 
-function prunePollCounters(snapshots: PegAssetMetricSnapshot[]): void {
-  const nextLabels = new Map<string, SourceLabels>();
+function pruneSourceCounters(snapshots: PegAssetMetricSnapshot[]): void {
+  // Empty batches are failed cycles: clear gauges below, but keep historical
+  // counters. A non-empty batch retires only absent content-addressed versions;
+  // source topology cannot change within a version, so source omission is
+  // transient rather than label retirement.
+  if (snapshots.length === 0) return;
+
+  const publishedVersions = new Set(
+    snapshots.map(({ policyVersion }) => policyVersion),
+  );
+  for (const [key, labels] of activeSourceCounterLabels) {
+    if (publishedVersions.has(labels.policy_version)) continue;
+    pegCounters.pollSuccess.remove(labels);
+    pegCounters.usableDecision.remove(labels);
+    activeSourceCounterLabels.delete(key);
+  }
+
   for (const snapshot of snapshots) {
     for (const source of snapshot.sources) {
       const labels = {
@@ -318,15 +362,8 @@ function prunePollCounters(snapshots: PegAssetMetricSnapshot[]): void {
         source: source.source,
         policy_version: source.policyVersion,
       };
-      nextLabels.set(pollCounterKey(labels), labels);
+      activeSourceCounterLabels.set(sourceCounterKey(labels), labels);
     }
-  }
-  for (const [key, labels] of activePollCounterLabels) {
-    if (!nextLabels.has(key)) pegCounters.pollSuccess.remove(labels);
-  }
-  activePollCounterLabels.clear();
-  for (const [key, labels] of nextLabels) {
-    activePollCounterLabels.set(key, labels);
   }
 }
 
@@ -380,6 +417,7 @@ function publishSource(source: PegSourceMetricSnapshot): void {
   if (source.observation !== null)
     publishObservation(labels, source.observation);
   if (source.newSuccess) pegCounters.pollSuccess.inc(labels);
+  if (source.newUsableDecision) pegCounters.usableDecision.inc(labels);
 }
 
 function publishAsset(snapshot: PegAssetMetricSnapshot): void {
@@ -406,7 +444,7 @@ function publishAsset(snapshot: PegAssetMetricSnapshot): void {
 
 export function publishPegMetrics(snapshots: PegAssetMetricSnapshot[]): void {
   validateSnapshots(snapshots);
-  prunePollCounters(snapshots);
+  pruneSourceCounters(snapshots);
   resetPegGauges();
   const versions = new Set<string>();
   for (const snapshot of snapshots) {
@@ -422,6 +460,7 @@ export function publishPegMetrics(snapshots: PegAssetMetricSnapshot[]): void {
 export function _resetPegMetricsForTests(): void {
   resetPegGauges();
   pegCounters.pollSuccess.reset();
+  pegCounters.usableDecision.reset();
   pegCounters.pollErrors.reset();
-  activePollCounterLabels.clear();
+  activeSourceCounterLabels.clear();
 }

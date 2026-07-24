@@ -1,12 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
+import { assertPegPolicyRegistrySupportsPolicy } from "../src/peg/compatibility.js";
 import {
   parsePegPolicyBundle,
   pegPolicyVersionForContent,
   type PegPolicyVersion,
 } from "../src/peg/policy.js";
 import type { PegPoller } from "../src/peg/poller.js";
-import { loadPegRegistry } from "../src/peg/registry.js";
+import { loadPegRegistry, parsePegRegistry } from "../src/peg/registry.js";
 import {
   createPegRuntime,
   startPegPolling,
@@ -116,7 +117,7 @@ describe("Peg runtime isolation", () => {
     expect(pegPoller.pollCycle).toHaveBeenCalledTimes(2);
     expect(pegPoller.pollCycle).toHaveBeenLastCalledWith({
       registry,
-      policy: bundle.active,
+      policies: [bundle.active],
     });
   });
 
@@ -192,6 +193,143 @@ describe("Peg runtime isolation", () => {
     expect(runtime.status).toBe("waiting");
     expect(errors.map(({ kind }) => kind)).toEqual(["poller_cycle"]);
   });
+
+  it.each([
+    ["primary", "deep"],
+    ["primary", "secondary"],
+    ["primary", "display"],
+    ["secondary", "secondary"],
+    ["secondary", "display"],
+    ["display", "display"],
+  ] as const)(
+    "supports %s registry topology with %s policy authority",
+    async (role, authority) => {
+      const bundle = await policy();
+      const registry = structuredClone(await loadPegRegistry());
+      const registrySource = registry["europ-schuman"]!.sources.find(
+        ({ id }) => id === "kraken_eur",
+      )!;
+      const policyVersion = structuredClone(bundle.active);
+      registrySource.role = role;
+      policyVersion.assets["europ-schuman"]!.sources.kraken_eur!.authority =
+        authority;
+
+      expect(() =>
+        assertPegPolicyRegistrySupportsPolicy(registry, policyVersion),
+      ).not.toThrow();
+    },
+  );
+
+  it.each([
+    ["secondary", "deep", /deep authority requires primary topology/],
+    ["display", "deep", /deep authority requires primary topology/],
+    ["display", "secondary", /display topology cannot carry alert authority/],
+  ] as const)(
+    "rejects %s registry topology with %s policy authority",
+    async (role, authority, expected) => {
+      const bundle = await policy();
+      const registry = structuredClone(await loadPegRegistry());
+      const registrySource = registry["europ-schuman"]!.sources.find(
+        ({ id }) => id === "kraken_eur",
+      )!;
+      const policyVersion = structuredClone(bundle.active);
+      registrySource.role = role;
+      policyVersion.assets["europ-schuman"]!.sources.kraken_eur!.authority =
+        authority;
+
+      expect(() =>
+        assertPegPolicyRegistrySupportsPolicy(registry, policyVersion),
+      ).toThrow(expected);
+    },
+  );
+
+  it.each(["active", "previous"] as const)(
+    "accepts display authority on secondary topology in the %s policy",
+    async (versionName) => {
+      const bundle = await policy();
+      const registry = await loadPegRegistry();
+      const displayVersion = structuredClone(bundle.active);
+      displayVersion.assets["europ-schuman"]!.sources.kraken_eur!.authority =
+        "display";
+      const compatibleDisplay = versioned(
+        `europ-${versionName}-display`,
+        displayVersion,
+      );
+      const rollover = parsePegPolicyBundle({
+        ...bundle,
+        active: versionName === "active" ? compatibleDisplay : bundle.active,
+        previous:
+          versionName === "previous" ? compatibleDisplay : bundle.active,
+      });
+      const pegPoller = poller();
+      const runtime = createPegRuntime({
+        policyUrl: "https://policy.invalid/peg.json",
+        loadRegistry: vi.fn().mockResolvedValue(registry),
+        policyClientOptions: {
+          fetch: vi.fn().mockImplementation(() => policyResponse(rollover)),
+        },
+        poller: pegPoller,
+      });
+
+      await runtime.runCycle();
+
+      expect(runtime.status).toBe("active");
+      expect(pegPoller.pollCycle).toHaveBeenCalledWith({
+        registry,
+        policies: [rollover.active, rollover.previous],
+      });
+    },
+  );
+
+  it.each(["active", "previous"] as const)(
+    "fails closed for deep authority on secondary topology in the %s policy",
+    async (versionName) => {
+      const bundle = await policy();
+      const registry = await loadPegRegistry();
+      const invalidVersion = structuredClone(bundle.active);
+      const invalidAsset = invalidVersion.assets["europ-schuman"]!;
+      invalidAsset.sources.bitvavo_eur!.authority = "secondary";
+      invalidAsset.sources.kraken_eur!.authority = "deep";
+      invalidAsset.deepVenueSource = "kraken_eur";
+      const incompatible = versioned(
+        `europ-${versionName}-deep`,
+        invalidVersion,
+      );
+      const rollover = parsePegPolicyBundle({
+        ...bundle,
+        active: versionName === "active" ? incompatible : bundle.active,
+        previous: versionName === "previous" ? incompatible : bundle.active,
+      });
+      const errors: PegRuntimeErrorEvent[] = [];
+      const pegPoller = poller();
+      const runtime = createPegRuntime({
+        policyUrl: "https://policy.invalid/peg.json",
+        loadRegistry: vi.fn().mockResolvedValue(registry),
+        policyClientOptions: {
+          fetch: vi.fn().mockImplementation(() => policyResponse(rollover)),
+        },
+        poller: pegPoller,
+        onError: (event) => errors.push(event),
+      });
+
+      await runtime.runCycle();
+
+      if (versionName === "active") {
+        expect(runtime.status).toBe("active");
+        expect(pegPoller.pollCycle).toHaveBeenCalledWith({
+          registry,
+          policies: [bundle.active],
+        });
+        expect(errors).toEqual([]);
+      } else {
+        expect(runtime.status).toBe("waiting");
+        expect(pegPoller.pollCycle).not.toHaveBeenCalled();
+        expect(errors.map(({ kind }) => kind)).toEqual([
+          "policy_compatibility",
+        ]);
+      }
+    },
+  );
 
   it("does not acknowledge policy for topology the baked registry cannot serve", async () => {
     const bundle = await policy();
@@ -282,12 +420,13 @@ describe("Peg runtime isolation", () => {
     expect(pegPoller.pollCycle).toHaveBeenCalledTimes(2);
     expect(pegPoller.pollCycle).toHaveBeenLastCalledWith({
       registry,
-      policy: bundle.active,
+      policies: [bundle.active],
     });
-    expect(pegPoller.pollCycle).not.toHaveBeenCalledWith({
-      registry,
-      policy: incompatibleActive,
-    });
+    expect(pegPoller.pollCycle).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        policies: expect.arrayContaining([incompatibleActive]),
+      }),
+    );
     expect(errors).toEqual([]);
   });
 
@@ -334,16 +473,17 @@ describe("Peg runtime isolation", () => {
     expect(pegPoller.pollCycle).toHaveBeenCalledOnce();
     expect(pegPoller.pollCycle).toHaveBeenCalledWith({
       registry,
-      policy: bundle.active,
+      policies: [bundle.active],
     });
-    expect(pegPoller.pollCycle).not.toHaveBeenCalledWith({
-      registry,
-      policy: incompatibleActive,
-    });
+    expect(pegPoller.pollCycle).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        policies: expect.arrayContaining([incompatibleActive]),
+      }),
+    );
     expect(errors).toEqual([]);
   });
 
-  it("prefers active when both rollover policies match the baked registry", async () => {
+  it("polls active first and retained previous when both match the baked registry", async () => {
     const bundle = await policy();
     const registry = await loadPegRegistry();
     const compatibleActive = versioned("europ-v2", {
@@ -371,11 +511,175 @@ describe("Peg runtime isolation", () => {
     expect(pegPoller.pollCycle).toHaveBeenCalledOnce();
     expect(pegPoller.pollCycle).toHaveBeenCalledWith({
       registry,
-      policy: compatibleActive,
+      policies: [compatibleActive, bundle.active],
     });
-    expect(pegPoller.pollCycle).not.toHaveBeenCalledWith({
+  });
+
+  it("rejects active-only production while retained topology is unsupported", async () => {
+    const bundle = await policy();
+    const registry = await loadPegRegistry();
+    const asset = bundle.active.assets["europ-schuman"]!;
+    const incompatiblePrevious = versioned("europ-v0", {
+      ...bundle.active,
+      assets: {
+        ...bundle.active.assets,
+        "europ-schuman": {
+          ...asset,
+          sources: {
+            ...asset.sources,
+            kraken_extra: {
+              ...asset.sources.kraken_eur!,
+              authority: "secondary",
+            },
+          },
+        },
+      },
+    });
+    const activeOnly = parsePegPolicyBundle({
+      ...bundle,
+      previous: incompatiblePrevious,
+    });
+    const errors: PegRuntimeErrorEvent[] = [];
+    const pegPoller = poller();
+    const runtime = createPegRuntime({
+      policyUrl: "https://policy.invalid/peg.json",
+      loadRegistry: vi.fn().mockResolvedValue(registry),
+      policyClientOptions: {
+        fetch: vi.fn().mockImplementation(() => policyResponse(activeOnly)),
+      },
+      poller: pegPoller,
+      onError: (event) => errors.push(event),
+    });
+
+    await runtime.runCycle();
+
+    expect(runtime.status).toBe("waiting");
+    expect(pegPoller.pollCycle).not.toHaveBeenCalled();
+    expect(errors.map(({ kind }) => kind)).toEqual(["policy_compatibility"]);
+  });
+
+  it("polls active and retained subsets from their union registry", async () => {
+    const bundle = await policy();
+    const registryInput = structuredClone(await loadPegRegistry());
+    const registryAsset = registryInput["europ-schuman"]!;
+    registryAsset.sources.push({
+      ...structuredClone(
+        registryAsset.sources.find(({ id }) => id === "kraken_eur")!,
+      ),
+      id: "kraken_extra",
+    });
+    const registry = parsePegRegistry(registryInput);
+    const policyAsset = bundle.active.assets["europ-schuman"]!;
+    const compatibleActive = versioned("europ-v2", {
+      ...bundle.active,
+      assets: {
+        ...bundle.active.assets,
+        "europ-schuman": {
+          ...policyAsset,
+          sources: {
+            ...policyAsset.sources,
+            kraken_extra: {
+              ...policyAsset.sources.kraken_eur!,
+              authority: "secondary",
+            },
+          },
+        },
+      },
+    });
+    const rollover = parsePegPolicyBundle({
+      ...bundle,
+      active: compatibleActive,
+      previous: bundle.active,
+    });
+    const pegPoller = poller();
+    const runtime = createPegRuntime({
+      policyUrl: "https://policy.invalid/peg.json",
+      loadRegistry: vi.fn().mockResolvedValue(registry),
+      policyClientOptions: {
+        fetch: vi.fn().mockImplementation(() => policyResponse(rollover)),
+      },
+      poller: pegPoller,
+    });
+
+    await runtime.runCycle();
+
+    expect(runtime.status).toBe("active");
+    expect(pegPoller.pollCycle).toHaveBeenCalledWith({
       registry,
-      policy: bundle.active,
+      policies: [compatibleActive, bundle.active],
+    });
+  });
+
+  it("keeps serving cleaned active policy from an old superset registry", async () => {
+    const bundle = await policy();
+    const registryInput = structuredClone(await loadPegRegistry());
+    const registryAsset = registryInput["europ-schuman"]!;
+    registryAsset.sources.push({
+      ...structuredClone(
+        registryAsset.sources.find(({ id }) => id === "kraken_eur")!,
+      ),
+      id: "retired_source",
+    });
+    const registry = parsePegRegistry(registryInput);
+    const pegPoller = poller();
+    const runtime = createPegRuntime({
+      policyUrl: "https://policy.invalid/peg.json",
+      loadRegistry: vi.fn().mockResolvedValue(registry),
+      policyClientOptions: {
+        fetch: vi.fn().mockImplementation(() => policyResponse(bundle)),
+      },
+      poller: pegPoller,
+    });
+
+    await runtime.runCycle();
+
+    expect(runtime.status).toBe("active");
+    expect(pegPoller.pollCycle).toHaveBeenCalledWith({
+      registry,
+      policies: [bundle.active],
+    });
+  });
+
+  it("drops the retained policy from the next cycle after ACK cleanup", async () => {
+    const bundle = await policy();
+    const registry = await loadPegRegistry();
+    const compatibleActive = versioned("europ-v2", {
+      ...bundle.active,
+      rolloverAckExpectedSeconds: 360,
+    });
+    const rollover = parsePegPolicyBundle({
+      ...bundle,
+      active: compatibleActive,
+      previous: bundle.active,
+    });
+    const cleaned = parsePegPolicyBundle({
+      ...rollover,
+      previous: null,
+    });
+    const pegPoller = poller();
+    const runtime = createPegRuntime({
+      policyUrl: "https://policy.invalid/peg.json",
+      loadRegistry: vi.fn().mockResolvedValue(registry),
+      policyClientOptions: {
+        fetch: vi
+          .fn()
+          .mockImplementationOnce(() => policyResponse(rollover))
+          .mockImplementationOnce(() => policyResponse(cleaned)),
+      },
+      poller: pegPoller,
+    });
+
+    await runtime.runCycle();
+    await runtime.runCycle();
+
+    expect(runtime.status).toBe("active");
+    expect(pegPoller.pollCycle).toHaveBeenNthCalledWith(1, {
+      registry,
+      policies: [compatibleActive, bundle.active],
+    });
+    expect(pegPoller.pollCycle).toHaveBeenNthCalledWith(2, {
+      registry,
+      policies: [compatibleActive],
     });
   });
 });

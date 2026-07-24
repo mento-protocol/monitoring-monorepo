@@ -30,6 +30,7 @@ function snapshot(
         premiumBps: 0,
         spreadBps: 9,
         newSuccess: true,
+        newUsableDecision: true,
         observation: {
           vwap: 0.9996,
           filledFraction: 1,
@@ -76,6 +77,9 @@ describe("Peg metrics", () => {
     expect(metrics).toContain(
       'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
     );
+    expect(metrics).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
   });
 
   it("drops deviation for capped observations but retains partial depth", async () => {
@@ -88,6 +92,7 @@ describe("Peg metrics", () => {
       capped: true,
       filledFraction: 0.4,
     };
+    source.newUsableDecision = false;
     publishPegMetrics([capped]);
     const metrics = await register.metrics();
 
@@ -111,6 +116,7 @@ describe("Peg metrics", () => {
     source.premiumBps = null;
     source.spreadBps = null;
     source.newSuccess = false;
+    source.newUsableDecision = false;
     publishPegMetrics([failed]);
     const metrics = await register.metrics();
 
@@ -131,6 +137,7 @@ describe("Peg metrics", () => {
     source.premiumBps = null;
     source.spreadBps = null;
     source.newSuccess = false;
+    source.newUsableDecision = false;
     source.observation = {
       ...source.observation,
       vwap: null,
@@ -156,6 +163,9 @@ describe("Peg metrics", () => {
     expect(metrics).toContain(
       'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
     );
+    expect(metrics).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
     expect(metrics).not.toContain("mento_peg_observation_at{");
     expect(metrics).not.toContain("mento_peg_executable_px{");
   });
@@ -167,14 +177,136 @@ describe("Peg metrics", () => {
     expect(metrics).toContain(
       'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 2',
     );
+    expect(metrics).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 2',
+    );
   });
 
-  it("removes counters from superseded policy versions", async () => {
+  it("preserves active-version counters across transient source omission", async () => {
     publishPegMetrics([snapshot()]);
+    publishPegMetrics([snapshot({ sources: [] })]);
+
+    const omitted = await register.metrics();
+    expect(omitted).not.toContain("mento_peg_source_healthy{");
+    expect(omitted).toContain(
+      'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+    expect(omitted).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+
+    publishPegMetrics([snapshot()]);
+    const recovered = await register.metrics();
+    expect(recovered).toContain(
+      'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 2',
+    );
+    expect(recovered).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 2',
+    );
+  });
+
+  it("preserves counters but clears gauges on an empty publication", async () => {
+    publishPegMetrics([snapshot()]);
+    publishPegMetrics([]);
+
+    const empty = await register.metrics();
+    expect(empty).not.toContain("mento_peg_policy_version{");
+    expect(empty).not.toContain("mento_peg_source_healthy{");
+    expect(empty).toContain(
+      'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+    expect(empty).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+
+    publishPegMetrics([snapshot()]);
+    const recovered = await register.metrics();
+    expect(recovered).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 2',
+    );
+  });
+
+  it("counts only newly accepted uncapped executable decisions", async () => {
+    publishPegMetrics([snapshot()]);
+
+    const capped = snapshot();
+    const cappedSource = capped.sources[0];
+    if (!cappedSource?.observation)
+      throw new Error("missing capped fixture observation");
+    cappedSource.observation = {
+      ...cappedSource.observation,
+      capped: true,
+      filledFraction: 0.5,
+    };
+    cappedSource.deviationBps = null;
+    cappedSource.premiumBps = null;
+    cappedSource.newUsableDecision = false;
+    publishPegMetrics([capped]);
+
+    const cached = snapshot();
+    const cachedSource = cached.sources[0];
+    if (!cachedSource) throw new Error("missing cached fixture source");
+    cachedSource.newSuccess = false;
+    cachedSource.newUsableDecision = false;
+    publishPegMetrics([cached]);
+
+    const failed = snapshot();
+    const failedSource = failed.sources[0];
+    if (!failedSource) throw new Error("missing failed fixture source");
+    failedSource.healthy = false;
+    failedSource.observation = null;
+    failedSource.deviationBps = null;
+    failedSource.premiumBps = null;
+    failedSource.spreadBps = null;
+    failedSource.newSuccess = false;
+    failedSource.newUsableDecision = false;
+    publishPegMetrics([failed]);
+
+    const metrics = await register.metrics();
+    expect(metrics).toContain(
+      'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 2',
+    );
+    expect(metrics).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+  });
+
+  it("publishes active and retained policy series together", async () => {
+    const active = snapshot({ policyVersion: "europ-v2" });
+    active.sources = active.sources.map((source) => ({
+      ...source,
+      policyVersion: "europ-v2",
+    }));
+
+    publishPegMetrics([active, snapshot()]);
+    const metrics = await register.metrics();
+
+    expect(metrics).toContain(
+      'mento_peg_policy_version{policy_version="europ-v2"} 1',
+    );
+    expect(metrics).toContain(
+      'mento_peg_policy_version{policy_version="europ-v1"} 1',
+    );
+    expect(metrics).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v2"} 1',
+    );
+    expect(metrics).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+  });
+
+  it("evicts retained-policy gauges and counters after ACK cleanup", async () => {
     const next = snapshot({ policyVersion: "europ-v2" });
     next.sources = next.sources.map((source) => ({
       ...source,
       policyVersion: "europ-v2",
+    }));
+    publishPegMetrics([next, snapshot()]);
+
+    next.sources = next.sources.map((source) => ({
+      ...source,
+      newSuccess: false,
+      newUsableDecision: false,
     }));
     publishPegMetrics([next]);
 
@@ -182,6 +314,9 @@ describe("Peg metrics", () => {
     expect(metrics).not.toContain('policy_version="europ-v1"');
     expect(metrics).toContain(
       'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v2"} 1',
+    );
+    expect(metrics).toContain(
+      'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v2"} 1',
     );
   });
 
