@@ -65,25 +65,22 @@ Phase 3 must implement the following protected artifact and rules contract:
   characters of the SHA-256 digest of its canonical content (excluding the
   version field). Canonicalization recursively sorts object keys by Unicode
   code point, preserves array order, and then hashes the compact JSON encoding;
-  runtime and CI verify that binding so a restarted replica
-  cannot reuse one metric label for changed semantics. Activation is two-phase because artifact publish and
-  bridge pickup cannot be atomic: the generated rules accept both the
-  previous and the new exact policy versions until a reviewed follow-up
-  artifact sets `previous=null` after the producer ACKNOWLEDGES the new
-  version. Acknowledgment resolves only the rollover-stuck condition; it
-  never auto-terminates retained rule acceptance. Old-version acceptance is
-  removed only by that reviewed artifact change and never expires by
-  wall-clock alone, so a delayed or unavailable artifact poll can never
-  leave the rules without an accepted producer version. Deviation
-  evaluation stays live on the previous policy throughout, and a distinct
-  rollover-stuck alert fires when acknowledgment exceeds the expected
-  window — a policy apply never opens a critical-monitoring gap. CI also
-  compares the candidate artifact with the current base policy:
-  a changed active version must retain that exact prior active object as
-  `previous`; an unchanged active version may only preserve or remove its
-  retained predecessor after acknowledgment. A second active rollover is
-  rejected until that predecessor has been cleared by the reviewed
-  `previous=null` update. There is no HCL mirror,
+  runtime and CI verify that binding so a restarted replica cannot reuse one
+  metric label for changed semantics. Activation is two-phase because
+  artifact publish and bridge pickup cannot be atomic: the generated rules
+  evaluate both the previous and new exact policy versions while `previous`
+  is retained. Producer acknowledgment resolves the distinct rollover-stuck
+  alert but never terminates old-version decisions by itself. After
+  acknowledgment and a complete active decision-history window, a separately
+  reviewed policy change sets `previous` to `null`; that apply removes the
+  retained rules and artifact content. No wall-clock expiry can leave the
+  rules without an accepted producer version, and deviation evaluation stays
+  live on the previous policy through cleanup. CI also compares the candidate
+  artifact with the current base policy: a changed active version must retain
+  that exact prior active object as `previous`; an unchanged active version
+  may only preserve or remove its retained predecessor. A second active
+  rollover is rejected until that predecessor has been cleared after
+  acknowledgment. There is no HCL mirror,
   so the existing mirror-drift check is unnecessary for this class; a sibling integrity
   check validates at source level: every threshold source key and the
   deep-venue designation must name an existing registry source id, every
@@ -111,7 +108,10 @@ Phase 3 must implement the following protected artifact and rules contract:
   - Blindness and heartbeat rules set `no_data_state = "Alerting"` with the
     documented justification and ~5-minute grace, following the
     bridge-down/pool-coverage precedent: for these rules, absence of data
-    is the signal.
+    is the signal. The producer publishes a policy-versioned consecutive-blind
+    poll count and resets it on each usable uncapped deep-venue decision. Rules
+    compare that count directly with `blindConsecutivePolls`; Grafana's
+    evaluation interval never stands in for a faster producer cadence.
   - Deviation sustain uses a duration-fraction window
     (`quantile_over_time`) rather than the rule `for` clock alone, so a
     single favorable sample on a thin, flapping book cannot reset a real

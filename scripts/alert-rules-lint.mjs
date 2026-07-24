@@ -865,6 +865,14 @@ function validatePegRuleScope(expression, policyVersions, selectors, failures) {
     );
     return { kind: "decision", policy: "active" };
   }
+  if (
+    scope.policy === "previous" &&
+    selectors.some(({ metric }) => metric === "mento_peg_policy_version")
+  ) {
+    failures.push(
+      `${location}: previous decision rules must not depend on mento_peg_policy_version; retained rules end only through reviewed policy cleanup`,
+    );
+  }
   // Previous-policy templates must exist before a rollover so a JSON-only
   // policy change can instantiate the full retained rule set. Even while
   // previous=null keeps those templates dormant, each selector must use exact

@@ -96,16 +96,18 @@ locals {
   }
   peg_active_blind_warning_promql = {
     for asset_id, asset in local.peg_active_assets : asset_id => format(
-      "(mento_peg_blind{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} == bool 1) * on(asset,policy_version) ((time() - mento_peg_last_poll{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"}) <= bool %d)",
+      "mento_peg_blind_consecutive_polls{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)",
       asset_id,
+      asset.blindConsecutivePolls,
       asset_id,
       asset.freshnessGraceSeconds,
     )
   }
   peg_active_blind_stressed_promql = {
     for asset_id, asset in local.peg_active_assets : asset_id => format(
-      "mento_peg_blind{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} == 1 and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d) and on(asset,policy_version) ((mento_peg_structural_saturation{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} >= %g and on(asset,policy_version) mento_peg_indexed_pool_reachable{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} == 1) or (mento_peg_spread_bps{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} > %g and on(asset,source,policy_version) (time() - mento_peg_observation_at{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)) or (mento_peg_capped{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} == 1 and on(asset,source,policy_version) ((%g - mento_peg_executable_px{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"}) / %g * 10000 >= %g) and on(asset,source,policy_version) (time() - mento_peg_observation_at{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)))",
+      "mento_peg_blind_consecutive_polls{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d) and on(asset,policy_version) ((mento_peg_structural_saturation{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} >= %g and on(asset,policy_version) mento_peg_indexed_pool_reachable{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} == 1) or (mento_peg_spread_bps{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} > %g and on(asset,source,policy_version) (time() - mento_peg_observation_at{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)) or (mento_peg_capped{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} == 1 and on(asset,source,policy_version) ((%g - mento_peg_executable_px{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"}) / %g * 10000 >= %g) and on(asset,source,policy_version) (time() - mento_peg_observation_at{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)))",
       asset_id,
+      asset.blindConsecutivePolls,
       asset_id,
       asset.freshnessGraceSeconds,
       asset_id,

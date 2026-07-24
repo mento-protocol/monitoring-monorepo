@@ -867,10 +867,14 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
   );
   assert(
     source.includes(
-      '(mento_peg_blind{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} == bool 1) * on(asset,policy_version) ((time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"}) <= bool %d)',
+      'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} <= %d)',
     ) &&
       source.includes(
-        '(mento_peg_blind{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} == bool 1) * on(asset,policy_version) ((time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"}) <= bool %d)',
+        'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} <= %d)',
+      ) &&
+      source.includes("asset.blindConsecutivePolls") &&
+      !source.includes(
+        "blindConsecutivePolls * asset.sources[asset.deepVenueSource].pollIntervalSeconds",
       ) &&
       source.includes(
         'max_over_time(mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"}[%ds]) > bool %d',
@@ -878,21 +882,16 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
       source.includes(
         'max_over_time(mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"}[%ds]) > bool %d',
       ),
-    "blindness and heartbeat templates must preserve explicit zero vectors while healthy without depending on the structural plane",
+    "blindness must use the producer-side consecutive-poll count while heartbeat remains fail-closed",
   );
   assert(
     source.includes(
-      'mento_peg_blind{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} == 1 and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} <= %d) and on(asset,policy_version) ((mento_peg_structural_saturation{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= %g and on(asset,policy_version) mento_peg_indexed_pool_reachable{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} == 1) or (mento_peg_spread_bps',
+      'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} <= %d) and on(asset,policy_version) ((mento_peg_structural_saturation{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= %g and on(asset,policy_version) mento_peg_indexed_pool_reachable{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} == 1) or (mento_peg_spread_bps',
     ) &&
       source.includes(
-        'mento_peg_blind{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} == 1 and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} <= %d) and on(asset,policy_version) ((mento_peg_structural_saturation{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} >= %g and on(asset,policy_version) mento_peg_indexed_pool_reachable{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} == 1) or (mento_peg_spread_bps',
+        'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} <= %d) and on(asset,policy_version) ((mento_peg_structural_saturation{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} >= %g and on(asset,policy_version) mento_peg_indexed_pool_reachable{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} == 1) or (mento_peg_spread_bps',
       ) &&
-      !source.includes(
-        'mento_peg_blind{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} == 1 and on(asset,policy_version) mento_peg_indexed_pool_reachable',
-      ) &&
-      !source.includes(
-        'mento_peg_blind{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} == 1 and on(asset,policy_version) mento_peg_indexed_pool_reachable',
-      ),
+      !source.includes("mento_peg_blind{"),
     "blind-while-stressed must gate only structural saturation on pool reachability so market stress remains independently page-capable",
   );
   assert(
@@ -999,22 +998,31 @@ test("peg PromQL ACK and rollover-stuck rules bind only exact active", () => {
   }
 });
 
-test("previous decision may gate on exact active ACK", () => {
-  const failures = validatePegPromqlExpressions(
-    [
-      {
-        file: "rules-peg.tf",
-        kind: "single",
-        expr: 'mento_peg_deviation_bps{policy_version="europ-v1"} > 25 unless mento_peg_policy_version{policy_version="europ-v2"}',
-        pegRule: { kind: "decision", policy: "previous" },
-      },
-    ],
+test("previous decisions cannot terminate on the active ACK", () => {
+  for (const versions of [
     { active: "europ-v2", previous: "europ-v1" },
-  );
-  assert(
-    failures.length === 0,
-    `expected previous decision plus active ACK gate to pass: ${failures.join("\n")}`,
-  );
+    { active: "europ-v2", previous: null },
+  ]) {
+    const failures = validatePegPromqlExpressions(
+      [
+        {
+          file: "rules-peg.tf",
+          kind: "single",
+          expr: 'mento_peg_deviation_bps{policy_version="${local.peg_previous_policy_version}"} > 25 unless mento_peg_policy_version{policy_version="${local.peg_active_policy_version}"}',
+          pegRule: { kind: "decision", policy: "previous" },
+        },
+      ],
+      versions,
+    );
+    assert(
+      failures.some((failure) =>
+        failure.includes(
+          "previous decision rules must not depend on mento_peg_policy_version",
+        ),
+      ),
+      `expected previous decision plus active ACK gate to fail: ${failures.join("\n")}`,
+    );
+  }
 });
 
 test("CLI passes against the real repository", () => {

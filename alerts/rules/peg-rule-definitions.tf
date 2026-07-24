@@ -111,7 +111,7 @@ locals {
       for asset_id, asset in local.peg_active_assets : "active-blind-${asset_id}" => {
         name               = "Peg Blind Warning [${asset_id} · active]"
         expr               = local.peg_active_blind_warning_promql[asset_id]
-        for_duration       = "${asset.blindConsecutivePolls * asset.sources[asset.deepVenueSource].pollIntervalSeconds}s"
+        for_duration       = "0s"
         no_data_state      = "Alerting"
         severity           = "warning"
         route              = "ops"
@@ -132,7 +132,7 @@ locals {
       for asset_id, asset in local.peg_active_assets : "active-blind-stressed-${asset_id}" => {
         name               = "Peg Blind While Stressed Critical [${asset_id} · active]"
         expr               = local.peg_active_blind_stressed_promql[asset_id]
-        for_duration       = "${asset.blindConsecutivePolls * asset.sources[asset.deepVenueSource].pollIntervalSeconds}s"
+        for_duration       = "0s"
         no_data_state      = "OK"
         severity           = "critical"
         route              = "page"
@@ -328,7 +328,7 @@ locals {
       for asset_id, asset in local.peg_previous_assets : "previous-blind-${asset_id}" => {
         name               = "Peg Blind Warning [${asset_id} · previous]"
         expr               = local.peg_previous_blind_warning_promql[asset_id]
-        for_duration       = "${asset.blindConsecutivePolls * asset.sources[asset.deepVenueSource].pollIntervalSeconds}s"
+        for_duration       = "0s"
         no_data_state      = "OK"
         severity           = "warning"
         route              = "ops"
@@ -349,7 +349,7 @@ locals {
       for asset_id, asset in local.peg_previous_assets : "previous-blind-stressed-${asset_id}" => {
         name               = "Peg Blind While Stressed Critical [${asset_id} · previous]"
         expr               = local.peg_previous_blind_stressed_promql[asset_id]
-        for_duration       = "${asset.blindConsecutivePolls * asset.sources[asset.deepVenueSource].pollIntervalSeconds}s"
+        for_duration       = "0s"
         no_data_state      = "OK"
         severity           = "critical"
         route              = "page"

@@ -51,19 +51,19 @@ Do not add placeholder selectors or infer listing state from source health.
 
 For each active policy, the generated source defines:
 
-| Rule                          | Signal                                                                                | Delivery                              |
-| ----------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------- |
-| Downside warning              | Fresh uncapped executable sell-price deviation with poll and usable-decision coverage | `#alerts-pools`                       |
-| Premium warning               | Fresh uncapped executable premium with the same coverage gates                        | `#alerts-pools`                       |
-| Deep-venue downside critical  | Sustained critical downside on the policy-designated deep venue                       | Splunk On-Call and `#alerts-critical` |
-| Deep-venue spread warning     | Fresh deep-venue spread above its approved envelope                                   | `#alerts-pools`                       |
-| Structural saturation warning | Fresh reachable indexed-pool saturation above policy                                  | `#alerts-pools`                       |
-| Blind warning                 | No usable uncapped deep-venue price after the approved grace                          | `#alerts-infra`                       |
-| Blind while stressed critical | Blindness plus reachable structural stress, spread stress, or partial-price shortfall | Splunk On-Call and `#alerts-critical` |
-| Source unhealthy              | Expected source unhealthy while the asset heartbeat is fresh                          | `#alerts-infra`                       |
-| Source permanently dead       | Source unhealthy for `permanentlyDeadSeconds`                                         | `#alerts-infra`                       |
-| Heartbeat missing             | The isolated asset poll no longer advances                                            | `#alerts-infra`                       |
-| Policy rollover stuck         | A retained previous policy exists and the active version is not acknowledged in time  | `#alerts-infra`                       |
+| Rule                          | Signal                                                                                                      | Delivery                              |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Downside warning              | Fresh uncapped executable sell-price deviation with poll and usable-decision coverage                       | `#alerts-pools`                       |
+| Premium warning               | Fresh uncapped executable premium with the same coverage gates                                              | `#alerts-pools`                       |
+| Deep-venue downside critical  | Sustained critical downside on the policy-designated deep venue                                             | Splunk On-Call and `#alerts-critical` |
+| Deep-venue spread warning     | Fresh deep-venue spread above its approved envelope                                                         | `#alerts-pools`                       |
+| Structural saturation warning | Fresh reachable indexed-pool saturation above policy                                                        | `#alerts-pools`                       |
+| Blind warning                 | Producer count reaches `blindConsecutivePolls` without a usable uncapped deep-venue decision                | `#alerts-infra`                       |
+| Blind while stressed critical | Confirmed consecutive blindness plus reachable structural stress, spread stress, or partial-price shortfall | Splunk On-Call and `#alerts-critical` |
+| Source unhealthy              | Expected source unhealthy while the asset heartbeat is fresh                                                | `#alerts-infra`                       |
+| Source permanently dead       | Source unhealthy for `permanentlyDeadSeconds`                                                               | `#alerts-infra`                       |
+| Heartbeat missing             | The isolated asset poll no longer advances                                                                  | `#alerts-infra`                       |
+| Policy rollover stuck         | A retained previous policy exists and the active version is not acknowledged in time                        | `#alerts-infra`                       |
 
 When `previous` is retained, the same decision ladder remains generated for
 that exact previous version. Previous-version rules do not stop at the first
@@ -72,7 +72,11 @@ active-version acknowledgement; cleanup is a later reviewed policy change.
 Display sources never create deviation or premium rules. Structural saturation
 never pages alone. Blindness does not depend on indexed-pool reachability:
 reachability gates only the structural branch of the independent-stress page,
-so market stress remains observable during an indexer or pool-data outage.
+so market stress remains observable during an indexer or pool-data outage. The
+producer updates `mento_peg_blind_consecutive_polls` at deep-venue poll cadence
+and resets it on each usable uncapped decision. Grafana compares that exact
+count with policy; its 60-second evaluation clock never approximates 30-second
+polls.
 
 ## Local source validation
 
@@ -107,8 +111,8 @@ are true:
 3. #1568 is merged, deployed, and the production bridge exposes the exact
    active `policy_version`.
 4. `mento_peg_last_poll`, `mento_peg_source_healthy`,
-   `mento_peg_observation_at`, and `mento_peg_indexed_pool_reachable` return
-   the expected labelled series.
+   `mento_peg_observation_at`, `mento_peg_indexed_pool_reachable`, and
+   `mento_peg_blind_consecutive_polls` return the expected labelled series.
 5. The full critical window has accumulated. For the current 20-minute deep
    venue window, both counters satisfy the policy-derived floor:
 

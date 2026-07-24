@@ -58,6 +58,9 @@ exact-version active and retained-previous rule sets. Market warnings route to
 `#alerts-pools`, producer and source warnings route to `#alerts-infra`, and
 critical rules route to both Splunk On-Call and `#alerts-critical`. Peg rules
 use direct rule-level contact points and never inherit the FX-weekend mute.
+Blind rules compare the producer's exact consecutive deep-poll count with
+policy; they do not infer 30-second poll history from Grafana's 60-second
+evaluation clock.
 
 The source is not live merely because it is merged. Policy publication and
 authentication, producer activation, the trusted-main Terraform plan, the
