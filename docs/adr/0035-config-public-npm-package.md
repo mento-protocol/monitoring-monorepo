@@ -3,7 +3,7 @@ title: shared-config publishes as the public @mento-protocol/config package
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-21
+last_verified: 2026-07-24
 scope: shared-config
 date: 2026-07
 doc_type: adr
@@ -34,6 +34,16 @@ builds on a GitHub-hosted runner, verifies the packed artifact, and publishes
 with npm provenance via GitHub OIDC. Manual dispatches from `main` only validate
 and pack the artifact; untagged workflow runs do not publish.
 
+## Current operational status
+
+The decision remains in force, but the release path is not healthy end to end.
+As verified on 2026-07-24, npm still serves `0.1.0` while the repository and tag
+`config-v0.2.0` identify `0.2.0`. Workflow run `29831994804` built and verified
+the package, signed provenance, then failed at `npm publish` with npm `E404` /
+missing permission. Issue [#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)
+tracks the trusted-publisher repair and `0.2.0` release. Until it closes, do not
+claim that every matching tag publishes successfully.
+
 ## Alternatives considered
 
 - **Keep the private monitoring-specific package** — rejected: it preserves a
@@ -52,9 +62,9 @@ and pack the artifact; untagged workflow runs do not publish.
   action pinning and pack-content verification.
 - Manual workflow dispatch is a dry-run path only. Publishing must remain tied
   to a matching `config-v<version>` tag reachable from `origin/main`.
-- npm trusted publishing cannot create a brand-new package. An npm org/package
-  maintainer must seed `@mento-protocol/config` once through an approved
-  maintainer publish, then configure trusted publishing for repository
+- npm trusted publishing cannot create a brand-new package. Version `0.1.0` was
+  seeded through an approved maintainer publish. An npm org/package maintainer
+  must keep trusted publishing configured for repository
   `mento-protocol/monitoring-monorepo`, workflow filename `publish-config.yml`,
   and allowed action `npm publish`.
 - The publish job intentionally uses a GitHub-hosted runner because npm trusted
@@ -71,3 +81,5 @@ and pack the artifact; untagged workflow runs do not publish.
 - `shared-config/package.json`
 - `.github/workflows/publish-config.yml`
 - [`shared-config/AGENTS.md`](../../shared-config/AGENTS.md)
+- Failed `config-v0.2.0` publish run `29831994804`; live npm version check on
+  2026-07-24; recovery issue [#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)

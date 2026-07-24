@@ -3,7 +3,7 @@ title: Sentry triage/autofix runs as a staged GitHub Actions agent pipeline with
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-15
+last_verified: 2026-07-24
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -140,9 +140,12 @@ trust is earned in phases, and Codex remains the independent PR reviewer.**
 - Tracker issue [#1282](https://github.com/mento-protocol/monitoring-monorepo/issues/1282)
   (phases, child issues #1274-#1281; noise-floor work
   mento-protocol/frontend-monorepo#529).
-- Phase-1 enforcement lands via sibling PRs in the same batch — #1287
-  (`scripts/sentry-triage-ingest.mjs`, `.github/workflows/sentry-triage-ingest.yml`),
-  #1286 (`.github/workflows/sentry-triage-agent.yml`, `.github/prompts/sentry-triage.md`),
-  and #1284 (`terraform/github-secrets.tf`) — plus
-  `docs/notes/sentry-triage-pipeline.md` (queue + verdict contracts, runbook).
-  Until those merge, this ADR records the accepted plan those PRs implement.
+- Phase 1 shipped through #1284, #1286, and #1287. Deterministic ingest and
+  read-only triage live in `.github/workflows/sentry-triage-ingest.yml` and
+  `.github/workflows/sentry-triage-agent.yml`; Phase 2a archive and Phase 2b
+  local-repo autofix live in `.github/workflows/sentry-triage-archive.yml` and
+  `.github/workflows/sentry-autofix.yml`. Their deterministic helpers,
+  Terraform-owned credentials and switches, and
+  `docs/notes/sentry-triage-pipeline.md` enforce the queue, verdict, mutation,
+  and operating contracts. [ADR 0038](0038-sentry-central-plane-verdict-projection.md)
+  records the owning-repo issue projection boundary.

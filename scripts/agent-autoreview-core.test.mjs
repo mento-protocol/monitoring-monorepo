@@ -604,6 +604,28 @@ assert.equal(
   null,
   "service token placeholders remain allowed",
 );
+assert.equal(
+  secretLikeReason("GH_TOKEN: ${{ github.token }}"),
+  null,
+  "GitHub Actions github.* context expressions are references, not literal tokens",
+);
+assert.equal(
+  secretLikeReason("APP_TOKEN: ${{ steps.app-token.outputs.token }}"),
+  null,
+  "steps.*.outputs.* expressions are references, not literal tokens",
+);
+assert.equal(
+  secretLikeReason("PROBE_TOKEN: ${{ needs.build.outputs.token }}"),
+  null,
+  "needs.*.outputs.* expressions are references, not literal tokens",
+);
+assert.match(
+  secretLikeReason(
+    `service_token: "\${{ github.token }}${genericTokenCredential}"`,
+  ),
+  /literal generic token assignment/,
+  "a real literal trailing a github.* expression is still rejected (anchor holds)",
+);
 const publicEvmTokenAddress = ["0x", "0".repeat(39), "1"].join("");
 assert.match(
   secretLikeReason(`USDC_TOKEN="${publicEvmTokenAddress}"`),

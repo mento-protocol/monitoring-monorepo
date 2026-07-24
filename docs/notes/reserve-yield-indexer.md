@@ -38,9 +38,10 @@ sUSDS/stETH event suites with reserve-yield event tests enabled.
 - sUSDS event handlers write movement rows, summary rows, and daily snapshots
   only when real `Transfer`, `Deposit`, or `Withdraw` logs for tracked reserve
   wallets are processed.
-- stETH daily snapshots are keyed by `chainId:token:wallet`, baseline at the
-  final Ethereum block before `2026-03-03T00:00:00Z`, and skipped as a batch when
-  any required historical wallet `balanceOf` read is unavailable.
+- stETH daily snapshots are keyed by chain, wallet, and day, baseline at the
+  final Ethereum block before `2026-03-03T00:00:00Z`, and skipped as a batch
+  when any required historical wallet `balanceOf` read is unavailable. The
+  dashboard joins them to current reserve holdings by wallet.
 - Dashboard reserve-yield readers use `NEXT_PUBLIC_HASURA_URL`.
 
 ## Why This Avoids The Hosted Replay Stall Class

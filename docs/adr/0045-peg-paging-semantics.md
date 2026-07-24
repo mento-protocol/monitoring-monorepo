@@ -3,7 +3,7 @@ title: Peg paging measures executable sell price; the deep venue pages alone
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 scope: metrics-bridge / alerts
 date: 2026-07
 doc_type: adr
@@ -13,8 +13,11 @@ garden_lane: adrs-architecture
 
 # ADR 0045 — Peg paging measures executable sell price; the deep venue pages alone
 
-**Status:** Accepted (Jul 2026), in force. Decided ahead of implementation;
-mechanics land per [`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
+**Status:** Accepted (Jul 2026), in force. PRs #1497 and #1568 landed the
+measurement and version-bound decision producer. Grafana paging rules, routing,
+and activation remain the Phase 3 rollout in
+[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md); they are not
+implemented on `main`.
 **Scope:** metrics-bridge / alerts
 
 ## Context
@@ -32,6 +35,10 @@ corroborating signal is throttled (trading limits), absent (pool paused),
 or structurally missing (thin second venue).
 
 ## Decision
+
+The bridge producer implements the measurement clauses below. Phase 3 rules
+must enforce the paging, blindness, and routing clauses before the producer
+becomes alert-authoritative.
 
 - **Measurand.** Deviation is computed from the executable _sell_ price at
   a per-asset reference size tied to real exposure: the binding bound is
@@ -54,7 +61,17 @@ or structurally missing (thin second venue).
   leg that is not the capped condition itself (structural saturation,
   envelope-excess spread, or a partial-fill VWAP shortfall at or beyond
   the critical threshold). A capped book still quoting par — benign depth
-  thinning — stays warn-tier.
+  thinning — stays warn-tier. Indexed-pool reachability never forces
+  `mento_peg_blind`; a still-fresh usable deep-venue decision remains usable
+  while the independent structural plane is unavailable. The version-bound
+  `mento_peg_blind_consecutive_polls` gauge advances once per due deep-source
+  cadence slot that produces no new usable uncapped decision, including a due
+  slot where no structural reference size can be derived. It resets to zero
+  on a usable decision, saturates at the approved `blindConsecutivePolls`
+  threshold, and never advances on non-deep polls or intermediate loop ticks.
+  A changed binding reference size also makes the deep source immediately due
+  under the scheduler's existing semantics. This producer-side streak
+  preserves a usable reset that occurs between Grafana evaluations.
 - **The deep venue pages alone.** Sustained executable deviation beyond the
   critical threshold on the policy-designated deep venue (designated in
   the gated thresholds artifact, ADR 0044 — not in the registry) pages by
@@ -121,9 +138,10 @@ or structurally missing (thin second venue).
   price discovery) remain undetectable by construction; issuer-side
   signals (redemption status, attestations) are runbook inputs, not
   automated sources — this residual risk is documented, not hidden.
-- Alert expressions, states, and the coverage-class gate are specified
-  before implementation; changes to paging semantics are ADR-level, not
-  tuning.
+- The bridge metric producer implements the executable-price, capped-depth,
+  blindness, and coverage-class semantics. Phase 3 must implement the alert
+  expressions, states, and routing before activation. Changes to paging
+  semantics remain ADR-level, not tuning.
 
 ## Evidence
 
@@ -132,4 +150,13 @@ or structurally missing (thin second venue).
   volume figures, 2026-07-22)
 - `docs/notes/polygon-monitoring.md` (EURm/EUROP pool, MANUAL feed,
   migration-multisig breaker path)
+- `metrics-bridge/src/peg/order-book.ts`,
+  `metrics-bridge/src/peg/poller.ts`, and
+  `metrics-bridge/src/peg/metrics.ts` (implemented measurement semantics)
+- `metrics-bridge/src/peg/poll-cycle.ts` (version-bound decision scheduling
+  and blind-streak state)
+- `metrics-bridge/test/peg-order-book.test.ts`,
+  `metrics-bridge/test/peg-poller.test.ts`, and
+  `metrics-bridge/test/peg-metrics.test.ts`
+- `alerts/rules/peg-thresholds.json` (dormant deep-venue and threshold policy)
 - ADRs 0042, 0043, 0044

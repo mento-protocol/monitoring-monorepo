@@ -3,7 +3,7 @@ title: stETH actuals use a launch-aligned sub-daily wallet balance sampler
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-07
+last_verified: 2026-07-24
 scope: indexer-envio
 date: 2026-07
 doc_type: adr
@@ -52,8 +52,9 @@ a bounded stETH sampler:
 ## Consequences
 
 - stETH has launch-aligned actual snapshots, while sUSDS remains event-only.
-- The dashboard reads stETH daily rows by `chainId:token:wallet` so it does not
-  merge earnings from different reserve wallets into one token-level stream.
+- The dashboard reads Ethereum stETH snapshots per wallet and joins them to
+  current reserve holdings by wallet, so it does not merge earnings from
+  different reserve wallets into one token-level stream.
 - If the launch-block stETH balance read is unavailable, the launch baseline
   handler fails so Envio retries the launch block before post-launch movements
   can mutate wallet positions. Later heartbeat samples require those baselines

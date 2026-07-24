@@ -3,7 +3,7 @@ title: Peg alert thresholds stay in the gated alerts-rules plane, read from one 
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 scope: alerts
 date: 2026-07
 doc_type: adr
@@ -13,9 +13,12 @@ garden_lane: adrs-architecture
 
 # ADR 0044 — Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON
 
-**Status:** Accepted (Jul 2026), in force. Decided ahead of implementation;
-the rule group lands in the alerts phase of
-[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
+**Status:** Accepted (Jul 2026), in force. PRs #1497 and #1568 landed
+bridge-side policy validation, version-bound decision metrics, and producer
+acknowledgment state. Protected policy publication, Grafana rules, routing, and
+activation remain the Phase 3 rollout in
+[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md); they are not
+implemented on `main`.
 **Scope:** alerts
 
 ## Context
@@ -38,6 +41,8 @@ are deliberately per-rule in this stack, and a single series-join rule
 auto-resolves a live page whenever the threshold series blips.
 
 ## Decision
+
+Phase 3 must implement the following protected artifact and rules contract:
 
 - Peg thresholds — and every declared parameter that changes whether a
   page can fire: warn/critical bps, sustain windows, per-source reference
@@ -63,8 +68,11 @@ auto-resolves a live page whenever the threshold series blips.
   runtime and CI verify that binding so a restarted replica
   cannot reuse one metric label for changed semantics. Activation is two-phase because artifact publish and
   bridge pickup cannot be atomic: the generated rules accept both the
-  previous and the new policy version until the producer ACKNOWLEDGES the
-  new version — old-version acceptance is ack-terminated, never expired by
+  previous and the new exact policy versions until a reviewed follow-up
+  artifact sets `previous=null` after the producer ACKNOWLEDGES the new
+  version. Acknowledgment resolves only the rollover-stuck condition; it
+  never auto-terminates retained rule acceptance. Old-version acceptance is
+  removed only by that reviewed artifact change and never expires by
   wall-clock alone, so a delayed or unavailable artifact poll can never
   leave the rules without an accepted producer version. Deviation
   evaluation stays live on the previous policy throughout, and a distinct
@@ -74,7 +82,8 @@ auto-resolves a live page whenever the threshold series blips.
   a changed active version must retain that exact prior active object as
   `previous`; an unchanged active version may only preserve or remove its
   retained predecessor after acknowledgment. A second active rollover is
-  rejected until that predecessor has been ACK-cleared. There is no HCL mirror,
+  rejected until that predecessor has been cleared by the reviewed
+  `previous=null` update. There is no HCL mirror,
   so the existing mirror-drift check is unnecessary for this class; a sibling integrity
   check validates at source level: every threshold source key and the
   deep-venue designation must name an existing registry source id, every
@@ -151,6 +160,16 @@ auto-resolves a live page whenever the threshold series blips.
 
 - `docs/PLAN-peg-monitoring.md` (review findings that reversed the
   thresholds-as-metrics lean)
+- `alerts/rules/peg-thresholds.json` (dormant source policy)
+- `metrics-bridge/src/peg/policy.ts`,
+  `metrics-bridge/src/peg/compatibility.ts`, and
+  `metrics-bridge/src/peg/runtime.ts` (implemented bridge-side policy
+  validation and activation path)
+- `metrics-bridge/src/peg/poll-cycle.ts` and
+  `metrics-bridge/src/peg/metrics.ts` (version-bound producer decisions and
+  acknowledgment telemetry)
+- `metrics-bridge/Dockerfile` (gated policy excluded from the service image)
+- `scripts/check-peg-registry-integrity.mjs` (cross-plane source contract)
 - `alerts/rules/rules-reserve-balances.tf`, `rules-oracle-relayers.tf`
   (per-key `for_each` threshold precedents)
 - `alerts/rules/rules-metrics-bridge.tf` (deliberate `no_data_state =
