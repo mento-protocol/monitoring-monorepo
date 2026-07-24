@@ -3,7 +3,7 @@ title: Documentation navigation is evaluated offline with deterministic scoring
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-21
+last_verified: 2026-07-24
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -96,7 +96,11 @@ Use a versioned, offline evaluation contract:
 
 - `docs/evals/documentation-navigation.md`
 - `docs/evals/documentation-navigation-fixtures.json`
+- `docs/evals/documentation-navigation-result.schema.json`
+- `docs/evals/documentation-navigation-baseline.json`
 - `scripts/docs-navigation-eval.mjs`
 - `scripts/docs-navigation-eval-helpers.mjs`
+- `scripts/docs-navigation-eval-result.mjs`
 - `scripts/docs-navigation-eval.test.mjs`
+- `.github/workflows/ci.yml`
 - `.github/workflows/documentation-garden.yml`
