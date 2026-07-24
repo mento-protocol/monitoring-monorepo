@@ -45,18 +45,20 @@ garden_lane: agent-entry-points
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER`,
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
   `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
-  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The bootstrap must not route
-  workflows through the refresh selectors; a separate cutover-routing PR owns
-  that change while retaining the legacy Token Creator rollback grant.
+  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The four trusted-main plan
+  workflows and `terraform-drift.yml` route through the refresh selectors.
+  Keep the legacy Token Creator rollback grant until live proof, drain checks,
+  and the separate authority-removal change are complete.
 - Build trusted-main refresh access from curated non-basic project read roles;
   never use basic `roles/viewer`. Keep Secret Accessor limited to the exact
   Terraform-managed secrets and Storage Object Viewer limited to state and
   deployment-source buckets. Treat service data exposed by predefined readers
   (including logs, metrics, and artifacts) as part of the confidentiality
-  review. After the routing PR lands, prove the role set through its checked-in
-  `main` route with live full-refresh, unlocked plans for every CI-managed
-  Google-provider stack; add only the exact missing permission named by a
-  provider denial. Drain and audit those runs before authority removal.
+  review. The routing is checked in, but live proof is still required through
+  the merged `main` route: run full-refresh, unlocked plans for every
+  CI-managed Google-provider stack and add only the exact missing permission
+  named by a provider denial. Drain and audit those runs before authority
+  removal.
 - Only a separate final removal PR may delete the routine deployer's
   `org-terraform` Token Creator grant, and only through an explicitly approved
   platform apply. Do not create the peg-policy project or bucket until that

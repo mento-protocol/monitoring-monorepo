@@ -9,15 +9,15 @@ name: Aegis Terraform
 #     provider as `production-infra-applier@…seed`, then impersonates
 #     `org-terraform@…seed` for backend state writes + locking. The applier's
 #     service-account-scoped Token Creator grant lives in `terraform/ci-wif.tf`.
-#   - plan (on PR) authenticates as the read-only CI SA
-#     (`GCP_SERVICE_ACCOUNT_PLAN`) and overrides the backend impersonation to
-#     `org-terraform-plan-readonly@…seed` via `-backend-config`. That seed SA
-#     holds only `roles/storage.objectViewer` on the state bucket, so plan
-#     passes `-lock=false`. PR plans receive a validation-safe placeholder
-#     `TF_VAR_grafana_service_account_token` and run `-refresh=false`, keeping
-#     the real Grafana token out of same-repo PR workflows. push/dispatch plans
-#     keep the real token and full refresh before deciding whether apply needs
-#     the `production-infra` gate.
+#   - PR plans authenticate as the state-only CI SA
+#     (`GCP_SERVICE_ACCOUNT_PLAN`) and override backend impersonation to
+#     `org-terraform-plan-readonly@…seed`. Trusted-main push/dispatch plans use
+#     the dedicated refresh provider, refresh runner, and
+#     `org-terraform-refresh-readonly@…seed` backend identity. Both identities
+#     are read-only and require `-lock=false`. PR plans receive a
+#     validation-safe placeholder `TF_VAR_grafana_service_account_token` and
+#     run `-refresh=false`; trusted-main plans keep the real token and full
+#     refresh before deciding whether apply needs the `production-infra` gate.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
@@ -154,7 +154,8 @@ jobs:
             echo "stack-changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate PR plan to Google Cloud
+        if: github.event_name == 'pull_request'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
@@ -164,6 +165,13 @@ jobs:
           # production-infra-only provider and applier. See file header +
           # `terraform/ci-wif.tf`.
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_PLAN }}
+
+      - name: Authenticate trusted-main refresh to Google Cloud
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
@@ -186,14 +194,13 @@ jobs:
       - name: Format check
         run: terraform fmt -check -recursive
 
-      - name: Init
-        # Override the backend impersonation (hardcoded to the write-capable
-        # `org-terraform@…seed` in main.tf, used by the apply job) to the
-        # read-only `org-terraform-plan-readonly@…seed` SA, which holds only
-        # `roles/storage.objectViewer` on the state bucket. `-backend-config`
-        # takes precedence over the backend block; fresh CI runners have no
-        # cached `.terraform`, so no `-reconfigure` is needed.
+      - name: Init PR plan backend
+        if: github.event_name == 'pull_request'
         run: terraform init -input=false -backend-config="impersonate_service_account=org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+
+      - name: Init trusted-main refresh backend
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        run: terraform init -input=false -backend-config="impersonate_service_account=org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
 
       - name: Validate
         run: terraform validate -no-color
@@ -208,13 +215,12 @@ jobs:
         # `/tmp/tf-plan.txt` for logs, the sticky comment, and Slack.
         # No `-out=` — saved plan files contain TF_VAR_* values in cleartext
         # (HashiCorp docs); apply creates a later plan after approval instead.
-        # `-lock=false`: the read-only plan SA (objectViewer only) can't
-        # create/delete the GCS lock object, so plan must skip locking. Safe
-        # because plan only reads state and re-runs on every push; a skipped
-        # lock can't drop work the way a missed apply could. PR plans also pass
-        # `-refresh=false` because their Grafana provider token is a placeholder;
-        # push/dispatch plans keep full refresh with the real token before the
-        # apply gate decides whether changes exist.
+        # `-lock=false`: neither read-only route can create/delete the GCS lock
+        # object, so plan must skip locking. Safe because plan only reads state
+        # and re-runs on every push; a skipped lock can't drop work the way a
+        # missed apply could. PR plans also pass `-refresh=false` because their
+        # Grafana provider token is a placeholder; trusted-main push/dispatch
+        # plans keep full refresh with the real token.
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |

@@ -518,7 +518,7 @@ expectFailure(
       BAD: ${escapedRefreshServiceAccountDot}
 `,
   },
-  "must not be used during bootstrap",
+  "refresh identity variables are allowed only in exact trusted-main refresh routes",
 );
 
 expectFailure(
@@ -531,7 +531,7 @@ expectFailure(
       BAD: ${escapedRefreshProviderDot}
 `,
   },
-  "must not be used during bootstrap",
+  "refresh identity variables are allowed only in exact trusted-main refresh routes",
 );
 
 expectFailure(
