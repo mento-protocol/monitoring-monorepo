@@ -1,4 +1,5 @@
 import type { FetchLike } from "./types.js";
+import { readBoundedUtf8Response } from "./bounded-response.js";
 
 export const GCP_METADATA_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
@@ -126,40 +127,6 @@ export function assertPinnedGcsJsonMediaUrl(url: URL): void {
   }
 }
 
-async function readBoundedTokenResponse(response: Response): Promise<string> {
-  const contentLength = response.headers.get("content-length");
-  if (
-    contentLength !== null &&
-    Number(contentLength) > GCP_METADATA_TOKEN_MAX_RESPONSE_BYTES
-  ) {
-    await response.body?.cancel();
-    throw new Error("GCP metadata token response exceeds the byte budget");
-  }
-  if (response.body === null) return "";
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    if (received > GCP_METADATA_TOKEN_MAX_RESPONSE_BYTES) {
-      await reader.cancel();
-      throw new Error("GCP metadata token response exceeds the byte budget");
-    }
-    chunks.push(value);
-  }
-
-  const body = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder("utf-8", { fatal: true }).decode(body);
-}
-
 function parseTokenRecord(raw: string): Record<string, unknown> {
   let parsed: unknown;
   try {
@@ -285,7 +252,11 @@ export class GcpMetadataBearerTokenProvider implements BearerTokenProvider {
         );
       }
       const token = parseTokenResponse(
-        await readBoundedTokenResponse(response),
+        await readBoundedUtf8Response(
+          response,
+          GCP_METADATA_TOKEN_MAX_RESPONSE_BYTES,
+          "GCP metadata token response exceeds the byte budget",
+        ),
       );
       const expiresAtMs = now + token.expiresInSeconds * 1_000;
       if (!Number.isSafeInteger(expiresAtMs)) {
