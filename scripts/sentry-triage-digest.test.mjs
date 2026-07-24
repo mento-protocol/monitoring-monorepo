@@ -650,12 +650,12 @@ await test("buildDigest produces a valid chat.postMessage payload shape", () => 
     { channel: "#engineering", now: NOW },
   );
   assertEqual(payload.channel, "#engineering");
-  assertEqual(payload.text, "Sentry triage — 1 issue(s) triaged");
+  assertEqual(payload.text, "Sentry triage — 1 issue triaged");
   assert(Array.isArray(payload.blocks), "expected blocks array");
   assertEqual(payload.blocks[0].type, "section");
   assertEqual(payload.blocks[0].text.type, "mrkdwn");
   assert(
-    payload.blocks[0].text.text.includes("Sentry triage — 1 issue(s) triaged"),
+    payload.blocks[0].text.text.includes("Sentry triage — 1 issue triaged"),
     "expected header text",
   );
   assert(
@@ -677,38 +677,10 @@ await test("every mrkdwn text object sets verbatim: true (no Slack auto-parsing)
     ],
     { channel: "#engineering", now: NOW },
   );
-  assert(payload.blocks.length >= 3, "expected header/counts/section blocks");
+  assert(payload.blocks.length >= 2, "expected header + section blocks");
   for (const block of payload.blocks) {
     assertEqual(block.text.verbatim, true);
   }
-});
-
-await test("buildDigest keeps the counts header line in contract order incl. failed triage", () => {
-  const payload = buildDigest(
-    [
-      issueFixture({ number: 1, labels: ["sentry:verdict-code-fix"] }),
-      issueFixture({ number: 2, labels: ["sentry:verdict-code-fix"] }),
-      issueFixture({ number: 3, labels: ["sentry:verdict-config-fix"] }),
-      issueFixture({
-        number: 4,
-        labels: ["sentry:verdict-needs-human"],
-        comments: [
-          {
-            body: verdictComment({
-              verdict: "needs-human",
-              humanQuestion: "Decide X.",
-            }),
-          },
-        ],
-      }),
-      issueFixture({ number: 5, labels: [NEEDS_TRIAGE_LABEL] }),
-    ],
-    { channel: "#engineering", now: NOW },
-  );
-  assertEqual(
-    payload.blocks[1].text.text,
-    "code-fix: 2 · config-fix: 1 · upstream-transient: 0 · needs-human: 1 · failed triage: 1",
-  );
 });
 
 await test("buildDigest renders sections in order (needs-human first) and omits empty ones", () => {
@@ -874,8 +846,14 @@ await test("buildDigest renders a decision-ready needs-human brief with all fiel
     { channel: "#engineering", now: NOW },
   );
   const text = allText(payload);
-  assert(text.includes("⚠️ *<"), "expected the highlighted needs-human header");
-  assert(text.includes("confidence: low"), "expected confidence");
+  assert(
+    text.includes(`• *<${SENTRY_PERMALINK}|NH-11>* · confidence: low`),
+    "expected a level-1 bullet whose id links straight to the Sentry issue, with no repeated project",
+  );
+  assert(
+    !text.includes("(app-mento-org)"),
+    "expected the project not repeated in parens on the needs-human line",
+  );
   assert(
     text.includes(
       "*Decision needed:* Decide whether to rotate the signing key or wait.",
@@ -998,6 +976,12 @@ await test("wontfix line links the queue-issue rationale with confidence", () =>
     ),
     "expected the wontfix line linking the queue issue",
   );
+  assert(
+    text.includes(
+      "    ◦ To archive in Sentry: add `sentry:approved-archive` to the queue issue above.",
+    ),
+    "expected a sub-bullet nudging the existing human-gated archive label",
+  );
 });
 
 await test("buildDigest renders a distinct failed-triage line with no verdict", () => {
@@ -1058,13 +1042,9 @@ await test("parseIssueNumbers fails loud on non-arrays and bad members", () => {
 
 await test("buildDigest tolerates an empty batch (defensive; job is gated upstream)", () => {
   const payload = buildDigest([], { channel: "#engineering", now: NOW });
-  assertEqual(payload.text, "Sentry triage — 0 issue(s) triaged");
-  assertEqual(
-    payload.blocks[1].text.text,
-    "code-fix: 0 · config-fix: 0 · upstream-transient: 0 · needs-human: 0 · failed triage: 0",
-  );
-  // No section blocks when nothing was triaged.
-  assertEqual(payload.blocks.length, 2);
+  assertEqual(payload.text, "Sentry triage — 0 issues triaged");
+  // No section blocks when nothing was triaged — just the header.
+  assertEqual(payload.blocks.length, 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -1093,7 +1073,7 @@ await test("buildDigest splits a worst-case 6-issue routed batch across sections
   );
   const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
 
-  const sectionBlocks = payload.blocks.slice(2);
+  const sectionBlocks = payload.blocks.slice(1);
   assert(
     sectionBlocks.length >= 2,
     "expected the routed lines split across sections",
@@ -1197,16 +1177,16 @@ await test("needs-human briefs never split across Slack blocks mid-entry", () =>
   );
   const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
   const briefBlocks = payload.blocks
-    .slice(2)
+    .slice(1)
     .map((block) => block.text.text)
     .filter((text) => text.includes("*Decision needed:*"));
   assert(briefBlocks.length >= 2, "expected the two briefs split into blocks");
   for (const text of briefBlocks) {
     assert(text.length <= MAX_SECTION_TEXT_LEN, "expected under the budget");
-    // A block contains only WHOLE briefs: every brief header line ("⚠️ *<…")
+    // A block contains only WHOLE briefs: every brief header line ("• *<…")
     // is matched by its closing links line — a mid-entry split would strand a
     // header without links (or links without a header) in some block.
-    const headers = text.match(/^⚠️ \*/gm) ?? [];
+    const headers = text.match(/^• \*/gm) ?? [];
     const linksLines = text.match(/\*Links:\*/g) ?? [];
     assertEqual(headers.length, linksLines.length);
     assert(headers.length >= 1, "expected at least one whole brief per block");
@@ -1276,7 +1256,7 @@ await test("collectIssues fetches each issue via the injected gh runner", async 
   assertEqual(calls[1][calls[1].indexOf("--repo") + 1], "o/r");
 
   const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
-  assertEqual(payload.text, "Sentry triage — 2 issue(s) triaged");
+  assertEqual(payload.text, "Sentry triage — 2 issues triaged");
 });
 
 await test("collectIssues propagates a single fetch failure (fail loud, no silent drop)", async () => {
