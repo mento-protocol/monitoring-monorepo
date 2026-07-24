@@ -3,7 +3,7 @@ title: The peg-monitor registry is service-local config, not published shared-co
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-24
 scope: metrics-bridge / shared-config
 date: 2026-07
 doc_type: adr
@@ -13,29 +13,32 @@ garden_lane: adrs-architecture
 
 # ADR 0043 — The peg-monitor registry is service-local config, not published shared-config
 
-**Status:** Accepted (Jul 2026), in force. Decided ahead of implementation;
-the registry schema lands with the poller per
+**Status:** Accepted (Jul 2026), in force. The registry and integrity gate
+landed in PR #1497; protected policy publication and alert activation remain
+separate rollout phases in
 [`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
 **Scope:** metrics-bridge / shared-config
 
 ## Context
 
-Peg monitoring for oracle-less stablecoins is driven by a per-asset registry:
-which venues to poll, pair mappings, reference sizes, source roles, gates,
-conversion legs, and coverage class. The obvious home appears to be
-`shared-config`, the repo's source of truth for chain/token metadata
+Peg monitoring for oracle-less stablecoins uses two coordinated per-asset
+artifacts. The service-local registry defines venue identity and topology:
+sources, pair mappings, source roles, conversion legs, pool monitors, and
+coverage class. The gated policy defines page-affecting reference sizes,
+cadence, freshness and spread gates, and deep-venue authority. The obvious
+home for the registry appears to be `shared-config`, the repo's source of truth
+for chain/token metadata
 ([ADR 0011](0011-shared-config-single-source-of-truth.md)).
 
 But `shared-config` publishes as the public npm package
 `@mento-protocol/config` ([ADR 0035](0035-config-public-npm-package.md)):
 every export is public API surface, releases are tag-driven, and the
 package's charter is _protocol_ metadata consumed by four packages. The peg
-registry is single-consumer _operational monitoring policy_ — venue
-topology, cadences, and staleness tolerances. Publishing it would (a) make
-every venue tweak a public API release event, (b) disclose monitoring
-parameters that are pointless to advertise, and (c) duplicate rate-feed and
-token identity already canonical in `shared-config/oracle-reporters.json`,
-creating a second source of truth with no drift check.
+registry is single-consumer operational monitoring topology. Publishing it
+would make every venue-topology tweak a public API release event and duplicate
+rate-feed and token identity already canonical in
+`shared-config/oracle-reporters.json`, creating a second source of truth with
+no drift check.
 
 The repo already has a home for this category: Aegis treats its
 `config.yaml` as production monitoring policy, service-local and
@@ -46,18 +49,19 @@ unpublished.
 - The registry lives with the consuming service
   (`metrics-bridge/peg-registry.json` + a schema module and fixture tests),
   repo-internal and never published to npm.
-- It **references** identity, never duplicates it: rate feeds and breaker
-  metadata by feed address (canonical in `oracle-reporters.json`), tokens by
-  chain + address (canonical in shared-config tokens). A referential-
+- It **references** identity, never duplicates it: rate-feed identity and pair
+  by feed address (canonical in `oracle-reporters.json`), tokens by chain +
+  address (canonical in shared-config tokens). A referential-
   integrity check script — sibling to the existing threshold-drift check,
   wired into the quality gate and CI — fails the build when a referenced
   feed or token does not exist upstream. Pool references cannot be proven
-  statically (pools are discovered on-chain), so the bridge resolves every
-  `(chain, pool)` against Hasura at startup AND re-validates continuously
-  with each structural poll, failing that asset's `indexed-pool` coverage
-  path closed — with a distinct ops alert — whenever resolution stops
-  (retired pool, resync, partial backend failure), not only when it never
-  resolved.
+  statically (pools are discovered on-chain), so the activated bridge resolves
+  every `(chain, pool)` against Hasura at startup and re-validates continuously
+  with each structural poll. It fails that asset's `indexed-pool` coverage path
+  closed and publishes `mento_peg_indexed_pool_reachable` whenever resolution
+  stops (retired pool, resync, partial backend failure), not only when it never
+  resolved. A distinct ops alert on that metric is required before the peg
+  signal becomes alert-authoritative.
 - Schema decisions that the first adversarial review forced:
   - Asset keys are internal slugs (`europ-schuman`), never tickers; the
     onboarding census binds by contract address / issuer identity (ticker
@@ -118,6 +122,12 @@ unpublished.
 ## Evidence
 
 - `docs/PLAN-peg-monitoring.md` (schema sketch and review findings)
+- `metrics-bridge/peg-registry.json` and
+  `metrics-bridge/src/peg/registry.ts` (implemented topology and schema)
+- `metrics-bridge/test/peg-registry.test.ts`
+- `scripts/check-peg-registry-integrity.mjs`
+- `metrics-bridge/Dockerfile` (service-local registry in the runtime image;
+  gated policy excluded)
 - `aegis/config.yaml` (service-local monitoring-policy precedent)
 - `shared-config/oracle-reporters.json` (canonical feed identity referenced,
   not duplicated)
