@@ -38,7 +38,10 @@ describe("GET /api/peg-monitoring", () => {
     };
     await expectInvalidOrigin("");
     await expectInvalidOrigin("http://remote.example");
-    await expectInvalidOrigin("https://user:x@bridge.example");
+    const credentialedOrigin = new URL("https://bridge.example");
+    credentialedOrigin.username = "test-user";
+    credentialedOrigin.password = "test-pass";
+    await expectInvalidOrigin(credentialedOrigin.href);
     await expectInvalidOrigin("https://bridge.example/x");
     expect(fetchMock).not.toHaveBeenCalled();
     vi.stubEnv("METRICS_BRIDGE_URL", "https://metrics-bridge.example");
