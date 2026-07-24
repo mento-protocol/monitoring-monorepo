@@ -3,7 +3,7 @@ title: Central Sentry triage plane with owning-repo verdict projection
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-24
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -68,9 +68,10 @@ deterministic step.**
   job — the matrix jobs hosting the LLM agent never see it. For a `code-fix` /
   `config-fix` verdict whose `affected_repo` is an EXTERNAL owning repo, it
   files an issue in that repo, labels the stub `sentry:projected`, comments
-  the projected URL, and closes the stub (queue hygiene; the matrix close
-  step settles all other buckets itself and defers these). `needs-human` and
-  `upstream-transient` are never projected.
+  the projected URL, and closes the stub. The matrix settles local actionable
+  and `upstream-transient` stubs, leaves `needs-human` open, and defers external
+  actionable stubs to this job. `needs-human` and `upstream-transient` are never
+  projected.
 - **The trust boundary is a fixed allowlist plus authorship.** `affected_repo`
   is untrusted agent text, validated against exactly `frontend-monorepo`,
   `mento-analytics-api`, `minipay-dapp`; anything else (including this repo) is a
@@ -86,9 +87,10 @@ deterministic step.**
   searched across all states, with a genuine match also required to be
   authored by the projector identity itself; a closed match is reopened so
   regressions resurface) so re-runs and regressions never duplicate — and
-  verdict-declared duplicates coalesce onto one owning-repo issue (the new
-  SHORT-ID persisted as a projector-authored alias comment: an atomic append,
-  race-free under parallel matrix jobs) instead of filing one per SHORT-ID.
+  verdict-declared duplicates coalesce onto one owning-repo issue. The new
+  SHORT-ID persists as a projector-authored alias comment, while the serialized
+  in-run registry prevents discovery races instead of filing one issue per
+  SHORT-ID.
 - **Issues-write ONLY, dedicated fine-grained PAT.** A `sentry-triage-projector`
   PAT with Issues Read+Write on exactly those three repos — no contents, no
   pull-requests — stored as the `count`-gated Actions secret
@@ -125,9 +127,9 @@ deterministic step.**
 ## Consequences
 
 - A cross-repo write credential now exists. It is bounded to Issues-write on
-  three repos, `count`-gated, and carries no `prevent_destroy` (brand-new, no
-  external consumer — mirrors `SENTRY_TRIAGE_TOKEN`). It is step-scoped so it is
-  never exposed to the triage agent.
+  three repos, `count`-gated, and was introduced without a pre-existing external
+  consumer, so it carries no `prevent_destroy` (mirroring `SENTRY_TRIAGE_TOKEN`).
+  It is step-scoped so it is never exposed to the triage agent.
 - Agent-authored text leaves the central plane, but only redaction-governed
   verdict fields, neutralized and length-bounded; no raw Sentry payload is
   fetched or copied. A leaked/wrong verdict can create a readable owning-repo
@@ -135,15 +137,16 @@ deterministic step.**
 - Projection is idempotent across regressions: a reopened-then-re-triaged stub
   reuses the existing owning-repo issue rather than filing a duplicate.
 - Owning-repo issues are advisory; the fix still happens the normal way in that
-  repo. Fix-PR automation stays out of scope (Phase 3, #1279).
+  repo. Cross-repo fix-PR automation stays out of scope (Phase 3, #1279).
 - The queue-close comment for `code-fix`/`config-fix` now records the projection
   outcome (linked issue, or an explicit "projection skipped" while the PAT is
   unprovisioned) — visible, not silent.
 
 ## Evidence
 
-- Implemented in the PR for issue
-  [#1339](https://github.com/mento-protocol/monitoring-monorepo/issues/1339):
+- Implemented for issue
+  [#1339](https://github.com/mento-protocol/monitoring-monorepo/issues/1339)
+  in PR #1356:
   `scripts/sentry-triage-project.mjs` (+ tests), the projection/close steps in
   `.github/workflows/sentry-triage-agent.yml`, the `count`-gated
   `github_actions_secret.sentry_projection_token` in

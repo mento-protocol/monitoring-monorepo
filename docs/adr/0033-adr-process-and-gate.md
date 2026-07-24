@@ -3,7 +3,7 @@ title: Architectural decisions are recorded as ADRs, enforced by a reminder gate
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-06
+last_verified: 2026-07-24
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -40,9 +40,10 @@ is enforced, not just documented:
 - **The PR template** asks "Architecture decision?" so authors consciously
   answer yes (link the ADR) or no (why).
 
-The gate is **advisory by default** (self-suppressing: silent unless a real
-trigger has no accompanying ADR); `--strict` exits non-zero for teams that want
-a hard CI block.
+The gate is **advisory by default** and silent when no trigger is present. When
+a trigger is present, it prints either a missing-ADR reminder or a lighter
+coverage prompt if the change includes an ADR; `--strict` exits non-zero only
+for a trigger without an accompanying ADR.
 
 ## Alternatives considered
 
@@ -60,8 +61,8 @@ a hard CI block.
 ## Consequences
 
 - Adding a new package, Terraform stack, or workflow without an ADR triggers a
-  visible reminder; the escape hatch is an explicit `no ADR needed: <reason>` on
-  the PR.
+  visible reminder; when no ADR is needed, record a one-line reason on the PR's
+  **Architecture decision?** checklist item.
 - ADRs are canonical context (ADR 0005), so each is enrolled in the 90-day
   re-verification check — the log stays honest over time.
 - `pnpm adr:check` is a repo command; `scripts/check-adr-reminder.test.mjs`
