@@ -150,6 +150,7 @@ const defaultSourceState = (): SourceState => ({
   observation: null,
   referenceSize: null,
   conversionValidUntil: null,
+  blindConsecutivePolls: 0,
 });
 
 const defaultReadConversionLeg = async (
@@ -433,6 +434,7 @@ type PollSourceInput = {
   target: number;
   source: PegSource;
   policy: PegSourcePolicy;
+  blindConsecutivePollLimit: number | null;
   structural: StructuralContext;
   context: CycleContext;
 };
@@ -715,7 +717,11 @@ async function pollDueSource(
 async function pollSource(
   input: PollSourceInput,
 ): Promise<PegSourceMetricSnapshot | null> {
-  const stateKey = `${input.context.policyVersion}:${input.assetId}:${input.source.id}`;
+  const stateKey = sourceStateKey(
+    input.context.policyVersion,
+    input.assetId,
+    input.source.id,
+  );
   input.context.activeStateKeys.add(stateKey);
   const state =
     input.context.sourceStates.get(stateKey) ?? defaultSourceState();
@@ -724,16 +730,27 @@ async function pollSource(
     input.structural,
     input.policy.referenceSizeCap,
   );
-  if (refSize === null) {
-    clearSource(state, null);
-    return null;
-  }
-  const due =
+  const cadenceDue =
     state.lastAttemptAt === null ||
-    state.referenceSize !== refSize ||
     input.context.nowSeconds - state.lastAttemptAt >=
       input.policy.pollIntervalSeconds;
-  if (due) return pollDueSource(input, state, refSize);
+  if (refSize === null) {
+    return snapshotWithoutReferenceSize(input, state, cadenceDue);
+  }
+  // A changed binding reference size requires an immediate new decision even
+  // inside the ordinary cadence window.
+  const due = cadenceDue || state.referenceSize !== refSize;
+  if (due) {
+    const snapshot = await pollDueSource(input, state, refSize);
+    if (input.blindConsecutivePollLimit !== null) {
+      updateBlindConsecutivePolls(
+        state,
+        input.blindConsecutivePollLimit,
+        snapshot.newUsableDecision,
+      );
+    }
+    return snapshot;
+  }
 
   const observation = cachedObservation(
     state,
@@ -742,6 +759,46 @@ async function pollSource(
     input.context,
   );
   return sourceSnapshot(input, refSize, observation, false);
+}
+
+function snapshotWithoutReferenceSize(
+  input: PollSourceInput,
+  state: SourceState,
+  cadenceDue: boolean,
+): PegSourceMetricSnapshot | null {
+  if (input.blindConsecutivePollLimit !== null && cadenceDue) {
+    state.lastAttemptAt = input.context.nowSeconds;
+    updateBlindConsecutivePolls(state, input.blindConsecutivePollLimit, false);
+  }
+  if (state.referenceSize === null) {
+    clearSource(state, null);
+    return null;
+  }
+  const observation = cachedObservation(
+    state,
+    input.source,
+    input.policy,
+    input.context,
+  );
+  return sourceSnapshot(input, state.referenceSize, observation, false);
+}
+
+function updateBlindConsecutivePolls(
+  state: SourceState,
+  limit: number,
+  usableDecision: boolean,
+): void {
+  state.blindConsecutivePolls = usableDecision
+    ? 0
+    : Math.min(state.blindConsecutivePolls + 1, limit);
+}
+
+function sourceStateKey(
+  policyVersion: string,
+  assetId: string,
+  sourceId: string,
+): string {
+  return `${policyVersion}:${assetId}:${sourceId}`;
 }
 
 function deepVenueIsBlind(
@@ -761,6 +818,54 @@ function deepVenueIsBlind(
   );
 }
 
+type PollPolicySourceInput = {
+  assetId: string;
+  asset: PegAsset;
+  policy: PegAssetPolicy;
+  sourceId: string;
+  sourcePolicy: PegSourcePolicy;
+  structural: StructuralContext;
+  context: CycleContext;
+};
+
+async function pollPolicySource({
+  assetId,
+  asset,
+  policy,
+  sourceId,
+  sourcePolicy,
+  structural,
+  context,
+}: PollPolicySourceInput): Promise<PegSourceMetricSnapshot | null> {
+  const source = asset.sources.find(({ id }) => id === sourceId);
+  if (source === undefined) {
+    context.dependencies.report(
+      "join",
+      new Error("policy source is absent from registry"),
+      { asset: assetId, source: sourceId },
+    );
+    throw new Error(`peg source ${assetId}/${sourceId} is unsupported`);
+  }
+  try {
+    return await pollSource({
+      assetId,
+      target: policy.target,
+      source,
+      policy: sourcePolicy,
+      blindConsecutivePollLimit:
+        sourcePolicy.authority === "deep" ? policy.blindConsecutivePolls : null,
+      structural,
+      context,
+    });
+  } catch (error) {
+    context.dependencies.report("source_fetch", error, {
+      asset: assetId,
+      source: source.id,
+    });
+    return null;
+  }
+}
+
 async function pollAsset(
   assetId: string,
   asset: PegAsset,
@@ -775,44 +880,31 @@ async function pollAsset(
     "policy asset sources",
   );
   const joined = await Promise.all(
-    policySources.map(async ([sourceId, sourcePolicy]) => {
-      const source = asset.sources.find(({ id }) => id === sourceId);
-      if (source === undefined) {
-        context.dependencies.report(
-          "join",
-          new Error("policy source is absent from registry"),
-          { asset: assetId, source: sourceId },
-        );
-        throw new Error(`peg source ${assetId}/${sourceId} is unsupported`);
-      }
-      try {
-        return await pollSource({
-          assetId,
-          target: policy.target,
-          source,
-          policy: sourcePolicy,
-          structural,
-          context,
-        });
-      } catch (error) {
-        context.dependencies.report("source_fetch", error, {
-          asset: assetId,
-          source: source.id,
-        });
-        return null;
-      }
-    }),
+    policySources.map(([sourceId, sourcePolicy]) =>
+      pollPolicySource({
+        assetId,
+        asset,
+        policy,
+        sourceId,
+        sourcePolicy,
+        structural,
+        context,
+      }),
+    ),
   );
   const sources = joined.filter(
     (snapshot): snapshot is PegSourceMetricSnapshot => snapshot !== null,
+  );
+  const deepVenueSource = policy.deepVenueSource;
+  const deepSourceState = context.sourceStates.get(
+    sourceStateKey(context.policyVersion, assetId, deepVenueSource),
   );
   return {
     asset: assetId,
     policyVersion: context.policyVersion,
     lastPollAt: context.nowSeconds,
-    blind:
-      !structural.reachable ||
-      deepVenueIsBlind(sources, policy.deepVenueSource),
+    blind: deepVenueIsBlind(sources, deepVenueSource),
+    blindConsecutivePolls: deepSourceState?.blindConsecutivePolls ?? 0,
     structuralSaturation: structural.saturation,
     structuralQuerySaturated: structural.querySaturated,
     indexedPoolReachable: structural.reachable,

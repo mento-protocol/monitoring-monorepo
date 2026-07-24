@@ -1,5 +1,6 @@
 import { Counter, Gauge } from "prom-client";
 import { register } from "../metrics.js";
+import { PEG_POLICY_MAX_BLIND_CONSECUTIVE_POLLS } from "./policy.js";
 import type { PegObservation } from "./types.js";
 
 const sourceLabels = ["asset", "source", "policy_version"] as const;
@@ -33,6 +34,7 @@ export interface PegAssetMetricSnapshot {
   policyVersion: string;
   lastPollAt: number;
   blind: boolean;
+  blindConsecutivePolls: number;
   structuralSaturation: number | null;
   structuralQuerySaturated: boolean;
   indexedPoolReachable: boolean;
@@ -122,6 +124,12 @@ export const pegGauges = {
   blind: new Gauge({
     name: "mento_peg_blind",
     help: "1 when the policy-designated deep venue has no usable uncapped executable price.",
+    labelNames: assetLabels,
+    registers: [register],
+  }),
+  blindConsecutivePolls: new Gauge({
+    name: "mento_peg_blind_consecutive_polls",
+    help: "Consecutive due policy-designated deep-venue cadence slots with no new usable uncapped executable decision, saturated at the approved policy threshold.",
     labelNames: assetLabels,
     registers: [register],
   }),
@@ -312,6 +320,18 @@ function validateSnapshots(snapshots: PegAssetMetricSnapshot[]): void {
       throw new Error(`Duplicate peg asset: ${assetKey}`);
     assets.add(assetKey);
     assertFiniteNonnegative(snapshot.lastPollAt, "lastPollAt");
+    assertFiniteNonnegative(
+      snapshot.blindConsecutivePolls,
+      "blindConsecutivePolls",
+    );
+    if (
+      !Number.isInteger(snapshot.blindConsecutivePolls) ||
+      snapshot.blindConsecutivePolls > PEG_POLICY_MAX_BLIND_CONSECUTIVE_POLLS
+    ) {
+      throw new Error(
+        `blindConsecutivePolls must be an integer no greater than ${PEG_POLICY_MAX_BLIND_CONSECUTIVE_POLLS}`,
+      );
+    }
     assertFiniteNonnegative(snapshot.counterpartyCount, "counterpartyCount");
     if (snapshot.structuralSaturation !== null) {
       assertFiniteNonnegative(
@@ -426,6 +446,7 @@ function publishAsset(snapshot: PegAssetMetricSnapshot): void {
     policy_version: snapshot.policyVersion,
   };
   pegGauges.blind.set(labels, snapshot.blind ? 1 : 0);
+  pegGauges.blindConsecutivePolls.set(labels, snapshot.blindConsecutivePolls);
   pegGauges.structuralQuerySaturated.set(
     labels,
     snapshot.structuralQuerySaturated ? 1 : 0,

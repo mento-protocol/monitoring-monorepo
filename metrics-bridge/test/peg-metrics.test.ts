@@ -15,6 +15,7 @@ function snapshot(
     policyVersion: "europ-v1",
     lastPollAt: 1_784_734_422,
     blind: false,
+    blindConsecutivePolls: 0,
     structuralSaturation: 0.25,
     structuralQuerySaturated: false,
     indexedPoolReachable: true,
@@ -73,6 +74,9 @@ describe("Peg metrics", () => {
     );
     expect(metrics).toContain(
       'mento_peg_policy_version{policy_version="europ-v1"} 1',
+    );
+    expect(metrics).toContain(
+      'mento_peg_blind_consecutive_polls{asset="europ-schuman",policy_version="europ-v1"} 0',
     );
     expect(metrics).toContain(
       'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
@@ -272,7 +276,10 @@ describe("Peg metrics", () => {
   });
 
   it("publishes active and retained policy series together", async () => {
-    const active = snapshot({ policyVersion: "europ-v2" });
+    const active = snapshot({
+      policyVersion: "europ-v2",
+      blindConsecutivePolls: 2,
+    });
     active.sources = active.sources.map((source) => ({
       ...source,
       policyVersion: "europ-v2",
@@ -292,6 +299,12 @@ describe("Peg metrics", () => {
     );
     expect(metrics).toContain(
       'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+    expect(metrics).toContain(
+      'mento_peg_blind_consecutive_polls{asset="europ-schuman",policy_version="europ-v2"} 2',
+    );
+    expect(metrics).toContain(
+      'mento_peg_blind_consecutive_polls{asset="europ-schuman",policy_version="europ-v1"} 0',
     );
   });
 
@@ -318,6 +331,9 @@ describe("Peg metrics", () => {
     expect(metrics).toContain(
       'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v2"} 1',
     );
+    expect(metrics).toContain(
+      'mento_peg_blind_consecutive_polls{asset="europ-schuman",policy_version="europ-v2"} 0',
+    );
   });
 
   it("validates an entire snapshot before clearing last-good gauges", async () => {
@@ -328,5 +344,14 @@ describe("Peg metrics", () => {
     expect(await register.metrics()).toContain(
       'mento_peg_structural_saturation{asset="europ-schuman",policy_version="europ-v1"} 0.25',
     );
+  });
+
+  it("rejects unbounded or fractional blind streak state", () => {
+    expect(() =>
+      publishPegMetrics([snapshot({ blindConsecutivePolls: 1_001 })]),
+    ).toThrow(/blindConsecutivePolls/);
+    expect(() =>
+      publishPegMetrics([snapshot({ blindConsecutivePolls: 1.5 })]),
+    ).toThrow(/blindConsecutivePolls/);
   });
 });

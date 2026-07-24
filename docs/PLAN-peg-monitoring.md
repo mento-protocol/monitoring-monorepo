@@ -129,8 +129,10 @@ Own gauge module + reset lifecycle (CDP precedent), own loop from
 `mento_peg_deviation_bps{asset,source}`, `mento_peg_executable_px`,
 `mento_peg_filled_fraction`, `mento_peg_venue_state`,
 `mento_peg_structural_saturation{asset}`, `mento_peg_source_healthy`,
-`mento_peg_blind{asset}`, `mento_peg_observation_at{asset,source}`,
-`mento_peg_last_poll{asset}`. All label values registry-bounded.
+`mento_peg_blind{asset}`, `mento_peg_blind_consecutive_polls{asset}`,
+`mento_peg_observation_at{asset,source}`, `mento_peg_last_poll{asset}`. Every
+decision and streak series also binds the exact `policy_version`; all label
+values are policy/registry-bounded.
 
 ### Alerting (ADR 0044, 0045)
 
@@ -141,10 +143,12 @@ publishes the same policy as an IaC-owned versioned runtime artifact
 that the bridge polls (never baked into the image;
 content-addressed version suffix verified by runtime and CI;
 `mento_peg_policy_version` asserted by the rules with two-phase
-rollover: previous + new version accepted until producer ack — never
-expired by wall-clock alone — with a rollover-stuck alert when ack
-exceeds the expected window; per-source poll cadences live in the same
-artifact so coverage cannot be gamed by an ungated cadence change). Per-rule conventions: freshness
+rollover: previous + new exact versions remain accepted until a reviewed
+follow-up sets `previous=null` after producer ACK. ACK only resolves the
+rollover-stuck condition and never auto-terminates retained rules; previous
+acceptance is never expired by wall-clock alone. Per-source poll cadences live
+in the same artifact so coverage cannot be gamed by an ungated cadence change).
+Per-rule conventions: freshness
 gate (`time() - mento_peg_observation_at`) on **every** peg rule;
 `no_data_state = "Alerting"` (+~5 min grace, documented) on blindness and
 heartbeat rules; duration-fraction sustain
@@ -156,7 +160,10 @@ ANDed with a sample-coverage predicate — `increase` over a monotonic
 series) — because range functions ignore gaps and a sparse post-outage
 window must not read as sustained. `observation_at` advances only on an
 authoritative venue-data timestamp/sequence, never on HTTP fetch success
-alone; a frozen venue feed fails the source closed.
+alone; a frozen venue feed fails the source closed. Blind duration uses the
+producer-side `mento_peg_blind_consecutive_polls` streak so a usable deep poll
+between slower Grafana evaluations resets the decision. Only due deep-source
+cadence slots advance it; non-deep polls and loop ticks do not.
 
 Ladder (EUROP initial values; per-asset data):
 
@@ -165,7 +172,8 @@ Ladder (EUROP initial values; per-asset data):
   second uncapped venue escalates priority. Also: blind-while-stressed.
 - **Warn (Slack, repeat-suppressed):** uncapped deviation
   ≥ 25 bps sustained ≥ 10 min; deep-venue envelope-excess spread; structural
-  saturation; blind ≥ M consecutive polls.
+  saturation; producer-counted blind ≥ M consecutive due deep-venue poll
+  slots.
 - **Ops-noise (Slack low-urgency):** source unhealthy (API errors, 429s);
   never pages. Distinct alerts: "source permanently dead" (N days),
   "critical path unreachable — re-onboard" (deep-venue loss, human ack).

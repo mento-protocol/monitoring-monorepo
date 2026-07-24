@@ -459,6 +459,7 @@ describe("peg poll cycle freshness and measurements", () => {
     const snapshot = (await poller.pollCycle(input))[0]!;
     expect(snapshot).toMatchObject({
       blind: true,
+      blindConsecutivePolls: 1,
       structuralSaturation: 0.2,
       counterpartyCount: 1,
     });
@@ -470,6 +471,68 @@ describe("peg poll cycle freshness and measurements", () => {
       premiumBps: null,
     });
     expect(source(snapshot).observation?.vwap).toBe(0.9);
+  });
+
+  it("counts only due deep slots across a blind-usable-blind evaluation gap", async () => {
+    const spec = primaryAsset({
+      sources: [
+        primarySource(),
+        primarySource({
+          id: "secondary_eur",
+          pair: "PEG2-EUR",
+          authority: "secondary",
+          pollIntervalSeconds: 15,
+        }),
+      ],
+    });
+    const input = makeInput([spec]);
+    const baseMs = 1_800_000_000_000;
+    let nowMs = baseMs;
+    const fetchBitvavo = vi.fn(async ({ market }: { market: string }) => {
+      const elapsedSeconds = (nowMs - baseMs) / 1_000;
+      const usable = market === "PEG-EUR" && elapsedSeconds === 30;
+      return observation(nowMs, {
+        vwap: usable ? 1 : 0.9,
+        capped: !usable,
+        filledFraction: usable ? 1 : 0.5,
+        sequence: `${market}-${elapsedSeconds}`,
+      });
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo,
+      publish: vi.fn(),
+    });
+
+    for (const [elapsedSeconds, expectedBlind, expectedCount] of [
+      [0, true, 1],
+      [15, true, 1],
+      [30, false, 0],
+      [45, false, 0],
+      [60, true, 1],
+      [90, true, 2],
+      [120, true, 3],
+      [150, true, 3],
+    ] as const) {
+      nowMs = baseMs + elapsedSeconds * 1_000;
+      const current = (await poller.pollCycle(input))[0]!;
+      expect(current).toMatchObject({
+        blind: expectedBlind,
+        blindConsecutivePolls: expectedCount,
+      });
+    }
+
+    const deepCalls = fetchBitvavo.mock.calls.filter(
+      ([request]) => request.market === "PEG-EUR",
+    );
+    const secondaryCalls = fetchBitvavo.mock.calls.filter(
+      ([request]) => request.market === "PEG2-EUR",
+    );
+    expect(deepCalls).toHaveLength(6);
+    expect(secondaryCalls).toHaveLength(8);
   });
 
   it("rejects a materially future-dated provider timestamp", async () => {
@@ -682,6 +745,7 @@ describe("peg poll cycle isolation", () => {
       indexedPoolReachable: false,
       structuralSaturation: null,
       blind: true,
+      blindConsecutivePolls: 1,
     });
     expect(failedStructural.sources).toEqual([]);
     expect(healthyStructural.indexedPoolReachable).toBe(true);
@@ -693,7 +757,43 @@ describe("peg poll cycle isolation", () => {
     expect(errors.map(({ kind }) => kind)).toContain("structural_query");
   });
 
-  it("does not replace an unknown live 10-unit limit with the 50-unit cap", async () => {
+  it("counts only due deep cadence slots when structural authority starts unavailable", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const baseMs = 1_800_000_000_000;
+    let nowMs = baseMs;
+    const fetchBitvavo = vi.fn(async () => observation(nowMs));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () => {
+        throw new Error("Hasura unavailable");
+      }),
+      fetchBitvavo,
+      publish: vi.fn(),
+    });
+
+    for (const [elapsedSeconds, expectedCount] of [
+      [0, 1],
+      [15, 1],
+      [30, 2],
+      [31, 2],
+      [60, 3],
+      [90, 3],
+    ] as const) {
+      nowMs = baseMs + elapsedSeconds * 1_000;
+      const current = (await poller.pollCycle(input))[0]!;
+      expect(current).toMatchObject({
+        blind: true,
+        blindConsecutivePolls: expectedCount,
+        indexedPoolReachable: false,
+        sources: [],
+      });
+    }
+
+    expect(fetchBitvavo).not.toHaveBeenCalled();
+  });
+
+  it("keeps a fresh deep price independent from unreachable structural state", async () => {
     const spec = primaryAsset();
     const input = makeInput([spec]);
     let nowMs = 1_800_000_000_000;
@@ -732,11 +832,18 @@ describe("peg poll cycle isolation", () => {
     nowMs += 30_000;
     const unknown = (await poller.pollCycle(input))[0]!;
     expect(unknown).toMatchObject({
-      blind: true,
+      blind: false,
+      blindConsecutivePolls: 1,
       indexedPoolReachable: false,
       structuralSaturation: null,
     });
-    expect(unknown.sources).toEqual([]);
+    expect(source(unknown)).toMatchObject({
+      healthy: true,
+      referenceSize: 10,
+      newSuccess: false,
+      newUsableDecision: false,
+      observation: { vwap: 0.9, capped: false },
+    });
     expect(fetchBitvavo).toHaveBeenCalledTimes(1);
     expect(fetchBitvavo.mock.calls[0]?.[0].refSize).toBe(10);
   });
@@ -778,10 +885,16 @@ describe("peg poll cycle isolation", () => {
     nowMs = baseMs + 30_000;
     const unavailable = (await poller.pollCycle(input))[0]!;
     expect(unavailable).toMatchObject({
-      blind: true,
+      blind: false,
+      blindConsecutivePolls: 1,
       indexedPoolReachable: false,
       structuralSaturation: null,
-      sources: [],
+    });
+    expect(source(unavailable)).toMatchObject({
+      healthy: true,
+      referenceSize: 10,
+      newSuccess: false,
+      observation: { vwap: 0.9, capped: false },
     });
     expect(fetchBitvavo).toHaveBeenCalledOnce();
 
@@ -796,6 +909,7 @@ describe("peg poll cycle isolation", () => {
       newSuccess: false,
     });
     expect(recovered.blind).toBe(true);
+    expect(recovered.blindConsecutivePolls).toBe(2);
     expect(fetchBitvavo).toHaveBeenCalledTimes(2);
     expect(errors.map(({ kind }) => kind)).toEqual([
       "structural_query",
@@ -1276,5 +1390,74 @@ describe("peg poll cycle conversion and cadence", () => {
     expect(now).toHaveBeenCalledTimes(4);
     expect(publish).toHaveBeenCalledTimes(4);
     expect(publish).toHaveBeenLastCalledWith(reintroduced);
+  });
+
+  it("isolates blind streak state by policy version and resets it after cleanup", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const retainedCandidate = {
+      ...input.policy,
+      rolloverAckExpectedSeconds: 301,
+    };
+    const retained = PegPolicyVersionSchema.parse({
+      ...retainedCandidate,
+      version: pegPolicyVersionForContent("test-v0", retainedCandidate),
+    });
+    const baseMs = 1_800_000_000_000;
+    let nowMs = baseMs;
+    const responses = [
+      { usable: false, sequence: "active-blind-1" },
+      { usable: true, sequence: "retained-usable-1" },
+      { usable: false, sequence: "active-blind-2" },
+      { usable: false, sequence: "retained-blind-1" },
+      { usable: true, sequence: "active-usable-1" },
+      { usable: false, sequence: "retained-reintroduced-blind-1" },
+    ];
+    const fetchBitvavo = vi.fn(async () => {
+      const next = responses.shift();
+      if (next === undefined) throw new Error("unexpected provider request");
+      return observation(nowMs, {
+        vwap: next.usable ? 1 : 0.9,
+        capped: !next.usable,
+        filledFraction: next.usable ? 1 : 0.5,
+        sequence: next.sequence,
+      });
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo,
+      publish: vi.fn(),
+    });
+    const rollover = {
+      registry: input.registry,
+      policies: [input.policy, retained] as const,
+    };
+
+    const first = await poller.pollCycle(rollover);
+    expect(
+      first.map(({ blindConsecutivePolls }) => blindConsecutivePolls),
+    ).toEqual([1, 0]);
+
+    nowMs = baseMs + 30_000;
+    const second = await poller.pollCycle(rollover);
+    expect(
+      second.map(({ blindConsecutivePolls }) => blindConsecutivePolls),
+    ).toEqual([2, 1]);
+
+    nowMs = baseMs + 60_000;
+    const cleaned = await poller.pollCycle({
+      registry: input.registry,
+      policies: [input.policy],
+    });
+    expect(cleaned[0]?.blindConsecutivePolls).toBe(0);
+
+    const reintroduced = await poller.pollCycle(rollover);
+    expect(
+      reintroduced.map(({ blindConsecutivePolls }) => blindConsecutivePolls),
+    ).toEqual([0, 1]);
+    expect(fetchBitvavo).toHaveBeenCalledTimes(6);
   });
 });

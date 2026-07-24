@@ -24,12 +24,15 @@ export type PegPollCycleInput =
   | MultiPolicyPegPollCycleInput;
 
 export interface PegPollSourceState {
+  // Provider attempt time, or the last counted deep-source cadence slot when
+  // no structural reference size was available for a provider request.
   lastAttemptAt: number | null;
   lastObservationAt: number | null;
   identitiesAtLastObservationAt: Set<string>;
   observation: PegObservation | null;
   referenceSize: number | null;
   conversionValidUntil: number | null;
+  blindConsecutivePolls: number;
 }
 
 export interface PegPollCycleCoordinatorDependencies {

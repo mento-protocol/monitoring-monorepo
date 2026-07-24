@@ -115,7 +115,7 @@ describe("Peg policy transitions", () => {
     expect(() => validatePolicyTransition(current, valid)).not.toThrow();
   });
 
-  it("allows ACK-terminated removal but not mutation of the retained previous package", async () => {
+  it("allows reviewed post-ACK removal but not mutation of the retained previous package", async () => {
     const original = await policy();
     const nextActive = versioned("europ-v2", {
       ...original.active,
