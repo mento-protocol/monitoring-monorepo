@@ -89,6 +89,32 @@ describe("PegMonitoringPageClient", () => {
     render();
     expect(container.textContent).toContain("Current package");
   });
+  it("keeps the ticking age outside the live status while announcing semantic state", () => {
+    state.current = {
+      data: makePegMonitoringResponse(),
+      isLoading: false,
+      hasError: false,
+    };
+    render();
+    const status = container.querySelector('[data-testid="peg-status"]');
+    const liveStatus = status?.querySelector('[role="status"]');
+    const age = status?.querySelector('[data-testid="peg-status-age"]');
+    expect(liveStatus?.textContent).toBe("Current package");
+    expect(age?.textContent).toContain("produced 20s ago");
+    expect(liveStatus?.contains(age ?? null)).toBe(false);
+
+    act(() => vi.advanceTimersByTime(80_000));
+    const staleStatus = container.querySelector('[data-testid="peg-status"]');
+    const staleLiveStatus = staleStatus?.querySelector('[role="status"]');
+    const staleAge = staleStatus?.querySelector(
+      '[data-testid="peg-status-age"]',
+    );
+    expect(staleLiveStatus?.textContent).toContain(
+      "Stale — last confirmed package.",
+    );
+    expect(staleAge?.textContent).toContain("Produced 1m ago;");
+    expect(staleLiveStatus?.contains(staleAge ?? null)).toBe(false);
+  });
   it("renders previous-policy, partial source evidence, disabled breaker, and null breaker distinctly", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;

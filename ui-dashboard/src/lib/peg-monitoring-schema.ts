@@ -173,6 +173,30 @@ const source = z
         path: ["fetchedAt"],
         message: "source evidence must be complete",
       });
+    // `healthy` comes from the producer only when it has a live, identified
+    // observation. A live observation always carries these fields.
+    if (
+      value.healthy &&
+      [
+        value.venueState,
+        value.observationAt,
+        value.fetchedAt,
+        value.filledFraction,
+        value.capped,
+        value.referenceSize,
+      ].some((evidence) => evidence === null)
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["healthy"],
+        message: "healthy source requires complete observation evidence",
+      });
+    if (value.healthy && value.venueState === "halted")
+      context.addIssue({
+        code: "custom",
+        path: ["venueState"],
+        message: "healthy source cannot report a halted venue",
+      });
     if (
       value.convertVia !== null &&
       value.convertVia.fromCurrency !== value.quoteCurrency

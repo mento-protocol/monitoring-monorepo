@@ -131,6 +131,87 @@ describe("PegMonitoringResponseSchema", () => {
       }),
     ).toBe(false);
   });
+  it("requires the producer's complete observation subset for healthy sources", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const invalid = (sourceOverride: Partial<typeof source>) =>
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: [{ ...source, ...sourceOverride }],
+          },
+        ],
+      }).success;
+
+    for (const required of [
+      "venueState",
+      "observationAt",
+      "fetchedAt",
+      "filledFraction",
+      "capped",
+      "referenceSize",
+    ] as const) {
+      expect(invalid({ [required]: null })).toBe(false);
+    }
+    expect(invalid({ venueState: "halted" })).toBe(false);
+  });
+  it("accepts unavailable and status-only unhealthy evidence, but keeps timestamp pairs complete", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const valid = (sourceOverride: Partial<typeof source>) =>
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: [{ ...source, healthy: false, ...sourceOverride }],
+          },
+        ],
+      }).success;
+
+    expect(
+      valid({
+        venueState: null,
+        observationAt: null,
+        fetchedAt: null,
+        lastTradeAt: null,
+        executablePrice: null,
+        filledFraction: null,
+        capped: null,
+        referenceSize: null,
+        bid: null,
+        ask: null,
+        spreadBps: null,
+        deviationBps: null,
+        premiumBps: null,
+      }),
+    ).toBe(true);
+    expect(
+      valid({
+        venueState: "halted",
+        observationAt: null,
+        fetchedAt: PEG_FIXTURE_PRODUCED_AT - 5,
+        filledFraction: 0,
+        capped: true,
+        executablePrice: null,
+        bid: null,
+        ask: null,
+        spreadBps: null,
+        deviationBps: null,
+        premiumBps: null,
+      }),
+    ).toBe(true);
+    expect(
+      valid({
+        observationAt: PEG_FIXTURE_PRODUCED_AT - 5,
+        fetchedAt: null,
+      }),
+    ).toBe(false);
+  });
   it("accepts disabled breakers and neutral null breakers", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;

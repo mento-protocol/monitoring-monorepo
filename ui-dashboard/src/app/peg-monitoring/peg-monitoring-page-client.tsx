@@ -64,10 +64,13 @@ function SnapshotStatus({
     return (
       <div
         data-testid="peg-status"
-        role="status"
         className="rounded-lg border border-emerald-500/20 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200"
       >
-        Current package · produced {formatAge(state.ageMs)} ago
+        <span role="status">Current package</span>
+        <span data-testid="peg-status-age">
+          {" "}
+          · produced {formatAge(state.ageMs)} ago
+        </span>
       </div>
     );
   const why = {
@@ -78,12 +81,17 @@ function SnapshotStatus({
   return (
     <div
       data-testid="peg-status"
-      role="status"
       className="rounded-lg border border-amber-500/30 bg-amber-950/40 px-4 py-3 text-sm text-amber-100"
     >
-      <span className="font-semibold">Stale — last confirmed package.</span>{" "}
-      {why} Produced {formatAge(state.ageMs)} ago; retained evidence is not
-      presented as current.
+      <span role="status">
+        <span className="font-semibold">Stale — last confirmed package.</span>{" "}
+        {why}
+      </span>
+      <span data-testid="peg-status-age">
+        {" "}
+        Produced {formatAge(state.ageMs)} ago;
+      </span>{" "}
+      retained evidence is not presented as current.
     </div>
   );
 }

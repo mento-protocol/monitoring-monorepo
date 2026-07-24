@@ -22,17 +22,23 @@ export const formatAge = (ms: number) => {
 export const shortAddress = (value: string) =>
   `${value.slice(0, 8)}…${value.slice(-6)}`;
 export const titleCase = (value: string | null) =>
-  value === null ? "Unknown" : value.replaceAll("_", " ");
+  value === null ? "Unknown" : value.replace(/_/g, " ");
 export const formatScaled = (raw: string | null, decimals: number) => {
   if (raw === null) return "—";
-  const value = BigInt(raw);
-  const scale = BigInt(10) ** BigInt(decimals);
-  const whole = value / scale;
-  const fraction = (value % scale)
-    .toString()
-    .padStart(decimals, "0")
-    .replace(/0+$/, "");
-  return `${whole}${fraction ? `.${fraction.slice(0, 8)}` : ""}`;
+  const negative = raw.startsWith("-");
+  const unsigned = (negative ? raw.slice(1) : raw).replace(/^0+(?=\d)/, "");
+  const splitAt = Math.max(0, unsigned.length - decimals);
+  const whole = decimals === 0 ? unsigned : unsigned.slice(0, splitAt) || "0";
+  const fraction =
+    decimals === 0
+      ? ""
+      : unsigned
+          .slice(splitAt)
+          .padStart(decimals, "0")
+          .slice(0, 8)
+          .replace(/0+$/, "");
+  const isZero = whole.replace(/^0+$/, "") === "" && fraction === "";
+  return `${negative && !isZero ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
 };
 
 export function EvidenceItem({
