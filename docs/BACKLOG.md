@@ -22,6 +22,3 @@ is preserved in git history.
 - Pilot workboard → GitHub Project #12: <https://github.com/orgs/mento-protocol/projects/12>
 - Transition storage + pointers → root [`BACKLOG.md`](../BACKLOG.md)
 - Workflow → [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md)
-
-Historical references in `docs/PLAN-cdps-monitoring.md` to line ranges in this
-file describe the pre-migration state and are intentionally left as-is.
