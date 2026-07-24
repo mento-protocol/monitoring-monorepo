@@ -41,7 +41,12 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 `metrics-bridge` retains its indexed Hasura poller and owns an isolated peg
 lifecycle. When the protected policy artifact is configured, that loop combines
 indexed pool and trading-limit state with direct CEX order books and RPC oracle
-conversion views before exporting bounded Prometheus gauges.
+conversion views before exporting bounded Prometheus gauges. Each due
+configured-source poll also re-validates its authoritative exact pair and
+publishes a bounded consecutive-absence streak; it never discovers or mutates
+source topology. Asset onboarding, policy publication, producer and dashboard
+proof, and protected rule activation are in
+[`docs/notes/peg-monitoring-onboarding.md`](docs/notes/peg-monitoring-onboarding.md).
 
 **Static production endpoint:** `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`
 

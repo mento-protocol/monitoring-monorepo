@@ -15,10 +15,12 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (Jul 2026), in force. PRs #1497 and #1568 landed
 bridge-side policy validation, version-bound decision metrics, and producer
-acknowledgment state. Protected policy publication, Grafana rules, routing, and
-activation remain the Phase 3 rollout in
-[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md); they are not
-implemented on `main`.
+acknowledgment state. Source now implements the bounded listing-confirmation
+producer, exact-version listing and indexed-pool rules, and direct operations
+routing. Protected policy publication and authentication, producer activation,
+human-approved Grafana application, and live proof remain separate rollout
+gates tracked by
+[`docs/notes/peg-monitoring.md`](../notes/peg-monitoring.md).
 **Scope:** alerts
 
 ## Context
@@ -65,25 +67,22 @@ Phase 3 must implement the following protected artifact and rules contract:
   characters of the SHA-256 digest of its canonical content (excluding the
   version field). Canonicalization recursively sorts object keys by Unicode
   code point, preserves array order, and then hashes the compact JSON encoding;
-  runtime and CI verify that binding so a restarted replica
-  cannot reuse one metric label for changed semantics. Activation is two-phase because artifact publish and
-  bridge pickup cannot be atomic: the generated rules accept both the
-  previous and the new exact policy versions until a reviewed follow-up
-  artifact sets `previous=null` after the producer ACKNOWLEDGES the new
-  version. Acknowledgment resolves only the rollover-stuck condition; it
-  never auto-terminates retained rule acceptance. Old-version acceptance is
-  removed only by that reviewed artifact change and never expires by
-  wall-clock alone, so a delayed or unavailable artifact poll can never
-  leave the rules without an accepted producer version. Deviation
-  evaluation stays live on the previous policy throughout, and a distinct
-  rollover-stuck alert fires when acknowledgment exceeds the expected
-  window — a policy apply never opens a critical-monitoring gap. CI also
-  compares the candidate artifact with the current base policy:
-  a changed active version must retain that exact prior active object as
-  `previous`; an unchanged active version may only preserve or remove its
-  retained predecessor after acknowledgment. A second active rollover is
-  rejected until that predecessor has been cleared by the reviewed
-  `previous=null` update. There is no HCL mirror,
+  runtime and CI verify that binding so a restarted replica cannot reuse one
+  metric label for changed semantics. Activation is two-phase because
+  artifact publish and bridge pickup cannot be atomic: the generated rules
+  evaluate both the previous and new exact policy versions while `previous`
+  is retained. Producer acknowledgment resolves the distinct rollover-stuck
+  alert but never terminates old-version decisions by itself. After
+  acknowledgment and a complete active decision-history window, a separately
+  reviewed policy change sets `previous` to `null`; that apply removes the
+  retained rules and artifact content. No wall-clock expiry can leave the
+  rules without an accepted producer version, and deviation evaluation stays
+  live on the previous policy through cleanup. CI also compares the candidate
+  artifact with the current base policy: a changed active version must retain
+  that exact prior active object as `previous`; an unchanged active version
+  may only preserve or remove its retained predecessor. A second active
+  rollover is rejected until that predecessor has been cleared after
+  acknowledgment. There is no HCL mirror,
   so the existing mirror-drift check is unnecessary for this class; a sibling integrity
   check validates at source level: every threshold source key and the
   deep-venue designation must name an existing registry source id, every
@@ -111,30 +110,33 @@ Phase 3 must implement the following protected artifact and rules contract:
   - Blindness and heartbeat rules set `no_data_state = "Alerting"` with the
     documented justification and ~5-minute grace, following the
     bridge-down/pool-coverage precedent: for these rules, absence of data
-    is the signal.
+    is the signal. The producer publishes a policy-versioned consecutive-blind
+    poll count and resets it on each usable uncapped deep-venue decision. Rules
+    compare that count directly with `blindConsecutivePolls`; Grafana's
+    evaluation interval never stands in for a faster producer cadence.
   - Deviation sustain uses a duration-fraction window
     (`quantile_over_time`) rather than the rule `for` clock alone, so a
     single favorable sample on a thin, flapping book cannot reset a real
     breach; this is a new idiom in the stack, adopted deliberately for
     thin-market series and documented in the rule file banner. Range
     functions ignore gaps, so the quantile counts as a duration fraction
-    only when a sample-coverage predicate also passes — `increase` over a
+    only when two sample-coverage predicates also pass: `increase` over the
     monotonic per-source poll-success counter
-    (`mento_peg_poll_success_total`) compared against the expected poll
-    cadence. A timestamp-gauge `changes` undercounts polls that land
-    between scrapes, and raw `count_over_time` counts scrapes of a
-    retained gauge; only producer-side successes qualify, and failed polls
-    drop or stale the per-source series instead of holding last-good
-    values — after an API outage a sparse window with one fresh deviated
-    sample must not read as a sustained breach.
-  - Listing absence confirmation uses a producer-side bounded consecutive-check
-    gauge. Inferring it from a timestamp gauge with `changes()` is
-    forbidden: a listed or halted reset can occur between 30-second scrapes
-    and never appear in the sampled range.
-    During this field's first rollover only, the exact retained
-    predecessor omits the field and the producer uses the initial value `2`.
-    Remove that compatibility default after the reviewed `previous=null`
-    cleanup; every active policy must declare its own bounded threshold.
+    (`mento_peg_poll_success_total`) and over the monotonic uncapped
+    decision counter (`mento_peg_usable_decision_total`), each compared
+    against the expected poll cadence. A timestamp-gauge `changes`
+    undercounts polls that land between scrapes, and raw `count_over_time`
+    counts scrapes of a retained gauge. Requiring both counters prevents
+    capped or unchanged successes plus one deviated sample from being read
+    as a sustained breach.
+  - Listing absence confirmation uses a producer-side bounded
+    consecutive-check gauge. Inferring it from a timestamp gauge with
+    `changes()` is forbidden: a listed or halted reset can occur between
+    30-second scrapes and never appear in the sampled range. During this
+    field's first rollover only, the exact retained predecessor omits the
+    field and the producer uses the initial value `2`. Remove that
+    compatibility default after the reviewed `previous=null` cleanup; every
+    active policy must declare its own bounded threshold.
   - Severity and routing stay per-rule: warn → Slack, critical → page, each
     with its own contact-point wiring.
 
@@ -175,13 +177,20 @@ Phase 3 must implement the following protected artifact and rules contract:
   validation and activation path)
 - `metrics-bridge/src/peg/poll-cycle.ts` and
   `metrics-bridge/src/peg/metrics.ts` (version-bound producer decisions and
-  acknowledgment telemetry)
+  acknowledgment telemetry, including authoritative listing state and bounded
+  consecutive-absence confirmation)
 - `metrics-bridge/Dockerfile` (gated policy excluded from the service image)
 - `scripts/check-peg-registry-integrity.mjs` (cross-plane source contract)
 - `alerts/rules/rules-reserve-balances.tf`, `rules-oracle-relayers.tf`
   (per-key `for_each` threshold precedents)
 - `alerts/rules/rules-metrics-bridge.tf` (deliberate `no_data_state =
 "Alerting"` precedent)
+- `alerts/rules/peg-promql-active.tf`,
+  `alerts/rules/peg-promql-previous.tf`, and
+  `alerts/rules/peg-rule-definitions.tf` (exact-version listing confirmation,
+  structural reachability, and warning-only operations routing)
+- `docs/notes/peg-monitoring-onboarding.md` (onboarding, scheduled exact-pair
+  re-census, rollout, response, and rollback)
 - `scripts/check-deviation-threshold-drift.mjs` (the mirror-drift pattern
   this class deliberately avoids needing)
 - ADRs 0029, 0043, 0045

@@ -59,7 +59,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`alerts/infra/onchain-event-handler/README.md`](../alerts/infra/onchain-event-handler/README.md) | On-chain Event Handler Module | canonical / active | runbook / alerts/infra/onchain-event-handler | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/onchain-event-listeners/README.md`](../alerts/infra/onchain-event-listeners/README.md) | On-chain Event Listeners Module | canonical / active | runbook / alerts/infra/onchain-event-listeners | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-17 |
-| [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-22 |
+| [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-24 |
 | [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
@@ -71,6 +71,8 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md) | Documentation gardening | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/github-tooling-surfaces.md`](notes/github-tooling-surfaces.md) | GitHub Tooling Surfaces — gh CLI vs MCP | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md) | Hasura isolation trigger | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/peg-monitoring-onboarding.md`](notes/peg-monitoring-onboarding.md) | Peg monitoring onboarding and re-census | canonical / active | runbook / metrics-bridge / alerts / ui-dashboard | eng | 90d; verified 2026-07-24 |
+| [`docs/notes/peg-monitoring.md`](notes/peg-monitoring.md) | Peg monitoring alert source validation and activation hold | canonical / active | runbook / alerts/peg-monitoring | eng | 90d; verified 2026-07-24 |
 | [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md) | PR Operating Card | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |

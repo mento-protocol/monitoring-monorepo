@@ -1,4 +1,4 @@
-<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
 
 # alerts/rules
 
@@ -7,9 +7,9 @@ templates for Mento monitoring.
 
 ## Scope
 
-- **In this module:** protocol `grafana_rule_group` resources for FPMM pool health, VirtualPool oracle freshness, oracle report quality, oracle relayers, reserve balances, trading modes, trading limits, indexer health, CDP (Liquity v2) markets, and metrics-bridge liveness, plus Aegis service-health and Aegis testnet-health rule groups. This stack also owns the singleton `grafana_notification_policy`, protocol/Aegis contact points, message templates, mute timings, and protocol folders.
+- **In this module:** protocol `grafana_rule_group` resources for FPMM pool health, VirtualPool oracle freshness, oracle report quality, oracle relayers, reserve balances, trading modes, trading limits, indexer health, CDP (Liquity v2) markets, metrics-bridge liveness, and policy-versioned peg monitoring, plus Aegis service-health and Aegis testnet-health rule groups. This stack also owns the singleton `grafana_notification_policy`, protocol/Aegis/peg contact points, message templates, mute timings, and protocol folders.
 - **Not in this module:** the Aegis dashboard and the Aegis Grafana folder. Those stay in [`aegis/terraform`](../../aegis/terraform); the relocated rule group references the externally owned Aegis folder UID from `main.tf`.
-- **Folder convention:** one folder per `service` label (`FPMMs`, `Oracles`, `Indexer`, `Metrics Bridge`, `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`, `CDPs`).
+- **Folder convention:** one folder per `service` label (`FPMMs`, `Oracles`, `Indexer`, `Metrics Bridge`, `Peg Monitoring`, `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`, `CDPs`).
 
 ## State
 
@@ -45,10 +45,44 @@ Run `pnpm alerts:rules:lint` after changing alert rules or metrics-bridge gauge
 names. The check parses extracted PromQL expressions from `alerts/rules/*.tf`
 and cross-checks every referenced `mento_pool_*` / `mento_cdp_*` metric against
 the gauges registered in `metrics-bridge/src/metrics.ts` and
-`metrics-bridge/src/cdp-metrics.ts`.
+`metrics-bridge/src/cdp-metrics.ts`, and every referenced `mento_peg_*` metric
+against `metrics-bridge/src/peg/metrics.ts`.
 
 CI runs this in the `CI / Lint + test root scripts` job, along with
 `pnpm alerts:rules:lint:test` for extractor and failure-case coverage.
+
+## Peg alert ladder
+
+The source-generated peg ladder reads `peg-thresholds.json` once and creates
+exact-version active and retained-previous rule sets. Market warnings route to
+`#alerts-pools`, producer and source warnings route to `#alerts-infra`, and
+critical rules route to both Splunk On-Call and `#alerts-critical`. Peg rules
+use direct rule-level contact points and never inherit the FX-weekend mute.
+Blind rules compare the producer's exact consecutive deep-poll count with
+policy; they do not infer 30-second poll history from Grafana's 60-second
+evaluation clock.
+
+The source is not live merely because it is merged. Policy publication and
+authentication, producer activation, the trusted-main Terraform plan, the
+human-approved apply, and live Grafana proof are separate gates. Follow
+[`docs/notes/peg-monitoring.md`](../../docs/notes/peg-monitoring.md) for the
+current dependency boundary, exact source checks, telemetry preconditions,
+activation hold, and rollback order.
+
+Registry-rot rules cover every non-deep policy source, including display-only
+sources. Critical-path-unreachable rules cover only the policy-designated deep
+source. Both read the producer's current `absent` state and bounded consecutive
+absence gauge, then require a fresh authoritative listing timestamp. They do
+not infer checks from Grafana scrapes or gate on book health. Indexed-pool-
+unreachable rules separately cover ADR-0043 structural reachability while the
+exact-version asset poll remains fresh; the heartbeat rule remains the total
+loop-outage detector.
+
+All three rule classes use `for = "0s"`, `no_data_state = "OK"`, and the
+warning-only `#alerts-infra` contact point. Missing or stale listing evidence
+is unknown rather than delisting, and none of these rules pages. The
+[onboarding and re-census runbook](../../docs/notes/peg-monitoring-onboarding.md)
+owns source admission, exact-pair re-census, operator response, and cleanup.
 
 ## Producer-first rollout and rollback
 
@@ -57,11 +91,15 @@ metric series exists before approving the `alerts-rules` apply. A merge can
 start the producer deployment and the protected Terraform workflow in
 parallel; keep the `production-infra` approval pending until the producer is
 deployed and the exact rule query returns the expected series. Scheduled mute
-timings, including the FX-weekend mute, are not deployment silences.
+timings, including the FX-weekend mute, are not deployment silences. Peg rules
+never use that mute and require a complete active decision-history window
+before their protected apply can be approved.
 
 Reverse the dependency for rollback. If a service or indexer rollback would
-remove a series required by a no-data-alerting rule, merge and apply the rule
-revert first, confirm the rule is absent, and only then withdraw the producer.
+remove a series used by a rule, merge and apply the rule revert first, confirm
+the consumer is absent, and only then withdraw the producer metric. This order
+also applies to warning rules with `no_data_state = "OK"` so stale rule
+definitions do not conceal an incomplete rollback.
 The Polygon-specific producer checks and ordered steps are in
 [`docs/notes/polygon-monitoring.md`](../../docs/notes/polygon-monitoring.md).
 
@@ -83,10 +121,10 @@ second resolve message.
 
 ## Service label routing
 
-FPMM pool/deviation-transition, oracle, CDP, indexer, metrics-bridge, and Aegis
-testnet-health rule groups use rule-level `notification_settings`. Relayer,
-reserve, trading-mode, trading-limit, and Aegis service-health rules use the
-global notification policy and route by `service`, `severity`, `chain`, and
-`rateFeed` labels. Aegis testnet-health rules route to `#alerts-testnet` via
+FPMM pool/deviation-transition, oracle, CDP, indexer, metrics-bridge, peg, and
+Aegis testnet-health rule groups use rule-level `notification_settings`.
+Relayer, reserve, trading-mode, trading-limit, and Aegis service-health rules
+use the global notification policy and route by `service`, `severity`, `chain`,
+and `rateFeed` labels. Aegis testnet-health rules route to `#alerts-testnet` via
 `service=aegis-testnet` and do not depend on a testnet metrics bridge or hosted
 testnet pool indexer.
