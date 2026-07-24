@@ -951,10 +951,10 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
       templates.includes("STRUCTURAL SATURATION:") &&
       source.includes('ref_id         = "Spread"') &&
       source.includes(
-        "try(rule.value.spread_expr, local.peg_empty_context_promql)",
+        "try(coalesce(rule.value.spread_expr, local.peg_empty_context_promql), local.peg_empty_context_promql)",
       ) &&
       contacts.includes("grafana_message_template.peg_victorops_message"),
-    "peg rules must route a complete decision package to dedicated warning/ops/page contact points",
+    "peg rules must route a complete decision package with a safe spread fallback for absent or null expressions",
   );
   assert(
     !source.includes("mute_timing") && !contacts.includes("mute_timing"),

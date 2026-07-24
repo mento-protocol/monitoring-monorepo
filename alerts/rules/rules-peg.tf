@@ -110,7 +110,7 @@ resource "grafana_rule_group" "peg_monitoring" {
         }
         model = jsonencode({
           refId   = "Spread"
-          expr    = try(rule.value.spread_expr, local.peg_empty_context_promql)
+          expr    = try(coalesce(rule.value.spread_expr, local.peg_empty_context_promql), local.peg_empty_context_promql)
           instant = true
         })
       }
