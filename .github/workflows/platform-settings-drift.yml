@@ -1,0 +1,205 @@
+name: Platform Settings Drift Detection
+
+# Daily lightweight check that a HIGH-VALUE platform-managed repository SETTING
+# has not been reverted out-of-band (issue #1564). Companion to
+# terraform-drift.yml, which runs `terraform plan` per stack: the `platform`
+# stack (terraform/) is manual plan/apply and deliberately NOT in that matrix.
+# A full platform plan would need the whole platform secret set — Vercel/Upstash
+# tokens, the App private key, and the Administration-scoped GitHub PAT — in an
+# unattended CI job, exactly the standing surface #1557 removed. Instead this
+# asserts just the invariant #1557 pins, via a single read-only REST call.
+#
+# INVARIANT (#1564, #1557): the repo default GitHub Actions workflow-token
+# permission stays `read` (and token PR-approval stays disabled). The autofix
+# CI-trust checker (scripts/check-autofix-ci-trust.mjs) treats a job with no
+# explicit `permissions:` as having no write scope — true ONLY while the repo
+# default is read-only. A manual flip to `write` silently breaks that
+# assumption; this catches it within a day and opens a `drift-detection` issue,
+# mirroring terraform-drift's issue UX.
+#
+# CREDENTIAL. The read hits `GET /repos/{owner}/{repo}/actions/permissions/
+# workflow`, which requires `administration: read`. Authenticated by the
+# dedicated `PLATFORM_SETTINGS_AUDIT_TOKEN` repo secret — a fine-grained PAT with
+# Administration:Read on THIS repo only, modeled by the platform stack
+# (terraform/github-secrets.tf). Deliberately NOT the autofix App (whose minimal
+# Contents+PR trust boundary we do not widen) and NOT the CI `TF_VAR_github_token`
+# (which must not gain administration). Read-only by design: it can never CHANGE
+# a setting. While the secret is unprovisioned the job no-ops, mirroring the rest
+# of the ADR-0036 pipeline. Runbook: docs/notes/sentry-triage-pipeline.md.
+
+on:
+  schedule:
+    # Daily at 05:41 UTC — after terraform-drift's 05:23 leg, off-the-hour to
+    # dodge GitHub scheduler contention.
+    - cron: 41 5 * * *
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Assert read-only default workflow-token permission
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      # Read-only, for the actions-timeline post step's getWorkflowRun /
+      # listJobsForWorkflowRunAttempt calls — an explicit permissions block
+      # sets every unlisted scope (incl. actions) to none, so without this the
+      # post step 403s and reddens every run. Matches terraform-drift.yml.
+      actions: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Read live setting and evaluate drift
+        id: check
+        env:
+          # The dedicated Administration:Read PAT — used ONLY to read the setting.
+          # Issue writes below use github.token (issues: write), never this token.
+          AUDIT_TOKEN: ${{ secrets.PLATFORM_SETTINGS_AUDIT_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUDIT_TOKEN}" ]; then
+            echo "::notice::PLATFORM_SETTINGS_AUDIT_TOKEN not provisioned — platform-settings drift check is inert (see terraform/github-secrets.tf + docs/notes/sentry-triage-pipeline.md)."
+            echo "state=inert" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A present-but-rejected token (401/403 — expired or revoked PAT, or
+          # missing administration:read) is an OPERATIONAL problem, not drift:
+          # fail loud so the red scheduled run signals "rotate the audit token",
+          # never a false drift issue. Only a clean 200 feeds the evaluator.
+          set +e
+          resp=$(GH_TOKEN="${AUDIT_TOKEN}" gh api "repos/${REPO}/actions/permissions/workflow" 2>/tmp/gh-err)
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::Could not read actions/permissions/workflow with PLATFORM_SETTINGS_AUDIT_TOKEN (gh exit $rc) — token expired/revoked or lacking administration:read. Rotate it in terraform.tfvars and apply the platform stack."
+            sed 's/[A-Za-z0-9_-]\{20,\}/[REDACTED]/g' /tmp/gh-err >&2 || true
+            exit 1
+          fi
+
+          set +e
+          verdict=$(printf '%s' "${resp}" | node scripts/check-workflow-permissions-drift.mjs)
+          vc=$?
+          set -e
+          echo "${verdict}"
+          {
+            echo "verdict<<VERDICT_EOF"
+            echo "${verdict}"
+            echo "VERDICT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          case "${vc}" in
+            0)
+              echo "state=ok" >> "$GITHUB_OUTPUT"
+              ;;
+            2)
+              echo "state=drift" >> "$GITHUB_OUTPUT"
+              echo "::warning::Platform setting drift detected — opening/updating a drift-detection issue."
+              ;;
+            *)
+              echo "::error::check-workflow-permissions-drift.mjs failed (exit ${vc}) — malformed API response; investigate the workflow logs."
+              exit 1
+              ;;
+          esac
+
+      - name: Ensure drift labels exist
+        if: steps.check.outputs.state == 'drift'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # `github.rest.issues.create()` SILENTLY DROPS unknown label names, so a
+        # missing label would make the issue land unlabelled and the next run's
+        # dedup miss it — creating a duplicate every cycle. `gh label create
+        # --force` is idempotent. Same labels as terraform-drift so platform
+        # setting drift lands in the same triage view.
+        run: |
+          set -euo pipefail
+          gh label create "drift-detection" --color "d73a4a" --description "Terraform drift detected by scheduled workflow" --force
+          gh label create "stack:platform" --color "0e8a16" --description "Affects Terraform stack: platform" --force
+
+      - name: Open or update drift issue
+        if: steps.check.outputs.state == 'drift'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          VERDICT: ${{ steps.check.outputs.verdict }}
+        with:
+          script: |
+            const verdict =
+              process.env.VERDICT || "(evaluator produced no output — see workflow logs)";
+
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+
+            const now = new Date().toISOString();
+
+            // A DISTINCT marker from terraform-drift's `terraform-drift-stack:*`
+            // so this API-based check and a future platform terraform-plan drift
+            // never fight over one issue, while sharing the `drift-detection` +
+            // `stack:platform` labels for a single triage surface.
+            const marker = "<!-- platform-settings-drift:workflow-permissions -->";
+
+            const body =
+              `**Stack:** \`platform\` (repository settings)\n` +
+              `**Check:** default GitHub Actions workflow-token permission\n` +
+              `**Last checked:** ${now}\n` +
+              `[Full workflow logs](${runUrl})\n\n` +
+              `A platform-managed repository setting no longer matches the value ` +
+              `pinned in Terraform (\`github_workflow_repository_permissions.default_read\`, ` +
+              `#1557). Either it was reverted out-of-band, or there is code on ` +
+              `\`main\` that has not been applied. Re-assert it with ` +
+              `\`pnpm tf apply platform\` from a clean \`main\` checkout.\n\n` +
+              `**Why it matters:** \`scripts/check-autofix-ci-trust.mjs\` assumes a ` +
+              `job with no explicit \`permissions:\` has no write scope, which holds ` +
+              `only while the repo default workflow-token permission is \`read\`.\n\n` +
+              `<details><summary>Check output</summary>\n\n` +
+              `\`\`\`\n${verdict}\n\`\`\`\n` +
+              `</details>\n\n` +
+              `${marker}`;
+
+            const labels = ["drift-detection", "stack:platform"];
+
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: "open",
+                labels: labels.join(","),
+                per_page: 100,
+              },
+            );
+
+            const existing = issues.find(
+              (i) => i.body && i.body.includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+              console.log(`Updated existing drift issue #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: "Platform settings drift: default workflow-token permission",
+                body,
+                labels,
+              });
+              console.log(`Opened drift issue #${created.data.number}`);
+            }
+
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+        if: always()
