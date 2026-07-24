@@ -13,6 +13,7 @@ import {
 } from "../src/peg/metrics.js";
 import {
   runPegPollCycle,
+  type PegPollCycleContext,
   type PegPollSourceState,
 } from "../src/peg/poll-cycle.js";
 import type { PegPolicyVersion } from "../src/peg/policy.js";
@@ -192,6 +193,9 @@ function sourceState(lastAttemptAt: number): PegPollSourceState {
   };
 }
 
+const sourceStateKey = (policyVersion: string, sourceId = "deep_eur") =>
+  `${policyVersion}:asset-one:${sourceId}`;
+
 const rolloverInput = {
   registry,
   policies: [active, previous] as const,
@@ -219,7 +223,10 @@ function currentDecisionPackages() {
   return JSON.parse(json) as {
     producedPolicyVersion: string;
     policySlot: "active" | "previous";
-    packages: Array<{ asset: string }>;
+    packages: Array<{
+      asset: string;
+      structural: { blind: boolean; blindConsecutivePolls: number };
+    }>;
   };
 }
 
@@ -517,30 +524,127 @@ describe("peg poll-cycle decision publication", () => {
     ]);
   });
 
-  it("rolls back source state while publishing a complete decision fallback", async () => {
-    const original = sourceState(1);
-    const sourceStates = new Map([["source", original]]);
+  it.each([
+    [active.version, previous.version],
+    [previous.version, active.version],
+  ])(
+    "commits and prunes only the visible %s policy when %s fails",
+    async (visibleVersion, failedVersion) => {
+      const visibleKey = sourceStateKey(visibleVersion);
+      const visibleStaleKey = sourceStateKey(visibleVersion, "stale");
+      const failedKey = sourceStateKey(failedVersion);
+      const failedStaleKey = sourceStateKey(failedVersion, "stale");
+      const failedOriginal = sourceState(20);
+      const failedStaleOriginal = sourceState(21);
+      const sourceStates = new Map([
+        [visibleKey, sourceState(10)],
+        [visibleStaleKey, sourceState(11)],
+        [failedKey, failedOriginal],
+        [failedStaleKey, failedStaleOriginal],
+      ]);
+      const { dependencies } = cycleDependencies();
+
+      await runPegPollCycle(
+        rolloverInput,
+        dependencies,
+        sourceStates,
+        async (_registry, selectedPolicy, cycle) => {
+          const key = sourceStateKey(selectedPolicy.version);
+          const state = cycle.sourceStates.get(key)!;
+          state.lastAttemptAt += 100;
+          cycle.activeStateKeys.add(key);
+          if (selectedPolicy.version === failedVersion) {
+            throw new Error("policy build failed");
+          }
+          return [snapshot(selectedPolicy.version)];
+        },
+      );
+
+      expect(sourceStates.get(visibleKey)?.lastAttemptAt).toBe(110);
+      expect(sourceStates.has(visibleStaleKey)).toBe(false);
+      expect(sourceStates.get(failedKey)).toBe(failedOriginal);
+      expect(sourceStates.get(failedStaleKey)).toBe(failedStaleOriginal);
+      expect(currentDecisionPackages()).toMatchObject({
+        producedPolicyVersion: visibleVersion,
+        policySlot: visibleVersion === active.version ? "active" : "previous",
+      });
+    },
+  );
+
+  it("accumulates selected-policy blind state across repeated partial decisions", async () => {
+    const activeKey = sourceStateKey(active.version);
+    const sourceStates = new Map([[activeKey, sourceState(0)]]);
     const { dependencies } = cycleDependencies();
+    const build = async (
+      _registry: typeof registry,
+      selectedPolicy: PegPolicyVersion,
+      cycle: PegPollCycleContext,
+    ): Promise<PegAssetMetricSnapshot[]> => {
+      if (selectedPolicy.version === previous.version) {
+        throw new Error("previous build failed");
+      }
+      const state = cycle.sourceStates.get(activeKey)!;
+      state.blindConsecutivePolls += 1;
+      cycle.activeStateKeys.add(activeKey);
+      return [
+        snapshot(active.version, {
+          blind: true,
+          blindConsecutivePolls: state.blindConsecutivePolls,
+        }),
+      ];
+    };
 
-    await runPegPollCycle(
-      rolloverInput,
-      dependencies,
-      sourceStates,
-      async (_registry, selectedPolicy, cycle) => {
-        cycle.sourceStates.get("source")!.lastAttemptAt = 2;
-        cycle.activeStateKeys.add("source");
-        if (selectedPolicy.version === previous.version) {
-          throw new Error("previous build failed");
-        }
-        return [snapshot(selectedPolicy.version)];
-      },
-    );
-
-    expect(sourceStates.get("source")).toBe(original);
-    expect(sourceStates.get("source")?.lastAttemptAt).toBe(1);
-    expect(currentDecisionPackages()).toMatchObject({
-      producedPolicyVersion: active.version,
-      policySlot: "active",
+    await runPegPollCycle(rolloverInput, dependencies, sourceStates, build);
+    expect(currentDecisionPackages().packages[0]?.structural).toMatchObject({
+      blind: true,
+      blindConsecutivePolls: 1,
     });
+
+    await runPegPollCycle(rolloverInput, dependencies, sourceStates, build);
+    expect(currentDecisionPackages().packages[0]?.structural).toMatchObject({
+      blind: true,
+      blindConsecutivePolls: 2,
+    });
+  });
+
+  it("commits neither policy state or decision body when publication fails", async () => {
+    publishPegPollSnapshot(
+      [snapshot(active.version)],
+      context([active, previous], active.version, previous.version),
+    );
+    const prior = currentPegDecisionPackagesJson();
+    const activeKey = sourceStateKey(active.version);
+    const previousKey = sourceStateKey(previous.version);
+    const activeOriginal = sourceState(1);
+    const previousOriginal = sourceState(2);
+    const sourceStates = new Map([
+      [activeKey, activeOriginal],
+      [previousKey, previousOriginal],
+    ]);
+    const dependencies = {
+      nowMs: () => 1_800_000_000_000,
+      publish: async () => {
+        throw new Error("publication failed");
+      },
+      report: vi.fn(),
+    };
+
+    await expect(
+      runPegPollCycle(
+        rolloverInput,
+        dependencies,
+        sourceStates,
+        async (_registry, selectedPolicy, cycle) => {
+          const key = sourceStateKey(selectedPolicy.version);
+          cycle.sourceStates.get(key)!.lastAttemptAt += 100;
+          cycle.activeStateKeys.add(key);
+          return [snapshot(selectedPolicy.version)];
+        },
+      ),
+    ).resolves.toEqual([]);
+
+    expect(sourceStates.get(activeKey)).toBe(activeOriginal);
+    expect(sourceStates.get(previousKey)).toBe(previousOriginal);
+    expect(currentPegDecisionPackagesJson()).toBe(prior);
   });
 });

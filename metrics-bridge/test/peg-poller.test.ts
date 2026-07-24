@@ -1258,7 +1258,7 @@ describe("peg poll cycle conversion and cadence", () => {
     );
   });
 
-  it("clears metrics and rolls back state when one policy build is incomplete", async () => {
+  it("clears metrics while committing selected-policy state when one policy build is incomplete", async () => {
     const spec = primaryAsset();
     const input = makeInput([spec]);
     const retainedCandidate = {
@@ -1314,11 +1314,14 @@ describe("peg poll cycle conversion and cadence", () => {
     expect(errors.map(({ kind }) => kind)).toEqual(["cycle"]);
 
     const recovered = await poller.pollCycle(rollover);
+    // The active policy supplied the visible partial decision on the failed
+    // cycle, so its committed cache is reused inside cadence. The previously
+    // failed retained policy still needs a provider request.
     expect(recovered.map((snapshot) => source(snapshot).newSuccess)).toEqual([
-      true,
+      false,
       true,
     ]);
-    expect(fetchBitvavo).toHaveBeenCalledTimes(6);
+    expect(fetchBitvavo).toHaveBeenCalledTimes(5);
     expect(publish).toHaveBeenNthCalledWith(
       3,
       recovered,

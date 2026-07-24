@@ -1,5 +1,8 @@
 import type { PegAssetMetricSnapshot } from "./metrics.js";
-import type { PegDecisionPackagePublicationContext } from "./decision-packages.js";
+import {
+  selectPegDecisionPackagePolicy,
+  type PegDecisionPackagePublicationContext,
+} from "./decision-packages.js";
 import type { PegPolicyVersion } from "./policy.js";
 import type { PegRegistry } from "./registry.js";
 import type { PegObservation } from "./types.js";
@@ -105,6 +108,82 @@ function replaceSourceStates(
   for (const [key, state] of source) target.set(key, state);
 }
 
+const sourceStatePrefix = (policyVersion: string) => `${policyVersion}:`;
+
+function mergeAndPrunePolicySourceStates(
+  target: Map<string, PegPollSourceState>,
+  staged: Map<string, PegPollSourceState>,
+  activeStateKeys: Set<string>,
+  policyVersion: string,
+): void {
+  const prefix = sourceStatePrefix(policyVersion);
+  for (const key of target.keys()) {
+    if (key.startsWith(prefix)) target.delete(key);
+  }
+  for (const key of activeStateKeys) {
+    if (!key.startsWith(prefix)) continue;
+    const state = staged.get(key);
+    if (state !== undefined) target.set(key, state);
+  }
+}
+
+interface CompletedPolicyCycle {
+  policy: PegPolicyVersion;
+  snapshots: PegAssetMetricSnapshot[];
+  sourceStates: Map<string, PegPollSourceState>;
+  activeStateKeys: Set<string>;
+}
+
+interface SourceStateCommitInput {
+  sourceStates: Map<string, PegPollSourceState>;
+  completedPolicies: CompletedPolicyCycle[];
+  cycleComplete: boolean;
+  publicationContext: PegDecisionPackagePublicationContext | null;
+  decisionSnapshots: PegAssetMetricSnapshot[];
+}
+
+function commitCompletedSourceStates({
+  sourceStates,
+  completedPolicies,
+  cycleComplete,
+  publicationContext,
+  decisionSnapshots,
+}: SourceStateCommitInput): void {
+  if (cycleComplete) {
+    const committed = cloneSourceStates(sourceStates);
+    const activeStateKeys = new Set<string>();
+    for (const completed of completedPolicies) {
+      mergeAndPrunePolicySourceStates(
+        committed,
+        completed.sourceStates,
+        completed.activeStateKeys,
+        completed.policy.version,
+      );
+      for (const key of completed.activeStateKeys) activeStateKeys.add(key);
+    }
+    pruneSourceStates(committed, activeStateKeys);
+    replaceSourceStates(sourceStates, committed);
+    return;
+  }
+  if (publicationContext === null || decisionSnapshots.length === 0) return;
+
+  const selectedPolicy = selectPegDecisionPackagePolicy(
+    decisionSnapshots,
+    publicationContext,
+  );
+  const completed = completedPolicies.find(
+    ({ policy }) => policy.version === selectedPolicy.version,
+  );
+  if (completed !== undefined) {
+    mergeAndPrunePolicySourceStates(
+      sourceStates,
+      completed.sourceStates,
+      completed.activeStateKeys,
+      selectedPolicy.version,
+    );
+  }
+}
+
 export function policiesForPegCycle(
   input: PegPollCycleInput,
 ): PegPollCyclePolicies {
@@ -183,7 +262,7 @@ export async function runPegPollCycle<
 ): Promise<PegAssetMetricSnapshot[]> {
   const snapshots: PegAssetMetricSnapshot[] = [];
   const decisionSnapshots: PegAssetMetricSnapshot[] = [];
-  const cycleSourceStates = cloneSourceStates(sourceStates);
+  const completedPolicies: CompletedPolicyCycle[] = [];
   let publicationContext: PegDecisionPackagePublicationContext | null = null;
   let cycleComplete = false;
   try {
@@ -192,17 +271,18 @@ export async function runPegPollCycle<
       throw new Error("peg poll clock must return finite Unix milliseconds");
     }
     const nowSeconds = Math.floor(nowMs / 1_000);
-    const activeStateKeys = new Set<string>();
-    let policyFailed = false;
     const policies = policiesForPegCycle(input);
     publicationContext = publicationContextForPegCycle(input, policies);
     for (const policy of policies) {
+      // A failed policy must never mutate a sibling's staged source state.
+      const policySourceStates = cloneSourceStates(sourceStates);
+      const activeStateKeys = new Set<string>();
       const context: PegPollCycleContext<Dependencies> = {
         nowMs,
         nowSeconds,
         policyVersion: policy.version,
         dependencies,
-        sourceStates: cycleSourceStates,
+        sourceStates: policySourceStates,
         activeStateKeys,
       };
       try {
@@ -214,16 +294,18 @@ export async function runPegPollCycle<
         assertCompletePolicySnapshots(policy, policySnapshots);
         snapshots.push(...policySnapshots);
         decisionSnapshots.push(...policySnapshots);
+        completedPolicies.push({
+          policy,
+          snapshots: policySnapshots,
+          sourceStates: policySourceStates,
+          activeStateKeys,
+        });
       } catch (error) {
         dependencies.report("cycle", error);
-        policyFailed = true;
       }
     }
-    if (policyFailed) snapshots.length = 0;
-    else {
-      pruneSourceStates(cycleSourceStates, activeStateKeys);
-      cycleComplete = true;
-    }
+    cycleComplete = completedPolicies.length === policies.length;
+    if (!cycleComplete) snapshots.length = 0;
   } catch (error) {
     dependencies.report("cycle", error);
   }
@@ -237,6 +319,12 @@ export async function runPegPollCycle<
     ))
   )
     return [];
-  if (cycleComplete) replaceSourceStates(sourceStates, cycleSourceStates);
+  commitCompletedSourceStates({
+    sourceStates,
+    completedPolicies,
+    cycleComplete,
+    publicationContext,
+    decisionSnapshots,
+  });
   return snapshots;
 }

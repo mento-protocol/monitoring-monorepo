@@ -233,6 +233,18 @@ function selectProducedVersion(
   );
 }
 
+/**
+ * Select the exact policy slot a decision package would publish. Poll-cycle
+ * state commits use this same selector, so a partial cycle advances only the
+ * state whose evidence became visible to readers.
+ */
+export function selectPegDecisionPackagePolicy(
+  snapshots: PegAssetMetricSnapshot[],
+  context: PegDecisionPackagePublicationContext,
+): PegPolicyVersion {
+  return selectProducedVersion(snapshots, context).policy;
+}
+
 function policyEvidence(policy: PegAssetPolicy): PegDecisionPackagePolicy {
   return {
     target: policy.target,
