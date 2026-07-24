@@ -76,7 +76,7 @@ Latest metrics-bridge result:
 - Runtime: 9s locally on 2026-07-24
 - Mutation score: **87.65% total / covered**
 - Mutants: 139 killed, 3 timed out, 20 survived, 0 no coverage
-- `metrics-bridge/stryker.config.mjs` sets `break: 84`, leaving a 3.65-point
+- `metrics-bridge/stryker.config.mjs` sets `break: 85`, leaving a 2.65-point
   margin below the verified score.
 
 The first dashboard run was worth doing: it found real assertion gaps in the
