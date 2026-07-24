@@ -153,6 +153,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0044-peg-thresholds-gated-rules-plane.md`](adr/0044-peg-thresholds-gated-rules-plane.md) | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON | canonical / active | adr / alerts | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) | Peg paging measures executable sell price; the deep venue pages alone | canonical / active | adr / metrics-bridge / alerts | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) | Oracle freshness is reconstructed from persisted report events | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-24 |
+| [`docs/adr/0048-private-gcs-peg-policy-artifact.md`](adr/0048-private-gcs-peg-policy-artifact.md) | Peg policy is a generation-pinned private GCS artifact | canonical / active | adr / metrics-bridge / alerts / terraform/infra | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0049-peg-decision-package-read-model.md`](adr/0049-peg-decision-package-read-model.md) | Peg decisions use a bounded Metrics Bridge read model | canonical / active | adr / metrics-bridge / ui-dashboard | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
