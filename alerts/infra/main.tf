@@ -36,6 +36,38 @@ module "project_factory" {
   labels = local.common_labels
 }
 
+# Allow the dedicated trusted-main refresh identity to read live resource
+# metadata without inheriting the write-capable `org-terraform` permissions or
+# the basic Viewer role's Cloud Storage object-read convenience grant. The
+# identity itself is created by the platform stack.
+locals {
+  terraform_refresh_readonly_project_roles = toset([
+    "roles/artifactregistry.viewer",
+    "roles/browser",
+    "roles/cloudfunctions.viewer",
+    "roles/cloudscheduler.viewer",
+    "roles/iam.securityReviewer",
+    "roles/iam.serviceAccountViewer",
+    "roles/logging.viewer",
+    "roles/monitoring.viewer",
+    "roles/run.viewer",
+    "roles/secretmanager.viewer",
+    "roles/serviceusage.serviceUsageConsumer",
+    "roles/serviceusage.serviceUsageViewer",
+    "roles/storage.bucketViewer",
+  ])
+}
+
+resource "google_project_iam_member" "terraform_refresh_readonly" {
+  for_each = local.terraform_refresh_readonly_project_roles
+
+  project = local.project_id
+  role    = each.value
+  member  = "serviceAccount:org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+
+  depends_on = [module.project_factory]
+}
+
 #####################
 # Service Account   #
 #####################
