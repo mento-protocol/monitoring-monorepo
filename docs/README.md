@@ -73,7 +73,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md) | Hasura isolation trigger | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md) | PR Operating Card | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
-| [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/reserve-yield-indexer.md`](notes/reserve-yield-indexer.md) | Reserve-Yield Indexer Topology | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md) | Sentry Triage Pipeline | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
