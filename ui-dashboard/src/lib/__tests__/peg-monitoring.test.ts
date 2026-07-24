@@ -17,6 +17,48 @@ describe("PegMonitoringResponseSchema", () => {
     expect(parsed.packages[0]?.structural.blindConsecutivePolls).toBe(0);
     expect(parsed.packages[0]?.policy.blindConsecutivePolls).toBe(10);
   });
+  it("accepts inclusive structural-saturation bounds and rejects values outside them", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const monitor = item.monitors[0]!;
+    const valid = (structuralSaturation: number) =>
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            structural: { ...item.structural, structuralSaturation },
+            monitors: [{ ...monitor, structuralSaturation }],
+          },
+        ],
+      }).success;
+    expect(valid(0)).toBe(true);
+    expect(valid(1)).toBe(true);
+    for (const structuralSaturation of [-0.01, 1.01]) {
+      expect(
+        PegMonitoringResponseSchema.safeParse({
+          ...response,
+          packages: [
+            {
+              ...item,
+              structural: { ...item.structural, structuralSaturation },
+            },
+          ],
+        }).success,
+      ).toBe(false);
+      expect(
+        PegMonitoringResponseSchema.safeParse({
+          ...response,
+          packages: [
+            {
+              ...item,
+              monitors: [{ ...monitor, structuralSaturation }],
+            },
+          ],
+        }).success,
+      ).toBe(false);
+    }
+  });
   it("rejects topology holes, policy-slot drift, and bad uint256", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;

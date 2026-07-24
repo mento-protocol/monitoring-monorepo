@@ -133,6 +133,61 @@ describe("PegMonitoringPageClient", () => {
     expect(disabled?.className).toContain("text-red-300");
     expect(container.textContent).toContain("Breaker unavailable");
   });
+  it("renders conversion provenance only for converted sources and distinguishes monitor query saturation", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const monitor = item.monitors[0]!;
+    const conversion = item.sources.find(
+      ({ convertVia }) => convertVia !== null,
+    )?.convertVia;
+    expect(conversion).not.toBeNull();
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            monitors: [
+              { ...monitor, structuralQuerySaturated: true },
+              {
+                ...monitor,
+                rateFeedId: "0x6666666666666666666666666666666666666666",
+                structuralQuerySaturated: false,
+              },
+            ],
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+    render();
+    expect(container.textContent).toContain("Price conversion:");
+    expect(container.textContent).toContain("USD → EUR");
+    expect(container.textContent).toContain("0xec5748…c318ca");
+    expect(container.textContent).toContain("chain 137");
+    expect(container.textContent).toContain("Saturated — partial-query risk");
+    expect(container.textContent).toContain("Complete within page limit");
+
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.map((source) => ({
+              ...source,
+              convertVia: null,
+            })),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+    render();
+    expect(container.textContent).not.toContain("Price conversion:");
+  });
   it("renders two monitors for one pool without duplicate React keys", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;

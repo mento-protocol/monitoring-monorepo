@@ -54,7 +54,18 @@ function Header(): React.JSX.Element {
     </header>
   );
 }
-const LOADING_MONITOR_KEYS = ["t", "u", "v", "w", "x", "y", "z", "aa", "ab"];
+const LOADING_MONITOR_KEYS = [
+  "t",
+  "u",
+  "v",
+  "w",
+  "x",
+  "y",
+  "z",
+  "aa",
+  "ab",
+  "ac",
+];
 const LOADING_SOURCE_KEYS = ["bitvavo-eur", "kraken-eur", "kraken-usd"];
 const LOADING_SOURCE_EVIDENCE_KEYS = [
   "ac",
@@ -84,7 +95,7 @@ function LoadingMonitors(): React.JSX.Element {
           {LOADING_MONITOR_KEYS.map((key) => (
             <div
               key={key}
-              className={`${key === "ab" ? "h-16" : "h-24"} animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40`}
+              className={`${key === "ab" || key === "ac" ? "h-16" : "h-24"} animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40`}
             />
           ))}
         </div>
@@ -112,7 +123,7 @@ function LoadingSources(): React.JSX.Element {
             {LOADING_SOURCE_EVIDENCE_KEYS.map((key) => (
               <div
                 key={`${sourceKey}-${key}`}
-                className="h-20 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
+                className={`${sourceKey === "kraken-usd" && key === "al" ? "h-24" : "h-20"} animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40`}
               />
             ))}
           </div>
@@ -394,6 +405,19 @@ function Monitor({ monitor }: { monitor: PegMonitor }): React.JSX.Element {
           value={formatFraction(monitor.structuralSaturation)}
           detail={`${monitor.counterpartyCount} advisory counterparties`}
         />
+        <EvidenceItem
+          label="Structural query"
+          value={
+            monitor.structuralQuerySaturated
+              ? "Saturated — partial-query risk"
+              : "Complete within page limit"
+          }
+          detail={
+            monitor.structuralQuerySaturated
+              ? "Bounded companion query may be incomplete"
+              : "No bounded-query truncation reported"
+          }
+        />
         {b ? (
           <>
             <EvidenceItem
@@ -495,6 +519,11 @@ function Source({ source }: { source: PegSource }): React.JSX.Element {
         <EvidenceItem
           label="Source policy"
           value={`${source.policy.pollIntervalSeconds}s poll · ${source.policy.staleAfterSeconds}s stale`}
+          detail={
+            source.convertVia
+              ? `Price conversion: ${source.convertVia.fromCurrency} → ${source.convertVia.toCurrency} via feed ${shortAddress(source.convertVia.rateFeedId)} · chain ${source.convertVia.chainId}`
+              : undefined
+          }
         />
       </dl>
     </article>

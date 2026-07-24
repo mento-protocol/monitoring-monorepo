@@ -32,6 +32,7 @@ const timestamp = z
   .nonnegative()
   .max(MAX_RENDERABLE_UNIX_SECONDS);
 const number = z.number().finite().nonnegative();
+const fraction = z.number().finite().min(0).max(1);
 const integer = z.number().int().nonnegative();
 const uint256 = z
   .string()
@@ -63,7 +64,7 @@ const structural = z
   .object({
     blind: z.boolean(),
     blindConsecutivePolls: integer.max(1_000),
-    structuralSaturation: number.nullable(),
+    structuralSaturation: fraction.nullable(),
     structuralQuerySaturated: z.boolean(),
     indexedPoolReachable: z.boolean(),
     counterpartyCount: integer,
@@ -92,7 +93,7 @@ const monitor = z
     rateFeedId: address,
     monitoredTokenAddress: address,
     indexedPoolReachable: z.boolean(),
-    structuralSaturation: number.nullable(),
+    structuralSaturation: fraction.nullable(),
     structuralQuerySaturated: z.boolean(),
     counterpartyCount: integer,
     breaker: breaker.nullable(),

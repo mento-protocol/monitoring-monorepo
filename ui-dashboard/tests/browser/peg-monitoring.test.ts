@@ -64,6 +64,16 @@ test("intercepts peg monitoring, retains stale evidence, and keeps regional load
     ),
   );
   await expect(page.getByText(/^Current package ·/)).toBeVisible();
+  const convertedSource = payload.packages[0]?.sources.find(
+    ({ convertVia }) => convertVia !== null,
+  );
+  expect(convertedSource?.convertVia).not.toBeNull();
+  await expect(
+    page.getByText(
+      "Price conversion: USD → EUR via feed 0xec5748…c318ca · chain 137",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("Complete within page limit")).toBeVisible();
   const loadedRects = await Promise.all(
     regions.map(([, , loadedTestId]) =>
       page.getByTestId(loadedTestId).boundingBox(),
