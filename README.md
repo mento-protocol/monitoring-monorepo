@@ -369,8 +369,9 @@ reviewing the plan first.
 Every push to `main` that touches `ui-dashboard/` auto-deploys to [monitoring.mento.org](https://monitoring.mento.org).
 
 Infrastructure (Vercel project, env vars, Upstash Redis, GCP project shape, CI
-WIF/IAM, Metrics Bridge Cloud Run shape, and Aegis bootstrap resources) is
-managed by the `platform` Terraform stack:
+WIF/IAM, Metrics Bridge Cloud Run shape, Aegis bootstrap resources, and the
+dormant unapplied Peg-policy GCS source foundation) is managed by the `platform`
+Terraform stack:
 
 ```bash
 pnpm tf list        # show all registered Terraform stacks

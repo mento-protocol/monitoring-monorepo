@@ -15,13 +15,13 @@ garden_lane: operator-runbooks
 `terraform.stacks.json` is the machine-readable registry for Terraform roots.
 Use it instead of inferring ownership from directory names.
 
-| Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                                              | Plan/apply policy                                                                                                   |
-| --------------------- | ---------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `platform`            | `terraform/`                 | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, separated CI WIF/IAM identities, and platform-owned repo Actions secrets/variables | Manual plan; human-approved local apply                                                                             |
-| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + Aegis service-health and testnet-health rule groups, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                          | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources, and stack-local trusted-main refresh grants                      | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                          | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `governance-watchdog` | `governance-watchdog/infra/` | `governance-watchdog` | Dedicated governance-watchdog GCP project, Cloud Function/source archive, Secret Manager, QuickNode webhook creation, scheduler, monitoring, alerts, and stack-local trusted-main refresh grants                  | PR plan; `main` apply through the `production-infra` GitHub Environment; daily drift plan via `terraform-drift.yml` |
+| Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                                                                                                    | Plan/apply policy                                                                                                   |
+| --------------------- | ---------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `platform`            | `terraform/`                 | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, separated CI WIF/IAM identities, platform-owned repo Actions secrets/variables, and a dormant unapplied Peg-policy GCS source foundation | Manual plan; human-approved local apply                                                                             |
+| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + Aegis service-health and testnet-health rule groups, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                                                                                | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources, and stack-local trusted-main refresh grants                                                                            | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                                                                                | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `governance-watchdog` | `governance-watchdog/infra/` | `governance-watchdog` | Dedicated governance-watchdog GCP project, Cloud Function/source archive, Secret Manager, QuickNode webhook creation, scheduler, monitoring, alerts, and stack-local trusted-main refresh grants                                                                        | PR plan; `main` apply through the `production-infra` GitHub Environment; daily drift plan via `terraform-drift.yml` |
 
 ## Commands
 
@@ -144,8 +144,16 @@ Follow ADR 0047's full procedure:
    old/proof run, and audit both paths.
 4. Only then land and explicitly apply the final legacy-authority removal.
 
-Do not create the peg-policy project or bucket until step 4 is applied, all
-runs drain, and the IAM audit proves the legacy path is gone.
+Keep the PR that introduces the Peg-policy source foundation unmerged through
+steps 1–4. Merge it only after the step 4 removal is applied, all runs drain,
+and the IAM audit proves the legacy path is gone; then review and explicitly
+approve its separate platform apply. This merge-order guard keeps unrelated
+platform applies from creating the bucket or identities early without adding a
+second, operator-set feature flag.
+
+The foundation routes private policy-bucket access logs to a separate private
+bucket. Those logs are best-effort audit telemetry, never an enforcement gate.
+Before activation, audit effective readers on both buckets.
 
 ## Platform GitHub Actions secrets and variables
 

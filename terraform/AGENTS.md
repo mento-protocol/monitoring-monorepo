@@ -3,7 +3,7 @@ title: Terraform Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 doc_type: agent-instructions
 scope: terraform
 review_interval_days: 90
@@ -16,7 +16,7 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, the separated Terraform/service-deploy Workload Identity Federation chains, and repo-level GitHub Actions secrets and variables owned by the platform stack. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, the separated Terraform/service-deploy Workload Identity Federation chains, repo-level GitHub Actions secrets and variables, and the dormant, unapplied Peg-policy GCS source foundation. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
 
 ## Operating Rules
 
@@ -59,9 +59,13 @@ garden_lane: agent-entry-points
   provider denial. Drain and audit those runs before authority removal.
 - Only a separate final removal PR may delete the routine deployer's
   `org-terraform` Token Creator grant, and only through an explicitly approved
-  platform apply. Do not create the peg-policy project or bucket until that
-  removal is applied, all queued and active runs drain, and the final IAM audit
-  confirms the old path is gone.
+  platform apply. Keep the PR that introduces the Peg-policy foundation
+  unmerged until that removal is applied, all queued and active runs drain, and
+  the final IAM audit confirms the old path is gone. Only then may the
+  foundation merge and receive its own explicitly approved platform apply.
+- Peg-policy access logs are audit telemetry, never an authorization control.
+  Before activation, audit effective readers on the policy and access-log
+  buckets.
 
 ## Verification
 

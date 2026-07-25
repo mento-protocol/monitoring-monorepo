@@ -41,6 +41,7 @@ const IDENTITY_REFERENCE_SPECIFICATIONS = [
       "terraform/ci-wif.tf:resource.google_service_account.production_infra_applier",
       "terraform/ci-wif.tf:resource.google_service_account_iam_member.production_infra_applier_wif_binding",
       "terraform/ci-wif.tf:resource.google_service_account_iam_member.production_infra_applier_org_terraform_token_creator",
+      "terraform/peg-policy.tf:resource.google_service_account_iam_member.production_infra_applier_peg_policy_publisher_token_creator",
       "terraform/github-variables.tf:resource.github_actions_variable.gcp_production_infra_service_account",
       "terraform/outputs.tf:output.ci_production_infra_applier_email",
     ]),
@@ -76,7 +77,6 @@ const IDENTITY_REFERENCE_SPECIFICATIONS = [
     ]),
   },
 ];
-
 export function validateProviderInventory(blocks, errors) {
   const actual = blocks
     .filter(
@@ -146,10 +146,14 @@ export function validateIdentityReferenceInventory(
   files,
   topLevelBlocks,
   errors,
+  additionalSpecifications = [],
 ) {
   const blocksByFile = Map.groupBy(topLevelBlocks, (block) => block.filePath);
 
-  for (const specification of IDENTITY_REFERENCE_SPECIFICATIONS) {
+  for (const specification of [
+    ...IDENTITY_REFERENCE_SPECIFICATIONS,
+    ...additionalSpecifications,
+  ]) {
     const unexpected = new Set();
     for (const [filePath, contents] of Object.entries(files)) {
       if (!filePath.endsWith(".tf")) continue;
@@ -436,7 +440,11 @@ export function rejectUnexpectedIdentityGrants(
   }
 }
 
-export function validateProductionIdentity(blocks, errors) {
+export function validateProductionIdentity(
+  blocks,
+  errors,
+  additionalAllowedGrantKeys = [],
+) {
   const legacyTokenCreator = requireBlock(
     blocks,
     "terraform/ci-wif.tf",
@@ -581,7 +589,11 @@ export function validateProductionIdentity(blocks, errors) {
   rejectUnexpectedIdentityGrants(
     blocks,
     referencesProductionApplier,
-    new Set([wifBinding, tokenCreator].filter(Boolean).map(blockKey)),
+    new Set(
+      [...additionalAllowedGrantKeys, wifBinding, tokenCreator]
+        .filter(Boolean)
+        .map((grant) => (typeof grant === "string" ? grant : blockKey(grant))),
+    ),
     errors,
     "terraform: production applier",
   );

@@ -13,9 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0048 — Peg policy is a generation-pinned private GCS artifact
 
-**Status:** Accepted (Jul 2026), dormant runtime support only. Production
-hosting and activation wait for the Terraform identity bootstrap and cutover
-tracked in #1566.
+**Status:** Accepted (Jul 2026). The source foundation exists in Terraform but
+is unapplied and dormant. Production hosting and activation wait for the
+Terraform identity bootstrap and cutover tracked in #1566.
 **Scope:** metrics-bridge / alerts / terraform/infra
 
 ## Context
@@ -31,10 +31,10 @@ different bytes under one runtime configuration after an overwrite or
 rollback.
 
 The Terraform identity bootstrap in #1566 separates routine deploy, PR-plan,
-trusted-main refresh, and production-apply authority. Provisioning the policy
-plane before that cutover, live proof, legacy-authority removal, queue drain,
-and final IAM audit would create infrastructure inside the authority window
-that the bootstrap is designed to close.
+trusted-main refresh, and production-apply authority. Applying or activating
+the policy plane before that cutover, live proof, legacy-authority removal,
+queue drain, and final IAM audit would create infrastructure inside the
+authority window that the bootstrap is designed to close.
 
 ## Decision
 
@@ -42,11 +42,20 @@ that the bootstrap is designed to close.
   `PEG_POLICY_URL` nor `PEG_POLICY_AUTH_MODE` in this change. The isolated Peg
   loop stays dormant while both values are absent; a missing, invalid, or
   mismatched pair fails only that loop.
-- A later platform change owns a dedicated private GCS bucket, object
-  versioning and retention, public-access prevention, uniform bucket-level
-  access, destructive-change protection, and a dedicated Metrics Bridge
-  runtime service account. That account receives only
-  `roles/storage.objectViewer` on the policy bucket.
+- The platform source foundation declares a dedicated private GCS bucket with
+  versioning, public-access prevention, uniform bucket-level access,
+  destructive-change protection, and deletion only after a generation has been
+  noncurrent for 30 days. It also declares dedicated no-key runtime and
+  publisher service accounts. The runtime account receives only
+  `roles/storage.objectViewer` and the publisher only
+  `roles/storage.objectAdmin`, both bucket-scoped. The PR introducing this
+  foundation stays unmerged until the identity cutover, legacy-authority
+  removal, queue drain, and final IAM audit are complete. It therefore creates
+  no bucket, object, or runtime attachment inside the old authority window. A
+  dedicated private access-log bucket receives policy bucket access logs
+  through the Google Storage analytics writer only. It retains LIVE objects
+  for 90 days and noncurrent ARCHIVED objects for 30 days. Those logs are
+  best-effort audit telemetry, never a policy-enforcement control.
 - The alerts-rules stack owns `peg-policy/current.json`. Its bytes come
   directly from `alerts/rules/peg-thresholds.json`, so the protected apply that
   owns paging policy also creates each new GCS object generation.
@@ -98,7 +107,11 @@ that the bootstrap is designed to close.
 ## Consequences
 
 - This runtime capability can merge and deploy without activating Peg polling.
-- Infrastructure work remains blocked on completion evidence for #1566.
+- The source foundation remains unapplied and runtime-dormant pending
+  completion evidence for #1566.
+- Before activation, audit effective readers of both policy and access-log
+  buckets. Access logs help investigate access; they never authorize or block
+  policy publication or reads.
 - A policy change needs a reviewed artifact generation and an explicit pinned
   runtime-configuration change. The bridge keeps producing the retained
   version until that change lands.
@@ -117,3 +130,6 @@ that the bootstrap is designed to close.
 - Future owning surfaces:
   `terraform/`, `alerts/rules/`, and the protected Terraform workflows after
   #1566.
+- Source foundation:
+  `terraform/peg-policy.tf` and the production-infrastructure identity
+  contract.

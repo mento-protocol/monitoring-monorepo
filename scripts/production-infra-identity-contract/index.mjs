@@ -14,6 +14,11 @@ import {
   validateProviderInventory,
 } from "./identity.mjs";
 import { validateIamGrantSinkInventory } from "./iam.mjs";
+import {
+  PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS,
+  PEG_POLICY_PRODUCTION_APPLIER_GRANT_KEY,
+  validatePegPolicyFoundation,
+} from "./peg-policy.mjs";
 import { validateRefreshIdentity } from "./refresh.mjs";
 import { validateWorkflowContract } from "./workflow.mjs";
 
@@ -68,10 +73,18 @@ function validateIdentityContract(files, completeInventory) {
     },
     errors,
   );
-  validateProductionIdentity(blocks, errors);
+  validateProductionIdentity(blocks, errors, [
+    PEG_POLICY_PRODUCTION_APPLIER_GRANT_KEY,
+  ]);
+  validatePegPolicyFoundation(files, blocks, errors);
   validateRefreshIdentity(files, blocks, errors);
   validateGithubVariables(blocks, errors);
-  validateIdentityReferenceInventory(files, topLevelBlocks, errors);
+  validateIdentityReferenceInventory(
+    files,
+    topLevelBlocks,
+    errors,
+    PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS,
+  );
   validateWorkflowContract(files, errors);
   return errors;
 }

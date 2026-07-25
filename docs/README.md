@@ -47,7 +47,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`metrics-bridge/AGENTS.md`](../metrics-bridge/AGENTS.md) | Metrics Bridge Instructions | canonical / active | agent-instructions / metrics-bridge | eng | 90d; verified 2026-07-23 |
 | [`scripts/AGENTS.md`](../scripts/AGENTS.md) | Scripts Instructions | canonical / active | agent-instructions / scripts | eng | 90d; verified 2026-07-23 |
 | [`shared-config/AGENTS.md`](../shared-config/AGENTS.md) | Shared Config Instructions | canonical / active | agent-instructions / shared-config | eng | 90d; verified 2026-07-23 |
-| [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-07-23 |
+| [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-07-24 |
 | [`ui-dashboard/AGENTS.md`](../ui-dashboard/AGENTS.md) | Monitoring Dashboard Instructions | canonical / active | agent-instructions / ui-dashboard | eng | 90d; verified 2026-07-23 |
 
 ## operator-runbooks

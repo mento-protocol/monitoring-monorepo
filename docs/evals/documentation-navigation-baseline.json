@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "suite_id": "documentation-navigation-v1",
-  "fixture_digest": "71c99eb084fc8098f0bdf83f4e41ca6373848157aae90df54293914c340f5b2c",
+  "fixture_digest": "fddfc39b7ec04d26da2adcfb0a880218bdb49ba43965cf2f071eaa67e84774ca",
   "run": {
     "agent": "codex-subagent",
     "model": "gpt-5",

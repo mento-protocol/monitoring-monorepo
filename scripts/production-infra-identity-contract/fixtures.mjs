@@ -188,6 +188,138 @@ resource "github_actions_variable" "gcp_terraform_refresh_workload_identity_prov
 }
 `;
 
+const pegPolicyFixture = `
+resource "google_storage_bucket" "peg_policy" {
+  name                        = "\${google_project.monitoring.project_id}-peg-policy"
+  project                     = google_project.monitoring.project_id
+  location                    = var.gcp_region
+  force_destroy               = false
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  versioning {
+    enabled = true
+  }
+
+  logging {
+    log_bucket        = google_storage_bucket.peg_policy_access_logs.name
+    log_object_prefix = "peg-policy/"
+  }
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      days_since_noncurrent_time = 30
+      with_state                 = "ARCHIVED"
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [
+    google_project_service.storage,
+    google_storage_bucket_iam_member.peg_policy_access_logs_writer,
+  ]
+}
+
+# trunk-ignore(checkov/CKV_GCP_62): a bucket cannot write access logs to itself.
+resource "google_storage_bucket" "peg_policy_access_logs" {
+  name                        = "\${google_project.monitoring.project_id}-peg-policy-access-logs"
+  project                     = google_project.monitoring.project_id
+  location                    = var.gcp_region
+  force_destroy               = false
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      age        = 90
+      with_state = "LIVE"
+    }
+  }
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      days_since_noncurrent_time = 30
+      with_state                 = "ARCHIVED"
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [google_project_service.storage]
+}
+
+resource "google_storage_bucket_iam_member" "peg_policy_access_logs_writer" {
+  bucket = google_storage_bucket.peg_policy_access_logs.name
+  role   = "roles/storage.objectCreator"
+  member = "group:cloud-storage-analytics@google.com"
+}
+
+resource "google_service_account" "metrics_bridge_runtime" {
+  project      = google_project.monitoring.project_id
+  account_id   = "metrics-bridge-runtime"
+  display_name = "Metrics Bridge runtime"
+  description  = "Dormant runtime identity for private Peg policy reads."
+
+  depends_on = [google_project_service.iam]
+}
+
+resource "google_service_account" "peg_policy_publisher" {
+  project      = google_project.monitoring.project_id
+  account_id   = "peg-policy-publisher"
+  display_name = "Peg policy publisher"
+  description  = "Protected Terraform publisher for private Peg policy generations."
+
+  depends_on = [google_project_service.iam]
+}
+
+resource "google_storage_bucket_iam_member" "metrics_bridge_runtime_peg_policy_object_viewer" {
+  bucket = google_storage_bucket.peg_policy.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:\${google_service_account.metrics_bridge_runtime.email}"
+}
+
+resource "google_storage_bucket_iam_member" "peg_policy_publisher_object_admin" {
+  bucket = google_storage_bucket.peg_policy.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:\${google_service_account.peg_policy_publisher.email}"
+}
+
+resource "google_service_account_iam_member" "production_infra_applier_peg_policy_publisher_token_creator" {
+  service_account_id = google_service_account.peg_policy_publisher.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:\${google_service_account.production_infra_applier.email}"
+}
+`;
+
+const storageApiFixture = `
+resource "google_project_service" "storage" {
+  project                    = google_project.monitoring.project_id
+  service                    = "storage.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+`;
+
 function targetProjectFixture(project) {
   return `
 ${roleSet("terraform_refresh_readonly_project_roles", commonRoles)}
@@ -266,7 +398,9 @@ export function validFixtureFiles() {
       "utf8",
     ),
     "terraform/ci-wif.tf": productionTerraformFixture,
+    "terraform/gcp-project.tf": storageApiFixture,
     "terraform/github-variables.tf": githubVariablesFixture,
+    "terraform/peg-policy.tf": pegPolicyFixture,
     "alerts/infra/main.tf": targetProjectFixture("local.project_id"),
     "governance-watchdog/infra/main.tf": targetProjectFixture(
       "module.governance_watchdog.project_id",
