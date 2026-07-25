@@ -454,9 +454,9 @@ locals {
     }
   }
 
-  peg_rule_definitions = merge(
+  peg_rule_definitions = local.peg_alerts_enabled ? tomap(merge(
     local.peg_active_rule_definitions,
     local.peg_previous_rule_definitions,
     local.peg_rollover_rule_definitions,
-  )
+  )) : tomap({})
 }
