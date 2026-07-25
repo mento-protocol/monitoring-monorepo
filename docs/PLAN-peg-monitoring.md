@@ -31,7 +31,7 @@ is a human multisig posting a >0.5% price to trip the ValueDeltaBreaker.
 Production still has no alert-authoritative measurement of how far EUROP
 trades from 1.00 EUR. `main` now contains the dormant producer and bounded
 decision-package path, but protected policy publication, runtime activation,
-Grafana rules, and live verification remain open. More oracle-less
+the Grafana apply, and live verification remain open. More oracle-less
 local-currency stablecoins are expected to onboard.
 
 ## Market structure evidence (live-verified 2026-07-22)
@@ -226,7 +226,11 @@ coverage), Bit2Me (stale). Structural: EURm/EUROP `SwapEvent` +
    added the bounded decision-package endpoint. The production loop stays
    dormant until the protected artifact, runtime configuration, deploy, and
    live proof land.
-3. **Protected policy and alerts — in review, not on `main`:** PR
+3. **Protected policy and alerts — source ladder merged, activation pending:**
+   PR
+   [#1581](https://github.com/mento-protocol/monitoring-monorepo/pull/1581)
+   added the full source-only deviation, premium, structural, blindness,
+   source-health, heartbeat, rollover, and routing ladder. Open PR
    [#1584](https://github.com/mento-protocol/monitoring-monorepo/pull/1584)
    adds private generation-pinned policy reads; PR
    [#1606](https://github.com/mento-protocol/monitoring-monorepo/pull/1606)
@@ -236,14 +240,16 @@ coverage), Bit2Me (stale). Structural: EURm/EUROP `SwapEvent` +
    [#1603](https://github.com/mento-protocol/monitoring-monorepo/pull/1603)
    add producer-owned listing confirmation and warning-only listing,
    registry, critical-path, and indexed-pool alerts. Protected policy
-   publication, the full deviation/blindness rule ladder and routing, the
-   human-approved apply, and live firing/recovery proof remain open.
-4. **Operator UI and re-census — in review or pending:** PR
+   publication, runtime activation, the human-approved apply, and live
+   firing/recovery proof remain open.
+4. **Operator UI merged; re-census in review or pending:** PR
    [#1588](https://github.com/mento-protocol/monitoring-monorepo/pull/1588)
-   adds the dashboard decision-package page, and stacked PR
+   added the dashboard decision-package page. Open PR
    [#1602](https://github.com/mento-protocol/monitoring-monorepo/pull/1602)
-   adds listing-confirmation policy evidence. Merge, deploy, live browser
-   proof, the onboarding runbook, and the scheduled re-census job remain open.
+   adds listing-confirmation policy evidence. Deployment and live browser
+   proof remain open; the onboarding and re-census runbooks are in
+   [#1603](https://github.com/mento-protocol/monitoring-monorepo/pull/1603),
+   while the scheduled re-census job remains pending.
 
 Issue [#1444](https://github.com/mento-protocol/monitoring-monorepo/issues/1444)
 owns the remaining rollout and production proof.
