@@ -998,14 +998,34 @@ expectFailure(
   "terraform/ci-wif.tf:google_service_account_iam_member.production_infra_applier_org_terraform_token_creator: IAM grant sink: member must be exactly",
 );
 
-const legacyHeader =
-  'resource "google_service_account_iam_member" "ci_alerts_org_terraform_token_creator" {';
-for (const metaArgument of ["count = 0", "for_each = {}"]) {
-  expectFailure(
-    mutateCiWif(legacyHeader, `${legacyHeader}\n  ${metaArgument}`),
-    "bootstrap legacy deployer token creator: resource multiplicity is forbidden",
-  );
+const forbiddenRoutineDeployerTokenCreator = `resource "google_service_account_iam_member" "reintroduced_routine_deployer_token_creator" {
+  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/\${var.terraform_service_account}"
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:\${google_service_account.metrics_bridge_deployer.email}"
 }
+`;
+expectFailure(
+  withTerraformFile(
+    "terraform/legacy-authority.tf",
+    forbiddenRoutineDeployerTokenCreator,
+  ),
+  "routine deployer Token Creator grants are forbidden after cutover",
+);
+expectFailure(
+  withTerraformFile(
+    "terraform/legacy-authority.tf",
+    forbiddenRoutineDeployerTokenCreator
+      .replace(
+        "reintroduced_routine_deployer_token_creator",
+        "renamed_legacy_path",
+      )
+      .replace(
+        "${google_service_account.metrics_bridge_deployer.email}",
+        "metrics-bridge-deployer@mento-monitoring.iam.gserviceaccount.com",
+      ),
+  ),
+  "routine deployer Token Creator grants are forbidden after cutover",
+);
 
 const productionWifHeader =
   'resource "google_service_account_iam_member" "production_infra_applier_wif_binding" {';

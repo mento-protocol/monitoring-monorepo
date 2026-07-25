@@ -72,11 +72,12 @@ apply behavior on `main`, gated by the `production-infra` GitHub Environment.
 Their plan jobs can run for workflow/notifier edits too, but the apply jobs only
 become eligible when stack-owned deployment inputs changed or a maintainer used
 `workflow_dispatch`. The platform stack remains manual-plan/manual-apply only.
-`terraform-drift.yml` runs a daily plan-only check for all four stacks. The
-checked-in plan workflows and scheduled drift route trusted-`main` work through
-the read-only refresh chain with full refresh and `-lock=false`. The legacy
-routine-deployer Token Creator grant remains only as a rollback path until live
-proof and drain checks pass.
+`terraform-drift.yml` runs a daily plan-only check for all four stacks.
+Trusted-`main` plans and scheduled drift use the read-only refresh chain with
+full refresh and `-lock=false`. The legacy
+routine-deployer Token Creator grant is rollback-only. Do not merge its removal
+until routing is live on current `main`, full-refresh plans prove it, affected
+runs drain, and the read boundary is audited.
 
 Secret-bearing workflows use validation-safe placeholder `TF_VAR_*` values or
 guarded targets for eligible same-repo human PR plans. Fork, Dependabot, and
@@ -134,19 +135,19 @@ apply-time re-plan and drift window remain in force.
 
 ## Identity bootstrap, routing cutover, and authority removal
 
-Follow ADR 0047's full procedure:
+Follow ADR 0047:
 
-1. Merge the bootstrap, cancel its queued infrastructure applies, then review
-   and explicitly approve a local platform plan/apply from clean current
-   `main`.
-2. Re-run alerts-delivery and governance-watchdog, verify the new apply path,
-   and retain the routine-deployer Token Creator grant for rollback.
-3. Merge the checked-in refresh routing, then run the live plans above, drain
-   every old/proof run, and audit both paths. Checked-in validation alone is
-   not live proof.
-4. Only then land and explicitly apply the final legacy-authority removal.
+1. Merge the bootstrap, cancel its queued runs, then explicitly approve its
+   clean-current-`main` platform plan/apply.
+2. Re-run the owning stacks, verify replacement apply auth, and keep rollback.
+3. On merged routing, run the live plans, drain old/proof runs, and audit the
+   read boundary. Checked-in validation is not proof.
+4. Only then merge removal; source omission leaves the live grant intact.
+5. Cancel superseded runs. After all infrastructure runs finish, plan from
+   clean current `main`, apply with explicit human approval, and audit final
+   IAM/WIF.
 
-Do not create the peg-policy project or bucket until step 4 is applied, all
+Do not create the peg-policy project or bucket until step 5 is applied, all
 runs drain, and the IAM audit proves the legacy path is gone.
 
 ## Platform GitHub Actions secrets and variables

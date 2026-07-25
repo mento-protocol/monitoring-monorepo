@@ -46,9 +46,9 @@ garden_lane: agent-entry-points
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
   `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
   `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The four trusted-main plan
-  workflows and `terraform-drift.yml` route through the refresh selectors.
-  Keep the legacy Token Creator rollback grant until live proof, drain checks,
-  and the separate authority-removal change are complete.
+  workflows and `terraform-drift.yml` route through the refresh selectors. This
+  final-removal source must not merge until that routing is live on current
+  `main`, proved through the checked-in route, drained, and audited.
 - Build trusted-main refresh access from curated non-basic project read roles;
   never use basic `roles/viewer`. Keep Secret Accessor limited to the exact
   Terraform-managed secrets and Storage Object Viewer limited to state and
@@ -56,13 +56,16 @@ garden_lane: agent-entry-points
   (including logs, metrics, and artifacts) as part of the confidentiality
   review. The routing is checked in, but live proof is still required through
   the merged `main` route: run full-refresh, unlocked plans for every
-  CI-managed Google-provider stack and add only the exact missing permission
-  named by a provider denial. Drain and audit those runs before authority
-  removal.
-- Only a separate final removal PR may delete the routine deployer's
-  `org-terraform` Token Creator grant, and only through an explicitly approved
-  platform apply. Do not create the peg-policy project or bucket until that
-  removal is applied, all queued and active runs drain, and the final IAM audit
+  CI-managed Google-provider stack; add only the exact missing permission named
+  by a provider denial. Before final authority removal merges, drain every
+  pre-routing and proof run and audit the read boundary.
+- The final-removal source omits the routine deployer's `org-terraform` Token
+  Creator grant. That source change does not remove the live grant. After
+  merge, cancel superseded runs, confirm every infrastructure run is terminal,
+  then run a clean current-`main` platform plan and apply only with explicit
+  human approval. Audit the final WIF and service-account IAM bindings before
+  declaring removal complete. Do not create the peg-policy project or bucket
+  until the removal is applied, all queued and active runs drain, and the audit
   confirms the old path is gone.
 
 ## Verification

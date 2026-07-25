@@ -13,8 +13,8 @@ garden_lane: adrs-architecture
 
 # ADR 0047 — Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities
 
-**Status:** Accepted (Jul 2026), refresh routing checked in; live proof and
-authority removal pending.
+**Status:** Accepted (Jul 2026), final-removal source prepared; live cutover
+incomplete.
 **Scope:** terraform/infra
 
 ## Context
@@ -143,6 +143,13 @@ and drain gates below complete:
    service-account IAM bindings before declaring the authority removal
    complete.
 
+The final-removal source now implements step 7 by omitting the legacy binding.
+This is source readiness only. It must not merge until the routing change is
+live on current `main`, the step 6 plans succeed, every pre-routing and proof
+run is terminal, and the read boundary is audited. The live grant remains until
+the post-merge platform apply succeeds and the final IAM audit proves it is
+gone.
+
 Do not create a dedicated peg-policy GCP project or bucket during this
 bootstrap or routing cutover. Until the final removal has been applied, every
 queued and active infrastructure run has drained, and the IAM audit proves the
@@ -215,9 +222,10 @@ that the current stacks do not otherwise need.
   carrying apply authority. Read-only still includes sensitive state, managed
   secret payloads, and function source, so this identity remains unavailable
   to PRs.
-- The staged rollout deliberately has a short period where both the legacy and
-  replacement appliers can reach `org-terraform`. Queue control, terminal-run
-  verification, and the later IAM audit are required parts of the cutover.
+- The live environment can retain both the legacy and replacement
+  `org-terraform` paths until the final-removal source is merged and explicitly
+  applied. Queue control, terminal-run verification, and the final IAM audit
+  are required parts of the cutover.
 - The checked-in identity contract is a regression guard over enumerated
   Terraform identity and authority blocks, credential and secret-payload
   sinks, output and declassification sites, imperative execution, and

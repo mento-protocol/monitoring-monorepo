@@ -100,11 +100,12 @@ approval requirement until a second active maintainer can satisfy it.
 - Environment approval is an operator acknowledgement of the commit and earlier
   plan. It does not prove human review of the apply-time plan or independent
   approval of the code.
-- The legacy routine-deployer Token Creator grant may exist only during the
-  staged ADR 0047 cutover. First land the trusted-main refresh routing while
-  retaining the grant, prove every CI-managed Google-provider stack through
-  that checked-in route, and drain and audit the runs. Only a separate final
-  removal PR and explicitly approved platform apply may delete the grant.
+- The final-removal source omits the legacy routine-deployer Token Creator
+  grant, but it must not merge until trusted-main refresh routing is live on
+  current `main`, every CI-managed Google-provider stack succeeds through that
+  checked-in route, all pre-routing and proof runs are terminal, and the read
+  boundary is audited. The grant remains live until an explicitly approved
+  platform apply removes it and the final IAM audit proves it is gone.
 - Worktrees lack `terraform.tfvars`, so run TF from `main`.
 - Agents never apply without explicit human approval; plan first, surface the diff.
 
