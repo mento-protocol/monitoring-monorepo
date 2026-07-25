@@ -12,13 +12,8 @@ import {
   readPegConversionLeg,
   type PegConversionLeg,
 } from "./conversion.js";
+import { fetchPegStructuralContext } from "./graphql.js";
 import {
-  fetchPegStructuralContext,
-  type PegStructuralContextResult,
-  type PegTradingLimitRow,
-} from "./graphql.js";
-import {
-  publishPegMetrics,
   type PegAssetMetricSnapshot,
   type PegSourceMetricSnapshot,
 } from "./metrics.js";
@@ -28,6 +23,8 @@ import {
   type PegPollCycleInput,
   type PegPollSourceState,
 } from "./poll-cycle.js";
+import { publishPegPollSnapshot } from "./publisher.js";
+import type { PegDecisionPackagePublicationContext } from "./decision-packages.js";
 import type {
   PegAssetPolicy,
   PegPolicyVersion,
@@ -40,17 +37,14 @@ import {
 import type {
   PegAsset,
   PegConversion,
-  PegMonitor,
   PegRegistry,
   PegSource,
 } from "./registry.js";
-import { PEG_REGISTRY_MAX_MONITORS_PER_ASSET } from "./registry.js";
 import {
-  computeStructuralSaturation,
-  deriveReferenceSize,
-  FPMM_L1_WINDOW_SECONDS,
-  TRADING_LIMIT_INTERNAL_DECIMALS,
-} from "./structural.js";
+  pollPegStructuralContext,
+  type PegPolledStructuralContext,
+} from "./structural-poller.js";
+import { deriveReferenceSize } from "./structural.js";
 import type { PegObservation } from "./types.js";
 
 export const MAX_PROVIDER_CLOCK_SKEW_MS = 60_000;
@@ -96,7 +90,11 @@ export interface PegPollerDependencies {
     conversion: PegConversion,
     nowSeconds: number,
   ) => Promise<PegConversionLeg>;
-  publish?: (snapshots: PegAssetMetricSnapshot[]) => void | Promise<void>;
+  publish?: (
+    snapshots: PegAssetMetricSnapshot[],
+    context: PegDecisionPackagePublicationContext | null,
+    decisionSnapshots: PegAssetMetricSnapshot[],
+  ) => void | Error | Promise<void | Error>;
   onError?: (event: PegPollErrorEvent) => void;
 }
 
@@ -125,16 +123,12 @@ interface Dependencies {
     conversion: PegConversion,
     nowSeconds: number,
   ) => Promise<PegConversionLeg>;
-  publish: (snapshots: PegAssetMetricSnapshot[]) => void | Promise<void>;
+  publish: (
+    snapshots: PegAssetMetricSnapshot[],
+    context: PegDecisionPackagePublicationContext | null,
+    decisionSnapshots: PegAssetMetricSnapshot[],
+  ) => void | Error | Promise<void | Error>;
   report: ReportError;
-}
-
-interface StructuralContext {
-  reachable: boolean;
-  querySaturated: boolean;
-  saturation: number | null;
-  counterpartyCount: number;
-  limits: PegTradingLimitRow[];
 }
 
 type SourceState = PegPollSourceState;
@@ -185,7 +179,7 @@ const resolveDependencies = (input: PegPollerDependencies): Dependencies => {
     fetchBitvavo: input.fetchBitvavo ?? fetchBitvavoObservation,
     fetchKraken: input.fetchKraken ?? fetchKrakenObservation,
     readConversionLeg: input.readConversionLeg ?? defaultReadConversionLeg,
-    publish: input.publish ?? publishPegMetrics,
+    publish: input.publish ?? publishPegPollSnapshot,
     report,
   };
 };
@@ -203,159 +197,6 @@ function takeBounded<Value>(
     );
   }
   return values.slice(0, maximum);
-}
-
-const poolIdFor = (monitor: PegMonitor) =>
-  `${monitor.chainId}-${monitor.poolAddress.toLowerCase()}`;
-
-const addressMatches = (left: string | null, right: string) =>
-  typeof left === "string" && left.toLowerCase() === right.toLowerCase();
-
-function structuralBindingIssue(
-  monitor: PegMonitor,
-  result: Extract<PegStructuralContextResult, { status: "ok" }>,
-): string | null {
-  const poolId = poolIdFor(monitor);
-  if (result.pool.id !== poolId) return "pool id mismatch";
-  if (result.pool.chainId !== monitor.chainId) return "pool chain mismatch";
-  if (!String(result.pool.source).toLowerCase().includes("fpmm")) {
-    return "pool source is not FPMM-backed";
-  }
-  if (!addressMatches(result.pool.referenceRateFeedID, monitor.rateFeedId)) {
-    return "pool rate-feed mismatch";
-  }
-  const monitoredTokenInPool = [result.pool.token0, result.pool.token1].some(
-    (token) => addressMatches(token, monitor.monitoredTokenAddress),
-  );
-  if (!monitoredTokenInPool) {
-    return "monitored token is absent from pool";
-  }
-  if (result.tradingLimit.chainId !== monitor.chainId) {
-    return "trading-limit chain mismatch";
-  }
-  if (result.tradingLimit.poolId !== poolId) {
-    return "trading-limit pool mismatch";
-  }
-  if (
-    !addressMatches(result.tradingLimit.token, monitor.monitoredTokenAddress)
-  ) {
-    return "trading-limit token mismatch";
-  }
-  if (result.tradingLimit.decimals !== TRADING_LIMIT_INTERNAL_DECIMALS) {
-    return "trading-limit internal decimals mismatch";
-  }
-  return null;
-}
-
-type MonitorResult = {
-  reachable: boolean;
-  querySaturated: boolean;
-  saturation: number | null;
-  counterpartyCount: number;
-  limit: PegTradingLimitRow | null;
-};
-
-const failedMonitor = (querySaturated = false): MonitorResult => ({
-  reachable: false,
-  querySaturated,
-  saturation: null,
-  counterpartyCount: 0,
-  limit: null,
-});
-
-async function pollMonitor(
-  assetId: string,
-  monitor: PegMonitor,
-  monitorIndex: number,
-  context: CycleContext,
-): Promise<MonitorResult> {
-  const location = { asset: assetId, monitorIndex };
-  let result: PegStructuralContextResult;
-  try {
-    result = await context.dependencies.fetchStructuralContext({
-      poolId: poolIdFor(monitor),
-      monitoredToken: monitor.monitoredTokenAddress,
-      since: BigInt(Math.max(0, context.nowSeconds - FPMM_L1_WINDOW_SECONDS)),
-    });
-  } catch (error) {
-    context.dependencies.report("structural_query", error, location);
-    return failedMonitor();
-  }
-
-  if (result.status !== "ok") {
-    context.dependencies.report(
-      "structural_missing",
-      new Error(`structural context status: ${result.status}`),
-      location,
-    );
-    return failedMonitor(result.pageSaturated);
-  }
-  const bindingIssue = structuralBindingIssue(monitor, result);
-  if (bindingIssue !== null) {
-    context.dependencies.report(
-      "structural_binding",
-      new Error(bindingIssue),
-      location,
-    );
-    return failedMonitor(result.pageSaturated);
-  }
-
-  try {
-    const { saturationFraction } = computeStructuralSaturation(
-      result.tradingLimit,
-      BigInt(context.nowSeconds),
-    );
-    // Validate the fixed-15 limits once. Source-specific caps are applied later.
-    deriveReferenceSize(result.tradingLimit, Number.MAX_VALUE);
-    return {
-      reachable: true,
-      querySaturated: result.pageSaturated,
-      saturation: saturationFraction,
-      counterpartyCount: new Set(
-        result.swaps.map(({ caller }) => caller.toLowerCase()),
-      ).size,
-      limit: result.tradingLimit,
-    };
-  } catch (error) {
-    context.dependencies.report("structural_data", error, location);
-    return failedMonitor(result.pageSaturated);
-  }
-}
-
-async function pollStructural(
-  assetId: string,
-  monitors: PegMonitor[],
-  context: CycleContext,
-): Promise<StructuralContext> {
-  const bounded = takeBounded(
-    monitors,
-    PEG_REGISTRY_MAX_MONITORS_PER_ASSET,
-    context,
-    "asset monitors",
-  );
-  const results = await Promise.all(
-    bounded.map((monitor, index) =>
-      pollMonitor(assetId, monitor, index, context),
-    ),
-  );
-  const reachable =
-    results.length > 0 && results.every((result) => result.reachable);
-  const saturations = results.flatMap(({ saturation }) =>
-    saturation === null ? [] : [saturation],
-  );
-  return {
-    reachable,
-    querySaturated: results.some((result) => result.querySaturated),
-    saturation:
-      reachable && saturations.length > 0 ? Math.max(...saturations) : null,
-    counterpartyCount: results.reduce(
-      (total, result) => total + result.counterpartyCount,
-      0,
-    ),
-    limits: reachable
-      ? results.flatMap(({ limit }) => (limit === null ? [] : [limit]))
-      : [],
-  };
 }
 
 function convertObservation(
@@ -435,7 +276,7 @@ type PollSourceInput = {
   source: PegSource;
   policy: PegSourcePolicy;
   blindConsecutivePollLimit: number | null;
-  structural: StructuralContext;
+  structural: PegPolledStructuralContext;
   context: CycleContext;
 };
 
@@ -468,7 +309,7 @@ function sourceSnapshot(
 }
 
 function referenceSize(
-  structural: StructuralContext,
+  structural: PegPolledStructuralContext,
   configuredCap: number,
 ): number | null {
   if (!structural.reachable || structural.limits.length === 0) {
@@ -824,7 +665,7 @@ type PollPolicySourceInput = {
   policy: PegAssetPolicy;
   sourceId: string;
   sourcePolicy: PegSourcePolicy;
-  structural: StructuralContext;
+  structural: PegPolledStructuralContext;
   context: CycleContext;
 };
 
@@ -872,7 +713,11 @@ async function pollAsset(
   policy: PegAssetPolicy,
   context: CycleContext,
 ): Promise<PegAssetMetricSnapshot> {
-  const structural = await pollStructural(assetId, asset.monitors, context);
+  const structural = await pollPegStructuralContext(
+    assetId,
+    asset.monitors,
+    context,
+  );
   const policySources = takeBounded(
     sortedEntries(policy.sources),
     PEG_POLICY_MAX_SOURCES_PER_ASSET,
@@ -909,6 +754,7 @@ async function pollAsset(
     structuralQuerySaturated: structural.querySaturated,
     indexedPoolReachable: structural.reachable,
     counterpartyCount: structural.counterpartyCount,
+    monitors: structural.monitors,
     sources,
   };
 }

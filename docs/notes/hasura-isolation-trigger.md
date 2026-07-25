@@ -27,8 +27,9 @@ The primary `metrics-bridge` loop polls `HASURA_URL` every 30s by default
 (`metrics-bridge/src/config.ts` and `metrics-bridge/src/env.ts`) and exports the
 gauges that back Grafana alerts. The isolated peg loop also uses `HASURA_URL`:
 once `PEG_POLICY_URL` activates it, every 15s cycle issues one bounded
-Pool/TradingLimit/SwapEvent companion query per registry monitor, with at most
-1,000 SwapEvent rows per query (`metrics-bridge/src/peg/runtime.ts` and
+Pool/TradingLimit/BreakerConfig/SwapEvent companion query per registry monitor,
+with at most eight BreakerConfig rows and 1,000 SwapEvent rows per query
+(`metrics-bridge/src/peg/runtime.ts` and
 `metrics-bridge/src/peg/graphql.ts`). It remains dormant while the protected
 policy artifact is absent. Both bridge paths share the same hosted endpoint as
 the public dashboard, even though peg failures never gate `/health`.

@@ -264,7 +264,12 @@ class DefaultPegRuntime implements PegRuntime {
     }
     try {
       const policies = selectCompatiblePolicies(registry, bundle);
-      await this.options.poller.pollCycle({ registry, policies });
+      await this.options.poller.pollCycle({
+        registry,
+        policies,
+        approvedActivePolicyVersion: bundle.active.version,
+        retainedPreviousPolicyVersion: bundle.previous?.version ?? null,
+      });
       this.#status = "active";
     } catch (error) {
       const kind =
