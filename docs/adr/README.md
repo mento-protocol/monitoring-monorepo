@@ -125,6 +125,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0042](0042-metrics-bridge-external-price-poller.md)     | The bridge hosts an isolated external market-price peg-polling lifecycle      |
 | [0043](0043-peg-registry-service-local.md)               | The peg-monitor registry is service-local config, not published shared-config |
 | [0045](0045-peg-paging-semantics.md)                     | Peg paging measures executable sell price; the deep venue pages alone         |
+| [0049](0049-peg-decision-package-read-model.md)          | Peg decisions use a bounded Metrics Bridge read model                         |
 
 ### terraform / infra
 

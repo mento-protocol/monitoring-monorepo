@@ -143,12 +143,12 @@ publishes the same policy as an IaC-owned versioned runtime artifact
 that the bridge polls (never baked into the image;
 content-addressed version suffix verified by runtime and CI;
 `mento_peg_policy_version` asserted by the rules with two-phase
-rollover: previous + new exact versions remain accepted until a reviewed
-follow-up sets `previous=null` after producer ACK. ACK only resolves the
-rollover-stuck condition and never auto-terminates retained rules; previous
-acceptance is never expired by wall-clock alone. Per-source poll cadences live
-in the same artifact so coverage cannot be gamed by an ungated cadence change).
-Per-rule conventions: freshness
+rollover: previous + new exact versions remain active until a separately
+reviewed `previous=null` follow-up after producer ACK. ACK itself only resolves
+the rollover-stuck alert; it never auto-terminates retained rules, and no wall
+clock expires their acceptance. Per-source poll cadences live in the same
+artifact so coverage cannot be gamed by an ungated cadence change). Per-rule
+conventions: freshness
 gate (`time() - mento_peg_observation_at`) on **every** peg rule;
 `no_data_state = "Alerting"` (+~5 min grace, documented) on blindness and
 heartbeat rules; duration-fraction sustain
@@ -172,8 +172,7 @@ Ladder (EUROP initial values; per-asset data):
   second uncapped venue escalates priority. Also: blind-while-stressed.
 - **Warn (Slack, repeat-suppressed):** uncapped deviation
   ≥ 25 bps sustained ≥ 10 min; deep-venue envelope-excess spread; structural
-  saturation; producer-counted blind ≥ M consecutive due deep-venue poll
-  slots.
+  saturation; producer-counted blind ≥ M consecutive deep-venue poll slots.
 - **Ops-noise (Slack low-urgency):** source unhealthy (API errors, 429s);
   never pages. Distinct alerts: "source permanently dead" (N days),
   "critical path unreachable — re-onboard" (deep-venue loss, human ack).

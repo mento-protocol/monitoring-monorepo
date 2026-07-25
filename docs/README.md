@@ -59,7 +59,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`alerts/infra/onchain-event-handler/README.md`](../alerts/infra/onchain-event-handler/README.md) | On-chain Event Handler Module | canonical / active | runbook / alerts/infra/onchain-event-handler | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/onchain-event-listeners/README.md`](../alerts/infra/onchain-event-listeners/README.md) | On-chain Event Listeners Module | canonical / active | runbook / alerts/infra/onchain-event-listeners | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-17 |
-| [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-22 |
+| [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-24 |
 | [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
@@ -71,6 +71,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md) | Documentation gardening | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/github-tooling-surfaces.md`](notes/github-tooling-surfaces.md) | GitHub Tooling Surfaces — gh CLI vs MCP | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md) | Hasura isolation trigger | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
+| [`docs/notes/peg-monitoring.md`](notes/peg-monitoring.md) | Peg monitoring alert source validation and activation hold | canonical / active | runbook / alerts/peg-monitoring | eng | 90d; verified 2026-07-24 |
 | [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md) | PR Operating Card | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
@@ -154,6 +155,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) | Peg paging measures executable sell price; the deep venue pages alone | canonical / active | adr / metrics-bridge / alerts | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) | Oracle freshness is reconstructed from persisted report events | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) | Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-24 |
+| [`docs/adr/0049-peg-decision-package-read-model.md`](adr/0049-peg-decision-package-read-model.md) | Peg decisions use a bounded Metrics Bridge read model | canonical / active | adr / metrics-bridge / ui-dashboard | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
 ## package-readmes-reference
@@ -177,16 +179,11 @@ the rules in [`context-standards.md`](context-standards.md).
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
-| [`BACKLOG.md`](../BACKLOG.md) | Backlog | unmanaged / unmanaged | tracker / repo-wide | unowned | 365d |
-| [`docs/BACKLOG.md`](BACKLOG.md) | Monitoring Monorepo — Task Backlog (retired) | non-canonical / archived | tracker / repo-wide | eng | 365d; verified 2026-07-23 |
-| [`docs/CODE-REVIEW-UI-DASHBOARD.md`](CODE-REVIEW-UI-DASHBOARD.md) | Code Review — ui-dashboard | non-canonical / archived | report / ui-dashboard | eng | 365d |
+| [`BACKLOG.md`](../BACKLOG.md) | Backlog transition storage | non-canonical / active | tracker / repo-wide | eng | 90d; verified 2026-07-24 |
 | [`docs/metrics/review-process-after-1045-comparison-2026-07-07.md`](metrics/review-process-after-1045-comparison-2026-07-07.md) | Review Process Metrics After PR 1045 | non-canonical / archived | report / ci/process | eng | 365d; verified 2026-07-07 |
-| [`docs/monad-launch-plan.md`](monad-launch-plan.md) | Monad Monitoring — Launch Runbook (archived) | non-canonical / archived | runbook / indexer | eng | 365d; verified 2026-07-23 |
-| [`docs/multichain-indexer-analysis.md`](multichain-indexer-analysis.md) | Multichain Indexer Analysis — Celo + Monad merge (archived) | non-canonical / archived | report / indexer | eng | 365d; verified 2026-07-23 |
-| [`docs/notes/file-size-watch.md`](notes/file-size-watch.md) | File-size and lint-hygiene watch list | canonical / active | report / repo-wide | eng | 30d; verified 2026-07-17 |
-| [`docs/notes/indexer-spec-followups.md`](notes/indexer-spec-followups.md) | Indexer SPEC §2 follow-up metrics (archived) | non-canonical / archived | note / indexer-envio | eng | 365d; verified 2026-07-17 |
-| [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) | React Compiler annotation-mode pilot (archived) | non-canonical / archived | note / ui-dashboard | eng | 365d; verified 2026-07-23 |
-| [`docs/notes/review-process-metrics.md`](notes/review-process-metrics.md) | Review process metrics evaluation | non-canonical / archived | report / ci/process | eng | 365d; verified 2026-07-17 |
+| [`docs/notes/file-size-watch.md`](notes/file-size-watch.md) | File-size and lint-hygiene watch list | canonical / active | report / repo-wide | eng | 30d; verified 2026-07-24 |
+| [`docs/notes/indexer-spec-followups.md`](notes/indexer-spec-followups.md) | Parked indexer metric ideas | non-canonical / archived | note / indexer-envio | eng | 365d; verified 2026-07-24 |
+| [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) | React Compiler annotation-mode pilot (archived) | non-canonical / archived | note / ui-dashboard | eng | 365d; verified 2026-07-24 |
 | [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) | Terraform CI/CD hardening — declined alternatives | non-canonical / archived | note / terraform/infra | eng | 365d; verified 2026-07-23 |
 | [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) | UI Dashboard Performance Plan (archived) | non-canonical / archived | plan / ui-dashboard | eng | 365d; verified 2026-07-23 |
 | [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) | AI Review Process Integration Plan | non-canonical / archived | plan / ci/process | eng | 365d; verified 2026-07-17 |
