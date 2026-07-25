@@ -406,7 +406,6 @@ export function referencesProductionApplier(block) {
 function referencesRoutineDeployer(block) {
   return (
     block.code.includes("google_service_account.metrics_bridge_deployer.") ||
-    block.code.includes("serviceAccount:metrics-bridge-deployer@") ||
     block.code.includes("metrics-bridge-deployer")
   );
 }
