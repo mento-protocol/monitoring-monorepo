@@ -89,6 +89,7 @@ export function RebalanceStatusValue({
 }) {
   const isWeekendNow = useResolvedIsWeekend();
   const liveNowSeconds = useNowSeconds();
+  const clockPending = liveNowSeconds === null;
   const statusNowSeconds = liveNowSeconds ?? oracleFreshnessTimestamp(pool);
   const {
     data: rebalanceCheck,
@@ -112,11 +113,14 @@ export function RebalanceStatusValue({
     statusText = "Diagnostics unavailable";
     statusColor = "text-slate-400";
   } else if (rebalanceCheck === null) {
-    // Mirror DeviationCell / HealthPanel: zero-filled defaults make
-    // computeHealthStatus return CRITICAL ("Oracle stale") for pools the
-    // indexer hasn't reached yet. Render the same "no data yet" copy
-    // HealthPanel uses instead of crying wolf.
-    if (pool.hasHealthData !== true) {
+    if (clockPending) {
+      statusText = "Health status pending live browser time";
+      statusColor = "text-slate-400";
+    } else if (pool.hasHealthData !== true) {
+      // Mirror DeviationCell / HealthPanel: zero-filled defaults make
+      // computeHealthStatus return CRITICAL ("Oracle stale") for pools the
+      // indexer hasn't reached yet. Render the same "no data yet" copy
+      // HealthPanel uses instead of crying wolf.
       statusText = "Health data not yet available";
       statusColor = "text-slate-400";
     } else {

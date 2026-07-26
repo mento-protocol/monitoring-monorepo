@@ -39,6 +39,7 @@ export function DeviationCell({
   // deviation bar for rows the indexer explicitly marked as no-data.
   const hasHealthData = pool.hasHealthData === true;
   const liveNowSeconds = useNowSeconds();
+  const clockPending = liveNowSeconds === null;
   const statusNowSeconds = resolveStatusNowSeconds(pool, liveNowSeconds);
   const oracleIsFresh = isOracleFresh(pool, statusNowSeconds, network.chainId);
 
@@ -54,7 +55,12 @@ export function DeviationCell({
     weekendPause,
     shouldFetchTrip,
     visibleBreachStartedAt,
-  } = resolveWeekendHealth(oracleIsFresh, isWeekendNow, breachStartedAt);
+  } = resolveWeekendHealth(
+    clockPending,
+    oracleIsFresh,
+    isWeekendNow,
+    breachStartedAt,
+  );
   // Look up the trip transaction so the "breach Xh ago" badge can link to
   // the explorer. Gate on the same conditions that the early-return
   // guards check below — virtual, no-health-data, and weekend-stale cells
@@ -74,12 +80,14 @@ export function DeviationCell({
   if (!hasHealthData) return null;
   if (weekendPause) return null;
 
-  const status = computeHealthStatus(
-    pool,
-    network.chainId,
-    statusNowSeconds,
-    isWeekendNow,
-  );
+  const status = clockPending
+    ? "N/A"
+    : computeHealthStatus(
+        pool,
+        network.chainId,
+        statusNowSeconds,
+        isWeekendNow,
+      );
   const showNeutralStatus = unresolvedWeekendHealth && status === "N/A";
 
   // Distinguish schema-default "threshold unknown" from governance's
@@ -136,11 +144,13 @@ function resolveStatusNowSeconds(
 }
 
 function resolveWeekendHealth(
+  clockPending: boolean,
   oracleIsFresh: boolean,
   isWeekendNow: boolean | null,
   breachStartedAt: string | null,
 ) {
-  const unresolvedWeekendHealth = !oracleIsFresh && isWeekendNow === null;
+  const unresolvedWeekendHealth =
+    clockPending || (!oracleIsFresh && isWeekendNow === null);
   const weekendPause = !oracleIsFresh && isWeekendNow === true;
   return {
     unresolvedWeekendHealth,

@@ -212,7 +212,7 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain("text-amber-400");
   });
 
-  it("uses the oracle timestamp as the deterministic pre-mount freshness clock", () => {
+  it("keeps stale health neutral until the live clock resolves", () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     testClock.nowSeconds = null;
     const html = renderToStaticMarkup(
@@ -227,9 +227,9 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("Balanced");
-    expect(html).toContain("text-emerald-400");
-    expect(html).not.toContain("Oracle stale");
+    expect(html).toContain("Health status pending live browser time");
+    expect(html).toContain("text-slate-400");
+    expect(html).not.toContain("Balanced");
   });
 
   it("renders 'Health data not yet available' when the pool's hasHealthData flag is not true", () => {

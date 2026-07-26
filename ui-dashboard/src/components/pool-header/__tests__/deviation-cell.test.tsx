@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { act } from "react";
 import { hydrateRoot, type Root } from "react-dom/client";
@@ -28,13 +28,29 @@ vi.mock("@/lib/graphql", () => ({
     data: { DeviationThresholdBreach: nextTripTx },
   }),
 }));
+
+const testClock = vi.hoisted(() => ({ nowSeconds: 0 as number | null }));
+
+vi.mock("@/hooks/use-now-seconds", async () => {
+  const { relativeTimeOrTimestamp, timestampOrUtc } =
+    await vi.importActual<typeof import("@/lib/format")>("@/lib/format");
+  const now = () => testClock.nowSeconds;
+  return {
+    useNowSeconds: now,
+    useSsrSafeRelative: (ts: string | null | undefined) =>
+      relativeTimeOrTimestamp(ts ?? "", now() ?? 0),
+    useSsrSafeTimestamp: (ts: string | null | undefined) =>
+      timestampOrUtc(ts ?? "", now() ?? 0),
+  };
+});
+
 function setTripTx(rows: { startedByTxHash?: string }[]) {
   nextTripTx = rows;
 }
 
-import { beforeEach } from "vitest";
 beforeEach(() => {
   nextTripTx = [];
+  testClock.nowSeconds = Math.floor(Date.now() / 1000);
 });
 
 afterEach(() => {
@@ -78,7 +94,7 @@ const BASE_POOL: Pool = {
 };
 
 describe("DeviationCell — bar fill colors track health status", () => {
-  it("keeps stale deviation deterministic through hydration before the live clock resolves", async () => {
+  it("keeps stale deviation neutral through hydration before the live clock resolves", async () => {
     vi.mocked(isWeekend).mockReturnValue(true);
     const testNow = Math.floor(Date.now() / 1000);
     const stalePool: Pool = {
@@ -91,9 +107,10 @@ describe("DeviationCell — bar fill colors track health status", () => {
     const serverHtml = renderToString(
       <DeviationCell pool={stalePool} network={NETWORK} />,
     );
-    expect(serverHtml).toContain("bg-emerald-500");
+    expect(serverHtml).toContain("N/A");
+    expect(serverHtml).not.toContain("bg-emerald-500");
     expect(serverHtml).not.toContain("bg-red-500");
-    expect(serverHtml).toContain("breach");
+    expect(serverHtml).not.toMatch(/breach <time/);
 
     vi.mocked(isWeekend).mockReturnValue(false);
     const container = document.createElement("div");
@@ -117,6 +134,10 @@ describe("DeviationCell — bar fill colors track health status", () => {
         ),
       );
       expect(hasHydrationError).toBe(false);
+      testClock.nowSeconds = testNow;
+      await act(async () => {
+        root?.render(<DeviationCell pool={stalePool} network={NETWORK} />);
+      });
       expect(container.innerHTML).toContain("bg-red-500");
     } finally {
       consoleError.mockRestore();
