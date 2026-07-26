@@ -66,6 +66,19 @@ const PACKAGE_ROOTS = new Set([
   "terraform",
   "ui-dashboard",
 ]);
+const CLAUDE_RUNTIME_REGISTRY_KEYS = new Set(["schema_version", "documents"]);
+const CLAUDE_RUNTIME_DOCUMENT_KEYS = new Set([
+  "path",
+  "title",
+  "status",
+  "owner",
+  "scope",
+  "doc_type",
+  "garden_lane",
+  "canonical",
+  "review_interval_days",
+  "canonical_sources",
+]);
 
 const OPERATOR_NAME_PATTERN =
   /(?:deploy|deployment|rollback|terraform|quick[_-]commands|webhook[_-]state|adding[_-]events|from[_-]scratch)/i;
@@ -193,6 +206,15 @@ function registryError(message) {
 
 function registryMetadataErrors({ repoRoot, files, document }) {
   const errors = [];
+  for (const key of Object.keys(document ?? {})) {
+    if (!CLAUDE_RUNTIME_DOCUMENT_KEYS.has(key)) {
+      errors.push(
+        registryError(
+          `${isNonEmptyString(document?.path) ? document.path : "entry"}: unknown key '${key}'`,
+        ),
+      );
+    }
+  }
   const stringFields = [
     "path",
     "title",
@@ -357,6 +379,11 @@ export function loadClaudeRuntimeDocumentRegistry({ repoRoot, files }) {
     };
   }
   const errors = [];
+  for (const key of Object.keys(registry ?? {})) {
+    if (!CLAUDE_RUNTIME_REGISTRY_KEYS.has(key)) {
+      errors.push(registryError(`unknown top-level key '${key}'`));
+    }
+  }
   if (registry?.schema_version !== CLAUDE_RUNTIME_DOCUMENT_REGISTRY_VERSION) {
     errors.push(
       registryError(

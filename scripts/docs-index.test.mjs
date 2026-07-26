@@ -311,6 +311,28 @@ test("Claude runtime registry rejects non-string scalar metadata", () => {
   });
 });
 
+test("Claude runtime registry rejects unknown top-level and document keys", () => {
+  withRepo((repo) => {
+    const { files, registry } = writeRuntimeRegistryFixture(repo);
+    registry.typo_field = true;
+    registry.documents[0].typo_field = "ignored";
+    write(
+      repo,
+      CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
+      `${JSON.stringify(registry, null, 2)}\n`,
+    );
+    const errors = buildDocumentationInventory({
+      repoRoot: repo,
+      files,
+    }).errors.join("\n");
+    assert.match(errors, /unknown top-level key 'typo_field'/);
+    assert.match(
+      errors,
+      /\.claude\/agents\/dashboard-explorer\.md: unknown key 'typo_field'/,
+    );
+  });
+});
+
 test("Claude runtime registry classification leaves live runtime bytes unchanged", () => {
   const repo = path.resolve(path.dirname(scriptPath), "..");
   const files = trackedDocumentationFiles(repo);
