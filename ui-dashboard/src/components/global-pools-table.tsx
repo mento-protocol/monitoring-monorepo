@@ -395,11 +395,7 @@ function GlobalPoolRows({
   );
 }
 
-function WeekendBanner({
-  initialIsWeekend,
-}: {
-  initialIsWeekend: boolean;
-}) {
+function WeekendBanner({ initialIsWeekend }: { initialIsWeekend: boolean }) {
   const show = useIsWeekend(initialIsWeekend);
   if (!show) return null;
 

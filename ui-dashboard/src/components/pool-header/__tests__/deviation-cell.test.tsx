@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+/** @vitest-environment jsdom */
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup, renderToString } from "react-dom/server";
+import { act } from "react";
+import { hydrateRoot, type Root } from "react-dom/client";
+import { isWeekend } from "@/lib/weekend";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 
@@ -30,6 +35,10 @@ function setTripTx(rows: { startedByTxHash?: string }[]) {
 import { beforeEach } from "vitest";
 beforeEach(() => {
   nextTripTx = [];
+});
+
+afterEach(() => {
+  vi.mocked(isWeekend).mockReturnValue(false);
 });
 
 import { DeviationCell } from "@/components/pool-header/deviation-cell";
@@ -69,6 +78,55 @@ const BASE_POOL: Pool = {
 };
 
 describe("DeviationCell — bar fill colors track health status", () => {
+  it("keeps stale deviation deterministic through hydration before the live clock resolves", async () => {
+    vi.mocked(isWeekend).mockReturnValue(true);
+    const testNow = Math.floor(Date.now() / 1000);
+    const stalePool: Pool = {
+      ...BASE_POOL,
+      oracleTimestamp: String(testNow - 600),
+      lastOracleReportAt: String(testNow - 600),
+      deviationBreachStartedAt: String(testNow - 120),
+      priceDifference: "1000",
+    };
+    const serverHtml = renderToString(
+      <DeviationCell pool={stalePool} network={NETWORK} />,
+    );
+    expect(serverHtml).toContain("bg-emerald-500");
+    expect(serverHtml).not.toContain("bg-red-500");
+    expect(serverHtml).toContain("breach");
+
+    vi.mocked(isWeekend).mockReturnValue(false);
+    const container = document.createElement("div");
+    container.innerHTML = serverHtml;
+    document.body.appendChild(container);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    let root: Root | null = null;
+    try {
+      await act(async () => {
+        root = hydrateRoot(
+          container,
+          <DeviationCell pool={stalePool} network={NETWORK} />,
+        );
+        await Promise.resolve();
+      });
+      const hasHydrationError = consoleError.mock.calls.some((call) =>
+        call.some((value) =>
+          /Hydration failed|didn't match|React error #418/i.test(String(value)),
+        ),
+      );
+      expect(hasHydrationError).toBe(false);
+      expect(container.innerHTML).toContain("bg-red-500");
+    } finally {
+      consoleError.mockRestore();
+      await act(async () => {
+        root?.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it("renders an emerald bar when deviation is well below the threshold (ratio < 0.8)", () => {
     const pool: Pool = { ...BASE_POOL, priceDifference: "3000" }; // ratio = 0.6
     const html = renderToStaticMarkup(

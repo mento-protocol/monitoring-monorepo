@@ -1,9 +1,9 @@
 /** @vitest-environment jsdom */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { isWeekend } from "@/lib/weekend";
 import type { Pool } from "@/lib/types";
 
@@ -148,7 +148,7 @@ describe("HealthPanel weekend mode", () => {
     expect(html).toBe("");
   });
 
-  it("surfaces stale VirtualPool oracle state instead of saying monitoring is not applicable", () => {
+  it("holds stale VirtualPool health neutral until the browser clock resolves", async () => {
     const virtualPool: Pool = {
       ...BASE_POOL,
       source: "virtual_pool_factory",
@@ -163,9 +163,20 @@ describe("HealthPanel weekend mode", () => {
     };
     const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
 
-    expect(html).toContain("VirtualPool oracle is stale");
-    expect(html).toContain("swaps may revert");
-    expect(html).not.toContain("Health monitoring is not applicable");
+    expect(html).toContain("N/A");
+    expect(html).toContain("VirtualPool oracle freshness is monitored");
+    expect(html).not.toContain("VirtualPool oracle is stale");
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<HealthPanel pool={virtualPool} />);
+    });
+    expect(container.textContent).toContain("VirtualPool oracle is stale");
+    expect(container.textContent).toContain("swaps may revert");
+    await act(async () => {
+      root.unmount();
+    });
   });
 
   it("surfaces invalid VirtualPool medians separately from stale reports", () => {
@@ -210,7 +221,7 @@ describe("HealthPanel weekend mode", () => {
     expect(html).toContain("VirtualPool oracle freshness is monitored");
   });
 
-  it("keeps stale VirtualPool weekend closures on the weekend explanation", async () => {
+  it("hydrates stale VirtualPool health through a server-weekend/client-weekday boundary", async () => {
     const weekend = await import("@/lib/weekend");
     vi.mocked(weekend.isWeekend).mockReturnValue(true);
 
@@ -226,10 +237,37 @@ describe("HealthPanel weekend mode", () => {
       oracleNumReporters: 2,
       wrappedExchangeMinimumReports: "1",
     };
-    const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
+    const serverHtml = renderToString(<HealthPanel pool={virtualPool} />);
+    expect(serverHtml).not.toContain("Trading is paused for the weekend");
+    expect(serverHtml).toContain("VirtualPool oracle freshness is monitored");
 
-    expect(html).toContain("Trading is paused for the weekend");
-    expect(html).not.toContain("VirtualPool oracle is stale");
+    vi.mocked(weekend.isWeekend).mockReturnValue(false);
+    const container = document.createElement("div");
+    container.innerHTML = serverHtml;
+    document.body.appendChild(container);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    let root: Root | null = null;
+    try {
+      await act(async () => {
+        root = hydrateRoot(container, <HealthPanel pool={virtualPool} />);
+        await Promise.resolve();
+      });
+      const hasHydrationError = consoleError.mock.calls.some((call) =>
+        call.some((value) =>
+          /Hydration failed|didn't match|React error #418/i.test(String(value)),
+        ),
+      );
+      expect(hasHydrationError).toBe(false);
+      expect(container.textContent).toContain("VirtualPool oracle is stale");
+    } finally {
+      consoleError.mockRestore();
+      await act(async () => {
+        root?.unmount();
+      });
+      container.remove();
+    }
   });
 
   it("keeps critical VirtualPool stale incidents ahead of mounted weekend copy", async () => {
@@ -323,10 +361,11 @@ describe("HealthPanel breaker halt", () => {
     expect(html).toBe("");
   });
 
-  it("defers to the header (no halt panel) when the oracle is stale on a weekday, even if a breaker is tripped", () => {
-    // Stale + weekday → computeHealthStatus resolves to CRITICAL (the deeper
-    // fault), not HALTED, so the exception panel stays collapsed and the
-    // header surfaces the critical state — keeping detail + fleet consistent.
+  it("renders the deterministic pre-mount halt, then defers stale weekday state to the header", async () => {
+    // Before the browser clock resolves, the oracle timestamp is the
+    // deterministic freshness clock, so the breaker state remains visible.
+    // Once mounted, the live clock reveals the stale weekday oracle and the
+    // header owns that deeper CRITICAL state.
     const staleHalted: Pool = {
       ...BASE_POOL,
       oracleTimestamp: STALE_TS,
@@ -334,6 +373,16 @@ describe("HealthPanel breaker halt", () => {
       breakerTripped: true,
     };
     const html = renderToStaticMarkup(<HealthPanel pool={staleHalted} />);
-    expect(html).toBe("");
+    expect(html).toContain("Trading is halted");
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<HealthPanel pool={staleHalted} />);
+    });
+    expect(container.innerHTML).toBe("");
+    await act(async () => {
+      root.unmount();
+    });
   });
 });

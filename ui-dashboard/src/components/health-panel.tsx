@@ -6,8 +6,10 @@ import {
   computeHealthStatus,
   isOracleFresh,
   isVirtualPoolMedianInvalid,
+  oracleFreshnessTimestamp,
 } from "@/lib/health";
-import { useIsWeekend } from "@/hooks/use-is-weekend";
+import { useResolvedIsWeekend } from "@/hooks/use-is-weekend";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { useNetwork } from "@/components/network-provider";
 
 interface HealthPanelProps {
@@ -156,8 +158,9 @@ function HealthPanelContent({ mode }: { mode: HealthPanelMode }) {
  */
 export function HealthPanel({ pool }: HealthPanelProps) {
   const { network } = useNetwork();
-  // SSR-safe weekend flag (server/client wall-clock days can differ). See useIsWeekend.
-  const isWeekendNow = useIsWeekend();
+  // Safety-sensitive health stays neutral until the browser resolves its clock.
+  const isWeekendNow = useResolvedIsWeekend();
+  const liveNowSeconds = useNowSeconds();
   const isVirtual = isVirtualPool(pool);
   // Trust only `hasHealthData === true` — `pool.healthStatus` is always
   // populated now (indexer's DEFAULT_ORACLE_FIELDS sets it to "N/A" even
@@ -165,16 +168,21 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   // the "not yet available" fallback message this panel is meant to show.
   const hasHealthData = pool.hasHealthData === true;
 
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);
-  const weekendPause = !oracleIsFresh && isWeekendNow;
+  const statusNowSeconds = liveNowSeconds ?? oracleFreshnessTimestamp(pool);
+  const oracleIsFresh = isOracleFresh(pool, statusNowSeconds, network.chainId);
+  const weekendPause = !oracleIsFresh && isWeekendNow === true;
 
   // Resolve the real status first. computeHealthStatus ranks HALTED ABOVE the
   // hasHealthData gate, so a tripped price breaker resolves to HALTED even when
   // health data isn't trusted yet — the halt must surface regardless. Keying on
   // the resolved status (not the raw flag) keeps it consistent with the fleet
-  // chip: stale / weekend pools resolve to CRITICAL / WEEKEND, not HALTED.
-  const computed = computeHealthStatus(pool, network.chainId);
+  // chip: unresolved stale health is N/A, then resolves to CRITICAL / WEEKEND.
+  const computed = computeHealthStatus(
+    pool,
+    network.chainId,
+    statusNowSeconds,
+    isWeekendNow,
+  );
   const showHalted = computed === "HALTED";
   const showVirtualOracleMedianIncident =
     isVirtual && computed === "CRITICAL" && isVirtualPoolMedianInvalid(pool);

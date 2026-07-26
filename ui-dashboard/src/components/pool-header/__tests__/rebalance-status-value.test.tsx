@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
@@ -10,15 +10,17 @@ import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 // time — matching the pre-SSR-safe relativeTime(Date.now()) behavior. SSR-safety
 // itself is covered by the browser hydration suite. Provide BOTH exports: vi.mock
 // replaces the whole module, so a missing useSsrSafeRelative would be undefined.
+const testClock = vi.hoisted(() => ({ nowSeconds: 0 as number | null }));
+
 vi.mock("@/hooks/use-now-seconds", async () => {
   const { relativeTimeOrTimestamp, timestampOrUtc } =
     await vi.importActual<typeof import("@/lib/format")>("@/lib/format");
-  const now = () => Math.floor(Date.now() / 1000);
+  const now = () => testClock.nowSeconds;
   return {
     useNowSeconds: now,
     useSsrSafeRelative: (ts: string | null | undefined) =>
-      relativeTimeOrTimestamp(ts ?? "", now()),
-    useSsrSafeTimestamp: (ts: string) => timestampOrUtc(ts, now()),
+      relativeTimeOrTimestamp(ts ?? "", now() ?? 0),
+    useSsrSafeTimestamp: (ts: string) => timestampOrUtc(ts, now() ?? 0),
   };
 });
 
@@ -45,8 +47,12 @@ const mockUseGQL = vi.fn<
 >(() => ({}));
 
 vi.mock("@/hooks/use-rebalance-check", () => ({
-  useRebalanceCheck: (pool: Pool, network: Network) =>
-    mockUseRebalanceCheck(pool, network),
+  useRebalanceCheck: (
+    pool: Pool,
+    network: Network,
+    nowSeconds: number | null,
+    isWeekendNow: boolean | null,
+  ) => mockUseRebalanceCheck(pool, network, nowSeconds, isWeekendNow),
 }));
 vi.mock("@/lib/graphql", () => ({
   useGQL: (query: string | null, variables?: Record<string, unknown>) =>
@@ -106,6 +112,10 @@ function rebalanceState(overrides: {
 }
 
 describe("RebalanceStatusValue", () => {
+  beforeEach(() => {
+    testClock.nowSeconds = Math.floor(Date.now() / 1000);
+  });
+
   it('renders "Checking…" while the hook is loading', () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ isLoading: true }));
     const html = renderToStaticMarkup(
@@ -202,8 +212,9 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain("text-amber-400");
   });
 
-  it('renders "Oracle stale" in red when health is CRITICAL but the check was skipped because deviation is still below threshold', () => {
+  it("uses the oracle timestamp as the deterministic pre-mount freshness clock", () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
+    testClock.nowSeconds = null;
     const html = renderToStaticMarkup(
       <RebalanceStatusValue
         pool={{
@@ -216,8 +227,9 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("Oracle stale");
-    expect(html).toContain("text-red-400");
+    expect(html).toContain("Balanced");
+    expect(html).toContain("text-emerald-400");
+    expect(html).not.toContain("Oracle stale");
   });
 
   it("renders 'Health data not yet available' when the pool's hasHealthData flag is not true", () => {

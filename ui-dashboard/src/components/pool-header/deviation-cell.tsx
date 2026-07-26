@@ -8,9 +8,14 @@ import {
   effectiveThreshold,
   isNeverRebalance,
   isOracleFresh,
+  oracleFreshnessTimestamp,
 } from "@/lib/health";
-import { useIsWeekend } from "@/hooks/use-is-weekend";
-import { relativeTime, formatTimestamp } from "@/lib/format";
+import { useResolvedIsWeekend } from "@/hooks/use-is-weekend";
+import {
+  useNowSeconds,
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { useGQL } from "@/lib/graphql";
 import { Tooltip } from "@/components/tooltip";
 import { POOL_OPEN_BREACH_TX } from "@/lib/queries";
@@ -33,22 +38,29 @@ export function DeviationCell({
   // `!== undefined` disjunction would let this cell render a synthetic
   // deviation bar for rows the indexer explicitly marked as no-data.
   const hasHealthData = pool.hasHealthData === true;
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);
+  const liveNowSeconds = useNowSeconds();
+  const statusNowSeconds = resolveStatusNowSeconds(pool, liveNowSeconds);
+  const oracleIsFresh = isOracleFresh(pool, statusNowSeconds, network.chainId);
 
   const breachStartedAt =
     pool.deviationBreachStartedAt && pool.deviationBreachStartedAt !== "0"
       ? pool.deviationBreachStartedAt
       : null;
 
-  // SSR-safe weekend flag (server/client wall-clock days can differ). See useIsWeekend.
-  const isWeekendNow = useIsWeekend();
+  // A stale oracle is neutral until the browser resolves the FX-weekend clock.
+  const isWeekendNow = useResolvedIsWeekend();
+  const {
+    unresolvedWeekendHealth,
+    weekendPause,
+    shouldFetchTrip,
+    visibleBreachStartedAt,
+  } = resolveWeekendHealth(oracleIsFresh, isWeekendNow, breachStartedAt);
   // Look up the trip transaction so the "breach Xh ago" badge can link to
   // the explorer. Gate on the same conditions that the early-return
-  // guards check below — virtual / no-health-data / weekend-stale cells
-  // render null, so firing the query for them would be a wasted round-trip.
-  const willRender =
-    !isVirtual && hasHealthData && !(!oracleIsFresh && isWeekendNow);
+  // guards check below — virtual, no-health-data, and weekend-stale cells
+  // render no deviation. The unresolved state renders neutral N/A, so it also
+  // skips this stale breach lookup.
+  const willRender = !isVirtual && hasHealthData && shouldFetchTrip;
   const { data: tripTxData } = useGQL<{
     DeviationThresholdBreach: { startedByTxHash?: string }[];
   }>(breachStartedAt && willRender ? POOL_OPEN_BREACH_TX : null, {
@@ -60,9 +72,15 @@ export function DeviationCell({
 
   if (isVirtual) return null;
   if (!hasHealthData) return null;
-  if (!oracleIsFresh && isWeekendNow) return null;
+  if (weekendPause) return null;
 
-  const status = computeHealthStatus(pool, network.chainId);
+  const status = computeHealthStatus(
+    pool,
+    network.chainId,
+    statusNowSeconds,
+    isWeekendNow,
+  );
+  const showNeutralStatus = unresolvedWeekendHealth && status === "N/A";
 
   // Distinguish schema-default "threshold unknown" from governance's
   // explicit "never rebalance" configuration — both arrive as `0`, but only
@@ -83,9 +101,9 @@ export function DeviationCell({
             content={explainer}
           />
         </span>
-        {breachStartedAt && (
+        {visibleBreachStartedAt && (
           <BreachAge
-            breachStartedAt={breachStartedAt}
+            breachStartedAt={visibleBreachStartedAt}
             trippedByTxHash={trippedByTxHash}
             network={network}
             status={status}
@@ -93,15 +111,43 @@ export function DeviationCell({
         )}
       </dt>
       <dd>
-        <DeviationBar
-          neverRebalances={neverRebalances}
-          priceDifference={pool.priceDifference ?? "0"}
-          rebalanceThreshold={effectiveThreshold(pool)}
-          status={status}
-        />
+        {showNeutralStatus ? (
+          <span className="inline-flex h-5 items-center text-sm text-slate-500">
+            N/A
+          </span>
+        ) : (
+          <DeviationBar
+            neverRebalances={neverRebalances}
+            priceDifference={pool.priceDifference ?? "0"}
+            rebalanceThreshold={effectiveThreshold(pool)}
+            status={status}
+          />
+        )}
       </dd>
     </div>
   );
+}
+
+function resolveStatusNowSeconds(
+  pool: Pool,
+  liveNowSeconds: number | null,
+): number {
+  return liveNowSeconds ?? oracleFreshnessTimestamp(pool);
+}
+
+function resolveWeekendHealth(
+  oracleIsFresh: boolean,
+  isWeekendNow: boolean | null,
+  breachStartedAt: string | null,
+) {
+  const unresolvedWeekendHealth = !oracleIsFresh && isWeekendNow === null;
+  const weekendPause = !oracleIsFresh && isWeekendNow === true;
+  return {
+    unresolvedWeekendHealth,
+    weekendPause,
+    shouldFetchTrip: !unresolvedWeekendHealth && !weekendPause,
+    visibleBreachStartedAt: unresolvedWeekendHealth ? null : breachStartedAt,
+  };
 }
 
 function DeviationBar({
@@ -191,15 +237,14 @@ function BreachAge({
   network: Network;
   status: HealthStatus;
 }) {
+  const relative = useSsrSafeRelative(breachStartedAt);
+  const timestamp = useSsrSafeTimestamp(breachStartedAt);
   const color = status === "CRITICAL" ? "text-red-400" : "text-amber-400";
   const dateTime = new Date(Number(breachStartedAt) * 1000).toISOString();
   const inner = (
     <>
-      breach <time dateTime={dateTime}>{relativeTime(breachStartedAt)}</time>
-      <span className="sr-only">
-        {" "}
-        (started at {formatTimestamp(breachStartedAt)})
-      </span>
+      breach <time dateTime={dateTime}>{relative}</time>
+      <span className="sr-only"> (started at {timestamp})</span>
     </>
   );
   if (trippedByTxHash) {
@@ -208,8 +253,8 @@ function BreachAge({
         href={explorerTxUrl(network, trippedByTxHash)}
         target="_blank"
         rel="noopener noreferrer"
-        title={formatTimestamp(breachStartedAt)}
-        aria-label={`breach ${relativeTime(breachStartedAt)} — open trip transaction on the explorer`}
+        title={timestamp}
+        aria-label={`breach ${relative} — open trip transaction on the explorer`}
         className={`text-xs font-normal hover:text-indigo-400 transition-colors ${color}`}
       >
         {inner}
@@ -217,10 +262,7 @@ function BreachAge({
     );
   }
   return (
-    <span
-      className={`text-xs font-normal ${color}`}
-      title={formatTimestamp(breachStartedAt)}
-    >
+    <span className={`text-xs font-normal ${color}`} title={timestamp}>
       {inner}
     </span>
   );
