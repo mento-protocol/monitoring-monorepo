@@ -3,7 +3,7 @@ title: Infra applies on merge to main behind the production-infra environment ga
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
@@ -59,8 +59,9 @@ jobs use a dedicated WIF pool whose provider requires the immutable repository
 ID `1172025835`, repository slug, protected `main` ref, and `production-infra`
 environment subject before they can impersonate the seed-project production
 applier. PR plans retain their state-only identity. The checked-in workflows
-route trusted-`main` refresh/drift through the separate read-only chain; live
-full-resource proof remains pending before authority removal.
+route trusted-`main` refresh/drift through the separate read-only chain. Run
+#30212385280 completed its full-resource proof; run drain and read-boundary
+audit remain before authority removal.
 [ADR 0047](0047-separated-terraform-ci-identities.md) owns the identity split
 and its staged bootstrap, routing, proof, and removal procedure.
 
@@ -100,11 +101,12 @@ approval requirement until a second active maintainer can satisfy it.
 - Environment approval is an operator acknowledgement of the commit and earlier
   plan. It does not prove human review of the apply-time plan or independent
   approval of the code.
-- The legacy routine-deployer Token Creator grant may exist only during the
-  staged ADR 0047 cutover. First land the trusted-main refresh routing while
-  retaining the grant, prove every CI-managed Google-provider stack through
-  that checked-in route, and drain and audit the runs. Only a separate final
-  removal PR and explicitly approved platform apply may delete the grant.
+- The final-removal source omits the legacy routine-deployer Token Creator
+  grant, but it must not merge until trusted-main refresh routing is live on
+  current `main`, every CI-managed Google-provider stack succeeds through that
+  checked-in route, all pre-routing and proof runs are terminal, and the read
+  boundary is audited. The grant remains live until an explicitly approved
+  platform apply removes it and the final IAM audit proves it is gone.
 - Worktrees lack `terraform.tfvars`, so run TF from `main`.
 - Agents never apply without explicit human approval; plan first, surface the diff.
 

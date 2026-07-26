@@ -27,9 +27,9 @@ name: Alerts Infra
 #   - plan (on trusted main/dispatch) authenticates through the dedicated
 #     refresh WIF variables, impersonates
 #     `org-terraform-refresh-readonly@…seed` for the backend and google
-#     provider, and runs a full-refresh unlocked plan. This checked-in route
-#     still needs live proof before the legacy deployer rollback grant can be
-#     removed.
+#     provider, and runs a full-refresh unlocked plan. Run #30212385280 proved
+#     this checked-in route; drain and read-boundary audit remain before the
+#     legacy deployer rollback grant can be removed.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs
