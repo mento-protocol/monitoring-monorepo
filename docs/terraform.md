@@ -177,15 +177,13 @@ reviewer.
 
 `sentry-pipeline` (`terraform/github-environment.tf`, issue #1289,
 [ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) gates the Sentry
-triage/autofix pipeline's exclusive secrets. It has a protected-branch
-deployment policy (main-only) and — deliberately, because the pipeline is
-unattended — NO reviewer and NO wait timer. Unlike the other two it is
-Terraform-managed; every platform apply reconciles its branch policy and
-secrets. Every secret-bearing job in the `sentry-triage-*`, `sentry-autofix`,
-and `platform-settings-drift` workflows declares it, so those secrets are
-reachable only from `main`, server-side, even on a branch-modified
-`workflow_dispatch`. The shared `CLAUDE_CODE_OAUTH_TOKEN` is intentionally NOT
-in this environment (it stays a repo-level secret for `claude.yml`).
+triage/autofix pipeline's exclusive secrets. It has a main-only
+protected-branch deployment policy and — deliberately, the pipeline is
+unattended — no reviewer or wait timer. Unlike the other two it is
+Terraform-managed; every platform apply reconciles its policy and secrets. Every secret-bearing Sentry job declares it, so those secrets are
+reachable only from `main` — server-enforced even on a branch-modified
+`workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level
+for `claude.yml`.
 
 Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow
