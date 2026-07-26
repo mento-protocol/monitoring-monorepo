@@ -34,7 +34,7 @@ const PROVIDER_BLOCK_SHAPE_SPECIFICATIONS = [
 ];
 
 const LOCAL_MUTATION_BLOCK_SHAPE_SPECIFICATIONS = [
-  "terraform/dashboard.tf:local_file.vercel_project_json|1a0b18e73c8e8bc6c1c6b7c2de51d29f90e5aa3fdb201690e0118329fcda887c",
+  "terraform/dashboard.tf:local_file.vercel_project_json|466008f8e72d2f490add00c191dfd843b1c6e17703c24ffee79e1e550e6e1246",
 ];
 
 // Pin identity attachments and GitHub auth-input managers. Application source

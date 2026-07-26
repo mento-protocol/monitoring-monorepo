@@ -130,6 +130,24 @@ test('the App Engine identity cannot drift from Terraform', () => {
   expectFailure(files, /service_account must pin/u);
 });
 
+test('activation inventory must follow every App Engine versions page', () => {
+  const files = sourceFiles();
+  files.entrypoint = files.entrypoint.replace(
+    'versions_url="${versions_url}&pageToken=${encoded_page_token}"',
+    'versions_url="${versions_url}"',
+  );
+  expectFailure(files, /must follow every version-inventory page/u);
+});
+
+test('activation inventory must reject repeated App Engine page tokens', () => {
+  const files = sourceFiles();
+  files.entrypoint = files.entrypoint.replace(
+    "'index($token) != null'",
+    "'false'",
+  );
+  expectFailure(files, /must reject repeated version page tokens/u);
+});
+
 test('the runtime account cannot gain another static secret grant', () => {
   const files = sourceFiles();
   files.bootstrap += `

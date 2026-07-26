@@ -82,18 +82,54 @@ activation_is_safe() {
     --max-time "${HTTP_TIMEOUT}" \
     "https://appengine.googleapis.com/v1/apps/${GCP_PROJECT}/services/${SERVICE}") ||
     return 1
-  versions_metadata=$(curl -sfH "Authorization: Bearer ${access_token}" \
-    --max-time "${HTTP_TIMEOUT}" \
-    "https://appengine.googleapis.com/v1/apps/${GCP_PROJECT}/services/${SERVICE}/versions?view=BASIC&pageSize=200") ||
-    return 1
 
   printf '%s' "${service_metadata}" |
     jq -e --arg version "${VERSION}" \
-      '.split.allocations[$version] == 1' >/dev/null &&
+      '.split.allocations[$version] == 1' >/dev/null ||
+    return 1
+
+  page_token=""
+  seen_page_tokens='[]'
+  page_count=0
+  while :; do
+    page_count=$((page_count + 1))
+    # App Engine currently caps an app near 210 versions. This bound is far
+    # above that quota but still fails closed if the API repeats page tokens.
+    if [ "${page_count}" -gt 100 ]; then
+      echo "entrypoint: version inventory exceeded 100 pages" >&2
+      return 1
+    fi
+
+    versions_url="https://appengine.googleapis.com/v1/apps/${GCP_PROJECT}/services/${SERVICE}/versions?view=BASIC&pageSize=200"
+    if [ -n "${page_token}" ]; then
+      encoded_page_token=$(printf '%s' "${page_token}" | jq -sRr @uri) ||
+        return 1
+      versions_url="${versions_url}&pageToken=${encoded_page_token}"
+    fi
+    versions_metadata=$(curl -sfH "Authorization: Bearer ${access_token}" \
+      --max-time "${HTTP_TIMEOUT}" "${versions_url}") ||
+      return 1
+
     printf '%s' "${versions_metadata}" |
       jq -e --arg version "${VERSION}" \
-        '(.nextPageToken // "") == "" and ([.versions[]? | select(.id != $version and .servingStatus != "STOPPED")] | length == 0)' \
-        >/dev/null
+        '((.versions // []) | type) == "array" and ([.versions[]? | select(.id != $version and .servingStatus != "STOPPED")] | length == 0)' \
+        >/dev/null ||
+      return 1
+    next_page_token=$(printf '%s' "${versions_metadata}" |
+      jq -er '(.nextPageToken // "") | select(type == "string")') ||
+      return 1
+    [ -z "${next_page_token}" ] && break
+    if printf '%s' "${seen_page_tokens}" |
+      jq -e --arg token "${next_page_token}" 'index($token) != null' \
+        >/dev/null; then
+      echo "entrypoint: version inventory repeated a page token" >&2
+      return 1
+    fi
+    seen_page_tokens=$(printf '%s' "${seen_page_tokens}" |
+      jq -c --arg token "${next_page_token}" '. + [$token]') ||
+      return 1
+    page_token="${next_page_token}"
+  done
 }
 
 start_passive() {

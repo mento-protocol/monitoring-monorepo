@@ -78,6 +78,7 @@ function gitCalls(logFile) {
 function makeFakeTools(tempDir) {
   const binDir = path.join(tempDir, "bin");
   const terraformLog = path.join(tempDir, "terraform.log");
+  const terraformCwdLog = path.join(tempDir, "terraform-cwd.log");
   const gitLog = path.join(tempDir, "git.log");
   mkdirSync(binDir);
 
@@ -88,6 +89,10 @@ const { appendFileSync } = require("node:fs");
 const log = process.env.TF_STACKS_TEST_TERRAFORM_LOG;
 if (log) {
   appendFileSync(log, JSON.stringify(process.argv.slice(2)) + "\\n");
+}
+const cwdLog = process.env.TF_STACKS_TEST_TERRAFORM_CWD_LOG;
+if (cwdLog) {
+  appendFileSync(cwdLog, process.cwd() + "\\n");
 }
 `,
   );
@@ -151,9 +156,11 @@ if (args[0] === "-C" && args[2] === "ls-files") {
     env: {
       PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
       TF_STACKS_TEST_GIT_LOG: gitLog,
+      TF_STACKS_TEST_TERRAFORM_CWD_LOG: terraformCwdLog,
       TF_STACKS_TEST_TERRAFORM_LOG: terraformLog,
     },
     gitLog,
+    terraformCwdLog,
     terraformLog,
   };
 }
@@ -269,6 +276,18 @@ function assertTerraformUsesCommittedSnapshot(logFile, message) {
   assert(
     !existsSync(snapshotStackPath),
     `${message}: temporary source snapshot should be removed`,
+  );
+}
+
+function assertTerraformRunsFromRepository(logFile, message) {
+  const workingDirectories = readFileSync(logFile, "utf8")
+    .trim()
+    .split(/\r?\n/u)
+    .filter(Boolean);
+  assert(
+    workingDirectories.length > 0 &&
+      workingDirectories.every((cwd) => cwd === repoRoot),
+    `${message}: ${JSON.stringify(workingDirectories)}`,
   );
 }
 
@@ -496,6 +515,10 @@ function runApplyGuardTests(tempDir) {
   assertTerraformUsesCommittedSnapshot(
     fakeTools.terraformLog,
     "platform apply must execute committed source",
+  );
+  assertTerraformRunsFromRepository(
+    fakeTools.terraformCwdLog,
+    "platform wrapper must keep Terraform's original cwd at the repository root",
   );
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
@@ -774,6 +797,50 @@ function assertMetricsBridgeScalingOwnership() {
   }
 }
 
+function assertRepositoryLocalOutputsStayInCheckoutSource(source) {
+  const localFile = extractHclBlock(
+    source,
+    'resource "local_file" "vercel_project_json"',
+  );
+
+  assert(
+    /repository_root\s*=\s*fileexists\("\$\{path\.cwd\}\/terraform\.stacks\.json"\) \? abspath\(path\.cwd\) : abspath\("\$\{path\.module\}\/\.\."\)/u.test(
+      source,
+    ),
+    "platform Terraform may trust path.cwd only when the repository registry marker is present",
+  );
+  assert(
+    /filename\s*=\s*"\$\{local\.repository_root\}\/\.vercel\/project\.json"/u.test(
+      localFile,
+    ),
+    "vercel_project_json must stay in the repository when platform Terraform runs from a source snapshot",
+  );
+}
+
+function assertRepositoryLocalOutputsStayInCheckout() {
+  const source = readFileSync(
+    path.join(repoRoot, "terraform/dashboard.tf"),
+    "utf8",
+  );
+  assertRepositoryLocalOutputsStayInCheckoutSource(source);
+
+  let failure = null;
+  try {
+    assertRepositoryLocalOutputsStayInCheckoutSource(
+      source.replace('fileexists("${path.cwd}/terraform.stacks.json")', "true"),
+    );
+  } catch (error) {
+    failure = error;
+  }
+  assert(
+    failure instanceof Error &&
+      /may trust path\.cwd only when the repository registry marker is present/u.test(
+        failure.message,
+      ),
+    "repository-local output guard must reject an unverified caller cwd",
+  );
+}
+
 function terraformEnvNames(workflowPath) {
   const contents = readFileSync(path.join(repoRoot, workflowPath), "utf8");
   const names = new Set();
@@ -860,6 +927,7 @@ for (const stack of registry.stacks) {
 
 assertDriftWorkflowEnvCoversAutoAppliedStackVars(registry.stacks);
 assertMetricsBridgeScalingOwnership();
+assertRepositoryLocalOutputsStayInCheckout();
 
 const tempDir = mkdtempSync(path.join(tmpdir(), "tf-stacks-test-"));
 try {

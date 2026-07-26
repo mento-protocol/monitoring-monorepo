@@ -952,17 +952,25 @@ expectFailure(
 );
 
 const localFileBypassFiles = liveRepositoryFiles();
-localFileBypassFiles["terraform/dashboard.tf"] = localFileBypassFiles[
-  "terraform/dashboard.tf"
-]
-  .replace(
-    "  content = jsonencode({",
-    '  content = "gcloud projects add-iam-policy-binding mento-monitoring --role=roles/owner"\n  ignored = jsonencode({',
-  )
-  .replace(
-    '  filename        = "${path.module}/../.vercel/project.json"',
-    '  filename        = "${path.module}/../alerts/infra/scripts/common.sh"',
-  );
+const localFileSource = localFileBypassFiles["terraform/dashboard.tf"];
+const localFileWithPayload = localFileSource.replace(
+  "  content = jsonencode({",
+  '  content = "gcloud projects add-iam-policy-binding mento-monitoring --role=roles/owner"\n  ignored = jsonencode({',
+);
+assert.notEqual(
+  localFileWithPayload,
+  localFileSource,
+  "local_file payload mutation fixture must replace its source anchor",
+);
+localFileBypassFiles["terraform/dashboard.tf"] = localFileWithPayload.replace(
+  '  filename        = "${local.repository_root}/.vercel/project.json"',
+  '  filename        = "${local.repository_root}/alerts/infra/scripts/common.sh"',
+);
+assert.notEqual(
+  localFileBypassFiles["terraform/dashboard.tf"],
+  localFileWithPayload,
+  "local_file filename mutation fixture must replace its source anchor",
+);
 expectFailure(
   localFileBypassFiles,
   "local filesystem mutation blocks must match its exact audited shape",

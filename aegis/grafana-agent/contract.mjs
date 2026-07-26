@@ -612,8 +612,14 @@ export function validateContract(files = readContractFiles()) {
   requirePattern(
     errors,
     entrypoint,
-    /\(\.nextPageToken \/\/ ""\) == ""/u,
-    `${CONTRACT_FILES.entrypoint}: paginated version inventory must fail closed`,
+    /versions_url="\$\{versions_url\}&pageToken=\$\{encoded_page_token\}"[\s\S]*next_page_token=.*\.nextPageToken[\s\S]*\[ -z "\$\{next_page_token\}" \] && break/su,
+    `${CONTRACT_FILES.entrypoint}: activation must follow every version-inventory page`,
+  );
+  requirePattern(
+    errors,
+    entrypoint,
+    /seen_page_tokens='\[\]'[\s\S]*index\(\$token\) != null[\s\S]*version inventory repeated a page token/su,
+    `${CONTRACT_FILES.entrypoint}: activation must reject repeated version page tokens`,
   );
   requirePattern(
     errors,
