@@ -72,20 +72,18 @@ apply behavior on `main`, gated by the `production-infra` GitHub Environment.
 Their plan jobs can run for workflow/notifier edits too, but the apply jobs only
 become eligible when stack-owned deployment inputs changed or a maintainer used
 `workflow_dispatch`. The platform stack remains manual-plan/manual-apply only.
-`terraform-drift.yml` runs a daily plan-only check for all four stacks. The
-checked-in plan workflows and scheduled drift route trusted-`main` work through
-the read-only refresh chain with full refresh and `-lock=false`. The legacy
-routine-deployer Token Creator grant remains only as a rollback path until live
-proof and drain checks pass.
+`terraform-drift.yml` runs daily plans for all four stacks. Trusted-`main`
+plans and drift use the read-only refresh chain, full refresh, and
+`-lock=false`; the legacy Token Creator grant remains only for rollback until
+live proof passes and old runs drain.
 
 Secret-bearing workflows use validation-safe placeholder `TF_VAR_*` values or
 guarded targets for eligible same-repo human PR plans. Fork, Dependabot, and
 `sentry-autofix/*` plans are skipped. Trusted push/dispatch plans use real
-secrets through the read-only refresh chain; environment-gated apply jobs use
-the same real inputs through the production identity. Those two trusted routes
-remain authoritative for full-stack, third-party-provider, and secret-value
-diffs. In particular, alerts-rules and alerts-delivery PR plans are
-intentionally partial; do not interpret them as full production plans.
+secrets through refresh; gated apply jobs use them through the production
+identity. These routes own full-stack, third-party-provider, and secret-value
+diffs. Alerts-rules and alerts-delivery PR plans remain partial, not full
+production plans.
 See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
 for the exact placeholder and target boundaries.
 
@@ -116,16 +114,16 @@ notification boundaries live in
 [ADR 0047](adr/0047-separated-terraform-ci-identities.md) owns the four lanes:
 routine deploy, state-only same-repo PR plan, read-only trusted-`main` refresh,
 and Environment-bound production apply. All three WIF providers bind repository
-slug plus immutable ID `1172025835`; apply also binds protected `main` and the
-`production-infra` subject, while refresh binds an exact `workflow_ref`
-allowlist. The four trusted-main plan workflows and `terraform-drift.yml` use
-both refresh variables; the identity contract rejects any other selector use.
+slug and immutable ID `1172025835`; apply also binds protected `main` and the
+`production-infra` subject, while refresh allows exact `workflow_ref` values.
+The four trusted-main plan workflows and `terraform-drift.yml` use both refresh
+variables; the identity contract rejects other selector use.
 
 Trusted-main plans use `-lock=false` and curated non-basic readers. Never add
 basic `roles/viewer`; keep object and secret payload access limited to state,
-deployment-source objects, and managed secrets. Routing is checked in, but
-live full-refresh proof remains pending for alerts-delivery and
-governance-watchdog. Add only permissions named by provider failures.
+deployment-source objects, and managed secrets. After merge, prove
+alerts-delivery and governance-watchdog with live full-refresh plans; add only
+permissions named by provider failures.
 
 ADR 0047 also selects the final no-artifact apply contract: make a private plan
 after approval, run fail-closed policy over its JSON, then apply those exact
@@ -141,9 +139,8 @@ Follow ADR 0047's full procedure:
    `main`.
 2. Re-run alerts-delivery and governance-watchdog, verify the new apply path,
    and retain the routine-deployer Token Creator grant for rollback.
-3. Merge the checked-in refresh routing, then run the live plans above, drain
-   every old/proof run, and audit both paths. Checked-in validation alone is
-   not live proof.
+3. Merge refresh routing, prove it with the live plans above, drain every
+   old/proof run, and audit both paths.
 4. Only then land and explicitly apply the final legacy-authority removal.
 
 Do not create the peg-policy project or bucket until step 4 is applied, all
@@ -158,7 +155,7 @@ optional input can plan deletion; inspect each one. It also owns
 `GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
 `GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
 `GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. Workflows read these as `vars`; never
-replace them with manual secrets or use the refresh selectors outside the four
+replace them with manual secrets. Use refresh selectors only in the four
 registered trusted-main plan workflows and `terraform-drift.yml`.
 Only `CLAUDE_CODE_OAUTH_TOKEN` currently has `prevent_destroy`; inspect every
 planned mirror deletion.
