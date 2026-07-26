@@ -56,10 +56,12 @@ resource "github_repository_environment" "sentry_pipeline" {
   # admin can no longer read the secret just by dispatching an off-main branch.
   # It does NOT by itself contain a fully-compromised repo admin, who holds
   # Administration:write and could first EDIT this environment (re-enable bypass
-  # or widen the branch policy) then dispatch; Terraform and the identity contract
-  # only reconcile that drift on a later run. Its value is defense-in-depth: any
-  # admin bypass now demands a visible, drift-detectable settings change rather
-  # than a silent one-step dispatch. Zero operational cost — legitimate runs are
+  # or widen the branch policy) then dispatch. That live settings edit leaves this
+  # file untouched, so the identity contract (which hashes only the checked-in
+  # block) does not catch it and no drift job monitors it — only the next manual
+  # `pnpm tf apply platform` reconciles it. Its value is still defense-in-depth:
+  # any admin bypass becomes an out-of-band settings change, not a silent one-step
+  # dispatch. Zero operational cost — legitimate runs are
   # scheduled on `main`, which is protected and satisfies the policy regardless
   # of this flag (issue #1289).
   can_admins_bypass = false

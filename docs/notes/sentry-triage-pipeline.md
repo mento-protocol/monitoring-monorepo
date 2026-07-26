@@ -346,7 +346,9 @@ secrets are live, so roll it out Terraform-FIRST:
    disabled (`can_admins_bypass = false` — "Allow administrators to bypass
    configured protection rules" unchecked; #1289), and that the expected
    environment secrets are present. The identity contract hash-pins the policy
-   and the flag, so drift also fails CI on any PR touching the file.
+   and the flag, so a _source_ change to either fails CI; a live settings change
+   made in GitHub's UI is caught only by the next manual `pnpm tf apply platform`
+   (no drift job monitors the platform stack's environment settings).
 3. Only THEN land the workflow `environment: sentry-pipeline` references and the
    removal of the repo-level `github_actions_secret` blocks from
    `github-secrets.tf`, and apply. The protected environment already exists, so

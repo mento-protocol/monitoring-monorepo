@@ -57,13 +57,17 @@ Boundaries of the decision:
   (verified empirically, #1289). Setting it false closes that silent path. It
   does **not** by itself contain a fully-compromised repo admin: holding
   Administration:write, they could first edit this environment (re-enable bypass,
-  widen the policy) and then dispatch — drift Terraform and the identity contract
-  reconcile only on a later run. The flag's value is defense-in-depth: any admin
-  bypass now requires a visible, drift-detectable settings change instead of a
-  one-step dispatch. Containing a compromised admin outright would need the
-  credential outside repo-admin control (the separate-repository alternative
-  below), out of scope here. The identity contract hash-pins the flag, so
-  flipping it fails CI.
+  widen the policy) and then dispatch. That live settings edit is **not**
+  continuously detected: the identity contract hash-pins only the checked-in
+  Terraform block, so a _source_ change to the flag fails CI, but a change made
+  through GitHub Settings leaves the file untouched and is reconciled only on the
+  next manual `pnpm tf apply platform` (the platform stack is manual-apply and
+  excluded from `terraform-drift.yml`; `platform-settings-drift.yml` audits only
+  the workflow-token permission). The flag's value is still defense-in-depth: it
+  forces any admin bypass to be an out-of-band settings change instead of a
+  silent one-step dispatch. Containing a compromised admin outright would need
+  the credential outside repo-admin control (the separate-repository alternative
+  below), out of scope here.
 - **`CLAUDE_CODE_OAUTH_TOKEN` stays repo-level.** `claude.yml` reads it on
   `pull_request` events from feature branches — exactly what a main-only policy
   denies. It is inference-only (no repo write capability), so its residual
