@@ -3,7 +3,7 @@ title: Transpile to ES2017; enforce an explicit browser API floor
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 scope: ui-dashboard
 date: 2026-05
 doc_type: adr
@@ -39,7 +39,8 @@ in `ui-dashboard/package.json`: Chrome 111+, Edge 111+, Firefox 111+, and Safari
 `Promise.allSettled`.
 
 ESLint blocks this closed set above the floor in client-shipped code:
-`toSorted`, `toReversed`, `toSpliced`, `Array.prototype.with`,
+`Array.prototype.toSorted`, `toReversed`, `toSpliced`, and `with`;
+`TypedArray.prototype.toSorted`, `toReversed`, and `with`;
 `Object.groupBy`, `Map.groupBy`, `String.prototype.isWellFormed`, and
 `String.prototype.toWellFormed`. Its explicit ignore list owns server-only
 routes, OG helpers, and tests. A regression test proves both the allowed and

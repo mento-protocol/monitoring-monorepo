@@ -57,7 +57,8 @@ available across that floor are allowed, including `Array.prototype.at`,
 `findLast`, `findLastIndex`, `flatMap`, and `Promise.allSettled`.
 
 Lint blocks APIs above the floor in client-shipped code:
-`toSorted`, `toReversed`, `toSpliced`, `Array.prototype.with`,
+`Array.prototype.toSorted`, `toReversed`, `toSpliced`, and `with`;
+`TypedArray.prototype.toSorted`, `toReversed`, and `with`;
 `Object.groupBy`, `Map.groupBy`, `String.prototype.isWellFormed`, and
 `String.prototype.toWellFormed`. Use `sortedCopy` from
 `@/lib/immutable-sort` for immutable sorting. Any module imported directly or

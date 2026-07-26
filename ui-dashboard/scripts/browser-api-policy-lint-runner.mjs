@@ -16,14 +16,26 @@ const BLOCKED_SOURCE = `
   "value".isWellFormed();
   "value".toWellFormed();
 `;
+const TYPED_ARRAY_BLOCKED_SOURCE = `
+  const values = new Uint8Array([3, 1]);
+  values.toSorted();
+  values.toReversed();
+  values.with(0, 2);
+`;
 const cases = {
   blocked: {
     filePath: "src/lib/immutable-sort.ts",
     source: BLOCKED_SOURCE,
   },
+  typedArrayBlocked: {
+    filePath: "src/lib/peg-monitoring.ts",
+    source: TYPED_ARRAY_BLOCKED_SOURCE,
+  },
   allowed: {
-    filePath: "src/lib/immutable-sort.ts",
+    filePath: "src/lib/address-report-fields.ts",
     source: `
+      export {};
+
       const values = [1, 2, 3];
       values.at(-1);
       values.findLast((value) => value > 1);
@@ -47,6 +59,16 @@ const cases = {
       domainObject.isWellFormed();
       domainObject.toWellFormed();
       domainObject.groupBy();
+
+      interface Uint8Array {
+        toSorted(): void;
+        toReversed(): void;
+        with(index: number, value: number): void;
+      }
+      declare const localTypedArray: Uint8Array;
+      localTypedArray.toSorted();
+      localTypedArray.toReversed();
+      localTypedArray.with(0, 2);
     `,
   },
   api: {
@@ -69,23 +91,21 @@ const eslint = new ESLint({
   ),
 });
 
-const results = Object.fromEntries(
-  await Promise.all(
-    Object.entries(cases).map(async ([name, fixture]) => {
-      const [result] = await eslint.lintText(fixture.source, {
-        filePath: fileURLToPath(new URL(fixture.filePath, DASHBOARD_ROOT_URL)),
-      });
-      if (!result) {
-        throw new Error(`ESLint returned no result for ${fixture.filePath}`);
-      }
-      return [
-        name,
-        result.messages
-          .filter(({ ruleId }) => ruleId && POLICY_RULE_IDS.has(ruleId))
-          .map(({ ruleId, message }) => ({ ruleId, message })),
-      ];
-    }),
-  ),
-);
+const resultEntries = [];
+for (const [name, fixture] of Object.entries(cases)) {
+  const [result] = await eslint.lintText(fixture.source, {
+    filePath: fileURLToPath(new URL(fixture.filePath, DASHBOARD_ROOT_URL)),
+  });
+  if (!result) {
+    throw new Error(`ESLint returned no result for ${fixture.filePath}`);
+  }
+  resultEntries.push([
+    name,
+    result.messages
+      .filter(({ ruleId }) => ruleId && POLICY_RULE_IDS.has(ruleId))
+      .map(({ ruleId, message }) => ({ ruleId, message })),
+  ]);
+}
+const results = Object.fromEntries(resultEntries);
 
 process.stdout.write(JSON.stringify(results));

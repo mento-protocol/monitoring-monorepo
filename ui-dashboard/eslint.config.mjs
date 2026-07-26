@@ -20,6 +20,20 @@ const receiverAwareRestrictions = browserApiPolicy.restrictions.filter(
 const propertyRestrictions = browserApiPolicy.restrictions.filter(
   (restriction) => !("receiver" in restriction),
 );
+const TYPED_ARRAY_INTERFACE_NAMES = new Set([
+  "BigInt64Array",
+  "BigUint64Array",
+  "Float16Array",
+  "Float32Array",
+  "Float64Array",
+  "Int8Array",
+  "Int16Array",
+  "Int32Array",
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "Uint16Array",
+  "Uint32Array",
+]);
 
 function memberPropertyName(node) {
   if (!node.computed && node.property.type === "Identifier") {
@@ -38,6 +52,7 @@ function memberPropertyName(node) {
 function hasBuiltInReceiverDeclaration(
   type,
   checker,
+  program,
   receiver,
   property,
   seen = new Set(),
@@ -47,25 +62,44 @@ function hasBuiltInReceiverDeclaration(
 
   if (type.isUnionOrIntersection()) {
     return type.types.some((part) =>
-      hasBuiltInReceiverDeclaration(part, checker, receiver, property, seen),
+      hasBuiltInReceiverDeclaration(
+        part,
+        checker,
+        program,
+        receiver,
+        property,
+        seen,
+      ),
     );
   }
 
   const constraint = checker.getBaseConstraintOfType(type);
   if (
     constraint &&
-    hasBuiltInReceiverDeclaration(constraint, checker, receiver, property, seen)
+    hasBuiltInReceiverDeclaration(
+      constraint,
+      checker,
+      program,
+      receiver,
+      property,
+      seen,
+    )
   ) {
     return true;
   }
 
   const symbol = checker.getPropertyOfType(type, property);
   return (symbol?.getDeclarations() ?? []).some((declaration) => {
+    if (!program.isSourceFileDefaultLibrary(declaration.getSourceFile())) {
+      return false;
+    }
     const parent = declaration.parent;
     if (!ts.isInterfaceDeclaration(parent)) return false;
     const interfaceName = parent.name.text;
     return receiver === "array"
-      ? interfaceName === "Array" || interfaceName === "ReadonlyArray"
+      ? interfaceName === "Array" ||
+          interfaceName === "ReadonlyArray" ||
+          TYPED_ARRAY_INTERFACE_NAMES.has(interfaceName)
       : interfaceName === "String";
   });
 }
@@ -113,6 +147,7 @@ const receiverAwareBrowserApiRule = {
           hasBuiltInReceiverDeclaration(
             receiverType,
             checker,
+            services.program,
             restriction.receiver,
             property,
           )

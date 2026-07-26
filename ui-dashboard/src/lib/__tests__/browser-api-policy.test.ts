@@ -21,7 +21,13 @@ const eslint = new ESLint({
     new URL("eslint.config.mjs", DASHBOARD_ROOT_URL),
   ),
 });
-type LintCase = "blocked" | "allowed" | "api" | "og" | "test";
+type LintCase =
+  | "blocked"
+  | "typedArrayBlocked"
+  | "allowed"
+  | "api"
+  | "og"
+  | "test";
 type BrowserApiMessage = { ruleId: string; message: string };
 const lintResultsPromise = execFileAsync(
   process.execPath,
@@ -113,6 +119,27 @@ describe("browser runtime API policy", () => {
         expect.arrayContaining([
           expect.objectContaining({
             ruleId: expectedRule,
+            message: expect.stringContaining(restriction.message),
+          }),
+        ]),
+      );
+    }
+  }, 15_000);
+
+  it("reports unsupported change-by-copy methods on typed arrays", async () => {
+    const messages = await browserApiMessages("typedArrayBlocked");
+    const properties = new Set(["toSorted", "toReversed", "with"]);
+    const restrictions = browserApiPolicy.restrictions.filter(
+      (restriction) =>
+        "receiver" in restriction && properties.has(restriction.property),
+    );
+
+    expect(messages).toHaveLength(restrictions.length);
+    for (const restriction of restrictions) {
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: RECEIVER_AWARE_RULE_ID,
             message: expect.stringContaining(restriction.message),
           }),
         ]),

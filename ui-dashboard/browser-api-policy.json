@@ -17,12 +17,12 @@
     {
       "receiver": "array",
       "property": "toSorted",
-      "message": "requires Firefox 115+; use sortedCopy() from '@/lib/immutable-sort' instead."
+      "message": "requires Firefox 115+; use sortedCopy() for arrays or an explicit typed-array copy and in-place sort."
     },
     {
       "receiver": "array",
       "property": "toReversed",
-      "message": "requires Firefox 115+; use `[...arr].reverse()` instead."
+      "message": "requires Firefox 115+; copy the array or typed array, then reverse the copy."
     },
     {
       "receiver": "array",
@@ -32,7 +32,7 @@
     {
       "receiver": "array",
       "property": "with",
-      "message": "Array.prototype.with requires Firefox 115+; use a copied array and indexed assignment instead."
+      "message": "Array/TypedArray.prototype.with requires Firefox 115+; copy and assign by index instead."
     },
     {
       "object": "Object",
