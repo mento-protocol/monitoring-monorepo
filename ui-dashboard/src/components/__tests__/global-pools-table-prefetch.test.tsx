@@ -206,7 +206,7 @@ describe("GlobalPoolsTable pool-detail prefetch", () => {
 });
 
 describe("GlobalPoolsTable hydration", () => {
-  it("keeps stale health fail-closed when the server and browser clocks disagree", async () => {
+  it("keeps stale health neutral through hydration, then resolves the weekend", async () => {
     const checkedAt = 1_713_200_100;
     const stalePool: Pool = {
       ...BASE_POOL,
@@ -227,13 +227,12 @@ describe("GlobalPoolsTable hydration", () => {
 
     mockIsWeekend.mockReturnValue(true);
     const serverHtml = renderToString(table);
-    expect(serverHtml).toMatch(/Pool health CRITICAL: Oracle stale/);
+    expect(serverHtml).toMatch(/Pool health N\/A:/);
     expect(serverHtml).not.toMatch(/Pool health WEEKEND:/);
 
     const hydrationContainer = document.createElement("div");
     hydrationContainer.innerHTML = serverHtml;
     document.body.appendChild(hydrationContainer);
-    mockIsWeekend.mockReturnValue(false);
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});
@@ -246,10 +245,7 @@ describe("GlobalPoolsTable hydration", () => {
       });
 
       expect(consoleError).not.toHaveBeenCalled();
-      expect(hydrationContainer.innerHTML).toMatch(
-        /Pool health CRITICAL: Oracle stale/,
-      );
-      expect(hydrationContainer.innerHTML).not.toMatch(/Pool health WEEKEND:/);
+      expect(hydrationContainer.innerHTML).toMatch(/Pool health WEEKEND:/);
     } finally {
       consoleError.mockRestore();
       if (hydrationRoot) {

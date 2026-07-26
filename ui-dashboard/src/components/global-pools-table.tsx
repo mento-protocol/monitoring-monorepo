@@ -3,7 +3,7 @@
 import { useMemo, useState, type ComponentProps } from "react";
 import { poolName, poolTvlUSD } from "@/lib/tokens";
 import { Table } from "@/components/table";
-import { useIsWeekend } from "@/hooks/use-is-weekend";
+import { useIsWeekend, useResolvedIsWeekend } from "@/hooks/use-is-weekend";
 import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { useTableSort } from "@/lib/use-table-sort";
@@ -105,8 +105,10 @@ export function GlobalPoolsTable({
     paramPrefix: "pools",
   });
   const liveNowSeconds = useNowSeconds();
-  // The route seed is banner-only. Health follows the browser snapshot.
-  const isWeekendNow = useIsWeekend();
+  // The route seed is banner-only. Health remains neutral until the browser
+  // resolves its clock snapshot, then follows that same snapshot for rows and
+  // sorting.
+  const isWeekendNow = useResolvedIsWeekend();
   const filters = useGlobalPoolFilters(entries);
   const { tvlByKey, totalVolumeByKey } = useGlobalPoolValues(entries);
   const sortedEntries = useSortedGlobalPools({
@@ -115,7 +117,7 @@ export function GlobalPoolsTable({
     sortDir,
     tvlByKey,
     totalVolumeByKey,
-    nowSeconds: liveNowSeconds ?? 0,
+    nowSeconds: liveNowSeconds,
     isWeekendNow,
     volume24hByKey,
     volume7dByKey,

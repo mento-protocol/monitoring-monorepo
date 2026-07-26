@@ -1,4 +1,4 @@
-import { computeEffectiveStatus, computePoolUptimePct } from "@/lib/health";
+import * as poolHealth from "@/lib/health";
 import { sortedCopy } from "@/lib/immutable-sort";
 import type { Network } from "@/lib/networks";
 import type { SortDir } from "@/lib/table-sort";
@@ -60,8 +60,8 @@ export function globalPoolKey(entry: GlobalPoolEntry): string {
 export interface GlobalSortContext {
   tvlByKey: Map<string, number | null>;
   totalVolumeByKey: Map<string, number | null>;
-  nowSeconds?: number | undefined;
-  isWeekendNow?: boolean | undefined;
+  nowSeconds?: number | null | undefined;
+  isWeekendNow?: boolean | null | undefined;
   volume24hByKey?: Map<string, number | null | undefined> | undefined;
   volume7dByKey?: Map<string, number | null | undefined> | undefined;
   tvlChangeWoWByKey?: Map<string, number | null> | undefined;
@@ -98,8 +98,8 @@ export function sortGlobalPools(
       }
       case "uptime": {
         // Unknown uptime sinks to the bottom regardless of direction.
-        const aUptime = computePoolUptimePct(a.pool, nowSeconds);
-        const bUptime = computePoolUptimePct(b.pool, nowSeconds);
+        const aUptime = uptimePct(a.pool, nowSeconds);
+        const bUptime = uptimePct(b.pool, nowSeconds);
         if (aUptime == null && bUptime == null) return 0;
         if (aUptime == null) return 1;
         if (bUptime == null) return -1;
@@ -163,15 +163,26 @@ export function sortGlobalPools(
   });
 }
 
+function uptimePct(pool: Pool, nowSeconds: number | null): number | null {
+  return poolHealth.computePoolUptimePct(pool, nowSeconds ?? 0);
+}
+
+function healthStatusNowSeconds(
+  entry: GlobalPoolEntry,
+  nowSeconds: number | null,
+): number {
+  return nowSeconds ?? poolHealth.oracleFreshnessTimestamp(entry.pool);
+}
+
 function effectiveHealthStatus(
   entry: GlobalPoolEntry,
-  nowSeconds: number,
-  isWeekendNow?: boolean,
-): ReturnType<typeof computeEffectiveStatus> {
-  return computeEffectiveStatus(
+  nowSeconds: number | null,
+  isWeekendNow?: boolean | null,
+): ReturnType<typeof poolHealth.computeEffectiveStatus> {
+  return poolHealth.computeEffectiveStatus(
     entry.pool,
     entry.network.chainId,
-    nowSeconds,
+    healthStatusNowSeconds(entry, nowSeconds),
     isWeekendNow,
   );
 }

@@ -37,3 +37,19 @@ export function useIsWeekend(initialIsWeekend = false): boolean {
     () => initialIsWeekend,
   );
 }
+
+/**
+ * Live FX-weekend flag for safety-sensitive status decisions.
+ *
+ * The clock is intentionally unresolved on the server and through hydration:
+ * treating it as a weekday would briefly label a stale FX oracle CRITICAL
+ * before the browser can classify the market closure. Consumers must render a
+ * neutral state for the null snapshot, then use the live browser value.
+ */
+export function useResolvedIsWeekend(): boolean | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => isWeekend(),
+    () => null,
+  );
+}

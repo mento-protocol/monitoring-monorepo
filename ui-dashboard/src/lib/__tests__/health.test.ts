@@ -62,6 +62,12 @@ describe("computeHealthStatus", () => {
     expect(computeEffectiveStatus(stalePool, CELO_CHAIN_ID, now, false)).toBe(
       "CRITICAL",
     );
+    expect(computeHealthStatus(stalePool, CELO_CHAIN_ID, now, null)).toBe(
+      "N/A",
+    );
+    expect(computeEffectiveStatus(stalePool, CELO_CHAIN_ID, now, null)).toBe(
+      "N/A",
+    );
   });
 
   it('returns "N/A" for VirtualPools (source includes "virtual")', () => {

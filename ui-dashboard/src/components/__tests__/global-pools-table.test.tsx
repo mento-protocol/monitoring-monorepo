@@ -192,7 +192,7 @@ describe("GlobalPoolsTable — FX weekend SSR banner", () => {
     expect(html).not.toContain("FX markets are closed this weekend.");
   });
 
-  it("keeps health critical when the seeded banner says weekend", () => {
+  it("keeps stale health unresolved when the seeded banner says weekend", () => {
     vi.mocked(isWeekend).mockReturnValue(true);
     const staleAt = String(TABLE_NOW_SECONDS - 600);
     const html = renderToStaticMarkup(
@@ -210,7 +210,7 @@ describe("GlobalPoolsTable — FX weekend SSR banner", () => {
     );
 
     expect(html).toContain("FX markets are closed this weekend.");
-    expect(html).toMatch(/Pool health CRITICAL: Oracle stale/);
+    expect(html).toMatch(/Pool health N\/A:/);
     expect(html).not.toMatch(/Pool health WEEKEND:/);
   });
 });
@@ -296,17 +296,14 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).not.toContain(">Chain</button>");
   });
 
-  it("renders health diagnostics through the accessible tooltip trigger", () => {
+  it("renders unresolved health through the accessible tooltip trigger", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).toMatch(
-      /<button[^>]*aria-label="Pool health CRITICAL: Oracle stale/,
-    );
+    expect(html).toMatch(/<button[^>]*aria-label="Pool health N\/A:/);
     expect(html).toMatch(/<button[^>]*aria-describedby="[^"]+"/);
     expect(html).toContain('role="tooltip"');
-    expect(html).toContain("Oracle stale — last update expired");
-    expect(html).not.toMatch(/title="[^"]*Oracle stale/);
+    expect(html).not.toMatch(/title="[^"]*Pool health/);
   });
 
   it("uses VP median/quorum tooltip copy for critical VirtualPool incidents", () => {
@@ -954,6 +951,30 @@ describe("sortGlobalPools — fee, health, and volume edge cases", () => {
         isWeekendNow: false,
       }).map((entry) => entry.pool.id),
     ).toEqual(["stale", "halted"]);
+  });
+
+  it("uses the row health clock while the weekend snapshot is unresolved", () => {
+    const warning = makeEntry({
+      id: "warning",
+      oracleTimestamp: "10000",
+      lastOracleReportAt: "10000",
+      priceDifference: "600000000000000000",
+      rebalanceThreshold: 500_000,
+      rebalanceThresholdsKnown: true,
+    });
+    const sustainedBreach = makeEntry({
+      ...warning.pool,
+      id: "sustained-breach",
+      deviationBreachStartedAt: "1",
+    });
+
+    expect(
+      sortGlobalPools([warning, sustainedBreach], "health", "desc", {
+        ...BASE_SORT_CTX,
+        nowSeconds: null,
+        isWeekendNow: null,
+      }).map((entry) => entry.pool.id),
+    ).toEqual(["sustained-breach", "warning"]);
   });
 
   it("keeps same-id pools from different chains separate in metric maps", () => {
