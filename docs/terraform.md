@@ -175,20 +175,22 @@ disabled Environment self-review when a second active maintainer exists.
 `production-services` records routine deploys from protected `main` without a
 reviewer.
 
-`sentry-pipeline` (`terraform/github-environment.tf`, issue #1289) gates the
-Sentry triage/autofix pipeline's exclusive secrets. It has a protected-branch
+`sentry-pipeline` (`terraform/github-environment.tf`, issue #1289,
+[ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) gates the Sentry
+triage/autofix pipeline's exclusive secrets. It has a protected-branch
 deployment policy (main-only) and — deliberately, because the pipeline is
-unattended — NO reviewer and NO wait timer. Every secret-bearing job in the
-`sentry-triage-*`, `sentry-autofix`, and `platform-settings-drift` workflows
-declares it, so those secrets are reachable only from `main`, server-side, even on
-a branch-modified `workflow_dispatch`. The shared `CLAUDE_CODE_OAUTH_TOKEN` is
-intentionally NOT in this environment (it stays a repo-level secret for
-`claude.yml`).
+unattended — NO reviewer and NO wait timer. Unlike the other two it is
+Terraform-managed; every platform apply reconciles its branch policy and
+secrets. Every secret-bearing job in the `sentry-triage-*`, `sentry-autofix`,
+and `platform-settings-drift` workflows declares it, so those secrets are
+reachable only from `main`, server-side, even on a branch-modified
+`workflow_dispatch`. The shared `CLAUDE_CODE_OAUTH_TOKEN` is intentionally NOT
+in this environment (it stays a repo-level secret for `claude.yml`).
 
-Never recreate retired `Production`/`production` names or manage Environment
-secrets outside their owning IaC/integration path. A new workflow reference can
-auto-create an unprotected Environment, so establish its protection before
-merging the reference.
+Never recreate retired `Production`/`production` names or manage
+Environment secrets outside their owning IaC/integration path. A new workflow
+reference can auto-create an unprotected Environment, so establish its
+protection before merging the reference.
 
 ## Grafana Alert Ownership
 

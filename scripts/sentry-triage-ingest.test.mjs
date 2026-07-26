@@ -384,6 +384,28 @@ await test("issue body falls back to plain text for a non-Sentry permalink", () 
   );
 });
 
+await test("issue body rejects a permalink with Slack link-control chars (#1586)", () => {
+  // The permalink written here is later read back and embedded in a Slack
+  // `<url|text>` link by the digest, so `<`, `>`, `|` (and control chars /
+  // whitespace) must fail closed at write time. Built as base + char so no
+  // literal control byte lands in the source.
+  const base = "https://mento-labs.sentry.io/issues/1";
+  for (const bad of ["<", ">", "|", "\x00", "\x7f", "\n", " "]) {
+    const body = buildIssueBody({
+      ...BODY_TEST_META,
+      permalink: `${base}${bad}x`,
+    });
+    assert(
+      body.includes("(permalink unavailable)"),
+      `expected fallback for permalink containing ${JSON.stringify(bad)}`,
+    );
+    assert(
+      !body.includes("[View in Sentry]"),
+      `expected no clickable link for permalink containing ${JSON.stringify(bad)}`,
+    );
+  }
+});
+
 await test("toMetadata maps v2 contract keys and drops payload-derived fields", () => {
   const meta = toMetadata(
     mapSentryIssue({

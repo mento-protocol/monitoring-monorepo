@@ -8,6 +8,7 @@ import {
   collectIssues,
   escapeSlackText,
   extractAutofixUrl,
+  extractPermalink,
   extractProjectedUrl,
   extractVerdictYamlBlock,
   findLatestVerdictComment,
@@ -1324,6 +1325,89 @@ await test("collectIssues propagates a single fetch failure (fail loud, no silen
   }
   assert(threw, "expected a single fetch failure to reject collectIssues");
   assert(/HTTP 502/.test(threw.message), "expected the gh error to propagate");
+});
+
+// ---------------------------------------------------------------------------
+// URL validators reject Slack link-control chars (#1586)
+// ---------------------------------------------------------------------------
+
+// `<`, `>`, `|` are Slack's link-control chars (`<url|text>`); a URL carrying
+// one would break out of the link (spoof the display text) once spliced into a
+// digest message. Control chars and raw whitespace are equally unsafe in a link
+// target. Built as base + char so no literal control byte lands in the source.
+const LINK_UNSAFE_CHARS = ["<", ">", "|", "\x00", "\x7f"];
+
+await test("extractPermalink rejects a Sentry permalink with Slack link-control chars (#1586)", () => {
+  // Clean permalink still passes.
+  assertEqual(extractPermalink(queueBody(SENTRY_PERMALINK)), SENTRY_PERMALINK);
+  const base = "https://mento-labs.sentry.io/issues/1";
+  for (const bad of LINK_UNSAFE_CHARS) {
+    assertEqual(extractPermalink(queueBody(`${base}${bad}x`)), null);
+  }
+});
+
+await test("extractProjectedUrl / extractAutofixUrl reject a github URL with link-control chars (#1586)", () => {
+  const base = "https://github.com/mento-protocol/monitoring-monorepo/issues/9";
+  for (const bad of LINK_UNSAFE_CHARS) {
+    const comment = {
+      body: `${PROJECTED_COMMENT_PREFIX}${base}${bad}x`,
+      author: BOT_AUTHOR,
+      createdAt: "2026-07-17T12:00:00Z",
+    };
+    assertEqual(extractProjectedUrl([comment]), null);
+    assertEqual(
+      extractAutofixUrl([
+        {
+          body: `${AUTOFIX_COMMENT_PREFIX}${base}${bad}x`,
+          author: BOT_AUTHOR,
+          createdAt: "2026-07-17T12:00:00Z",
+        },
+      ]),
+      null,
+    );
+  }
+});
+
+await test("buildDigest fails closed: a queue URL with Slack link-control chars is never spliced as a link (#1586)", () => {
+  // `entry.url` flows straight to the Slack sink (link()/idAndProject()) with no
+  // classify-time validation, so it is the end-to-end vector for the sink guard.
+  const poisoned = {
+    ...issueFixture({
+      number: 7,
+      shortId: "X-7",
+      labels: ["sentry:verdict-code-fix"],
+      comments: [{ body: verdictComment({ summary: "boom" }) }],
+    }),
+    url: "https://github.com/mento-protocol/monitoring-monorepo/issues/7|@channel>",
+  };
+  const text = allText(buildDigest([poisoned], { channel: "#eng", now: NOW }));
+  // Fail closed: the unsafe URL is dropped entirely (no link splice), not
+  // embedded — so neither the URL nor a `<...|` breakout reaches Slack.
+  assert(!text.includes("github.com"), "unsafe queue URL must not be linked");
+  assert(!text.includes("|@channel"), "no Slack link breakout may survive");
+  // The short id still renders as plain (escaped) text, so the entry is visible.
+  assert(text.includes("X-7"), "entry stays visible as plain text");
+
+  // Positive control: a clean queue URL DOES render as a Slack link.
+  const clean = allText(
+    buildDigest(
+      [
+        issueFixture({
+          number: 8,
+          shortId: "X-8",
+          labels: ["sentry:verdict-code-fix"],
+          comments: [{ body: verdictComment({ summary: "boom" }) }],
+        }),
+      ],
+      { channel: "#eng", now: NOW },
+    ),
+  );
+  assert(
+    clean.includes(
+      "<https://github.com/mento-protocol/monitoring-monorepo/issues/8|",
+    ),
+    "a clean queue URL should render as a Slack link",
+  );
 });
 
 if (failed > 0) {

@@ -248,12 +248,24 @@ export function findLatestVerdictComment(comments) {
   return selectVerdictComment(comments).body;
 }
 
+// Every URL below is embedded in Slack mrkdwn link syntax (`<url|text>`, in
+// `link()` / `idAndProject()`), so `<`, `>`, `|` in the URL would break out of
+// the link — spoofing the display text or splitting the Slack block. Reject
+// those plus any ASCII control char or whitespace (space, tab, newline, …).
+// `new URL()` accepts all of them in the path/query and these validators embed
+// the RAW input string, so the shape check must run on the original — not on
+// the re-encoded `parsed.href`.
+// eslint-disable-next-line no-control-regex -- rejecting control chars in a link target is the point
+const UNSAFE_URL_CHARS = /[<>|\x00-\x20\x7f]/;
+
 /** True for an https `github.com` URL. The projected-issue and fix-PR pointers
  * are trusted-bot-posted, but shape-validate them anyway before turning them
  * into links (defense in depth on the authorship fence). */
 function isGithubUrl(value) {
+  const str = String(value);
+  if (UNSAFE_URL_CHARS.test(str)) return false;
   try {
-    const parsed = new URL(String(value));
+    const parsed = new URL(str);
     return parsed.protocol === "https:" && parsed.hostname === "github.com";
   } catch {
     return false;
@@ -418,8 +430,10 @@ function issueCountText(total) {
 }
 
 function isHttpsUrl(value) {
+  const str = String(value);
+  if (UNSAFE_URL_CHARS.test(str)) return false;
   try {
-    return new URL(String(value)).protocol === "https:";
+    return new URL(str).protocol === "https:";
   } catch {
     return false;
   }
