@@ -95,6 +95,23 @@ override those defaults. Canonical context normally uses a 90-day semantic
 review interval. Classification controls routing and gardening only; it never
 overrides `canonical` authority.
 
+### Claude runtime registry
+
+Claude agents, commands, and security-review guidance use runtime-specific
+frontmatter or prompt text. Do not add generic documentation metadata to those
+files. Their seven supported paths are instead registered in
+[`claude-runtime-document-registry.json`](claude-runtime-document-registry.json).
+Each entry is non-canonical, active, owned, classified, and points to one or
+more canonical sources. The catalog and garden packet render those pointers so
+runtime projections do not become an authority source themselves.
+
+When adding, removing, or moving one of those runtime files, update the
+registry in the same change. `pnpm docs:index --check`, `pnpm docs:audit`, and
+`pnpm agent:context-check` fail if the registry is incomplete, has an invalid
+entry or source, or no longer matches the proposed runtime-file set. Keep this
+registry limited to its seven named Claude runtime documents; use normal
+frontmatter for other managed Markdown.
+
 ## Placement Rules
 
 - Put instructions at the most specific directory that fully owns them.

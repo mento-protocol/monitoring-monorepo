@@ -36,6 +36,8 @@ const NAVIGATION_EVAL_OWNERSHIP_LABEL = "source:audit";
 const RETIRED_VERIFICATION_SOURCE_TOMBSTONES = new Set([
   // Retained by the immutable pre-garden fixture after issue #1442 deleted it.
   "docs/PLAN-celo-mainnet-indexer.md",
+  // Retained by the immutable pre-garden fixture after issue #1594 deleted it.
+  "docs/CODE-REVIEW-UI-DASHBOARD.md",
 ]);
 
 function isObject(value) {

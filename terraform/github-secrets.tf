@@ -130,106 +130,33 @@ resource "github_actions_secret" "integration_probe_squid_integrator_id" {
 # Sentry triage/autofix pipeline secrets
 # ───────────────────────────────────────
 #
-# The staged Sentry triage/autofix pipeline (ADR 0036) runs entirely inside
-# this repo's GitHub Actions. Two scheduled workflows —
-# `.github/workflows/sentry-triage-ingest.yml` and
-# `.github/workflows/sentry-triage-agent.yml`, added by sibling Phase-1 PRs —
-# consume these two repo-level secrets:
+# The staged Sentry triage/autofix pipeline (ADR 0036) runs entirely inside this
+# repo's GitHub Actions. Its Sentry-pipeline-EXCLUSIVE secrets
+# (SENTRY_TRIAGE_TOKEN, SENTRY_PROJECTION_TOKEN, AUTOFIX_APP_PRIVATE_KEY,
+# SENTRY_ARCHIVE_TOKEN, PLATFORM_SETTINGS_AUDIT_TOKEN) moved OUT of repo scope to
+# the `sentry-pipeline` GitHub Environment in `github-environment.tf` (issue
+# #1289): a repo-level secret is readable by any branch-modified workflow run via
+# workflow_dispatch, whereas the environment restricts access to `main`
+# server-side. Only CLAUDE_CODE_OAUTH_TOKEN stays here, at repo scope, because it
+# is SHARED with `.github/workflows/claude.yml` (which reads it on `pull_request`
+# events from feature branches — the very surface a main-only environment
+# denies), and it is inference-only with no repo write capability of its own.
 #
-#   - SENTRY_TRIAGE_TOKEN: a READ-ONLY Sentry internal-integration token
-#     (scopes: Issue & Event Read, Project Read, Organization Read — NO write
-#     scopes). Phase-1 triage is read-only by design; the investigating agent
-#     treats Sentry payloads as untrusted input and holds no write credential
-#     beyond commenting on its queue issue (ADR 0036 trust boundary). A
-#     separate write-scoped token is minted only if/when Phase-2 auto-archive
-#     is approved — do NOT widen this token's scopes here.
-#   - CLAUDE_CODE_OAUTH_TOKEN: the Max-subscription OAuth token minted by
-#     `claude setup-token`, used by `anthropics/claude-code-action@v1` in agent
-#     mode. Inference-only; it carries no repo write capability of its own.
-#     NOT a triage-only secret: it already exists live and is consumed by both
-#     `.github/workflows/claude.yml` jobs (on-demand assistant + auto-review),
-#     so the resource below ADOPTS a shared production credential — see its
-#     lifecycle note.
-#
-# Both are `count`-gated on their tfvar being non-empty, exactly like the
-# integration-probe aggregator keys above: plan and apply succeed while the
-# values are unset, so this stack can merge and apply before the operator
-# provisions the tokens. The pipeline stays inert until the tokens exist AND
+# CLAUDE_CODE_OAUTH_TOKEN is `count`-gated on its tfvar being non-empty, exactly
+# like the integration-probe aggregator keys above: plan and apply succeed while
+# the value is unset. The pipeline stays inert until the tokens exist AND
 # `github_actions_variable.sentry_triage_enabled` is flipped to "true" (see
 # `github-variables.tf`). Human provisioning runbook:
 # `docs/notes/sentry-triage-pipeline.md`.
 
-# SENTRY_TRIAGE_TOKEN is brand-new: no live secret of this name exists and no
-# workflow consumes it until the sibling Phase-1 PRs land, so plain count
-# gating is enough — destroying it while unused breaks nothing, which is why
-# it carries no `prevent_destroy` (asymmetric with
-# `claude_code_oauth_token` below, which guards a shared live credential).
-resource "github_actions_secret" "sentry_triage_token" {
-  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
-  # `vercel_automation_bypass`; see the comment above for the threat model.
-  count = var.sentry_triage_token == "" ? 0 : 1
-
-  repository  = "monitoring-monorepo"
-  secret_name = "SENTRY_TRIAGE_TOKEN"
-  value       = var.sentry_triage_token
-}
-
-# SENTRY_PROJECTION_TOKEN is brand-new (ADR 0038): a fine-grained GitHub PAT
-# with Issues Read+Write on EXACTLY the three owning repos (frontend-monorepo,
-# mento-analytics-api, minipay-dapp) and no other scope. The verdict-projection
-# step in `.github/workflows/sentry-triage-agent.yml` is its ONLY consumer, and
-# only for cross-repo issue create/search; the step no-ops gracefully while the
-# secret is absent. Like `sentry_triage_token` above — and UNLIKE
-# `claude_code_oauth_token` below — no live secret of this name exists and no
-# external consumer depends on it, so plain `count` gating is enough and it
-# carries NO `prevent_destroy`: destroying it while unused breaks nothing.
-resource "github_actions_secret" "sentry_projection_token" {
-  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
-  # `vercel_automation_bypass`; see the comment above for the threat model.
-  count = var.sentry_projection_token == "" ? 0 : 1
-
-  repository  = "monitoring-monorepo"
-  secret_name = "SENTRY_PROJECTION_TOKEN"
-  value       = var.sentry_projection_token
-}
-
-# AUTOFIX_APP_PRIVATE_KEY is brand-new (ADR 0036 Phase 2b): the PEM private key
-# of the `sentry-autofix` GitHub App. The autofix finalize step in
-# `.github/workflows/sentry-autofix.yml` is its ONLY consumer, and only to mint
-# a short-lived installation token for the fix-branch push + PR create (which is
-# what makes required CI + Codex review fire, unlike a `github.token` push). Like
-# `sentry_triage_token`/`sentry_projection_token` above — and UNLIKE
-# `claude_code_oauth_token` below — no live secret of this name exists and no
-# external consumer depends on it, so plain `count` gating is enough and it
-# carries NO `prevent_destroy`: destroying it while unused breaks nothing.
-resource "github_actions_secret" "autofix_app_private_key" {
-  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
-  # `vercel_automation_bypass`; see the comment above for the threat model.
-  count = var.autofix_app_private_key == "" ? 0 : 1
-
-  repository  = "monitoring-monorepo"
-  secret_name = "AUTOFIX_APP_PRIVATE_KEY"
-  value       = var.autofix_app_private_key
-}
-
-# SENTRY_ARCHIVE_TOKEN is brand-new (ADR 0036 Stage C, Phase 2a): a WRITE-scoped
-# Sentry internal-integration token (Issue & Event: Read + Write, nothing else),
-# consumed ONLY by `.github/workflows/sentry-triage-archive.yml` to set an issue
-# to `archived_until_escalating`. Deliberately separate from the read-only
-# `sentry_triage_token` (that token must never gain write scopes). Like
-# `sentry_triage_token`/`sentry_projection_token` above — and UNLIKE
-# `claude_code_oauth_token` below — no live secret of this name exists and no
-# external consumer depends on it, so plain `count` gating is enough and it
-# carries NO `prevent_destroy`: destroying it while unused breaks nothing.
-resource "github_actions_secret" "sentry_archive_token" {
-  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
-  # `vercel_automation_bypass`; see the comment above for the threat model.
-  count = var.sentry_archive_token == "" ? 0 : 1
-
-  repository  = "monitoring-monorepo"
-  secret_name = "SENTRY_ARCHIVE_TOKEN"
-  value       = var.sentry_archive_token
-}
+# The five Sentry-pipeline-EXCLUSIVE secrets that used to live here as repo-level
+# `github_actions_secret` resources — SENTRY_TRIAGE_TOKEN, SENTRY_PROJECTION_TOKEN,
+# AUTOFIX_APP_PRIVATE_KEY, SENTRY_ARCHIVE_TOKEN, PLATFORM_SETTINGS_AUDIT_TOKEN —
+# are now `github_actions_environment_secret` resources on the `sentry-pipeline`
+# GitHub Environment in `github-environment.tf` (issue #1289). Applying their
+# removal DESTROYS the repo-level copies; do that only AFTER the environment + its
+# secrets are applied and the workflows declare `environment: sentry-pipeline`
+# (the migration plan is in github-environment.tf and docs/notes/sentry-triage-pipeline.md).
 
 resource "github_actions_secret" "claude_code_oauth_token" {
   # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as

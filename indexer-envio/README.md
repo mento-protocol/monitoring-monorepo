@@ -1,4 +1,4 @@
-<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Mento v3 Envio HyperIndex Indexer
 
@@ -35,7 +35,9 @@ event list; the table highlights the main monitoring surfaces.
 | WormholeNttManager    | `TransferSent`, `TransferRedeemed`, `MessageAttestedTo`, `InboundTransferQueued`                                                                                                                                         |
 | WormholeTransceiver   | `ReceivedMessage`                                                                                                                                                                                                        |
 
-### Entities Written
+### Selected Entity Groups Written
+
+The schema is the source of truth for the complete entity list.
 
 | Entity group            | Description                                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -52,6 +54,8 @@ event list; the table highlights the main monitoring surfaces.
 | Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                            |
 | Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending` |
 | Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                             |
+| Liquity / CDP           | Instance, collateral, trove, stability-pool, reserve-trove, and daily-snapshot entities                                                                                         |
+| Stable supply           | Token supply, custody state, and daily-snapshot entities                                                                                                                        |
 | Reserve yield           | Ethereum sUSDS/stETH movement, cost-basis, position, summary, and daily-snapshot entities; stETH also records `StethWalletLaunchBaseline` for the balance sampler               |
 
 ### Pool ID Format
@@ -140,7 +144,7 @@ pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test     # Cod
 pnpm deploy:indexer                 # Push to envio branch → triggers hosted reindex
 pnpm deploy:indexer:status <commit> --watch --compact  # Low-noise wait for registration + sync
 pnpm deploy:indexer:logs <commit> --build    # Show build logs for a deployment
-pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Show runtime issues
+pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # Show explicitly marked runtime errors
 pnpm deploy:indexer:metrics <commit>         # Show per-chain indexing progress
 pnpm deploy:indexer:info <commit>            # Show deployment info/cache state
 pnpm deploy:indexer:perf <commit>            # Combined status/metrics/log snapshot for perf comparisons
@@ -165,8 +169,9 @@ When a new `@mento-protocol/contracts` version is published:
 
 1. Update the version in `indexer-envio/package.json` and
    `ui-dashboard/package.json`.
-2. Update the affected namespace in
-   `shared-config/deployment-namespaces.json`.
+2. Update the affected namespace in both
+   `shared-config/deployment-namespaces.json` and
+   `indexer-envio/config/deployment-namespaces.json`.
 3. Run `pnpm install` from the repository root.
 4. From `indexer-envio/`, run `pnpm generate:abis` and commit any vendored ABI
    changes.
@@ -277,7 +282,7 @@ COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
 pnpm deploy:indexer:status "$COMMIT" --watch --compact
 pnpm deploy:indexer:logs "$COMMIT" --build
-pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
+pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"

@@ -55,6 +55,13 @@ jobs:
   select:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # sentry-pipeline Environment (issue #1289): its main-only deployment-branch
+    # policy makes the SENTRY_TRIAGE_TOKEN + CLAUDE_CODE_OAUTH_TOKEN presence
+    # checks server-enforced — a branch-modified workflow_dispatch on a non-main
+    # ref is refused before this job runs. (CLAUDE_CODE_OAUTH_TOKEN stays a
+    # repo-level secret for claude.yml; on this main-gated job it resolves via the
+    # repo-level fallback since the environment does not redefine it.)
+    environment: sentry-pipeline
     permissions:
       contents: read
       issues: read
@@ -155,6 +162,11 @@ jobs:
   triage:
     needs: select
     if: ${{ needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
+    # sentry-pipeline Environment (issue #1289): server-enforced main-only access
+    # to SENTRY_TRIAGE_TOKEN (job env) and CLAUDE_CODE_OAUTH_TOKEN
+    # (claude-code-action) — a non-main workflow_dispatch is refused before this
+    # matrix job runs.
+    environment: sentry-pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -374,6 +386,11 @@ jobs:
   project:
     needs: [select, triage]
     if: ${{ always() && needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
+    # sentry-pipeline Environment (issue #1289): SENTRY_PROJECTION_TOKEN is now an
+    # environment secret, so this job MUST declare the environment to receive it;
+    # the deployment-branch policy also makes the existing inline
+    # `github.ref == 'refs/heads/main'` gate on that token a redundant backstop.
+    environment: sentry-pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

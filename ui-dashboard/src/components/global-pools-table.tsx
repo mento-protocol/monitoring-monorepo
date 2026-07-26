@@ -3,7 +3,7 @@
 import { useMemo, useState, type ComponentProps } from "react";
 import { poolName, poolTvlUSD } from "@/lib/tokens";
 import { Table } from "@/components/table";
-import { useIsWeekend } from "@/hooks/use-is-weekend";
+import { useIsWeekend, useResolvedIsWeekend } from "@/hooks/use-is-weekend";
 import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { useTableSort } from "@/lib/use-table-sort";
@@ -86,7 +86,7 @@ interface GlobalPoolsTableProps {
 export function GlobalPoolsTable({
   entries,
   showFilters = false,
-  initialIsWeekend = false,
+  initialIsWeekend,
   volume24hByKey,
   volume24hLoading = false,
   volume24hError = false,
@@ -105,6 +105,10 @@ export function GlobalPoolsTable({
     paramPrefix: "pools",
   });
   const liveNowSeconds = useNowSeconds();
+  // The route seed is banner-only. Health remains neutral until the browser
+  // resolves its clock snapshot, then follows that same snapshot for rows and
+  // sorting.
+  const isWeekendNow = useResolvedIsWeekend();
   const filters = useGlobalPoolFilters(entries);
   const { tvlByKey, totalVolumeByKey } = useGlobalPoolValues(entries);
   const sortedEntries = useSortedGlobalPools({
@@ -113,7 +117,8 @@ export function GlobalPoolsTable({
     sortDir,
     tvlByKey,
     totalVolumeByKey,
-    nowSeconds: liveNowSeconds ?? 0,
+    nowSeconds: liveNowSeconds,
+    isWeekendNow,
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
@@ -123,7 +128,7 @@ export function GlobalPoolsTable({
 
   return (
     <>
-      <WeekendBanner initialIsWeekend={initialIsWeekend} />
+      <WeekendBanner initialIsWeekend={initialIsWeekend ?? false} />
       {showFilters && <GlobalPoolFilters filters={filters} />}
       <Table>
         <PoolTableHeader
@@ -146,6 +151,7 @@ export function GlobalPoolsTable({
           totalVolumeByKey={totalVolumeByKey}
           tvlChangeWoWByKey={tvlChangeWoWByKey}
           nowSeconds={liveNowSeconds}
+          isWeekendNow={isWeekendNow}
           olsPoolKeys={olsPoolKeys}
           cdpPoolKeys={cdpPoolKeys}
           reservePoolKeys={reservePoolKeys}
@@ -318,6 +324,7 @@ function useSortedGlobalPools({
   tvlByKey,
   totalVolumeByKey,
   nowSeconds,
+  isWeekendNow,
   volume24hByKey,
   volume7dByKey,
   tvlChangeWoWByKey,
@@ -332,6 +339,7 @@ function useSortedGlobalPools({
         tvlByKey,
         totalVolumeByKey,
         nowSeconds,
+        isWeekendNow,
         volume24hByKey,
         volume7dByKey,
         tvlChangeWoWByKey,
@@ -343,6 +351,7 @@ function useSortedGlobalPools({
       tvlByKey,
       totalVolumeByKey,
       nowSeconds,
+      isWeekendNow,
       volume24hByKey,
       volume7dByKey,
       tvlChangeWoWByKey,
@@ -387,9 +396,8 @@ function GlobalPoolRows({
 }
 
 function WeekendBanner({ initialIsWeekend }: { initialIsWeekend: boolean }) {
-  // Reuse the route's serialized snapshot through hydration, then go live.
-  const showWeekendBanner = useIsWeekend(initialIsWeekend);
-  if (!showWeekendBanner) return null;
+  const show = useIsWeekend(initialIsWeekend);
+  if (!show) return null;
 
   return (
     <div className="mb-4 flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-300">

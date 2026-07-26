@@ -778,10 +778,19 @@ export function sensitivePathReason(rawPath) {
 // steps, job(s), runner, strategy, secrets, vars); the trailing path only allows
 // [A-Z0-9_.-], so a trailing inline secret (`"${{ secrets.X }}ghp_real"`) still
 // fails the `^…$` anchor and is caught.
+// The `<scope>.path` clauses — both bare and the legacy `${…}` interpolation
+// wrapper — cover Terraform/HCL traversal references
+// (var, local, module, data) the same way — `var.x`, `local.audit_token`,
+// `data.terraform_remote_state.platform.outputs.token` name a value resolved at
+// plan/apply time, never an inline secret, so a `github_actions_secret` block
+// whose `value = local.x`/`data.x.y` (or a credential-named local set from one)
+// is a reference, not a committed literal. Same `[A-Z0-9_.-]` path + `^…$`
+// anchor, so a trailing inline secret (`local.x ghp_real`, `"local.x"; realKey`)
+// still fails to match and is caught.
 function placeholderValue(value) {
   const trimmed = value.trim();
   return (
-    /^(?:\$\{(?:[A-Z_][A-Z0-9_]*|(?:secrets|vars|var)\.[A-Z0-9_.-]+|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\]))\}|\$\{\{\s*(?:secrets|vars|github|env|inputs|matrix|needs|steps|job|jobs|runner|strategy)\.[A-Z0-9_.-]+\s*\}\}|\$[A-Z_][A-Z0-9_]*|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\])|(?:secrets|vars|var)\.[A-Z0-9_.-]+)$/i.test(
+    /^(?:\$\{(?:[A-Z_][A-Z0-9_]*|(?:secrets|vars|var|local|module|data)\.[A-Z0-9_.-]+|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\]))\}|\$\{\{\s*(?:secrets|vars|github|env|inputs|matrix|needs|steps|job|jobs|runner|strategy)\.[A-Z0-9_.-]+\s*\}\}|\$[A-Z_][A-Z0-9_]*|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\])|(?:secrets|vars|var|local|module|data)\.[A-Z0-9_.-]+)$/i.test(
       trimmed,
     ) ||
     /^(?:process(?:\.|\?\.)env(?:(?:\.|\?\.)[A-Z_][A-Z0-9_]*|(?:\?\.)?\[["'][A-Z_][A-Z0-9_]*["']\])|\$\{process(?:\.|\?\.)env(?:(?:\.|\?\.)[A-Z_][A-Z0-9_]*|(?:\?\.)?\[["'][A-Z_][A-Z0-9_]*["']\])\})$/i.test(

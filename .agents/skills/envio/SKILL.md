@@ -50,7 +50,7 @@ pnpm deploy:indexer:info [<commit>]
 pnpm deploy:indexer:perf [<commit>] [--json]
 pnpm deploy:indexer:verify [<commit>] [--prod] [--json]
 pnpm deploy:indexer:promote [<commit>]
-pnpm deploy:indexer:logs [<commit>] [--follow] [--level error] [--build]
+pnpm deploy:indexer:logs [<commit>] [--follow] [--errors-only] [--build]
 pnpm deploy:indexer:rollback <commit> [--dry-run]
 ```
 
@@ -111,14 +111,20 @@ Progress math for a per-chain % estimate: `(latest_processed_block - start_block
 ## Logs
 
 ```bash
-pnpm deploy:indexer:logs <commit> --level error  # runtime errors
+pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # explicitly marked runtime errors
 pnpm deploy:indexer:logs <commit> --build        # registered build logs
 pnpm deploy:indexer:logs <commit> --follow       # tail every 10s
 ```
 
-`envio-cloud` defaults to 100 log lines and supports `--limit` up to 100; the
-wrapper passes that flag through. `--level` is comma-separated and `--build`
-selects build-time logs. If the target never registers, do not substitute an
+`envio-cloud` defaults to 100 log lines and supports `--limit` up to 100. The
+wrapper normally passes that flag through. `--errors-only` owns the limit,
+queries the maximum 100-record page, and fails closed if Envio fills it because
+the rest of the requested window cannot be inspected. Narrow `--since` and
+retry; do not combine `--limit` with `--errors-only`. The mode uses the
+wrapper's local JSON filter because Envio's `--level error` can retain
+stdout-carried records;
+`--level` remains useful for broad provider-level inspection. `--build` selects
+build-time logs. If the target never registers, do not substitute an
 unscoped older deployment's logs; use the registration diagnostic and Envio UI.
 
 ## `envio-cloud` CLI

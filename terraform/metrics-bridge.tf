@@ -30,6 +30,11 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
 
   depends_on = [google_project_service.run]
 
+  # Keep the optional parent block present so the child ignore paths below can
+  # preserve zero-valued defaults stamped by gcloud. `scaling_mode` stays
+  # unignored and Terraform-managed.
+  scaling {}
+
   template {
     scaling {
       min_instance_count = 1

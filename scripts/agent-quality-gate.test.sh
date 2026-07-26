@@ -2222,6 +2222,19 @@ run_gate "scripts/deploy-indexer-status.sh"
 assert_contains "- bash -n scripts/deploy-indexer-status.sh (shell script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
+run_gate "scripts/deploy-indexer-logs.sh"
+assert_contains "- bash -n scripts/deploy-indexer-logs.sh (shell script changed)"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+
+run_gate "scripts/filter-envio-runtime-errors.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+
+run_gate "scripts/filter-envio-runtime-errors.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+
 run_gate "scripts/deploy-indexer-verify.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
@@ -3642,6 +3655,12 @@ run_gate "scripts/check-github-action-pins.mjs"
 assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions pin checker changed)"
 assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker changed)"
 
+run_gate "scripts/check-workflow-permissions-drift.mjs"
+assert_contains "- node scripts/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"
+
+run_gate "scripts/check-workflow-permissions-drift.test.mjs"
+assert_contains "- node scripts/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"
+
 run_gate "scripts/check-github-action-pins.test.mjs"
 assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker test changed)"
 
@@ -3700,6 +3719,15 @@ assert_contains "- pnpm agent:context-check (documentation catalog metadata cont
 
 run_gate "scripts/docs-index-helpers.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
+
+run_gate "scripts/claude-runtime-document-registry.mjs"
+assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
+assert_contains "- pnpm docs:index --check (documentation catalog helper changed)"
+assert_contains "- pnpm agent:context-check (documentation catalog metadata contract changed)"
+
+run_gate "docs/claude-runtime-document-registry.json"
+assert_contains "- pnpm docs:index --check (Claude runtime document registry changed)"
+assert_contains "- pnpm agent:context-check (Claude runtime document registry changed)"
 
 run_gate "scripts/docs-index.test.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
@@ -4376,6 +4404,10 @@ STUB
 
 run_parallel_interrupt_regression registration INT 130
 run_parallel_interrupt_regression execution TERM 143
+
+# Keep the production identity contract reachable from every protected source
+# in CI and from the local changed-path router.
+node scripts/production-infra-identity-contract/routing.test.mjs
 
 # PR 1492 review: prerequisite commands (install/codegen/setup) produce outputs
 # the source fingerprint cannot see, so they must never be stamped or reused —

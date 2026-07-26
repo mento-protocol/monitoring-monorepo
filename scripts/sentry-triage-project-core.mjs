@@ -177,9 +177,21 @@ export function isValidShortId(shortId) {
   );
 }
 
+// A validated permalink is later embedded in Slack mrkdwn link syntax
+// (`<url|text>`, in the digest's `link()`), so `<`, `>`, `|` in the URL would
+// break out of the link — spoofing the display text or splitting the Slack
+// block. Reject those plus any ASCII control char or whitespace (space, tab,
+// newline, …). `new URL()` accepts all of them in the path/query and these
+// validators return the RAW input string, so the shape check must run on the
+// original — not on the re-encoded `parsed.href`.
+// eslint-disable-next-line no-control-regex -- rejecting control chars in a link target is the point
+const UNSAFE_URL_CHARS = /[<>|\x00-\x20\x7f]/;
+
 function isSafeSentryPermalink(url) {
+  const value = String(url);
+  if (UNSAFE_URL_CHARS.test(value)) return false;
   try {
-    const parsed = new URL(String(url));
+    const parsed = new URL(value);
     return (
       parsed.protocol === "https:" && /(^|\.)sentry\.io$/.test(parsed.hostname)
     );
