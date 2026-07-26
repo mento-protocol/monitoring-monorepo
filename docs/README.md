@@ -55,10 +55,10 @@ the rules in [`context-standards.md`](context-standards.md).
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
 | [`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md) | Grafana Alloy | canonical / active | runbook / aegis/grafana-agent | eng | 90d; verified 2026-07-17 |
-| [`alerts/infra/channels/sentry-bridge/README.md`](../alerts/infra/channels/sentry-bridge/README.md) | Sentry Alerts Module | canonical / active | runbook / alerts/infra/channels/sentry-bridge | eng | 90d; verified 2026-07-17 |
+| [`alerts/infra/channels/sentry-bridge/README.md`](../alerts/infra/channels/sentry-bridge/README.md) | Sentry Alerts Module | canonical / active | runbook / alerts/infra/channels/sentry-bridge | eng | 90d; verified 2026-07-26 |
 | [`alerts/infra/onchain-event-handler/README.md`](../alerts/infra/onchain-event-handler/README.md) | On-chain Event Handler Module | canonical / active | runbook / alerts/infra/onchain-event-handler | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/onchain-event-listeners/README.md`](../alerts/infra/onchain-event-listeners/README.md) | On-chain Event Listeners Module | canonical / active | runbook / alerts/infra/onchain-event-listeners | eng | 90d; verified 2026-07-22 |
-| [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-17 |
+| [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-26 |
 | [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-24 |
 | [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
