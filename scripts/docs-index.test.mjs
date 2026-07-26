@@ -17,6 +17,9 @@ import assert from "node:assert/strict";
 
 import {
   buildDocumentationInventory,
+  CLAUDE_RUNTIME_DOCUMENT_PATHS,
+  CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
+  CLAUDE_RUNTIME_DOCUMENT_REGISTRY_VERSION,
   classifyDocumentation,
   extractMarkdownTargets,
   isDocumentationPath,
@@ -51,6 +54,45 @@ function run(repo, ...args) {
   return spawnSync(process.execPath, [scriptPath, "--root", repo, ...args], {
     encoding: "utf8",
   });
+}
+
+function runtimeRegistryDocuments(source = "AGENTS.md") {
+  return CLAUDE_RUNTIME_DOCUMENT_PATHS.map((file) => ({
+    path: file,
+    title: path.posix.basename(file),
+    canonical: false,
+    status: "active",
+    owner: "eng",
+    scope: "repo-wide",
+    doc_type: file.includes("/agents/") ? "role" : "command",
+    garden_lane: "agent-entry-points",
+    review_interval_days: 180,
+    canonical_sources: [source],
+  }));
+}
+
+function writeRuntimeRegistryFixture(repo) {
+  write(
+    repo,
+    "AGENTS.md",
+    "---\ntitle: Rules\nstatus: active\nowner: eng\ncanonical: true\nlast_verified: 2026-07-17\ndoc_type: agent-instructions\nscope: repo-wide\nreview_interval_days: 90\ngarden_lane: agent-entry-points\n---\n# Rules\n",
+  );
+  for (const file of CLAUDE_RUNTIME_DOCUMENT_PATHS) {
+    write(repo, file, `# ${path.posix.basename(file)}\n`);
+  }
+  const registry = {
+    schema_version: CLAUDE_RUNTIME_DOCUMENT_REGISTRY_VERSION,
+    documents: runtimeRegistryDocuments(),
+  };
+  write(
+    repo,
+    CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
+    `${JSON.stringify(registry, null, 2)}\n`,
+  );
+  return {
+    files: ["AGENTS.md", ...CLAUDE_RUNTIME_DOCUMENT_PATHS],
+    registry,
+  };
 }
 
 test("parses frontmatter and hidden README metadata", () => {
@@ -123,6 +165,166 @@ test("classification is single-valued and explicit metadata overrides defaults",
   assert.equal(override.garden_lane, "package-readmes-reference");
   assert.equal(override.review_interval_days, 30);
   assert.deepEqual(override.errors, []);
+});
+
+test("Claude runtime registry gives all seven projections owned non-canonical metadata", () => {
+  withRepo((repo) => {
+    const { files } = writeRuntimeRegistryFixture(repo);
+    const first = buildDocumentationInventory({ repoRoot: repo, files });
+    const second = buildDocumentationInventory({ repoRoot: repo, files });
+    assert.deepEqual(first.errors, []);
+    assert.deepEqual(first, second);
+    const runtimeRecords = first.records.filter((record) =>
+      CLAUDE_RUNTIME_DOCUMENT_PATHS.includes(record.path),
+    );
+    assert.equal(runtimeRecords.length, CLAUDE_RUNTIME_DOCUMENT_PATHS.length);
+    for (const record of runtimeRecords) {
+      assert.equal(record.authority, "non-canonical");
+      assert.equal(record.status, "active");
+      assert.equal(record.owner, "eng");
+      assert.deepEqual(record.canonical_sources, ["AGENTS.md"]);
+    }
+    const rendered = renderDocumentationIndex(first, {
+      lastVerified: "2026-07-17",
+    });
+    assert.match(rendered, /Sources:/);
+    assert.match(rendered, /\[`AGENTS\.md`\]/);
+  });
+});
+
+test("Claude runtime registry fails closed for invalid entries and proposed-tree drift", () => {
+  withRepo((repo) => {
+    const { files, registry } = writeRuntimeRegistryFixture(repo);
+    registry.documents[0].owner = "";
+    registry.documents[1].canonical_sources = ["docs/missing.md"];
+    write(
+      repo,
+      CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
+      `${JSON.stringify(registry, null, 2)}\n`,
+    );
+    write(repo, ".claude/commands/unregistered.md", "# Unregistered\n");
+    rmSync(path.join(repo, CLAUDE_RUNTIME_DOCUMENT_PATHS[2]));
+    const inventory = buildDocumentationInventory({
+      repoRoot: repo,
+      files: [
+        ...files.filter((file) => file !== CLAUDE_RUNTIME_DOCUMENT_PATHS[2]),
+        ".claude/commands/unregistered.md",
+      ],
+    });
+    assert.match(
+      inventory.errors.join("\n"),
+      /'owner' must be a non-empty string/,
+    );
+    assert.match(
+      inventory.errors.join("\n"),
+      /canonical source 'docs\/missing\.md' is missing from the proposed tree/,
+    );
+    assert.match(
+      inventory.errors.join("\n"),
+      /runtime document is missing from the proposed tree/,
+    );
+    assert.match(
+      inventory.errors.join("\n"),
+      /unregistered Claude runtime document/,
+    );
+  });
+});
+
+test("Claude runtime registry must be a proposed regular repository file", () => {
+  withRepo((repo) => {
+    const { files } = writeRuntimeRegistryFixture(repo);
+    write(repo, ".gitignore", `${CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH}\n`);
+    track(repo, ".gitignore");
+    const ignored = buildDocumentationInventory({ repoRoot: repo, files });
+    assert.match(
+      ignored.errors.join("\n"),
+      /registry is missing from the proposed tree/,
+    );
+  });
+
+  withRepo((repo) => {
+    const { files } = writeRuntimeRegistryFixture(repo);
+    const registryPath = path.join(repo, CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH);
+    const registryContent = readFileSync(registryPath, "utf8");
+    rmSync(registryPath);
+    write(repo, "registry-target.json", registryContent);
+    symlinkSync(path.join(repo, "registry-target.json"), registryPath);
+    const symlinked = buildDocumentationInventory({ repoRoot: repo, files });
+    assert.match(symlinked.errors.join("\n"), /registry is not a regular file/);
+  });
+});
+
+test("Claude runtime projections cannot serve as canonical sources", () => {
+  withRepo((repo) => {
+    const { files, registry } = writeRuntimeRegistryFixture(repo);
+    const runtimeSource = CLAUDE_RUNTIME_DOCUMENT_PATHS[0];
+    write(
+      repo,
+      runtimeSource,
+      "---\ntitle: Runtime\nstatus: active\nowner: eng\ncanonical: true\nlast_verified: 2026-07-26\n---\n# Runtime\n",
+    );
+    registry.documents[1].canonical_sources = [runtimeSource];
+    write(
+      repo,
+      CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
+      `${JSON.stringify(registry, null, 2)}\n`,
+    );
+    const inventory = buildDocumentationInventory({ repoRoot: repo, files });
+    assert.match(
+      inventory.errors.join("\n"),
+      /canonical source '.claude\/agents\/dashboard-explorer\.md' is a Claude runtime projection/,
+    );
+  });
+});
+
+test("Claude runtime registry rejects non-string scalar metadata", () => {
+  withRepo((repo) => {
+    const { files, registry } = writeRuntimeRegistryFixture(repo);
+    const scalarFields = [
+      "path",
+      "title",
+      "owner",
+      "scope",
+      "status",
+      "doc_type",
+      "garden_lane",
+    ];
+    for (const [index, field] of scalarFields.entries()) {
+      registry.documents[index][field] = index % 2 === 0 ? [] : {};
+    }
+    write(
+      repo,
+      CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
+      `${JSON.stringify(registry, null, 2)}\n`,
+    );
+    const errors = buildDocumentationInventory({
+      repoRoot: repo,
+      files,
+    }).errors.join("\n");
+    for (const field of scalarFields) {
+      assert.match(
+        errors,
+        new RegExp(`'${field}' must be a non-empty string`),
+        field,
+      );
+    }
+  });
+});
+
+test("Claude runtime registry classification leaves live runtime bytes unchanged", () => {
+  const repo = path.resolve(path.dirname(scriptPath), "..");
+  const files = trackedDocumentationFiles(repo);
+  const before = new Map(
+    CLAUDE_RUNTIME_DOCUMENT_PATHS.map((file) => [
+      file,
+      readFileSync(path.join(repo, file), "utf8"),
+    ]),
+  );
+  const inventory = buildDocumentationInventory({ repoRoot: repo, files });
+  assert.deepEqual(inventory.errors, []);
+  for (const [file, content] of before) {
+    assert.equal(readFileSync(path.join(repo, file), "utf8"), content, file);
+  }
 });
 
 test("extracts links but ignores inline-code and both fenced-code styles", () => {

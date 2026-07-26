@@ -12,6 +12,10 @@ import {
   parseFrontmatter,
   STALE_AFTER_DAYS,
 } from "./check-agent-context-helpers.mjs";
+import {
+  loadClaudeRuntimeDocumentRegistry,
+  trackedDocumentationFiles,
+} from "./docs-index-helpers.mjs";
 
 const repoRoot = process.cwd();
 const failures = [];
@@ -240,6 +244,11 @@ const claudeSkillFiles = trackedFiles(
 // hidden metadata marker instead of visible frontmatter, so they are enrolled
 // with the same metadata parser used by requireMetadata.
 const trackedRepoFiles = trackedFiles(".");
+const claudeRuntimeRegistry = loadClaudeRuntimeDocumentRegistry({
+  repoRoot,
+  files: trackedDocumentationFiles(repoRoot),
+});
+for (const error of claudeRuntimeRegistry.errors) fail(error);
 const managedContextFiles = discoverCanonicalFiles(trackedRepoFiles, (file) =>
   exists(file) ? read(file) : "",
 );
