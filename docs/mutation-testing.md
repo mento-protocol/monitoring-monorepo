@@ -34,9 +34,10 @@ of [`e86c638d7feed52228afd658bf742ff5124a6da5`](https://github.com/mento-protoco
 v24.13.1, and pnpm 11.9.0. Stryker's native JSON and HTML reports were emitted
 under each package's ignored `reports/mutation/` directory; the table below is
 the retained, reviewable extraction from those reports.
-Review then identified the bridge's `probeInProgress = true` survivor as a
-real first-cycle test gap. The metrics-bridge row records the corrected rerun
-from this proposed tree after adding that test; the other two rows retain the
+Review then identified the bridge's `probeInProgress = true` and
+`reentryWarnedThisWindow = true` survivors as real first-cycle test gaps. The
+metrics-bridge row records the corrected rerun from this proposed tree after
+adding one first-window test that kills both; the other two rows retain the
 clean-checkout measurements.
 
 Run from the repo root:
@@ -55,7 +56,7 @@ parallel without scanning transient mutation files.
 
 | Target         | Native report                                                   | Runtime | Score (total / covered) | Mutants (killed / timed out / survived / no coverage / errors) | `break` / margin |
 | -------------- | --------------------------------------------------------------- | ------: | ----------------------- | -------------------------------------------------------------- | ---------------- |
-| Metrics bridge | `metrics-bridge/reports/mutation/{mutation.json,mutation.html}` |      9s | 88.27% / 88.27%         | 140 / 3 / 19 / 0 / 0                                           | 86 / 2.27 points |
+| Metrics bridge | `metrics-bridge/reports/mutation/{mutation.json,mutation.html}` |      8s | 88.89% / 88.89%         | 140 / 4 / 18 / 0 / 0                                           | 86 / 2.89 points |
 | Dashboard      | `ui-dashboard/reports/mutation/{mutation.json,mutation.html}`   |     12s | 88.83% / 91.50%         | 172 / 11 / 17 / 6 / 0                                          | 86 / 2.83 points |
 | Indexer        | `indexer-envio/reports/mutation/{mutation.json,mutation.html}`  |     58s | 96.09% / 96.09%         | 161 / 11 / 7 / 0 / 0                                           | 94 / 2.09 points |
 
@@ -123,15 +124,13 @@ these classifications.
   `slice(1)`, the namespaced format leaves a single address segment, so
   `join("")` and `join("-")` return the same value.
 
-**Metrics bridge (19 survived)**
+**Metrics bridge (18 survived)**
 
 The survivors are classified as accepted noise or equivalent mutants:
 
-**Test scaffolding (2)** — affect test cleanup, not production behavior:
+**Test scaffolding (1)** — affects test cleanup, not production behavior:
 
 - `_resetProbeInProgressForTests()` body emptied.
-- Module-scope `let reentryWarnedThisWindow = false` flipped to `true`
-  and then reset in the `finally` block.
 
 **`eligibleForProbe` optimization branches (5)** — equivalent mutants
 because NaN-comparison semantics naturally short-circuit downstream:
