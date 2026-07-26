@@ -32,7 +32,11 @@ The source-owned surfaces are:
 
 This source packet does not publish or authenticate the private policy
 artifact, change a GitHub Actions workflow or Terraform identity, deploy the
-producer, apply Grafana resources, or prove live telemetry.
+producer, apply Grafana resources, or prove live telemetry. Its Grafana
+consumers are absent by default because the source-controlled
+`local.peg_alerts_enabled` switch is `false`. That single Terraform local gates
+the Peg folder, templates, contact points, and rule group; it is not a workflow,
+variable, or policy-artifact switch.
 
 The production identity bootstrap in
 [#1566](https://github.com/mento-protocol/monitoring-monorepo/pull/1566) must be
@@ -88,13 +92,13 @@ Run from the repository root:
 pnpm alerts:rules:lint:test
 pnpm alerts:rules:lint
 pnpm tf validate alerts-rules
+(cd alerts/rules && TF_DATA_DIR=.terraform-tf-wrapper terraform test -no-color)
 pnpm agent:quality-gate --run
 ```
 
-The linter parses map-comprehension `format()` expressions, requires every
-`mento_peg_*` selector to bind one approved policy version, cross-checks metric
-names against the producer registry, and validates active/retained-previous
-rollover scope. Terraform validation proves configuration shape only.
+The linter parses Peg expressions, binds every `mento_peg_*` selector to an
+approved policy version, checks the producer registry, and validates rollover
+scope.
 
 The pull-request alert plan deliberately excludes rule groups with direct
 secret-backed contact-point dependencies. The first complete remote diff is
@@ -128,8 +132,12 @@ are true:
 
 6. Every exact generated query evaluates in the production Grafana data source
    without `Error` or unexplained `NoData`.
-7. A human reviews the trusted-main plan and explicitly approves the
-   `production-infra` apply.
+7. After preconditions 1–6 are verified, a reviewed source change flips
+   `local.peg_alerts_enabled` to `true`. Do not make this activation change
+   earlier or through a workflow, Terraform variable, GitHub variable, or
+   policy-artifact field.
+8. After the reviewed source flip reaches protected `main`, a human reviews the
+   trusted-main plan and explicitly approves the `production-infra` apply.
 
 Active blindness and heartbeat rules use `no_data_state = "Alerting"`.
 Applying while production peg samples are absent can create incidents by

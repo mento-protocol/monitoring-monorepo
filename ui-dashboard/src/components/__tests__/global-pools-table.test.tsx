@@ -194,15 +194,26 @@ describe("GlobalPoolsTable — FX weekend SSR banner", () => {
     expect(html).not.toContain("FX markets are closed this weekend.");
   });
 
-  it("keeps live weekend behavior when a direct caller has no snapshot", () => {
+  it("keeps stale health unresolved when the seeded banner says weekend", () => {
     mockIsWeekend.mockReturnValue(true);
-
+    const staleAt = String(TABLE_NOW_SECONDS - 600);
     const html = renderToStaticMarkup(
-      <GlobalPoolsTable entries={[makeEntry()]} />,
+      <GlobalPoolsTable
+        entries={[
+          makeEntry({
+            oracleTimestamp: staleAt,
+            lastOracleReportAt: staleAt,
+            oracleFreshnessCheckedAt: TABLE_NOW_SECONDS,
+            oracleExpiry: "300",
+          }),
+        ]}
+        initialIsWeekend={true}
+      />,
     );
 
     expect(html).toContain("FX markets are closed this weekend.");
-    expect(html).toContain('aria-label="Pool health WEEKEND:');
+    expect(html).toMatch(/Pool health N\/A:/);
+    expect(html).not.toMatch(/Pool health WEEKEND:/);
   });
 });
 
@@ -287,17 +298,14 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).not.toContain(">Chain</button>");
   });
 
-  it("renders health diagnostics through the accessible tooltip trigger", () => {
+  it("renders unresolved health through the accessible tooltip trigger", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).toMatch(
-      /<button[^>]*aria-label="Pool health CRITICAL: Oracle stale/,
-    );
+    expect(html).toMatch(/<button[^>]*aria-label="Pool health N\/A:/);
     expect(html).toMatch(/<button[^>]*aria-describedby="[^"]+"/);
     expect(html).toContain('role="tooltip"');
-    expect(html).toContain("Oracle stale — last update expired");
-    expect(html).not.toMatch(/title="[^"]*Oracle stale/);
+    expect(html).not.toMatch(/title="[^"]*Pool health/);
   });
 
   it("uses VP median/quorum tooltip copy for critical VirtualPool incidents", () => {
@@ -921,34 +929,61 @@ describe("sortGlobalPools — fee, health, and volume edge cases", () => {
   });
 
   it("uses the same weekend snapshot for health sorting as row badges", () => {
-    const nowSeconds = 1_700_000_000;
-    const freshTs = String(nowSeconds + 60);
+    mockIsWeekend.mockReturnValue(true);
     const stale = makeEntry({
       id: "stale",
-      oracleTimestamp: String(nowSeconds - 600),
-      oracleFreshnessWindow: "300",
+      oracleTimestamp: String(TABLE_NOW_SECONDS - 600),
+      lastOracleReportAt: String(TABLE_NOW_SECONDS - 600),
+      oracleFreshnessCheckedAt: TABLE_NOW_SECONDS,
+      oracleExpiry: "300",
     });
     const halted = makeEntry({
       id: "halted",
-      oracleTimestamp: freshTs,
-      lastOracleReportAt: freshTs,
+      oracleTimestamp: String(TABLE_NOW_SECONDS - 120),
+      lastOracleReportAt: String(TABLE_NOW_SECONDS - 120),
+      oracleFreshnessCheckedAt: TABLE_NOW_SECONDS,
+      oracleExpiry: "300",
       breakerTripped: true,
     });
 
     expect(
       sortGlobalPools([halted, stale], "health", "desc", {
         ...BASE_SORT_CTX,
-        nowSeconds,
+        nowSeconds: TABLE_NOW_SECONDS,
         isWeekendNow: false,
       }).map((entry) => entry.pool.id),
     ).toEqual(["stale", "halted"]);
     expect(
       sortGlobalPools([halted, stale], "health", "desc", {
         ...BASE_SORT_CTX,
-        nowSeconds,
+        nowSeconds: TABLE_NOW_SECONDS,
         isWeekendNow: true,
       }).map((entry) => entry.pool.id),
     ).toEqual(["halted", "stale"]);
+  });
+
+  it("uses the row health clock while the weekend snapshot is unresolved", () => {
+    const warning = makeEntry({
+      id: "warning",
+      oracleTimestamp: "10000",
+      lastOracleReportAt: "10000",
+      priceDifference: "600000000000000000",
+      rebalanceThreshold: 500_000,
+      rebalanceThresholdsKnown: true,
+    });
+    const sustainedBreach = makeEntry({
+      ...warning.pool,
+      id: "sustained-breach",
+      deviationBreachStartedAt: "1",
+    });
+
+    expect(
+      sortGlobalPools([warning, sustainedBreach], "health", "desc", {
+        ...BASE_SORT_CTX,
+        nowSeconds: null,
+        isWeekendNow: null,
+      }).map((entry) => entry.pool.id),
+    ).toEqual(["sustained-breach", "warning"]);
   });
 
   it("keeps same-id pools from different chains separate in metric maps", () => {

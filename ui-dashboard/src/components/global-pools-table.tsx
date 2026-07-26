@@ -3,9 +3,8 @@
 import { useMemo, useState, type ComponentProps } from "react";
 import { poolName, poolTvlUSD } from "@/lib/tokens";
 import { Table } from "@/components/table";
-import { useIsWeekend } from "@/hooks/use-is-weekend";
+import { useIsWeekend, useResolvedIsWeekend } from "@/hooks/use-is-weekend";
 import { useNowSeconds } from "@/hooks/use-now-seconds";
-import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { useTableSort } from "@/lib/use-table-sort";
 import { useRovingTabIndex } from "@/lib/use-roving-tab-index";
@@ -106,11 +105,10 @@ export function GlobalPoolsTable({
     paramPrefix: "pools",
   });
   const liveNowSeconds = useNowSeconds();
-  const seededIsWeekend = useIsWeekend(initialIsWeekend ?? false);
-  // Production routes serialize this snapshot. Preserve the previous live
-  // behavior for direct/shared callers that do not have a server snapshot.
-  const isWeekendNow =
-    initialIsWeekend === undefined ? isWeekend() : seededIsWeekend;
+  // The route seed is banner-only. Health remains neutral until the browser
+  // resolves its clock snapshot, then follows that same snapshot for rows and
+  // sorting.
+  const isWeekendNow = useResolvedIsWeekend();
   const filters = useGlobalPoolFilters(entries);
   const { tvlByKey, totalVolumeByKey } = useGlobalPoolValues(entries);
   const sortedEntries = useSortedGlobalPools({
@@ -119,7 +117,7 @@ export function GlobalPoolsTable({
     sortDir,
     tvlByKey,
     totalVolumeByKey,
-    nowSeconds: liveNowSeconds ?? 0,
+    nowSeconds: liveNowSeconds,
     isWeekendNow,
     volume24hByKey,
     volume7dByKey,
@@ -130,7 +128,7 @@ export function GlobalPoolsTable({
 
   return (
     <>
-      <WeekendBanner show={isWeekendNow} />
+      <WeekendBanner initialIsWeekend={initialIsWeekend ?? false} />
       {showFilters && <GlobalPoolFilters filters={filters} />}
       <Table>
         <PoolTableHeader
@@ -397,7 +395,8 @@ function GlobalPoolRows({
   );
 }
 
-function WeekendBanner({ show }: { show: boolean }) {
+function WeekendBanner({ initialIsWeekend }: { initialIsWeekend: boolean }) {
+  const show = useIsWeekend(initialIsWeekend);
   if (!show) return null;
 
   return (

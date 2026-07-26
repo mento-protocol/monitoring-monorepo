@@ -959,7 +959,14 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
     source.includes("for_each = local.peg_rule_definitions") &&
       source.includes('name             = "Peg Monitoring"') &&
       source.includes("notification_settings {") &&
-      contacts.includes("grafana_contact_point.peg_page.name") &&
+      source.includes("grafana_contact_point.peg_market_warning") &&
+      source.includes("grafana_contact_point.peg_ops_warning") &&
+      source.includes("grafana_contact_point.peg_page") &&
+      contacts.includes("peg_contact_point_names = {") &&
+      contacts.includes("name = local.peg_contact_point_names.page") &&
+      contacts.includes(
+        "contact_point   = local.peg_contact_point_names.page",
+      ) &&
       contacts.includes("victorops {") &&
       contacts.includes("var.slack_channel_critical") &&
       contacts.includes(
@@ -986,6 +993,117 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
   assert(
     !source.includes("mute_timing") && !contacts.includes("mute_timing"),
     "peg decisions must not inherit the FX weekend mute",
+  );
+});
+
+test("Peg Grafana consumers stay behind the default-off source activation guard", () => {
+  const rulesDir = path.resolve(__dirname, "..", "alerts/rules");
+  const policyLocals = readFileSync(
+    path.join(rulesDir, "peg-policy-locals.tf"),
+    "utf8",
+  );
+  const guardedResources = [
+    ["main.tf", 'resource "grafana_folder" "peg_monitoring"'],
+    [
+      "peg-message-templates.tf",
+      'resource "grafana_message_template" "peg_slack_title"',
+    ],
+    [
+      "peg-message-templates.tf",
+      'resource "grafana_message_template" "peg_slack_message"',
+    ],
+    [
+      "peg-message-templates.tf",
+      'resource "grafana_message_template" "peg_victorops_title"',
+    ],
+    [
+      "peg-message-templates.tf",
+      'resource "grafana_message_template" "peg_victorops_message"',
+    ],
+    [
+      "peg-contact-points.tf",
+      'resource "grafana_contact_point" "peg_market_warning"',
+    ],
+    [
+      "peg-contact-points.tf",
+      'resource "grafana_contact_point" "peg_ops_warning"',
+    ],
+    ["peg-contact-points.tf", 'resource "grafana_contact_point" "peg_page"'],
+    ["rules-peg.tf", 'resource "grafana_rule_group" "peg_monitoring"'],
+  ];
+  const sourceForFile = (file) =>
+    readFileSync(path.join(rulesDir, file), "utf8");
+  const definitions = readFileSync(
+    path.join(rulesDir, "peg-rule-definitions.tf"),
+    "utf8",
+  );
+  const assertDefaultOff = (source) => {
+    assert(
+      /\bpeg_alerts_enabled\s*=\s*false\b/.test(source),
+      "peg alert activation must default to false in source-controlled Terraform",
+    );
+  };
+  const assertGuardedResource = (file, marker, source) => {
+    const blocks = blocksFor(source, marker);
+    assert(
+      blocks.length === 1,
+      `expected one ${marker} block in ${file}, found ${blocks.length}`,
+    );
+    assert(
+      /\bfor_each\s*=\s*local\.peg_alert_instances\b/.test(blocks[0]),
+      `${marker} in ${file} must use the shared Peg activation map`,
+    );
+  };
+  const expectFailure = (mutation, message) => {
+    try {
+      mutation();
+    } catch {
+      return;
+    }
+    throw new Error(message);
+  };
+
+  assertDefaultOff(policyLocals);
+  assert(
+    /peg_alert_instances\s*=\s*local\.peg_alerts_enabled\s*\?\s*\{\s*"peg-monitoring"\s*=\s*true\s*\}\s*:\s*\{\}/s.test(
+      policyLocals,
+    ),
+    "peg alert instances must be one stable singleton map derived from the default-off switch",
+  );
+  assert(
+    guardedResources.length === 9,
+    `expected exactly nine Peg Grafana consumers, found ${guardedResources.length}`,
+  );
+  for (const [file, marker] of guardedResources) {
+    assertGuardedResource(file, marker, sourceForFile(file));
+  }
+  assert(
+    /peg_rule_definitions\s*=\s*merge\([\s\S]*?local\.peg_active_rule_definitions,[\s\S]*?local\.peg_previous_rule_definitions,[\s\S]*?local\.peg_rollover_rule_definitions,[\s\S]*?\)/.test(
+      definitions,
+    ) && !definitions.includes("tomap("),
+    "Peg rule definitions must preserve their heterogeneous object shape before activation",
+  );
+  expectFailure(
+    () =>
+      assertDefaultOff(
+        policyLocals.replace(
+          "peg_alerts_enabled = false",
+          "peg_alerts_enabled = true",
+        ),
+      ),
+    "activation guard test must reject a forced-open default",
+  );
+  expectFailure(
+    () =>
+      assertGuardedResource(
+        "rules-peg.tf",
+        'resource "grafana_rule_group" "peg_monitoring"',
+        sourceForFile("rules-peg.tf").replace(
+          "for_each = local.peg_alert_instances",
+          "# for_each intentionally removed",
+        ),
+      ),
+    "activation guard test must reject an unguarded Peg Grafana consumer",
   );
 });
 

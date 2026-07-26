@@ -4,6 +4,8 @@
 # resources explicitly because their template calls are plain strings.
 
 resource "grafana_message_template" "peg_slack_title" {
+  for_each = local.peg_alert_instances
+
   name     = "Peg - Slack Title"
   template = <<-EOT
 {{ define "peg.slack.title" -}}
@@ -13,6 +15,8 @@ EOT
 }
 
 resource "grafana_message_template" "peg_slack_message" {
+  for_each = local.peg_alert_instances
+
   name     = "Peg - Slack Message"
   template = <<-EOT
 {{ define "peg.slack.message" }}
@@ -43,6 +47,8 @@ EOT
 }
 
 resource "grafana_message_template" "peg_victorops_title" {
+  for_each = local.peg_alert_instances
+
   name     = "Peg - VictorOps Title"
   template = <<-EOT
 {{ define "peg.victorops.title" -}}
@@ -59,6 +65,8 @@ EOT
 }
 
 resource "grafana_message_template" "peg_victorops_message" {
+  for_each = local.peg_alert_instances
+
   name     = "Peg - VictorOps Message"
   template = <<-EOT
 {{ define "peg.victorops.message" }}

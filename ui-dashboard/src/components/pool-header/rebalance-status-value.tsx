@@ -5,11 +5,18 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { Tooltip } from "@/components/tooltip";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
+import { useResolvedIsWeekend } from "@/hooks/use-is-weekend";
 import {
+  useNowSeconds,
   useSsrSafeRelative,
   useSsrSafeTimestamp,
 } from "@/hooks/use-now-seconds";
-import { computeHealthStatus } from "@/lib/health";
+import {
+  computeHealthStatus,
+  confirmedFreshnessCheckedAt,
+  isOracleFresh,
+  oracleFreshnessTimestamp,
+} from "@/lib/health";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 import {
   isHealthyNoOp,
@@ -85,11 +92,19 @@ export function RebalanceStatusValue({
   network: Network;
   strategyAddress: string;
 }) {
+  const isWeekendNow = useResolvedIsWeekend();
+  const liveNowSeconds = useNowSeconds();
+  const clockPending = liveNowSeconds === null;
+  const statusNowSeconds =
+    liveNowSeconds ??
+    confirmedFreshnessCheckedAt(pool) ??
+    oracleFreshnessTimestamp(pool);
+  const oracleIsFresh = isOracleFresh(pool, statusNowSeconds, network.chainId);
   const {
     data: rebalanceCheck,
     isLoading,
     error,
-  } = useRebalanceCheck(pool, network);
+  } = useRebalanceCheck(pool, network, liveNowSeconds, isWeekendNow);
 
   let statusText: string;
   let statusColor: string;
@@ -107,17 +122,22 @@ export function RebalanceStatusValue({
     statusText = "Diagnostics unavailable";
     statusColor = "text-slate-400";
   } else if (rebalanceCheck === null) {
-    // Mirror DeviationCell / HealthPanel: zero-filled defaults make
-    // computeHealthStatus return CRITICAL ("Oracle stale") for pools the
-    // indexer hasn't reached yet. Render the same "no data yet" copy
-    // HealthPanel uses instead of crying wolf.
     if (pool.hasHealthData !== true) {
+      // Mirror DeviationCell / HealthPanel: zero-filled defaults make
+      // computeHealthStatus return CRITICAL ("Oracle stale") for pools the
+      // indexer hasn't reached yet. Render the same "no data yet" copy
+      // HealthPanel uses instead of crying wolf.
       statusText = "Health data not yet available";
+      statusColor = "text-slate-400";
+    } else if (clockPending && !oracleIsFresh) {
+      statusText = "Health status pending live browser time";
       statusColor = "text-slate-400";
     } else {
       ({ text: statusText, color: statusColor } = getPassiveStatus(
         pool,
         network,
+        statusNowSeconds,
+        isWeekendNow,
       ));
     }
   } else if (rebalanceCheck.canRebalance) {
@@ -212,6 +232,8 @@ function isTechnicalErrorIdentifier(value: string): boolean {
 function getPassiveStatus(
   pool: Pool,
   network: Network,
+  nowSeconds: number,
+  isWeekendNow: boolean | null,
 ): {
   text: string;
   color: string;
@@ -221,7 +243,12 @@ function getPassiveStatus(
   // wiping "Balanced" for every healthy pool on an RPC-less network. The
   // rpcUrl gate lives only in the live-probe path (useRebalanceCheck) where
   // it belongs.
-  const health = computeHealthStatus(pool, network.chainId);
+  const health = computeHealthStatus(
+    pool,
+    network.chainId,
+    nowSeconds,
+    isWeekendNow,
+  );
   if (health === "OK") {
     return { text: "Balanced", color: "text-emerald-400" };
   }

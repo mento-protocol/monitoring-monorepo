@@ -40,7 +40,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.github/prompts/sentry-autofix.md`](../.github/prompts/sentry-autofix.md) | sentry-autofix.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
 | [`.github/prompts/sentry-triage.md`](../.github/prompts/sentry-triage.md) | sentry-triage.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
 | [`aegis/AGENTS.md`](../aegis/AGENTS.md) | Aegis Instructions | canonical / active | agent-instructions / aegis | eng | 90d; verified 2026-07-23 |
-| [`AGENTS.md`](../AGENTS.md) | Monitoring Monorepo Instructions | canonical / active | agent-instructions / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`AGENTS.md`](../AGENTS.md) | Monitoring Monorepo Instructions | canonical / active | agent-instructions / repo-wide | eng | 90d; verified 2026-07-26 |
 | [`alerts/AGENTS.md`](../alerts/AGENTS.md) | Alerts Instructions | canonical / active | agent-instructions / alerts | eng | 90d; verified 2026-07-23 |
 | [`indexer-envio/AGENTS.md`](../indexer-envio/AGENTS.md) | Envio Indexer Instructions | canonical / active | agent-instructions / indexer-envio | eng | 90d; verified 2026-07-23 |
 | [`integration-probes/AGENTS.md`](../integration-probes/AGENTS.md) | Integration Probes Instructions | canonical / active | agent-instructions / integration-probes | eng | 90d; verified 2026-07-23 |
@@ -55,10 +55,10 @@ the rules in [`context-standards.md`](context-standards.md).
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
 | [`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md) | Grafana Alloy | canonical / active | runbook / aegis/grafana-agent | eng | 90d; verified 2026-07-17 |
-| [`alerts/infra/channels/sentry-bridge/README.md`](../alerts/infra/channels/sentry-bridge/README.md) | Sentry Alerts Module | canonical / active | runbook / alerts/infra/channels/sentry-bridge | eng | 90d; verified 2026-07-17 |
+| [`alerts/infra/channels/sentry-bridge/README.md`](../alerts/infra/channels/sentry-bridge/README.md) | Sentry Alerts Module | canonical / active | runbook / alerts/infra/channels/sentry-bridge | eng | 90d; verified 2026-07-26 |
 | [`alerts/infra/onchain-event-handler/README.md`](../alerts/infra/onchain-event-handler/README.md) | On-chain Event Handler Module | canonical / active | runbook / alerts/infra/onchain-event-handler | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/onchain-event-listeners/README.md`](../alerts/infra/onchain-event-listeners/README.md) | On-chain Event Listeners Module | canonical / active | runbook / alerts/infra/onchain-event-listeners | eng | 90d; verified 2026-07-22 |
-| [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-17 |
+| [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-26 |
 | [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-24 |
 | [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
 | [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
@@ -99,7 +99,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/pr-checklists/keyboard-a11y-controlled-widgets.md`](pr-checklists/keyboard-a11y-controlled-widgets.md) | Keyboard Accessibility on Controlled Widgets Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-23 |
 | [`docs/pr-checklists/mutation-testing.md`](pr-checklists/mutation-testing.md) | Mutation Testing Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-23 |
 | [`docs/pr-checklists/recurring-review-patterns.md`](pr-checklists/recurring-review-patterns.md) | Recurring PR Review Patterns | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-23 |
-| [`docs/pr-checklists/review-prompt-exclusions.md`](pr-checklists/review-prompt-exclusions.md) | Review Prompt Exclusions | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-03 |
+| [`docs/pr-checklists/review-prompt-exclusions.md`](pr-checklists/review-prompt-exclusions.md) | Review Prompt Exclusions | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-26 |
 | [`docs/pr-checklists/stateful-data-ui.md`](pr-checklists/stateful-data-ui.md) | Stateful Data and UI Checklist | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/pr-checklists/swr-polling-hasura.md`](pr-checklists/swr-polling-hasura.md) | SWR and Hasura Polling Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-23 |
 | [`docs/pr-checklists/terraform-cloudrun.md`](pr-checklists/terraform-cloudrun.md) | Terraform and Cloud Run Checklist | canonical / active | checklist / terraform/infra | eng | 90d; verified 2026-07-23 |
@@ -127,7 +127,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0017-broker-denormalization-volume-dedup.md`](adr/0017-broker-denormalization-volume-dedup.md) | Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed volume | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-23 |
 | [`docs/adr/0018-indexer-observability-loki.md`](adr/0018-indexer-observability-loki.md) | Indexer observability contract requires structured logs and a verified error-log path | canonical / archived | adr / indexer-envio | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/0019-vercel-path-aware-deploys.md`](adr/0019-vercel-path-aware-deploys.md) | Dashboard deploys on Vercel Git integration with a path-aware skip script | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-23 |
-| [`docs/adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) | Read model is SWR polling plus bounded snapshot composition at current scale | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-23 |
+| [`docs/adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) | Read model is SWR polling plus bounded snapshot composition at current scale | non-canonical / archived | adr / ui-dashboard | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/0021-dashboard-state-upstash-blob.md`](adr/0021-dashboard-state-upstash-blob.md) | Dashboard mutable state lives in Upstash Redis with Vercel Blob backups | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0022-authjs-google-shared-preview-secrets.md`](adr/0022-authjs-google-shared-preview-secrets.md) | Auth.js with Google; previews share prod auth secrets behind SSO and Git fork protection | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0023-es2017-no-polyfill.md`](adr/0023-es2017-no-polyfill.md) | Ship ES2017 with no polyfill; ban immutable-array methods via lint and sortedCopy | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-24 |
@@ -157,6 +157,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) | Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0049-peg-decision-package-read-model.md`](adr/0049-peg-decision-package-read-model.md) | Peg decisions use a bounded Metrics Bridge read model | canonical / active | adr / metrics-bridge / ui-dashboard | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0050-environment-scoped-pipeline-secrets.md`](adr/0050-environment-scoped-pipeline-secrets.md) | Pipeline secrets are gated by a Terraform-managed GitHub Environment | canonical / active | adr / terraform / ci | eng | 90d; verified 2026-07-26 |
+| [`docs/adr/0051-dashboard-volume-scale-bounds.md`](adr/0051-dashboard-volume-scale-bounds.md) | Dashboard volume composition has per-chain and total re-review bounds | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/0052-envio-logs-prometheus-grafana-alerting.md`](adr/0052-envio-logs-prometheus-grafana-alerting.md) | Envio logs diagnose; Prometheus and Grafana alert | canonical / active | adr / indexer-envio / alerts | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
