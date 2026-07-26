@@ -2,10 +2,7 @@ import { ESLint } from "eslint";
 import { fileURLToPath } from "node:url";
 
 const DASHBOARD_ROOT_URL = new URL("../", import.meta.url);
-const POLICY_RULE_IDS = new Set([
-  "browser-api-policy/no-unsupported-receiver-property",
-  "no-restricted-properties",
-]);
+const POLICY_RULE_ID = "browser-api-policy/no-unsupported-receiver-property";
 const BLOCKED_SOURCE = `
   [3, 1].toSorted();
   [3, 1].toReversed();
@@ -30,6 +27,40 @@ const DESTRUCTURED_BLOCKED_SOURCE = `
   toReversed.call(new Uint8Array([3, 1]));
   validateString.call("value");
 `;
+const STATIC_BLOCKED_SOURCE = `
+  const BuiltinObject = Object;
+  const BuiltinMap = Map;
+  Object.groupBy([1], String);
+  Map.groupBy([1], String);
+  BuiltinObject.groupBy([1], String);
+  BuiltinMap.groupBy([1], String);
+  globalThis.Object.groupBy([1], String);
+  globalThis.Map.groupBy([1], String);
+  const { groupBy: groupObjects } = Object;
+  const { groupBy: groupMaps } = globalThis.Map;
+  groupObjects([1], String);
+  groupMaps([1], String);
+`;
+const STATIC_ALLOWED_SOURCE = `
+  export {};
+
+  const Object = { groupBy() {} };
+  const Map = { groupBy() {} };
+  const CustomObject = Object;
+  const CustomMap = Map;
+  Object.groupBy();
+  Map.groupBy();
+  CustomObject.groupBy();
+  CustomMap.groupBy();
+
+  const customGlobal = { Object, Map };
+  customGlobal.Object.groupBy();
+  customGlobal.Map.groupBy();
+  const { groupBy: groupObjects } = Object;
+  const { groupBy: groupMaps } = customGlobal.Map;
+  groupObjects();
+  groupMaps();
+`;
 const cases = {
   blocked: {
     filePath: "src/lib/immutable-sort.ts",
@@ -42,6 +73,14 @@ const cases = {
   destructuredBlocked: {
     filePath: "src/lib/tag-suggestions.ts",
     source: DESTRUCTURED_BLOCKED_SOURCE,
+  },
+  staticBlocked: {
+    filePath: "src/lib/address-reports-shared.ts",
+    source: STATIC_BLOCKED_SOURCE,
+  },
+  staticAllowed: {
+    filePath: "src/lib/address-label-fields.ts",
+    source: STATIC_ALLOWED_SOURCE,
   },
   allowed: {
     filePath: "src/lib/address-report-fields.ts",
@@ -118,7 +157,7 @@ for (const [name, fixture] of Object.entries(cases)) {
   resultEntries.push([
     name,
     result.messages
-      .filter(({ ruleId }) => ruleId && POLICY_RULE_IDS.has(ruleId))
+      .filter(({ ruleId }) => ruleId === POLICY_RULE_ID)
       .map(({ ruleId, message }) => ({ ruleId, message })),
   ]);
 }

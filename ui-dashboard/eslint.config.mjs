@@ -14,12 +14,7 @@ import ts from "typescript";
 import browserApiPolicy from "./browser-api-policy.json" with { type: "json" };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const receiverAwareRestrictions = browserApiPolicy.restrictions.filter(
-  (restriction) => "receiver" in restriction,
-);
-const propertyRestrictions = browserApiPolicy.restrictions.filter(
-  (restriction) => !("receiver" in restriction),
-);
+const symbolAwareRestrictions = browserApiPolicy.restrictions;
 const TYPED_ARRAY_INTERFACE_NAMES = new Set([
   "BigInt64Array",
   "BigUint64Array",
@@ -72,12 +67,22 @@ function destructuringSource(node) {
   return pattern;
 }
 
-function hasBuiltInReceiverDeclaration(
+function matchesBuiltInInterface(interfaceName, restriction) {
+  if ("object" in restriction) {
+    return interfaceName === `${restriction.object}Constructor`;
+  }
+  return restriction.receiver === "array"
+    ? interfaceName === "Array" ||
+        interfaceName === "ReadonlyArray" ||
+        TYPED_ARRAY_INTERFACE_NAMES.has(interfaceName)
+    : interfaceName === "String";
+}
+
+function hasBuiltInPropertyDeclaration(
   type,
   checker,
   program,
-  receiver,
-  property,
+  restriction,
   seen = new Set(),
 ) {
   if (seen.has(type)) return false;
@@ -85,54 +90,41 @@ function hasBuiltInReceiverDeclaration(
 
   if (type.isUnionOrIntersection()) {
     return type.types.some((part) =>
-      hasBuiltInReceiverDeclaration(
-        part,
-        checker,
-        program,
-        receiver,
-        property,
-        seen,
-      ),
+      hasBuiltInPropertyDeclaration(part, checker, program, restriction, seen),
     );
   }
 
   const constraint = checker.getBaseConstraintOfType(type);
   if (
     constraint &&
-    hasBuiltInReceiverDeclaration(
+    hasBuiltInPropertyDeclaration(
       constraint,
       checker,
       program,
-      receiver,
-      property,
+      restriction,
       seen,
     )
   ) {
     return true;
   }
 
-  const symbol = checker.getPropertyOfType(type, property);
+  const symbol = checker.getPropertyOfType(type, restriction.property);
   return (symbol?.getDeclarations() ?? []).some((declaration) => {
     if (!program.isSourceFileDefaultLibrary(declaration.getSourceFile())) {
       return false;
     }
     const parent = declaration.parent;
     if (!ts.isInterfaceDeclaration(parent)) return false;
-    const interfaceName = parent.name.text;
-    return receiver === "array"
-      ? interfaceName === "Array" ||
-          interfaceName === "ReadonlyArray" ||
-          TYPED_ARRAY_INTERFACE_NAMES.has(interfaceName)
-      : interfaceName === "String";
+    return matchesBuiltInInterface(parent.name.text, restriction);
   });
 }
 
-const receiverAwareBrowserApiRule = {
+const symbolAwareBrowserApiRule = {
   meta: {
     type: "problem",
     docs: {
       description:
-        "Disallow browser APIs only when the receiver resolves to the specified built-in type.",
+        "Disallow browser APIs only when the receiver resolves to the specified built-in instance or constructor.",
     },
     schema: [
       {
@@ -140,12 +132,14 @@ const receiverAwareBrowserApiRule = {
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["receiver", "property", "message"],
+          required: ["property", "message"],
           properties: {
             receiver: { enum: ["array", "string"] },
+            object: { type: "string" },
             property: { type: "string" },
             message: { type: "string" },
           },
+          oneOf: [{ required: ["receiver"] }, { required: ["object"] }],
         },
       },
     ],
@@ -159,22 +153,20 @@ const receiverAwareBrowserApiRule = {
       MemberExpression(node) {
         const property = memberPropertyName(node);
         if (!property) return;
-        const restriction = context.options[0].find(
-          (candidate) => candidate.property === property,
-        );
-        if (!restriction) return;
 
         const receiverNode = services.esTreeNodeToTSNodeMap.get(node.object);
         const receiverType = checker.getTypeAtLocation(receiverNode);
-        if (
-          hasBuiltInReceiverDeclaration(
-            receiverType,
-            checker,
-            services.program,
-            restriction.receiver,
-            property,
-          )
-        ) {
+        const restriction = context.options[0].find(
+          (candidate) =>
+            candidate.property === property &&
+            hasBuiltInPropertyDeclaration(
+              receiverType,
+              checker,
+              services.program,
+              candidate,
+            ),
+        );
+        if (restriction) {
           context.report({ node: node.property, message: restriction.message });
         }
       },
@@ -183,22 +175,20 @@ const receiverAwareBrowserApiRule = {
         if (!source || node.parent.type !== "ObjectPattern") return;
         const property = objectPropertyName(node);
         if (!property) return;
-        const restriction = context.options[0].find(
-          (candidate) => candidate.property === property,
-        );
-        if (!restriction) return;
 
         const receiverNode = services.esTreeNodeToTSNodeMap.get(source);
         const receiverType = checker.getTypeAtLocation(receiverNode);
-        if (
-          hasBuiltInReceiverDeclaration(
-            receiverType,
-            checker,
-            services.program,
-            restriction.receiver,
-            property,
-          )
-        ) {
+        const restriction = context.options[0].find(
+          (candidate) =>
+            candidate.property === property &&
+            hasBuiltInPropertyDeclaration(
+              receiverType,
+              checker,
+              services.program,
+              candidate,
+            ),
+        );
+        if (restriction) {
           context.report({ node: node.key, message: restriction.message });
         }
       },
@@ -208,7 +198,7 @@ const receiverAwareBrowserApiRule = {
 
 const browserApiPlugin = {
   rules: {
-    "no-unsupported-receiver-property": receiverAwareBrowserApiRule,
+    "no-unsupported-receiver-property": symbolAwareBrowserApiRule,
   },
 };
 
@@ -403,10 +393,9 @@ export default tseslint.config(
     ignores: browserApiPolicy.serverAndTestIgnores,
     plugins: { "browser-api-policy": browserApiPlugin },
     rules: {
-      "no-restricted-properties": ["error", ...propertyRestrictions],
       "browser-api-policy/no-unsupported-receiver-property": [
         "error",
-        receiverAwareRestrictions,
+        symbolAwareRestrictions,
       ],
     },
   },

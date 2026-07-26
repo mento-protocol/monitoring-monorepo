@@ -11,9 +11,8 @@ const CLIENT_FIXTURE_PATH = "src/lib/immutable-sort.ts";
 const SERVER_FIXTURE_PATH = "src/app/api/address-labels/route.ts";
 const OG_FIXTURE_PATH = "src/lib/homepage-og.ts";
 const TEST_FIXTURE_PATH = "src/lib/__tests__/browser-api-policy.test.ts";
-const RECEIVER_AWARE_RULE_ID =
+const SYMBOL_AWARE_RULE_ID =
   "browser-api-policy/no-unsupported-receiver-property";
-const PROPERTY_RULE_ID = "no-restricted-properties";
 const LINT_RUNNER_TIMEOUT_MS = 30_000;
 const execFileAsync = promisify(execFile);
 const eslint = new ESLint({
@@ -26,6 +25,8 @@ type LintCase =
   | "blocked"
   | "typedArrayBlocked"
   | "destructuredBlocked"
+  | "staticBlocked"
+  | "staticAllowed"
   | "allowed"
   | "api"
   | "og"
@@ -57,7 +58,7 @@ async function browserApiRules(filePath: string) {
   );
   return {
     property: config?.rules?.["no-restricted-properties"],
-    receiverAware: config?.rules?.[RECEIVER_AWARE_RULE_ID],
+    symbolAware: config?.rules?.[SYMBOL_AWARE_RULE_ID],
   };
 }
 
@@ -76,38 +77,13 @@ describe("browser runtime API policy", () => {
 
   it("uses the exact blocked sets in the effective client config", async () => {
     const rules = await browserApiRules(CLIENT_FIXTURE_PATH);
-    const propertyRestrictions = browserApiPolicy.restrictions.filter(
-      (restriction) => !("receiver" in restriction),
-    );
-    const receiverAwareRestrictions = browserApiPolicy.restrictions.filter(
-      (restriction) => "receiver" in restriction,
-    );
-
-    expect(rules.property).toEqual([2, ...propertyRestrictions]);
-    expect(rules.receiverAware).toEqual([2, receiverAwareRestrictions]);
+    expect(rules.property).toBeUndefined();
+    expect(rules.symbolAware).toEqual([2, browserApiPolicy.restrictions]);
   });
 
-  it("keeps receiver-specific names out of the generic property ban", async () => {
+  it("does not configure a generic property ban", async () => {
     const rules = await browserApiRules(CLIENT_FIXTURE_PATH);
-    const genericProperties = new Set(
-      (rules.property?.slice(1) ?? []).map((restriction: unknown) => {
-        if (
-          typeof restriction !== "object" ||
-          restriction === null ||
-          !("property" in restriction)
-        ) {
-          return undefined;
-        }
-        return restriction.property;
-      }),
-    );
-
-    expect(genericProperties).not.toContain("with");
-    expect(genericProperties).not.toContain("toSorted");
-    expect(genericProperties).not.toContain("toReversed");
-    expect(genericProperties).not.toContain("toSpliced");
-    expect(genericProperties).not.toContain("isWellFormed");
-    expect(genericProperties).not.toContain("toWellFormed");
+    expect(rules.property).toBeUndefined();
   });
 
   it(
@@ -117,12 +93,10 @@ describe("browser runtime API policy", () => {
 
       expect(messages).toHaveLength(browserApiPolicy.restrictions.length);
       for (const restriction of browserApiPolicy.restrictions) {
-        const expectedRule =
-          "receiver" in restriction ? RECEIVER_AWARE_RULE_ID : PROPERTY_RULE_ID;
         expect(messages).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
-              ruleId: expectedRule,
+              ruleId: SYMBOL_AWARE_RULE_ID,
               message: expect.stringContaining(restriction.message),
             }),
           ]),
@@ -147,7 +121,7 @@ describe("browser runtime API policy", () => {
         expect(messages).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
-              ruleId: RECEIVER_AWARE_RULE_ID,
+              ruleId: SYMBOL_AWARE_RULE_ID,
               message: expect.stringContaining(restriction.message),
             }),
           ]),
@@ -172,7 +146,7 @@ describe("browser runtime API policy", () => {
         expect(messages).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
-              ruleId: RECEIVER_AWARE_RULE_ID,
+              ruleId: SYMBOL_AWARE_RULE_ID,
               message: expect.stringContaining(restriction.message),
             }),
           ]),
@@ -181,6 +155,35 @@ describe("browser runtime API policy", () => {
     },
     LINT_RUNNER_TIMEOUT_MS,
   );
+
+  it(
+    "reports static built-ins through direct, aliased, qualified, and destructured access",
+    async () => {
+      const messages = await browserApiMessages("staticBlocked");
+      const restrictions = browserApiPolicy.restrictions.filter(
+        (restriction) => "object" in restriction,
+      );
+
+      expect(messages).toHaveLength(restrictions.length * 4);
+      for (const restriction of restrictions) {
+        expect(
+          messages.filter((message) => message.message === restriction.message),
+        ).toHaveLength(4);
+        expect(messages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ ruleId: SYMBOL_AWARE_RULE_ID }),
+          ]),
+        );
+      }
+    },
+    LINT_RUNNER_TIMEOUT_MS,
+  );
+
+  it("allows shadowed and custom static groupBy methods", async () => {
+    const messages = await browserApiMessages("staticAllowed");
+
+    expect(messages).toEqual([]);
+  });
 
   it("allows floor-compatible APIs and arbitrary same-name methods", async () => {
     const messages = await browserApiMessages("allowed");
@@ -201,7 +204,7 @@ describe("browser runtime API policy", () => {
       ]);
 
       expect(rules.property).toBeUndefined();
-      expect(rules.receiverAware).toBeUndefined();
+      expect(rules.symbolAware).toBeUndefined();
       expect(messages).toEqual([]);
     },
   );
