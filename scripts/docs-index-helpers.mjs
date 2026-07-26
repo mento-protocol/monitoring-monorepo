@@ -453,7 +453,11 @@ export function buildDocumentationInventory({ repoRoot, files }) {
       status: lifecycle(metadata),
       owner: metadata?.owner || "unowned",
       last_verified: metadata?.last_verified || null,
-      canonical_sources: metadata?.canonical_sources || [],
+      canonical_sources: Array.isArray(metadata?.canonical_sources)
+        ? metadata.canonical_sources.filter(
+            (source) => typeof source === "string",
+          )
+        : [],
       ...classification,
       words: countWords(content),
       bytes: Buffer.byteLength(content),

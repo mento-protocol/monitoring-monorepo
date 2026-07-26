@@ -313,6 +313,46 @@ test("Claude runtime registry rejects non-string scalar metadata", () => {
   });
 });
 
+test("Claude runtime registry reports malformed source lists in every render mode", () => {
+  for (const canonicalSources of ["AGENTS.md", {}, [42]]) {
+    withRepo((repo) => {
+      const { files, registry } = writeRuntimeRegistryFixture(repo);
+      registry.documents[0].canonical_sources = canonicalSources;
+      write(
+        repo,
+        CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
+        `${JSON.stringify(registry, null, 2)}\n`,
+      );
+      track(repo, ...files, CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH);
+
+      const printResult = run(repo);
+      assert.equal(printResult.status, 1);
+      assert.doesNotMatch(printResult.stderr, /TypeError/);
+      assert.match(
+        printResult.stderr,
+        /canonical_sources must be non-empty|invalid canonical source '42'/,
+      );
+
+      const jsonResult = run(repo, "--json");
+      assert.equal(jsonResult.status, 1);
+      assert.doesNotMatch(jsonResult.stderr, /TypeError/);
+      const inventory = JSON.parse(jsonResult.stdout);
+      assert.match(
+        inventory.errors.join("\n"),
+        /canonical_sources must be non-empty|invalid canonical source '42'/,
+      );
+
+      const checkResult = run(repo, "--check");
+      assert.equal(checkResult.status, 1);
+      assert.doesNotMatch(checkResult.stderr, /TypeError/);
+      assert.match(
+        checkResult.stderr,
+        /canonical_sources must be non-empty|invalid canonical source '42'/,
+      );
+    });
+  }
+});
+
 test("Claude runtime registry rejects unknown top-level and document keys", () => {
   withRepo((repo) => {
     const { files, registry } = writeRuntimeRegistryFixture(repo);
