@@ -133,12 +133,7 @@ event type.
 
 ## Observability
 
-Indexer failures use structured `context.log.error` events with the
-`<area>.<event>` convention. Do not add Sentry to handlers. Envio Cloud logs
-are commit-scoped diagnostics: use `pnpm deploy:indexer:logs "$COMMIT"
---errors-only --since 2h` for records explicitly marked as errors, then inspect
-`pnpm deploy:indexer:status "$COMMIT" --json` and
-`pnpm deploy:indexer:metrics "$COMMIT" --json`. Prometheus metrics and Grafana
-rules own alerts; a log event alone never creates one. The full contract and
-the current diagnostic-only error families are in
-[ADR 0052](../docs/adr/0052-envio-logs-prometheus-grafana-alerting.md).
+Use `context.log.error` names (`<area>.<event>`); never add Sentry. Envio logs
+diagnose; Prometheus/Grafana metrics and rules alert.
+[ADR 0052](../docs/adr/0052-envio-logs-prometheus-grafana-alerting.md) defines
+the commands and classifications.
