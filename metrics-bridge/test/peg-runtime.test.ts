@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { assertPegPolicyRegistrySupportsPolicy } from "../src/peg/compatibility.js";
+import { GCP_METADATA_TOKEN_URL } from "../src/peg/gcp-metadata-auth.js";
 import {
   parsePegPolicyBundle,
   pegPolicyVersionForContent,
@@ -9,15 +10,28 @@ import {
 import type { PegPoller } from "../src/peg/poller.js";
 import { loadPegRegistry, parsePegRegistry } from "../src/peg/registry.js";
 import {
-  createPegRuntime,
+  createPegRuntime as createProductionPegRuntime,
   startPegPolling,
+  type PegRuntimeOptions,
   type PegRuntimeErrorEvent,
 } from "../src/peg/runtime.js";
+import type { FetchLike } from "../src/peg/types.js";
 
 const POLICY_PATH = new URL(
   "../../alerts/rules/peg-thresholds.json",
   import.meta.url,
 );
+const PINNED_POLICY_URL =
+  "https://storage.googleapis.com/download/storage/v1/b/mento-monitoring-peg-policy/o/peg-policy%2Fcurrent.json?alt=media&generation=1750000000000000";
+
+function createPegRuntime(options: PegRuntimeOptions) {
+  const dormant = options.policyUrl === null;
+  return createProductionPegRuntime({
+    policyAuthMode: dormant ? null : "none",
+    ...(dormant ? {} : { allowUnauthenticatedPolicy: true }),
+    ...options,
+  });
+}
 
 async function policy() {
   return parsePegPolicyBundle(
@@ -59,7 +73,7 @@ describe("Peg runtime isolation", () => {
 
     expect(startPegPolling(runtime)).toBe(runtime);
     expect(log).toHaveBeenCalledWith(
-      "metrics-bridge peg polling dormant: PEG_POLICY_URL is not provisioned",
+      "metrics-bridge peg polling dormant: PEG_POLICY_URL and PEG_POLICY_AUTH_MODE are not provisioned",
     );
     expect(loadRegistry).not.toHaveBeenCalled();
     log.mockRestore();
@@ -94,6 +108,147 @@ describe("Peg runtime isolation", () => {
     expect(runtime.status).toBe("misconfigured");
     expect(errors.map(({ kind }) => kind)).toEqual(["policy_config"]);
     expect(loadRegistry).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      policyUrl: PINNED_POLICY_URL,
+      policyAuthMode: null,
+      expected: /configured together/,
+    },
+    {
+      policyUrl: null,
+      policyAuthMode: "gcp-metadata",
+      expected: /configured together/,
+    },
+    {
+      policyUrl: "https://policy.invalid/peg.json",
+      policyAuthMode: "none",
+      expected: /code-level local or test opt-in/,
+    },
+    {
+      policyUrl: PINNED_POLICY_URL,
+      policyAuthMode: "unexpected",
+      expected: /supported mode/,
+    },
+  ])(
+    "fails closed on missing or invalid paired policy configuration",
+    async ({ policyUrl, policyAuthMode, expected }) => {
+      const errors: PegRuntimeErrorEvent[] = [];
+      const loadRegistry = vi.fn();
+      const fetch = vi.fn();
+      const runtime = createProductionPegRuntime({
+        policyUrl,
+        policyAuthMode,
+        loadRegistry,
+        policyClientOptions: { fetch },
+        onError: (event) => errors.push(event),
+      });
+
+      await runtime.runCycle();
+
+      expect(runtime.status).toBe("misconfigured");
+      expect(errors).toHaveLength(1);
+      expect((errors[0]?.cause as Error).message).toMatch(expected);
+      expect(loadRegistry).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects a bearer provider in unauthenticated local mode", async () => {
+    const loadRegistry = vi.fn();
+    const fetch = vi.fn();
+    const getToken = vi.fn().mockResolvedValue("test-token");
+    const runtime = createProductionPegRuntime({
+      policyUrl: "https://policy.invalid/peg.json",
+      policyAuthMode: "none",
+      allowUnauthenticatedPolicy: true,
+      loadRegistry,
+      policyClientOptions: {
+        fetch,
+        bearerTokenProvider: { getToken },
+      },
+    });
+
+    await runtime.runCycle();
+
+    expect(runtime.status).toBe("misconfigured");
+    expect(loadRegistry).not.toHaveBeenCalled();
+    expect(getToken).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "https://attacker.invalid/download/storage/v1/b/bucket/o/peg-policy%2Fcurrent.json?alt=media&generation=1",
+    "https://storage.googleapis.com.attacker.invalid/download/storage/v1/b/bucket/o/peg-policy%2Fcurrent.json?alt=media&generation=1",
+    "https://storage.googleapis.com/storage/v1/b/bucket/o/peg-policy%2Fcurrent.json?alt=media&generation=1",
+    "https://storage.googleapis.com/download/storage/v1/b/bucket/o/peg-policy%2Fcurrent.json?alt=media",
+    "https://storage.googleapis.com/download/storage/v1/b/bucket/o/peg-policy%2Fcurrent.json?alt=media&generation=1&unsafe=1",
+  ])(
+    "does not request metadata or policy from an invalid GCS target: %s",
+    async (policyUrl) => {
+      const loadRegistry = vi.fn();
+      const fetch = vi.fn();
+      const runtime = createProductionPegRuntime({
+        policyUrl,
+        policyAuthMode: "gcp-metadata",
+        loadRegistry,
+        policyClientOptions: { fetch },
+      });
+
+      await runtime.runCycle();
+
+      expect(runtime.status).toBe("misconfigured");
+      expect(loadRegistry).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fetches private policy with a cached metadata bearer token", async () => {
+    const bundle = await policy();
+    const registry = await loadPegRegistry();
+    const policyRequests: RequestInit[] = [];
+    const fetch = vi.fn<FetchLike>(async (input, init) => {
+      if (String(input) === GCP_METADATA_TOKEN_URL) {
+        return new Response(
+          JSON.stringify({
+            access_token: "test-token",
+            expires_in: 3_600,
+            token_type: "Bearer",
+          }),
+        );
+      }
+      policyRequests.push(init ?? {});
+      return policyResponse(bundle);
+    });
+    const runtime = createProductionPegRuntime({
+      policyUrl: PINNED_POLICY_URL,
+      policyAuthMode: "gcp-metadata",
+      loadRegistry: vi.fn().mockResolvedValue(registry),
+      policyClientOptions: { fetch },
+      poller: poller(),
+    });
+
+    await runtime.runCycle();
+    await runtime.runCycle();
+
+    expect(runtime.status).toBe("active");
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(
+      fetch.mock.calls.filter(
+        ([input]) => String(input) === GCP_METADATA_TOKEN_URL,
+      ),
+    ).toHaveLength(1);
+    expect(
+      policyRequests.map((request) =>
+        new Headers(request.headers).get("authorization"),
+      ),
+    ).toEqual(["Bearer test-token", "Bearer test-token"]);
+    expect(
+      policyRequests.map((request) =>
+        new Headers(request.headers).get("Metadata-Flavor"),
+      ),
+    ).toEqual([null, null]);
   });
 
   it("loads the static registry once and refreshes policy every cycle", async () => {

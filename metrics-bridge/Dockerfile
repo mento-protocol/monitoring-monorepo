@@ -43,8 +43,8 @@ COPY --from=builder /app/metrics-bridge/dist ./metrics-bridge/dist
 # dist/peg/registry.js resolves ../../peg-registry.json from its own module URL,
 # which lands at /app/metrics-bridge/peg-registry.json in the final image.
 # This service-local identity/topology registry ships with the code. The gated
-# peg-threshold policy is fetched from PEG_POLICY_URL and must never be copied
-# into the image.
+# Peg policy is fetched through paired PEG_POLICY_URL / PEG_POLICY_AUTH_MODE
+# runtime configuration and must never be copied into the image.
 COPY --from=builder /app/metrics-bridge/peg-registry.json ./metrics-bridge/peg-registry.json
 COPY --from=builder /app/shared-config/dist ./shared-config/dist
 

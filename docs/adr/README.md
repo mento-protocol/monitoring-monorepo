@@ -127,6 +127,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0042](0042-metrics-bridge-external-price-poller.md)     | The bridge hosts an isolated external market-price peg-polling lifecycle      |
 | [0043](0043-peg-registry-service-local.md)               | The peg-monitor registry is service-local config, not published shared-config |
 | [0045](0045-peg-paging-semantics.md)                     | Peg paging measures executable sell price; the deep venue pages alone         |
+| [0048](0048-private-gcs-peg-policy-artifact.md)          | Peg policy uses a generation-pinned private GCS object                        |
 | [0049](0049-peg-decision-package-read-model.md)          | Peg decisions use a bounded Metrics Bridge read model                         |
 
 ### terraform / infra
@@ -139,6 +140,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0044](0044-peg-thresholds-gated-rules-plane.md)    | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON               |
 | [0045](0045-peg-paging-semantics.md)                | Peg paging measures executable sell price; the deep venue pages alone                       |
 | [0047](0047-separated-terraform-ci-identities.md)   | Routine deploy, PR plan, trusted-main refresh, and production apply use separate identities |
+| [0048](0048-private-gcs-peg-policy-artifact.md)     | Peg policy uses private GCS after identity bootstrap and pins one immutable generation      |
 | [0050](0050-environment-scoped-pipeline-secrets.md) | Pipeline secrets are gated by a Terraform-managed, main-only GitHub Environment             |
 
 ### governance-watchdog

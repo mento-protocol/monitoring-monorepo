@@ -12,10 +12,8 @@ garden_lane: operator-runbooks
 
 # Agent Quality Gate — Mechanics
 
-This runbook owns the invocation contract and the mechanics behind it: how the
-gate maps paths to commands, its parallelism and caching behavior, and the
-package-script refusal guard. Root `AGENTS.md` keeps only the mandatory trigger
-and routes here.
+This runbook owns gate invocation, path mapping, parallelism, caching, and the
+package-script refusal guard. Root `AGENTS.md` routes here.
 
 ## Invocation contract
 
@@ -28,33 +26,20 @@ pnpm agent:autoreview            # required for a non-trivial completed batch
 pnpm agent:autoreview:test -- --jobs 1  # sequential full regression closeout for autoreview runtime changes
 ```
 
-The gate is local-only and never deploys or runs Terraform apply. Do not assume
-the pre-push hook is installed; run the gate explicitly.
+The local-only gate never deploys or applies Terraform. Run it explicitly;
+do not assume the pre-push hook exists.
 
-`pnpm agent:autoreview` performs source review and never runs tests.
-`pnpm agent:autoreview:test` is the canonical command boundary for the complete
-autoreview regression harness. It defaults to at most three independent family
-workers and emits bounded family-start/heartbeat progress plus per-family
-completion timings, so a long adversarial case does not look hung. The mapped
-local quality gate invokes this package command and preserves those progress
-and timing lines. For deterministic autoreview-runtime closeout, pass
-`-- --jobs 1`; this changes scheduling only and keeps the same full family
-coverage. The path-filtered `Autoreview adversarial suite` job runs that same
-complete family set sequentially on `ubuntu-latest` whenever autoreview runtime
-or fixture inputs change. The required `ci` sentinel allows the job to skip for
-unrelated paths and requires it to pass whenever the path filter selects it.
+`pnpm agent:autoreview` reviews source only. `pnpm agent:autoreview:test` runs
+all families with at most three workers and bounded progress/timings, which the
+mapped gate preserves. `-- --jobs 1` changes only scheduling. CI uses that mode
+on `ubuntu-latest` for runtime or fixture changes; required `ci` demands success
+when selected.
 
-Agent sessions must run `--run` gate invocations and `git push` as background
-tasks: foreground commands are killed at 600s, and a killed run writes no
-freshness stamp, so the next invocation re-runs the full mapped command set
-instead of hitting `--skip-if-fresh`.
-
-`--run` appends one JSON line per mapped command (plus one `__run_total__`
-summary line per invocation) to `.tmp/agent-quality-gate/durations.jsonl`, a
-gitignored scratch file, for local wall-clock tracking. Budget targets: the
-common-case mapped set should finish in 3 minutes or less; the full workspace
-suite in 8 minutes or less. Treat a durations regression against these targets
-like any other perf regression (Refs #1415).
+Background `--run` gates and `git push`: a 600s foreground kill writes no
+freshness stamp, so the next run cannot use `--skip-if-fresh`. Each run appends
+per-command JSON plus one `__run_total__` line to gitignored
+`.tmp/agent-quality-gate/durations.jsonl`. Targets: 3 minutes for common mapped
+sets and 8 minutes for the full workspace (Refs #1415).
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
