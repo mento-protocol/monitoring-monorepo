@@ -10,6 +10,20 @@ const pool = {
   source: "fpmm_factory",
 } as Pool;
 
+const staleVirtualPool = {
+  ...pool,
+  source: "virtual_pool_factory",
+  token0: "0xccf663b1ff11028f0b19058d0f7b674004a40746",
+  token1: "0x765de816845861e75a25fca122bb6898b8b1282a",
+  vpOracleTimestamp: "400",
+  vpOracleFreshnessCheckedAt: 1000,
+  oracleFreshnessWindow: "300",
+  vpTokenDecimalsKnown: true,
+  medianLive: true,
+  vpOracleNumReporters: 2,
+  wrappedExchangeMinimumReports: "1",
+} as Pool;
+
 describe("combinedTooltip", () => {
   it("does not describe unresolved FPMM health as a VirtualPool", () => {
     expect(combinedTooltip("N/A", "OK", pool, network, null)).toBe(
@@ -17,14 +31,32 @@ describe("combinedTooltip", () => {
     );
   });
 
-  it("keeps the VirtualPool explanation for VirtualPool N/A", () => {
+  it("waits for live browser time before explaining stale VirtualPool freshness", () => {
+    expect(combinedTooltip("N/A", "OK", staleVirtualPool, network, null)).toBe(
+      "VirtualPool oracle freshness pending live browser time",
+    );
+  });
+
+  it("keeps the VirtualPool explanation for resolved N/A health", () => {
+    expect(
+      combinedTooltip(
+        "N/A",
+        "OK",
+        { ...staleVirtualPool, vpOracleTimestamp: "1000" },
+        network,
+        1000,
+      ),
+    ).toBe("VirtualPool — oracle health not tracked");
+  });
+
+  it("keeps the VirtualPool explanation when health is inapplicable", () => {
     expect(
       combinedTooltip(
         "N/A",
         "OK",
         {
-          ...pool,
-          source: "virtual_pool_factory",
+          ...staleVirtualPool,
+          wrappedExchangeDeprecated: true,
           hasHealthData: false,
         },
         network,

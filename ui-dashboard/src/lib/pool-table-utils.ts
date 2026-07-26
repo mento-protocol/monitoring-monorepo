@@ -1,4 +1,8 @@
-import { isOracleFresh, isVirtualPoolMedianInvalid } from "@/lib/health";
+import {
+  isOracleFresh,
+  isVirtualPoolMedianInvalid,
+  oracleFreshnessTimestamp,
+} from "@/lib/health";
 import type { Network } from "@/lib/networks";
 import { isVirtualPool, type Pool } from "@/lib/types";
 import { tokenSymbol } from "@/lib/tokens";
@@ -44,6 +48,23 @@ const STATIC_HEALTH_TOOLTIP: Record<string, string> = {
     "FX markets are closed this weekend — trading paused until ~Sunday 23:00 UTC",
 };
 
+function virtualPoolNaTooltip(
+  p: Pool,
+  chainId: number | undefined,
+  nowSeconds: number | null,
+): string {
+  const observedAt = oracleFreshnessTimestamp(p);
+  const freshnessPending =
+    nowSeconds === null &&
+    observedAt > 0 &&
+    p.wrappedExchangeDeprecated !== true &&
+    p.vpDeprecationKnown !== false &&
+    !isOracleFresh(p, observedAt, chainId);
+  return freshnessPending
+    ? "VirtualPool oracle freshness pending live browser time"
+    : "VirtualPool — oracle health not tracked";
+}
+
 function healthTooltip(
   status: string,
   p: Pool,
@@ -51,7 +72,7 @@ function healthTooltip(
   nowSeconds: number | null = Math.floor(Date.now() / 1000),
 ): string {
   if (status === "N/A") {
-    if (isVirtualPool(p)) return "VirtualPool — oracle health not tracked";
+    if (isVirtualPool(p)) return virtualPoolNaTooltip(p, chainId, nowSeconds);
     if (p.hasHealthData === false) return "Health data not yet available";
     return nowSeconds === null
       ? "Health status pending live browser time"
