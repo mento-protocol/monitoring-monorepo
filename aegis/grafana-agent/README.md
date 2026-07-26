@@ -70,8 +70,8 @@ Terraform requires two operator-held inputs for this path:
   `terraform/terraform.tfvars`, a gitignored `terraform/*.auto.tfvars` file, or
   an equivalent approved operator input.
 - `grafana_agent_secret_rotation_counters` supplies the three non-secret,
-  positive integer write-only versions. Increment only the counter for the
-  value being rotated.
+  positive integer write-only versions passed as `secret_data_wo_version`.
+  Increment only the counter for the value being rotated.
 
 The values do not enter Terraform state, saved plans, source staging, build
 substitutions, or image layers. They still enter the local Terraform process
@@ -87,9 +87,10 @@ before apply. Its plan/apply wrapper always requires a clean `main` checkout
 whose HEAD matches freshly fetched `origin/main`; `--force-local-apply` cannot
 bypass this rule. It executes Terraform configuration from a temporary snapshot
 of the verified commit while passing gitignored tfvars by absolute file path;
-the snapshot never contains those operator values. Feature-branch validation
-does not replace that current-`main` plan/apply. Secret rotation creates the
-replacement version before disabling the previous version.
+the snapshot never contains those operator values and is removed after the
+command. Feature-branch validation does not replace that current-`main`
+plan/apply. Secret rotation creates the replacement version before disabling
+the previous version.
 
 The legacy `pnpm aegis:agent:seed-secrets` path calls
 `gcloud secrets versions add`. Phase A retains it only as a rollback artifact.
