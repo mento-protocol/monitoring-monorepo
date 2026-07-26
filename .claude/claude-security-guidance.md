@@ -76,8 +76,9 @@ instructions and PR checklists. These rules supplement, but do not replace,
   blow up Grafana storage and break dashboards.
 - Indexer `context.log.error("<area>.<event>")` events are Envio Cloud
   diagnostics, not alert delivery. An operator notification needs an owned
-  Prometheus metric and Grafana rule; see ADR 0050. Do not infer alerts from
-  repeated log signatures.
+  Prometheus metric and Grafana rule; see
+  [ADR 0052](../docs/adr/0052-envio-logs-prometheus-grafana-alerting.md). Do not
+  infer alerts from repeated log signatures.
 
 ## Webhook receivers (alerts/infra/onchain-event-handler)
 
