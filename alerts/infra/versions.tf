@@ -3,15 +3,11 @@ terraform {
   required_providers {
     sentry = {
       source = "jianyuan/sentry"
-      # 0.15.0-beta3 supports both the new `sentry_alert` supertype resource
-      # used by `channels/sentry-bridge/` AND the `sentry_project_issue_stream_monitor`
-      # data source needed to feed it. The deprecated `sentry_issue_alert`
-      # resource (which the bridge previously used) is no longer referenced
-      # by any module here — see `channels/sentry-bridge/README.md` for the
-      # migration rationale. Historical note: this beta also fixes the
-      # "Unable to create, got status 201" regression that affected the old
-      # `sentry_issue_alert` (provider issues #816, #844, #846).
-      version = "0.15.0-beta3"
+      # Keep the root and sentry-bridge constraints exact. Stable 0.15.4
+      # supports the monitor-driven `sentry_alert` resources and normalizes
+      # Slack channel-name comparisons by trimming a leading `#` (upstream
+      # PR #897). See `channels/sentry-bridge/README.md`.
+      version = "0.15.4"
     }
     github = {
       source  = "integrations/github"
