@@ -4,6 +4,7 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import type { HealthStatus } from "@/lib/health";
 import {
+  confirmedFreshnessCheckedAt,
   computeHealthStatus,
   effectiveThreshold,
   isNeverRebalance,
@@ -85,7 +86,6 @@ export function DeviationCell({
     network.chainId,
     statusNowSeconds,
     isWeekendNow,
-    clockPending,
   );
   const showNeutralStatus = unresolvedWeekendHealth && status === "N/A";
 
@@ -139,7 +139,11 @@ function resolveStatusNowSeconds(
   pool: Pool,
   liveNowSeconds: number | null,
 ): number {
-  return liveNowSeconds ?? oracleFreshnessTimestamp(pool);
+  return (
+    liveNowSeconds ??
+    confirmedFreshnessCheckedAt(pool) ??
+    oracleFreshnessTimestamp(pool)
+  );
 }
 
 function resolveDeviationStatus(
@@ -147,9 +151,7 @@ function resolveDeviationStatus(
   chainId: number,
   nowSeconds: number,
   isWeekendNow: boolean | null,
-  clockPending: boolean,
 ): HealthStatus {
-  if (clockPending) return "N/A";
   return computeHealthStatus(pool, chainId, nowSeconds, isWeekendNow);
 }
 
@@ -160,7 +162,7 @@ function resolveWeekendHealth(
   breachStartedAt: string | null,
 ) {
   const unresolvedWeekendHealth =
-    clockPending || (!oracleIsFresh && isWeekendNow === null);
+    !oracleIsFresh && (clockPending || isWeekendNow === null);
   const weekendPause = !oracleIsFresh && isWeekendNow === true;
   return {
     unresolvedWeekendHealth,

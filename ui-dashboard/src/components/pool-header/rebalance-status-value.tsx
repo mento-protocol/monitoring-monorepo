@@ -11,7 +11,12 @@ import {
   useSsrSafeRelative,
   useSsrSafeTimestamp,
 } from "@/hooks/use-now-seconds";
-import { computeHealthStatus, oracleFreshnessTimestamp } from "@/lib/health";
+import {
+  computeHealthStatus,
+  confirmedFreshnessCheckedAt,
+  isOracleFresh,
+  oracleFreshnessTimestamp,
+} from "@/lib/health";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 import {
   isHealthyNoOp,
@@ -90,7 +95,11 @@ export function RebalanceStatusValue({
   const isWeekendNow = useResolvedIsWeekend();
   const liveNowSeconds = useNowSeconds();
   const clockPending = liveNowSeconds === null;
-  const statusNowSeconds = liveNowSeconds ?? oracleFreshnessTimestamp(pool);
+  const statusNowSeconds =
+    liveNowSeconds ??
+    confirmedFreshnessCheckedAt(pool) ??
+    oracleFreshnessTimestamp(pool);
+  const oracleIsFresh = isOracleFresh(pool, statusNowSeconds, network.chainId);
   const {
     data: rebalanceCheck,
     isLoading,
@@ -120,7 +129,7 @@ export function RebalanceStatusValue({
       // HealthPanel uses instead of crying wolf.
       statusText = "Health data not yet available";
       statusColor = "text-slate-400";
-    } else if (clockPending) {
+    } else if (clockPending && !oracleIsFresh) {
       statusText = "Health status pending live browser time";
       statusColor = "text-slate-400";
     } else {

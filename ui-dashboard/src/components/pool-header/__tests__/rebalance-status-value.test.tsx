@@ -221,6 +221,7 @@ describe("RebalanceStatusValue", () => {
           ...BASE_POOL,
           oracleTimestamp: String(nowSeconds - 600),
           lastOracleReportAt: String(nowSeconds - 600),
+          oracleFreshnessCheckedAt: nowSeconds,
           priceDifference: "1000",
         }}
         network={NETWORK}
@@ -230,6 +231,21 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain("Health status pending live browser time");
     expect(html).toContain("text-slate-400");
     expect(html).not.toContain("Balanced");
+  });
+
+  it("preserves an explicit oracle fault before the live clock resolves", () => {
+    mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
+    testClock.nowSeconds = null;
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={{ ...BASE_POOL, oracleOk: false }}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain("Oracle stale");
+    expect(html).toContain("text-red-400");
+    expect(html).not.toContain("Health status pending live browser time");
   });
 
   it("renders 'Health data not yet available' when the pool's hasHealthData flag is not true", () => {

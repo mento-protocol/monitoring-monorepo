@@ -102,10 +102,12 @@ describe("DeviationCell — bar fill colors track health status", () => {
   it("keeps stale deviation neutral through hydration before the live clock resolves", async () => {
     vi.mocked(isWeekend).mockReturnValue(true);
     const testNow = Math.floor(Date.now() / 1000);
+    testClock.nowSeconds = null;
     const stalePool: Pool = {
       ...BASE_POOL,
       oracleTimestamp: String(testNow - 600),
       lastOracleReportAt: String(testNow - 600),
+      oracleFreshnessCheckedAt: testNow,
       deviationBreachStartedAt: String(testNow - 120),
       priceDifference: "1000",
     };
@@ -152,6 +154,43 @@ describe("DeviationCell — bar fill colors track health status", () => {
       });
       container.remove();
     }
+  });
+
+  it("preserves a confirmed oracle fault before the live clock resolves", () => {
+    testClock.nowSeconds = null;
+    const html = renderToStaticMarkup(
+      <DeviationCell
+        pool={{ ...BASE_POOL, oracleOk: false, priceDifference: "1000" }}
+        network={NETWORK}
+      />,
+    );
+
+    expect(html).toContain("bg-red-500");
+    expect(html).not.toContain(">N/A<");
+    expect(queriedTripKey).toBeNull();
+  });
+
+  it("preserves a sustained critical deviation before the live clock resolves", () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    testClock.nowSeconds = null;
+    const html = renderToStaticMarkup(
+      <DeviationCell
+        pool={{
+          ...BASE_POOL,
+          oracleTimestamp: String(nowSeconds - 60),
+          lastOracleReportAt: String(nowSeconds - 60),
+          oracleFreshnessCheckedAt: nowSeconds,
+          deviationBreachStartedAt: String(nowSeconds - 2 * 3600),
+          priceDifference: "6000",
+        }}
+        network={NETWORK}
+      />,
+    );
+
+    expect(html).toContain("bg-red-500");
+    expect(html).not.toContain(">N/A<");
+    expect(html).toMatch(/breach <time/);
+    expect(queriedTripKey).not.toBeNull();
   });
 
   it("renders an emerald bar when deviation is well below the threshold (ratio < 0.8)", () => {
