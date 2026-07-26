@@ -179,6 +179,43 @@ describe("HealthPanel weekend mode", () => {
     });
   });
 
+  it("explains confirmed VirtualPool staleness while the FX clock is unresolved", async () => {
+    const virtualPool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId:
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      oracleTimestamp: STALE_TS,
+      oracleFreshnessWindow: "300",
+      vpOracleFreshnessCheckedAt: Math.floor(Date.now() / 1000),
+      tokenDecimalsKnown: true,
+      medianLive: true,
+      oracleNumReporters: 2,
+      wrappedExchangeMinimumReports: "1",
+    };
+
+    const html = renderToStaticMarkup(<HealthPanel pool={virtualPool} />);
+
+    expect(html).toContain("VirtualPool oracle report is stale");
+    expect(html).toContain("Live browser time is required");
+    expect(html).not.toContain("once the wrapped exchange reset window");
+    expect(html).not.toContain("VirtualPool oracle is stale");
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<HealthPanel pool={virtualPool} />);
+    });
+
+    expect(container.textContent).toContain("VirtualPool oracle is stale");
+    expect(container.textContent).not.toContain(
+      "Live browser time is required",
+    );
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("surfaces invalid VirtualPool medians separately from stale reports", () => {
     const virtualPool: Pool = {
       ...BASE_POOL,

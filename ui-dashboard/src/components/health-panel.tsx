@@ -19,6 +19,7 @@ interface HealthPanelProps {
 type HealthPanelMode =
   | "virtual-oracle-median-incident"
   | "virtual-oracle-incident"
+  | "virtual-oracle-clock-pending"
   | "weekend"
   | "virtual"
   | "halted"
@@ -30,6 +31,7 @@ interface HealthPanelModeInput {
   showHalted: boolean;
   showVirtualOracleMedianIncident: boolean;
   showVirtualOracleIncident: boolean;
+  showVirtualOracleClockPending: boolean;
   showWeekendPause: boolean;
   weekendPause: boolean;
 }
@@ -40,6 +42,7 @@ function resolveHealthPanelMode({
   showHalted,
   showVirtualOracleMedianIncident,
   showVirtualOracleIncident,
+  showVirtualOracleClockPending,
   showWeekendPause,
   weekendPause,
 }: HealthPanelModeInput): HealthPanelMode | null {
@@ -48,6 +51,7 @@ function resolveHealthPanelMode({
   }
   if (showWeekendPause && isVirtual) return "weekend";
   if (showVirtualOracleIncident) return "virtual-oracle-incident";
+  if (showVirtualOracleClockPending) return "virtual-oracle-clock-pending";
   if (isVirtual) return "virtual";
   if (showHalted) return "halted";
   if (!hasHealthData) return "missing-data";
@@ -93,6 +97,13 @@ function HealthPanelContent({ mode }: { mode: HealthPanelMode }) {
             its reset window, so swaps may revert until a fresh report arrives.
           </span>
         </div>
+      );
+    case "virtual-oracle-clock-pending":
+      return (
+        <p className="text-sm text-slate-400">
+          VirtualPool oracle report is stale. Live browser time is required to
+          determine whether FX markets are closed or this is an active incident.
+        </p>
       );
     case "weekend":
       return (
@@ -148,6 +159,25 @@ function HealthPanelContent({ mode }: { mode: HealthPanelMode }) {
   }
 }
 
+function shouldShowVirtualOracleClockPending(args: {
+  pool: Pool;
+  isVirtual: boolean;
+  liveNowSeconds: number | null;
+  computed: ReturnType<typeof computeHealthStatus>;
+  oracleIsFresh: boolean;
+}): boolean {
+  const { pool, isVirtual, liveNowSeconds, computed, oracleIsFresh } = args;
+  return (
+    isVirtual &&
+    liveNowSeconds === null &&
+    computed === "N/A" &&
+    oracleFreshnessTimestamp(pool) > 0 &&
+    !oracleIsFresh &&
+    pool.wrappedExchangeDeprecated !== true &&
+    pool.vpDeprecationKnown !== false
+  );
+}
+
 /**
  * Exception-only panel — the pool header owns the primary health surface
  * (DeviationCell, Rebalance Status cell, metric grid). Rebalance diagnostics
@@ -188,6 +218,17 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     isVirtual && computed === "CRITICAL" && isVirtualPoolMedianInvalid(pool);
   const showVirtualOracleIncident =
     isVirtual && computed === "CRITICAL" && !showVirtualOracleMedianIncident;
+  // A known, valid VirtualPool report can already be stale before hydration,
+  // while non-USD pairs still need the browser clock to distinguish a weekend
+  // pause from a critical incident. Keep that pending state distinct from
+  // genuinely inapplicable, untrusted, or deprecated VirtualPool health.
+  const showVirtualOracleClockPending = shouldShowVirtualOracleClockPending({
+    pool,
+    isVirtual,
+    liveNowSeconds,
+    computed,
+    oracleIsFresh,
+  });
   const showWeekendPause =
     computed === "WEEKEND" || (!isVirtual && weekendPause);
   // No-data pools otherwise resolve to a misleading CRITICAL from the indexer's
@@ -202,6 +243,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     showHalted,
     showVirtualOracleMedianIncident,
     showVirtualOracleIncident,
+    showVirtualOracleClockPending,
     showWeekendPause,
     weekendPause,
   });
