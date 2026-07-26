@@ -3,7 +3,7 @@ title: Terraform CI separates routine deploy, PR plan, trusted-main refresh, and
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 scope: terraform/infra
 date: 2026-07
 doc_type: adr
@@ -13,8 +13,8 @@ garden_lane: adrs-architecture
 
 # ADR 0047 — Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities
 
-**Status:** Accepted (Jul 2026), final-removal source prepared; live cutover
-incomplete.
+**Status:** Accepted (Jul 2026), final-removal source prepared and refresh proof
+complete; live cutover incomplete.
 **Scope:** terraform/infra
 
 ## Context
@@ -106,10 +106,11 @@ pinned Google providers read them during refresh. It still cannot mutate them,
 and PR workflows cannot impersonate it.
 
 The identity bootstrap, refresh routing, and authority removal land in three
-separate PRs. The repository now contains the refresh-routing configuration,
-but that checked-in state is not evidence that the merged workflows can refresh
-the full live resource graph. The legacy rollback grant remains until the proof
-and drain gates below complete:
+separate PRs. Run
+[#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
+proved that the merged workflows can refresh the full live resource graph. The
+legacy rollback grant remains until the drain, audit, removal-apply, and final
+audit gates below complete:
 
 1. Merge the identity-bootstrap PR. Cancel every infrastructure apply queued
    by that merge; do not approve or reuse those runs because their repository
@@ -134,7 +135,8 @@ and drain gates below complete:
    superseded queued runs, drain every pre-routing and proof run to a terminal
    state, and confirm that the final IAM policy has no basic role and no
    object-payload grant outside the explicitly named state, deployment-source,
-   and managed-secret resources.
+   and managed-secret resources. Run #30212385280 completed the full-refresh
+   plans; the drain and read-boundary audit remain.
 7. Only after step 6 succeeds, land a final removal PR that deletes the routine
    deployer's `org-terraform` Token Creator grant from the platform
    configuration. Merge it, cancel superseded runs, and confirm that every
@@ -144,11 +146,10 @@ and drain gates below complete:
    complete.
 
 The final-removal source now implements step 7 by omitting the legacy binding.
-This is source readiness only. It must not merge until the routing change is
-live on current `main`, the step 6 plans succeed, every pre-routing and proof
-run is terminal, and the read boundary is audited. The live grant remains until
-the post-merge platform apply succeeds and the final IAM audit proves it is
-gone.
+This is source readiness only. Routing is live and the step 6 plans succeeded;
+the source must not merge until every pre-routing and proof run is terminal and
+the read boundary is audited. The live grant remains until the post-merge
+platform apply succeeds and the final IAM audit proves it is gone.
 
 Do not create a dedicated peg-policy GCP project or bucket during this
 bootstrap or routing cutover. Until the final removal has been applied, every

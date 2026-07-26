@@ -46,19 +46,20 @@ garden_lane: agent-entry-points
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
   `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
   `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The four trusted-main plan
-  workflows and `terraform-drift.yml` route through the refresh selectors. This
-  final-removal source must not merge until that routing is live on current
-  `main`, proved through the checked-in route, drained, and audited.
+  workflows and `terraform-drift.yml` route through the refresh selectors.
+  Routing is live, and run
+  [#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
+  completed the full-refresh proof. Before final-removal merges, drain the
+  affected runs and audit the read boundary.
 - Build trusted-main refresh access from curated non-basic project read roles;
   never use basic `roles/viewer`. Keep Secret Accessor limited to the exact
   Terraform-managed secrets and Storage Object Viewer limited to state and
   deployment-source buckets. Treat service data exposed by predefined readers
   (including logs, metrics, and artifacts) as part of the confidentiality
-  review. The routing is checked in, but live proof is still required through
-  the merged `main` route: run full-refresh, unlocked plans for every
-  CI-managed Google-provider stack; add only the exact missing permission named
-  by a provider denial. Before final authority removal merges, drain every
-  pre-routing and proof run and audit the read boundary.
+  review. The merged `main` route completed full-refresh, unlocked plans for
+  every CI-managed Google-provider stack. Add only an exact missing permission
+  named by a provider denial. Before final authority removal merges, drain
+  every pre-routing and proof run and audit the read boundary.
 - The final-removal source omits the routine deployer's `org-terraform` Token
   Creator grant. That source change does not remove the live grant. After
   merge, cancel superseded runs, confirm every infrastructure run is terminal,

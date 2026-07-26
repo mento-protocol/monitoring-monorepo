@@ -3,7 +3,7 @@ title: Terraform secret strategy hardening
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 doc_type: reference
 scope: terraform/infra
 review_interval_days: 90
@@ -63,9 +63,8 @@ on separate identities:
   secrets, and Storage Object Viewer on only Cloud Function deployment-source
   buckets. The project-read core includes Browser, IAM Security Reviewer, and
   Storage Bucket Viewer; each owning stack enumerates its additional
-  service-specific readers. The routing change retains the legacy
-  routine-deployer Token Creator grant until live proof and drain checks
-  complete.
+  service-specific readers. The legacy routine-deployer Token Creator grant
+  remains rollback-only until run drain and read-boundary audit complete.
 - Production applies select
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. The dedicated pool accepts only
@@ -84,15 +83,12 @@ service readers can still expose project-wide Cloud Logging entries, Monitoring
 time series, and Artifact Registry contents. The complete bundle confers no
 mutation permissions and is unreachable from PR refs.
 
-The routing is checked in, but live proof remains pending. After it reaches
-`main`, run a live full-refresh, unlocked plan (`-lock=false`, without
-`-refresh=false`) for every CI-managed Google-provider stack; the current set
-is `alerts-delivery` and `governance-watchdog`. Treat a provider 403 as a
-request to review one exact read permission, not as justification for a basic
-role. Validation and an IAM-grants-only plan do not prove the full resource
-graph can refresh or that payload boundaries remain intact. Drain the
-pre-routing and proof runs and audit the read boundary before the prepared
-final-removal source may merge.
+Run
+[#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
+completed live full-refresh, unlocked plans for `alerts-delivery` and
+`governance-watchdog` through the checked-in route. Drain the pre-routing and
+proof runs and audit the read boundary before the prepared final-removal source
+may merge.
 After merge, cancel superseded runs, confirm every infrastructure run is
 terminal, run a platform plan from clean current `main`, and apply only with
 explicit human approval. The final WIF and service-account IAM audit must prove
