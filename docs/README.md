@@ -97,7 +97,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/pr-checklists/dynamic-route-metadata.md`](pr-checklists/dynamic-route-metadata.md) | Dynamic Route Metadata and Private Data Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-23 |
 | [`docs/pr-checklists/indexer-handler-invariants.md`](pr-checklists/indexer-handler-invariants.md) | Indexer Handler Invariants | canonical / active | checklist / indexer-envio | eng | 90d; verified 2026-07-23 |
 | [`docs/pr-checklists/keyboard-a11y-controlled-widgets.md`](pr-checklists/keyboard-a11y-controlled-widgets.md) | Keyboard Accessibility on Controlled Widgets Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-23 |
-| [`docs/pr-checklists/mutation-testing.md`](pr-checklists/mutation-testing.md) | Mutation Testing Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-23 |
+| [`docs/pr-checklists/mutation-testing.md`](pr-checklists/mutation-testing.md) | Mutation Testing Checklist | canonical / active | checklist / ci/process | eng | 90d; verified 2026-07-26 |
 | [`docs/pr-checklists/recurring-review-patterns.md`](pr-checklists/recurring-review-patterns.md) | Recurring PR Review Patterns | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/pr-checklists/review-prompt-exclusions.md`](pr-checklists/review-prompt-exclusions.md) | Review Prompt Exclusions | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-03 |
 | [`docs/pr-checklists/stateful-data-ui.md`](pr-checklists/stateful-data-ui.md) | Stateful Data and UI Checklist | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-23 |
@@ -166,7 +166,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`alerts/infra/channels/slack-channels/README.md`](../alerts/infra/channels/slack-channels/README.md) | Slack Channels | canonical / active | reference / alerts/infra/channels/slack-channels | eng | 90d; verified 2026-07-24 |
 | [`alerts/infra/oncall-announcer/README.md`](../alerts/infra/oncall-announcer/README.md) | On-call Announcer | canonical / active | reference / alerts/infra/oncall-announcer | eng | 90d; verified 2026-07-24 |
 | [`docs/context-standards.md`](context-standards.md) | Agent Context Standards | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-24 |
-| [`docs/mutation-testing.md`](mutation-testing.md) | Mutation Testing | non-canonical / active | reference / repo-wide | eng | 180d; verified 2026-07-24 |
+| [`docs/mutation-testing.md`](mutation-testing.md) | Mutation Testing | canonical / active | reference / repo-wide | eng | 7d; verified 2026-07-26 |
 | [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md) | Liquity Monitoring Invariants | canonical / active | reference / indexer-envio/ui-dashboard | eng | 90d; verified 2026-07-24 |
 | [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md) | Terraform secret strategy hardening | canonical / active | reference / terraform/infra | eng | 90d; verified 2026-07-24 |
 | [`docs/README.md`](README.md) | Documentation Catalog | canonical / active | index / repo-wide | eng | 90d; verified 2026-07-24 |

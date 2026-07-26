@@ -109,7 +109,7 @@ jobs:
     # step. The `filter`/`decide` machinery is kept inert here: it self-
     # reactivates the path-gated PR behaviour if a `pull_request` trigger is
     # ever re-added, with no other change. `indexer-envio/stryker.config.mjs`
-    # sets `break: 92`, so when the mutation step runs a score below 92% fails
+    # sets `break: 94`, so when the mutation step runs a score below 94% fails
     # the job.
     name: Indexer logic baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
@@ -194,7 +194,7 @@ jobs:
     # step. The `filter`/`decide` machinery is kept inert here: it self-
     # reactivates the path-gated PR behaviour if a `pull_request` trigger is
     # ever re-added, with no other change. `metrics-bridge/stryker.config.mjs`
-    # sets `break: 84`, so when the mutation step runs a score below 84% fails
+    # sets `break: 85`, so when the mutation step runs a score below 85% fails
     # the job.
     name: Bridge rebalance probe baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm

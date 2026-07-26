@@ -3,7 +3,7 @@ title: Mutation Testing Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-26
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -44,9 +44,10 @@ one of the current mutation targets.
   | ---------------- | ----------------------------------- | ------: | --------------------------------- |
   | `metrics-bridge` | `metrics-bridge/stryker.config.mjs` |      85 | `bridge-rebalance-probe-baseline` |
   | `ui-dashboard`   | `ui-dashboard/stryker.config.mjs`   |      86 | `dashboard-logic-baseline`        |
-  | `indexer-envio`  | `indexer-envio/stryker.config.mjs`  |      92 | `indexer-logic-baseline`          |
+  | `indexer-envio`  | `indexer-envio/stryker.config.mjs`  |      94 | `indexer-logic-baseline`          |
 
-  Measured scores, runtimes, and survivor classifications belong in
+  Measured scores, runtimes, and survivor classifications belong in the
+  canonical
   [`docs/mutation-testing.md`](../mutation-testing.md), not this workflow
   checklist.
 
