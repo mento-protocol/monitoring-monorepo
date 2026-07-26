@@ -38,12 +38,19 @@ invocations. The scripts own parsing, idempotency, and state transitions. The
 ADRs own the trust boundaries and rationale. Update those sources and this
 runbook together when a contract changes.
 
-The triage row states an operator requirement, not a mechanical guarantee.
-The triage workflow does not yet guard its dispatch ref: a feature-ref dispatch
-checks out that ref while holding the read-only Sentry token and issue-write
-workflow token. Always select `main`.
-GitHub Environment enforcement for this surface is tracked in
-[#1289](https://github.com/mento-protocol/monitoring-monorepo/issues/1289).
+The triage row states an operator requirement, now backed by a mechanical
+guarantee. Every secret-bearing job in these workflows declares the
+`sentry-pipeline` GitHub Environment, whose deployment-branch policy is limited to
+the protected `main` branch (Terraform in `terraform/github-environment.tf`, issue
+#1289). GitHub refuses such a job on any non-main ref server-side — before it
+starts, and regardless of what the branch's workflow file says — so a feature-ref
+`workflow_dispatch` can no longer reach the pipeline's secrets by stripping the
+in-workflow `if: github.ref == 'refs/heads/main'` guard. Still select `main`; the
+environment is the backstop, not a licence to dispatch off-main. The shared
+`CLAUDE_CODE_OAUTH_TOKEN` deliberately stays a repo-level secret (it is consumed
+by `.github/workflows/claude.yml` on feature-branch `pull_request` events, which a
+main-only environment would break); it is inference-only, so its residual
+exposure is bounded to inference-quota abuse.
 
 ## Non-negotiable invariants
 
@@ -277,6 +284,17 @@ stack:
 | Archive         | `sentry_archive_token`, `sentry_archive_enabled`                          | `SENTRY_ARCHIVE_TOKEN`, `SENTRY_ARCHIVE_ENABLED`                                 | Separate Sentry Issue/Event read/write token                       |
 | Settings audit  | `platform_settings_audit_token`                                           | `PLATFORM_SETTINGS_AUDIT_TOKEN`                                                  | GitHub Administration **read-only** on this repo only              |
 
+All five Sentry-pipeline-exclusive secrets above — `SENTRY_TRIAGE_TOKEN`,
+`SENTRY_PROJECTION_TOKEN`, `AUTOFIX_APP_PRIVATE_KEY`, `SENTRY_ARCHIVE_TOKEN`,
+`PLATFORM_SETTINGS_AUDIT_TOKEN` — are `github_actions_environment_secret`
+resources on the `sentry-pipeline` GitHub Environment
+(`terraform/github-environment.tf`), not repo-level Actions secrets. They are
+still count-gated on the same tfvars, so an unset value plans and applies cleanly
+and the stage stays inert. `CLAUDE_CODE_OAUTH_TOKEN` remains a repo-level secret
+(`terraform/github-secrets.tf`) because it is shared with `claude.yml`. Adding a
+new Sentry-pipeline secret means: add its `github_actions_environment_secret`
+here, and add `environment: sentry-pipeline` to every job that reads it.
+
 To change a stage:
 
 1. update only the relevant tfvars;
@@ -293,6 +311,37 @@ visible projection-skipped outcome instead of creating owning-repo issues.
 Never widen the read-only token or reuse it for archive. Treat
 `CLAUDE_CODE_OAUTH_TOKEN` replacement as a shared-secret rotation and verify
 the existing Claude PR workflow after applying it.
+
+#### GitHub Environment rollout (issue #1289)
+
+Moving the five Sentry-pipeline-exclusive secrets behind the `sentry-pipeline`
+Environment is a one-time, ordered migration. A new `environment:` workflow
+reference AUTO-CREATES an unprotected Environment if the protected one does not
+already exist (see docs/terraform.md, "GitHub Environments"), and several of the
+secrets are live, so roll it out Terraform-FIRST:
+
+1. Apply `terraform/github-environment.tf` FIRST — the
+   `github_repository_environment.sentry_pipeline` environment (main-only
+   protected-branch deployment policy) plus the five
+   `github_actions_environment_secret` resources — while the repo-level
+   `github_actions_secret` copies in `github-secrets.tf` are still present. The
+   env secrets duplicate the repo ones (GitHub allows a secret at both scopes),
+   so nothing breaks.
+2. Verify (Settings → Environments → `sentry-pipeline`) that the environment
+   exists with a `main`-only protected-branch policy and that the expected
+   environment secrets are present.
+3. Only THEN land the workflow `environment: sentry-pipeline` references and the
+   removal of the repo-level `github_actions_secret` blocks from
+   `github-secrets.tf`, and apply. The protected environment already exists, so
+   nothing auto-creates unprotected; the repo-level copies are destroyed and the
+   jobs read the environment secrets.
+
+Apply step 3 at a quiet time (avoid the 05:30 / 05:41 / 07:55 / 08:30 UTC cron
+windows) so no scheduled run coincides with the repo-secret destroy. Split the
+change into two PRs (environment first, then workflows + repo-secret removal).
+The platform PAT must carry the **Environments: Read/write** fine-grained
+permission or the environment and environment-secret writes 403 (see
+`terraform/providers.tf`).
 
 The **settings audit** row is not a pipeline stage — it powers
 `.github/workflows/platform-settings-drift.yml`, a daily read-only check

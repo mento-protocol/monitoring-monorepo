@@ -164,7 +164,7 @@ Sentry credential routing lives in
 
 ## GitHub Environments
 
-Keep two production Environments. `production-infra` has a required reviewer,
+Keep three managed Environments. `production-infra` has a required reviewer,
 self-review allowed, admin bypass disabled, and protected-branch deployment; its
 workflows verify that state before cloud auth. With one maintainer this is
 operator acknowledgement, not independent or exact-plan review. [ADR
@@ -173,10 +173,22 @@ same-owner `CODEOWNERS` gate; revisit PR approval, latest-push approval, and
 disabled Environment self-review when a second active maintainer exists.
 
 `production-services` records routine deploys from protected `main` without a
-reviewer. Never recreate retired `Production`/`production` names or manage
-Environment secrets outside their owning IaC/integration path. A new workflow
-reference can auto-create an unprotected Environment, so establish its
-protection before merging the reference.
+reviewer.
+
+`sentry-pipeline` (`terraform/github-environment.tf`, issue #1289) gates the
+Sentry triage/autofix pipeline's exclusive secrets. It has a protected-branch
+deployment policy (main-only) and — deliberately, because the pipeline is
+unattended — NO reviewer and NO wait timer. Every secret-bearing job in the
+`sentry-triage-*`, `sentry-autofix`, and `platform-settings-drift` workflows
+declares it, so those secrets are reachable only from `main`, server-side, even on
+a branch-modified `workflow_dispatch`. The shared `CLAUDE_CODE_OAUTH_TOKEN` is
+intentionally NOT in this environment (it stays a repo-level secret for
+`claude.yml`).
+
+Never recreate retired `Production`/`production` names or manage Environment
+secrets outside their owning IaC/integration path. A new workflow reference can
+auto-create an unprotected Environment, so establish its protection before
+merging the reference.
 
 ## Grafana Alert Ownership
 
