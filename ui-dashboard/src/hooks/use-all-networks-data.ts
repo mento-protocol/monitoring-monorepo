@@ -466,8 +466,8 @@ export function useAllNetworksData(
     // from timestamp 0; other consumers keep the same SWR key and failure
     // semantics. Swallow the promise rejection here—the SWR `error` channel
     // below is what renders an honest unavailable state for the selected
-    // "All" range. Use `.then(success, failure)` rather than `Promise.finally`
-    // because this client bundle targets ES2017 without a Promise polyfill.
+    // "All" range. Handle both outcomes explicitly so this cleanup promise
+    // resolves after SWR records the original rejection.
     const request = mutate().then(
       () => {
         fullHistoryRequestRef.current = null;

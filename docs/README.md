@@ -139,7 +139,7 @@ Authority: canonical
 - [`docs/adr/0019-vercel-path-aware-deploys.md`](adr/0019-vercel-path-aware-deploys.md) — Dashboard deploys on Vercel Git integration with a path-aware skip script
 - [`docs/adr/0021-dashboard-state-upstash-blob.md`](adr/0021-dashboard-state-upstash-blob.md) — Dashboard mutable state lives in Upstash Redis with Vercel Blob backups
 - [`docs/adr/0022-authjs-google-shared-preview-secrets.md`](adr/0022-authjs-google-shared-preview-secrets.md) — Auth.js with Google; previews share prod auth secrets behind SSO and Git fork protection
-- [`docs/adr/0023-es2017-no-polyfill.md`](adr/0023-es2017-no-polyfill.md) — Ship ES2017 with no polyfill; ban immutable-array methods via lint and sortedCopy
+- [`docs/adr/0023-es2017-no-polyfill.md`](adr/0023-es2017-no-polyfill.md) — Transpile to ES2017; pin the browser floor and block named API hazards
 - [`docs/adr/0024-plotly-basic-dist-bundle-budgets.md`](adr/0024-plotly-basic-dist-bundle-budgets.md) — Plotly.js basic-dist-min plus enforced bundle-size budgets
 - [`docs/adr/0025-fixture-browser-tests-react-doctor.md`](adr/0025-fixture-browser-tests-react-doctor.md) — Fixture-driven browser tests, visual snapshots, and a react-doctor score gate
 - [`docs/adr/0026-aegis-nestjs-app-engine.md`](adr/0026-aegis-nestjs-app-engine.md) — Aegis is a NestJS App Engine service polling view calls into Prometheus
@@ -164,6 +164,7 @@ Authority: canonical
 - [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) — Peg paging measures executable sell price; the deep venue pages alone
 - [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) — Oracle freshness is reconstructed from persisted report events
 - [`docs/adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) — Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities
+- [`docs/adr/0048-private-gcs-peg-policy-artifact.md`](adr/0048-private-gcs-peg-policy-artifact.md) — Peg policy is a generation-pinned private GCS artifact
 - [`docs/adr/0049-peg-decision-package-read-model.md`](adr/0049-peg-decision-package-read-model.md) — Peg decisions use a bounded Metrics Bridge read model
 - [`docs/adr/0050-environment-scoped-pipeline-secrets.md`](adr/0050-environment-scoped-pipeline-secrets.md) — Pipeline secrets are gated by a Terraform-managed GitHub Environment
 - [`docs/adr/0051-dashboard-volume-scale-bounds.md`](adr/0051-dashboard-volume-scale-bounds.md) — Dashboard volume composition has per-chain and total re-review bounds
@@ -182,6 +183,7 @@ Authority: canonical
 - [`alerts/infra/channels/slack-channels/README.md`](../alerts/infra/channels/slack-channels/README.md)
 - [`alerts/infra/oncall-announcer/README.md`](../alerts/infra/oncall-announcer/README.md)
 - [`docs/context-standards.md`](context-standards.md)
+- [`docs/mutation-testing.md`](mutation-testing.md)
 - [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md)
 - [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
 - [`docs/README.md`](README.md)
@@ -189,10 +191,6 @@ Authority: canonical
 - [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md)
 - [`README.md`](../README.md)
 - [`SPEC.md`](../SPEC.md)
-
-Authority: non-canonical
-
-- [`docs/mutation-testing.md`](mutation-testing.md)
 
 ## notes-plans-archive
 

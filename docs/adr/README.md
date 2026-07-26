@@ -105,7 +105,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0020](0020-swr-polling-read-model.md)                   | Archived: original SWR polling + bounded snapshot composition decision                |
 | [0021](0021-dashboard-state-upstash-blob.md)             | Dashboard state lives in Upstash Redis with Vercel Blob backups, not a DB             |
 | [0022](0022-authjs-google-shared-preview-secrets.md)     | Auth.js + Google; preview shares prod auth secrets behind SSO and Git fork protection |
-| [0023](0023-es2017-no-polyfill.md)                       | Ship ES2017 with no polyfill; ban immutable-array methods via lint + `sortedCopy`     |
+| [0023](0023-es2017-no-polyfill.md)                       | Transpile to ES2017; pin the browser floor and block named API hazards                |
 | [0024](0024-plotly-basic-dist-bundle-budgets.md)         | Plotly.js `basic-dist-min` + enforced bundle-size budgets                             |
 | [0025](0025-fixture-browser-tests-react-doctor.md)       | Fixture-driven browser tests + visual snapshots + a react-doctor score gate           |
 | [0037](0037-dashboard-graphql-zod-mini.md)               | Native GraphQL transport + Zod Mini for browser-reachable validation                  |
@@ -127,6 +127,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0042](0042-metrics-bridge-external-price-poller.md)     | The bridge hosts an isolated external market-price peg-polling lifecycle      |
 | [0043](0043-peg-registry-service-local.md)               | The peg-monitor registry is service-local config, not published shared-config |
 | [0045](0045-peg-paging-semantics.md)                     | Peg paging measures executable sell price; the deep venue pages alone         |
+| [0048](0048-private-gcs-peg-policy-artifact.md)          | Peg policy uses a generation-pinned private GCS object                        |
 | [0049](0049-peg-decision-package-read-model.md)          | Peg decisions use a bounded Metrics Bridge read model                         |
 
 ### terraform / infra
@@ -139,6 +140,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0044](0044-peg-thresholds-gated-rules-plane.md)    | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON               |
 | [0045](0045-peg-paging-semantics.md)                | Peg paging measures executable sell price; the deep venue pages alone                       |
 | [0047](0047-separated-terraform-ci-identities.md)   | Routine deploy, PR plan, trusted-main refresh, and production apply use separate identities |
+| [0048](0048-private-gcs-peg-policy-artifact.md)     | Peg policy uses private GCS after identity bootstrap and pins one immutable generation      |
 | [0050](0050-environment-scoped-pipeline-secrets.md) | Pipeline secrets are gated by a Terraform-managed, main-only GitHub Environment             |
 
 ### governance-watchdog

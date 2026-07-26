@@ -164,13 +164,22 @@ commit:
 
 ## Metrics Bridge Peg-Policy Bootstrap
 
-`PEG_POLICY_URL` is optional raw runtime configuration for the protected,
-versioned peg-policy artifact. The platform Terraform stack will own the Cloud
-Run value when that artifact plane is provisioned; do not add or change it with
-an ad hoc `gcloud run services update --set-env-vars` command. Until then, an
-absent value intentionally leaves only the isolated peg poller dormant. Blank
-or malformed values are reported through that loop's bounded error channel and
-must not affect the primary Hasura polling loop or `/health`.
+`PEG_POLICY_URL` and `PEG_POLICY_AUTH_MODE` are paired raw runtime
+configuration for the protected, versioned peg-policy artifact. The platform
+Terraform stack will own both Cloud Run values when that artifact plane is
+provisioned; do not add or change them with an ad hoc
+`gcloud run services update --set-env-vars` command. Until then, both remain
+absent and only the isolated Peg poller stays dormant.
+
+Production mode is `gcp-metadata`. The URL must use the exact GCS JSON download
+host and path, a canonical percent-encoded object component, `alt=media`, and
+an immutable pinned `generation`. `none` exists only for deliberate local or
+test HTTPS artifacts and requires the code-only
+`allowUnauthenticatedPolicy` option. Environment configuration cannot enable
+it. Blank, malformed, missing, or mismatched pairs and token/fetch failures are
+reported through the Peg loop's bounded error channel, preserve the last
+accepted policy, and must not affect the primary Hasura polling loop or
+`/health`.
 
 Every policy version must end in `-<32 lowercase hex>` matching the first 32
 characters of the SHA-256 digest over its canonical content without the
@@ -191,7 +200,9 @@ The metrics-bridge image contains its service-local `peg-registry.json`
 identity/topology data at the compiled loader's expected path. It never bakes
 `alerts/rules/peg-thresholds.json` into the image: page-affecting thresholds are
 fetched from the gated runtime artifact under
-[ADR 0044](adr/0044-peg-thresholds-gated-rules-plane.md).
+[ADR 0044](adr/0044-peg-thresholds-gated-rules-plane.md). Its private,
+generation-pinned GCS transport and dormant activation boundary are fixed by
+[ADR 0048](adr/0048-private-gcs-peg-policy-artifact.md).
 
 ---
 
