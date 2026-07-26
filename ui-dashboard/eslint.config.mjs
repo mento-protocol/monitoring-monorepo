@@ -30,32 +30,25 @@ const TYPED_ARRAY_INTERFACE_NAMES = new Set([
   "Uint32Array",
 ]);
 
-function memberPropertyName(node) {
-  if (!node.computed && node.property.type === "Identifier") {
-    return node.property.name;
+function staticallyKnownPropertyName(node, computed, services, checker) {
+  if (!computed && node.type === "Identifier") {
+    return node.name;
+  }
+  if (computed && node.type === "Literal" && typeof node.value === "string") {
+    return node.value;
   }
   if (
-    node.computed &&
-    node.property.type === "Literal" &&
-    typeof node.property.value === "string"
+    computed &&
+    node.type === "TemplateLiteral" &&
+    node.expressions.length === 0
   ) {
-    return node.property.value;
+    return node.quasis[0]?.value.cooked ?? null;
   }
-  return null;
-}
 
-function objectPropertyName(node) {
-  if (!node.computed && node.key.type === "Identifier") {
-    return node.key.name;
-  }
-  if (
-    node.computed &&
-    node.key.type === "Literal" &&
-    typeof node.key.value === "string"
-  ) {
-    return node.key.value;
-  }
-  return null;
+  if (!computed) return null;
+  const propertyNode = services.esTreeNodeToTSNodeMap.get(node);
+  const propertyType = checker.getTypeAtLocation(propertyNode);
+  return propertyType.isStringLiteral() ? propertyType.value : null;
 }
 
 function destructuringSource(node) {
@@ -151,7 +144,12 @@ const symbolAwareBrowserApiRule = {
 
     return {
       MemberExpression(node) {
-        const property = memberPropertyName(node);
+        const property = staticallyKnownPropertyName(
+          node.property,
+          node.computed,
+          services,
+          checker,
+        );
         if (!property) return;
 
         const receiverNode = services.esTreeNodeToTSNodeMap.get(node.object);
@@ -173,7 +171,12 @@ const symbolAwareBrowserApiRule = {
       Property(node) {
         const source = destructuringSource(node);
         if (!source || node.parent.type !== "ObjectPattern") return;
-        const property = objectPropertyName(node);
+        const property = staticallyKnownPropertyName(
+          node.key,
+          node.computed,
+          services,
+          checker,
+        );
         if (!property) return;
 
         const receiverNode = services.esTreeNodeToTSNodeMap.get(source);

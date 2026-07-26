@@ -27,6 +27,21 @@ const DESTRUCTURED_BLOCKED_SOURCE = `
   toReversed.call(new Uint8Array([3, 1]));
   validateString.call("value");
 `;
+const COMPUTED_BLOCKED_SOURCE = `
+  const arrayMethod = "toSorted";
+  const typedArrayMethod = \`toReversed\`;
+  const stringMethod = "toWellFormed" as const;
+  const staticMethod = \`groupBy\`;
+  const values = [3, 1];
+  values[arrayMethod]();
+  new Uint8Array(values)[typedArrayMethod]();
+  "value"[stringMethod]();
+  Object[staticMethod](values, String);
+  Map[\`groupBy\`](values, String);
+  values[\`toSpliced\`](0, 1);
+  const { [arrayMethod]: sortCopy } = Array.prototype;
+  sortCopy.call(values);
+`;
 const STATIC_BLOCKED_SOURCE = `
   const BuiltinObject = Object;
   const BuiltinMap = Map;
@@ -61,6 +76,25 @@ const STATIC_ALLOWED_SOURCE = `
   groupObjects();
   groupMaps();
 `;
+const COMPUTED_ALLOWED_SOURCE = `
+  export {};
+
+  const arrayMethod = "toSorted";
+  const staticMethod = \`groupBy\`;
+  const domainObject = { toSorted() {} };
+  domainObject[arrayMethod]();
+
+  const Object = { groupBy() {} };
+  const Map = { groupBy() {} };
+  Object[staticMethod]();
+  Map[staticMethod]();
+
+  interface Uint8Array {
+    toSorted(): void;
+  }
+  declare const localTypedArray: Uint8Array;
+  localTypedArray[arrayMethod]();
+`;
 const cases = {
   blocked: {
     filePath: "src/lib/immutable-sort.ts",
@@ -74,6 +108,10 @@ const cases = {
     filePath: "src/lib/tag-suggestions.ts",
     source: DESTRUCTURED_BLOCKED_SOURCE,
   },
+  computedBlocked: {
+    filePath: "src/lib/fetch-json.ts",
+    source: COMPUTED_BLOCKED_SOURCE,
+  },
   staticBlocked: {
     filePath: "src/lib/address-reports-shared.ts",
     source: STATIC_BLOCKED_SOURCE,
@@ -81,6 +119,10 @@ const cases = {
   staticAllowed: {
     filePath: "src/lib/address-label-fields.ts",
     source: STATIC_ALLOWED_SOURCE,
+  },
+  computedAllowed: {
+    filePath: "src/lib/swr-state.ts",
+    source: COMPUTED_ALLOWED_SOURCE,
   },
   allowed: {
     filePath: "src/lib/address-report-fields.ts",

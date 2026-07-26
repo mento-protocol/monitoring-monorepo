@@ -27,8 +27,10 @@ type LintCase =
   | "blocked"
   | "typedArrayBlocked"
   | "destructuredBlocked"
+  | "computedBlocked"
   | "staticBlocked"
   | "staticAllowed"
+  | "computedAllowed"
   | "allowed"
   | "api"
   | "og"
@@ -170,6 +172,29 @@ describe("browser runtime API policy", () => {
   );
 
   it(
+    "reports blocked APIs through statically known computed keys",
+    async () => {
+      const messages = await browserApiMessages("computedBlocked");
+      const exercisedProperties = new Set([
+        "toSorted",
+        "toReversed",
+        "toSpliced",
+        "groupBy",
+        "toWellFormed",
+      ]);
+
+      expect(messages).toHaveLength(7);
+      for (const restriction of browserApiPolicy.restrictions) {
+        if (!exercisedProperties.has(restriction.property)) continue;
+        expect(
+          messages.filter((message) => message.message === restriction.message),
+        ).toHaveLength(restriction.property === "toSorted" ? 2 : 1);
+      }
+    },
+    LINT_RUNNER_TIMEOUT_MS,
+  );
+
+  it(
     "reports static built-ins through direct, aliased, qualified, and destructured access",
     async () => {
       const messages = await browserApiMessages("staticBlocked");
@@ -194,6 +219,12 @@ describe("browser runtime API policy", () => {
 
   it("allows shadowed and custom static groupBy methods", async () => {
     const messages = await browserApiMessages("staticAllowed");
+
+    expect(messages).toEqual([]);
+  });
+
+  it("allows computed keys on shadowed and custom receivers", async () => {
+    const messages = await browserApiMessages("computedAllowed");
 
     expect(messages).toEqual([]);
   });
