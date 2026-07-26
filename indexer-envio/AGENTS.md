@@ -134,10 +134,11 @@ event type.
 ## Observability
 
 Indexer failures use structured `context.log.error` events with the
-`<area>.<event>` convention. Do not add Sentry to handlers. Use the
-commit-scoped `pnpm deploy:indexer:logs`, `:status`, and `:metrics` commands for
-the current operator surface. [ADR 0018](../docs/adr/0018-indexer-observability-loki.md)
-records the intended Loki/Grafana plane, but
-[#1561](https://github.com/mento-protocol/monitoring-monorepo/issues/1561)
-tracks missing repository and live evidence; do not assume Grafana alert
-coverage until that issue is resolved.
+`<area>.<event>` convention. Do not add Sentry to handlers. Envio Cloud logs
+are commit-scoped diagnostics: use `pnpm deploy:indexer:logs "$COMMIT"
+--errors-only --since 2h` for records explicitly marked as errors, then inspect
+`pnpm deploy:indexer:status "$COMMIT" --json` and
+`pnpm deploy:indexer:metrics "$COMMIT" --json`. Prometheus metrics and Grafana
+rules own alerts; a log event alone never creates one. The full contract and
+the current diagnostic-only error families are in
+[ADR 0050](../docs/adr/0050-envio-logs-prometheus-grafana-alerting.md).

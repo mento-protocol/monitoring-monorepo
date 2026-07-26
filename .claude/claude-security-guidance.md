@@ -74,10 +74,10 @@ instructions and PR checklists. These rules supplement, but do not replace,
 - Prometheus labels must have bounded cardinality. Never expose tx hashes,
   user addresses, or pool-specific free text as unbounded labels — they
   blow up Grafana storage and break dashboards.
-- Loki + Grafana: error events emitted as `context.log.error("<area>.<event>")`
-  in the indexer are deduped per process for alert routing. Don't emit
-  identical signatures from unrelated code paths — it breaks the per-area
-  dedup.
+- Indexer `context.log.error("<area>.<event>")` events are Envio Cloud
+  diagnostics, not alert delivery. An operator notification needs an owned
+  Prometheus metric and Grafana rule; see ADR 0050. Do not infer alerts from
+  repeated log signatures.
 
 ## Webhook receivers (alerts/infra/onchain-event-handler)
 

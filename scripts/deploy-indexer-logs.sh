@@ -6,6 +6,7 @@
 #   pnpm deploy:indexer:logs <commit>       → specific deployment logs
 #   pnpm deploy:indexer:logs <commit> --follow       → follow/tail logs
 #   pnpm deploy:indexer:logs <commit> --level error  → filter by level (trace,debug,info,warn,error)
+#   pnpm deploy:indexer:logs <commit> --errors-only --since 2h → explicitly marked runtime errors only
 #   pnpm deploy:indexer:logs <commit> --build        → show build logs instead
 #   pnpm deploy:indexer:logs --json         → JSON output
 #
@@ -24,8 +25,28 @@ fi
 
 ARGS=()
 JSON_OUTPUT=false
+ERRORS_ONLY=false
+FOLLOW=false
+BUILD_LOGS=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --errors-only)
+      ERRORS_ONLY=true
+      JSON_OUTPUT=true
+      ARGS+=(--level error)
+      ARGS+=(-o json)
+      shift
+      ;;
+    --follow|-f)
+      FOLLOW=true
+      ARGS+=("$1")
+      shift
+      ;;
+    --build)
+      BUILD_LOGS=true
+      ARGS+=("$1")
+      shift
+      ;;
     --json|-j)
       JSON_OUTPUT=true
       ARGS+=(-o json)
@@ -56,6 +77,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$ERRORS_ONLY" == "true" && "$FOLLOW" == "true" ]]; then
+  echo "deploy:indexer:logs: --errors-only cannot be combined with --follow"
+  exit 2
+fi
+if [[ "$ERRORS_ONLY" == "true" && "$BUILD_LOGS" == "true" ]]; then
+  echo "deploy:indexer:logs: --errors-only filters runtime logs and cannot be combined with --build"
+  exit 2
+fi
+
 DEPLOYMENTS_JSON=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json)
 COMMIT=$(printf '%s' "$DEPLOYMENTS_JSON" | node scripts/resolve-envio-deployment.mjs "$COMMIT")
 
@@ -70,5 +100,12 @@ if [[ "$JSON_OUTPUT" != "true" ]]; then
   echo ""
 fi
 
-# Pass normalized flags through
-pnpm exec envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${ARGS[@]}"
+# Pass normalized flags through. The Envio API's --level filter can retain
+# stdout-carried records, so --errors-only applies a local filter to its JSON
+# response and retains only records explicitly marked as errors.
+if [[ "$ERRORS_ONLY" == "true" ]]; then
+  pnpm exec envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${ARGS[@]}" |
+    node scripts/filter-envio-runtime-errors.mjs
+else
+  pnpm exec envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${ARGS[@]}"
+fi
