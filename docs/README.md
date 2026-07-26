@@ -127,7 +127,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0017-broker-denormalization-volume-dedup.md`](adr/0017-broker-denormalization-volume-dedup.md) | Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed volume | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-23 |
 | [`docs/adr/0018-indexer-observability-loki.md`](adr/0018-indexer-observability-loki.md) | Indexer observability contract requires structured logs and a verified error-log path | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-23 |
 | [`docs/adr/0019-vercel-path-aware-deploys.md`](adr/0019-vercel-path-aware-deploys.md) | Dashboard deploys on Vercel Git integration with a path-aware skip script | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-23 |
-| [`docs/adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) | Read model is SWR polling plus bounded snapshot composition at current scale | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-26 |
+| [`docs/adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) | Read model is SWR polling plus bounded snapshot composition at current scale | non-canonical / archived | adr / ui-dashboard | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/0021-dashboard-state-upstash-blob.md`](adr/0021-dashboard-state-upstash-blob.md) | Dashboard mutable state lives in Upstash Redis with Vercel Blob backups | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0022-authjs-google-shared-preview-secrets.md`](adr/0022-authjs-google-shared-preview-secrets.md) | Auth.js with Google; previews share prod auth secrets behind SSO and Git fork protection | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0023-es2017-no-polyfill.md`](adr/0023-es2017-no-polyfill.md) | Ship ES2017 with no polyfill; ban immutable-array methods via lint and sortedCopy | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-24 |
@@ -156,6 +156,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) | Oracle freshness is reconstructed from persisted report events | canonical / active | adr / indexer-envio | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) | Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0049-peg-decision-package-read-model.md`](adr/0049-peg-decision-package-read-model.md) | Peg decisions use a bounded Metrics Bridge read model | canonical / active | adr / metrics-bridge / ui-dashboard | eng | 90d; verified 2026-07-24 |
+| [`docs/adr/0051-dashboard-volume-scale-bounds.md`](adr/0051-dashboard-volume-scale-bounds.md) | Dashboard volume composition has per-chain and total re-review bounds | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
 ## package-readmes-reference

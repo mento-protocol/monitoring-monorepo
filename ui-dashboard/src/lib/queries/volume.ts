@@ -607,7 +607,7 @@ export const BROKER_VOLUME_PARTIAL_OVERLAP_TRADERS = /* GraphQL */ `
 /**
  * Today's partial — added on top of the snapshot's [windowStart, yesterday]
  * total to keep hero numbers current to the minute. Today's
- * TraderDailySnapshot rows have a 1,000-row cap. ADR 0020 owns the observed
+ * TraderDailySnapshot rows have a 1,000-row cap. ADR 0051 owns the observed
  * production baseline and requires a re-review at 100 rows; if one day
  * saturates this cap, the hero volume tile silently understates (no cap-hit
  * banner), which is the same blind spot as BROKER_AGGREGATOR_DAILY_TOP.

@@ -78,9 +78,10 @@ flag the concrete regression and cite the evidence.
   issue solely because it reduces daily rows in the client. On 2026-07-26,
   public production measured 30 pools and 3,197 rows across five pages; the
   largest chain used three pages, 2,429 rows, and 686 ms first-load pagination.
-  Re-open the concern when pool count exceeds 40, one chain exceeds 3,500 rows
-  or four pages, or one complete chain pagination reaches 1,500 ms on two
-  consecutive measurements. [ADR 0020](../adr/0020-swr-polling-read-model.md)
+  Re-open the concern when pool count exceeds 40, one chain returns 3,500 or
+  more rows or requires four or more pages, all chains together return 6,000 or
+  more rows or require eight or more pages, or one complete chain pagination
+  reaches 1,500 ms on two consecutive measurements. [ADR 0051](../adr/0051-dashboard-volume-scale-bounds.md)
   owns the reproducible request details. This is not a cost or quota claim.
 - Do not apply that pool-snapshot evidence to `/volume`. Its public v3 7d hero
   separately measured `VolumeWindowLatest` at 3 rows and
@@ -88,7 +89,8 @@ flag the concrete regression and cite the evidence.
   rollup exceeds 10 rows or one page, when the current-day partial reaches 100
   rows, or when either primary query reaches 1,000 ms on two consecutive
   measurements. The 1,000-row Hasura cap remains a hard rework boundary for
-  the current-day query.
+  the current-day query. [ADR 0051](../adr/0051-dashboard-volume-scale-bounds.md)
+  owns the reproducible request details.
 - Neither exclusion waives Hasura row caps for hero or table queries. If a
   query shape approaches a cap or mixes deploy-window-sensitive schema fields
   into a primary page query, use the SWR/Hasura checklist.

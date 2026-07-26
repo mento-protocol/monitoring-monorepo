@@ -577,7 +577,7 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
 }
 
 /**
- * Daily rollup pagination. ADR 0020 records the current production row/page
+ * Daily rollup pagination. ADR 0051 records the current production row/page
  * baseline and the threshold that requires this path to be re-reviewed.
  */
 export async function fetchAllDailySnapshotPages(
