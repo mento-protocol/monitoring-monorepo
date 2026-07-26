@@ -23,10 +23,14 @@ vi.mock("@/lib/weekend", () => ({
 // about the link see a plain `<span>` breach indicator. The "links to the
 // trip tx" tests override per-call.
 let nextTripTx: { startedByTxHash?: string }[] = [];
+let queriedTripKey: string | null = null;
 vi.mock("@/lib/graphql", () => ({
-  useGQL: () => ({
-    data: { DeviationThresholdBreach: nextTripTx },
-  }),
+  useGQL: (query: string | null) => {
+    queriedTripKey = query;
+    return {
+      data: { DeviationThresholdBreach: nextTripTx },
+    };
+  },
 }));
 
 const testClock = vi.hoisted(() => ({ nowSeconds: 0 as number | null }));
@@ -50,6 +54,7 @@ function setTripTx(rows: { startedByTxHash?: string }[]) {
 
 beforeEach(() => {
   nextTripTx = [];
+  queriedTripKey = null;
   testClock.nowSeconds = Math.floor(Date.now() / 1000);
 });
 
@@ -111,6 +116,7 @@ describe("DeviationCell — bar fill colors track health status", () => {
     expect(serverHtml).not.toContain("bg-emerald-500");
     expect(serverHtml).not.toContain("bg-red-500");
     expect(serverHtml).not.toMatch(/breach <time/);
+    expect(queriedTripKey).toBeNull();
 
     vi.mocked(isWeekend).mockReturnValue(false);
     const container = document.createElement("div");
