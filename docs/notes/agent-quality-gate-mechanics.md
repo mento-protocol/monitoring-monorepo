@@ -12,10 +12,8 @@ garden_lane: operator-runbooks
 
 # Agent Quality Gate — Mechanics
 
-This runbook owns the invocation contract and the mechanics behind it: how the
-gate maps paths to commands, its parallelism and caching behavior, and the
-package-script refusal guard. Root `AGENTS.md` keeps only the mandatory trigger
-and routes here.
+This runbook owns gate invocation, path mapping, parallelism, caching, and the
+package-script refusal guard. Root `AGENTS.md` routes here.
 
 ## Invocation contract
 
@@ -28,23 +26,20 @@ pnpm agent:autoreview            # required for a non-trivial completed batch
 pnpm agent:autoreview:test -- --jobs 1  # sequential full regression closeout for autoreview runtime changes
 ```
 
-The gate is local-only and never deploys or runs Terraform apply. Do not assume
-the pre-push hook is installed; run the gate explicitly.
+The local-only gate never deploys or applies Terraform. Run it explicitly;
+do not assume the pre-push hook exists.
 
-`pnpm agent:autoreview` reviews source only. `pnpm agent:autoreview:test` owns
-the full regression harness: at most three independent family workers, bounded
-start/heartbeat progress, and per-family timings. The mapped gate preserves
-that output. For deterministic closeout with identical coverage, pass
-`-- --jobs 1`; CI's path-filtered `Autoreview adversarial suite` does this on
-`ubuntu-latest` when autoreview runtime or fixtures change. The required `ci`
-sentinel skips unrelated paths and requires success when selected.
+`pnpm agent:autoreview` reviews source only. `pnpm agent:autoreview:test` runs
+all families with at most three workers and bounded progress/timings, which the
+mapped gate preserves. `-- --jobs 1` changes only scheduling. CI uses that mode
+on `ubuntu-latest` for runtime or fixture changes; required `ci` demands success
+when selected.
 
-Run `--run` gates and `git push` in the background: foreground commands die at
-600s and write no freshness stamp, so the next run repeats the full mapped set
-instead of using `--skip-if-fresh`. Each `--run` records one JSON line per
-mapped command and one `__run_total__` line in gitignored
-`.tmp/agent-quality-gate/durations.jsonl`. Targets are 3 minutes for common
-mapped sets and 8 minutes for the full workspace (Refs #1415).
+Background `--run` gates and `git push`: a 600s foreground kill writes no
+freshness stamp, so the next run cannot use `--skip-if-fresh`. Each run appends
+per-command JSON plus one `__run_total__` line to gitignored
+`.tmp/agent-quality-gate/durations.jsonl`. Targets: 3 minutes for common mapped
+sets and 8 minutes for the full workspace (Refs #1415).
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:

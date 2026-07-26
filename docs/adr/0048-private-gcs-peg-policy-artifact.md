@@ -3,7 +3,7 @@ title: Peg policy is a generation-pinned private GCS artifact
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 scope: metrics-bridge / alerts / terraform/infra
 date: 2026-07
 doc_type: adr
@@ -14,8 +14,7 @@ garden_lane: adrs-architecture
 # ADR 0048 — Peg policy is a generation-pinned private GCS artifact
 
 **Status:** Accepted (Jul 2026), dormant runtime support only. Production
-hosting and activation wait for the Terraform identity bootstrap and cutover
-tracked in #1566.
+hosting and activation wait for ADR 0047's remaining identity-cutover gates.
 **Scope:** metrics-bridge / alerts / terraform/infra
 
 ## Context
@@ -30,11 +29,12 @@ expiring bearer credentials. An unpinned `current.json` URL could also return
 different bytes under one runtime configuration after an overwrite or
 rollback.
 
-The Terraform identity bootstrap in #1566 separates routine deploy, PR-plan,
-trusted-main refresh, and production-apply authority. Provisioning the policy
-plane before that cutover, live proof, legacy-authority removal, queue drain,
-and final IAM audit would create infrastructure inside the authority window
-that the bootstrap is designed to close.
+ADR 0047 separates routine deploy, PR-plan, trusted-main refresh, and
+production-apply authority. Its remaining gates are the read-boundary audit,
+terminal pre-routing and proof runs, the final legacy-authority removal apply,
+and the final IAM audit. Provisioning the policy plane before those gates pass
+would create infrastructure inside the authority window that the cutover is
+designed to close.
 
 ## Decision
 
@@ -72,7 +72,7 @@ that the bootstrap is designed to close.
 - The same-repo PR-plan identity receives no policy-object read access. Future
   Terraform must keep PR planning state-only, route trusted-main refresh
   through its read-only identity, and route production apply through the
-  protected production chain established by #1566.
+  protected production chain established by ADR 0047.
 - Policy publication, runtime generation selection, producer proof, and rule
   activation remain separate reviewed steps. A new generation first retains
   the exact previous policy required by ADR 0044. The platform plan then
@@ -98,7 +98,7 @@ that the bootstrap is designed to close.
 ## Consequences
 
 - This runtime capability can merge and deploy without activating Peg polling.
-- Infrastructure work remains blocked on completion evidence for #1566.
+- Infrastructure work remains blocked on ADR 0047's final cutover evidence.
 - A policy change needs a reviewed artifact generation and an explicit pinned
   runtime-configuration change. The bridge keeps producing the retained
   version until that change lands.
@@ -116,4 +116,4 @@ that the bootstrap is designed to close.
   `alerts/rules/peg-thresholds.json` and ADR 0044.
 - Future owning surfaces:
   `terraform/`, `alerts/rules/`, and the protected Terraform workflows after
-  #1566.
+  ADR 0047's final cutover.
