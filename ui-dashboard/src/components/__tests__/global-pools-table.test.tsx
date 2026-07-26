@@ -16,7 +16,7 @@ vi.mock("next/navigation", () => ({
 beforeEach(() => {
   mockSearchParams = new URLSearchParams();
   mockReplace.mockClear();
-  vi.mocked(isWeekend).mockReturnValue(false);
+  mockIsWeekend.mockReturnValue(false);
 });
 
 // Mock weekend detection so tests are deterministic.
@@ -60,6 +60,8 @@ import {
 } from "@/components/global-pools-table/formatting";
 import { uptimeColorClass, uptimeTierGlyph } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
+
+const mockIsWeekend = vi.mocked(isWeekend);
 
 const CELO_NETWORK: Network = {
   id: "celo-mainnet",
@@ -193,7 +195,7 @@ describe("GlobalPoolsTable — FX weekend SSR banner", () => {
   });
 
   it("keeps stale health unresolved when the seeded banner says weekend", () => {
-    vi.mocked(isWeekend).mockReturnValue(true);
+    mockIsWeekend.mockReturnValue(true);
     const staleAt = String(TABLE_NOW_SECONDS - 600);
     const html = renderToStaticMarkup(
       <GlobalPoolsTable
@@ -926,8 +928,8 @@ describe("sortGlobalPools — fee, health, and volume edge cases", () => {
     ).toEqual(["ok", "warn", "critical"]);
   });
 
-  it("uses the explicit weekday snapshot while sorting health", () => {
-    vi.mocked(isWeekend).mockReturnValue(true);
+  it("uses the same weekend snapshot for health sorting as row badges", () => {
+    mockIsWeekend.mockReturnValue(true);
     const stale = makeEntry({
       id: "stale",
       oracleTimestamp: String(TABLE_NOW_SECONDS - 600),
@@ -951,6 +953,13 @@ describe("sortGlobalPools — fee, health, and volume edge cases", () => {
         isWeekendNow: false,
       }).map((entry) => entry.pool.id),
     ).toEqual(["stale", "halted"]);
+    expect(
+      sortGlobalPools([halted, stale], "health", "desc", {
+        ...BASE_SORT_CTX,
+        nowSeconds: TABLE_NOW_SECONDS,
+        isWeekendNow: true,
+      }).map((entry) => entry.pool.id),
+    ).toEqual(["halted", "stale"]);
   });
 
   it("uses the row health clock while the weekend snapshot is unresolved", () => {

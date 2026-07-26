@@ -86,7 +86,7 @@ interface GlobalPoolsTableProps {
 export function GlobalPoolsTable({
   entries,
   showFilters = false,
-  initialIsWeekend = false,
+  initialIsWeekend,
   volume24hByKey,
   volume24hLoading = false,
   volume24hError = false,
@@ -128,7 +128,7 @@ export function GlobalPoolsTable({
 
   return (
     <>
-      <WeekendBanner initialIsWeekend={initialIsWeekend} />
+      <WeekendBanner initialIsWeekend={initialIsWeekend ?? false} />
       {showFilters && <GlobalPoolFilters filters={filters} />}
       <Table>
         <PoolTableHeader
@@ -395,10 +395,13 @@ function GlobalPoolRows({
   );
 }
 
-function WeekendBanner({ initialIsWeekend }: { initialIsWeekend: boolean }) {
-  // Reuse the route's serialized snapshot through hydration, then go live.
-  const showWeekendBanner = useIsWeekend(initialIsWeekend);
-  if (!showWeekendBanner) return null;
+function WeekendBanner({
+  initialIsWeekend,
+}: {
+  initialIsWeekend: boolean;
+}) {
+  const show = useIsWeekend(initialIsWeekend);
+  if (!show) return null;
 
   return (
     <div className="mb-4 flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-300">
