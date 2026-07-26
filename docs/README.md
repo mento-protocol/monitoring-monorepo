@@ -47,14 +47,14 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`metrics-bridge/AGENTS.md`](../metrics-bridge/AGENTS.md) | Metrics Bridge Instructions | canonical / active | agent-instructions / metrics-bridge | eng | 90d; verified 2026-07-23 |
 | [`scripts/AGENTS.md`](../scripts/AGENTS.md) | Scripts Instructions | canonical / active | agent-instructions / scripts | eng | 90d; verified 2026-07-23 |
 | [`shared-config/AGENTS.md`](../shared-config/AGENTS.md) | Shared Config Instructions | canonical / active | agent-instructions / shared-config | eng | 90d; verified 2026-07-23 |
-| [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-07-23 |
+| [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-07-26 |
 | [`ui-dashboard/AGENTS.md`](../ui-dashboard/AGENTS.md) | Monitoring Dashboard Instructions | canonical / active | agent-instructions / ui-dashboard | eng | 90d; verified 2026-07-23 |
 
 ## operator-runbooks
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
-| [`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md) | Grafana Alloy | canonical / active | runbook / aegis/grafana-agent | eng | 90d; verified 2026-07-17 |
+| [`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md) | Grafana Alloy | canonical / active | runbook / aegis/grafana-agent | eng | 90d; verified 2026-07-26 |
 | [`alerts/infra/channels/sentry-bridge/README.md`](../alerts/infra/channels/sentry-bridge/README.md) | Sentry Alerts Module | canonical / active | runbook / alerts/infra/channels/sentry-bridge | eng | 90d; verified 2026-07-17 |
 | [`alerts/infra/onchain-event-handler/README.md`](../alerts/infra/onchain-event-handler/README.md) | On-chain Event Handler Module | canonical / active | runbook / alerts/infra/onchain-event-handler | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/onchain-event-listeners/README.md`](../alerts/infra/onchain-event-listeners/README.md) | On-chain Event Listeners Module | canonical / active | runbook / alerts/infra/onchain-event-listeners | eng | 90d; verified 2026-07-22 |
@@ -137,7 +137,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0027-metrics-bridge-hasura-to-prometheus.md`](adr/0027-metrics-bridge-hasura-to-prometheus.md) | A Hasura to Prometheus bridge exists so v3 DB data can drive Grafana alerts | canonical / active | adr / metrics-bridge | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0028-terraform-stack-registry.md`](adr/0028-terraform-stack-registry.md) | Terraform ownership is a registry with roots split by cadence and blast radius | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0029-ci-apply-production-infra-gate.md`](adr/0029-ci-apply-production-infra-gate.md) | Infra applies on merge to main behind the production-infra environment gate | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-24 |
-| [`docs/adr/0030-iac-before-cli-secrets.md`](adr/0030-iac-before-cli-secrets.md) | All secrets are managed by IaC; agents never touch them with CLI commands | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-24 |
+| [`docs/adr/0030-iac-before-cli-secrets.md`](adr/0030-iac-before-cli-secrets.md) | All secrets are managed by IaC; agents never touch them with CLI commands | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/0031-governance-watchdog-standalone-root.md`](adr/0031-governance-watchdog-standalone-root.md) | governance-watchdog deploys as a standalone source root in its own GCP project | canonical / active | adr / governance-watchdog | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0032-integration-probes-quote-only.md`](adr/0032-integration-probes-quote-only.md) | Integration probes are quote-only, evidence-gated, and TTL-degraded | canonical / active | adr / integration-probes | eng | 90d; verified 2026-07-24 |
 | [`docs/adr/0033-adr-process-and-gate.md`](adr/0033-adr-process-and-gate.md) | Architectural decisions are recorded as ADRs, enforced by a reminder gate | canonical / active | adr / ci/process | eng | 90d; verified 2026-07-24 |
@@ -169,11 +169,11 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/context-standards.md`](context-standards.md) | Agent Context Standards | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-24 |
 | [`docs/mutation-testing.md`](mutation-testing.md) | Mutation Testing | non-canonical / active | reference / repo-wide | eng | 180d; verified 2026-07-24 |
 | [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md) | Liquity Monitoring Invariants | canonical / active | reference / indexer-envio/ui-dashboard | eng | 90d; verified 2026-07-24 |
-| [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md) | Terraform secret strategy hardening | canonical / active | reference / terraform/infra | eng | 90d; verified 2026-07-24 |
+| [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md) | Terraform secret strategy hardening | canonical / active | reference / terraform/infra | eng | 90d; verified 2026-07-26 |
 | [`docs/README.md`](README.md) | Documentation Catalog | canonical / active | index / repo-wide | eng | 90d; verified 2026-07-24 |
 | [`indexer-envio/README.md`](../indexer-envio/README.md) | Mento v3 Envio HyperIndex Indexer | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-24 |
 | [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md) | Indexer Deployment Reference | canonical / active | reference / indexer-envio | eng | 90d; verified 2026-07-24 |
-| [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-24 |
+| [`README.md`](../README.md) | Mento Monitoring Monorepo | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-26 |
 | [`SPEC.md`](../SPEC.md) | Mento Monitoring Technical Specification | canonical / active | reference / repo-wide | eng | 90d; verified 2026-07-24 |
 
 ## notes-plans-archive

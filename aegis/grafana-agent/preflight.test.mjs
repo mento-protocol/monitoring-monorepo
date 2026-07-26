@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { runPreflight } from './preflight.mjs';
 
@@ -37,18 +38,36 @@ const preflightPermissions = [
   'secretmanager.versions.get',
 ];
 
-function successfulProjectPolicy(extraBindings = []) {
+function memberSetFingerprint(members) {
+  const canonicalMembers = JSON.stringify([...new Set(members)].sort()).replace(
+    /[<>&\u2028\u2029]/gu,
+    (character) =>
+      ({
+        '<': '\\u003c',
+        '>': '\\u003e',
+        '&': '\\u0026',
+        '\u2028': '\\u2028',
+        '\u2029': '\\u2029',
+      })[character],
+  );
+  return createHash('sha256').update(canonicalMembers).digest('hex');
+}
+
+function successfulProjectPolicy(
+  extraBindings = [],
+  configuredSubmitters = submitters,
+) {
   return {
     bindings: [
       { role: activationRole, members: [runtimeMember] },
-      { role: preflightRole, members: submitters },
+      { role: preflightRole, members: configuredSubmitters },
       ...builderRoles.map((role) => ({ role, members: [builderMember] })),
       ...extraBindings,
     ],
   };
 }
 
-function successfulRunner(overrides = {}) {
+function successfulRunner(overrides = {}, configuredSubmitters = submitters) {
   return (args) => {
     const key = args.join(' ');
     if (overrides[key] !== undefined) return overrides[key];
@@ -76,7 +95,7 @@ function successfulRunner(overrides = {}) {
         bindings: [
           {
             role: 'roles/iam.serviceAccountUser',
-            members: submitters,
+            members: configuredSubmitters,
           },
         ],
       };
@@ -91,10 +110,13 @@ function successfulRunner(overrides = {}) {
       key ===
       `iam roles describe grafanaAgentPreflightReader --project ${project}`
     ) {
-      return { includedPermissions: preflightPermissions };
+      return {
+        description: `Alloy metadata preflight. operator-set-sha256=${memberSetFingerprint(configuredSubmitters)}`,
+        includedPermissions: preflightPermissions,
+      };
     }
     if (key === `projects get-iam-policy ${project}`)
-      return successfulProjectPolicy();
+      return successfulProjectPolicy([], configuredSubmitters);
     if (key === `secrets list --project ${project}`) {
       return [
         { name: 'projects/123/secrets/grafana-agent-endpoint' },
@@ -137,6 +159,65 @@ test('live preflight checks only metadata and accepts the exact contract', () =>
     write: (message) => output.push(message),
   });
   assert.match(output.at(-1), /live preflight passed/u);
+});
+
+test('live preflight accepts a matching Terraform operator override', () => {
+  const configuredSubmitters = [
+    'group:platform@mentolabs.xyz',
+    'user:release-manager@mentolabs.xyz',
+  ];
+  runPreflight({
+    project,
+    runGcloud: successfulRunner({}, configuredSubmitters),
+    validateStatic: staticPass,
+    write: () => {},
+  });
+});
+
+test('member fingerprints match Terraform jsonencode escaping', () => {
+  const configuredSubmitters = ['group:ops&alerts\u2028@example.com'];
+  const preflightRoleKey = `iam roles describe grafanaAgentPreflightReader --project ${project}`;
+  runPreflight({
+    project,
+    runGcloud: successfulRunner(
+      {
+        [preflightRoleKey]: {
+          description:
+            'Alloy metadata preflight. operator-set-sha256=191889319a5329834d3198be12ba2ac82e65decbad637aa2790dc95e06c65116',
+          includedPermissions: preflightPermissions,
+        },
+      },
+      configuredSubmitters,
+    ),
+    validateStatic: staticPass,
+    write: () => {},
+  });
+});
+
+test('coordinated policy drift still fails the Terraform fingerprint', () => {
+  const driftedSubmitters = [...submitters, 'user:unexpected@example.com'];
+  const projectPolicyKey = `projects get-iam-policy ${project}`;
+  const builderPolicyKey = `iam service-accounts get-iam-policy ${builderEmail} --project ${project}`;
+  assert.throws(
+    () =>
+      runPreflight({
+        project,
+        runGcloud: successfulRunner({
+          [projectPolicyKey]: successfulProjectPolicy([], driftedSubmitters),
+          [builderPolicyKey]: {
+            bindings: [
+              {
+                role: 'roles/iam.serviceAccountUser',
+                members: driftedSubmitters,
+              },
+            ],
+          },
+        }),
+        validateStatic: staticPass,
+        write: () => {},
+      }),
+    /must match the Terraform configuration fingerprint/u,
+  );
 });
 
 test('static-only mode never calls gcloud', () => {
@@ -456,7 +537,7 @@ test('operator preflight permissions cannot broaden', () => {
   );
 });
 
-test('operator preflight readers must match the engineering group', () => {
+test('operator preflight readers must match builder submitters', () => {
   const key = `projects get-iam-policy ${project}`;
   const policy = successfulProjectPolicy();
   policy.bindings = policy.bindings.map((binding) =>
@@ -475,11 +556,29 @@ test('operator preflight readers must match the engineering group', () => {
         validateStatic: staticPass,
         write: () => {},
       }),
-    /operator preflight reader members must match the least-privilege contract/u,
+    /builder service account submitters members must match the exact expected identities/u,
   );
 });
 
-test('builder submitters must match the engineering group', () => {
+test('the authoritative operator set cannot be empty', () => {
+  const key = `projects get-iam-policy ${project}`;
+  const policy = successfulProjectPolicy();
+  policy.bindings = policy.bindings.filter(
+    (binding) => binding.role !== preflightRole,
+  );
+  assert.throws(
+    () =>
+      runPreflight({
+        project,
+        runGcloud: successfulRunner({ [key]: policy }),
+        validateStatic: staticPass,
+        write: () => {},
+      }),
+    /operator preflight reader must have at least one configured member/u,
+  );
+});
+
+test('builder submitters must match the operator preflight readers', () => {
   const key = `iam service-accounts get-iam-policy ${builderEmail} --project ${project}`;
   assert.throws(
     () =>

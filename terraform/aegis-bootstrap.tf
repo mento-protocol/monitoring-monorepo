@@ -125,7 +125,7 @@ resource "google_project_iam_custom_role" "grafana_agent_preflight_reader" {
   project     = google_project.monitoring.project_id
   role_id     = "grafanaAgentPreflightReader"
   title       = "Grafana Agent Preflight Reader"
-  description = "Allows deploy operators to verify the exact Alloy IAM, secret metadata, runtime identity, and traffic contract without reading secret payloads."
+  description = "Alloy metadata preflight. operator-set-sha256=${sha256(jsonencode(sort(distinct(var.gcp_dev_members))))}"
   permissions = [
     "appengine.applications.get",
     "appengine.services.get",

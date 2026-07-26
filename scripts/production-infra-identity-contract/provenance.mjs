@@ -60,7 +60,7 @@ const SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform:local.grafana_agent_builder_project_roles|ed3614725615ce166ccaaea0e7e2ad4f480f47b1805494a46dd93c828735cbe0",
   "terraform:variable.agent_readonly_impersonators|4fcf4928762c3e8301cef20a21cc1fe0e96df244dfba2eb5e7f5ef2017c67bb7",
   "terraform:variable.agent_readonly_storage_object_projects|ed7b4d8a7e1e6e3b16360d5d2941ef6451648d1ee60fbb31219f162a7058593b",
-  "terraform:variable.gcp_dev_members|5775d46fc6449d33e2e21992b7fc1e975083d40c0611768a500c34f5c7f774b2",
+  "terraform:variable.gcp_dev_members|8cafd6b852bc3c5158a8da417189d43141d484099ac206173dec88304b4b0c8f",
   "terraform:variable.gcp_org_id|6ec91fd45db313e543458758d709eafd7843406448fe3e73c0b0c8b898c72cef",
   "terraform:variable.terraform_service_account|d024a2372d4aca16e4122a6cbd873c389b5eabfac2e30efad6b5252fca88afbc",
 ];

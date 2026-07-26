@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-26 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -334,7 +334,7 @@ pnpm aegis:logs
 
 Grafana Alloy deploys from the same project under the existing `grafana-agent`
 service/command names. Platform Terraform accepts its three values as
-sensitive, ephemeral inputs and writes them through Google provider 6.50
+sensitive, ephemeral inputs and writes them through Google provider 6.50.x
 write-only arguments. Its App Engine service pins the dedicated
 `grafana-agent-runtime` service account.
 

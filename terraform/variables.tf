@@ -523,7 +523,7 @@ variable "metrics_bridge_image" {
 }
 
 variable "gcp_dev_members" {
-  description = "IAM members who can deploy and manage the metrics-bridge service."
+  description = "IAM members who can deploy and manage monitoring services, including Alloy preflight and builder submission."
   type        = list(string)
   default     = ["group:eng@mentolabs.xyz"]
 }

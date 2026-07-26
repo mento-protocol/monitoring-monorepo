@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateContract } from './contract.mjs';
@@ -15,7 +16,6 @@ const BUILDER_PROJECT_ROLES = [
   'roles/logging.logWriter',
   'roles/storage.objectAdmin',
 ];
-const EXPECTED_BUILD_SUBMITTERS = ['group:eng@mentolabs.xyz'];
 const ACTIVATION_ROLE_ID = 'grafanaAgentActivationReader';
 const ACTIVATION_PERMISSIONS = [
   'appengine.services.get',
@@ -143,21 +143,38 @@ function assertExactProjectRoles(policy, member, expectedRoles, label) {
   }
 }
 
-function assertExactRoleMembers(policy, role, expectedMembers, label) {
-  const actual = [
+function membersForRole(policy, role) {
+  return [
     ...new Set(
       collectBindings(policy)
         .filter((binding) => binding.role === role)
         .flatMap((binding) => binding.members),
     ),
   ].sort();
-  const expected = [...expectedMembers].sort();
-  if (
-    actual.length !== expected.length ||
-    !expected.every((member, index) => actual[index] === member)
-  ) {
+}
+
+function memberSetFingerprint(members) {
+  const canonicalMembers = JSON.stringify([...new Set(members)].sort()).replace(
+    /[<>&\u2028\u2029]/gu,
+    (character) =>
+      ({
+        '<': '\\u003c',
+        '>': '\\u003e',
+        '&': '\\u0026',
+        '\u2028': '\\u2028',
+        '\u2029': '\\u2029',
+      })[character],
+  );
+  return createHash('sha256').update(canonicalMembers).digest('hex');
+}
+
+function assertOperatorSetFingerprint(role, members) {
+  const match = String(role?.description ?? '').match(
+    /(?:^|\s)operator-set-sha256=([0-9a-f]{64})(?:\s|$)/u,
+  );
+  if (!match || match[1] !== memberSetFingerprint(members)) {
     throw new Error(
-      `${label} members must match the least-privilege contract; found ${actual.join(', ') || 'none'}`,
+      'operator preflight reader members must match the Terraform configuration fingerprint',
     );
   }
 }
@@ -242,16 +259,25 @@ export function runPreflight({
     '--project',
     project,
   ]);
-  assertExactRolePolicy(
-    builderPolicy,
-    'roles/iam.serviceAccountUser',
-    EXPECTED_BUILD_SUBMITTERS,
-    'builder service account submitters',
-  );
 
   const projectPolicy = runGcloud(['projects', 'get-iam-policy', project]);
   const activationRoleName = `projects/${project}/roles/${ACTIVATION_ROLE_ID}`;
   const preflightRoleName = `projects/${project}/roles/${PREFLIGHT_ROLE_ID}`;
+  const expectedBuildSubmitters = membersForRole(
+    projectPolicy,
+    preflightRoleName,
+  );
+  if (expectedBuildSubmitters.length === 0) {
+    throw new Error(
+      'operator preflight reader must have at least one configured member',
+    );
+  }
+  assertExactRolePolicy(
+    builderPolicy,
+    'roles/iam.serviceAccountUser',
+    expectedBuildSubmitters,
+    'builder service account submitters',
+  );
   assertExactProjectRoles(
     projectPolicy,
     runtimeMember,
@@ -263,12 +289,6 @@ export function runPreflight({
     builderMember,
     BUILDER_PROJECT_ROLES,
     'builder',
-  );
-  assertExactRoleMembers(
-    projectPolicy,
-    preflightRoleName,
-    EXPECTED_BUILD_SUBMITTERS,
-    'operator preflight reader',
   );
 
   const activationRole = runGcloud([
@@ -297,6 +317,7 @@ export function runPreflight({
     PREFLIGHT_PERMISSIONS,
     'operator preflight permissions',
   );
+  assertOperatorSetFingerprint(preflightRole, expectedBuildSubmitters);
 
   const secrets = runGcloud(['secrets', 'list', '--project', project]);
   if (!Array.isArray(secrets)) {

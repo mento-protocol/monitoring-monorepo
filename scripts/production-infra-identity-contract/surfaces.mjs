@@ -12,7 +12,7 @@ const TERRAFORM_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/versions.tf:terraform|397590cfe66d20a4d1825388a04907e6f7f9c288a318b763a65fb5347588ce1b",
   "alerts/rules/versions.tf:terraform|dc025ec58d779e88576b1e298ce04afe84e91147c73e0dbe1609763c5c836dfa",
   "governance-watchdog/infra/versions.tf:terraform|e0a15645d55984ee2013ba6342c89743251029192fb312512e8b89003651cb1f",
-  "terraform/providers.tf:terraform|36acd857347323f9fab31fda95e3a1ae58f9f7ec8d8cbbcfc4008ddc51380b2d",
+  "terraform/providers.tf:terraform|220c27447f2c9496849dee19feda26c30ff93815e2e7eb7b93351b8c4f33cea7",
 ];
 
 const PROVIDER_BLOCK_SHAPE_SPECIFICATIONS = [

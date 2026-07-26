@@ -45,6 +45,7 @@ function sourceFiles() {
     cloudbuild: readFileSync(path.join(agentDir, 'cloudbuild.yaml'), 'utf8'),
     cloudIgnore: readFileSync(path.join(agentDir, '.gcloudignore'), 'utf8'),
     deploy: readFileSync(path.join(agentDir, 'deploy.sh'), 'utf8'),
+    preflight: readFileSync(path.join(agentDir, 'preflight.mjs'), 'utf8'),
     legacySeed: readFileSync(path.join(agentDir, 'seed-secrets.sh'), 'utf8'),
     terraformIgnore: readFileSync(
       path.join(repoRoot, 'terraform/.gitignore'),
@@ -80,6 +81,18 @@ test('the Google provider cannot drift from the reviewed 6.50 schema', () => {
     'version     = "6.51.0"',
   );
   expectFailure(files, /Google provider must stay locked to 6\.50\.0/u);
+});
+
+test('the Google provider constraint cannot admit another minor', () => {
+  const files = sourceFiles();
+  files.providers = files.providers.replace('~> 6.50.0', '~> 6.50');
+  expectFailure(files, /must stay constrained to 6\.50\.x/u);
+});
+
+test('the Google provider lock preserves the reviewed minor constraint', () => {
+  const files = sourceFiles();
+  files.providerLock = files.providerLock.replace('~> 6.50.0', '~> 6.50');
+  expectFailure(files, /lock must preserve the 6\.50\.x constraint/u);
 });
 
 test('state-stored Secret Manager values are rejected', () => {
@@ -194,7 +207,16 @@ test('operator preflight reader cannot gain secret payload access', () => {
   );
 });
 
-test('operator preflight reader must stay scoped to engineering members', () => {
+test('operator preflight role pins the Terraform member-set fingerprint', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    'operator-set-sha256=${sha256(jsonencode(sort(distinct(var.gcp_dev_members))))}',
+    'operator-set-sha256=unverified',
+  );
+  expectFailure(files, /must carry the Terraform member-set fingerprint/u);
+});
+
+test('operator preflight reader must stay scoped to gcp_dev_members', () => {
   const files = sourceFiles();
   files.bootstrap = files.bootstrap.replace(
     'resource "google_project_iam_member" "grafana_agent_operator_preflight_reader" {\n  for_each = toset(var.gcp_dev_members)',
@@ -203,6 +225,18 @@ test('operator preflight reader must stay scoped to engineering members', () => 
   expectFailure(
     files,
     /operator preflight readers must stay scoped to gcp_dev_members/u,
+  );
+});
+
+test('live preflight derives submitters from the Terraform-managed operator set', () => {
+  const files = sourceFiles();
+  files.preflight = files.preflight.replace(
+    "    expectedBuildSubmitters,\n    'builder service account submitters',",
+    "    ['group:eng@mentolabs.xyz'],\n    'builder service account submitters',",
+  );
+  expectFailure(
+    files,
+    /both submitter policies must derive from and match the Terraform member-set fingerprint/u,
   );
 });
 

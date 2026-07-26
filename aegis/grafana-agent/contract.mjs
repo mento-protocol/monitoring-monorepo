@@ -17,6 +17,7 @@ const CONTRACT_FILES = {
   cloudbuild: 'aegis/grafana-agent/cloudbuild.yaml',
   cloudIgnore: 'aegis/grafana-agent/.gcloudignore',
   deploy: 'aegis/grafana-agent/deploy.sh',
+  preflight: 'aegis/grafana-agent/preflight.mjs',
   legacySeed: 'aegis/grafana-agent/seed-secrets.sh',
   terraformIgnore: 'terraform/.gitignore',
   tfvarsExample: 'terraform/terraform.tfvars.example',
@@ -128,6 +129,7 @@ export function validateContract(files = readContractFiles()) {
     cloudbuild,
     cloudIgnore,
     deploy,
+    preflight,
     legacySeed,
     terraformIgnore,
     tfvarsExample,
@@ -149,8 +151,8 @@ export function validateContract(files = readContractFiles()) {
   requirePattern(
     errors,
     terraformBlock,
-    /source\s*=\s*"hashicorp\/google"\s+version\s*=\s*"~>\s*6\.50"/u,
-    `${CONTRACT_FILES.providers}: Google provider must stay constrained to 6.50`,
+    /source\s*=\s*"hashicorp\/google"\s+version\s*=\s*"~>\s*6\.50\.0"/u,
+    `${CONTRACT_FILES.providers}: Google provider must stay constrained to 6.50.x`,
   );
   const googleLock = requireBlock(
     errors,
@@ -163,6 +165,12 @@ export function validateContract(files = readContractFiles()) {
     googleLock,
     /version\s*=\s*"6\.50\.0"/u,
     `${CONTRACT_FILES.providerLock}: Google provider must stay locked to 6.50.0`,
+  );
+  requirePattern(
+    errors,
+    googleLock,
+    /constraints\s*=\s*"~>\s*6\.50\.0"/u,
+    `${CONTRACT_FILES.providerLock}: Google provider lock must preserve the 6.50.x constraint`,
   );
 
   const valueVariable = requireBlock(
@@ -441,6 +449,12 @@ export function validateContract(files = readContractFiles()) {
     /role_id\s*=\s*"grafanaAgentPreflightReader"/u,
     `${CONTRACT_FILES.bootstrap}: operator preflight reader role ID must remain exact`,
   );
+  requirePattern(
+    errors,
+    preflightRole,
+    /description\s*=\s*"Alloy metadata preflight\. operator-set-sha256=\$\{sha256\(jsonencode\(sort\(distinct\(var\.gcp_dev_members\)\)\)\)\}"/u,
+    `${CONTRACT_FILES.bootstrap}: operator preflight role must carry the Terraform member-set fingerprint`,
+  );
   const preflightPermissions = [
     ...preflightRole.matchAll(/"([a-z]+\.[^"]+)"/gu),
   ].map((match) => match[1]);
@@ -489,7 +503,7 @@ export function validateContract(files = readContractFiles()) {
     errors,
     operatorPreflightGrant,
     /member\s*=\s*each\.value/u,
-    `${CONTRACT_FILES.bootstrap}: operator preflight grant must target each engineering member`,
+    `${CONTRACT_FILES.bootstrap}: operator preflight grant must target each configured member`,
   );
 
   const deployerActAs = requireBlock(
@@ -711,6 +725,20 @@ export function validateContract(files = readContractFiles()) {
     /node "\$agent_dir\/preflight\.mjs" --project "\$project"/u,
     `${CONTRACT_FILES.deploy}: deploy must run the live preflight before mutation`,
   );
+  requirePattern(
+    errors,
+    preflight,
+    /const expectedBuildSubmitters = membersForRole\(\s*projectPolicy,\s*preflightRoleName,\s*\)[\s\S]*assertExactRolePolicy\(\s*builderPolicy,\s*'roles\/iam\.serviceAccountUser',\s*expectedBuildSubmitters,[\s\S]*assertOperatorSetFingerprint\(preflightRole, expectedBuildSubmitters\)/u,
+    `${CONTRACT_FILES.preflight}: both submitter policies must derive from and match the Terraform member-set fingerprint`,
+  );
+  if (
+    preflight.includes('EXPECTED_BUILD_SUBMITTERS') ||
+    preflight.includes("['group:eng@mentolabs.xyz']")
+  ) {
+    errors.push(
+      `${CONTRACT_FILES.preflight}: operator membership must not be pinned to the default gcp_dev_members value`,
+    );
+  }
   requirePattern(
     errors,
     deploy,

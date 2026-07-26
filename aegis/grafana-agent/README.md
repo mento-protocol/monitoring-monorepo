@@ -1,4 +1,4 @@
-<!-- agent-context: title="Grafana Alloy" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=aegis/grafana-agent review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Grafana Alloy" status=active owner=eng canonical=true last_verified=2026-07-26 doc_type=runbook scope=aegis/grafana-agent review_interval_days=90 garden_lane=operator-runbooks -->
 
 # Grafana Alloy
 
@@ -37,7 +37,7 @@ disabled and the UI is mounted under `/-/alloy`.
 ## Secret and identity boundary
 
 Platform Terraform creates the legacy-named secret containers, writes their
-versions through Google provider 6.50 write-only arguments, and binds the
+versions through Google provider 6.50.x write-only arguments, and binds the
 dedicated runtime identity:
 
 - `grafana-agent-endpoint`
@@ -52,13 +52,14 @@ contains only `appengine.services.get` and `appengine.versions.list`, which the
 supervisor needs to prove a single active collector. Cloud Build pins
 `grafana-agent-builder@mento-monitoring.iam.gserviceaccount.com`, which has only
 the five project roles needed to submit logs/artifacts and deploy App Engine
-versions. The engineering group can submit as that builder, and only that
-builder can act as the runtime account. The builder has no Secret Manager
-access. The engineering group also receives
-`grafanaAgentPreflightReader`, a metadata-only custom role containing the exact
-App Engine get, IAM policy/role get, project policy get, secret list/IAM get,
-and secret-version get permissions used by the mandatory live preflight. It
-does not include `secretmanager.versions.access`. The former Cloud Build,
+versions. Terraform grants `gcp_dev_members` permission to submit as that
+builder and the metadata-only `grafanaAgentPreflightReader` role. The live
+preflight requires both policies to match Terraform's member-set fingerprint
+in that role's description. Only the builder can act as the runtime account;
+it has no Secret Manager access. The preflight role contains the exact App
+Engine get, IAM policy/role get, project policy get, secret list/IAM get, and
+secret-version get permissions; it does not include
+`secretmanager.versions.access`. The former Cloud Build,
 compute-default, and AppSpot secret bindings remain during Phase A as an
 explicit rollback route; they are not the selected runtime path and issue
 #1473 removes them after live proof.

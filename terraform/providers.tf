@@ -24,7 +24,7 @@ terraform {
     }
     google = {
       source  = "hashicorp/google"
-      version = "~> 6.50"
+      version = "~> 6.50.0"
     }
     github = {
       source = "integrations/github"

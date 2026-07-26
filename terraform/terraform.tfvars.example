@@ -205,7 +205,8 @@ gcp_billing_account = "..."
 # changing the service's first-creation image.
 # metrics_bridge_image = "europe-west1-docker.pkg.dev/mento-monitoring/metrics-bridge/metrics-bridge:abc123"
 
-# Dev team IAM — defaults to group:eng@mentolabs.xyz in variables.tf.
+# Operator IAM — defaults to group:eng@mentolabs.xyz in variables.tf. Alloy
+# preflight fingerprints this set and checks both applied submitter policies.
 # gcp_dev_members = ["group:eng@mentolabs.xyz"]
 
 # Caller must have roles/iam.serviceAccountTokenCreator on this SA.
