@@ -92,13 +92,13 @@ Run from the repository root:
 pnpm alerts:rules:lint:test
 pnpm alerts:rules:lint
 pnpm tf validate alerts-rules
+(cd alerts/rules && TF_DATA_DIR=.terraform-tf-wrapper terraform test -no-color)
 pnpm agent:quality-gate --run
 ```
 
-The linter parses map-comprehension `format()` expressions, requires every
-`mento_peg_*` selector to bind one approved policy version, cross-checks metric
-names against the producer registry, and validates active/retained-previous
-rollover scope. Terraform validation proves configuration shape only.
+The linter parses Peg expressions, binds every `mento_peg_*` selector to an
+approved policy version, checks the producer registry, and validates rollover
+scope.
 
 The pull-request alert plan deliberately excludes rule groups with direct
 secret-backed contact-point dependencies. The first complete remote diff is
