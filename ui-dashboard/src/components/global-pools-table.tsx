@@ -105,6 +105,8 @@ export function GlobalPoolsTable({
     paramPrefix: "pools",
   });
   const liveNowSeconds = useNowSeconds();
+  // The route seed is banner-only. Health follows the browser snapshot.
+  const isWeekendNow = useIsWeekend();
   const filters = useGlobalPoolFilters(entries);
   const { tvlByKey, totalVolumeByKey } = useGlobalPoolValues(entries);
   const sortedEntries = useSortedGlobalPools({
@@ -114,6 +116,7 @@ export function GlobalPoolsTable({
     tvlByKey,
     totalVolumeByKey,
     nowSeconds: liveNowSeconds ?? 0,
+    isWeekendNow,
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
@@ -146,6 +149,7 @@ export function GlobalPoolsTable({
           totalVolumeByKey={totalVolumeByKey}
           tvlChangeWoWByKey={tvlChangeWoWByKey}
           nowSeconds={liveNowSeconds}
+          isWeekendNow={isWeekendNow}
           olsPoolKeys={olsPoolKeys}
           cdpPoolKeys={cdpPoolKeys}
           reservePoolKeys={reservePoolKeys}
@@ -318,6 +322,7 @@ function useSortedGlobalPools({
   tvlByKey,
   totalVolumeByKey,
   nowSeconds,
+  isWeekendNow,
   volume24hByKey,
   volume7dByKey,
   tvlChangeWoWByKey,
@@ -332,6 +337,7 @@ function useSortedGlobalPools({
         tvlByKey,
         totalVolumeByKey,
         nowSeconds,
+        isWeekendNow,
         volume24hByKey,
         volume7dByKey,
         tvlChangeWoWByKey,
@@ -343,6 +349,7 @@ function useSortedGlobalPools({
       tvlByKey,
       totalVolumeByKey,
       nowSeconds,
+      isWeekendNow,
       volume24hByKey,
       volume7dByKey,
       tvlChangeWoWByKey,

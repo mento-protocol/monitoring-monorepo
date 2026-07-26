@@ -37,6 +37,33 @@ const GBPM_ADDR = "0xccf663b1ff11028f0b19058d0f7b674004a40746";
 const USDC_ADDR = "0xceba9300f2b948710d2653dd7b07f33a8b32118c";
 
 describe("computeHealthStatus", () => {
+  it("honors explicit weekend overrides for stale health", () => {
+    const now = 1_713_200_100;
+    const stalePool = {
+      source: "fpmm_factory",
+      oracleOk: true,
+      oracleTimestamp: String(now - 600),
+      lastOracleReportAt: String(now - 600),
+      oracleFreshnessCheckedAt: now,
+      oracleExpiry: "300",
+      priceDifference: "0",
+      rebalanceThreshold: 5000,
+    };
+
+    expect(computeHealthStatus(stalePool, CELO_CHAIN_ID, now, true)).toBe(
+      "WEEKEND",
+    );
+    expect(computeHealthStatus(stalePool, CELO_CHAIN_ID, now, false)).toBe(
+      "CRITICAL",
+    );
+    expect(computeEffectiveStatus(stalePool, CELO_CHAIN_ID, now, true)).toBe(
+      "WEEKEND",
+    );
+    expect(computeEffectiveStatus(stalePool, CELO_CHAIN_ID, now, false)).toBe(
+      "CRITICAL",
+    );
+  });
+
   it('returns "N/A" for VirtualPools (source includes "virtual")', () => {
     expect(
       computeHealthStatus({

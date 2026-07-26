@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({
 beforeEach(() => {
   mockSearchParams = new URLSearchParams();
   mockReplace.mockClear();
+  vi.mocked(isWeekend).mockReturnValue(false);
 });
 
 // Mock weekend detection so tests are deterministic.
@@ -58,6 +59,7 @@ import {
   hasFeeData,
 } from "@/components/global-pools-table/formatting";
 import { uptimeColorClass, uptimeTierGlyph } from "@/lib/health";
+import { isWeekend } from "@/lib/weekend";
 
 const CELO_NETWORK: Network = {
   id: "celo-mainnet",
@@ -188,6 +190,28 @@ describe("GlobalPoolsTable — FX weekend SSR banner", () => {
     );
 
     expect(html).not.toContain("FX markets are closed this weekend.");
+  });
+
+  it("keeps health critical when the seeded banner says weekend", () => {
+    vi.mocked(isWeekend).mockReturnValue(true);
+    const staleAt = String(TABLE_NOW_SECONDS - 600);
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[
+          makeEntry({
+            oracleTimestamp: staleAt,
+            lastOracleReportAt: staleAt,
+            oracleFreshnessCheckedAt: TABLE_NOW_SECONDS,
+            oracleExpiry: "300",
+          }),
+        ]}
+        initialIsWeekend={true}
+      />,
+    );
+
+    expect(html).toContain("FX markets are closed this weekend.");
+    expect(html).toMatch(/Pool health CRITICAL: Oracle stale/);
+    expect(html).not.toMatch(/Pool health WEEKEND:/);
   });
 });
 
@@ -903,6 +927,33 @@ describe("sortGlobalPools — fee, health, and volume edge cases", () => {
         (e) => e.pool.id,
       ),
     ).toEqual(["ok", "warn", "critical"]);
+  });
+
+  it("uses the explicit weekday snapshot while sorting health", () => {
+    vi.mocked(isWeekend).mockReturnValue(true);
+    const stale = makeEntry({
+      id: "stale",
+      oracleTimestamp: String(TABLE_NOW_SECONDS - 600),
+      lastOracleReportAt: String(TABLE_NOW_SECONDS - 600),
+      oracleFreshnessCheckedAt: TABLE_NOW_SECONDS,
+      oracleExpiry: "300",
+    });
+    const halted = makeEntry({
+      id: "halted",
+      oracleTimestamp: String(TABLE_NOW_SECONDS - 120),
+      lastOracleReportAt: String(TABLE_NOW_SECONDS - 120),
+      oracleFreshnessCheckedAt: TABLE_NOW_SECONDS,
+      oracleExpiry: "300",
+      breakerTripped: true,
+    });
+
+    expect(
+      sortGlobalPools([halted, stale], "health", "desc", {
+        ...BASE_SORT_CTX,
+        nowSeconds: TABLE_NOW_SECONDS,
+        isWeekendNow: false,
+      }).map((entry) => entry.pool.id),
+    ).toEqual(["stale", "halted"]);
   });
 
   it("keeps same-id pools from different chains separate in metric maps", () => {

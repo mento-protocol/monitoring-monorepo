@@ -24,13 +24,11 @@ export type GlobalSortKey =
   | "volume7d"
   | "totalVolume";
 
-// URL-settable sort keys. Excludes "tvlChangeWoW": the WoW delta renders as a
-// secondary line inside the TVL cell rather than as its own sortable header, so
-// it has no header to expose `aria-sort`. Keeping it out of this set means a
-// stale deep link (?poolsSort=tvlChangeWoW) falls back to the default "tvl
-// desc" instead of sorting by an invisible column. The comparator below still
-// handles it so it can be re-promoted to a sortable header without re-deriving
-// the sort logic.
+// URL-settable sort keys exclude "tvlChangeWoW": the WoW delta is a secondary
+// line inside the TVL cell with no sortable header or `aria-sort`. A stale deep
+// link (?poolsSort=tvlChangeWoW) therefore falls back to the default "tvl desc"
+// instead of sorting by an invisible column. The comparator still handles it
+// so a future sortable header can reuse the existing logic.
 export const GLOBAL_SORT_KEYS: ReadonlySet<GlobalSortKey> = new Set([
   "pool",
   "health",
@@ -42,9 +40,9 @@ export const GLOBAL_SORT_KEYS: ReadonlySet<GlobalSortKey> = new Set([
   "totalVolume",
 ]);
 
-// Higher rank = more severe. "desc" puts highest rank first → CRITICAL first.
-// Mirrors STATUS_RANK in lib/health.ts: HALTED outranks WEEKEND/WARN (a halted
-// pool deserves attention) but sits below CRITICAL.
+// Higher rank means greater severity; descending puts CRITICAL first.
+// This mirrors STATUS_RANK: HALTED outranks WEEKEND/WARN but remains below
+// CRITICAL.
 const HEALTH_ORDER: Record<string, number> = {
   "N/A": 0,
   OK: 1,
@@ -63,6 +61,7 @@ export interface GlobalSortContext {
   tvlByKey: Map<string, number | null>;
   totalVolumeByKey: Map<string, number | null>;
   nowSeconds?: number | undefined;
+  isWeekendNow?: boolean | undefined;
   volume24hByKey?: Map<string, number | null | undefined> | undefined;
   volume7dByKey?: Map<string, number | null | undefined> | undefined;
   tvlChangeWoWByKey?: Map<string, number | null> | undefined;
@@ -76,6 +75,7 @@ export function sortGlobalPools(
     tvlByKey,
     totalVolumeByKey,
     nowSeconds = Math.floor(Date.now() / 1000),
+    isWeekendNow,
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
@@ -91,16 +91,8 @@ export function sortGlobalPools(
         );
         break;
       case "health": {
-        const aH = computeEffectiveStatus(
-          a.pool,
-          a.network.chainId,
-          nowSeconds,
-        );
-        const bH = computeEffectiveStatus(
-          b.pool,
-          b.network.chainId,
-          nowSeconds,
-        );
+        const aH = effectiveHealthStatus(a, nowSeconds, isWeekendNow);
+        const bH = effectiveHealthStatus(b, nowSeconds, isWeekendNow);
         cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
         break;
       }
@@ -169,4 +161,17 @@ export function sortGlobalPools(
     }
     return sortDir === "asc" ? cmp : -cmp;
   });
+}
+
+function effectiveHealthStatus(
+  entry: GlobalPoolEntry,
+  nowSeconds: number,
+  isWeekendNow?: boolean,
+): ReturnType<typeof computeEffectiveStatus> {
+  return computeEffectiveStatus(
+    entry.pool,
+    entry.network.chainId,
+    nowSeconds,
+    isWeekendNow,
+  );
 }
