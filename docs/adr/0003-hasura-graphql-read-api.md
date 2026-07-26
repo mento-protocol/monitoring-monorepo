@@ -40,7 +40,7 @@ service between the database and the clients.
 - The GraphQL schema is a generated artifact of the Envio schema — schema changes
   propagate straight to query and UI types (hence ADR 0008's cross-layer checklist).
 - Hosted Hasura disables `_aggregate`; precompute snapshot entities for
-  full-lifetime and hot-path aggregation instead (ADR 0014, ADR 0020).
+  full-lifetime and hot-path aggregation instead (ADRs 0014 and 0051).
 - Verify an explicitly promoted deployment with the commit-scoped verifier,
   the full propagation wait, and an affected data/UI probe. Static-endpoint
   introspection alone is not rollout proof.

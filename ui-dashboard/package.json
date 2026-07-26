@@ -2,6 +2,12 @@
   "name": "@mento-protocol/ui-dashboard",
   "version": "0.1.0",
   "private": true,
+  "browserslist": [
+    "Chrome >= 111",
+    "Edge >= 111",
+    "Firefox >= 111",
+    "Safari >= 16.4"
+  ],
   "scripts": {
     "dev": "node scripts/dev-with-live-hasura.mjs",
     "codegen": "node scripts/generate-graphql-types.mjs",

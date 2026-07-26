@@ -64,7 +64,7 @@ output "ci_terraform_refresh_wif_provider" {
 }
 
 output "ci_deployer_email" {
-  description = "Generic CI deployer SA email — used by service deploys and transitional trusted-main Terraform plans. Set as GH repo secret GCP_SERVICE_ACCOUNT."
+  description = "Generic CI deployer SA email — used only by routine service deploy workflows after the refresh cutover. Set as GH repo secret GCP_SERVICE_ACCOUNT."
   value       = google_service_account.metrics_bridge_deployer.email
 }
 

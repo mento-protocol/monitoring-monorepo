@@ -44,6 +44,44 @@ import { getRpcClient } from "../src/rpc.js";
 const mockProbe = vi.mocked(probeRebalance);
 const mockGetRpcClient = vi.mocked(getRpcClient);
 
+it("runs and warns on an overlapping first cycle before any test-only mutex reset", async () => {
+  register.resetMetrics();
+  vi.clearAllMocks();
+  mockGetRpcClient.mockReturnValue({
+    call: vi.fn(),
+  } as unknown as ReturnType<typeof getRpcClient>);
+  const pool = makePool({
+    deviationBreachStartedAt: "1713200000",
+    lastDeviationRatio: "1.50",
+  });
+  let resolveProbe: (value: { kind: "ok" }) => void = () => {};
+  mockProbe.mockReturnValueOnce(
+    new Promise<{ kind: "ok" }>((resolve) => {
+      resolveProbe = resolve;
+    }) as unknown as ReturnType<typeof probeRebalance>,
+  );
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const before = Math.floor(Date.now() / 1000);
+
+  const firstCycle = runRebalanceProbes([pool]);
+  await runRebalanceProbes([pool]);
+
+  expect(mockProbe).toHaveBeenCalledTimes(1);
+  expect(warn).toHaveBeenCalledWith(
+    expect.stringContaining("[REBALANCE_PROBE_REENTRY]"),
+  );
+
+  resolveProbe({ kind: "ok" });
+  await firstCycle;
+
+  const value = await getGaugeValue(
+    register,
+    "mento_pool_rebalance_probe_last_run",
+  );
+  expect(value).toBeGreaterThanOrEqual(before);
+  warn.mockRestore();
+});
+
 describe("eligibleForProbe — gating mirrors the critical alert rule", () => {
   it("excludes pools without an active breach anchor", () => {
     const pool = makePool({

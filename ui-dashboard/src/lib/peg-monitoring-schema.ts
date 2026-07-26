@@ -5,6 +5,8 @@ const MAX_SOURCES = 16;
 const MAX_MONITORS = 8;
 const MAX_TOKENS = 8;
 const MAX_RENDERABLE_UNIX_SECONDS = 8_640_000_000_000;
+const LEGACY_LISTING_ABSENCE_DEFAULT_POLICY_VERSION =
+  "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f";
 
 const policyVersion = z
   .string()
@@ -104,18 +106,56 @@ const sourcePolicy = z
     referenceSizeCap: z.number().finite().positive(),
     pollIntervalSeconds: z.number().int().min(15).max(3_600),
     staleAfterSeconds: z.number().int().positive().max(86_400),
+    listingAbsentConsecutiveChecks: z
+      .number()
+      .finite()
+      .int()
+      .min(2)
+      .max(1_000)
+      .optional(),
     spreadEnvelopeBps: number.max(10_000),
     conversionErrorBps: number.max(10_000),
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.staleAfterSeconds < value.pollIntervalSeconds * 2)
+    if (
+      value.staleAfterSeconds <
+      value.pollIntervalSeconds * (value.listingAbsentConsecutiveChecks ?? 2)
+    )
       context.addIssue({
         code: "custom",
         path: ["staleAfterSeconds"],
-        message: "must allow two poll intervals",
+        message: "must allow the listing absence confirmation window",
       });
   });
+
+function validateListingEvidence(
+  value: {
+    listingState: "listed" | "halted" | "absent" | null;
+    listingCheckedAt: number | null;
+    healthy: boolean;
+  },
+  context: z.RefinementCtx,
+): void {
+  if ((value.listingState === null) !== (value.listingCheckedAt === null))
+    context.addIssue({
+      code: "custom",
+      path: ["listingCheckedAt"],
+      message: "listing state and checked time must both be present or null",
+    });
+  // The producer records halted and absent listings as non-healthy source
+  // evidence. Legacy packages retain the null/null pair, so this does not
+  // constrain the pre-listing producer during the staged rollout.
+  if (
+    value.healthy &&
+    (value.listingState === "halted" || value.listingState === "absent")
+  )
+    context.addIssue({
+      code: "custom",
+      path: ["listingState"],
+      message: "healthy source cannot report a halted or absent listing",
+    });
+}
 const source = z
   .object({
     id,
@@ -135,8 +175,8 @@ const source = z
       .strict()
       .nullable(),
     policy: sourcePolicy,
-    listingState: z.null(),
-    listingCheckedAt: z.null(),
+    listingState: z.enum(["listed", "halted", "absent"]).nullable(),
+    listingCheckedAt: timestamp.nullable(),
     healthy: z.boolean(),
     venueState: z
       .enum([
@@ -163,6 +203,7 @@ const source = z
   })
   .strict()
   .superRefine((value, context) => {
+    validateListingEvidence(value, context);
     if (
       !value.healthy &&
       value.observationAt !== null &&
@@ -417,10 +458,43 @@ export const PegMonitoringResponseSchema = z
           message: "duplicate asset package",
         });
       assets.add(item.asset);
+      item.sources.forEach((source, sourceIndex) => {
+        if (
+          source.policy.listingAbsentConsecutiveChecks === undefined &&
+          value.producedPolicyVersion !==
+            LEGACY_LISTING_ABSENCE_DEFAULT_POLICY_VERSION
+        )
+          context.addIssue({
+            code: "custom",
+            path: [
+              "packages",
+              index,
+              "sources",
+              sourceIndex,
+              "policy",
+              "listingAbsentConsecutiveChecks",
+            ],
+            message: "must be present outside the legacy policy rollout",
+          });
+      });
     });
-  });
+  })
+  .transform((value) => ({
+    ...value,
+    packages: value.packages.map((item) => ({
+      ...item,
+      sources: item.sources.map((source) => ({
+        ...source,
+        policy: {
+          ...source.policy,
+          listingAbsentConsecutiveChecks:
+            source.policy.listingAbsentConsecutiveChecks ?? 2,
+        },
+      })),
+    })),
+  }));
 
 export type PegMonitoringResponse = z.infer<typeof PegMonitoringResponseSchema>;
-export type PegAssetPackage = z.infer<typeof assetPackage>;
-export type PegMonitor = z.infer<typeof monitor>;
-export type PegSource = z.infer<typeof source>;
+export type PegAssetPackage = PegMonitoringResponse["packages"][number];
+export type PegMonitor = PegAssetPackage["monitors"][number];
+export type PegSource = PegAssetPackage["sources"][number];

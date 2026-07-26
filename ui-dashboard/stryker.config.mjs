@@ -12,13 +12,11 @@ const config = {
     high: 90,
     low: 80,
     // Blocking gate: `pnpm dashboard:mutation` exits non-zero when the
-    // combined score across `src/lib/weekend.ts` + `src/lib/pool-id.ts`
-    // drops below 86%. The CI workflow wires this into the
-    // `dashboard-logic-baseline` job (see
-    // `.github/workflows/mutation-testing.yml`). Current baseline: 88.81%
-    // with a 2-pt margin for measurement noise. All remaining survivors
-    // are classified as equivalent mutants or accepted noise — see
-    // `docs/mutation-testing.md` for the taxonomy.
+    // combined score across `src/lib/weekend.ts` + `src/lib/pool-id.ts` drops
+    // below 86%. The CI workflow wires this into the dashboard baseline job.
+    // The floor preserves the documented two-point rounded-down safety margin;
+    // current evidence and survivor classification live in
+    // `docs/mutation-testing.md`.
     break: 86,
   },
   ignorePatterns: [

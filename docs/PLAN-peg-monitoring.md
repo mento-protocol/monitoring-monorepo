@@ -15,7 +15,8 @@ review_interval_days: 365
 > [0042](adr/0042-metrics-bridge-external-price-poller.md),
 > [0043](adr/0043-peg-registry-service-local.md),
 > [0044](adr/0044-peg-thresholds-gated-rules-plane.md),
-> [0045](adr/0045-peg-paging-semantics.md). Market figures below are a
+> [0045](adr/0045-peg-paging-semantics.md), and
+> [0048](adr/0048-private-gcs-peg-policy-artifact.md). Market figures below are a
 > 2026-07-22 snapshot — re-verify before relying on them. Rollout status below
 > was checked against `main` and the linked pull requests on 2026-07-25.
 

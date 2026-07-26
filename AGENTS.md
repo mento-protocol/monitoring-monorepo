@@ -3,7 +3,7 @@ title: Monitoring Monorepo Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-26
 doc_type: agent-instructions
 scope: repo-wide
 review_interval_days: 90
@@ -12,10 +12,8 @@ garden_lane: agent-entry-points
 
 # AGENTS.md — Monitoring Monorepo
 
-This pnpm monorepo contains the indexer, dashboard, monitoring services,
-alerting, probes, shared configuration, and infrastructure. The current package
-map and setup live in [`README.md`](README.md); architecture and data flow live
-in [`SPEC.md`](SPEC.md).
+Package setup lives in [`README.md`](README.md); architecture and data flow
+live in [`SPEC.md`](SPEC.md).
 
 ## Operating Rule (read this before opening PRs)
 
@@ -180,14 +178,12 @@ the `/verify-ui` command owns the route-level smoke sequence.
 
 ## Agent Tooling and Setup
 
-Reusable project workflows live under `.agents/skills/`; Claude mirrors under
-`.claude/skills/` must stay aligned. Codex Cloud routing, status-polling
-guidance, the SessionEnd hook, and skill ownership are in
-[`docs/notes/codex-agent-skills.md`](docs/notes/codex-agent-skills.md).
-Claude slash commands live under `.claude/commands/`.
+Skills live under `.agents/skills/`; keep `.claude/skills/` mirrors aligned.
+Codex routing and skill ownership are in
+[`docs/notes/codex-agent-skills.md`](docs/notes/codex-agent-skills.md); Claude
+commands live under `.claude/commands/`.
 
-After cloning or creating a worktree, run `./scripts/setup.sh`. Hosted Claude
-setup and Worktrunk hooks are described in
-[`docs/notes/worktree-and-web-setup.md`](docs/notes/worktree-and-web-setup.md).
-Environment prerequisites and service startup belong to the root and package
-READMEs.
+Run `./scripts/setup.sh` in a new clone or worktree. Hosted setup and Worktrunk
+hooks are in
+[`docs/notes/worktree-and-web-setup.md`](docs/notes/worktree-and-web-setup.md);
+service prerequisites stay in package READMEs.

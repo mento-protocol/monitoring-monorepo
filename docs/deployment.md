@@ -62,7 +62,7 @@ Then wait for the deployment to catch up and promote it:
 ```bash
 pnpm deploy:indexer:status "$COMMIT" --watch --compact
 pnpm deploy:indexer:logs "$COMMIT" --build
-pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
+pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
@@ -95,7 +95,7 @@ pnpm deploy:indexer --yes
 ### After Redeployment Checklist
 
 1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch --compact` for low-noise agent output, `pnpm deploy:indexer:status "$COMMIT" --watch` for the full terminal table, or [envio.dev/app](https://envio.dev/app)).
-2. Inspect build and runtime errors with explicit commit-scoped logs (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h`).
+2. Inspect build logs and explicitly marked runtime errors with commit-scoped commands (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h`). Use `--level warn` separately when warnings are relevant; Envio can carry them as stdout records. Error-only inspection owns Envio's 100-record limit and fails closed when the page is full; narrow `--since` and retry until the result is complete.
 3. Capture a combined status/metrics/log snapshot for comparison (`pnpm deploy:indexer:perf "$COMMIT"`).
 4. Verify sync, metrics, endpoint resolution, core rows, and fail-closed Polygon replay semantics (`pnpm deploy:indexer:verify "$COMMIT"`). The verifier reads `indexer-envio/config/replay-integrity.json` from that exact commit, so a pre-invariant replay cannot pass merely because later rows look healthy. A caught-up status alone is only `SYNCED_PENDING_DATA_VERIFY`.
 5. Capture the current production commit for rollback, then promote the same caught-up, semantically verified commit (`pnpm deploy:indexer:promote "$COMMIT"`) and confirm its `prod_status=prod`. The `deploy-indexer` skill owns the exact prefix-safe query and guarded rollback command.
@@ -164,13 +164,22 @@ commit:
 
 ## Metrics Bridge Peg-Policy Bootstrap
 
-`PEG_POLICY_URL` is optional raw runtime configuration for the protected,
-versioned peg-policy artifact. The platform Terraform stack will own the Cloud
-Run value when that artifact plane is provisioned; do not add or change it with
-an ad hoc `gcloud run services update --set-env-vars` command. Until then, an
-absent value intentionally leaves only the isolated peg poller dormant. Blank
-or malformed values are reported through that loop's bounded error channel and
-must not affect the primary Hasura polling loop or `/health`.
+`PEG_POLICY_URL` and `PEG_POLICY_AUTH_MODE` are paired raw runtime
+configuration for the protected, versioned peg-policy artifact. The platform
+Terraform stack will own both Cloud Run values when that artifact plane is
+provisioned; do not add or change them with an ad hoc
+`gcloud run services update --set-env-vars` command. Until then, both remain
+absent and only the isolated Peg poller stays dormant.
+
+Production mode is `gcp-metadata`. The URL must use the exact GCS JSON download
+host and path, a canonical percent-encoded object component, `alt=media`, and
+an immutable pinned `generation`. `none` exists only for deliberate local or
+test HTTPS artifacts and requires the code-only
+`allowUnauthenticatedPolicy` option. Environment configuration cannot enable
+it. Blank, malformed, missing, or mismatched pairs and token/fetch failures are
+reported through the Peg loop's bounded error channel, preserve the last
+accepted policy, and must not affect the primary Hasura polling loop or
+`/health`.
 
 Every policy version must end in `-<32 lowercase hex>` matching the first 32
 characters of the SHA-256 digest over its canonical content without the
@@ -191,7 +200,9 @@ The metrics-bridge image contains its service-local `peg-registry.json`
 identity/topology data at the compiled loader's expected path. It never bakes
 `alerts/rules/peg-thresholds.json` into the image: page-affecting thresholds are
 fetched from the gated runtime artifact under
-[ADR 0044](adr/0044-peg-thresholds-gated-rules-plane.md).
+[ADR 0044](adr/0044-peg-thresholds-gated-rules-plane.md). Its private,
+generation-pinned GCS transport and dormant activation boundary are fixed by
+[ADR 0048](adr/0048-private-gcs-peg-policy-artifact.md).
 
 ---
 

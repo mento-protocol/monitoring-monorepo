@@ -2,11 +2,11 @@
 title: "Mutation Testing"
 status: active
 owner: eng
-canonical: false
-last_verified: 2026-07-24
+canonical: true
+last_verified: 2026-07-26
 doc_type: reference
 scope: repo-wide
-review_interval_days: 180
+review_interval_days: 7
 garden_lane: package-readmes-reference
 ---
 
@@ -24,12 +24,28 @@ Mutation testing is intentionally scoped to proven pure-logic targets:
 
 ## Current Baseline
 
+This document is the canonical record for current mutation measurements,
+runtimes, and accepted survivor classifications. The package configs own only
+the enforced floors; the checklist owns the recurring workflow policy.
+
+The 2026-07-26 baseline ran the three commands serially from a clean checkout
+of [`e86c638d7feed52228afd658bf742ff5124a6da5`](https://github.com/mento-protocol/monitoring-monorepo/commit/e86c638d7feed52228afd658bf742ff5124a6da5)
+(`docs: finish notes and plans garden (#1612)`) on macOS 26.5.2, Node
+v24.13.1, and pnpm 11.9.0. Stryker's native JSON and HTML reports were emitted
+under each package's ignored `reports/mutation/` directory; the table below is
+the retained, reviewable extraction from those reports.
+Review then identified the bridge's `probeInProgress = true` and
+`reentryWarnedThisWindow = true` survivors as real first-cycle test gaps. The
+metrics-bridge row records the corrected rerun from this proposed tree after
+adding one first-window test that kills both; the other two rows retain the
+clean-checkout measurements.
+
 Run from the repo root:
 
 ```bash
-pnpm indexer:mutation
-pnpm dashboard:mutation
 pnpm bridge:mutation
+pnpm dashboard:mutation
+pnpm indexer:mutation
 ```
 
 Each command runs StrykerJS with the Vitest runner and a dedicated mutation
@@ -38,18 +54,24 @@ mutated files. The indexer baseline writes Stryker's temp sandbox to the repo
 root under `.stryker-tmp/indexer-envio` so the package lint gate can run in
 parallel without scanning transient mutation files.
 
-Latest indexer result:
+| Target         | Native report                                                     | Runtime | Score (total / covered) | Mutants (killed / timed out / survived / no coverage / errors) | `break` / margin |
+| -------------- | ----------------------------------------------------------------- | ------: | ----------------------- | -------------------------------------------------------------- | ---------------- |
+| Metrics bridge | `metrics-bridge/reports/mutation/{mutation.json,html/index.html}` |      8s | 88.89% / 88.89%         | 140 / 4 / 18 / 0 / 0                                           | 86 / 2.89 points |
+| Dashboard      | `ui-dashboard/reports/mutation/{mutation.json,html/index.html}`   |     12s | 88.83% / 91.50%         | 172 / 11 / 17 / 6 / 0                                          | 86 / 2.83 points |
+| Indexer        | `indexer-envio/reports/mutation/{mutation.json,html/index.html}`  |     58s | 96.09% / 96.09%         | 161 / 11 / 7 / 0 / 0                                           | 94 / 2.09 points |
 
-- Runtime: 15s on the final root-script run (15-26s observed locally)
-- Mutation score: 94.19% total / covered
-- Mutants: 162 killed, 0 timed out, 10 survived, 0 no coverage
-- Per-file: `helpers.ts` 91.11% total / covered; `tradingLimits.ts`
-  96.63% total / covered; `stables/classifyKind.ts` 90.00% total /
-  covered; `stables/dailyFlush.ts` 100.00% total / covered
-- `indexer-envio/stryker.config.mjs` sets `break: 92` (current baseline
-  94.19% with the standard 2-pt margin). All remaining survivors are
-  classified as equivalent mutants or accepted noise — see the
-  Survivor Classification section below.
+The floor is `floor(measured total score) - 2`. Stryker counts timed-out
+mutants as detected in its total score, while retaining their count separately
+in the reports. The corrected bridge floor moves from 85 to 86, and the indexer
+floor moves from 92 to 94, because these measured baselines support the existing
+two-point policy; no targets or schedule change.
+
+Per-file results:
+
+- Indexer: `helpers.ts` 92.98%, `tradingLimits.ts` 96.63%,
+  `stables/classifyKind.ts` 100.00%, and `stables/dailyFlush.ts` 100.00%.
+- Dashboard: `weekend.ts` 87.71% total / 90.75% covered and `pool-id.ts`
+  96.30% total / covered.
 
 The indexer scope is limited to deterministic helpers with direct tests:
 chain/event/pool/snapshot ID helpers, trading-limit derivation, and stables
@@ -58,26 +80,6 @@ and `priceDifference.ts` ran in 1m07s but scored 65.19% total / 79.03% covered
 because broad branchy math helpers produced many survivors/no-coverage mutants.
 Revisit those one file at a time after adding smaller direct tests; adding them
 now would dilute the baseline.
-
-Latest dashboard result:
-
-- Runtime: 9s on the final root-script run (5-14s observed locally)
-- Mutation score: 88.81% total / 92.70% covered
-- Mutants: 122 killed, 5 timed out, 10 survived, 6 no coverage
-- Per-file: `weekend.ts` 87.07% total / 91.82% covered; `pool-id.ts`
-  96.30% total / covered
-- `ui-dashboard/stryker.config.mjs` sets `break: 86` (current baseline
-  88.81% with the standard 2-pt margin). All remaining survivors are
-  classified as equivalent mutants or accepted noise — see the
-  Survivor Classification section below.
-
-Latest metrics-bridge result:
-
-- Runtime: 9s locally on 2026-07-24
-- Mutation score: **87.65% total / covered**
-- Mutants: 139 killed, 3 timed out, 20 survived, 0 no coverage
-- `metrics-bridge/stryker.config.mjs` sets `break: 85`, leaving a 2.65-point
-  margin below the verified score.
 
 The first dashboard run was worth doing: it found real assertion gaps in the
 default `Date.now()` path, reversed weekend-overlap ranges, and the exact/future
@@ -103,32 +105,32 @@ The metrics-bridge evaluation was mixed:
 
 ## Survivor Classification
 
-Remaining dashboard survivors are accepted noise:
+The 2026-07-26 survivors are accepted noise or equivalent mutants in the
+current target scope. Treat a new survivor as a test gap unless it fits one of
+these classifications.
 
-- `isWeekend()` day-gap mutants are equivalent with the current calendar because
-  close day and reopen day return before the generic modulo branch.
-- `weekendOverlapSeconds()` half-open boundary mutants add or skip zero seconds
-  when a range starts or ends exactly on a weekend boundary.
+**Dashboard (17 survived, 6 no coverage)**
+
+- `isWeekend()` day-gap mutants are equivalent with the current calendar
+  because close and reopen days return before the generic modulo branch.
+- `fxWeekendBands()` and `weekendOverlapSeconds()` boundary mutants only change
+  zero-width ranges or empty-shape presentation at half-open boundaries.
 - `tradingSecondsInRange()` `<=` to `<` is equivalent for equal timestamps
   because the subtraction path still returns zero.
-- `nextMarketHoursTransition()` loop-bound/update mutants return the same
-  boundary for reachable inputs; the final fallback remains an unreachable
-  defensive return.
-- The no-coverage mutants are in that defensive fallback.
+- `nextMarketHoursTransition()` loop-bound and update mutants return the same
+  boundary for reachable inputs. Its final fallback is defensive and has the
+  six no-coverage mutants.
 - `stripChainIdFromPoolId()` has one equivalent separator mutant: after
   `slice(1)`, the namespaced format leaves a single address segment, so
   `join("")` and `join("-")` return the same value.
 
-The 20 metrics-bridge survivors from the 2026-07-24 run are classified as
-accepted noise or equivalent mutants:
+**Metrics bridge (18 survived)**
 
-**Test scaffolding (3)** — affect test cleanup, not production behavior:
+The survivors are classified as accepted noise or equivalent mutants:
+
+**Test scaffolding (1)** — affects test cleanup, not production behavior:
 
 - `_resetProbeInProgressForTests()` body emptied.
-- Module-scope `let probeInProgress = false` flipped to `true`;
-  `runRebalanceProbes()` re-sets it every cycle before reading.
-- Module-scope `let reentryWarnedThisWindow = false` flipped to `true`
-  and then reset in the `finally` block.
 
 **`eligibleForProbe` optimization branches (5)** — equivalent mutants
 because NaN-comparison semantics naturally short-circuit downstream:
@@ -183,22 +185,15 @@ timeoutMessage` and the fallback now returns
   zero iterations, and the function still reaches the same final
   `rebalanceProbeLastRun` gauge update at the end of the `try` block.
 
-Remaining indexer survivors are accepted noise for this baseline:
+**Indexer (7 survived)**
 
-- `extractAddressFromPoolId()` regex anchor and error-string mutants do not
-  change the currently asserted valid extraction / bare-address /
-  double-namespacing behavior.
-- The `addr === undefined` guard mutant is unreachable after the preceding
-  capture-group match succeeds; it is defensive against future regex edits.
-- Trading-limit `<` to `<=` absolute-value mutants are equivalent for zero,
-  because negating `0n` still yields `0n`.
-- `classifyStableSupplyChangeKind()` broker-cache branch mutants are accepted
-  noise: the test suite already proves first-call classification for broker,
-  NTT helper, NTT transceiver, unknown, null, and cross-chain broker inputs; the
-  surviving mutants only change the cached-repeat path or collapse to the same
-  returned address/null semantics.
-- `_resetBrokerAddressCacheForTest()` body removal affects test cleanup only,
-  not production behavior.
+- `extractAddressFromPoolId()` has three error-message/regex-shape survivors;
+  they do not change the currently asserted valid extraction, bare-address, or
+  double-namespacing behavior. The `addr === undefined` guard is unreachable
+  after the preceding capture-group match succeeds and remains defensive
+  against future regex edits.
+- The three trading-limit `<` to `<=` absolute-value mutants are equivalent for
+  zero because negating `0n` still yields `0n`.
 
 ## Expansion Guidance
 
