@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({
 beforeEach(() => {
   mockSearchParams = new URLSearchParams();
   mockReplace.mockClear();
+  mockIsWeekend.mockReturnValue(false);
 });
 
 // Mock weekend detection so tests are deterministic.
@@ -58,6 +59,9 @@ import {
   hasFeeData,
 } from "@/components/global-pools-table/formatting";
 import { uptimeColorClass, uptimeTierGlyph } from "@/lib/health";
+import { isWeekend } from "@/lib/weekend";
+
+const mockIsWeekend = vi.mocked(isWeekend);
 
 const CELO_NETWORK: Network = {
   id: "celo-mainnet",
@@ -188,6 +192,17 @@ describe("GlobalPoolsTable — FX weekend SSR banner", () => {
     );
 
     expect(html).not.toContain("FX markets are closed this weekend.");
+  });
+
+  it("keeps live weekend behavior when a direct caller has no snapshot", () => {
+    mockIsWeekend.mockReturnValue(true);
+
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry()]} />,
+    );
+
+    expect(html).toContain("FX markets are closed this weekend.");
+    expect(html).toContain('aria-label="Pool health WEEKEND:');
   });
 });
 
@@ -903,6 +918,37 @@ describe("sortGlobalPools — fee, health, and volume edge cases", () => {
         (e) => e.pool.id,
       ),
     ).toEqual(["ok", "warn", "critical"]);
+  });
+
+  it("uses the same weekend snapshot for health sorting as row badges", () => {
+    const nowSeconds = 1_700_000_000;
+    const freshTs = String(nowSeconds + 60);
+    const stale = makeEntry({
+      id: "stale",
+      oracleTimestamp: String(nowSeconds - 600),
+      oracleFreshnessWindow: "300",
+    });
+    const halted = makeEntry({
+      id: "halted",
+      oracleTimestamp: freshTs,
+      lastOracleReportAt: freshTs,
+      breakerTripped: true,
+    });
+
+    expect(
+      sortGlobalPools([halted, stale], "health", "desc", {
+        ...BASE_SORT_CTX,
+        nowSeconds,
+        isWeekendNow: false,
+      }).map((entry) => entry.pool.id),
+    ).toEqual(["stale", "halted"]);
+    expect(
+      sortGlobalPools([halted, stale], "health", "desc", {
+        ...BASE_SORT_CTX,
+        nowSeconds,
+        isWeekendNow: true,
+      }).map((entry) => entry.pool.id),
+    ).toEqual(["halted", "stale"]);
   });
 
   it("keeps same-id pools from different chains separate in metric maps", () => {
