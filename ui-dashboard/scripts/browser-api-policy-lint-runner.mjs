@@ -22,6 +22,14 @@ const TYPED_ARRAY_BLOCKED_SOURCE = `
   values.toReversed();
   values.with(0, 2);
 `;
+const DESTRUCTURED_BLOCKED_SOURCE = `
+  const { toSorted } = Array.prototype;
+  const { toReversed } = new Uint8Array([3, 1]);
+  const { isWellFormed: validateString } = String.prototype;
+  toSorted.call([3, 1]);
+  toReversed.call(new Uint8Array([3, 1]));
+  validateString.call("value");
+`;
 const cases = {
   blocked: {
     filePath: "src/lib/immutable-sort.ts",
@@ -30,6 +38,10 @@ const cases = {
   typedArrayBlocked: {
     filePath: "src/lib/peg-monitoring.ts",
     source: TYPED_ARRAY_BLOCKED_SOURCE,
+  },
+  destructuredBlocked: {
+    filePath: "src/lib/tag-suggestions.ts",
+    source: DESTRUCTURED_BLOCKED_SOURCE,
   },
   allowed: {
     filePath: "src/lib/address-report-fields.ts",
@@ -69,6 +81,10 @@ const cases = {
       localTypedArray.toSorted();
       localTypedArray.toReversed();
       localTypedArray.with(0, 2);
+
+      const customCollection = { toSorted() {} };
+      const { toSorted: customSort } = customCollection;
+      customSort();
     `,
   },
   api: {

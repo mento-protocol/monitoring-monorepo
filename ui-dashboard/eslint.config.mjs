@@ -49,6 +49,29 @@ function memberPropertyName(node) {
   return null;
 }
 
+function objectPropertyName(node) {
+  if (!node.computed && node.key.type === "Identifier") {
+    return node.key.name;
+  }
+  if (
+    node.computed &&
+    node.key.type === "Literal" &&
+    typeof node.key.value === "string"
+  ) {
+    return node.key.value;
+  }
+  return null;
+}
+
+function destructuringSource(node) {
+  const pattern = node.parent;
+  const parent = pattern?.parent;
+  if (pattern?.type !== "ObjectPattern") return null;
+  if (parent?.type === "VariableDeclarator") return parent.init ?? pattern;
+  if (parent?.type === "AssignmentExpression") return parent.right;
+  return pattern;
+}
+
 function hasBuiltInReceiverDeclaration(
   type,
   checker,
@@ -153,6 +176,30 @@ const receiverAwareBrowserApiRule = {
           )
         ) {
           context.report({ node: node.property, message: restriction.message });
+        }
+      },
+      Property(node) {
+        const source = destructuringSource(node);
+        if (!source || node.parent.type !== "ObjectPattern") return;
+        const property = objectPropertyName(node);
+        if (!property) return;
+        const restriction = context.options[0].find(
+          (candidate) => candidate.property === property,
+        );
+        if (!restriction) return;
+
+        const receiverNode = services.esTreeNodeToTSNodeMap.get(source);
+        const receiverType = checker.getTypeAtLocation(receiverNode);
+        if (
+          hasBuiltInReceiverDeclaration(
+            receiverType,
+            checker,
+            services.program,
+            restriction.receiver,
+            property,
+          )
+        ) {
+          context.report({ node: node.key, message: restriction.message });
         }
       },
     };

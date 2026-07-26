@@ -24,6 +24,7 @@ const eslint = new ESLint({
 type LintCase =
   | "blocked"
   | "typedArrayBlocked"
+  | "destructuredBlocked"
   | "allowed"
   | "api"
   | "og"
@@ -129,6 +130,27 @@ describe("browser runtime API policy", () => {
   it("reports unsupported change-by-copy methods on typed arrays", async () => {
     const messages = await browserApiMessages("typedArrayBlocked");
     const properties = new Set(["toSorted", "toReversed", "with"]);
+    const restrictions = browserApiPolicy.restrictions.filter(
+      (restriction) =>
+        "receiver" in restriction && properties.has(restriction.property),
+    );
+
+    expect(messages).toHaveLength(restrictions.length);
+    for (const restriction of restrictions) {
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: RECEIVER_AWARE_RULE_ID,
+            message: expect.stringContaining(restriction.message),
+          }),
+        ]),
+      );
+    }
+  }, 15_000);
+
+  it("reports blocked methods extracted through destructuring", async () => {
+    const messages = await browserApiMessages("destructuredBlocked");
+    const properties = new Set(["toSorted", "toReversed", "isWellFormed"]);
     const restrictions = browserApiPolicy.restrictions.filter(
       (restriction) =>
         "receiver" in restriction && properties.has(restriction.property),
