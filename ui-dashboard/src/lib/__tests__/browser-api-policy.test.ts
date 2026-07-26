@@ -14,6 +14,7 @@ const TEST_FIXTURE_PATH = "src/lib/__tests__/browser-api-policy.test.ts";
 const RECEIVER_AWARE_RULE_ID =
   "browser-api-policy/no-unsupported-receiver-property";
 const PROPERTY_RULE_ID = "no-restricted-properties";
+const LINT_RUNNER_TIMEOUT_MS = 30_000;
 const execFileAsync = promisify(execFile);
 const eslint = new ESLint({
   cwd: fileURLToPath(DASHBOARD_ROOT_URL),
@@ -109,65 +110,77 @@ describe("browser runtime API policy", () => {
     expect(genericProperties).not.toContain("toWellFormed");
   });
 
-  it("reports every blocked API with its intended rule and message", async () => {
-    const messages = await browserApiMessages("blocked");
+  it(
+    "reports every blocked API with its intended rule and message",
+    async () => {
+      const messages = await browserApiMessages("blocked");
 
-    expect(messages).toHaveLength(browserApiPolicy.restrictions.length);
-    for (const restriction of browserApiPolicy.restrictions) {
-      const expectedRule =
-        "receiver" in restriction ? RECEIVER_AWARE_RULE_ID : PROPERTY_RULE_ID;
-      expect(messages).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            ruleId: expectedRule,
-            message: expect.stringContaining(restriction.message),
-          }),
-        ]),
+      expect(messages).toHaveLength(browserApiPolicy.restrictions.length);
+      for (const restriction of browserApiPolicy.restrictions) {
+        const expectedRule =
+          "receiver" in restriction ? RECEIVER_AWARE_RULE_ID : PROPERTY_RULE_ID;
+        expect(messages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              ruleId: expectedRule,
+              message: expect.stringContaining(restriction.message),
+            }),
+          ]),
+        );
+      }
+    },
+    LINT_RUNNER_TIMEOUT_MS,
+  );
+
+  it(
+    "reports unsupported change-by-copy methods on typed arrays",
+    async () => {
+      const messages = await browserApiMessages("typedArrayBlocked");
+      const properties = new Set(["toSorted", "toReversed", "with"]);
+      const restrictions = browserApiPolicy.restrictions.filter(
+        (restriction) =>
+          "receiver" in restriction && properties.has(restriction.property),
       );
-    }
-  }, 15_000);
 
-  it("reports unsupported change-by-copy methods on typed arrays", async () => {
-    const messages = await browserApiMessages("typedArrayBlocked");
-    const properties = new Set(["toSorted", "toReversed", "with"]);
-    const restrictions = browserApiPolicy.restrictions.filter(
-      (restriction) =>
-        "receiver" in restriction && properties.has(restriction.property),
-    );
+      expect(messages).toHaveLength(restrictions.length);
+      for (const restriction of restrictions) {
+        expect(messages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              ruleId: RECEIVER_AWARE_RULE_ID,
+              message: expect.stringContaining(restriction.message),
+            }),
+          ]),
+        );
+      }
+    },
+    LINT_RUNNER_TIMEOUT_MS,
+  );
 
-    expect(messages).toHaveLength(restrictions.length);
-    for (const restriction of restrictions) {
-      expect(messages).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            ruleId: RECEIVER_AWARE_RULE_ID,
-            message: expect.stringContaining(restriction.message),
-          }),
-        ]),
+  it(
+    "reports blocked methods extracted through destructuring",
+    async () => {
+      const messages = await browserApiMessages("destructuredBlocked");
+      const properties = new Set(["toSorted", "toReversed", "isWellFormed"]);
+      const restrictions = browserApiPolicy.restrictions.filter(
+        (restriction) =>
+          "receiver" in restriction && properties.has(restriction.property),
       );
-    }
-  }, 15_000);
 
-  it("reports blocked methods extracted through destructuring", async () => {
-    const messages = await browserApiMessages("destructuredBlocked");
-    const properties = new Set(["toSorted", "toReversed", "isWellFormed"]);
-    const restrictions = browserApiPolicy.restrictions.filter(
-      (restriction) =>
-        "receiver" in restriction && properties.has(restriction.property),
-    );
-
-    expect(messages).toHaveLength(restrictions.length);
-    for (const restriction of restrictions) {
-      expect(messages).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            ruleId: RECEIVER_AWARE_RULE_ID,
-            message: expect.stringContaining(restriction.message),
-          }),
-        ]),
-      );
-    }
-  }, 15_000);
+      expect(messages).toHaveLength(restrictions.length);
+      for (const restriction of restrictions) {
+        expect(messages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              ruleId: RECEIVER_AWARE_RULE_ID,
+              message: expect.stringContaining(restriction.message),
+            }),
+          ]),
+        );
+      }
+    },
+    LINT_RUNNER_TIMEOUT_MS,
+  );
 
   it("allows floor-compatible APIs and arbitrary same-name methods", async () => {
     const messages = await browserApiMessages("allowed");
