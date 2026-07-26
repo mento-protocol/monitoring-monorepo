@@ -21,7 +21,8 @@ export function createPlotlyIdlePreloadScheduler(
     };
 
     // Match the route-independent Sentry Replay preload: busy tabs get a
-    // bounded 1.5s wait, and older Safari gets the same post-hydration delay.
+    // bounded 1.5s wait, and Safari without idle callbacks gets the same
+    // post-hydration delay.
     if (typeof window.requestIdleCallback === "function") {
       window.requestIdleCallback(load, { timeout: 1_500 });
     } else {

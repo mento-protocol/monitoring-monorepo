@@ -38,7 +38,7 @@ function lazyLoadReplayIntegration(): void {
       });
   };
 
-  // requestIdleCallback is missing from older Safari; ES2017-safe fallback.
+  // requestIdleCallback is missing from Safari in the supported range.
   // The timeout bounds how late replay can attach on busy/backgrounded tabs
   // — without it a tab that never goes idle would never start recording,
   // degrading replaysOnErrorSampleRate well beyond the documented
