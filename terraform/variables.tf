@@ -30,13 +30,15 @@ variable "github_token" {
     GitHub PAT for writing repository Actions secrets, variables, and the
     default workflow-token permission on `mento-protocol/monitoring-monorepo`.
     Fine-grained PAT scoped to that repo with Repository → Secrets: Read/write,
-    Variables: Read/write, and Administration: Read/write — least-privilege for
-    this stack's use case (org-admin scope is NOT needed because the resources
-    managed here are repo-level, not org-level). GitHub scopes these repo
-    permissions independently: Variables for `github_actions_variable`, and
-    Administration for `github_workflow_repository_permissions`
-    (`github-actions-permissions.tf`, issue #1557) — a Secrets-only PAT 403s on
-    the latter two.
+    Variables: Read/write, Administration: Read/write, and Environments:
+    Read/write — least-privilege for this stack's use case (org-admin scope is
+    NOT needed because the resources managed here are repo-level, not org-level).
+    GitHub scopes these repo permissions independently: Variables for
+    `github_actions_variable`, Administration for
+    `github_workflow_repository_permissions` (`github-actions-permissions.tf`,
+    issue #1557), and Environments for the `sentry-pipeline` GitHub Environment +
+    its `github_actions_environment_secret` mirrors (`github-environment.tf`,
+    issue #1289) — a PAT missing any of these 403s.
   EOT
   type        = string
   sensitive   = true
