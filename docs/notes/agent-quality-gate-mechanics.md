@@ -88,8 +88,7 @@ pnpm agent:quality-gate --run
 ```
 
 Execution stays local: lint, typecheck, tests, codegen,
-Trunk, and formatting/validation commands. It never runs deploy commands or
-Terraform apply. Terraform formatting receives an explicit Git-visible source
+Trunk, and formatting/validation commands. Terraform formatting receives an explicit Git-visible source
 list, so tracked and non-ignored untracked Terraform files are checked without
 letting gitignored operator-held `*.tfvars` affect a branch-source gate. If any
 package manifest, `pnpm-lock.yaml`,
@@ -173,8 +172,7 @@ one command to `pnpm --filter <pkg> exec vitest related --run <files>` so an
 agent only pays for the tests reaching its edit. The reason string carries
 `(scoped-tests)` so the substitution is visible in dry-run output. This is a
 local-signal optimization only: CI still runs the full `test:coverage` coverage
-floors, so scoping never changes what gets enforced — it only trims the local
-feedback loop.
+floors, so scoping never changes what gets enforced.
 
 The rewrite fires for a package only when **all** of these hold:
 
@@ -219,7 +217,7 @@ still writes `ui-dashboard/.next`; competing writers can produce false
 `Another next dev server is already running` or `ChunkLoadError` failures. The gate also schedules coverage alongside other
 independent checks, so an extra ad hoc coverage run only adds load and can turn
 normally passing accessibility tests into timeout noise. Run focused tests
-before the gate, then let one gate invocation own the full mapped batch.
+before the gate instead.
 
 For non-trivial behavioral, workflow, security, data-flow, or UI batches, run
 the structured closeout review after the mapped gate and before pushing:
@@ -250,9 +248,8 @@ lookups for base-branch detection and `--feedback-pr auto` resolution are
 bounded by `AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS` (default 60s); the separate
 multi-call PR feedback capture is bounded by its own
 `AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS` (default 120s, higher because it
-runs several GitHub calls in one pass). Either way a hung `gh` process cannot
-stall autoreview indefinitely; a lookup that exceeds its deadline fails closed
-like any other lookup error. The wrapper's
+runs several GitHub calls in one pass). Either way, an exceeded deadline fails
+closed like any other lookup error. The wrapper's
 own `gh`/subprocess deadlines (`run_with_deadline`) run the command in its own
 process group and escalate `SIGTERM` then `SIGKILL` on timeout or on the
 wrapper itself being interrupted; the helper's `gh` calls (`spawnSync`) use
@@ -583,8 +580,8 @@ pnpm agent:review-materiality
 
 The command reports `trivial`, `standard`, or `full` materiality from changed
 path risk and diff size, plus whether the change likely needs AGENTS, README,
-runbook, checklist, or skill context updates. It is advisory: it helps choose
-review depth, but it does not replace `pnpm agent:quality-gate --run`,
+runbook, checklist, or skill context updates. It is advisory and does not
+replace `pnpm agent:quality-gate --run`,
 `pnpm agent:autoreview`, or `pnpm pr:ready-state`.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
@@ -596,9 +593,8 @@ pnpm agent:prewarm --base origin/main
 ```
 
 It is a no-op when the gate maps no relevant Turbo commands. Like the run mode
-gate, prewarm refuses to execute Turbo-backed package scripts when package
-manifests, lockfiles, `.npmrc`, pnpmfile, or `patches/**` changed unless you
-first review the script/lifecycle diff and pass `--allow-package-script-changes`. Prewarm runs
+gate, prewarm refuses those same package scripts until you review the
+script/lifecycle diff and pass `--allow-package-script-changes`. Prewarm runs
 Turbo commands with bounded parallelism too (`--parallel <n>`, default `2`, or
 `AGENT_PREWARM_PARALLELISM`) and captures each command's output separately so
 concurrent logs do not interleave. The same dashboard `.next` serialization rule
@@ -624,11 +620,9 @@ review the script/lifecycle diff first, then set
 both the manual warm run and the hook) so a just-passed acknowledged manual gate
 can satisfy the `--skip-if-fresh` check.
 
-An exact-signature success stamp is reusable for at most two hours. The
-signature binds the fetched base object, mapped plan, gate implementation,
-changed paths and validated content, plus package-risk state; any bound-input
-change reruns the mapped commands immediately, and an unchanged stamp older
-than two hours expires instead of masking drift.
+The whole-run stamp's signature is the same bound-input set described above;
+any change to it reruns the mapped commands immediately, while an unchanged
+stamp still expires after two hours to avoid masking drift.
 
 Below the whole-run stamp, `--run` also keeps per-command success stamps
 (`.tmp/agent-quality-gate/command-stamps.tsv`) so a run that was killed
@@ -637,14 +631,13 @@ mid-way, or that lost a single flaky check, resumes instead of restarting
 string, the command, and its completion time. When the whole-run fast-path skip
 does not fire and execution begins, each mapped command is skipped (printed as
 `↻ <command> (fresh from previous run)` and reported as `reused`, not executed)
-only when a stamp exists whose fingerprint matches this run exactly, whose
-command matches exactly, and whose age is within the same two-hour TTL. Every
+only when a stamp exists whose fingerprint and command both match this run
+exactly, and whose age is within the same two-hour TTL. Every
 other outcome — parse error, missing file, fingerprint mismatch, TTL expiry —
 fails toward rerun. Because the fingerprint includes the content hash of every
-changed file, ANY edit to a validated file invalidates every per-command stamp,
-so reuse only helps the killed-run / single-flake case where content is
-unchanged; that same invalidation, plus a start-of-run prune that drops
-non-matching and expired entries, keeps the file bounded. Only
+changed file, ANY edit to a validated file invalidates every per-command stamp;
+that invalidation, plus a start-of-run prune that drops non-matching and expired
+entries, keeps the file bounded. Only
 quality/serialized/parallel commands are stamped. Prerequisite phases
 (install/codegen/quality-setup) always re-run: their outputs (node_modules,
 generated code, built packages) are invisible to the source fingerprint, so a

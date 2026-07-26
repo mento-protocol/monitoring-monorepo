@@ -135,22 +135,11 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
 
 ### Available Commands (from repo root)
 
-```bash
-pnpm indexer:codegen                # Generate types (multichain mainnet — Ethereum reserve-yield + Celo + Monad + Polygon)
-pnpm indexer:dev                    # Start local multichain mainnet indexer
-pnpm indexer:testnet:codegen        # Generate types (multichain testnet — Celo Sepolia + Monad testnet + Polygon Amoy)
-pnpm indexer:testnet:dev            # Start local multichain testnet indexer
-pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test     # Codegen mainnet config, run sUSDS/stETH tests, restore mainnet codegen
-pnpm deploy:indexer                 # Push to envio branch → triggers hosted reindex
-pnpm deploy:indexer:status <commit> --watch --compact  # Low-noise wait for registration + sync
-pnpm deploy:indexer:logs <commit> --build    # Show build logs for a deployment
-pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # Show explicitly marked runtime errors
-pnpm deploy:indexer:metrics <commit>         # Show per-chain indexing progress
-pnpm deploy:indexer:info <commit>            # Show deployment info/cache state
-pnpm deploy:indexer:perf <commit>            # Combined status/metrics/log snapshot for perf comparisons
-pnpm deploy:indexer:verify <commit>          # Gate promotion on sync, core rows, and Polygon replay semantics
-pnpm deploy:indexer:promote <commit>         # Promote a synced deployment to prod
-```
+The canonical repo-root command list — including codegen, dev, `reserve-yield:test`,
+and every `deploy:indexer:*` command — lives in
+[`docs/notes/quick-commands.md`](../docs/notes/quick-commands.md).
+`pnpm deploy:indexer:logs <commit> --build` additionally prints a deployment's
+build logs.
 
 ### From `indexer-envio/` directory
 
