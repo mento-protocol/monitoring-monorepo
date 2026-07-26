@@ -13,9 +13,12 @@ import {
   STALE_AFTER_DAYS,
 } from "./check-agent-context-helpers.mjs";
 import {
-  loadClaudeRuntimeDocumentRegistry,
+  DOCUMENT_TYPES,
+  GARDEN_LANES,
+  parseDocumentationMetadata,
   trackedDocumentationFiles,
 } from "./docs-index-helpers.mjs";
+import { loadClaudeRuntimeDocumentRegistry } from "./claude-runtime-document-registry.mjs";
 
 const repoRoot = process.cwd();
 const failures = [];
@@ -247,6 +250,9 @@ const trackedRepoFiles = trackedFiles(".");
 const claudeRuntimeRegistry = loadClaudeRuntimeDocumentRegistry({
   repoRoot,
   files: trackedDocumentationFiles(repoRoot),
+  parseDocumentationMetadata,
+  documentTypes: DOCUMENT_TYPES,
+  gardenLanes: GARDEN_LANES,
 });
 for (const error of claudeRuntimeRegistry.errors) fail(error);
 const managedContextFiles = discoverCanonicalFiles(trackedRepoFiles, (file) =>

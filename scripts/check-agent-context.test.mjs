@@ -39,7 +39,7 @@ import {
   CLAUDE_RUNTIME_DOCUMENT_PATHS,
   CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
   CLAUDE_RUNTIME_DOCUMENT_REGISTRY_VERSION,
-} from "./docs-index-helpers.mjs";
+} from "./claude-runtime-document-registry.mjs";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

@@ -3707,6 +3707,11 @@ assert_contains "- pnpm agent:context-check (documentation catalog metadata cont
 run_gate "scripts/docs-index-helpers.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 
+run_gate "scripts/claude-runtime-document-registry.mjs"
+assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
+assert_contains "- pnpm docs:index --check (documentation catalog helper changed)"
+assert_contains "- pnpm agent:context-check (documentation catalog metadata contract changed)"
+
 run_gate "scripts/docs-index.test.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 

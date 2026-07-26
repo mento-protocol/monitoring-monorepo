@@ -16,10 +16,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  buildDocumentationInventory,
   CLAUDE_RUNTIME_DOCUMENT_PATHS,
   CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
   CLAUDE_RUNTIME_DOCUMENT_REGISTRY_VERSION,
+} from "./claude-runtime-document-registry.mjs";
+import {
+  buildDocumentationInventory,
   classifyDocumentation,
   extractMarkdownTargets,
   isDocumentationPath,
@@ -330,6 +332,28 @@ test("Claude runtime registry rejects unknown top-level and document keys", () =
       errors,
       /\.claude\/agents\/dashboard-explorer\.md: unknown key 'typo_field'/,
     );
+  });
+});
+
+test("Claude runtime registry reports every malformed path-less entry", () => {
+  withRepo((repo) => {
+    const { files, registry } = writeRuntimeRegistryFixture(repo);
+    delete registry.documents[0].path;
+    delete registry.documents[1].path;
+    registry.documents[0].owner = "";
+    registry.documents[1].scope = "";
+    write(
+      repo,
+      CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
+      `${JSON.stringify(registry, null, 2)}\n`,
+    );
+    const errors = buildDocumentationInventory({
+      repoRoot: repo,
+      files,
+    }).errors.join("\n");
+    assert.match(errors, /entry: 'owner' must be a non-empty string/);
+    assert.match(errors, /entry: 'scope' must be a non-empty string/);
+    assert.doesNotMatch(errors, /entry: duplicate runtime path/);
   });
 });
 
