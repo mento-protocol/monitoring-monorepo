@@ -36,10 +36,8 @@ function criticalHealthTooltip(args: {
     : "Rebalance overdue — deviation above threshold for more than 1h";
 }
 
-// Status-only tooltips (no oracle/breach context needed). A lookup instead of
-// per-status branches keeps `healthTooltip` under the complexity budget.
+// Status-only tooltips (no oracle/breach context needed).
 const STATIC_HEALTH_TOOLTIP: Record<string, string> = {
-  "N/A": "VirtualPool — oracle health not tracked",
   HALTED:
     "Trading halted — a price circuit breaker is tripped; swaps are paused until it resets",
   WEEKEND:
@@ -52,6 +50,12 @@ function healthTooltip(
   chainId?: number,
   nowSeconds: number | null = Math.floor(Date.now() / 1000),
 ): string {
+  if (status === "N/A") {
+    if (isVirtualPool(p)) return "VirtualPool — oracle health not tracked";
+    return nowSeconds === null
+      ? "Health status pending live browser time"
+      : "Health data not yet available";
+  }
   const staticText = STATIC_HEALTH_TOOLTIP[status];
   if (staticText) return staticText;
   // Reuse the badge's observation-time semantics so a cached row cannot yield
