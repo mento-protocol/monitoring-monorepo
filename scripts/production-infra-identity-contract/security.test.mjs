@@ -694,12 +694,12 @@ const githubResourceNameKey = ["secret", "name"].join("_");
 const sentryArchiveEntry = `  ${githubResourceNameKey} = "SENTRY_ARCHIVE_TOKEN"
   value       = var.sentry_archive_token`;
 assert(
-  githubSecretCollisionFiles["terraform/github-secrets.tf"].includes(
+  githubSecretCollisionFiles["terraform/github-environment.tf"].includes(
     sentryArchiveEntry,
   ),
 );
-githubSecretCollisionFiles["terraform/github-secrets.tf"] =
-  githubSecretCollisionFiles["terraform/github-secrets.tf"].replace(
+githubSecretCollisionFiles["terraform/github-environment.tf"] =
+  githubSecretCollisionFiles["terraform/github-environment.tf"].replace(
     sentryArchiveEntry,
     `  ${githubResourceNameKey} = "GCP_SERVICE_ACCOUNT"
   value       = google_service_account.metrics_bridge_deployer.email`,
