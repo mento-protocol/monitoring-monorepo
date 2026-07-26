@@ -36,18 +36,27 @@ test("rejects a malformed Envio log payload", () => {
   );
 });
 
-test("wrapper rejects streaming or build-log error filtering", () => {
+test("wrapper rejects flags that conflict with exact error filtering", () => {
   const wrapper = fileURLToPath(
     new URL("./deploy-indexer-logs.sh", import.meta.url),
   );
-  for (const incompatible of ["--follow", "--build"]) {
+  const incompatibleCases = [
+    ["--follow"],
+    ["--build"],
+    ["--level", "error,warn"],
+    ["--level=warn"],
+    ["-o", "table"],
+    ["--output", "table"],
+    ["--output=table"],
+  ];
+  for (const incompatible of incompatibleCases) {
     const result = spawnSync(
       "bash",
-      [wrapper, "b5d14b7", "--errors-only", incompatible],
+      [wrapper, "b5d14b7", "--errors-only", ...incompatible],
       { encoding: "utf8" },
     );
 
-    assert.equal(result.status, 2, incompatible);
+    assert.equal(result.status, 2, incompatible.join(" "));
     assert.match(result.stdout, /--errors-only/);
   }
 });

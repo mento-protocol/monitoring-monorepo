@@ -28,13 +28,13 @@ JSON_OUTPUT=false
 ERRORS_ONLY=false
 FOLLOW=false
 BUILD_LOGS=false
+LEVEL_FILTER_SET=false
+OUTPUT_FORMAT_SET=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --errors-only)
       ERRORS_ONLY=true
       JSON_OUTPUT=true
-      ARGS+=(--level error)
-      ARGS+=(-o json)
       shift
       ;;
     --follow|-f)
@@ -52,7 +52,22 @@ while [[ $# -gt 0 ]]; do
       ARGS+=(-o json)
       shift
       ;;
+    --level)
+      LEVEL_FILTER_SET=true
+      ARGS+=("$1")
+      shift
+      if [[ $# -gt 0 ]]; then
+        ARGS+=("$1")
+        shift
+      fi
+      ;;
+    --level=*)
+      LEVEL_FILTER_SET=true
+      ARGS+=("$1")
+      shift
+      ;;
     -o|--output)
+      OUTPUT_FORMAT_SET=true
       ARGS+=("$1")
       shift
       if [[ $# -gt 0 ]]; then
@@ -64,6 +79,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --output=*)
+      OUTPUT_FORMAT_SET=true
       if [[ "${1#--output=}" == "json" ]]; then
         JSON_OUTPUT=true
       fi
@@ -84,6 +100,18 @@ fi
 if [[ "$ERRORS_ONLY" == "true" && "$BUILD_LOGS" == "true" ]]; then
   echo "deploy:indexer:logs: --errors-only filters runtime logs and cannot be combined with --build"
   exit 2
+fi
+if [[ "$ERRORS_ONLY" == "true" && "$LEVEL_FILTER_SET" == "true" ]]; then
+  echo "deploy:indexer:logs: --errors-only owns the Envio --level filter"
+  exit 2
+fi
+if [[ "$ERRORS_ONLY" == "true" && "$OUTPUT_FORMAT_SET" == "true" ]]; then
+  echo "deploy:indexer:logs: --errors-only owns the Envio output format"
+  exit 2
+fi
+if [[ "$ERRORS_ONLY" == "true" ]]; then
+  ARGS+=(--level error)
+  ARGS+=(-o json)
 fi
 
 DEPLOYMENTS_JSON=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json)
