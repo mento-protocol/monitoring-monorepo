@@ -91,7 +91,8 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0015](0015-abi-vendoring-and-address-drift-gate.md)     | Vendor ABIs from the contracts package; gate indexed config addresses on a drift check    |
 | [0016](0016-effect-rpc-split-and-heal-stages.md)         | Split effects/RPC from handlers; decompose `upsertPool` into named effect-injected stages |
 | [0017](0017-broker-denormalization-volume-dedup.md)      | Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed volume             |
-| [0018](0018-indexer-observability-loki.md)               | Indexer observability requires structured logs and a verified error-log path              |
+| [0018](0018-indexer-observability-loki.md)               | Archived: envisioned Loki-backed indexer error-log alerting                               |
+| [0052](0052-envio-logs-prometheus-grafana-alerting.md)   | Envio logs diagnose; Prometheus metrics and Grafana rules alert                           |
 | [0034](0034-steth-wallet-daily-sampler.md)               | stETH actuals use a launch-aligned sub-daily wallet balance sampler                       |
 | [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses           |
 | [0046](0046-event-sourced-oracle-freshness.md)           | Oracle freshness is reconstructed from persisted report events                            |
@@ -101,7 +102,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | ADR                                                      | Decision                                                                              |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | [0019](0019-vercel-path-aware-deploys.md)                | Dashboard deploys on Vercel Git integration with a path-aware skip script             |
-| [0020](0020-swr-polling-read-model.md)                   | Read model is SWR polling + bounded snapshot composition at current scale             |
+| [0020](0020-swr-polling-read-model.md)                   | Archived: original SWR polling + bounded snapshot composition decision                |
 | [0021](0021-dashboard-state-upstash-blob.md)             | Dashboard state lives in Upstash Redis with Vercel Blob backups, not a DB             |
 | [0022](0022-authjs-google-shared-preview-secrets.md)     | Auth.js + Google; preview shares prod auth secrets behind SSO and Git fork protection |
 | [0023](0023-es2017-no-polyfill.md)                       | Ship ES2017 with no polyfill; ban immutable-array methods via lint + `sortedCopy`     |
@@ -109,6 +110,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0025](0025-fixture-browser-tests-react-doctor.md)       | Fixture-driven browser tests + visual snapshots + a react-doctor score gate           |
 | [0037](0037-dashboard-graphql-zod-mini.md)               | Native GraphQL transport + Zod Mini for browser-reachable validation                  |
 | [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool detail renders every active strategy from the indexed many-to-many registry      |
+| [0051](0051-dashboard-volume-scale-bounds.md)            | Dashboard volume composition has per-chain and total re-review bounds                 |
 
 ### aegis
 
@@ -130,15 +132,16 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### terraform / infra
 
-| ADR                                               | Decision                                                                                    |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [0028](0028-terraform-stack-registry.md)          | Terraform ownership is a registry (`terraform.stacks.json`) with roots split by cadence     |
-| [0029](0029-ci-apply-production-infra-gate.md)    | Infra applies on merge to `main` behind the `production-infra` environment gate             |
-| [0030](0030-iac-before-cli-secrets.md)            | All secrets are managed by IaC; agents never touch them with CLI commands                   |
-| [0044](0044-peg-thresholds-gated-rules-plane.md)  | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON               |
-| [0045](0045-peg-paging-semantics.md)              | Peg paging measures executable sell price; the deep venue pages alone                       |
-| [0047](0047-separated-terraform-ci-identities.md) | Routine deploy, PR plan, trusted-main refresh, and production apply use separate identities |
-| [0048](0048-private-gcs-peg-policy-artifact.md)   | Peg policy uses private GCS after identity bootstrap and pins one immutable generation      |
+| ADR                                                 | Decision                                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [0028](0028-terraform-stack-registry.md)            | Terraform ownership is a registry (`terraform.stacks.json`) with roots split by cadence     |
+| [0029](0029-ci-apply-production-infra-gate.md)      | Infra applies on merge to `main` behind the `production-infra` environment gate             |
+| [0030](0030-iac-before-cli-secrets.md)              | All secrets are managed by IaC; agents never touch them with CLI commands                   |
+| [0044](0044-peg-thresholds-gated-rules-plane.md)    | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON               |
+| [0045](0045-peg-paging-semantics.md)                | Peg paging measures executable sell price; the deep venue pages alone                       |
+| [0047](0047-separated-terraform-ci-identities.md)   | Routine deploy, PR plan, trusted-main refresh, and production apply use separate identities |
+| [0048](0048-private-gcs-peg-policy-artifact.md)     | Peg policy uses private GCS after identity bootstrap and pins one immutable generation      |
+| [0050](0050-environment-scoped-pipeline-secrets.md) | Pipeline secrets are gated by a Terraform-managed, main-only GitHub Environment             |
 
 ### governance-watchdog
 

@@ -14,10 +14,11 @@ garden_lane: adrs-architecture
 # ADR 0045 — Peg paging measures executable sell price; the deep venue pages alone
 
 **Status:** Accepted (Jul 2026), in force. PRs #1497 and #1568 landed the
-measurement and version-bound decision producer. Grafana paging rules, routing,
-and activation remain the Phase 3 rollout in
-[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md); they are not
-implemented on `main`.
+measurement and version-bound decision producer. PR #1581 implements the source
+Grafana paging rules and routing. Protected policy publication and
+authentication, producer activation, human-approved Grafana application, and
+live proof remain rollout gates in
+[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
 **Scope:** metrics-bridge / alerts
 
 ## Context
@@ -36,9 +37,10 @@ or structurally missing (thin second venue).
 
 ## Decision
 
-The bridge producer implements the measurement clauses below. Phase 3 rules
-must enforce the paging, blindness, and routing clauses before the producer
-becomes alert-authoritative.
+The bridge producer implements the measurement clauses below. The source rules
+implement paging, blindness, and routing. The producer does not become
+alert-authoritative until the remaining protected activation, application, and
+live-proof gates pass.
 
 - **Measurand.** Deviation is computed from the executable _sell_ price at
   a per-asset reference size tied to real exposure: the binding bound is
@@ -139,9 +141,10 @@ becomes alert-authoritative.
   signals (redemption status, attestations) are runbook inputs, not
   automated sources — this residual risk is documented, not hidden.
 - The bridge metric producer implements the executable-price, capped-depth,
-  blindness, and coverage-class semantics. Phase 3 must implement the alert
-  expressions, states, and routing before activation. Changes to paging
-  semantics remain ADR-level, not tuning.
+  blindness, and coverage-class semantics. The source rules implement the
+  alert expressions, states, and routing; production activation still requires
+  the protected rollout gates. Changes to paging semantics remain ADR-level,
+  not tuning.
 
 ## Evidence
 
@@ -159,4 +162,7 @@ becomes alert-authoritative.
   `metrics-bridge/test/peg-poller.test.ts`, and
   `metrics-bridge/test/peg-metrics.test.ts`
 - `alerts/rules/peg-thresholds.json` (dormant deep-venue and threshold policy)
+- `alerts/rules/peg-promql-active.tf`, `peg-promql-previous.tf`,
+  `peg-rule-definitions.tf`, and `peg-contact-points.tf` (implemented source
+  rules and routing)
 - ADRs 0042, 0043, 0044

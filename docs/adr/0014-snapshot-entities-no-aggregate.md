@@ -29,7 +29,7 @@ tables would also couple UI latency and row-cap risk to history size.
 `BrokerVolumeWindowSnapshot`) and have the UI read those rows. Never ship
 Hasura `_aggregate` queries to the dashboard. Full-lifetime metrics come from a
 pre-rolled entity; bounded charts and lists may paginate rollup rows and reduce
-them client-side at current scale (ADR 0020).
+them client-side within ADR 0051's measured bounds.
 
 ## Alternatives considered
 

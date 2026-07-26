@@ -58,9 +58,9 @@ Cloud identity is part of the infrastructure gate. Production Terraform apply
 jobs use a dedicated WIF pool whose provider requires the immutable repository
 ID `1172025835`, repository slug, protected `main` ref, and `production-infra`
 environment subject before they can impersonate the seed-project production
-applier. PR plans retain their state-only identity, and a separate
-cutover-routing PR moves trusted-`main` refresh/drift to a read-only chain
-before authority removal.
+applier. PR plans retain their state-only identity. The checked-in workflows
+route trusted-`main` refresh/drift through the separate read-only chain; live
+full-resource proof remains pending before authority removal.
 [ADR 0047](0047-separated-terraform-ci-identities.md) owns the identity split
 and its staged bootstrap, routing, proof, and removal procedure.
 

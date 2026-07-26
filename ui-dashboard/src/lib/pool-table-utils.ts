@@ -1,4 +1,8 @@
-import { isOracleFresh, isVirtualPoolMedianInvalid } from "@/lib/health";
+import {
+  isOracleFresh,
+  isVirtualPoolMedianInvalid,
+  oracleFreshnessTimestamp,
+} from "@/lib/health";
 import type { Network } from "@/lib/networks";
 import { isVirtualPool, type Pool } from "@/lib/types";
 import { tokenSymbol } from "@/lib/tokens";
@@ -36,15 +40,30 @@ function criticalHealthTooltip(args: {
     : "Rebalance overdue — deviation above threshold for more than 1h";
 }
 
-// Status-only tooltips (no oracle/breach context needed). A lookup instead of
-// per-status branches keeps `healthTooltip` under the complexity budget.
+// Status-only tooltips (no oracle/breach context needed).
 const STATIC_HEALTH_TOOLTIP: Record<string, string> = {
-  "N/A": "VirtualPool — oracle health not tracked",
   HALTED:
     "Trading halted — a price circuit breaker is tripped; swaps are paused until it resets",
   WEEKEND:
     "FX markets are closed this weekend — trading paused until ~Sunday 23:00 UTC",
 };
+
+function virtualPoolNaTooltip(
+  p: Pool,
+  chainId: number | undefined,
+  nowSeconds: number | null,
+): string {
+  const observedAt = oracleFreshnessTimestamp(p);
+  const freshnessPending =
+    nowSeconds === null &&
+    observedAt > 0 &&
+    p.wrappedExchangeDeprecated !== true &&
+    p.vpDeprecationKnown !== false &&
+    !isOracleFresh(p, observedAt, chainId);
+  return freshnessPending
+    ? "VirtualPool oracle freshness pending live browser time"
+    : "VirtualPool — oracle health not tracked";
+}
 
 function healthTooltip(
   status: string,
@@ -52,6 +71,13 @@ function healthTooltip(
   chainId?: number,
   nowSeconds: number | null = Math.floor(Date.now() / 1000),
 ): string {
+  if (status === "N/A") {
+    if (isVirtualPool(p)) return virtualPoolNaTooltip(p, chainId, nowSeconds);
+    if (p.hasHealthData === false) return "Health data not yet available";
+    return nowSeconds === null
+      ? "Health status pending live browser time"
+      : "Health data not yet available";
+  }
   const staticText = STATIC_HEALTH_TOOLTIP[status];
   if (staticText) return staticText;
   // Reuse the badge's observation-time semantics so a cached row cannot yield

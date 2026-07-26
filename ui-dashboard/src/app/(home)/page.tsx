@@ -94,12 +94,14 @@ export default async function HomePage() {
     () => undefined,
   );
   const initialIsWeekend = isWeekend();
+  const initialUtcDayKey = Math.floor(Date.now() / 1000 / 86_400);
   return (
     <GlobalPage
       initialNetworkData={initialPayload?.networks}
       initialNetworkDataFetchedAtMs={initialPayload?.fetchedAtMs}
       initialUniqueLpCount={initialPayload?.uniqueLpCount}
       initialIsWeekend={initialIsWeekend}
+      initialUtcDayKey={initialUtcDayKey}
     />
   );
 }

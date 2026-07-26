@@ -3,6 +3,7 @@ title: Peg monitoring for oracle-less stablecoins (EUROP first)
 status: active
 owner: eng
 canonical: false
+last_verified: 2026-07-25
 doc_type: plan
 scope: repo-wide
 review_interval_days: 365
@@ -16,7 +17,8 @@ review_interval_days: 365
 > [0044](adr/0044-peg-thresholds-gated-rules-plane.md),
 > [0045](adr/0045-peg-paging-semantics.md), and
 > [0048](adr/0048-private-gcs-peg-policy-artifact.md). Market figures below are a
-> 2026-07-22 snapshot — re-verify before relying on them.
+> 2026-07-22 snapshot — re-verify before relying on them. Rollout status below
+> was checked against `main` and the linked pull requests on 2026-07-25.
 
 ## Problem
 
@@ -27,8 +29,11 @@ multisig `0x58099B…`, ~one-year expiry). No oracle network publishes EUROP
 (verified: Chainlink, Pyth, RedStone, Chronicle, Stork). If EUROP depegs,
 arbitrage sells it into the pool at par and drains EURm/reserve; the defense
 is a human multisig posting a >0.5% price to trip the ValueDeltaBreaker.
-Nothing measures how far EUROP actually trades from 1.00 EUR — and more
-oracle-less local-currency stablecoins are expected to onboard.
+Production still has no alert-authoritative measurement of how far EUROP
+trades from 1.00 EUR. `main` now contains the dormant producer and bounded
+decision-package path, but protected policy publication, runtime activation,
+the Grafana apply, and live verification remain open. More oracle-less
+local-currency stablecoins are expected to onboard.
 
 ## Market structure evidence (live-verified 2026-07-22)
 
@@ -116,12 +121,15 @@ saturation flag; no Hasura `_aggregate` per ADR 0014), already-polled
 denominator. Token-native amounts (USD rollups are zero for EURm/EUROP).
 Anomaly = net directional inflow vs trading-limit-implied max rate
 (saturation fraction, per configured window on the monitored token's
-inflow direction, max across active L0/L1 windows; the window-duration
-source must be established in Phase 2 — the FPMM RPC surface exposes no
-timesteps — and saturation fails closed until it is verified; lazy-reset
-expiry applies; swap amounts normalized from raw token units into the
-15-decimal TradingLimitsV2 scale before division). Counterparty diversity (`caller` = tx.from) is
-dashboard-advisory only. Never pages alone; escalates price-based pages.
+inflow direction, max across active L0/L1 windows). The FPMM RPC surface
+exposes no timesteps, so the implementation vendors the reviewed private L0/L1
+constants of 300 and 86,400 seconds from the exact `mento-core` commit recorded
+in `metrics-bridge/src/peg/structural.ts`; saturation fails closed if that
+provenance can no longer be verified. Lazy-reset expiry applies, and swap
+amounts are normalized from raw token units into the 15-decimal
+TradingLimitsV2 scale before division. Counterparty diversity (`caller` =
+tx.from) is dashboard-advisory only. It never pages alone; it escalates
+price-based pages.
 
 ### Metrics (ADR 0042)
 
@@ -144,12 +152,12 @@ publishes the same policy as an IaC-owned versioned runtime artifact
 that the bridge polls (never baked into the image;
 content-addressed version suffix verified by runtime and CI;
 `mento_peg_policy_version` asserted by the rules with two-phase
-rollover: previous + new exact versions remain accepted until a reviewed
-follow-up sets `previous=null` after producer ACK. ACK only resolves the
-rollover-stuck condition and never auto-terminates retained rules; previous
-acceptance is never expired by wall-clock alone. Per-source poll cadences live
-in the same artifact so coverage cannot be gamed by an ungated cadence change).
-Per-rule conventions: freshness
+rollover: previous + new exact versions remain active until a separately
+reviewed `previous=null` follow-up after producer ACK. ACK itself only resolves
+the rollover-stuck alert; it never auto-terminates retained rules, and no wall
+clock expires their acceptance. Per-source poll cadences live in the same
+artifact so coverage cannot be gamed by an ungated cadence change). Per-rule
+conventions: freshness
 gate (`time() - mento_peg_observation_at`) on **every** peg rule;
 `no_data_state = "Alerting"` (+~5 min grace, documented) on blindness and
 heartbeat rules; duration-fraction sustain
@@ -173,8 +181,7 @@ Ladder (EUROP initial values; per-asset data):
   second uncapped venue escalates priority. Also: blind-while-stressed.
 - **Warn (Slack, repeat-suppressed):** uncapped deviation
   ≥ 25 bps sustained ≥ 10 min; deep-venue envelope-excess spread; structural
-  saturation; producer-counted blind ≥ M consecutive due deep-venue poll
-  slots.
+  saturation; producer-counted blind ≥ M consecutive deep-venue poll slots.
 - **Ops-noise (Slack low-urgency):** source unhealthy (API errors, 429s);
   never pages. Distinct alerts: "source permanently dead" (N days),
   "critical path unreachable — re-onboard" (deep-venue loss, human ack).
@@ -205,29 +212,48 @@ coverage), Bit2Me (stale). Structural: EURm/EUROP `SwapEvent` +
 `cex-book+indexed-pool` (all paths reachable). Bridge egress must allow
 `api.kraken.com`, `api.bitvavo.com` (+ aggregator hosts for display).
 
-## Phasing
+## Rollout status (verified 2026-07-25)
 
-1. **PR 1 (this PR):** ADRs 0042–0045, this plan, docs catalog.
-2. **PR 2:** bridge peg module — registry schema/fixtures, adapters
-   (Kraken, Bitvavo), observation contract, structural queries, metrics,
-   integrity script into gate/CI. Seed the dormant `peg-thresholds.json` policy
-   source so the runtime and cross-plane validators share a real fixture; PR 2
-   does not publish that artifact, configure `PEG_POLICY_URL`, or create rules.
-3. **PR 3A:** land dormant generation-pinned private-GCS authentication in
-   Metrics Bridge. It adds no production runtime configuration or
-   infrastructure.
-4. **Identity prerequisite:** complete #1566's bootstrap apply, refresh cutover
-   and live proof, legacy-authority removal apply, queue drain, and final IAM
-   audit.
-5. **PR 3B:** after that prerequisite, create the private policy bucket,
-   runtime identity, object publisher, and pinned Cloud Run configuration
-   through their owning Terraform stacks.
-6. **PR 3C:** deploy the version-bound producer, verify complete live telemetry,
-   then add the rule group and routing through the protected alerts-rules
-   apply. Follow the no-data rollout discipline from
-   `docs/notes/polygon-monitoring.md`.
-7. **PR 4:** dashboard decision-package panel + onboarding runbook doc +
-   re-census job.
+1. **Design — merged:** PR
+   [#1445](https://github.com/mento-protocol/monitoring-monorepo/pull/1445)
+   added ADRs 0042–0045, this plan, and the catalog entry.
+2. **Producer and read model — merged but dormant:** PR
+   [#1497](https://github.com/mento-protocol/monitoring-monorepo/pull/1497)
+   added the registry, adapters, structural queries, metrics, and integrity
+   gate. PR
+   [#1568](https://github.com/mento-protocol/monitoring-monorepo/pull/1568)
+   added version-bound decisions and producer acknowledgment, and PR
+   [#1583](https://github.com/mento-protocol/monitoring-monorepo/pull/1583)
+   added the bounded decision-package endpoint. The production loop stays
+   dormant until the protected artifact, runtime configuration, deploy, and
+   live proof land.
+3. **Protected policy and alerts — source ladder merged, activation pending:**
+   PR
+   [#1581](https://github.com/mento-protocol/monitoring-monorepo/pull/1581)
+   added the full source-only deviation, premium, structural, blindness,
+   source-health, heartbeat, rollover, and routing ladder. Open PR
+   [#1584](https://github.com/mento-protocol/monitoring-monorepo/pull/1584)
+   adds private generation-pinned policy reads; PR
+   [#1606](https://github.com/mento-protocol/monitoring-monorepo/pull/1606)
+   adds the dormant Terraform identity and bucket foundation; stacked PRs
+   [#1601](https://github.com/mento-protocol/monitoring-monorepo/pull/1601)
+   and
+   [#1603](https://github.com/mento-protocol/monitoring-monorepo/pull/1603)
+   add producer-owned listing confirmation and warning-only listing,
+   registry, critical-path, and indexed-pool alerts. Protected policy
+   publication, runtime activation, the human-approved apply, and live
+   firing/recovery proof remain open.
+4. **Operator UI merged; re-census in review or pending:** PR
+   [#1588](https://github.com/mento-protocol/monitoring-monorepo/pull/1588)
+   added the dashboard decision-package page. Open PR
+   [#1602](https://github.com/mento-protocol/monitoring-monorepo/pull/1602)
+   adds listing-confirmation policy evidence. Deployment and live browser
+   proof remain open; the onboarding and re-census runbooks are in
+   [#1603](https://github.com/mento-protocol/monitoring-monorepo/pull/1603),
+   while the scheduled re-census job remains pending.
+
+Issue [#1444](https://github.com/mento-protocol/monitoring-monorepo/issues/1444)
+owns the remaining rollout and production proof.
 
 ## Residual risks (accepted, documented)
 

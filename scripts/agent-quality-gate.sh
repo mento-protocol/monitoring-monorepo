@@ -1591,6 +1591,11 @@ while IFS= read -r path; do
       add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation contract changed"
       add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation evaluation contract changed"
       ;;
+    docs/claude-runtime-document-registry.json)
+      add_surface "docs"
+      add_command "pnpm docs:index --check" "Claude runtime document registry changed"
+      add_command "pnpm agent:context-check" "Claude runtime document registry changed"
+      ;;
     AGENTS.md|*/AGENTS.md|.codex/config.toml)
       add_surface "agent-context"
       add_command "pnpm agent:context-budget --strict" "agent instruction budget input changed"
@@ -2143,6 +2148,10 @@ while IFS= read -r path; do
     scripts/*.sh)
       add_surface "scripts"
       case "$path" in
+        scripts/deploy-indexer-logs.sh)
+          add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy wrapper changed"
+          add_command "node scripts/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
+          ;;
         scripts/deploy-*.sh)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy wrapper changed"
           ;;
@@ -2194,7 +2203,7 @@ while IFS= read -r path; do
           add_command "pnpm agent:context-check" "agent context checker changed"
           add_command "node scripts/check-agent-context.test.mjs" "agent context checker changed"
           ;;
-        scripts/docs-index.mjs|scripts/docs-index-helpers.mjs|scripts/docs-index.test.mjs)
+        scripts/claude-runtime-document-registry.mjs|scripts/docs-index.mjs|scripts/docs-index-helpers.mjs|scripts/docs-index.test.mjs)
           add_command "pnpm docs:index:test" "documentation catalog helper changed"
           add_command "pnpm docs:index --check" "documentation catalog helper changed"
           add_command "pnpm agent:context-check" "documentation catalog metadata contract changed"
@@ -2327,6 +2336,9 @@ while IFS= read -r path; do
           ;;
         scripts/deploy-indexer-perf.mjs|scripts/deploy-indexer-perf.test.mjs)
           add_command "node scripts/deploy-indexer-perf.test.mjs" "indexer deploy perf helper changed"
+          ;;
+        scripts/filter-envio-runtime-errors.mjs|scripts/filter-envio-runtime-errors.test.mjs)
+          add_command "node scripts/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
           ;;
         scripts/alert-rules-lint.mjs|scripts/alert-rules-lint.test.mjs)
           add_command "pnpm alerts:rules:lint:test" "alert-rules lint helper changed"

@@ -443,8 +443,8 @@ export const POOL_LIQUIDITY_COUNT = `
 `;
 
 // Daily rollup across all pools on a chain — used for the homepage volume-over-time
-// chart. Still paginated (across all pools the row count exceeds 1000 after a few
-// years), but pagination cost is ~20× lower than the hourly cross-pool query.
+// chart. It remains paginated because cross-pool history can exceed the
+// hosted-Hasura row cap; ADR 0051 owns the current production re-review bounds.
 export const POOL_DAILY_SNAPSHOTS_ALL = `
   query PoolDailySnapshotsAll($poolIds: [String!]!, $afterTimestamp: numeric!, $limit: Int!, $offset: Int!) {
     PoolDailySnapshot(
