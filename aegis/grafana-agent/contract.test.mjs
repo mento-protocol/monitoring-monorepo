@@ -587,13 +587,14 @@ test('immutable verifier snapshot executes the captured static preflight', () =>
       [
         '--input-type=module',
         '--eval',
-        'const module = await import(process.argv[1]); module.runPreflight({ staticOnly: true });',
+        'const module = await import(process.argv[2]); module.runPreflight({ staticOnly: true, runGcloud: () => { throw new Error("static preflight invoked gcloud"); } });',
+        'static-preflight-contract-test',
         path.join(output, 'aegis/grafana-agent/preflight.mjs'),
       ],
       { encoding: 'utf8' },
     );
     assert.equal(preflight.status, 0, preflight.stderr);
-    assert.match(preflight.stdout, /static preflight passed/u);
+    assert.equal(preflight.stdout, 'Alloy static preflight passed.\n');
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }
