@@ -222,9 +222,10 @@ and autoreview.
 best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override
 the directory with `AGENT_AUTOREVIEW_DURATIONS_DIR` or enable stderr summaries
 with `AGENT_AUTOREVIEW_STAGE_SUMMARY`. Base lookup and `--feedback-pr auto`
-default to 60 seconds; feedback capture defaults to 120 seconds. Timeouts fail
-closed: the wrapper terminates then kills its process group, and the helper
-kills its synchronous child directly.
+use `AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS` (60 seconds by default); feedback
+capture uses `AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS` (120 seconds by
+default). Timeouts fail closed: the wrapper terminates then kills its process
+group, and the helper kills its synchronous child directly.
 
 This adapter uses the repo-local helper at `scripts/agent-autoreview.mjs` and
 keeps the repo's branch-local target: merge-base-to-`HEAD` commits plus current
