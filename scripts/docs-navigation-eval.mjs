@@ -35,6 +35,8 @@ export const DEFAULT_FIXTURES =
   "docs/evals/documentation-navigation-fixtures.json";
 export const DEFAULT_BASELINE =
   "docs/evals/documentation-navigation-baseline.json";
+export const DEFAULT_BASELINE_FIXTURES =
+  "docs/evals/documentation-navigation-baseline-fixtures.json";
 
 function parseBoolean(value, name) {
   if (value == null || String(value).trim() === "") return false;
@@ -54,6 +56,7 @@ export function parseArgs(argv, env = process.env) {
     repoRoot: process.cwd(),
     fixturesPath: DEFAULT_FIXTURES,
     baselinePath: DEFAULT_BASELINE,
+    baselineFixturesPath: DEFAULT_BASELINE_FIXTURES,
     resultPath: null,
     questionId: null,
     baseCommit: null,
@@ -96,6 +99,8 @@ export function parseArgs(argv, env = process.env) {
     else if (arg === "--root") options.repoRoot = readValue();
     else if (arg === "--fixtures") options.fixturesPath = readValue();
     else if (arg === "--baseline") options.baselinePath = readValue();
+    else if (arg === "--baseline-fixtures")
+      options.baselineFixturesPath = readValue();
     else if (arg === "--base-commit") options.baseCommit = readValue();
     else if (arg === "--date") options.date = readValue();
     else if (arg === "--dry-run") options.dryRun = true;
@@ -145,6 +150,8 @@ Options:
   --root PATH            Repository root (default: current directory)
   --fixtures PATH        Fixture JSON path relative to the repository root
   --baseline PATH        Baseline result used for routing-change reminders
+  --baseline-fixtures PATH
+                         Frozen fixture contract used to validate the baseline
   --date YYYY-MM-DD      Evaluation/scheduler date (default: today UTC)
   --dry-run              Read and plan issue synchronization without mutation
   --json                 Print machine-readable check/schedule output
@@ -238,6 +245,14 @@ export async function runNavigationEvalIssue(
   { suite, repoRoot },
   deps = {},
 ) {
+  const readBaselineSuite =
+    deps.readBaselineSuite ?? ((file) => readJson(file));
+  const baselineSuite = readBaselineSuite(
+    path.resolve(
+      repoRoot,
+      options.baselineFixturesPath ?? DEFAULT_BASELINE_FIXTURES,
+    ),
+  );
   const {
     listIssues = defaultListIssues,
     authorizeLiveCreation = assertAuthorizedGardenWorkflow,
@@ -247,7 +262,7 @@ export async function runNavigationEvalIssue(
     readBaseline = (file) => readJson(file),
     validateBaseline = (baseline) =>
       assertPassingNavigationResult({
-        suite,
+        suite: baselineSuite,
         result: baseline,
         repoRoot,
         label: "committed navigation baseline",

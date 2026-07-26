@@ -857,6 +857,28 @@ test("the committed baseline satisfies its own month without a duplicate issue",
   assert.deepEqual(calls, ["list"]);
 });
 
+test("the frozen baseline contract queues the changed current fixture", async () => {
+  const result = await runNavigationEvalIssue(
+    {
+      ...options,
+      repo: "owner/repo",
+      date: "2026-07-21",
+      dryRun: true,
+    },
+    context,
+    {
+      listIssues: async () => [],
+      changesSinceBaseline: () => [],
+    },
+  );
+  assert.notEqual(
+    committedBaseline.fixture_digest,
+    fixtureDigest(context.suite),
+  );
+  assert.equal(result.action, "create");
+  assert.equal(result.mutated, false);
+});
+
 test("issue scheduling rejects an invalid committed baseline before discovery", async () => {
   const invalidBaseline = validResult();
   invalidBaseline.answers = [];
@@ -943,6 +965,14 @@ test("CLI parsing enforces one explicit mode", () => {
       "commands-pr-readiness",
     ]).questionId,
     "commands-pr-readiness",
+  );
+  assert.equal(
+    parseArgs([
+      "--schedule-issue",
+      "--baseline-fixtures",
+      "docs/evals/frozen.json",
+    ]).baselineFixturesPath,
+    "docs/evals/frozen.json",
   );
   assert.throws(() => parseArgs([]), /choose one/);
   assert.throws(
