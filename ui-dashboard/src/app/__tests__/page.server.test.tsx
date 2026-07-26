@@ -7,6 +7,7 @@ type GlobalPageProps = {
   initialNetworkDataFetchedAtMs?: number;
   initialUniqueLpCount?: number | null;
   initialIsWeekend?: boolean;
+  initialUtcDayKey?: number;
 };
 
 const { mockFetchInitialNetworkData, mockFetchHomepageOgData, mockGlobalPage } =
@@ -112,6 +113,9 @@ describe("HomePage server component", () => {
       initialNetworkDataFetchedAtMs: 1_700_000_000_000,
       initialUniqueLpCount: 123,
       initialIsWeekend: true,
+      initialUtcDayKey: Math.floor(
+        Date.parse("2026-04-18T12:00:00Z") / 1000 / 86_400,
+      ),
     });
   });
 
@@ -129,6 +133,9 @@ describe("HomePage server component", () => {
       initialNetworkDataFetchedAtMs: undefined,
       initialUniqueLpCount: undefined,
       initialIsWeekend: false,
+      initialUtcDayKey: Math.floor(
+        Date.parse("2026-04-15T12:00:00Z") / 1000 / 86_400,
+      ),
     });
   });
 });

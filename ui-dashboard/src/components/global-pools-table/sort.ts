@@ -1,9 +1,14 @@
-import { computeEffectiveStatus, computePoolUptimePct } from "@/lib/health";
+import {
+  computeEffectiveStatus,
+  computePoolUptimePct,
+  type HealthStatus,
+} from "@/lib/health";
 import { sortedCopy } from "@/lib/immutable-sort";
 import type { Network } from "@/lib/networks";
 import type { SortDir } from "@/lib/table-sort";
 import { poolName, type OracleRateMap } from "@/lib/tokens";
 import type { Pool } from "@/lib/types";
+import { isWeekend } from "@/lib/weekend";
 import { hasFeeData } from "./formatting";
 
 /** A pool entry enriched with its originating network and oracle rates. */
@@ -59,10 +64,24 @@ export function globalPoolKey(entry: GlobalPoolEntry): string {
   return `${entry.network.id}:${entry.pool.id}`;
 }
 
+function effectiveHealthStatus(
+  entry: GlobalPoolEntry,
+  nowSeconds: number,
+  isWeekendNow: boolean,
+): HealthStatus {
+  return computeEffectiveStatus(
+    entry.pool,
+    entry.network.chainId,
+    nowSeconds,
+    isWeekendNow,
+  );
+}
+
 export interface GlobalSortContext {
   tvlByKey: Map<string, number | null>;
   totalVolumeByKey: Map<string, number | null>;
   nowSeconds?: number | undefined;
+  isWeekendNow?: boolean | undefined;
   volume24hByKey?: Map<string, number | null | undefined> | undefined;
   volume7dByKey?: Map<string, number | null | undefined> | undefined;
   tvlChangeWoWByKey?: Map<string, number | null> | undefined;
@@ -76,6 +95,7 @@ export function sortGlobalPools(
     tvlByKey,
     totalVolumeByKey,
     nowSeconds = Math.floor(Date.now() / 1000),
+    isWeekendNow = isWeekend(),
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
@@ -91,16 +111,8 @@ export function sortGlobalPools(
         );
         break;
       case "health": {
-        const aH = computeEffectiveStatus(
-          a.pool,
-          a.network.chainId,
-          nowSeconds,
-        );
-        const bH = computeEffectiveStatus(
-          b.pool,
-          b.network.chainId,
-          nowSeconds,
-        );
+        const aH = effectiveHealthStatus(a, nowSeconds, isWeekendNow);
+        const bH = effectiveHealthStatus(b, nowSeconds, isWeekendNow);
         cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
         break;
       }
