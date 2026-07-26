@@ -984,10 +984,6 @@ jobs:
           pnpm docs:navigation-eval -- --validate
           docs/evals/documentation-navigation-baseline.json
           --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
-      - name: Documentation navigation current result
-        run: >-
-          pnpm docs:navigation-eval -- --validate
-          docs/evals/documentation-navigation-current.json
       - name: Agent context budget tests
         run: pnpm agent:context-budget:test
       - name: Enforce agent context budgets

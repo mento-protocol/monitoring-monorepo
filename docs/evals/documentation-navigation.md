@@ -36,8 +36,6 @@ The versioned inputs are:
 - `documentation-navigation-baseline-fixtures.json` — the frozen fixture
   contract used by that historical run. Current fixture changes never rewrite
   either baseline artifact.
-- `documentation-navigation-current.json` — the latest dated run against the
-  current fixture contract. It may advance only through a fresh read-only run.
 
 The prompt deliberately omits accepted routes and historical-source traps. It
 starts from root `AGENTS.md` plus the generated `docs/README.md`, forbids the
@@ -117,14 +115,12 @@ result, then validate it:
 pnpm docs:navigation-eval -- --validate /tmp/documentation-navigation-result.json
 ```
 
-Validate the two committed result artifacts against their respective contracts:
+Validate the committed historical result against its frozen contract:
 
 ```bash
 pnpm docs:navigation-eval -- --validate \
   docs/evals/documentation-navigation-baseline.json \
   --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
-pnpm docs:navigation-eval -- --validate \
-  docs/evals/documentation-navigation-current.json
 ```
 
 For one failed or contested case, generate a bounded escalation prompt:
@@ -210,9 +206,11 @@ issues. The evaluation agent itself never edits documentation.
 
 The baseline captures the route quality before issues #1348–#1353 prune and
 consolidate the six documentation lanes. Keep both the result and its frozen
-fixture artifact immutable. After all six lane trackers close, run the current
-fixture again and commit the dated output as
-`documentation-navigation-current.json` plus a short comparison. If a fixture
-must change because the intended route or context contract changed, review that
-change separately and report both the historical-suite and current-suite
-interpretation instead of silently rewriting the baseline digest.
+fixture artifact immutable. A contract-changing PR cannot commit its own
+post-change result: the evaluated commit must already be reachable from the
+default branch. After the change merges, the monthly issue runs the current
+fixture from clean `main`; commit its dated result plus a short comparison in a
+follow-up PR. If a fixture must change because the intended route or context
+contract changed, review that change separately and report both the
+historical-suite and current-suite interpretation instead of silently rewriting
+the baseline digest.

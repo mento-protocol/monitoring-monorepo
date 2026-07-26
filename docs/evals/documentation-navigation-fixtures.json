@@ -14,7 +14,6 @@
     "docs/evals/documentation-navigation-fixtures.json",
     "docs/evals/documentation-navigation-baseline-fixtures.json",
     "docs/evals/documentation-navigation-baseline.json",
-    "docs/evals/documentation-navigation-current.json",
     "scripts/docs-navigation-eval.mjs",
     "scripts/docs-navigation-eval-helpers.mjs",
     "scripts/docs-navigation-eval-result.mjs",
