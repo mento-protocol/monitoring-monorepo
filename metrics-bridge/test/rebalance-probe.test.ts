@@ -44,6 +44,19 @@ import { getRpcClient } from "../src/rpc.js";
 const mockProbe = vi.mocked(probeRebalance);
 const mockGetRpcClient = vi.mocked(getRpcClient);
 
+it("runs the first probe cycle before any test-only mutex reset", async () => {
+  register.resetMetrics();
+  const before = Math.floor(Date.now() / 1000);
+
+  await runRebalanceProbes([]);
+
+  const value = await getGaugeValue(
+    register,
+    "mento_pool_rebalance_probe_last_run",
+  );
+  expect(value).toBeGreaterThanOrEqual(before);
+});
+
 describe("eligibleForProbe — gating mirrors the critical alert rule", () => {
   it("excludes pools without an active breach anchor", () => {
     const pool = makePool({

@@ -12,11 +12,11 @@ const config = {
     high: 90,
     low: 80,
     // Blocking gate: `pnpm bridge:mutation` exits non-zero when the mutation
-    // score on `src/rebalance-probe.ts` drops below 85%. The CI workflow wires
+    // score on `src/rebalance-probe.ts` drops below 86%. The CI workflow wires
     // this into the `bridge-rebalance-probe-baseline` job. The floor preserves
     // the documented two-point rounded-down safety margin; current evidence
     // and survivor classification live in `docs/mutation-testing.md`.
-    break: 85,
+    break: 86,
   },
   ignorePatterns: ["coverage/**", "dist/**", "reports/**"],
   vitest: {

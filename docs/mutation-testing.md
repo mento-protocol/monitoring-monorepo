@@ -34,6 +34,10 @@ of [`e86c638d7feed52228afd658bf742ff5124a6da5`](https://github.com/mento-protoco
 v24.13.1, and pnpm 11.9.0. Stryker's native JSON and HTML reports were emitted
 under each package's ignored `reports/mutation/` directory; the table below is
 the retained, reviewable extraction from those reports.
+Review then identified the bridge's `probeInProgress = true` survivor as a
+real first-cycle test gap. The metrics-bridge row records the corrected rerun
+from this proposed tree after adding that test; the other two rows retain the
+clean-checkout measurements.
 
 Run from the repo root:
 
@@ -51,14 +55,15 @@ parallel without scanning transient mutation files.
 
 | Target         | Native report                                                   | Runtime | Score (total / covered) | Mutants (killed / timed out / survived / no coverage / errors) | `break` / margin |
 | -------------- | --------------------------------------------------------------- | ------: | ----------------------- | -------------------------------------------------------------- | ---------------- |
-| Metrics bridge | `metrics-bridge/reports/mutation/{mutation.json,mutation.html}` |      9s | 87.65% / 87.65%         | 139 / 3 / 20 / 0 / 0                                           | 85 / 2.65 points |
+| Metrics bridge | `metrics-bridge/reports/mutation/{mutation.json,mutation.html}` |      9s | 88.27% / 88.27%         | 140 / 3 / 19 / 0 / 0                                           | 86 / 2.27 points |
 | Dashboard      | `ui-dashboard/reports/mutation/{mutation.json,mutation.html}`   |     12s | 88.83% / 91.50%         | 172 / 11 / 17 / 6 / 0                                          | 86 / 2.83 points |
 | Indexer        | `indexer-envio/reports/mutation/{mutation.json,mutation.html}`  |     58s | 96.09% / 96.09%         | 161 / 11 / 7 / 0 / 0                                           | 94 / 2.09 points |
 
 The floor is `floor(measured total score) - 2`. Stryker counts timed-out
 mutants as detected in its total score, while retaining their count separately
-in the reports. The indexer floor moves from 92 to 94 because this measured
-baseline supports the existing two-point policy; no targets or schedule change.
+in the reports. The corrected bridge floor moves from 85 to 86, and the indexer
+floor moves from 92 to 94, because these measured baselines support the existing
+two-point policy; no targets or schedule change.
 
 Per-file results:
 
@@ -118,15 +123,13 @@ these classifications.
   `slice(1)`, the namespaced format leaves a single address segment, so
   `join("")` and `join("-")` return the same value.
 
-**Metrics bridge (20 survived)**
+**Metrics bridge (19 survived)**
 
 The survivors are classified as accepted noise or equivalent mutants:
 
-**Test scaffolding (3)** — affect test cleanup, not production behavior:
+**Test scaffolding (2)** — affect test cleanup, not production behavior:
 
 - `_resetProbeInProgressForTests()` body emptied.
-- Module-scope `let probeInProgress = false` flipped to `true`;
-  `runRebalanceProbes()` re-sets it every cycle before reading.
 - Module-scope `let reentryWarnedThisWindow = false` flipped to `true`
   and then reset in the `finally` block.
 

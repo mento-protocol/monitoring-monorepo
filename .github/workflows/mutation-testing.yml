@@ -194,7 +194,7 @@ jobs:
     # step. The `filter`/`decide` machinery is kept inert here: it self-
     # reactivates the path-gated PR behaviour if a `pull_request` trigger is
     # ever re-added, with no other change. `metrics-bridge/stryker.config.mjs`
-    # sets `break: 85`, so when the mutation step runs a score below 85% fails
+    # sets `break: 86`, so when the mutation step runs a score below 86% fails
     # the job.
     name: Bridge rebalance probe baseline
     runs-on: blacksmith-4vcpu-ubuntu-2404-arm
