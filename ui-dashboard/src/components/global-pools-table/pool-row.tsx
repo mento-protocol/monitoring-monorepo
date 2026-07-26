@@ -42,7 +42,7 @@ interface PoolRowProps {
   totalVolumeByKey: Map<string, number | null>;
   tvlChangeWoWByKey?: Map<string, number | null> | undefined;
   nowSeconds: number | null;
-  isWeekendNow: boolean;
+  isWeekendNow: boolean | null;
   olsPoolKeys?: Set<string> | undefined;
   cdpPoolKeys?: Set<string> | undefined;
   reservePoolKeys?: Set<string> | undefined;
