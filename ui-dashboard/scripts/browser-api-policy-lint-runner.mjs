@@ -138,6 +138,10 @@ const cases = {
     filePath: "src/lib/__tests__/browser-api-policy.test.ts",
     source: BLOCKED_SOURCE,
   },
+  rootServer: {
+    filePath: "sentry.server.config.ts",
+    source: BLOCKED_SOURCE,
+  },
 };
 const eslint = new ESLint({
   cwd: fileURLToPath(DASHBOARD_ROOT_URL),

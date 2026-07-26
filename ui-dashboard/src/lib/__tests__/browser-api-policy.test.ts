@@ -8,6 +8,8 @@ import browserApiPolicy from "../../../browser-api-policy.json";
 
 const DASHBOARD_ROOT_URL = new URL("../../../", import.meta.url);
 const CLIENT_FIXTURE_PATH = "src/lib/immutable-sort.ts";
+const ROOT_CLIENT_FIXTURE_PATH = "sentry.shared.ts";
+const ROOT_SERVER_FIXTURE_PATH = "sentry.server.config.ts";
 const SERVER_FIXTURE_PATH = "src/app/api/address-labels/route.ts";
 const OG_FIXTURE_PATH = "src/lib/homepage-og.ts";
 const TEST_FIXTURE_PATH = "src/lib/__tests__/browser-api-policy.test.ts";
@@ -30,7 +32,8 @@ type LintCase =
   | "allowed"
   | "api"
   | "og"
-  | "test";
+  | "test"
+  | "rootServer";
 type BrowserApiMessage = { ruleId: string; message: string };
 const lintResultsPromise = execFileAsync(
   process.execPath,
@@ -102,6 +105,16 @@ describe("browser runtime API policy", () => {
           ]),
         );
       }
+    },
+    LINT_RUNNER_TIMEOUT_MS,
+  );
+
+  it(
+    "applies the policy to browser dependencies at the package root",
+    async () => {
+      const rules = await browserApiRules(ROOT_CLIENT_FIXTURE_PATH);
+
+      expect(rules.symbolAware).toEqual([2, browserApiPolicy.restrictions]);
     },
     LINT_RUNNER_TIMEOUT_MS,
   );
@@ -195,6 +208,7 @@ describe("browser runtime API policy", () => {
     ["an explicit server-only route", SERVER_FIXTURE_PATH, "api"],
     ["an explicit OG helper", OG_FIXTURE_PATH, "og"],
     ["a test", TEST_FIXTURE_PATH, "test"],
+    ["a root server config", ROOT_SERVER_FIXTURE_PATH, "rootServer"],
   ] as const)(
     "allows the blocked APIs in %s",
     async (_surface, filePath, lintCase) => {

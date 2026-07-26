@@ -5,8 +5,14 @@
     "Firefox >= 111",
     "Safari >= 16.4"
   ],
-  "clientFiles": ["src/**/*.{ts,tsx}"],
+  "clientFiles": ["src/**/*.{ts,tsx}", "*.{ts,tsx}"],
   "serverAndTestIgnores": [
+    "next-env.d.ts",
+    "next.config.ts",
+    "playwright.config.ts",
+    "sentry.edge.config.ts",
+    "sentry.server.config.ts",
+    "vitest*.{ts,tsx}",
     "src/app/api/**/route.ts",
     "src/lib/homepage-og.ts",
     "src/lib/pool-og.ts",
