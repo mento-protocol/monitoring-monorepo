@@ -22,10 +22,26 @@ describe("combinedTooltip", () => {
       combinedTooltip(
         "N/A",
         "OK",
-        { ...pool, source: "virtual_pool_factory" },
+        {
+          ...pool,
+          source: "virtual_pool_factory",
+          hasHealthData: false,
+        },
         network,
         null,
       ),
     ).toBe("VirtualPool — oracle health not tracked");
+  });
+
+  it("explains missing FPMM health data before pending browser time", () => {
+    expect(
+      combinedTooltip(
+        "N/A",
+        "OK",
+        { ...pool, hasHealthData: false },
+        network,
+        null,
+      ),
+    ).toBe("Health data not yet available");
   });
 });

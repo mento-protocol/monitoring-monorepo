@@ -52,6 +52,7 @@ function healthTooltip(
 ): string {
   if (status === "N/A") {
     if (isVirtualPool(p)) return "VirtualPool — oracle health not tracked";
+    if (p.hasHealthData === false) return "Health data not yet available";
     return nowSeconds === null
       ? "Health status pending live browser time"
       : "Health data not yet available";
