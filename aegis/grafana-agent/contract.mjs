@@ -393,6 +393,12 @@ export function validateContract(files = readContractFiles()) {
     /role_id\s*=\s*"grafanaAgentActivationReader"/u,
     `${CONTRACT_FILES.bootstrap}: activation reader role ID must remain exact`,
   );
+  requirePattern(
+    errors,
+    activationRole,
+    /depends_on\s*=\s*\[\s*google_project_service\.appengineflex,\s*google_project_service\.iam,\s*\]/u,
+    `${CONTRACT_FILES.bootstrap}: activation reader role must wait for App Engine Flex and IAM APIs`,
+  );
   const activationPermissions = [
     ...activationRole.matchAll(/"(appengine\.[^"]+)"/gu),
   ].map((match) => match[1]);

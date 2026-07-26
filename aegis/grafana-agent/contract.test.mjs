@@ -130,6 +130,18 @@ test('the App Engine identity cannot drift from Terraform', () => {
   expectFailure(files, /service_account must pin/u);
 });
 
+test('the activation role waits for every required API', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    `  depends_on = [
+    google_project_service.appengineflex,
+    google_project_service.iam,
+  ]`,
+    '  depends_on = [google_project_service.appengineflex]',
+  );
+  expectFailure(files, /must wait for App Engine Flex and IAM APIs/u);
+});
+
 test('activation inventory must follow every App Engine versions page', () => {
   const files = sourceFiles();
   files.entrypoint = files.entrypoint.replace(

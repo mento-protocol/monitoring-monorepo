@@ -107,7 +107,10 @@ resource "google_project_iam_custom_role" "grafana_agent_activation_reader" {
     "appengine.versions.list",
   ]
 
-  depends_on = [google_project_service.appengineflex]
+  depends_on = [
+    google_project_service.appengineflex,
+    google_project_service.iam,
+  ]
 }
 
 resource "google_project_iam_member" "grafana_agent_runtime_activation_reader" {
