@@ -77,7 +77,7 @@ const LOOKAHEAD_FRACTION = 0.2;
 //
 // The query orders DESC (so the 1000-row cap drops the oldest days, keeping the
 // newest ~2.7yr); reverse to chronological ASC here for the chart's line.
-// `[...].reverse()` (not `toReversed`) for the ES2017 target. Memoized so the
+// `toReversed` is outside the browser floor. Memoized so the
 // reversed array stays referentially stable across renders.
 function useOracleDailyCandles(
   chartQuery: string | null,

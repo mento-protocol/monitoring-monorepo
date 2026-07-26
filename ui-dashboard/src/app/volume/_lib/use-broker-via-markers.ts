@@ -34,9 +34,7 @@ function callersCacheKey(callers: readonly string[]): string {
       hash = Math.imul(hash, 16777619);
     }
   }
-  // Array.prototype.at is ES2022 — Safari ≤15 / Chrome ≤91 throw on it. The
-  // dashboard targets ES2017 with no polyfill, so the indexed access form is
-  // the safe alternative for any code path that ships to the browser.
+  // Avoid allocating or adding a method call for this one indexed read.
   const last = sorted.length > 0 ? sorted[sorted.length - 1] : "";
   return `${sorted.length}:${sorted[0] ?? ""}:${last}:${(hash >>> 0).toString(36)}`;
 }

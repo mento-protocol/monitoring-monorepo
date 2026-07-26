@@ -10,8 +10,125 @@ import sonarjs from "eslint-plugin-sonarjs";
 import globals from "globals";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import ts from "typescript";
+import browserApiPolicy from "./browser-api-policy.json" with { type: "json" };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const receiverAwareRestrictions = browserApiPolicy.restrictions.filter(
+  (restriction) => "receiver" in restriction,
+);
+const propertyRestrictions = browserApiPolicy.restrictions.filter(
+  (restriction) => !("receiver" in restriction),
+);
+
+function memberPropertyName(node) {
+  if (!node.computed && node.property.type === "Identifier") {
+    return node.property.name;
+  }
+  if (
+    node.computed &&
+    node.property.type === "Literal" &&
+    typeof node.property.value === "string"
+  ) {
+    return node.property.value;
+  }
+  return null;
+}
+
+function hasBuiltInReceiverDeclaration(
+  type,
+  checker,
+  receiver,
+  property,
+  seen = new Set(),
+) {
+  if (seen.has(type)) return false;
+  seen.add(type);
+
+  if (type.isUnionOrIntersection()) {
+    return type.types.some((part) =>
+      hasBuiltInReceiverDeclaration(part, checker, receiver, property, seen),
+    );
+  }
+
+  const constraint = checker.getBaseConstraintOfType(type);
+  if (
+    constraint &&
+    hasBuiltInReceiverDeclaration(constraint, checker, receiver, property, seen)
+  ) {
+    return true;
+  }
+
+  const symbol = checker.getPropertyOfType(type, property);
+  return (symbol?.getDeclarations() ?? []).some((declaration) => {
+    const parent = declaration.parent;
+    if (!ts.isInterfaceDeclaration(parent)) return false;
+    const interfaceName = parent.name.text;
+    return receiver === "array"
+      ? interfaceName === "Array" || interfaceName === "ReadonlyArray"
+      : interfaceName === "String";
+  });
+}
+
+const receiverAwareBrowserApiRule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Disallow browser APIs only when the receiver resolves to the specified built-in type.",
+    },
+    schema: [
+      {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["receiver", "property", "message"],
+          properties: {
+            receiver: { enum: ["array", "string"] },
+            property: { type: "string" },
+            message: { type: "string" },
+          },
+        },
+      },
+    ],
+  },
+  create(context) {
+    const services = context.sourceCode.parserServices;
+    if (!services?.program || !services.esTreeNodeToTSNodeMap) return {};
+    const checker = services.program.getTypeChecker();
+
+    return {
+      MemberExpression(node) {
+        const property = memberPropertyName(node);
+        if (!property) return;
+        const restriction = context.options[0].find(
+          (candidate) => candidate.property === property,
+        );
+        if (!restriction) return;
+
+        const receiverNode = services.esTreeNodeToTSNodeMap.get(node.object);
+        const receiverType = checker.getTypeAtLocation(receiverNode);
+        if (
+          hasBuiltInReceiverDeclaration(
+            receiverType,
+            checker,
+            restriction.receiver,
+            property,
+          )
+        ) {
+          context.report({ node: node.property, message: restriction.message });
+        }
+      },
+    };
+  },
+};
+
+const browserApiPlugin = {
+  rules: {
+    "no-unsupported-receiver-property": receiverAwareBrowserApiRule,
+  },
+};
 
 export default tseslint.config(
   js.configs.recommended,
@@ -190,43 +307,24 @@ export default tseslint.config(
       "sonarjs/no-collapsible-if": "off",
     },
   },
-  // Backstop for AGENTS.md "Browser target — ES2017, no polyfill": these
-  // ES2023 Array methods compile fine (the TS `lib` includes `esnext`) but
-  // throw at runtime on Safari <=15 / Chrome <=109. `toSorted` use `sortedCopy`
-  // from `@/lib/immutable-sort` instead; `toReversed`/`toSpliced` use
-  // `[...arr].reverse()` / manual copy. Excludes the paths AGENTS.md's
-  // "Browser target" section names as ES2023+-safe (Node >=20, never bundled
-  // to the browser) and tests. Deliberately narrower than the broader
+  // Backstop for the package.json runtime floor (Chrome/Edge/Firefox 111+,
+  // Safari 16.4+). These APIs compile because the TS `lib` includes `esnext`,
+  // but are unavailable in part of that browser range. `toSorted` callers use
+  // `sortedCopy` from `@/lib/immutable-sort`; the other messages name the
+  // compatible form. Excludes paths that run on Node >=20 and never ship to
+  // the browser, plus tests. Deliberately narrower than the broader
   // server-only surface in "Server vs client module boundaries" (e.g.
   // `bridge-flows-og.ts`, `opengraph-image.tsx`) — widen the ignore list if a
   // future PR needs ES2023+ there instead of hand-rolling the ES2017 form.
   {
-    files: ["src/**/*.{ts,tsx}"],
-    ignores: [
-      "src/app/api/**/route.ts",
-      "src/lib/homepage-og.ts",
-      "src/lib/pool-og.ts",
-      "**/__tests__/**",
-      "**/*.test.{ts,tsx}",
-    ],
+    files: browserApiPolicy.clientFiles,
+    ignores: browserApiPolicy.serverAndTestIgnores,
+    plugins: { "browser-api-policy": browserApiPlugin },
     rules: {
-      "no-restricted-properties": [
+      "no-restricted-properties": ["error", ...propertyRestrictions],
+      "browser-api-policy/no-unsupported-receiver-property": [
         "error",
-        {
-          property: "toSorted",
-          message:
-            "requires Safari 16+/Chrome 110+; use sortedCopy() from '@/lib/immutable-sort' instead.",
-        },
-        {
-          property: "toReversed",
-          message:
-            "requires Safari 16+/Chrome 110+; use `[...arr].reverse()` instead.",
-        },
-        {
-          property: "toSpliced",
-          message:
-            "requires Safari 16+/Chrome 110+; use a manual copy instead.",
-        },
+        receiverAwareRestrictions,
       ],
     },
   },

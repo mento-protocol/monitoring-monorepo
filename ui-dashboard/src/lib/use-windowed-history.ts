@@ -239,7 +239,8 @@ export function useWindowedHistory<T extends WindowedHistoryRow>({
   // ----- Merged, sorted view. ------------------------------------------------
   const rows = useMemo(() => {
     const arr = Array.from(loadedRef.current.values());
-    // Spread+sort (not toSorted) — ES2017 target per ui-dashboard/CLAUDE.md.
+    // `toSorted` is outside the browser floor; sorting this fresh array in
+    // place avoids an unnecessary second copy.
     arr.sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
     return arr;
     // `version` is the deliberate re-merge trigger; loadedRef is a ref.
