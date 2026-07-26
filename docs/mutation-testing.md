@@ -54,11 +54,11 @@ mutated files. The indexer baseline writes Stryker's temp sandbox to the repo
 root under `.stryker-tmp/indexer-envio` so the package lint gate can run in
 parallel without scanning transient mutation files.
 
-| Target         | Native report                                                   | Runtime | Score (total / covered) | Mutants (killed / timed out / survived / no coverage / errors) | `break` / margin |
-| -------------- | --------------------------------------------------------------- | ------: | ----------------------- | -------------------------------------------------------------- | ---------------- |
-| Metrics bridge | `metrics-bridge/reports/mutation/{mutation.json,mutation.html}` |      8s | 88.89% / 88.89%         | 140 / 4 / 18 / 0 / 0                                           | 86 / 2.89 points |
-| Dashboard      | `ui-dashboard/reports/mutation/{mutation.json,mutation.html}`   |     12s | 88.83% / 91.50%         | 172 / 11 / 17 / 6 / 0                                          | 86 / 2.83 points |
-| Indexer        | `indexer-envio/reports/mutation/{mutation.json,mutation.html}`  |     58s | 96.09% / 96.09%         | 161 / 11 / 7 / 0 / 0                                           | 94 / 2.09 points |
+| Target         | Native report                                                     | Runtime | Score (total / covered) | Mutants (killed / timed out / survived / no coverage / errors) | `break` / margin |
+| -------------- | ----------------------------------------------------------------- | ------: | ----------------------- | -------------------------------------------------------------- | ---------------- |
+| Metrics bridge | `metrics-bridge/reports/mutation/{mutation.json,html/index.html}` |      8s | 88.89% / 88.89%         | 140 / 4 / 18 / 0 / 0                                           | 86 / 2.89 points |
+| Dashboard      | `ui-dashboard/reports/mutation/{mutation.json,html/index.html}`   |     12s | 88.83% / 91.50%         | 172 / 11 / 17 / 6 / 0                                          | 86 / 2.83 points |
+| Indexer        | `indexer-envio/reports/mutation/{mutation.json,html/index.html}`  |     58s | 96.09% / 96.09%         | 161 / 11 / 7 / 0 / 0                                           | 94 / 2.09 points |
 
 The floor is `floor(measured total score) - 2`. Stryker counts timed-out
 mutants as detected in its total score, while retaining their count separately
