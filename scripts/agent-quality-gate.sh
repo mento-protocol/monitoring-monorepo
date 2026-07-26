@@ -2143,6 +2143,10 @@ while IFS= read -r path; do
     scripts/*.sh)
       add_surface "scripts"
       case "$path" in
+        scripts/deploy-indexer-logs.sh)
+          add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy wrapper changed"
+          add_command "node scripts/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
+          ;;
         scripts/deploy-*.sh)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy wrapper changed"
           ;;
@@ -2327,6 +2331,9 @@ while IFS= read -r path; do
           ;;
         scripts/deploy-indexer-perf.mjs|scripts/deploy-indexer-perf.test.mjs)
           add_command "node scripts/deploy-indexer-perf.test.mjs" "indexer deploy perf helper changed"
+          ;;
+        scripts/filter-envio-runtime-errors.mjs|scripts/filter-envio-runtime-errors.test.mjs)
+          add_command "node scripts/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
           ;;
         scripts/alert-rules-lint.mjs|scripts/alert-rules-lint.test.mjs)
           add_command "pnpm alerts:rules:lint:test" "alert-rules lint helper changed"
