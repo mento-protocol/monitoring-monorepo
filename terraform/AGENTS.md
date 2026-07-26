@@ -16,13 +16,33 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, the separated Terraform/service-deploy Workload Identity Federation chains, and repo-level GitHub Actions secrets and variables owned by the platform stack. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, the separated Terraform/service-deploy Workload Identity Federation chains, and repo-level GitHub Actions secrets and variables owned by the platform stack. Alloy values are required sensitive, ephemeral operator inputs that terminate at the pinned Google provider's write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
+
+Alloy's runtime project authority is the custom
+`grafanaAgentActivationReader` role with exactly `appengine.services.get` and
+`appengine.versions.list`. Do not replace it with a predefined App Engine
+viewer role or broaden it; the active/passive collector handshake depends on
+this exact read boundary.
 
 ## Operating Rules
 
 - Use `pnpm tf list` to confirm stack ownership before moving resources.
 - Run `pnpm infra:plan` or `pnpm tf plan platform` before any apply.
 - Never run `terraform apply` without explicit human approval.
+- Platform plan/apply must run with `TF_LOG`, `TF_LOG_CORE`,
+  `TF_LOG_PROVIDER`, every `TF_LOG_PROVIDER_*`, `TF_LOG_SDK`, and
+  `TF_LOG_SDK_PROTO` unset or `OFF`. Every other `TF_LOG_SDK_*`, including
+  `TF_LOG_SDK_PROTO_DATA_DIR`, must be unset or empty; `OFF` is a directory name
+  there and does not disable protocol dumps. `TF_LOG_PATH` alone does not
+  enable logs and remains allowed. Platform plan and apply must use a clean
+  `main` checkout whose HEAD matches freshly fetched `origin/main`;
+  `--force-local-apply` does not bypass this secret-input guard. The wrapper
+  executes the verified commit from a temporary source snapshot; gitignored
+  tfvars stay external and are passed by absolute file path.
+- Alloy deploy operators receive the exact metadata-only
+  `grafanaAgentPreflightReader` custom role so the mandatory live preflight can
+  inspect IAM, secret metadata, runtime identity, and traffic without reading
+  secret payloads. Keep its permissions and `gcp_dev_members` binding exact.
 - Never set GitHub Actions, Vercel, GCP Secret Manager, Upstash, Grafana, or
   other platform secrets manually with CLI commands. Secrets owned by this stack
   must be modeled as Terraform variables/resources and delivered by a

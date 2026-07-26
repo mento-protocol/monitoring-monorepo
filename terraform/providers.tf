@@ -1,8 +1,8 @@
 terraform {
-  # `>= 1.7` for the `removed { lifecycle { destroy = false } }` block used to
-  # drop `vercel_project_environment_variable.blob_token` from state without
-  # destroying the live env var.
-  required_version = ">= 1.7"
+  # `>= 1.11` for write-only provider arguments and ephemeral variables used
+  # by the Grafana Alloy Secret Manager versions. The root also uses the
+  # `removed { lifecycle { destroy = false } }` block introduced in 1.7.
+  required_version = ">= 1.11"
 
   backend "gcs" {
     bucket = "mento-terraform-tfstate-6ed6"
@@ -24,7 +24,7 @@ terraform {
     }
     google = {
       source  = "hashicorp/google"
-      version = "~> 6.11"
+      version = "~> 6.50"
     }
     github = {
       source = "integrations/github"

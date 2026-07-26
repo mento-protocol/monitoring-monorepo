@@ -333,19 +333,27 @@ pnpm aegis:logs
 ```
 
 Grafana Alloy deploys from the same project under the existing `grafana-agent`
-service/command names. Deploy only when its three Secret Manager values already
-have enabled versions and the effective App Engine runtime identity has been
-verified:
+service/command names. Platform Terraform accepts its three values as
+sensitive, ephemeral inputs and writes them through Google provider 6.50
+write-only arguments. Its App Engine service pins the dedicated
+`grafana-agent-runtime` service account.
 
 ```bash
+pnpm aegis:agent:preflight -- --static-only
+pnpm aegis:agent:test
 pnpm aegis:agent:deploy
 ```
 
-The legacy seed command writes secret versions with `gcloud` and is not an
-agent-authorized bootstrap or rotation path under ADR 0030. Follow
-[`aegis/grafana-agent/README.md`](./aegis/grafana-agent/README.md); issue
-[#1473](https://github.com/mento-protocol/monitoring-monorepo/issues/1473)
-tracks its policy-compliant replacement.
+The deploy wrapper requires clean current `main`, checks the latest secret
+versions and exact IAM contract, and submits an immutable commit snapshot
+through a dedicated builder with no secret access. It verifies the new
+version's identity and live zero-traffic allocation, assigns 100% traffic
+atomically, then uses a stop-before-start handoff to prevent duplicate
+collectors. The handoff leaves a temporary collection gap until the new version
+activates or the wrapper rolls back. The legacy seed command remains only for
+Phase A rollback and is not an agent-authorized bootstrap or rotation path
+under ADR 0030. Follow
+[`aegis/grafana-agent/README.md`](./aegis/grafana-agent/README.md).
 
 The Aegis dashboard lives in `aegis/terraform` and keeps the existing GCS
 backend prefix `aegis`; the Aegis service-health alert rules moved to

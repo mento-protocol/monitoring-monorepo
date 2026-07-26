@@ -150,18 +150,18 @@ const registeredAegisLocals = `locals {
     "grafana-agent-password",
   ])
 
-  grafana_agent_cloudbuild_service_accounts = {
-    legacy  = "\${google_project.monitoring.number}@cloudbuild.gserviceaccount.com"
-    compute = "\${google_project.monitoring.number}-compute@developer.gserviceaccount.com"
-  }
-
-  grafana_agent_cloudbuild_project_roles = toset([
-    "roles/appengine.appAdmin",
+  grafana_agent_builder_project_roles = toset([
+    "roles/appengine.deployer",
     "roles/artifactregistry.writer",
     "roles/cloudbuild.builds.editor",
-    "roles/logging.viewer",
-    "roles/storage.admin",
+    "roles/logging.logWriter",
+    "roles/storage.objectAdmin",
   ])
+
+  grafana_agent_secret_ids_by_key = {
+    for secret_id in local.grafana_agent_secret_ids :
+    trimprefix(secret_id, "grafana-agent-") => secret_id
+  }
 }
 `;
 

@@ -129,19 +129,30 @@ pnpm aegis:test               # Jest tests
 pnpm aegis:lint               # ESLint baseline gate for Aegis
 pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-monitoring
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
-# Alloy deploy requires existing enabled secrets and a verified runtime identity.
-# Bootstrap/rotation remains blocked by open owner-decision issue #1473; never run the legacy seed command.
-pnpm aegis:agent:deploy       # Deploy the already provisioned Alloy collector
+# Alloy checks; live preflight reads metadata.
+pnpm aegis:agent:preflight -- --static-only
+pnpm aegis:agent:test
+# Deploy clean main: immutable build/verifier snapshots, atomic traffic
+# assignment, then a stop-before-start handoff. This prevents overlap but can
+# leave a temporary collection gap until activation or rollback; never use
+# --migrate for this collector.
+pnpm aegis:agent:deploy
+# Platform owns bootstrap/rotation via ephemeral values and counters.
+# Never seed via CLI. Log-level vars may be unset/OFF; other TF_LOG_SDK_*
+# settings, including TF_LOG_SDK_PROTO_DATA_DIR, must be unset or empty.
+pnpm infra:init
+pnpm infra:plan
+# Aegis Terraform owns Grafana folder/dashboard; CI applies on main.
 pnpm aegis:tf:init
 pnpm aegis:tf:plan
-# Apply runs in CI on merge to main (aegis-terraform.yml; production-infra gate).
 
 # Infrastructure (Terraform)
 pnpm tf list                  # Registered Terraform stacks from terraform.stacks.json
 pnpm tf validate <stack>      # fmt/init -backend=false/validate for one stack
 pnpm infra:init               # Init providers (first time or after changes)
-pnpm infra:plan               # Preview infrastructure changes
-# Never run apply without explicit human approval. Plan first and surface the diff.
+pnpm infra:plan               # Preview a committed snapshot from clean current main
+# Plan/apply enforce clean current main and execute its committed snapshot.
+# Explicit human approval remains required before apply.
 pnpm infra:apply              # Apply infrastructure changes
 # Event-driven alerts stack (Cloud Functions + Slack channels/usergroups + Sentry bridge + QuickNode webhooks):
 pnpm alerts:infra:init

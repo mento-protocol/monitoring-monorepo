@@ -87,6 +87,47 @@ production plans.
 See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
 for the exact placeholder and target boundaries.
 
+The platform stack requires `grafana_agent_secret_values` and
+`grafana_agent_secret_rotation_counters` for the Alloy Secret Manager versions.
+The values are sensitive and ephemeral and terminate at Google provider 6.50
+`secret_data_wo`; the non-secret positive integer counters terminate at
+`secret_data_wo_version`. Supply both through gitignored
+`terraform/terraform.tfvars`, a gitignored `terraform/*.auto.tfvars` file, or an
+equivalent approved operator input on a clean current-`main` checkout. Review
+the manual plan and obtain explicit human approval before apply. Do not save the
+plan, print the inputs, pass them through CLI arguments, or use the retained
+legacy seed script. A feature-branch validation proves configuration only; it
+is not the authoritative live plan. Unset `TF_LOG`, `TF_LOG_CORE`,
+`TF_LOG_PROVIDER`, every `TF_LOG_PROVIDER_*`, `TF_LOG_SDK`, and
+`TF_LOG_SDK_PROTO`, or set those actual log-level variables to `OFF`. Every
+other `TF_LOG_SDK_*`, including `TF_LOG_SDK_PROTO_DATA_DIR`, must be unset or
+empty because `OFF` would name a protocol-dump directory. The platform wrapper
+rejects plan/apply when these settings can expose payloads. `TF_LOG_PATH` alone
+remains allowed because it does not enable logging. Platform plan and apply
+always require a clean `main` checkout whose HEAD matches freshly fetched
+`origin/main`, and `--force-local-apply` does not bypass that guard. This
+protects write-only inputs from unreviewed local Terraform or provider code.
+The wrapper executes platform configuration from a temporary snapshot
+materialized from that verified commit. Gitignored `terraform.tfvars` and
+`*.auto.tfvars` inputs remain outside the snapshot and are passed by absolute
+file path; cleanup removes the source snapshot after the command. Write-only
+secret rotation creates the replacement before disabling the prior version.
+
+The Alloy runtime has Secret Accessor only on its three managed secrets plus
+the project custom role `grafanaAgentActivationReader`. That role contains only
+`appengine.services.get` and `appengine.versions.list`, allowing the supervisor
+to prove full allocation and every peer collector stopped before Alloy starts.
+The engineering group receives the separate custom role
+`grafanaAgentPreflightReader`. Its exact metadata-only permissions cover the
+mandatory live preflight's App Engine identity/traffic reads, service-account
+and project IAM policy reads, custom-role reads, Secret Manager inventory/IAM
+reads, and latest-version state reads. It cannot access secret payloads.
+The deploy wrapper assigns 100% traffic atomically, then uses a
+stop-before-start handoff. This prevents duplicate background collectors but
+leaves a temporary collection gap until the new version activates or the
+wrapper rolls back. `--migrate` is forbidden because it cannot establish the
+required full-allocation activation condition.
+
 For a real `main` plan, the workflow posts a secretless Slack action summary
 before its apply waits for approval. GitHub evaluates Environment protection
 before starting the apply job, so the operator approves the commit and this

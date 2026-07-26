@@ -6,7 +6,12 @@ FORCE="${FORCE:-0}"
 
 usage() {
   cat <<'USAGE'
-Seed Grafana Alloy remote-write Secret Manager versions.
+LEGACY PHASE A ROLLBACK ARTIFACT — DO NOT USE FOR BOOTSTRAP OR ROTATION.
+
+This script writes Grafana Alloy remote-write Secret Manager versions with
+gcloud and conflicts with ADR 0030. Platform Terraform owns the selected
+write-only path. Retain this file only until issue #1473 retires the rollback
+route.
 
 The secret IDs and environment variable names intentionally retain the
 grafana-agent prefix for compatibility with existing Terraform and deploy

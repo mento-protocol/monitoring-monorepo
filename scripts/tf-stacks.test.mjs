@@ -131,6 +131,15 @@ if (args[0] === "-C" && args[2] === "ls-files") {
       process.env.TF_STACKS_TEST_HEAD ??
       "abc123") + "\\n",
   );
+} else if (
+  args[0] === "ls-tree" &&
+  args[1] === "-r" &&
+  args[2] === "--name-only" &&
+  args[3] === "-z"
+) {
+  process.stdout.write("terraform/main.tf\\0");
+} else if (args[0] === "show" && args[1]?.endsWith(":terraform/main.tf")) {
+  process.stdout.write("terraform {}\\n");
 } else {
   process.stderr.write("unexpected git command: " + command + "\\n");
   process.exit(92);
@@ -187,6 +196,19 @@ function assertApplyRefused(result) {
   );
 }
 
+function assertPlatformCommandRefused(result, command) {
+  assertIncludes(
+    result.stderr,
+    `refusing platform Terraform ${command} outside clean current main`,
+    "refusal should identify the platform current-main guard",
+  );
+  assertIncludes(
+    result.stderr,
+    "Platform secret inputs require a clean main checkout whose HEAD matches freshly fetched origin/main before plan or apply.",
+    "refusal should explain the platform secret-input boundary",
+  );
+}
+
 function runValidateFormatTest(tempDir) {
   const fixtureRoot = path.join(tempDir, "validate-format");
   mkdirSync(fixtureRoot);
@@ -226,6 +248,27 @@ function assertApplyCallWithoutForce(logFile) {
   assert(
     !applyCall.includes("--force-local-apply"),
     "wrapper override must not be forwarded to terraform",
+  );
+}
+
+function assertTerraformUsesCommittedSnapshot(logFile, message) {
+  const sourcePath = `-chdir=${path.join(repoRoot, "terraform")}`;
+  const calls = terraformCalls(logFile);
+  assert(calls.length > 0, `${message}: expected Terraform calls`);
+  assert(
+    calls.every(
+      (args) =>
+        args[0] !== sourcePath &&
+        args[0].startsWith(
+          `-chdir=${path.join(tmpdir(), "tf-stacks-platform-source.")}`,
+        ),
+    ),
+    `${message}: ${JSON.stringify(calls)}`,
+  );
+  const snapshotStackPath = calls[0][0].slice("-chdir=".length);
+  assert(
+    !existsSync(snapshotStackPath),
+    `${message}: temporary source snapshot should be removed`,
   );
 }
 
@@ -384,20 +427,256 @@ function runApplyGuardTests(tempDir) {
   assertNoGitCalls(fakeTools.gitLog, "plan should not inspect git state");
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
-  run(["apply", "platform", "-auto-approve"], {
+  result = runFail(
+    ["apply", "platform", "--force-local-apply", "-auto-approve"],
+    {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_BRANCH: "feature/platform-secret-rotation",
+      },
+    },
+  );
+  assertPlatformCommandRefused(result, "apply");
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "feature-branch platform apply must not run terraform",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["apply", "platform", "-auto-approve"], {
     env: {
       ...baseEnv,
-      TF_STACKS_TEST_FAIL_ON_GIT: "1",
+      TF_STACKS_TEST_STATUS: " M terraform/aegis-bootstrap.tf\n",
     },
+  });
+  assertPlatformCommandRefused(result, "apply");
+  assertIncludes(
+    result.stderr,
+    "clean=no",
+    "platform refusal should explain dirty worktrees",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "dirty platform apply must not run terraform",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["apply", "platform", "-auto-approve"], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_HEAD: "abc123",
+      TF_STACKS_TEST_ORIGIN_MAIN: "def456",
+    },
+  });
+  assertPlatformCommandRefused(result, "apply");
+  assertIncludes(
+    result.stderr,
+    "HEAD==origin/main=no",
+    "platform refusal should explain stale main",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "stale platform apply must not run terraform",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  run(["apply", "platform", "-auto-approve"], {
+    env: baseEnv,
   });
   assertTerraformCommands(
     fakeTools.terraformLog,
     ["init", "apply"],
-    "manual apply stacks must not be guarded",
+    "safe current-main platform apply should run terraform",
   );
-  assertNoGitCalls(
+  assertGitCallsInclude(
     fakeTools.gitLog,
-    "manual apply should not inspect git state",
+    originMainFetchCommand,
+    "platform apply should refresh origin/main before terraform",
+  );
+  assertTerraformUsesCommittedSnapshot(
+    fakeTools.terraformLog,
+    "platform apply must execute committed source",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["plan", "platform"], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_BRANCH: "feature/platform-secret-plan",
+    },
+  });
+  assertPlatformCommandRefused(result, "plan");
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "feature-branch platform plan must not run terraform",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["plan", "platform"], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_STATUS: " M terraform/aegis-bootstrap.tf\n",
+    },
+  });
+  assertPlatformCommandRefused(result, "plan");
+  assertIncludes(
+    result.stderr,
+    "clean=no",
+    "platform plan refusal should explain dirty worktrees",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "dirty platform plan must not run terraform",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  run(["plan", "platform", "-var-file=operator.tfvars"], {
+    env: baseEnv,
+  });
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["init", "plan"],
+    "safe current-main platform plan should run terraform",
+  );
+  assertGitCallsInclude(
+    fakeTools.gitLog,
+    originMainFetchCommand,
+    "platform plan should refresh origin/main before terraform",
+  );
+  const platformPlanGitCalls = gitCalls(fakeTools.gitLog);
+  assert(
+    platformPlanGitCalls.indexOf(originMainFetchCommand) <
+      platformPlanGitCalls.indexOf("status --porcelain"),
+    "platform plan should fetch origin/main before capturing worktree status",
+  );
+  assert(
+    platformPlanGitCalls.includes("show abc123:terraform/main.tf"),
+    "platform plan snapshot should read source from the verified commit object",
+  );
+  assertTerraformUsesCommittedSnapshot(
+    fakeTools.terraformLog,
+    "platform plan must execute committed source",
+  );
+  const platformPlanCall = terraformCalls(fakeTools.terraformLog).find(
+    (args) => args[1] === "plan",
+  );
+  assert(
+    platformPlanCall.includes(
+      `-var-file=${path.join(repoRoot, "terraform/operator.tfvars")}`,
+    ),
+    `platform plan should keep operator inputs outside the source snapshot: ${JSON.stringify(
+      platformPlanCall,
+    )}`,
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+}
+
+function runWriteOnlyLoggingGuardTests(tempDir) {
+  const fixtureRoot = path.join(tempDir, "logging-guard");
+  mkdirSync(fixtureRoot);
+  const fakeTools = makeFakeTools(fixtureRoot);
+
+  for (const command of ["plan", "apply"]) {
+    for (const variable of [
+      "TF_LOG",
+      "TF_LOG_CORE",
+      "TF_LOG_PROVIDER",
+      "TF_LOG_PROVIDER_GOOGLE",
+      "TF_LOG_SDK",
+      "TF_LOG_SDK_PROTO",
+      "TF_LOG_SDK_PROTO_DATA_DIR",
+      "TF_LOG_SDK_FUTURE_OUTPUT",
+    ]) {
+      const result = runFail([command, "platform"], {
+        env: {
+          ...fakeTools.env,
+          [variable]: "DEBUG",
+          TF_STACKS_TEST_FAIL_ON_GIT: "1",
+        },
+      });
+      assertIncludes(
+        result.stderr,
+        `refusing platform Terraform ${command}: ${variable} can expose write-only secret payloads`,
+        `${variable} should fail closed for platform ${command}`,
+      );
+      assertNoTerraformCalls(
+        fakeTools.terraformLog,
+        `${variable} platform ${command} must not run terraform`,
+      );
+      assertNoGitCalls(
+        fakeTools.gitLog,
+        `${variable} platform ${command} must fail before git checks`,
+      );
+      resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+    }
+  }
+
+  for (const variable of [
+    "TF_LOG_SDK_PROTO_DATA_DIR",
+    "TF_LOG_SDK_FUTURE_OUTPUT",
+  ]) {
+    const result = runFail(["plan", "platform"], {
+      env: {
+        ...fakeTools.env,
+        [variable]: "OFF",
+        TF_STACKS_TEST_FAIL_ON_GIT: "1",
+      },
+    });
+    assertIncludes(
+      result.stderr,
+      `refusing platform Terraform plan: ${variable} can expose write-only secret payloads`,
+      `${variable}=OFF must not bypass the path-or-unknown guard`,
+    );
+    assertNoTerraformCalls(
+      fakeTools.terraformLog,
+      `${variable}=OFF must not run terraform`,
+    );
+    assertNoGitCalls(
+      fakeTools.gitLog,
+      `${variable}=OFF must fail before git checks`,
+    );
+    resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+  }
+
+  run(["plan", "platform"], {
+    env: {
+      ...fakeTools.env,
+      TF_LOG_PATH: "/tmp/inert-terraform.log",
+    },
+  });
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["init", "plan"],
+    "TF_LOG_PATH alone should remain allowed because it does not enable logging",
+  );
+  assertGitCallsInclude(
+    fakeTools.gitLog,
+    originMainFetchCommand,
+    "allowed platform plan should still verify current main",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  run(["plan", "platform"], {
+    env: {
+      ...fakeTools.env,
+      TF_LOG: "OFF",
+      TF_LOG_CORE: "OFF",
+      TF_LOG_PROVIDER: "off",
+      TF_LOG_PROVIDER_GOOGLE: "OFF",
+      TF_LOG_SDK: "off",
+      TF_LOG_SDK_PROTO: "OFF",
+      TF_LOG_PATH: "/tmp/inert-terraform.log",
+    },
+  });
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["init", "plan"],
+    "explicitly disabled Terraform logging should be accepted",
+  );
+  assertGitCallsInclude(
+    fakeTools.gitLog,
+    originMainFetchCommand,
+    "logging-disabled platform plan should still verify current main",
   );
 }
 
@@ -615,6 +894,7 @@ try {
 
   runValidateFormatTest(tempDir);
   runApplyGuardTests(tempDir);
+  runWriteOnlyLoggingGuardTests(tempDir);
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
 }

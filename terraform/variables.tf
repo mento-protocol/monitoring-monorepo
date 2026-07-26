@@ -467,6 +467,45 @@ variable "aegis_app_engine_location_id" {
   }
 }
 
+variable "grafana_agent_secret_values" {
+  description = <<-EOT
+    Grafana Cloud remote-write values for the Alloy collector. Supply all three
+    fields through the operator's gitignored terraform.tfvars only for an
+    explicitly approved current-main plan/apply. The ephemeral value terminates
+    at google_secret_manager_secret_version.grafana_agent.secret_data_wo and is
+    omitted from Terraform plan and state.
+  EOT
+  type = object({
+    endpoint = string
+    username = string
+    password = string
+  })
+  sensitive = true
+  ephemeral = true
+}
+
+variable "grafana_agent_secret_rotation_counters" {
+  description = <<-EOT
+    Reviewed non-secret rotation counters for the Alloy Secret Manager values.
+    Start each field at 1 for Terraform adoption and increment only the field
+    whose value is intentionally rotated through an approved current-main
+    plan/apply.
+  EOT
+  type = object({
+    endpoint = number
+    username = number
+    password = number
+  })
+
+  validation {
+    condition = alltrue([
+      for counter in values(var.grafana_agent_secret_rotation_counters) :
+      counter >= 1 && counter == floor(counter)
+    ])
+    error_message = "Every grafana_agent_secret_rotation_counters value must be a positive integer."
+  }
+}
+
 variable "metrics_bridge_image" {
   description = "Bootstrap image used only when the Cloud Run service is first created. After bootstrap, image rollouts happen out-of-band via `gcloud run services update` (see scripts/deploy-bridge.sh + the GitHub workflow) — terraform ignores image drift via `lifecycle.ignore_changes`. Pinned by digest so bootstrap behavior is deterministic across environments; `gcr.io/cloudrun/hello`'s `http.HandleFunc(\"/\", …)` catch-all handles the `/health` probe."
   type        = string
