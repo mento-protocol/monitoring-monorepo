@@ -3712,6 +3712,10 @@ assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 assert_contains "- pnpm docs:index --check (documentation catalog helper changed)"
 assert_contains "- pnpm agent:context-check (documentation catalog metadata contract changed)"
 
+run_gate "docs/claude-runtime-document-registry.json"
+assert_contains "- pnpm docs:index --check (Claude runtime document registry changed)"
+assert_contains "- pnpm agent:context-check (Claude runtime document registry changed)"
+
 run_gate "scripts/docs-index.test.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 

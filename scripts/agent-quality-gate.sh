@@ -1591,6 +1591,11 @@ while IFS= read -r path; do
       add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation contract changed"
       add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation evaluation contract changed"
       ;;
+    docs/claude-runtime-document-registry.json)
+      add_surface "docs"
+      add_command "pnpm docs:index --check" "Claude runtime document registry changed"
+      add_command "pnpm agent:context-check" "Claude runtime document registry changed"
+      ;;
     AGENTS.md|*/AGENTS.md|.codex/config.toml)
       add_surface "agent-context"
       add_command "pnpm agent:context-budget --strict" "agent instruction budget input changed"
