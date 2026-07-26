@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -57,25 +57,18 @@ Environment approval.
 
 ## CI Model
 
-`.github/workflows/infra.yml` uses coarse YAML path filters to admit a run. The
-required `.github/workflows/ci.yml` sentinel runs on every PR and routes
-internally. Its change filter and `scripts/tf-stacks.mjs` use
-`terraform.stacks.json` to classify changed stacks and validate only their
-registered roots. The registry remains the ownership source of truth, but a new
-`changedPathPatterns` entry must also reach the infra admission filter and the
-CI internal filter until
+`infra.yml` uses coarse admission filters; the required `ci.yml` sentinel
+always runs and routes internally. Both classify registered roots through
+`terraform.stacks.json` and `scripts/tf-stacks.mjs`. Until
 [#1501](https://github.com/mento-protocol/monitoring-monorepo/issues/1501)
-replaces that duplication with enforced parity.
+enforces parity, add new `changedPathPatterns` to the registry and both filters.
 
-`alerts-rules`, `alerts-delivery`, `aegis`, and `governance-watchdog` have CI
-apply behavior on `main`, gated by the `production-infra` GitHub Environment.
-Their plan jobs can run for workflow/notifier edits too, but the apply jobs only
-become eligible when stack-owned deployment inputs changed or a maintainer used
-`workflow_dispatch`. The platform stack remains manual-plan/manual-apply only.
-`terraform-drift.yml` runs daily plans for all four stacks. Trusted-`main`
-plans and drift use the read-only refresh chain, full refresh, and
-`-lock=false`; the legacy Token Creator grant remains only for rollback until
-live proof passes and old runs drain.
+`alerts-rules`, `alerts-delivery`, `aegis`, and `governance-watchdog` plan and
+apply on `main` through `production-infra`; apply runs only for stack deployment
+inputs or `workflow_dispatch`. Platform remains manual. Daily drift and trusted
+`main` plans use the read-only refresh chain, full refresh, and `-lock=false`.
+Keep the legacy Token Creator grant only for rollback until proof passes and old
+runs drain.
 
 Secret-bearing workflows use validation-safe placeholder `TF_VAR_*` values or
 guarded targets for eligible same-repo human PR plans. Fork, Dependabot, and
@@ -87,46 +80,12 @@ production plans.
 See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
 for the exact placeholder and target boundaries.
 
-The platform stack requires `grafana_agent_secret_values` and
-`grafana_agent_secret_rotation_counters` for the Alloy Secret Manager versions.
-The values are sensitive and ephemeral and terminate at Google provider 6.50
-`secret_data_wo`; the non-secret positive integer counters terminate at
-`secret_data_wo_version`. Supply both through gitignored
-`terraform/terraform.tfvars`, a gitignored `terraform/*.auto.tfvars` file, or an
-equivalent approved operator input on a clean current-`main` checkout. Review
-the manual plan and obtain explicit human approval before apply. Do not save the
-plan, print the inputs, pass them through CLI arguments, or use the retained
-legacy seed script. A feature-branch validation proves configuration only; it
-is not the authoritative live plan. Unset `TF_LOG`, `TF_LOG_CORE`,
-`TF_LOG_PROVIDER`, every `TF_LOG_PROVIDER_*`, `TF_LOG_SDK`, and
-`TF_LOG_SDK_PROTO`, or set those actual log-level variables to `OFF`. Every
-other `TF_LOG_SDK_*`, including `TF_LOG_SDK_PROTO_DATA_DIR`, must be unset or
-empty because `OFF` would name a protocol-dump directory. The platform wrapper
-rejects plan/apply when these settings can expose payloads. `TF_LOG_PATH` alone
-remains allowed because it does not enable logging. Platform plan and apply
-always require a clean `main` checkout whose HEAD matches freshly fetched
-`origin/main`, and `--force-local-apply` does not bypass that guard. This
-protects write-only inputs from unreviewed local Terraform or provider code.
-The wrapper executes platform configuration from a temporary snapshot
-materialized from that verified commit. Gitignored `terraform.tfvars` and
-`*.auto.tfvars` inputs remain outside the snapshot and are passed by absolute
-file path; cleanup removes the source snapshot after the command. Write-only
-secret rotation creates the replacement before disabling the prior version.
-
-The Alloy runtime has Secret Accessor only on its three managed secrets plus
-the project custom role `grafanaAgentActivationReader`. That role contains only
-`appengine.services.get` and `appengine.versions.list`, allowing the supervisor
-to prove full allocation and every peer collector stopped before Alloy starts.
-The engineering group receives the separate custom role
-`grafanaAgentPreflightReader`. Its exact metadata-only permissions cover the
-mandatory live preflight's App Engine identity/traffic reads, service-account
-and project IAM policy reads, custom-role reads, Secret Manager inventory/IAM
-reads, and latest-version state reads. It cannot access secret payloads.
-The deploy wrapper assigns 100% traffic atomically, then uses a
-stop-before-start handoff. This prevents duplicate background collectors but
-leaves a temporary collection gap until the new version activates or the
-wrapper rolls back. `--migrate` is forbidden because it cannot establish the
-required full-allocation activation condition.
+Alloy's full write-only input, IAM, deploy, and rollback contract lives in
+[`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md). Platform
+plan/apply rejects unsafe logging, requires freshly fetched clean `main`, and
+runs its verified snapshot with gitignored tfvars outside. Review the manual
+plan and get explicit approval before apply; never seed via CLI or use
+`--migrate`.
 
 For a real `main` plan, the workflow posts a secretless Slack action summary
 before its apply waits for approval. GitHub evaluates Environment protection

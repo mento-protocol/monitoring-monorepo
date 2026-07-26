@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -129,31 +129,20 @@ pnpm aegis:test               # Jest tests
 pnpm aegis:lint               # ESLint baseline gate for Aegis
 pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-monitoring
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
-# Alloy checks; live preflight reads metadata.
-pnpm aegis:agent:preflight -- --static-only
+# Alloy: the scoped runbook owns write-only inputs, no-seed/--migrate rules,
+# and the stop-before-start handoff.
+pnpm aegis:agent:preflight -- --static-only # Static contract only
 pnpm aegis:agent:test
-# Deploy clean main: immutable build/verifier snapshots, atomic traffic
-# assignment, then a stop-before-start handoff. This prevents overlap but can
-# leave a temporary collection gap until activation or rollback; never use
-# --migrate for this collector.
-pnpm aegis:agent:deploy
-# Platform owns bootstrap/rotation via ephemeral values and counters.
-# Never seed via CLI. Log-level vars may be unset/OFF; other TF_LOG_SDK_*
-# settings, including TF_LOG_SDK_PROTO_DATA_DIR, must be unset or empty.
-pnpm infra:init
-pnpm infra:plan
-# Aegis Terraform owns Grafana folder/dashboard; CI applies on main.
-pnpm aegis:tf:init
+pnpm aegis:agent:deploy                    # Deploy from clean current main
+pnpm aegis:tf:init                         # Grafana folder/dashboard stack
 pnpm aegis:tf:plan
 
 # Infrastructure (Terraform)
 pnpm tf list                  # Registered Terraform stacks from terraform.stacks.json
 pnpm tf validate <stack>      # fmt/init -backend=false/validate for one stack
 pnpm infra:init               # Init providers (first time or after changes)
-pnpm infra:plan               # Preview a committed snapshot from clean current main
-# Plan/apply enforce clean current main and execute its committed snapshot.
-# Explicit human approval remains required before apply.
-pnpm infra:apply              # Apply infrastructure changes
+pnpm infra:plan               # Plan a committed snapshot from clean current main
+pnpm infra:apply              # Explicit human approval required
 # Event-driven alerts stack (Cloud Functions + Slack channels/usergroups + Sentry bridge + QuickNode webhooks):
 pnpm alerts:infra:init
 pnpm alerts:infra:plan

@@ -40,7 +40,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.github/prompts/sentry-autofix.md`](../.github/prompts/sentry-autofix.md) | sentry-autofix.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
 | [`.github/prompts/sentry-triage.md`](../.github/prompts/sentry-triage.md) | sentry-triage.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
 | [`aegis/AGENTS.md`](../aegis/AGENTS.md) | Aegis Instructions | canonical / active | agent-instructions / aegis | eng | 90d; verified 2026-07-23 |
-| [`AGENTS.md`](../AGENTS.md) | Monitoring Monorepo Instructions | canonical / active | agent-instructions / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`AGENTS.md`](../AGENTS.md) | Monitoring Monorepo Instructions | canonical / active | agent-instructions / repo-wide | eng | 90d; verified 2026-07-26 |
 | [`alerts/AGENTS.md`](../alerts/AGENTS.md) | Alerts Instructions | canonical / active | agent-instructions / alerts | eng | 90d; verified 2026-07-23 |
 | [`indexer-envio/AGENTS.md`](../indexer-envio/AGENTS.md) | Envio Indexer Instructions | canonical / active | agent-instructions / indexer-envio | eng | 90d; verified 2026-07-23 |
 | [`integration-probes/AGENTS.md`](../integration-probes/AGENTS.md) | Integration Probes Instructions | canonical / active | agent-instructions / integration-probes | eng | 90d; verified 2026-07-23 |
@@ -75,13 +75,13 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md) | PR Operating Card | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
-| [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-26 |
 | [`docs/notes/reserve-yield-indexer.md`](notes/reserve-yield-indexer.md) | Reserve-Yield Indexer Topology | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md) | Sentry Triage Pipeline | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md) | GitHub-to-Slack notifications for Terraform-applying workflows | canonical / active | runbook / terraform/infra | eng | 30d; verified 2026-07-22 |
 | [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md) | Spoken Attention Nudge | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md) | New Worktree / Clone Setup and Claude Code on the Web Setup | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-24 |
+| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-26 |
 | [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md) | Adding Governance Watchdog Events | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md) | Governance Watchdog Bootstrap | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/README.md`](../governance-watchdog/README.md) | Governance Watchdog | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
