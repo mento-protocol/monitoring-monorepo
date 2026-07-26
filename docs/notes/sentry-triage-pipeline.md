@@ -308,6 +308,37 @@ local-only) or grant Administration to the autofix App. Fine-grained PATs
 expire (≤1 year); when it lapses the check fails loudly ("rotate the audit
 token") rather than reporting false drift, so rotate it on that signal.
 
+#### GitHub Environment rollout (issue #1289)
+
+Moving the five Sentry-pipeline-exclusive secrets behind the `sentry-pipeline`
+Environment is a one-time, ordered migration. A new `environment:` workflow
+reference AUTO-CREATES an unprotected Environment if the protected one does not
+already exist (see docs/terraform.md, "GitHub Environments"), and several of the
+secrets are live, so roll it out Terraform-FIRST:
+
+1. Apply `terraform/github-environment.tf` FIRST — the
+   `github_repository_environment.sentry_pipeline` environment (main-only
+   protected-branch deployment policy) plus the five
+   `github_actions_environment_secret` resources — while the repo-level
+   `github_actions_secret` copies in `github-secrets.tf` are still present. The
+   env secrets duplicate the repo ones (GitHub allows a secret at both scopes),
+   so nothing breaks.
+2. Verify (Settings → Environments → `sentry-pipeline`) that the environment
+   exists with a `main`-only protected-branch policy and that the expected
+   environment secrets are present.
+3. Only THEN land the workflow `environment: sentry-pipeline` references and the
+   removal of the repo-level `github_actions_secret` blocks from
+   `github-secrets.tf`, and apply. The protected environment already exists, so
+   nothing auto-creates unprotected; the repo-level copies are destroyed and the
+   jobs read the environment secrets.
+
+Apply step 3 at a quiet time (avoid the 05:30 / 05:41 / 07:55 / 08:30 UTC cron
+windows) so no scheduled run coincides with the repo-secret destroy. Split the
+change into two PRs (environment first, then workflows + repo-secret removal).
+The platform PAT must carry the **Environments: Read/write** fine-grained
+permission or the environment and environment-secret writes 403 (see
+`terraform/providers.tf`).
+
 ### Backfill or retry
 
 - After an ingest outage longer than the default lookback, dispatch
