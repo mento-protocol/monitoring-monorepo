@@ -252,6 +252,7 @@ document the source of truth here, and wait for a human-approved plan/apply.
 | ------------------------------------- | ------------------------ | --------------------------------------------------------------------- |
 | `ENABLE_EXPERIMENTAL_COREPACK`        | Terraform resource       | Vercel Corepack opt-in so hosted builds honor pnpm 11                 |
 | `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Ethereum reserve-yield + Celo + Monad + Polygon) |
+| `METRICS_BRIDGE_URL`                  | Terraform Cloud Run URI  | Server-only Metrics Bridge origin for the peg-monitoring proxy        |
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                                 |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                                  |
 | `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks             |
@@ -259,6 +260,12 @@ document the source of truth here, and wait for a human-approved plan/apply.
 | `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Dashboard-managed Redis token — auto-set                              |
 | `BLOB_STORE_ID`                       | Vercel store integration | Blob OIDC store id for backup and restore routes                      |
 | `BLOB_WEBHOOK_PUBLIC_KEY`             | Vercel store integration | Blob OIDC public key for the connected store                          |
+
+Terraform derives `METRICS_BRIDGE_URL` from
+`google_cloud_run_v2_service.metrics_bridge.uri`. A human-approved platform
+plan and apply own the Vercel environment update, and the dashboard deployment
+workflow owns the deployment that consumes it. The checked-in resource alone
+does not activate the proxy in production.
 
 ### Aggregator Integration Probes
 

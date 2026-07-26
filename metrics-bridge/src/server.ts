@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { register } from "./metrics.js";
 import { PORT, POLL_INTERVAL_MS } from "./config.js";
+import { currentPegDecisionPackagesJson } from "./peg/decision-packages.js";
 
 let lastSuccessfulPollAt = 0;
 
@@ -14,6 +15,20 @@ function isHealthy(): boolean {
   if (lastSuccessfulPollAt === 0) return false;
   return (
     Math.floor(Date.now() / 1000) - lastSuccessfulPollAt < STALENESS_WINDOW_S
+  );
+}
+
+function serveDecisionPackages(res: {
+  writeHead: (status: number, headers?: Record<string, string>) => void;
+  end: (body: string) => void;
+}): void {
+  const body = currentPegDecisionPackagesJson();
+  res.writeHead(body === null ? 503 : 200, {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json; charset=utf-8",
+  });
+  res.end(
+    body ?? JSON.stringify({ error: "peg decision packages unavailable" }),
   );
 }
 
@@ -37,6 +52,11 @@ export function handleRequest(
         res.writeHead(500);
         res.end("internal error");
       });
+    return;
+  }
+
+  if (path === "/peg/decision-packages" && req.method === "GET") {
+    serveDecisionPackages(res);
     return;
   }
 

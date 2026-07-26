@@ -375,6 +375,7 @@ function computeVirtualPoolHealthStatus(
   pool: PoolHealthState,
   chainId: number | undefined,
   nowSeconds: number,
+  isWeekendNow: boolean,
 ): HealthStatus {
   if (pool.wrappedExchangeDeprecated === true) return "N/A";
   if (pool.vpDeprecationKnown === false) return "N/A";
@@ -383,7 +384,7 @@ function computeVirtualPoolHealthStatus(
   if (medianValidity === null) return "N/A";
   if (!isVirtualPoolResetWindowStale(pool, nowSeconds)) return "N/A";
   const usdPeggedPair = isUsdPeggedVirtualPoolPair(pool, chainId);
-  return isWeekend() && usdPeggedPair === false ? "WEEKEND" : "CRITICAL";
+  return isWeekendNow && usdPeggedPair === false ? "WEEKEND" : "CRITICAL";
 }
 
 /**
@@ -420,9 +421,15 @@ export function computeHealthStatus(
   pool: PoolHealthState,
   chainId?: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
+  isWeekendNow: boolean = isWeekend(),
 ): HealthStatus {
   if (isVirtualPool(pool)) {
-    return computeVirtualPoolHealthStatus(pool, chainId, nowSeconds);
+    return computeVirtualPoolHealthStatus(
+      pool,
+      chainId,
+      nowSeconds,
+      isWeekendNow,
+    );
   }
   // Oracle-staleness is an alertable freshness incident — keep it ABOVE
   // the hasHealthData gate so a stale-oracle pool doesn't get masked into
@@ -431,7 +438,7 @@ export function computeHealthStatus(
   const isOracleStale = !isOracleFresh(pool, nowSeconds, chainId);
   if (isOracleStale) {
     // Distinguish expected weekend staleness from a real incident
-    if (isWeekend()) return "WEEKEND";
+    if (isWeekendNow) return "WEEKEND";
     return "CRITICAL";
   }
   if (pool.oracleOk === false) return "CRITICAL";
@@ -891,8 +898,9 @@ export function computeEffectiveStatus(
   },
   chainId?: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
+  isWeekendNow: boolean = isWeekend(),
 ): HealthStatus {
-  const health = computeHealthStatus(pool, chainId, nowSeconds);
+  const health = computeHealthStatus(pool, chainId, nowSeconds, isWeekendNow);
   const limit = resolveLimitStatus(pool);
   if (health === "N/A" && (limit === "OK" || limit === "N/A")) return "N/A";
   return worstStatus(health, limit);
