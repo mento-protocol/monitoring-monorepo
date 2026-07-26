@@ -42,6 +42,12 @@ test("wrapper rejects flags that conflict with exact error filtering", () => {
   );
   const incompatibleCases = [
     ["--follow"],
+    ["--follow=true"],
+    ["--follow=True"],
+    ["--follow=TRUE"],
+    ["--follow=1"],
+    ["--follow=t"],
+    ["--follow=T"],
     ["--build"],
     ["--level", "error,warn"],
     ["--level=warn"],

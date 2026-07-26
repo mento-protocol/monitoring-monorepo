@@ -42,6 +42,15 @@ while [[ $# -gt 0 ]]; do
       ARGS+=("$1")
       shift
       ;;
+    --follow=*)
+      case "${1#--follow=}" in
+        true|True|TRUE|1|t|T)
+          FOLLOW=true
+          ;;
+      esac
+      ARGS+=("$1")
+      shift
+      ;;
     --build)
       BUILD_LOGS=true
       ARGS+=("$1")
