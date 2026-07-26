@@ -342,8 +342,11 @@ secrets are live, so roll it out Terraform-FIRST:
    env secrets duplicate the repo ones (GitHub allows a secret at both scopes),
    so nothing breaks.
 2. Verify (Settings → Environments → `sentry-pipeline`) that the environment
-   exists with a `main`-only protected-branch policy and that the expected
-   environment secrets are present.
+   exists with a `main`-only protected-branch policy, that admin bypass is
+   disabled (`can_admins_bypass = false` — "Allow administrators to bypass
+   configured protection rules" unchecked; #1289), and that the expected
+   environment secrets are present. The identity contract hash-pins the policy
+   and the flag, so drift also fails CI on any PR touching the file.
 3. Only THEN land the workflow `environment: sentry-pipeline` references and the
    removal of the repo-level `github_actions_secret` blocks from
    `github-secrets.tf`, and apply. The protected environment already exists, so

@@ -52,11 +52,16 @@ resource "github_repository_environment" "sentry_pipeline" {
   # repo ADMIN bypass the deployment-branch policy — verified empirically: an
   # admin `workflow_dispatch` of an environment-gated job from a non-main branch
   # (with the in-workflow `if: main` guard stripped, as a malicious branch would)
-  # read the environment secret. Setting it false makes the main-only boundary
-  # hold even against a compromised or malicious admin token, which is the whole
-  # point of gating the pipeline's Contents:R/W App key. Zero operational cost:
-  # legitimate runs are scheduled on `main`, which is protected and satisfies the
-  # policy regardless of this flag (issue #1289 defense-in-depth).
+  # read the environment secret. Setting it false closes that SILENT bypass — an
+  # admin can no longer read the secret just by dispatching an off-main branch.
+  # It does NOT by itself contain a fully-compromised repo admin, who holds
+  # Administration:write and could first EDIT this environment (re-enable bypass
+  # or widen the branch policy) then dispatch; Terraform and the identity contract
+  # only reconcile that drift on a later run. Its value is defense-in-depth: any
+  # admin bypass now demands a visible, drift-detectable settings change rather
+  # than a silent one-step dispatch. Zero operational cost — legitimate runs are
+  # scheduled on `main`, which is protected and satisfies the policy regardless
+  # of this flag (issue #1289).
   can_admins_bypass = false
 
   deployment_branch_policy {
