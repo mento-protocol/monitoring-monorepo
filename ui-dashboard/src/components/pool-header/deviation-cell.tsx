@@ -80,14 +80,13 @@ export function DeviationCell({
   if (!hasHealthData) return null;
   if (weekendPause) return null;
 
-  const status = clockPending
-    ? "N/A"
-    : computeHealthStatus(
-        pool,
-        network.chainId,
-        statusNowSeconds,
-        isWeekendNow,
-      );
+  const status = resolveDeviationStatus(
+    pool,
+    network.chainId,
+    statusNowSeconds,
+    isWeekendNow,
+    clockPending,
+  );
   const showNeutralStatus = unresolvedWeekendHealth && status === "N/A";
 
   // Distinguish schema-default "threshold unknown" from governance's
@@ -141,6 +140,17 @@ function resolveStatusNowSeconds(
   liveNowSeconds: number | null,
 ): number {
   return liveNowSeconds ?? oracleFreshnessTimestamp(pool);
+}
+
+function resolveDeviationStatus(
+  pool: Pool,
+  chainId: number,
+  nowSeconds: number,
+  isWeekendNow: boolean | null,
+  clockPending: boolean,
+): HealthStatus {
+  if (clockPending) return "N/A";
+  return computeHealthStatus(pool, chainId, nowSeconds, isWeekendNow);
 }
 
 function resolveWeekendHealth(
