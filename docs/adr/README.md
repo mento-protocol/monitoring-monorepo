@@ -92,7 +92,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0016](0016-effect-rpc-split-and-heal-stages.md)         | Split effects/RPC from handlers; decompose `upsertPool` into named effect-injected stages |
 | [0017](0017-broker-denormalization-volume-dedup.md)      | Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed volume             |
 | [0018](0018-indexer-observability-loki.md)               | Archived: envisioned Loki-backed indexer error-log alerting                               |
-| [0050](0050-envio-logs-prometheus-grafana-alerting.md)   | Envio logs diagnose; Prometheus metrics and Grafana rules own indexer alerting            |
+| [0052](0052-envio-logs-prometheus-grafana-alerting.md)   | Envio logs diagnose; Prometheus metrics and Grafana rules own indexer alerting            |
 | [0034](0034-steth-wallet-daily-sampler.md)               | stETH actuals use a launch-aligned sub-daily wallet balance sampler                       |
 | [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses           |
 | [0046](0046-event-sourced-oracle-freshness.md)           | Oracle freshness is reconstructed from persisted report events                            |
@@ -130,14 +130,15 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### terraform / infra
 
-| ADR                                               | Decision                                                                                    |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [0028](0028-terraform-stack-registry.md)          | Terraform ownership is a registry (`terraform.stacks.json`) with roots split by cadence     |
-| [0029](0029-ci-apply-production-infra-gate.md)    | Infra applies on merge to `main` behind the `production-infra` environment gate             |
-| [0030](0030-iac-before-cli-secrets.md)            | All secrets are managed by IaC; agents never touch them with CLI commands                   |
-| [0044](0044-peg-thresholds-gated-rules-plane.md)  | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON               |
-| [0045](0045-peg-paging-semantics.md)              | Peg paging measures executable sell price; the deep venue pages alone                       |
-| [0047](0047-separated-terraform-ci-identities.md) | Routine deploy, PR plan, trusted-main refresh, and production apply use separate identities |
+| ADR                                                 | Decision                                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [0028](0028-terraform-stack-registry.md)            | Terraform ownership is a registry (`terraform.stacks.json`) with roots split by cadence     |
+| [0029](0029-ci-apply-production-infra-gate.md)      | Infra applies on merge to `main` behind the `production-infra` environment gate             |
+| [0030](0030-iac-before-cli-secrets.md)              | All secrets are managed by IaC; agents never touch them with CLI commands                   |
+| [0044](0044-peg-thresholds-gated-rules-plane.md)    | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON               |
+| [0045](0045-peg-paging-semantics.md)                | Peg paging measures executable sell price; the deep venue pages alone                       |
+| [0047](0047-separated-terraform-ci-identities.md)   | Routine deploy, PR plan, trusted-main refresh, and production apply use separate identities |
+| [0050](0050-environment-scoped-pipeline-secrets.md) | Pipeline secrets are gated by a Terraform-managed, main-only GitHub Environment             |
 
 ### governance-watchdog
 

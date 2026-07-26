@@ -72,19 +72,18 @@ apply behavior on `main`, gated by the `production-infra` GitHub Environment.
 Their plan jobs can run for workflow/notifier edits too, but the apply jobs only
 become eligible when stack-owned deployment inputs changed or a maintainer used
 `workflow_dispatch`. The platform stack remains manual-plan/manual-apply only.
-`terraform-drift.yml` runs a daily plan-only check for all four stacks. During
-the identity bootstrap, its Google-provider legs still use the legacy
-write-capable deployer. A separate routing PR moves trusted-main plans and
-scheduled drift to the refresh chain, retaining the legacy path for rollback
-until live proof and drain checks pass.
+`terraform-drift.yml` runs daily plans for all four stacks. Trusted-`main`
+plans and drift use the read-only refresh chain, full refresh, and
+`-lock=false`; the legacy Token Creator grant remains only for rollback until
+live proof passes and old runs drain.
 
 Secret-bearing workflows use validation-safe placeholder `TF_VAR_*` values or
 guarded targets for eligible same-repo human PR plans. Fork, Dependabot, and
-`sentry-autofix/*` plans are skipped. Trusted push/dispatch plans and the
-environment-gated apply jobs retain the real secrets and are authoritative for
-full-stack, third-party-provider, and secret-value diffs. In particular,
-alerts-rules and alerts-delivery PR plans are intentionally partial; do not
-interpret them as full production plans.
+`sentry-autofix/*` plans are skipped. Trusted push/dispatch plans use real
+secrets through refresh; gated apply jobs use them through the production
+identity. These routes own full-stack, third-party-provider, and secret-value
+diffs. Alerts-rules and alerts-delivery PR plans remain partial, not full
+production plans.
 See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
 for the exact placeholder and target boundaries.
 
@@ -115,16 +114,16 @@ notification boundaries live in
 [ADR 0047](adr/0047-separated-terraform-ci-identities.md) owns the four lanes:
 routine deploy, state-only same-repo PR plan, read-only trusted-`main` refresh,
 and Environment-bound production apply. All three WIF providers bind repository
-slug plus immutable ID `1172025835`; apply also binds protected `main` and the
-`production-infra` subject, while refresh binds an exact `workflow_ref`
-allowlist. The bootstrap must not route workflows through either refresh
-variable.
+slug and immutable ID `1172025835`; apply also binds protected `main` and the
+`production-infra` subject, while refresh allows exact `workflow_ref` values.
+The four trusted-main plan workflows and `terraform-drift.yml` use both refresh
+variables; the identity contract rejects other selector use.
 
 Trusted-main plans use `-lock=false` and curated non-basic readers. Never add
 basic `roles/viewer`; keep object and secret payload access limited to state,
-deployment-source objects, and managed secrets. After routing, prove
-alerts-delivery and governance-watchdog with live full-refresh plans and add
-only permissions named by provider failures.
+deployment-source objects, and managed secrets. After merge, prove
+alerts-delivery and governance-watchdog with live full-refresh plans; add only
+permissions named by provider failures.
 
 ADR 0047 also selects the final no-artifact apply contract: make a private plan
 after approval, run fail-closed policy over its JSON, then apply those exact
@@ -140,7 +139,7 @@ Follow ADR 0047's full procedure:
    `main`.
 2. Re-run alerts-delivery and governance-watchdog, verify the new apply path,
    and retain the routine-deployer Token Creator grant for rollback.
-3. Land the separate refresh-routing PR, run the live plans above, drain every
+3. Merge refresh routing, prove it with the live plans above, drain every
    old/proof run, and audit both paths.
 4. Only then land and explicitly apply the final legacy-authority removal.
 
@@ -156,7 +155,8 @@ optional input can plan deletion; inspect each one. It also owns
 `GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
 `GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
 `GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. Workflows read these as `vars`; never
-replace them with manual secrets or use the refresh selectors before routing.
+replace them with manual secrets. Use refresh selectors only in the four
+registered trusted-main plan workflows and `terraform-drift.yml`.
 Only `CLAUDE_CODE_OAUTH_TOKEN` currently has `prevent_destroy`; inspect every
 planned mirror deletion.
 Sentry credential routing lives in
@@ -164,7 +164,7 @@ Sentry credential routing lives in
 
 ## GitHub Environments
 
-Keep two production Environments. `production-infra` has a required reviewer,
+Keep three managed Environments. `production-infra` has a required reviewer,
 self-review allowed, admin bypass disabled, and protected-branch deployment; its
 workflows verify that state before cloud auth. With one maintainer this is
 operator acknowledgement, not independent or exact-plan review. [ADR
@@ -173,7 +173,20 @@ same-owner `CODEOWNERS` gate; revisit PR approval, latest-push approval, and
 disabled Environment self-review when a second active maintainer exists.
 
 `production-services` records routine deploys from protected `main` without a
-reviewer. Never recreate retired `Production`/`production` names or manage
+reviewer.
+
+`sentry-pipeline` (`terraform/github-environment.tf`, issue #1289,
+[ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) gates the Sentry
+triage/autofix pipeline's exclusive secrets. It has a protected-branch
+deployment policy (main-only) and — deliberately, because the pipeline is
+unattended — NO reviewer and NO wait timer. Unlike the other two it is
+Terraform-managed; every platform apply reconciles its branch policy and
+secrets. The secret-bearing Sentry workflow jobs adopt
+`environment: sentry-pipeline` (and the repo-level secret copies are removed)
+in the #1289 phase-2 follow-up, only after this environment is applied and
+verified protected.
+
+Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow
 reference can auto-create an unprotected Environment, so establish its
 protection before merging the reference.

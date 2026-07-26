@@ -12,7 +12,7 @@ garden_lane: adrs-architecture
 supersedes: ADR-0018
 ---
 
-# ADR 0050 — Envio logs diagnose indexer errors; Prometheus and Grafana own alerting
+# ADR 0052 — Envio logs diagnose indexer errors; Prometheus and Grafana own alerting
 
 **Status:** Accepted (Jul 2026), in force. Supersedes
 [ADR 0018](0018-indexer-observability-loki.md).

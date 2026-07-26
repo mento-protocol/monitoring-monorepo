@@ -141,4 +141,4 @@ are commit-scoped diagnostics: use `pnpm deploy:indexer:logs "$COMMIT"
 `pnpm deploy:indexer:metrics "$COMMIT" --json`. Prometheus metrics and Grafana
 rules own alerts; a log event alone never creates one. The full contract and
 the current diagnostic-only error families are in
-[ADR 0050](../docs/adr/0050-envio-logs-prometheus-grafana-alerting.md).
+[ADR 0052](../docs/adr/0052-envio-logs-prometheus-grafana-alerting.md).

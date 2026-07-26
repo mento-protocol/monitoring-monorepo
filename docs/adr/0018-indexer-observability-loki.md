@@ -4,7 +4,7 @@ status: archived
 owner: eng
 canonical: true
 last_verified: 2026-07-26
-superseded_by: ADR-0050
+superseded_by: ADR-0052
 scope: indexer-envio
 date: 2026-04
 doc_type: adr
@@ -14,13 +14,13 @@ garden_lane: adrs-architecture
 
 # ADR 0018 — Indexer observability requires structured logs and a verified error-log path
 
-**Status:** Superseded by [ADR 0050](0050-envio-logs-prometheus-grafana-alerting.md)
+**Status:** Superseded by [ADR 0052](0052-envio-logs-prometheus-grafana-alerting.md)
 (Jul 2026). Historical decision retained.
 **Scope:** indexer-envio
 
 **Historical outcome:** The structured logging convention landed, but the
 selected Envio-to-Loki alert path never became repository-owned or operational.
-ADR 0050 defines the replacement operator and alerting contract.
+ADR 0052 defines the replacement operator and alerting contract.
 
 ## Context
 
@@ -49,11 +49,11 @@ the indexer.
 - Error visibility depends on log discipline: use the `<area>.<event>` naming so
   commit-scoped diagnostics remain searchable.
 - The original Loki delivery path is not an operational contract. Follow ADR
-  0050 for alerting and operator commands.
+  0052 for alerting and operator commands.
 
 ## Evidence
 
 - Indexer logging convention in
   [`indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md); Sentry is used
   only by the dashboard and `alerts/infra` (ADR 0004).
-- Superseding evidence and current contract: [ADR 0050](0050-envio-logs-prometheus-grafana-alerting.md).
+- Superseding evidence and current contract: [ADR 0052](0052-envio-logs-prometheus-grafana-alerting.md).
