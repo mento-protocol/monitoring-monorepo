@@ -42,12 +42,10 @@ resource "sentry_alert" "slack_default" {
         {
           slack = {
             integration_id = data.sentry_organization_integration.slack.id
-            # No leading `#` — Sentry's Slack integration strips it
-            # server-side and persists `sentry-X`, but the jianyuan
-            # provider then compares the planned `#sentry-X` to the
-            # API-returned `sentry-X` and crashes with "Provider produced
-            # inconsistent result after apply" on every recreate. Storing
-            # without the `#` lets state, plan, and reality stay aligned.
+            # Stable provider 0.15.4 treats bare and `#`-prefixed Slack
+            # channel names as equal by trimming `#` before comparison
+            # (upstream PR #897). Retain the existing bare config to avoid
+            # needless routing churn; channel_id provides the delivery target.
             channel_name = "sentry-${each.key}"
             # channel_id is documented as a rate-limit-safe optional field.
             # Wired through restapi_object so Sentry resolves the channel
@@ -92,7 +90,10 @@ resource "sentry_alert" "slack_critical_fanout" {
         {
           slack = {
             integration_id = data.sentry_organization_integration.slack.id
-            channel_name   = var.slack_critical_channel
+            # Keep the validated `#` form here. Provider comparison accepts
+            # both forms, but the explicit prefix protects critical delivery
+            # from Sentry's silent bare-name notification failure.
+            channel_name = var.slack_critical_channel
             # channel_id matches the per-project Slack action above: it lets
             # Sentry route directly without resolving the channel name.
             channel_id = var.slack_critical_channel_id

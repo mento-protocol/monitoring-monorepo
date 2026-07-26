@@ -144,7 +144,7 @@ pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test     # Cod
 pnpm deploy:indexer                 # Push to envio branch → triggers hosted reindex
 pnpm deploy:indexer:status <commit> --watch --compact  # Low-noise wait for registration + sync
 pnpm deploy:indexer:logs <commit> --build    # Show build logs for a deployment
-pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Show runtime issues
+pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # Show explicitly marked runtime errors
 pnpm deploy:indexer:metrics <commit>         # Show per-chain indexing progress
 pnpm deploy:indexer:info <commit>            # Show deployment info/cache state
 pnpm deploy:indexer:perf <commit>            # Combined status/metrics/log snapshot for perf comparisons
@@ -282,7 +282,7 @@ COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
 pnpm deploy:indexer:status "$COMMIT" --watch --compact
 pnpm deploy:indexer:logs "$COMMIT" --build
-pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
+pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"

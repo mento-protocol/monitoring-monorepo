@@ -577,8 +577,8 @@ async function fetchPaginatedRowsIncremental<TRow, TVars>(args: {
 }
 
 /**
- * Daily rollup pagination: about 365 rows per pool per year, so for typical
- * history a few pages cover everything.
+ * Daily rollup pagination. ADR 0051 records the current production row/page
+ * baseline and the threshold that requires this path to be re-reviewed.
  */
 export async function fetchAllDailySnapshotPages(
   client: GraphQLClient,

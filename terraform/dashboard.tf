@@ -68,6 +68,16 @@ resource "vercel_project_environment_variable" "hasura_url" {
   target     = ["production", "preview"]
 }
 
+# Server-only origin for the dashboard's validated peg-monitoring proxy. The
+# browser only calls the same-origin `/api/peg-monitoring` route.
+resource "vercel_project_environment_variable" "metrics_bridge_url" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "METRICS_BRIDGE_URL"
+  value      = google_cloud_run_v2_service.metrics_bridge.uri
+  target     = ["production", "preview"]
+}
+
 resource "vercel_project_environment_variable" "hasura_testnet_url" {
   count      = var.hasura_testnet_url == "" ? 0 : 1
   project_id = vercel_project.dashboard.id

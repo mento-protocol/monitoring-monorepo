@@ -243,6 +243,9 @@ jobs:
       - name: Validate
         run: terraform validate -no-color
 
+      - name: Test Peg rule definitions
+        run: terraform test -no-color
+
       - name: Plan
         id: plan
         # `-detailed-exitcode`: 0 = no changes, 1 = error, 2 = changes present.

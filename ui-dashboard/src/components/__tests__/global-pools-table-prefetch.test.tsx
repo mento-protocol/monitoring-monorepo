@@ -1,13 +1,15 @@
 /** @vitest-environment jsdom */
 
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot, hydrateRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 import { HASURA_TIMEOUT_MS } from "@/lib/hasura-timeout";
 import { POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
+import { isWeekend } from "@/lib/weekend";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -57,6 +59,7 @@ vi.mock("next/link", () => ({
 
 import { GlobalPoolsTable } from "@/components/global-pools-table";
 
+const mockIsWeekend = vi.mocked(isWeekend);
 const CELO_NETWORK: Network = {
   id: "celo-mainnet",
   label: "Celo",
@@ -100,6 +103,7 @@ beforeEach(() => {
   mockSearchParams = new URLSearchParams();
   mockPreloadGQL.mockClear();
   mockLinkProps.mockClear();
+  mockIsWeekend.mockReturnValue(false);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -198,5 +202,58 @@ describe("GlobalPoolsTable pool-detail prefetch", () => {
       { id: POOL_ID, chainId: 42220 },
       { timeoutMs: HASURA_TIMEOUT_MS },
     );
+  });
+});
+
+describe("GlobalPoolsTable hydration", () => {
+  it("keeps stale health neutral through hydration, then resolves the weekend", async () => {
+    const checkedAt = 1_713_200_100;
+    const stalePool: Pool = {
+      ...BASE_POOL,
+      oracleOk: true,
+      oracleTimestamp: String(checkedAt - 600),
+      lastOracleReportAt: String(checkedAt - 600),
+      oracleFreshnessCheckedAt: checkedAt,
+      oracleExpiry: "300",
+      priceDifference: "0",
+      rebalanceThreshold: 5000,
+    };
+    const table = (
+      <GlobalPoolsTable
+        entries={[{ pool: stalePool, network: CELO_NETWORK, rates: new Map() }]}
+        initialIsWeekend={true}
+      />
+    );
+
+    mockIsWeekend.mockReturnValue(true);
+    const serverHtml = renderToString(table);
+    expect(serverHtml).toMatch(/Pool health N\/A:/);
+    expect(serverHtml).not.toMatch(/Pool health WEEKEND:/);
+
+    const hydrationContainer = document.createElement("div");
+    hydrationContainer.innerHTML = serverHtml;
+    document.body.appendChild(hydrationContainer);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    let hydrationRoot: Root | null = null;
+
+    try {
+      await act(async () => {
+        hydrationRoot = hydrateRoot(hydrationContainer, table);
+        await Promise.resolve();
+      });
+
+      expect(consoleError).not.toHaveBeenCalled();
+      expect(hydrationContainer.innerHTML).toMatch(/Pool health WEEKEND:/);
+    } finally {
+      consoleError.mockRestore();
+      if (hydrationRoot) {
+        act(() => {
+          (hydrationRoot as Root).unmount();
+        });
+      }
+      hydrationContainer.remove();
+    }
   });
 });

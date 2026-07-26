@@ -4,6 +4,7 @@ import { HASURA_URL } from "../config.js";
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export const PEG_STRUCTURAL_PAGE_LIMIT = 1_000;
+export const PEG_BREAKER_CONFIG_LIMIT = 8;
 
 // Keep the structural fetch isolated from the bridge's load-bearing pool query:
 // a peg-specific schema or request failure must fail this coverage path closed
@@ -12,6 +13,8 @@ export const PEG_STRUCTURAL_QUERY = gql`
   query PegStructuralContext(
     $poolId: String!
     $monitoredToken: String!
+    $chainId: Int!
+    $rateFeedId: String!
     $since: numeric!
   ) {
     Pool(where: { id: { _eq: $poolId } }, limit: 1) {
@@ -43,6 +46,28 @@ export const PEG_STRUCTURAL_QUERY = gql`
       lastUpdated1
       updatedAtBlock
       updatedAtTimestamp
+    }
+    BreakerConfig(
+      where: { chainId: { _eq: $chainId }, rateFeedID: { _eq: $rateFeedId } }
+      order_by: { id: asc }
+      limit: 8
+    ) {
+      id
+      enabled
+      rateChangeThreshold
+      referenceValue
+      lastMedianRate
+      lastUpdatedAt
+      status
+      tradingMode
+      lastStatusUpdatedAt
+      breaker {
+        id
+        address
+        kind
+        defaultRateChangeThreshold
+        removed
+      }
     }
     SwapEvent(
       where: { poolId: { _eq: $poolId }, blockTimestamp: { _gte: $since } }
@@ -99,15 +124,37 @@ export type PegSwapEventRow = {
   blockTimestamp: string;
 };
 
+export type PegBreakerConfigRow = {
+  id: string;
+  enabled: boolean;
+  rateChangeThreshold: string;
+  referenceValue: string | null;
+  lastMedianRate: string | null;
+  lastUpdatedAt: string | null;
+  status: "OK" | "TRIPPED";
+  tradingMode: number;
+  lastStatusUpdatedAt: string;
+  breaker: {
+    id: string;
+    address: string;
+    kind: "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
+    defaultRateChangeThreshold: string;
+    removed: boolean;
+  };
+};
+
 export type PegStructuralQueryVariables = {
   poolId: string;
   monitoredToken: string;
+  chainId: number;
+  rateFeedId: string;
   since: string;
 };
 
 export type PegStructuralQueryResponse = {
   Pool: PegStructuralPoolRow[];
   TradingLimit: PegTradingLimitRow[];
+  BreakerConfig?: PegBreakerConfigRow[];
   SwapEvent: PegSwapEventRow[];
 };
 
@@ -122,6 +169,7 @@ export type PegStructuralContextResult =
       status: "ok";
       pool: PegStructuralPoolRow;
       tradingLimit: PegTradingLimitRow;
+      breakerConfigs?: PegBreakerConfigRow[];
       swaps: PegSwapEventRow[];
       pageSaturated: boolean;
     }
@@ -150,6 +198,8 @@ export async function fetchPegStructuralContext(
   input: {
     poolId: string;
     monitoredToken: string;
+    chainId: number;
+    rateFeedId: string;
     since: bigint;
   },
   request: PegStructuralRequest = defaultRequest,
@@ -159,6 +209,8 @@ export async function fetchPegStructuralContext(
     variables: {
       poolId: input.poolId,
       monitoredToken: input.monitoredToken,
+      chainId: input.chainId,
+      rateFeedId: input.rateFeedId,
       // graphql-request cannot JSON.stringify a native bigint. Hasura's BigInt
       // scalar accepts the lossless decimal string form.
       since: input.since.toString(),
@@ -189,5 +241,12 @@ export async function fetchPegStructuralContext(
     };
   }
 
-  return { status: "ok", pool, tradingLimit, swaps, pageSaturated };
+  return {
+    status: "ok",
+    pool,
+    tradingLimit,
+    breakerConfigs: data.BreakerConfig ?? [],
+    swaps,
+    pageSaturated,
+  };
 }
