@@ -34,6 +34,7 @@ function record(file, words, lane = "operator-runbooks") {
     garden_lane: lane,
     scope: "repo-wide",
     review_interval_days: 90,
+    canonical_sources: ["docs/owner.md"],
     words,
     bytes: words * 5,
     inbound_links: 1,
@@ -180,6 +181,8 @@ test("packet contains evidence fields, safety rules, and stable Markdown", () =>
     assert.equal(packet.files[0].version_reference_candidates.length, 1);
     const markdown = renderAuditPacket(packet);
     assert.match(markdown, /Age is a review signal, never deletion evidence/);
+    assert.match(markdown, /Sources:/);
+    assert.match(markdown, /docs\/owner\.md/);
     assert.match(markdown, /_required_ \| _required_/);
   });
 });
