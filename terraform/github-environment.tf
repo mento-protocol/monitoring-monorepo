@@ -46,10 +46,19 @@ resource "github_repository_environment" "sentry_pipeline" {
   # — the same shape `scripts/verify-github-environment-protection.mjs` asserts
   # for `production-infra` (protected_branches = true, custom_branch_policies =
   # false). No `reviewers {}` block and no `wait_timer`: the pipeline runs
-  # unattended, so a human-approval gate would stall every scheduled run. The
-  # branch policy itself is NOT admin-bypassable (admin bypass only ever applies
-  # to required reviewers / wait timers, of which this environment has none), so
-  # `can_admins_bypass` is left at its default and does not weaken the gate.
+  # unattended, so a human-approval gate would stall every scheduled run.
+  #
+  # `can_admins_bypass = false` is load-bearing here. The default (true) lets a
+  # repo ADMIN bypass the deployment-branch policy — verified empirically: an
+  # admin `workflow_dispatch` of an environment-gated job from a non-main branch
+  # (with the in-workflow `if: main` guard stripped, as a malicious branch would)
+  # read the environment secret. Setting it false makes the main-only boundary
+  # hold even against a compromised or malicious admin token, which is the whole
+  # point of gating the pipeline's Contents:R/W App key. Zero operational cost:
+  # legitimate runs are scheduled on `main`, which is protected and satisfies the
+  # policy regardless of this flag (issue #1289 defense-in-depth).
+  can_admins_bypass = false
+
   deployment_branch_policy {
     protected_branches     = true
     custom_branch_policies = false
