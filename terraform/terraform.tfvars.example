@@ -19,11 +19,13 @@ vercel_token = "vcp_..."
 #   Resource owner: mento-protocol
 #   Repository access: mento-protocol/monitoring-monorepo
 #   Permissions: Repository → Secrets: Read/write, Variables: Read/write,
-#     Administration: Read/write
+#     Administration: Read/write, Environments: Read/write
 #     (Variables is required for terraform_apply_slack_channel below;
 #      Administration is required by github_workflow_repository_permissions in
 #      github-actions-permissions.tf — issue #1557 — which pins the default
-#      workflow-token permission to read-only. GitHub scopes these repo
+#      workflow-token permission to read-only; Environments is required by the
+#      sentry-pipeline GitHub Environment + its environment secrets in
+#      github-environment.tf — issue #1289. GitHub scopes these repo
 #      permissions independently. All are repo-level — org-admin is still NOT
 #      needed.)
 github_token = "ghp_..."

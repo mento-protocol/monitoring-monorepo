@@ -262,6 +262,21 @@ await test("parseStubMetadata drops an unsafe permalink", () => {
   assertEqual(meta.permalink, null);
 });
 
+await test("isSafeSentryPermalink rejects Slack/Markdown link-control chars (#1586)", () => {
+  // A clean Sentry permalink stays safe.
+  assertEqual(
+    isSafeSentryPermalink("https://mento-labs.sentry.io/issues/6197137101/"),
+    true,
+  );
+  // `<`, `>`, `|` would break out of a Slack `<url|text>` (or Markdown
+  // `[text](url)`) link; control chars and raw whitespace are equally unsafe in
+  // a link target. Built as base + char so no literal control byte lands here.
+  const base = "https://mento-labs.sentry.io/issues/1";
+  for (const bad of ["<", ">", "|", "\x00", "\x7f", "\n", " "]) {
+    assertEqual(isSafeSentryPermalink(`${base}${bad}x`), false);
+  }
+});
+
 await test("isNumericId only accepts bare digit strings", () => {
   assertEqual(isNumericId("6197137101"), true);
   assertEqual(isNumericId(""), false);
