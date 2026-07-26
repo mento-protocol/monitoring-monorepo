@@ -956,9 +956,7 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
     "previous decisions must not stop at the first active-policy ACK",
   );
   assert(
-    source.includes(
-      "for_each = local.peg_alerts_enabled ? local.peg_rule_definitions : local.peg_active_rule_definitions",
-    ) &&
+    source.includes("for_each = local.peg_rule_definitions") &&
       source.includes('name             = "Peg Monitoring"') &&
       source.includes("notification_settings {") &&
       source.includes("grafana_contact_point.peg_market_warning") &&
@@ -1080,10 +1078,10 @@ test("Peg Grafana consumers stay behind the default-off source activation guard"
     assertGuardedResource(file, marker, sourceForFile(file));
   }
   assert(
-    /peg_rule_definitions\s*=\s*local\.peg_alerts_enabled\s*\?\s*tomap\(merge\([\s\S]*?\)\)\s*:\s*tomap\(\{\}\)/.test(
+    /peg_rule_definitions\s*=\s*merge\([\s\S]*?local\.peg_active_rule_definitions,[\s\S]*?local\.peg_previous_rule_definitions,[\s\S]*?local\.peg_rollover_rule_definitions,[\s\S]*?\)/.test(
       definitions,
-    ),
-    "Peg rule definitions must be empty while the activation switch is false",
+    ) && !definitions.includes("tomap("),
+    "Peg rule definitions must preserve their heterogeneous object shape before activation",
   );
   expectFailure(
     () =>

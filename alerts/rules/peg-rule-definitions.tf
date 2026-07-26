@@ -454,9 +454,13 @@ locals {
     }
   }
 
-  peg_rule_definitions = local.peg_alerts_enabled ? tomap(merge(
+  # These objects intentionally have optional fields such as spread_expr, so
+  # keep their native object shape. Consumers remain disabled by the shared
+  # activation map; defining the rules here lets Terraform evaluate the enabled
+  # rule payload before a reviewed source change opens that map.
+  peg_rule_definitions = merge(
     local.peg_active_rule_definitions,
     local.peg_previous_rule_definitions,
     local.peg_rollover_rule_definitions,
-  )) : tomap({})
+  )
 }

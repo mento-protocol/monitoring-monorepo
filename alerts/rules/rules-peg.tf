@@ -12,11 +12,7 @@ resource "grafana_rule_group" "peg_monitoring" {
   ]
 
   dynamic "rule" {
-    # The Grafana provider validates the nested-block minimum before it applies
-    # this resource's zero-instance for_each. Reuse the generated active
-    # definitions only for that schema check while disabled; no rule-group
-    # instance exists until the shared Peg activation map is non-empty.
-    for_each = local.peg_alerts_enabled ? local.peg_rule_definitions : local.peg_active_rule_definitions
+    for_each = local.peg_rule_definitions
     content {
       name           = rule.value.name
       condition      = "threshold"
