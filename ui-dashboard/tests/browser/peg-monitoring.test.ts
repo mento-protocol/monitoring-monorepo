@@ -13,10 +13,14 @@ test("intercepts peg monitoring, retains stale evidence, and keeps regional load
   await page.clock.install({ time: new Date(now * 1000 + 20_000) });
   await page.setViewportSize({ width: 1280, height: 900 });
   let request = 0;
+  let releaseFirstResponse!: () => void;
+  const firstResponseGate = new Promise<void>((resolve) => {
+    releaseFirstResponse = resolve;
+  });
   await page.route("**/api/peg-monitoring", async (route) => {
     request += 1;
     if (request === 1) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await firstResponseGate;
       await route.fulfill({ json: payload });
       return;
     }
@@ -63,6 +67,7 @@ test("intercepts peg monitoring, retains stale evidence, and keeps regional load
       page.getByTestId(skeletonTestId).boundingBox(),
     ),
   );
+  releaseFirstResponse();
   await expect(page.getByText(/^Current package ·/)).toBeVisible();
   const convertedSource = payload.packages[0]?.sources.find(
     ({ convertVia }) => convertVia !== null,
