@@ -40,7 +40,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.github/prompts/sentry-autofix.md`](../.github/prompts/sentry-autofix.md) | sentry-autofix.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
 | [`.github/prompts/sentry-triage.md`](../.github/prompts/sentry-triage.md) | sentry-triage.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
 | [`aegis/AGENTS.md`](../aegis/AGENTS.md) | Aegis Instructions | canonical / active | agent-instructions / aegis | eng | 90d; verified 2026-07-23 |
-| [`AGENTS.md`](../AGENTS.md) | Monitoring Monorepo Instructions | canonical / active | agent-instructions / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`AGENTS.md`](../AGENTS.md) | Monitoring Monorepo Instructions | canonical / active | agent-instructions / repo-wide | eng | 90d; verified 2026-07-26 |
 | [`alerts/AGENTS.md`](../alerts/AGENTS.md) | Alerts Instructions | canonical / active | agent-instructions / alerts | eng | 90d; verified 2026-07-23 |
 | [`indexer-envio/AGENTS.md`](../indexer-envio/AGENTS.md) | Envio Indexer Instructions | canonical / active | agent-instructions / indexer-envio | eng | 90d; verified 2026-07-23 |
 | [`integration-probes/AGENTS.md`](../integration-probes/AGENTS.md) | Integration Probes Instructions | canonical / active | agent-instructions / integration-probes | eng | 90d; verified 2026-07-23 |
