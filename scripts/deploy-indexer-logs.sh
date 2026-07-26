@@ -56,6 +56,15 @@ while [[ $# -gt 0 ]]; do
       ARGS+=("$1")
       shift
       ;;
+    --build=*)
+      case "${1#--build=}" in
+        true|True|TRUE|1|t|T)
+          BUILD_LOGS=true
+          ;;
+      esac
+      ARGS+=("$1")
+      shift
+      ;;
     --json|-j)
       JSON_OUTPUT=true
       ARGS+=(-o json)
