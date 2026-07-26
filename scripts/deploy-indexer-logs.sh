@@ -30,6 +30,7 @@ FOLLOW=false
 BUILD_LOGS=false
 LEVEL_FILTER_SET=false
 OUTPUT_FORMAT_SET=false
+LIMIT_SET=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --errors-only)
@@ -104,6 +105,20 @@ while [[ $# -gt 0 ]]; do
       ARGS+=("$1")
       shift
       ;;
+    --limit)
+      LIMIT_SET=true
+      ARGS+=("$1")
+      shift
+      if [[ $# -gt 0 ]]; then
+        ARGS+=("$1")
+        shift
+      fi
+      ;;
+    --limit=*)
+      LIMIT_SET=true
+      ARGS+=("$1")
+      shift
+      ;;
     *)
       ARGS+=("$1")
       shift
@@ -127,8 +142,13 @@ if [[ "$ERRORS_ONLY" == "true" && "$OUTPUT_FORMAT_SET" == "true" ]]; then
   echo "deploy:indexer:logs: --errors-only owns the Envio output format"
   exit 2
 fi
+if [[ "$ERRORS_ONLY" == "true" && "$LIMIT_SET" == "true" ]]; then
+  echo "deploy:indexer:logs: --errors-only owns --limit so it can detect an incomplete capped page"
+  exit 2
+fi
 if [[ "$ERRORS_ONLY" == "true" ]]; then
   ARGS+=(--level error)
+  ARGS+=(--limit 100)
   ARGS+=(-o json)
 fi
 
@@ -148,7 +168,9 @@ fi
 
 # Pass normalized flags through. The Envio API's --level filter can retain
 # stdout-carried records, so --errors-only applies a local filter to its JSON
-# response and retains only records explicitly marked as errors.
+# response and retains only records explicitly marked as errors. It owns the
+# maximum page size and fails closed when Envio fills that page, because the
+# provider does not expose a way to retrieve the rest of the requested window.
 if [[ "$ERRORS_ONLY" == "true" ]]; then
   pnpm exec envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${ARGS[@]}" |
     node scripts/filter-envio-runtime-errors.mjs

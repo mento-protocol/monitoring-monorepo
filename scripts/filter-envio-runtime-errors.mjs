@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+export const ENVIO_RUNTIME_LOG_PAGE_LIMIT = 100;
+
 /**
  * Envio's `--level error` filter leaves some stdout-carried records in the
  * response. Keep only entries the API itself marks as errors; do not infer a
@@ -22,6 +24,11 @@ export function filterEnvioRuntimeErrors(payload) {
     !Array.isArray(payload.data)
   ) {
     throw new TypeError("Envio runtime-log JSON must contain a data array");
+  }
+  if (payload.data.length >= ENVIO_RUNTIME_LOG_PAGE_LIMIT) {
+    throw new RangeError(
+      `Envio returned the full ${ENVIO_RUNTIME_LOG_PAGE_LIMIT}-record page; the requested window may contain unreturned errors. Narrow --since and retry`,
+    );
   }
   return { ...payload, data: payload.data.filter(isEnvioRuntimeError) };
 }

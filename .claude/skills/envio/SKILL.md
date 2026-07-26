@@ -116,9 +116,13 @@ pnpm deploy:indexer:logs <commit> --build        # registered build logs
 pnpm deploy:indexer:logs <commit> --follow       # tail every 10s
 ```
 
-`envio-cloud` defaults to 100 log lines and supports `--limit` up to 100; the
-wrapper passes that flag through. `--errors-only` uses the wrapper's local JSON
-filter because Envio's `--level error` can retain stdout-carried records;
+`envio-cloud` defaults to 100 log lines and supports `--limit` up to 100. The
+wrapper normally passes that flag through. `--errors-only` owns the limit,
+queries the maximum 100-record page, and fails closed if Envio fills it because
+the rest of the requested window cannot be inspected. Narrow `--since` and
+retry; do not combine `--limit` with `--errors-only`. The mode uses the
+wrapper's local JSON filter because Envio's `--level error` can retain
+stdout-carried records;
 `--level` remains useful for broad provider-level inspection. `--build` selects
 build-time logs. If the target never registers, do not substitute an
 unscoped older deployment's logs; use the registration diagnostic and Envio UI.

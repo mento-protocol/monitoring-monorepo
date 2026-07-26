@@ -29,7 +29,7 @@ pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test    # Code
 pnpm indexer:mutation              # Targeted StrykerJS baseline for indexer pure logic
 pnpm deploy:indexer                # Push HEAD to envio branch and trigger hosted reindex
 pnpm deploy:indexer:status <commit> --watch --compact  # Low-noise wait for registration + sync
-pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # Explicitly marked runtime errors
+pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # Explicit errors; narrow --since if the 100-record page fills
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:perf <commit>     # Combined status/metrics/log snapshot for perf comparisons

@@ -88,7 +88,9 @@ transport.
 - `pnpm deploy:indexer:logs b5d14b7 --level error --since 7d --limit 100 --json`
   returned stdout records as well as explicit error records.
   `--errors-only` preserves that provider-side narrowing and then locally keeps
-  only `level: error` or an `error` object.
+  only `level: error` or an `error` object. The wrapper fixes this mode at
+  Envio's maximum 100-record page size and fails closed when that page is full;
+  narrow `--since` and retry instead of treating a capped result as clean.
 - Live Grafana checks found the `grafanacloud-logs` and `grafanacloud-prom`
   datasources healthy, zero Loki labels over 2026-06-27 through 2026-07-26,
   no Envio or Indexer dashboard, and the normal `Envio Effect Cache
