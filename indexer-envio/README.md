@@ -138,8 +138,8 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
 The canonical repo-root command list — including codegen, dev, `reserve-yield:test`,
 and every `deploy:indexer:*` command — lives in
 [`docs/notes/quick-commands.md`](../docs/notes/quick-commands.md).
-`pnpm deploy:indexer:logs <commit> --build` additionally prints a deployment's
-build logs.
+`pnpm deploy:indexer:logs <commit> --build` switches that command to a
+deployment's build logs instead of its runtime logs.
 
 ### From `indexer-envio/` directory
 
