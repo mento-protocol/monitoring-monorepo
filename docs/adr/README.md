@@ -104,7 +104,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0020](0020-swr-polling-read-model.md)                   | Read model is SWR polling + bounded snapshot composition at current scale             |
 | [0021](0021-dashboard-state-upstash-blob.md)             | Dashboard state lives in Upstash Redis with Vercel Blob backups, not a DB             |
 | [0022](0022-authjs-google-shared-preview-secrets.md)     | Auth.js + Google; preview shares prod auth secrets behind SSO and Git fork protection |
-| [0023](0023-es2017-no-polyfill.md)                       | Transpile to ES2017; enforce an explicit browser API floor                            |
+| [0023](0023-es2017-no-polyfill.md)                       | Transpile to ES2017; pin the browser floor and block named API hazards                |
 | [0024](0024-plotly-basic-dist-bundle-budgets.md)         | Plotly.js `basic-dist-min` + enforced bundle-size budgets                             |
 | [0025](0025-fixture-browser-tests-react-doctor.md)       | Fixture-driven browser tests + visual snapshots + a react-doctor score gate           |
 | [0037](0037-dashboard-graphql-zod-mini.md)               | Native GraphQL transport + Zod Mini for browser-reachable validation                  |

@@ -1,5 +1,5 @@
 ---
-title: Transpile to ES2017; enforce an explicit browser API floor
+title: Transpile to ES2017; pin the browser floor and block named API hazards
 status: active
 owner: eng
 canonical: true
@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0023 — Transpile to ES2017; enforce a browser API floor
+# ADR 0023 — Transpile to ES2017; pin the floor and block named API hazards
 
 **Status:** Accepted (May 2026), in force.
 **Scope:** ui-dashboard
@@ -38,13 +38,15 @@ in `ui-dashboard/package.json`: Chrome 111+, Edge 111+, Firefox 111+, and Safari
 `Array.prototype.at`, `findLast`, `findLastIndex`, `flatMap`, and
 `Promise.allSettled`.
 
-ESLint blocks this closed set above the floor in client-shipped code:
+ESLint blocks this closed set of known hazards in client-shipped code:
 `Array.prototype.toSorted`, `toReversed`, `toSpliced`, and `with`;
 `TypedArray.prototype.toSorted`, `toReversed`, and `with`;
 `Object.groupBy`, `Map.groupBy`, `String.prototype.isWellFormed`, and
 `String.prototype.toWellFormed`. Its explicit ignore list owns server-only
 routes, OG helpers, and tests. A regression test proves both the allowed and
-blocked sets against the effective ESLint configuration.
+blocked sets against the effective ESLint configuration. This list is not an
+exhaustive compatibility checker for every JavaScript built-in; adding another
+API outside the browser floor requires updating the policy and its fixtures.
 
 The sanctioned reusable immutable sort is `sortedCopy(arr, cmp)` from
 `@/lib/immutable-sort`, which centralizes the `[...arr].sort()` workaround and

@@ -56,14 +56,17 @@ Edge 111+, Firefox 111+, and Safari 16.4+, pinned in `package.json`. APIs
 available across that floor are allowed, including `Array.prototype.at`,
 `findLast`, `findLastIndex`, `flatMap`, and `Promise.allSettled`.
 
-Lint blocks APIs above the floor in client-shipped code:
+Lint blocks this closed set of known hazards in client-shipped code:
 `Array.prototype.toSorted`, `toReversed`, `toSpliced`, and `with`;
 `TypedArray.prototype.toSorted`, `toReversed`, and `with`;
 `Object.groupBy`, `Map.groupBy`, `String.prototype.isWellFormed`, and
 `String.prototype.toWellFormed`. Use `sortedCopy` from
 `@/lib/immutable-sort` for immutable sorting. Any module imported directly or
 transitively by a `"use client"` component ships to the browser; the lint rule
-exempts explicit server-only routes, OG helpers, and tests.
+exempts explicit server-only routes, OG helpers, and tests. The blocklist is
+not an exhaustive compatibility checker for every JavaScript built-in; update
+the policy and its regression fixtures before adding another API outside the
+browser floor.
 
 See [ADR 0023](../docs/adr/0023-es2017-no-polyfill.md) before changing the
 transpilation target, browser floor, polyfill posture, or restriction.
