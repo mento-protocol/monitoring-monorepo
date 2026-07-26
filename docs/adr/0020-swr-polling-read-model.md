@@ -1,19 +1,20 @@
 ---
 title: Read model is SWR polling plus bounded snapshot composition at current scale
-status: active
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-07-23
+canonical: false
+last_verified: 2026-07-26
 scope: ui-dashboard
 date: 2026-03
 doc_type: adr
 review_interval_days: 90
 garden_lane: adrs-architecture
+superseded_by: ADR-0051
 ---
 
 # ADR 0020 — Read model: SWR polling + bounded snapshot composition at current scale
 
-**Status:** Accepted (Mar 2026), in force.
+**Status:** Accepted (Mar 2026); superseded by [ADR 0051](0051-dashboard-volume-scale-bounds.md).
 **Scope:** ui-dashboard
 
 ## Context
@@ -51,7 +52,7 @@ degraded state where applicable.
 - The pool-scale assumption is the load-bearing caveat for pool-level snapshot
   composition. If pool count, polling frequency, row volume, latency, or cost
   changes materially, revisit the split between indexer rollups and client
-  reduction.
+  reduction. ADR 0051 defines the successor's measured re-review bounds.
 - Polling discipline (intervals, dedupe) is a review surface for stateful UI changes.
 
 ## Evidence
@@ -66,5 +67,5 @@ degraded state where applicable.
   [`ui-dashboard/src/lib/volume-ssr.ts`](../../ui-dashboard/src/lib/volume-ssr.ts).
 - Polling and row-cap rules in
   [`docs/pr-checklists/swr-polling-hasura.md`](../pr-checklists/swr-polling-hasura.md);
-  the pool-scale exclusion in
-  [`docs/pr-checklists/review-prompt-exclusions.md`](../pr-checklists/review-prompt-exclusions.md).
+  the successor scale evidence in
+  [ADR 0051](0051-dashboard-volume-scale-bounds.md).
