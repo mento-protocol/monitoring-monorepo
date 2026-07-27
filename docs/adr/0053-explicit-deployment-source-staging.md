@@ -121,8 +121,9 @@ order makes both automatic deploys race missing infrastructure and fail closed.
 - A checked-in contract allows exactly five literal checked-in submit/deploy
   callsites and their required source-staging flag/value. Any other literal
   deploy-shaped text in an executable surface fails closed, including text in a
-  wrapper or generated script. Dynamically constructed executables and paths
-  are forbidden by this workflow; static discovery cannot prove them.
+  wrapper, generated script, or Terraform configuration outside comments.
+  Dynamically constructed executables and paths are forbidden by this workflow;
+  static discovery cannot prove them.
 - Operators must preserve the phase boundary: merge and apply the additive
   infrastructure from current `main`, merge routing, run all deploy canaries,
   then remove broad roles in a separate approved platform apply. This ADR

@@ -460,6 +460,16 @@ assertForbiddenSignature(
   "JSON entrypoint and argv array",
   "new-cloudbuild.json",
 );
+assertForbiddenSignature(
+  `resource "terraform_data" "unregistered_deploy" {
+  provisioner "local-exec" {
+    command = "gcloud builds submit ."
+  }
+}
+`,
+  "Terraform local-exec command",
+  "terraform/local-exec-deploy.tf",
+);
 
 assert.equal(
   discoverDeployStagingCallsites({
@@ -470,6 +480,18 @@ assert.equal(
   }).length,
   0,
   "comments must remain outside the literal deploy policy",
+);
+assert.equal(
+  discoverDeployStagingCallsites({
+    "terraform/comment-only.tf": `# gcloud builds submit .
+// gcloud app deploy app.yaml
+/*
+gcloud builds submit .
+*/
+`,
+  }).length,
+  0,
+  "Terraform comments must remain outside the literal deploy policy",
 );
 
 const commentsOnly = {

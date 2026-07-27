@@ -93,7 +93,8 @@ trimmed build context:
       Cloud Build upload/Docker context contains the same files.
 - [ ] The approved `gcloud builds submit` / `gcloud app deploy` callsites use
       their required source-staging flag/value. `pnpm tf:test` fails closed on
-      any other literal deploy-shaped text in an executable surface.
+      any other literal deploy-shaped text in an executable surface or in
+      Terraform configuration outside comments.
 - [ ] Bucket-scope upload IAM: Cloud Build callers get bucket read/object create,
       build identities get object view, and App Engine uploaders get bucket
       read/Object Admin.

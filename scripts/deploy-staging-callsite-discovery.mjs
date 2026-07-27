@@ -1,4 +1,5 @@
 import { load as loadYaml } from "js-yaml";
+import { commentMaskedHcl } from "./production-infra-identity-contract/hcl.mjs";
 import { stripShellComment } from "./production-infra-identity-contract/workflow-inventory.mjs";
 import { isMapping } from "./production-infra-identity-contract/workflow-inventory.mjs";
 
@@ -227,7 +228,16 @@ export function discoverDeployStagingCallsites(files, errors = []) {
     // The centralized fixture deliberately contains forbidden examples. It is
     // the one non-production executable surface excluded from self-scanning.
     if (filePath === CONTRACT_FIXTURE) continue;
-    if (filePath.endsWith(".tf")) continue;
+    if (filePath.endsWith(".tf")) {
+      records.push(
+        ...lexicalDeployRecords(
+          filePath,
+          "terraform",
+          commentMaskedHcl(contents),
+        ),
+      );
+      continue;
+    }
     if (filePath.endsWith("package.json")) {
       const packageJson = parseDeployStagingStructuredFile(
         filePath,

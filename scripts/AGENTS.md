@@ -43,9 +43,10 @@ garden_lane: agent-entry-points
   five literal checked-in `gcloud builds submit` / `gcloud app deploy`
   callsites, including their source-staging flag and value. Any other literal
   deploy-shaped text in an executable shell, package-script, workflow, or
-  nested Cloud Build surface fails closed, even inside a wrapper or generated
-  script. Dynamically constructed executables and paths remain forbidden but
-  cannot be proven statically.
+  nested Cloud Build surface fails closed, as does deploy-shaped text in
+  Terraform configuration outside comments. This includes wrappers and
+  generated scripts. Dynamically constructed executables and paths remain
+  forbidden but cannot be proven statically.
 
 ## Verification
 

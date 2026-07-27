@@ -176,9 +176,10 @@ The Metrics Bridge workflow and `pnpm bridge:deploy` pass
 snapshot in the Cloud Build bucket. `pnpm tf:test` allows exactly five literal
 checked-in `gcloud builds submit` / `gcloud app deploy` callsites and their
 required source-staging flag/value. Any other literal deploy-shaped text in an
-executable surface fails closed, including text in a wrapper or generated
-script. Dynamically constructed executables and paths are forbidden by this
-workflow; static discovery cannot prove them.
+executable surface fails closed, including text in a wrapper, generated script,
+or Terraform configuration outside comments. Dynamically constructed
+executables and paths are forbidden by this workflow; static discovery cannot
+prove them.
 
 This migration has a strict rollout order. First merge the infrastructure-only
 PR. Refresh current `main`, run a clean current-main platform plan, get explicit

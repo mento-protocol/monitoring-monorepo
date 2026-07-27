@@ -161,8 +161,9 @@ Metrics Bridge's default Compute executor has no App Engine source-bucket grant.
 The five approved checked-in `gcloud builds submit` / `gcloud app deploy`
 calls use their required source-staging flag/value. `pnpm tf:test` fails closed
 on any other literal deploy-shaped text in an executable surface, including
-text in a wrapper or generated script. Dynamically constructed executables and
-paths are forbidden by this workflow; static discovery cannot prove them.
+text in a wrapper, generated script, or Terraform configuration outside
+comments. Dynamically constructed executables and paths are forbidden by this
+workflow; static discovery cannot prove them.
 
 The migration is deliberately additive. Merge the infrastructure-only PR,
 refresh current `main`, run a clean current-main platform plan, get explicit
