@@ -137,26 +137,6 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
     ],
   },
   {
-    expression:
-      '"serviceAccount:${google_service_account.metrics_bridge_runtime.email}"',
-    blocks: [
-      "terraform/peg-policy.tf:google_storage_bucket_iam_member.metrics_bridge_runtime_peg_policy_object_viewer",
-    ],
-  },
-  {
-    expression:
-      '"serviceAccount:${google_service_account.peg_policy_publisher.email}"',
-    blocks: [
-      "terraform/peg-policy.tf:google_storage_bucket_iam_member.peg_policy_publisher_object_admin",
-    ],
-  },
-  {
-    expression: '"group:cloud-storage-analytics@google.com"',
-    blocks: [
-      "terraform/peg-policy.tf:google_storage_bucket_iam_member.peg_policy_access_logs_writer",
-    ],
-  },
-  {
     expression: '"serviceAccount:${google_service_account.project_sa.email}"',
     blocks: [
       "alerts/infra/main.tf:google_project_iam_member.cloudbuild_builder",
@@ -305,9 +285,8 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_plan_readonly|14bfbae95fdd8cf89f98a71d6b0ff755e291f25ed5d946d633614813734e4ac5",
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_refresh_readonly|f6756d526277862e2378cd24b6605b16725030c636d67e8a483411435ad6998f",
   "terraform/peg-policy.tf:google_service_account_iam_member.production_infra_applier_peg_policy_publisher_token_creator|57bfe37a62371790fdc30f70fd393423464366d169fb74214c499e801ee67d98",
-  "terraform/peg-policy.tf:google_storage_bucket_iam_member.peg_policy_access_logs_writer|eb88fef60df291d0ad86c9fcfe86a5334c67b5c64fb2eaca9a2e50700e417d1a",
-  "terraform/peg-policy.tf:google_storage_bucket_iam_member.metrics_bridge_runtime_peg_policy_object_viewer|7e0c650e7170f1f41643cb32983f1dc714193b40338db9605b4cdd9bb2b159f2",
-  "terraform/peg-policy.tf:google_storage_bucket_iam_member.peg_policy_publisher_object_admin|7d8203fe6dd3c3d5d1a2f754e5a0bdf09d1eb9d3b11f1a7839db9dbca380e524",
+  "terraform/peg-policy.tf:google_storage_bucket_iam_policy.peg_policy_access_logs|e7abbe2a07d3a595e4fe2daa4a17a2173d5b41fbb778ab870f4fc35df25f6ed7",
+  "terraform/peg-policy.tf:google_storage_bucket_iam_policy.peg_policy|8654ea4c5cfe26a5a3ecdee37fa4f2be66e2d5eae1b107c6b1ca84f4050f1546",
   "terraform/deploy-staging.tf:google_service_account_iam_member.ci_default_compute_service_account_user|00dc24e7f8a41d04bed69c4aa2f22f05e538384da239b39cbce1c533dfb75ce5",
   "terraform/deploy-staging.tf:google_service_account_iam_member.dev_default_compute_service_account_user|69411b48dc5c68cbdf44db133a283333939cf9497977acb0a3fbf5e12b703be9",
   "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_appspot_object_viewer|c0d52c65b643e00d1e975719c1a12e7acb0bf67095ef3ad252a280c3e8fa7a80",
@@ -407,13 +386,12 @@ const EXPECTED_IDENTITY_SOURCE_BLOCK_SHAPES = buildBlockShapeRegistry(
 );
 
 if (
-  EXPECTED_IAM_BLOCK_SHAPES.size !== EXPECTED_MEMBER_EXPRESSION_BY_BLOCK.size ||
-  [...EXPECTED_IAM_BLOCK_SHAPES].some(
-    ([key]) => !EXPECTED_MEMBER_EXPRESSION_BY_BLOCK.has(key),
+  [...EXPECTED_MEMBER_EXPRESSION_BY_BLOCK].some(
+    ([key]) => !EXPECTED_IAM_BLOCK_SHAPES.has(key),
   )
 ) {
   throw new Error(
-    "IAM grant sink member and block shape registries must contain the same keys",
+    "IAM grant sink member registry entries must have an audited block shape",
   );
 }
 

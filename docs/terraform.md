@@ -129,10 +129,14 @@ The bootstrap, refresh routing, live full-refresh proof, legacy-authority
 removal, run drain, and final IAM/WIF audit are complete. The approved removal
 apply completed with `0 added, 1 changed, 1 destroyed`, a full post-apply plan
 reported no changes, and live IAM contains no `metrics-bridge-deployer` Token
-Creator grant. The Peg-policy foundation stays source-only and unapplied until
-its own reviewed, human-approved platform plan and apply. It creates no policy
-object and does not attach the runtime identity to Cloud Run; policy
-publication and activation remain separate reviewed steps.
+Creator grant. The Peg-policy foundation stays source-only. It creates no
+policy object and does not attach the runtime identity to Cloud Run; policy
+publication and activation remain separate reviewed steps. Its authoritative
+bucket policies make direct grants exact, but inherited project or organization
+grants can still allow access while the buckets remain in the monitoring
+project. Same-project placement is temporary and unresolved: no merge, apply,
+or activation may proceed until a separate effective-isolation control is
+selected and proven.
 
 ## Routine deployment source staging
 

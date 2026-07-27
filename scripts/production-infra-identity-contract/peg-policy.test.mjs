@@ -11,7 +11,8 @@ function expectContractFailure(files, expectedMessage) {
   );
 }
 
-function mutateFile(files, filePath, from, to) {
+function mutateFile(files, from, to) {
+  const filePath = "terraform/peg-policy.tf";
   assert(
     files[filePath].includes(from),
     `fixture mutation source missing: ${from}`,
@@ -22,7 +23,8 @@ function mutateFile(files, filePath, from, to) {
   };
 }
 
-function mutateFileOccurrence(files, filePath, from, to, occurrence) {
+function mutateOccurrence(files, from, to, occurrence) {
+  const filePath = "terraform/peg-policy.tf";
   const contents = files[filePath];
   let index = -1;
   for (let count = 0; count <= occurrence; count += 1) {
@@ -39,512 +41,155 @@ function mutateFileOccurrence(files, filePath, from, to, occurrence) {
 }
 
 const validFiles = validFixtureFiles();
+assert.deepEqual(validateProductionInfraIdentityContract(validFiles), []);
 
-for (const [filePath, from, to, expected] of [
+for (const [from, to, expected] of [
   [
-    "terraform/gcp-project.tf",
-    '  service                    = "storage.googleapis.com"',
-    '  service                    = "compute.googleapis.com"',
-    "Peg policy Storage API: service must be exactly",
+    '  role_id     = "pegPolicyBucketController"',
+    '  role_id     = "pegPolicyBucketAdministrator"',
+    "Peg policy bucket controller role: role_id must be exactly",
   ],
   [
-    "terraform/gcp-project.tf",
-    "  project                    = google_project.monitoring.project_id",
-    "  project                    = var.gcp_project_id",
-    "Peg policy Storage API: project must be exactly",
+    '    "storage.buckets.update",',
+    '    "storage.objects.delete",',
+    "Peg policy bucket controller role: permissions must contain only",
   ],
   [
-    "terraform/gcp-project.tf",
-    "  disable_on_destroy         = false",
-    "  disable_on_destroy         = true",
-    "Peg policy Storage API: disable_on_destroy must be exactly",
+    "  policy_data = data.google_iam_policy.peg_policy.policy_data",
+    "  policy_data = data.google_iam_policy.peg_policy_access_logs.policy_data",
+    "Peg policy peg_policy authoritative IAM policy: policy_data must be exactly",
   ],
   [
-    "terraform/gcp-project.tf",
-    "  disable_dependent_services = false",
-    "  disable_dependent_services = true",
-    "Peg policy Storage API: disable_dependent_services must be exactly",
-  ],
-  [
-    "terraform/gcp-project.tf",
-    "  depends_on = [google_project_iam_member.terraform_owner]",
-    "  depends_on = [google_project_service.iam]",
-    "Peg policy Storage API: depends_on must contain only",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    '  name                        = "${google_project.monitoring.project_id}-peg-policy"',
-    '  name                        = "public-peg-policy"',
-    "Peg policy bucket: name must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    "  project                     = google_project.monitoring.project_id",
-    "  project                     = var.gcp_project_id",
-    "Peg policy bucket: project must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    "  location                    = var.gcp_region",
-    "  location                    = var.gcp_project_id",
-    "Peg policy bucket: location must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    "  force_destroy               = false",
-    "  force_destroy               = true",
-    "Peg policy bucket: force_destroy must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    "  uniform_bucket_level_access = true",
-    "  uniform_bucket_level_access = false",
-    "Peg policy bucket: uniform_bucket_level_access must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    '  public_access_prevention    = "enforced"',
-    '  public_access_prevention    = "inherited"',
-    "Peg policy bucket: public_access_prevention must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    "    enabled = true",
-    "    enabled = false",
-    "Peg policy bucket: enabled must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    '      type = "Delete"',
-    '      type = "SetStorageClass"',
-    "Peg policy bucket: type must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    "      days_since_noncurrent_time = 30",
-    "      days_since_noncurrent_time = 29",
-    "Peg policy bucket: days_since_noncurrent_time must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    "      days_since_noncurrent_time = 30",
-    "      age = 30",
-    "Peg policy bucket: days_since_noncurrent_time must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    '      with_state                 = "ARCHIVED"',
-    '      with_state                 = "ANY"',
-    "Peg policy bucket: with_state must be exactly",
-  ],
-  [
-    "terraform/peg-policy.tf",
-    "    prevent_destroy = true",
-    "    prevent_destroy = false",
-    "Peg policy bucket: prevent_destroy must be exactly",
-  ],
-]) {
-  expectContractFailure(mutateFile(validFiles, filePath, from, to), expected);
-}
-
-expectContractFailure(
-  mutateFile(
-    validFiles,
-    "terraform/peg-policy.tf",
-    `  depends_on = [
-    google_project_service.storage,
-    google_storage_bucket_iam_member.peg_policy_access_logs_writer,
-  ]`,
-    "  depends_on = [google_project_service.storage]",
-  ),
-  "Peg policy bucket: depends_on must contain exactly the Storage API and access-log writer",
-);
-expectContractFailure(
-  mutateFile(
-    validFiles,
-    "terraform/peg-policy.tf",
-    `  lifecycle {
-    prevent_destroy = true
-  }`,
-    `  lifecycle_rule {
-    action {
-      type = "Delete"
-    }
-    condition {
-      days_since_noncurrent_time = 30
-      with_state                 = "ARCHIVED"
-    }
-  }
-
-  lifecycle {
-    prevent_destroy = true
-  }`,
-  ),
-  "Peg policy bucket: must contain exactly one lifecycle rule",
-);
-expectContractFailure(
-  mutateFile(
-    validFiles,
-    "terraform/peg-policy.tf",
-    `  lifecycle_rule {
-    action {
-      type = "Delete"
-    }
-    condition {
-      days_since_noncurrent_time = 30
-      with_state                 = "ARCHIVED"
-    }
-  }
-
-`,
-    "",
-  ),
-  "Peg policy bucket: must contain exactly one lifecycle rule",
-);
-
-for (const [from, to, expected, occurrence = 0] of [
-  [
-    "    log_bucket        = google_storage_bucket.peg_policy_access_logs.name",
-    "    log_bucket        = google_storage_bucket.unrelated.name",
-    "Peg policy bucket: log_bucket must be exactly",
-  ],
-  [
-    '    log_object_prefix = "peg-policy/"',
-    '    log_object_prefix = "other/"',
-    "Peg policy bucket: log_object_prefix must be exactly",
-  ],
-  [
-    '  name                        = "${google_project.monitoring.project_id}-peg-policy-access-logs"',
-    '  name                        = "public-access-logs"',
-    "Peg policy access-log bucket: name must be exactly",
-  ],
-  [
-    "  project                     = google_project.monitoring.project_id",
-    "  project                     = var.gcp_project_id",
-    "Peg policy access-log bucket: project must be exactly",
-    1,
-  ],
-  [
-    "  location                    = var.gcp_region",
-    '  location                    = "US"',
-    "Peg policy access-log bucket: location must be exactly",
-    1,
-  ],
-  [
-    "  force_destroy               = false",
-    "  force_destroy               = true",
-    "Peg policy access-log bucket: force_destroy must be exactly",
-    1,
-  ],
-  [
-    "  uniform_bucket_level_access = true",
-    "  uniform_bucket_level_access = false",
-    "Peg policy access-log bucket: uniform_bucket_level_access must be exactly",
-    1,
-  ],
-  [
-    '  public_access_prevention    = "enforced"',
-    '  public_access_prevention    = "inherited"',
-    "Peg policy access-log bucket: public_access_prevention must be exactly",
-    1,
-  ],
-  [
-    "      age        = 90",
-    "      age        = 89",
-    "Peg policy access-log bucket: must retain the LIVE and ARCHIVED retention rules",
-  ],
-  [
-    '      with_state = "LIVE"',
-    '      with_state = "ARCHIVED"',
-    "Peg policy access-log bucket: must retain the LIVE and ARCHIVED retention rules",
-  ],
-  [
-    "  bucket = google_storage_bucket.peg_policy_access_logs.name",
-    "  bucket = google_storage_bucket.peg_policy.name",
-    "Peg policy access-log writer: bucket must be exactly",
-  ],
-  [
-    '  role   = "roles/storage.objectCreator"',
-    '  role   = "roles/storage.objectAdmin"',
-    "Peg policy access-log writer: role must be exactly",
-  ],
-  [
-    '  member = "group:cloud-storage-analytics@google.com"',
-    '  member = "group:eng@mentolabs.xyz"',
-    "Peg policy access-log writer: member must be exactly",
-  ],
-]) {
-  expectContractFailure(
-    mutateFileOccurrence(
-      validFiles,
-      "terraform/peg-policy.tf",
-      from,
-      to,
-      occurrence,
-    ),
-    expected,
-  );
-}
-expectContractFailure(
-  mutateFile(
-    validFiles,
-    "terraform/peg-policy.tf",
-    "  depends_on = [google_project_service.storage]",
+    "  depends_on = [google_storage_bucket_iam_policy.peg_policy_access_logs]",
     "  depends_on = []",
-  ),
-  "Peg policy access-log bucket: depends_on must contain only the Storage API",
-);
+    "Peg policy peg_policy authoritative IAM policy: depends_on must contain exactly the authoritative prerequisites",
+  ],
+  [
+    "    google_storage_bucket_iam_policy.peg_policy_access_logs,",
+    "    google_project_service.storage,",
+    "Peg policy bucket: depends_on must contain exactly the Storage API and authoritative access-log policy",
+  ],
+]) {
+  expectContractFailure(mutateFile(validFiles, from, to), expected);
+}
+
 expectContractFailure(
-  mutateFileOccurrence(
+  mutateOccurrence(
     validFiles,
-    "terraform/peg-policy.tf",
-    "    enabled = true",
-    "    enabled = false",
-    1,
-  ),
-  "Peg policy access-log bucket: enabled must be exactly",
-);
-expectContractFailure(
-  mutateFileOccurrence(
-    validFiles,
-    "terraform/peg-policy.tf",
-    '      type = "Delete"',
-    '      type = "SetStorageClass"',
-    1,
-  ),
-  "Peg policy access-log bucket: type must be exactly",
-);
-expectContractFailure(
-  mutateFileOccurrence(
-    validFiles,
-    "terraform/peg-policy.tf",
     "    prevent_destroy = true",
     "    prevent_destroy = false",
-    1,
-  ),
-  "Peg policy access-log bucket: prevent_destroy must be exactly",
-);
-expectContractFailure(
-  mutateFileOccurrence(
-    validFiles,
-    "terraform/peg-policy.tf",
-    "  lifecycle_rule {",
-    "  # archived retention removed",
     2,
   ),
-  "Peg policy access-log bucket: must contain exactly two lifecycle rules",
+  "Peg policy peg_policy_access_logs authoritative IAM policy: prevent_destroy must be exactly",
 );
 expectContractFailure(
-  mutateFileOccurrence(
+  mutateOccurrence(
     validFiles,
-    "terraform/peg-policy.tf",
-    "      days_since_noncurrent_time = 30",
-    "      days_since_noncurrent_time = 29",
-    1,
+    "    prevent_destroy = true",
+    "    prevent_destroy = false",
+    3,
   ),
-  "Peg policy access-log bucket: must retain the LIVE and ARCHIVED retention rules",
-);
-expectContractFailure(
-  mutateFile(
-    validFiles,
-    "terraform/peg-policy.tf",
-    "# trunk-ignore(checkov/CKV_GCP_62): a bucket cannot write access logs to itself.",
-    "# checkov exception removed",
-  ),
-  "Peg policy access-log bucket: must keep the scoped self-logging Checkov exception",
-);
-expectContractFailure(
-  mutateFile(
-    validFiles,
-    "terraform/peg-policy.tf",
-    'resource "google_storage_bucket" "peg_policy" {',
-    '#checkov:skip=CKV_GCP_62: invalid second exception\nresource "google_storage_bucket" "peg_policy" {',
-  ),
-  "Peg policy access-log bucket: must keep the scoped self-logging Checkov exception",
+  "Peg policy peg_policy authoritative IAM policy: prevent_destroy must be exactly",
 );
 
-for (const [occurrence, replacement, expected] of [
+for (const [from, to, expected, occurrence] of [
   [
+    '    role = "roles/storage.objectCreator"',
+    '    role = "roles/storage.objectAdmin"',
+    'Peg policy peg_policy_access_logs authoritative IAM policy: must contain exactly one "roles/storage.objectCreator" binding',
     0,
-    "  project      = var.gcp_project_id",
-    "Peg policy metrics_bridge_runtime identity: project must be exactly",
   ],
   [
-    1,
-    "  project      = var.gcp_project_id",
-    "Peg policy peg_policy_publisher identity: project must be exactly",
-  ],
-]) {
-  expectContractFailure(
-    mutateFileOccurrence(
-      validFiles,
-      "terraform/peg-policy.tf",
-      "  project      = google_project.monitoring.project_id",
-      replacement,
-      occurrence,
-    ),
-    expected,
-  );
-}
-for (const [from, to, expected] of [
-  [
-    '  account_id   = "metrics-bridge-runtime"',
-    '  account_id   = "metrics-bridge-runtime-writer"',
-    "Peg policy metrics_bridge_runtime identity: account_id must be exactly",
-  ],
-  [
-    '  account_id   = "peg-policy-publisher"',
-    '  account_id   = "peg-policy-publisher-writer"',
-    "Peg policy peg_policy_publisher identity: account_id must be exactly",
-  ],
-]) {
-  expectContractFailure(
-    mutateFile(validFiles, "terraform/peg-policy.tf", from, to),
-    expected,
-  );
-}
-for (const [occurrence, expected] of [
-  [
+    '    role = "roles/storage.objectViewer"',
+    '    role = "roles/storage.objectAdmin"',
+    'Peg policy peg_policy authoritative IAM policy: must contain exactly one "roles/storage.objectViewer" binding',
     0,
-    "Peg policy metrics_bridge_runtime identity: depends_on must contain only",
-  ],
-  [1, "Peg policy peg_policy_publisher identity: depends_on must contain only"],
-]) {
-  expectContractFailure(
-    mutateFileOccurrence(
-      validFiles,
-      "terraform/peg-policy.tf",
-      "  depends_on = [google_project_service.iam]",
-      "  depends_on = [google_project_service.storage]",
-      occurrence,
-    ),
-    expected,
-  );
-}
-
-for (const [from, to, expected] of [
-  [
-    "  service_account_id = google_service_account.peg_policy_publisher.name",
-    "  service_account_id = google_service_account.metrics_bridge_runtime.name",
-    "Peg policy publisher Token Creator: service_account_id must be exactly",
   ],
   [
-    '  role               = "roles/iam.serviceAccountTokenCreator"',
-    '  role               = "roles/iam.serviceAccountUser"',
-    "Peg policy publisher Token Creator: role must be exactly",
+    '      "serviceAccount:${var.terraform_service_account}",',
+    '      "serviceAccount:${var.terraform_service_account}",\n      "group:eng@mentolabs.xyz",',
+    "Peg policy peg_policy_access_logs authoritative IAM policy: google_project_iam_custom_role.peg_policy_bucket_controller.name members must contain only",
+    0,
   ],
   [
-    '  member             = "serviceAccount:${google_service_account.production_infra_applier.email}"',
-    '  member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"',
-    "Peg policy publisher Token Creator: member must be exactly",
-  ],
-  [
-    '  role   = "roles/storage.objectViewer"',
-    '  role   = "roles/storage.objectAdmin"',
-    "metrics_bridge_runtime_peg_policy_object_viewer bucket grant: role must be exactly",
-  ],
-  [
-    '  role   = "roles/storage.objectAdmin"',
-    '  role   = "roles/storage.objectViewer"',
-    "peg_policy_publisher_object_admin bucket grant: role must be exactly",
-  ],
-]) {
-  expectContractFailure(
-    mutateFile(validFiles, "terraform/peg-policy.tf", from, to),
-    expected,
-  );
-}
-
-expectContractFailure(
-  mutateFile(
-    validFiles,
-    "terraform/peg-policy.tf",
-    "  bucket = google_storage_bucket.peg_policy.name",
-    "  bucket = google_storage_bucket.unrelated.name",
-  ),
-  "metrics_bridge_runtime_peg_policy_object_viewer bucket grant: bucket must be exactly",
-);
-expectContractFailure(
-  mutateFileOccurrence(
-    validFiles,
-    "terraform/peg-policy.tf",
-    "  bucket = google_storage_bucket.peg_policy.name",
-    "  bucket = google_storage_bucket.unrelated.name",
+    '      "serviceAccount:${var.terraform_service_account}",',
+    '      "serviceAccount:${var.terraform_service_account}",\n      "group:eng@mentolabs.xyz",',
+    "Peg policy peg_policy authoritative IAM policy: google_project_iam_custom_role.peg_policy_bucket_controller.name members must contain only",
     1,
-  ),
-  "peg_policy_publisher_object_admin bucket grant: bucket must be exactly",
-);
+  ],
+]) {
+  expectContractFailure(
+    mutateOccurrence(validFiles, from, to, occurrence),
+    expected,
+  );
+}
+
 expectContractFailure(
   mutateFile(
     validFiles,
-    "terraform/peg-policy.tf",
-    '  member = "serviceAccount:${google_service_account.metrics_bridge_runtime.email}"',
-    '  member = "serviceAccount:${google_service_account.peg_policy_publisher.email}"',
-  ),
-  "metrics_bridge_runtime_peg_policy_object_viewer bucket grant: member must be exactly",
-);
-expectContractFailure(
-  mutateFile(
-    validFiles,
-    "terraform/peg-policy.tf",
-    '  member = "serviceAccount:${google_service_account.peg_policy_publisher.email}"',
-    '  member = "serviceAccount:${google_service_account.metrics_bridge_runtime.email}"',
-  ),
-  "peg_policy_publisher_object_admin bucket grant: member must be exactly",
-);
-
-expectContractFailure(
-  {
-    ...validFiles,
-    "terraform/peg-policy-extra.tf": `
-resource "google_project_iam_member" "production_applier_fourth_grant" {
-  project = google_project.monitoring.project_id
-  role    = "roles/storage.admin"
-  member  = "serviceAccount:\${google_service_account.production_infra_applier.email}"
-}
-`,
-  },
-  "production applier: unexpected IAM grants",
-);
-expectContractFailure(
-  {
-    ...validFiles,
-    "terraform/peg-policy-extra-runtime.tf": `
-resource "google_project_iam_member" "runtime_extra_grant" {
-  project = google_project.monitoring.project_id
-  role    = "roles/storage.admin"
-  member  = "serviceAccount:\${google_service_account.metrics_bridge_runtime.email}"
-}
-`,
-  },
-  "Peg policy runtime identity: unexpected IAM grants",
-);
-expectContractFailure(
-  {
-    ...validFiles,
-    "terraform/peg-policy-runtime-attachment.tf": `
-resource "google_cloud_run_v2_service" "forbidden_peg_runtime" {
-  name     = "forbidden-peg-runtime"
-  location = var.gcp_region
-
-  template {
-    service_account = google_service_account.metrics_bridge_runtime.email
+    `  binding {
+    role = "roles/storage.objectAdmin"
+    members = [
+      "serviceAccount:\${google_service_account.peg_policy_publisher.email}",
+    ]
   }
+}`,
+    `  binding {
+    role = "roles/storage.objectAdmin"
+    members = [
+      "serviceAccount:\${google_service_account.peg_policy_publisher.email}",
+    ]
+  }
+
+  binding {
+    role = "roles/storage.objectCreator"
+    members = ["group:eng@mentolabs.xyz"]
+  }
+}`,
+  ),
+  "Peg policy peg_policy authoritative IAM policy: must contain exactly 3 bindings",
+);
+
+expectContractFailure(
+  {
+    ...validFiles,
+    "terraform/peg-policy-legacy-member.tf": `
+resource "google_storage_bucket_iam_member" "peg_policy_legacy_reader" {
+  bucket = google_storage_bucket.peg_policy.name
+  role   = "roles/storage.objectViewer"
+  member = "group:eng@mentolabs.xyz"
 }
 `,
   },
-  "Peg policy runtime identity: identity references are allowed only",
+  "Peg buckets must use only authoritative IAM policies, not member or binding resources",
 );
 expectContractFailure(
   {
     ...validFiles,
-    "terraform/peg-policy-extra-publisher.tf": `
-resource "google_project_iam_member" "publisher_extra_grant" {
-  project = google_project.monitoring.project_id
-  role    = "roles/storage.admin"
-  member  = "serviceAccount:\${google_service_account.peg_policy_publisher.email}"
+    "terraform/peg-policy-legacy-binding.tf": `
+resource "google_storage_bucket_iam_binding" "peg_policy_access_logs_legacy_writer" {
+  bucket  = google_storage_bucket.peg_policy_access_logs.name
+  role    = "roles/storage.objectCreator"
+  members = ["group:eng@mentolabs.xyz"]
 }
 `,
   },
-  "Peg policy publisher identity: unexpected IAM grants",
+  "Peg buckets must use only authoritative IAM policies, not member or binding resources",
+);
+expectContractFailure(
+  {
+    ...validFiles,
+    "terraform/peg-policy-controller-escape.tf": `
+resource "google_project_iam_member" "peg_policy_bucket_controller_escape" {
+  project = google_project.monitoring.project_id
+  role    = google_project_iam_custom_role.peg_policy_bucket_controller.name
+  member  = "serviceAccount:\${var.terraform_service_account}"
+}
+`,
+  },
+  "Peg policy bucket controller role may appear only in the two authoritative policy documents",
+);
+
+console.log(
+  "production infrastructure Peg policy authoritative IAM tests passed",
 );

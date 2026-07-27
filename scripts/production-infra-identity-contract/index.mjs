@@ -76,7 +76,7 @@ function validateIdentityContract(files, completeInventory) {
   validateProductionIdentity(blocks, errors, [
     PEG_POLICY_PRODUCTION_APPLIER_GRANT_KEY,
   ]);
-  validatePegPolicyFoundation(files, blocks, errors);
+  validatePegPolicyFoundation(files, topLevelBlocks, errors);
   validateRefreshIdentity(files, blocks, errors);
   validateGithubVariables(blocks, errors);
   validateIdentityReferenceInventory(

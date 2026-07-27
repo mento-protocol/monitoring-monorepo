@@ -41,7 +41,7 @@ resource "google_storage_bucket" "peg_policy" {
 
   depends_on = [
     google_project_service.storage,
-    google_storage_bucket_iam_member.peg_policy_access_logs_writer,
+    google_storage_bucket_iam_policy.peg_policy_access_logs,
   ]
 }
 
@@ -85,10 +85,42 @@ resource "google_storage_bucket" "peg_policy_access_logs" {
   depends_on = [google_project_service.storage]
 }
 
-resource "google_storage_bucket_iam_member" "peg_policy_access_logs_writer" {
-  bucket = google_storage_bucket.peg_policy_access_logs.name
-  role   = "roles/storage.objectCreator"
-  member = "group:cloud-storage-analytics@google.com"
+resource "google_project_iam_custom_role" "peg_policy_bucket_controller" {
+  project     = google_project.monitoring.project_id
+  role_id     = "pegPolicyBucketController"
+  title       = "Peg policy bucket controller"
+  description = "Controls the authoritative IAM policies on the dormant Peg-policy buckets."
+  permissions = [
+    "storage.buckets.get",
+    "storage.buckets.getIamPolicy",
+    "storage.buckets.setIamPolicy",
+    "storage.buckets.update",
+  ]
+}
+
+data "google_iam_policy" "peg_policy_access_logs" {
+  binding {
+    role = google_project_iam_custom_role.peg_policy_bucket_controller.name
+    members = [
+      "serviceAccount:${var.terraform_service_account}",
+    ]
+  }
+
+  binding {
+    role = "roles/storage.objectCreator"
+    members = [
+      "group:cloud-storage-analytics@google.com",
+    ]
+  }
+}
+
+resource "google_storage_bucket_iam_policy" "peg_policy_access_logs" {
+  bucket      = google_storage_bucket.peg_policy_access_logs.name
+  policy_data = data.google_iam_policy.peg_policy_access_logs.policy_data
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # These service accounts intentionally have no keys and no project-level roles.
@@ -111,16 +143,38 @@ resource "google_service_account" "peg_policy_publisher" {
   depends_on = [google_project_service.iam]
 }
 
-resource "google_storage_bucket_iam_member" "metrics_bridge_runtime_peg_policy_object_viewer" {
-  bucket = google_storage_bucket.peg_policy.name
-  role   = "roles/storage.objectViewer"
-  member = "serviceAccount:${google_service_account.metrics_bridge_runtime.email}"
+data "google_iam_policy" "peg_policy" {
+  binding {
+    role = google_project_iam_custom_role.peg_policy_bucket_controller.name
+    members = [
+      "serviceAccount:${var.terraform_service_account}",
+    ]
+  }
+
+  binding {
+    role = "roles/storage.objectViewer"
+    members = [
+      "serviceAccount:${google_service_account.metrics_bridge_runtime.email}",
+    ]
+  }
+
+  binding {
+    role = "roles/storage.objectAdmin"
+    members = [
+      "serviceAccount:${google_service_account.peg_policy_publisher.email}",
+    ]
+  }
 }
 
-resource "google_storage_bucket_iam_member" "peg_policy_publisher_object_admin" {
-  bucket = google_storage_bucket.peg_policy.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.peg_policy_publisher.email}"
+resource "google_storage_bucket_iam_policy" "peg_policy" {
+  bucket      = google_storage_bucket.peg_policy.name
+  policy_data = data.google_iam_policy.peg_policy.policy_data
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  depends_on = [google_storage_bucket_iam_policy.peg_policy_access_logs]
 }
 
 # Only the Environment-bound production applier can impersonate the publisher.

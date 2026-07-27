@@ -10,6 +10,7 @@ import {
   requireBlock,
   sameSortedValues,
   stringAttribute,
+  topLevelBlockKey,
 } from "./hcl.mjs";
 
 export const PEG_POLICY_PRODUCTION_APPLIER_GRANT_KEY =
@@ -22,7 +23,7 @@ export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
     accountId: "metrics-bridge-runtime",
     allowedBlocks: new Set([
       "terraform/peg-policy.tf:resource.google_service_account.metrics_bridge_runtime",
-      "terraform/peg-policy.tf:resource.google_storage_bucket_iam_member.metrics_bridge_runtime_peg_policy_object_viewer",
+      "terraform/peg-policy.tf:data.google_iam_policy.peg_policy",
     ]),
   },
   {
@@ -31,7 +32,7 @@ export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
     accountId: "peg-policy-publisher",
     allowedBlocks: new Set([
       "terraform/peg-policy.tf:resource.google_service_account.peg_policy_publisher",
-      "terraform/peg-policy.tf:resource.google_storage_bucket_iam_member.peg_policy_publisher_object_admin",
+      "terraform/peg-policy.tf:data.google_iam_policy.peg_policy",
       "terraform/peg-policy.tf:resource.google_service_account_iam_member.production_infra_applier_peg_policy_publisher_token_creator",
     ]),
   },
@@ -106,29 +107,182 @@ function validatePegPolicyServiceAccount(blocks, name, accountId, errors) {
   return block;
 }
 
-function validatePegPolicyBucketGrant(blocks, { name, role, member }, errors) {
-  const label = `terraform: Peg policy ${name} bucket grant`;
-  const block = requireBlock(
+function exactStringList(block, attribute) {
+  const match = new RegExp(
+    `^\\s*${attribute}\\s*=\\s*\\[\\s*((?:"(?:[^"\\\\]|\\\\.)*"\\s*,?\\s*)*)\\]\\s*$`,
+    "gmu",
+  ).exec(block.code);
+  if (!match) return undefined;
+  const values = [...match[1].matchAll(/"((?:[^"\\]|\\.)*)"/gu)].map(
+    ([, value]) => JSON.parse(`"${value}"`),
+  );
+  return values.length > 0 ? values : undefined;
+}
+
+function requireData(blocks, type, name, errors, label) {
+  const matches = blocks.filter(
+    (block) =>
+      block.kind === "data" &&
+      block.filePath === "terraform/peg-policy.tf" &&
+      block.labels[0] === type &&
+      block.labels[1] === name,
+  );
+  if (matches.length === 0) {
+    errors.push(`${label}: required data ${type}.${name} is missing`);
+  } else if (matches.length > 1) {
+    errors.push(`${label}: data ${type}.${name} must be declared exactly once`);
+  }
+  return matches[0];
+}
+
+function validateExactBindings(data, expectedBindings, errors, label) {
+  const bindings = nestedBlocks(data, "binding");
+  if (bindings.length !== expectedBindings.length) {
+    errors.push(
+      `${label}: must contain exactly ${expectedBindings.length} bindings`,
+    );
+    return;
+  }
+  for (const { role, member } of expectedBindings) {
+    const matching = bindings.filter(
+      (binding) =>
+        normalizeExpression(attributeExpression(binding, "role")) === role,
+    );
+    if (matching.length !== 1) {
+      errors.push(`${label}: must contain exactly one ${role} binding`);
+      continue;
+    }
+    const binding = matching[0];
+    expectExpression(binding, "role", role, errors, label);
+    const members = exactStringList(binding, "members");
+    if (!sameSortedValues(members, [member])) {
+      errors.push(`${label}: ${role} members must contain only ${member}`);
+    }
+    if (nestedBlocks(binding, "condition").length !== 0) {
+      errors.push(`${label}: ${role} binding must not be conditional`);
+    }
+  }
+}
+
+function validatePegPolicyCustomRole(blocks, errors) {
+  const label = "terraform: Peg policy bucket controller role";
+  const role = requireBlock(
     blocks,
     "terraform/peg-policy.tf",
-    "google_storage_bucket_iam_member",
+    "google_project_iam_custom_role",
+    "peg_policy_bucket_controller",
+    errors,
+    label,
+  );
+  if (!role) return;
+  expectNoResourceMultiplicity(role, errors, label);
+  expectExpression(
+    role,
+    "project",
+    "google_project.monitoring.project_id",
+    errors,
+    label,
+  );
+  expectString(role, "role_id", "pegPolicyBucketController", errors, label);
+  const permissions = exactStringList(role, "permissions");
+  if (
+    !sameSortedValues(permissions, [
+      "storage.buckets.get",
+      "storage.buckets.getIamPolicy",
+      "storage.buckets.setIamPolicy",
+      "storage.buckets.update",
+    ])
+  ) {
+    errors.push(
+      `${label}: permissions must contain only the exact bucket-policy controls`,
+    );
+  }
+}
+
+function validatePegPolicyAuthoritativePolicy(
+  blocks,
+  { name, bucket, expectedBindings, dependsOn = [] },
+  errors,
+) {
+  const label = `terraform: Peg policy ${name} authoritative IAM policy`;
+  const data = requireData(blocks, "google_iam_policy", name, errors, label);
+  if (data) {
+    validateExactBindings(data, expectedBindings, errors, label);
+  }
+
+  const policy = requireBlock(
+    blocks,
+    "terraform/peg-policy.tf",
+    "google_storage_bucket_iam_policy",
     name,
     errors,
     label,
   );
-  if (!block) return undefined;
-
-  expectNoResourceMultiplicity(block, errors, label);
+  if (!policy) return;
+  expectNoResourceMultiplicity(policy, errors, label);
+  expectExpression(policy, "bucket", bucket, errors, label);
   expectExpression(
-    block,
-    "bucket",
-    "google_storage_bucket.peg_policy.name",
+    policy,
+    "policy_data",
+    `data.google_iam_policy.${name}.policy_data`,
     errors,
     label,
   );
-  expectString(block, "role", role, errors, label);
-  expectString(block, "member", member, errors, label);
-  return block;
+  const lifecycles = nestedBlocks(policy, "lifecycle");
+  if (lifecycles.length !== 1) {
+    errors.push(`${label}: must contain exactly one lifecycle block`);
+  } else {
+    expectExpression(lifecycles[0], "prevent_destroy", "true", errors, label);
+  }
+  if (
+    !sameSortedValues(
+      extractExpressionList(policy, "depends_on") ?? [],
+      dependsOn,
+    )
+  ) {
+    errors.push(
+      `${label}: depends_on must contain exactly the authoritative prerequisites`,
+    );
+  }
+}
+
+function rejectPegBucketMemberOrBindingResources(blocks, errors) {
+  const forbidden = blocks
+    .filter(
+      (block) =>
+        block.kind === "resource" &&
+        /google_storage_bucket_iam_(?:member|binding)$/u.test(block.type) &&
+        (block.code.includes("google_storage_bucket.peg_policy.") ||
+          block.code.includes("google_storage_bucket.peg_policy_access_logs.")),
+    )
+    .map(blockKey)
+    .sort();
+  if (forbidden.length > 0) {
+    errors.push(
+      `terraform: Peg buckets must use only authoritative IAM policies, not member or binding resources: ${forbidden.join(", ")}`,
+    );
+  }
+}
+
+function rejectCustomRoleReferencesOutsidePolicies(blocks, errors) {
+  const allowed = new Set([
+    "terraform/peg-policy.tf:data.google_iam_policy.peg_policy",
+    "terraform/peg-policy.tf:data.google_iam_policy.peg_policy_access_logs",
+  ]);
+  const unexpected = blocks
+    .filter(
+      (block) =>
+        block.code.includes(
+          "google_project_iam_custom_role.peg_policy_bucket_controller",
+        ) && !allowed.has(topLevelBlockKey(block)),
+    )
+    .map(topLevelBlockKey)
+    .sort();
+  if (unexpected.length > 0) {
+    errors.push(
+      `terraform: Peg policy bucket controller role may appear only in the two authoritative policy documents: ${unexpected.join(", ")}`,
+    );
+  }
 }
 
 function validatePegPolicyLifecycleRule(
@@ -264,37 +418,10 @@ function validatePegPolicyAccessLogBucket(files, blocks, errors) {
       expectExpression(lifecycles[0], "prevent_destroy", "true", errors, label);
     }
   }
-
-  const writer = requireBlock(
-    blocks,
-    "terraform/peg-policy.tf",
-    "google_storage_bucket_iam_member",
-    "peg_policy_access_logs_writer",
-    errors,
-    "terraform: Peg policy access-log writer",
-  );
-  if (writer) {
-    const label = "terraform: Peg policy access-log writer";
-    expectNoResourceMultiplicity(writer, errors, label);
-    expectExpression(
-      writer,
-      "bucket",
-      "google_storage_bucket.peg_policy_access_logs.name",
-      errors,
-      label,
-    );
-    expectString(writer, "role", "roles/storage.objectCreator", errors, label);
-    expectString(
-      writer,
-      "member",
-      "group:cloud-storage-analytics@google.com",
-      errors,
-      label,
-    );
-  }
 }
 
-export function validatePegPolicyFoundation(files, blocks, errors) {
+export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
+  const blocks = topLevelBlocks.filter((block) => block.kind === "resource");
   const storageApiLabel = "terraform: Peg policy Storage API";
   const storageApi = requireBlock(
     blocks,
@@ -389,11 +516,11 @@ export function validatePegPolicyFoundation(files, blocks, errors) {
     if (
       !sameSortedValues(extractExpressionList(bucket, "depends_on"), [
         "google_project_service.storage",
-        "google_storage_bucket_iam_member.peg_policy_access_logs_writer",
+        "google_storage_bucket_iam_policy.peg_policy_access_logs",
       ])
     ) {
       errors.push(
-        `${bucketLabel}: depends_on must contain exactly the Storage API and access-log writer`,
+        `${bucketLabel}: depends_on must contain exactly the Storage API and authoritative access-log policy`,
       );
     }
 
@@ -482,23 +609,47 @@ export function validatePegPolicyFoundation(files, blocks, errors) {
     errors,
   );
 
-  const runtimeBucketGrant = validatePegPolicyBucketGrant(
-    blocks,
+  validatePegPolicyCustomRole(blocks, errors);
+  validatePegPolicyAuthoritativePolicy(
+    topLevelBlocks,
     {
-      name: "metrics_bridge_runtime_peg_policy_object_viewer",
-      role: "roles/storage.objectViewer",
-      member:
-        "serviceAccount:${google_service_account.metrics_bridge_runtime.email}",
+      name: "peg_policy_access_logs",
+      bucket: "google_storage_bucket.peg_policy_access_logs.name",
+      expectedBindings: [
+        {
+          role: "google_project_iam_custom_role.peg_policy_bucket_controller.name",
+          member: "serviceAccount:${var.terraform_service_account}",
+        },
+        {
+          role: '"roles/storage.objectCreator"',
+          member: "group:cloud-storage-analytics@google.com",
+        },
+      ],
     },
     errors,
   );
-  const publisherBucketGrant = validatePegPolicyBucketGrant(
-    blocks,
+  validatePegPolicyAuthoritativePolicy(
+    topLevelBlocks,
     {
-      name: "peg_policy_publisher_object_admin",
-      role: "roles/storage.objectAdmin",
-      member:
-        "serviceAccount:${google_service_account.peg_policy_publisher.email}",
+      name: "peg_policy",
+      bucket: "google_storage_bucket.peg_policy.name",
+      expectedBindings: [
+        {
+          role: "google_project_iam_custom_role.peg_policy_bucket_controller.name",
+          member: "serviceAccount:${var.terraform_service_account}",
+        },
+        {
+          role: '"roles/storage.objectViewer"',
+          member:
+            "serviceAccount:${google_service_account.metrics_bridge_runtime.email}",
+        },
+        {
+          role: '"roles/storage.objectAdmin"',
+          member:
+            "serviceAccount:${google_service_account.peg_policy_publisher.email}",
+        },
+      ],
+      dependsOn: ["google_storage_bucket_iam_policy.peg_policy_access_logs"],
     },
     errors,
   );
@@ -536,21 +687,19 @@ export function validatePegPolicyFoundation(files, blocks, errors) {
     );
   }
 
+  rejectPegBucketMemberOrBindingResources(topLevelBlocks, errors);
+  rejectCustomRoleReferencesOutsidePolicies(topLevelBlocks, errors);
   rejectUnexpectedPegPolicyGrants(
     blocks,
     referencesPegPolicyRuntime,
-    new Set([runtimeBucketGrant].filter(Boolean).map(blockKey)),
+    new Set(),
     errors,
     "terraform: Peg policy runtime identity",
   );
   rejectUnexpectedPegPolicyGrants(
     blocks,
     referencesPegPolicyPublisher,
-    new Set(
-      [publisherBucketGrant, publisherTokenCreator]
-        .filter(Boolean)
-        .map(blockKey),
-    ),
+    new Set([publisherTokenCreator].filter(Boolean).map(blockKey)),
     errors,
     "terraform: Peg policy publisher identity",
   );

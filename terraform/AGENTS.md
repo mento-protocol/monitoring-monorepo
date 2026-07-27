@@ -88,11 +88,14 @@ active/passive collector handshake depends on this exact read access.
   review. The merged `main` route completed full-refresh, unlocked plans for
   every CI-managed Google-provider stack. Add only an exact missing permission
   named by a provider denial.
-- The Peg-policy foundation remains source-only until a separate reviewed,
-  human-approved platform plan and apply. It creates no policy object and does
-  not attach the runtime identity to Cloud Run. Peg-policy access logs are audit
-  telemetry, never an authorization control; audit effective readers on both
-  buckets before activation.
+- The Peg-policy foundation remains source-only and creates no policy object or
+  Cloud Run runtime attachment. Its two authoritative bucket policies make
+  direct grants exact, but inherited project or organization grants can still
+  allow access while the buckets remain in the monitoring project. Same-project
+  placement is temporary and unresolved: do not merge, apply, or activate until
+  a separate effective-isolation control is selected and proven. Peg-policy
+  access logs are audit telemetry, never an authorization control; audit
+  effective readers and writers on both buckets before activation.
 
 ## Verification
 

@@ -40,16 +40,24 @@ human-approved platform plan and apply before it exists in production.
   `PEG_POLICY_URL` nor `PEG_POLICY_AUTH_MODE` in this change. The isolated Peg
   loop stays dormant while both values are absent; a missing, invalid, or
   mismatched pair fails only that loop.
-- The dormant Terraform source foundation defines a dedicated private GCS
-  bucket with versioning, public-access prevention, uniform bucket-level
-  access, destructive-change protection, and deletion only after a generation
-  has been noncurrent for 30 days. It also defines no-key runtime and publisher
-  service accounts. The runtime receives only `roles/storage.objectViewer` and
-  the publisher only `roles/storage.objectAdmin`, both bucket-scoped. A
-  dedicated private access-log bucket receives policy-bucket access logs through
-  the Google Storage analytics writer only. It retains LIVE objects for 90 days
-  and noncurrent ARCHIVED objects for 30 days. Logs are audit telemetry, never
-  an authorization control.
+- The dormant Terraform source foundation defines a GCS policy bucket with
+  versioning, public-access prevention, uniform bucket-level access,
+  destructive-change protection, and deletion only after a generation has been
+  noncurrent for 30 days. It also defines no-key runtime and publisher service
+  accounts. The exact direct bucket policy grants the runtime only
+  `roles/storage.objectViewer` and the publisher only
+  `roles/storage.objectAdmin`; a controller custom role can read and replace
+  each bucket policy. The access-log bucket has an exact direct policy for that
+  controller and the Google Storage analytics writer. It retains LIVE objects
+  for 90 days and noncurrent ARCHIVED objects for 30 days. Logs are audit
+  telemetry, never an authorization control.
+- Exact direct bucket policies do not establish effective isolation while this
+  source foundation remains in the monitoring project: inherited project or
+  organization grants, including service-agent authority, may still allow
+  access. Same-project placement is temporary and unresolved. Do not merge,
+  apply, or activate this foundation until a separate effective-isolation
+  control is selected and proven, such as a dedicated Peg project with audited
+  inherited access.
 - The alerts-rules stack owns `peg-policy/current.json`. Its bytes come
   directly from `alerts/rules/peg-thresholds.json`, so the protected apply that
   owns paging policy also creates each new GCS object generation.
@@ -101,11 +109,13 @@ human-approved platform plan and apply before it exists in production.
 ## Consequences
 
 - This runtime capability can merge and deploy without activating Peg polling.
-- The foundation remains unapplied and runtime-dormant until its own reviewed,
-  human-approved platform apply completes.
-- Before activation, audit effective readers of the policy and access-log
-  buckets. Access logs help investigate access; they never authorize or block
-  policy publication or reads.
+- The foundation remains source-only and runtime-dormant. Its direct policies
+  are exact, but no merge, apply, or activation may proceed until the separate
+  effective-isolation control is selected and proven.
+- Before activation, prove the selected effective-isolation control and audit
+  effective readers and writers of the policy and access-log buckets. Access
+  logs help investigate access; they never authorize or block policy
+  publication or reads.
 - A policy change needs a reviewed artifact generation and an explicit pinned
   runtime-configuration change. The bridge keeps producing the retained
   version until that change lands.
