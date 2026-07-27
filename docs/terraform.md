@@ -156,6 +156,8 @@ only on Metrics Bridge's default Compute Engine service account, preserving the
 automated and direct `pnpm bridge:deploy` Cloud Run paths after the broad
 project-level fallback is removed.
 
+Metrics Bridge's default Compute executor has no App Engine source-bucket grant.
+
 The routing follow-up must move every checked-in `gcloud builds submit` to
 `--gcs-source-staging-dir` and every checked-in `gcloud app deploy` to
 `--bucket`. That follow-up also extends `pnpm tf:test` to discover these

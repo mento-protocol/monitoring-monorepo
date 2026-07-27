@@ -17,9 +17,12 @@ locals {
     "serviceAccount:${google_service_account.grafana_agent_builder.email}",
     "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
   ])
+
+  # Metrics Bridge's default Compute executor has no App Engine deploy path.
+  # Keep its archive read authority out of the App Engine source bucket.
   app_engine_source_uploaders = setunion(
     local.deploy_source_callers,
-    local.cloud_build_source_executor_members,
+    toset(["serviceAccount:${google_service_account.grafana_agent_builder.email}"]),
   )
 }
 

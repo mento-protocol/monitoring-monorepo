@@ -67,6 +67,10 @@ uploaders — those callers plus that builder — receive bucket metadata read p
 object admin on the App Engine bucket. AppSpot receives object view. No staging
 grant is project-wide.
 
+Metrics Bridge's default Compute executor is not an App Engine uploader. It has
+read-only access to the Cloud Build source bucket and no grant on the App Engine
+source bucket.
+
 The routine deployer and `gcp_dev_members` receive Service Account User on the
 exact default Compute Engine service account used by the unpinned Metrics
 Bridge Cloud Run service. This preserves both the automated Metrics Bridge

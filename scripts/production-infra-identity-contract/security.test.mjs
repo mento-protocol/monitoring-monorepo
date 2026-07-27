@@ -712,6 +712,37 @@ expectFailure(
   "IAM local source blocks must match its exact audited shape",
 );
 
+const appEngineUploaderSet = `  app_engine_source_uploaders = setunion(
+    local.deploy_source_callers,
+    toset(["serviceAccount:\${google_service_account.grafana_agent_builder.email}"]),
+  )`;
+assert(
+  cloudBuildExecutorFiles["terraform/deploy-staging.tf"].includes(
+    appEngineUploaderSet,
+  ),
+);
+const broadenedAppEngineUploaderFiles = {
+  ...cloudBuildExecutorFiles,
+  "terraform/deploy-staging.tf": cloudBuildExecutorFiles[
+    "terraform/deploy-staging.tf"
+  ].replace(
+    appEngineUploaderSet,
+    appEngineUploaderSet.replace(
+      '    toset(["serviceAccount:${google_service_account.grafana_agent_builder.email}"]),',
+      [
+        "    toset([",
+        '      "serviceAccount:${google_service_account.grafana_agent_builder.email}",',
+        '      "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",',
+        "    ]),",
+      ].join("\n"),
+    ),
+  ),
+};
+expectFailure(
+  broadenedAppEngineUploaderFiles,
+  "IAM local source blocks must match its exact audited shape",
+);
+
 const broadenedCloudBuildExecutorRoleFiles = {
   ...cloudBuildExecutorFiles,
   "terraform/deploy-staging.tf": cloudBuildExecutorFiles[
