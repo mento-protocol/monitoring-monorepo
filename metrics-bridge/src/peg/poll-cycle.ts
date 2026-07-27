@@ -32,9 +32,12 @@ export type PegPollCycleInput =
   | MultiPolicyPegPollCycleInput;
 
 export interface PegPollSourceState {
-  // Provider attempt time, or the last counted deep-source cadence slot when
-  // no structural reference size was available for a provider request.
+  // Order-book attempt time, or the last counted deep-source cadence slot when
+  // no structural reference size was available for an order-book request.
   lastAttemptAt: number | null;
+  // Listing checks keep their own cadence so forced order-book refreshes do
+  // not defer absence confirmation.
+  listingLastAttemptAt: number | null;
   lastObservationAt: number | null;
   identitiesAtLastObservationAt: Set<string>;
   observation: PegObservation | null;

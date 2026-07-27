@@ -360,13 +360,14 @@ describe("peg poll cycle freshness and measurements", () => {
     });
   });
 
-  it("counts cadence-due absent checks, preserves the streak on forced refreshes, and resets on listing evidence", async () => {
+  it("keeps the listing cadence through repeated forced refreshes and resets on listing evidence", async () => {
     const spec = primaryAsset();
     const input = makeInput([spec]);
     const baseMs = 1_800_000_000_000;
     let nowMs = baseMs;
     let limit0 = fixed15(50);
     const listingStates: Array<"absent" | "listed" | "halted"> = [
+      "absent",
       "absent",
       "absent",
       "absent",
@@ -404,7 +405,13 @@ describe("peg poll cycle freshness and measurements", () => {
       listingAbsentConsecutiveChecks: 1,
     });
 
-    nowMs += 30_000;
+    nowMs += 10_000;
+    limit0 = fixed15(30);
+    const forcedAgain = (await poller.pollCycle(input))[0]!;
+    expect(source(forcedAgain).listingAbsentConsecutiveChecks).toBe(1);
+
+    nowMs += 10_000;
+    limit0 = fixed15(20);
     const confirmed = (await poller.pollCycle(input))[0]!;
     expect(source(confirmed).listingAbsentConsecutiveChecks).toBe(2);
 
@@ -425,6 +432,43 @@ describe("peg poll cycle freshness and measurements", () => {
       listingState: "halted",
       listingAbsentConsecutiveChecks: 0,
     });
+  });
+
+  it("checks listings without structural reference size and publishes no price authority", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const baseMs = 1_800_000_000_000;
+    let nowMs = baseMs;
+    const fetchBitvavo = vi.fn(async () => observation(nowMs));
+    const fetchBitvavoListing = vi.fn(async () => ({
+      state: "absent" as const,
+      checkedAt: nowMs,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () => {
+        throw new Error("Hasura unavailable");
+      }),
+      fetchBitvavo,
+      fetchBitvavoListing,
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    expect(source(first)).toMatchObject({
+      referenceSize: null,
+      observation: null,
+      listingState: "absent",
+      listingAbsentConsecutiveChecks: 1,
+    });
+    nowMs += 30_000;
+    const confirmed = (await poller.pollCycle(input))[0]!;
+    expect(source(confirmed)).toMatchObject({
+      listingState: "absent",
+      listingAbsentConsecutiveChecks: 2,
+    });
+    expect(fetchBitvavo).not.toHaveBeenCalled();
+    expect(fetchBitvavoListing).toHaveBeenCalledTimes(2);
   });
 
   it("does not count a frozen at-par book and fails it stale", async () => {
