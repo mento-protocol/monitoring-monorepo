@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -193,54 +193,22 @@ replacement provisioner map to
 `bash alerts/infra/scripts/fix-webhook-state.test.sh`; the handler test suite
 also executes that shell fixture in CI.
 
-Do not launch dashboard browser tests, a dashboard dev server, or another
-quality-gate run concurrently with `pnpm agent:quality-gate --run` in the same
-worktree. Browser tests serve a fixture production build (`.next-fixture`) via
-`next start` rather than `next dev`, but their `next build` and size-limit's
-`next build` both rewrite the tracked `next-env.d.ts`, and a stray dev server
-still writes `ui-dashboard/.next`; competing writers can produce false
-`Another next dev server is already running` or `ChunkLoadError` failures. The gate also schedules coverage alongside other
-independent checks, so an extra ad hoc coverage run only adds load and can turn
-normally passing accessibility tests into timeout noise. Run focused tests
-before the gate instead.
+The [PR operating card](pr-operating-card.md#the-loop) owns ordinary gate and
+closeout sequencing. Do not run a dashboard server, browser suite, or second
+gate in the same worktree. Browser tests and size-limit both run `next build`
+and can rewrite `next-env.d.ts`; run focused checks first, then let one gate
+own the mapped batch. For a non-trivial batch, freeze the card's scope baseline
+and run autoreview after the gate; after accepted fixes, rerun focused checks
+and autoreview.
 
-For non-trivial behavioral, workflow, security, data-flow, or UI batches, run
-the structured closeout review after the mapped gate and before pushing:
-
-```bash
-pnpm agent:autoreview
-```
-
-Use it as a batch-boundary verifier. Verify every accepted finding in the real
-code before editing, rerun focused checks after review-triggered fixes, and
-rerun autoreview for the fixed batch. Freeze the initial request, target/owner,
-changed-file set, and non-test changed-line count as the scope baseline before
-the first pass. Classify proposed additions as in-scope, follow-up, or stop;
-create an issue before deferring a valid follow-up, warn when non-test scope
-approaches twice the baseline, and pause for reclassification after two
-review-triggered patch cycles instead of starting a third automatically.
-
-**Stage timing and gh-lookup deadlines.** Both the wrapper and the helper
-append one best-effort JSON line per stage (`target-selection`, `bundle-prep`,
-`engine-invocation` from the helper; `prepare-bundle`, `verification` from the
-wrapper) to `.tmp/agent-autoreview/durations.jsonl` (gitignored), each shaped
-`{"ts","stage","seconds","mode"}`. `AGENT_AUTOREVIEW_DURATIONS_DIR` overrides
-that directory; `AGENT_AUTOREVIEW_STAGE_SUMMARY` (any non-empty value) also
-echoes a filterable `agent:autoreview: stage-timing ...` line per stage to
-stderr — off by default so it never violates the reviewer-cleanliness stderr
-contract. Logging failure never aborts or fails a run. Automatic `gh`-based PR
-lookups for base-branch detection and `--feedback-pr auto` resolution are
-bounded by `AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS` (default 60s); the separate
-multi-call PR feedback capture is bounded by its own
-`AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS` (default 120s, higher because it
-runs several GitHub calls in one pass). Either way, an exceeded deadline fails
-closed like any other lookup error. The wrapper's
-own `gh`/subprocess deadlines (`run_with_deadline`) run the command in its own
-process group and escalate `SIGTERM` then `SIGKILL` on timeout or on the
-wrapper itself being interrupted; the helper's `gh` calls (`spawnSync`) use
-`SIGKILL` directly, since a synchronous child-process call blocks until the
-child actually exits and a `SIGTERM`-ignoring child would otherwise hang it
-despite the timeout.
+**Stage timing and gh-lookup deadlines.** The wrapper and helper append
+best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override
+the directory with `AGENT_AUTOREVIEW_DURATIONS_DIR` or enable stderr summaries
+with `AGENT_AUTOREVIEW_STAGE_SUMMARY`. Base lookup and `--feedback-pr auto`
+use `AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS` (60 seconds by default); feedback
+capture uses `AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS` (120 seconds by
+default). Timeouts fail closed: the wrapper terminates then kills its process
+group, and the helper kills its synchronous child directly.
 
 This adapter uses the repo-local helper at `scripts/agent-autoreview.mjs` and
 keeps the repo's branch-local target: merge-base-to-`HEAD` commits plus current

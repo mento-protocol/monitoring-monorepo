@@ -170,18 +170,20 @@ The platform stack owns two explicit source buckets for routine deploys:
   `gs://mento-monitoring-cloud-build-source/<service>`;
 - App Engine uploads use `gs://mento-monitoring-app-engine-source`.
 
-The Metrics Bridge workflow and `pnpm bridge:deploy` pass
-`--gcs-source-staging-dir`. `pnpm aegis:deploy` and the nested Alloy build pass
-`--bucket`; `pnpm aegis:agent:deploy` also stages its outer build in the Cloud
-Build bucket. Do not remove these flags or add an unregistered direct
-`gcloud builds submit` / `gcloud app deploy` path. `pnpm tf:test` discovers and
-enforces every executable callsite.
+The follow-up routing change makes the Metrics Bridge workflow and
+`pnpm bridge:deploy` pass `--gcs-source-staging-dir`. It makes
+`pnpm aegis:deploy` and the nested Alloy build pass `--bucket`, while
+`pnpm aegis:agent:deploy` stages its outer build in the Cloud Build bucket.
+That follow-up also makes `pnpm tf:test` discover every executable callsite and
+reject a direct `gcloud builds submit` / `gcloud app deploy` path that omits
+the explicit bucket.
 
 This migration has a strict rollout order. First merge the infrastructure-only
 PR. Refresh current `main`, run a clean current-main platform plan, get explicit
 apply approval, apply, and verify both buckets, their bucket-scoped IAM, and the
-routine deployer's exact default-compute act-as grant. Only then merge the
-routing follow-up; that merge triggers the Metrics Bridge and Aegis workflows.
+exact default-Compute act-as grants for the routine deployer and
+`gcp_dev_members`. Only then merge the routing follow-up; that merge triggers
+the Metrics Bridge and Aegis workflows.
 Canary those two paths and `pnpm aegis:agent:deploy` before a separate platform
 change removes the temporary project-wide Storage Admin and Service Account
 User grants. Never combine that removal with creation of the private

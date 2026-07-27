@@ -1583,13 +1583,13 @@ while IFS= read -r path; do
       add_surface "docs"
       add_command "pnpm docs:navigation-eval:test" "documentation navigation baseline changed"
       add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation baseline changed"
-      add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation baseline changed"
+      add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json" "documentation navigation baseline changed"
       ;;
     docs/evals/documentation-navigation-*.json)
       add_surface "docs"
       add_command "pnpm docs:navigation-eval:test" "documentation navigation evaluation contract changed"
       add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation contract changed"
-      add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation evaluation contract changed"
+      add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json" "documentation navigation evaluation contract changed"
       ;;
     docs/claude-runtime-document-registry.json)
       add_surface "docs"
@@ -2221,7 +2221,7 @@ while IFS= read -r path; do
         scripts/docs-navigation-eval.mjs|scripts/docs-navigation-eval-helpers.mjs|scripts/docs-navigation-eval-result.mjs|scripts/docs-navigation-eval.test.mjs)
           add_command "pnpm docs:navigation-eval:test" "documentation navigation evaluation changed"
           add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation changed"
-          add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json" "documentation navigation evaluation changed"
+          add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json" "documentation navigation evaluation changed"
           add_command "pnpm docs:index --check" "documentation navigation evaluation consumes the catalog"
           ;;
         scripts/agent-context-budget.mjs|scripts/agent-context-budget.test.mjs)

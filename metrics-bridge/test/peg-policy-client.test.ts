@@ -21,9 +21,12 @@ const PINNED_POLICY_URL = new URL(
 );
 
 async function policy(): Promise<PegPolicyBundle> {
-  return parsePegPolicyBundle(
+  const parsed = parsePegPolicyBundle(
     JSON.parse(await readFile(POLICY_PATH, "utf8")) as unknown,
   );
+  // Transition tests build their own predecessors; start each from a stable
+  // post-ACK shape rather than the checked-in field-migration rollover.
+  return { ...parsed, previous: null };
 }
 
 function response(bundle: PegPolicyBundle, status = 200): Response {

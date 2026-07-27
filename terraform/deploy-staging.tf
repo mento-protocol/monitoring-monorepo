@@ -8,13 +8,12 @@ locals {
     toset(var.gcp_dev_members),
     toset(["serviceAccount:${google_service_account.metrics_bridge_deployer.email}"]),
   )
-  cloud_build_default_service_account_members = toset([
-    for service_account in values(local.grafana_agent_cloudbuild_service_accounts) :
-    "serviceAccount:${service_account}"
+  cloud_build_source_executor_members = toset([
+    "serviceAccount:${google_service_account.grafana_agent_builder.email}",
   ])
   app_engine_source_uploaders = setunion(
     local.deploy_source_callers,
-    local.cloud_build_default_service_account_members,
+    local.cloud_build_source_executor_members,
   )
 }
 
@@ -104,15 +103,20 @@ resource "google_storage_bucket_iam_member" "cloud_build_source_caller_object_cr
   member = each.value
 }
 
-# Cloud Build's default execution identity depends on project history and
-# configuration. Grant both documented candidates read-only source access
-# until the deploy canaries identify which one is active.
+# The Alloy rollout pins Cloud Build to the dedicated builder identity. Give it
+# read-only access to the explicit source bucket before the routing follow-up
+# directs its build submissions there.
 resource "google_storage_bucket_iam_member" "cloud_build_source_executor_object_viewer" {
-  for_each = local.cloud_build_default_service_account_members
+  for_each = local.cloud_build_source_executor_members
 
   bucket = google_storage_bucket.cloud_build_source_staging.name
   role   = "roles/storage.objectViewer"
   member = each.value
+
+  depends_on = [
+    google_project_service.cloudbuild,
+    google_project_service.compute,
+  ]
 }
 
 # App Engine lists its staging bucket and may replace or clean up hash-named
@@ -123,6 +127,11 @@ resource "google_storage_bucket_iam_member" "app_engine_source_uploader_bucket_r
   bucket = google_storage_bucket.app_engine_source_staging.name
   role   = "roles/storage.legacyBucketReader"
   member = each.value
+
+  depends_on = [
+    google_project_service.cloudbuild,
+    google_project_service.compute,
+  ]
 }
 
 resource "google_storage_bucket_iam_member" "app_engine_source_uploader_object_admin" {
@@ -131,12 +140,19 @@ resource "google_storage_bucket_iam_member" "app_engine_source_uploader_object_a
   bucket = google_storage_bucket.app_engine_source_staging.name
   role   = "roles/storage.objectAdmin"
   member = each.value
+
+  depends_on = [
+    google_project_service.cloudbuild,
+    google_project_service.compute,
+  ]
 }
 
 resource "google_storage_bucket_iam_member" "app_engine_source_appspot_object_viewer" {
   bucket = google_storage_bucket.app_engine_source_staging.name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${local.aegis_app_engine_default_service_account}"
+
+  depends_on = [google_app_engine_application.aegis]
 }
 
 # Preserve the routine Metrics Bridge rollout after phase 2 removes the
@@ -150,5 +166,22 @@ resource "google_service_account_iam_member" "ci_default_compute_service_account
   depends_on = [
     google_project_service.compute,
     google_service_account.metrics_bridge_deployer,
+  ]
+}
+
+# `pnpm bridge:deploy` is a supported direct Cloud Run deployment path. Devs
+# already have Run Admin; bind Service Account User only on the service's
+# default compute identity so that path keeps working after the broad fallback
+# is removed.
+resource "google_service_account_iam_member" "dev_default_compute_service_account_user" {
+  for_each = toset(var.gcp_dev_members)
+
+  service_account_id = "projects/${google_project.monitoring.project_id}/serviceAccounts/${google_project.monitoring.number}-compute@developer.gserviceaccount.com"
+  role               = "roles/iam.serviceAccountUser"
+  member             = each.value
+
+  depends_on = [
+    google_project_service.compute,
+    google_project_iam_member.dev_run_admin,
   ]
 }

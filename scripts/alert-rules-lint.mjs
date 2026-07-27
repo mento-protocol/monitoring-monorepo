@@ -38,7 +38,12 @@ const pegPolicyPath =
 const pegRegistryPath =
   process.env.ALERT_RULES_LINT_PEG_REGISTRY ??
   path.join(repoRoot, "metrics-bridge/peg-registry.json");
-const GAUGE_SOURCE_FILES = ["metrics.ts", "cdp-metrics.ts", "peg/metrics.ts"];
+const GAUGE_SOURCE_FILES = [
+  "metrics.ts",
+  "cdp-metrics.ts",
+  "peg/metrics.ts",
+  "peg/listing-metrics.ts",
+];
 const LITERAL_PERCENT = "__ALERT_RULES_LINT_LITERAL_PERCENT__";
 
 const POLICY_BUNDLE_KEYS = ["schemaVersion", "active", "previous"];
@@ -64,6 +69,7 @@ const POLICY_SOURCE_KEYS = [
   "referenceSizeCap",
   "pollIntervalSeconds",
   "staleAfterSeconds",
+  "listingAbsentConsecutiveChecks",
   "spreadEnvelopeBps",
   "conversionErrorBps",
 ];
@@ -71,6 +77,8 @@ const POLICY_VERSION_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const POLICY_VERSION_DIGEST_PATTERN = /-([0-9a-f]{32})$/;
 const MAX_POLICY_ASSETS = 32;
 const MAX_POLICY_SOURCES = 16;
+const LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION =
+  "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f";
 const APPROVED_POLICY_VERSION_INTERPOLATION = {
   active: "${local.peg_active_policy_version}",
   previous: "${local.peg_previous_policy_version}",
@@ -103,9 +111,17 @@ const SOURCE_NUMBER_RULES = [
   ["referenceSizeCap", { greaterThan: 0 }],
   ["pollIntervalSeconds", { integer: true, minimum: 15, maximum: 3_600 }],
   ["staleAfterSeconds", { integer: true, minimum: 1, maximum: 86_400 }],
+  [
+    "listingAbsentConsecutiveChecks",
+    { integer: true, minimum: 2, maximum: 1_000 },
+  ],
   ["spreadEnvelopeBps", { minimum: 0, maximum: 10_000 }],
   ["conversionErrorBps", { minimum: 0, maximum: 10_000 }],
 ];
+
+function effectiveListingAbsentConsecutiveChecks(source) {
+  return source.listingAbsentConsecutiveChecks ?? 2;
+}
 
 const intEnv = (name, fallback) => {
   const raw = process.env[name];
@@ -459,11 +475,36 @@ function collectRegistrySources(registryAsset, location, failures) {
   return sources;
 }
 
-function validatePolicySource(source, registrySource, location, failures) {
-  if (!validateExactObject(source, POLICY_SOURCE_KEYS, location, failures)) {
+function validatePolicySource(
+  source,
+  registrySource,
+  location,
+  failures,
+  allowLegacyThreshold,
+) {
+  const hasListingThreshold = Object.hasOwn(
+    source,
+    "listingAbsentConsecutiveChecks",
+  );
+  const expectedKeys =
+    allowLegacyThreshold && !hasListingThreshold
+      ? POLICY_SOURCE_KEYS.filter(
+          (key) => key !== "listingAbsentConsecutiveChecks",
+        )
+      : POLICY_SOURCE_KEYS;
+  if (!validateExactObject(source, expectedKeys, location, failures)) {
     return;
   }
-  validateNumberFields(source, location, SOURCE_NUMBER_RULES, failures);
+  validateNumberFields(
+    source,
+    location,
+    allowLegacyThreshold && !hasListingThreshold
+      ? SOURCE_NUMBER_RULES.filter(
+          ([field]) => field !== "listingAbsentConsecutiveChecks",
+        )
+      : SOURCE_NUMBER_RULES,
+    failures,
+  );
 
   const expectedAuthority =
     SOURCE_AUTHORITY_BY_REGISTRY_ROLE[registrySource?.role];
@@ -485,10 +526,12 @@ function validatePolicySource(source, registrySource, location, failures) {
   if (
     Number.isFinite(source.pollIntervalSeconds) &&
     Number.isFinite(source.staleAfterSeconds) &&
-    source.staleAfterSeconds < source.pollIntervalSeconds * 2
+    source.staleAfterSeconds <
+      source.pollIntervalSeconds *
+        effectiveListingAbsentConsecutiveChecks(source)
   ) {
     failures.push(
-      `${location}.staleAfterSeconds: must cover at least 2 poll intervals`,
+      `${location}.staleAfterSeconds: must cover pollIntervalSeconds * listingAbsentConsecutiveChecks`,
     );
   }
 }
@@ -499,6 +542,7 @@ function validatePolicySources(
   location,
   failures,
   registryAligned,
+  allowLegacyListingThreshold,
 ) {
   const registrySources = registryAligned
     ? collectRegistrySources(registryAsset, `registry.${location}`, failures)
@@ -541,6 +585,7 @@ function validatePolicySources(
       registrySources.get(sourceId),
       `${location}.sources.${sourceId}`,
       failures,
+      allowLegacyListingThreshold,
     );
     if (source.authority === "deep") deepSourceCount += 1;
   }
@@ -594,6 +639,7 @@ function validatePolicyAsset(
   location,
   failures,
   registryAligned,
+  allowLegacyListingThreshold,
 ) {
   if (!validateExactObject(asset, POLICY_ASSET_KEYS, location, failures)) {
     return;
@@ -606,6 +652,7 @@ function validatePolicyAsset(
     location,
     failures,
     registryAligned,
+    allowLegacyListingThreshold,
   );
 }
 
@@ -672,6 +719,8 @@ function validatePolicyVersion(
       `${location}.assets.${assetId}`,
       failures,
       registryAligned,
+      !registryAligned &&
+        policy.version === LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION,
     );
   }
 }

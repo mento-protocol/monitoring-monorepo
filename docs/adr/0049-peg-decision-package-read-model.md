@@ -60,9 +60,16 @@ authoritative for duration, coverage, pending/firing state, and notifications.
 The dashboard uses `producedAt`, clock skew, and fetch errors to classify
 current versus stale-last-confirmed data.
 
-This decision does not implement registry listing re-census or registry-rot
-rules. Until a typed listing cache is added, each source emits
-`listingState:null` and `listingCheckedAt:null`.
+Each source carries the last successful authoritative exact-pair listing
+evidence: `listingState` is `listed`, `halted`, or `absent`, and
+`listingCheckedAt` is its local completion timestamp. The fields are paired:
+both remain null before the first successful check, then advance together.
+Failed listing lookups preserve the last committed pair. `absent` is registry
+rot evidence; `halted` is a known listed market state; a listed empty book is
+not registry rot. The source also carries the effective policy confirmation
+threshold and the producer's bounded consecutive-absence streak. The streak
+increments only on authoritative `absent`, resets on authoritative `listed` or
+`halted`, and is never reconstructed from dashboard or Grafana scrape history.
 
 ## Alternatives considered
 
@@ -79,12 +86,19 @@ rules. Until a typed listing cache is added, each source emits
   primary Hasura bridge.
 - The dashboard gets one validated current-state input but must not recreate
   Grafana alert evaluation.
-- Listing re-census, alert rules, UI routes, infrastructure, and deployment
-  stay separate follow-up work.
+- Source now defines the decision read model and exact-version Grafana listing
+  consumers. The UI route, infrastructure activation, and production proof
+  remain separate rollout work.
 
 ## Evidence
 
 - `metrics-bridge/src/peg/poll-cycle.ts`
+- `metrics-bridge/src/peg/poller.ts`
+- `metrics-bridge/src/peg/metrics.ts`
 - `metrics-bridge/src/peg/decision-packages.ts`
 - `metrics-bridge/src/peg/breaker-evidence.ts`
+- `alerts/rules/peg-promql-active.tf`,
+  `alerts/rules/peg-promql-previous.tf`, and
+  `alerts/rules/peg-rule-definitions.tf`
+- `docs/notes/peg-monitoring-onboarding.md`
 - ADRs 0042–0045

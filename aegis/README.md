@@ -95,10 +95,14 @@ From inside `aegis/`, `pnpm deploy` is equivalent. The deploy script rebuilds
 Aegis importer, and uploads that staged service to `mento-monitoring`.
 
 Deploy the Alloy collector only in an already provisioned environment and
-follow [grafana-agent/README.md](./grafana-agent/README.md). Its legacy manual
-secret-seeding path is not agent-authorized under ADR 0030; bootstrap and
-rotation are tracked in issue
-[#1473](https://github.com/mento-protocol/monitoring-monorepo/issues/1473).
+follow [grafana-agent/README.md](./grafana-agent/README.md). Platform Terraform
+owns its write-only secret versions and dedicated runtime identity. The deploy
+wrapper submits an immutable commit snapshot through a dedicated builder, then
+uses a committed verifier snapshot, assigns 100% traffic atomically, and stops
+prior manual collectors before the new Alloy process starts. This
+stop-before-start handoff prevents duplicate collectors but leaves a temporary
+collection gap until activation or rollback. Its legacy manual secret-seeding
+path remains only for Phase A rollback and is not agent-authorized under ADR 0030.
 
 ### Deploying Grafana Resources
 

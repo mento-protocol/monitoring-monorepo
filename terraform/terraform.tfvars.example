@@ -205,11 +205,37 @@ gcp_billing_account = "..."
 # changing the service's first-creation image.
 # metrics_bridge_image = "europe-west1-docker.pkg.dev/mento-monitoring/metrics-bridge/metrics-bridge:abc123"
 
-# Dev team IAM — defaults to group:eng@mentolabs.xyz in variables.tf.
+# Operator IAM — defaults to group:eng@mentolabs.xyz in variables.tf. Alloy
+# preflight fingerprints this set and checks both applied submitter policies.
 # gcp_dev_members = ["group:eng@mentolabs.xyz"]
 
 # Caller must have roles/iam.serviceAccountTokenCreator on this SA.
 # terraform_service_account = "org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+
+# Grafana Alloy remote-write values. These required inputs are sensitive and
+# ephemeral: Terraform passes them only to the Google provider's write-only
+# `secret_data_wo` argument, so they are omitted from plan and state. Copy this
+# stanza into gitignored `terraform.tfvars` or an `*.auto.tfvars` file; both are
+# auto-loaded by Terraform. Never replace the tracked example values, pass the
+# values on a command line, or place them in a saved plan. Keep TF_LOG,
+# TF_LOG_CORE, TF_LOG_PROVIDER*, TF_LOG_SDK, and TF_LOG_SDK_PROTO unset or OFF
+# for platform plan/apply. Every other TF_LOG_SDK_*, including
+# TF_LOG_SDK_PROTO_DATA_DIR, must be unset or empty. TF_LOG_PATH alone is
+# allowed because it does not enable logging.
+grafana_agent_secret_values = {
+  endpoint = "https://prometheus-prod-XX-prod-region.grafana.net/api/prom/push"
+  username = "REPLACE_WITH_GRAFANA_CLOUD_USERNAME"
+  password = "<GRAFANA_CLOUD_ACCESS_POLICY_TOKEN>"
+}
+
+# Non-secret rotation controls. Start at 1 for the first approved Terraform
+# adoption. Increment only the field whose value is intentionally rotated; the
+# reviewed counter change is what triggers `secret_data_wo` to write a version.
+grafana_agent_secret_rotation_counters = {
+  endpoint = 1
+  username = 1
+  password = 1
+}
 
 # ── Read-only AI agent investigator ──────────────────────────────────────────
 # IAM members allowed to impersonate `agent-readonly@mento-monitoring.iam`

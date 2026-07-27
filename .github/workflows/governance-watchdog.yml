@@ -170,7 +170,7 @@ jobs:
       # target, which performs the full live-resource read before the apply gate.
       TF_VAR_terraform_service_account: ${{ github.event_name == 'pull_request' && 'org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com' || 'org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com' }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           # PR-head HCL is planned in this job; never leave the checkout token
@@ -571,7 +571,7 @@ jobs:
       TF_VAR_slack_notification_channel_id: ${{ secrets.TF_VAR_GOVERNANCE_WATCHDOG_SLACK_NOTIFICATION_CHANNEL_ID }}
       TF_VAR_github_token: ${{ secrets.TF_VAR_GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 

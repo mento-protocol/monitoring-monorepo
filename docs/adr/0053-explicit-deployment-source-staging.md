@@ -13,9 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0053 — Routine GCP deploys use explicit source-staging buckets
 
-**Status:** Accepted (Jul 2026), split into separate infrastructure and routing
-changes; current-main apply, canaries, and broad-role removal remain separate
-operator gates.
+**Status:** Accepted (Jul 2026), phase A infrastructure source prepared;
+current-main apply, phase B routing, canaries, and broad-role removal remain
+separate gates.
 **Scope:** terraform/infra
 
 ## Context
@@ -32,9 +32,10 @@ and can re-upload, replace, or clean up a hash-named object near lifecycle
 expiry. App Engine also requires a `US`-compatible bucket for the immutable
 `us-central` application, while Metrics Bridge builds run in `var.gcp_region`.
 
-Cloud Build projects can use either the legacy Cloud Build service account or
-the default Compute Engine service account as the build identity. This project
-does not yet pin one candidate across every build path.
+The Alloy Cloud Build path is pinned to the dedicated
+`grafana_agent_builder` service account. Legacy default build identities retain
+only the temporary Secret Manager rollback bindings required by the Alloy
+cutover; they are not source-staging principals.
 
 ## Decision
 
@@ -49,22 +50,25 @@ Both buckets enforce public-access prevention, disable soft-delete retention,
 set `force_destroy = false`, and use Terraform `prevent_destroy`. Their
 contents are reconstructible deployment input, not durable records.
 
-The routing phase makes every executable deploy path name its bucket:
+The follow-up routing phase makes every executable deploy path name its bucket:
 
 - `gcloud builds submit` uses `--gcs-source-staging-dir`;
 - `gcloud app deploy` uses `--bucket`;
 - the nested Alloy Cloud Build writes logs only to Cloud Logging.
 
 Cloud Build callers — the routine deployer and `gcp_dev_members` — receive
-bucket metadata read plus object create on the Cloud Build bucket. Both
-candidate default Cloud Build identities receive object view. App Engine
-uploaders — those callers plus both build candidates — receive bucket metadata
-read plus object admin on the App Engine bucket. AppSpot receives object view.
-No staging grant is project-wide.
+bucket metadata read plus object create on the Cloud Build bucket. The
+dedicated `grafana_agent_builder` receives object view there. App Engine
+uploaders — those callers plus that builder — receive bucket metadata read plus
+object admin on the App Engine bucket. AppSpot receives object view. No staging
+grant is project-wide.
 
-The routine deployer also receives Service Account User on the exact default
-Compute Engine service account used by the unpinned Metrics Bridge Cloud Run
-service. The existing exact AppSpot binding continues to cover Aegis.
+The routine deployer and `gcp_dev_members` receive Service Account User on the
+exact default Compute Engine service account used by the unpinned Metrics
+Bridge Cloud Run service. This preserves both the automated Metrics Bridge
+rollout and the supported direct `pnpm bridge:deploy` path after the broad
+fallback is removed. The existing exact AppSpot binding continues to cover
+Aegis.
 
 This first phase is additive. Existing project-wide Storage Admin and routine
 Service Account User grants remain until real Metrics Bridge, Aegis, and Alloy
@@ -99,9 +103,9 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   sensitive buckets cannot inherit.
 - App Engine uploaders retain stronger object authority, but only on a
   short-lived source bucket.
-- Both candidate build identities have temporary read/upload coverage until
-  live build metadata identifies the active identity.
-- A checked-in contract discovers every executable
+- The dedicated Alloy builder has the exact read/upload staging grants it needs;
+  legacy default identities remain outside the staging-principal set.
+- The routing phase adds a checked-in contract that discovers every executable
   submit/deploy callsite and rejects a new one unless it names the correct
   staging bucket.
 - Operators must preserve the phase boundary: merge and apply the additive
@@ -113,13 +117,6 @@ order makes both automatic deploys race missing infrastructure and fail closed.
 
 - Bucket and IAM ownership:
   [`terraform/deploy-staging.tf`](../../terraform/deploy-staging.tf)
-- Executable-path enforcement:
-  [`scripts/deploy-staging-contract.mjs`](../../scripts/deploy-staging-contract.mjs)
-- Gcloud command routing:
-  [`.github/workflows/metrics-bridge.yml`](../../.github/workflows/metrics-bridge.yml),
-  [`scripts/deploy-bridge.sh`](../../scripts/deploy-bridge.sh),
-  [`aegis/bin/deploy.sh`](../../aegis/bin/deploy.sh), and
-  [`aegis/grafana-agent/cloudbuild.yaml`](../../aegis/grafana-agent/cloudbuild.yaml)
 - [Cloud Build source staging reference](https://cloud.google.com/sdk/gcloud/reference/builds/submit)
 - [App Engine deployment bucket reference](https://cloud.google.com/sdk/gcloud/reference/app/deploy)
 - [Cloud Storage IAM roles](https://cloud.google.com/storage/docs/access-control/iam-roles)

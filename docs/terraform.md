@@ -80,6 +80,13 @@ alerts-delivery PR plans are intentionally partial.
 See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
 for the exact placeholder and target boundaries.
 
+Alloy's full write-only input, IAM, deploy, and rollback contract lives in
+[`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md). Platform
+plan/apply rejects unsafe logging, requires freshly fetched clean `main`, and
+runs its verified snapshot with gitignored tfvars outside. Review the manual
+plan and get explicit approval before apply; never seed via CLI or use
+`--migrate`.
+
 On `main`, the workflow posts a secretless Slack summary before approval.
 Environment protection blocks the apply job, so the operator approves the
 commit and earlier plan. Apply then creates and uses a later plan, leaving an
@@ -138,15 +145,19 @@ upload boundary for routine GCP deploys. The platform stack creates:
 Both buckets use uniform access, enforced public-access prevention, disabled
 soft-delete retention, `force_destroy = false`, and Terraform
 `prevent_destroy`. Cloud Build callers can read bucket metadata and create
-objects; its two possible default build identities can view objects. App Engine
-uploaders have Object Admin only on the App Engine source bucket because the
-CLI can replace or clean up cached hash-named objects. AppSpot can view those
-objects.
+objects; the dedicated Alloy `grafana_agent_builder` can view those objects and
+is also an App Engine uploader. App Engine uploaders have Object Admin only on
+the App Engine source bucket because the CLI can replace or clean up cached
+hash-named objects. AppSpot can view those objects. The routine deployer and
+`gcp_dev_members` have Service Account User
+only on Metrics Bridge's default Compute Engine service account, preserving the
+automated and direct `pnpm bridge:deploy` Cloud Run paths after the broad
+project-level fallback is removed.
 
-Every checked-in `gcloud builds submit` uses
-`--gcs-source-staging-dir`; every checked-in `gcloud app deploy` uses
-`--bucket`. `pnpm tf:test` discovers these executable surfaces and rejects a
-new unflagged callsite.
+The routing follow-up must move every checked-in `gcloud builds submit` to
+`--gcs-source-staging-dir` and every checked-in `gcloud app deploy` to
+`--bucket`. That follow-up also extends `pnpm tf:test` to discover these
+executable surfaces and reject a new unflagged callsite.
 
 The migration is deliberately additive. Merge the infrastructure-only PR,
 refresh current `main`, run a clean current-main platform plan, get explicit
