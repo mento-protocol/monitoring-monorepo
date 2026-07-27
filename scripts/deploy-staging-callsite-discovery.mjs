@@ -94,6 +94,16 @@ function normalize(text, stripBackslashEscapes = true) {
     .trim();
 }
 
+function flattenStaticShellTemplate(contents) {
+  return contents
+    .split(/\r?\n/u)
+    .map((line) => {
+      const code = stripShellComment(line);
+      return code === line ? line : `${code};`;
+    })
+    .join(" ");
+}
+
 function topLevelFragments(text) {
   const fragments = [];
   let start = 0;
@@ -205,19 +215,61 @@ function programmaticScriptKind(filePath) {
   return ts.ScriptKind.JS;
 }
 
+function unwrapStaticExpression(node) {
+  let expression = node;
+  while (
+    expression !== undefined &&
+    (ts.isParenthesizedExpression(expression) ||
+      ts.isAsExpression(expression) ||
+      ts.isTypeAssertionExpression(expression) ||
+      ts.isSatisfiesExpression(expression) ||
+      ts.isNonNullExpression(expression))
+  ) {
+    expression = expression.expression;
+  }
+  return expression;
+}
+
 function staticString(node) {
   if (node === undefined) return undefined;
-  return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)
-    ? node.text
-    : undefined;
+  const expression = unwrapStaticExpression(node);
+  if (expression === undefined) return undefined;
+  if (
+    ts.isStringLiteral(expression) ||
+    ts.isNoSubstitutionTemplateLiteral(expression)
+  ) {
+    return expression.text;
+  }
+  if (
+    ts.isBinaryExpression(expression) &&
+    expression.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
+    const left = staticString(expression.left);
+    const right = staticString(expression.right);
+    return left === undefined || right === undefined
+      ? undefined
+      : `${left}${right}`;
+  }
+  if (ts.isTemplateExpression(expression)) {
+    let value = expression.head.text;
+    for (const span of expression.templateSpans) {
+      const interpolation = staticString(span.expression);
+      if (interpolation === undefined) return undefined;
+      value += interpolation;
+      value += span.literal.text;
+    }
+    return value;
+  }
+  return undefined;
 }
 
 function staticStringArray(node) {
-  if (node === undefined || !ts.isArrayLiteralExpression(node)) {
+  const expression = unwrapStaticExpression(node);
+  if (expression === undefined || !ts.isArrayLiteralExpression(expression)) {
     return undefined;
   }
   const values = [];
-  for (const element of node.elements) {
+  for (const element of expression.elements) {
     const value = staticString(element);
     if (value === undefined) return undefined;
     values.push(value);
@@ -226,10 +278,11 @@ function staticStringArray(node) {
 }
 
 function staticStringArrayProperty(node, propertyName) {
-  if (node === undefined || !ts.isObjectLiteralExpression(node)) {
+  const expression = unwrapStaticExpression(node);
+  if (expression === undefined || !ts.isObjectLiteralExpression(expression)) {
     return undefined;
   }
-  for (const property of node.properties) {
+  for (const property of expression.properties) {
     if (!ts.isPropertyAssignment(property)) continue;
     const name =
       ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)
@@ -322,6 +375,26 @@ function programmaticDeployRecords(filePath, contents, errors) {
             args,
             normalized: normalize(`${commandVector[0]} ${args.join(" ")}`),
           });
+        }
+      }
+    }
+    if (ts.isTaggedTemplateExpression(node)) {
+      // A tag is an executable wrapper. Treat unknown tags like unknown calls:
+      // they may execute the command or generate a script that does.
+      const templateText = staticString(node.template);
+      if (templateText !== undefined) {
+        const existingKinds = new Set(
+          lexicalDeployRecords(filePath, "shell", node.getText(sourceFile)).map(
+            ({ kind }) => kind,
+          ),
+        );
+        const templateRecords = lexicalDeployRecords(
+          filePath,
+          "programmatic",
+          flattenStaticShellTemplate(templateText),
+        );
+        for (const record of templateRecords) {
+          if (!existingKinds.has(record.kind)) records.push(record);
         }
       }
     }

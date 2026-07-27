@@ -722,6 +722,63 @@ assertForbiddenSignature(
   "scripts/unknown-object-command-vector-deploy.mjs",
 );
 assertForbiddenSignature(
+  `await $\`gcloud builds
+submit .\`;
+`,
+  "multiline zx tagged-template command",
+  "scripts/zx-tagged-template-deploy.mjs",
+);
+assertForbiddenSignature(
+  `await Bun.$\`gcloud app
+deploy app.yaml\`;
+`,
+  "multiline Bun tagged-template command",
+  "scripts/bun-tagged-template-deploy.mjs",
+);
+assertForbiddenSignature(
+  `await deploy\`gcloud builds
+submit .\`;
+`,
+  "multiline unknown tagged wrapper fails closed",
+  "scripts/unknown-tagged-template-deploy.mjs",
+);
+assertForbiddenSignature(
+  `await $\`# setup
+gcloud builds submit .\`;
+`,
+  "tagged-template command after a shell comment",
+  "scripts/comment-prefixed-tagged-template-deploy.mjs",
+);
+assertForbiddenSignature(
+  `execSync(
+  "gcloud builds " +
+    "submit .",
+);
+`,
+  "multiline statically concatenated command",
+  "scripts/concatenated-command-deploy.mjs",
+);
+assertForbiddenSignature(
+  `execSync(\`gcloud \${"builds"}
+\${"submit"} .\`);
+`,
+  "multiline static template-expression command",
+  "scripts/static-template-expression-deploy.mjs",
+);
+assertForbiddenSignature(
+  `execFileSync(
+  ("gcloud" as string),
+  [
+    "builds",
+    "submit",
+    ".",
+  ] as const,
+);
+`,
+  "typed multiline child-process argv",
+  "scripts/typed-child-process-deploy.ts",
+);
+assertForbiddenSignature(
   `new Deno.Command("gcloud", {
   args: [
     "app",
@@ -829,6 +886,33 @@ execFileSync("gcloud", [
 `,
     "AST recovery must not treat an inert Bun command vector as an invocation",
   ],
+  [
+    `const example = \`gcloud builds
+submit .\`;
+`,
+    "AST recovery must not treat an untagged template as an invocation",
+  ],
+  [
+    `await $\`
+# gcloud builds
+submit .
+echo safe
+\`;
+`,
+    "AST recovery must preserve shell comments in tagged templates",
+  ],
+  [
+    `await $\`gcloud builds # incomplete command
+submit .\`;
+`,
+    "AST recovery must not join commands across shell comments",
+  ],
+  [
+    `await $\`gcloud builds \${flags}
+submit .\`;
+`,
+    "AST recovery must not guess across dynamic template substitutions",
+  ],
 ]) {
   assert.equal(
     discoverDeployStagingCallsites({
@@ -838,6 +922,14 @@ execFileSync("gcloud", [
     message,
   );
 }
+
+assert.equal(
+  discoverDeployStagingCallsites({
+    "scripts/inline-tagged-template.mjs": "await $`gcloud builds submit .`;\n",
+  }).length,
+  1,
+  "AST recovery must not duplicate inline tagged-template records",
+);
 
 assert.equal(
   discoverDeployStagingCallsites({
