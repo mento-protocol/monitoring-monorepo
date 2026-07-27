@@ -401,6 +401,15 @@ function gcloudCommandKind(tokens, index) {
   return undefined;
 }
 
+function invocationArgs(tokens, gcloudIndex) {
+  const args = [];
+  for (let index = gcloudIndex + 1; index < tokens.length; index += 1) {
+    if (SHELL_COMMAND_BOUNDARIES.has(tokens[index])) break;
+    args.push(tokens[index]);
+  }
+  return args;
+}
+
 function commandRecords(filePath, surface, contents) {
   const records = [];
   const commands = shellCommands(contents);
@@ -428,7 +437,7 @@ function commandRecords(filePath, surface, contents) {
           filePath,
           surface,
           kind,
-          command,
+          invocationArgs: invocationArgs(tokens, index),
         });
       }
       commandStart = false;
@@ -520,22 +529,12 @@ export function discoverDeployStagingCallsites(files, errors = []) {
 }
 
 function hasFlag(record, flag, value) {
-  if (record.args) {
-    const index = record.args.findIndex(
-      (argument) =>
-        argument === `--${flag}` || argument.startsWith(`--${flag}=`),
-    );
-    if (index === -1) return false;
-    return record.args[index] === `--${flag}=${value}`
-      ? true
-      : record.args[index + 1] === value;
-  }
-  const command = record.command.replaceAll('"', "").replaceAll("'", "");
-  const pattern = new RegExp(
-    `(?:^|\\s)--${flag}(?:=|\\s+)${value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?=\\s|$)`,
-    "u",
+  const args = record.args ?? record.invocationArgs;
+  return args.some(
+    (argument, index) =>
+      argument === `--${flag}=${value}` ||
+      (argument === `--${flag}` && args[index + 1] === value),
   );
-  return pattern.test(command);
 }
 
 function validateCallsites(files, errors) {

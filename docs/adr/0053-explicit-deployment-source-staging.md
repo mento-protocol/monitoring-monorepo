@@ -13,9 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0053 — Routine GCP deploys use explicit source-staging buckets
 
-**Status:** Accepted (Jul 2026), phase A infrastructure source prepared;
-current-main apply, phase B routing, canaries, and broad-role removal remain
-separate gates.
+**Status:** Accepted (Jul 2026). The additive infrastructure prerequisite is
+applied and routing is implemented in source; live canaries and broad-role
+removal remain separate future gates.
 **Scope:** terraform/infra
 
 ## Context

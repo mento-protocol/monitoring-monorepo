@@ -169,12 +169,35 @@ expectFailure(
 );
 expectFailure(
   mutate(
+    mutate(
+      files,
+      ".github/workflows/metrics-bridge.yml",
+      '            --gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+      "",
+    ),
+    ".github/workflows/metrics-bridge.yml",
+    "            .\n",
+    '            . && echo --gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge"\n',
+  ),
+  "metrics-bridge.yml: builds-submit must use --gcs-source-staging-dir",
+);
+expectFailure(
+  mutate(
     files,
     "aegis/bin/deploy.sh",
     "  --bucket=gs://mento-monitoring-app-engine-source \\\n",
     "",
   ),
   "aegis/bin/deploy.sh: app-deploy must use --bucket",
+);
+expectFailure(
+  mutate(
+    files,
+    "aegis/grafana-agent/cloudbuild.yaml",
+    "        --bucket=gs://mento-monitoring-app-engine-source,\n",
+    "        --bucket=gs://wrong-bucket,\n        gs://mento-monitoring-app-engine-source,\n",
+  ),
+  "aegis/grafana-agent/cloudbuild.yaml: app-deploy must use --bucket",
 );
 expectFailure(
   mutate(
