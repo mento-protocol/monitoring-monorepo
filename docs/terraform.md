@@ -186,26 +186,59 @@ Sentry credential routing lives in
 
 ## GitHub Environments
 
-Keep three managed Environments. `production-infra` has a required reviewer,
-self-review allowed, admin bypass disabled, and protected-branch deployment; its
-workflows verify that state before cloud auth. With one maintainer this is
-operator acknowledgement, not independent or exact-plan review. [ADR
-0029](adr/0029-ci-apply-production-infra-gate.md) records the decision against a
-same-owner `CODEOWNERS` gate; revisit PR approval, latest-push approval, and
-disabled Environment self-review when a second active maintainer exists.
+All three Environments are Terraform-managed in
+`terraform/github-environment.tf` and restrict deployments with an **explicit
+`main` branch pattern** (`custom_branch_policies = true` plus a
+`github_repository_environment_deployment_policy`), never
+`protected_branches = true`.
 
-`production-services` records routine deploys from protected `main` without a
-reviewer.
+> **Use the branch pattern, not `protected_branches` (issue #1649).**
+> `protected_branches = true` only admits branches covered by **classic** branch
+> protection. This repo protects `main` with a **ruleset** and has no classic
+> protection — `GET /repos/:o/:r/branches/main/protection` returns
+> `404 Branch not protected` — so that policy matched nothing and **failed
+> open**: off-main runs reached environment secrets. `GET .../branches/main`
+> reporting `"protected": true` (rulesets count there, the deployment policy
+> does not read it) is what made the broken config look correct. An explicit
+> branch pattern does not depend on classic protection.
+>
+> `scripts/verify-github-environment-protection.mjs` enforces this shape before
+> cloud auth, and reads the deployment-branch-policy allow-list itself so an
+> empty or over-broad pattern set cannot pass.
+
+`production-infra` has a required reviewer, self-review allowed, and admin
+bypass disabled; its workflows verify that state before cloud auth. With one
+maintainer this is operator acknowledgement, not independent or exact-plan
+review. [ADR 0029](adr/0029-ci-apply-production-infra-gate.md) records the
+decision against a same-owner `CODEOWNERS` gate; revisit PR approval,
+latest-push approval, and disabled Environment self-review when a second active
+maintainer exists. The reviewer rule is enforced independently of the branch
+policy, so it held even while that policy was inert.
+
+`production-services` records routine deploys from `main` without a reviewer.
+
+`production-infra` and `production-services` were UI-managed until #1649. They
+are bound to Terraform with an explicit state import — the identity contract
+forbids top-level `import` blocks — before the first apply that owns them:
+
+```bash
+terraform -chdir=terraform import \
+  github_repository_environment.production_infra monitoring-monorepo:production-infra
+terraform -chdir=terraform import \
+  github_repository_environment.production_services monitoring-monorepo:production-services
+```
+
+After importing, their plan must read `0 to add, N to change, 0 to destroy`. A
+diff that drops `production-infra`'s `reviewers` would remove the production
+apply gate — do not apply it.
 
 `sentry-pipeline` (`terraform/github-environment.tf`, issue #1289,
 [ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) gates the Sentry
-triage/autofix pipeline's exclusive secrets. It has a main-only
-protected-branch deployment policy with admin bypass disabled
-(`can_admins_bypass = false`, #1289 — an admin cannot silently dispatch an
-off-main branch past the policy) and — deliberately, the pipeline is
-unattended — no reviewer or wait timer. Unlike the other two it is
-Terraform-managed; every platform apply reconciles its policy and secrets. Every secret-bearing Sentry job declares it, so those secrets are
-reachable only from `main` — server-enforced even on a branch-modified
+triage/autofix pipeline's exclusive secrets. It has the same `main`-only branch
+pattern, admin bypass disabled, and — deliberately, the pipeline is unattended —
+no reviewer or wait timer. Every platform apply reconciles its policy and
+secrets. Every secret-bearing Sentry job declares it, so those secrets are
+reachable only from `main`, server-enforced even on a branch-modified
 `workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level
 for `claude.yml`.
 

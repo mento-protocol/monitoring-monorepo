@@ -13,9 +13,51 @@ garden_lane: adrs-architecture
 
 # ADR 0050 — Pipeline secrets are gated by a Terraform-managed GitHub Environment
 
-**Status:** Accepted (Jul 2026), two-phase rollout in progress.
+**Status:** Accepted (Jul 2026). Amended 2026-07-27 — the decision stands, but
+its first implementation used a branch-policy mechanism that does not work in
+this repo and silently failed open; see "Correction" below and
+[#1649](https://github.com/mento-protocol/monitoring-monorepo/issues/1649).
 **Scope:** terraform / ci (Sentry pipeline first; the pattern for future
 secret-bearing scheduled workflows).
+
+## Correction (2026-07-27) — use an explicit branch pattern
+
+The environment was created with
+`deployment_branch_policy.protected_branches = true`, which admits only branches
+covered by **classic** branch protection. This repo protects `main` with a
+**ruleset** and has no classic protection
+(`GET /repos/:o/:r/branches/main/protection` → `404 Branch not protected`), so
+the policy matched nothing and **failed open**.
+
+Verified empirically before the fix: an admin `workflow_dispatch`, a **non-admin
+`write`** `workflow_dispatch`, and a **non-admin `push`** each reached the
+environment's secrets from a non-main branch. The probe secret has no repo-level
+copy, so it came through the environment. `GET .../branches/main` reporting
+`"protected": true` — rulesets count for that field, but the deployment policy
+does not read it — is what made the broken configuration look correct.
+
+The fix keeps this ADR's decision and replaces the mechanism:
+
+```hcl
+deployment_branch_policy {
+  protected_branches     = false
+  custom_branch_policies = true
+}
+# plus a github_repository_environment_deployment_policy with branch_pattern = "main"
+```
+
+An explicit pattern does not depend on classic protection. `production-infra`
+and `production-services` carried the same broken shape and are corrected and
+adopted into Terraform at the same time; `production-infra`'s required-reviewer
+rule is enforced independently of the branch policy, so the production apply
+gate held throughout.
+
+Two lessons are folded into the tooling: `can_admins_bypass` governs the
+reviewer / wait-timer rules, not the branch policy, so it was never the control
+it was described as; and `scripts/verify-github-environment-protection.mjs` now
+reads the deployment-branch-policy allow-list rather than only asserting the
+configured shape — asserting configuration is what let an open gate look
+verified.
 
 ## Context
 

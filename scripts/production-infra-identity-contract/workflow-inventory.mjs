@@ -165,7 +165,7 @@ const LOCAL_DEPENDENCY_INVENTORY = [
   {
     path: "scripts/verify-github-environment-protection.mjs",
     phase: "pre-auth protection verifier",
-    sha256: "9a8dbea69115dcb29855ceecdf22f29a837021e9de3ec8d3968d13dbfe0a53af",
+    sha256: "83068efbec1f64bc5b1c8c478542c4399605115cec0a122fc8177e3c17e13bf9",
   },
   {
     path: "scripts/sanitize-terraform-output.sh",
