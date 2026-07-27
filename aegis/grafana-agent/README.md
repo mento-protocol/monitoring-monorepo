@@ -64,8 +64,10 @@ it has no Secret Manager access. The preflight role contains the exact App
 Engine get, Artifact Registry repository IAM get, IAM policy/role get, project
 policy get, secret list/IAM get, and secret-version get permissions; it does
 not include `secretmanager.versions.access`. Terraform grants Secret Accessor
-only to the pinned runtime account. Cloud Build, the Compute default account,
-and AppSpot cannot read Alloy secret payloads.
+only to the pinned runtime account. This source state becomes effective only
+after an approved platform apply. Until that apply and the live preflight
+succeed, production may still retain legacy Secret Accessor bindings for Cloud
+Build, the Compute default account, and AppSpot.
 
 Terraform requires two operator-held inputs for this path:
 
