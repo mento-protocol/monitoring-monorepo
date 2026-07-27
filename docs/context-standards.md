@@ -3,7 +3,7 @@ title: Agent Context Standards
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 doc_type: reference
 scope: repo-wide
 review_interval_days: 90
@@ -63,10 +63,13 @@ The catalog makes documents discoverable; it does not promote them. Its
 `canonical`, `non-canonical`, and `unmanaged` labels are derived from each
 document's metadata under the authority rules above.
 
-The committed catalog intentionally contains stable navigation metadata only.
-Volatile analytics such as word counts and inbound-link counts remain available
-from `pnpm docs:index --json` and `pnpm docs:audit`; they are not committed into
-the catalog, so prose-only edits do not churn this shared file.
+The committed catalog intentionally stays lean: lane headings, authority labels,
+navigable source paths, ADR titles for numeric decision records, non-active
+lifecycle markers, and runtime-source pointers. Full metadata remains in each
+document and the JSON inventory. Volatile analytics such as word counts and
+inbound-link counts remain available from `pnpm docs:index --json` and
+`pnpm docs:audit`; they are not committed into the catalog, so prose-only edits
+do not churn this shared file.
 
 ## Metadata Contract
 

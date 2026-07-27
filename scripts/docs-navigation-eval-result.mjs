@@ -107,16 +107,7 @@ function authorityFromMetadata(metadata) {
 }
 
 function resultSourcePaths(suite, result, questions = suite.questions) {
-  const paths = new Set(suite.bootstrap_sources);
-  for (const question of questions) {
-    for (const route of question.accepted_routes) {
-      for (const file of route) paths.add(file);
-    }
-    for (const source of question.sources_requiring_verification) {
-      if (typeof source?.path === "string") paths.add(source.path);
-      for (const target of source?.verify_against ?? []) paths.add(target);
-    }
-  }
+  const paths = fixtureSourcePaths(suite, questions);
   for (const source of Array.isArray(result?.run?.bootstrap_sources)
     ? result.run.bootstrap_sources
     : []) {
@@ -136,6 +127,22 @@ function resultSourcePaths(suite, result, questions = suite.questions) {
       for (const entry of Array.isArray(answer?.[field]) ? answer[field] : []) {
         if (typeof entry?.path === "string") paths.add(entry.path);
       }
+    }
+  }
+  return paths;
+}
+
+function fixtureSourcePaths(suite, questions = suite?.questions ?? []) {
+  const paths = new Set(
+    Array.isArray(suite?.bootstrap_sources) ? suite.bootstrap_sources : [],
+  );
+  for (const question of questions) {
+    for (const route of question.accepted_routes ?? []) {
+      for (const file of route) paths.add(file);
+    }
+    for (const source of question.sources_requiring_verification ?? []) {
+      if (typeof source?.path === "string") paths.add(source.path);
+      for (const target of source?.verify_against ?? []) paths.add(target);
     }
   }
   return paths;
@@ -165,6 +172,48 @@ function historicalInventoryMap(repoRoot, commit, paths, errors) {
     });
   }
   return records;
+}
+
+export function buildHistoricalNavigationInventory({
+  suite,
+  repoRoot,
+  commit,
+}) {
+  const errors = [];
+  if (!/^[0-9a-f]{40}$/.test(commit ?? "")) {
+    return {
+      records: [],
+      errors: [
+        "historical inventory commit must be a 40-character lowercase commit",
+      ],
+      warnings: [],
+      broken_links: [],
+    };
+  }
+  if (!commitIsReadable(repoRoot, commit)) {
+    return {
+      records: [],
+      errors: [
+        `historical inventory commit is not available locally: ${commit}`,
+      ],
+      warnings: [],
+      broken_links: [],
+    };
+  }
+  const records = historicalInventoryMap(
+    repoRoot,
+    commit,
+    fixtureSourcePaths(suite),
+    errors,
+  );
+  return {
+    records: [...records.values()].sort((left, right) =>
+      left.path.localeCompare(right.path),
+    ),
+    errors,
+    warnings: [],
+    broken_links: [],
+  };
 }
 
 function validateLoadedSources({
