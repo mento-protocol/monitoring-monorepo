@@ -219,7 +219,10 @@ const SHELL_COMMAND_PREFIXES = new Set([
   "env",
   "if",
   "then",
+  "until",
+  "while",
 ]);
+const SHELL_COMMAND_WRAPPERS = new Set(["command", "env", "exec", "time"]);
 
 function shellTokens(command) {
   const tokens = [];
@@ -287,6 +290,49 @@ function shellTokens(command) {
 
 function isAssignment(token) {
   return /^[A-Za-z_][A-Za-z0-9_]*=.*/u.test(token);
+}
+
+function wrappedCommandIndex(tokens, index) {
+  let commandIndex = index + 1;
+  const wrapper = tokens[index];
+  if (wrapper === "command") {
+    let lookupOnly = false;
+    while (/^-[pVv]+$/u.test(tokens[commandIndex])) {
+      lookupOnly ||= /[vV]/u.test(tokens[commandIndex]);
+      commandIndex += 1;
+    }
+    if (lookupOnly) return null;
+    if (tokens[commandIndex] === "--") commandIndex += 1;
+  } else if (wrapper === "env") {
+    while (tokens[commandIndex]?.startsWith("-")) {
+      const option = tokens[commandIndex];
+      if (option === "--") {
+        commandIndex += 1;
+        break;
+      }
+      if (option === "-i" || option === "--ignore-environment") {
+        commandIndex += 1;
+      } else if (/^-(?:[uC].+|-(?:unset|chdir)=.+)$/u.test(option)) {
+        commandIndex += 1;
+      } else if (["-u", "-C", "--unset", "--chdir"].includes(option)) {
+        if (commandIndex + 1 >= tokens.length) return undefined;
+        commandIndex += 2;
+      } else {
+        return undefined;
+      }
+    }
+    while (isAssignment(tokens[commandIndex])) commandIndex += 1;
+  } else if (wrapper === "exec") {
+    while (
+      /^-[cl]+$/u.test(tokens[commandIndex]) ||
+      tokens[commandIndex] === "-a"
+    ) {
+      commandIndex += tokens[commandIndex] === "-a" ? 2 : 1;
+    }
+  } else if (tokens[commandIndex] === "-p") {
+    commandIndex += 1;
+  }
+  return tokens[commandIndex]?.startsWith("-") ? undefined : commandIndex;
 }
 
 function shellFilePath(filePath) {
@@ -410,6 +456,30 @@ function invocationArgs(tokens, gcloudIndex) {
   return args;
 }
 
+function wrappedGcloudIndex(tokens, wrapperIndex) {
+  let commandIndex = wrapperIndex;
+  while (SHELL_COMMAND_WRAPPERS.has(tokens[commandIndex])) {
+    const nextIndex = wrappedCommandIndex(tokens, commandIndex);
+    if (nextIndex === null) return undefined;
+    if (nextIndex === undefined) {
+      // Unknown option forms fail closed: an exact deploy tail later in this
+      // command segment is actionable even when it could be an option operand.
+      for (let index = commandIndex + 1; index < tokens.length; index += 1) {
+        if (SHELL_COMMAND_BOUNDARIES.has(tokens[index])) return undefined;
+        if (tokens[index] === "gcloud" && gcloudCommandKind(tokens, index)) {
+          return index;
+        }
+      }
+      return undefined;
+    }
+    commandIndex = nextIndex;
+  }
+  return tokens[commandIndex] === "gcloud" &&
+    gcloudCommandKind(tokens, commandIndex)
+    ? commandIndex
+    : undefined;
+}
+
 function commandRecords(filePath, surface, contents) {
   const records = [];
   const commands = shellCommands(contents);
@@ -428,7 +498,20 @@ function commandRecords(filePath, surface, contents) {
         commandStart = true;
         continue;
       }
-      if (SHELL_COMMAND_PREFIXES.has(token) && commandStart) continue;
+      if (commandStart && SHELL_COMMAND_WRAPPERS.has(token)) {
+        const gcloudIndex = wrappedGcloudIndex(tokens, index);
+        if (gcloudIndex !== undefined) {
+          records.push({
+            filePath,
+            surface,
+            kind: gcloudCommandKind(tokens, gcloudIndex),
+            invocationArgs: invocationArgs(tokens, gcloudIndex),
+          });
+        }
+        commandStart = false;
+        continue;
+      }
+      if (commandStart && SHELL_COMMAND_PREFIXES.has(token)) continue;
       if (commandStart && isAssignment(token)) continue;
       if (commandStart && token === "gcloud") {
         const kind = gcloudCommandKind(tokens, index);

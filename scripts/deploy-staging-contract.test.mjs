@@ -332,26 +332,88 @@ function assertCallsiteKinds(contents, expected, message) {
   );
 }
 
-assertCallsiteKinds(
-  "gcloud --project=mento-monitoring builds submit .",
-  ["builds-submit"],
-  "gcloud-wide flags must not hide build submissions",
-);
-assertCallsiteKinds(
-  "gcloud --log-http builds submit .",
-  ["builds-submit"],
-  "boolean gcloud flags must not consume a command group",
-);
-assertCallsiteKinds(
-  "command gcloud --user-output-enabled app deploy app.yaml",
-  ["app-deploy"],
-  "command wrappers must expose app deploys",
-);
-assertCallsiteKinds(
-  "env FOO=bar gcloud beta app deploy app.yaml",
-  ["app-deploy"],
-  "environment wrappers and release tracks must expose app deploys",
-);
+for (const [contents, expected, message] of [
+  [
+    "gcloud --project=mento-monitoring builds submit .",
+    ["builds-submit"],
+    "global flags",
+  ],
+  ["gcloud --log-http builds submit .", ["builds-submit"], "boolean flags"],
+  [
+    "command gcloud --user-output-enabled app deploy app.yaml",
+    ["app-deploy"],
+    "command",
+  ],
+  [
+    "env FOO=bar gcloud beta app deploy app.yaml",
+    ["app-deploy"],
+    "env assignments",
+  ],
+  ["exec gcloud builds submit .", ["builds-submit"], "bare exec"],
+  ["time gcloud app deploy app.yaml", ["app-deploy"], "bare time"],
+  ["time -p gcloud app deploy app.yaml", ["app-deploy"], "time -p"],
+  ["exec -a deploy gcloud builds submit .", ["builds-submit"], "exec -a"],
+  ["exec -c gcloud builds submit .", ["builds-submit"], "exec -c"],
+  ["exec -l gcloud app deploy app.yaml", ["app-deploy"], "exec -l"],
+  ["exec -cl gcloud builds submit .", ["builds-submit"], "exec -cl"],
+  ["exec -lc gcloud app deploy app.yaml", ["app-deploy"], "exec -lc"],
+  ["command -p gcloud app deploy app.yaml", ["app-deploy"], "command -p"],
+  ["command -- gcloud builds submit .", ["builds-submit"], "command --"],
+  ["env -i FOO=bar gcloud builds submit .", ["builds-submit"], "env -i"],
+  [
+    "env --ignore-environment gcloud app deploy app.yaml",
+    ["app-deploy"],
+    "env --ignore-environment",
+  ],
+  ["env -u NAME gcloud builds submit .", ["builds-submit"], "env -u"],
+  ["env -uNAME gcloud app deploy app.yaml", ["app-deploy"], "env -uNAME"],
+  ["env --unset NAME gcloud builds submit .", ["builds-submit"], "env --unset"],
+  [
+    "env --unset=NAME gcloud app deploy app.yaml",
+    ["app-deploy"],
+    "env --unset=NAME",
+  ],
+  ["env -C DIR gcloud builds submit .", ["builds-submit"], "env -C"],
+  ["env -CDIR gcloud app deploy app.yaml", ["app-deploy"], "env -CDIR"],
+  ["env --chdir DIR gcloud builds submit .", ["builds-submit"], "env --chdir"],
+  [
+    "env --chdir=DIR gcloud app deploy app.yaml",
+    ["app-deploy"],
+    "env --chdir=DIR",
+  ],
+  ["env -- gcloud builds submit .", ["builds-submit"], "env --"],
+  [
+    "env -- FOO=bar gcloud app deploy app.yaml",
+    ["app-deploy"],
+    "env -- assignment",
+  ],
+  [
+    "time env -i FOO=bar gcloud builds submit .",
+    ["builds-submit"],
+    "nested wrappers",
+  ],
+  ["time command -v gcloud", [], "nested lookup"],
+  ["while gcloud builds submit .; do break; done", ["builds-submit"], "while"],
+  ["until gcloud app deploy app.yaml; do break; done", ["app-deploy"], "until"],
+  [
+    "exec -clx gcloud builds submit .",
+    ["builds-submit"],
+    "unsupported wrapper option fallback",
+  ],
+  ["command -v gcloud", [], "command -v lookup"],
+  ["command -V gcloud", [], "command -V lookup"],
+  ["command -pv gcloud", [], "command -pv lookup"],
+  ["command -pV gcloud", [], "command -pV lookup"],
+  ["echo gcloud builds submit .", [], "echo data"],
+  ["env -S 'gcloud builds submit .'", [], "env -S runtime string"],
+  [
+    "env -S echo gcloud builds submit .",
+    ["builds-submit"],
+    "unknown option fails closed",
+  ],
+]) {
+  assertCallsiteKinds(contents, expected, message);
+}
 assertCallsiteKinds(
   "( gcloud builds submit . )",
   ["builds-submit"],
