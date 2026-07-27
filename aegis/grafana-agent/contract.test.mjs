@@ -195,6 +195,24 @@ test('the App Engine Flex runtime must keep Logs Writer', () => {
   expectFailure(files, /App Engine Flex Logs Writer/u);
 });
 
+test('the App Engine Flex runtime must keep repository-scoped image Reader', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    'resource "google_artifact_registry_repository_iam_member" "grafana_agent_runtime_image_reader"',
+    'resource "google_artifact_registry_repository_iam_member" "removed_runtime_image_reader"',
+  );
+  expectFailure(files, /grafana_agent_runtime_image_reader/u);
+});
+
+test('runtime image access cannot broaden beyond us.gcr.io Reader', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    'role       = "roles/artifactregistry.reader"',
+    'role       = "roles/artifactregistry.writer"',
+  );
+  expectFailure(files, /Reader on only the us\.gcr\.io repository/u);
+});
+
 test('runtime secret IAM must preserve bootstrap ordering', () => {
   const files = sourceFiles();
   files.bootstrap = files.bootstrap.replace(

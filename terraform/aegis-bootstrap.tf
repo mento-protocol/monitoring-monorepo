@@ -134,6 +134,19 @@ resource "google_project_iam_member" "grafana_agent_runtime_log_writer" {
   depends_on = [google_project_service.appengineflex]
 }
 
+resource "google_artifact_registry_repository_iam_member" "grafana_agent_runtime_image_reader" {
+  project    = google_project.monitoring.project_id
+  location   = "us"
+  repository = "us.gcr.io"
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.grafana_agent_runtime.email}"
+
+  depends_on = [
+    google_app_engine_application.aegis,
+    google_project_service.artifactregistry,
+  ]
+}
+
 resource "google_project_iam_custom_role" "grafana_agent_preflight_reader" {
   project     = google_project.monitoring.project_id
   role_id     = "grafanaAgentPreflightReader"
@@ -143,6 +156,7 @@ resource "google_project_iam_custom_role" "grafana_agent_preflight_reader" {
     "appengine.applications.get",
     "appengine.services.get",
     "appengine.versions.get",
+    "artifactregistry.repositories.getIamPolicy",
     "iam.roles.get",
     "iam.serviceAccounts.get",
     "iam.serviceAccounts.getIamPolicy",

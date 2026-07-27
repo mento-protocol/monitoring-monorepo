@@ -462,6 +462,24 @@ export function validateContract(files = readContractFiles()) {
     /member\s*=\s*"serviceAccount:\$\{google_service_account\.grafana_agent_runtime\.email\}"/u,
     `${CONTRACT_FILES.bootstrap}: Logs Writer must target the dedicated runtime account`,
   );
+  const runtimeImageReaderGrant = requireBlock(
+    errors,
+    bootstrap,
+    'resource "google_artifact_registry_repository_iam_member" "grafana_agent_runtime_image_reader"',
+    CONTRACT_FILES.bootstrap,
+  );
+  requirePattern(
+    errors,
+    runtimeImageReaderGrant,
+    /location\s*=\s*"us"\s+repository\s*=\s*"us\.gcr\.io"\s+role\s*=\s*"roles\/artifactregistry\.reader"/u,
+    `${CONTRACT_FILES.bootstrap}: runtime image access must stay Reader on only the us.gcr.io repository`,
+  );
+  requirePattern(
+    errors,
+    runtimeImageReaderGrant,
+    /member\s*=\s*"serviceAccount:\$\{google_service_account\.grafana_agent_runtime\.email\}"/u,
+    `${CONTRACT_FILES.bootstrap}: image Reader must target the dedicated runtime account`,
+  );
 
   const preflightRole = requireBlock(
     errors,
@@ -488,6 +506,7 @@ export function validateContract(files = readContractFiles()) {
     'appengine.applications.get',
     'appengine.services.get',
     'appengine.versions.get',
+    'artifactregistry.repositories.getIamPolicy',
     'iam.roles.get',
     'iam.serviceAccounts.get',
     'iam.serviceAccounts.getIamPolicy',

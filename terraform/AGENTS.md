@@ -21,9 +21,12 @@ garden_lane: agent-entry-points
 Alloy's runtime project authority is the custom
 `grafanaAgentActivationReader` role with exactly `appengine.services.get` and
 `appengine.versions.list`, plus the predefined `roles/logging.logWriter` role
-required to start App Engine Flex instances. Do not replace the custom role
-with a predefined App Engine viewer role or broaden either boundary; the
-active/passive collector handshake depends on this exact read access.
+required to start App Engine Flex instances. It also has repository-level
+`roles/artifactregistry.reader` on only the App Engine-managed `us.gcr.io`
+repository so the version can pull its image. Do not replace these grants with
+project-wide Artifact Registry or predefined App Engine viewer access; the
+active/passive collector handshake and image-pull path depend on these exact
+boundaries.
 
 ## Operating Rules
 
@@ -42,9 +45,10 @@ active/passive collector handshake depends on this exact read access.
   tfvars stay external and are passed by absolute file path.
 - Alloy deploy operators receive the exact metadata-only
   `grafanaAgentPreflightReader` custom role so the mandatory live preflight can
-  inspect IAM, secret metadata, runtime identity, and traffic without reading
-  secret payloads. Its description carries Terraform's `gcp_dev_members`
-  fingerprint; both operator and builder policies must match it.
+  inspect project and `us.gcr.io` repository IAM, secret metadata, runtime
+  identity, and traffic without reading secret payloads. Its description
+  carries Terraform's `gcp_dev_members` fingerprint; both operator and builder
+  policies must match it.
 - Never set GitHub Actions, Vercel, GCP Secret Manager, Upstash, Grafana, or
   other platform secrets manually with CLI commands. Secrets owned by this stack
   must be modeled as Terraform variables/resources and delivered by a
