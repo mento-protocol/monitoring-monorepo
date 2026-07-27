@@ -54,6 +54,9 @@ const IDENTITY_BEARING_RESOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/github-environment.tf:github_actions_environment_secret.sentry_archive_token|fa80c0dce3fe92c01289d906d593ec61d4aed31099a40120c67560b36ff8120d",
   "terraform/github-environment.tf:github_actions_environment_secret.sentry_projection_token|2fdd8d9f4b542258182b9ed473fdc1c493484245c9e1309efc01a7bfa5abd694",
   "terraform/github-environment.tf:github_actions_environment_secret.sentry_triage_token|8d72bed10df06aec31d666839bde335e76b248a3d3ad4f8bb637b5ce592a91bf",
+  "terraform/github-environment.tf:github_repository_environment_deployment_policy.production_infra_main|2231e35adce6c2b4d41b8dcd07c99121e1daff80fa26d000b8a7d609259920d9",
+  "terraform/github-environment.tf:github_repository_environment_deployment_policy.production_services_main|7b1846f07ceed4924551b203863f574822c8e6a5b77337af8fb845f32e5c56b5",
+  "terraform/github-environment.tf:github_repository_environment_deployment_policy.sentry_pipeline_main|9f5e8fde03a7faa07c89c6ad0258d831c19f50c4e7a5a1838fa104a526f73962",
   "terraform/github-environment.tf:github_repository_environment.production_infra|6474846020b2d7b3b24f01ffd63b3181c5418494dee76973c43545f17b0670e9",
   "terraform/github-environment.tf:github_repository_environment.production_services|b9b6b1272e8714b3bf32dd9fb1971c05c48bfe4d1546eae7fb5172d6d1081910",
   "terraform/github-environment.tf:github_repository_environment.sentry_pipeline|11ead0d7ebe06de92b1de47244f2283232221ff21513b3ae8782b273ea82ee91",
@@ -305,6 +308,11 @@ const IDENTITY_BEARING_RESOURCE_TYPES = new Set([
   "github_actions_environment_secret",
   "github_actions_secret",
   "github_repository_environment",
+  // The `main`-only allow-list lives in these blocks (issue #1649), not in the
+  // environment block, so they carry the branch restriction and must be
+  // shape-pinned too: without this, widening `branch_pattern` to `*` would pass
+  // the contract while opening every environment.
+  "github_repository_environment_deployment_policy",
   "github_actions_variable",
   "github_workflow_repository_permissions",
   "google_cloud_scheduler_job",
