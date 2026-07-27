@@ -3,7 +3,7 @@ title: Terraform secret strategy hardening
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 doc_type: reference
 scope: terraform/infra
 review_interval_days: 90
@@ -47,22 +47,24 @@ service deploy, same-repo PR plan, trusted-main refresh, and production apply
 on separate identities:
 
 - Routine services use the general repository WIF provider and
-  `metrics-bridge-deployer`. The final removal apply removes its ability to
-  impersonate `org-terraform`. The provider requires both the repository slug
-  and immutable repository ID `1172025835`.
+  `metrics-bridge-deployer`. The final-removal source no longer declares its
+  ability to impersonate `org-terraform`, but the live grant remains until an
+  explicitly approved platform apply removes it and the final IAM audit proves
+  it is gone. The provider requires both the repository slug and immutable
+  repository ID `1172025835`.
 - PR plans use the state-only plan chain. It receives neither project/service
   read roles nor live secret/object access.
-- The separate cutover-routing PR routes trusted-main plans and scheduled drift
-  through `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER` and
-  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. Its dedicated pool accepts
-  only the five named Terraform workflows on `main`. The downstream
+- The checked-in workflows route trusted-main plans and scheduled drift through
+  `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER` and
+  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The dedicated pool accepts only
+  the five named Terraform workflows on `main`. The downstream
   `org-terraform-refresh-readonly` identity has state Object Viewer, a curated
   non-basic project read-role set, Secret Accessor on only Terraform-managed
   secrets, and Storage Object Viewer on only Cloud Function deployment-source
   buckets. The project-read core includes Browser, IAM Security Reviewer, and
   Storage Bucket Viewer; each owning stack enumerates its additional
-  service-specific readers. That routing PR retains the legacy routine-deployer
-  Token Creator grant until live proof and drain checks complete.
+  service-specific readers. The legacy routine-deployer Token Creator grant
+  remains rollback-only until run drain and read-boundary audit complete.
 - Production applies select
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. The dedicated pool accepts only
@@ -81,15 +83,16 @@ service readers can still expose project-wide Cloud Logging entries, Monitoring
 time series, and Artifact Registry contents. The complete bundle confers no
 mutation permissions and is unreachable from PR refs.
 
-After the cutover-routing PR lands, use its checked-in `main` route to run a
-live full-refresh, unlocked plan (`-lock=false`, without `-refresh=false`) for
-every CI-managed Google-provider stack; the current set is `alerts-delivery`
-and `governance-watchdog`. Treat a provider 403 as a request to review one exact
-read permission, not as justification for a basic role. Validation and an
-IAM-grants-only plan do not prove the full resource graph can refresh or that
-payload boundaries remain intact. Drain the pre-routing and proof runs and
-audit the read boundary before a separate final removal PR deletes the legacy
-Token Creator grant through an explicitly approved platform apply.
+Run
+[#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
+completed live full-refresh, unlocked plans for `alerts-delivery` and
+`governance-watchdog` through the checked-in route. Drain the pre-routing and
+proof runs and audit the read boundary before the prepared final-removal source
+may merge.
+After merge, cancel superseded runs, confirm every infrastructure run is
+terminal, run a platform plan from clean current `main`, and apply only with
+explicit human approval. The final WIF and service-account IAM audit must prove
+the legacy Token Creator grant is gone.
 
 ## Stack inventory
 

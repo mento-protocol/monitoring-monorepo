@@ -20,14 +20,12 @@ const config = {
     high: 90,
     low: 80,
     // Blocking gate: `pnpm indexer:mutation` exits non-zero when the
-    // combined score across `src/helpers.ts`, `src/tradingLimits.ts`, and
-    // the stables handler helpers drops below 92%. The CI workflow wires this
-    // into the `indexer-logic-baseline` job (see
-    // `.github/workflows/mutation-testing.yml`). Current baseline: 94.19%
-    // with a 2-pt margin for measurement noise. All remaining survivors are
-    // classified as equivalent mutants or accepted noise — see
-    // `docs/mutation-testing.md` for the taxonomy.
-    break: 92,
+    // combined score across `src/helpers.ts`, `src/tradingLimits.ts`, and the
+    // stables handler helpers drops below 94%. The CI workflow wires this into
+    // the indexer baseline job. The floor preserves the documented two-point
+    // rounded-down safety margin; current evidence and survivor classification
+    // live in `docs/mutation-testing.md`.
+    break: 94,
   },
   ignorePatterns: [
     ".envio/**",

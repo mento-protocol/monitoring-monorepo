@@ -95,9 +95,19 @@ function stripYamlQuotes(value) {
   return v;
 }
 
+// Same URL-shape guard the digest and ingest apply (issue #1586): reject `<`,
+// `>`, `|` — which would break out of a Slack/Markdown link target — plus any
+// ASCII control char or whitespace. `new URL()` accepts all of them in the
+// path/query and this validator returns the RAW input string, so the shape
+// check must run on the original — not on the re-encoded `parsed.href`.
+// eslint-disable-next-line no-control-regex -- rejecting control chars in a link target is the point
+const UNSAFE_URL_CHARS = /[<>|\x00-\x20\x7f]/;
+
 export function isSafeSentryPermalink(url) {
+  const value = String(url);
+  if (UNSAFE_URL_CHARS.test(value)) return false;
   try {
-    const parsed = new URL(String(url));
+    const parsed = new URL(value);
     return (
       parsed.protocol === "https:" && /(^|\.)sentry\.io$/.test(parsed.hostname)
     );

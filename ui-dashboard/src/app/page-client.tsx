@@ -44,6 +44,7 @@ export default function GlobalPage({
   initialNetworkDataFetchedAtMs,
   initialUniqueLpCount,
   initialIsWeekend = false,
+  initialUtcDayKey = Math.floor(Date.now() / 1000 / SECONDS_PER_DAY),
 }: {
   initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
@@ -51,6 +52,8 @@ export default function GlobalPage({
    * from the bounded Flight payload. `null` is a real unavailable result. */
   initialUniqueLpCount?: number | null | undefined;
   initialIsWeekend?: boolean;
+  /** Server-render day key retained through hydration, then reconciled live. */
+  initialUtcDayKey?: number;
 }) {
   // First paint uses `initialNetworkData` via SWR's `fallbackData`; on
   // back-navigation the populated homepage SWR cache wins, which is the right
@@ -66,6 +69,7 @@ export default function GlobalPage({
         initialNetworkDataFetchedAtMs={initialNetworkDataFetchedAtMs}
         initialUniqueLpCount={initialUniqueLpCount}
         initialIsWeekend={initialIsWeekend}
+        initialUtcDayKey={initialUtcDayKey}
       />
     </Suspense>
   );
@@ -124,11 +128,13 @@ function GlobalContent({
   initialNetworkDataFetchedAtMs,
   initialUniqueLpCount,
   initialIsWeekend,
+  initialUtcDayKey,
 }: {
   initialNetworkData?: InitialNetworkData[] | undefined;
   initialNetworkDataFetchedAtMs?: number | undefined;
   initialUniqueLpCount?: number | null | undefined;
   initialIsWeekend: boolean;
+  initialUtcDayKey: number;
 }) {
   const {
     networkData,
@@ -445,7 +451,11 @@ function GlobalContent({
             isLoading={isInitialLoading}
             totalSwapsAllTime={aggregated.totalSwapsAllTime}
           />
-          <TradersTile isLoading={isInitialLoading} networkData={networkData} />
+          <TradersTile
+            isLoading={isInitialLoading}
+            networkData={networkData}
+            initialUtcDayKey={initialUtcDayKey}
+          />
         </div>
       </section>
 
@@ -572,9 +582,11 @@ function LpTile({
 function TradersTile({
   isLoading,
   networkData,
+  initialUtcDayKey,
 }: {
   isLoading: boolean;
   networkData: NetworkData[];
+  initialUtcDayKey: number;
 }) {
   const snapshotGql = useVolumeWindowTradersSnapshot();
   // Today's traders aren't yet in the closed-day snapshot (the heartbeat
@@ -585,7 +597,7 @@ function TradersTile({
   // `useHeroRollup` (`mergeHeroSnapshot`). `useUtcDayKey` resets the
   // today-partial query window at each UTC rollover (see hook
   // definition below for the polling rationale).
-  const utcDayKey = useUtcDayKey();
+  const utcDayKey = useUtcDayKey(initialUtcDayKey);
   const todayMidnight = utcDayKey * SECONDS_PER_DAY;
   const expectedChainIds = useMemo(
     () => new Set(networkData.map((n) => n.network.chainId)),
@@ -754,18 +766,18 @@ function useVolumeWindowTradersSnapshot() {
 // midnight would keep querying `TraderDailySnapshot` from the
 // original day forever and eventually hit the `limit: 1000`
 // truncation as the slice grew multi-day.
-function useUtcDayKey(): number {
-  const [key, setKey] = useState<number>(() =>
-    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY),
-  );
+function useUtcDayKey(initialKey: number): number {
+  const [key, setKey] = useState(initialKey);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const id = window.setInterval(() => {
+    const update = () => {
       setKey((prev) => {
         const next = Math.floor(Date.now() / 1000 / SECONDS_PER_DAY);
         return next === prev ? prev : next;
       });
-    }, 60_000);
+    };
+    update();
+    const id = window.setInterval(update, 60_000);
     return () => window.clearInterval(id);
   }, []);
   return key;

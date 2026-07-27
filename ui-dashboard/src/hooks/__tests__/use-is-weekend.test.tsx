@@ -5,7 +5,7 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isWeekend } from "@/lib/weekend";
-import { useIsWeekend } from "../use-is-weekend";
+import { useIsWeekend, useResolvedIsWeekend } from "../use-is-weekend";
 
 vi.mock("@/lib/weekend", () => ({ isWeekend: vi.fn() }));
 const mockIsWeekend = vi.mocked(isWeekend);
@@ -16,6 +16,10 @@ let previousActEnvironment: boolean | undefined;
 
 function Probe({ initialIsWeekend = false }: { initialIsWeekend?: boolean }) {
   return createElement("span", null, String(useIsWeekend(initialIsWeekend)));
+}
+
+function ResolvedProbe() {
+  return createElement("span", null, String(useResolvedIsWeekend()));
 }
 
 async function renderOnClient(
@@ -145,6 +149,63 @@ describe("useIsWeekend", () => {
       expect(container.textContent).toBe("false");
     } finally {
       act(() => root.unmount());
+    }
+  });
+});
+
+describe("useResolvedIsWeekend", () => {
+  beforeEach(() => {
+    previousActEnvironment = reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+    mockIsWeekend.mockReset();
+    mockIsWeekend.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT =
+      previousActEnvironment ?? false;
+    document.body.replaceChildren();
+  });
+
+  it("renders an unresolved snapshot on the server", () => {
+    expect(renderToStaticMarkup(createElement(ResolvedProbe))).toBe(
+      "<span>null</span>",
+    );
+    expect(mockIsWeekend).not.toHaveBeenCalled();
+  });
+
+  it("hydrates unresolved before using the live weekend clock", async () => {
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(createElement(ResolvedProbe));
+    document.body.appendChild(container);
+    mockIsWeekend.mockReturnValue(true);
+    const snapshots: Array<boolean | null> = [];
+    function HydrationProbe(): ReactNode {
+      const snapshot = useResolvedIsWeekend();
+      snapshots.push(snapshot);
+      return createElement("span", null, String(snapshot));
+    }
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    let root: Root | null = null;
+
+    try {
+      await act(async () => {
+        root = hydrateRoot(container, createElement(HydrationProbe));
+        await Promise.resolve();
+      });
+
+      expect(consoleError).not.toHaveBeenCalled();
+      expect(snapshots[0]).toBeNull();
+      expect(container.textContent).toBe("true");
+    } finally {
+      consoleError.mockRestore();
+      if (root) {
+        act(() => {
+          (root as Root).unmount();
+        });
+      }
     }
   });
 });

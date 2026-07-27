@@ -26,6 +26,8 @@ import { stripChainIdFromPoolId } from "@/lib/pool-id";
 export function useRebalanceCheck(
   pool: Pool | null,
   network: Network,
+  nowSeconds: number | null,
+  isWeekendNow: boolean | null,
 ): {
   data: RebalanceCheckResult | null;
   isLoading: boolean;
@@ -34,7 +36,9 @@ export function useRebalanceCheck(
   // Also gate on rpcUrl client-side — the server returns 400 when it's
   // missing, and without this guard every SWR refresh burns a guaranteed
   // failing request that would then surface as "Diagnostics unavailable".
-  const shouldCheck = shouldRunCheck(pool, network.chainId) && !!network.rpcUrl;
+  const shouldCheck =
+    shouldRunCheck(pool, network.chainId, nowSeconds, isWeekendNow) &&
+    !!network.rpcUrl;
   const key = shouldCheck
     ? `/api/rebalance-check?network=${encodeURIComponent(network.id)}&pool=${encodeURIComponent(stripChainIdFromPoolId(pool!.id))}&strategy=${encodeURIComponent(pool!.rebalancerAddress!)}`
     : null;
@@ -65,7 +69,16 @@ export function useRebalanceCheck(
   };
 }
 
-function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {
+function shouldRunCheck(
+  pool: Pool | null,
+  chainId: number | undefined,
+  nowSeconds: number | null,
+  isWeekendNow: boolean | null,
+): boolean {
+  // Server and hydration renders intentionally have no live clock. Do not make
+  // an RPC request from a synthetic freshness fallback; the browser retries as
+  // soon as useNowSeconds resolves after mount.
+  if (nowSeconds === null) return false;
   if (!pool) return false;
   if (isVirtualPool(pool)) return false;
   if (!pool.rebalancerAddress) return false;
@@ -76,7 +89,7 @@ function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {
   if (pool.hasHealthData !== true) return false;
 
   // Pass chainId so chain-aware staleness thresholds are used (e.g. Monad = 360s)
-  const health = computeHealthStatus(pool, chainId);
+  const health = computeHealthStatus(pool, chainId, nowSeconds, isWeekendNow);
   // WEEKEND = expected oracle staleness during FX market closure, not actionable.
   // HALTED = a price breaker tripped, so swaps are paused — a rebalance probe is
   // moot (and can't execute) until it resets.

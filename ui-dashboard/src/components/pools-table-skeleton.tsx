@@ -25,9 +25,8 @@
 // The pools table's row source (`buildGlobalPoolEntries`, fed by
 // `useAllNetworksData`) is runtime GraphQL data from the indexer per chain,
 // not a static list — @mento-protocol/config has no pool registry to derive
-// a count from statically. 27 approximates the current live pool count
-// (repo guidance: ~30-50 pools at current scale); nudge this constant if the
-// live count drifts materially from that.
+// a count from statically. 27 approximates the 27 pools measured on 2026-07-14;
+// nudge this constant if the live count drifts materially from that.
 export const POOLS_TABLE_SKELETON_ROWS = 27;
 
 const POOLS_TABLE_HEADER_HEIGHT_PX = 45;

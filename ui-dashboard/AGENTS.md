@@ -47,19 +47,29 @@ Use package scripts in `package.json` or the root command reference in
 `../indexer-envio/schema.graphql`, or `../scripts/envio-schema-stubs.graphql`.
 Keep runtime Zod guards for hosted-Hasura rollout drift.
 
-## Browser Target — ES2017, No Polyfill
+## Browser Target — Explicit Runtime Floor, No Blocklist Polyfills
 
-Client code targets ES2017 with no polyfill. Do not use `toSorted`,
-`toReversed`, `toSpliced`, `findLast`, `findLastIndex`, `Array.prototype.with`,
-`Object.groupBy`, `String.prototype.isWellFormed`, or another newer runtime API
-merely because `lib: esnext` supplies types. Use `sortedCopy` from
-`@/lib/immutable-sort` for immutable sorting; lint bans the unsafe array APIs.
+Client code is transpiled to ES2017. The app adds no polyfill for the closed
+blocklist below; Next.js still injects selected framework polyfills such as
+`fetch`, `URL`, and `Object.assign`. The runtime support floor is Chrome 111+,
+Edge 111+, Firefox 111+, and Safari 16.4+, pinned in `package.json`. APIs
+available across that floor are allowed, including `Array.prototype.at`,
+`findLast`, `findLastIndex`, `flatMap`, and `Promise.allSettled`.
 
-ES2023+ is allowed only in server-only API routes, OG helpers, and tests. Any
-module imported directly or transitively by a `"use client"` component ships to
-the browser. See
-[ADR 0023](../docs/adr/0023-es2017-no-polyfill.md) before changing the target,
-polyfill posture, or restriction.
+Lint blocks this closed set of known hazards in client-shipped code:
+`Array.prototype.toSorted`, `toReversed`, `toSpliced`, and `with`;
+`TypedArray.prototype.toSorted`, `toReversed`, and `with`;
+`Object.groupBy`, `Map.groupBy`, `String.prototype.isWellFormed`, and
+`String.prototype.toWellFormed`. Use `sortedCopy` from
+`@/lib/immutable-sort` for immutable sorting. Any module imported directly or
+transitively by a `"use client"` component ships to the browser; the lint rule
+exempts explicit server-only routes, OG helpers, and tests. The blocklist is
+not an exhaustive compatibility checker for every JavaScript built-in; update
+the policy and its regression fixtures before adding another API outside the
+browser floor.
+
+See [ADR 0023](../docs/adr/0023-es2017-no-polyfill.md) before changing the
+transpilation target, browser floor, polyfill posture, or restriction.
 
 ## Browser and Quality Verification
 

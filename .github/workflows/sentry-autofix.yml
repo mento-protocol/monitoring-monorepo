@@ -93,6 +93,12 @@ jobs:
   select:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # sentry-pipeline Environment (issue #1289): AUTOFIX_APP_PRIVATE_KEY is now an
+    # environment secret, so this job MUST declare the environment for its
+    # presence check to see it; the main-only deployment-branch policy also
+    # refuses a non-main workflow_dispatch before this job runs. (CLAUDE_CODE_OAUTH_TOKEN
+    # stays repo-level for claude.yml and resolves via the repo-level fallback here.)
+    environment: sentry-pipeline
     permissions:
       contents: read
       issues: read
@@ -423,6 +429,11 @@ jobs:
     # whole finalize matrix; each finalize entry decides from its OWN download (a
     # missing artifact fails only that entry).
     if: ${{ !cancelled() && needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
+    # sentry-pipeline Environment (issue #1289): AUTOFIX_APP_PRIVATE_KEY is now an
+    # environment secret, so this trusted job MUST declare the environment to mint
+    # the App token; the main-only deployment-branch policy enforces that the
+    # branch-push + PR-create credential is only ever reachable on main.
+    environment: sentry-pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:

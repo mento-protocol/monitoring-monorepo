@@ -77,6 +77,7 @@ const IDENTITY_REFERENCE_SPECIFICATIONS = [
     ]),
   },
 ];
+
 export function validateProviderInventory(blocks, errors) {
   const actual = blocks
     .filter(
@@ -407,6 +408,13 @@ export function referencesProductionApplier(block) {
   );
 }
 
+function referencesRoutineDeployer(block) {
+  return (
+    block.code.includes("google_service_account.metrics_bridge_deployer.") ||
+    block.code.includes("metrics-bridge-deployer")
+  );
+}
+
 export function referencesRefreshWif(block) {
   return (
     block.code.includes("google_service_account.terraform_refresh_readonly.") ||
@@ -445,40 +453,17 @@ export function validateProductionIdentity(
   errors,
   additionalAllowedGrantKeys = [],
 ) {
-  const legacyTokenCreator = requireBlock(
-    blocks,
-    "terraform/ci-wif.tf",
-    "google_service_account_iam_member",
-    "ci_alerts_org_terraform_token_creator",
-    errors,
-    "terraform: bootstrap legacy deployer token creator",
-  );
-  if (legacyTokenCreator) {
-    expectNoResourceMultiplicity(
-      legacyTokenCreator,
-      errors,
-      "terraform: bootstrap legacy deployer token creator",
-    );
-    expectString(
-      legacyTokenCreator,
-      "service_account_id",
-      `projects/${SEED_PROJECT_ID}/serviceAccounts/\${var.terraform_service_account}`,
-      errors,
-      "terraform: bootstrap legacy deployer token creator",
-    );
-    expectString(
-      legacyTokenCreator,
-      "role",
-      "roles/iam.serviceAccountTokenCreator",
-      errors,
-      "terraform: bootstrap legacy deployer token creator",
-    );
-    expectString(
-      legacyTokenCreator,
-      "member",
-      "serviceAccount:${google_service_account.metrics_bridge_deployer.email}",
-      errors,
-      "terraform: bootstrap legacy deployer token creator",
+  const routineDeployerTokenCreators = iamBlocks(blocks)
+    .filter(referencesRoutineDeployer)
+    .filter(
+      (block) =>
+        stringAttribute(block, "role") ===
+        "roles/iam.serviceAccountTokenCreator",
+    )
+    .map(blockKey);
+  if (routineDeployerTokenCreators.length > 0) {
+    errors.push(
+      `terraform: routine deployer Token Creator grants are forbidden after cutover: ${routineDeployerTokenCreators.sort().join(", ")}`,
     );
   }
 

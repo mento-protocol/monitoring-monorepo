@@ -273,7 +273,7 @@ export function renderAuditPacket(packet) {
         : null,
     ].filter(Boolean);
     lines.push(
-      `| \`${escapeCell(record.path)}\` | ${record.authority} / ${record.status} | ${record.doc_type} / ${record.scope} | ${escapeCell(record.owner)} | ${record.words.toLocaleString("en-US")} / ${record.inbound_links} | ${record.last_verified || "—"} / ${record.last_content_change || "—"} | ${signals.join(", ") || "—"} | _required_ | _required_ |`,
+      `| \`${escapeCell(record.path)}\` | ${record.authority} / ${record.status} | ${record.doc_type} / ${record.scope} | ${escapeCell(record.owner)}${record.canonical_sources?.length ? `; Sources: ${record.canonical_sources.map((source) => `\`${escapeCell(source)}\``).join("; ")}` : ""} | ${record.words.toLocaleString("en-US")} / ${record.inbound_links} | ${record.last_verified || "—"} / ${record.last_content_change || "—"} | ${signals.join(", ") || "—"} | _required_ | _required_ |`,
     );
   }
   lines.push("", "## Evidence details", "");

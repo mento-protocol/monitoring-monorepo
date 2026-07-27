@@ -21,6 +21,13 @@ resource "grafana_folder" "metrics_bridge" {
   uid   = "metrics-bridge"
 }
 
+resource "grafana_folder" "peg_monitoring" {
+  for_each = local.peg_alert_instances
+
+  title = "Peg Monitoring"
+  uid   = "peg-monitoring"
+}
+
 resource "grafana_folder" "indexer" {
   title = "Indexer"
   uid   = "indexer"

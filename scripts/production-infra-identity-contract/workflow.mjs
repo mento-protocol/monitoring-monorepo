@@ -9,7 +9,9 @@ import {
   SERVICE_AND_DRIFT_WORKFLOWS,
 } from "./constants.mjs";
 import { escapeRegExp, requireFile } from "./hcl.mjs";
+import { validateRefreshRouting } from "./refresh-routing.mjs";
 import {
+  isMapping,
   validateWorkflowDependencyInventory,
   validateWorkflowInventory,
 } from "./workflow-inventory.mjs";
@@ -89,10 +91,6 @@ function extractJobSteps(jobText) {
     end: starts[index + 1] ?? bodyEnd,
     text: jobText.slice(start, starts[index + 1] ?? bodyEnd),
   }));
-}
-
-function isMapping(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function hasExactProductionEnvironment(job) {
@@ -344,12 +342,17 @@ function variableOccurrences(contents, variableName) {
   return contextVariableOccurrences(contents, "vars", variableName);
 }
 
-function decodedVariableOccurrenceCount(root, variableName) {
+function decodedContextVariableOccurrenceCount(
+  root,
+  contextName,
+  variableName,
+) {
   const ancestors = new WeakSet();
 
   function visit(value) {
     if (typeof value === "string") {
-      return variableOccurrences(value, variableName).length;
+      return contextVariableOccurrences(value, contextName, variableName)
+        .length;
     }
     if (value === null || typeof value !== "object") return 0;
     if (ancestors.has(value)) return 0;
@@ -402,23 +405,30 @@ export function validateWorkflowContract(files, errors) {
     validateWorkflowInventory(workflowPath, parsedWorkflow, errors);
 
     const code = stripYamlComments(files[workflowPath]);
-    for (const refreshVariable of [
-      REFRESH_PROVIDER_VARIABLE,
-      REFRESH_SERVICE_ACCOUNT_VARIABLE,
-    ]) {
-      const decodedRefreshUses = decodedVariableOccurrenceCount(
-        parsedWorkflow,
-        refreshVariable,
-      );
-      if (
-        variableOccurrences(code, refreshVariable).length > 0 ||
-        decodedRefreshUses > 0
-      ) {
-        errors.push(
-          `${workflowPath}: vars.${refreshVariable} must not be used during bootstrap`,
-        );
-      }
-    }
+    validateRefreshRouting(
+      workflowPath,
+      parsedWorkflow,
+      {
+        sourceProvider: variableOccurrences(code, REFRESH_PROVIDER_VARIABLE)
+          .length,
+        sourceServiceAccount: variableOccurrences(
+          code,
+          REFRESH_SERVICE_ACCOUNT_VARIABLE,
+        ).length,
+        decodedProvider: decodedContextVariableOccurrenceCount(
+          parsedWorkflow,
+          "vars",
+          REFRESH_PROVIDER_VARIABLE,
+        ),
+        decodedServiceAccount: decodedContextVariableOccurrenceCount(
+          parsedWorkflow,
+          "vars",
+          REFRESH_SERVICE_ACCOUNT_VARIABLE,
+        ),
+        selectorCount: decodedContextVariableOccurrenceCount,
+      },
+      errors,
+    );
 
     const providerUses = variableOccurrences(
       code,
@@ -428,12 +438,14 @@ export function validateWorkflowContract(files, errors) {
       code,
       PRODUCTION_SERVICE_ACCOUNT_VARIABLE,
     );
-    const decodedProviderUses = decodedVariableOccurrenceCount(
+    const decodedProviderUses = decodedContextVariableOccurrenceCount(
       parsedWorkflow,
+      "vars",
       PRODUCTION_PROVIDER_VARIABLE,
     );
-    const decodedServiceAccountUses = decodedVariableOccurrenceCount(
+    const decodedServiceAccountUses = decodedContextVariableOccurrenceCount(
       parsedWorkflow,
+      "vars",
       PRODUCTION_SERVICE_ACCOUNT_VARIABLE,
     );
 

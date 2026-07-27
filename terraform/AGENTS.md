@@ -3,7 +3,7 @@ title: Terraform Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-23
 doc_type: agent-instructions
 scope: terraform
 review_interval_days: 90
@@ -45,27 +45,25 @@ garden_lane: agent-entry-points
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER`,
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
   `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
-  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The bootstrap must not route
-  workflows through the refresh selectors; a separate cutover-routing PR owns
-  that change while retaining the legacy Token Creator rollback grant.
+  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The four trusted-main plan
+  workflows and `terraform-drift.yml` route through the refresh selectors.
+  Routing is live, and run
+  [#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
+  completed the full-refresh proof. The legacy-authority removal, run drain,
+  and final IAM/WIF audit are complete.
 - Build trusted-main refresh access from curated non-basic project read roles;
   never use basic `roles/viewer`. Keep Secret Accessor limited to the exact
   Terraform-managed secrets and Storage Object Viewer limited to state and
   deployment-source buckets. Treat service data exposed by predefined readers
   (including logs, metrics, and artifacts) as part of the confidentiality
-  review. After the routing PR lands, prove the role set through its checked-in
-  `main` route with live full-refresh, unlocked plans for every CI-managed
-  Google-provider stack; add only the exact missing permission named by a
-  provider denial. Drain and audit those runs before authority removal.
-- Only a separate final removal PR may delete the routine deployer's
-  `org-terraform` Token Creator grant, and only through an explicitly approved
-  platform apply. Keep the PR that introduces the Peg-policy foundation
-  unmerged until that removal is applied, all queued and active runs drain, and
-  the final IAM audit confirms the old path is gone. Only then may the
-  foundation merge and receive its own explicitly approved platform apply.
-- Peg-policy access logs are audit telemetry, never an authorization control.
-  Before activation, audit effective readers on the policy and access-log
-  buckets.
+  review. The merged `main` route completed full-refresh, unlocked plans for
+  every CI-managed Google-provider stack. Add only an exact missing permission
+  named by a provider denial.
+- The Peg-policy foundation remains source-only until a separate reviewed,
+  human-approved platform plan and apply. It creates no policy object and does
+  not attach the runtime identity to Cloud Run. Peg-policy access logs are audit
+  telemetry, never an authorization control; audit effective readers on both
+  buckets before activation.
 
 ## Verification
 
