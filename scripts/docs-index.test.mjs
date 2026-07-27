@@ -189,7 +189,8 @@ test("Claude runtime registry gives all seven projections owned non-canonical me
     const rendered = renderDocumentationIndex(first, {
       lastVerified: "2026-07-17",
     });
-    assert.match(rendered, /Sources:/);
+    assert.match(rendered, /Authority: non-canonical/);
+    assert.match(rendered, /; sources:/);
     assert.match(rendered, /\[`AGENTS\.md`\]/);
   });
 });
@@ -566,7 +567,39 @@ test("render groups documents in deterministic lane order", () => {
         rendered.indexOf("## operator-runbooks"),
     );
     assert.ok(rendered.includes("`AGENTS.md`"));
+    assert.match(rendered, /Authority: unmanaged/);
+    assert.doesNotMatch(rendered, /\| Document \| Title \|/);
     assert.doesNotMatch(rendered, /unique documents|Words \/ inbound/);
+  });
+});
+
+test("render keeps ADR titles while using source paths for other documents", () => {
+  withRepo((repo) => {
+    write(
+      repo,
+      "docs/notes/example.md",
+      "---\ntitle: Example note\nstatus: archived\nowner: eng\ncanonical: false\ndoc_type: note\nscope: repo-wide\nreview_interval_days: 180\ngarden_lane: notes-plans-archive\n---\n# Example note\n",
+    );
+    write(
+      repo,
+      "docs/adr/0001-example.md",
+      "---\ntitle: Example decision\nstatus: active\nowner: eng\ncanonical: true\nlast_verified: 2026-07-17\ndoc_type: adr\nscope: repo-wide\nreview_interval_days: 90\ngarden_lane: adrs-architecture\n---\n# Example decision\n",
+    );
+    const inventory = buildDocumentationInventory({
+      repoRoot: repo,
+      files: ["docs/notes/example.md", "docs/adr/0001-example.md"],
+    });
+    const rendered = renderDocumentationIndex(inventory, {
+      lastVerified: "2026-07-17",
+    });
+    assert.match(
+      rendered,
+      /\[`docs\/adr\/0001-example\.md`\]\(adr\/0001-example\.md\) — Example decision/,
+    );
+    assert.match(
+      rendered,
+      /\[`docs\/notes\/example\.md`\]\(notes\/example\.md\) \(archived\)(?! —)/,
+    );
   });
 });
 

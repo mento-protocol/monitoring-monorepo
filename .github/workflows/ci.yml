@@ -980,7 +980,10 @@ jobs:
       - name: Documentation navigation fixture contract
         run: pnpm docs:navigation-eval -- --check-fixtures
       - name: Documentation navigation committed baseline
-        run: pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json
+        run: >-
+          pnpm docs:navigation-eval -- --validate
+          docs/evals/documentation-navigation-baseline.json
+          --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
       - name: Agent context budget tests
         run: pnpm agent:context-budget:test
       - name: Enforce agent context budgets
