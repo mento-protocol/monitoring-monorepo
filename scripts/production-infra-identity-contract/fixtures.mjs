@@ -1,5 +1,14 @@
 import { readFileSync } from "node:fs";
 import { dump as dumpYaml } from "js-yaml";
+import {
+  DRIFT_REFRESH_CONDITION,
+  GOOGLE_AUTH_ACTION,
+  PLAN_JOB_CONDITION,
+  PLAN_PROVIDER_TARGET,
+  PR_PLAN_TARGETS,
+  REFRESH_TARGET_EMAIL,
+  TRUSTED_REFRESH_CONDITION,
+} from "./constants.mjs";
 import { protectedApplyJobInventory } from "./workflow-inventory.mjs";
 
 const commonRoles = [
@@ -106,12 +115,6 @@ resource "google_service_account_iam_member" "production_infra_applier_org_terra
   service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/$\{var.terraform_service_account}"
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:$\{google_service_account.production_infra_applier.email}"
-}
-
-resource "google_service_account_iam_member" "ci_alerts_org_terraform_token_creator" {
-  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/$\{var.terraform_service_account}"
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:$\{google_service_account.metrics_bridge_deployer.email}"
 }
 
 resource "google_service_account" "terraform_refresh_readonly" {
@@ -226,24 +229,83 @@ ${Object.entries(entries)
 `;
 }
 
+const refreshProvider =
+  "${{ vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER }}";
+const refreshServiceAccount =
+  "${{ vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT }}";
+
+function planRunFixture(workflowPath) {
+  const targetFlags = PR_PLAN_TARGETS.get(workflowPath)
+    .map((target) => ` -target=${target}`)
+    .join("");
+  return `set +e
+if [ "$EVENT_NAME" = "pull_request" ]; then
+  terraform plan -detailed-exitcode -no-color -input=false -lock=false -refresh=false${targetFlags} > /tmp/tf-plan.raw 2>&1
+else
+  terraform plan -detailed-exitcode -no-color -input=false -lock=false > /tmp/tf-plan.raw 2>&1
+fi
+`;
+}
+
+function routedPlanJobFixture(workflowPath) {
+  const job = {
+    "runs-on": "ubuntu-latest",
+    if: PLAN_JOB_CONDITION,
+    steps: [
+      {
+        name: "Authenticate PR plan to Google Cloud",
+        if: "github.event_name == 'pull_request'",
+        uses: GOOGLE_AUTH_ACTION,
+        with: {
+          workload_identity_provider:
+            "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}",
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT_PLAN }}",
+        },
+      },
+      {
+        name: "Authenticate trusted-main refresh to Google Cloud",
+        if: TRUSTED_REFRESH_CONDITION,
+        uses: GOOGLE_AUTH_ACTION,
+        with: {
+          workload_identity_provider: refreshProvider,
+          service_account: refreshServiceAccount,
+        },
+      },
+      {
+        name: "Init PR plan backend",
+        if: "github.event_name == 'pull_request'",
+        run: 'terraform init -input=false -backend-config="impersonate_service_account=org-terraform-plan-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"',
+      },
+      {
+        name: "Init trusted-main refresh backend",
+        if: TRUSTED_REFRESH_CONDITION,
+        run: `terraform init -input=false -backend-config="impersonate_service_account=${REFRESH_TARGET_EMAIL}"`,
+      },
+      {
+        name: "Plan",
+        id: "plan",
+        env: {
+          EVENT_NAME: "${{ github.event_name }}",
+        },
+        run: planRunFixture(workflowPath),
+      },
+    ],
+  };
+  if (
+    workflowPath === ".github/workflows/alerts-infra.yml" ||
+    workflowPath === ".github/workflows/governance-watchdog.yml"
+  ) {
+    job.env = { TF_VAR_terraform_service_account: PLAN_PROVIDER_TARGET };
+  }
+  return job;
+}
+
 function applyWorkflowFixture(workflowPath) {
   return dumpYaml(
     {
       name: "Terraform fixture",
       jobs: {
-        plan: {
-          "runs-on": "ubuntu-latest",
-          steps: [
-            {
-              uses: "google-github-actions/auth@pinned",
-              with: {
-                workload_identity_provider:
-                  "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}",
-                service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}",
-              },
-            },
-          ],
-        },
+        plan: routedPlanJobFixture(workflowPath),
         apply: protectedApplyJobInventory(workflowPath),
       },
     },
@@ -352,6 +414,45 @@ export function validFixtureFiles() {
       name: production-services
       url: https://mento-monitoring.uc.r.appspot.com
 `,
-    ".github/workflows/terraform-drift.yml": "jobs:\n  drift:\n",
+    ".github/workflows/terraform-drift.yml": dumpYaml(
+      {
+        jobs: {
+          "drift-check": {
+            "runs-on": "ubuntu-latest",
+            if: DRIFT_REFRESH_CONDITION,
+            env: {
+              TF_VAR_terraform_service_account: REFRESH_TARGET_EMAIL,
+            },
+            steps: [
+              {
+                name: "Authenticate trusted-main refresh to Google Cloud",
+                uses: GOOGLE_AUTH_ACTION,
+                with: {
+                  workload_identity_provider: refreshProvider,
+                  service_account: refreshServiceAccount,
+                },
+              },
+              {
+                name: "Init trusted-main refresh backend",
+                run: `terraform init -input=false -backend-config="impersonate_service_account=${REFRESH_TARGET_EMAIL}"`,
+              },
+              {
+                name: "Plan",
+                id: "plan",
+                env: {
+                  STACK_ID: "${{ matrix.id }}",
+                },
+                run: "terraform plan -detailed-exitcode -no-color -input=false -lock=false > /tmp/tf-plan.raw 2>&1\n",
+              },
+            ],
+          },
+        },
+      },
+      {
+        lineWidth: -1,
+        noCompatMode: true,
+        noRefs: true,
+      },
+    ),
   };
 }

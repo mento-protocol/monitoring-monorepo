@@ -92,7 +92,6 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       '"serviceAccount:${google_service_account.metrics_bridge_deployer.email}"',
     blocks: [
       "terraform/ci-wif.tf:google_project_iam_member.ci_deployer",
-      "terraform/ci-wif.tf:google_service_account_iam_member.ci_alerts_org_terraform_token_creator",
       "terraform/ci-wif.tf:google_service_account_iam_member.ci_appengine_default_service_account_user",
     ],
   },
@@ -258,7 +257,6 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/agent-readonly.tf:google_project_iam_member.agent_readonly_storage_object_viewer|711050d13fd79a3a8824657145fe93b3453c1d7b6ffbe31ebdf7e658c3a3398f",
   "terraform/agent-readonly.tf:google_service_account_iam_member.agent_readonly_token_creators|70839f6d974946314e5657a18e65df3afff646801c915595ed125f619557f188",
   "terraform/ci-wif.tf:google_project_iam_member.ci_deployer|baeabc756e63cb7199f2e4cbb227eb457e10e5239e95cb0232ee8591a9b34f9b",
-  "terraform/ci-wif.tf:google_service_account_iam_member.ci_alerts_org_terraform_token_creator|9a92def649ccee67f6f6c820842138698834b7aeafed4b50c8f802d63ea8e359,9fdb25d39e0a61872f93aed03d6f089c8775c6228592d16b58b9f8fcf6c13e9d",
   "terraform/ci-wif.tf:google_service_account_iam_member.ci_appengine_default_service_account_user|5abbcb1b4d14a91e5cba70cf7a81af90be95754f83f2d8d15581e68794b3ee0b",
   "terraform/ci-wif.tf:google_service_account_iam_member.ci_plan_readonly_org_terraform_plan_readonly_token_creator|12f23643afcc9349e76c1c0c2972acb6145adf62388c784b6f3602c530474541",
   "terraform/ci-wif.tf:google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator|4a6e6bd58072639804c56a55a26356285a19b8d8eec83ac8732102e988e6979c",

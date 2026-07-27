@@ -1,10 +1,14 @@
 import { getRpcClient } from "../rpc.js";
 import {
+  fetchBitvavoListing,
   fetchBitvavoObservation,
+  type BitvavoListingRequest,
   type BitvavoObservationRequest,
 } from "./adapters/bitvavo.js";
 import {
+  fetchKrakenListing,
   fetchKrakenObservation,
+  type KrakenListingRequest,
   type KrakenObservationRequest,
 } from "./adapters/kraken.js";
 import {
@@ -23,6 +27,14 @@ import {
   type PegPollCycleInput,
   type PegPollSourceState,
 } from "./poll-cycle.js";
+import {
+  acceptRecordedListingCheck,
+  cadenceDue,
+  createListingCheckRecorder,
+  fetchListing,
+  listingCadenceDue,
+  pollListingOnly as pollListingCheckOnly,
+} from "./listing-poller.js";
 import { publishPegPollSnapshot } from "./publisher.js";
 import type { PegDecisionPackagePublicationContext } from "./decision-packages.js";
 import type {
@@ -51,7 +63,6 @@ import type {
   PegObservation,
   RecordListingCheck,
 } from "./types.js";
-import { MARKET_STATES } from "./types.js";
 
 export const MAX_PROVIDER_CLOCK_SKEW_MS = 60_000;
 
@@ -92,6 +103,12 @@ export interface PegPollerDependencies {
     request: BitvavoObservationRequest,
   ) => Promise<PegObservation>;
   fetchKraken?: (request: KrakenObservationRequest) => Promise<PegObservation>;
+  fetchBitvavoListing?: (
+    request: BitvavoListingRequest,
+  ) => Promise<AuthoritativeListingCheck>;
+  fetchKrakenListing?: (
+    request: KrakenListingRequest,
+  ) => Promise<AuthoritativeListingCheck>;
   readConversionLeg?: (
     conversion: PegConversion,
     nowSeconds: number,
@@ -125,6 +142,12 @@ interface Dependencies {
   fetchStructuralContext: typeof fetchPegStructuralContext;
   fetchBitvavo: (request: BitvavoObservationRequest) => Promise<PegObservation>;
   fetchKraken: (request: KrakenObservationRequest) => Promise<PegObservation>;
+  fetchBitvavoListing:
+    | ((request: BitvavoListingRequest) => Promise<AuthoritativeListingCheck>)
+    | null;
+  fetchKrakenListing:
+    | ((request: KrakenListingRequest) => Promise<AuthoritativeListingCheck>)
+    | null;
   readConversionLeg: (
     conversion: PegConversion,
     nowSeconds: number,
@@ -145,6 +168,7 @@ const sortedEntries = <Value>(record: Record<string, Value>) =>
 
 const defaultSourceState = (): SourceState => ({
   lastAttemptAt: null,
+  listingLastAttemptAt: null,
   lastObservationAt: null,
   identitiesAtLastObservationAt: new Set(),
   observation: null,
@@ -167,6 +191,16 @@ const defaultReadConversionLeg = async (
   return readPegConversionLeg(conversion, client, nowSeconds);
 };
 
+function resolveListingDependency<Request>(
+  listing:
+    | ((request: Request) => Promise<AuthoritativeListingCheck>)
+    | undefined,
+  observation: unknown,
+  fallback: (request: Request) => Promise<AuthoritativeListingCheck>,
+): ((request: Request) => Promise<AuthoritativeListingCheck>) | null {
+  return listing ?? (observation === undefined ? fallback : null);
+}
+
 const resolveDependencies = (input: PegPollerDependencies): Dependencies => {
   const report: ReportError = (kind, cause, location = {}) => {
     try {
@@ -187,6 +221,20 @@ const resolveDependencies = (input: PegPollerDependencies): Dependencies => {
       input.fetchStructuralContext ?? fetchPegStructuralContext,
     fetchBitvavo: input.fetchBitvavo ?? fetchBitvavoObservation,
     fetchKraken: input.fetchKraken ?? fetchKrakenObservation,
+    // Explicit listing dependencies serve independent listing-only requests.
+    // Ordinary due observation adapters report through onListingChecked, so
+    // they do not trigger a duplicate provider listing call. Replaced
+    // observation adapters must opt in so a mock never reaches real traffic.
+    fetchBitvavoListing: resolveListingDependency(
+      input.fetchBitvavoListing,
+      input.fetchBitvavo,
+      fetchBitvavoListing,
+    ),
+    fetchKrakenListing: resolveListingDependency(
+      input.fetchKrakenListing,
+      input.fetchKraken,
+      fetchKrakenListing,
+    ),
     readConversionLeg: input.readConversionLeg ?? defaultReadConversionLeg,
     publish: input.publish ?? publishPegPollSnapshot,
     report,
@@ -290,7 +338,7 @@ type PollSourceInput = {
 };
 
 type SourceSnapshotContent = {
-  referenceSize: number;
+  referenceSize: number | null;
   observation: PegObservation | null;
   newSuccess: boolean;
 };
@@ -340,6 +388,25 @@ function referenceSize(
   );
 }
 
+function sourceCadences(
+  state: SourceState,
+  input: PollSourceInput,
+): { observationCadenceDue: boolean; listingCadenceDue: boolean } {
+  const { context, policy } = input;
+  return {
+    observationCadenceDue: cadenceDue(
+      state.lastAttemptAt,
+      context.nowSeconds,
+      policy.pollIntervalSeconds,
+    ),
+    listingCadenceDue: listingCadenceDue(
+      state,
+      context.nowSeconds,
+      policy.pollIntervalSeconds,
+    ),
+  };
+}
+
 function fetchSource(
   input: PollSourceInput,
   refSize: number,
@@ -378,9 +445,15 @@ function cachedObservation(
   policy: PegSourcePolicy,
   context: CycleContext,
 ): PegObservation | null {
-  if (state.observation?.venueState === "halted") {
-    return state.observation;
+  // An explicit absence is newer authoritative evidence than a retained halt
+  // diagnostic. A halted listing still retains a halted observation, but
+  // cannot retain an executable cached book.
+  if (state.listingState === "absent") {
+    clearSource(state, state.referenceSize);
+    return null;
   }
+  if (state.observation?.venueState === "halted") return state.observation;
+  if (state.listingState === "halted") clearSource(state, state.referenceSize);
   const conversionFresh =
     source.convertVia === undefined ||
     (state.conversionValidUntil !== null &&
@@ -548,92 +621,47 @@ function acceptDueObservation(
   });
 }
 
-function acceptListingCheck(
-  state: SourceState,
-  check: AuthoritativeListingCheck | undefined,
-  listingAbsentConsecutiveCheckLimit: number,
-  cadenceDue: boolean,
-): Error | null {
-  if (check === undefined) return null;
-  if (!Number.isFinite(check.checkedAt) || check.checkedAt < 0) {
-    return new Error("listing check time must be finite and non-negative");
-  }
-  if (!MARKET_STATES.includes(check.state)) {
-    return new Error("listing check state is unsupported");
-  }
-  if (
-    state.listingCheckedAt !== null &&
-    check.checkedAt < state.listingCheckedAt
-  ) {
-    return new Error("listing check timestamp regressed");
-  }
-  const listingAbsentConsecutiveChecks =
-    check.state !== "absent"
-      ? 0
-      : state.listingState !== "absent"
-        ? 1
-        : cadenceDue
-          ? Math.min(
-              state.listingAbsentConsecutiveChecks + 1,
-              listingAbsentConsecutiveCheckLimit,
-            )
-          : state.listingAbsentConsecutiveChecks;
-  state.listingState = check.state;
-  state.listingCheckedAt = check.checkedAt;
-  state.listingAbsentConsecutiveChecks = listingAbsentConsecutiveChecks;
-  return null;
-}
-
-function acceptRecordedListingCheck(
+async function pollListingOnly(
   input: PollSourceInput,
   state: SourceState,
-  listingChecks: AuthoritativeListingCheck[],
-  cadenceDue: boolean,
-): Error | null {
-  return acceptListingCheck(
+  listingCadenceDue: boolean,
+): Promise<boolean> {
+  if (!listingCadenceDue) return true;
+  const request = fetchListing(input.source, input.context.dependencies);
+  return pollListingCheckOnly({
     state,
-    listingChecks[0],
-    effectiveListingAbsentConsecutiveChecks(input.policy),
-    cadenceDue,
-  );
-}
-
-function listingCheckRecorder(): {
-  listingChecks: AuthoritativeListingCheck[];
-  onListingChecked: RecordListingCheck;
-} {
-  const listingChecks: AuthoritativeListingCheck[] = [];
-  return {
-    listingChecks,
-    onListingChecked: (check) => {
-      if (listingChecks.length !== 0) {
-        throw new Error("provider emitted more than one listing check");
-      }
-      if (!Number.isFinite(check.checkedAt) || check.checkedAt < 0) {
-        throw new Error("listing check time must be finite and non-negative");
-      }
-      listingChecks.push({ ...check });
-    },
-  };
+    nowSeconds: input.context.nowSeconds,
+    listingCadenceIsDue: listingCadenceDue,
+    request,
+    listingAbsentConsecutiveCheckLimit: effectiveListingAbsentConsecutiveChecks(
+      input.policy,
+    ),
+    report: (cause) =>
+      input.context.dependencies.report("source_fetch", cause, {
+        asset: input.assetId,
+        source: input.source.id,
+      }),
+  });
 }
 
 async function pollDueSource(
   input: PollSourceInput,
   state: SourceState,
   refSize: number,
-  cadenceDue: boolean,
+  listingCadenceDue: boolean,
 ): Promise<PegSourceMetricSnapshot> {
   state.lastAttemptAt = input.context.nowSeconds;
-  const { listingChecks, onListingChecked } = listingCheckRecorder();
+  if (listingCadenceDue) state.listingLastAttemptAt = input.context.nowSeconds;
+  const { listingChecks, onListingChecked } = createListingCheckRecorder();
   let rawObservation: PegObservation;
   try {
     rawObservation = await fetchSource(input, refSize, onListingChecked);
   } catch (cause) {
     const listingError = acceptRecordedListingCheck(
-      input,
       state,
       listingChecks,
-      cadenceDue,
+      effectiveListingAbsentConsecutiveChecks(input.policy),
+      listingCadenceDue,
     );
     const supported =
       input.source.provider === "bitvavo" || input.source.provider === "kraken";
@@ -643,10 +671,10 @@ async function pollDueSource(
     });
   }
   const listingError = acceptRecordedListingCheck(
-    input,
     state,
     listingChecks,
-    cadenceDue,
+    effectiveListingAbsentConsecutiveChecks(input.policy),
+    listingCadenceDue,
   );
   if (listingError !== null) {
     return failSource(input, state, refSize, {
@@ -686,18 +714,28 @@ async function pollSource(
     input.structural,
     input.policy.referenceSizeCap,
   );
-  const cadenceDue =
-    state.lastAttemptAt === null ||
-    input.context.nowSeconds - state.lastAttemptAt >=
-      input.policy.pollIntervalSeconds;
+  const { observationCadenceDue, listingCadenceDue } = sourceCadences(
+    state,
+    input,
+  );
   if (refSize === null) {
-    return snapshotWithoutReferenceSize(input, state, cadenceDue);
+    return snapshotWithoutReferenceSize(
+      input,
+      state,
+      observationCadenceDue,
+      listingCadenceDue,
+    );
   }
   // A changed binding reference size requires an immediate new decision even
   // inside the ordinary cadence window.
-  const due = cadenceDue || state.referenceSize !== refSize;
+  const due = observationCadenceDue || state.referenceSize !== refSize;
   if (due) {
-    const snapshot = await pollDueSource(input, state, refSize, cadenceDue);
+    const snapshot = await pollDueSource(
+      input,
+      state,
+      refSize,
+      listingCadenceDue,
+    );
     if (input.blindConsecutivePollLimit !== null) {
       updateBlindConsecutivePolls(
         state,
@@ -707,6 +745,8 @@ async function pollSource(
     }
     return snapshot;
   }
+
+  await pollListingOnly(input, state, listingCadenceDue);
 
   const observation = cachedObservation(
     state,
@@ -721,18 +761,29 @@ async function pollSource(
   });
 }
 
-function snapshotWithoutReferenceSize(
+async function snapshotWithoutReferenceSize(
   input: PollSourceInput,
   state: SourceState,
-  cadenceDue: boolean,
-): PegSourceMetricSnapshot | null {
-  if (input.blindConsecutivePollLimit !== null && cadenceDue) {
+  observationCadenceDue: boolean,
+  listingCadenceDue: boolean,
+): Promise<PegSourceMetricSnapshot | null> {
+  if (input.blindConsecutivePollLimit !== null && observationCadenceDue) {
     state.lastAttemptAt = input.context.nowSeconds;
     updateBlindConsecutivePolls(state, input.blindConsecutivePollLimit, false);
   }
+  const listingAvailable = await pollListingOnly(
+    input,
+    state,
+    listingCadenceDue,
+  );
   if (state.referenceSize === null) {
     clearSource(state, null);
-    return null;
+    if (!listingAvailable && state.listingState === null) return null;
+    return sourceSnapshot(input, state, {
+      referenceSize: null,
+      observation: null,
+      newSuccess: false,
+    });
   }
   const observation = cachedObservation(
     state,

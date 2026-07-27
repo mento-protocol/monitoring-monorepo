@@ -1535,6 +1535,44 @@ test("trading-mode alerts keep incidents open across short flaps", () => {
   );
 });
 
+test("CLI recognizes gauges registered by the peg listing module", () => {
+  const dir = mkdtempSync(join(tmpdir(), "alert-rules-lint-test-"));
+  try {
+    writeFileSync(
+      join(dir, "peg-listing.tf"),
+      [
+        "locals {",
+        '  peg_active_listing_promql = "mento_peg_listing_state{asset=\\"europ-schuman\\",source=\\"bitvavo_eur\\",state=\\"absent\\",policy_version=\\"${local.peg_active_policy_version}\\"}"',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const result = runCli({
+      env: {
+        ALERT_RULES_LINT_RULES_DIR: dir,
+        ALERT_RULES_LINT_PEG_POLICY: path.resolve(
+          __dirname,
+          "..",
+          "alerts/rules/peg-thresholds.json",
+        ),
+        ALERT_RULES_LINT_PEG_REGISTRY: path.resolve(
+          __dirname,
+          "..",
+          "metrics-bridge/peg-registry.json",
+        ),
+        ALERT_RULES_LINT_MIN_EXPRESSIONS: "1",
+        ALERT_RULES_LINT_MIN_REFERENCED: "1",
+      },
+    });
+    assert(
+      result.status === 0,
+      `expected exit 0, got ${result.status}: ${result.stderr}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI reports parse failures and unknown bridge metrics", () => {
   const dir = mkdtempSync(join(tmpdir(), "alert-rules-lint-test-"));
   try {

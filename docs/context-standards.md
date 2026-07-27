@@ -3,7 +3,7 @@ title: Agent Context Standards
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 doc_type: reference
 scope: repo-wide
 review_interval_days: 90
@@ -63,10 +63,13 @@ The catalog makes documents discoverable; it does not promote them. Its
 `canonical`, `non-canonical`, and `unmanaged` labels are derived from each
 document's metadata under the authority rules above.
 
-The committed catalog intentionally contains stable navigation metadata only.
-Volatile analytics such as word counts and inbound-link counts remain available
-from `pnpm docs:index --json` and `pnpm docs:audit`; they are not committed into
-the catalog, so prose-only edits do not churn this shared file.
+The committed catalog intentionally stays lean: lane headings, authority labels,
+navigable source paths, ADR titles for numeric decision records, non-active
+lifecycle markers, and runtime-source pointers. Full metadata remains in each
+document and the JSON inventory. Volatile analytics such as word counts and
+inbound-link counts remain available from `pnpm docs:index --json` and
+`pnpm docs:audit`; they are not committed into the catalog, so prose-only edits
+do not churn this shared file.
 
 ## Metadata Contract
 
@@ -94,6 +97,23 @@ path defaults tested in `scripts/docs-index-helpers.mjs`; explicit metadata can
 override those defaults. Canonical context normally uses a 90-day semantic
 review interval. Classification controls routing and gardening only; it never
 overrides `canonical` authority.
+
+### Claude runtime registry
+
+Claude agents, commands, and security-review guidance use runtime-specific
+frontmatter or prompt text. Do not add generic documentation metadata to those
+files. Their seven supported paths are instead registered in
+[`claude-runtime-document-registry.json`](claude-runtime-document-registry.json).
+Each entry is non-canonical, active, owned, classified, and points to one or
+more canonical sources. The catalog and garden packet render those pointers so
+runtime projections do not become an authority source themselves.
+
+When adding, removing, or moving one of those runtime files, update the
+registry in the same change. `pnpm docs:index --check`, `pnpm docs:audit`, and
+`pnpm agent:context-check` fail if the registry is incomplete, has an invalid
+entry or source, or no longer matches the proposed runtime-file set. Keep this
+registry limited to its seven named Claude runtime documents; use normal
+frontmatter for other managed Markdown.
 
 ## Placement Rules
 

@@ -38,7 +38,12 @@ const pegPolicyPath =
 const pegRegistryPath =
   process.env.ALERT_RULES_LINT_PEG_REGISTRY ??
   path.join(repoRoot, "metrics-bridge/peg-registry.json");
-const GAUGE_SOURCE_FILES = ["metrics.ts", "cdp-metrics.ts", "peg/metrics.ts"];
+const GAUGE_SOURCE_FILES = [
+  "metrics.ts",
+  "cdp-metrics.ts",
+  "peg/metrics.ts",
+  "peg/listing-metrics.ts",
+];
 const LITERAL_PERCENT = "__ALERT_RULES_LINT_LITERAL_PERCENT__";
 
 const POLICY_BUNDLE_KEYS = ["schemaVersion", "active", "previous"];

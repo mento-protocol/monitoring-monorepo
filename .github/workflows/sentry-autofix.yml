@@ -93,6 +93,12 @@ jobs:
   select:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # sentry-pipeline Environment (issue #1289): AUTOFIX_APP_PRIVATE_KEY is now an
+    # environment secret, so this job MUST declare the environment for its
+    # presence check to see it; the main-only deployment-branch policy also
+    # refuses a non-main workflow_dispatch before this job runs. (CLAUDE_CODE_OAUTH_TOKEN
+    # stays repo-level for claude.yml and resolves via the repo-level fallback here.)
+    environment: sentry-pipeline
     permissions:
       contents: read
       issues: read
@@ -297,7 +303,7 @@ jobs:
             echo 'SENTRY_AUTOFIX_PROMPT_EOF'
           } >> "${GITHUB_OUTPUT}"
 
-      - uses: anthropics/claude-code-action@12531344451323133b0493233c759991ac61da12 # v1.0.174
+      - uses: anthropics/claude-code-action@b76a0776ae74036e77cd11018083743453d7ad35 # v1.0.179
         if: ${{ matrix.entry.reconcile != true }}
         with:
           github_token: ${{ github.token }}
@@ -423,6 +429,11 @@ jobs:
     # whole finalize matrix; each finalize entry decides from its OWN download (a
     # missing artifact fails only that entry).
     if: ${{ !cancelled() && needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
+    # sentry-pipeline Environment (issue #1289): AUTOFIX_APP_PRIVATE_KEY is now an
+    # environment secret, so this trusted job MUST declare the environment to mint
+    # the App token; the main-only deployment-branch policy enforces that the
+    # branch-push + PR-create credential is only ever reachable on main.
+    environment: sentry-pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -491,7 +502,7 @@ jobs:
       # other finalize entries.
       - name: Download agent working tree
         if: ${{ matrix.entry.reconcile != true }}
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sentry-autofix-worktree-${{ matrix.entry.issue }}
           path: ${{ runner.temp }}/dl

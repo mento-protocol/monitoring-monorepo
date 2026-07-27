@@ -6,6 +6,7 @@ import {
 } from "../order-book.js";
 import type {
   AdapterRuntime,
+  AuthoritativeListingCheck,
   BookLevel,
   MarketState,
   ObservationPolicy,
@@ -35,6 +36,10 @@ type JsonRecord = Record<string, unknown>;
 export interface BitvavoObservationRequest extends ObservationPolicy {
   market: string;
   onListingChecked?: RecordListingCheck;
+}
+
+export interface BitvavoListingRequest {
+  market: string;
 }
 
 const asRecord = (value: unknown, field: string): JsonRecord => {
@@ -236,4 +241,24 @@ export const fetchBitvavoObservation = async (
     observationAt: book.observationAt,
     sequence: book.sequence,
   });
+};
+
+/** Fetch only the bounded, authoritative exact-market listing evidence. */
+export const fetchBitvavoListing = async (
+  request: BitvavoListingRequest,
+  runtime: AdapterRuntime = {},
+): Promise<AuthoritativeListingCheck> => {
+  const fetch = runtime.fetch ?? globalThis.fetch;
+  const sleep = runtime.sleep ?? defaultSleep;
+  const payload = await fetchBoundedJson({
+    url: marketUrl(request.market),
+    fetch,
+    sleep,
+    timeoutMs: BITVAVO_TIMEOUT_MS,
+    maxResponseBytes: BITVAVO_MAX_RESPONSE_BYTES,
+  });
+  return {
+    state: parseBitvavoMarketState(payload, request.market),
+    checkedAt: (runtime.now ?? Date.now)(),
+  };
 };

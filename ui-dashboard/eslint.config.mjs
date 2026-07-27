@@ -10,8 +10,200 @@ import sonarjs from "eslint-plugin-sonarjs";
 import globals from "globals";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import ts from "typescript";
+import browserApiPolicy from "./browser-api-policy.json" with { type: "json" };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const symbolAwareRestrictions = browserApiPolicy.restrictions;
+const TYPED_ARRAY_INTERFACE_NAMES = new Set([
+  "BigInt64Array",
+  "BigUint64Array",
+  "Float16Array",
+  "Float32Array",
+  "Float64Array",
+  "Int8Array",
+  "Int16Array",
+  "Int32Array",
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "Uint16Array",
+  "Uint32Array",
+]);
+
+function staticallyKnownPropertyName(node, computed, services, checker) {
+  if (!computed && node.type === "Identifier") {
+    return node.name;
+  }
+  if (computed && node.type === "Literal" && typeof node.value === "string") {
+    return node.value;
+  }
+  if (
+    computed &&
+    node.type === "TemplateLiteral" &&
+    node.expressions.length === 0
+  ) {
+    return node.quasis[0]?.value.cooked ?? null;
+  }
+
+  if (!computed) return null;
+  const propertyNode = services.esTreeNodeToTSNodeMap.get(node);
+  const propertyType = checker.getTypeAtLocation(propertyNode);
+  return propertyType.isStringLiteral() ? propertyType.value : null;
+}
+
+function destructuringSource(node) {
+  const pattern = node.parent;
+  const parent = pattern?.parent;
+  if (pattern?.type !== "ObjectPattern") return null;
+  if (parent?.type === "VariableDeclarator") return parent.init ?? pattern;
+  if (parent?.type === "AssignmentExpression") return parent.right;
+  return pattern;
+}
+
+function matchesBuiltInInterface(interfaceName, restriction) {
+  if ("object" in restriction) {
+    return interfaceName === `${restriction.object}Constructor`;
+  }
+  return restriction.receiver === "array"
+    ? interfaceName === "Array" ||
+        interfaceName === "ReadonlyArray" ||
+        TYPED_ARRAY_INTERFACE_NAMES.has(interfaceName)
+    : interfaceName === "String";
+}
+
+function hasBuiltInPropertyDeclaration(
+  type,
+  checker,
+  program,
+  restriction,
+  seen = new Set(),
+) {
+  if (seen.has(type)) return false;
+  seen.add(type);
+
+  if (type.isUnionOrIntersection()) {
+    return type.types.some((part) =>
+      hasBuiltInPropertyDeclaration(part, checker, program, restriction, seen),
+    );
+  }
+
+  const constraint = checker.getBaseConstraintOfType(type);
+  if (
+    constraint &&
+    hasBuiltInPropertyDeclaration(
+      constraint,
+      checker,
+      program,
+      restriction,
+      seen,
+    )
+  ) {
+    return true;
+  }
+
+  const symbol = checker.getPropertyOfType(type, restriction.property);
+  return (symbol?.getDeclarations() ?? []).some((declaration) => {
+    if (!program.isSourceFileDefaultLibrary(declaration.getSourceFile())) {
+      return false;
+    }
+    const parent = declaration.parent;
+    if (!ts.isInterfaceDeclaration(parent)) return false;
+    return matchesBuiltInInterface(parent.name.text, restriction);
+  });
+}
+
+const symbolAwareBrowserApiRule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Disallow browser APIs only when the receiver resolves to the specified built-in instance or constructor.",
+    },
+    schema: [
+      {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["property", "message"],
+          properties: {
+            receiver: { enum: ["array", "string"] },
+            object: { type: "string" },
+            property: { type: "string" },
+            message: { type: "string" },
+          },
+          oneOf: [{ required: ["receiver"] }, { required: ["object"] }],
+        },
+      },
+    ],
+  },
+  create(context) {
+    const services = context.sourceCode.parserServices;
+    if (!services?.program || !services.esTreeNodeToTSNodeMap) return {};
+    const checker = services.program.getTypeChecker();
+
+    return {
+      MemberExpression(node) {
+        const property = staticallyKnownPropertyName(
+          node.property,
+          node.computed,
+          services,
+          checker,
+        );
+        if (!property) return;
+
+        const receiverNode = services.esTreeNodeToTSNodeMap.get(node.object);
+        const receiverType = checker.getTypeAtLocation(receiverNode);
+        const restriction = context.options[0].find(
+          (candidate) =>
+            candidate.property === property &&
+            hasBuiltInPropertyDeclaration(
+              receiverType,
+              checker,
+              services.program,
+              candidate,
+            ),
+        );
+        if (restriction) {
+          context.report({ node: node.property, message: restriction.message });
+        }
+      },
+      Property(node) {
+        const source = destructuringSource(node);
+        if (!source || node.parent.type !== "ObjectPattern") return;
+        const property = staticallyKnownPropertyName(
+          node.key,
+          node.computed,
+          services,
+          checker,
+        );
+        if (!property) return;
+
+        const receiverNode = services.esTreeNodeToTSNodeMap.get(source);
+        const receiverType = checker.getTypeAtLocation(receiverNode);
+        const restriction = context.options[0].find(
+          (candidate) =>
+            candidate.property === property &&
+            hasBuiltInPropertyDeclaration(
+              receiverType,
+              checker,
+              services.program,
+              candidate,
+            ),
+        );
+        if (restriction) {
+          context.report({ node: node.key, message: restriction.message });
+        }
+      },
+    };
+  },
+};
+
+const browserApiPlugin = {
+  rules: {
+    "no-unsupported-receiver-property": symbolAwareBrowserApiRule,
+  },
+};
 
 export default tseslint.config(
   js.configs.recommended,
@@ -190,43 +382,23 @@ export default tseslint.config(
       "sonarjs/no-collapsible-if": "off",
     },
   },
-  // Backstop for AGENTS.md "Browser target — ES2017, no polyfill": these
-  // ES2023 Array methods compile fine (the TS `lib` includes `esnext`) but
-  // throw at runtime on Safari <=15 / Chrome <=109. `toSorted` use `sortedCopy`
-  // from `@/lib/immutable-sort` instead; `toReversed`/`toSpliced` use
-  // `[...arr].reverse()` / manual copy. Excludes the paths AGENTS.md's
-  // "Browser target" section names as ES2023+-safe (Node >=20, never bundled
-  // to the browser) and tests. Deliberately narrower than the broader
+  // Backstop for the package.json runtime floor (Chrome/Edge/Firefox 111+,
+  // Safari 16.4+). These APIs compile because the TS `lib` includes `esnext`,
+  // but are unavailable in part of that browser range. `toSorted` callers use
+  // `sortedCopy` from `@/lib/immutable-sort`; the other messages name the
+  // compatible form. Excludes paths that run on Node >=20 and never ship to
+  // the browser, plus tests. Deliberately narrower than the broader
   // server-only surface in "Server vs client module boundaries" (e.g.
   // `bridge-flows-og.ts`, `opengraph-image.tsx`) — widen the ignore list if a
   // future PR needs ES2023+ there instead of hand-rolling the ES2017 form.
   {
-    files: ["src/**/*.{ts,tsx}"],
-    ignores: [
-      "src/app/api/**/route.ts",
-      "src/lib/homepage-og.ts",
-      "src/lib/pool-og.ts",
-      "**/__tests__/**",
-      "**/*.test.{ts,tsx}",
-    ],
+    files: browserApiPolicy.clientFiles,
+    ignores: browserApiPolicy.serverAndTestIgnores,
+    plugins: { "browser-api-policy": browserApiPlugin },
     rules: {
-      "no-restricted-properties": [
+      "browser-api-policy/no-unsupported-receiver-property": [
         "error",
-        {
-          property: "toSorted",
-          message:
-            "requires Safari 16+/Chrome 110+; use sortedCopy() from '@/lib/immutable-sort' instead.",
-        },
-        {
-          property: "toReversed",
-          message:
-            "requires Safari 16+/Chrome 110+; use `[...arr].reverse()` instead.",
-        },
-        {
-          property: "toSpliced",
-          message:
-            "requires Safari 16+/Chrome 110+; use a manual copy instead.",
-        },
+        symbolAwareRestrictions,
       ],
     },
   },

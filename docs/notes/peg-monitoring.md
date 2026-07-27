@@ -32,7 +32,8 @@ The source-owned surfaces are:
 
 This source packet does not publish or authenticate the private policy
 artifact, change a GitHub Actions workflow or Terraform identity, deploy the
-producer, apply Grafana resources, or prove live telemetry.
+producer, apply Grafana resources, or prove live telemetry. Its Grafana
+consumers remain unapplied until every activation precondition below is met.
 
 The production identity bootstrap in
 [#1566](https://github.com/mento-protocol/monitoring-monorepo/pull/1566) must be
@@ -47,10 +48,9 @@ below.
 The listing-confirmation producer and consumer source now includes
 `mento_peg_listing_state`, `mento_peg_listing_checked_at`, and the bounded
 `mento_peg_listing_absent_consecutive_checks` gauge. This does not prove those
-series are deployed. Keep the protected rules apply blocked until all exact
-active and retained-previous queries below are live. Listing state must never
-be inferred from source health, observation timestamps, scrape counts, or
-timestamp changes.
+series are live: protected policy publication, runtime activation, a
+human-approved Grafana application, and live evidence remain separate gates.
+Listing state must never be inferred from source health.
 
 ## Rule inventory
 
@@ -73,12 +73,13 @@ For each active policy, the generated source defines:
 | Heartbeat missing             | The isolated asset poll no longer advances                                                                  | `#alerts-infra`                       |
 | Policy rollover stuck         | A retained previous policy exists and the active version is not acknowledged in time                        | `#alerts-infra`                       |
 
-When `previous` is retained, the same rule ladder remains generated for that
-exact previous version. Previous-version rules do not stop at the first active-
-version acknowledgement; cleanup is a later reviewed policy change. The exact
-legacy predecessor
+When `previous` is retained, the same decision ladder remains generated for
+that exact previous version. Previous-version rules do not stop at the first
+active-version acknowledgement; cleanup is a later reviewed policy change.
+The legacy retained policy
 `europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f` has an effective listing
-threshold of `2`; every newer policy must declare its threshold.
+absence threshold of two checks. Every newer policy declares its own bounded
+threshold.
 
 Display sources never create deviation or premium rules. Structural saturation
 never pages alone. Blindness does not depend on indexed-pool reachability:
@@ -98,7 +99,7 @@ delisting. `Peg Registry Rot`, `Peg Critical Path Unreachable`, and
 `Peg Indexed Pool Unreachable` use `for = "0s"`, `no_data_state = "OK"`,
 warning severity, and the direct `#alerts-infra` contact point. They never
 page. The [onboarding and re-census runbook](peg-monitoring-onboarding.md)
-owns admission, scheduled exact-pair checks, operator response, and cleanup.
+owns source admission, response, and cleanup.
 
 ## Local source validation
 
@@ -108,6 +109,7 @@ Run from the repository root:
 pnpm alerts:rules:lint:test
 pnpm alerts:rules:lint
 pnpm tf validate alerts-rules
+(cd alerts/rules && TF_DATA_DIR=.terraform-tf-wrapper terraform test -no-color)
 pnpm agent:quality-gate --run
 ```
 
@@ -173,5 +175,3 @@ Remove or disable the Grafana consumers first through a reviewed,
 human-approved alerts-rules change. Confirm the rules are absent before
 withdrawing any producer series they require. Never remove the producer first:
 active blindness and heartbeat intentionally fail closed on missing data.
-Consumer removal and any later policy cleanup stay behind the protected apply;
-do not use a local apply or provider CLI mutation.

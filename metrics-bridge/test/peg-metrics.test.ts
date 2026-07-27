@@ -140,6 +140,28 @@ describe("Peg metrics", () => {
     );
   });
 
+  it("publishes listing evidence without inventing a structural reference size", async () => {
+    const withoutReference = snapshot();
+    const source = withoutReference.sources[0]!;
+    source.referenceSize = null;
+    source.observation = null;
+    source.healthy = false;
+    source.deviationBps = null;
+    source.premiumBps = null;
+    source.spreadBps = null;
+    source.newSuccess = false;
+    source.newUsableDecision = false;
+    source.listingState = "absent";
+    source.listingAbsentConsecutiveChecks = 1;
+
+    publishPegMetrics([withoutReference]);
+    const metrics = await register.metrics();
+    expect(metrics).toContain(
+      'mento_peg_listing_state{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1",state="absent"} 1',
+    );
+    expect(metrics).not.toContain("mento_peg_reference_size{");
+  });
+
   it("drops deviation for capped observations but retains partial depth", async () => {
     const capped = snapshot();
     const source = capped.sources[0];
@@ -270,6 +292,7 @@ describe("Peg metrics", () => {
     const empty = await register.metrics();
     expect(empty).not.toContain("mento_peg_policy_version{");
     expect(empty).not.toContain("mento_peg_source_healthy{");
+    expect(empty).not.toContain("mento_peg_listing_state{");
     expect(empty).toContain(
       'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
     );

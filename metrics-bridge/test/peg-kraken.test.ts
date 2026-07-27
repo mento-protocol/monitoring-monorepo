@@ -94,6 +94,30 @@ afterEach(() => {
 });
 
 describe("Kraken response parsing", () => {
+  it("treats only the exact unknown-pair AssetPairs error as absence", () => {
+    expect(
+      parseKrakenMarketState(
+        { error: ["EQuery:Unknown asset pair"], result: {} },
+        SYMBOL,
+      ),
+    ).toBe("absent");
+    expect(() =>
+      parseKrakenMarketState(
+        { error: ["EGeneral:Temporary lockout"], result: {} },
+        SYMBOL,
+      ),
+    ).toThrow("Kraken API error: EGeneral:Temporary lockout");
+    expect(() =>
+      parseKrakenMarketState(
+        {
+          error: ["EQuery:Unknown asset pair", "EGeneral:Temporary lockout"],
+          result: {},
+        },
+        SYMBOL,
+      ),
+    ).toThrow("Kraken API error");
+  });
+
   it("binds observation identity to executable bids, not fresher asks", async () => {
     const fetch = queuedFetch([
       jsonResponse(assetPairs()),
@@ -286,6 +310,23 @@ describe("Kraken response parsing", () => {
     ).rejects.toThrow(/absent/);
     expect(fetch).toHaveBeenCalledOnce();
     expect(parseKrakenMarketState(assetPairs(), SYMBOL)).toBe("listed");
+    expect(onListingChecked).toHaveBeenCalledWith({
+      state: "absent",
+      checkedAt: 1_800_000_000_999,
+    });
+  });
+
+  it("records Kraken's exact unknown-pair response as authoritative absence", async () => {
+    const fetch = queuedFetch([
+      jsonResponse({ error: ["EQuery:Unknown asset pair"], result: {} }),
+    ]);
+    const onListingChecked = vi.fn();
+    await expect(
+      fetchKrakenObservation(
+        { ...request, onListingChecked },
+        { fetch, now: () => 1_800_000_000_999 },
+      ),
+    ).rejects.toThrow(/absent/);
     expect(onListingChecked).toHaveBeenCalledWith({
       state: "absent",
       checkedAt: 1_800_000_000_999,

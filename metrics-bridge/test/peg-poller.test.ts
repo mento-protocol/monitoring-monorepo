@@ -360,13 +360,14 @@ describe("peg poll cycle freshness and measurements", () => {
     });
   });
 
-  it("counts cadence-due absent checks, preserves the streak on forced refreshes, and resets on listing evidence", async () => {
+  it("keeps the listing cadence through repeated forced refreshes and resets on listing evidence", async () => {
     const spec = primaryAsset();
     const input = makeInput([spec]);
     const baseMs = 1_800_000_000_000;
     let nowMs = baseMs;
     let limit0 = fixed15(50);
     const listingStates: Array<"absent" | "listed" | "halted"> = [
+      "absent",
       "absent",
       "absent",
       "absent",
@@ -404,7 +405,13 @@ describe("peg poll cycle freshness and measurements", () => {
       listingAbsentConsecutiveChecks: 1,
     });
 
-    nowMs += 30_000;
+    nowMs += 10_000;
+    limit0 = fixed15(30);
+    const forcedAgain = (await poller.pollCycle(input))[0]!;
+    expect(source(forcedAgain).listingAbsentConsecutiveChecks).toBe(1);
+
+    nowMs += 10_000;
+    limit0 = fixed15(20);
     const confirmed = (await poller.pollCycle(input))[0]!;
     expect(source(confirmed).listingAbsentConsecutiveChecks).toBe(2);
 
@@ -425,6 +432,143 @@ describe("peg poll cycle freshness and measurements", () => {
       listingState: "halted",
       listingAbsentConsecutiveChecks: 0,
     });
+  });
+
+  it("invalidates a cached observation after a listing-only absence check", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const baseMs = 1_800_000_000_000;
+    let nowMs = baseMs;
+    let limit0 = fixed15(50);
+    const fetchBitvavo = vi.fn(async (request) => {
+      request.onListingChecked?.({ state: "listed", checkedAt: nowMs });
+      return observation(nowMs, { sequence: `book-${nowMs}` });
+    });
+    const fetchBitvavoListing = vi.fn(async () => ({
+      state: "absent" as const,
+      checkedAt: nowMs,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000), { limit0 }),
+      ),
+      fetchBitvavo,
+      fetchBitvavoListing,
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    expect(source(first)).toMatchObject({
+      healthy: true,
+      listingState: "listed",
+    });
+
+    // This forced order-book refresh moves only the observation cadence.
+    nowMs += 10_000;
+    limit0 = fixed15(40);
+    const forced = (await poller.pollCycle(input))[0]!;
+    expect(source(forced)).toMatchObject({
+      healthy: true,
+      listingState: "listed",
+    });
+
+    // The listing cadence is now due before the observation cadence. Its
+    // absence evidence must invalidate the otherwise fresh cached book.
+    nowMs += 20_000;
+    const absent = (await poller.pollCycle(input))[0]!;
+    expect(source(absent)).toMatchObject({
+      healthy: false,
+      observation: null,
+      listingState: "absent",
+      listingAbsentConsecutiveChecks: 1,
+    });
+    expect(fetchBitvavo).toHaveBeenCalledTimes(2);
+    expect(fetchBitvavoListing).toHaveBeenCalledOnce();
+  });
+
+  it("invalidates a cached observation after a listing-only halt without structural authority", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const baseMs = 1_800_000_000_000;
+    let nowMs = baseMs;
+    let limit0 = fixed15(50);
+    let structuralAvailable = true;
+    const fetchBitvavo = vi.fn(async (request) => {
+      request.onListingChecked?.({ state: "listed", checkedAt: nowMs });
+      return observation(nowMs, { sequence: `book-${nowMs}` });
+    });
+    const fetchBitvavoListing = vi.fn(async () => ({
+      state: "halted" as const,
+      checkedAt: nowMs,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () => {
+        if (!structuralAvailable) throw new Error("Hasura unavailable");
+        return structuralContext(spec, Math.floor(nowMs / 1_000), { limit0 });
+      }),
+      fetchBitvavo,
+      fetchBitvavoListing,
+      publish: vi.fn(),
+    });
+
+    await poller.pollCycle(input);
+    nowMs += 10_000;
+    limit0 = fixed15(40);
+    await poller.pollCycle(input);
+
+    // The prior reference size permits the no-reference-size cache path, but
+    // a fresh halted listing result must still clear the cached observation.
+    nowMs += 20_000;
+    structuralAvailable = false;
+    const halted = (await poller.pollCycle(input))[0]!;
+    expect(source(halted)).toMatchObject({
+      healthy: false,
+      observation: null,
+      referenceSize: 40,
+      listingState: "halted",
+      listingAbsentConsecutiveChecks: 0,
+    });
+    expect(fetchBitvavo).toHaveBeenCalledTimes(2);
+    expect(fetchBitvavoListing).toHaveBeenCalledOnce();
+  });
+
+  it("checks listings without structural reference size and publishes no price authority", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const baseMs = 1_800_000_000_000;
+    let nowMs = baseMs;
+    const fetchBitvavo = vi.fn(async () => observation(nowMs));
+    const fetchBitvavoListing = vi.fn(async () => ({
+      state: "absent" as const,
+      checkedAt: nowMs,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () => {
+        throw new Error("Hasura unavailable");
+      }),
+      fetchBitvavo,
+      fetchBitvavoListing,
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    expect(source(first)).toMatchObject({
+      referenceSize: null,
+      observation: null,
+      listingState: "absent",
+      listingAbsentConsecutiveChecks: 1,
+    });
+    nowMs += 30_000;
+    const confirmed = (await poller.pollCycle(input))[0]!;
+    expect(source(confirmed)).toMatchObject({
+      listingState: "absent",
+      listingAbsentConsecutiveChecks: 2,
+    });
+    expect(fetchBitvavo).not.toHaveBeenCalled();
+    expect(fetchBitvavoListing).toHaveBeenCalledTimes(2);
   });
 
   it("does not count a frozen at-par book and fails it stale", async () => {
@@ -799,8 +943,9 @@ describe("peg poll cycle freshness and measurements", () => {
     const spec = primaryAsset();
     const input = makeInput([spec]);
     let nowMs = 1_800_000_000_000;
-    const fetchBitvavo = vi.fn(async () =>
-      observation(nowMs, {
+    const fetchBitvavo = vi.fn(async (request) => {
+      request.onListingChecked?.({ state: "halted", checkedAt: nowMs });
+      return observation(nowMs, {
         vwap: null,
         filledFraction: 0,
         capped: true,
@@ -810,8 +955,8 @@ describe("peg poll cycle freshness and measurements", () => {
         observationAt: null,
         sequence: null,
         venueState: "halted",
-      }),
-    );
+      });
+    });
     const poller = createPegPoller({
       nowMs: () => nowMs,
       fetchStructuralContext: vi.fn(async () =>
@@ -824,6 +969,7 @@ describe("peg poll cycle freshness and measurements", () => {
     const first = (await poller.pollCycle(input))[0]!;
     expect(source(first)).toMatchObject({
       healthy: false,
+      listingState: "halted",
       newSuccess: false,
       newUsableDecision: false,
       deviationBps: null,
@@ -839,11 +985,79 @@ describe("peg poll cycle freshness and measurements", () => {
     const cached = (await poller.pollCycle(input))[0]!;
     expect(source(cached)).toMatchObject({
       healthy: false,
+      listingState: "halted",
       newSuccess: false,
       newUsableDecision: false,
       observation: { venueState: "halted" },
     });
     expect(fetchBitvavo).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears a cached halted diagnostic after a listing-only absence check", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const baseMs = 1_800_000_000_000;
+    let nowMs = baseMs;
+    let limit0 = fixed15(50);
+    const fetchBitvavo = vi.fn(async (request) => {
+      request.onListingChecked?.({ state: "halted", checkedAt: nowMs });
+      return observation(nowMs, {
+        vwap: null,
+        filledFraction: 0,
+        capped: true,
+        bid: null,
+        ask: null,
+        lastTradeAt: null,
+        observationAt: null,
+        sequence: null,
+        venueState: "halted",
+      });
+    });
+    const fetchBitvavoListing = vi.fn(async () => ({
+      state: "absent" as const,
+      checkedAt: nowMs,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000), { limit0 }),
+      ),
+      fetchBitvavo,
+      fetchBitvavoListing,
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    expect(source(first)).toMatchObject({
+      healthy: false,
+      observation: { venueState: "halted" },
+      listingState: "halted",
+    });
+
+    // Move only the observation cadence; the listing cadence remains anchored
+    // at the initial status-only listing evidence.
+    nowMs += 10_000;
+    limit0 = fixed15(40);
+    const forced = (await poller.pollCycle(input))[0]!;
+    expect(source(forced)).toMatchObject({
+      observation: { venueState: "halted" },
+      listingState: "halted",
+    });
+
+    // The independent listing-only absence is authoritative over the cached
+    // halt diagnostic and leaves no price authority.
+    nowMs += 20_000;
+    const absent = (await poller.pollCycle(input))[0]!;
+    expect(source(absent)).toMatchObject({
+      healthy: false,
+      observation: null,
+      listingState: "absent",
+      listingAbsentConsecutiveChecks: 1,
+      deviationBps: null,
+      premiumBps: null,
+    });
+    expect(fetchBitvavo).toHaveBeenCalledTimes(2);
+    expect(fetchBitvavoListing).toHaveBeenCalledOnce();
   });
 
   it("preserves the last successful identity across a status-only halt", async () => {

@@ -97,6 +97,7 @@ describe("NavLinks", () => {
 
     expect(hrefs).toEqual([
       ...publicHrefs,
+      "/peg-monitoring",
       "/integrations",
       "/revenue",
       "/address-book",

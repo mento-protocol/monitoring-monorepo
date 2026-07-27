@@ -254,6 +254,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
 | `ENABLE_EXPERIMENTAL_COREPACK`             | Vercel Corepack opt-in so hosted builds honor the repo `packageManager` pnpm version (Terraform-managed)   |
 | `NEXT_PUBLIC_HASURA_URL`                   | Prod Envio GraphQL endpoint (shared by Celo, Monad, Polygon, and Ethereum reserve-yield data)              |
+| `METRICS_BRIDGE_URL`                       | Server-only HTTPS Metrics Bridge origin for the validated `/api/peg-monitoring` proxy (Terraform-managed)  |
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`           | Optional shared Monad Testnet + Polygon Amoy Envio GraphQL endpoint                                        |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`      | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
 | `NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET`      | Optional Polygon RPC override (default: `https://polygon.drpc.org`)                                        |
@@ -301,7 +302,7 @@ COMMIT=$(git rev-parse HEAD)
 pnpm deploy:indexer
 pnpm deploy:indexer:status "$COMMIT" --watch --compact
 pnpm deploy:indexer:logs "$COMMIT" --build
-pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
+pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"

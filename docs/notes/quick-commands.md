@@ -29,7 +29,7 @@ pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test    # Code
 pnpm indexer:mutation              # Targeted StrykerJS baseline for indexer pure logic
 pnpm deploy:indexer                # Push HEAD to envio branch and trigger hosted reindex
 pnpm deploy:indexer:status <commit> --watch --compact  # Low-noise wait for registration + sync
-pnpm deploy:indexer:logs <commit> --level error,warn --since 2h  # Runtime issues
+pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # Explicit errors; narrow --since if the 100-record page fills
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:perf <commit>     # Combined status/metrics/log snapshot for perf comparisons
@@ -66,8 +66,7 @@ pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, ev
 pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-route AGENTS byte caps
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
-node scripts/review-process-metrics.mjs --before-pr 1034 --limit 20  # Collect review-process baseline metrics
-node scripts/review-process-metrics.mjs --after-pr 1045 --limit 20   # Collect review-process check-in metrics
+node scripts/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # Collect a new cohort; define its boundary and tracking issue first
 pnpm lockfile:lint                 # Fail-closed integrity + registry + override-floor check; no install needed
 pnpm skew:check                    # Fail on dependency version skew vs the pnpm catalog; no install needed
 pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
@@ -152,12 +151,11 @@ pnpm alerts:oncall:test
 pnpm alerts:oncall:build
 # Grafana metric alert rules (v3 Slack rules):
 pnpm alerts:rules:lint
+pnpm tf validate alerts-rules
 pnpm alerts:rules:init
 pnpm alerts:rules:plan
-# Apply happens via CI on merge to main for alerts-rules, alerts-delivery, and Aegis.
-# The production-infra gate enforces required-reviewer approval and allows
-# self-review for the sole-maintainer workflow. This is operator acknowledgement
-# of the commit and earlier plan, not independent or exact apply-plan review.
+# CI applies alerts-rules, alerts-delivery, and Aegis after `production-infra`
+# reviewer approval; that acknowledges the commit and earlier plan, not the exact apply plan.
 
 # Dev janitor
 bash scripts/dev-janitor.sh            # Dry-run: report stale trunk repo caches, pnpm store, git worktrees, /private/tmp trees
