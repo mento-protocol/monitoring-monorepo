@@ -33,9 +33,12 @@ expiry. App Engine also requires a `US`-compatible bucket for the immutable
 `us-central` application, while Metrics Bridge builds run in `var.gcp_region`.
 
 The Alloy Cloud Build path is pinned to the dedicated
-`grafana_agent_builder` service account. Legacy default build identities retain
-only the temporary Secret Manager rollback bindings required by the Alloy
-cutover; they are not source-staging principals.
+`grafana_agent_builder` service account. Recent Metrics Bridge builds use the
+project's default Compute service account
+`80554359692-compute@developer.gserviceaccount.com`. Both are exact Cloud
+Build source executors. The legacy
+`80554359692@cloudbuild.gserviceaccount.com` identity retains only temporary
+Alloy Secret Manager rollback bindings; it is not a source-staging principal.
 
 ## Decision
 
@@ -57,8 +60,9 @@ The follow-up routing phase makes every executable deploy path name its bucket:
 - the nested Alloy Cloud Build writes logs only to Cloud Logging.
 
 Cloud Build callers — the routine deployer and `gcp_dev_members` — receive
-bucket metadata read plus object create on the Cloud Build bucket. The
-dedicated `grafana_agent_builder` receives object view there. App Engine
+bucket metadata read plus object create on the Cloud Build bucket. Its exact
+executors — the dedicated `grafana_agent_builder` and Metrics Bridge's verified
+default Compute service account — receive object view there. App Engine
 uploaders — those callers plus that builder — receive bucket metadata read plus
 object admin on the App Engine bucket. AppSpot receives object view. No staging
 grant is project-wide.
@@ -103,8 +107,9 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   sensitive buckets cannot inherit.
 - App Engine uploaders retain stronger object authority, but only on a
   short-lived source bucket.
-- The dedicated Alloy builder has the exact read/upload staging grants it needs;
-  legacy default identities remain outside the staging-principal set.
+- The dedicated Alloy builder and Metrics Bridge's verified default Compute
+  executor have the exact staging grants they need; the legacy default Cloud
+  Build identity remains outside the staging-principal set.
 - The routing phase adds a checked-in contract that discovers every executable
   submit/deploy callsite and rejects a new one unless it names the correct
   staging bucket.
