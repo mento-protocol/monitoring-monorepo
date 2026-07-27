@@ -6,11 +6,28 @@
 # and (b) the container image layer. Runtime fetch keeps the secrets in
 # Secret Manager only.
 #
-# The effective App Engine version identity needs Secret Manager access.
-# Terraform currently grants the expected AppSpot principal, but
-# `grafana-agent.yaml` does not pin `service_account` and therefore inherits
-# the mutable app-level default. Verify it before deploy; issue #1473 tracks
-# a pinned or fail-closed identity design.
+# The checked-in App Engine version identity is pinned to
+# grafana-agent-runtime@mento-monitoring.iam.gserviceaccount.com. The local
+# deploy wrapper runs the read-only identity/secret preflight and exports an
+# immutable five-file commit snapshot before submitting this build as the
+# dedicated builder below. The build creates a zero-traffic version; the
+# wrapper assigns 100% traffic atomically. The runtime supervisor remains
+# passive until every peer version is stopped, preventing collector overlap
+# while leaving a temporary collection gap until activation or rollback. The
+# wrapper verifies identity/allocation from a committed verifier snapshot,
+# stops and proves a target whose verification fails, retires peers, and proves
+# active collector health before completing the handoff.
 steps:
   - name: gcr.io/cloud-builders/gcloud
-    args: [app, deploy, --quiet, grafana-agent.yaml]
+    args:
+      [
+        app,
+        deploy,
+        --quiet,
+        --no-promote,
+        '--version=${_VERSION}',
+        grafana-agent.yaml,
+      ]
+serviceAccount: projects/mento-monitoring/serviceAccounts/grafana-agent-builder@mento-monitoring.iam.gserviceaccount.com
+options:
+  logging: CLOUD_LOGGING_ONLY

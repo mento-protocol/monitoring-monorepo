@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +23,7 @@ const registryPath = path.join(repoRoot, "terraform.stacks.json");
 const AUTO_APPLY_CI_POLICY = "push-main-production-infra-environment";
 const FORCE_LOCAL_APPLY_ARG = "--force-local-apply";
 const ORIGIN_MAIN_FETCH_REFSPEC = "refs/heads/main:refs/remotes/origin/main";
+const WRITE_ONLY_SECRET_STACKS = new Set(["platform"]);
 
 function usage(exitCode = 0) {
   const out = exitCode === 0 ? process.stdout : process.stderr;
@@ -84,7 +94,11 @@ function run(command, args, options = {}) {
     throw result.error;
   }
   if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+    const error = new Error(
+      `${command} exited with status ${result.status ?? 1}`,
+    );
+    error.exitCode = result.status ?? 1;
+    throw error;
   }
   return result.stdout ?? "";
 }
@@ -110,6 +124,25 @@ function gitOutput(args) {
     );
   }
   return result.stdout.trim();
+}
+
+function gitSource(args) {
+  const result = spawnSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    const stderr = result.stderr.trim();
+    throw new Error(
+      `git ${args.join(" ")} failed${stderr ? `: ${stderr}` : ""}`,
+    );
+  }
+  return result.stdout;
 }
 
 function printStacks(json) {
@@ -312,6 +345,7 @@ function splitApplyArgs(args) {
 
 function localApplySafetyStatus() {
   try {
+    gitOutput(["fetch", "--quiet", "origin", ORIGIN_MAIN_FETCH_REFSPEC]);
     const branch = gitOutput(["rev-parse", "--abbrev-ref", "HEAD"]);
     const status = gitOutput(["status", "--porcelain"]);
     const head = gitOutput(["rev-parse", "HEAD"]);
@@ -325,7 +359,6 @@ function localApplySafetyStatus() {
       };
     }
 
-    gitOutput(["fetch", "--quiet", "origin", ORIGIN_MAIN_FETCH_REFSPEC]);
     const originMain = gitOutput(["rev-parse", "origin/main"]);
     const headMatchesOriginMain = head === originMain;
 
@@ -334,6 +367,7 @@ function localApplySafetyStatus() {
       clean,
       headMatchesOriginMain,
       safe: branch === "main" && clean && headMatchesOriginMain,
+      sourceHead: head,
     };
   } catch (error) {
     return {
@@ -343,14 +377,22 @@ function localApplySafetyStatus() {
   }
 }
 
-function assertLocalApplyAllowed(stack, forceLocalApply) {
-  if (stack.ci.apply !== AUTO_APPLY_CI_POLICY || forceLocalApply) {
+function assertTrustedCheckoutAllowed(stack, command, forceLocalApply) {
+  const isManualSecretCommand =
+    WRITE_ONLY_SECRET_STACKS.has(stack.id) &&
+    ["plan", "apply"].includes(command);
+  const isAutoAppliedStack =
+    command === "apply" && stack.ci.apply === AUTO_APPLY_CI_POLICY;
+  if (
+    (!isManualSecretCommand && !isAutoAppliedStack) ||
+    (!isManualSecretCommand && forceLocalApply)
+  ) {
     return;
   }
 
   const status = localApplySafetyStatus();
   if (status.safe) {
-    return;
+    return status.sourceHead;
   }
 
   const checkoutDetails = status.error
@@ -369,12 +411,150 @@ function assertLocalApplyAllowed(stack, forceLocalApply) {
 
   throw new Error(
     [
-      `refusing local Terraform apply for auto-applied stack ${stack.id}`,
-      "Expected safe path: merge to main and let GitHub Actions apply through the production environment.",
-      `Override for a deliberate local apply: pass ${FORCE_LOCAL_APPLY_ARG}.`,
+      isManualSecretCommand
+        ? `refusing platform Terraform ${command} outside clean current main`
+        : `refusing local Terraform apply for auto-applied stack ${stack.id}`,
+      isManualSecretCommand
+        ? "Platform secret inputs require a clean main checkout whose HEAD matches freshly fetched origin/main before plan or apply."
+        : "Expected safe path: merge to main and let GitHub Actions apply through the production environment.",
+      ...(isManualSecretCommand
+        ? []
+        : [
+            `Override for a deliberate local apply: pass ${FORCE_LOCAL_APPLY_ARG}.`,
+          ]),
       checkoutDetails,
     ].join("\n"),
   );
+}
+
+function materializeCommittedStackSnapshot(stack, sourceHead) {
+  const snapshotRoot = mkdtempSync(
+    path.join(tmpdir(), "tf-stacks-platform-source."),
+  );
+  const trackedFiles = gitOutput([
+    "ls-tree",
+    "-r",
+    "--name-only",
+    "-z",
+    sourceHead,
+    "--",
+    stack.path,
+  ])
+    .split("\0")
+    .filter(Boolean);
+
+  if (trackedFiles.length === 0) {
+    rmSync(snapshotRoot, { force: true, recursive: true });
+    throw new Error(
+      `could not materialize committed source for Terraform stack ${stack.id}`,
+    );
+  }
+
+  try {
+    for (const trackedFile of trackedFiles) {
+      if (
+        trackedFile !== stack.path &&
+        !trackedFile.startsWith(`${stack.path}/`)
+      ) {
+        throw new Error(
+          `refusing committed Terraform source outside ${stack.path}: ${trackedFile}`,
+        );
+      }
+      const destination = path.join(snapshotRoot, trackedFile);
+      mkdirSync(path.dirname(destination), { recursive: true });
+      writeFileSync(
+        destination,
+        gitSource(["show", `${sourceHead}:${trackedFile}`]),
+      );
+    }
+  } catch (error) {
+    rmSync(snapshotRoot, { force: true, recursive: true });
+    throw error;
+  }
+
+  return snapshotRoot;
+}
+
+function platformVariableArgs(stack, terraformArgs) {
+  const sourceRoot = path.join(repoRoot, stack.path);
+  const implicitVariableFiles = [
+    "terraform.tfvars",
+    "terraform.tfvars.json",
+    ...readdirSync(sourceRoot)
+      .filter(
+        (name) =>
+          name.endsWith(".auto.tfvars") || name.endsWith(".auto.tfvars.json"),
+      )
+      .sort(),
+  ]
+    .map((name) => path.join(sourceRoot, name))
+    .filter(existsSync)
+    .map((filePath) => `-var-file=${filePath}`);
+
+  const normalizedArgs = [];
+  for (let index = 0; index < terraformArgs.length; index += 1) {
+    const arg = terraformArgs[index];
+    if (arg === "-var-file") {
+      const value = terraformArgs[++index];
+      if (!value) {
+        throw new Error("-var-file requires a path");
+      }
+      normalizedArgs.push(
+        "-var-file",
+        path.isAbsolute(value) ? value : path.join(sourceRoot, value),
+      );
+    } else if (arg.startsWith("-var-file=")) {
+      const value = arg.slice("-var-file=".length);
+      if (!value) {
+        throw new Error("-var-file requires a path");
+      }
+      normalizedArgs.push(
+        `-var-file=${
+          path.isAbsolute(value) ? value : path.join(sourceRoot, value)
+        }`,
+      );
+    } else {
+      normalizedArgs.push(arg);
+    }
+  }
+
+  return [...implicitVariableFiles, ...normalizedArgs];
+}
+
+function assertWriteOnlySecretLoggingDisabled(stack, command) {
+  if (
+    !WRITE_ONLY_SECRET_STACKS.has(stack.id) ||
+    !["plan", "apply"].includes(command)
+  ) {
+    return;
+  }
+
+  const enabledLoggingVariables = Object.keys(process.env)
+    .filter(
+      (name) =>
+        ["TF_LOG", "TF_LOG_CORE", "TF_LOG_PROVIDER", "TF_LOG_SDK"].includes(
+          name,
+        ) ||
+        name.startsWith("TF_LOG_PROVIDER_") ||
+        name.startsWith("TF_LOG_SDK_"),
+    )
+    .filter((name) => {
+      const value = process.env[name]?.trim().toLowerCase();
+      if (!value) {
+        return false;
+      }
+      const isSdkLevel = name === "TF_LOG_SDK_PROTO";
+      const isSdkDataOrUnknown = name.startsWith("TF_LOG_SDK_") && !isSdkLevel;
+      return isSdkDataOrUnknown || value !== "off";
+    })
+    .sort();
+  if (enabledLoggingVariables.length > 0) {
+    throw new Error(
+      `refusing platform Terraform ${command}: ${enabledLoggingVariables.join(
+        ", ",
+      )} can expose write-only secret payloads in provider logs or protocol dumps; unset them (OFF is accepted only for Terraform log-level variables)`,
+    );
+  }
 }
 
 function runStackCommand(command, args) {
@@ -390,15 +570,39 @@ function runStackCommand(command, args) {
       : { forceLocalApply: false, terraformArgs: rawTerraformArgs };
   const initArgs = ["init", "-input=false"];
 
-  if (command === "apply") {
-    assertLocalApplyAllowed(stack, forceLocalApply);
-  }
+  assertWriteOnlySecretLoggingDisabled(stack, command);
+  const trustedSourceHead = ["plan", "apply"].includes(command)
+    ? assertTrustedCheckoutAllowed(stack, command, forceLocalApply)
+    : undefined;
+  let snapshotRoot;
 
   process.stderr.write(
     `Terraform stack ${stack.id}: path=${stack.path}, state=${stack.state.prefix}, applyPolicy=${stack.applyPolicy}\n`,
   );
-  runTerraform(stack, initArgs);
-  runTerraform(stack, [command, ...terraformArgs]);
+  try {
+    const executionStack =
+      WRITE_ONLY_SECRET_STACKS.has(stack.id) && trustedSourceHead
+        ? (() => {
+            snapshotRoot = materializeCommittedStackSnapshot(
+              stack,
+              trustedSourceHead,
+            );
+            return {
+              ...stack,
+              path: path.join(snapshotRoot, stack.path),
+            };
+          })()
+        : stack;
+    const executionArgs = WRITE_ONLY_SECRET_STACKS.has(stack.id)
+      ? platformVariableArgs(stack, terraformArgs)
+      : terraformArgs;
+    runTerraform(executionStack, initArgs);
+    runTerraform(executionStack, [command, ...executionArgs]);
+  } finally {
+    if (snapshotRoot) {
+      rmSync(snapshotRoot, { force: true, recursive: true });
+    }
+  }
 }
 
 try {
@@ -426,5 +630,5 @@ try {
   }
 } catch (error) {
   process.stderr.write(`tf-stacks: ${error.message}\n`);
-  process.exit(1);
+  process.exit(error.exitCode ?? 1);
 }

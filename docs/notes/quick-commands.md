@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -129,20 +129,20 @@ pnpm aegis:test               # Jest tests
 pnpm aegis:lint               # ESLint baseline gate for Aegis
 pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-monitoring
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
-# Alloy deploy requires existing enabled secrets and a verified runtime identity.
-# Bootstrap/rotation remains blocked by open owner-decision issue #1473; never run the legacy seed command.
-pnpm aegis:agent:deploy       # Deploy the already provisioned Alloy collector
-pnpm aegis:tf:init
+# Alloy: the scoped runbook owns write-only inputs, no-seed/--migrate rules,
+# and the stop-before-start handoff.
+pnpm aegis:agent:preflight -- --static-only # Static contract only
+pnpm aegis:agent:test
+pnpm aegis:agent:deploy                    # Deploy from clean current main
+pnpm aegis:tf:init                         # Grafana folder/dashboard stack
 pnpm aegis:tf:plan
-# Apply runs in CI on merge to main (aegis-terraform.yml; production-infra gate).
 
 # Infrastructure (Terraform)
 pnpm tf list                  # Registered Terraform stacks from terraform.stacks.json
 pnpm tf validate <stack>      # fmt/init -backend=false/validate for one stack
 pnpm infra:init               # Init providers (first time or after changes)
-pnpm infra:plan               # Preview infrastructure changes
-# Never run apply without explicit human approval. Plan first and surface the diff.
-pnpm infra:apply              # Apply infrastructure changes
+pnpm infra:plan               # Plan a committed snapshot from clean current main
+pnpm infra:apply              # Explicit human approval required
 # Event-driven alerts stack (Cloud Functions + Slack channels/usergroups + Sentry bridge + QuickNode webhooks):
 pnpm alerts:infra:init
 pnpm alerts:infra:plan
