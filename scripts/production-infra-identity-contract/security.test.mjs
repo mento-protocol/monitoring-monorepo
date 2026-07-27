@@ -670,6 +670,93 @@ expectFailure(
   "terraform:local.ci_deployer_roles: IAM local source blocks must match its exact audited shape",
 );
 
+const cloudBuildExecutorFiles = liveRepositoryFiles();
+const alloyBuilderExecutor =
+  '    "serviceAccount:${google_service_account.grafana_agent_builder.email}",\n';
+const metricsBridgeExecutor =
+  '    "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",\n';
+assert(
+  cloudBuildExecutorFiles["terraform/deploy-staging.tf"].includes(
+    alloyBuilderExecutor,
+  ),
+);
+assert(
+  cloudBuildExecutorFiles["terraform/deploy-staging.tf"].includes(
+    metricsBridgeExecutor,
+  ),
+);
+for (const executor of [alloyBuilderExecutor, metricsBridgeExecutor]) {
+  const files = {
+    ...cloudBuildExecutorFiles,
+    "terraform/deploy-staging.tf": cloudBuildExecutorFiles[
+      "terraform/deploy-staging.tf"
+    ].replace(executor, ""),
+  };
+  expectFailure(
+    files,
+    "IAM local source blocks must match its exact audited shape",
+  );
+}
+
+const broadenedCloudBuildExecutorFiles = {
+  ...cloudBuildExecutorFiles,
+  "terraform/deploy-staging.tf": cloudBuildExecutorFiles[
+    "terraform/deploy-staging.tf"
+  ].replace(
+    metricsBridgeExecutor,
+    `${metricsBridgeExecutor}    "serviceAccount:\${google_project.monitoring.number}@cloudbuild.gserviceaccount.com",\n`,
+  ),
+};
+expectFailure(
+  broadenedCloudBuildExecutorFiles,
+  "IAM local source blocks must match its exact audited shape",
+);
+
+const appEngineUploaderSet = `  app_engine_source_uploaders = setunion(
+    local.deploy_source_callers,
+    toset(["serviceAccount:\${google_service_account.grafana_agent_builder.email}"]),
+  )`;
+assert(
+  cloudBuildExecutorFiles["terraform/deploy-staging.tf"].includes(
+    appEngineUploaderSet,
+  ),
+);
+const broadenedAppEngineUploaderFiles = {
+  ...cloudBuildExecutorFiles,
+  "terraform/deploy-staging.tf": cloudBuildExecutorFiles[
+    "terraform/deploy-staging.tf"
+  ].replace(
+    appEngineUploaderSet,
+    appEngineUploaderSet.replace(
+      '    toset(["serviceAccount:${google_service_account.grafana_agent_builder.email}"]),',
+      [
+        "    toset([",
+        '      "serviceAccount:${google_service_account.grafana_agent_builder.email}",',
+        '      "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",',
+        "    ]),",
+      ].join("\n"),
+    ),
+  ),
+};
+expectFailure(
+  broadenedAppEngineUploaderFiles,
+  "IAM local source blocks must match its exact audited shape",
+);
+
+const broadenedCloudBuildExecutorRoleFiles = {
+  ...cloudBuildExecutorFiles,
+  "terraform/deploy-staging.tf": cloudBuildExecutorFiles[
+    "terraform/deploy-staging.tf"
+  ].replace(
+    'resource "google_storage_bucket_iam_member" "cloud_build_source_executor_object_viewer" {\n  for_each = local.cloud_build_source_executor_members\n\n  bucket = google_storage_bucket.cloud_build_source_staging.name\n  role   = "roles/storage.objectViewer"',
+    'resource "google_storage_bucket_iam_member" "cloud_build_source_executor_object_viewer" {\n  for_each = local.cloud_build_source_executor_members\n\n  bucket = google_storage_bucket.cloud_build_source_staging.name\n  role   = "roles/storage.objectAdmin"',
+  ),
+};
+expectFailure(
+  broadenedCloudBuildExecutorRoleFiles,
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer: IAM grant sinks must match its exact audited shape",
+);
+
 const githubVariableCollisionFiles = liveRepositoryFiles();
 const sentryArchiveVariable = `  variable_name = "SENTRY_ARCHIVE_ENABLED"
   value         = var.sentry_archive_enabled`;
