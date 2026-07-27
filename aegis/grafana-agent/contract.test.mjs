@@ -762,6 +762,63 @@ test('immutable verifier snapshot executes the captured static preflight', () =>
     );
     assert.equal(preflight.status, 0, preflight.stderr);
     assert.equal(preflight.stdout, 'Alloy static preflight passed.\n');
+
+    const lookupFailure = spawnSync(
+      'bash',
+      [
+        '-c',
+        'source "$1"\nmaterialize_verifier_snapshot "$2" "$3" "$4"',
+        'bash',
+        path.join(agentDir, 'deploy.sh'),
+        fixture,
+        'missing-commit',
+        path.join(fixture, 'lookup-failure-snapshot'),
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(lookupFailure.status, 1);
+    assert.match(
+      lookupFailure.stderr,
+      /could not prove the retired legacy seed writer is absent/u,
+    );
+
+    const legacySeedPath = path.join(
+      fixture,
+      'aegis/grafana-agent/seed-secrets.sh',
+    );
+    writeFileSync(legacySeedPath, '#!/usr/bin/env bash\n');
+    for (const args of [
+      ['add', 'aegis/grafana-agent/seed-secrets.sh'],
+      ['commit', '--quiet', '-m', 'restore retired seed writer'],
+    ]) {
+      const result = spawnSync('git', args, {
+        cwd: fixture,
+        encoding: 'utf8',
+      });
+      assert.equal(result.status, 0, result.stderr);
+    }
+    const legacyHead = spawnSync('git', ['rev-parse', 'HEAD'], {
+      cwd: fixture,
+      encoding: 'utf8',
+    }).stdout.trim();
+    const rejectedSnapshot = spawnSync(
+      'bash',
+      [
+        '-c',
+        'source "$1"\nmaterialize_verifier_snapshot "$2" "$3" "$4"',
+        'bash',
+        path.join(agentDir, 'deploy.sh'),
+        fixture,
+        legacyHead,
+        path.join(fixture, 'rejected-snapshot'),
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(rejectedSnapshot.status, 1);
+    assert.match(
+      rejectedSnapshot.stderr,
+      /source commit retains the retired legacy seed writer/u,
+    );
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }
@@ -1204,9 +1261,21 @@ test('legacy CLI seed route cannot return', () => {
     '"agent:deploy"',
     '"agent:seed-secrets": "forbidden",\n    "agent:deploy"',
   );
-  files.deploy += '\naegis/grafana-agent/seed-secrets.sh\n';
+  files.deploy = files.deploy.replace(
+    '  aegis/grafana-agent/preflight.mjs',
+    '  aegis/grafana-agent/preflight.mjs\n  aegis/grafana-agent/seed-secrets.sh',
+  );
   const errors = validateContract(files).join('\n');
   assert.match(errors, /legacy CLI secret writer must stay absent/u);
   assert.match(errors, /package\.json: legacy Alloy seed command/u);
   assert.match(errors, /immutable verifier must not retain/u);
+});
+
+test('immutable verifier must prove the retired seed path is absent', () => {
+  const files = sourceFiles();
+  files.deploy = files.deploy.replace(
+    'if ! legacy_seed_entry="$(',
+    'if legacy_seed_entry="$(',
+  );
+  expectFailure(files, /immutable verifier must fail closed while proving/u);
 });

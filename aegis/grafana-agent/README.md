@@ -110,8 +110,9 @@ target, verify its identity and zero-traffic state:
 pnpm aegis:agent:preflight -- --version TARGET
 ```
 
-Do not bump this runbook's `last_verified` date until the effective production
-version identity and secret-delivery path have both been verified.
+This runbook's `last_verified` date records the latest live check of the
+effective production version identity and secret-delivery path. Repeat that
+check after any identity or IAM apply before closing its rollout issue.
 
 ## Validate and deploy an already provisioned service
 

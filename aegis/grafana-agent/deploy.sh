@@ -7,6 +7,7 @@ set -euo pipefail
 agent_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$agent_dir/../.." && pwd)"
 project="${GCP_PROJECT:-mento-monitoring}"
+legacy_seed_path="aegis/grafana-agent/seed-secrets.sh"
 snapshot_files=(
   aegis/grafana-agent/Dockerfile
   aegis/grafana-agent/config.alloy
@@ -133,6 +134,18 @@ materialize_verifier_snapshot() {
   local root="$1"
   local commit="$2"
   local destination="$3"
+  local legacy_seed_entry
+
+  if ! legacy_seed_entry="$(
+    git -C "$root" ls-tree --name-only "$commit" -- "$legacy_seed_path"
+  )"; then
+    echo "Refusing production Alloy deploy: could not prove the retired legacy seed writer is absent." >&2
+    return 1
+  fi
+  if [[ -n "$legacy_seed_entry" ]]; then
+    echo "Refusing production Alloy deploy: source commit retains the retired legacy seed writer." >&2
+    return 1
+  fi
 
   mkdir -p "$destination"
   git -C "$root" archive --format=tar "$commit" -- "${verifier_files[@]}" |

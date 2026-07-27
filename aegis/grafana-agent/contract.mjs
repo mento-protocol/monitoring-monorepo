@@ -851,6 +851,25 @@ export function validateContract(files = readContractFiles()) {
   requirePattern(
     errors,
     deploy,
+    /legacy_seed_path="aegis\/grafana-agent\/seed-secrets\.sh"[\s\S]*if ! legacy_seed_entry="\$\([\s\S]*git -C "\$root" ls-tree --name-only "\$commit" -- "\$legacy_seed_path"[\s\S]*\)"; then[\s\S]*could not prove the retired legacy seed writer is absent[\s\S]*if \[\[ -n "\$legacy_seed_entry" \]\]; then[\s\S]*source commit retains the retired legacy seed writer/u,
+    `${CONTRACT_FILES.deploy}: immutable verifier must fail closed while proving the legacy seed writer is absent`,
+  );
+  const retiredSeedCheckIndex = deploy.indexOf('if ! legacy_seed_entry="$(');
+  const verifierArchiveIndex = deploy.indexOf(
+    'git -C "$root" archive --format=tar "$commit" -- "${verifier_files[@]}"',
+  );
+  if (
+    retiredSeedCheckIndex === -1 ||
+    verifierArchiveIndex === -1 ||
+    retiredSeedCheckIndex > verifierArchiveIndex
+  ) {
+    errors.push(
+      `${CONTRACT_FILES.deploy}: legacy seed absence must be proven before the verifier snapshot is archived`,
+    );
+  }
+  requirePattern(
+    errors,
+    deploy,
     /--config "\$snapshot_root\/cloudbuild\.yaml"[\s\\]+--substitutions "_VERSION=\$version"[\s\\]+"\$snapshot_source_dir"/u,
     `${CONTRACT_FILES.deploy}: Cloud Build must submit only the immutable snapshot`,
   );
@@ -1106,7 +1125,9 @@ export function validateContract(files = readContractFiles()) {
       `${CONTRACT_FILES.aegisPackage}: legacy Alloy seed command must stay absent`,
     );
   }
-  if (deploy.includes(LEGACY_SEED_PATH)) {
+  const verifierFilesBlock =
+    deploy.match(/verifier_files=\([\s\S]*?\n\)/u)?.[0] ?? '';
+  if (verifierFilesBlock.includes(LEGACY_SEED_PATH)) {
     errors.push(
       `${CONTRACT_FILES.deploy}: immutable verifier must not retain the deleted legacy seed route`,
     );
