@@ -57,6 +57,13 @@ workflow owns only the issue envelope; `eng` owns the cadence and recovery
 contract, while the eventual issue assignee owns semantic review and PR
 closeout.
 
+The garden issue sync stops at issue creation. It does not assign the issue,
+start an agent, or send a Slack success notification. The issue stays
+`agent-ready` until an active agent session claims it with `pnpm issue:claim`.
+Scheduled workflow failures route to `#ci-failures`; manual-dispatch failures
+do not. Successful issue notifications, when wanted, come from a Slack-side
+GitHub App subscription.
+
 The queue is deliberately serialized:
 
 - no live marked issue: create the selected occurrence as `agent-ready`;
