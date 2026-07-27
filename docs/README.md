@@ -47,7 +47,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`metrics-bridge/AGENTS.md`](../metrics-bridge/AGENTS.md) | Metrics Bridge Instructions | canonical / active | agent-instructions / metrics-bridge | eng | 90d; verified 2026-07-23 |
 | [`scripts/AGENTS.md`](../scripts/AGENTS.md) | Scripts Instructions | canonical / active | agent-instructions / scripts | eng | 90d; verified 2026-07-23 |
 | [`shared-config/AGENTS.md`](../shared-config/AGENTS.md) | Shared Config Instructions | canonical / active | agent-instructions / shared-config | eng | 90d; verified 2026-07-23 |
-| [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-07-23 |
+| [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-07-27 |
 | [`ui-dashboard/AGENTS.md`](../ui-dashboard/AGENTS.md) | Monitoring Dashboard Instructions | canonical / active | agent-instructions / ui-dashboard | eng | 90d; verified 2026-07-23 |
 
 ## operator-runbooks
@@ -60,7 +60,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`alerts/infra/onchain-event-listeners/README.md`](../alerts/infra/onchain-event-listeners/README.md) | On-chain Event Listeners Module | canonical / active | runbook / alerts/infra/onchain-event-listeners | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-26 |
 | [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-24 |
-| [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
+| [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-27 |
 | [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
@@ -81,7 +81,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md) | GitHub-to-Slack notifications for Terraform-applying workflows | canonical / active | runbook / terraform/infra | eng | 30d; verified 2026-07-22 |
 | [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md) | Spoken Attention Nudge | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md) | New Worktree / Clone Setup and Claude Code on the Web Setup | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-26 |
+| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-27 |
 | [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md) | Adding Governance Watchdog Events | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md) | Governance Watchdog Bootstrap | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/README.md`](../governance-watchdog/README.md) | Governance Watchdog | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
@@ -160,6 +160,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0050-environment-scoped-pipeline-secrets.md`](adr/0050-environment-scoped-pipeline-secrets.md) | Pipeline secrets are gated by a Terraform-managed GitHub Environment | canonical / active | adr / terraform / ci | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/0051-dashboard-volume-scale-bounds.md`](adr/0051-dashboard-volume-scale-bounds.md) | Dashboard volume composition has per-chain and total re-review bounds | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/0052-envio-logs-prometheus-grafana-alerting.md`](adr/0052-envio-logs-prometheus-grafana-alerting.md) | Envio logs diagnose; Prometheus and Grafana alert | canonical / active | adr / indexer-envio / alerts | eng | 90d; verified 2026-07-26 |
+| [`docs/adr/0053-explicit-deployment-source-staging.md`](adr/0053-explicit-deployment-source-staging.md) | Routine GCP deploys use explicit source-staging buckets | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-27 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
 ## package-readmes-reference
