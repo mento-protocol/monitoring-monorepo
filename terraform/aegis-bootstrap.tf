@@ -134,6 +134,33 @@ resource "google_project_iam_member" "grafana_agent_runtime_log_writer" {
   depends_on = [google_project_service.appengineflex]
 }
 
+# Artifact Registry creates gcr.io-compatible repositories on first push. Keep
+# this repository explicit so a fresh platform apply creates it before IAM and
+# App Engine deployment. Existing production must import the repository once
+# before the first apply that includes this resource; see the Alloy runbook.
+resource "google_artifact_registry_repository" "grafana_agent_runtime_images" {
+  project       = google_project.monitoring.project_id
+  location      = "us"
+  repository_id = "us.gcr.io"
+  format        = "DOCKER"
+
+  depends_on = [google_project_service.artifactregistry]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_artifact_registry_repository_iam_member" "grafana_agent_runtime_image_reader" {
+  project    = google_artifact_registry_repository.grafana_agent_runtime_images.project
+  location   = google_artifact_registry_repository.grafana_agent_runtime_images.location
+  repository = google_artifact_registry_repository.grafana_agent_runtime_images.repository_id
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.grafana_agent_runtime.email}"
+
+  depends_on = [google_app_engine_application.aegis]
+}
+
 resource "google_project_iam_custom_role" "grafana_agent_preflight_reader" {
   project     = google_project.monitoring.project_id
   role_id     = "grafanaAgentPreflightReader"
@@ -143,6 +170,7 @@ resource "google_project_iam_custom_role" "grafana_agent_preflight_reader" {
     "appengine.applications.get",
     "appengine.services.get",
     "appengine.versions.get",
+    "artifactregistry.repositories.getIamPolicy",
     "iam.roles.get",
     "iam.serviceAccounts.get",
     "iam.serviceAccounts.getIamPolicy",
@@ -155,6 +183,7 @@ resource "google_project_iam_custom_role" "grafana_agent_preflight_reader" {
 
   depends_on = [
     google_project_service.appengineflex,
+    google_project_service.artifactregistry,
     google_project_service.iam,
     google_project_service.secretmanager,
   ]

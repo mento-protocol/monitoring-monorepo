@@ -195,6 +195,53 @@ test('the App Engine Flex runtime must keep Logs Writer', () => {
   expectFailure(files, /App Engine Flex Logs Writer/u);
 });
 
+test('the App Engine Flex runtime must keep repository-scoped image Reader', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    'resource "google_artifact_registry_repository_iam_member" "grafana_agent_runtime_image_reader"',
+    'resource "google_artifact_registry_repository_iam_member" "removed_runtime_image_reader"',
+  );
+  expectFailure(files, /grafana_agent_runtime_image_reader/u);
+});
+
+test('runtime image repository must exist before its IAM binding', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    'resource "google_artifact_registry_repository" "grafana_agent_runtime_images"',
+    'resource "google_artifact_registry_repository" "removed_runtime_images"',
+  );
+  expectFailure(files, /grafana_agent_runtime_images/u);
+});
+
+test('runtime image repository must reject deletion', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    `  depends_on = [google_project_service.artifactregistry]
+
+  lifecycle {
+    prevent_destroy = true
+  }`,
+    `  depends_on = [google_project_service.artifactregistry]
+
+  lifecycle {
+    prevent_destroy = false
+  }`,
+  );
+  expectFailure(
+    files,
+    /runtime image repository must wait for its API and reject deletion/u,
+  );
+});
+
+test('runtime image access cannot broaden beyond us.gcr.io Reader', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    'role       = "roles/artifactregistry.reader"',
+    'role       = "roles/artifactregistry.writer"',
+  );
+  expectFailure(files, /Reader on only the us\.gcr\.io repository/u);
+});
+
 test('runtime secret IAM must preserve bootstrap ordering', () => {
   const files = sourceFiles();
   files.bootstrap = files.bootstrap.replace(
@@ -223,6 +270,24 @@ test('operator preflight role pins the Terraform member-set fingerprint', () => 
     'operator-set-sha256=unverified',
   );
   expectFailure(files, /must carry the Terraform member-set fingerprint/u);
+});
+
+test('operator preflight role waits for every permission-owning API', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    `  depends_on = [
+    google_project_service.appengineflex,
+    google_project_service.artifactregistry,
+    google_project_service.iam,
+    google_project_service.secretmanager,
+  ]`,
+    `  depends_on = [
+    google_project_service.appengineflex,
+    google_project_service.iam,
+    google_project_service.secretmanager,
+  ]`,
+  );
+  expectFailure(files, /must wait for every permission-owning API/u);
 });
 
 test('operator preflight reader must stay scoped to gcp_dev_members', () => {
@@ -1072,6 +1137,15 @@ test('documented Terraform secret input files are gitignored', () => {
     });
     assert.equal(result.status, 0, `${relativePath} must stay ignored`);
   }
+});
+
+test('production documents one-time adoption of the existing image repository', () => {
+  const files = sourceFiles();
+  files.runbook = files.runbook.replace(
+    'terraform -chdir=terraform import',
+    'echo import-skipped',
+  );
+  expectFailure(files, /must document one-time adoption/u);
 });
 
 test('deploy must retain the explicit previous-version rollback command', () => {
