@@ -1,4 +1,4 @@
-<!-- agent-context: title="Grafana Alloy" status=active owner=eng canonical=true last_verified=2026-07-26 doc_type=runbook scope=aegis/grafana-agent review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Grafana Alloy" status=active owner=eng canonical=true last_verified=2026-07-27 doc_type=runbook scope=aegis/grafana-agent review_interval_days=90 garden_lane=operator-runbooks -->
 
 # Grafana Alloy
 
@@ -63,10 +63,11 @@ in that role's description. Only the builder can act as the runtime account;
 it has no Secret Manager access. The preflight role contains the exact App
 Engine get, Artifact Registry repository IAM get, IAM policy/role get, project
 policy get, secret list/IAM get, and secret-version get permissions; it does
-not include `secretmanager.versions.access`. The former Cloud Build,
-compute-default, and AppSpot secret bindings remain during Phase A as an
-explicit rollback route; they are not the selected runtime path and issue
-#1473 removes them after live proof.
+not include `secretmanager.versions.access`. Terraform grants Secret Accessor
+only to the pinned runtime account. This source state becomes effective only
+after an approved platform apply. Until that apply and the live preflight
+succeed, production may still retain legacy Secret Accessor bindings for Cloud
+Build, the Compute default account, and AppSpot.
 
 Terraform requires two operator-held inputs for this path:
 
@@ -97,34 +98,23 @@ command. Feature-branch validation does not replace that current-`main`
 plan/apply. Secret rotation creates the replacement version before disabling
 the previous version.
 
-Artifact Registry auto-created production's `us.gcr.io` repository during the
-first App Engine image push. Terraform now owns that repository so fresh
-platform bootstraps create it before its IAM binding. Before the first
-production apply that includes
-`google_artifact_registry_repository.grafana_agent_runtime_images`, obtain
-explicit approval for this state adoption and run this command once from a
-clean current-`main` checkout:
+Production's `us.gcr.io` repository is already state-managed as
+`google_artifact_registry_repository.grafana_agent_runtime_images`. Fresh
+platform bootstraps create it before its IAM binding. Never remove this
+resource from state or destroy it; it contains the deployed App Engine images.
+
+Versions that do not pin
+`grafana-agent-runtime@mento-monitoring.iam.gserviceaccount.com` intentionally
+lack secret access and must not be restarted. Before starting a rollback
+target, verify its identity and zero-traffic state:
 
 ```bash
-terraform -chdir=terraform import \
-  google_artifact_registry_repository.grafana_agent_runtime_images \
-  projects/mento-monitoring/locations/us/repositories/us.gcr.io
+pnpm aegis:agent:preflight -- --version TARGET
 ```
 
-Skip the import only when the repository does not exist; Terraform then creates
-it. After import, run a fresh `pnpm infra:plan` and obtain separate explicit
-approval for the exact apply plan. Never remove this resource from state or
-destroy it; it contains the deployed App Engine images.
-
-The legacy `pnpm aegis:agent:seed-secrets` path calls
-`gcloud secrets versions add`. Phase A retains it only as a rollback artifact.
-It conflicts with [`ADR 0030`](../../docs/adr/0030-iac-before-cli-secrets.md),
-so agents must not use it for bootstrap or rotation. Do not remove it until
-issue [#1473](https://github.com/mento-protocol/monitoring-monorepo/issues/1473)
-records live proof and the rollback route is retired.
-
-Do not bump this runbook's `last_verified` date until the effective production
-version identity and secret-delivery path have both been verified.
+This runbook's `last_verified` date records the latest live check of the
+effective production version identity and secret-delivery path. Repeat that
+check after any identity or IAM apply before closing its rollout issue.
 
 ## Validate and deploy an already provisioned service
 
@@ -178,15 +168,25 @@ gcloud app versions stop TARGET --project mento-monitoring --service grafana-age
       peer_status="$(gcloud app versions describe "$peer_version" --project mento-monitoring --service grafana-agent --format='value(servingStatus)')" && \
       test "$peer_status" = STOPPED || exit 1; \
   done && \
-  gcloud app versions start PREVIOUS --project mento-monitoring --service grafana-agent --quiet && \
-  gcloud app services set-traffic grafana-agent --project mento-monitoring --splits PREVIOUS=1
+  (pnpm aegis:agent:preflight -- --version PREVIOUS --version-traffic full || \
+    (pnpm aegis:agent:preflight -- --version PREVIOUS && \
+      gcloud app versions start PREVIOUS --project mento-monitoring --service grafana-agent --quiet && \
+      gcloud app services set-traffic grafana-agent --project mento-monitoring --splits PREVIOUS=1))
 ```
 
 Never start `PREVIOUS` until `TARGET` and every other serving peer report
-`STOPPED`; doing so can run duplicate collectors. The local operator needs
-permission to submit as the dedicated builder and change App Engine traffic;
-the builder performs the version deployment without access to secret payloads.
+`STOPPED`. If `PREVIOUS` already owns full traffic, verify that state and its
+pinned runtime identity with
+`pnpm aegis:agent:preflight -- --version PREVIOUS --version-traffic full` and
+do not restart it. Otherwise,
+`pnpm aegis:agent:preflight -- --version PREVIOUS` must prove its pinned runtime
+identity and zero-traffic state before restart; doing so can otherwise restart a
+legacy collector without secret access or run duplicate collectors. The local
+operator needs permission to submit as the dedicated builder and change App
+Engine traffic; the builder performs the version deployment without access to
+secret payloads.
 
 Do not deploy until an explicitly approved platform apply has created the
-write-only versions and identity bindings. Never use the legacy seed command,
-`gcloud secrets versions add`, or another CLI workaround.
+write-only versions and identity bindings. Terraform's write-only path is the
+only authorized bootstrap and rotation route. Never use
+`gcloud secrets versions add` or another CLI workaround.

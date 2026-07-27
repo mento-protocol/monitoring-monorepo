@@ -7,6 +7,7 @@ set -euo pipefail
 agent_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$agent_dir/../.." && pwd)"
 project="${GCP_PROJECT:-mento-monitoring}"
+legacy_seed_path="aegis/grafana-agent/seed-secrets.sh"
 snapshot_files=(
   aegis/grafana-agent/Dockerfile
   aegis/grafana-agent/config.alloy
@@ -25,7 +26,8 @@ verifier_files=(
   aegis/grafana-agent/grafana-agent.yaml
   aegis/grafana-agent/passive-health.sh
   aegis/grafana-agent/preflight.mjs
-  aegis/grafana-agent/seed-secrets.sh
+  aegis/package.json
+  package.json
   terraform/.gitignore
   terraform/.terraform.lock.hcl
   terraform/aegis-bootstrap.tf
@@ -132,6 +134,18 @@ materialize_verifier_snapshot() {
   local root="$1"
   local commit="$2"
   local destination="$3"
+  local legacy_seed_entry
+
+  if ! legacy_seed_entry="$(
+    git -C "$root" ls-tree --name-only "$commit" -- "$legacy_seed_path"
+  )"; then
+    echo "Refusing production Alloy deploy: could not prove the retired legacy seed writer is absent." >&2
+    return 1
+  fi
+  if [[ -n "$legacy_seed_entry" ]]; then
+    echo "Refusing production Alloy deploy: source commit retains the retired legacy seed writer." >&2
+    return 1
+  fi
 
   mkdir -p "$destination"
   git -C "$root" archive --format=tar "$commit" -- "${verifier_files[@]}" |
@@ -233,6 +247,25 @@ stop_other_collectors() {
   done <<<"$other_versions"
 }
 
+verify_restart_target() {
+  local verifier_root="$1"
+  local restart_version="$2"
+
+  node "$verifier_root/aegis/grafana-agent/preflight.mjs" \
+    --project "$project" \
+    --version "$restart_version"
+}
+
+verify_restored_target() {
+  local verifier_root="$1"
+  local restored_version="$2"
+
+  node "$verifier_root/aegis/grafana-agent/preflight.mjs" \
+    --project "$project" \
+    --version "$restored_version" \
+    --version-traffic full
+}
+
 print_manual_rollback_commands() {
   local previous_version="$1"
   local target_version="$2"
@@ -248,13 +281,16 @@ print_manual_rollback_commands() {
     "        peer_status=\"\$(gcloud app versions describe \"\$peer_version\" --project $project --service grafana-agent --format='value(servingStatus)')\" && \\" \
     "        test \"\$peer_status\" = STOPPED || exit 1; \\" \
     "    done && \\" \
-    "    gcloud app versions start $previous_version --project $project --service grafana-agent --quiet && \\" \
-    "    gcloud app services set-traffic grafana-agent --project $project --splits ${previous_version}=1"
+    "    (pnpm --dir \"$repo_root\" aegis:agent:preflight -- --version $previous_version --version-traffic full || \\" \
+    "      (pnpm --dir \"$repo_root\" aegis:agent:preflight -- --version $previous_version && \\" \
+    "        gcloud app versions start $previous_version --project $project --service grafana-agent --quiet && \\" \
+    "        gcloud app services set-traffic grafana-agent --project $project --splits ${previous_version}=1))"
 }
 
 rollback_cutover() {
   local previous_version="$1"
   local target_version="$2"
+  local verifier_root="$3"
 
   echo "Cutover failed; restoring the previous collector." >&2
   if ! gcloud app versions stop "$target_version" \
@@ -273,6 +309,16 @@ rollback_cutover() {
   if [[ -n "$previous_version" ]]; then
     if ! stop_other_collectors "$previous_version"; then
       echo "Automatic rollback halted: another collector could not be proven STOPPED." >&2
+      echo "Manual stop-before-start recovery:" >&2
+      print_manual_rollback_commands "$previous_version" "$target_version" >&2
+      return 1
+    fi
+    if verify_restored_target "$verifier_root" "$previous_version"; then
+      echo "Previous collector already owns full traffic; rollback is restored." >&2
+      return 0
+    fi
+    if ! verify_restart_target "$verifier_root" "$previous_version"; then
+      echo "Automatic rollback halted: previous collector failed pinned-identity and zero-traffic preflight." >&2
       echo "Manual stop-before-start recovery:" >&2
       print_manual_rollback_commands "$previous_version" "$target_version" >&2
       return 1
@@ -386,7 +432,7 @@ main() {
   if ! gcloud app services set-traffic grafana-agent \
     --project "$project" \
     --splits "${version}=1"; then
-    rollback_cutover "$previous_version" "$version"
+    rollback_cutover "$previous_version" "$version" "$verifier_root"
     return 1
   fi
 
@@ -397,12 +443,12 @@ main() {
   # wrapper rolls back after 12 failed health attempts. --migrate cannot
   # establish the required full-allocation activation condition.
   if ! stop_other_collectors "$version"; then
-    rollback_cutover "$previous_version" "$version"
+    rollback_cutover "$previous_version" "$version" "$verifier_root"
     return 1
   fi
 
   if ! wait_for_collector_health "$service_url"; then
-    rollback_cutover "$previous_version" "$version"
+    rollback_cutover "$previous_version" "$version" "$verifier_root"
     return 1
   fi
 

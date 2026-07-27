@@ -9,7 +9,6 @@
     "build": "nest build",
     "agent:deploy": "cd grafana-agent && ./deploy.sh",
     "agent:preflight": "node grafana-agent/preflight.mjs",
-    "agent:seed-secrets": "cd grafana-agent && ./seed-secrets.sh",
     "agent:test": "node --test grafana-agent/*.test.mjs",
     "deploy": "./bin/deploy.sh",
     "dev": "nest start --watch",

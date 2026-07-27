@@ -355,9 +355,9 @@ through a dedicated builder with no secret access. It verifies the new
 version's identity and live zero-traffic allocation, assigns 100% traffic
 atomically, then uses a stop-before-start handoff to prevent duplicate
 collectors. The handoff leaves a temporary collection gap until the new version
-activates or the wrapper rolls back. The legacy seed command remains only for
-Phase A rollback and is not an agent-authorized bootstrap or rotation path
-under ADR 0030. Follow
+activates or the wrapper rolls back. Terraform's write-only Secret Manager
+versions are the only authorized bootstrap and rotation path under ADR 0030.
+Follow
 [`aegis/grafana-agent/README.md`](./aegis/grafana-agent/README.md).
 
 The Aegis dashboard lives in `aegis/terraform` and keeps the existing GCS

@@ -59,7 +59,7 @@ boundaries.
   resource without destroying its remote counterpart, use a `removed` block
   with an explicit `destroy` choice.
 - Keep the Alloy `us.gcr.io` repository state-managed with `prevent_destroy`;
-  the Alloy runbook owns the one-time production import.
+  production already completed its one-time import.
 - Cloud Run services use `/health`, not `/healthz`.
 - For deploy-owned Cloud Run images, retain the necessary
   `lifecycle.ignore_changes` for the image and provider bookkeeping drift. If a
