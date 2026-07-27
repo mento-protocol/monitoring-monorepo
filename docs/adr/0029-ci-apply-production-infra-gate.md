@@ -28,7 +28,10 @@ rollouts.
 Terraform stacks with CI-apply policy (`alerts-rules`, `alerts-delivery`, `aegis`,
 `governance-watchdog`) **apply on merge to `main`**, gated by the **`production-infra`
 GitHub Environment** (required reviewer, self-review allowed, admin bypass disabled,
-branch restricted to protected `main`). PR runs do **read-only plans** under a
+deployment restricted to `main` by an explicit branch pattern — `protected_branches`
+fails open in this repo, see
+[ADR 0050](0050-environment-scoped-pipeline-secrets.md) and #1649). PR runs do
+**read-only plans** under a
 read-only plan service account. Secret-bearing PR plan workflows also export
 validation-safe placeholder `TF_VAR_*` values instead of production secrets; the
 push/dispatch plan and environment-gated apply paths keep real secrets and
@@ -119,7 +122,12 @@ approval requirement until a second active maintainer can satisfy it.
   [`scripts/verify-github-environment-protection.mjs`](../../scripts/verify-github-environment-protection.mjs).
 - Live `production-infra` settings verified through the GitHub API on
   2026-07-24: one required reviewer, self-review allowed, admin bypass
-  disabled, and deployment limited to protected branches.
+  disabled, and deployment limited to protected branches. **Superseded
+  2026-07-27 (#1649):** that `protected_branches` restriction was inert — this
+  repo has no classic branch protection, so it matched nothing and failed open.
+  The required reviewer, enforced independently of the branch policy, is what
+  actually gated applies. Deployment is now restricted by an explicit `main`
+  branch pattern.
 - Live `main` ruleset verified through the GitHub API on 2026-07-24: zero
   required approvals, no code-owner or latest-push approval, required thread
   resolution and status checks, and organization-administrator bypass.

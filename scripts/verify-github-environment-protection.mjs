@@ -3,7 +3,18 @@
 const DEFAULT_ENVIRONMENT = "production-infra";
 const DEFAULT_API_URL = "https://api.github.com";
 
-export function environmentProtectionFailures(environment) {
+// `branchPolicies` is the `branch_policies` array from
+// GET /repos/:o/:r/environments/:env/deployment-branch-policies.
+//
+// Why this function needs it (issue #1649): the previous version asserted
+// `protected_branches === true`, which restricts deployments to branches under
+// CLASSIC branch protection. This repo protects `main` with a ruleset and has
+// no classic protection, so that policy matched nothing and FAILED OPEN — the
+// configuration read as correct here while off-main runs could reach the
+// environment's secrets. Asserting the configured shape was not enough; the
+// allow-list itself has to be checked, so an empty or over-broad pattern set
+// cannot pass.
+export function environmentProtectionFailures(environment, branchPolicies) {
   const rules = Array.isArray(environment.protection_rules)
     ? environment.protection_rules
     : [];
@@ -21,10 +32,31 @@ export function environmentProtectionFailures(environment) {
     failures.push("self-review is not allowed for required reviewers");
   }
   if (
-    branchPolicy?.protected_branches !== true ||
-    branchPolicy?.custom_branch_policies !== false
+    branchPolicy?.custom_branch_policies !== true ||
+    branchPolicy?.protected_branches !== false
   ) {
-    failures.push("deployment branches are not limited to protected branches");
+    failures.push(
+      "deployment branches are not limited by an explicit branch pattern",
+    );
+  } else {
+    // Fail closed: an unreadable or empty allow-list is a failure, never a pass.
+    //
+    // The allow-list holds BOTH branch and tag policies, so `type` is load
+    // bearing: a TAG named `main` would otherwise satisfy a name-only check and
+    // let a run at that tag through this gate into production cloud auth.
+    // Require exactly one entry, `branch:main`.
+    const entries = Array.isArray(branchPolicies)
+      ? branchPolicies.map((policy) => `${policy?.type}:${policy?.name}`)
+      : null;
+    if (entries === null) {
+      failures.push("deployment branch policies could not be read");
+    } else if (entries.length === 0) {
+      failures.push("no deployment branch pattern is configured");
+    } else if (entries.length !== 1 || entries[0] !== "branch:main") {
+      failures.push(
+        `deployment policies must be exactly ["branch:main"], found ${JSON.stringify(entries)}`,
+      );
+    }
   }
 
   return failures;
@@ -69,6 +101,34 @@ async function fetchEnvironment({
   return response.json();
 }
 
+async function fetchBranchPolicies({
+  apiUrl,
+  repository,
+  environmentName,
+  token,
+}) {
+  const url = new URL(
+    "deployment-branch-policies",
+    `${environmentUrl(apiUrl, repository, environmentName)}/`,
+  );
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `GitHub deployment-branch-policy lookup failed with HTTP ${response.status}`,
+    );
+  }
+
+  const body = await response.json();
+  return body?.branch_policies ?? [];
+}
+
 async function main(env = process.env) {
   const token = env.GITHUB_TOKEN;
   if (!token) throw new Error("GITHUB_TOKEN is required");
@@ -77,13 +137,22 @@ async function main(env = process.env) {
   if (!repository) throw new Error("GITHUB_REPOSITORY is required");
 
   const environmentName = env.GITHUB_ENVIRONMENT_NAME || DEFAULT_ENVIRONMENT;
+  const apiUrl = env.GITHUB_API_URL || DEFAULT_API_URL;
   const environment = await fetchEnvironment({
-    apiUrl: env.GITHUB_API_URL || DEFAULT_API_URL,
+    apiUrl,
     repository,
     environmentName,
     token,
   });
-  const failures = environmentProtectionFailures(environment);
+  // Read the allow-list too — the configured shape alone does not prove the
+  // branch restriction is effective (#1649). A throw here fails the gate.
+  const branchPolicies = await fetchBranchPolicies({
+    apiUrl,
+    repository,
+    environmentName,
+    token,
+  });
+  const failures = environmentProtectionFailures(environment, branchPolicies);
 
   if (failures.length > 0) {
     throw new Error(
