@@ -242,3 +242,7 @@ be evaluator retrieval mistakes rather than repository routing defects. The
 indexer route reaches the detailed procedure through `indexer-envio/AGENTS.md`
 and `indexer-envio/README.md`; the alerts boundary is stated directly in
 `alerts/AGENTS.md`. No documentation follow-up issue was required.
+
+Because two independent runs have now missed `package-indexer-add-contract`, a
+third independent miss must trigger a fresh review of the accepted route and
+fixture instead of another automatic evaluator-error disposition.
