@@ -106,34 +106,6 @@ concurrency:
 permissions: read-all
 
 jobs:
-  test:
-    name: Terraform Test (alerts/rules)
-    if: github.event_name == 'pull_request'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    defaults:
-      run:
-        working-directory: alerts/rules
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_version: 1.14.6
-          terraform_wrapper: false
-
-      # Terraform tests can execute PR-controlled provisioners. This job has
-      # no cloud credentials or repository token before it evaluates them.
-      - name: Init test providers without the remote backend
-        run: terraform init -backend=false -input=false
-
-      - name: Test Peg rule definitions
-        run: terraform test -no-color
-
   plan:
     name: Terraform Plan (alerts/rules)
     # Fork PRs and Dependabot PRs don't get repository secrets, so the
@@ -273,8 +245,8 @@ jobs:
 
       - name: Test Peg rule definitions
         # Test files can run apply commands and provisioners, so never execute
-        # PR-head tests in this credentialed job. The credential-free test job
-        # above retains pull-request coverage; trusted main runs here.
+        # PR-head tests in this credentialed job. The required ci sentinel
+        # retains pull-request coverage without cloud credentials.
         if: github.event_name != 'pull_request'
         run: terraform test -no-color
 

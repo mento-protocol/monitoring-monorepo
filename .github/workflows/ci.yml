@@ -829,6 +829,16 @@ jobs:
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.14.6
+          terraform_wrapper: false
+      # Terraform tests can execute PR-controlled provisioners. Run the Peg
+      # assertions before any backend or cloud authentication, so the required
+      # ci sentinel retains PR coverage without exposing credentials.
+      - name: Test Peg rule definitions
+        if: github.event_name == 'pull_request'
+        working-directory: alerts/rules
+        run: |
+          terraform init -backend=false -input=false
+          terraform test -no-color
       - name: Validate changed stacks
         env:
           EVENT_NAME: ${{ github.event_name }}
