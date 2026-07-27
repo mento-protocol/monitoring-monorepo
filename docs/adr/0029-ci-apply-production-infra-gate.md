@@ -3,7 +3,7 @@ title: Infra applies on merge to main behind the production-infra environment ga
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-27
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
@@ -60,8 +60,9 @@ ID `1172025835`, repository slug, protected `main` ref, and `production-infra`
 environment subject before they can impersonate the seed-project production
 applier. PR plans retain their state-only identity. The checked-in workflows
 route trusted-`main` refresh/drift through the separate read-only chain. Run
-#30212385280 completed its full-resource proof; run drain and read-boundary
-audit remain before authority removal.
+#30212385280 completed its full-resource proof. The later run drain,
+read-boundary audit, approved removal apply, and final IAM/WIF audit completed
+on 2026-07-27.
 [ADR 0047](0047-separated-terraform-ci-identities.md) owns the identity split
 and its staged bootstrap, routing, proof, and removal procedure.
 
@@ -101,12 +102,11 @@ approval requirement until a second active maintainer can satisfy it.
 - Environment approval is an operator acknowledgement of the commit and earlier
   plan. It does not prove human review of the apply-time plan or independent
   approval of the code.
-- The final-removal source omits the legacy routine-deployer Token Creator
-  grant, but it must not merge until trusted-main refresh routing is live on
-  current `main`, every CI-managed Google-provider stack succeeds through that
-  checked-in route, all pre-routing and proof runs are terminal, and the read
-  boundary is audited. The grant remains live until an explicitly approved
-  platform apply removes it and the final IAM audit proves it is gone.
+- The legacy routine-deployer Token Creator grant is removed in source and
+  live IAM. The approved removal apply reported
+  `0 added, 1 changed, 1 destroyed`. A full post-apply plan reported no
+  changes, and the final audit found only `production-infra-applier` on
+  `org-terraform` Token Creator.
 - Worktrees lack `terraform.tfvars`, so run TF from `main`.
 - Agents never apply without explicit human approval; plan first, surface the diff.
 

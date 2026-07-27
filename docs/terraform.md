@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-27
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -68,9 +68,10 @@ deployment changes or maintainer `workflow_dispatch`. Platform remains manual.
 Trusted-`main` plans and drift use the read-only refresh chain, full refresh,
 and `-lock=false`. Run
 [#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
-proved that route for `alerts-delivery` and `governance-watchdog`. The legacy
-routine-deployer Token Creator grant remains rollback-only until affected runs
-drain and the read boundary is audited.
+proved that route for `alerts-delivery` and `governance-watchdog`. The
+2026-07-27 run drain, read-boundary audit, approved removal apply, clean
+post-apply plan, and final IAM/WIF audit completed the cutover. Live
+`org-terraform` Token Creator now contains only `production-infra-applier`.
 
 Eligible same-repo human PR plans use safe placeholder `TF_VAR_*` values or
 guarded targets; fork, Dependabot, and `sentry-autofix/*` plans are skipped.
@@ -105,9 +106,10 @@ allowlist. The identity contract restricts the four trusted-main plan workflows
 and `terraform-drift.yml` to both refresh selectors.
 
 Trusted-main plans use `-lock=false` and curated non-basic readers. Run
-#30212385280 completed the required full-refresh proof; the run-drain and
-read-boundary audits remain. Never add basic `roles/viewer`; limit object and
-secret payload reads to state, deployment source, and managed secrets.
+#30212385280 completed the required full-refresh proof; the later run-drain and
+read-boundary audits also completed. Never add basic `roles/viewer`; limit
+object and secret payload reads to state, deployment source, and managed
+secrets.
 
 ADR 0047 also selects the final no-artifact apply contract: make a private plan
 after approval, run fail-closed policy over its JSON, then apply those exact
@@ -117,10 +119,13 @@ apply-time re-plan and drift window remain in force.
 ## Identity bootstrap, routing cutover, and authority removal
 
 The bootstrap, refresh routing, live full-refresh proof, legacy-authority
-removal, run drain, and final IAM/WIF audit are complete. The Peg-policy foundation stays
-source-only and unapplied until its own reviewed, human-approved platform plan
-and apply. It creates no policy object and does not attach the runtime identity
-to Cloud Run; policy publication and activation remain separate reviewed steps.
+removal, run drain, and final IAM/WIF audit are complete. The approved removal
+apply completed with `0 added, 1 changed, 1 destroyed`, a full post-apply plan
+reported no changes, and live IAM contains no `metrics-bridge-deployer` Token
+Creator grant. The Peg-policy foundation stays source-only and unapplied until
+its own reviewed, human-approved platform plan and apply. It creates no policy
+object and does not attach the runtime identity to Cloud Run; policy
+publication and activation remain separate reviewed steps.
 
 ## Platform GitHub Actions secrets and variables
 

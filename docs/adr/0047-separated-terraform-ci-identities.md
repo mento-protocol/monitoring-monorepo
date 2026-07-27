@@ -3,7 +3,7 @@ title: Terraform CI separates routine deploy, PR plan, trusted-main refresh, and
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-27
 scope: terraform/infra
 date: 2026-07
 doc_type: adr
@@ -13,8 +13,8 @@ garden_lane: adrs-architecture
 
 # ADR 0047 — Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities
 
-**Status:** Accepted (Jul 2026), final-removal source prepared and refresh proof
-complete; live cutover incomplete.
+**Status:** Accepted (Jul 2026), live cutover and final authority removal
+complete.
 **Scope:** terraform/infra
 
 ## Context
@@ -105,12 +105,12 @@ read the managed secret payloads and deployment-source objects because the
 pinned Google providers read them during refresh. It still cannot mutate them,
 and PR workflows cannot impersonate it.
 
-The identity bootstrap, refresh routing, and authority removal land in three
+The identity bootstrap, refresh routing, and authority removal landed in three
 separate PRs. Run
 [#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
-proved that the merged workflows can refresh the full live resource graph. The
-legacy rollback grant remains until the drain, audit, removal-apply, and final
-audit gates below complete:
+proved that the merged workflows can refresh the full live resource graph.
+All seven cutover steps below are complete; the sequence remains here as the
+audited procedure:
 
 1. Merge the identity-bootstrap PR. Cancel every infrastructure apply queued
    by that merge; do not approve or reuse those runs because their repository
@@ -136,7 +136,7 @@ audit gates below complete:
    state, and confirm that the final IAM policy has no basic role and no
    object-payload grant outside the explicitly named state, deployment-source,
    and managed-secret resources. Run #30212385280 completed the full-refresh
-   plans; the drain and read-boundary audit remain.
+   plans. The later drain and read-boundary audit completed on 2026-07-27.
 7. Only after step 6 succeeds, land a final removal PR that deletes the routine
    deployer's `org-terraform` Token Creator grant from the platform
    configuration. Merge it, cancel superseded runs, and confirm that every
@@ -145,19 +145,25 @@ audit gates below complete:
    service-account IAM bindings before declaring the authority removal
    complete.
 
-The final-removal source now implements step 7 by omitting the legacy binding.
-This is source readiness only. Routing is live and the step 6 plans succeeded;
-the source must not merge until every pre-routing and proof run is terminal and
-the read boundary is audited. The live grant remains until the post-merge
-platform apply succeeds and the final IAM audit proves it is gone.
+The final-removal source omitted the legacy binding, and the approved
+2026-07-27 platform apply completed with `0 added, 1 changed, 1 destroyed`.
+The destroy removed the routine deployer's Token Creator grant; the unrelated
+change disabled admin bypass on the `sentry-pipeline` Environment. A full
+post-apply platform plan reported no changes. The live IAM audit found only
+`production-infra-applier` on `org-terraform` Token Creator, found no
+`metrics-bridge-deployer` grant, and confirmed the production provider still
+requires the exact `production-infra` Environment subject.
 
-Do not create a dedicated peg-policy GCP project or bucket during this
-bootstrap or routing cutover. Until the final removal has been applied, every
-queued and active infrastructure run has drained, and the IAM audit proves the
-old routine-deployer impersonation path is gone, that deployer can still reach
-`org-terraform`; a new project would not provide the intended isolation. A
-later reviewed change may create the project and bucket only after those gates
-pass.
+No queued or active infrastructure job remained. GitHub still displayed stale
+rerun wrapper #26444624366 as queued, but its only attempt was terminal, had no
+jobs, and both cancellation APIs rejected it as already completed or not
+queued. This display-only wrapper carries no cloud credentials or deployment
+state.
+
+The cutover boundary barred a dedicated Peg-policy project or bucket while the
+legacy path remained. That boundary is now satisfied. A later reviewed change
+may create the policy foundation only through its own full plan and explicit
+human-approved apply.
 
 ### Final apply-plan contract
 
@@ -223,10 +229,9 @@ that the current stacks do not otherwise need.
   carrying apply authority. Read-only still includes sensitive state, managed
   secret payloads, and function source, so this identity remains unavailable
   to PRs.
-- The live environment can retain both the legacy and replacement
-  `org-terraform` paths until the final-removal source is merged and explicitly
-  applied. Queue control, terminal-run verification, and the final IAM audit
-  are required parts of the cutover.
+- The live environment no longer retains the legacy routine-deployer
+  `org-terraform` path. The identity contract treats any reintroduction of that
+  Token Creator grant as a regression.
 - The checked-in identity contract is a regression guard over enumerated
   Terraform identity and authority blocks, credential and secret-payload
   sinks, output and declassification sites, imperative execution, and
