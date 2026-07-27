@@ -492,19 +492,20 @@ export function discoverDeployStagingCallsites(files, errors = []) {
           records.push(...commandRecords(filePath, path, value));
         }
         if (!isMapping(value)) return;
-        const appIndex = Array.isArray(value.args)
-          ? value.args.indexOf("app")
-          : -1;
         if (
-          /^gcr\.io\/cloud-builders\/gcloud(?::|@|$)/u.test(value.name) &&
-          appIndex >= 0 &&
-          value.args[appIndex + 1] === "deploy"
+          !/^gcr\.io\/cloud-builders\/gcloud(?::|@|$)/u.test(value.name) ||
+          !Array.isArray(value.args)
         ) {
+          return;
+        }
+        const args = value.args.map(String);
+        const kind = gcloudCommandKind(["gcloud", ...args], 0);
+        if (kind) {
           records.push({
             filePath,
             surface: `${path}.args`,
-            kind: "app-deploy",
-            args: value.args.map(String),
+            kind,
+            args,
           });
         }
       });

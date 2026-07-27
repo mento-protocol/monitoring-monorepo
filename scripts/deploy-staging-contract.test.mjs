@@ -209,6 +209,22 @@ expectFailure(
     "new-cloudbuild.yaml": `steps:
   - name: gcr.io/cloud-builders/gcloud
     args:
+      - --project
+      - mento-monitoring
+      - beta
+      - builds
+      - submit
+      - .
+`,
+  },
+  "executable callsite inventory must be exactly",
+);
+expectFailure(
+  {
+    ...files,
+    "new-cloudbuild.yaml": `steps:
+  - name: gcr.io/cloud-builders/gcloud
+    args:
       - app
       - deploy
       - --bucket=gs://mento-monitoring-app-engine-source
@@ -218,12 +234,33 @@ expectFailure(
   "executable callsite inventory must be exactly",
 );
 
+const nestedYamlBuildCallsites = discoverDeployStagingCallsites({
+  "cloudbuild.yaml": `steps:
+  - name: gcr.io/cloud-builders/gcloud
+    args:
+      - --project
+      - mento-monitoring
+      - beta
+      - builds
+      - submit
+      - .
+`,
+});
+assert.deepEqual(
+  nestedYamlBuildCallsites.map(({ kind }) => kind),
+  ["builds-submit"],
+  "nested Cloud Build YAML build submissions must be discovered",
+);
+
 const nestedJsonCallsites = discoverDeployStagingCallsites({
   "cloudbuild.json": JSON.stringify({
     steps: [
       {
         name: "gcr.io/cloud-builders/gcloud",
         args: [
+          "--project",
+          "mento-monitoring",
+          "beta",
           "app",
           "deploy",
           "--bucket=gs://mento-monitoring-app-engine-source",
@@ -237,6 +274,29 @@ assert.deepEqual(
   nestedJsonCallsites.map(({ kind }) => kind),
   ["app-deploy"],
   "nested Cloud Build JSON app deploys must be discovered",
+);
+
+const nestedJsonBuildCallsites = discoverDeployStagingCallsites({
+  "cloudbuild.json": JSON.stringify({
+    steps: [
+      {
+        name: "gcr.io/cloud-builders/gcloud",
+        args: [
+          "--project",
+          "mento-monitoring",
+          "alpha",
+          "builds",
+          "submit",
+          ".",
+        ],
+      },
+    ],
+  }),
+});
+assert.deepEqual(
+  nestedJsonBuildCallsites.map(({ kind }) => kind),
+  ["builds-submit"],
+  "nested Cloud Build JSON build submissions must be discovered",
 );
 
 function assertCallsiteKinds(contents, expected, message) {
