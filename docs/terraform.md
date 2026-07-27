@@ -145,10 +145,11 @@ upload boundary for routine GCP deploys. The platform stack creates:
 Both buckets use uniform access, enforced public-access prevention, disabled
 soft-delete retention, `force_destroy = false`, and Terraform
 `prevent_destroy`. Cloud Build callers can read bucket metadata and create
-objects; its two possible default build identities can view objects. App Engine
-uploaders have Object Admin only on the App Engine source bucket because the
-CLI can replace or clean up cached hash-named objects. AppSpot can view those
-objects. The routine deployer and `gcp_dev_members` have Service Account User
+objects; the dedicated Alloy `grafana_agent_builder` can view those objects and
+is also an App Engine uploader. App Engine uploaders have Object Admin only on
+the App Engine source bucket because the CLI can replace or clean up cached
+hash-named objects. AppSpot can view those objects. The routine deployer and
+`gcp_dev_members` have Service Account User
 only on Metrics Bridge's default Compute Engine service account, preserving the
 automated and direct `pnpm bridge:deploy` Cloud Run paths after the broad
 project-level fallback is removed.

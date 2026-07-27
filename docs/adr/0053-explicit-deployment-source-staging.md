@@ -32,9 +32,10 @@ and can re-upload, replace, or clean up a hash-named object near lifecycle
 expiry. App Engine also requires a `US`-compatible bucket for the immutable
 `us-central` application, while Metrics Bridge builds run in `var.gcp_region`.
 
-Cloud Build projects can use either the legacy Cloud Build service account or
-the default Compute Engine service account as the build identity. This project
-does not yet pin one candidate across every build path.
+The Alloy Cloud Build path is pinned to the dedicated
+`grafana_agent_builder` service account. Legacy default build identities retain
+only the temporary Secret Manager rollback bindings required by the Alloy
+cutover; they are not source-staging principals.
 
 ## Decision
 
@@ -56,11 +57,11 @@ The follow-up routing phase makes every executable deploy path name its bucket:
 - the nested Alloy Cloud Build writes logs only to Cloud Logging.
 
 Cloud Build callers — the routine deployer and `gcp_dev_members` — receive
-bucket metadata read plus object create on the Cloud Build bucket. Both
-candidate default Cloud Build identities receive object view. App Engine
-uploaders — those callers plus both build candidates — receive bucket metadata
-read plus object admin on the App Engine bucket. AppSpot receives object view.
-No staging grant is project-wide.
+bucket metadata read plus object create on the Cloud Build bucket. The
+dedicated `grafana_agent_builder` receives object view there. App Engine
+uploaders — those callers plus that builder — receive bucket metadata read plus
+object admin on the App Engine bucket. AppSpot receives object view. No staging
+grant is project-wide.
 
 The routine deployer and `gcp_dev_members` receive Service Account User on the
 exact default Compute Engine service account used by the unpinned Metrics
@@ -102,8 +103,8 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   sensitive buckets cannot inherit.
 - App Engine uploaders retain stronger object authority, but only on a
   short-lived source bucket.
-- Both candidate build identities have temporary read/upload coverage until
-  live build metadata identifies the active identity.
+- The dedicated Alloy builder has the exact read/upload staging grants it needs;
+  legacy default identities remain outside the staging-principal set.
 - The routing phase adds a checked-in contract that discovers every executable
   submit/deploy callsite and rejects a new one unless it names the correct
   staging bucket.
