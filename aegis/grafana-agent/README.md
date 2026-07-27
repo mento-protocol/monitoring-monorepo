@@ -46,10 +46,12 @@ dedicated runtime identity:
 
 [`grafana-agent.yaml`](grafana-agent.yaml) pins
 `grafana-agent-runtime@mento-monitoring.iam.gserviceaccount.com`. That service
-account receives Secret Accessor on exactly the three secrets above and no
-general project-level role. Its custom `grafanaAgentActivationReader` role
-contains only `appengine.services.get` and `appengine.versions.list`, which the
-supervisor needs to prove a single active collector. Cloud Build pins
+account receives Secret Accessor on exactly the three secrets above. Its only
+project roles are the custom `grafanaAgentActivationReader` role and the
+predefined `roles/logging.logWriter` role that App Engine Flex requires to
+start an instance. The custom role contains only `appengine.services.get` and
+`appengine.versions.list`, which the supervisor needs to prove a single active
+collector. Cloud Build pins
 `grafana-agent-builder@mento-monitoring.iam.gserviceaccount.com`, which has only
 the five project roles needed to submit logs/artifacts and deploy App Engine
 versions. Terraform grants `gcp_dev_members` permission to submit as that
