@@ -28,10 +28,10 @@ const EXPECTED_CALLSITES = [
     value: "gs://${PROJECT}-cloud-build-source/metrics-bridge",
   },
   {
-    filePath: "aegis/package.json",
+    filePath: "aegis/grafana-agent/deploy.sh",
     kind: "builds-submit",
     flag: "gcs-source-staging-dir",
-    value: "gs://mento-monitoring-cloud-build-source/grafana-agent",
+    value: "gs://${project}-cloud-build-source/alloy",
   },
   {
     filePath: "aegis/bin/deploy.sh",

@@ -760,7 +760,7 @@ export function validateContract(files = readContractFiles()) {
   requirePattern(
     errors,
     deploy,
-    /--config "\$snapshot_root\/cloudbuild\.yaml"[\s\\]+--substitutions "_VERSION=\$version"[\s\\]+"\$snapshot_source_dir"/u,
+    /--config "\$snapshot_root\/cloudbuild\.yaml"[\s\\]+--gcs-source-staging-dir="gs:\/\/\$\{project\}-cloud-build-source\/alloy"[\s\\]+--substitutions "_VERSION=\$version"[\s\\]+"\$snapshot_source_dir"/u,
     `${CONTRACT_FILES.deploy}: Cloud Build must submit only the immutable snapshot`,
   );
   const buildSubmission =

@@ -121,6 +121,15 @@ expectFailure(
 expectFailure(
   mutate(
     files,
+    "aegis/grafana-agent/deploy.sh",
+    '    --gcs-source-staging-dir="gs://${project}-cloud-build-source/alloy" \\\n',
+    "",
+  ),
+  "aegis/grafana-agent/deploy.sh: builds-submit must use --gcs-source-staging-dir",
+);
+expectFailure(
+  mutate(
+    files,
     "aegis/grafana-agent/cloudbuild.yaml",
     "  logging: CLOUD_LOGGING_ONLY",
     "  logging: GCS_ONLY",

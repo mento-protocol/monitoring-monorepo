@@ -50,7 +50,7 @@ Both buckets enforce public-access prevention, disable soft-delete retention,
 set `force_destroy = false`, and use Terraform `prevent_destroy`. Their
 contents are reconstructible deployment input, not durable records.
 
-The follow-up routing phase makes every executable deploy path name its bucket:
+The routing phase makes every executable deploy path name its bucket:
 
 - `gcloud builds submit` uses `--gcs-source-staging-dir`;
 - `gcloud app deploy` uses `--bucket`;
@@ -105,7 +105,7 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   short-lived source bucket.
 - The dedicated Alloy builder has the exact read/upload staging grants it needs;
   legacy default identities remain outside the staging-principal set.
-- The routing phase adds a checked-in contract that discovers every executable
+- A checked-in contract discovers every executable
   submit/deploy callsite and rejects a new one unless it names the correct
   staging bucket.
 - Operators must preserve the phase boundary: merge and apply the additive

@@ -154,10 +154,9 @@ only on Metrics Bridge's default Compute Engine service account, preserving the
 automated and direct `pnpm bridge:deploy` Cloud Run paths after the broad
 project-level fallback is removed.
 
-The routing follow-up must move every checked-in `gcloud builds submit` to
-`--gcs-source-staging-dir` and every checked-in `gcloud app deploy` to
-`--bucket`. That follow-up also extends `pnpm tf:test` to discover these
-executable surfaces and reject a new unflagged callsite.
+Every checked-in `gcloud builds submit` uses `--gcs-source-staging-dir`; every
+checked-in `gcloud app deploy` uses `--bucket`. `pnpm tf:test` discovers these
+executable surfaces and rejects a new unflagged callsite.
 
 The migration is deliberately additive. Merge the infrastructure-only PR,
 refresh current `main`, run a clean current-main platform plan, get explicit

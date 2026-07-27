@@ -170,13 +170,12 @@ The platform stack owns two explicit source buckets for routine deploys:
   `gs://mento-monitoring-cloud-build-source/<service>`;
 - App Engine uploads use `gs://mento-monitoring-app-engine-source`.
 
-The follow-up routing change makes the Metrics Bridge workflow and
-`pnpm bridge:deploy` pass `--gcs-source-staging-dir`. It makes
-`pnpm aegis:deploy` and the nested Alloy build pass `--bucket`, while
-`pnpm aegis:agent:deploy` stages its outer build in the Cloud Build bucket.
-That follow-up also makes `pnpm tf:test` discover every executable callsite and
-reject a direct `gcloud builds submit` / `gcloud app deploy` path that omits
-the explicit bucket.
+The Metrics Bridge workflow and `pnpm bridge:deploy` pass
+`--gcs-source-staging-dir`. `pnpm aegis:deploy` and the nested Alloy build pass
+`--bucket`; the guarded `pnpm aegis:agent:deploy` wrapper stages its immutable
+snapshot in the Cloud Build bucket. `pnpm tf:test` discovers every executable
+callsite and rejects a direct `gcloud builds submit` / `gcloud app deploy` path
+that omits the explicit bucket.
 
 This migration has a strict rollout order. First merge the infrastructure-only
 PR. Refresh current `main`, run a clean current-main platform plan, get explicit

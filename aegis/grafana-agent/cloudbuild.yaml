@@ -23,6 +23,7 @@ steps:
       [
         app,
         deploy,
+        --bucket=gs://mento-monitoring-app-engine-source,
         --quiet,
         --no-promote,
         '--version=${_VERSION}',
