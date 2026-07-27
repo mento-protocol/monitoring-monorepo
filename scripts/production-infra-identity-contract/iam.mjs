@@ -103,6 +103,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       '"serviceAccount:${google_service_account.grafana_agent_runtime.email}"',
     blocks: [
       "terraform/aegis-bootstrap.tf:google_project_iam_member.grafana_agent_runtime_activation_reader",
+      "terraform/aegis-bootstrap.tf:google_project_iam_member.grafana_agent_runtime_log_writer",
       "terraform/aegis-bootstrap.tf:google_secret_manager_secret_iam_member.grafana_agent_runtime_accessor",
     ],
   },
@@ -282,6 +283,7 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/aegis-bootstrap.tf:google_project_iam_member.grafana_agent_cloudbuild_deployer|f8387f5a74c1aa324293a9dff5eb0c7ede26cbf8ea37dd661c1d7356980f248d",
   "terraform/aegis-bootstrap.tf:google_project_iam_member.grafana_agent_operator_preflight_reader|ecad955a357992cd72df4c46548a07dce968e69bb371f89df4523ab248befb39",
   "terraform/aegis-bootstrap.tf:google_project_iam_member.grafana_agent_runtime_activation_reader|c75986b039701801be52fcfc9da9d04570aa672bbddbee7f851d12254c547942",
+  "terraform/aegis-bootstrap.tf:google_project_iam_member.grafana_agent_runtime_log_writer|94a89a5d15ca380bf24a3ce3ee0ca247f5ce0980fde2ff9fdde3548872871b28",
   "terraform/aegis-bootstrap.tf:google_secret_manager_secret_iam_member.grafana_agent_appspot_accessor|94c851425e7ee6828fdd263880505e7592dc39921192cfa0bede42e11908eb75",
   "terraform/aegis-bootstrap.tf:google_secret_manager_secret_iam_member.grafana_agent_cloudbuild_accessor|093901800fdf61475d1dd5a4be6bddff7e05d0691c7d062a4d8c8d2c21c5188a",
   "terraform/aegis-bootstrap.tf:google_secret_manager_secret_iam_member.grafana_agent_cloudbuild_compute_accessor|7460e94dd1796e89ef5a8807871d71c9197a14f14491ec48b87722780771afb6",

@@ -20,9 +20,10 @@ garden_lane: agent-entry-points
 
 Alloy's runtime project authority is the custom
 `grafanaAgentActivationReader` role with exactly `appengine.services.get` and
-`appengine.versions.list`. Do not replace it with a predefined App Engine
-viewer role or broaden it; the active/passive collector handshake depends on
-this exact read boundary.
+`appengine.versions.list`, plus the predefined `roles/logging.logWriter` role
+required to start App Engine Flex instances. Do not replace the custom role
+with a predefined App Engine viewer role or broaden either boundary; the
+active/passive collector handshake depends on this exact read access.
 
 ## Operating Rules
 
