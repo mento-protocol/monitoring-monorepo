@@ -42,11 +42,11 @@ garden_lane: agent-entry-points
 - `pnpm tf:test` owns the deployment source-staging contract. It allows exactly
   five literal checked-in `gcloud builds submit` / `gcloud app deploy`
   callsites, including their source-staging flag and value. Any other literal
-  deploy-shaped text in an executable shell, package-script, workflow, or
-  nested Cloud Build surface fails closed, as does deploy-shaped text in
-  Terraform configuration outside comments. This includes wrappers and
-  generated scripts. Dynamically constructed executables and paths remain
-  forbidden but cannot be proven statically.
+  deploy-shaped text in an executable shell, package-script, Node/TypeScript
+  source, workflow, Dockerfile, or nested Cloud Build surface fails closed, as
+  does deploy-shaped text in Terraform configuration outside comments. This
+  includes wrappers and generated scripts. Dynamically constructed executables
+  and paths remain forbidden but cannot be proven statically.
 
 ## Verification
 

@@ -64,6 +64,7 @@ function normalize(text) {
   return text
     .replace(/\\(.)/gu, "$1")
     .replace(/["'`]/gu, "")
+    .replace(/[\[\](){},:]/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
 }
@@ -222,12 +223,22 @@ function structuredRecords(filePath, contents, errors) {
   return records;
 }
 
-export function discoverDeployStagingCallsites(files, errors = []) {
+const FILE_DISCOVERY_CACHE = new Map();
+
+function discoverDeployStagingFile(filePath, contents) {
+  let byContents = FILE_DISCOVERY_CACHE.get(filePath);
+  if (!byContents) {
+    byContents = new Map();
+    FILE_DISCOVERY_CACHE.set(filePath, byContents);
+  }
+  const cached = byContents.get(contents);
+  if (cached) return cached;
+
   const records = [];
-  for (const [filePath, contents] of Object.entries(files)) {
-    // The centralized fixture deliberately contains forbidden examples. It is
-    // the one non-production executable surface excluded from self-scanning.
-    if (filePath === CONTRACT_FIXTURE) continue;
+  const errors = [];
+  // The centralized fixture deliberately contains forbidden examples. It is
+  // the one non-production executable surface excluded from self-scanning.
+  if (filePath !== CONTRACT_FIXTURE) {
     if (filePath.endsWith(".tf")) {
       records.push(
         ...lexicalDeployRecords(
@@ -236,33 +247,43 @@ export function discoverDeployStagingCallsites(files, errors = []) {
           commentMaskedHcl(contents),
         ),
       );
-      continue;
-    }
-    if (filePath.endsWith("package.json")) {
+    } else if (filePath.endsWith("package.json")) {
       const packageJson = parseDeployStagingStructuredFile(
         filePath,
         contents,
         errors,
       );
-      if (!isMapping(packageJson?.scripts)) continue;
-      for (const [name, command] of Object.entries(packageJson.scripts)) {
-        if (typeof command === "string") {
-          records.push(
-            ...lexicalDeployRecords(filePath, `scripts.${name}`, command),
-          );
+      if (isMapping(packageJson?.scripts)) {
+        for (const [name, command] of Object.entries(packageJson.scripts)) {
+          if (typeof command === "string") {
+            records.push(
+              ...lexicalDeployRecords(filePath, `scripts.${name}`, command),
+            );
+          }
         }
       }
-      continue;
-    }
-    if (
+    } else if (
       filePath.endsWith(".yml") ||
       filePath.endsWith(".yaml") ||
       filePath.endsWith(".json")
     ) {
       records.push(...structuredRecords(filePath, contents, errors));
-      continue;
+    } else {
+      records.push(...lexicalDeployRecords(filePath, "shell", contents));
     }
-    records.push(...lexicalDeployRecords(filePath, "shell", contents));
+  }
+
+  const result = { errors, records };
+  byContents.set(contents, result);
+  return result;
+}
+
+export function discoverDeployStagingCallsites(files, errors = []) {
+  const records = [];
+  for (const [filePath, contents] of Object.entries(files)) {
+    const discovered = discoverDeployStagingFile(filePath, contents);
+    records.push(...discovered.records);
+    errors.push(...discovered.errors);
   }
   return records;
 }

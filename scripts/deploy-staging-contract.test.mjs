@@ -33,10 +33,30 @@ const SHELL_FILE_EXTENSIONS = [
   ".zsh",
 ];
 
+const SCRIPT_SOURCE_FILE_EXTENSIONS = [
+  ".cjs",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".mts",
+  ".ts",
+  ".tsx",
+];
+
+function isDockerfile(filePath) {
+  const basename = path.basename(filePath);
+  return basename === "Dockerfile" || basename.startsWith("Dockerfile.");
+}
+
 function isCandidate(filePath) {
   return (
     filePath.endsWith(".tf") ||
     SHELL_FILE_EXTENSIONS.some((extension) => filePath.endsWith(extension)) ||
+    SCRIPT_SOURCE_FILE_EXTENSIONS.some((extension) =>
+      filePath.endsWith(extension),
+    ) ||
+    isDockerfile(filePath) ||
     filePath.endsWith(".yml") ||
     filePath.endsWith(".yaml") ||
     filePath.endsWith(".json") ||
@@ -140,6 +160,21 @@ assert.equal(
   isCandidate("cloudbuild.json"),
   true,
   "JSON Cloud Build configurations must be scanned for deploy callsites",
+);
+assert.equal(
+  isCandidate("scripts/new-deploy.mjs"),
+  true,
+  "Node source files must be scanned for deploy callsites",
+);
+assert.equal(
+  isCandidate("packages/deployer/src/deploy.ts"),
+  true,
+  "TypeScript source files must be scanned for deploy callsites",
+);
+assert.equal(
+  isCandidate("images/bridge/Dockerfile.release"),
+  true,
+  "named Dockerfiles must be scanned for deploy callsites",
 );
 
 expectFailure(
@@ -469,6 +504,25 @@ assertForbiddenSignature(
 `,
   "Terraform local-exec command",
   "terraform/local-exec-deploy.tf",
+);
+assertForbiddenSignature(
+  `import { execFileSync } from "node:child_process";
+execFileSync("gcloud", ["builds", "submit", "."]);
+`,
+  "Node child-process argv",
+  "scripts/alternate-deploy.mjs",
+);
+assertForbiddenSignature(
+  `import { execa } from "execa";
+await execa("gcloud", ["app", "deploy", "app.yaml"]);
+`,
+  "TypeScript child-process argv",
+  "packages/deployer/src/deploy.ts",
+);
+assertForbiddenSignature(
+  "FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:stable\nRUN gcloud app deploy app.yaml\n",
+  "named Dockerfile",
+  "images/deployer/Dockerfile.release",
 );
 
 assert.equal(
