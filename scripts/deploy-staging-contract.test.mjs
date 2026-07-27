@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import {
   assertDeployStagingContract,
   discoverDeployStagingCallsites,
+  recordHasDeployStagingFlag,
   validateDeployStagingContract,
 } from "./deploy-staging-contract.mjs";
 
@@ -503,6 +504,335 @@ function assertForbiddenSignature(
   );
 }
 
+function assertProgrammaticConstCallsite(contents, message) {
+  assertForbiddenSignature(contents, message, "scripts/const-deploy.mjs");
+}
+
+for (const [contents, message] of [
+  [
+    `const args = ["builds", "submit", "."];
+execFileSync("gcloud", args);
+`,
+    "const argv aliases must be discovered",
+  ],
+  [
+    `const command = "gcloud";
+const args = ["app", "deploy", "app.yaml"];
+childProcess.execFileSync(command, args);
+`,
+    "const executable and argv aliases through member callees must be discovered",
+  ],
+  [
+    `const baseArgs = ["builds", "submit", "."];
+const args = baseArgs;
+execFileSync("gcloud", args);
+`,
+    "two-hop const argv aliases must be discovered",
+  ],
+  [
+    `function deploy() {
+  const command = "gcloud";
+  const args = ["builds", "submit", "."];
+  execFileSync(command, args);
+}
+`,
+    "function-local const aliases must be discovered",
+  ],
+  [
+    `function deploy() {
+  execFileSync("gcloud", args);
+}
+const args = ["builds", "submit", "."];
+deploy();
+`,
+    "closure captures of later const declarations must be discovered",
+  ],
+  [
+    `const command = "echo";
+function deploy() {
+  const command = "gcloud";
+  execFileSync(command, ["builds", "submit", "."]);
+}
+`,
+    "nested lexical shadowing must resolve the bound const",
+  ],
+  [
+    `const command = ["gcloud", "builds", "submit", "."];
+Bun.spawn(command);
+`,
+    "const command-vector aliases must be discovered",
+  ],
+  [
+    `const options = {
+  cmd: ["gcloud", "app", "deploy", "app.yaml"],
+};
+run(options);
+`,
+    "const object cmd aliases must be discovered",
+  ],
+  [
+    `const spec = {
+  command: "gcloud",
+  args: ["builds", "submit", "."],
+};
+execFileSync(spec.command, spec.args);
+`,
+    "const object property aliases must be discovered",
+  ],
+  [
+    `run({ command: "gcloud", args: ["builds", "submit", "."] });
+`,
+    "object command and args must be discovered",
+  ],
+  [
+    `new Deno.Command("gcloud", { args: ["app", "deploy", "app.yaml"] });
+`,
+    "Deno options must be discovered",
+  ],
+  [
+    `const args = ["app", "deploy", "app.yaml"];
+new Deno.Command("gcloud", { args });
+`,
+    "Deno shorthand const args must be discovered",
+  ],
+  [
+    `const cmd = ["gcloud", "builds", "submit", "."];
+Bun.spawn({ cmd });
+`,
+    "Bun shorthand const command vectors must be discovered",
+  ],
+  [
+    `run({
+  ...defaults,
+  command: "gcloud",
+  args: ["builds", "submit", "."],
+});
+`,
+    "direct static object properties after a spread must be discovered",
+  ],
+  [
+    `const command = "C:\\\\SDK\\\\GCLOUD.CMD";
+execFileSync(command, ["builds", "submit", "."]);
+`,
+    "mixed-case gcloud.cmd const executables must be discovered",
+  ],
+]) {
+  assertProgrammaticConstCallsite(contents, message);
+}
+
+for (const [contents, message] of [
+  [
+    `let args = ["builds", "submit", "."];
+execFileSync("gcloud", args);
+`,
+    "let aliases must not be evaluated",
+  ],
+  [
+    `var args = ["builds", "submit", "."];
+execFileSync("gcloud", args);
+`,
+    "var aliases must not be evaluated",
+  ],
+  [
+    `const args = ["builds", "submit", "."];
+function deploy(args) { execFileSync("gcloud", args); }
+`,
+    "parameter shadowing must not be evaluated",
+  ],
+  [
+    `const spec = {
+  command: "gcloud",
+  args: ["builds", "submit", "."],
+};
+function deploy(spec) { execFileSync(spec.command, spec.args); }
+`,
+    "object parameter shadowing must not be evaluated",
+  ],
+  [
+    `const command = "gcloud";
+const args = ["builds", "submit", "."];
+logger.debug(command, args);
+`,
+    "const aliases passed to inert member methods must not be executable",
+  ],
+  [
+    `const spec = {
+  command: "gcloud",
+  args: ["builds", "submit", "."],
+};
+source.indexOf(spec.command, spec.args);
+`,
+    "const property aliases passed to inert member methods must not be executable",
+  ],
+  [
+    `import args from "./args.mjs";
+execFileSync("gcloud", args);
+`,
+    "imports must not be evaluated",
+  ],
+  [
+    `const { args } = config;
+execFileSync("gcloud", args);
+`,
+    "destructured aliases must not be evaluated",
+  ],
+  [
+    `const args = args;
+execFileSync("gcloud", args);
+`,
+    "self-referential aliases must not be evaluated",
+  ],
+  [
+    `const first = second;
+const second = first;
+execFileSync("gcloud", first);
+`,
+    "cyclic aliases must not be evaluated",
+  ],
+  [
+    `const dynamic = getArg();
+execFileSync("gcloud", ["builds", dynamic, "."]);
+`,
+    "dynamic array elements must not be evaluated",
+  ],
+  [
+    `execFileSync("gcloud", ["builds", , "."]);
+`,
+    "array holes must not be evaluated",
+  ],
+  [
+    `const extra = ["submit", "."];
+execFileSync("gcloud", ["builds", ...extra]);
+`,
+    "array spreads must not be evaluated",
+  ],
+  [
+    `const args = getArgs();
+execFileSync("gcloud", args);
+`,
+    "dynamic initializers must not be evaluated",
+  ],
+  [
+    `const spec = { command: "gcloud", args: getArgs() };
+execFileSync(spec.command, spec.args);
+`,
+    "dynamic object properties must not be evaluated",
+  ],
+  [
+    `run({
+  command: "gcloud",
+  ...{ args: ["builds", "submit", "."] },
+});
+`,
+    "object spreads must not be evaluated",
+  ],
+  [
+    `run({
+  command: "gcloud",
+  get args() { return ["builds", "submit", "."]; },
+});
+`,
+    "object getters must not be evaluated",
+  ],
+  [
+    `run({
+  command: "gcloud",
+  ["args"]: ["builds", "submit", "."],
+});
+`,
+    "computed object properties must not be evaluated",
+  ],
+  [
+    `run({
+  command: "gcloud",
+  args: ["builds"],
+  args: ["builds", "submit", "."],
+});
+`,
+    "duplicate object properties must not be evaluated",
+  ],
+  [
+    `const command = "gcloud";
+const args = ["builds", "submit", "."];
+`,
+    "inert const data must not be evaluated",
+  ],
+]) {
+  assert.equal(
+    discoverDeployStagingCallsites({ "scripts/const-negative.mjs": contents })
+      .length,
+    0,
+    message,
+  );
+}
+
+const inlineArgsRecord = discoverDeployStagingCallsites({
+  "scripts/inline-trusted.mjs": `execFileSync(
+  "gcloud",
+  ["builds", "submit", "--gcs-source-staging-dir=gs://trusted", "."],
+);
+`,
+})[0];
+assert.equal(
+  recordHasDeployStagingFlag(
+    inlineArgsRecord,
+    "gcs-source-staging-dir",
+    "gs://trusted",
+  ),
+  true,
+  "literal argv arrays must remain trusted staging evidence",
+);
+const mutableArgsRecord = discoverDeployStagingCallsites({
+  "scripts/mutable-const-argv.mjs": `const args = [
+  "builds",
+  "submit",
+  "--gcs-source-staging-dir=gs://trusted",
+  ".",
+];
+args[2] = "--gcs-source-staging-dir=gs://mutated";
+execFileSync("gcloud", args);
+`,
+})[0];
+assert(mutableArgsRecord, "mutable const argv must still be detected");
+assert.equal(
+  mutableArgsRecord.argsTrusted,
+  false,
+  "const-bound aggregate argv must carry untrusted provenance",
+);
+assert.equal(
+  recordHasDeployStagingFlag(
+    mutableArgsRecord,
+    "gcs-source-staging-dir",
+    "gs://trusted",
+  ),
+  false,
+  "const-bound aggregate argv must not satisfy the staging-flag requirement",
+);
+const mutablePropertyRecord = discoverDeployStagingCallsites({
+  "scripts/mutable-const-property.mjs": `const option = {
+  value: "--gcs-source-staging-dir=gs://trusted",
+};
+option.value = "--gcs-source-staging-dir=gs://mutated";
+execFileSync(
+  "gcloud",
+  ["builds", "submit", option.value, "."],
+);
+`,
+})[0];
+assert(
+  mutablePropertyRecord,
+  "mutable const object properties must still be detected",
+);
+assert.equal(
+  recordHasDeployStagingFlag(
+    mutablePropertyRecord,
+    "gcs-source-staging-dir",
+    "gs://trusted",
+  ),
+  false,
+  "mutable const object properties must not satisfy the staging-flag requirement",
+);
+
 for (const [contents, message, filePath] of [
   [
     "gcloud --project mento-monitoring builds submit .",
@@ -759,6 +1089,15 @@ assertForbiddenSignature(
   "scripts/concatenated-command-deploy.mjs",
 );
 assertForbiddenSignature(
+  `childProcess.execSync(
+  "gcloud builds " +
+    "submit .",
+);
+`,
+  "multiline static command string through a member callee",
+  "scripts/member-concatenated-command-deploy.mjs",
+);
+assertForbiddenSignature(
   `execSync(\`gcloud \${"builds"}
 \${"submit"} .\`);
 `,
@@ -954,6 +1293,14 @@ assert.equal(
   }).length,
   1,
   "AST recovery must not duplicate inline tagged-template records",
+);
+assert.equal(
+  discoverDeployStagingCallsites({
+    "scripts/static-tagged-template.mjs":
+      'await $`gcloud ${"builds"} ${"submit"} .`;\n',
+  }).length,
+  1,
+  "tagged templates with literal-only interpolations must stay discoverable",
 );
 assert.equal(
   discoverDeployStagingCallsites({

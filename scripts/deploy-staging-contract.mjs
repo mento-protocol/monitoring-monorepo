@@ -305,8 +305,13 @@ function hasStructuredFlag(args, flag, value) {
   return false;
 }
 
-function hasFlag(record, flag, value) {
-  if (record.args) return hasStructuredFlag(record.args, flag, value);
+export function recordHasDeployStagingFlag(record, flag, value) {
+  if (record.args) {
+    return (
+      record.argsTrusted !== false &&
+      hasStructuredFlag(record.args, flag, value)
+    );
+  }
   const tokens = topLevelShellWords(record.raw ?? record.normalized ?? "");
   const gcloudIndex = tokens.findIndex(isGcloudExecutable);
   if (gcloudIndex === -1) return false;
@@ -369,7 +374,7 @@ function validateCallsites(files, errors) {
     );
     if (
       matches.length === 1 &&
-      !hasFlag(matches[0], expected.flag, expected.value)
+      !recordHasDeployStagingFlag(matches[0], expected.flag, expected.value)
     ) {
       errors.push(
         `${expected.filePath}: ${expected.kind} must use --${expected.flag}=${expected.value}`,

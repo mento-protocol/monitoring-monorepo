@@ -20,6 +20,19 @@ const GCLOUD_WINDOWS =
 const GCLOUD_PROGRAMMATIC_CMD =
   /(?:^|[^A-Za-z0-9_.-])(?:\/[A-Za-z0-9_./-]+\/)?[gG][cC][lL][oO][uU][dD]\.[cC][mM][dD](?=$|[^A-Za-z0-9_.-])/gu;
 const GCLOUD_TEXT = /gcloud(?:\.cmd)?/iu;
+const PROGRAMMATIC_EXECUTION_MEMBERS = new Set([
+  "Command",
+  "command",
+  "commandSync",
+  "exec",
+  "execFile",
+  "execFileSync",
+  "execSync",
+  "execa",
+  "execaSync",
+  "spawn",
+  "spawnSync",
+]);
 
 export function isGcloudExecutable(value) {
   const basename = value.split(/[/\\]/u).at(-1) ?? "";
@@ -244,10 +257,105 @@ function unwrapStaticExpression(node) {
   return expression;
 }
 
-function staticString(node) {
+function isStaticReference(node) {
+  const expression = unwrapStaticExpression(node);
+  return (
+    expression !== undefined &&
+    (ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression))
+  );
+}
+
+function acceptsResolvedCommandReferences(node) {
+  const expression = unwrapStaticExpression(node.expression);
+  return (
+    expression !== undefined &&
+    (ts.isIdentifier(expression) ||
+      (ts.isPropertyAccessExpression(expression) &&
+        PROGRAMMATIC_EXECUTION_MEMBERS.has(expression.name.text)))
+  );
+}
+
+function createStaticResolver(sourceFile) {
+  const options = {
+    allowJs: true,
+    noLib: true,
+    noResolve: true,
+    target: ts.ScriptTarget.Latest,
+  };
+  const host = {
+    fileExists: (fileName) => fileName === sourceFile.fileName,
+    getCanonicalFileName: (fileName) => fileName,
+    getCurrentDirectory: () => "",
+    getDefaultLibFileName: () => "",
+    getNewLine: () => "\n",
+    getSourceFile: (fileName) =>
+      fileName === sourceFile.fileName ? sourceFile : undefined,
+    readFile: (fileName) =>
+      fileName === sourceFile.fileName ? sourceFile.text : undefined,
+    useCaseSensitiveFileNames: () => true,
+    writeFile: () => {},
+  };
+  const program = ts.createProgram({
+    rootNames: [sourceFile.fileName],
+    options,
+    host,
+  });
+  const checker = program.getTypeChecker();
+  const resolving = new Set();
+
+  return (identifier) => {
+    const symbol =
+      ts.isShorthandPropertyAssignment(identifier.parent) &&
+      identifier.parent.name === identifier
+        ? checker.getShorthandAssignmentValueSymbol(identifier.parent)
+        : checker.getSymbolAtLocation(identifier);
+    // JavaScript's binder also records assignment identifiers as declarations.
+    // Require one actual binding declaration while ignoring those write sites.
+    const declarations = (symbol?.declarations ?? []).filter((declaration) =>
+      ts.isVariableDeclaration(declaration),
+    );
+    if (declarations.length !== 1) return undefined;
+    const declaration = declarations[0];
+    if (
+      !ts.isVariableDeclaration(declaration) ||
+      declaration.getSourceFile() !== sourceFile ||
+      !ts.isIdentifier(declaration.name) ||
+      declaration.name.text !== identifier.text ||
+      declaration.initializer === undefined ||
+      !ts.isVariableDeclarationList(declaration.parent) ||
+      (declaration.parent.flags & ts.NodeFlags.Const) === 0 ||
+      resolving.has(declaration)
+    ) {
+      return undefined;
+    }
+    resolving.add(declaration);
+    return {
+      initializer: declaration.initializer,
+      release: () => resolving.delete(declaration),
+    };
+  };
+}
+
+function staticString(node, resolveIdentifier) {
   if (node === undefined) return undefined;
   const expression = unwrapStaticExpression(node);
   if (expression === undefined) return undefined;
+  if (ts.isIdentifier(expression)) {
+    const resolved = resolveIdentifier?.(expression);
+    if (resolved === undefined) return undefined;
+    try {
+      return staticString(resolved.initializer, resolveIdentifier);
+    } finally {
+      resolved.release();
+    }
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return staticStringProperty(
+      expression.expression,
+      expression.name.text,
+      resolveIdentifier,
+    );
+  }
   if (
     ts.isStringLiteral(expression) ||
     ts.isNoSubstitutionTemplateLiteral(expression)
@@ -258,8 +366,8 @@ function staticString(node) {
     ts.isBinaryExpression(expression) &&
     expression.operatorToken.kind === ts.SyntaxKind.PlusToken
   ) {
-    const left = staticString(expression.left);
-    const right = staticString(expression.right);
+    const left = staticString(expression.left, resolveIdentifier);
+    const right = staticString(expression.right, resolveIdentifier);
     return left === undefined || right === undefined
       ? undefined
       : `${left}${right}`;
@@ -267,7 +375,7 @@ function staticString(node) {
   if (ts.isTemplateExpression(expression)) {
     let value = expression.head.text;
     for (const span of expression.templateSpans) {
-      const interpolation = staticString(span.expression);
+      const interpolation = staticString(span.expression, resolveIdentifier);
       if (interpolation === undefined) return undefined;
       value += interpolation;
       value += span.literal.text;
@@ -277,36 +385,127 @@ function staticString(node) {
   return undefined;
 }
 
-function staticStringArray(node) {
+function staticStringArray(node, resolveIdentifier, aggregate = false) {
   const expression = unwrapStaticExpression(node);
-  if (expression === undefined || !ts.isArrayLiteralExpression(expression)) {
+  if (expression === undefined) {
     return undefined;
   }
+  if (ts.isIdentifier(expression)) {
+    const resolved = resolveIdentifier(expression);
+    if (resolved === undefined) return undefined;
+    try {
+      return staticStringArray(resolved.initializer, resolveIdentifier, true);
+    } finally {
+      resolved.release();
+    }
+  }
+  if (ts.isPropertyAccessExpression(expression)) {
+    return staticStringArrayProperty(
+      expression.expression,
+      expression.name.text,
+      resolveIdentifier,
+    );
+  }
+  if (!ts.isArrayLiteralExpression(expression)) return undefined;
   const values = [];
+  let trusted = !aggregate;
   for (const element of expression.elements) {
-    const value = staticString(element);
+    const value = staticString(element, resolveIdentifier);
     if (value === undefined) return undefined;
+    // Identifier resolution can pass through a mutable const-bound object
+    // property. Keep evaluating it for conservative deploy detection, but
+    // only literal-only elements may prove a required staging flag.
+    if (staticString(element) === undefined) trusted = false;
     values.push(value);
   }
-  return values;
+  return { trusted, values };
 }
 
-function staticStringArrayProperty(node, propertyName) {
-  const expression = unwrapStaticExpression(node);
-  if (expression === undefined || !ts.isObjectLiteralExpression(expression)) {
-    return undefined;
-  }
+function staticObjectProperty(expression, propertyName) {
+  if (!ts.isObjectLiteralExpression(expression)) return undefined;
+  let trusted = true;
+  let initializer;
   for (const property of expression.properties) {
-    if (!ts.isPropertyAssignment(property)) continue;
+    if (
+      ts.isShorthandPropertyAssignment(property) &&
+      property.name.text === propertyName
+    ) {
+      if (initializer !== undefined) return undefined;
+      initializer = property.name;
+      continue;
+    }
+    if (
+      !ts.isPropertyAssignment(property) ||
+      property.name === undefined ||
+      ts.isComputedPropertyName(property.name)
+    ) {
+      trusted = false;
+      continue;
+    }
     const name =
       ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)
         ? property.name.text
         : undefined;
-    if (name === propertyName) {
-      return staticStringArray(property.initializer);
+    if (name !== propertyName) continue;
+    if (initializer !== undefined) return undefined;
+    initializer = property.initializer;
+  }
+  return initializer === undefined ? undefined : { initializer, trusted };
+}
+
+function staticStringProperty(node, propertyName, resolveIdentifier) {
+  const expression = unwrapStaticExpression(node);
+  if (expression === undefined) return undefined;
+  if (ts.isIdentifier(expression)) {
+    const resolved = resolveIdentifier?.(expression);
+    if (resolved === undefined) return undefined;
+    try {
+      return staticStringProperty(
+        resolved.initializer,
+        propertyName,
+        resolveIdentifier,
+      );
+    } finally {
+      resolved.release();
     }
   }
-  return undefined;
+  const property = staticObjectProperty(expression, propertyName);
+  return property === undefined
+    ? undefined
+    : staticString(property.initializer, resolveIdentifier);
+}
+
+function staticStringArrayProperty(node, propertyName, resolveIdentifier) {
+  const expression = unwrapStaticExpression(node);
+  if (expression === undefined) return undefined;
+  if (ts.isIdentifier(expression)) {
+    const resolved = resolveIdentifier?.(expression);
+    if (resolved === undefined) return undefined;
+    try {
+      const property = staticStringArrayProperty(
+        resolved.initializer,
+        propertyName,
+        resolveIdentifier,
+      );
+      return property === undefined
+        ? undefined
+        : { ...property, trusted: false };
+    } finally {
+      resolved.release();
+    }
+  }
+  if (!ts.isObjectLiteralExpression(expression)) {
+    return undefined;
+  }
+  const objectProperty = staticObjectProperty(expression, propertyName);
+  if (objectProperty === undefined) return undefined;
+  const property = staticStringArray(
+    objectProperty.initializer,
+    resolveIdentifier,
+  );
+  return property === undefined
+    ? undefined
+    : { ...property, trusted: property.trusted && objectProperty.trusted };
 }
 
 function programmaticDeployRecords(filePath, contents, errors) {
@@ -329,6 +528,7 @@ function programmaticDeployRecords(filePath, contents, errors) {
     return [];
   }
 
+  const resolveIdentifier = createStaticResolver(sourceFile);
   const records = [];
   const visit = (node) => {
     if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
@@ -342,30 +542,56 @@ function programmaticDeployRecords(filePath, contents, errors) {
         ),
       );
       const invocationArguments = node.arguments ?? [];
-      const firstArgument = staticString(invocationArguments[0]);
-      if (firstArgument !== undefined) {
-        const commandRecords = lexicalDeployRecords(
-          filePath,
-          "programmatic",
-          firstArgument.replace(/\r?\n/gu, " "),
+      const firstArgument =
+        staticString(invocationArguments[0], resolveIdentifier) ??
+        staticStringProperty(
+          invocationArguments[0],
+          "command",
+          resolveIdentifier,
         );
-        for (const record of commandRecords) {
-          if (!existingKinds.has(record.kind)) records.push(record);
+      if (firstArgument !== undefined) {
+        // Resolved aliases passed to arbitrary member methods may be inert
+        // data. Literal expressions stay fail-closed for every callee; aliases
+        // require either a direct call or a known command-execution member.
+        const acceptsFirstArgument =
+          !isStaticReference(invocationArguments[0]) ||
+          acceptsResolvedCommandReferences(node);
+        if (acceptsFirstArgument) {
+          const commandRecords = lexicalDeployRecords(
+            filePath,
+            "programmatic",
+            firstArgument.replace(/\r?\n/gu, " "),
+          );
+          for (const record of commandRecords) {
+            if (!existingKinds.has(record.kind)) records.push(record);
+          }
         }
 
-        if (isGcloudExecutable(firstArgument)) {
+        if (acceptsFirstArgument && isGcloudExecutable(firstArgument)) {
           const args =
-            staticStringArray(invocationArguments[1]) ??
-            staticStringArrayProperty(invocationArguments[1], "args");
+            staticStringArray(invocationArguments[1], resolveIdentifier) ??
+            staticStringArrayProperty(
+              invocationArguments[1],
+              "args",
+              resolveIdentifier,
+            ) ??
+            staticStringArrayProperty(
+              invocationArguments[0],
+              "args",
+              resolveIdentifier,
+            );
           if (args !== undefined) {
-            const kind = kindAfterGcloud(args.join(" "));
+            const kind = kindAfterGcloud(args.values.join(" "));
             if (kind && !existingKinds.has(kind)) {
               records.push({
                 filePath,
                 surface: "programmatic",
                 kind,
-                args,
-                normalized: normalize(`${firstArgument} ${args.join(" ")}`),
+                args: args.values,
+                argsTrusted: args.trusted,
+                normalized: normalize(
+                  `${firstArgument} ${args.values.join(" ")}`,
+                ),
               });
             }
           }
@@ -373,13 +599,19 @@ function programmaticDeployRecords(filePath, contents, errors) {
       }
 
       const commandVector =
-        staticStringArray(invocationArguments[0]) ??
-        staticStringArrayProperty(invocationArguments[0], "cmd");
+        staticStringArray(invocationArguments[0], resolveIdentifier) ??
+        staticStringArrayProperty(
+          invocationArguments[0],
+          "cmd",
+          resolveIdentifier,
+        );
       if (
         commandVector !== undefined &&
-        isGcloudExecutable(commandVector[0] ?? "")
+        (!isStaticReference(invocationArguments[0]) ||
+          acceptsResolvedCommandReferences(node)) &&
+        isGcloudExecutable(commandVector.values[0] ?? "")
       ) {
-        const args = commandVector.slice(1);
+        const args = commandVector.values.slice(1);
         const kind = kindAfterGcloud(args.join(" "));
         if (kind && !existingKinds.has(kind)) {
           records.push({
@@ -387,7 +619,10 @@ function programmaticDeployRecords(filePath, contents, errors) {
             surface: "programmatic",
             kind,
             args,
-            normalized: normalize(`${commandVector[0]} ${args.join(" ")}`),
+            argsTrusted: commandVector.trusted,
+            normalized: normalize(
+              `${commandVector.values[0]} ${args.join(" ")}`,
+            ),
           });
         }
       }
