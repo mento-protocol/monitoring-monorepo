@@ -24,7 +24,7 @@ const protectedEnvironment = {
   },
 };
 
-const mainOnly = [{ name: "main" }];
+const mainOnly = [{ type: "branch", name: "main" }];
 
 assert.deepEqual(
   environmentProtectionFailures(protectedEnvironment, mainOnly),
@@ -55,11 +55,31 @@ assert.deepEqual(environmentProtectionFailures(protectedEnvironment, []), [
 ]);
 assert.deepEqual(
   environmentProtectionFailures(protectedEnvironment, [
-    { name: "main" },
-    { name: "release/*" },
+    { type: "branch", name: "main" },
+    { type: "branch", name: "release/*" },
   ]),
   [
-    'deployment branch patterns must be exactly ["main"], found ["main","release/*"]',
+    'deployment policies must be exactly ["branch:main"], found ["branch:main","branch:release/*"]',
+  ],
+);
+
+// A TAG named `main` must NOT satisfy the branch restriction: tags are a
+// separate deploy surface, and a name-only check would let one through.
+assert.deepEqual(
+  environmentProtectionFailures(protectedEnvironment, [
+    { type: "tag", name: "main" },
+  ]),
+  ['deployment policies must be exactly ["branch:main"], found ["tag:main"]'],
+);
+
+// ...including alongside a legitimate branch policy.
+assert.deepEqual(
+  environmentProtectionFailures(protectedEnvironment, [
+    { type: "branch", name: "main" },
+    { type: "tag", name: "main" },
+  ]),
+  [
+    'deployment policies must be exactly ["branch:main"], found ["branch:main","tag:main"]',
   ],
 );
 

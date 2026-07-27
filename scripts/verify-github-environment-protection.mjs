@@ -40,16 +40,21 @@ export function environmentProtectionFailures(environment, branchPolicies) {
     );
   } else {
     // Fail closed: an unreadable or empty allow-list is a failure, never a pass.
-    const patterns = Array.isArray(branchPolicies)
-      ? branchPolicies.map((policy) => policy?.name)
+    //
+    // The allow-list holds BOTH branch and tag policies, so `type` is load
+    // bearing: a TAG named `main` would otherwise satisfy a name-only check and
+    // let a run at that tag through this gate into production cloud auth.
+    // Require exactly one entry, `branch:main`.
+    const entries = Array.isArray(branchPolicies)
+      ? branchPolicies.map((policy) => `${policy?.type}:${policy?.name}`)
       : null;
-    if (patterns === null) {
+    if (entries === null) {
       failures.push("deployment branch policies could not be read");
-    } else if (patterns.length === 0) {
+    } else if (entries.length === 0) {
       failures.push("no deployment branch pattern is configured");
-    } else if (patterns.some((name) => name !== "main")) {
+    } else if (entries.length !== 1 || entries[0] !== "branch:main") {
       failures.push(
-        `deployment branch patterns must be exactly ["main"], found ${JSON.stringify(patterns)}`,
+        `deployment policies must be exactly ["branch:main"], found ${JSON.stringify(entries)}`,
       );
     }
   }
