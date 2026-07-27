@@ -277,12 +277,16 @@ function topLevelShellWords(text) {
 }
 
 function matchesShellValue(token, value) {
-  return (
-    token === value ||
-    ((token.startsWith('"') || token.startsWith("'")) &&
-      token.at(-1) === token[0] &&
-      token.slice(1, -1) === value)
-  );
+  if (token === value) return true;
+  if (token.startsWith('"') && token.endsWith('"')) {
+    return token.slice(1, -1) === value;
+  }
+  if (token.startsWith("'") && token.endsWith("'")) {
+    // Single quotes preserve static values but suppress required shell
+    // interpolation in variable-based bucket paths.
+    return !/[$`]/u.test(value) && token.slice(1, -1) === value;
+  }
+  return false;
 }
 
 function hasStructuredFlag(args, flag, value) {

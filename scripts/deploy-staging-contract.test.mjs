@@ -216,6 +216,39 @@ expectFailure(
   ),
   "metrics-bridge.yml: builds-submit must use --gcs-source-staging-dir",
 );
+for (const [filePath, doubleQuoted, singleQuoted, expectedError] of [
+  [
+    ".github/workflows/metrics-bridge.yml",
+    '--gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge"',
+    "--gcs-source-staging-dir='gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge'",
+    "metrics-bridge.yml: builds-submit must use --gcs-source-staging-dir",
+  ],
+  [
+    "scripts/deploy-bridge.sh",
+    '--gcs-source-staging-dir="gs://${PROJECT}-cloud-build-source/metrics-bridge"',
+    "--gcs-source-staging-dir='gs://${PROJECT}-cloud-build-source/metrics-bridge'",
+    "scripts/deploy-bridge.sh: builds-submit must use --gcs-source-staging-dir",
+  ],
+  [
+    "aegis/grafana-agent/deploy.sh",
+    '--gcs-source-staging-dir="gs://${project}-cloud-build-source/alloy"',
+    "--gcs-source-staging-dir='gs://${project}-cloud-build-source/alloy'",
+    "aegis/grafana-agent/deploy.sh: builds-submit must use --gcs-source-staging-dir",
+  ],
+]) {
+  expectFailure(
+    mutate(files, filePath, doubleQuoted, singleQuoted),
+    expectedError,
+  );
+}
+assertDeployStagingContract(
+  mutate(
+    files,
+    "aegis/bin/deploy.sh",
+    "--bucket=gs://mento-monitoring-app-engine-source",
+    "--bucket='gs://mento-monitoring-app-engine-source'",
+  ),
+);
 for (const replacement of [
   '            > --gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
   '            2> --gcs-source-staging-dir "gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
@@ -497,6 +530,16 @@ for (const [contents, message, filePath] of [
     "function Deploy-App { gcloud app deploy app.yaml }",
     "PowerShell module candidate",
     "scripts/deploy.psm1",
+  ],
+  [
+    "gcloud builds `\n  submit .",
+    "PowerShell continuation",
+    "scripts/multiline-deploy.ps1",
+  ],
+  [
+    "function Deploy-App {\n  gcloud app `\n    deploy app.yaml\n}",
+    "PowerShell module continuation",
+    "scripts/multiline-deploy.psm1",
   ],
 ]) {
   assertForbiddenSignature(contents, message, filePath);

@@ -43,15 +43,20 @@ export function parseDeployStagingStructuredFile(filePath, contents, errors) {
   }
 }
 
-function logicalLines(contents) {
+function logicalLines(filePath, contents) {
   const lines = [];
   let pending = "";
+  const continuation =
+    filePath.endsWith(".ps1") || filePath.endsWith(".psm1")
+      ? /`\s*$/u
+      : /\\\s*$/u;
   for (const line of contents.split(/\r?\n/u)) {
     const code = stripShellComment(line);
-    const continued = /\\\s*$/u.test(code);
-    // Shell joins an escaped newline without inserting a character. Keeping
-    // that exact behavior catches static command names split across lines.
-    pending += continued ? code.replace(/\\\s*$/u, "") : code;
+    const continued = continuation.test(code);
+    // Shell and PowerShell join an escaped newline without inserting a
+    // character. Keeping that exact behavior catches static command names
+    // split across lines.
+    pending += continued ? code.replace(continuation, "") : code;
     if (!continued) {
       lines.push(pending);
       pending = "";
@@ -143,7 +148,7 @@ function kindAfterGcloud(text) {
 
 function lexicalDeployRecords(filePath, surface, contents) {
   const records = [];
-  for (const line of logicalLines(contents)) {
+  for (const line of logicalLines(filePath, contents)) {
     for (const fragment of topLevelFragments(line)) {
       const normalizedFragment = normalize(fragment);
       for (const match of normalizedFragment.matchAll(GCLOUD)) {
