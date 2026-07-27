@@ -5,7 +5,7 @@ import { validFixtureFiles } from "./fixtures.mjs";
 import { validateWorkflowContract } from "./workflow.mjs";
 
 const workflowPath = ".github/workflows/alerts-rules.yml";
-const validCheckoutStep = `      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+const validCheckoutStep = `      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false`;
 const automaticGithubCredential = ["${{ github.", "token }}"].join("");

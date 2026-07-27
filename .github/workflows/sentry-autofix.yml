@@ -112,7 +112,7 @@ jobs:
       # (record-run job): off-main | disabled | unprovisioned | active.
       disposition: ${{ steps.select.outputs.disposition }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
@@ -239,7 +239,7 @@ jobs:
     steps:
       # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
       # silently run new code. Bump via Dependabot (.github/dependabot.yml).
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           # The agent has Write access to this checkout, INCLUDING .git/. Do NOT
@@ -470,7 +470,7 @@ jobs:
       # the checkout token out of .git/config on principle. The fix path still runs
       # every helper from a separate pristine clone (base) and copies the agent's
       # changes byte-for-byte from the DOWNLOAD (work), never from this checkout.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -992,7 +992,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
