@@ -204,6 +204,35 @@ test('the App Engine Flex runtime must keep repository-scoped image Reader', () 
   expectFailure(files, /grafana_agent_runtime_image_reader/u);
 });
 
+test('runtime image repository must exist before its IAM binding', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    'resource "google_artifact_registry_repository" "grafana_agent_runtime_images"',
+    'resource "google_artifact_registry_repository" "removed_runtime_images"',
+  );
+  expectFailure(files, /grafana_agent_runtime_images/u);
+});
+
+test('runtime image repository must reject deletion', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    `  depends_on = [google_project_service.artifactregistry]
+
+  lifecycle {
+    prevent_destroy = true
+  }`,
+    `  depends_on = [google_project_service.artifactregistry]
+
+  lifecycle {
+    prevent_destroy = false
+  }`,
+  );
+  expectFailure(
+    files,
+    /runtime image repository must wait for its API and reject deletion/u,
+  );
+});
+
 test('runtime image access cannot broaden beyond us.gcr.io Reader', () => {
   const files = sourceFiles();
   files.bootstrap = files.bootstrap.replace(
@@ -1108,6 +1137,15 @@ test('documented Terraform secret input files are gitignored', () => {
     });
     assert.equal(result.status, 0, `${relativePath} must stay ignored`);
   }
+});
+
+test('production documents one-time adoption of the existing image repository', () => {
+  const files = sourceFiles();
+  files.runbook = files.runbook.replace(
+    'terraform -chdir=terraform import',
+    'echo import-skipped',
+  );
+  expectFailure(files, /must document one-time adoption/u);
 });
 
 test('deploy must retain the explicit previous-version rollback command', () => {

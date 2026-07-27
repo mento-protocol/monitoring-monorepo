@@ -462,6 +462,24 @@ export function validateContract(files = readContractFiles()) {
     /member\s*=\s*"serviceAccount:\$\{google_service_account\.grafana_agent_runtime\.email\}"/u,
     `${CONTRACT_FILES.bootstrap}: Logs Writer must target the dedicated runtime account`,
   );
+  const runtimeImageRepository = requireBlock(
+    errors,
+    bootstrap,
+    'resource "google_artifact_registry_repository" "grafana_agent_runtime_images"',
+    CONTRACT_FILES.bootstrap,
+  );
+  requirePattern(
+    errors,
+    runtimeImageRepository,
+    /project\s*=\s*google_project\.monitoring\.project_id\s+location\s*=\s*"us"\s+repository_id\s*=\s*"us\.gcr\.io"\s+format\s*=\s*"DOCKER"/u,
+    `${CONTRACT_FILES.bootstrap}: runtime image repository must stay the managed us.gcr.io Docker repository`,
+  );
+  requirePattern(
+    errors,
+    runtimeImageRepository,
+    /depends_on\s*=\s*\[google_project_service\.artifactregistry\][\s\S]*lifecycle\s*\{\s*prevent_destroy\s*=\s*true\s*\}/u,
+    `${CONTRACT_FILES.bootstrap}: runtime image repository must wait for its API and reject deletion`,
+  );
   const runtimeImageReaderGrant = requireBlock(
     errors,
     bootstrap,
@@ -471,7 +489,7 @@ export function validateContract(files = readContractFiles()) {
   requirePattern(
     errors,
     runtimeImageReaderGrant,
-    /location\s*=\s*"us"\s+repository\s*=\s*"us\.gcr\.io"\s+role\s*=\s*"roles\/artifactregistry\.reader"/u,
+    /project\s*=\s*google_artifact_registry_repository\.grafana_agent_runtime_images\.project\s+location\s*=\s*google_artifact_registry_repository\.grafana_agent_runtime_images\.location\s+repository\s*=\s*google_artifact_registry_repository\.grafana_agent_runtime_images\.repository_id\s+role\s*=\s*"roles\/artifactregistry\.reader"/u,
     `${CONTRACT_FILES.bootstrap}: runtime image access must stay Reader on only the us.gcr.io repository`,
   );
   requirePattern(
@@ -1086,6 +1104,12 @@ export function validateContract(files = readContractFiles()) {
     runbook,
     /gitignored\s+`terraform\/terraform\.tfvars`, a gitignored `terraform\/\*\.auto\.tfvars` file/u,
     `${CONTRACT_FILES.runbook}: runbook must name the exact ignored secret input files`,
+  );
+  requirePattern(
+    errors,
+    runbook,
+    /terraform -chdir=terraform import[\s\\]+google_artifact_registry_repository\.grafana_agent_runtime_images[\s\\]+projects\/mento-monitoring\/locations\/us\/repositories\/us\.gcr\.io/u,
+    `${CONTRACT_FILES.runbook}: production must document one-time adoption of the existing us.gcr.io repository`,
   );
 
   return errors;

@@ -22,7 +22,7 @@ Alloy's runtime project authority is the custom
 `grafanaAgentActivationReader` role with exactly `appengine.services.get` and
 `appengine.versions.list`, plus the predefined `roles/logging.logWriter` role
 required to start App Engine Flex instances. It also has repository-level
-`roles/artifactregistry.reader` on only the App Engine-managed `us.gcr.io`
+`roles/artifactregistry.reader` on only the Terraform-managed `us.gcr.io`
 repository so the version can pull its image. Do not replace these grants with
 project-wide Artifact Registry or predefined App Engine viewer access; the
 active/passive collector handshake and image-pull path depend on these exact
@@ -58,6 +58,8 @@ boundaries.
 - Resource address renames need `moved` blocks. To retire a state-managed
   resource without destroying its remote counterpart, use a `removed` block
   with an explicit `destroy` choice.
+- Keep the Alloy `us.gcr.io` repository state-managed with `prevent_destroy`;
+  the Alloy runbook owns the one-time production import.
 - Cloud Run services use `/health`, not `/healthz`.
 - For deploy-owned Cloud Run images, retain the necessary
   `lifecycle.ignore_changes` for the image and provider bookkeeping drift. If a
