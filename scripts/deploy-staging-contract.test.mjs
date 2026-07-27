@@ -26,7 +26,9 @@ const repoRoot = path.resolve(
 
 const SHELL_FILE_EXTENSIONS = [
   ".bash",
+  ".bat",
   ".command",
+  ".cmd",
   ".fish",
   ".ksh",
   ".ps1",
@@ -152,6 +154,16 @@ assert.equal(
   shouldScanFile("scripts/new-deploy.command", { mode: 0o100644 }, false),
   true,
   "shell extensions must be scanned without a shebang",
+);
+assert.equal(
+  shouldScanFile("scripts/new-deploy.bat", { mode: 0o100644 }, false),
+  true,
+  "batch files must be scanned without a shebang or executable bit",
+);
+assert.equal(
+  shouldScanFile("scripts/new-deploy.cmd", { mode: 0o100644 }, false),
+  true,
+  "command files must be scanned without a shebang or executable bit",
 );
 assert.equal(
   shouldScanFile("scripts/new-deploy.ps1", { mode: 0o100644 }, false),
@@ -540,6 +552,22 @@ for (const [contents, message, filePath] of [
     "function Deploy-App {\n  gcloud app `\n    deploy app.yaml\n}",
     "PowerShell module continuation",
     "scripts/multiline-deploy.psm1",
+  ],
+  ["gcloud builds submit .", "Windows batch candidate", "scripts/deploy.bat"],
+  [
+    "gcloud app deploy app.yaml",
+    "Windows command candidate",
+    "scripts/deploy.cmd",
+  ],
+  [
+    "gcloud builds ^\n  submit .",
+    "Windows batch continuation",
+    "scripts/multiline-deploy.bat",
+  ],
+  [
+    "gcloud app ^\n  deploy app.yaml",
+    "Windows command continuation",
+    "scripts/multiline-deploy.cmd",
   ],
 ]) {
   assertForbiddenSignature(contents, message, filePath);

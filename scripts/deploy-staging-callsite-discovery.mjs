@@ -49,13 +49,15 @@ function logicalLines(filePath, contents) {
   const continuation =
     filePath.endsWith(".ps1") || filePath.endsWith(".psm1")
       ? /`\s*$/u
-      : /\\\s*$/u;
+      : filePath.endsWith(".bat") || filePath.endsWith(".cmd")
+        ? /\^\s*$/u
+        : /\\\s*$/u;
   for (const line of contents.split(/\r?\n/u)) {
     const code = stripShellComment(line);
     const continued = continuation.test(code);
-    // Shell and PowerShell join an escaped newline without inserting a
-    // character. Keeping that exact behavior catches static command names
-    // split across lines.
+    // Shell, PowerShell, and batch files join an escaped newline without
+    // inserting a character. Keeping that exact behavior catches static
+    // command names split across lines.
     pending += continued ? code.replace(continuation, "") : code;
     if (!continued) {
       lines.push(pending);
