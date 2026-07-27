@@ -113,6 +113,11 @@ resource "google_storage_bucket_iam_member" "cloud_build_source_executor_object_
   bucket = google_storage_bucket.cloud_build_source_staging.name
   role   = "roles/storage.objectViewer"
   member = each.value
+
+  depends_on = [
+    google_project_service.cloudbuild,
+    google_project_service.compute,
+  ]
 }
 
 # App Engine lists its staging bucket and may replace or clean up hash-named
@@ -123,6 +128,11 @@ resource "google_storage_bucket_iam_member" "app_engine_source_uploader_bucket_r
   bucket = google_storage_bucket.app_engine_source_staging.name
   role   = "roles/storage.legacyBucketReader"
   member = each.value
+
+  depends_on = [
+    google_project_service.cloudbuild,
+    google_project_service.compute,
+  ]
 }
 
 resource "google_storage_bucket_iam_member" "app_engine_source_uploader_object_admin" {
@@ -131,6 +141,11 @@ resource "google_storage_bucket_iam_member" "app_engine_source_uploader_object_a
   bucket = google_storage_bucket.app_engine_source_staging.name
   role   = "roles/storage.objectAdmin"
   member = each.value
+
+  depends_on = [
+    google_project_service.cloudbuild,
+    google_project_service.compute,
+  ]
 }
 
 resource "google_storage_bucket_iam_member" "app_engine_source_appspot_object_viewer" {
