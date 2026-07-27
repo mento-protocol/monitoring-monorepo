@@ -1,7 +1,12 @@
 import { Counter, Gauge } from "prom-client";
 import { register } from "../metrics.js";
 import { PEG_POLICY_MAX_BLIND_CONSECUTIVE_POLLS } from "./policy.js";
-import type { PegObservation } from "./types.js";
+import {
+  pegListingGauges,
+  publishListingGauges,
+  validateListingEvidence,
+} from "./listing-metrics.js";
+import type { MarketState, PegObservation } from "./types.js";
 
 const sourceLabels = ["asset", "source", "policy_version"] as const;
 const venueStateLabels = [...sourceLabels, "state"] as const;
@@ -21,7 +26,10 @@ export interface PegSourceMetricSnapshot {
   policyVersion: string;
   healthy: boolean;
   observation: PegObservation | null;
-  referenceSize: number;
+  referenceSize: number | null;
+  listingState: MarketState | null;
+  listingCheckedAt: number | null;
+  listingAbsentConsecutiveChecks: number;
   deviationBps: number | null;
   premiumBps: number | null;
   spreadBps: number | null;
@@ -318,10 +326,13 @@ function validateSourceSnapshot(
   ) {
     throw new Error("Peg source labels must match their asset snapshot");
   }
-  assertFiniteNonnegative(source.referenceSize, "referenceSize");
-  if (source.referenceSize === 0) {
-    throw new Error("referenceSize must be positive");
+  if (source.referenceSize !== null) {
+    assertFiniteNonnegative(source.referenceSize, "referenceSize");
+    if (source.referenceSize === 0) {
+      throw new Error("referenceSize must be positive");
+    }
   }
+  validateListingEvidence(source);
   if (source.deviationBps !== null) {
     assertFiniteNonnegative(source.deviationBps, "deviationBps");
   }
@@ -379,6 +390,7 @@ function validateSnapshots(snapshots: PegAssetMetricSnapshot[]): void {
 
 function resetPegGauges(): void {
   for (const gauge of Object.values(pegGauges)) gauge.reset();
+  for (const gauge of Object.values(pegListingGauges)) gauge.reset();
 }
 
 function sourceCounterKey(labels: SourceLabels): string {
@@ -453,7 +465,10 @@ function publishSourceGauges(source: PegSourceMetricSnapshot): void {
     policy_version: source.policyVersion,
   };
   pegGauges.sourceHealthy.set(labels, source.healthy ? 1 : 0);
-  pegGauges.referenceSize.set(labels, source.referenceSize);
+  publishListingGauges(labels, source);
+  if (source.referenceSize !== null) {
+    pegGauges.referenceSize.set(labels, source.referenceSize);
+  }
   if (source.deviationBps !== null) {
     pegGauges.deviationBps.set(labels, source.deviationBps);
   }

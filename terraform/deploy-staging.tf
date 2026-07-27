@@ -8,13 +8,12 @@ locals {
     toset(var.gcp_dev_members),
     toset(["serviceAccount:${google_service_account.metrics_bridge_deployer.email}"]),
   )
-  cloud_build_default_service_account_members = toset([
-    for service_account in values(local.grafana_agent_cloudbuild_service_accounts) :
-    "serviceAccount:${service_account}"
+  cloud_build_source_executor_members = toset([
+    "serviceAccount:${google_service_account.grafana_agent_builder.email}",
   ])
   app_engine_source_uploaders = setunion(
     local.deploy_source_callers,
-    local.cloud_build_default_service_account_members,
+    local.cloud_build_source_executor_members,
   )
 }
 
@@ -104,11 +103,11 @@ resource "google_storage_bucket_iam_member" "cloud_build_source_caller_object_cr
   member = each.value
 }
 
-# Cloud Build's default execution identity depends on project history and
-# configuration. Grant both documented candidates read-only source access
-# until the deploy canaries identify which one is active.
+# The Alloy rollout pins Cloud Build to the dedicated builder identity. Give it
+# read-only access to the explicit source bucket before the routing follow-up
+# directs its build submissions there.
 resource "google_storage_bucket_iam_member" "cloud_build_source_executor_object_viewer" {
-  for_each = local.cloud_build_default_service_account_members
+  for_each = local.cloud_build_source_executor_members
 
   bucket = google_storage_bucket.cloud_build_source_staging.name
   role   = "roles/storage.objectViewer"

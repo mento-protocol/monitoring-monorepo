@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   parsePegPolicyBundle,
   PEG_POLICY_MAX_ASSETS,
+  PEG_POLICY_MAX_LISTING_ABSENT_CONSECUTIVE_CHECKS,
+  effectiveListingAbsentConsecutiveChecks,
   PEG_POLICY_MAX_SOURCES_PER_ASSET,
   pegPolicyContentDigest,
   pegPolicyVersionForContent,
@@ -78,7 +80,7 @@ describe("Peg policy", () => {
     const policy = await productionPolicy();
 
     expect(policy.active.version).toBe(
-      "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f",
+      "europ-2026-07-22-v1-f6cdaa2681ab92ce9d90572a4d29d32f",
     );
     expect(policy.active.assets["europ-schuman"]?.deepVenueSource).toBe(
       "bitvavo_eur",
@@ -87,7 +89,18 @@ describe("Peg policy", () => {
       policy.active.assets["europ-schuman"]?.sources.bitvavo_eur
         ?.referenceSizeCap,
     ).toBe(50_000);
-    expect(policy.previous).toBeNull();
+    expect(policy.previous?.version).toBe(
+      "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f",
+    );
+    expect(
+      policy.previous?.assets["europ-schuman"]?.sources.bitvavo_eur
+        ?.listingAbsentConsecutiveChecks,
+    ).toBeUndefined();
+    expect(
+      effectiveListingAbsentConsecutiveChecks(
+        policy.previous!.assets["europ-schuman"]!.sources.bitvavo_eur!,
+      ),
+    ).toBe(2);
   });
 
   it("rejects a deep designation that does not own deep authority", async () => {
@@ -109,7 +122,7 @@ describe("Peg policy", () => {
     ).toThrow(/single source with deep alert authority/);
   });
 
-  it("requires a stale gate of at least two approved poll intervals", async () => {
+  it("requires a bounded listing-absence confirmation threshold and matching stale gate", async () => {
     const policy = await productionPolicy();
     const asset = policy.active.assets["europ-schuman"];
     const source = asset?.sources.bitvavo_eur;
@@ -127,13 +140,92 @@ describe("Peg policy", () => {
               ...asset,
               sources: {
                 ...asset?.sources,
-                bitvavo_eur: { ...source, staleAfterSeconds: 30 },
+                bitvavo_eur: { ...source, staleAfterSeconds: 59 },
               },
             },
           },
         },
       }),
-    ).toThrow(/two approved poll intervals/);
+    ).toThrow(/pollIntervalSeconds \* listingAbsentConsecutiveChecks/);
+
+    expect(() =>
+      parsePegPolicyBundle({
+        ...policy,
+        active: {
+          ...policy.active,
+          assets: {
+            ...policy.active.assets,
+            "europ-schuman": {
+              ...asset,
+              sources: {
+                ...asset?.sources,
+                bitvavo_eur: {
+                  ...source,
+                  listingAbsentConsecutiveChecks:
+                    PEG_POLICY_MAX_LISTING_ABSENT_CONSECUTIVE_CHECKS + 1,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(/<=1000/);
+
+    expect(() =>
+      parsePegPolicyBundle({
+        ...policy,
+        active: {
+          ...policy.active,
+          assets: {
+            ...policy.active.assets,
+            "europ-schuman": {
+              ...asset,
+              sources: {
+                ...asset?.sources,
+                bitvavo_eur: {
+                  ...source,
+                  listingAbsentConsecutiveChecks: 1,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(/>=2/);
+  });
+
+  it("accepts a missing threshold only in the exact retained legacy policy", async () => {
+    const policy = await productionPolicy();
+    const asset = policy.active.assets["europ-schuman"]!;
+    const source = asset.sources.bitvavo_eur!;
+    const withoutThreshold = { ...source };
+    delete withoutThreshold.listingAbsentConsecutiveChecks;
+
+    expect(() =>
+      parsePegPolicyBundle({
+        ...policy,
+        active: {
+          ...policy.active,
+          assets: {
+            ...policy.active.assets,
+            "europ-schuman": {
+              ...asset,
+              sources: {
+                ...asset.sources,
+                bitvavo_eur: withoutThreshold,
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(/must be declared by the active policy/);
+
+    const futureLegacy = versioned("europ-2026-07-22-v0", policy.previous!);
+    expect(() =>
+      parsePegPolicyBundle({ ...policy, previous: futureLegacy }),
+    ).toThrow(
+      /may be omitted only by the exact pre-streak retained predecessor/,
+    );
   });
 
   it("keeps asset freshness relationships executable", async () => {

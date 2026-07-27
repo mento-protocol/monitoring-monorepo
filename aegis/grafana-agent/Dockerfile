@@ -3,10 +3,12 @@
 FROM grafana/alloy:v1.16.1@sha256:51aeb9d829239345070619dad3edd6873186f913c84f45b365b74574fcb38ec0
 
 # Install jq + ensure curl is present so entrypoint.sh can call the GCE
-# metadata server and Secret Manager. base64 ships in coreutils on Debian.
+# metadata server, App Engine API, and Secret Manager. socat serves App
+# Engine health checks while a zero-allocation version stays passive.
+# base64 ships in coreutils on Debian.
 USER root
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends jq curl ca-certificates \
+    && apt-get install -y --no-install-recommends jq curl ca-certificates socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Add healthcheck.
@@ -32,7 +34,8 @@ COPY --chown=agent:agent config.alloy /etc/alloy/config.alloy
 # driver doesn't enable. App Engine's source-based build runs the legacy
 # builder, so we chmod in a separate RUN step that works on both.
 COPY --chown=agent:agent entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod 0555 /usr/local/bin/entrypoint.sh
+COPY --chown=agent:agent passive-health.sh /usr/local/bin/passive-health.sh
+RUN chmod 0555 /usr/local/bin/entrypoint.sh /usr/local/bin/passive-health.sh
 
 # Switch to non-root user
 USER agent
