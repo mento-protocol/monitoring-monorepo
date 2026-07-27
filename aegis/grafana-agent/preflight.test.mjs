@@ -28,6 +28,7 @@ const preflightPermissions = [
   'appengine.applications.get',
   'appengine.services.get',
   'appengine.versions.get',
+  'artifactregistry.repositories.getIamPolicy',
   'iam.roles.get',
   'iam.serviceAccounts.get',
   'iam.serviceAccounts.getIamPolicy',
@@ -118,6 +119,19 @@ function successfulRunner(overrides = {}, configuredSubmitters = submitters) {
     }
     if (key === `projects get-iam-policy ${project}`)
       return successfulProjectPolicy([], configuredSubmitters);
+    if (
+      key ===
+      `artifacts repositories get-iam-policy us.gcr.io --location us --project ${project}`
+    ) {
+      return {
+        bindings: [
+          {
+            role: 'roles/artifactregistry.reader',
+            members: [runtimeMember],
+          },
+        ],
+      };
+    }
     if (key === `secrets list --project ${project}`) {
       return [
         { name: 'projects/123/secrets/grafana-agent-endpoint' },
@@ -356,6 +370,73 @@ test('missing App Engine Flex Logs Writer on the runtime identity fails closed',
         write: () => {},
       }),
     /runtime activation project roles must match the least-privilege contract/u,
+  );
+});
+
+test('missing Artifact Registry image reader on the runtime identity fails closed', () => {
+  const key = `artifacts repositories get-iam-policy us.gcr.io --location us --project ${project}`;
+  assert.throws(
+    () =>
+      runPreflight({
+        project,
+        runGcloud: successfulRunner({
+          [key]: { bindings: [] },
+        }),
+        validateStatic: staticPass,
+        write: () => {},
+      }),
+    /runtime image repository roles must match the least-privilege contract/u,
+  );
+});
+
+test('broader Artifact Registry image access on the runtime identity fails closed', () => {
+  const key = `artifacts repositories get-iam-policy us.gcr.io --location us --project ${project}`;
+  assert.throws(
+    () =>
+      runPreflight({
+        project,
+        runGcloud: successfulRunner({
+          [key]: {
+            bindings: [
+              {
+                role: 'roles/artifactregistry.writer',
+                members: [runtimeMember],
+              },
+            ],
+          },
+        }),
+        validateStatic: staticPass,
+        write: () => {},
+      }),
+    /runtime image repository roles must match the least-privilege contract/u,
+  );
+});
+
+test('conditional Artifact Registry image reader on the runtime identity fails closed', () => {
+  const key = `artifacts repositories get-iam-policy us.gcr.io --location us --project ${project}`;
+  assert.throws(
+    () =>
+      runPreflight({
+        project,
+        runGcloud: successfulRunner({
+          [key]: {
+            bindings: [
+              {
+                role: 'roles/artifactregistry.reader',
+                members: [runtimeMember],
+                condition: {
+                  title: 'inactive-reader',
+                  expression:
+                    'request.time < timestamp("2020-01-01T00:00:00Z")',
+                },
+              },
+            ],
+          },
+        }),
+        validateStatic: staticPass,
+        write: () => {},
+      }),
+    /runtime image repository roles must be unconditional/u,
   );
 });
 

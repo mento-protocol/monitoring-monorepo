@@ -49,9 +49,11 @@ dedicated runtime identity:
 account receives Secret Accessor on exactly the three secrets above. Its only
 project roles are the custom `grafanaAgentActivationReader` role and the
 predefined `roles/logging.logWriter` role that App Engine Flex requires to
-start an instance. The custom role contains only `appengine.services.get` and
-`appengine.versions.list`, which the supervisor needs to prove a single active
-collector. Cloud Build pins
+start an instance. It also receives repository-level
+`roles/artifactregistry.reader` on only the Terraform-managed `us.gcr.io`
+repository so Flex can pull the version image. The custom role contains only
+`appengine.services.get` and `appengine.versions.list`, which the supervisor
+needs to prove a single active collector. Cloud Build pins
 `grafana-agent-builder@mento-monitoring.iam.gserviceaccount.com`, which has only
 the five project roles needed to submit logs/artifacts and deploy App Engine
 versions. Terraform grants `gcp_dev_members` permission to submit as that
@@ -59,9 +61,9 @@ builder and the metadata-only `grafanaAgentPreflightReader` role. The live
 preflight requires both policies to match Terraform's member-set fingerprint
 in that role's description. Only the builder can act as the runtime account;
 it has no Secret Manager access. The preflight role contains the exact App
-Engine get, IAM policy/role get, project policy get, secret list/IAM get, and
-secret-version get permissions; it does not include
-`secretmanager.versions.access`. The former Cloud Build,
+Engine get, Artifact Registry repository IAM get, IAM policy/role get, project
+policy get, secret list/IAM get, and secret-version get permissions; it does
+not include `secretmanager.versions.access`. The former Cloud Build,
 compute-default, and AppSpot secret bindings remain during Phase A as an
 explicit rollback route; they are not the selected runtime path and issue
 #1473 removes them after live proof.
@@ -94,6 +96,25 @@ the snapshot never contains those operator values and is removed after the
 command. Feature-branch validation does not replace that current-`main`
 plan/apply. Secret rotation creates the replacement version before disabling
 the previous version.
+
+Artifact Registry auto-created production's `us.gcr.io` repository during the
+first App Engine image push. Terraform now owns that repository so fresh
+platform bootstraps create it before its IAM binding. Before the first
+production apply that includes
+`google_artifact_registry_repository.grafana_agent_runtime_images`, obtain
+explicit approval for this state adoption and run this command once from a
+clean current-`main` checkout:
+
+```bash
+terraform -chdir=terraform import \
+  google_artifact_registry_repository.grafana_agent_runtime_images \
+  projects/mento-monitoring/locations/us/repositories/us.gcr.io
+```
+
+Skip the import only when the repository does not exist; Terraform then creates
+it. After import, run a fresh `pnpm infra:plan` and obtain separate explicit
+approval for the exact apply plan. Never remove this resource from state or
+destroy it; it contains the deployed App Engine images.
 
 The legacy `pnpm aegis:agent:seed-secrets` path calls
 `gcloud secrets versions add`. Phase A retains it only as a rollback artifact.

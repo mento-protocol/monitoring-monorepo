@@ -8,12 +8,21 @@ locals {
     toset(var.gcp_dev_members),
     toset(["serviceAccount:${google_service_account.metrics_bridge_deployer.email}"]),
   )
+
+  # Alloy pins its Cloud Build executor to grafana_agent_builder. Recent
+  # Metrics Bridge builds use the project's default Compute service account
+  # (80554359692-compute@developer.gserviceaccount.com). Both executors need
+  # only object reads for the submitted archive, on this bucket only.
   cloud_build_source_executor_members = toset([
     "serviceAccount:${google_service_account.grafana_agent_builder.email}",
+    "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
   ])
+
+  # Metrics Bridge's default Compute executor has no App Engine deploy path.
+  # Keep its archive read authority out of the App Engine source bucket.
   app_engine_source_uploaders = setunion(
     local.deploy_source_callers,
-    local.cloud_build_source_executor_members,
+    toset(["serviceAccount:${google_service_account.grafana_agent_builder.email}"]),
   )
 }
 
@@ -103,9 +112,10 @@ resource "google_storage_bucket_iam_member" "cloud_build_source_caller_object_cr
   member = each.value
 }
 
-# The Alloy rollout pins Cloud Build to the dedicated builder identity. Give it
-# read-only access to the explicit source bucket before the routing follow-up
-# directs its build submissions there.
+# The Alloy rollout pins its executor to the dedicated builder identity. Metrics
+# Bridge's verified executor is the project's default Compute service account.
+# Give both read-only access to the explicit source bucket before the routing
+# follow-up directs their build submissions there.
 resource "google_storage_bucket_iam_member" "cloud_build_source_executor_object_viewer" {
   for_each = local.cloud_build_source_executor_members
 
