@@ -27,6 +27,14 @@ import {
   type PegPollCycleInput,
   type PegPollSourceState,
 } from "./poll-cycle.js";
+import {
+  acceptRecordedListingCheck,
+  cadenceDue,
+  createListingCheckRecorder,
+  fetchListing,
+  listingCadenceDue,
+  pollListingOnly as pollListingCheckOnly,
+} from "./listing-poller.js";
 import { publishPegPollSnapshot } from "./publisher.js";
 import type { PegDecisionPackagePublicationContext } from "./decision-packages.js";
 import type {
@@ -55,7 +63,6 @@ import type {
   PegObservation,
   RecordListingCheck,
 } from "./types.js";
-import { MARKET_STATES } from "./types.js";
 
 export const MAX_PROVIDER_CLOCK_SKEW_MS = 60_000;
 
@@ -379,17 +386,6 @@ function referenceSize(
   );
 }
 
-function cadenceDue(
-  lastAttemptAt: number | null,
-  context: CycleContext,
-  pollIntervalSeconds: number,
-): boolean {
-  return (
-    lastAttemptAt === null ||
-    context.nowSeconds - lastAttemptAt >= pollIntervalSeconds
-  );
-}
-
 function sourceCadences(
   state: SourceState,
   input: PollSourceInput,
@@ -398,12 +394,12 @@ function sourceCadences(
   return {
     observationCadenceDue: cadenceDue(
       state.lastAttemptAt,
-      context,
+      context.nowSeconds,
       policy.pollIntervalSeconds,
     ),
-    listingCadenceDue: cadenceDue(
-      state.listingLastAttemptAt,
-      context,
+    listingCadenceDue: listingCadenceDue(
+      state,
+      context.nowSeconds,
       policy.pollIntervalSeconds,
     ),
   };
@@ -431,28 +427,6 @@ function fetchSource(
       symbol: input.source.pair,
       onListingChecked,
     });
-  }
-  throw new Error(`Unsupported peg provider: ${input.source.provider}`);
-}
-
-function fetchListing(
-  input: PollSourceInput,
-): Promise<AuthoritativeListingCheck> | null {
-  if (input.source.provider === "bitvavo") {
-    const fetch = input.context.dependencies.fetchBitvavoListing;
-    return (
-      fetch?.({
-        market: input.source.pair,
-      }) ?? null
-    );
-  }
-  if (input.source.provider === "kraken") {
-    const fetch = input.context.dependencies.fetchKrakenListing;
-    return (
-      fetch?.({
-        symbol: input.source.pair,
-      }) ?? null
-    );
   }
   throw new Error(`Unsupported peg provider: ${input.source.provider}`);
 }
@@ -639,99 +613,27 @@ function acceptDueObservation(
   });
 }
 
-function acceptListingCheck(
-  state: SourceState,
-  check: AuthoritativeListingCheck | undefined,
-  listingAbsentConsecutiveCheckLimit: number,
-  cadenceDue: boolean,
-): Error | null {
-  if (check === undefined) return null;
-  if (!Number.isFinite(check.checkedAt) || check.checkedAt < 0) {
-    return new Error("listing check time must be finite and non-negative");
-  }
-  if (!MARKET_STATES.includes(check.state)) {
-    return new Error("listing check state is unsupported");
-  }
-  if (
-    state.listingCheckedAt !== null &&
-    check.checkedAt < state.listingCheckedAt
-  ) {
-    return new Error("listing check timestamp regressed");
-  }
-  const listingAbsentConsecutiveChecks =
-    check.state !== "absent"
-      ? 0
-      : state.listingState !== "absent"
-        ? 1
-        : cadenceDue
-          ? Math.min(
-              state.listingAbsentConsecutiveChecks + 1,
-              listingAbsentConsecutiveCheckLimit,
-            )
-          : state.listingAbsentConsecutiveChecks;
-  state.listingState = check.state;
-  state.listingCheckedAt = check.checkedAt;
-  state.listingAbsentConsecutiveChecks = listingAbsentConsecutiveChecks;
-  return null;
-}
-
-function acceptRecordedListingCheck(
-  input: PollSourceInput,
-  state: SourceState,
-  listingChecks: AuthoritativeListingCheck[],
-  cadenceDue: boolean,
-): Error | null {
-  return acceptListingCheck(
-    state,
-    listingChecks[0],
-    effectiveListingAbsentConsecutiveChecks(input.policy),
-    cadenceDue,
-  );
-}
-
-function listingCheckRecorder(): {
-  listingChecks: AuthoritativeListingCheck[];
-  onListingChecked: RecordListingCheck;
-} {
-  const listingChecks: AuthoritativeListingCheck[] = [];
-  return {
-    listingChecks,
-    onListingChecked: (check) => {
-      if (listingChecks.length !== 0) {
-        throw new Error("provider emitted more than one listing check");
-      }
-      if (!Number.isFinite(check.checkedAt) || check.checkedAt < 0) {
-        throw new Error("listing check time must be finite and non-negative");
-      }
-      listingChecks.push({ ...check });
-    },
-  };
-}
-
 async function pollListingOnly(
   input: PollSourceInput,
   state: SourceState,
   listingCadenceDue: boolean,
 ): Promise<boolean> {
   if (!listingCadenceDue) return true;
-  const request = fetchListing(input);
-  if (request === null) return false;
-  state.listingLastAttemptAt = input.context.nowSeconds;
-  try {
-    const error = acceptListingCheck(
-      state,
-      await request,
-      effectiveListingAbsentConsecutiveChecks(input.policy),
-      true,
-    );
-    if (error !== null) throw error;
-  } catch (cause) {
-    input.context.dependencies.report("source_fetch", cause, {
-      asset: input.assetId,
-      source: input.source.id,
-    });
-  }
-  return true;
+  const request = fetchListing(input.source, input.context.dependencies);
+  return pollListingCheckOnly({
+    state,
+    nowSeconds: input.context.nowSeconds,
+    listingCadenceIsDue: listingCadenceDue,
+    request,
+    listingAbsentConsecutiveCheckLimit: effectiveListingAbsentConsecutiveChecks(
+      input.policy,
+    ),
+    report: (cause) =>
+      input.context.dependencies.report("source_fetch", cause, {
+        asset: input.assetId,
+        source: input.source.id,
+      }),
+  });
 }
 
 async function pollDueSource(
@@ -742,15 +644,15 @@ async function pollDueSource(
 ): Promise<PegSourceMetricSnapshot> {
   state.lastAttemptAt = input.context.nowSeconds;
   if (listingCadenceDue) state.listingLastAttemptAt = input.context.nowSeconds;
-  const { listingChecks, onListingChecked } = listingCheckRecorder();
+  const { listingChecks, onListingChecked } = createListingCheckRecorder();
   let rawObservation: PegObservation;
   try {
     rawObservation = await fetchSource(input, refSize, onListingChecked);
   } catch (cause) {
     const listingError = acceptRecordedListingCheck(
-      input,
       state,
       listingChecks,
+      effectiveListingAbsentConsecutiveChecks(input.policy),
       listingCadenceDue,
     );
     const supported =
@@ -761,9 +663,9 @@ async function pollDueSource(
     });
   }
   const listingError = acceptRecordedListingCheck(
-    input,
     state,
     listingChecks,
+    effectiveListingAbsentConsecutiveChecks(input.policy),
     listingCadenceDue,
   );
   if (listingError !== null) {
