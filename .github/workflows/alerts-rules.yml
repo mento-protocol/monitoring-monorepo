@@ -244,6 +244,10 @@ jobs:
         run: terraform validate -no-color
 
       - name: Test Peg rule definitions
+        # Test files can run apply commands and provisioners, so never execute
+        # PR-head tests in this credentialed job. The required ci sentinel
+        # retains pull-request coverage without cloud credentials.
+        if: github.event_name != 'pull_request'
         run: terraform test -no-color
 
       - name: Plan
