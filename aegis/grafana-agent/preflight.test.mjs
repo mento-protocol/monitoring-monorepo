@@ -8,6 +8,11 @@ const runtimeEmail = `grafana-agent-runtime@${project}.iam.gserviceaccount.com`;
 const runtimeMember = `serviceAccount:${runtimeEmail}`;
 const builderEmail = `grafana-agent-builder@${project}.iam.gserviceaccount.com`;
 const builderMember = `serviceAccount:${builderEmail}`;
+const legacySecretMembers = [
+  'serviceAccount:mento-monitoring@appspot.gserviceaccount.com',
+  'serviceAccount:80554359692@cloudbuild.gserviceaccount.com',
+  'serviceAccount:80554359692-compute@developer.gserviceaccount.com',
+];
 const builderRoles = [
   'roles/appengine.deployer',
   'roles/artifactregistry.writer',
@@ -520,6 +525,34 @@ test('an extra role on a managed secret fails closed', () => {
   );
 });
 
+test('a conditional runtime binding on a managed secret fails closed', () => {
+  const key = `secrets get-iam-policy grafana-agent-endpoint --project ${project}`;
+  assert.throws(
+    () =>
+      runPreflight({
+        project,
+        runGcloud: successfulRunner({
+          [key]: {
+            bindings: [
+              {
+                role: 'roles/secretmanager.secretAccessor',
+                members: [runtimeMember],
+                condition: {
+                  expression:
+                    'request.time < timestamp("2099-01-01T00:00:00Z")',
+                  title: 'temporary',
+                },
+              },
+            ],
+          },
+        }),
+        validateStatic: staticPass,
+        write: () => {},
+      }),
+    /Secret Accessor policy must be unconditional/u,
+  );
+});
+
 test('effective App Engine version identity mismatch fails closed', () => {
   const version = 'r-abcdef0-1';
   const key = `app versions describe ${version} --service grafana-agent --project mento-monitoring`;
@@ -582,6 +615,54 @@ test('builder must not have Secret Manager access', () => {
     /builder.*must not have secret IAM/u,
   );
 });
+
+for (const legacyMember of legacySecretMembers) {
+  test(`legacy secret access fails closed for ${legacyMember}`, () => {
+    const key = `secrets get-iam-policy grafana-agent-endpoint --project ${project}`;
+    assert.throws(
+      () =>
+        runPreflight({
+          project,
+          runGcloud: successfulRunner({
+            [key]: {
+              bindings: [
+                {
+                  role: 'roles/secretmanager.secretAccessor',
+                  members: [runtimeMember, legacyMember],
+                },
+              ],
+            },
+          }),
+          validateStatic: staticPass,
+          write: () => {},
+        }),
+      /Secret Accessor policy members must match the exact expected identities/u,
+    );
+  });
+}
+
+for (const legacyMember of legacySecretMembers) {
+  test(`project-level legacy secret access fails closed for ${legacyMember}`, () => {
+    const key = `projects get-iam-policy ${project}`;
+    assert.throws(
+      () =>
+        runPreflight({
+          project,
+          runGcloud: successfulRunner({
+            [key]: successfulProjectPolicy([
+              {
+                role: 'roles/secretmanager.secretAccessor',
+                members: [legacyMember],
+              },
+            ]),
+          }),
+          validateStatic: staticPass,
+          write: () => {},
+        }),
+      /project Secret Accessor must have no members/u,
+    );
+  });
+}
 
 test('builder project roles must match the least-privilege set', () => {
   const key = `projects get-iam-policy ${project}`;

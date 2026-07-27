@@ -25,7 +25,8 @@ verifier_files=(
   aegis/grafana-agent/grafana-agent.yaml
   aegis/grafana-agent/passive-health.sh
   aegis/grafana-agent/preflight.mjs
-  aegis/grafana-agent/seed-secrets.sh
+  aegis/package.json
+  package.json
   terraform/.gitignore
   terraform/.terraform.lock.hcl
   terraform/aegis-bootstrap.tf

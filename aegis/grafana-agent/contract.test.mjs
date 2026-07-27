@@ -46,7 +46,12 @@ function sourceFiles() {
     cloudIgnore: readFileSync(path.join(agentDir, '.gcloudignore'), 'utf8'),
     deploy: readFileSync(path.join(agentDir, 'deploy.sh'), 'utf8'),
     preflight: readFileSync(path.join(agentDir, 'preflight.mjs'), 'utf8'),
-    legacySeed: readFileSync(path.join(agentDir, 'seed-secrets.sh'), 'utf8'),
+    rootPackage: readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
+    aegisPackage: readFileSync(
+      path.join(repoRoot, 'aegis/package.json'),
+      'utf8',
+    ),
+    legacySeedExists: false,
     terraformIgnore: readFileSync(
       path.join(repoRoot, 'terraform/.gitignore'),
       'utf8',
@@ -314,13 +319,36 @@ test('live preflight derives submitters from the Terraform-managed operator set'
   );
 });
 
-test('Phase A cannot delete the rollback accessors', () => {
+test('live preflight must reject non-runtime secret members', () => {
   const files = sourceFiles();
-  files.bootstrap = files.bootstrap.replace(
-    'resource "google_secret_manager_secret_iam_member" "grafana_agent_appspot_accessor"',
-    'resource "google_secret_manager_secret_iam_member" "removed_early"',
+  files.preflight = files.preflight.replace(
+    '      [runtimeMember],\n      `${secretId} Secret Accessor policy`,',
+    '      [runtimeMember, builderMember],\n      `${secretId} Secret Accessor policy`,',
   );
-  expectFailure(files, /missing .*grafana_agent_appspot_accessor/u);
+  expectFailure(
+    files,
+    /managed Alloy secret policies must allow only the pinned runtime identity/u,
+  );
+});
+
+test('live preflight must reject project-level and conditional secret access', () => {
+  const files = sourceFiles();
+  files.preflight = files.preflight
+    .replace(
+      "'roles/secretmanager.secretAccessor',\n  );",
+      "'roles/secretmanager.viewer',\n  );",
+    )
+    .replace('binding.role === role && binding.condition != null', 'false');
+  const errors = validateContract(files).join('\n');
+  assert.match(errors, /project IAM must not grant Secret Accessor/u);
+  assert.match(errors, /exact IAM policies must reject conditional bindings/u);
+});
+
+test('legacy secret accessors cannot return', () => {
+  const files = sourceFiles();
+  files.bootstrap +=
+    '\nresource "google_secret_manager_secret_iam_member" "grafana_agent_appspot_accessor" {}\n';
+  expectFailure(files, /legacy secret accessor .* must stay absent/u);
 });
 
 test('deploy must verify the new version identity', () => {
@@ -670,7 +698,8 @@ test('immutable verifier snapshot executes the captured static preflight', () =>
     'aegis/grafana-agent/grafana-agent.yaml',
     'aegis/grafana-agent/passive-health.sh',
     'aegis/grafana-agent/preflight.mjs',
-    'aegis/grafana-agent/seed-secrets.sh',
+    'aegis/package.json',
+    'package.json',
     'terraform/.gitignore',
     'terraform/.terraform.lock.hcl',
     'terraform/aegis-bootstrap.tf',
@@ -1139,13 +1168,20 @@ test('documented Terraform secret input files are gitignored', () => {
   }
 });
 
-test('production documents one-time adoption of the existing image repository', () => {
+test('completed image repository import cannot remain an operator step', () => {
+  const files = sourceFiles();
+  files.runbook +=
+    '\nterraform -chdir=terraform import google_artifact_registry_repository.grafana_agent_runtime_images\n';
+  expectFailure(files, /completed production repository import/u);
+});
+
+test('rollback guidance must reject legacy version identities', () => {
   const files = sourceFiles();
   files.runbook = files.runbook.replace(
-    'terraform -chdir=terraform import',
-    'echo import-skipped',
+    'pnpm aegis:agent:preflight -- --version TARGET',
+    'echo legacy-rollback',
   );
-  expectFailure(files, /must document one-time adoption/u);
+  expectFailure(files, /rollback guidance must reject legacy identities/u);
 });
 
 test('deploy must retain the explicit previous-version rollback command', () => {
@@ -1157,11 +1193,20 @@ test('deploy must retain the explicit previous-version rollback command', () => 
   expectFailure(files, /printed rollback must short-circuit/u);
 });
 
-test('Phase A must retain and mark the legacy seed rollback route', () => {
+test('legacy CLI seed route cannot return', () => {
   const files = sourceFiles();
-  files.legacySeed = files.legacySeed.replace(
-    'LEGACY PHASE A ROLLBACK ARTIFACT',
-    'secret helper',
+  files.legacySeedExists = true;
+  files.rootPackage = files.rootPackage.replace(
+    '"aegis:agent:deploy"',
+    '"aegis:agent:seed-secrets": "forbidden",\n    "aegis:agent:deploy"',
   );
-  expectFailure(files, /explicitly marked for Phase A rollback/u);
+  files.aegisPackage = files.aegisPackage.replace(
+    '"agent:deploy"',
+    '"agent:seed-secrets": "forbidden",\n    "agent:deploy"',
+  );
+  files.deploy += '\naegis/grafana-agent/seed-secrets.sh\n';
+  const errors = validateContract(files).join('\n');
+  assert.match(errors, /legacy CLI secret writer must stay absent/u);
+  assert.match(errors, /package\.json: legacy Alloy seed command/u);
+  assert.match(errors, /immutable verifier must not retain/u);
 });

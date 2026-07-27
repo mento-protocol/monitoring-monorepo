@@ -17,15 +17,14 @@
 # the custom `grafanaAgentActivationReader` role, containing only
 # `appengine.services.get` and `appengine.versions.list`, to prove it has the
 # full traffic allocation and every other collector version is stopped, plus
-# `roles/secretmanager.secretAccessor` on each legacy grafana-agent-* secret:
+# `roles/secretmanager.secretAccessor` on each grafana-agent-* secret:
 #   - grafana-agent-endpoint
 #   - grafana-agent-username
 #   - grafana-agent-password
 # Terraform grants the pinned `grafana-agent-runtime` service account access
 # through `terraform/aegis-bootstrap.tf` →
-# `grafana_agent_runtime_accessor`. AppSpot and build-principal grants remain
-# temporarily for Phase A rollback only; the new version must not depend on
-# them.
+# `grafana_agent_runtime_accessor`. No AppSpot or build identity may read these
+# secret payloads.
 
 set -eu
 

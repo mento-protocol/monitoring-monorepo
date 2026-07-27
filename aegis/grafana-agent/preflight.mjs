@@ -117,6 +117,13 @@ function assertExactRolePolicy(policy, role, expectedMembers, label) {
     );
   }
 
+  const conditionalBindings = bindings.filter(
+    (binding) => binding.role === role && binding.condition != null,
+  );
+  if (conditionalBindings.length > 0) {
+    throw new Error(`${label} must be unconditional`);
+  }
+
   const actualMembers = [
     ...new Set(
       bindings
@@ -286,6 +293,15 @@ export function runPreflight({
   ]);
 
   const projectPolicy = runGcloud(['projects', 'get-iam-policy', project]);
+  const projectSecretAccessors = membersForRole(
+    projectPolicy,
+    'roles/secretmanager.secretAccessor',
+  );
+  if (projectSecretAccessors.length > 0) {
+    throw new Error(
+      `project Secret Accessor must have no members; found ${projectSecretAccessors.join(', ')}`,
+    );
+  }
   const activationRoleName = `projects/${project}/roles/${ACTIVATION_ROLE_ID}`;
   const preflightRoleName = `projects/${project}/roles/${PREFLIGHT_ROLE_ID}`;
   const expectedBuildSubmitters = membersForRole(
@@ -406,6 +422,12 @@ export function runPreflight({
         `${runtimeEmail} must have only Secret Accessor on ${secretId}; found ${runtimeRoles.join(', ') || 'no roles'}`,
       );
     }
+    assertExactRolePolicy(
+      secretPolicy,
+      'roles/secretmanager.secretAccessor',
+      [runtimeMember],
+      `${secretId} Secret Accessor policy`,
+    );
 
     const latestVersion = runGcloud([
       'secrets',

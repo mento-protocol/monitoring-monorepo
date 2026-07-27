@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -18,11 +18,13 @@ const CONTRACT_FILES = {
   cloudIgnore: 'aegis/grafana-agent/.gcloudignore',
   deploy: 'aegis/grafana-agent/deploy.sh',
   preflight: 'aegis/grafana-agent/preflight.mjs',
-  legacySeed: 'aegis/grafana-agent/seed-secrets.sh',
+  rootPackage: 'package.json',
+  aegisPackage: 'aegis/package.json',
   terraformIgnore: 'terraform/.gitignore',
   tfvarsExample: 'terraform/terraform.tfvars.example',
   runbook: 'aegis/grafana-agent/README.md',
 };
+const LEGACY_SEED_PATH = 'aegis/grafana-agent/seed-secrets.sh';
 
 const EXPECTED_RUNTIME_EMAIL =
   'grafana-agent-runtime@mento-monitoring.iam.gserviceaccount.com';
@@ -30,12 +32,15 @@ const EXPECTED_BUILDER_EMAIL =
   'grafana-agent-builder@mento-monitoring.iam.gserviceaccount.com';
 
 function readContractFiles(root = REPO_ROOT) {
-  return Object.fromEntries(
-    Object.entries(CONTRACT_FILES).map(([key, relativePath]) => [
-      key,
-      readFileSync(path.join(root, relativePath), 'utf8'),
-    ]),
-  );
+  return {
+    ...Object.fromEntries(
+      Object.entries(CONTRACT_FILES).map(([key, relativePath]) => [
+        key,
+        readFileSync(path.join(root, relativePath), 'utf8'),
+      ]),
+    ),
+    legacySeedExists: existsSync(path.join(root, LEGACY_SEED_PATH)),
+  };
 }
 
 function extractHclBlock(source, header) {
@@ -130,7 +135,9 @@ export function validateContract(files = readContractFiles()) {
     cloudIgnore,
     deploy,
     preflight,
-    legacySeed,
+    rootPackage,
+    aegisPackage,
+    legacySeedExists,
     terraformIgnore,
     tfvarsExample,
     runbook,
@@ -639,19 +646,16 @@ export function validateContract(files = readContractFiles()) {
     'grafana_agent_cloudbuild_compute_accessor',
     'grafana_agent_appspot_accessor',
   ]) {
-    requireBlock(
-      errors,
-      bootstrap,
-      `resource "google_secret_manager_secret_iam_member" "${legacyResource}"`,
-      CONTRACT_FILES.bootstrap,
-    );
+    if (
+      bootstrap.includes(
+        `resource "google_secret_manager_secret_iam_member" "${legacyResource}"`,
+      )
+    ) {
+      errors.push(
+        `${CONTRACT_FILES.bootstrap}: legacy secret accessor ${legacyResource} must stay absent`,
+      );
+    }
   }
-  requirePattern(
-    errors,
-    bootstrap,
-    /Phase A rollback only/u,
-    `${CONTRACT_FILES.bootstrap}: retained legacy access must be marked Phase A rollback only`,
-  );
 
   requirePattern(
     errors,
@@ -799,6 +803,24 @@ export function validateContract(files = readContractFiles()) {
     preflight,
     /const expectedBuildSubmitters = membersForRole\(\s*projectPolicy,\s*preflightRoleName,\s*\)[\s\S]*assertExactRolePolicy\(\s*builderPolicy,\s*'roles\/iam\.serviceAccountUser',\s*expectedBuildSubmitters,[\s\S]*assertOperatorSetFingerprint\(preflightRole, expectedBuildSubmitters\)/u,
     `${CONTRACT_FILES.preflight}: both submitter policies must derive from and match the Terraform member-set fingerprint`,
+  );
+  requirePattern(
+    errors,
+    preflight,
+    /assertExactRolePolicy\(\s*secretPolicy,\s*'roles\/secretmanager\.secretAccessor',\s*\[runtimeMember\],\s*`\$\{secretId\} Secret Accessor policy`,\s*\)/u,
+    `${CONTRACT_FILES.preflight}: managed Alloy secret policies must allow only the pinned runtime identity`,
+  );
+  requirePattern(
+    errors,
+    preflight,
+    /membersForRole\(\s*projectPolicy,\s*'roles\/secretmanager\.secretAccessor',\s*\)[\s\S]*project Secret Accessor must have no members/u,
+    `${CONTRACT_FILES.preflight}: project IAM must not grant Secret Accessor`,
+  );
+  requirePattern(
+    errors,
+    preflight,
+    /binding\.role === role && binding\.condition != null[\s\S]*must be unconditional/u,
+    `${CONTRACT_FILES.preflight}: exact IAM policies must reject conditional bindings`,
   );
   if (
     preflight.includes('EXPECTED_BUILD_SUBMITTERS') ||
@@ -1069,18 +1091,26 @@ export function validateContract(files = readContractFiles()) {
       `${CONTRACT_FILES.deploy}: predeploy and post-success output must print target-aware stop-before-start rollback`,
     );
   }
-  requirePattern(
-    errors,
-    legacySeed,
-    /LEGACY PHASE A ROLLBACK ARTIFACT/u,
-    `${CONTRACT_FILES.legacySeed}: legacy seed route must stay explicitly marked for Phase A rollback`,
-  );
-  requirePattern(
-    errors,
-    legacySeed,
-    /gcloud secrets versions add/u,
-    `${CONTRACT_FILES.legacySeed}: Phase A must retain the legacy rollback route`,
-  );
+  if (legacySeedExists) {
+    errors.push(
+      `${LEGACY_SEED_PATH}: legacy CLI secret writer must stay absent`,
+    );
+  }
+  if (rootPackage.includes('"aegis:agent:seed-secrets"')) {
+    errors.push(
+      `${CONTRACT_FILES.rootPackage}: legacy Alloy seed command must stay absent`,
+    );
+  }
+  if (aegisPackage.includes('"agent:seed-secrets"')) {
+    errors.push(
+      `${CONTRACT_FILES.aegisPackage}: legacy Alloy seed command must stay absent`,
+    );
+  }
+  if (deploy.includes(LEGACY_SEED_PATH)) {
+    errors.push(
+      `${CONTRACT_FILES.deploy}: immutable verifier must not retain the deleted legacy seed route`,
+    );
+  }
   requirePattern(
     errors,
     terraformIgnore,
@@ -1105,11 +1135,20 @@ export function validateContract(files = readContractFiles()) {
     /gitignored\s+`terraform\/terraform\.tfvars`, a gitignored `terraform\/\*\.auto\.tfvars` file/u,
     `${CONTRACT_FILES.runbook}: runbook must name the exact ignored secret input files`,
   );
+  if (
+    /terraform -chdir=terraform import[\s\\]+google_artifact_registry_repository\.grafana_agent_runtime_images/u.test(
+      runbook,
+    )
+  ) {
+    errors.push(
+      `${CONTRACT_FILES.runbook}: completed production repository import must not remain an operator step`,
+    );
+  }
   requirePattern(
     errors,
     runbook,
-    /terraform -chdir=terraform import[\s\\]+google_artifact_registry_repository\.grafana_agent_runtime_images[\s\\]+projects\/mento-monitoring\/locations\/us\/repositories\/us\.gcr\.io/u,
-    `${CONTRACT_FILES.runbook}: production must document one-time adoption of the existing us.gcr.io repository`,
+    /Versions that do not pin[\s\S]*grafana-agent-runtime@mento-monitoring\.iam\.gserviceaccount\.com[\s\S]*must not be restarted[\s\S]*pnpm aegis:agent:preflight -- --version TARGET/u,
+    `${CONTRACT_FILES.runbook}: rollback guidance must reject legacy identities and require target preflight`,
   );
 
   return errors;

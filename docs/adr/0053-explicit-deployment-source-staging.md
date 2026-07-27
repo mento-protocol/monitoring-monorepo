@@ -37,8 +37,8 @@ The Alloy Cloud Build path is pinned to the dedicated
 project's default Compute service account
 `80554359692-compute@developer.gserviceaccount.com`. Both are exact Cloud
 Build source executors. The legacy
-`80554359692@cloudbuild.gserviceaccount.com` identity retains only temporary
-Alloy Secret Manager rollback bindings; it is not a source-staging principal.
+`80554359692@cloudbuild.gserviceaccount.com` identity is not a source-staging
+principal and has no Alloy Secret Manager access.
 
 ## Decision
 

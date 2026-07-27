@@ -136,8 +136,8 @@ resource "google_project_iam_member" "grafana_agent_runtime_log_writer" {
 
 # Artifact Registry creates gcr.io-compatible repositories on first push. Keep
 # this repository explicit so a fresh platform apply creates it before IAM and
-# App Engine deployment. Existing production must import the repository once
-# before the first apply that includes this resource; see the Alloy runbook.
+# App Engine deployment. Production's existing repository is already imported
+# and state-managed.
 resource "google_artifact_registry_repository" "grafana_agent_runtime_images" {
   project       = google_project.monitoring.project_id
   location      = "us"
@@ -198,49 +198,6 @@ resource "google_project_iam_member" "grafana_agent_operator_preflight_reader" {
 
   depends_on = [
     google_project_iam_custom_role.grafana_agent_preflight_reader,
-  ]
-}
-
-# Phase A rollback only. Cloud Build does not need secret payloads for the new
-# pinned runtime path. Retain these legacy accessors until the dedicated
-# identity is live and verified; Phase C removes every unproven grant.
-resource "google_secret_manager_secret_iam_member" "grafana_agent_cloudbuild_accessor" {
-  for_each  = google_secret_manager_secret.grafana_agent
-  project   = google_project.monitoring.project_id
-  secret_id = each.value.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_project.monitoring.number}@cloudbuild.gserviceaccount.com"
-
-  depends_on = [google_project_service.cloudbuild]
-}
-
-# Phase A rollback only. See the legacy-access note above.
-resource "google_secret_manager_secret_iam_member" "grafana_agent_cloudbuild_compute_accessor" {
-  for_each  = google_secret_manager_secret.grafana_agent
-  project   = google_project.monitoring.project_id
-  secret_id = each.value.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com"
-
-  depends_on = [
-    google_project_service.appengineflex,
-    google_project_service.compute,
-  ]
-}
-
-# Phase A rollback only. Previously deployed versions can still run as AppSpot;
-# keep their payload access until the new pinned version passes live proof and
-# the rollback window closes. Phase C removes this grant separately.
-resource "google_secret_manager_secret_iam_member" "grafana_agent_appspot_accessor" {
-  for_each  = google_secret_manager_secret.grafana_agent
-  project   = google_project.monitoring.project_id
-  secret_id = each.value.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${local.aegis_app_engine_default_service_account}"
-
-  depends_on = [
-    google_project_service.appengineflex,
-    google_project_service.secretmanager,
   ]
 }
 
