@@ -3,7 +3,7 @@ title: Documentation Navigation Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-27
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -217,3 +217,28 @@ follow-up PR. If a fixture must change because the intended route or context
 contract changed, review that change separately and report both the
 historical-suite and current-suite interpretation instead of silently rewriting
 the baseline digest.
+
+### 2026-07 post-garden result
+
+The first run after all six baseline garden trackers closed is
+[`documentation-navigation-2026-07-post-garden.json`](documentation-navigation-2026-07-post-garden.json).
+It evaluated default-branch commit
+`c909129681b2e041f05f10e72e85a0ff7f98ec52` with `gpt-5.6-terra` at low
+effort.
+
+| Measure                             |   Frozen baseline | 2026-07 post-garden |
+| ----------------------------------- | ----------------: | ------------------: |
+| Routing accuracy                    |             94.4% |               88.9% |
+| Unqualified non-canonical sources   |                 0 |                   0 |
+| Answer evidence                     |              100% |                100% |
+| Shortest useful path                |             88.9% |               88.9% |
+| Bootstrap bytes                     |            42,681 |              27,305 |
+| Unique suite bytes                  | 245,723 / 272,000 |   249,421 / 260,000 |
+| Questions over the per-question cap |                 0 |                   0 |
+
+The current run missed `package-indexer-add-contract`, which the baseline also
+missed, and `operator-alerts-stack-boundary`. Independent review found both to
+be evaluator retrieval mistakes rather than repository routing defects. The
+indexer route reaches the detailed procedure through `indexer-envio/AGENTS.md`
+and `indexer-envio/README.md`; the alerts boundary is stated directly in
+`alerts/AGENTS.md`. No documentation follow-up issue was required.
