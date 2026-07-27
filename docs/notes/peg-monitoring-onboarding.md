@@ -215,10 +215,13 @@ Use this order for a new asset or source topology:
 8. Provision the dashboard's server-only bridge URL through IaC, deploy the
    dashboard, and browser-verify current, stale-last-confirmed, and unavailable
    behavior against the same policy version.
-9. Only after producer and dashboard proof, review and explicitly approve the
-   protected follow-up that activates Grafana rules. Never apply it from an
-   agent session. Confirm active and retained-previous rules are Normal and use
-   the documented direct contact points.
+9. Only after producer and dashboard proof, merge a reviewed source change that
+   sets `local.peg_alerts_enabled` to `true`. Do not open the consumers through
+   a workflow, Terraform variable, GitHub variable, or policy artifact. After
+   that source flip reaches protected `main`, review and explicitly approve the
+   protected apply. Never apply it from an agent session. Confirm active and
+   retained-previous rules are Normal and use the documented direct contact
+   points.
 10. Mark Live only after the dashboard version matches the producer and the
     registry-rot, critical-path, indexed-pool, blindness, and deviation paths
     are reachable.

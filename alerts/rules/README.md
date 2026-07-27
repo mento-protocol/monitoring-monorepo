@@ -53,21 +53,24 @@ CI runs this in the `CI / Lint + test root scripts` job, along with
 
 ## Peg alert ladder
 
-The source-generated peg ladder reads `peg-thresholds.json` once and creates
-exact-version active and retained-previous rule sets. Market warnings route to
-`#alerts-pools`, producer and source warnings route to `#alerts-infra`, and
-critical rules route to both Splunk On-Call and `#alerts-critical`. Peg rules
-use direct rule-level contact points and never inherit the FX-weekend mute.
-Blind rules compare the producer's exact consecutive deep-poll count with
-policy; they do not infer 30-second poll history from Grafana's 60-second
-evaluation clock.
+The source-generated peg ladder reads `peg-thresholds.json` once and generates
+exact-version active and retained-previous rule sets. Its folder, templates,
+contact points, and rule group remain absent while the source-controlled
+`local.peg_alerts_enabled` switch is `false`. When a reviewed activation change
+sets it to `true`, market warnings route to `#alerts-pools`, producer and source
+warnings route to `#alerts-infra`, and critical rules route to both Splunk
+On-Call and `#alerts-critical`. Peg rules use direct rule-level contact points
+and never inherit the FX-weekend mute. Blind rules compare the producer's exact
+consecutive deep-poll count with policy; they do not infer 30-second poll
+history from Grafana's 60-second evaluation clock.
 
-The source is not live merely because it is merged. Policy publication and
-authentication, producer activation, the trusted-main Terraform plan, the
-human-approved apply, and live Grafana proof are separate gates. Follow
+The source is not live merely because it is merged. After every production
+precondition is verified, a reviewed source change may set the activation
+switch to `true`; the trusted-main plan, human-approved apply, and live Grafana
+proof remain required. Follow
 [`docs/notes/peg-monitoring.md`](../../docs/notes/peg-monitoring.md) for the
-current dependency boundary, exact source checks, telemetry preconditions,
-activation hold, and rollback order.
+current dependency boundary, exact source checks, activation sequence, and
+rollback order.
 
 Registry-rot rules cover every non-deep policy source, including display-only
 sources. Critical-path-unreachable rules cover only the policy-designated deep
