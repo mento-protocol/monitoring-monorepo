@@ -68,10 +68,12 @@ jobs:
     # with SENTRY_TRIAGE_TOKEN and `issues: write`. Same pattern as
     # terraform-deploy-queue-watch.yml.
     if: github.ref == 'refs/heads/main'
-    # sentry-pipeline Environment (issue #1289): its main-only deployment-branch
-    # policy makes SENTRY_TRIAGE_TOKEN access server-enforced — a branch-modified
-    # workflow_dispatch on a non-main ref is refused before this job runs, even if
-    # the `if:` main guard above is stripped on that branch.
+    # sentry-pipeline Environment (issue #1289): scopes SENTRY_TRIAGE_TOKEN to
+    # the jobs that declare it instead of the whole repo. NOT a boundary against
+    # workflow_dispatch — deployment-branch policies do not gate dispatch runs,
+    # so a writer who strips the `if:` guard above on a branch and dispatches it
+    # still receives this secret (verified 2026-07-27). The guard is the only
+    # control on that vector; fix options tracked in #1649.
     environment: sentry-pipeline
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 15

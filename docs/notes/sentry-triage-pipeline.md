@@ -38,15 +38,20 @@ invocations. The scripts own parsing, idempotency, and state transitions. The
 ADRs own the trust boundaries and rationale. Update those sources and this
 runbook together when a contract changes.
 
-The triage row states an operator requirement, now backed by a mechanical
-guarantee. Every secret-bearing job in these workflows declares the
-`sentry-pipeline` GitHub Environment, whose deployment-branch policy is limited to
-the protected `main` branch (Terraform in `terraform/github-environment.tf`, issue
-#1289). GitHub refuses such a job on any non-main ref server-side — before it
-starts, and regardless of what the branch's workflow file says — so a feature-ref
-`workflow_dispatch` can no longer reach the pipeline's secrets by stripping the
-in-workflow `if: github.ref == 'refs/heads/main'` guard. Still select `main`; the
-environment is the backstop, not a licence to dispatch off-main. The shared
+The triage row states an operator requirement, and it is **not** backed by a
+mechanical guarantee — always select `main`. Every secret-bearing job in these
+workflows declares the `sentry-pipeline` GitHub Environment, whose
+deployment-branch policy is limited to the protected `main` branch (Terraform in
+`terraform/github-environment.tf`, issue #1289). That environment **scopes** the
+secrets to the declaring jobs, but it does **not** bound them by branch: GitHub
+does not gate `workflow_dispatch` on deployment-branch policies, so a user with
+`write` who dispatches a branch with the in-workflow
+`if: github.ref == 'refs/heads/main'` guard removed still receives the pipeline's
+secrets (verified 2026-07-27 with both an admin and a non-admin collaborator;
+[#1649](https://github.com/mento-protocol/monitoring-monorepo/issues/1649)).
+Those `if:` guards are therefore the only control on this vector, and a branch
+author can delete them — treat off-main dispatch of these workflows as an
+incident, not a nuisance. The shared
 `CLAUDE_CODE_OAUTH_TOKEN` deliberately stays a repo-level secret (it is consumed
 by `.github/workflows/claude.yml` on feature-branch `pull_request` events, which a
 main-only environment would break); it is inference-only, so its residual
@@ -343,12 +348,14 @@ secrets are live, so roll it out Terraform-FIRST:
    so nothing breaks.
 2. Verify (Settings → Environments → `sentry-pipeline`) that the environment
    exists with a `main`-only protected-branch policy, that admin bypass is
-   disabled (`can_admins_bypass = false` — "Allow administrators to bypass
-   configured protection rules" unchecked; #1289), and that the expected
-   environment secrets are present. The identity contract hash-pins the policy
-   and the flag, so a _source_ change to either fails CI; a live settings change
-   made in GitHub's UI is caught only by the next manual `pnpm tf apply platform`
-   (no drift job monitors the platform stack's environment settings).
+   disabled (`can_admins_bypass = false`), and that the expected environment
+   secrets are present. The identity contract hash-pins the policy and the flag,
+   so a _source_ change to either fails CI; a live settings change made in
+   GitHub's UI is caught only by the next manual `pnpm tf apply platform` (no
+   drift job monitors the platform stack's environment settings). Note that
+   neither setting bounds `workflow_dispatch` — verifying them confirms the
+   configuration matches Terraform, not that the secrets are branch-protected
+   (see the stage map above and #1649).
 3. Only THEN land the workflow `environment: sentry-pipeline` references and the
    removal of the repo-level `github_actions_secret` blocks from
    `github-secrets.tf`, and apply. The protected environment already exists, so

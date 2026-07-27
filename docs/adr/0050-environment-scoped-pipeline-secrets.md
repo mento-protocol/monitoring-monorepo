@@ -13,9 +13,29 @@ garden_lane: adrs-architecture
 
 # ADR 0050 — Pipeline secrets are gated by a Terraform-managed GitHub Environment
 
-**Status:** Accepted (Jul 2026), two-phase rollout in progress.
+**Status:** Accepted (Jul 2026) — **its central premise is disproven; the chosen
+control does not deliver the intended protection.** Amended 2026-07-27; a
+replacement decision is pending in
+[#1649](https://github.com/mento-protocol/monitoring-monorepo/issues/1649).
 **Scope:** terraform / ci (Sentry pipeline first; the pattern for future
 secret-bearing scheduled workflows).
+
+> **Correction (2026-07-27).** This ADR assumed a deployment-branch policy makes
+> environment secrets unreachable from a non-main ref. **GitHub does not gate
+> `workflow_dispatch` on deployment-branch policies.** Verified empirically:
+> both a repo admin and a **non-admin `write` collaborator** dispatched a
+> guard-stripped branch off `main` and each received the environment secret.
+>
+> What the environment still delivers: **scoping** — only jobs that declare it
+> receive these secrets, instead of every workflow run in the repo. What it does
+> **not** deliver: the branch boundary against a compromised writer that #1289
+> set out to build. The in-workflow `if: main` guards remain the only control on
+> the dispatch vector, and they are a convention the branch author controls.
+>
+> Everything below is retained as the original record. Read the Decision and
+> Consequences sections as **superseded** on the enforcement claim. Replacement
+> options — separate repository, short-lived OIDC/App-minted credentials, or
+> removing `workflow_dispatch` from secret-bearing workflows — are in #1649.
 
 ## Context
 
@@ -28,10 +48,13 @@ branch whose copy of the workflow file was rewritten to drop its
 dispatched ref, so it is a convention the branch author controls, not a
 boundary (issue #1289).
 
-GitHub Environments invert that: when a job declares `environment:`, the
-secrets scoped to that environment are injected only if the run's ref satisfies
-the environment's deployment-branch policy, which is enforced server-side
-before the job starts — independent of the branch's workflow content.
+GitHub Environments were expected to invert that: when a job declares
+`environment:`, the secrets scoped to that environment would be injected only if
+the run's ref satisfied the environment's deployment-branch policy, enforced
+server-side before the job starts and independent of the branch's workflow
+content. **That expectation was wrong for `workflow_dispatch`** — see the
+correction above; branch policies constrain `push`/`pull_request`/`deployment`
+by ref, but not dispatch runs.
 
 ## Decision
 
@@ -101,9 +124,12 @@ Boundaries of the decision:
 
 ## Consequences
 
-- A branch-rewritten `workflow_dispatch` can no longer reach the pipeline's
+- ~~A branch-rewritten `workflow_dispatch` can no longer reach the pipeline's
   secrets; an off-main dispatch of a gated job is refused at the environment
-  gate before the job starts (previously a graceful in-job no-op).
+  gate before the job starts.~~ **False — see the correction at the top.** An
+  off-main dispatch still receives the secrets, for any user with `write`. What
+  did change: the secrets are now visible only to jobs that declare the
+  environment, rather than to every workflow run in the repo.
 - The platform PAT permission set grows by Environments: Read/write
   (documented in `providers.tf`, `variables.tf`, `terraform.tfvars.example`).
 - New secret-bearing scheduled workflows should scope their secrets to an

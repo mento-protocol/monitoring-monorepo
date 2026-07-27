@@ -135,9 +135,12 @@ resource "github_actions_secret" "integration_probe_squid_integrator_id" {
 # (SENTRY_TRIAGE_TOKEN, SENTRY_PROJECTION_TOKEN, AUTOFIX_APP_PRIVATE_KEY,
 # SENTRY_ARCHIVE_TOKEN, PLATFORM_SETTINGS_AUDIT_TOKEN) moved OUT of repo scope to
 # the `sentry-pipeline` GitHub Environment in `github-environment.tf` (issue
-# #1289): a repo-level secret is readable by any branch-modified workflow run via
-# workflow_dispatch, whereas the environment restricts access to `main`
-# server-side. Only CLAUDE_CODE_OAUTH_TOKEN stays here, at repo scope, because it
+# #1289), which narrows them from "any workflow run in the repo" to "jobs that
+# declare the environment". NOTE: that is a scoping improvement, NOT the
+# branch boundary #1289 intended — deployment-branch policies do not gate
+# `workflow_dispatch`, so a writer dispatching a guard-stripped branch still
+# receives them (verified 2026-07-27; fix options in #1649).
+# Only CLAUDE_CODE_OAUTH_TOKEN stays here, at repo scope, because it
 # is SHARED with `.github/workflows/claude.yml` (which reads it on `pull_request`
 # events from feature branches — the very surface a main-only environment
 # denies), and it is inference-only with no repo write capability of its own.

@@ -8,13 +8,22 @@
 # guard and exfiltrate every repo-level secret the workflow names. The guard is
 # a convention, not a security boundary.
 #
-# FIX. A GitHub Environment whose deployment-branch policy is limited to the
-# repo's protected branch (main) makes secret access SERVER-ENFORCED: a job that
-# declares `environment: sentry-pipeline` only receives the environment's
-# secrets when the run's ref satisfies the branch policy, no matter what the
-# branch's workflow file says. A `workflow_dispatch` from a feature branch is
-# refused at the environment gate before the job starts; scheduled runs (always
-# on the default branch) and `issues`-event runs (also the default branch) pass.
+# WHAT THIS ACTUALLY DOES (corrected 2026-07-27 — see issue #1649). The intent
+# was that a deployment-branch policy limited to the protected branch (main)
+# would make secret access SERVER-ENFORCED regardless of the branch's workflow
+# file. THAT IS NOT WHAT GITHUB DOES. Deployment-branch policies constrain
+# `push`/`pull_request`/`deployment` events by ref, but they DO NOT gate
+# `workflow_dispatch`: a dispatch run — which any user with `write` can trigger
+# on any ref — receives the environment's secrets whether or not the ref
+# satisfies the policy. Verified empirically with both an admin and a non-admin
+# `write` collaborator dispatching a guard-stripped branch; both got the secret.
+#
+# So this environment provides SCOPING (only jobs that declare it see these
+# secrets, instead of every workflow run in the repo), not the branch boundary
+# #1289 intended. The in-workflow `if: github.ref == 'refs/heads/main'` guards
+# remain the only control on the dispatch vector, and they are a convention the
+# branch author controls. Real fixes (separate repo / short-lived OIDC-minted
+# credentials / dropping `workflow_dispatch`) are tracked in #1649.
 # This mirrors the `production-infra` environment that already gates Terraform
 # applies — but this one carries NO required reviewers (the pipeline is
 # unattended; a reviewer gate would stall every scheduled run) and NO wait timer.
@@ -48,22 +57,17 @@ resource "github_repository_environment" "sentry_pipeline" {
   # false). No `reviewers {}` block and no `wait_timer`: the pipeline runs
   # unattended, so a human-approval gate would stall every scheduled run.
   #
-  # `can_admins_bypass = false` is load-bearing here. The default (true) lets a
-  # repo ADMIN bypass the deployment-branch policy — verified empirically: an
-  # admin `workflow_dispatch` of an environment-gated job from a non-main branch
-  # (with the in-workflow `if: main` guard stripped, as a malicious branch would)
-  # read the environment secret. Setting it false closes that SILENT bypass — an
-  # admin can no longer read the secret just by dispatching an off-main branch.
-  # It does NOT by itself contain a fully-compromised repo admin, who holds
-  # Administration:write and could first EDIT this environment (re-enable bypass
-  # or widen the branch policy) then dispatch. That live settings edit leaves this
-  # file untouched, so the identity contract (which hashes only the checked-in
-  # block) does not catch it and no drift job monitors it — only the next manual
-  # `pnpm tf apply platform` reconciles it. Its value is still defense-in-depth:
-  # any admin bypass becomes an out-of-band settings change, not a silent one-step
-  # dispatch. Zero operational cost — legitimate runs are
-  # scheduled on `main`, which is protected and satisfies the policy regardless
-  # of this flag (issue #1289).
+  # `can_admins_bypass = false` (#1635) is INERT for this environment — kept only
+  # because it is the strictest value and costs nothing. It governs the reviewer
+  # / wait-timer PROTECTION RULES (the ones that park a deployment in a "Pending"
+  # state for an admin to override); this environment declares neither, so the
+  # flag has nothing to act on. It does NOT restrict the deployment-branch
+  # policy: verified 2026-07-27 with the flag already `false`, an admin
+  # `workflow_dispatch` from a non-main branch still read the environment secret
+  # — as did a NON-ADMIN `write` collaborator, because branch policies do not
+  # gate `workflow_dispatch` at all (see the header note and #1649).
+  #
+  # Do not read this flag as a security control. The real fixes are in #1649.
   can_admins_bypass = false
 
   deployment_branch_policy {
@@ -115,8 +119,9 @@ resource "github_actions_environment_secret" "sentry_projection_token" {
 # Consumed as a presence guard by the autofix `select` job and to mint the App
 # installation token by the autofix `finalize` job; both now declare
 # `environment: sentry-pipeline`. This is the highest-value secret in the set (it
-# mints Contents:R/W + Pull-requests:R/W tokens), so server-enforced main-only
-# access matters most here.
+# mints Contents:R/W + Pull-requests:R/W tokens), which is why the header note
+# matters most here: environment scoping is NOT a branch boundary, so this key
+# is still reachable by any writer via `workflow_dispatch` (#1649).
 resource "github_actions_environment_secret" "autofix_app_private_key" {
   # checkov:skip=CKV_GIT_4: same state-backed plaintext trade-off; see
   # github-secrets.tf.

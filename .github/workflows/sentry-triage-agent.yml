@@ -55,10 +55,12 @@ jobs:
   select:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # sentry-pipeline Environment (issue #1289): its main-only deployment-branch
-    # policy makes the SENTRY_TRIAGE_TOKEN + CLAUDE_CODE_OAUTH_TOKEN presence
-    # checks server-enforced — a branch-modified workflow_dispatch on a non-main
-    # ref is refused before this job runs. (CLAUDE_CODE_OAUTH_TOKEN stays a
+    # sentry-pipeline Environment (issue #1289): scopes the SENTRY_TRIAGE_TOKEN +
+    # CLAUDE_CODE_OAUTH_TOKEN presence checks to the jobs that declare it instead
+    # of the whole repo. NOT a boundary against workflow_dispatch —
+    # deployment-branch policies do not gate dispatch runs (verified 2026-07-27),
+    # so the `if:` main guards on the secret-bearing jobs are the only control on
+    # that vector; fix options tracked in #1649. (CLAUDE_CODE_OAUTH_TOKEN stays a
     # repo-level secret for claude.yml; on this main-gated job it resolves via the
     # repo-level fallback since the environment does not redefine it.)
     environment: sentry-pipeline
@@ -162,10 +164,10 @@ jobs:
   triage:
     needs: select
     if: ${{ needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
-    # sentry-pipeline Environment (issue #1289): server-enforced main-only access
-    # to SENTRY_TRIAGE_TOKEN (job env) and CLAUDE_CODE_OAUTH_TOKEN
-    # (claude-code-action) — a non-main workflow_dispatch is refused before this
-    # matrix job runs.
+    # sentry-pipeline Environment (issue #1289): scopes SENTRY_TRIAGE_TOKEN (job
+    # env) and CLAUDE_CODE_OAUTH_TOKEN (claude-code-action) to the declaring
+    # jobs. NOT a boundary against workflow_dispatch — dispatch runs are not
+    # gated by the branch policy (verified 2026-07-27; #1649).
     environment: sentry-pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -371,9 +373,10 @@ jobs:
   #   - Token isolation: SENTRY_PROJECTION_TOKEN reaches ONLY this job's single
   #     step — the triage matrix jobs (which host the LLM agent) never see it.
   #     The env expression is ref-gated: off-main it resolves to '' (branch
-  #     dispatch runs branch-modified code; durable Environment protection is
-  #     #1289), and the run block re-queues actionable stubs loudly instead of
-  #     consuming them.
+  #     dispatch runs branch-modified code). That ref gate is the ONLY control
+  #     here — the sentry-pipeline Environment does not gate workflow_dispatch
+  #     (verified 2026-07-27; #1649) — and the run block re-queues actionable
+  #     stubs loudly instead of consuming them.
   #   - if: always() + count gate (like the digest): failed matrix jobs leave
   #     their stubs on sentry:needs-triage, which --batch skips; the rest of
   #     the batch still projects.

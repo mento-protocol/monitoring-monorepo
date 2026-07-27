@@ -98,7 +98,9 @@ deterministic step.**
   `SENTRY_TRIAGE_TOKEN`. The token is step-scoped env so it reaches only the
   projection step, never the triage agent; the agent's allowlist and permissions
   are untouched. It is also ref-gated to `main` (a branch `workflow_dispatch`
-  runs branch-modified workflow code; durable Environment protection is #1289).
+  runs branch-modified workflow code). That ref gate is the only control on this
+  vector: the `sentry-pipeline` Environment added by #1289 does not gate
+  `workflow_dispatch` (verified 2026-07-27; see #1649).
   Absent PAT → graceful no-op. Cross-repo fix **PRs** remain a later phase
   (ADR 0036 Stage C Phase 3, tracked in #1279) — this ADR authorizes
   Issues-write only.

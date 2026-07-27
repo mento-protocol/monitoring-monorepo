@@ -54,10 +54,12 @@ jobs:
     # sentry-triage-archive.yml. (Scheduled runs are always on the default
     # branch, so this only ever narrows manual dispatch.)
     if: github.ref == 'refs/heads/main'
-    # sentry-pipeline Environment (issue #1289): its main-only deployment-branch
-    # policy makes PLATFORM_SETTINGS_AUDIT_TOKEN access server-enforced — a
-    # branch-modified workflow_dispatch on a non-main ref is refused before this
-    # job runs, even if the `if:` main guard above is stripped on that branch.
+    # sentry-pipeline Environment (issue #1289): scopes
+    # PLATFORM_SETTINGS_AUDIT_TOKEN to the jobs that declare it instead of the
+    # whole repo. NOT a boundary against workflow_dispatch — deployment-branch
+    # policies do not gate dispatch runs, so a writer who strips the `if:` guard
+    # above on a branch and dispatches it still receives this secret (verified
+    # 2026-07-27). The guard is the only control there; fixes tracked in #1649.
     environment: sentry-pipeline
     permissions:
       contents: read

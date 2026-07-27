@@ -164,14 +164,21 @@ reviewer.
 `sentry-pipeline` (`terraform/github-environment.tf`, issue #1289,
 [ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) gates the Sentry
 triage/autofix pipeline's exclusive secrets. It has a main-only
-protected-branch deployment policy with admin bypass disabled
-(`can_admins_bypass = false`, #1289 — an admin cannot silently dispatch an
-off-main branch past the policy) and — deliberately, the pipeline is
-unattended — no reviewer or wait timer. Unlike the other two it is
-Terraform-managed; every platform apply reconciles its policy and secrets. Every secret-bearing Sentry job declares it, so those secrets are
-reachable only from `main` — server-enforced even on a branch-modified
-`workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level
-for `claude.yml`.
+protected-branch deployment policy, `can_admins_bypass = false`, and —
+deliberately, the pipeline is unattended — no reviewer or wait timer. Unlike the
+other two it is Terraform-managed; every platform apply reconciles its policy and
+secrets. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level for
+`claude.yml`.
+
+**This environment scopes those secrets; it does not bound them by branch.**
+GitHub does not gate `workflow_dispatch` on deployment-branch policies, so a
+user with `write` who dispatches a branch with the in-workflow `if: main` guard
+removed still receives the secrets (verified 2026-07-27, with both an admin and
+a non-admin collaborator). `can_admins_bypass` governs reviewer/wait-timer rules,
+which this environment does not declare, so it is inert here. The `if: main` job
+guards remain the only control on that vector. Do not treat this environment as
+a trust boundary; replacement options are tracked in
+[#1649](https://github.com/mento-protocol/monitoring-monorepo/issues/1649).
 
 Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow

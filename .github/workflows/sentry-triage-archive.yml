@@ -76,10 +76,12 @@ jobs:
       (github.event_name == 'workflow_dispatch' ||
        (github.event.label.name == 'sentry:approved-archive' &&
         contains(github.event.issue.labels.*.name, 'sentry-triage')))
-    # sentry-pipeline Environment (issue #1289): its main-only deployment-branch
-    # policy makes SENTRY_ARCHIVE_TOKEN (write-scoped) access server-enforced — a
-    # branch-modified workflow_dispatch on a non-main ref is refused before this
-    # job runs, even if the `if:` main guard above is stripped on that branch.
+    # sentry-pipeline Environment (issue #1289): scopes the write-scoped
+    # SENTRY_ARCHIVE_TOKEN to the jobs that declare it instead of the whole repo.
+    # NOT a boundary against workflow_dispatch — deployment-branch policies do
+    # not gate dispatch runs, so a writer who strips the `if:` guard above on a
+    # branch and dispatches it still receives this secret (verified 2026-07-27).
+    # The guard is the only control on that vector; fixes tracked in #1649.
     environment: sentry-pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 10
