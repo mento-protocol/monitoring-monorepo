@@ -17,6 +17,8 @@ const GCLOUD =
   /(?:^|[^A-Za-z0-9_.-])(?:\/[A-Za-z0-9_./-]+\/)?gcloud(?:\.cmd)?(?=$|[^A-Za-z0-9_.-])/gu;
 const GCLOUD_WINDOWS =
   /(?:^|[^A-Za-z0-9_.-])(?:\/[A-Za-z0-9_./-]+\/)?gcloud(?:\.cmd)?(?=$|[^A-Za-z0-9_.-])/giu;
+const GCLOUD_PROGRAMMATIC_CMD =
+  /(?:^|[^A-Za-z0-9_.-])(?:\/[A-Za-z0-9_./-]+\/)?[gG][cC][lL][oO][uU][dD]\.[cC][mM][dD](?=$|[^A-Za-z0-9_.-])/gu;
 const GCLOUD_TEXT = /gcloud(?:\.cmd)?/iu;
 
 export function isGcloudExecutable(value) {
@@ -178,25 +180,37 @@ function kindAfterGcloud(text) {
 function lexicalDeployRecords(filePath, surface, contents) {
   const records = [];
   const windowsShell = isBatchSource(filePath) || isPowerShellSource(filePath);
-  const stripBackslashEscapes = !windowsShell;
+  const scans = windowsShell
+    ? [{ matcher: GCLOUD_WINDOWS, stripBackslashEscapes: false }]
+    : [{ matcher: GCLOUD, stripBackslashEscapes: true }];
+  if (!windowsShell && surface === "programmatic") {
+    scans.push({
+      matcher: GCLOUD_PROGRAMMATIC_CMD,
+      stripBackslashEscapes: false,
+    });
+  }
   for (const line of logicalLines(filePath, contents)) {
     for (const fragment of topLevelFragments(line)) {
-      const normalizedFragment = normalize(fragment, stripBackslashEscapes);
-      for (const match of normalizedFragment.matchAll(
-        windowsShell ? GCLOUD_WINDOWS : GCLOUD,
-      )) {
-        const suffix = normalizedFragment.slice(
-          (match.index ?? 0) + match[0].length,
-        );
-        const kind = kindAfterGcloud(suffix);
-        if (!kind) continue;
-        records.push({
-          filePath,
-          surface,
-          kind,
-          normalized: `${match[0]}${suffix}`,
-          raw: fragment,
-        });
+      const seen = new Set();
+      for (const { matcher, stripBackslashEscapes } of scans) {
+        const normalizedFragment = normalize(fragment, stripBackslashEscapes);
+        for (const match of normalizedFragment.matchAll(matcher)) {
+          const suffix = normalizedFragment.slice(
+            (match.index ?? 0) + match[0].length,
+          );
+          const kind = kindAfterGcloud(suffix);
+          if (!kind) continue;
+          const key = `${kind}\0${match[0]}\0${suffix}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          records.push({
+            filePath,
+            surface,
+            kind,
+            normalized: `${match[0]}${suffix}`,
+            raw: fragment,
+          });
+        }
       }
     }
   }

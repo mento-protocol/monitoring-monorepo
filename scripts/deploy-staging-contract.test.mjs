@@ -766,6 +766,31 @@ assertForbiddenSignature(
   "scripts/static-template-expression-deploy.mjs",
 );
 assertForbiddenSignature(
+  `execSync("GCLOUD.CMD builds submit .");
+`,
+  "mixed-case Windows launcher in a programmatic command string",
+  "scripts/windows-command-string-deploy.mjs",
+);
+assertForbiddenSignature(
+  `execSync("C:\\\\SDK\\\\GCLOUD.CMD app deploy app.yaml");
+`,
+  "mixed-case Windows launcher path in a programmatic command string",
+  "scripts/windows-path-command-string-deploy.mjs",
+);
+assertForbiddenSignature(
+  `execSync("/usr/local/bin/gcloud builds submit .");
+`,
+  "Unix launcher path in a programmatic command string",
+  "scripts/unix-path-command-string-deploy.mjs",
+);
+assertForbiddenSignature(
+  `await $\`GCLOUD.CMD builds
+submit .\`;
+`,
+  "mixed-case Windows launcher in a tagged-template command",
+  "scripts/windows-tagged-template-deploy.mjs",
+);
+assertForbiddenSignature(
   `execFileSync(
   ("gcloud" as string),
   [
@@ -930,6 +955,14 @@ assert.equal(
   1,
   "AST recovery must not duplicate inline tagged-template records",
 );
+assert.equal(
+  discoverDeployStagingCallsites({
+    "scripts/lowercase-windows-command-string.mjs":
+      'execSync("gcloud.cmd builds submit .");\n',
+  }).length,
+  1,
+  "programmatic Windows launcher recovery must not duplicate lowercase records",
+);
 
 assert.equal(
   discoverDeployStagingCallsites({
@@ -979,6 +1012,22 @@ assert.equal(
   }).length,
   0,
   "longer Windows executable names must not match the gcloud.cmd basename",
+);
+assert.equal(
+  discoverDeployStagingCallsites({
+    "scripts/gcloud-wrapper.mjs":
+      'execSync("GCLOUD.CMDX app deploy app.yaml");\n',
+  }).length,
+  0,
+  "programmatic Windows launcher near misses must stay ignored",
+);
+assert.equal(
+  discoverDeployStagingCallsites({
+    "scripts/uppercase-unix-launcher.mjs":
+      'execSync("GCLOUD builds submit .");\n',
+  }).length,
+  0,
+  "programmatic Windows support must not make bare Unix launchers case-insensitive",
 );
 
 assertDeployStagingContract(files);
