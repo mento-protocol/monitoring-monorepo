@@ -181,9 +181,9 @@ the explicit bucket.
 This migration has a strict rollout order. First merge the infrastructure-only
 PR. Refresh current `main`, run a clean current-main platform plan, get explicit
 apply approval, apply, and verify both buckets, their bucket-scoped IAM, and the
-routine deployer's plus `gcp_dev_members`' exact default-compute act-as grants.
-Only then merge the
-routing follow-up; that merge triggers the Metrics Bridge and Aegis workflows.
+exact default-Compute act-as grants for the routine deployer and
+`gcp_dev_members`. Only then merge the routing follow-up; that merge triggers
+the Metrics Bridge and Aegis workflows.
 Canary those two paths and `pnpm aegis:agent:deploy` before a separate platform
 change removes the temporary project-wide Storage Admin and Service Account
 User grants. Never combine that removal with creation of the private
