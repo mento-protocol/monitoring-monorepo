@@ -40,6 +40,15 @@ export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
 
 const PEG_POLICY_PROJECT_ID = "mento-monitoring-peg-policy";
 const PEG_POLICY_PROJECT_EXPRESSION = "google_project.peg_policy.project_id";
+const PEG_POLICY_PROJECT_ID_VALIDATION =
+  'length(var.gcp_peg_policy_project_id) > 0 && can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.gcp_peg_policy_project_id)) && !strcontains(var.gcp_peg_policy_project_id, "google") && !strcontains(var.gcp_peg_policy_project_id, "ssl")';
+const PEG_POLICY_PROJECT_ID_VALIDATION_ERROR =
+  "gcp_peg_policy_project_id must be nonempty and a valid GCP project ID: 6-30 lowercase letters, digits, or hyphens; start with a letter; end with a letter or digit; and contain neither 'google' nor 'ssl'.";
+const PEG_POLICY_OWNER_CHECKOV_EXCEPTIONS = [
+  "# trunk-ignore(checkov/CKV_GCP_117): protected Terraform needs Owner to bootstrap the dedicated project's IAM and buckets.",
+  "# trunk-ignore(checkov/CKV_GCP_42): the bootstrap Owner is an intentional, production-gated control-plane exception.",
+  "# trunk-ignore(checkov/CKV_GCP_49): the exception is scoped to the dedicated project and protected Terraform identity.",
+];
 const PEG_POLICY_PROJECT_MARKERS = [
   PEG_POLICY_PROJECT_EXPRESSION,
   "var.gcp_peg_policy_project_id",
@@ -112,7 +121,7 @@ function validatePegPolicyServiceAccount(
   return block;
 }
 
-function validatePegPolicyProject(topLevelBlocks, blocks, errors) {
+function validatePegPolicyProject(files, topLevelBlocks, blocks, errors) {
   const variableLabel = "terraform: Peg policy project ID";
   const projectId = requireBlock(
     topLevelBlocks,
@@ -131,6 +140,27 @@ function validatePegPolicyProject(topLevelBlocks, blocks, errors) {
       errors,
       variableLabel,
     );
+    const validations = nestedBlocks(projectId, "validation");
+    if (validations.length !== 1) {
+      errors.push(
+        `${variableLabel}: must contain exactly one validation block`,
+      );
+    } else {
+      expectExpression(
+        validations[0],
+        "condition",
+        PEG_POLICY_PROJECT_ID_VALIDATION,
+        errors,
+        variableLabel,
+      );
+      expectString(
+        validations[0],
+        "error_message",
+        PEG_POLICY_PROJECT_ID_VALIDATION_ERROR,
+        errors,
+        variableLabel,
+      );
+    }
   }
 
   const projectLabel = "terraform: isolated Peg policy project";
@@ -209,6 +239,72 @@ function validatePegPolicyProject(topLevelBlocks, blocks, errors) {
     );
   }
 
+  const source = files["terraform/peg-policy.tf"];
+  const ownerExceptions = `${PEG_POLICY_OWNER_CHECKOV_EXCEPTIONS.join("\n")}\nresource "google_project_iam_member" "peg_policy_terraform_owner" {`;
+  const exceptionCount = PEG_POLICY_OWNER_CHECKOV_EXCEPTIONS.map(
+    (exception) => source?.split(exception).length - 1,
+  );
+  if (
+    !source?.includes(ownerExceptions) ||
+    exceptionCount.some((count) => count !== 1)
+  ) {
+    errors.push(
+      `${ownerLabel}: must keep only the three scoped Checkov exceptions on the protected Owner bootstrap`,
+    );
+  }
+
+  const auditLabel = "terraform: Peg policy all-services audit configuration";
+  const audit = requireBlock(
+    blocks,
+    "terraform/peg-policy.tf",
+    "google_project_iam_audit_config",
+    "peg_policy",
+    errors,
+    auditLabel,
+  );
+  if (audit) {
+    expectNoResourceMultiplicity(audit, errors, auditLabel);
+    expectExpression(
+      audit,
+      "project",
+      PEG_POLICY_PROJECT_EXPRESSION,
+      errors,
+      auditLabel,
+    );
+    expectString(audit, "service", "allServices", errors, auditLabel);
+    if (
+      !sameSortedValues(extractExpressionList(audit, "depends_on"), [
+        "google_project_iam_member.peg_policy_terraform_owner",
+      ])
+    ) {
+      errors.push(
+        `${auditLabel}: depends_on must contain only the protected Terraform owner bootstrap`,
+      );
+    }
+    const auditLogConfigs = nestedBlocks(audit, "audit_log_config");
+    const requiredAuditTypes = ["ADMIN_READ", "DATA_READ", "DATA_WRITE"];
+    if (auditLogConfigs.length !== requiredAuditTypes.length) {
+      errors.push(`${auditLabel}: must contain exactly three audit log types`);
+    } else {
+      const auditTypes = auditLogConfigs.map((config) =>
+        stringAttribute(config, "log_type"),
+      );
+      if (!sameSortedValues(auditTypes, requiredAuditTypes)) {
+        errors.push(
+          `${auditLabel}: audit log types must be exactly ADMIN_READ, DATA_READ, and DATA_WRITE`,
+        );
+      }
+    }
+    if (
+      auditLogConfigs.some(
+        (config) =>
+          attributeExpression(config, "exempted_members") !== undefined,
+      )
+    ) {
+      errors.push(`${auditLabel}: exempted members are forbidden`);
+    }
+  }
+
   const expectedApis = new Map([
     ["peg_policy_storage", "storage.googleapis.com"],
     ["peg_policy_iam", "iam.googleapis.com"],
@@ -237,11 +333,11 @@ function validatePegPolicyProject(topLevelBlocks, blocks, errors) {
     expectExpression(api, "disable_dependent_services", "false", errors, label);
     if (
       !sameSortedValues(extractExpressionList(api, "depends_on"), [
-        "google_project_iam_member.peg_policy_terraform_owner",
+        "google_project_iam_audit_config.peg_policy",
       ])
     ) {
       errors.push(
-        `${label}: depends_on must contain only the protected Terraform owner bootstrap`,
+        `${label}: depends_on must contain only the all-services audit configuration`,
       );
     }
   }
@@ -439,6 +535,7 @@ function rejectUnexpectedPegProjectReferences(topLevelBlocks, errors) {
     "terraform/variables.tf:variable.gcp_peg_policy_project_id",
     "terraform/peg-policy.tf:resource.google_project.peg_policy",
     "terraform/peg-policy.tf:resource.google_project_iam_member.peg_policy_terraform_owner",
+    "terraform/peg-policy.tf:resource.google_project_iam_audit_config.peg_policy",
     "terraform/peg-policy.tf:resource.google_project_service.peg_policy_storage",
     "terraform/peg-policy.tf:resource.google_project_service.peg_policy_iam",
     "terraform/peg-policy.tf:resource.google_storage_bucket.peg_policy",
@@ -620,7 +717,7 @@ function validatePegPolicyAccessLogBucket(files, blocks, errors) {
 
 export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
   const blocks = topLevelBlocks.filter((block) => block.kind === "resource");
-  validatePegPolicyProject(topLevelBlocks, blocks, errors);
+  validatePegPolicyProject(files, topLevelBlocks, blocks, errors);
 
   const bucketLabel = "terraform: Peg policy bucket";
   const bucket = requireBlock(

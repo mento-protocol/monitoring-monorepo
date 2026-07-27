@@ -196,6 +196,11 @@ variable "gcp_peg_policy_project_id" {
   description = "GCP project ID for the isolated Peg-policy storage project."
   type        = string
   default     = "mento-monitoring-peg-policy"
+
+  validation {
+    condition     = length(var.gcp_peg_policy_project_id) > 0 && can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.gcp_peg_policy_project_id)) && !strcontains(var.gcp_peg_policy_project_id, "google") && !strcontains(var.gcp_peg_policy_project_id, "ssl")
+    error_message = "gcp_peg_policy_project_id must be nonempty and a valid GCP project ID: 6-30 lowercase letters, digits, or hyphens; start with a letter; end with a letter or digit; and contain neither 'google' nor 'ssl'."
+  }
 }
 `;
 
@@ -212,10 +217,32 @@ resource "google_project" "peg_policy" {
   }
 }
 
+# trunk-ignore(checkov/CKV_GCP_117): protected Terraform needs Owner to bootstrap the dedicated project's IAM and buckets.
+# trunk-ignore(checkov/CKV_GCP_42): the bootstrap Owner is an intentional, production-gated control-plane exception.
+# trunk-ignore(checkov/CKV_GCP_49): the exception is scoped to the dedicated project and protected Terraform identity.
 resource "google_project_iam_member" "peg_policy_terraform_owner" {
   project = google_project.peg_policy.project_id
   role    = "roles/owner"
   member  = "serviceAccount:\${var.terraform_service_account}"
+}
+
+resource "google_project_iam_audit_config" "peg_policy" {
+  project = google_project.peg_policy.project_id
+  service = "allServices"
+
+  audit_log_config {
+    log_type = "ADMIN_READ"
+  }
+
+  audit_log_config {
+    log_type = "DATA_READ"
+  }
+
+  audit_log_config {
+    log_type = "DATA_WRITE"
+  }
+
+  depends_on = [google_project_iam_member.peg_policy_terraform_owner]
 }
 
 resource "google_project_service" "peg_policy_storage" {
@@ -224,7 +251,7 @@ resource "google_project_service" "peg_policy_storage" {
   disable_on_destroy         = false
   disable_dependent_services = false
 
-  depends_on = [google_project_iam_member.peg_policy_terraform_owner]
+  depends_on = [google_project_iam_audit_config.peg_policy]
 }
 
 resource "google_project_service" "peg_policy_iam" {
@@ -233,7 +260,7 @@ resource "google_project_service" "peg_policy_iam" {
   disable_on_destroy         = false
   disable_dependent_services = false
 
-  depends_on = [google_project_iam_member.peg_policy_terraform_owner]
+  depends_on = [google_project_iam_audit_config.peg_policy]
 }
 
 resource "google_storage_bucket" "peg_policy" {

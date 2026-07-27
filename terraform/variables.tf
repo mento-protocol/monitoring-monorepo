@@ -449,6 +449,11 @@ variable "gcp_peg_policy_project_id" {
   description = "GCP project ID for the isolated Peg-policy storage project."
   type        = string
   default     = "mento-monitoring-peg-policy"
+
+  validation {
+    condition     = length(var.gcp_peg_policy_project_id) > 0 && can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.gcp_peg_policy_project_id)) && !strcontains(var.gcp_peg_policy_project_id, "google") && !strcontains(var.gcp_peg_policy_project_id, "ssl")
+    error_message = "gcp_peg_policy_project_id must be nonempty and a valid GCP project ID: 6-30 lowercase letters, digits, or hyphens; start with a letter; end with a letter or digit; and contain neither 'google' nor 'ssl'."
+  }
 }
 
 variable "gcp_org_id" {

@@ -23,10 +23,34 @@ resource "google_project" "peg_policy" {
 # can enable APIs or manage storage. This owner grant is an intentional
 # control-plane exception: it can change project and bucket IAM, so production
 # apply protection and the effective-IAM audit remain part of the boundary.
+# trunk-ignore(checkov/CKV_GCP_117): protected Terraform needs Owner to bootstrap the dedicated project's IAM and buckets.
+# trunk-ignore(checkov/CKV_GCP_42): the bootstrap Owner is an intentional, production-gated control-plane exception.
+# trunk-ignore(checkov/CKV_GCP_49): the exception is scoped to the dedicated project and protected Terraform identity.
 resource "google_project_iam_member" "peg_policy_terraform_owner" {
   project = google_project.peg_policy.project_id
   role    = "roles/owner"
   member  = "serviceAccount:${var.terraform_service_account}"
+}
+
+# Record every project-level admin read and data read/write action before the
+# dedicated project's APIs, buckets, and identities are created.
+resource "google_project_iam_audit_config" "peg_policy" {
+  project = google_project.peg_policy.project_id
+  service = "allServices"
+
+  audit_log_config {
+    log_type = "ADMIN_READ"
+  }
+
+  audit_log_config {
+    log_type = "DATA_READ"
+  }
+
+  audit_log_config {
+    log_type = "DATA_WRITE"
+  }
+
+  depends_on = [google_project_iam_member.peg_policy_terraform_owner]
 }
 
 # Keep the isolated project narrow: the source foundation explicitly enables
@@ -37,7 +61,7 @@ resource "google_project_service" "peg_policy_storage" {
   disable_on_destroy         = false
   disable_dependent_services = false
 
-  depends_on = [google_project_iam_member.peg_policy_terraform_owner]
+  depends_on = [google_project_iam_audit_config.peg_policy]
 }
 
 resource "google_project_service" "peg_policy_iam" {
@@ -46,7 +70,7 @@ resource "google_project_service" "peg_policy_iam" {
   disable_on_destroy         = false
   disable_dependent_services = false
 
-  depends_on = [google_project_iam_member.peg_policy_terraform_owner]
+  depends_on = [google_project_iam_audit_config.peg_policy]
 }
 
 resource "google_storage_bucket" "peg_policy" {

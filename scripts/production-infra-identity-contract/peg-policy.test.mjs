@@ -54,6 +54,18 @@ for (const [filePath, from, to, expected] of [
     "Peg policy project ID: default must be exactly",
   ],
   [
+    "terraform/variables.tf",
+    '!strcontains(var.gcp_peg_policy_project_id, "ssl")',
+    '!strcontains(var.gcp_peg_policy_project_id, "tls")',
+    "Peg policy project ID: condition must be exactly",
+  ],
+  [
+    "terraform/variables.tf",
+    "gcp_peg_policy_project_id must be nonempty and a valid GCP project ID",
+    "Peg policy project ID is valid",
+    "Peg policy project ID: error_message must be exactly",
+  ],
+  [
     "terraform/peg-policy.tf",
     '  name            = "Mento Peg Policy"',
     '  name            = "Mento Monitoring"',
@@ -172,6 +184,20 @@ for (const [filePath, from, to, expected] of [
 }
 
 expectContractFailure(
+  mutateFile(
+    validFiles,
+    "terraform/variables.tf",
+    `
+  validation {
+    condition     = length(var.gcp_peg_policy_project_id) > 0 && can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.gcp_peg_policy_project_id)) && !strcontains(var.gcp_peg_policy_project_id, "google") && !strcontains(var.gcp_peg_policy_project_id, "ssl")
+    error_message = "gcp_peg_policy_project_id must be nonempty and a valid GCP project ID: 6-30 lowercase letters, digits, or hyphens; start with a letter; end with a letter or digit; and contain neither 'google' nor 'ssl'."
+  }`,
+    "",
+  ),
+  "Peg policy project ID: must contain exactly one validation block",
+);
+
+expectContractFailure(
   mutateFileOccurrence(
     validFiles,
     "terraform/peg-policy.tf",
@@ -190,6 +216,53 @@ expectContractFailure(
     1,
   ),
   "Peg policy bucket: prevent_destroy must be exactly",
+);
+
+for (const [from, to, expected] of [
+  [
+    '  service = "allServices"',
+    '  service = "storage.googleapis.com"',
+    "Peg policy all-services audit configuration: service must be exactly",
+  ],
+  [
+    '    log_type = "DATA_WRITE"',
+    '    log_type = "DATA_ACCESS"',
+    "Peg policy all-services audit configuration: audit log types must be exactly",
+  ],
+  [
+    '    log_type = "DATA_WRITE"',
+    `    log_type = "DATA_WRITE"
+    exempted_members = ["serviceAccount:excluded@example.com"]`,
+    "Peg policy all-services audit configuration: exempted members are forbidden",
+  ],
+  [
+    `  audit_log_config {
+    log_type = "DATA_WRITE"
+  }`,
+    `  audit_log_config {
+    log_type = "DATA_WRITE"
+  }
+
+  audit_log_config {
+    log_type = "DATA_READ"
+  }`,
+    "Peg policy all-services audit configuration: must contain exactly three audit log types",
+  ],
+]) {
+  expectContractFailure(
+    mutateFile(validFiles, "terraform/peg-policy.tf", from, to),
+    expected,
+  );
+}
+
+expectContractFailure(
+  mutateFile(
+    validFiles,
+    "terraform/peg-policy.tf",
+    'resource "google_project_iam_audit_config" "peg_policy" {',
+    '# audit configuration removed\nresource "google_project_iam_audit_config" "peg_policy_removed" {',
+  ),
+  "Peg policy all-services audit configuration: required resource google_project_iam_audit_config.peg_policy is missing",
 );
 
 for (const [name, service, replacement] of [
@@ -256,7 +329,7 @@ for (const [name, service, replacement] of [
       "terraform/peg-policy.tf",
       block,
       block.replace(
-        "  depends_on = [google_project_iam_member.peg_policy_terraform_owner]",
+        "  depends_on = [google_project_iam_audit_config.peg_policy]",
         "  depends_on = []",
       ),
     ),

@@ -64,6 +64,10 @@ human-approved platform plan and apply before it exists in production.
   settings; Terraform review and reconciliation protect those settings, not the
   custom role itself. The Owner grant can also change project IAM. These are
   intentional protected control-plane exceptions.
+- The dedicated project records `ADMIN_READ`, `DATA_READ`, and `DATA_WRITE`
+  audit logs for `allServices`, without exempted members. Audit coverage starts
+  after the protected Owner bootstrap so subsequent project configuration and
+  policy-plane access are attributable.
 - The access-log bucket's exact direct policy contains only the protected
   controller and the Google Storage analytics writer. It retains LIVE objects
   for 90 days and noncurrent ARCHIVED objects for 30 days. Logs are audit
