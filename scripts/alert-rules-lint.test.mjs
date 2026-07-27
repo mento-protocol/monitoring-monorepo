@@ -427,11 +427,12 @@ test("peg policy requires exactly one registry-aligned deep venue", () => {
   );
 });
 
-test("peg policy requires positive cadence and two-poll staleness", () => {
+test("peg policy requires bounded listing confirmation and matching staleness", () => {
   const policy = freshPegPolicy();
   const source = policy.active.assets["europ-schuman"].sources.bitvavo_eur;
   source.pollIntervalSeconds = 30;
   source.staleAfterSeconds = 59;
+  source.listingAbsentConsecutiveChecks = 2;
   source.referenceSizeCap = 0;
 
   const failures = pegPolicyFailures(policy);
@@ -440,8 +441,17 @@ test("peg policy requires positive cadence and two-poll staleness", () => {
     "expected positive reference-size cap",
   );
   assert(
-    /staleAfterSeconds: must cover at least 2 poll intervals/.test(failures),
-    "expected staleness to cover two polls",
+    /staleAfterSeconds: must cover pollIntervalSeconds \* listingAbsentConsecutiveChecks/.test(
+      failures,
+    ),
+    "expected staleness to cover listing confirmation",
+  );
+  source.staleAfterSeconds = 60;
+  source.listingAbsentConsecutiveChecks = 1_001;
+  const boundedFailures = pegPolicyFailures(policy);
+  assert(
+    /listingAbsentConsecutiveChecks: must be <= 1000/.test(boundedFailures),
+    "expected bounded listing confirmation",
   );
 });
 
@@ -1508,6 +1518,44 @@ test("trading-mode alerts keep incidents open across short flaps", () => {
     /^(?![ \t]*#).*\bkeep_firing_for\s*=\s*"1h"/m.test(tradingModeRules),
     "trading-mode alerts should keep incidents open across short breaker flaps",
   );
+});
+
+test("CLI recognizes gauges registered by the peg listing module", () => {
+  const dir = mkdtempSync(join(tmpdir(), "alert-rules-lint-test-"));
+  try {
+    writeFileSync(
+      join(dir, "peg-listing.tf"),
+      [
+        "locals {",
+        '  peg_active_listing_promql = "mento_peg_listing_state{asset=\\"europ-schuman\\",source=\\"bitvavo_eur\\",state=\\"absent\\",policy_version=\\"${local.peg_active_policy_version}\\"}"',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const result = runCli({
+      env: {
+        ALERT_RULES_LINT_RULES_DIR: dir,
+        ALERT_RULES_LINT_PEG_POLICY: path.resolve(
+          __dirname,
+          "..",
+          "alerts/rules/peg-thresholds.json",
+        ),
+        ALERT_RULES_LINT_PEG_REGISTRY: path.resolve(
+          __dirname,
+          "..",
+          "metrics-bridge/peg-registry.json",
+        ),
+        ALERT_RULES_LINT_MIN_EXPRESSIONS: "1",
+        ALERT_RULES_LINT_MIN_REFERENCED: "1",
+      },
+    });
+    assert(
+      result.status === 0,
+      `expected exit 0, got ${result.status}: ${result.stderr}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("CLI reports parse failures and unknown bridge metrics", () => {

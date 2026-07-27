@@ -6,11 +6,13 @@ import {
 } from "../order-book.js";
 import type {
   AdapterRuntime,
+  AuthoritativeListingCheck,
   BookLevel,
   MarketState,
   ObservationPolicy,
   ParsedOrderBook,
   PegObservation,
+  RecordListingCheck,
 } from "../types.js";
 
 export const BITVAVO_TIMEOUT_MS = 5_000;
@@ -32,6 +34,11 @@ const BITVAVO_MARKET_STATUSES = new Set([
 type JsonRecord = Record<string, unknown>;
 
 export interface BitvavoObservationRequest extends ObservationPolicy {
+  market: string;
+  onListingChecked?: RecordListingCheck;
+}
+
+export interface BitvavoListingRequest {
   market: string;
 }
 
@@ -189,14 +196,15 @@ export const fetchBitvavoObservation = async (
       maxResponseBytes: BITVAVO_MAX_RESPONSE_BYTES,
     });
 
+  const now = runtime.now ?? Date.now;
   const marketState = parseBitvavoMarketState(
     await boundedRequest(marketUrl(request.market)),
     request.market,
   );
+  request.onListingChecked?.({ state: marketState, checkedAt: now() });
   if (marketState === "absent") {
     throw new Error("Bitvavo market is absent from the provider listing");
   }
-  const now = runtime.now ?? Date.now;
   if (marketState === "halted") {
     return createPegObservation({
       bids: [],
@@ -233,4 +241,24 @@ export const fetchBitvavoObservation = async (
     observationAt: book.observationAt,
     sequence: book.sequence,
   });
+};
+
+/** Fetch only the bounded, authoritative exact-market listing evidence. */
+export const fetchBitvavoListing = async (
+  request: BitvavoListingRequest,
+  runtime: AdapterRuntime = {},
+): Promise<AuthoritativeListingCheck> => {
+  const fetch = runtime.fetch ?? globalThis.fetch;
+  const sleep = runtime.sleep ?? defaultSleep;
+  const payload = await fetchBoundedJson({
+    url: marketUrl(request.market),
+    fetch,
+    sleep,
+    timeoutMs: BITVAVO_TIMEOUT_MS,
+    maxResponseBytes: BITVAVO_MAX_RESPONSE_BYTES,
+  });
+  return {
+    state: parseBitvavoMarketState(payload, request.market),
+    checkedAt: (runtime.now ?? Date.now)(),
+  };
 };
