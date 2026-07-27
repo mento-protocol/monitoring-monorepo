@@ -46,6 +46,7 @@ function parseArgs(argv) {
     project: process.env.GCP_PROJECT || 'mento-monitoring',
     staticOnly: false,
     version: '',
+    versionTraffic: 'zero',
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -58,9 +59,18 @@ function parseArgs(argv) {
       options.project = argv[++index];
     } else if (argument === '--version' && argv[index + 1]) {
       options.version = argv[++index];
+    } else if (argument === '--version-traffic' && argv[index + 1]) {
+      options.versionTraffic = argv[++index];
     } else {
       throw new Error(`unknown or incomplete argument: ${argument}`);
     }
+  }
+
+  if (!['zero', 'full'].includes(options.versionTraffic)) {
+    throw new Error('--version-traffic must be zero or full');
+  }
+  if (options.versionTraffic !== 'zero' && !options.version) {
+    throw new Error('--version-traffic requires --version');
   }
 
   return options;
@@ -115,6 +125,13 @@ function assertExactRolePolicy(policy, role, expectedMembers, label) {
     throw new Error(
       `${label} has unexpected inbound roles: ${unexpectedRoles.join(', ')}`,
     );
+  }
+
+  const conditionalBindings = bindings.filter(
+    (binding) => binding.role === role && binding.condition != null,
+  );
+  if (conditionalBindings.length > 0) {
+    throw new Error(`${label} must be unconditional`);
   }
 
   const actualMembers = [
@@ -220,6 +237,7 @@ function assertExactValues(actualValues, expectedValues, label) {
 export function runPreflight({
   project = EXPECTED_PROJECT,
   version = '',
+  versionTraffic = 'zero',
   staticOnly = false,
   runGcloud = defaultGcloud,
   validateStatic = validateContract,
@@ -229,6 +247,12 @@ export function runPreflight({
     throw new Error(
       `project must be ${EXPECTED_PROJECT}; refusing cross-project preflight`,
     );
+  }
+  if (!['zero', 'full'].includes(versionTraffic)) {
+    throw new Error('versionTraffic must be zero or full');
+  }
+  if (versionTraffic !== 'zero' && !version) {
+    throw new Error('versionTraffic requires a version');
   }
   const contractErrors = validateStatic();
   if (contractErrors.length > 0) {
@@ -286,6 +310,15 @@ export function runPreflight({
   ]);
 
   const projectPolicy = runGcloud(['projects', 'get-iam-policy', project]);
+  const projectSecretAccessors = membersForRole(
+    projectPolicy,
+    'roles/secretmanager.secretAccessor',
+  );
+  if (projectSecretAccessors.length > 0) {
+    throw new Error(
+      `project Secret Accessor must have no members; found ${projectSecretAccessors.join(', ')}`,
+    );
+  }
   const activationRoleName = `projects/${project}/roles/${ACTIVATION_ROLE_ID}`;
   const preflightRoleName = `projects/${project}/roles/${PREFLIGHT_ROLE_ID}`;
   const expectedBuildSubmitters = membersForRole(
@@ -406,6 +439,12 @@ export function runPreflight({
         `${runtimeEmail} must have only Secret Accessor on ${secretId}; found ${runtimeRoles.join(', ') || 'no roles'}`,
       );
     }
+    assertExactRolePolicy(
+      secretPolicy,
+      'roles/secretmanager.secretAccessor',
+      [runtimeMember],
+      `${secretId} Secret Accessor policy`,
+    );
 
     const latestVersion = runGcloud([
       'secrets',
@@ -457,13 +496,17 @@ export function runPreflight({
       throw new Error('could not verify grafana-agent traffic allocations');
     }
     const targetAllocation = Number(allocations[version] ?? 0);
-    if (!Number.isFinite(targetAllocation) || targetAllocation !== 0) {
+    const expectedAllocation = versionTraffic === 'full' ? 1 : 0;
+    if (
+      !Number.isFinite(targetAllocation) ||
+      targetAllocation !== expectedAllocation
+    ) {
       throw new Error(
-        `App Engine version ${version} has non-zero traffic allocation ${allocations[version]}`,
+        `App Engine version ${version} has traffic allocation ${allocations[version] ?? 0}, expected ${expectedAllocation}`,
       );
     }
     write(`App Engine version ${version}: runtime identity verified`);
-    write(`App Engine version ${version}: zero traffic verified`);
+    write(`App Engine version ${version}: ${versionTraffic} traffic verified`);
   }
 
   write(`Alloy live preflight passed for ${runtimeEmail}.`);

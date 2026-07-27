@@ -68,7 +68,6 @@
     "aegis:logs": "pnpm --filter @mento-protocol/aegis logs",
     "aegis:tf:init": "terraform -chdir=aegis/terraform init",
     "aegis:tf:plan": "pnpm tf plan aegis",
-    "aegis:agent:seed-secrets": "pnpm --filter @mento-protocol/aegis agent:seed-secrets",
     "aegis:agent:deploy": "pnpm --filter @mento-protocol/aegis agent:deploy",
     "aegis:agent:preflight": "pnpm --filter @mento-protocol/aegis agent:preflight",
     "aegis:agent:test": "pnpm --filter @mento-protocol/aegis agent:test",

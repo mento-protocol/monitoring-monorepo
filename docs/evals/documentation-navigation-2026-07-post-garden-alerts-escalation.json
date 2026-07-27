@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "suite_id": "documentation-navigation-v1",
+  "fixture_digest": "3b0af8a455942d24b31202fd30950b26c5712a48547b46e3563ad7f5cb1167f6",
+  "run": {
+    "agent": "codex",
+    "model": "gpt-5.6-sol",
+    "effort": "medium",
+    "executed_at": "2026-07-27T15:05:08Z",
+    "repository_base_commit": "c909129681b2e041f05f10e72e85a0ff7f98ec52",
+    "fresh_context": true,
+    "read_only": true,
+    "bootstrap_sources": [
+      {
+        "path": "AGENTS.md",
+        "bytes": 9085,
+        "sha256": "2372980725c6c8e88a8347eeb4c72a392f8819fafeba906834a39ec7d29ae33d"
+      },
+      {
+        "path": "docs/README.md",
+        "bytes": 18220,
+        "sha256": "f333c46f0f6dffad41480049abbb7f4d8ddef98c74831fc3b90ce9430be9fcfb"
+      }
+    ]
+  },
+  "answers": [
+    {
+      "question_id": "operator-alerts-stack-boundary",
+      "chosen_documents": ["alerts/AGENTS.md", "alerts/infra/README.md"],
+      "answer": "The `alerts/infra/` event-driven alert-delivery stack owns all three paths: QuickNode webhooks through the on-chain event Cloud Function to Slack, the Sentry-to-Slack bridge, and the Splunk On-Call announcer that posts to `#eng` and reconciles `@support-engineer`. It is separate from `alerts/rules/`, which owns Grafana metric rules and their notification routing. Treat any change as live multi-provider infrastructure: plan first, expect `pnpm alerts:infra:plan` to show zero changes except the intended delta, and review the CI plan. Never apply locally; apply only after merge to `main` through the `production-infra` required-reviewer gate, with explicit human approval. Do not partially override the `multisigs` map because that can silently stop monitoring omitted Safes. Preserve the QuickNode state-management module name, and run `bash alerts/infra/scripts/fix-webhook-state.test.sh` when changing its parser, repair tool, or replacement provisioner. For handler or announcer code changes, keep the standalone lockfile in sync and require typecheck, coverage, lint, and knip to pass; run the path-aware quality gate for combined edits.",
+      "evidence": [
+        {
+          "path": "alerts/AGENTS.md",
+          "line_start": 19,
+          "line_end": 28,
+          "supports": "Defines the two independent Terraform stacks and assigns QuickNode delivery, Sentry-to-Slack, and on-call announcements to `alerts/infra/`."
+        },
+        {
+          "path": "alerts/AGENTS.md",
+          "line_start": 30,
+          "line_end": 37,
+          "supports": "Requires explicit approval before apply, warns that the stack talks to live external APIs, documents the QuickNode state-management naming hazard and standalone lockfiles, and confirms the active Slack delivery paths."
+        },
+        {
+          "path": "alerts/AGENTS.md",
+          "line_start": 49,
+          "line_end": 58,
+          "supports": "Lists stack plan, component test, QuickNode state repair test, combined quality-gate, and deploy-verification checks."
+        },
+        {
+          "path": "alerts/infra/README.md",
+          "line_start": 77,
+          "line_end": 95,
+          "supports": "Warns against partial multisig overrides and requires initialization, planning, CI plan review, and production-infra-gated apply after merge rather than local apply."
+        },
+        {
+          "path": "alerts/infra/README.md",
+          "line_start": 199,
+          "line_end": 212,
+          "supports": "Requires reviewing webhook replacements and routes applies and destroys through the production-infra gate, with explicit human approval for destroys."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "alerts/AGENTS.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        },
+        {
+          "path": "alerts/infra/README.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "alerts/AGENTS.md",
+          "bytes": 5677,
+          "sha256": "d272f293229a5de734d2155cbc55d9dbf94732f78ebd455b39dd34b31fc146a2"
+        },
+        {
+          "path": "alerts/infra/README.md",
+          "bytes": 10258,
+          "sha256": "cd2f52c61090d4a5c89f05ecb074283a8d7051e23192859fee8bbd5ebc241865"
+        }
+      ]
+    }
+  ]
+}

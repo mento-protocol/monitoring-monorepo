@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -18,11 +18,13 @@ const CONTRACT_FILES = {
   cloudIgnore: 'aegis/grafana-agent/.gcloudignore',
   deploy: 'aegis/grafana-agent/deploy.sh',
   preflight: 'aegis/grafana-agent/preflight.mjs',
-  legacySeed: 'aegis/grafana-agent/seed-secrets.sh',
+  rootPackage: 'package.json',
+  aegisPackage: 'aegis/package.json',
   terraformIgnore: 'terraform/.gitignore',
   tfvarsExample: 'terraform/terraform.tfvars.example',
   runbook: 'aegis/grafana-agent/README.md',
 };
+const LEGACY_SEED_PATH = 'aegis/grafana-agent/seed-secrets.sh';
 
 const EXPECTED_RUNTIME_EMAIL =
   'grafana-agent-runtime@mento-monitoring.iam.gserviceaccount.com';
@@ -30,12 +32,15 @@ const EXPECTED_BUILDER_EMAIL =
   'grafana-agent-builder@mento-monitoring.iam.gserviceaccount.com';
 
 function readContractFiles(root = REPO_ROOT) {
-  return Object.fromEntries(
-    Object.entries(CONTRACT_FILES).map(([key, relativePath]) => [
-      key,
-      readFileSync(path.join(root, relativePath), 'utf8'),
-    ]),
-  );
+  return {
+    ...Object.fromEntries(
+      Object.entries(CONTRACT_FILES).map(([key, relativePath]) => [
+        key,
+        readFileSync(path.join(root, relativePath), 'utf8'),
+      ]),
+    ),
+    legacySeedExists: existsSync(path.join(root, LEGACY_SEED_PATH)),
+  };
 }
 
 function extractHclBlock(source, header) {
@@ -130,7 +135,9 @@ export function validateContract(files = readContractFiles()) {
     cloudIgnore,
     deploy,
     preflight,
-    legacySeed,
+    rootPackage,
+    aegisPackage,
+    legacySeedExists,
     terraformIgnore,
     tfvarsExample,
     runbook,
@@ -639,19 +646,16 @@ export function validateContract(files = readContractFiles()) {
     'grafana_agent_cloudbuild_compute_accessor',
     'grafana_agent_appspot_accessor',
   ]) {
-    requireBlock(
-      errors,
-      bootstrap,
-      `resource "google_secret_manager_secret_iam_member" "${legacyResource}"`,
-      CONTRACT_FILES.bootstrap,
-    );
+    if (
+      bootstrap.includes(
+        `resource "google_secret_manager_secret_iam_member" "${legacyResource}"`,
+      )
+    ) {
+      errors.push(
+        `${CONTRACT_FILES.bootstrap}: legacy secret accessor ${legacyResource} must stay absent`,
+      );
+    }
   }
-  requirePattern(
-    errors,
-    bootstrap,
-    /Phase A rollback only/u,
-    `${CONTRACT_FILES.bootstrap}: retained legacy access must be marked Phase A rollback only`,
-  );
 
   requirePattern(
     errors,
@@ -800,6 +804,24 @@ export function validateContract(files = readContractFiles()) {
     /const expectedBuildSubmitters = membersForRole\(\s*projectPolicy,\s*preflightRoleName,\s*\)[\s\S]*assertExactRolePolicy\(\s*builderPolicy,\s*'roles\/iam\.serviceAccountUser',\s*expectedBuildSubmitters,[\s\S]*assertOperatorSetFingerprint\(preflightRole, expectedBuildSubmitters\)/u,
     `${CONTRACT_FILES.preflight}: both submitter policies must derive from and match the Terraform member-set fingerprint`,
   );
+  requirePattern(
+    errors,
+    preflight,
+    /assertExactRolePolicy\(\s*secretPolicy,\s*'roles\/secretmanager\.secretAccessor',\s*\[runtimeMember\],\s*`\$\{secretId\} Secret Accessor policy`,\s*\)/u,
+    `${CONTRACT_FILES.preflight}: managed Alloy secret policies must allow only the pinned runtime identity`,
+  );
+  requirePattern(
+    errors,
+    preflight,
+    /membersForRole\(\s*projectPolicy,\s*'roles\/secretmanager\.secretAccessor',\s*\)[\s\S]*project Secret Accessor must have no members/u,
+    `${CONTRACT_FILES.preflight}: project IAM must not grant Secret Accessor`,
+  );
+  requirePattern(
+    errors,
+    preflight,
+    /binding\.role === role && binding\.condition != null[\s\S]*must be unconditional/u,
+    `${CONTRACT_FILES.preflight}: exact IAM policies must reject conditional bindings`,
+  );
   if (
     preflight.includes('EXPECTED_BUILD_SUBMITTERS') ||
     preflight.includes("['group:eng@mentolabs.xyz']")
@@ -826,6 +848,25 @@ export function validateContract(files = readContractFiles()) {
     /materialize_verifier_snapshot "\$repo_root" "\$source_head" "\$verifier_root"/u,
     `${CONTRACT_FILES.deploy}: deploy must capture committed verifier code and contract inputs`,
   );
+  requirePattern(
+    errors,
+    deploy,
+    /legacy_seed_path="aegis\/grafana-agent\/seed-secrets\.sh"[\s\S]*if ! legacy_seed_entry="\$\([\s\S]*git -C "\$root" ls-tree --name-only "\$commit" -- "\$legacy_seed_path"[\s\S]*\)"; then[\s\S]*could not prove the retired legacy seed writer is absent[\s\S]*if \[\[ -n "\$legacy_seed_entry" \]\]; then[\s\S]*source commit retains the retired legacy seed writer/u,
+    `${CONTRACT_FILES.deploy}: immutable verifier must fail closed while proving the legacy seed writer is absent`,
+  );
+  const retiredSeedCheckIndex = deploy.indexOf('if ! legacy_seed_entry="$(');
+  const verifierArchiveIndex = deploy.indexOf(
+    'git -C "$root" archive --format=tar "$commit" -- "${verifier_files[@]}"',
+  );
+  if (
+    retiredSeedCheckIndex === -1 ||
+    verifierArchiveIndex === -1 ||
+    retiredSeedCheckIndex > verifierArchiveIndex
+  ) {
+    errors.push(
+      `${CONTRACT_FILES.deploy}: legacy seed absence must be proven before the verifier snapshot is archived`,
+    );
+  }
   requirePattern(
     errors,
     deploy,
@@ -882,7 +923,9 @@ export function validateContract(files = readContractFiles()) {
     );
   }
   const versionVerification =
-    'node "$verifier_root/aegis/grafana-agent/preflight.mjs"';
+    'node "$verifier_root/aegis/grafana-agent/preflight.mjs" \\\n' +
+    '    --project "$project" \\\n' +
+    '    --version "$version"';
   const versionVerificationIndex = deploy.indexOf(versionVerification);
   const failedBuildCleanupIndex = deploy.indexOf(
     'cleanup_unpromoted_target "$version"',
@@ -981,6 +1024,12 @@ export function validateContract(files = readContractFiles()) {
   const rollbackPeersIndex = rollback.indexOf(
     'stop_other_collectors "$previous_version"',
   );
+  const rollbackRestoredIndex = rollback.indexOf(
+    'verify_restored_target "$verifier_root" "$previous_version"',
+  );
+  const rollbackPreflightIndex = rollback.indexOf(
+    'verify_restart_target "$verifier_root" "$previous_version"',
+  );
   const rollbackStartIndex = rollback.indexOf(
     'gcloud app versions start "$previous_version"',
   );
@@ -988,13 +1037,55 @@ export function validateContract(files = readContractFiles()) {
     rollbackStopIndex === -1 ||
     rollbackVerifyIndex === -1 ||
     rollbackPeersIndex === -1 ||
+    rollbackRestoredIndex === -1 ||
+    rollbackPreflightIndex === -1 ||
     rollbackStartIndex === -1 ||
     rollbackStopIndex > rollbackVerifyIndex ||
     rollbackVerifyIndex > rollbackPeersIndex ||
-    rollbackPeersIndex > rollbackStartIndex
+    rollbackPeersIndex > rollbackRestoredIndex ||
+    rollbackRestoredIndex > rollbackPreflightIndex ||
+    rollbackPreflightIndex > rollbackStartIndex
   ) {
     errors.push(
-      `${CONTRACT_FILES.deploy}: rollback must prove the target and every other peer stopped before restarting the previous collector`,
+      `${CONTRACT_FILES.deploy}: rollback must prove stopped peers plus the previous identity and zero-traffic state before restart`,
+    );
+  }
+  const restartPreflight = requireBlock(
+    errors,
+    deploy,
+    'verify_restart_target()',
+    CONTRACT_FILES.deploy,
+  );
+  requirePattern(
+    errors,
+    restartPreflight,
+    /node "\$verifier_root\/aegis\/grafana-agent\/preflight\.mjs"[\s\\]+--project "\$project"[\s\\]+--version "\$restart_version"/u,
+    `${CONTRACT_FILES.deploy}: automated rollback must use the immutable verifier for restart preflight`,
+  );
+  const restoredPreflight = requireBlock(
+    errors,
+    deploy,
+    'verify_restored_target()',
+    CONTRACT_FILES.deploy,
+  );
+  requirePattern(
+    errors,
+    restoredPreflight,
+    /node "\$verifier_root\/aegis\/grafana-agent\/preflight\.mjs"[\s\\]+--project "\$project"[\s\\]+--version "\$restored_version"[\s\\]+--version-traffic full/u,
+    `${CONTRACT_FILES.deploy}: automated rollback must prove an already-restored version has pinned identity and full traffic`,
+  );
+  const rollbackCalls =
+    deploy.match(/^[ \t]*rollback_cutover(?!\(\))[^\n]*$/gmu) ?? [];
+  if (
+    rollbackCalls.length !== 3 ||
+    rollbackCalls.some(
+      (call) =>
+        call.trim() !==
+        'rollback_cutover "$previous_version" "$version" "$verifier_root"',
+    )
+  ) {
+    errors.push(
+      `${CONTRACT_FILES.deploy}: every automatic rollback path must pass the immutable verifier snapshot`,
     );
   }
   const manualRollback = requireBlock(
@@ -1024,6 +1115,12 @@ export function validateContract(files = readContractFiles()) {
   const manualPeerVerifyIndex = manualRollback.indexOf(
     'test \\"\\$peer_status\\" = STOPPED',
   );
+  const manualRestoredPreflightIndex = manualRollback.indexOf(
+    'pnpm --dir \\"$repo_root\\" aegis:agent:preflight -- --version $previous_version --version-traffic full',
+  );
+  const manualRestartPreflightIndex = manualRollback.indexOf(
+    'pnpm --dir \\"$repo_root\\" aegis:agent:preflight -- --version $previous_version &&',
+  );
   const manualStartIndex = manualRollback.indexOf(
     'gcloud app versions start $previous_version',
   );
@@ -1038,6 +1135,8 @@ export function validateContract(files = readContractFiles()) {
     manualPeerStopIndex === -1 ||
     manualPeerDescribeIndex === -1 ||
     manualPeerVerifyIndex === -1 ||
+    manualRestoredPreflightIndex === -1 ||
+    manualRestartPreflightIndex === -1 ||
     manualStartIndex === -1 ||
     manualTrafficIndex === -1 ||
     manualStopIndex > manualDescribeIndex ||
@@ -1046,12 +1145,14 @@ export function validateContract(files = readContractFiles()) {
     manualPeerListIndex > manualPeerStopIndex ||
     manualPeerStopIndex > manualPeerDescribeIndex ||
     manualPeerDescribeIndex > manualPeerVerifyIndex ||
-    manualPeerVerifyIndex > manualStartIndex ||
+    manualPeerVerifyIndex > manualRestoredPreflightIndex ||
+    manualRestoredPreflightIndex > manualRestartPreflightIndex ||
+    manualRestartPreflightIndex > manualStartIndex ||
     manualStartIndex > manualTrafficIndex ||
-    (manualRollback.match(/&& \\\\/gu) ?? []).length !== 8
+    (manualRollback.match(/&& \\\\/gu) ?? []).length !== 9
   ) {
     errors.push(
-      `${CONTRACT_FILES.deploy}: printed rollback must short-circuit target and peer STOPPED proofs before previous start and atomic traffic assignment`,
+      `${CONTRACT_FILES.deploy}: printed rollback must accept a proven restored target or short-circuit restart proofs before start and traffic assignment`,
     );
   }
   const plannedManualRollbackCalls =
@@ -1069,18 +1170,35 @@ export function validateContract(files = readContractFiles()) {
       `${CONTRACT_FILES.deploy}: predeploy and post-success output must print target-aware stop-before-start rollback`,
     );
   }
-  requirePattern(
-    errors,
-    legacySeed,
-    /LEGACY PHASE A ROLLBACK ARTIFACT/u,
-    `${CONTRACT_FILES.legacySeed}: legacy seed route must stay explicitly marked for Phase A rollback`,
-  );
-  requirePattern(
-    errors,
-    legacySeed,
-    /gcloud secrets versions add/u,
-    `${CONTRACT_FILES.legacySeed}: Phase A must retain the legacy rollback route`,
-  );
+  const deployRestartSurfaces =
+    deploy.match(/gcloud app versions start/gu) ?? [];
+  if (deployRestartSurfaces.length !== 2) {
+    errors.push(
+      `${CONTRACT_FILES.deploy}: every rollback restart surface must stay inside the guarded automatic or printed path`,
+    );
+  }
+  if (legacySeedExists) {
+    errors.push(
+      `${LEGACY_SEED_PATH}: legacy CLI secret writer must stay absent`,
+    );
+  }
+  if (rootPackage.includes('"aegis:agent:seed-secrets"')) {
+    errors.push(
+      `${CONTRACT_FILES.rootPackage}: legacy Alloy seed command must stay absent`,
+    );
+  }
+  if (aegisPackage.includes('"agent:seed-secrets"')) {
+    errors.push(
+      `${CONTRACT_FILES.aegisPackage}: legacy Alloy seed command must stay absent`,
+    );
+  }
+  const verifierFilesBlock =
+    deploy.match(/verifier_files=\([\s\S]*?\n\)/u)?.[0] ?? '';
+  if (verifierFilesBlock.includes(LEGACY_SEED_PATH)) {
+    errors.push(
+      `${CONTRACT_FILES.deploy}: immutable verifier must not retain the deleted legacy seed route`,
+    );
+  }
   requirePattern(
     errors,
     terraformIgnore,
@@ -1105,12 +1223,46 @@ export function validateContract(files = readContractFiles()) {
     /gitignored\s+`terraform\/terraform\.tfvars`, a gitignored `terraform\/\*\.auto\.tfvars` file/u,
     `${CONTRACT_FILES.runbook}: runbook must name the exact ignored secret input files`,
   );
+  if (
+    /terraform -chdir=terraform import[\s\\]+google_artifact_registry_repository\.grafana_agent_runtime_images/u.test(
+      runbook,
+    )
+  ) {
+    errors.push(
+      `${CONTRACT_FILES.runbook}: completed production repository import must not remain an operator step`,
+    );
+  }
   requirePattern(
     errors,
     runbook,
-    /terraform -chdir=terraform import[\s\\]+google_artifact_registry_repository\.grafana_agent_runtime_images[\s\\]+projects\/mento-monitoring\/locations\/us\/repositories\/us\.gcr\.io/u,
-    `${CONTRACT_FILES.runbook}: production must document one-time adoption of the existing us.gcr.io repository`,
+    /Versions that do not pin[\s\S]*grafana-agent-runtime@mento-monitoring\.iam\.gserviceaccount\.com[\s\S]*must not be restarted[\s\S]*pnpm aegis:agent:preflight -- --version TARGET/u,
+    `${CONTRACT_FILES.runbook}: rollback guidance must reject legacy identities and require target preflight`,
   );
+  requirePattern(
+    errors,
+    preflight,
+    /const expectedAllocation = versionTraffic === 'full' \? 1 : 0;[\s\S]*targetAllocation !== expectedAllocation/u,
+    `${CONTRACT_FILES.preflight}: version preflight must require the selected zero or full traffic state`,
+  );
+  const runbookRestartSurfaces =
+    runbook.match(/gcloud app versions start PREVIOUS/gu) ?? [];
+  const runbookRestartPreflights =
+    runbook.match(
+      /pnpm aegis:agent:preflight -- --version PREVIOUS && \\\n\s+gcloud app versions start PREVIOUS/gu,
+    ) ?? [];
+  const runbookRestoredPreflights =
+    runbook.match(
+      /pnpm aegis:agent:preflight -- --version PREVIOUS --version-traffic full/gu,
+    ) ?? [];
+  if (
+    runbookRestartSurfaces.length !== 1 ||
+    runbookRestartPreflights.length !== 1 ||
+    runbookRestoredPreflights.length !== 2
+  ) {
+    errors.push(
+      `${CONTRACT_FILES.runbook}: executable rollback must accept a proven full-traffic target or preflight PREVIOUS immediately before its only restart`,
+    );
+  }
 
   return errors;
 }

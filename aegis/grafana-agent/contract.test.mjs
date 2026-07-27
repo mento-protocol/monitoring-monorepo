@@ -46,7 +46,12 @@ function sourceFiles() {
     cloudIgnore: readFileSync(path.join(agentDir, '.gcloudignore'), 'utf8'),
     deploy: readFileSync(path.join(agentDir, 'deploy.sh'), 'utf8'),
     preflight: readFileSync(path.join(agentDir, 'preflight.mjs'), 'utf8'),
-    legacySeed: readFileSync(path.join(agentDir, 'seed-secrets.sh'), 'utf8'),
+    rootPackage: readFileSync(path.join(repoRoot, 'package.json'), 'utf8'),
+    aegisPackage: readFileSync(
+      path.join(repoRoot, 'aegis/package.json'),
+      'utf8',
+    ),
+    legacySeedExists: false,
     terraformIgnore: readFileSync(
       path.join(repoRoot, 'terraform/.gitignore'),
       'utf8',
@@ -314,19 +319,46 @@ test('live preflight derives submitters from the Terraform-managed operator set'
   );
 });
 
-test('Phase A cannot delete the rollback accessors', () => {
+test('live preflight must reject non-runtime secret members', () => {
   const files = sourceFiles();
-  files.bootstrap = files.bootstrap.replace(
-    'resource "google_secret_manager_secret_iam_member" "grafana_agent_appspot_accessor"',
-    'resource "google_secret_manager_secret_iam_member" "removed_early"',
+  files.preflight = files.preflight.replace(
+    '      [runtimeMember],\n      `${secretId} Secret Accessor policy`,',
+    '      [runtimeMember, builderMember],\n      `${secretId} Secret Accessor policy`,',
   );
-  expectFailure(files, /missing .*grafana_agent_appspot_accessor/u);
+  expectFailure(
+    files,
+    /managed Alloy secret policies must allow only the pinned runtime identity/u,
+  );
+});
+
+test('live preflight must reject project-level and conditional secret access', () => {
+  const files = sourceFiles();
+  files.preflight = files.preflight
+    .replace(
+      "'roles/secretmanager.secretAccessor',\n  );",
+      "'roles/secretmanager.viewer',\n  );",
+    )
+    .replace('binding.role === role && binding.condition != null', 'false');
+  const errors = validateContract(files).join('\n');
+  assert.match(errors, /project IAM must not grant Secret Accessor/u);
+  assert.match(errors, /exact IAM policies must reject conditional bindings/u);
+});
+
+test('legacy secret accessors cannot return', () => {
+  const files = sourceFiles();
+  files.bootstrap +=
+    '\nresource "google_secret_manager_secret_iam_member" "grafana_agent_appspot_accessor" {}\n';
+  expectFailure(files, /legacy secret accessor .* must stay absent/u);
 });
 
 test('deploy must verify the new version identity', () => {
   const files = sourceFiles();
+  const verification =
+    'node "$verifier_root/aegis/grafana-agent/preflight.mjs" \\\n' +
+    '    --project "$project" \\\n' +
+    '    --version "$version"';
   files.deploy = files.deploy.replace(
-    'node "$verifier_root/aegis/grafana-agent/preflight.mjs"',
+    verification,
     'echo "verification skipped"',
   );
   expectFailure(files, /immutable verifier snapshot/u);
@@ -371,7 +403,9 @@ test('Cloud Build source staging cannot broaden beyond runtime inputs', () => {
 test('traffic promotion must follow live version verification', () => {
   const files = sourceFiles();
   const verification =
-    'node "$verifier_root/aegis/grafana-agent/preflight.mjs"';
+    'node "$verifier_root/aegis/grafana-agent/preflight.mjs" \\\n' +
+    '    --project "$project" \\\n' +
+    '    --version "$version"';
   files.deploy = files.deploy.replace(verification, '');
   files.deploy += `\n${verification}\n`;
   expectFailure(files, /failed build or version verification must stop/u);
@@ -670,7 +704,8 @@ test('immutable verifier snapshot executes the captured static preflight', () =>
     'aegis/grafana-agent/grafana-agent.yaml',
     'aegis/grafana-agent/passive-health.sh',
     'aegis/grafana-agent/preflight.mjs',
-    'aegis/grafana-agent/seed-secrets.sh',
+    'aegis/package.json',
+    'package.json',
     'terraform/.gitignore',
     'terraform/.terraform.lock.hcl',
     'terraform/aegis-bootstrap.tf',
@@ -733,6 +768,63 @@ test('immutable verifier snapshot executes the captured static preflight', () =>
     );
     assert.equal(preflight.status, 0, preflight.stderr);
     assert.equal(preflight.stdout, 'Alloy static preflight passed.\n');
+
+    const lookupFailure = spawnSync(
+      'bash',
+      [
+        '-c',
+        'source "$1"\nmaterialize_verifier_snapshot "$2" "$3" "$4"',
+        'bash',
+        path.join(agentDir, 'deploy.sh'),
+        fixture,
+        'missing-commit',
+        path.join(fixture, 'lookup-failure-snapshot'),
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(lookupFailure.status, 1);
+    assert.match(
+      lookupFailure.stderr,
+      /could not prove the retired legacy seed writer is absent/u,
+    );
+
+    const legacySeedPath = path.join(
+      fixture,
+      'aegis/grafana-agent/seed-secrets.sh',
+    );
+    writeFileSync(legacySeedPath, '#!/usr/bin/env bash\n');
+    for (const args of [
+      ['add', 'aegis/grafana-agent/seed-secrets.sh'],
+      ['commit', '--quiet', '-m', 'restore retired seed writer'],
+    ]) {
+      const result = spawnSync('git', args, {
+        cwd: fixture,
+        encoding: 'utf8',
+      });
+      assert.equal(result.status, 0, result.stderr);
+    }
+    const legacyHead = spawnSync('git', ['rev-parse', 'HEAD'], {
+      cwd: fixture,
+      encoding: 'utf8',
+    }).stdout.trim();
+    const rejectedSnapshot = spawnSync(
+      'bash',
+      [
+        '-c',
+        'source "$1"\nmaterialize_verifier_snapshot "$2" "$3" "$4"',
+        'bash',
+        path.join(agentDir, 'deploy.sh'),
+        fixture,
+        legacyHead,
+        path.join(fixture, 'rejected-snapshot'),
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(rejectedSnapshot.status, 1);
+    assert.match(
+      rejectedSnapshot.stderr,
+      /source commit retains the retired legacy seed writer/u,
+    );
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }
@@ -785,7 +877,11 @@ gcloud() {
     printf '%s\\n' STOPPED
   fi
 }
-rollback_cutover previous target`,
+node() {
+  printf 'node %s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"--version-traffic full"* ]]; then return 1; fi
+}
+rollback_cutover previous target /verification`,
       'bash',
       deployPath,
       path.join(tmpdir(), `alloy-rollback-${process.pid}.log`),
@@ -801,9 +897,58 @@ rollback_cutover previous target`,
       calls.indexOf('versions start previous'),
   );
   assert.ok(
+    calls.indexOf(
+      'node /verification/aegis/grafana-agent/preflight.mjs --project mento-monitoring --version previous --version-traffic full',
+    ) <
+      calls.indexOf(
+        'node /verification/aegis/grafana-agent/preflight.mjs --project mento-monitoring --version previous\n',
+      ),
+  );
+  assert.ok(
+    calls.indexOf(
+      'node /verification/aegis/grafana-agent/preflight.mjs --project mento-monitoring --version previous\n',
+    ) < calls.indexOf('versions start previous'),
+  );
+  assert.ok(
     calls.indexOf('versions start previous') <
       calls.indexOf('services set-traffic grafana-agent'),
   );
+});
+
+test('rollback accepts a pinned previous collector that already owns full traffic', () => {
+  const deployPath = path.join(agentDir, 'deploy.sh');
+  const logPath = path.join(
+    tmpdir(),
+    `alloy-rollback-restored-${process.pid}.log`,
+  );
+  const result = spawnSync(
+    'bash',
+    [
+      '-c',
+      `source "$1"
+project=mento-monitoring
+LOG_PATH="$2"
+gcloud() {
+  printf '%s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"versions describe target"* ]]; then printf '%s\\n' STOPPED; fi
+}
+node() {
+  printf 'node %s\\n' "$*" >>"$LOG_PATH"
+}
+rollback_cutover previous target /verification`,
+      'bash',
+      deployPath,
+      logPath,
+    ],
+    { encoding: 'utf8' },
+  );
+  const calls = readFileSync(logPath, 'utf8');
+  rmSync(logPath, { force: true });
+  assert.equal(result.status, 0, `${result.stderr}\n${calls}`);
+  assert.match(calls, /--version previous --version-traffic full/u);
+  assert.doesNotMatch(calls, /versions start previous/u);
+  assert.doesNotMatch(calls, /services set-traffic grafana-agent/u);
+  assert.match(result.stderr, /already owns full traffic/u);
 });
 
 test('unpromoted target cleanup stops and proves the passive version', () => {
@@ -890,7 +1035,7 @@ gcloud() {
   printf '%s\\n' "$*" >>"$LOG_PATH"
   if [[ "$*" == *"versions stop target"* ]]; then return 1; fi
 }
-rollback_cutover previous target`,
+rollback_cutover previous target /verification`,
       'bash',
       deployPath,
       logPath,
@@ -924,7 +1069,7 @@ gcloud() {
     return 1
   fi
 }
-rollback_cutover previous target`,
+rollback_cutover previous target /verification`,
       'bash',
       deployPath,
       logPath,
@@ -958,7 +1103,7 @@ gcloud() {
   if [[ "$*" == *"versions list"* ]]; then printf '%s\\n' peer; fi
   if [[ "$*" == *"versions stop peer"* ]]; then return 1; fi
 }
-rollback_cutover previous target`,
+rollback_cutover previous target /verification`,
       'bash',
       deployPath,
       logPath,
@@ -971,6 +1116,46 @@ rollback_cutover previous target`,
   assert.match(calls, /versions stop peer/u);
   assert.doesNotMatch(calls, /versions start previous/u);
   assert.match(result.stderr, /another collector could not be proven STOPPED/u);
+});
+
+test('rollback never restarts a previous collector that fails restart preflight', () => {
+  const deployPath = path.join(agentDir, 'deploy.sh');
+  const logPath = path.join(
+    tmpdir(),
+    `alloy-rollback-preflight-failure-${process.pid}.log`,
+  );
+  const result = spawnSync(
+    'bash',
+    [
+      '-c',
+      `source "$1"
+project=mento-monitoring
+LOG_PATH="$2"
+gcloud() {
+  printf '%s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"versions describe target"* ]]; then printf '%s\\n' STOPPED; fi
+}
+node() {
+  printf 'node %s\\n' "$*" >>"$LOG_PATH"
+  return 1
+}
+rollback_cutover previous target /verification`,
+      'bash',
+      deployPath,
+      logPath,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.notEqual(result.status, 0);
+  const calls = readFileSync(logPath, 'utf8');
+  rmSync(logPath, { force: true });
+  assert.match(
+    calls,
+    /preflight\.mjs --project mento-monitoring --version previous/u,
+  );
+  assert.doesNotMatch(calls, /versions start previous/u);
+  assert.doesNotMatch(calls, /services set-traffic grafana-agent/u);
+  assert.match(result.stderr, /failed pinned-identity and zero-traffic/u);
 });
 
 test('serving-version inventory failure cannot retire collectors or report success', () => {
@@ -1017,7 +1202,7 @@ test('printed rollback is ordered and short-circuits when target stop fails', ()
 project=mento-monitoring
 LOG_PATH="$2"
 command="$(print_manual_rollback_commands previous target)"
-[[ "$(grep -o '&&' <<<"$command" | wc -l | tr -d ' ')" == 8 ]]
+[[ "$(grep -o '&&' <<<"$command" | wc -l | tr -d ' ')" == 9 ]]
 gcloud() {
   printf '%s\\n' "$*" >>"$LOG_PATH"
   if [[ "$*" == *"versions stop target"* ]]; then return 1; fi
@@ -1092,6 +1277,10 @@ gcloud() {
   if [[ "$*" == *"versions list"* ]]; then printf '%s\\n' peer; fi
   if [[ "$*" == *"versions describe peer"* ]]; then printf '%s\\n' STOPPED; fi
 }
+pnpm() {
+  printf 'pnpm %s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"--version-traffic full"* ]]; then return 1; fi
+}
 eval "$command"`,
       'bash',
       deployPath,
@@ -1107,12 +1296,88 @@ eval "$command"`,
   );
   assert.ok(
     calls.indexOf('versions stop peer') <
+      calls.indexOf('aegis:agent:preflight -- --version previous'),
+  );
+  assert.ok(
+    calls.indexOf('aegis:agent:preflight -- --version previous') <
       calls.indexOf('versions start previous'),
   );
   assert.ok(
     calls.indexOf('versions start previous') <
       calls.indexOf('services set-traffic grafana-agent'),
   );
+});
+
+test('printed rollback accepts a pinned previous collector that already owns full traffic', () => {
+  const deployPath = path.join(agentDir, 'deploy.sh');
+  const logPath = path.join(
+    tmpdir(),
+    `alloy-manual-restored-${process.pid}.log`,
+  );
+  const result = spawnSync(
+    'bash',
+    [
+      '-c',
+      `source "$1"
+project=mento-monitoring
+LOG_PATH="$2"
+command="$(print_manual_rollback_commands previous target)"
+gcloud() {
+  printf '%s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"versions describe target"* ]]; then printf '%s\\n' STOPPED; fi
+}
+pnpm() {
+  printf 'pnpm %s\\n' "$*" >>"$LOG_PATH"
+}
+eval "$command"`,
+      'bash',
+      deployPath,
+      logPath,
+    ],
+    { encoding: 'utf8' },
+  );
+  const calls = readFileSync(logPath, 'utf8');
+  rmSync(logPath, { force: true });
+  assert.equal(result.status, 0, `${result.stderr}\n${calls}`);
+  assert.match(calls, /--version previous --version-traffic full/u);
+  assert.doesNotMatch(calls, /versions start previous/u);
+  assert.doesNotMatch(calls, /services set-traffic grafana-agent/u);
+});
+
+test('printed rollback never starts a previous collector that fails preflight', () => {
+  const deployPath = path.join(agentDir, 'deploy.sh');
+  const logPath = path.join(
+    tmpdir(),
+    `alloy-manual-preflight-failure-${process.pid}.log`,
+  );
+  const result = spawnSync(
+    'bash',
+    [
+      '-c',
+      `source "$1"
+project=mento-monitoring
+LOG_PATH="$2"
+command="$(print_manual_rollback_commands previous target)"
+gcloud() {
+  printf '%s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"versions describe target"* ]]; then printf '%s\\n' STOPPED; fi
+}
+pnpm() {
+  printf 'pnpm %s\\n' "$*" >>"$LOG_PATH"
+  return 1
+}
+if eval "$command"; then exit 90; fi
+if grep -Eq "versions start previous|services set-traffic" "$LOG_PATH"; then exit 91; fi`,
+      'bash',
+      deployPath,
+      logPath,
+    ],
+    { encoding: 'utf8' },
+  );
+  const calls = readFileSync(logPath, 'utf8');
+  rmSync(logPath, { force: true });
+  assert.equal(result.status, 0, `${result.stderr}\n${calls}`);
+  assert.match(calls, /aegis:agent:preflight -- --version previous/u);
 });
 
 test('post-confirmation source guard must precede Cloud Build submission', () => {
@@ -1139,13 +1404,20 @@ test('documented Terraform secret input files are gitignored', () => {
   }
 });
 
-test('production documents one-time adoption of the existing image repository', () => {
+test('completed image repository import cannot remain an operator step', () => {
+  const files = sourceFiles();
+  files.runbook +=
+    '\nterraform -chdir=terraform import google_artifact_registry_repository.grafana_agent_runtime_images\n';
+  expectFailure(files, /completed production repository import/u);
+});
+
+test('rollback guidance must reject legacy version identities', () => {
   const files = sourceFiles();
   files.runbook = files.runbook.replace(
-    'terraform -chdir=terraform import',
-    'echo import-skipped',
+    'pnpm aegis:agent:preflight -- --version TARGET',
+    'echo legacy-rollback',
   );
-  expectFailure(files, /must document one-time adoption/u);
+  expectFailure(files, /rollback guidance must reject legacy identities/u);
 });
 
 test('deploy must retain the explicit previous-version rollback command', () => {
@@ -1154,14 +1426,91 @@ test('deploy must retain the explicit previous-version rollback command', () => 
     'gcloud app services set-traffic grafana-agent',
     'echo rollback-skipped',
   );
-  expectFailure(files, /printed rollback must short-circuit/u);
+  expectFailure(
+    files,
+    /printed rollback must accept a proven restored target/u,
+  );
 });
 
-test('Phase A must retain and mark the legacy seed rollback route', () => {
+test('every automatic rollback call must carry the immutable verifier', () => {
   const files = sourceFiles();
-  files.legacySeed = files.legacySeed.replace(
-    'LEGACY PHASE A ROLLBACK ARTIFACT',
-    'secret helper',
+  files.deploy += '\nrollback_cutover "$previous_version" "$version"\n';
+  expectFailure(
+    files,
+    /every automatic rollback path must pass the immutable verifier/u,
   );
-  expectFailure(files, /explicitly marked for Phase A rollback/u);
+});
+
+test('unguarded deploy restart surfaces cannot be added', () => {
+  const files = sourceFiles();
+  files.deploy +=
+    '\ngcloud app versions start "$previous_version" --project "$project"\n';
+  expectFailure(
+    files,
+    /every rollback restart surface must stay inside the guarded/u,
+  );
+});
+
+test('runbook restart must keep the inline previous-version preflight', () => {
+  const files = sourceFiles();
+  files.runbook = files.runbook.replace(
+    '    (pnpm aegis:agent:preflight -- --version PREVIOUS && \\\n',
+    '',
+  );
+  expectFailure(
+    files,
+    /executable rollback must accept a proven full-traffic target/u,
+  );
+});
+
+test('runbook rollback must keep the already-restored full-traffic proof', () => {
+  const files = sourceFiles();
+  files.runbook = files.runbook.replaceAll(
+    ' --version PREVIOUS --version-traffic full',
+    ' --version PREVIOUS',
+  );
+  expectFailure(
+    files,
+    /executable rollback must accept a proven full-traffic target/u,
+  );
+});
+
+test('runbook cannot add an unguarded previous-version restart', () => {
+  const files = sourceFiles();
+  files.runbook +=
+    '\ngcloud app versions start PREVIOUS --project mento-monitoring\n';
+  expectFailure(
+    files,
+    /executable rollback must accept a proven full-traffic target/u,
+  );
+});
+
+test('legacy CLI seed route cannot return', () => {
+  const files = sourceFiles();
+  files.legacySeedExists = true;
+  files.rootPackage = files.rootPackage.replace(
+    '"aegis:agent:deploy"',
+    '"aegis:agent:seed-secrets": "forbidden",\n    "aegis:agent:deploy"',
+  );
+  files.aegisPackage = files.aegisPackage.replace(
+    '"agent:deploy"',
+    '"agent:seed-secrets": "forbidden",\n    "agent:deploy"',
+  );
+  files.deploy = files.deploy.replace(
+    '  aegis/grafana-agent/preflight.mjs',
+    '  aegis/grafana-agent/preflight.mjs\n  aegis/grafana-agent/seed-secrets.sh',
+  );
+  const errors = validateContract(files).join('\n');
+  assert.match(errors, /legacy CLI secret writer must stay absent/u);
+  assert.match(errors, /package\.json: legacy Alloy seed command/u);
+  assert.match(errors, /immutable verifier must not retain/u);
+});
+
+test('immutable verifier must prove the retired seed path is absent', () => {
+  const files = sourceFiles();
+  files.deploy = files.deploy.replace(
+    'if ! legacy_seed_entry="$(',
+    'if legacy_seed_entry="$(',
+  );
+  expectFailure(files, /immutable verifier must fail closed while proving/u);
 });

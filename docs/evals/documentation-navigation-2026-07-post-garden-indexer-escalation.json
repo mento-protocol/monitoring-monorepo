@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "suite_id": "documentation-navigation-v1",
+  "fixture_digest": "3b0af8a455942d24b31202fd30950b26c5712a48547b46e3563ad7f5cb1167f6",
+  "run": {
+    "agent": "codex",
+    "model": "gpt-5.6-sol",
+    "effort": "medium",
+    "executed_at": "2026-07-27T15:04:49Z",
+    "repository_base_commit": "c909129681b2e041f05f10e72e85a0ff7f98ec52",
+    "fresh_context": true,
+    "read_only": true,
+    "bootstrap_sources": [
+      {
+        "path": "AGENTS.md",
+        "bytes": 9085,
+        "sha256": "2372980725c6c8e88a8347eeb4c72a392f8819fafeba906834a39ec7d29ae33d"
+      },
+      {
+        "path": "docs/README.md",
+        "bytes": 18220,
+        "sha256": "f333c46f0f6dffad41480049abbb7f4d8ddef98c74831fc3b90ce9430be9fcfb"
+      }
+    ]
+  },
+  "answers": [
+    {
+      "question_id": "package-indexer-add-contract",
+      "chosen_documents": [
+        "indexer-envio/AGENTS.md",
+        "indexer-envio/README.md"
+      ],
+      "answer": "Use the canonical package router `indexer-envio/AGENTS.md` together with the canonical package reference `indexer-envio/README.md`. The router identifies the hosted/testnet YAML configs, `schema.graphql`, required `src/EventHandlers.ts` entry point, vendored ABI generator, codegen command, and checked-in shared-config mirrors used by out-of-workspace hosted builds. The README owns the step-by-step contract-add procedure: update every applicable multichain config, generate or minimally vendor the ABI, update the schema, add the handler and side-effect import it from `src/EventHandlers.ts`, then run package codegen and the cross-layer checklist. For a new contracts deployment or namespace, it also says to update both the shared-config and indexer `deployment-namespaces.json` mirrors, regenerate ABIs, check YAML addresses, run codegen, and run the selected typechecks.",
+      "evidence": [
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "line_start": 15,
+          "line_end": 27,
+          "supports": "The package router sends contract-add and promotion work to the README and names production config plus the loaded handler graph as operating truth."
+        },
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "line_start": 42,
+          "line_end": 57,
+          "supports": "The package router identifies the config, schema, required handler entry point, hosted-build mirrors, ABI directory, and ABI generator."
+        },
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "line_start": 59,
+          "line_end": 64,
+          "supports": "Schema, config, entry-point, or handler-reachability changes require indexer codegen."
+        },
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "line_start": 86,
+          "line_end": 100,
+          "supports": "Published ABIs and addresses come from the contracts package, while hosted builds require synchronized checked-in shared-config mirrors because they may run outside the workspace."
+        },
+        {
+          "path": "indexer-envio/README.md",
+          "line_start": 129,
+          "line_end": 134,
+          "supports": "Codegen must use package scripts, and every new handler module must be imported through `src/EventHandlers.ts` before codegen."
+        },
+        {
+          "path": "indexer-envio/README.md",
+          "line_start": 155,
+          "line_end": 168,
+          "supports": "The contracts-deployment promotion procedure updates both deployment-namespace mirrors, regenerates ABIs, checks YAML addresses, runs codegen, and runs typechecks."
+        },
+        {
+          "path": "indexer-envio/README.md",
+          "line_start": 170,
+          "line_end": 181,
+          "supports": "The complete contract-add procedure covers ABI sourcing, all applicable multichain configs, schema entities, handler location and entry-point import, codegen, and the cross-layer checklist."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        },
+        {
+          "path": "indexer-envio/README.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "bytes": 6535,
+          "sha256": "e49e0f779e79e82ba5366d5230507edcaf39fcb8f43487640e07cf22de118963"
+        },
+        {
+          "path": "indexer-envio/README.md",
+          "bytes": 21967,
+          "sha256": "27f631884076838a6b44ad76231f7cf7d47bb91065a254f6438957669d2c8dfb"
+        }
+      ]
+    }
+  ]
+}

@@ -46,7 +46,7 @@ tldr: five hazards, each raised as a separate review round on PR #1210 — audit
 
 ### Time-unit math — [checklist](stateful-data-ui.md)
 
-tldr: FX-pool metrics use trading-seconds — MUST call `tradingSecondsInRange` (`ui-dashboard/src/lib/weekend.ts:110`), NEVER `now - start` directly. Threshold-derived metrics (peak severity %, etc.) MUST be computed from the per-event threshold, NEVER from the live mutable `pool.rebalanceThreshold`. Full rules in the linked checklist.
+tldr: FX-pool metrics use trading-seconds — MUST call `tradingSecondsInRange` (`ui-dashboard/src/lib/weekend.ts`), NEVER `now - start` directly. Threshold-derived metrics (peak severity %, etc.) MUST be computed from the per-event threshold, NEVER from the live mutable `pool.rebalanceThreshold`. Full rules in the linked checklist.
 
 ### Keyboard a11y on controlled widgets — [checklist](keyboard-a11y-controlled-widgets.md)
 

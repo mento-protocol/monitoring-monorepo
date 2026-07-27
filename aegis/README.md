@@ -101,8 +101,8 @@ wrapper submits an immutable commit snapshot through a dedicated builder, then
 uses a committed verifier snapshot, assigns 100% traffic atomically, and stops
 prior manual collectors before the new Alloy process starts. This
 stop-before-start handoff prevents duplicate collectors but leaves a temporary
-collection gap until activation or rollback. Its legacy manual secret-seeding
-path remains only for Phase A rollback and is not agent-authorized under ADR 0030.
+collection gap until activation or rollback. Terraform's write-only path is the
+only authorized way to create or rotate its secret versions under ADR 0030.
 
 ### Deploying Grafana Resources
 
