@@ -54,17 +54,20 @@ function isDockerfile(filePath) {
 }
 
 function isCandidate(filePath) {
+  const lowercasePath = filePath.toLowerCase();
   return (
-    filePath.endsWith(".tf") ||
-    SHELL_FILE_EXTENSIONS.some((extension) => filePath.endsWith(extension)) ||
+    lowercasePath.endsWith(".tf") ||
+    SHELL_FILE_EXTENSIONS.some((extension) =>
+      lowercasePath.endsWith(extension),
+    ) ||
     SCRIPT_SOURCE_FILE_EXTENSIONS.some((extension) =>
-      filePath.endsWith(extension),
+      lowercasePath.endsWith(extension),
     ) ||
     isDockerfile(filePath) ||
-    filePath.endsWith(".yml") ||
-    filePath.endsWith(".yaml") ||
-    filePath.endsWith(".json") ||
-    filePath.endsWith("package.json") ||
+    lowercasePath.endsWith(".yml") ||
+    lowercasePath.endsWith(".yaml") ||
+    lowercasePath.endsWith(".json") ||
+    lowercasePath.endsWith("package.json") ||
     path.extname(filePath) === ""
   );
 }
@@ -166,6 +169,11 @@ assert.equal(
   "command files must be scanned without a shebang or executable bit",
 );
 assert.equal(
+  shouldScanFile("scripts/new-deploy.CMD", { mode: 0o100644 }, false),
+  true,
+  "Windows script extensions must be matched case-insensitively",
+);
+assert.equal(
   shouldScanFile("scripts/new-deploy.ps1", { mode: 0o100644 }, false),
   true,
   "PowerShell scripts must be scanned without an executable bit",
@@ -259,6 +267,14 @@ assertDeployStagingContract(
     "aegis/bin/deploy.sh",
     "--bucket=gs://mento-monitoring-app-engine-source",
     "--bucket='gs://mento-monitoring-app-engine-source'",
+  ),
+);
+assertDeployStagingContract(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    "gcloud builds submit",
+    "gcloud.cmd builds submit",
   ),
 );
 for (const replacement of [
@@ -569,6 +585,21 @@ for (const [contents, message, filePath] of [
     "Windows command continuation",
     "scripts/multiline-deploy.cmd",
   ],
+  [
+    "gcloud.cmd builds submit .",
+    "Windows gcloud launcher",
+    "scripts/windows-launcher-deploy.cmd",
+  ],
+  [
+    "C:\\SDK\\GCLOUD.CMD builds submit .",
+    "mixed-case absolute Windows gcloud launcher path",
+    "scripts/windows-path-launcher-deploy.CMD",
+  ],
+  [
+    ".\\gcloud.cmd app deploy app.yaml",
+    "relative Windows gcloud launcher path",
+    "scripts/windows-relative-launcher-deploy.ps1",
+  ],
 ]) {
   assertForbiddenSignature(contents, message, filePath);
 }
@@ -615,6 +646,17 @@ execFileSync("gcloud", [
 `,
   "multiline Node child-process argv",
   "scripts/alternate-multiline-deploy.mjs",
+);
+assertForbiddenSignature(
+  `import { execFileSync } from "node:child_process";
+execFileSync("C:\\\\SDK\\\\GCLOUD.CMD", [
+  "builds",
+  "submit",
+  ".",
+]);
+`,
+  "mixed-case Windows gcloud launcher through Node",
+  "scripts/windows-launcher-deploy.MJS",
 );
 assertForbiddenSignature(
   `import { spawn } from "node:child_process";
@@ -787,6 +829,13 @@ assert.equal(
   }).length,
   0,
   "different executable names must not match the gcloud basename",
+);
+assert.equal(
+  discoverDeployStagingCallsites({
+    "scripts/gcloud-wrapper.cmd": "gcloud.cmdx app deploy app.yaml\n",
+  }).length,
+  0,
+  "longer Windows executable names must not match the gcloud.cmd basename",
 );
 
 assertDeployStagingContract(files);

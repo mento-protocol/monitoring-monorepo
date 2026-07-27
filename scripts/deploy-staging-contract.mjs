@@ -8,6 +8,7 @@ import {
 } from "./production-infra-identity-contract/hcl.mjs";
 import {
   discoverDeployStagingCallsites,
+  isGcloudExecutable,
   parseDeployStagingStructuredFile,
 } from "./deploy-staging-callsite-discovery.mjs";
 
@@ -307,9 +308,7 @@ function hasStructuredFlag(args, flag, value) {
 function hasFlag(record, flag, value) {
   if (record.args) return hasStructuredFlag(record.args, flag, value);
   const tokens = topLevelShellWords(record.raw ?? record.normalized ?? "");
-  const gcloudIndex = tokens.findIndex((token) =>
-    /^(?:\/[A-Za-z0-9_./-]+\/)?gcloud$/u.test(token),
-  );
+  const gcloudIndex = tokens.findIndex(isGcloudExecutable);
   if (gcloudIndex === -1) return false;
   let optionsTerminated = false;
   let redirectionConsumesNext = false;

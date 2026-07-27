@@ -14,7 +14,23 @@ const DEPLOY_KINDS = [
 ];
 const CONTRACT_FIXTURE = "scripts/deploy-staging-contract.test.mjs";
 const GCLOUD =
-  /(?:^|[^A-Za-z0-9_.-])(?:\/[A-Za-z0-9_./-]+\/)?gcloud(?=$|[^A-Za-z0-9_.-])/gu;
+  /(?:^|[^A-Za-z0-9_.-])(?:\/[A-Za-z0-9_./-]+\/)?gcloud(?:\.cmd)?(?=$|[^A-Za-z0-9_.-])/gu;
+const GCLOUD_WINDOWS =
+  /(?:^|[^A-Za-z0-9_.-])(?:\/[A-Za-z0-9_./-]+\/)?gcloud(?:\.cmd)?(?=$|[^A-Za-z0-9_.-])/giu;
+const GCLOUD_TEXT = /gcloud(?:\.cmd)?/iu;
+
+export function isGcloudExecutable(value) {
+  const basename = value.split(/[/\\]/u).at(-1) ?? "";
+  return basename === "gcloud" || /^gcloud\.cmd$/iu.test(basename);
+}
+
+function isPowerShellSource(filePath) {
+  return /\.(?:ps1|psm1)$/iu.test(filePath);
+}
+
+function isBatchSource(filePath) {
+  return /\.(?:bat|cmd)$/iu.test(filePath);
+}
 
 function visitYaml(value, path, callback) {
   callback(value, path);
@@ -32,7 +48,7 @@ function visitYaml(value, path, callback) {
 
 export function parseDeployStagingStructuredFile(filePath, contents, errors) {
   try {
-    return filePath.endsWith(".json")
+    return filePath.toLowerCase().endsWith(".json")
       ? JSON.parse(contents)
       : loadYaml(contents);
   } catch (error) {
@@ -46,12 +62,11 @@ export function parseDeployStagingStructuredFile(filePath, contents, errors) {
 function logicalLines(filePath, contents) {
   const lines = [];
   let pending = "";
-  const continuation =
-    filePath.endsWith(".ps1") || filePath.endsWith(".psm1")
-      ? /`\s*$/u
-      : filePath.endsWith(".bat") || filePath.endsWith(".cmd")
-        ? /\^\s*$/u
-        : /\\\s*$/u;
+  const continuation = isPowerShellSource(filePath)
+    ? /`\s*$/u
+    : isBatchSource(filePath)
+      ? /\^\s*$/u
+      : /\\\s*$/u;
   for (const line of contents.split(/\r?\n/u)) {
     const code = stripShellComment(line);
     const continued = continuation.test(code);
@@ -68,9 +83,11 @@ function logicalLines(filePath, contents) {
   return lines;
 }
 
-function normalize(text) {
-  return text
-    .replace(/\\(.)/gu, "$1")
+function normalize(text, stripBackslashEscapes = true) {
+  const unescaped = stripBackslashEscapes
+    ? text.replace(/\\(.)/gu, "$1")
+    : text;
+  return unescaped
     .replace(/["'`]/gu, "")
     .replace(/[[\](){},:]/gu, " ")
     .replace(/\s+/gu, " ")
@@ -150,10 +167,14 @@ function kindAfterGcloud(text) {
 
 function lexicalDeployRecords(filePath, surface, contents) {
   const records = [];
+  const windowsShell = isBatchSource(filePath) || isPowerShellSource(filePath);
+  const stripBackslashEscapes = !windowsShell;
   for (const line of logicalLines(filePath, contents)) {
     for (const fragment of topLevelFragments(line)) {
-      const normalizedFragment = normalize(fragment);
-      for (const match of normalizedFragment.matchAll(GCLOUD)) {
+      const normalizedFragment = normalize(fragment, stripBackslashEscapes);
+      for (const match of normalizedFragment.matchAll(
+        windowsShell ? GCLOUD_WINDOWS : GCLOUD,
+      )) {
         const suffix = normalizedFragment.slice(
           (match.index ?? 0) + match[0].length,
         );
@@ -173,13 +194,14 @@ function lexicalDeployRecords(filePath, surface, contents) {
 }
 
 function isProgrammaticSource(filePath) {
-  return /\.(?:[cm]?[jt]s|[jt]sx)$/u.test(filePath);
+  return /\.(?:[cm]?[jt]s|[jt]sx)$/iu.test(filePath);
 }
 
 function programmaticScriptKind(filePath) {
-  if (filePath.endsWith(".tsx")) return ts.ScriptKind.TSX;
-  if (filePath.endsWith(".jsx")) return ts.ScriptKind.JSX;
-  if (/\.(?:cts|mts|ts)$/u.test(filePath)) return ts.ScriptKind.TS;
+  const lowercasePath = filePath.toLowerCase();
+  if (lowercasePath.endsWith(".tsx")) return ts.ScriptKind.TSX;
+  if (lowercasePath.endsWith(".jsx")) return ts.ScriptKind.JSX;
+  if (/\.(?:cts|mts|ts)$/u.test(lowercasePath)) return ts.ScriptKind.TS;
   return ts.ScriptKind.JS;
 }
 
@@ -221,7 +243,7 @@ function staticStringArrayProperty(node, propertyName) {
 }
 
 function programmaticDeployRecords(filePath, contents, errors) {
-  if (!contents.includes("gcloud")) return [];
+  if (!GCLOUD_TEXT.test(contents)) return [];
   const sourceFile = ts.createSourceFile(
     filePath,
     contents,
@@ -264,7 +286,7 @@ function programmaticDeployRecords(filePath, contents, errors) {
           if (!existingKinds.has(record.kind)) records.push(record);
         }
 
-        if (/^(?:.*[/\\])?gcloud$/u.test(firstArgument)) {
+        if (isGcloudExecutable(firstArgument)) {
           const args =
             staticStringArray(invocationArguments[1]) ??
             staticStringArrayProperty(invocationArguments[1], "args");
@@ -286,7 +308,7 @@ function programmaticDeployRecords(filePath, contents, errors) {
       const commandVector = staticStringArray(invocationArguments[0]);
       if (
         commandVector !== undefined &&
-        /^(?:.*[/\\])?gcloud$/u.test(commandVector[0] ?? "")
+        isGcloudExecutable(commandVector[0] ?? "")
       ) {
         const args = commandVector.slice(1);
         const kind = kindAfterGcloud(args.join(" "));
@@ -345,7 +367,9 @@ function structuredEntryPointRecords(filePath, path, value) {
 function structuredRecords(filePath, contents, errors) {
   // JSON configuration files such as tsconfig may intentionally use comments.
   // They cannot contain a deploy signature when they do not contain gcloud.
-  if (filePath.endsWith(".json") && !contents.includes("gcloud")) return [];
+  if (filePath.toLowerCase().endsWith(".json") && !GCLOUD_TEXT.test(contents)) {
+    return [];
+  }
   const document = parseDeployStagingStructuredFile(filePath, contents, errors);
   if (document === undefined) return [];
   const records = [];
@@ -379,10 +403,11 @@ function discoverDeployStagingFile(filePath, contents) {
 
   const records = [];
   const errors = [];
+  const lowercasePath = filePath.toLowerCase();
   // The centralized fixture deliberately contains forbidden examples. It is
   // the one non-production executable surface excluded from self-scanning.
   if (filePath !== CONTRACT_FIXTURE) {
-    if (filePath.endsWith(".tf")) {
+    if (lowercasePath.endsWith(".tf")) {
       records.push(
         ...lexicalDeployRecords(
           filePath,
@@ -390,7 +415,7 @@ function discoverDeployStagingFile(filePath, contents) {
           commentMaskedHcl(contents),
         ),
       );
-    } else if (filePath.endsWith("package.json")) {
+    } else if (lowercasePath.endsWith("package.json")) {
       const packageJson = parseDeployStagingStructuredFile(
         filePath,
         contents,
@@ -406,9 +431,9 @@ function discoverDeployStagingFile(filePath, contents) {
         }
       }
     } else if (
-      filePath.endsWith(".yml") ||
-      filePath.endsWith(".yaml") ||
-      filePath.endsWith(".json")
+      lowercasePath.endsWith(".yml") ||
+      lowercasePath.endsWith(".yaml") ||
+      lowercasePath.endsWith(".json")
     ) {
       records.push(...structuredRecords(filePath, contents, errors));
     } else if (isProgrammaticSource(filePath)) {
