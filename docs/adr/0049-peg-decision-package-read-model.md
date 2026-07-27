@@ -60,9 +60,13 @@ authoritative for duration, coverage, pending/firing state, and notifications.
 The dashboard uses `producedAt`, clock skew, and fetch errors to classify
 current versus stale-last-confirmed data.
 
-This decision does not implement registry listing re-census or registry-rot
-rules. Until a typed listing cache is added, each source emits
-`listingState:null` and `listingCheckedAt:null`.
+Each source carries the last successful authoritative exact-pair listing
+evidence: `listingState` is `listed`, `halted`, or `absent`, and
+`listingCheckedAt` is its local completion timestamp. The fields are paired:
+both remain null before the first successful check, then advance together.
+Failed listing lookups preserve the last committed pair. `absent` is registry
+rot evidence; `halted` is a known listed market state; a listed empty book is
+not registry rot.
 
 ## Alternatives considered
 
@@ -79,8 +83,8 @@ rules. Until a typed listing cache is added, each source emits
   primary Hasura bridge.
 - The dashboard gets one validated current-state input but must not recreate
   Grafana alert evaluation.
-- Listing re-census, alert rules, UI routes, infrastructure, and deployment
-  stay separate follow-up work.
+- Alert rules, UI routes, infrastructure, and deployment stay separate
+  follow-up work.
 
 ## Evidence
 

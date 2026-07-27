@@ -7,6 +7,7 @@ import type {
 } from "./metrics.js";
 import {
   PEG_POLICY_MAX_ASSETS,
+  effectiveListingAbsentConsecutiveChecks,
   type PegAssetPolicy,
   type PegPolicyVersion,
   type PegSourcePolicy,
@@ -21,7 +22,7 @@ import {
   type PegSourceRole,
   type PegTokenRef,
 } from "./registry.js";
-import type { VenueState } from "./types.js";
+import type { MarketState, VenueState } from "./types.js";
 
 export const PEG_DECISION_PACKAGE_SCHEMA_VERSION = 1;
 export const PEG_DECISION_PACKAGE_MAX_BYTES = 512 * 1_024;
@@ -70,11 +71,13 @@ export interface PegDecisionPackageSource {
   registryRole: PegSourceRole;
   authority: PegSourcePolicy["authority"];
   convertVia: PegConversion | null;
-  policy: Omit<PegSourcePolicy, "authority">;
-  /** Reserved for the later typed listing-cache packet; currently always null. */
-  listingState: null;
-  /** Reserved for the later typed listing-cache packet; currently always null. */
-  listingCheckedAt: null;
+  // Live streak state stays in Prometheus; this policy threshold gives readers
+  // complete decision context, including the retained legacy default.
+  policy: Omit<PegSourcePolicy, "authority"> & {
+    listingAbsentConsecutiveChecks: number;
+  };
+  listingState: MarketState | null;
+  listingCheckedAt: number | null;
   healthy: boolean;
   venueState: VenueState | null;
   observationAt: number | null;
@@ -321,11 +324,13 @@ function sourceEvidence(
       referenceSizeCap: policy.referenceSizeCap,
       pollIntervalSeconds: policy.pollIntervalSeconds,
       staleAfterSeconds: policy.staleAfterSeconds,
+      listingAbsentConsecutiveChecks:
+        effectiveListingAbsentConsecutiveChecks(policy),
       spreadEnvelopeBps: policy.spreadEnvelopeBps,
       conversionErrorBps: policy.conversionErrorBps,
     },
-    listingState: null,
-    listingCheckedAt: null,
+    listingState: metric?.listingState ?? null,
+    listingCheckedAt: millisecondsToSeconds(metric?.listingCheckedAt ?? null),
     healthy: metric?.healthy ?? false,
     venueState: observation?.venueState ?? null,
     observationAt: millisecondsToSeconds(observation?.observationAt ?? null),

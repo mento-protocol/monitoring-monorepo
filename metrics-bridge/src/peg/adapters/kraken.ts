@@ -7,11 +7,13 @@ import {
 } from "../order-book.js";
 import type {
   AdapterRuntime,
+  AuthoritativeListingCheck,
   BookLevel,
   MarketState,
   ObservationPolicy,
   ParsedOrderBook,
   PegObservation,
+  RecordListingCheck,
 } from "../types.js";
 
 export const KRAKEN_TIMEOUT_MS = 5_000;
@@ -25,6 +27,11 @@ const KRAKEN_API_URL = "https://api.kraken.com/0/public";
 type JsonRecord = Record<string, unknown>;
 
 export interface KrakenObservationRequest extends ObservationPolicy {
+  symbol: string;
+  onListingChecked?: RecordListingCheck;
+}
+
+export interface KrakenListingRequest {
   symbol: string;
 }
 
@@ -65,7 +72,20 @@ export const parseKrakenMarketState = (
   payload: unknown,
   expectedSymbol: string,
 ): MarketState => {
-  const result = parseEnvelope(payload);
+  let result: JsonRecord;
+  try {
+    result = parseEnvelope(payload);
+  } catch (error) {
+    // AssetPairs uses this exact API response for a pair that no longer
+    // exists. It is authoritative absence; every other error remains unknown.
+    if (
+      error instanceof Error &&
+      error.message === "Kraken API error: EQuery:Unknown asset pair"
+    ) {
+      return "absent";
+    }
+    throw error;
+  }
   const markets = Object.values(result).filter((value) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       return false;
@@ -270,14 +290,15 @@ export const fetchKrakenObservation = async (
       maxResponseBytes: KRAKEN_MAX_RESPONSE_BYTES,
     });
 
+  const now = runtime.now ?? Date.now;
   const marketState = parseKrakenMarketState(
     await boundedRequest(marketUrl(request.symbol)),
     request.symbol,
   );
+  request.onListingChecked?.({ state: marketState, checkedAt: now() });
   if (marketState === "absent") {
     throw new Error("Kraken market is absent from the provider listing");
   }
-  const now = runtime.now ?? Date.now;
   // AssetPairs is authoritative for halts. Return before scheduling the
   // PreTrade and PostTrade requests, which do not supply executable identity
   // for a halted market.
@@ -315,4 +336,24 @@ export const fetchKrakenObservation = async (
     observationAt: identity.observationAt,
     sequence: identity.sequence,
   });
+};
+
+/** Fetch only the bounded, authoritative exact-pair listing evidence. */
+export const fetchKrakenListing = async (
+  request: KrakenListingRequest,
+  runtime: AdapterRuntime = {},
+): Promise<AuthoritativeListingCheck> => {
+  const fetch = runtime.fetch ?? globalThis.fetch;
+  const sleep = runtime.sleep ?? defaultSleep;
+  const payload = await fetchBoundedJson({
+    url: marketUrl(request.symbol),
+    fetch,
+    sleep,
+    timeoutMs: KRAKEN_TIMEOUT_MS,
+    maxResponseBytes: KRAKEN_MAX_RESPONSE_BYTES,
+  });
+  return {
+    state: parseKrakenMarketState(payload, request.symbol),
+    checkedAt: (runtime.now ?? Date.now)(),
+  };
 };
