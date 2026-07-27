@@ -23,7 +23,10 @@ import {
   routingSensitiveChanges,
   validateFixtureSuite,
 } from "./docs-navigation-eval-helpers.mjs";
-import { scoreNavigationResult } from "./docs-navigation-eval-result.mjs";
+import {
+  buildHistoricalNavigationInventory,
+  scoreNavigationResult,
+} from "./docs-navigation-eval-result.mjs";
 import {
   buildDocumentationInventory,
   trackedDocumentationFiles,
@@ -35,6 +38,8 @@ export const DEFAULT_FIXTURES =
   "docs/evals/documentation-navigation-fixtures.json";
 export const DEFAULT_BASELINE =
   "docs/evals/documentation-navigation-baseline.json";
+export const DEFAULT_BASELINE_FIXTURES =
+  "docs/evals/documentation-navigation-baseline-fixtures.json";
 
 function parseBoolean(value, name) {
   if (value == null || String(value).trim() === "") return false;
@@ -54,6 +59,7 @@ export function parseArgs(argv, env = process.env) {
     repoRoot: process.cwd(),
     fixturesPath: DEFAULT_FIXTURES,
     baselinePath: DEFAULT_BASELINE,
+    baselineFixturesPath: DEFAULT_BASELINE_FIXTURES,
     resultPath: null,
     questionId: null,
     baseCommit: null,
@@ -96,6 +102,8 @@ export function parseArgs(argv, env = process.env) {
     else if (arg === "--root") options.repoRoot = readValue();
     else if (arg === "--fixtures") options.fixturesPath = readValue();
     else if (arg === "--baseline") options.baselinePath = readValue();
+    else if (arg === "--baseline-fixtures")
+      options.baselineFixturesPath = readValue();
     else if (arg === "--base-commit") options.baseCommit = readValue();
     else if (arg === "--date") options.date = readValue();
     else if (arg === "--dry-run") options.dryRun = true;
@@ -145,6 +153,8 @@ Options:
   --root PATH            Repository root (default: current directory)
   --fixtures PATH        Fixture JSON path relative to the repository root
   --baseline PATH        Baseline result used for routing-change reminders
+  --baseline-fixtures PATH
+                         Frozen fixture contract used to validate the baseline
   --date YYYY-MM-DD      Evaluation/scheduler date (default: today UTC)
   --dry-run              Read and plan issue synchronization without mutation
   --json                 Print machine-readable check/schedule output
@@ -191,14 +201,23 @@ export function assertCleanEvaluationCheckout(repoRoot, runner = execFileSync) {
   }
 }
 
-export function loadEvaluationContext(options) {
+export function loadEvaluationContext(
+  options,
+  { inventoryCommit = null } = {},
+) {
   const repoRoot = realpathSync(path.resolve(options.repoRoot));
   const fixturesPath = path.resolve(repoRoot, options.fixturesPath);
   const suite = readJson(fixturesPath);
-  const inventory = buildDocumentationInventory({
-    repoRoot,
-    files: trackedDocumentationFiles(repoRoot),
-  });
+  const inventory = inventoryCommit
+    ? buildHistoricalNavigationInventory({
+        suite,
+        repoRoot,
+        commit: inventoryCommit,
+      })
+    : buildDocumentationInventory({
+        repoRoot,
+        files: trackedDocumentationFiles(repoRoot),
+      });
   if (inventory.errors.length > 0) {
     throw new Error(
       `documentation inventory failed:\n${inventory.errors.join("\n")}`,
@@ -233,11 +252,42 @@ async function defaultCreateIssue(options, spec) {
   ]);
 }
 
+function validateHistoricalBaseline({ baselineSuite, baseline, repoRoot }) {
+  const historicalInventory = buildHistoricalNavigationInventory({
+    suite: baselineSuite,
+    repoRoot,
+    commit: baseline?.run?.repository_base_commit,
+  });
+  const fixtureErrors =
+    historicalInventory.errors.length > 0
+      ? historicalInventory.errors
+      : validateFixtureSuite(baselineSuite, historicalInventory);
+  if (fixtureErrors.length > 0) {
+    throw new Error(
+      `committed navigation baseline fixtures are invalid:\n${fixtureErrors.join("\n")}`,
+    );
+  }
+  return assertPassingNavigationResult({
+    suite: baselineSuite,
+    result: baseline,
+    repoRoot,
+    label: "committed navigation baseline",
+  });
+}
+
 export async function runNavigationEvalIssue(
   options,
   { suite, repoRoot },
   deps = {},
 ) {
+  const readBaselineSuite =
+    deps.readBaselineSuite ?? ((file) => readJson(file));
+  const baselineSuite = readBaselineSuite(
+    path.resolve(
+      repoRoot,
+      options.baselineFixturesPath ?? DEFAULT_BASELINE_FIXTURES,
+    ),
+  );
   const {
     listIssues = defaultListIssues,
     authorizeLiveCreation = assertAuthorizedGardenWorkflow,
@@ -246,12 +296,7 @@ export async function runNavigationEvalIssue(
     changesSinceBaseline = routingSensitiveChanges,
     readBaseline = (file) => readJson(file),
     validateBaseline = (baseline) =>
-      assertPassingNavigationResult({
-        suite,
-        result: baseline,
-        repoRoot,
-        label: "committed navigation baseline",
-      }),
+      validateHistoricalBaseline({ baselineSuite, baseline, repoRoot }),
   } = deps;
   const month = monthForDate(options.date);
   const digest = fixtureDigest(suite);
@@ -331,7 +376,16 @@ async function main() {
     process.stdout.write(usage());
     return;
   }
-  const context = loadEvaluationContext(options);
+  const validationResult =
+    options.mode === "validate"
+      ? readJson(path.resolve(options.resultPath))
+      : null;
+  const validationCommit = validationResult?.run?.repository_base_commit;
+  const context = loadEvaluationContext(options, {
+    inventoryCommit: /^[0-9a-f]{40}$/.test(validationCommit ?? "")
+      ? validationCommit
+      : null,
+  });
   if (options.mode === "check-fixtures") {
     const contextFloor = navigationContextFloor(
       context.suite,
@@ -377,10 +431,9 @@ async function main() {
     return;
   }
   if (options.mode === "validate") {
-    const result = readJson(path.resolve(options.resultPath));
     const scored = scoreNavigationResult({
       suite: context.suite,
-      result,
+      result: validationResult,
       inventory: context.inventory,
       repoRoot: context.repoRoot,
       questionId: options.questionId,

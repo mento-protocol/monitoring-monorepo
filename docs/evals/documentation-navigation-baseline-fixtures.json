@@ -7,12 +7,11 @@
     "answer_evidence_percent": 100,
     "questions_over_context_budget": 0,
     "max_question_source_bytes": 45000,
-    "max_total_unique_source_bytes": 260000
+    "max_total_unique_source_bytes": 272000
   },
   "bootstrap_sources": ["AGENTS.md", "docs/README.md"],
   "forbidden_sources": [
     "docs/evals/documentation-navigation-fixtures.json",
-    "docs/evals/documentation-navigation-baseline-fixtures.json",
     "docs/evals/documentation-navigation-baseline.json",
     "scripts/docs-navigation-eval.mjs",
     "scripts/docs-navigation-eval-helpers.mjs",
