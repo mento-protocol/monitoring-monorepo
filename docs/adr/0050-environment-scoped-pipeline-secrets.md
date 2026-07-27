@@ -47,8 +47,27 @@ Boundaries of the decision:
 
 - **No required reviewers or wait timer.** The pipeline is unattended and
   scheduled; a reviewer gate would stall every run. The branch policy is the
-  control. (This is why `scripts/verify-github-environment-protection.mjs`,
-  which asserts reviewer gates for `production-infra`, does not apply here.)
+  control — but only while admins cannot silently bypass it, so the environment
+  also sets `can_admins_bypass = false` (see the admin-bypass boundary below).
+  (This is why `scripts/verify-github-environment-protection.mjs`, which asserts
+  reviewer gates for `production-infra`, does not apply here.)
+- **`can_admins_bypass = false`, and its limit.** With the default (`true`) a
+  repo admin bypasses the branch policy outright — an admin `workflow_dispatch`
+  of a gated job from an off-main branch reads the secret with no config change
+  (verified empirically, #1289). Setting it false closes that silent path. It
+  does **not** by itself contain a fully-compromised repo admin: holding
+  Administration:write, they could first edit this environment (re-enable bypass,
+  widen the policy) and then dispatch. That live settings edit is **not**
+  continuously detected: the identity contract hash-pins only the checked-in
+  Terraform block, so a _source_ change to the flag fails CI, but a change made
+  through GitHub Settings leaves the file untouched and is reconciled only on the
+  next manual `pnpm tf apply platform` (the platform stack is manual-apply and
+  excluded from `terraform-drift.yml`; `platform-settings-drift.yml` audits only
+  the workflow-token permission). The flag's value is still defense-in-depth: it
+  forces any admin bypass to be an out-of-band settings change instead of a
+  silent one-step dispatch. Containing a compromised admin outright would need
+  the credential outside repo-admin control (the separate-repository alternative
+  below), out of scope here.
 - **`CLAUDE_CODE_OAUTH_TOKEN` stays repo-level.** `claude.yml` reads it on
   `pull_request` events from feature branches — exactly what a main-only policy
   denies. It is inference-only (no repo write capability), so its residual
