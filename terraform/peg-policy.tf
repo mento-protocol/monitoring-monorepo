@@ -89,7 +89,7 @@ resource "google_project_iam_custom_role" "peg_policy_bucket_controller" {
   project     = google_project.monitoring.project_id
   role_id     = "pegPolicyBucketController"
   title       = "Peg policy bucket controller"
-  description = "Controls the authoritative IAM policies on the dormant Peg-policy buckets."
+  description = "Controls configuration and authoritative IAM on the dormant Peg-policy buckets."
   permissions = [
     "storage.buckets.get",
     "storage.buckets.getIamPolicy",

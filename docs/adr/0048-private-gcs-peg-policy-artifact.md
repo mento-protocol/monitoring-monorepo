@@ -42,15 +42,17 @@ human-approved platform plan and apply before it exists in production.
   mismatched pair fails only that loop.
 - The dormant Terraform source foundation defines a GCS policy bucket with
   versioning, public-access prevention, uniform bucket-level access,
-  destructive-change protection, and deletion only after a generation has been
-  noncurrent for 30 days. It also defines no-key runtime and publisher service
-  accounts. The exact direct bucket policy grants the runtime only
-  `roles/storage.objectViewer` and the publisher only
-  `roles/storage.objectAdmin`; a controller custom role can read and replace
-  each bucket policy. The access-log bucket has an exact direct policy for that
-  controller and the Google Storage analytics writer. It retains LIVE objects
-  for 90 days and noncurrent ARCHIVED objects for 30 days. Logs are audit
-  telemetry, never an authorization control.
+  destructive-change protection, and automatic lifecycle deletion after a
+  generation has been noncurrent for 30 days. The publisher's
+  `roles/storage.objectAdmin` grant can still delete objects directly. It also
+  defines no-key runtime and publisher service accounts. The exact direct
+  bucket policy grants the runtime only `roles/storage.objectViewer` and the
+  publisher only `roles/storage.objectAdmin`; a controller custom role can
+  update bucket configuration and replace each bucket policy. The access-log
+  bucket has an exact direct policy for that controller and the Google Storage
+  analytics writer. It retains LIVE objects for 90 days and noncurrent ARCHIVED
+  objects for 30 days. Logs are audit telemetry, never an authorization
+  control.
 - Exact direct bucket policies do not establish effective isolation while this
   source foundation remains in the monitoring project: inherited project or
   organization grants, including service-agent authority, may still allow

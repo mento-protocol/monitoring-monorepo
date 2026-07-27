@@ -194,7 +194,7 @@ function validatePegPolicyCustomRole(blocks, errors) {
     ])
   ) {
     errors.push(
-      `${label}: permissions must contain only the exact bucket-policy controls`,
+      `${label}: permissions must contain only the exact bucket controls`,
     );
   }
   if (
