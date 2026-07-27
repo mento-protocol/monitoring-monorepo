@@ -197,6 +197,13 @@ function validatePegPolicyCustomRole(blocks, errors) {
       `${label}: permissions must contain only the exact bucket-policy controls`,
     );
   }
+  if (
+    !sameSortedValues(extractExpressionList(role, "depends_on"), [
+      "google_project_service.iam",
+    ])
+  ) {
+    errors.push(`${label}: depends_on must contain only the IAM API`);
+  }
 }
 
 function validatePegPolicyAuthoritativePolicy(
@@ -247,13 +254,18 @@ function validatePegPolicyAuthoritativePolicy(
 }
 
 function rejectPegBucketMemberOrBindingResources(blocks, errors) {
+  const pegBucketTargets = [
+    "google_storage_bucket.peg_policy.",
+    "google_storage_bucket.peg_policy_access_logs.",
+    "${google_project.monitoring.project_id}-peg-policy",
+    "${google_project.monitoring.project_id}-peg-policy-access-logs",
+  ];
   const forbidden = blocks
     .filter(
       (block) =>
         block.kind === "resource" &&
         /google_storage_bucket_iam_(?:member|binding)$/u.test(block.type) &&
-        (block.code.includes("google_storage_bucket.peg_policy.") ||
-          block.code.includes("google_storage_bucket.peg_policy_access_logs.")),
+        pegBucketTargets.some((target) => block.code.includes(target)),
     )
     .map(blockKey)
     .sort();

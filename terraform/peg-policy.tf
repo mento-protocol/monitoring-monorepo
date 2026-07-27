@@ -96,6 +96,8 @@ resource "google_project_iam_custom_role" "peg_policy_bucket_controller" {
     "storage.buckets.setIamPolicy",
     "storage.buckets.update",
   ]
+
+  depends_on = [google_project_service.iam]
 }
 
 data "google_iam_policy" "peg_policy_access_logs" {
