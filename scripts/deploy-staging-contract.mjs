@@ -18,30 +18,35 @@ const TERRAFORM_FILE = "terraform/deploy-staging.tf";
 const EXPECTED_CALLSITES = [
   {
     filePath: ".github/workflows/metrics-bridge.yml",
+    surface: "jobs.deploy.steps[3].run",
     kind: "builds-submit",
     flag: "gcs-source-staging-dir",
     value: "gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge",
   },
   {
     filePath: "scripts/deploy-bridge.sh",
+    surface: "shell",
     kind: "builds-submit",
     flag: "gcs-source-staging-dir",
     value: "gs://${PROJECT}-cloud-build-source/metrics-bridge",
   },
   {
     filePath: "aegis/grafana-agent/deploy.sh",
+    surface: "shell",
     kind: "builds-submit",
     flag: "gcs-source-staging-dir",
     value: "gs://${project}-cloud-build-source/alloy",
   },
   {
     filePath: "aegis/bin/deploy.sh",
+    surface: "shell",
     kind: "app-deploy",
     flag: "bucket",
     value: "gs://mento-monitoring-app-engine-source",
   },
   {
     filePath: "aegis/grafana-agent/cloudbuild.yaml",
+    surface: "steps[0].args",
     kind: "app-deploy",
     flag: "bucket",
     value: "gs://mento-monitoring-app-engine-source",
@@ -171,22 +176,180 @@ function validateTerraform(files, errors) {
   );
 }
 
-function hasFlag(record, flag, value) {
-  const args = record.args ?? record.invocationArgs;
-  return args.some(
-    (argument, index) =>
-      argument === `--${flag}=${value}` ||
-      (argument === `--${flag}` && args[index + 1] === value),
+function isShellRedirection(token) {
+  return /^(?:(?:\d+|\{[A-Za-z_][A-Za-z0-9_]*\})?(?:<<<|<<-|<<|<>|>\||>>|>|<|>&|<&)|&>>|&>)$/u.test(
+    token,
   );
+}
+
+function topLevelShellWords(text) {
+  const words = [];
+  let token = "";
+  let quote;
+  let backtick = false;
+  let escaped = false;
+  let substitutionDepth = 0;
+  const flush = () => {
+    if (token) words.push(token);
+    token = "";
+  };
+  const operator = (index) => {
+    const rest = text.slice(index);
+    return [
+      "<<<",
+      "<<-",
+      "<<",
+      "<>",
+      ">|",
+      ">>",
+      ">&",
+      "<&",
+      "&>>",
+      "&>",
+      ">",
+      "<",
+    ].find((candidate) => rest.startsWith(candidate));
+  };
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (escaped) {
+      token += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      token += character;
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      token += character;
+      if (character === quote) quote = undefined;
+      continue;
+    }
+    if (backtick) {
+      token += character;
+      if (character === "`") backtick = false;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      token += character;
+      quote = character;
+      continue;
+    }
+    if (character === "`") {
+      token += character;
+      backtick = true;
+      continue;
+    }
+    if (substitutionDepth > 0) {
+      token += character;
+      if (character === "(") substitutionDepth += 1;
+      if (character === ")") substitutionDepth -= 1;
+      continue;
+    }
+    if (character === "(" && ["$", "<", ">"].includes(text[index - 1])) {
+      token += character;
+      substitutionDepth = 1;
+      continue;
+    }
+    if ((character === "<" || character === ">") && text[index + 1] === "(") {
+      token += `${character}(`;
+      substitutionDepth = 1;
+      index += 1;
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      flush();
+      continue;
+    }
+    const redirection = operator(index);
+    if (redirection) {
+      flush();
+      words.push(redirection);
+      index += redirection.length - 1;
+      continue;
+    }
+    token += character;
+  }
+  flush();
+  return words;
+}
+
+function matchesShellValue(token, value) {
+  return (
+    token === value ||
+    ((token.startsWith('"') || token.startsWith("'")) &&
+      token.at(-1) === token[0] &&
+      token.slice(1, -1) === value)
+  );
+}
+
+function hasStructuredFlag(args, flag, value) {
+  let optionsTerminated = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--") {
+      optionsTerminated = true;
+      continue;
+    }
+    if (optionsTerminated) continue;
+    if (argument === `--${flag}=${value}`) return true;
+    if (argument === `--${flag}` && args[index + 1] === value) return true;
+  }
+  return false;
+}
+
+function hasFlag(record, flag, value) {
+  if (record.args) return hasStructuredFlag(record.args, flag, value);
+  const tokens = topLevelShellWords(record.raw ?? record.normalized ?? "");
+  const gcloudIndex = tokens.findIndex((token) =>
+    /^(?:\/[A-Za-z0-9_./-]+\/)?gcloud$/u.test(token),
+  );
+  if (gcloudIndex === -1) return false;
+  let optionsTerminated = false;
+  let redirectionConsumesNext = false;
+  for (let index = gcloudIndex + 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "--") {
+      optionsTerminated = true;
+      continue;
+    }
+    if (isShellRedirection(token)) {
+      redirectionConsumesNext = true;
+      continue;
+    }
+    if (redirectionConsumesNext) {
+      redirectionConsumesNext = false;
+      continue;
+    }
+    if (optionsTerminated) {
+      continue;
+    }
+    const prefix = `--${flag}=`;
+    if (
+      token.startsWith(prefix) &&
+      matchesShellValue(token.slice(prefix.length), value)
+    ) {
+      return true;
+    }
+    if (
+      token === `--${flag}` &&
+      matchesShellValue(tokens[index + 1] ?? "", value)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function validateCallsites(files, errors) {
   const records = discoverDeployStagingCallsites(files, errors);
   const expectedKeys = EXPECTED_CALLSITES.map(
-    ({ filePath, kind }) => `${filePath}:${kind}`,
+    ({ filePath, surface, kind }) => `${filePath}:${surface}:${kind}`,
   ).sort();
   const actualKeys = records
-    .map(({ filePath, kind }) => `${filePath}:${kind}`)
+    .map(({ filePath, surface, kind }) => `${filePath}:${surface}:${kind}`)
     .sort();
   if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
     errors.push(
@@ -197,7 +360,9 @@ function validateCallsites(files, errors) {
   for (const expected of EXPECTED_CALLSITES) {
     const matches = records.filter(
       (record) =>
-        record.filePath === expected.filePath && record.kind === expected.kind,
+        record.filePath === expected.filePath &&
+        record.surface === expected.surface &&
+        record.kind === expected.kind,
     );
     if (
       matches.length === 1 &&

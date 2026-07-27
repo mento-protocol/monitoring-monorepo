@@ -91,9 +91,9 @@ trimmed build context:
       `gcloud builds submit --config=cloudbuild.yaml ...`. Local package tests and
       `pnpm install` prove dependency resolution, but they do not prove a reduced
       Cloud Build upload/Docker context contains the same files.
-- [ ] Every `gcloud builds submit` sets `--gcs-source-staging-dir`; every
-      `gcloud app deploy`, including nested steps, sets `--bucket`. `pnpm tf:test`
-      rejects unknown or unflagged calls.
+- [ ] The approved `gcloud builds submit` / `gcloud app deploy` callsites use
+      their required source-staging flag/value. `pnpm tf:test` fails closed on
+      any other literal deploy-shaped text in an executable surface.
 - [ ] Bucket-scope upload IAM: Cloud Build callers get bucket read/object create,
       build identities get object view, and App Engine uploaders get bucket
       read/Object Admin.

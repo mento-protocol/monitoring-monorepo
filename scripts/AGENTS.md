@@ -39,12 +39,13 @@ garden_lane: agent-entry-points
 - New Node root scripts must be covered by `pnpm lint:scripts`; new shell scripts
   must pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh`
   for behavior that syntax and lint checks cannot verify.
-- `pnpm tf:test` owns the deployment source-staging contract. It inventories
-  literal checked-in `gcloud builds submit` / `gcloud app deploy` invocations
-  across executable shell, package-script, workflow, and nested Cloud Build
-  surfaces, and rejects unflagged calls or supported opaque wrappers when the
-  literal is present. Dynamically constructed executables and paths are
-  forbidden by this workflow; static discovery cannot prove them.
+- `pnpm tf:test` owns the deployment source-staging contract. It allows exactly
+  five literal checked-in `gcloud builds submit` / `gcloud app deploy`
+  callsites, including their source-staging flag and value. Any other literal
+  deploy-shaped text in an executable shell, package-script, workflow, or
+  nested Cloud Build surface fails closed, even inside a wrapper or generated
+  script. Dynamically constructed executables and paths remain forbidden but
+  cannot be proven statically.
 
 ## Verification
 

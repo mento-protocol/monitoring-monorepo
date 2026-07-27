@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   closeSync,
+  existsSync,
   lstatSync,
   openSync,
   readFileSync,
@@ -17,7 +18,6 @@ import {
   discoverDeployStagingCallsites,
   validateDeployStagingContract,
 } from "./deploy-staging-contract.mjs";
-import { shellCommandRecords } from "./deploy-staging-shell-discovery.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -77,6 +77,7 @@ function repositoryFiles() {
   const files = {};
   for (const filePath of paths) {
     const absolutePath = path.join(repoRoot, filePath);
+    if (!existsSync(absolutePath)) continue;
     const linkMetadata = lstatSync(absolutePath);
     let metadata = linkMetadata;
     if (linkMetadata.isSymbolicLink()) {
@@ -116,30 +117,6 @@ function expectFailure(files, expected) {
     errors.some((error) => error.includes(expected)),
     `expected deploy-staging failure containing "${expected}", got:\n${errors.join("\n")}`,
   );
-}
-
-function expectOpaqueExecutionFailure(contents, boundary) {
-  const filePath = "scripts/opaque-deploy.sh";
-  const discoveryErrors = [];
-  const records = discoverDeployStagingCallsites(
-    { [filePath]: contents },
-    discoveryErrors,
-  );
-  assert.equal(
-    records.length,
-    0,
-    `${boundary} must not create a trusted record`,
-  );
-  assert(
-    discoveryErrors.some(
-      (error) =>
-        error.includes(filePath) &&
-        error.includes("opaque shell") &&
-        error.includes(boundary),
-    ),
-    `${boundary} must report a discovery error, got:\n${discoveryErrors.join("\n")}`,
-  );
-  expectFailure({ ...files, [filePath]: contents }, "opaque shell");
 }
 
 const files = repositoryFiles();
@@ -192,6 +169,55 @@ expectFailure(
   ),
   "metrics-bridge.yml: builds-submit must use --gcs-source-staging-dir",
 );
+for (const replacement of [
+  '            > --gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+  '            2> --gcs-source-staging-dir "gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+  '            <<< --gcs-source-staging-dir "gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+  '            < --gcs-source-staging-dir "gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+  '            << --gcs-source-staging-dir "gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+  '            >| --gcs-source-staging-dir "gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+  '            &> --gcs-source-staging-dir "gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+  '            -- --gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+  '            "x --gcs-source-staging-dir=gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+  "            $(echo --gcs-source-staging-dir=gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge) \\\n",
+]) {
+  expectFailure(
+    mutate(
+      files,
+      ".github/workflows/metrics-bridge.yml",
+      '            --gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+      replacement,
+    ),
+    "metrics-bridge.yml: builds-submit must use --gcs-source-staging-dir",
+  );
+}
+assertDeployStagingContract(
+  mutate(
+    files,
+    ".github/workflows/metrics-bridge.yml",
+    '            --gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+    '            > /tmp/deploy.log \\\n            --gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+  ),
+);
+expectFailure(
+  mutate(
+    mutate(
+      mutate(
+        files,
+        ".github/workflows/metrics-bridge.yml",
+        "          gcloud builds submit \\\n",
+        "          echo --gcs-source-staging-dir=gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge $(gcloud builds submit \\\n",
+      ),
+      ".github/workflows/metrics-bridge.yml",
+      '            --gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \\\n',
+      "",
+    ),
+    ".github/workflows/metrics-bridge.yml",
+    "            .\n",
+    "            .)\n",
+  ),
+  "metrics-bridge.yml: builds-submit must use --gcs-source-staging-dir",
+);
 expectFailure(
   mutate(
     mutate(
@@ -221,6 +247,15 @@ expectFailure(
     "aegis/grafana-agent/cloudbuild.yaml",
     "        --bucket=gs://mento-monitoring-app-engine-source,\n",
     "        --bucket=gs://wrong-bucket,\n        gs://mento-monitoring-app-engine-source,\n",
+  ),
+  "aegis/grafana-agent/cloudbuild.yaml: app-deploy must use --bucket",
+);
+expectFailure(
+  mutate(
+    files,
+    "aegis/grafana-agent/cloudbuild.yaml",
+    "        --bucket=gs://mento-monitoring-app-engine-source,\n",
+    '        "x --bucket=gs://mento-monitoring-app-engine-source",\n',
   ),
   "aegis/grafana-agent/cloudbuild.yaml: app-deploy must use --bucket",
 );
@@ -347,263 +382,94 @@ assert.deepEqual(
   "nested Cloud Build JSON build submissions must be discovered",
 );
 
-function assertCallsiteKinds(contents, expected, message) {
-  assert.deepEqual(
-    discoverDeployStagingCallsites({
-      "scripts/common-invocations.command": contents,
-    }).map(({ kind }) => kind),
-    expected,
-    message,
+function assertForbiddenSignature(
+  contents,
+  message,
+  filePath = "scripts/deploy",
+) {
+  const records = discoverDeployStagingCallsites({ [filePath]: contents });
+  assert(records.length > 0, `${message}: literal deploy signature was missed`);
+  expectFailure(
+    { ...files, [filePath]: contents },
+    "executable callsite inventory must be exactly",
   );
 }
 
-function assertShellParserCase(contents, expected, message) {
-  const filePath = "scripts/deploy";
-  const direct = shellCommandRecords(filePath, "shell", contents).map(
-    ({ kind }) => kind,
-  );
-  const discovered = discoverDeployStagingCallsites({
-    [filePath]: contents,
-  }).map(({ kind }) => kind);
-  assert.deepEqual(direct, expected, `${message}: direct shell parser`);
-  assert.deepEqual(discovered, expected, `${message}: contract discovery`);
-  if (expected.length > 0) {
-    expectFailure(
-      { ...files, [filePath]: contents },
-      "executable callsite inventory must be exactly",
-    );
-  }
-}
-
-for (const [contents, expected, message] of [
+for (const [contents, message, filePath] of [
   [
-    "gcloud --project=mento-monitoring builds submit .",
-    ["builds-submit"],
-    "global flags",
+    "gcloud --project mento-monitoring builds submit .",
+    "separated global flag",
   ],
   [
-    "gcloud --access-token-file /tmp/token builds submit .",
-    ["builds-submit"],
-    "separated access token file global flag",
-  ],
-  ["gcloud --log-http builds submit .", ["builds-submit"], "boolean flags"],
-  [
-    "command gcloud --user-output-enabled app deploy app.yaml",
-    ["app-deploy"],
-    "command",
+    "gcloud builds --project mento-monitoring submit .",
+    "group-interposed flag",
   ],
   [
-    "env FOO=bar gcloud beta app deploy app.yaml",
-    ["app-deploy"],
-    "env assignments",
+    "gcloud app --access-token-file /tmp/token deploy app.yaml",
+    "group-interposed global flag",
   ],
-  ["exec gcloud builds submit .", ["builds-submit"], "bare exec"],
-  ["time gcloud app deploy app.yaml", ["app-deploy"], "bare time"],
-  ["time -p gcloud app deploy app.yaml", ["app-deploy"], "time -p"],
-  ["exec -a deploy gcloud builds submit .", ["builds-submit"], "exec -a"],
-  ["exec -c gcloud builds submit .", ["builds-submit"], "exec -c"],
-  ["exec -l gcloud app deploy app.yaml", ["app-deploy"], "exec -l"],
-  ["exec -cl gcloud builds submit .", ["builds-submit"], "exec -cl"],
-  ["exec -lc gcloud app deploy app.yaml", ["app-deploy"], "exec -lc"],
-  ["command -p gcloud app deploy app.yaml", ["app-deploy"], "command -p"],
-  ["command -- gcloud builds submit .", ["builds-submit"], "command --"],
-  ["env -i FOO=bar gcloud builds submit .", ["builds-submit"], "env -i"],
+  ["{ gcloud builds submit .; }", "brace group"],
+  ["f(){ gcloud app deploy app.yaml; }", "function body"],
+  ["function f { gcloud builds submit .; }", "function declaration"],
+  ["echo { gcloud builds submit .; }", "inert brace data fails closed"],
+  ["echo 'gcloud app deploy app.yaml'", "quoted log fails closed"],
+  ['g"cloud" build\\s sub\\mit .', "quoted and escaped literals"],
+  ["g\\\ncloud build\\\ns sub\\\nmit .", "escaped line continuations"],
+  ["`gcloud builds submit .`", "backtick substitution"],
+  ["/usr/local/bin/gcloud app deploy app.yaml", "absolute gcloud path"],
+  ["cat <<\\EOF\ngcloud builds submit .\nEOF", "backslash quoted heredoc"],
+  ["cat <<'E'OF\ngcloud app deploy app.yaml\nEOF", "quoted heredoc"],
+  ["bash -s <<EOF\ngcloud builds submit .\nEOF", "shell-fed heredoc"],
+  ["printf 'gcloud app deploy app.yaml\\n' | xargs -I{} {}", "xargs direct"],
   [
-    "env --ignore-environment gcloud app deploy app.yaml",
-    ["app-deploy"],
-    "env --ignore-environment",
-  ],
-  ["env -u NAME gcloud builds submit .", ["builds-submit"], "env -u"],
-  ["env -uNAME gcloud app deploy app.yaml", ["app-deploy"], "env -uNAME"],
-  ["env --unset NAME gcloud builds submit .", ["builds-submit"], "env --unset"],
-  [
-    "env --unset=NAME gcloud app deploy app.yaml",
-    ["app-deploy"],
-    "env --unset=NAME",
-  ],
-  ["env -C DIR gcloud builds submit .", ["builds-submit"], "env -C"],
-  ["env -CDIR gcloud app deploy app.yaml", ["app-deploy"], "env -CDIR"],
-  ["env --chdir DIR gcloud builds submit .", ["builds-submit"], "env --chdir"],
-  [
-    "env --chdir=DIR gcloud app deploy app.yaml",
-    ["app-deploy"],
-    "env --chdir=DIR",
-  ],
-  ["env -- gcloud builds submit .", ["builds-submit"], "env --"],
-  [
-    "env -- FOO=bar gcloud app deploy app.yaml",
-    ["app-deploy"],
-    "env -- assignment",
+    "bash -O extglob -c 'gcloud builds submit .'",
+    "bash option and command string",
   ],
   [
-    "time env -i FOO=bar gcloud builds submit .",
-    ["builds-submit"],
-    "nested wrappers",
+    "printf 'gcloud app deploy app.yaml\\n' > ./generated; source ./generated",
+    "relative generated source",
   ],
-  ["time command -v gcloud", [], "nested lookup"],
-  ["while gcloud builds submit .; do break; done", ["builds-submit"], "while"],
-  ["until gcloud app deploy app.yaml; do break; done", ["app-deploy"], "until"],
   [
-    "exec -clx gcloud builds submit .",
-    ["builds-submit"],
-    "unsupported wrapper option fallback",
+    "gcloud builds submit .",
+    "nested extensionless candidate",
+    "packages/foo/scripts/deploy",
   ],
-  ["command -v gcloud", [], "command -v lookup"],
-  ["command -V gcloud", [], "command -V lookup"],
-  ["command -pv gcloud", [], "command -pv lookup"],
-  ["command -pV gcloud", [], "command -pV lookup"],
-  ["echo gcloud builds submit .", [], "echo data"],
-  ["env -S 'gcloud builds submit .'", [], "env -S runtime string"],
+  ["gcloud app deploy app.yaml", "root extensionless candidate", "deploy"],
+  ["gcloud builds submit .", "tools extensionless candidate", "tools/deploy"],
   [
-    "env -S echo gcloud builds submit .",
-    ["builds-submit"],
-    "unknown option fails closed",
+    "gcloud app deploy app.yaml",
+    "executable custom extension candidate",
+    "scripts/deploy.custom",
   ],
 ]) {
-  assertCallsiteKinds(contents, expected, message);
+  assertForbiddenSignature(contents, message, filePath);
 }
-assertCallsiteKinds(
-  "( gcloud builds submit . )",
-  ["builds-submit"],
-  "grouped commands must expose build submissions",
-);
-assertCallsiteKinds(
-  "result=$(gcloud app deploy app.yaml)",
-  ["app-deploy"],
-  "command substitutions must expose app deploys once",
-);
-assertCallsiteKinds(
-  'result="$(gcloud beta app deploy app.yaml)"',
-  ["app-deploy"],
-  "double-quoted command substitutions must expose app deploys",
-);
-assertCallsiteKinds(
-  "echo 'gcloud builds submit .'",
-  [],
-  "single-quoted command text must remain literal",
-);
 
-for (const [contents, expected, message] of [
-  ["{ gcloud builds submit .; }", ["builds-submit"], "brace group"],
-  ["f(){ gcloud app deploy app.yaml; }", ["app-deploy"], "function body"],
-  [
-    "function f { gcloud builds submit .; }",
-    ["builds-submit"],
-    "function declaration body",
-  ],
-  [
-    "gcloud builds submit --project=${PROJECT} .",
-    ["builds-submit"],
-    "parameter expansion braces",
-  ],
-  [
-    "echo {one,two}; gcloud app deploy app.yaml",
-    ["app-deploy"],
-    "brace expansion",
-  ],
-  ["echo '{ gcloud builds submit .; }'", [], "quoted braces remain data"],
-  [
-    "gcloud builds submit .\ncat <<EOF\ngcloud app deploy app.yaml\nEOF\ngcloud app deploy app.yaml",
-    ["builds-submit", "app-deploy"],
-    "heredoc body and surrounding commands",
-  ],
-  [
-    "cat <<'ONE' <<-\"TWO\"\ngcloud builds submit .\nONE\n\tgcloud app deploy app.yaml\n\tTWO\ngcloud app deploy app.yaml",
-    ["app-deploy"],
-    "quoted and tab-stripped multiple heredocs",
-  ],
-  [
-    "printf '%s\\n' payload <<<\"gcloud builds submit .\"\ngcloud app deploy app.yaml",
-    ["app-deploy"],
-    "here string is not a heredoc",
-  ],
-]) {
-  assertShellParserCase(contents, expected, message);
-}
+assertForbiddenSignature(
+  JSON.stringify({ scripts: { deploy: "gcloud builds submit ." } }),
+  "package-script surface",
+  "package.json",
+);
+assertForbiddenSignature(
+  "command: [gcloud, builds, submit, .]\n",
+  "YAML argv array",
+  "new-cloudbuild.yaml",
+);
+assertForbiddenSignature(
+  JSON.stringify({ entrypoint: "gcloud", args: ["app", "deploy", "app.yaml"] }),
+  "JSON entrypoint and argv array",
+  "new-cloudbuild.json",
+);
 
 assert.equal(
   discoverDeployStagingCallsites({
-    "scripts/log-deploy.sh": `#!/usr/bin/env bash
-echo "gcloud builds submit ."
-printf '%s\\n' 'gcloud beta app deploy app.yaml'
+    "scripts/comment-only.sh": `#!/usr/bin/env bash
+# gcloud builds submit .
+# gcloud app deploy app.yaml
 `,
   }).length,
   0,
-  "quoted deploy text must not create executable callsites",
-);
-
-expectOpaqueExecutionFailure(
-  "#!/usr/bin/env bash\neval 'gcloud builds submit .'\n",
-  "eval",
-);
-expectOpaqueExecutionFailure(
-  "#!/usr/bin/env bash\neval 'gcloud --project=mento-monitoring builds submit .'\n",
-  "eval",
-);
-const duplicateOpaqueErrors = [];
-discoverDeployStagingCallsites(
-  {
-    "scripts/repeated-opaque-deploy.sh": `#!/usr/bin/env bash
-eval 'gcloud builds submit .'
-eval 'gcloud builds submit .'
-`,
-  },
-  duplicateOpaqueErrors,
-);
-assert.equal(
-  duplicateOpaqueErrors.filter((error) => error.includes("opaque shell eval"))
-    .length,
-  1,
-  "repeated opaque boundaries must report one diagnostic per file and surface",
-);
-expectOpaqueExecutionFailure(
-  "#!/usr/bin/env bash\nsh -c 'gcloud app deploy app.yaml'\n",
-  "sh -c",
-);
-expectOpaqueExecutionFailure(
-  "#!/usr/bin/env bash\nprintf 'gcloud builds submit .\\n' | xargs -I{} sh -c '{}'\n",
-  "xargs shell evaluation",
-);
-expectOpaqueExecutionFailure(
-  '#!/usr/bin/env bash\nprintf \'gcloud app deploy app.yaml\\n\' > "/tmp/deploy script"\nbash "/tmp/deploy script"\n',
-  "generated /tmp/deploy script",
-);
-expectOpaqueExecutionFailure(
-  "#!/usr/bin/env bash\nprintf 'gcloud app deploy app.yaml\\n' > /tmp/deploy\nsource /tmp/deploy\n",
-  "generated /tmp/deploy",
-);
-expectOpaqueExecutionFailure(
-  "#!/usr/bin/env bash\nprintf 'gcloud app deploy app.yaml\\n' > /tmp/deploy\n. /tmp/deploy\n",
-  "generated /tmp/deploy",
-);
-expectOpaqueExecutionFailure(
-  "#!/usr/bin/env bash\nprintf 'gcloud app deploy app.yaml\\n' > /tmp/deploy\nsh < /tmp/deploy\n",
-  "generated /tmp/deploy",
-);
-expectOpaqueExecutionFailure(
-  "#!/usr/bin/env bash\nprintf 'gcloud app deploy app.yaml\\n' > /tmp/deploy\nprintf '%s\\n' /tmp/deploy | xargs -I{} sh\n",
-  "xargs generated /tmp/deploy",
-);
-
-const safeQuotedLogErrors = [];
-assert.equal(
-  discoverDeployStagingCallsites(
-    {
-      "scripts/log-only.sh": `#!/usr/bin/env bash
-echo "gcloud builds submit ."
-printf '%s\\n' 'gcloud app deploy app.yaml'
-command -v gcloud
-`,
-    },
-    safeQuotedLogErrors,
-  ).length,
-  0,
-  "quoted deploy text and gcloud lookup must not create executable callsites",
-);
-assert.deepEqual(
-  safeQuotedLogErrors,
-  [],
-  "quoted deploy text and gcloud lookup must not create opaque-execution errors",
+  "comments must remain outside the literal deploy policy",
 );
 
 const commentsOnly = {
@@ -617,6 +483,13 @@ assert.equal(
   discoverDeployStagingCallsites(commentsOnly).length,
   discoverDeployStagingCallsites(files).length,
   "comments must not create executable callsites",
+);
+assert.equal(
+  discoverDeployStagingCallsites({
+    "scripts/gcloud-wrapper.sh": "gcloud.py app deploy app.yaml\n",
+  }).length,
+  0,
+  "different executable names must not match the gcloud basename",
 );
 
 assertDeployStagingContract(files);
