@@ -8,13 +8,17 @@
 # guard and exfiltrate every repo-level secret the workflow names. The guard is
 # a convention, not a security boundary.
 #
-# FIX. A GitHub Environment whose deployment-branch policy is limited to the
-# repo's protected branch (main) makes secret access SERVER-ENFORCED: a job that
-# declares `environment: sentry-pipeline` only receives the environment's
-# secrets when the run's ref satisfies the branch policy, no matter what the
-# branch's workflow file says. A `workflow_dispatch` from a feature branch is
-# refused at the environment gate before the job starts; scheduled runs (always
-# on the default branch) and `issues`-event runs (also the default branch) pass.
+# FIX. A GitHub Environment whose deployment-branch policy names `main`
+# explicitly makes secret access SERVER-ENFORCED: a job that declares
+# `environment: sentry-pipeline` only receives the environment's secrets when
+# the run's ref satisfies the branch policy, no matter what the branch's
+# workflow file says. A `workflow_dispatch` from a feature branch is refused at
+# the environment gate before the job starts; scheduled runs (always on the
+# default branch) and `issues`-event runs (also the default branch) pass.
+#
+# The policy MUST be an explicit `branch_pattern`, not `protected_branches`
+# (#1649) — see the deployment_branch_policy block below for why that shape
+# fails open in this repo.
 # This mirrors the `production-infra` environment that already gates Terraform
 # applies — but this one carries NO required reviewers (the pipeline is
 # unattended; a reviewer gate would stall every scheduled run) and NO wait timer.
@@ -41,35 +45,118 @@ resource "github_repository_environment" "sentry_pipeline" {
   repository  = "monitoring-monorepo"
   environment = "sentry-pipeline"
 
-  # Deployment-branch policy limited to PROTECTED branches. `main` is the repo's
-  # only protected branch, so this restricts every environment consumer to main
-  # — the same shape `scripts/verify-github-environment-protection.mjs` asserts
-  # for `production-infra` (protected_branches = true, custom_branch_policies =
-  # false). No `reviewers {}` block and no `wait_timer`: the pipeline runs
-  # unattended, so a human-approval gate would stall every scheduled run.
-  #
-  # `can_admins_bypass = false` is load-bearing here. The default (true) lets a
-  # repo ADMIN bypass the deployment-branch policy — verified empirically: an
-  # admin `workflow_dispatch` of an environment-gated job from a non-main branch
-  # (with the in-workflow `if: main` guard stripped, as a malicious branch would)
-  # read the environment secret. Setting it false closes that SILENT bypass — an
-  # admin can no longer read the secret just by dispatching an off-main branch.
-  # It does NOT by itself contain a fully-compromised repo admin, who holds
-  # Administration:write and could first EDIT this environment (re-enable bypass
-  # or widen the branch policy) then dispatch. That live settings edit leaves this
-  # file untouched, so the identity contract (which hashes only the checked-in
-  # block) does not catch it and no drift job monitors it — only the next manual
-  # `pnpm tf apply platform` reconciles it. Its value is still defense-in-depth:
-  # any admin bypass becomes an out-of-band settings change, not a silent one-step
-  # dispatch. Zero operational cost — legitimate runs are
-  # scheduled on `main`, which is protected and satisfies the policy regardless
-  # of this flag (issue #1289).
+  # `can_admins_bypass = false` keeps repo admins subject to whatever protection
+  # rules this environment declares. It does NOT bound the deployment-branch
+  # policy on its own (it governs the reviewer / wait-timer rules, which this
+  # environment does not declare) — the branch pattern below is what restricts
+  # access to `main`.
   can_admins_bypass = false
 
+  # CUSTOM branch policy, NOT `protected_branches` (issue #1649). This is the
+  # correction that makes the #1289 gate actually work:
+  #
+  #   `protected_branches = true` restricts deployments to branches covered by
+  #   CLASSIC branch protection. This repo protects `main` with a RULESET, and
+  #   has no classic protection (`GET /repos/:o/:r/branches/main/protection`
+  #   returns 404 "Branch not protected"), so the policy matched nothing and
+  #   FAILED OPEN. Verified empirically: with that shape live, an admin
+  #   `workflow_dispatch`, a non-admin `workflow_dispatch`, and a non-admin
+  #   `push` all reached the environment's secrets from a non-main branch.
+  #   `GET /repos/:o/:r/branches/main` reporting `"protected": true` (rulesets
+  #   count there, but the deployment policy does not read that field) is what
+  #   made the broken config look correct.
+  #
+  # An explicit branch pattern does not depend on classic protection, so it
+  # evaluates regardless of which protection mechanism the repo uses. The
+  # matching pattern lives in the companion
+  # `github_repository_environment_deployment_policy` resource below —
+  # `custom_branch_policies = true` with no pattern would deny every deployment.
   deployment_branch_policy {
-    protected_branches     = true
-    custom_branch_policies = false
+    protected_branches     = false
+    custom_branch_policies = true
   }
+}
+
+# The one branch allowed to deploy to `sentry-pipeline`. Exact name, no glob:
+# `main` matches only `main`. Without this resource the custom policy above has
+# an empty allow-list and every deployment is refused, so the two must land in
+# the same apply.
+resource "github_repository_environment_deployment_policy" "sentry_pipeline_main" {
+  repository     = "monitoring-monorepo"
+  environment    = github_repository_environment.sentry_pipeline.environment
+  branch_pattern = "main"
+}
+
+# `production-infra` and `production-services` predate Terraform ownership and
+# were created through the UI (ADR 0050 recorded them as the UI-managed
+# precedent). They carry the SAME broken `protected_branches = true` policy, so
+# they are adopted here to correct it.
+#
+# ADOPTION IS A STATE OPERATION, NOT A CONFIG ONE. The identity contract forbids
+# top-level `import` blocks, so these resources must be bound to the existing
+# environments with an explicit import BEFORE the first apply, or Terraform will
+# try to create environments that already exist:
+#
+#   terraform -chdir=terraform import \
+#     github_repository_environment.production_infra \
+#     monitoring-monorepo:production-infra
+#   terraform -chdir=terraform import \
+#     github_repository_environment.production_services \
+#     monitoring-monorepo:production-services
+#
+# After importing, the plan for these two must read `0 to add, N to change,
+# 0 to destroy`. Anything else means the shape below does not match live and
+# must be corrected before applying. Runbook: docs/terraform.md.
+#
+# production-infra additionally gates every production Terraform apply behind a
+# required reviewer (ADR 0029). That reviewer rule is enforced independently of
+# the branch policy, so it is the control that DID hold while the branch policy
+# was inert — it is modeled here exactly as it exists live so the adoption
+# cannot weaken it. Review the plan for this resource with particular care: a
+# diff that drops `reviewers` would remove the production apply gate.
+resource "github_repository_environment" "production_infra" {
+  repository  = "monitoring-monorepo"
+  environment = "production-infra"
+
+  can_admins_bypass = false
+
+  # Human approval for production Terraform applies (ADR 0029). Single active
+  # maintainer, so this is operator acknowledgement rather than independent
+  # review; revisit when a second maintainer exists.
+  reviewers {
+    users = [117495] # chapati23
+  }
+
+  deployment_branch_policy {
+    protected_branches     = false
+    custom_branch_policies = true
+  }
+}
+
+resource "github_repository_environment_deployment_policy" "production_infra_main" {
+  repository     = "monitoring-monorepo"
+  environment    = github_repository_environment.production_infra.environment
+  branch_pattern = "main"
+}
+
+resource "github_repository_environment" "production_services" {
+  repository  = "monitoring-monorepo"
+  environment = "production-services"
+
+  can_admins_bypass = false
+
+  # No reviewers and no wait timer: this environment records routine deploys
+  # from `main` rather than gating them on a human.
+  deployment_branch_policy {
+    protected_branches     = false
+    custom_branch_policies = true
+  }
+}
+
+resource "github_repository_environment_deployment_policy" "production_services_main" {
+  repository     = "monitoring-monorepo"
+  environment    = github_repository_environment.production_services.environment
+  branch_pattern = "main"
 }
 
 # The five Sentry-pipeline-EXCLUSIVE secrets, moved from `github_actions_secret`
