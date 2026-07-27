@@ -305,7 +305,9 @@ function programmaticDeployRecords(filePath, contents, errors) {
         }
       }
 
-      const commandVector = staticStringArray(invocationArguments[0]);
+      const commandVector =
+        staticStringArray(invocationArguments[0]) ??
+        staticStringArrayProperty(invocationArguments[0], "cmd");
       if (
         commandVector !== undefined &&
         isGcloudExecutable(commandVector[0] ?? "")

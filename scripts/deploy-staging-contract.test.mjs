@@ -683,6 +683,45 @@ assertForbiddenSignature(
   "scripts/command-vector-deploy.mjs",
 );
 assertForbiddenSignature(
+  `Bun.spawn({
+  cmd: [
+    "gcloud",
+    "builds",
+    "submit",
+    ".",
+  ],
+});
+`,
+  "multiline object-form command-vector argv",
+  "scripts/object-command-vector-deploy.mjs",
+);
+assertForbiddenSignature(
+  `Bun.spawnSync({
+  cmd: [
+    "gcloud",
+    "app",
+    "deploy",
+    "app.yaml",
+  ],
+});
+`,
+  "multiline synchronous object-form command-vector argv",
+  "scripts/sync-object-command-vector-deploy.mjs",
+);
+assertForbiddenSignature(
+  `run({
+  cmd: [
+    "gcloud",
+    "builds",
+    "submit",
+    ".",
+  ],
+});
+`,
+  "multiline unknown object-form wrapper fails closed",
+  "scripts/unknown-object-command-vector-deploy.mjs",
+);
+assertForbiddenSignature(
   `new Deno.Command("gcloud", {
   args: [
     "app",
@@ -777,6 +816,18 @@ execFileSync("gcloud", [
 };
 `,
     "AST recovery must not treat inert constructor data as an invocation",
+  ],
+  [
+    `const example = {
+  cmd: [
+    "gcloud",
+    "builds",
+    "submit",
+    ".",
+  ],
+};
+`,
+    "AST recovery must not treat an inert Bun command vector as an invocation",
   ],
 ]) {
   assert.equal(
