@@ -214,7 +214,8 @@ const resolveDependencies = (input: PegPollerDependencies): Dependencies => {
       input.fetchStructuralContext ?? fetchPegStructuralContext,
     fetchBitvavo: input.fetchBitvavo ?? fetchBitvavoObservation,
     fetchKraken: input.fetchKraken ?? fetchKrakenObservation,
-    // Replaced adapters need explicit listing requests, so mocks never call real providers.
+    // Replaced observation adapters must explicitly opt into listing requests,
+    // so a mock never triggers real provider traffic.
     fetchBitvavoListing: resolveListingDependency(
       input.fetchBitvavoListing,
       input.fetchBitvavo,
@@ -456,20 +457,20 @@ function fetchListing(
   throw new Error(`Unsupported peg provider: ${input.source.provider}`);
 }
 
-function clearSource(state: SourceState, refSize: number | null): null {
+function clearSource(state: SourceState, refSize: number | null): void {
+  state.observation = null;
   state.referenceSize = refSize;
   state.conversionValidUntil = null;
-  return (state.observation = null);
 }
+
 function cachedObservation(
   state: SourceState,
   source: PegSource,
   policy: PegSourcePolicy,
   context: CycleContext,
 ): PegObservation | null {
-  if (state.listingState === "absent" || state.listingState === "halted") {
-    return clearSource(state, state.referenceSize);
-  }
+  if (state.listingState !== null && state.listingState !== "listed")
+    clearSource(state, state.referenceSize);
   if (state.observation?.venueState === "halted") return state.observation;
   const conversionFresh =
     source.convertVia === undefined ||
@@ -815,7 +816,8 @@ async function pollSource(
       listingCadenceDue,
     );
   }
-  // A changed reference size forces a new decision inside ordinary cadence.
+  // A changed binding reference size requires an immediate new decision even
+  // inside the ordinary cadence window.
   const due = observationCadenceDue || state.referenceSize !== refSize;
   if (due) {
     const snapshot = await pollDueSource(
