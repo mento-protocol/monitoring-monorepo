@@ -993,6 +993,73 @@ describe("peg poll cycle freshness and measurements", () => {
     expect(fetchBitvavo).toHaveBeenCalledTimes(1);
   });
 
+  it("clears a cached halted diagnostic after a listing-only absence check", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const baseMs = 1_800_000_000_000;
+    let nowMs = baseMs;
+    let limit0 = fixed15(50);
+    const fetchBitvavo = vi.fn(async (request) => {
+      request.onListingChecked?.({ state: "halted", checkedAt: nowMs });
+      return observation(nowMs, {
+        vwap: null,
+        filledFraction: 0,
+        capped: true,
+        bid: null,
+        ask: null,
+        lastTradeAt: null,
+        observationAt: null,
+        sequence: null,
+        venueState: "halted",
+      });
+    });
+    const fetchBitvavoListing = vi.fn(async () => ({
+      state: "absent" as const,
+      checkedAt: nowMs,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000), { limit0 }),
+      ),
+      fetchBitvavo,
+      fetchBitvavoListing,
+      publish: vi.fn(),
+    });
+
+    const first = (await poller.pollCycle(input))[0]!;
+    expect(source(first)).toMatchObject({
+      healthy: false,
+      observation: { venueState: "halted" },
+      listingState: "halted",
+    });
+
+    // Move only the observation cadence; the listing cadence remains anchored
+    // at the initial status-only listing evidence.
+    nowMs += 10_000;
+    limit0 = fixed15(40);
+    const forced = (await poller.pollCycle(input))[0]!;
+    expect(source(forced)).toMatchObject({
+      observation: { venueState: "halted" },
+      listingState: "halted",
+    });
+
+    // The independent listing-only absence is authoritative over the cached
+    // halt diagnostic and leaves no price authority.
+    nowMs += 20_000;
+    const absent = (await poller.pollCycle(input))[0]!;
+    expect(source(absent)).toMatchObject({
+      healthy: false,
+      observation: null,
+      listingState: "absent",
+      listingAbsentConsecutiveChecks: 1,
+      deviationBps: null,
+      premiumBps: null,
+    });
+    expect(fetchBitvavo).toHaveBeenCalledTimes(2);
+    expect(fetchBitvavoListing).toHaveBeenCalledOnce();
+  });
+
   it("preserves the last successful identity across a status-only halt", async () => {
     const spec = primaryAsset();
     const input = makeInput([spec]);

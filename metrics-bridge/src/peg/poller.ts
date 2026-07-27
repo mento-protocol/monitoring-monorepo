@@ -221,8 +221,10 @@ const resolveDependencies = (input: PegPollerDependencies): Dependencies => {
       input.fetchStructuralContext ?? fetchPegStructuralContext,
     fetchBitvavo: input.fetchBitvavo ?? fetchBitvavoObservation,
     fetchKraken: input.fetchKraken ?? fetchKrakenObservation,
-    // Replaced observation adapters must explicitly opt into listing requests,
-    // so a mock never triggers real provider traffic.
+    // Explicit listing dependencies serve independent listing-only requests.
+    // Ordinary due observation adapters report through onListingChecked, so
+    // they do not trigger a duplicate provider listing call. Replaced
+    // observation adapters must opt in so a mock never reaches real traffic.
     fetchBitvavoListing: resolveListingDependency(
       input.fetchBitvavoListing,
       input.fetchBitvavo,
@@ -443,9 +445,15 @@ function cachedObservation(
   policy: PegSourcePolicy,
   context: CycleContext,
 ): PegObservation | null {
-  if (state.observation?.venueState === "halted") return state.observation;
-  if (state.listingState !== null && state.listingState !== "listed")
+  // An explicit absence is newer authoritative evidence than a retained halt
+  // diagnostic. A halted listing still retains a halted observation, but
+  // cannot retain an executable cached book.
+  if (state.listingState === "absent") {
     clearSource(state, state.referenceSize);
+    return null;
+  }
+  if (state.observation?.venueState === "halted") return state.observation;
+  if (state.listingState === "halted") clearSource(state, state.referenceSize);
   const conversionFresh =
     source.convertVia === undefined ||
     (state.conversionValidUntil !== null &&
