@@ -469,9 +469,9 @@ function cachedObservation(
   policy: PegSourcePolicy,
   context: CycleContext,
 ): PegObservation | null {
+  if (state.observation?.venueState === "halted") return state.observation;
   if (state.listingState !== null && state.listingState !== "listed")
     clearSource(state, state.referenceSize);
-  if (state.observation?.venueState === "halted") return state.observation;
   const conversionFresh =
     source.convertVia === undefined ||
     (state.conversionValidUntil !== null &&

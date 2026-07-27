@@ -943,8 +943,9 @@ describe("peg poll cycle freshness and measurements", () => {
     const spec = primaryAsset();
     const input = makeInput([spec]);
     let nowMs = 1_800_000_000_000;
-    const fetchBitvavo = vi.fn(async () =>
-      observation(nowMs, {
+    const fetchBitvavo = vi.fn(async (request) => {
+      request.onListingChecked?.({ state: "halted", checkedAt: nowMs });
+      return observation(nowMs, {
         vwap: null,
         filledFraction: 0,
         capped: true,
@@ -954,8 +955,8 @@ describe("peg poll cycle freshness and measurements", () => {
         observationAt: null,
         sequence: null,
         venueState: "halted",
-      }),
-    );
+      });
+    });
     const poller = createPegPoller({
       nowMs: () => nowMs,
       fetchStructuralContext: vi.fn(async () =>
@@ -968,6 +969,7 @@ describe("peg poll cycle freshness and measurements", () => {
     const first = (await poller.pollCycle(input))[0]!;
     expect(source(first)).toMatchObject({
       healthy: false,
+      listingState: "halted",
       newSuccess: false,
       newUsableDecision: false,
       deviationBps: null,
@@ -983,6 +985,7 @@ describe("peg poll cycle freshness and measurements", () => {
     const cached = (await poller.pollCycle(input))[0]!;
     expect(source(cached)).toMatchObject({
       healthy: false,
+      listingState: "halted",
       newSuccess: false,
       newUsableDecision: false,
       observation: { venueState: "halted" },
