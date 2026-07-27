@@ -1,7 +1,15 @@
 resource "grafana_rule_group" "peg_monitoring" {
+  for_each = local.peg_alert_instances
+
   name             = "Peg Monitoring"
-  folder_uid       = grafana_folder.peg_monitoring.uid
+  folder_uid       = grafana_folder.peg_monitoring[each.key].uid
   interval_seconds = 60
+
+  depends_on = [
+    grafana_contact_point.peg_market_warning,
+    grafana_contact_point.peg_ops_warning,
+    grafana_contact_point.peg_page,
+  ]
 
   dynamic "rule" {
     for_each = local.peg_rule_definitions

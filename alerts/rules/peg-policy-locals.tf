@@ -9,6 +9,14 @@
 # poll_success while intentionally omitting deviation_bps.
 
 locals {
+  # This source-controlled switch is the only production activation boundary
+  # for Peg Grafana consumers. Keep it false until the runbook's production
+  # preconditions have been verified and a reviewed source change enables it.
+  peg_alerts_enabled = false
+  peg_alert_instances = local.peg_alerts_enabled ? {
+    "peg-monitoring" = true
+  } : {}
+
   peg_policy_bundle                                           = jsondecode(file("${path.module}/peg-thresholds.json"))
   peg_active_policy                                           = local.peg_policy_bundle.active
   peg_previous_policy                                         = local.peg_policy_bundle.previous
