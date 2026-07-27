@@ -157,7 +157,9 @@ reviewer.
 `sentry-pipeline` (`terraform/github-environment.tf`, issue #1289,
 [ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) gates the Sentry
 triage/autofix pipeline's exclusive secrets. It has a main-only
-protected-branch deployment policy and — deliberately, the pipeline is
+protected-branch deployment policy with admin bypass disabled
+(`can_admins_bypass = false`, #1289 — an admin cannot silently dispatch an
+off-main branch past the policy) and — deliberately, the pipeline is
 unattended — no reviewer or wait timer. Unlike the other two it is
 Terraform-managed; every platform apply reconciles its policy and secrets. Every secret-bearing Sentry job declares it, so those secrets are
 reachable only from `main` — server-enforced even on a branch-modified
