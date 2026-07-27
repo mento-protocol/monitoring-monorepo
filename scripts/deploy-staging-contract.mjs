@@ -188,17 +188,250 @@ function shellCommands(contents) {
   return commands;
 }
 
+const GCLOUD_GLOBAL_FLAGS_WITH_VALUE = new Set([
+  "--account",
+  "--billing-project",
+  "--configuration",
+  "--flags-file",
+  "--flatten",
+  "--format",
+  "--impersonate-service-account",
+  "--project",
+  "--trace-token",
+  "--verbosity",
+]);
+
+const SHELL_FILE_EXTENSIONS = [
+  ".bash",
+  ".command",
+  ".fish",
+  ".ksh",
+  ".sh",
+  ".zsh",
+];
+const SHELL_COMMAND_BOUNDARIES = new Set(["(", ")", ";", "&&", "||", "|", "&"]);
+const SHELL_COMMAND_PREFIXES = new Set([
+  "!",
+  "command",
+  "do",
+  "elif",
+  "else",
+  "env",
+  "if",
+  "then",
+]);
+
+function shellTokens(command) {
+  const tokens = [];
+  let token = "";
+  let quote;
+  let escaped = false;
+  const flush = () => {
+    if (token) tokens.push(token);
+    token = "";
+  };
+
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (escaped) {
+      token += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) {
+        quote = undefined;
+      } else {
+        token += character;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      flush();
+      continue;
+    }
+    if (character === "(" && command[index - 1] === "$") {
+      token += character;
+      continue;
+    }
+    if (
+      character === "(" ||
+      character === ")" ||
+      character === ";" ||
+      character === "|" ||
+      character === "&"
+    ) {
+      flush();
+      const next = command[index + 1];
+      if (next === character && (character === "|" || character === "&")) {
+        tokens.push(`${character}${next}`);
+        index += 1;
+      } else {
+        tokens.push(character);
+      }
+      continue;
+    }
+    token += character;
+  }
+  flush();
+  return tokens;
+}
+
+function isAssignment(token) {
+  return /^[A-Za-z_][A-Za-z0-9_]*=.*/u.test(token);
+}
+
+function shellFilePath(filePath) {
+  return SHELL_FILE_EXTENSIONS.some((extension) =>
+    filePath.endsWith(extension),
+  );
+}
+
+function isShellScript(filePath, contents) {
+  return (
+    shellFilePath(filePath) ||
+    /^#!.*\b(?:bash|dash|fish|ksh|sh|zsh)\b/u.test(contents)
+  );
+}
+
+// This static scan follows direct commands and $(...) substitutions. Runtime
+// indirection through eval, xargs, or generated shell text remains unsupported.
+function commandSubstitutions(command) {
+  const substitutions = [];
+  let quote;
+  let substitution;
+  let escaped = false;
+
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+
+    if (substitution) {
+      if (substitution.quote) {
+        if (character === substitution.quote) {
+          substitution.quote = undefined;
+        }
+        continue;
+      }
+      if (character === '"' || character === "'") {
+        substitution.quote = character;
+        continue;
+      }
+      if (character === "$") {
+        if (command[index + 1] === "(") {
+          substitution.depth += 1;
+          index += 1;
+        }
+        continue;
+      }
+      if (character !== ")") continue;
+      substitution.depth -= 1;
+      if (substitution.depth === 0) {
+        substitutions.push(command.slice(substitution.start, index));
+        substitution = undefined;
+      }
+      continue;
+    }
+
+    if (quote) {
+      if (quote === '"' && character === "$" && command[index + 1] === "(") {
+        substitution = { depth: 1, start: index + 2 };
+        index += 1;
+        continue;
+      }
+      if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "$" && command[index + 1] === "(") {
+      substitution = { depth: 1, start: index + 2 };
+      index += 1;
+    }
+  }
+  return substitutions;
+}
+
+function gcloudCommandKind(tokens, index) {
+  let commandIndex = index + 1;
+  while (commandIndex < tokens.length) {
+    const token = tokens[commandIndex];
+    if (token === "alpha" || token === "beta") {
+      commandIndex += 1;
+      continue;
+    }
+    if (!token.startsWith("-")) break;
+    const [flag] = token.split("=", 1);
+    commandIndex += 1;
+    if (
+      !token.includes("=") &&
+      GCLOUD_GLOBAL_FLAGS_WITH_VALUE.has(flag) &&
+      commandIndex < tokens.length
+    ) {
+      commandIndex += 1;
+    }
+  }
+
+  if (
+    tokens[commandIndex] === "builds" &&
+    tokens[commandIndex + 1] === "submit"
+  ) {
+    return "builds-submit";
+  }
+  if (tokens[commandIndex] === "app" && tokens[commandIndex + 1] === "deploy") {
+    return "app-deploy";
+  }
+  return undefined;
+}
+
 function commandRecords(filePath, surface, contents) {
   const records = [];
-  const pattern = /\bgcloud\s+(builds\s+submit|app\s+deploy)\b/gu;
-  for (const command of shellCommands(contents)) {
-    for (const match of command.matchAll(pattern)) {
-      records.push({
-        filePath,
-        surface,
-        kind: match[1].startsWith("builds") ? "builds-submit" : "app-deploy",
-        command,
-      });
+  const commands = shellCommands(contents);
+  for (
+    let commandIndex = 0;
+    commandIndex < commands.length;
+    commandIndex += 1
+  ) {
+    const command = commands[commandIndex];
+    commands.push(...commandSubstitutions(command));
+    const tokens = shellTokens(command);
+    let commandStart = true;
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      if (SHELL_COMMAND_BOUNDARIES.has(token)) {
+        commandStart = true;
+        continue;
+      }
+      if (SHELL_COMMAND_PREFIXES.has(token) && commandStart) continue;
+      if (commandStart && isAssignment(token)) continue;
+      if (commandStart && token === "gcloud") {
+        const kind = gcloudCommandKind(tokens, index);
+        if (!kind) continue;
+        records.push({
+          filePath,
+          surface,
+          kind,
+          command,
+        });
+      }
+      commandStart = false;
     }
   }
   return records;
@@ -220,7 +453,7 @@ function visitYaml(value, path, callback) {
 
 function parseStructuredFile(filePath, contents, errors) {
   try {
-    return filePath.endsWith("package.json")
+    return filePath.endsWith(".json")
       ? JSON.parse(contents)
       : loadYaml(contents);
   } catch (error) {
@@ -245,7 +478,14 @@ export function discoverDeployStagingCallsites(files, errors = []) {
       continue;
     }
 
-    if (filePath.endsWith(".yml") || filePath.endsWith(".yaml")) {
+    if (
+      filePath.endsWith(".yml") ||
+      filePath.endsWith(".yaml") ||
+      filePath.endsWith(".json")
+    ) {
+      if (filePath.endsWith(".json") && !contents.includes("gcloud")) {
+        continue;
+      }
       const document = parseStructuredFile(filePath, contents, errors);
       visitYaml(document, "", (value, path) => {
         if (typeof value === "string") {
@@ -271,7 +511,7 @@ export function discoverDeployStagingCallsites(files, errors = []) {
       continue;
     }
 
-    if (filePath.endsWith(".sh") || contents.startsWith("#!")) {
+    if (isShellScript(filePath, contents)) {
       records.push(...commandRecords(filePath, "shell", contents));
     }
   }

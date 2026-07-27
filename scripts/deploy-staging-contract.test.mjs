@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -15,15 +23,46 @@ const repoRoot = path.resolve(
   "..",
 );
 
+const SHELL_FILE_EXTENSIONS = [
+  ".bash",
+  ".command",
+  ".fish",
+  ".ksh",
+  ".sh",
+  ".zsh",
+];
+
 function isCandidate(filePath) {
   return (
     filePath.endsWith(".tf") ||
-    filePath.endsWith(".sh") ||
+    SHELL_FILE_EXTENSIONS.some((extension) => filePath.endsWith(extension)) ||
     filePath.endsWith(".yml") ||
     filePath.endsWith(".yaml") ||
+    filePath.endsWith(".json") ||
     filePath.endsWith("package.json") ||
     path.extname(filePath) === ""
   );
+}
+
+function isExecutable(metadata) {
+  return (metadata.mode & 0o111) !== 0;
+}
+
+function hasShebang(filePath) {
+  const descriptor = openSync(filePath, "r");
+  try {
+    const bytes = Buffer.alloc(2);
+    return (
+      readSync(descriptor, bytes, 0, bytes.length, 0) === bytes.length &&
+      bytes.toString("utf8") === "#!"
+    );
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function shouldScanFile(filePath, metadata, startsWithShebang) {
+  return isCandidate(filePath) || isExecutable(metadata) || startsWithShebang;
 }
 
 function repositoryFiles() {
@@ -33,13 +72,13 @@ function repositoryFiles() {
     { cwd: repoRoot, encoding: "utf8" },
   )
     .split("\0")
-    .filter(Boolean)
-    .filter(isCandidate);
+    .filter(Boolean);
   const files = {};
   for (const filePath of paths) {
     const absolutePath = path.join(repoRoot, filePath);
-    const metadata = lstatSync(absolutePath);
-    if (metadata.isSymbolicLink()) {
+    const linkMetadata = lstatSync(absolutePath);
+    let metadata = linkMetadata;
+    if (linkMetadata.isSymbolicLink()) {
       const target = realpathSync(absolutePath);
       const relativeTarget = path.relative(repoRoot, target);
       if (
@@ -50,16 +89,14 @@ function repositoryFiles() {
           `${filePath}: deploy-staging contract source symlink must stay inside the repository`,
         );
       }
+      metadata = statSync(absolutePath);
     }
-    if (!metadata.isFile() && !metadata.isSymbolicLink()) continue;
+    if (!metadata.isFile()) continue;
+    if (!shouldScanFile(filePath, metadata, hasShebang(absolutePath))) {
+      continue;
+    }
     const contents = readFileSync(absolutePath, "utf8");
-    if (
-      path.extname(filePath) !== "" ||
-      filePath.endsWith("package.json") ||
-      contents.startsWith("#!")
-    ) {
-      files[filePath] = contents;
-    }
+    files[filePath] = contents;
   }
   return files;
 }
@@ -81,6 +118,27 @@ function expectFailure(files, expected) {
 }
 
 const files = repositoryFiles();
+
+assert.equal(
+  shouldScanFile("scripts/new-deploy.bash", { mode: 0o100755 }, false),
+  true,
+  "executable .bash files must be scanned for deploy callsites",
+);
+assert.equal(
+  shouldScanFile("scripts/new-deploy.command", { mode: 0o100644 }, false),
+  true,
+  "shell extensions must be scanned without a shebang",
+);
+assert.equal(
+  shouldScanFile("scripts/new-deploy.custom", { mode: 0o100644 }, true),
+  true,
+  "non-executable arbitrary-extension shebang files must be scanned",
+);
+assert.equal(
+  isCandidate("cloudbuild.json"),
+  true,
+  "JSON Cloud Build configurations must be scanned for deploy callsites",
+);
 
 expectFailure(
   mutate(
@@ -158,6 +216,89 @@ expectFailure(
 `,
   },
   "executable callsite inventory must be exactly",
+);
+
+const nestedJsonCallsites = discoverDeployStagingCallsites({
+  "cloudbuild.json": JSON.stringify({
+    steps: [
+      {
+        name: "gcr.io/cloud-builders/gcloud",
+        args: [
+          "app",
+          "deploy",
+          "--bucket=gs://mento-monitoring-app-engine-source",
+          "app.yaml",
+        ],
+      },
+    ],
+  }),
+});
+assert.deepEqual(
+  nestedJsonCallsites.map(({ kind }) => kind),
+  ["app-deploy"],
+  "nested Cloud Build JSON app deploys must be discovered",
+);
+
+function assertCallsiteKinds(contents, expected, message) {
+  assert.deepEqual(
+    discoverDeployStagingCallsites({
+      "scripts/common-invocations.command": contents,
+    }).map(({ kind }) => kind),
+    expected,
+    message,
+  );
+}
+
+assertCallsiteKinds(
+  "gcloud --project=mento-monitoring builds submit .",
+  ["builds-submit"],
+  "gcloud-wide flags must not hide build submissions",
+);
+assertCallsiteKinds(
+  "gcloud --log-http builds submit .",
+  ["builds-submit"],
+  "boolean gcloud flags must not consume a command group",
+);
+assertCallsiteKinds(
+  "command gcloud --user-output-enabled app deploy app.yaml",
+  ["app-deploy"],
+  "command wrappers must expose app deploys",
+);
+assertCallsiteKinds(
+  "env FOO=bar gcloud beta app deploy app.yaml",
+  ["app-deploy"],
+  "environment wrappers and release tracks must expose app deploys",
+);
+assertCallsiteKinds(
+  "( gcloud builds submit . )",
+  ["builds-submit"],
+  "grouped commands must expose build submissions",
+);
+assertCallsiteKinds(
+  "result=$(gcloud app deploy app.yaml)",
+  ["app-deploy"],
+  "command substitutions must expose app deploys once",
+);
+assertCallsiteKinds(
+  'result="$(gcloud beta app deploy app.yaml)"',
+  ["app-deploy"],
+  "double-quoted command substitutions must expose app deploys",
+);
+assertCallsiteKinds(
+  "echo 'gcloud builds submit .'",
+  [],
+  "single-quoted command text must remain literal",
+);
+
+assert.equal(
+  discoverDeployStagingCallsites({
+    "scripts/log-deploy.sh": `#!/usr/bin/env bash
+echo "gcloud builds submit ."
+printf '%s\\n' 'gcloud beta app deploy app.yaml'
+`,
+  }).length,
+  0,
+  "quoted deploy text must not create executable callsites",
 );
 
 const commentsOnly = {
