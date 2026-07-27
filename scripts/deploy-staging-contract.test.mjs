@@ -17,6 +17,7 @@ import {
   discoverDeployStagingCallsites,
   validateDeployStagingContract,
 } from "./deploy-staging-contract.mjs";
+import { shellCommandRecords } from "./deploy-staging-shell-discovery.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -356,6 +357,24 @@ function assertCallsiteKinds(contents, expected, message) {
   );
 }
 
+function assertShellParserCase(contents, expected, message) {
+  const filePath = "scripts/deploy";
+  const direct = shellCommandRecords(filePath, "shell", contents).map(
+    ({ kind }) => kind,
+  );
+  const discovered = discoverDeployStagingCallsites({
+    [filePath]: contents,
+  }).map(({ kind }) => kind);
+  assert.deepEqual(direct, expected, `${message}: direct shell parser`);
+  assert.deepEqual(discovered, expected, `${message}: contract discovery`);
+  if (expected.length > 0) {
+    expectFailure(
+      { ...files, [filePath]: contents },
+      "executable callsite inventory must be exactly",
+    );
+  }
+}
+
 for (const [contents, expected, message] of [
   [
     "gcloud --project=mento-monitoring builds submit .",
@@ -463,6 +482,44 @@ assertCallsiteKinds(
   [],
   "single-quoted command text must remain literal",
 );
+
+for (const [contents, expected, message] of [
+  ["{ gcloud builds submit .; }", ["builds-submit"], "brace group"],
+  ["f(){ gcloud app deploy app.yaml; }", ["app-deploy"], "function body"],
+  [
+    "function f { gcloud builds submit .; }",
+    ["builds-submit"],
+    "function declaration body",
+  ],
+  [
+    "gcloud builds submit --project=${PROJECT} .",
+    ["builds-submit"],
+    "parameter expansion braces",
+  ],
+  [
+    "echo {one,two}; gcloud app deploy app.yaml",
+    ["app-deploy"],
+    "brace expansion",
+  ],
+  ["echo '{ gcloud builds submit .; }'", [], "quoted braces remain data"],
+  [
+    "gcloud builds submit .\ncat <<EOF\ngcloud app deploy app.yaml\nEOF\ngcloud app deploy app.yaml",
+    ["builds-submit", "app-deploy"],
+    "heredoc body and surrounding commands",
+  ],
+  [
+    "cat <<'ONE' <<-\"TWO\"\ngcloud builds submit .\nONE\n\tgcloud app deploy app.yaml\n\tTWO\ngcloud app deploy app.yaml",
+    ["app-deploy"],
+    "quoted and tab-stripped multiple heredocs",
+  ],
+  [
+    "printf '%s\\n' payload <<<\"gcloud builds submit .\"\ngcloud app deploy app.yaml",
+    ["app-deploy"],
+    "here string is not a heredoc",
+  ],
+]) {
+  assertShellParserCase(contents, expected, message);
+}
 
 assert.equal(
   discoverDeployStagingCallsites({
