@@ -191,10 +191,54 @@ resource "github_actions_variable" "gcp_terraform_refresh_workload_identity_prov
 }
 `;
 
+const pegPolicyVariablesFixture = `
+variable "gcp_peg_policy_project_id" {
+  description = "GCP project ID for the isolated Peg-policy storage project."
+  type        = string
+  default     = "mento-monitoring-peg-policy"
+}
+`;
+
 const pegPolicyFixture = `
+resource "google_project" "peg_policy" {
+  name            = "Mento Peg Policy"
+  project_id      = var.gcp_peg_policy_project_id
+  org_id          = var.gcp_org_id
+  billing_account = var.gcp_billing_account
+  auto_create_network = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_project_iam_member" "peg_policy_terraform_owner" {
+  project = google_project.peg_policy.project_id
+  role    = "roles/owner"
+  member  = "serviceAccount:\${var.terraform_service_account}"
+}
+
+resource "google_project_service" "peg_policy_storage" {
+  project                    = google_project.peg_policy.project_id
+  service                    = "storage.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.peg_policy_terraform_owner]
+}
+
+resource "google_project_service" "peg_policy_iam" {
+  project                    = google_project.peg_policy.project_id
+  service                    = "iam.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.peg_policy_terraform_owner]
+}
+
 resource "google_storage_bucket" "peg_policy" {
-  name                        = "\${google_project.monitoring.project_id}-peg-policy"
-  project                     = google_project.monitoring.project_id
+  name                        = google_project.peg_policy.project_id
+  project                     = google_project.peg_policy.project_id
   location                    = var.gcp_region
   force_destroy               = false
   uniform_bucket_level_access = true
@@ -224,15 +268,15 @@ resource "google_storage_bucket" "peg_policy" {
   }
 
   depends_on = [
-    google_project_service.storage,
+    google_project_service.peg_policy_storage,
     google_storage_bucket_iam_policy.peg_policy_access_logs,
   ]
 }
 
 # trunk-ignore(checkov/CKV_GCP_62): a bucket cannot write access logs to itself.
 resource "google_storage_bucket" "peg_policy_access_logs" {
-  name                        = "\${google_project.monitoring.project_id}-peg-policy-access-logs"
-  project                     = google_project.monitoring.project_id
+  name                        = "\${google_project.peg_policy.project_id}-access-logs"
+  project                     = google_project.peg_policy.project_id
   location                    = var.gcp_region
   force_destroy               = false
   uniform_bucket_level_access = true
@@ -266,14 +310,14 @@ resource "google_storage_bucket" "peg_policy_access_logs" {
     prevent_destroy = true
   }
 
-  depends_on = [google_project_service.storage]
+  depends_on = [google_project_service.peg_policy_storage]
 }
 
 resource "google_project_iam_custom_role" "peg_policy_bucket_controller" {
-  project     = google_project.monitoring.project_id
+  project     = google_project.peg_policy.project_id
   role_id     = "pegPolicyBucketController"
   title       = "Peg policy bucket controller"
-  description = "Controls the authoritative IAM policies on the dormant Peg-policy buckets."
+  description = "Protected Terraform control of Peg bucket metadata, configuration, and authoritative IAM."
   permissions = [
     "storage.buckets.get",
     "storage.buckets.getIamPolicy",
@@ -281,7 +325,7 @@ resource "google_project_iam_custom_role" "peg_policy_bucket_controller" {
     "storage.buckets.update",
   ]
 
-  depends_on = [google_project_service.iam]
+  depends_on = [google_project_service.peg_policy_iam]
 }
 
 data "google_iam_policy" "peg_policy_access_logs" {
@@ -319,12 +363,12 @@ resource "google_service_account" "metrics_bridge_runtime" {
 }
 
 resource "google_service_account" "peg_policy_publisher" {
-  project      = google_project.monitoring.project_id
+  project      = google_project.peg_policy.project_id
   account_id   = "peg-policy-publisher"
   display_name = "Peg policy publisher"
   description  = "Protected Terraform publisher for private Peg policy generations."
 
-  depends_on = [google_project_service.iam]
+  depends_on = [google_project_service.peg_policy_iam]
 }
 
 data "google_iam_policy" "peg_policy" {
@@ -519,6 +563,7 @@ export function validFixtureFiles() {
     "terraform/gcp-project.tf": storageApiFixture,
     "terraform/github-variables.tf": githubVariablesFixture,
     "terraform/peg-policy.tf": pegPolicyFixture,
+    "terraform/variables.tf": pegPolicyVariablesFixture,
     "alerts/infra/main.tf": targetProjectFixture("local.project_id"),
     "governance-watchdog/infra/main.tf": targetProjectFixture(
       "module.governance_watchdog.project_id",

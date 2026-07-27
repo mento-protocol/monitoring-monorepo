@@ -445,6 +445,12 @@ variable "gcp_project_id" {
   default     = "mento-monitoring"
 }
 
+variable "gcp_peg_policy_project_id" {
+  description = "GCP project ID for the isolated Peg-policy storage project."
+  type        = string
+  default     = "mento-monitoring-peg-policy"
+}
+
 variable "gcp_org_id" {
   description = "GCP organization ID. Find with: gcloud organizations list"
   type        = string

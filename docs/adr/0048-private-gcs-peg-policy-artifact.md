@@ -40,26 +40,42 @@ human-approved platform plan and apply before it exists in production.
   `PEG_POLICY_URL` nor `PEG_POLICY_AUTH_MODE` in this change. The isolated Peg
   loop stays dormant while both values are absent; a missing, invalid, or
   mismatched pair fails only that loop.
-- The dormant Terraform source foundation defines a GCS policy bucket with
-  versioning, public-access prevention, uniform bucket-level access,
-  destructive-change protection, and automatic lifecycle deletion after a
-  generation has been noncurrent for 30 days. The publisher's
-  `roles/storage.objectAdmin` grant can still delete objects directly. It also
-  defines no-key runtime and publisher service accounts. The exact direct
-  bucket policy grants the runtime only `roles/storage.objectViewer` and the
-  publisher only `roles/storage.objectAdmin`; a controller custom role can
-  update bucket configuration and replace each bucket policy. The access-log
-  bucket has an exact direct policy for that controller and the Google Storage
-  analytics writer. It retains LIVE objects for 90 days and noncurrent ARCHIVED
-  objects for 30 days. Logs are audit telemetry, never an authorization
-  control.
-- Exact direct bucket policies do not establish effective isolation while this
-  source foundation remains in the monitoring project: inherited project or
-  organization grants, including service-agent authority, may still allow
-  access. Same-project placement is temporary and unresolved. Do not merge,
-  apply, or activate this foundation until a separate effective-isolation
-  control is selected and proven, such as a dedicated Peg project with audited
-  inherited access.
+- The dormant Terraform source foundation creates the
+  `mento-monitoring-peg-policy` project under the monitoring project's
+  organization and billing account. Terraform explicitly manages only Storage
+  and IAM service enablement there; Google project-bootstrap services are not
+  part of the application surface. The policy bucket, access-log bucket, and
+  publisher service account live in that project. The runtime service account
+  remains in `mento-monitoring` for its later Cloud Run attachment and receives
+  one cross-project bucket grant. Routine deploy, PR-plan, trusted-main refresh,
+  and developer identities receive no role in the dedicated project.
+- The policy bucket uses versioning, public-access prevention, uniform
+  bucket-level access, and Terraform destructive-change protection. Cloud
+  Storage automatically deletes a generation only after it has stayed
+  noncurrent for 30 days. That lifecycle rule does not stop the publisher's
+  `roles/storage.objectAdmin` grant from deleting current or retained objects
+  directly. The exact direct bucket policy grants the runtime only
+  `roles/storage.objectViewer` and the publisher only
+  `roles/storage.objectAdmin`.
+- Protected org-Terraform bootstraps the dedicated project with a direct
+  project Owner grant. A bucket-scoped custom role also lets it read and
+  replace each bucket policy and update bucket metadata. That metadata authority
+  includes retention, versioning, logging, uniform-access, and public-access
+  settings; Terraform review and reconciliation protect those settings, not the
+  custom role itself. The Owner grant can also change project IAM. These are
+  intentional protected control-plane exceptions.
+- The access-log bucket's exact direct policy contains only the protected
+  controller and the Google Storage analytics writer. It retains LIVE objects
+  for 90 days and noncurrent ARCHIVED objects for 30 days. Logs are audit
+  telemetry, never an authorization control.
+- Project separation removes monitoring-project roles and service agents from
+  the policy plane, but organization-level grants still inherit. The accepted
+  exceptions are the protected org-Terraform path and organization IAM
+  administrators. The current organization policy also gives org-Terraform
+  inherited `roles/storage.objectViewer`. The policy is non-secret, so that
+  audited protected read path is acceptable; an inherited routine writer is
+  not. Audit effective readers, writers, and IAM administrators before apply
+  and activation.
 - The alerts-rules stack owns `peg-policy/current.json`. Its bytes come
   directly from `alerts/rules/peg-thresholds.json`, so the protected apply that
   owns paging policy also creates each new GCS object generation.
@@ -107,17 +123,23 @@ human-approved platform plan and apply before it exists in production.
   alerts apply.
 - **Default Cloud Run identity** — rejected because a dedicated bucket-scoped
   reader makes runtime authority explicit.
+- **Buckets in `mento-monitoring`** — rejected because monitoring service
+  agents and broad operational roles would inherit access to the policy plane.
+- **Tag-scoped IAM deny policy** — rejected because tag attachment and
+  propagation add a brittle create-time and recovery dependency. A small
+  dedicated project gives the isolation boundary with ordinary project and
+  bucket IAM.
 
 ## Consequences
 
 - This runtime capability can merge and deploy without activating Peg polling.
-- The foundation remains source-only and runtime-dormant. Its direct policies
-  are exact, but no merge, apply, or activation may proceed until the separate
-  effective-isolation control is selected and proven.
-- Before activation, prove the selected effective-isolation control and audit
-  effective readers and writers of the policy and access-log buckets. Access
-  logs help investigate access; they never authorize or block policy
-  publication or reads.
+- The foundation remains source-only and runtime-dormant. The dedicated project
+  is the effective-isolation control; it does not make organization inheritance
+  disappear.
+- Before apply and activation, audit effective readers, writers, and IAM
+  administrators of the dedicated project and both buckets. Any inherited
+  routine writer blocks rollout. Access logs help investigate access; they
+  never authorize or block policy publication or reads.
 - A policy change needs a reviewed artifact generation and an explicit pinned
   runtime-configuration change. The bridge keeps producing the retained
   version until that change lands.

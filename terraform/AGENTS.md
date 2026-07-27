@@ -16,7 +16,7 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, the separated Terraform/service-deploy Workload Identity Federation chains, repo-level GitHub Actions secrets and variables owned by the platform stack, and the dormant, unapplied Peg-policy GCS source foundation. Alloy values are required sensitive, ephemeral operator inputs that terminate at Google provider 6.50.x write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, the isolated Peg-policy storage project, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, the separated Terraform/service-deploy Workload Identity Federation chains, repo-level GitHub Actions secrets and variables owned by the platform stack, and the dormant, unapplied Peg-policy GCS source foundation. Alloy values are required sensitive, ephemeral operator inputs that terminate at Google provider 6.50.x write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
 
 Alloy's runtime project authority is the custom
 `grafanaAgentActivationReader` role with exactly `appengine.services.get` and
@@ -89,13 +89,17 @@ active/passive collector handshake depends on this exact read access.
   every CI-managed Google-provider stack. Add only an exact missing permission
   named by a provider denial.
 - The Peg-policy foundation remains source-only and creates no policy object or
-  Cloud Run runtime attachment. Its two authoritative bucket policies make
-  direct grants exact, but inherited project or organization grants can still
-  allow access while the buckets remain in the monitoring project. Same-project
-  placement is temporary and unresolved: do not merge, apply, or activate until
-  a separate effective-isolation control is selected and proven. Peg-policy
-  access logs are audit telemetry, never an authorization control; audit
-  effective readers and writers on both buckets before activation.
+  Cloud Run runtime attachment. It places both buckets and the publisher in the
+  dedicated `mento-monitoring-peg-policy` project; the cross-project runtime
+  reader stays in `mento-monitoring`. Explicitly enable only Storage and IAM in
+  the dedicated project. Keep both bucket policies authoritative and give no
+  dedicated-project access to routine deploy, PR-plan, trusted-main refresh, or
+  developer identities. The protected org-Terraform owner is an intentional
+  control-plane exception that can change IAM and bucket metadata. Organization
+  IAM admins remain control-plane exceptions and inherited organization grants
+  still apply. Audit effective readers, writers, and IAM administrators before
+  apply and activation. Access logs are audit telemetry, never an authorization
+  control.
 
 ## Verification
 

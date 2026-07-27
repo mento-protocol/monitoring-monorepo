@@ -192,6 +192,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
     expression: '"serviceAccount:${var.terraform_service_account}"',
     blocks: [
       "terraform/gcp-project.tf:google_project_iam_member.terraform_owner",
+      "terraform/peg-policy.tf:google_project_iam_member.peg_policy_terraform_owner",
     ],
   },
   {
@@ -285,6 +286,7 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_plan_readonly|14bfbae95fdd8cf89f98a71d6b0ff755e291f25ed5d946d633614813734e4ac5",
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_refresh_readonly|f6756d526277862e2378cd24b6605b16725030c636d67e8a483411435ad6998f",
   "terraform/peg-policy.tf:google_service_account_iam_member.production_infra_applier_peg_policy_publisher_token_creator|57bfe37a62371790fdc30f70fd393423464366d169fb74214c499e801ee67d98",
+  "terraform/peg-policy.tf:google_project_iam_member.peg_policy_terraform_owner|6aa74b5953f911b901586a8f1a1bd58eb604c01e941197cf1e5ec8f8097ad099",
   "terraform/peg-policy.tf:google_storage_bucket_iam_policy.peg_policy_access_logs|e7abbe2a07d3a595e4fe2daa4a17a2173d5b41fbb778ab870f4fc35df25f6ed7",
   "terraform/peg-policy.tf:google_storage_bucket_iam_policy.peg_policy|8654ea4c5cfe26a5a3ecdee37fa4f2be66e2d5eae1b107c6b1ca84f4050f1546",
   "terraform/deploy-staging.tf:google_service_account_iam_member.ci_default_compute_service_account_user|00dc24e7f8a41d04bed69c4aa2f22f05e538384da239b39cbce1c533dfb75ce5",
@@ -333,7 +335,7 @@ const IDENTITY_SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/ci-wif.tf:google_service_account.production_infra_applier|02bb20c0c7f7c5550ff341f77f85dcfa00cd0b4615936eb6a1e18ea6923c11d5,53ab416891c6eeba7ad063fd45341139fba6a8e7d341a5e45242b7be76f08e1f",
   "terraform/ci-wif.tf:google_service_account.terraform_refresh_readonly|c51792f5180d455dd87e9acbea26fa08a50b24a91bc4e4a93e01149f80007b66,73b3810af667664ebddf1aa217846be5cffe9340970a7d0a53d3d4e7a4fb2b05",
   "terraform/peg-policy.tf:google_service_account.metrics_bridge_runtime|a96ee5a36934ee2d1d7e3ce6fd72dd28f0e02461e1a370b787cddce42dac85be",
-  "terraform/peg-policy.tf:google_service_account.peg_policy_publisher|8a48876857f9b5d6b7b90c053a3b97b526cb8708f7989f67c8d523be04ef3386",
+  "terraform/peg-policy.tf:google_service_account.peg_policy_publisher|a298e157935c9da9f848be76941b78ee0042f75a5e9e5b5369c04f8ba44fb75d",
 ];
 
 function buildExpectedMemberExpressions() {

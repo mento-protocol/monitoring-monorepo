@@ -42,44 +42,74 @@ const validFiles = validFixtureFiles();
 
 for (const [filePath, from, to, expected] of [
   [
-    "terraform/gcp-project.tf",
-    '  service                    = "storage.googleapis.com"',
-    '  service                    = "compute.googleapis.com"',
-    "Peg policy Storage API: service must be exactly",
+    "terraform/variables.tf",
+    "  type        = string",
+    "  type        = number",
+    "Peg policy project ID: type must be exactly",
   ],
   [
-    "terraform/gcp-project.tf",
-    "  project                    = google_project.monitoring.project_id",
-    "  project                    = var.gcp_project_id",
-    "Peg policy Storage API: project must be exactly",
-  ],
-  [
-    "terraform/gcp-project.tf",
-    "  disable_on_destroy         = false",
-    "  disable_on_destroy         = true",
-    "Peg policy Storage API: disable_on_destroy must be exactly",
-  ],
-  [
-    "terraform/gcp-project.tf",
-    "  disable_dependent_services = false",
-    "  disable_dependent_services = true",
-    "Peg policy Storage API: disable_dependent_services must be exactly",
-  ],
-  [
-    "terraform/gcp-project.tf",
-    "  depends_on = [google_project_iam_member.terraform_owner]",
-    "  depends_on = [google_project_service.iam]",
-    "Peg policy Storage API: depends_on must contain only",
+    "terraform/variables.tf",
+    '  default     = "mento-monitoring-peg-policy"',
+    '  default     = "mento-monitoring"',
+    "Peg policy project ID: default must be exactly",
   ],
   [
     "terraform/peg-policy.tf",
-    '  name                        = "${google_project.monitoring.project_id}-peg-policy"',
+    '  name            = "Mento Peg Policy"',
+    '  name            = "Mento Monitoring"',
+    "isolated Peg policy project: name must be exactly",
+  ],
+  [
+    "terraform/peg-policy.tf",
+    "  project_id      = var.gcp_peg_policy_project_id",
+    "  project_id      = var.gcp_project_id",
+    "isolated Peg policy project: project_id must be exactly",
+  ],
+  [
+    "terraform/peg-policy.tf",
+    "  org_id          = var.gcp_org_id",
+    '  org_id          = "123456789"',
+    "isolated Peg policy project: org_id must be exactly",
+  ],
+  [
+    "terraform/peg-policy.tf",
+    "  billing_account = var.gcp_billing_account",
+    '  billing_account = "000000-000000-000000"',
+    "isolated Peg policy project: billing_account must be exactly",
+  ],
+  [
+    "terraform/peg-policy.tf",
+    "  auto_create_network = false",
+    "  auto_create_network = true",
+    "isolated Peg policy project: auto_create_network must be exactly",
+  ],
+  [
+    "terraform/peg-policy.tf",
+    "  project = google_project.peg_policy.project_id",
+    "  project = google_project.monitoring.project_id",
+    "Peg policy Terraform owner bootstrap: project must be exactly",
+  ],
+  [
+    "terraform/peg-policy.tf",
+    '  role    = "roles/owner"',
+    '  role    = "roles/editor"',
+    "Peg policy Terraform owner bootstrap: role must be exactly",
+  ],
+  [
+    "terraform/peg-policy.tf",
+    '  member  = "serviceAccount:${var.terraform_service_account}"',
+    '  member  = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"',
+    "Peg policy Terraform owner bootstrap: member must be exactly",
+  ],
+  [
+    "terraform/peg-policy.tf",
+    "  name                        = google_project.peg_policy.project_id",
     '  name                        = "public-peg-policy"',
     "Peg policy bucket: name must be exactly",
   ],
   [
     "terraform/peg-policy.tf",
-    "  project                     = google_project.monitoring.project_id",
+    "  project                     = google_project.peg_policy.project_id",
     "  project                     = var.gcp_project_id",
     "Peg policy bucket: project must be exactly",
   ],
@@ -137,30 +167,188 @@ for (const [filePath, from, to, expected] of [
     '      with_state                 = "ANY"',
     "Peg policy bucket: with_state must be exactly",
   ],
-  [
-    "terraform/peg-policy.tf",
-    "    prevent_destroy = true",
-    "    prevent_destroy = false",
-    "Peg policy bucket: prevent_destroy must be exactly",
-  ],
 ]) {
   expectContractFailure(mutateFile(validFiles, filePath, from, to), expected);
 }
+
+expectContractFailure(
+  mutateFileOccurrence(
+    validFiles,
+    "terraform/peg-policy.tf",
+    "    prevent_destroy = true",
+    "    prevent_destroy = false",
+    0,
+  ),
+  "isolated Peg policy project: prevent_destroy must be exactly",
+);
+expectContractFailure(
+  mutateFileOccurrence(
+    validFiles,
+    "terraform/peg-policy.tf",
+    "    prevent_destroy = true",
+    "    prevent_destroy = false",
+    1,
+  ),
+  "Peg policy bucket: prevent_destroy must be exactly",
+);
+
+for (const [name, service, replacement] of [
+  ["peg_policy_storage", "storage.googleapis.com", "compute.googleapis.com"],
+  ["peg_policy_iam", "iam.googleapis.com", "run.googleapis.com"],
+]) {
+  const blockHeader = `resource "google_project_service" "${name}" {`;
+  const source = validFiles["terraform/peg-policy.tf"];
+  const blockStart = source.indexOf(blockHeader);
+  const blockEnd = source.indexOf("\n}", blockStart) + 2;
+  assert(blockStart >= 0 && blockEnd > blockStart, `${name} fixture missing`);
+  const block = source.slice(blockStart, blockEnd);
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/peg-policy.tf",
+      block,
+      block.replace(
+        `  service                    = "${service}"`,
+        `  service                    = "${replacement}"`,
+      ),
+    ),
+    `Peg policy ${name} API: service must be exactly`,
+  );
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/peg-policy.tf",
+      block,
+      block.replace(
+        "  project                    = google_project.peg_policy.project_id",
+        "  project                    = google_project.monitoring.project_id",
+      ),
+    ),
+    `Peg policy ${name} API: project must be exactly`,
+  );
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/peg-policy.tf",
+      block,
+      block.replace(
+        "  disable_on_destroy         = false",
+        "  disable_on_destroy         = true",
+      ),
+    ),
+    `Peg policy ${name} API: disable_on_destroy must be exactly`,
+  );
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/peg-policy.tf",
+      block,
+      block.replace(
+        "  disable_dependent_services = false",
+        "  disable_dependent_services = true",
+      ),
+    ),
+    `Peg policy ${name} API: disable_dependent_services must be exactly`,
+  );
+  expectContractFailure(
+    mutateFile(
+      validFiles,
+      "terraform/peg-policy.tf",
+      block,
+      block.replace(
+        "  depends_on = [google_project_iam_member.peg_policy_terraform_owner]",
+        "  depends_on = []",
+      ),
+    ),
+    `Peg policy ${name} API: depends_on must contain only`,
+  );
+}
+
+expectContractFailure(
+  {
+    ...validFiles,
+    "terraform/peg-policy-extra-api.tf": `
+resource "google_project_service" "peg_policy_compute" {
+  project                    = google_project.peg_policy.project_id
+  service                    = "compute.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+}
+`,
+  },
+  "isolated Peg policy project may enable only Storage and IAM",
+);
+
+for (const [name, member] of [
+  [
+    "routine_deployer",
+    "serviceAccount:${google_service_account.metrics_bridge_deployer.email}",
+  ],
+  [
+    "pr_plan",
+    "serviceAccount:${google_service_account.metrics_bridge_plan_readonly.email}",
+  ],
+  [
+    "trusted_refresh",
+    "serviceAccount:${google_service_account.org_terraform_refresh_readonly.email}",
+  ],
+  ["developer", "group:eng@mentolabs.xyz"],
+]) {
+  expectContractFailure(
+    {
+      ...validFiles,
+      [`terraform/peg-policy-${name}.tf`]: `
+resource "google_project_iam_member" "peg_policy_${name}" {
+  project = google_project.peg_policy.project_id
+  role    = "roles/storage.objectViewer"
+  member  = "${member}"
+}
+`,
+    },
+    "isolated Peg policy project references are restricted to the source foundation",
+  );
+}
+
+expectContractFailure(
+  {
+    ...validFiles,
+    "terraform/peg-policy-hard-coded-project-grant.tf": `
+resource "google_project_iam_member" "peg_policy_hard_coded_grant" {
+  project = "mento-monitoring-peg-policy"
+  role    = "roles/storage.objectAdmin"
+  member  = "group:eng@mentolabs.xyz"
+}
+`,
+  },
+  "isolated Peg policy project references are restricted to the source foundation",
+);
+
+expectContractFailure(
+  {
+    ...validFiles,
+    "terraform/peg-policy-derived-project.tf": `
+locals {
+  forbidden_peg_policy_project = google_project.peg_policy.project_id
+}
+`,
+  },
+  "isolated Peg policy project references are restricted to the source foundation",
+);
 
 expectContractFailure(
   mutateFile(
     validFiles,
     "terraform/peg-policy.tf",
     `  depends_on = [
-    google_project_service.storage,
+    google_project_service.peg_policy_storage,
     google_storage_bucket_iam_policy.peg_policy_access_logs,
   ]`,
-    "  depends_on = [google_project_service.storage]",
+    "  depends_on = [google_project_service.peg_policy_storage]",
   ),
   "Peg policy bucket: depends_on must contain exactly the Storage API and authoritative access-log policy",
 );
 expectContractFailure(
-  mutateFile(
+  mutateFileOccurrence(
     validFiles,
     "terraform/peg-policy.tf",
     `  lifecycle {
@@ -179,6 +367,7 @@ expectContractFailure(
   lifecycle {
     prevent_destroy = true
   }`,
+    1,
   ),
   "Peg policy bucket: must contain exactly one lifecycle rule",
 );
@@ -214,12 +403,12 @@ for (const [from, to, expected, occurrence = 0] of [
     "Peg policy bucket: log_object_prefix must be exactly",
   ],
   [
-    '  name                        = "${google_project.monitoring.project_id}-peg-policy-access-logs"',
+    '  name                        = "${google_project.peg_policy.project_id}-access-logs"',
     '  name                        = "public-access-logs"',
     "Peg policy access-log bucket: name must be exactly",
   ],
   [
-    "  project                     = google_project.monitoring.project_id",
+    "  project                     = google_project.peg_policy.project_id",
     "  project                     = var.gcp_project_id",
     "Peg policy access-log bucket: project must be exactly",
     1,
@@ -274,7 +463,7 @@ expectContractFailure(
   mutateFile(
     validFiles,
     "terraform/peg-policy.tf",
-    "  depends_on = [google_project_service.storage]",
+    "  depends_on = [google_project_service.peg_policy_storage]",
     "  depends_on = []",
   ),
   "Peg policy access-log bucket: depends_on must contain only the Storage API",
@@ -305,7 +494,7 @@ expectContractFailure(
     "terraform/peg-policy.tf",
     "    prevent_destroy = true",
     "    prevent_destroy = false",
-    1,
+    2,
   ),
   "Peg policy access-log bucket: prevent_destroy must be exactly",
 );
@@ -348,30 +537,30 @@ expectContractFailure(
   "Peg policy access-log bucket: must keep the scoped self-logging Checkov exception",
 );
 
-for (const [occurrence, replacement, expected] of [
-  [
-    0,
-    "  project      = var.gcp_project_id",
-    "Peg policy metrics_bridge_runtime identity: project must be exactly",
-  ],
-  [
-    1,
-    "  project      = var.gcp_project_id",
-    "Peg policy peg_policy_publisher identity: project must be exactly",
-  ],
-]) {
-  expectContractFailure(
-    mutateFileOccurrence(
-      validFiles,
-      "terraform/peg-policy.tf",
-      "  project      = google_project.monitoring.project_id",
-      replacement,
-      occurrence,
-    ),
-    expected,
-  );
-}
+expectContractFailure(
+  mutateFile(
+    validFiles,
+    "terraform/peg-policy.tf",
+    "  project      = google_project.monitoring.project_id",
+    "  project      = google_project.peg_policy.project_id",
+  ),
+  "Peg policy metrics_bridge_runtime identity: project must be exactly",
+);
+expectContractFailure(
+  mutateFile(
+    validFiles,
+    "terraform/peg-policy.tf",
+    "  project      = google_project.peg_policy.project_id",
+    "  project      = google_project.monitoring.project_id",
+  ),
+  "Peg policy peg_policy_publisher identity: project must be exactly",
+);
 for (const [from, to, expected] of [
+  [
+    "  project     = google_project.peg_policy.project_id",
+    "  project     = google_project.monitoring.project_id",
+    "Peg policy bucket controller role: project must be exactly",
+  ],
   [
     '  account_id   = "metrics-bridge-runtime"',
     '  account_id   = "metrics-bridge-runtime-writer"',
@@ -388,24 +577,25 @@ for (const [from, to, expected] of [
     expected,
   );
 }
-for (const [occurrence, expected] of [
-  [
+expectContractFailure(
+  mutateFile(
+    validFiles,
+    "terraform/peg-policy.tf",
+    "  depends_on = [google_project_service.iam]",
+    "  depends_on = [google_project_service.storage]",
+  ),
+  "Peg policy metrics_bridge_runtime identity: depends_on must contain only",
+);
+expectContractFailure(
+  mutateFileOccurrence(
+    validFiles,
+    "terraform/peg-policy.tf",
+    "  depends_on = [google_project_service.peg_policy_iam]",
+    "  depends_on = [google_project_service.peg_policy_storage]",
     1,
-    "Peg policy metrics_bridge_runtime identity: depends_on must contain only",
-  ],
-  [2, "Peg policy peg_policy_publisher identity: depends_on must contain only"],
-]) {
-  expectContractFailure(
-    mutateFileOccurrence(
-      validFiles,
-      "terraform/peg-policy.tf",
-      "  depends_on = [google_project_service.iam]",
-      "  depends_on = [google_project_service.storage]",
-      occurrence,
-    ),
-    expected,
-  );
-}
+  ),
+  "Peg policy peg_policy_publisher identity: depends_on must contain only",
+);
 
 expectContractFailure(
   {
@@ -514,8 +704,8 @@ for (const [from, to, expected] of [
     "Peg policy bucket controller role: permissions must contain only",
   ],
   [
-    "  depends_on = [google_project_service.iam]",
-    "  depends_on = [google_project_service.storage]",
+    "  depends_on = [google_project_service.peg_policy_iam]",
+    "  depends_on = [google_project_service.peg_policy_storage]",
     "Peg policy bucket controller role: depends_on must contain only the IAM API",
   ],
   [
@@ -534,11 +724,11 @@ for (const [from, to, expected] of [
 
 for (const [occurrence, expected] of [
   [
-    2,
+    3,
     "Peg policy peg_policy_access_logs authoritative IAM policy: prevent_destroy must be exactly",
   ],
   [
-    3,
+    4,
     "Peg policy peg_policy authoritative IAM policy: prevent_destroy must be exactly",
   ],
 ]) {
@@ -671,7 +861,7 @@ resource "google_storage_bucket_iam_binding" "peg_policy_access_logs_legacy_writ
     "terraform/peg-policy-hard-coded-member.tf",
     `
 resource "google_storage_bucket_iam_member" "peg_policy_derived_legacy_reader" {
-  bucket = "\${google_project.monitoring.project_id}-peg-policy"
+  bucket = "mento-monitoring-peg-policy"
   role   = "roles/storage.objectViewer"
   member = "group:eng@mentolabs.xyz"
 }

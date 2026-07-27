@@ -38,6 +38,14 @@ export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
   },
 ];
 
+const PEG_POLICY_PROJECT_ID = "mento-monitoring-peg-policy";
+const PEG_POLICY_PROJECT_EXPRESSION = "google_project.peg_policy.project_id";
+const PEG_POLICY_PROJECT_MARKERS = [
+  PEG_POLICY_PROJECT_EXPRESSION,
+  "var.gcp_peg_policy_project_id",
+  PEG_POLICY_PROJECT_ID,
+];
+
 function iamBlocks(blocks) {
   return blocks.filter((block) =>
     /_iam_(?:member|binding|policy)$/u.test(block.type),
@@ -76,7 +84,14 @@ function referencesPegPolicyPublisher(block) {
   );
 }
 
-function validatePegPolicyServiceAccount(blocks, name, accountId, errors) {
+function validatePegPolicyServiceAccount(
+  blocks,
+  name,
+  accountId,
+  project,
+  iamApi,
+  errors,
+) {
   const label = `terraform: Peg policy ${name} identity`;
   const block = requireBlock(
     blocks,
@@ -89,22 +104,163 @@ function validatePegPolicyServiceAccount(blocks, name, accountId, errors) {
   if (!block) return undefined;
 
   expectNoResourceMultiplicity(block, errors, label);
-  expectExpression(
-    block,
-    "project",
-    "google_project.monitoring.project_id",
-    errors,
-    label,
-  );
+  expectExpression(block, "project", project, errors, label);
   expectString(block, "account_id", accountId, errors, label);
-  if (
-    !sameSortedValues(extractExpressionList(block, "depends_on"), [
-      "google_project_service.iam",
-    ])
-  ) {
+  if (!sameSortedValues(extractExpressionList(block, "depends_on"), [iamApi])) {
     errors.push(`${label}: depends_on must contain only the IAM API`);
   }
   return block;
+}
+
+function validatePegPolicyProject(topLevelBlocks, blocks, errors) {
+  const variableLabel = "terraform: Peg policy project ID";
+  const projectId = requireBlock(
+    topLevelBlocks,
+    "terraform/variables.tf",
+    "variable",
+    "gcp_peg_policy_project_id",
+    errors,
+    variableLabel,
+  );
+  if (projectId) {
+    expectExpression(projectId, "type", "string", errors, variableLabel);
+    expectString(
+      projectId,
+      "default",
+      PEG_POLICY_PROJECT_ID,
+      errors,
+      variableLabel,
+    );
+  }
+
+  const projectLabel = "terraform: isolated Peg policy project";
+  const project = requireBlock(
+    blocks,
+    "terraform/peg-policy.tf",
+    "google_project",
+    "peg_policy",
+    errors,
+    projectLabel,
+  );
+  if (project) {
+    expectNoResourceMultiplicity(project, errors, projectLabel);
+    expectString(project, "name", "Mento Peg Policy", errors, projectLabel);
+    expectExpression(
+      project,
+      "project_id",
+      "var.gcp_peg_policy_project_id",
+      errors,
+      projectLabel,
+    );
+    expectExpression(project, "org_id", "var.gcp_org_id", errors, projectLabel);
+    expectExpression(
+      project,
+      "billing_account",
+      "var.gcp_billing_account",
+      errors,
+      projectLabel,
+    );
+    expectExpression(
+      project,
+      "auto_create_network",
+      "false",
+      errors,
+      projectLabel,
+    );
+    const lifecycles = nestedBlocks(project, "lifecycle");
+    if (lifecycles.length !== 1) {
+      errors.push(`${projectLabel}: must contain exactly one lifecycle block`);
+    } else {
+      expectExpression(
+        lifecycles[0],
+        "prevent_destroy",
+        "true",
+        errors,
+        projectLabel,
+      );
+    }
+  }
+
+  const ownerLabel = "terraform: Peg policy Terraform owner bootstrap";
+  const owner = requireBlock(
+    blocks,
+    "terraform/peg-policy.tf",
+    "google_project_iam_member",
+    "peg_policy_terraform_owner",
+    errors,
+    ownerLabel,
+  );
+  if (owner) {
+    expectNoResourceMultiplicity(owner, errors, ownerLabel);
+    expectExpression(
+      owner,
+      "project",
+      PEG_POLICY_PROJECT_EXPRESSION,
+      errors,
+      ownerLabel,
+    );
+    expectString(owner, "role", "roles/owner", errors, ownerLabel);
+    expectString(
+      owner,
+      "member",
+      "serviceAccount:${var.terraform_service_account}",
+      errors,
+      ownerLabel,
+    );
+  }
+
+  const expectedApis = new Map([
+    ["peg_policy_storage", "storage.googleapis.com"],
+    ["peg_policy_iam", "iam.googleapis.com"],
+  ]);
+  for (const [name, service] of expectedApis) {
+    const label = `terraform: Peg policy ${name} API`;
+    const api = requireBlock(
+      blocks,
+      "terraform/peg-policy.tf",
+      "google_project_service",
+      name,
+      errors,
+      label,
+    );
+    if (!api) continue;
+    expectNoResourceMultiplicity(api, errors, label);
+    expectExpression(
+      api,
+      "project",
+      PEG_POLICY_PROJECT_EXPRESSION,
+      errors,
+      label,
+    );
+    expectString(api, "service", service, errors, label);
+    expectExpression(api, "disable_on_destroy", "false", errors, label);
+    expectExpression(api, "disable_dependent_services", "false", errors, label);
+    if (
+      !sameSortedValues(extractExpressionList(api, "depends_on"), [
+        "google_project_iam_member.peg_policy_terraform_owner",
+      ])
+    ) {
+      errors.push(
+        `${label}: depends_on must contain only the protected Terraform owner bootstrap`,
+      );
+    }
+  }
+
+  const extraApis = blocks
+    .filter(
+      (block) =>
+        block.type === "google_project_service" &&
+        normalizeExpression(attributeExpression(block, "project")) ===
+          PEG_POLICY_PROJECT_EXPRESSION &&
+        !expectedApis.has(block.name),
+    )
+    .map(blockKey)
+    .sort();
+  if (extraApis.length > 0) {
+    errors.push(
+      `terraform: isolated Peg policy project may enable only Storage and IAM: ${extraApis.join(", ")}`,
+    );
+  }
 }
 
 function exactStringList(block, attribute) {
@@ -179,7 +335,7 @@ function validatePegPolicyCustomRole(blocks, errors) {
   expectExpression(
     role,
     "project",
-    "google_project.monitoring.project_id",
+    PEG_POLICY_PROJECT_EXPRESSION,
     errors,
     label,
   );
@@ -199,7 +355,7 @@ function validatePegPolicyCustomRole(blocks, errors) {
   }
   if (
     !sameSortedValues(extractExpressionList(role, "depends_on"), [
-      "google_project_service.iam",
+      "google_project_service.peg_policy_iam",
     ])
   ) {
     errors.push(`${label}: depends_on must contain only the IAM API`);
@@ -257,8 +413,10 @@ function rejectPegBucketMemberOrBindingResources(blocks, errors) {
   const pegBucketTargets = [
     "google_storage_bucket.peg_policy.",
     "google_storage_bucket.peg_policy_access_logs.",
-    "${google_project.monitoring.project_id}-peg-policy",
-    "${google_project.monitoring.project_id}-peg-policy-access-logs",
+    PEG_POLICY_PROJECT_EXPRESSION,
+    "${google_project.peg_policy.project_id}-access-logs",
+    PEG_POLICY_PROJECT_ID,
+    `${PEG_POLICY_PROJECT_ID}-access-logs`,
   ];
   const forbidden = blocks
     .filter(
@@ -272,6 +430,34 @@ function rejectPegBucketMemberOrBindingResources(blocks, errors) {
   if (forbidden.length > 0) {
     errors.push(
       `terraform: Peg buckets must use only authoritative IAM policies, not member or binding resources: ${forbidden.join(", ")}`,
+    );
+  }
+}
+
+function rejectUnexpectedPegProjectReferences(topLevelBlocks, errors) {
+  const allowed = new Set([
+    "terraform/variables.tf:variable.gcp_peg_policy_project_id",
+    "terraform/peg-policy.tf:resource.google_project.peg_policy",
+    "terraform/peg-policy.tf:resource.google_project_iam_member.peg_policy_terraform_owner",
+    "terraform/peg-policy.tf:resource.google_project_service.peg_policy_storage",
+    "terraform/peg-policy.tf:resource.google_project_service.peg_policy_iam",
+    "terraform/peg-policy.tf:resource.google_storage_bucket.peg_policy",
+    "terraform/peg-policy.tf:resource.google_storage_bucket.peg_policy_access_logs",
+    "terraform/peg-policy.tf:resource.google_project_iam_custom_role.peg_policy_bucket_controller",
+    "terraform/peg-policy.tf:resource.google_service_account.peg_policy_publisher",
+  ]);
+  const unexpected = topLevelBlocks
+    .filter(
+      (block) =>
+        PEG_POLICY_PROJECT_MARKERS.some((marker) =>
+          block.code.includes(marker),
+        ) && !allowed.has(topLevelBlockKey(block)),
+    )
+    .map(topLevelBlockKey)
+    .sort();
+  if (unexpected.length > 0) {
+    errors.push(
+      `terraform: isolated Peg policy project references are restricted to the source foundation: ${unexpected.join(", ")}`,
     );
   }
 }
@@ -348,14 +534,14 @@ function validatePegPolicyAccessLogBucket(files, blocks, errors) {
     expectString(
       bucket,
       "name",
-      "${google_project.monitoring.project_id}-peg-policy-access-logs",
+      "${google_project.peg_policy.project_id}-access-logs",
       errors,
       label,
     );
     expectExpression(
       bucket,
       "project",
-      "google_project.monitoring.project_id",
+      PEG_POLICY_PROJECT_EXPRESSION,
       errors,
       label,
     );
@@ -371,7 +557,7 @@ function validatePegPolicyAccessLogBucket(files, blocks, errors) {
     expectString(bucket, "public_access_prevention", "enforced", errors, label);
     if (
       !sameSortedValues(extractExpressionList(bucket, "depends_on"), [
-        "google_project_service.storage",
+        "google_project_service.peg_policy_storage",
       ])
     ) {
       errors.push(`${label}: depends_on must contain only the Storage API`);
@@ -434,55 +620,7 @@ function validatePegPolicyAccessLogBucket(files, blocks, errors) {
 
 export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
   const blocks = topLevelBlocks.filter((block) => block.kind === "resource");
-  const storageApiLabel = "terraform: Peg policy Storage API";
-  const storageApi = requireBlock(
-    blocks,
-    "terraform/gcp-project.tf",
-    "google_project_service",
-    "storage",
-    errors,
-    storageApiLabel,
-  );
-  if (storageApi) {
-    expectNoResourceMultiplicity(storageApi, errors, storageApiLabel);
-    expectExpression(
-      storageApi,
-      "project",
-      "google_project.monitoring.project_id",
-      errors,
-      storageApiLabel,
-    );
-    expectString(
-      storageApi,
-      "service",
-      "storage.googleapis.com",
-      errors,
-      storageApiLabel,
-    );
-    expectExpression(
-      storageApi,
-      "disable_on_destroy",
-      "false",
-      errors,
-      storageApiLabel,
-    );
-    expectExpression(
-      storageApi,
-      "disable_dependent_services",
-      "false",
-      errors,
-      storageApiLabel,
-    );
-    if (
-      !sameSortedValues(extractExpressionList(storageApi, "depends_on"), [
-        "google_project_iam_member.terraform_owner",
-      ])
-    ) {
-      errors.push(
-        `${storageApiLabel}: depends_on must contain only the Terraform owner grant`,
-      );
-    }
-  }
+  validatePegPolicyProject(topLevelBlocks, blocks, errors);
 
   const bucketLabel = "terraform: Peg policy bucket";
   const bucket = requireBlock(
@@ -495,17 +633,17 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
   );
   if (bucket) {
     expectNoResourceMultiplicity(bucket, errors, bucketLabel);
-    expectString(
+    expectExpression(
       bucket,
       "name",
-      "${google_project.monitoring.project_id}-peg-policy",
+      PEG_POLICY_PROJECT_EXPRESSION,
       errors,
       bucketLabel,
     );
     expectExpression(
       bucket,
       "project",
-      "google_project.monitoring.project_id",
+      PEG_POLICY_PROJECT_EXPRESSION,
       errors,
       bucketLabel,
     );
@@ -527,7 +665,7 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
     );
     if (
       !sameSortedValues(extractExpressionList(bucket, "depends_on"), [
-        "google_project_service.storage",
+        "google_project_service.peg_policy_storage",
         "google_storage_bucket_iam_policy.peg_policy_access_logs",
       ])
     ) {
@@ -612,12 +750,16 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
     blocks,
     "metrics_bridge_runtime",
     "metrics-bridge-runtime",
+    "google_project.monitoring.project_id",
+    "google_project_service.iam",
     errors,
   );
   validatePegPolicyServiceAccount(
     blocks,
     "peg_policy_publisher",
     "peg-policy-publisher",
+    PEG_POLICY_PROJECT_EXPRESSION,
+    "google_project_service.peg_policy_iam",
     errors,
   );
 
@@ -700,6 +842,7 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
   }
 
   rejectPegBucketMemberOrBindingResources(topLevelBlocks, errors);
+  rejectUnexpectedPegProjectReferences(topLevelBlocks, errors);
   rejectCustomRoleReferencesOutsidePolicies(topLevelBlocks, errors);
   rejectUnexpectedPegPolicyGrants(
     blocks,
