@@ -1,4 +1,5 @@
 import { load as loadYaml } from "js-yaml";
+import ts from "typescript";
 import { commentMaskedHcl } from "./production-infra-identity-contract/hcl.mjs";
 import { stripShellComment } from "./production-infra-identity-contract/workflow-inventory.mjs";
 import { isMapping } from "./production-infra-identity-contract/workflow-inventory.mjs";
@@ -164,6 +165,141 @@ function lexicalDeployRecords(filePath, surface, contents) {
   return records;
 }
 
+function isProgrammaticSource(filePath) {
+  return /\.(?:[cm]?[jt]s|[jt]sx)$/u.test(filePath);
+}
+
+function programmaticScriptKind(filePath) {
+  if (filePath.endsWith(".tsx")) return ts.ScriptKind.TSX;
+  if (filePath.endsWith(".jsx")) return ts.ScriptKind.JSX;
+  if (/\.(?:cts|mts|ts)$/u.test(filePath)) return ts.ScriptKind.TS;
+  return ts.ScriptKind.JS;
+}
+
+function staticString(node) {
+  if (node === undefined) return undefined;
+  return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)
+    ? node.text
+    : undefined;
+}
+
+function staticStringArray(node) {
+  if (node === undefined || !ts.isArrayLiteralExpression(node)) {
+    return undefined;
+  }
+  const values = [];
+  for (const element of node.elements) {
+    const value = staticString(element);
+    if (value === undefined) return undefined;
+    values.push(value);
+  }
+  return values;
+}
+
+function staticStringArrayProperty(node, propertyName) {
+  if (node === undefined || !ts.isObjectLiteralExpression(node)) {
+    return undefined;
+  }
+  for (const property of node.properties) {
+    if (!ts.isPropertyAssignment(property)) continue;
+    const name =
+      ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)
+        ? property.name.text
+        : undefined;
+    if (name === propertyName) {
+      return staticStringArray(property.initializer);
+    }
+  }
+  return undefined;
+}
+
+function programmaticDeployRecords(filePath, contents, errors) {
+  if (!contents.includes("gcloud")) return [];
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    contents,
+    ts.ScriptTarget.Latest,
+    true,
+    programmaticScriptKind(filePath),
+  );
+  if (sourceFile.parseDiagnostics.length > 0) {
+    const message = ts.flattenDiagnosticMessageText(
+      sourceFile.parseDiagnostics[0].messageText,
+      " ",
+    );
+    errors.push(
+      `${filePath}: cannot parse programmatic source for deploy-staging discovery: ${message}`,
+    );
+    return [];
+  }
+
+  const records = [];
+  const visit = (node) => {
+    if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+      // The existing line-level guard deliberately rejects literal deploy
+      // shapes even through unknown wrappers. Keep that fail-closed policy
+      // while using the AST only to recover shapes split across lines.
+      const callText = node.getText(sourceFile);
+      const existingKinds = new Set(
+        lexicalDeployRecords(filePath, "shell", callText).map(
+          ({ kind }) => kind,
+        ),
+      );
+      const invocationArguments = node.arguments ?? [];
+      const firstArgument = staticString(invocationArguments[0]);
+      if (firstArgument !== undefined) {
+        const commandRecords = lexicalDeployRecords(
+          filePath,
+          "programmatic",
+          firstArgument.replace(/\r?\n/gu, " "),
+        );
+        for (const record of commandRecords) {
+          if (!existingKinds.has(record.kind)) records.push(record);
+        }
+
+        if (/^(?:.*[/\\])?gcloud$/u.test(firstArgument)) {
+          const args =
+            staticStringArray(invocationArguments[1]) ??
+            staticStringArrayProperty(invocationArguments[1], "args");
+          if (args !== undefined) {
+            const kind = kindAfterGcloud(args.join(" "));
+            if (kind && !existingKinds.has(kind)) {
+              records.push({
+                filePath,
+                surface: "programmatic",
+                kind,
+                args,
+                normalized: normalize(`${firstArgument} ${args.join(" ")}`),
+              });
+            }
+          }
+        }
+      }
+
+      const commandVector = staticStringArray(invocationArguments[0]);
+      if (
+        commandVector !== undefined &&
+        /^(?:.*[/\\])?gcloud$/u.test(commandVector[0] ?? "")
+      ) {
+        const args = commandVector.slice(1);
+        const kind = kindAfterGcloud(args.join(" "));
+        if (kind && !existingKinds.has(kind)) {
+          records.push({
+            filePath,
+            surface: "programmatic",
+            kind,
+            args,
+            normalized: normalize(`${commandVector[0]} ${args.join(" ")}`),
+          });
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return records;
+}
+
 function structuredGcloudRecord(filePath, path, value) {
   if (
     !isMapping(value) ||
@@ -268,6 +404,9 @@ function discoverDeployStagingFile(filePath, contents) {
       filePath.endsWith(".json")
     ) {
       records.push(...structuredRecords(filePath, contents, errors));
+    } else if (isProgrammaticSource(filePath)) {
+      records.push(...lexicalDeployRecords(filePath, "shell", contents));
+      records.push(...programmaticDeployRecords(filePath, contents, errors));
     } else {
       records.push(...lexicalDeployRecords(filePath, "shell", contents));
     }

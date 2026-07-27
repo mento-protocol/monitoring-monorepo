@@ -535,6 +535,63 @@ execFileSync("gcloud", ["builds", "submit", "."]);
   "scripts/alternate-deploy.mjs",
 );
 assertForbiddenSignature(
+  `import { execFileSync } from "node:child_process";
+execFileSync("gcloud", [
+  "builds",
+  "submit",
+  ".",
+]);
+`,
+  "multiline Node child-process argv",
+  "scripts/alternate-multiline-deploy.mjs",
+);
+assertForbiddenSignature(
+  `import { spawn } from "node:child_process";
+spawn("/usr/local/bin/gcloud", [
+  "app",
+  // Keep the deploy mode explicit.
+  "deploy",
+  "app.yaml",
+]);
+`,
+  "multiline absolute-path child-process argv",
+  "scripts/absolute-multiline-deploy.mjs",
+);
+assertForbiddenSignature(
+  `Bun.spawn([
+  "/usr/local/bin/gcloud",
+  "builds",
+  // Keep source staging explicit.
+  "submit",
+  ".",
+]);
+`,
+  "multiline command-vector argv",
+  "scripts/command-vector-deploy.mjs",
+);
+assertForbiddenSignature(
+  `new Deno.Command("gcloud", {
+  args: [
+    "app",
+    "deploy",
+    "app.yaml",
+  ],
+});
+`,
+  "multiline constructor args object",
+  "scripts/constructor-deploy.mjs",
+);
+assertForbiddenSignature(
+  `record("gcloud", [
+  "builds",
+  "submit",
+  ".",
+]);
+`,
+  "multiline unknown programmatic wrapper fails closed",
+  "scripts/unknown-wrapper-deploy.mjs",
+);
+assertForbiddenSignature(
   `import { execa } from "execa";
 await execa("gcloud", ["app", "deploy", "app.yaml"]);
 `,
@@ -542,10 +599,81 @@ await execa("gcloud", ["app", "deploy", "app.yaml"]);
   "packages/deployer/src/deploy.ts",
 );
 assertForbiddenSignature(
+  `import { execa } from "execa";
+await execa(
+  "gcloud",
+  ["app", "deploy", "app.yaml"],
+);
+`,
+  "multiline TypeScript child-process argv",
+  "packages/deployer/src/multiline-deploy.ts",
+);
+assertForbiddenSignature(
+  `import { execSync } from "node:child_process";
+execSync(\`gcloud builds
+submit .\`);
+`,
+  "multiline static command string",
+  "scripts/static-command-deploy.mjs",
+);
+assertForbiddenSignature(
   "FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:stable\nRUN gcloud app deploy app.yaml\n",
   "named Dockerfile",
   "images/deployer/Dockerfile.release",
 );
+
+for (const [contents, message] of [
+  [
+    `/*
+execFileSync("gcloud", [
+  "builds",
+  "submit",
+  ".",
+]);
+*/
+`,
+    "AST recovery must not join comment-only multiline tokens",
+  ],
+  [
+    `const example = \`execFileSync("gcloud", [
+  "builds",
+  "submit",
+  ".",
+])\`;
+`,
+    "AST recovery must not join quoted multiline example tokens",
+  ],
+  [
+    `const example = [
+  "gcloud",
+  "builds",
+  "submit",
+  ".",
+];
+`,
+    "AST recovery must not treat an inert command vector as an invocation",
+  ],
+  [
+    `const example = {
+  command: "gcloud",
+  args: [
+    "builds",
+    "submit",
+    ".",
+  ],
+};
+`,
+    "AST recovery must not treat inert constructor data as an invocation",
+  ],
+]) {
+  assert.equal(
+    discoverDeployStagingCallsites({
+      "scripts/programmatic-decoy.mjs": contents,
+    }).length,
+    0,
+    message,
+  );
+}
 
 assert.equal(
   discoverDeployStagingCallsites({
