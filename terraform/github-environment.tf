@@ -8,13 +8,17 @@
 # guard and exfiltrate every repo-level secret the workflow names. The guard is
 # a convention, not a security boundary.
 #
-# FIX. A GitHub Environment whose deployment-branch policy is limited to the
-# repo's protected branch (main) makes secret access SERVER-ENFORCED: a job that
-# declares `environment: sentry-pipeline` only receives the environment's
-# secrets when the run's ref satisfies the branch policy, no matter what the
-# branch's workflow file says. A `workflow_dispatch` from a feature branch is
-# refused at the environment gate before the job starts; scheduled runs (always
-# on the default branch) and `issues`-event runs (also the default branch) pass.
+# FIX. A GitHub Environment whose deployment-branch policy names `main`
+# explicitly makes secret access SERVER-ENFORCED: a job that declares
+# `environment: sentry-pipeline` only receives the environment's secrets when
+# the run's ref satisfies the branch policy, no matter what the branch's
+# workflow file says. A `workflow_dispatch` from a feature branch is refused at
+# the environment gate before the job starts; scheduled runs (always on the
+# default branch) and `issues`-event runs (also the default branch) pass.
+#
+# The policy MUST be an explicit `branch_pattern`, not `protected_branches`
+# (#1649) — see the deployment_branch_policy block below for why that shape
+# fails open in this repo.
 # This mirrors the `production-infra` environment that already gates Terraform
 # applies — but this one carries NO required reviewers (the pipeline is
 # unattended; a reviewer gate would stall every scheduled run) and NO wait timer.
