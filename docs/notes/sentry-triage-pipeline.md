@@ -40,9 +40,10 @@ runbook together when a contract changes.
 
 The triage row states an operator requirement, now backed by a mechanical
 guarantee. Every secret-bearing job in these workflows declares the
-`sentry-pipeline` GitHub Environment, whose deployment-branch policy is limited to
-the protected `main` branch (Terraform in `terraform/github-environment.tf`, issue
-#1289). GitHub refuses such a job on any non-main ref server-side — before it
+`sentry-pipeline` GitHub Environment, whose deployment-branch policy names `main`
+explicitly (Terraform in `terraform/github-environment.tf`, issues #1289 and
+#1649 — an explicit pattern, never `protected_branches`, which is inert in this
+repo and fails open). GitHub refuses such a job on any non-main ref server-side — before it
 starts, and regardless of what the branch's workflow file says — so a feature-ref
 `workflow_dispatch` can no longer reach the pipeline's secrets by stripping the
 in-workflow `if: github.ref == 'refs/heads/main'` guard. Still select `main`; the
@@ -335,27 +336,33 @@ already exist (see docs/terraform.md, "GitHub Environments"), and several of the
 secrets are live, so roll it out Terraform-FIRST:
 
 1. Apply `terraform/github-environment.tf` FIRST — the
-   `github_repository_environment.sentry_pipeline` environment (main-only
-   protected-branch deployment policy) plus the five
-   `github_actions_environment_secret` resources — while the repo-level
-   `github_actions_secret` copies in `github-secrets.tf` are still present. The
-   env secrets duplicate the repo ones (GitHub allows a secret at both scopes),
-   so nothing breaks.
-2. Verify (Settings → Environments → `sentry-pipeline`) that the environment
-   exists with a `main`-only protected-branch policy, that admin bypass is
-   disabled (`can_admins_bypass = false` — "Allow administrators to bypass
-   configured protection rules" unchecked; #1289), and that the expected
-   environment secrets are present. The identity contract hash-pins the policy
-   and the flag, so a _source_ change to either fails CI; a live settings change
-   made in GitHub's UI is caught only by the next manual `pnpm tf apply platform`
-   (no drift job monitors the platform stack's environment settings).
-3. Only THEN land the workflow `environment: sentry-pipeline` references and the
+   `github_repository_environment.sentry_pipeline` environment plus its
+   `github_repository_environment_deployment_policy` (`branch_pattern = "main"`)
+   and the five `github_actions_environment_secret` resources — while the
+   repo-level `github_actions_secret` copies in `github-secrets.tf` are still
+   present. The env secrets duplicate the repo ones (GitHub allows a secret at
+   both scopes), so nothing breaks. The environment and its branch pattern must
+   land in the SAME apply: `custom_branch_policies = true` with no pattern
+   refuses every deployment.
+2. Verify (Settings → Environments → `sentry-pipeline`) that the deployment
+   branch rule is an explicit `main` pattern — **not** "Protected branches",
+   which is inert here and fails open (#1649) — that admin bypass is disabled,
+   and that the expected environment secrets are present. The identity contract
+   hash-pins both the environment and the deployment-policy blocks, so a
+   _source_ change to either fails CI; a live settings change made in GitHub's UI
+   is caught only by the next manual `pnpm tf apply platform` (no drift job
+   monitors the platform stack's environment settings).
+3. Prove the gate, do not assume it: from a throwaway branch, have a non-admin
+   writer push a workflow that declares `environment: sentry-pipeline` and
+   reports only whether a secret is present (never its value). It must be
+   refused. #1649 exists because this step was skipped.
+4. Only THEN land the workflow `environment: sentry-pipeline` references and the
    removal of the repo-level `github_actions_secret` blocks from
    `github-secrets.tf`, and apply. The protected environment already exists, so
    nothing auto-creates unprotected; the repo-level copies are destroyed and the
    jobs read the environment secrets.
 
-Apply step 3 at a quiet time (avoid the 05:30 / 05:41 / 07:55 / 08:30 UTC cron
+Apply step 4 at a quiet time (avoid the 05:30 / 05:41 / 07:55 / 08:30 UTC cron
 windows) so no scheduled run coincides with the repo-secret destroy. The
 platform PAT must carry the **Environments: Read/write** fine-grained
 permission or the environment-secret writes 403 (`terraform/providers.tf`).
