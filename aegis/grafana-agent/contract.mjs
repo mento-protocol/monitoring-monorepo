@@ -1024,6 +1024,9 @@ export function validateContract(files = readContractFiles()) {
   const rollbackPeersIndex = rollback.indexOf(
     'stop_other_collectors "$previous_version"',
   );
+  const rollbackRestoredIndex = rollback.indexOf(
+    'verify_restored_target "$verifier_root" "$previous_version"',
+  );
   const rollbackPreflightIndex = rollback.indexOf(
     'verify_restart_target "$verifier_root" "$previous_version"',
   );
@@ -1034,11 +1037,13 @@ export function validateContract(files = readContractFiles()) {
     rollbackStopIndex === -1 ||
     rollbackVerifyIndex === -1 ||
     rollbackPeersIndex === -1 ||
+    rollbackRestoredIndex === -1 ||
     rollbackPreflightIndex === -1 ||
     rollbackStartIndex === -1 ||
     rollbackStopIndex > rollbackVerifyIndex ||
     rollbackVerifyIndex > rollbackPeersIndex ||
-    rollbackPeersIndex > rollbackPreflightIndex ||
+    rollbackPeersIndex > rollbackRestoredIndex ||
+    rollbackRestoredIndex > rollbackPreflightIndex ||
     rollbackPreflightIndex > rollbackStartIndex
   ) {
     errors.push(
@@ -1056,6 +1061,18 @@ export function validateContract(files = readContractFiles()) {
     restartPreflight,
     /node "\$verifier_root\/aegis\/grafana-agent\/preflight\.mjs"[\s\\]+--project "\$project"[\s\\]+--version "\$restart_version"/u,
     `${CONTRACT_FILES.deploy}: automated rollback must use the immutable verifier for restart preflight`,
+  );
+  const restoredPreflight = requireBlock(
+    errors,
+    deploy,
+    'verify_restored_target()',
+    CONTRACT_FILES.deploy,
+  );
+  requirePattern(
+    errors,
+    restoredPreflight,
+    /node "\$verifier_root\/aegis\/grafana-agent\/preflight\.mjs"[\s\\]+--project "\$project"[\s\\]+--version "\$restored_version"[\s\\]+--version-traffic full/u,
+    `${CONTRACT_FILES.deploy}: automated rollback must prove an already-restored version has pinned identity and full traffic`,
   );
   const rollbackCalls =
     deploy.match(/^[ \t]*rollback_cutover(?!\(\))[^\n]*$/gmu) ?? [];
@@ -1098,8 +1115,11 @@ export function validateContract(files = readContractFiles()) {
   const manualPeerVerifyIndex = manualRollback.indexOf(
     'test \\"\\$peer_status\\" = STOPPED',
   );
-  const manualPreflightIndex = manualRollback.indexOf(
-    'pnpm --dir \\"$repo_root\\" aegis:agent:preflight -- --version $previous_version',
+  const manualRestoredPreflightIndex = manualRollback.indexOf(
+    'pnpm --dir \\"$repo_root\\" aegis:agent:preflight -- --version $previous_version --version-traffic full',
+  );
+  const manualRestartPreflightIndex = manualRollback.indexOf(
+    'pnpm --dir \\"$repo_root\\" aegis:agent:preflight -- --version $previous_version &&',
   );
   const manualStartIndex = manualRollback.indexOf(
     'gcloud app versions start $previous_version',
@@ -1115,7 +1135,8 @@ export function validateContract(files = readContractFiles()) {
     manualPeerStopIndex === -1 ||
     manualPeerDescribeIndex === -1 ||
     manualPeerVerifyIndex === -1 ||
-    manualPreflightIndex === -1 ||
+    manualRestoredPreflightIndex === -1 ||
+    manualRestartPreflightIndex === -1 ||
     manualStartIndex === -1 ||
     manualTrafficIndex === -1 ||
     manualStopIndex > manualDescribeIndex ||
@@ -1124,13 +1145,14 @@ export function validateContract(files = readContractFiles()) {
     manualPeerListIndex > manualPeerStopIndex ||
     manualPeerStopIndex > manualPeerDescribeIndex ||
     manualPeerDescribeIndex > manualPeerVerifyIndex ||
-    manualPeerVerifyIndex > manualPreflightIndex ||
-    manualPreflightIndex > manualStartIndex ||
+    manualPeerVerifyIndex > manualRestoredPreflightIndex ||
+    manualRestoredPreflightIndex > manualRestartPreflightIndex ||
+    manualRestartPreflightIndex > manualStartIndex ||
     manualStartIndex > manualTrafficIndex ||
     (manualRollback.match(/&& \\\\/gu) ?? []).length !== 9
   ) {
     errors.push(
-      `${CONTRACT_FILES.deploy}: printed rollback must short-circuit stopped-peer and restart-target proofs before start and traffic assignment`,
+      `${CONTRACT_FILES.deploy}: printed rollback must accept a proven restored target or short-circuit restart proofs before start and traffic assignment`,
     );
   }
   const plannedManualRollbackCalls =
@@ -1216,18 +1238,29 @@ export function validateContract(files = readContractFiles()) {
     /Versions that do not pin[\s\S]*grafana-agent-runtime@mento-monitoring\.iam\.gserviceaccount\.com[\s\S]*must not be restarted[\s\S]*pnpm aegis:agent:preflight -- --version TARGET/u,
     `${CONTRACT_FILES.runbook}: rollback guidance must reject legacy identities and require target preflight`,
   );
+  requirePattern(
+    errors,
+    preflight,
+    /const expectedAllocation = versionTraffic === 'full' \? 1 : 0;[\s\S]*targetAllocation !== expectedAllocation/u,
+    `${CONTRACT_FILES.preflight}: version preflight must require the selected zero or full traffic state`,
+  );
   const runbookRestartSurfaces =
     runbook.match(/gcloud app versions start PREVIOUS/gu) ?? [];
   const runbookRestartPreflights =
     runbook.match(
       /pnpm aegis:agent:preflight -- --version PREVIOUS && \\\n\s+gcloud app versions start PREVIOUS/gu,
     ) ?? [];
+  const runbookRestoredPreflights =
+    runbook.match(
+      /pnpm aegis:agent:preflight -- --version PREVIOUS --version-traffic full/gu,
+    ) ?? [];
   if (
     runbookRestartSurfaces.length !== 1 ||
-    runbookRestartPreflights.length !== 1
+    runbookRestartPreflights.length !== 1 ||
+    runbookRestoredPreflights.length !== 2
   ) {
     errors.push(
-      `${CONTRACT_FILES.runbook}: executable rollback must preflight PREVIOUS immediately before its only restart`,
+      `${CONTRACT_FILES.runbook}: executable rollback must accept a proven full-traffic target or preflight PREVIOUS immediately before its only restart`,
     );
   }
 

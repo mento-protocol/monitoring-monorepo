@@ -589,7 +589,47 @@ test('effective App Engine version must have zero traffic before promotion', () 
         validateStatic: staticPass,
         write: () => {},
       }),
-    /has non-zero traffic allocation 0\.1/u,
+    /has traffic allocation 0\.1, expected 0/u,
+  );
+});
+
+test('effective App Engine rollback version accepts exactly full traffic', () => {
+  const version = 'r-abcdef0-1';
+  const key = `app services describe grafana-agent --project ${project}`;
+  assert.doesNotThrow(() =>
+    runPreflight({
+      project,
+      version,
+      versionTraffic: 'full',
+      runGcloud: successfulRunner({
+        [key]: {
+          split: { allocations: { [version]: 1 } },
+        },
+      }),
+      validateStatic: staticPass,
+      write: () => {},
+    }),
+  );
+});
+
+test('effective App Engine rollback version rejects partial traffic', () => {
+  const version = 'r-abcdef0-1';
+  const key = `app services describe grafana-agent --project ${project}`;
+  assert.throws(
+    () =>
+      runPreflight({
+        project,
+        version,
+        versionTraffic: 'full',
+        runGcloud: successfulRunner({
+          [key]: {
+            split: { allocations: { previous: 0.1, [version]: 0.9 } },
+          },
+        }),
+        validateStatic: staticPass,
+        write: () => {},
+      }),
+    /has traffic allocation 0\.9, expected 1/u,
   );
 });
 

@@ -256,6 +256,16 @@ verify_restart_target() {
     --version "$restart_version"
 }
 
+verify_restored_target() {
+  local verifier_root="$1"
+  local restored_version="$2"
+
+  node "$verifier_root/aegis/grafana-agent/preflight.mjs" \
+    --project "$project" \
+    --version "$restored_version" \
+    --version-traffic full
+}
+
 print_manual_rollback_commands() {
   local previous_version="$1"
   local target_version="$2"
@@ -271,9 +281,10 @@ print_manual_rollback_commands() {
     "        peer_status=\"\$(gcloud app versions describe \"\$peer_version\" --project $project --service grafana-agent --format='value(servingStatus)')\" && \\" \
     "        test \"\$peer_status\" = STOPPED || exit 1; \\" \
     "    done && \\" \
-    "    pnpm --dir \"$repo_root\" aegis:agent:preflight -- --version $previous_version && \\" \
-    "    gcloud app versions start $previous_version --project $project --service grafana-agent --quiet && \\" \
-    "    gcloud app services set-traffic grafana-agent --project $project --splits ${previous_version}=1"
+    "    (pnpm --dir \"$repo_root\" aegis:agent:preflight -- --version $previous_version --version-traffic full || \\" \
+    "      (pnpm --dir \"$repo_root\" aegis:agent:preflight -- --version $previous_version && \\" \
+    "        gcloud app versions start $previous_version --project $project --service grafana-agent --quiet && \\" \
+    "        gcloud app services set-traffic grafana-agent --project $project --splits ${previous_version}=1))"
 }
 
 rollback_cutover() {
@@ -301,6 +312,10 @@ rollback_cutover() {
       echo "Manual stop-before-start recovery:" >&2
       print_manual_rollback_commands "$previous_version" "$target_version" >&2
       return 1
+    fi
+    if verify_restored_target "$verifier_root" "$previous_version"; then
+      echo "Previous collector already owns full traffic; rollback is restored." >&2
+      return 0
     fi
     if ! verify_restart_target "$verifier_root" "$previous_version"; then
       echo "Automatic rollback halted: previous collector failed pinned-identity and zero-traffic preflight." >&2

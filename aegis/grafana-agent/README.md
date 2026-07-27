@@ -168,18 +168,23 @@ gcloud app versions stop TARGET --project mento-monitoring --service grafana-age
       peer_status="$(gcloud app versions describe "$peer_version" --project mento-monitoring --service grafana-agent --format='value(servingStatus)')" && \
       test "$peer_status" = STOPPED || exit 1; \
   done && \
-  pnpm aegis:agent:preflight -- --version PREVIOUS && \
-  gcloud app versions start PREVIOUS --project mento-monitoring --service grafana-agent --quiet && \
-  gcloud app services set-traffic grafana-agent --project mento-monitoring --splits PREVIOUS=1
+  (pnpm aegis:agent:preflight -- --version PREVIOUS --version-traffic full || \
+    (pnpm aegis:agent:preflight -- --version PREVIOUS && \
+      gcloud app versions start PREVIOUS --project mento-monitoring --service grafana-agent --quiet && \
+      gcloud app services set-traffic grafana-agent --project mento-monitoring --splits PREVIOUS=1))
 ```
 
 Never start `PREVIOUS` until `TARGET` and every other serving peer report
-`STOPPED` and `pnpm aegis:agent:preflight -- --version PREVIOUS` proves its
-pinned runtime identity and zero-traffic state; doing so can otherwise restart
-a legacy collector without secret access or run duplicate collectors. The
-local operator needs permission to submit as the dedicated builder and change
-App Engine traffic; the builder performs the version deployment without access
-to secret payloads.
+`STOPPED`. If `PREVIOUS` already owns full traffic, verify that state and its
+pinned runtime identity with
+`pnpm aegis:agent:preflight -- --version PREVIOUS --version-traffic full` and
+do not restart it. Otherwise,
+`pnpm aegis:agent:preflight -- --version PREVIOUS` must prove its pinned runtime
+identity and zero-traffic state before restart; doing so can otherwise restart a
+legacy collector without secret access or run duplicate collectors. The local
+operator needs permission to submit as the dedicated builder and change App
+Engine traffic; the builder performs the version deployment without access to
+secret payloads.
 
 Do not deploy until an explicitly approved platform apply has created the
 write-only versions and identity bindings. Terraform's write-only path is the

@@ -46,6 +46,7 @@ function parseArgs(argv) {
     project: process.env.GCP_PROJECT || 'mento-monitoring',
     staticOnly: false,
     version: '',
+    versionTraffic: 'zero',
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -58,9 +59,18 @@ function parseArgs(argv) {
       options.project = argv[++index];
     } else if (argument === '--version' && argv[index + 1]) {
       options.version = argv[++index];
+    } else if (argument === '--version-traffic' && argv[index + 1]) {
+      options.versionTraffic = argv[++index];
     } else {
       throw new Error(`unknown or incomplete argument: ${argument}`);
     }
+  }
+
+  if (!['zero', 'full'].includes(options.versionTraffic)) {
+    throw new Error('--version-traffic must be zero or full');
+  }
+  if (options.versionTraffic !== 'zero' && !options.version) {
+    throw new Error('--version-traffic requires --version');
   }
 
   return options;
@@ -227,6 +237,7 @@ function assertExactValues(actualValues, expectedValues, label) {
 export function runPreflight({
   project = EXPECTED_PROJECT,
   version = '',
+  versionTraffic = 'zero',
   staticOnly = false,
   runGcloud = defaultGcloud,
   validateStatic = validateContract,
@@ -236,6 +247,12 @@ export function runPreflight({
     throw new Error(
       `project must be ${EXPECTED_PROJECT}; refusing cross-project preflight`,
     );
+  }
+  if (!['zero', 'full'].includes(versionTraffic)) {
+    throw new Error('versionTraffic must be zero or full');
+  }
+  if (versionTraffic !== 'zero' && !version) {
+    throw new Error('versionTraffic requires a version');
   }
   const contractErrors = validateStatic();
   if (contractErrors.length > 0) {
@@ -479,13 +496,17 @@ export function runPreflight({
       throw new Error('could not verify grafana-agent traffic allocations');
     }
     const targetAllocation = Number(allocations[version] ?? 0);
-    if (!Number.isFinite(targetAllocation) || targetAllocation !== 0) {
+    const expectedAllocation = versionTraffic === 'full' ? 1 : 0;
+    if (
+      !Number.isFinite(targetAllocation) ||
+      targetAllocation !== expectedAllocation
+    ) {
       throw new Error(
-        `App Engine version ${version} has non-zero traffic allocation ${allocations[version]}`,
+        `App Engine version ${version} has traffic allocation ${allocations[version] ?? 0}, expected ${expectedAllocation}`,
       );
     }
     write(`App Engine version ${version}: runtime identity verified`);
-    write(`App Engine version ${version}: zero traffic verified`);
+    write(`App Engine version ${version}: ${versionTraffic} traffic verified`);
   }
 
   write(`Alloy live preflight passed for ${runtimeEmail}.`);

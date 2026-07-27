@@ -879,6 +879,7 @@ gcloud() {
 }
 node() {
   printf 'node %s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"--version-traffic full"* ]]; then return 1; fi
 }
 rollback_cutover previous target /verification`,
       'bash',
@@ -897,13 +898,57 @@ rollback_cutover previous target /verification`,
   );
   assert.ok(
     calls.indexOf(
-      'node /verification/aegis/grafana-agent/preflight.mjs --project mento-monitoring --version previous',
+      'node /verification/aegis/grafana-agent/preflight.mjs --project mento-monitoring --version previous --version-traffic full',
+    ) <
+      calls.indexOf(
+        'node /verification/aegis/grafana-agent/preflight.mjs --project mento-monitoring --version previous\n',
+      ),
+  );
+  assert.ok(
+    calls.indexOf(
+      'node /verification/aegis/grafana-agent/preflight.mjs --project mento-monitoring --version previous\n',
     ) < calls.indexOf('versions start previous'),
   );
   assert.ok(
     calls.indexOf('versions start previous') <
       calls.indexOf('services set-traffic grafana-agent'),
   );
+});
+
+test('rollback accepts a pinned previous collector that already owns full traffic', () => {
+  const deployPath = path.join(agentDir, 'deploy.sh');
+  const logPath = path.join(
+    tmpdir(),
+    `alloy-rollback-restored-${process.pid}.log`,
+  );
+  const result = spawnSync(
+    'bash',
+    [
+      '-c',
+      `source "$1"
+project=mento-monitoring
+LOG_PATH="$2"
+gcloud() {
+  printf '%s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"versions describe target"* ]]; then printf '%s\\n' STOPPED; fi
+}
+node() {
+  printf 'node %s\\n' "$*" >>"$LOG_PATH"
+}
+rollback_cutover previous target /verification`,
+      'bash',
+      deployPath,
+      logPath,
+    ],
+    { encoding: 'utf8' },
+  );
+  const calls = readFileSync(logPath, 'utf8');
+  rmSync(logPath, { force: true });
+  assert.equal(result.status, 0, `${result.stderr}\n${calls}`);
+  assert.match(calls, /--version previous --version-traffic full/u);
+  assert.doesNotMatch(calls, /versions start previous/u);
+  assert.doesNotMatch(calls, /services set-traffic grafana-agent/u);
+  assert.match(result.stderr, /already owns full traffic/u);
 });
 
 test('unpromoted target cleanup stops and proves the passive version', () => {
@@ -1234,6 +1279,7 @@ gcloud() {
 }
 pnpm() {
   printf 'pnpm %s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"--version-traffic full"* ]]; then return 1; fi
 }
 eval "$command"`,
       'bash',
@@ -1260,6 +1306,42 @@ eval "$command"`,
     calls.indexOf('versions start previous') <
       calls.indexOf('services set-traffic grafana-agent'),
   );
+});
+
+test('printed rollback accepts a pinned previous collector that already owns full traffic', () => {
+  const deployPath = path.join(agentDir, 'deploy.sh');
+  const logPath = path.join(
+    tmpdir(),
+    `alloy-manual-restored-${process.pid}.log`,
+  );
+  const result = spawnSync(
+    'bash',
+    [
+      '-c',
+      `source "$1"
+project=mento-monitoring
+LOG_PATH="$2"
+command="$(print_manual_rollback_commands previous target)"
+gcloud() {
+  printf '%s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"versions describe target"* ]]; then printf '%s\\n' STOPPED; fi
+}
+pnpm() {
+  printf 'pnpm %s\\n' "$*" >>"$LOG_PATH"
+}
+eval "$command"`,
+      'bash',
+      deployPath,
+      logPath,
+    ],
+    { encoding: 'utf8' },
+  );
+  const calls = readFileSync(logPath, 'utf8');
+  rmSync(logPath, { force: true });
+  assert.equal(result.status, 0, `${result.stderr}\n${calls}`);
+  assert.match(calls, /--version previous --version-traffic full/u);
+  assert.doesNotMatch(calls, /versions start previous/u);
+  assert.doesNotMatch(calls, /services set-traffic grafana-agent/u);
 });
 
 test('printed rollback never starts a previous collector that fails preflight', () => {
@@ -1344,7 +1426,10 @@ test('deploy must retain the explicit previous-version rollback command', () => 
     'gcloud app services set-traffic grafana-agent',
     'echo rollback-skipped',
   );
-  expectFailure(files, /printed rollback must short-circuit/u);
+  expectFailure(
+    files,
+    /printed rollback must accept a proven restored target/u,
+  );
 });
 
 test('every automatic rollback call must carry the immutable verifier', () => {
@@ -1369,12 +1454,24 @@ test('unguarded deploy restart surfaces cannot be added', () => {
 test('runbook restart must keep the inline previous-version preflight', () => {
   const files = sourceFiles();
   files.runbook = files.runbook.replace(
-    '  pnpm aegis:agent:preflight -- --version PREVIOUS && \\\n',
+    '    (pnpm aegis:agent:preflight -- --version PREVIOUS && \\\n',
     '',
   );
   expectFailure(
     files,
-    /executable rollback must preflight PREVIOUS immediately/u,
+    /executable rollback must accept a proven full-traffic target/u,
+  );
+});
+
+test('runbook rollback must keep the already-restored full-traffic proof', () => {
+  const files = sourceFiles();
+  files.runbook = files.runbook.replaceAll(
+    ' --version PREVIOUS --version-traffic full',
+    ' --version PREVIOUS',
+  );
+  expectFailure(
+    files,
+    /executable rollback must accept a proven full-traffic target/u,
   );
 });
 
@@ -1384,7 +1481,7 @@ test('runbook cannot add an unguarded previous-version restart', () => {
     '\ngcloud app versions start PREVIOUS --project mento-monitoring\n';
   expectFailure(
     files,
-    /executable rollback must preflight PREVIOUS immediately/u,
+    /executable rollback must accept a proven full-traffic target/u,
   );
 });
 
