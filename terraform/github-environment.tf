@@ -20,9 +20,13 @@
 #
 # So this environment provides SCOPING (only jobs that declare it see these
 # secrets, instead of every workflow run in the repo), not the branch boundary
-# #1289 intended. The in-workflow `if: github.ref == 'refs/heads/main'` guards
-# remain the only control on the dispatch vector, and they are a convention the
-# branch author controls. Real fixes (separate repo / short-lived OIDC-minted
+# #1289 intended. The in-workflow `if: github.ref == 'refs/heads/main'` guards do
+# not close the gap either: the environment-declaring jobs in
+# sentry-triage-agent.yml and sentry-autofix.yml carry NO such guard (so the
+# triage token and the autofix App key are reachable off-main with nothing in the
+# way), and even where a guard exists it cannot bind an attacker, who controls
+# the whole workflow file on their branch and can declare this environment from
+# any job they write. Real fixes (separate repo / short-lived OIDC-minted
 # credentials / dropping `workflow_dispatch`) are tracked in #1649.
 # This mirrors the `production-infra` environment that already gates Terraform
 # applies — but this one carries NO required reviewers (the pipeline is

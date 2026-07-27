@@ -49,9 +49,15 @@ does not gate `workflow_dispatch` on deployment-branch policies, so a user with
 `if: github.ref == 'refs/heads/main'` guard removed still receives the pipeline's
 secrets (verified 2026-07-27 with both an admin and a non-admin collaborator;
 [#1649](https://github.com/mento-protocol/monitoring-monorepo/issues/1649)).
-Those `if:` guards are therefore the only control on this vector, and a branch
-author can delete them — treat off-main dispatch of these workflows as an
-incident, not a nuisance. The shared
+And the `if:` guards do not close the gap: the environment-declaring jobs in
+`sentry-triage-agent.yml` (`select`, `triage`, `project`) and
+`sentry-autofix.yml` (`select`, `finalize`) carry **no** `github.ref` guard at
+all, so an off-main dispatch reaches them with `SENTRY_TRIAGE_TOKEN` and
+`AUTOFIX_APP_PRIVATE_KEY` in scope. (`SENTRY_PROJECTION_TOKEN` is ref-gated in
+its `env:` expression, so it alone resolves to `''` off-main.) Even where a guard
+exists, a branch author controls the whole workflow file and can declare the
+environment from any job they write. Treat off-main dispatch of these workflows
+as an incident, not a nuisance. The shared
 `CLAUDE_CODE_OAUTH_TOKEN` deliberately stays a repo-level secret (it is consumed
 by `.github/workflows/claude.yml` on feature-branch `pull_request` events, which a
 main-only environment would break); it is inference-only, so its residual

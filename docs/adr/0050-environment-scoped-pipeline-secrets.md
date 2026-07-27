@@ -29,8 +29,22 @@ secret-bearing scheduled workflows).
 > What the environment still delivers: **scoping** — only jobs that declare it
 > receive these secrets, instead of every workflow run in the repo. What it does
 > **not** deliver: the branch boundary against a compromised writer that #1289
-> set out to build. The in-workflow `if: main` guards remain the only control on
-> the dispatch vector, and they are a convention the branch author controls.
+> set out to build.
+>
+> Nor do the in-workflow `if: main` guards close the gap. Two problems:
+>
+> - **They are absent where the value is highest.** Every environment-declaring
+>   job in `sentry-triage-agent.yml` (`select`, `triage`, `project`) and
+>   `sentry-autofix.yml` (`select`, `finalize`) carries **no `github.ref`
+>   guard**, so an off-main dispatch reaches them with `SENTRY_TRIAGE_TOKEN` and
+>   `AUTOFIX_APP_PRIVATE_KEY` in scope. Only `sentry-triage-ingest.yml`,
+>   `sentry-triage-archive.yml`, and `platform-settings-drift.yml` carry one.
+>   (`SENTRY_PROJECTION_TOKEN` is the exception: its `env:` expression is
+>   ref-gated to `main`, so it resolves to `''` off-main.)
+> - **A guard could not be a boundary anyway.** The branch author controls the
+>   entire workflow file, so they can declare `environment: sentry-pipeline`
+>   from any job they write, guard or not. Adding guards would reduce accidental
+>   off-main dispatch of the existing workflows; it would not bound an attacker.
 >
 > Everything below is retained as the original record. Read the Decision and
 > Consequences sections as **superseded** on the enforcement claim. Replacement

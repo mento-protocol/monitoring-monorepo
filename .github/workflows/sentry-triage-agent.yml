@@ -58,11 +58,14 @@ jobs:
     # sentry-pipeline Environment (issue #1289): scopes the SENTRY_TRIAGE_TOKEN +
     # CLAUDE_CODE_OAUTH_TOKEN presence checks to the jobs that declare it instead
     # of the whole repo. NOT a boundary against workflow_dispatch —
-    # deployment-branch policies do not gate dispatch runs (verified 2026-07-27),
-    # so the `if:` main guards on the secret-bearing jobs are the only control on
-    # that vector; fix options tracked in #1649. (CLAUDE_CODE_OAUTH_TOKEN stays a
-    # repo-level secret for claude.yml; on this main-gated job it resolves via the
-    # repo-level fallback since the environment does not redefine it.)
+    # deployment-branch policies do not gate dispatch runs (verified 2026-07-27).
+    # This job additionally carries NO `github.ref` guard, so an off-main
+    # dispatch reaches it and receives SENTRY_TRIAGE_TOKEN with nothing in the
+    # way. Do not add a guard here expecting it to be a boundary: a branch author
+    # controls the whole workflow file and can declare this environment from any
+    # job they write. Tracked in #1649. (CLAUDE_CODE_OAUTH_TOKEN stays a
+    # repo-level secret for claude.yml; it resolves via the repo-level fallback
+    # since the environment does not redefine it.)
     environment: sentry-pipeline
     permissions:
       contents: read
@@ -167,7 +170,9 @@ jobs:
     # sentry-pipeline Environment (issue #1289): scopes SENTRY_TRIAGE_TOKEN (job
     # env) and CLAUDE_CODE_OAUTH_TOKEN (claude-code-action) to the declaring
     # jobs. NOT a boundary against workflow_dispatch — dispatch runs are not
-    # gated by the branch policy (verified 2026-07-27; #1649).
+    # gated by the branch policy (verified 2026-07-27), and like `select` this
+    # job has no `github.ref` guard, so an off-main dispatch reaches it with
+    # SENTRY_TRIAGE_TOKEN in scope. Tracked in #1649.
     environment: sentry-pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 30
