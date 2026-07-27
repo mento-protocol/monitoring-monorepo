@@ -169,6 +169,7 @@ resource "google_project_iam_custom_role" "grafana_agent_preflight_reader" {
 
   depends_on = [
     google_project_service.appengineflex,
+    google_project_service.artifactregistry,
     google_project_service.iam,
     google_project_service.secretmanager,
   ]

@@ -243,6 +243,24 @@ test('operator preflight role pins the Terraform member-set fingerprint', () => 
   expectFailure(files, /must carry the Terraform member-set fingerprint/u);
 });
 
+test('operator preflight role waits for every permission-owning API', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    `  depends_on = [
+    google_project_service.appengineflex,
+    google_project_service.artifactregistry,
+    google_project_service.iam,
+    google_project_service.secretmanager,
+  ]`,
+    `  depends_on = [
+    google_project_service.appengineflex,
+    google_project_service.iam,
+    google_project_service.secretmanager,
+  ]`,
+  );
+  expectFailure(files, /must wait for every permission-owning API/u);
+});
+
 test('operator preflight reader must stay scoped to gcp_dev_members', () => {
   const files = sourceFiles();
   files.bootstrap = files.bootstrap.replace(

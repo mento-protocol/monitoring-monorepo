@@ -499,6 +499,12 @@ export function validateContract(files = readContractFiles()) {
     /description\s*=\s*"Alloy metadata preflight\. operator-set-sha256=\$\{sha256\(jsonencode\(sort\(distinct\(var\.gcp_dev_members\)\)\)\)\}"/u,
     `${CONTRACT_FILES.bootstrap}: operator preflight role must carry the Terraform member-set fingerprint`,
   );
+  requirePattern(
+    errors,
+    preflightRole,
+    /depends_on\s*=\s*\[\s*google_project_service\.appengineflex,\s*google_project_service\.artifactregistry,\s*google_project_service\.iam,\s*google_project_service\.secretmanager,\s*\]/u,
+    `${CONTRACT_FILES.bootstrap}: operator preflight role must wait for every permission-owning API`,
+  );
   const preflightPermissions = [
     ...preflightRole.matchAll(/"([a-z]+\.[^"]+)"/gu),
   ].map((match) => match[1]);
