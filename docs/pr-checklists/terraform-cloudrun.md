@@ -3,7 +3,7 @@ title: Terraform and Cloud Run Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-27
 doc_type: checklist
 scope: terraform/infra
 review_interval_days: 90
