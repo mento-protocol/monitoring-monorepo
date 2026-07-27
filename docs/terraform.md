@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-27
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -15,13 +15,13 @@ garden_lane: operator-runbooks
 `terraform.stacks.json` is the source of truth for Terraform roots; do not infer
 ownership from directory names.
 
-| Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                                              | Plan/apply policy                                                                                                   |
-| --------------------- | ---------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `platform`            | `terraform/`                 | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, separated CI WIF/IAM identities, and platform-owned repo Actions secrets/variables | Manual plan; human-approved local apply                                                                             |
-| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + Aegis service-health and testnet-health rule groups, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                          | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources, and stack-local trusted-main refresh grants                      | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                          | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
-| `governance-watchdog` | `governance-watchdog/infra/` | `governance-watchdog` | Dedicated governance-watchdog GCP project, Cloud Function/source archive, Secret Manager, QuickNode webhook creation, scheduler, monitoring, alerts, and stack-local trusted-main refresh grants                  | PR plan; `main` apply through the `production-infra` GitHub Environment; daily drift plan via `terraform-drift.yml` |
+| Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                                                                              | Plan/apply policy                                                                                                   |
+| --------------------- | ---------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `platform`            | `terraform/`                 | `monitoring-monorepo` | Dashboard Vercel project, Upstash, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit deploy-source buckets, separated CI WIF/IAM identities, and platform-owned repo Actions secrets/variables | Manual plan; human-approved local apply                                                                             |
+| `alerts-rules`        | `alerts/rules/`              | `alerts-rules`        | Protocol Grafana alert rules + Aegis service-health and testnet-health rule groups, Grafana folders, global Grafana notification policy, contact points, message templates, mute timings                                                          | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `alerts-delivery`     | `alerts/infra/`              | `alerts-infra`        | QuickNode webhooks, alert Cloud Functions, Sentry bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, related GCP resources, and stack-local trusted-main refresh grants                                                      | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `aegis`               | `aegis/terraform/`           | `aegis`               | Aegis Grafana dashboard and Aegis folder                                                                                                                                                                                                          | PR plan; `main` apply through the `production-infra` GitHub Environment                                             |
+| `governance-watchdog` | `governance-watchdog/infra/` | `governance-watchdog` | Dedicated governance-watchdog GCP project, Cloud Function/source archive, Secret Manager, QuickNode webhook creation, scheduler, monitoring, alerts, and stack-local trusted-main refresh grants                                                  | PR plan; `main` apply through the `production-infra` GitHub Environment; daily drift plan via `terraform-drift.yml` |
 
 ## Commands
 
@@ -131,6 +131,42 @@ After merge, cancel superseded runs and wait for all infrastructure runs to
 finish. Then plan from clean current `main`, apply only with explicit human
 approval, and audit final IAM/WIF. Do not create the peg-policy project or
 bucket until that apply, queue drain, and audit prove the legacy path is gone.
+
+## Routine deployment source staging
+
+[ADR 0053](adr/0053-explicit-deployment-source-staging.md) owns the source
+upload boundary for routine GCP deploys. The platform stack creates:
+
+- `mento-monitoring-cloud-build-source` in `var.gcp_region`, with a 7-day live
+  object lifecycle;
+- `mento-monitoring-app-engine-source` in `US`, with a 30-day live object
+  lifecycle for App Engine's content-addressed source cache.
+
+Both buckets use uniform access, enforced public-access prevention, disabled
+soft-delete retention, `force_destroy = false`, and Terraform
+`prevent_destroy`. Cloud Build callers can read bucket metadata and create
+objects; the dedicated Alloy `grafana_agent_builder` can view those objects and
+is also an App Engine uploader. App Engine uploaders have Object Admin only on
+the App Engine source bucket because the CLI can replace or clean up cached
+hash-named objects. AppSpot can view those objects. The routine deployer and
+`gcp_dev_members` have Service Account User
+only on Metrics Bridge's default Compute Engine service account, preserving the
+automated and direct `pnpm bridge:deploy` Cloud Run paths after the broad
+project-level fallback is removed.
+
+The routing follow-up must move every checked-in `gcloud builds submit` to
+`--gcs-source-staging-dir` and every checked-in `gcloud app deploy` to
+`--bucket`. That follow-up also extends `pnpm tf:test` to discover these
+executable surfaces and reject a new unflagged callsite.
+
+The migration is deliberately additive. Merge the infrastructure-only PR,
+refresh current `main`, run a clean current-main platform plan, get explicit
+apply approval, apply, and verify the live buckets and IAM. Only then merge the
+command-routing follow-up, whose merge triggers the automatic Metrics Bridge
+and Aegis workflows. Canary Metrics Bridge, Aegis, and Alloy. Remove
+project-wide Storage Admin and routine Service Account User only in the
+separate post-canary phase, followed by an effective-IAM audit. Do not combine
+that removal with peg-policy bucket or identity creation.
 
 ## Platform GitHub Actions secrets and variables
 

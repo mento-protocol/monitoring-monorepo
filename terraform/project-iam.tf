@@ -30,6 +30,10 @@ resource "google_project_iam_member" "dev_cloudbuild_editor" {
   depends_on = [google_project_iam_member.terraform_owner]
 }
 
+# Temporary rollback access during the explicit staging-bucket canaries.
+# deploy-staging.tf already grants the dev members only the bucket roles used
+# by the planned Cloud Build and App Engine routing. Remove this project-wide
+# grant in the separate post-canary phase.
 resource "google_project_iam_member" "dev_storage_admin" {
   for_each = toset(var.gcp_dev_members)
   project  = google_project.monitoring.project_id
