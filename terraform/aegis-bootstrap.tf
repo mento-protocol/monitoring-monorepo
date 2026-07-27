@@ -126,6 +126,14 @@ resource "google_project_iam_member" "grafana_agent_runtime_activation_reader" {
   depends_on = [google_project_iam_custom_role.grafana_agent_activation_reader]
 }
 
+resource "google_project_iam_member" "grafana_agent_runtime_log_writer" {
+  project = google_project.monitoring.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.grafana_agent_runtime.email}"
+
+  depends_on = [google_project_service.appengineflex]
+}
+
 resource "google_project_iam_custom_role" "grafana_agent_preflight_reader" {
   project     = google_project.monitoring.project_id
   role_id     = "grafanaAgentPreflightReader"

@@ -60,6 +60,7 @@ function successfulProjectPolicy(
   return {
     bindings: [
       { role: activationRole, members: [runtimeMember] },
+      { role: 'roles/logging.logWriter', members: [runtimeMember] },
       { role: preflightRole, members: configuredSubmitters },
       ...builderRoles.map((role) => ({ role, members: [builderMember] })),
       ...extraBindings,
@@ -326,6 +327,30 @@ test('unexpected project roles on the runtime identity fail closed', () => {
               },
             ]),
           },
+        }),
+        validateStatic: staticPass,
+        write: () => {},
+      }),
+    /runtime activation project roles must match the least-privilege contract/u,
+  );
+});
+
+test('missing App Engine Flex Logs Writer on the runtime identity fails closed', () => {
+  const key = `projects get-iam-policy ${project}`;
+  const projectPolicy = successfulProjectPolicy();
+  projectPolicy.bindings = projectPolicy.bindings.filter(
+    (binding) =>
+      !(
+        binding.role === 'roles/logging.logWriter' &&
+        binding.members.includes(runtimeMember)
+      ),
+  );
+  assert.throws(
+    () =>
+      runPreflight({
+        project,
+        runGcloud: successfulRunner({
+          [key]: projectPolicy,
         }),
         validateStatic: staticPass,
         write: () => {},

@@ -186,6 +186,15 @@ resource "google_secret_manager_secret_iam_member" "extra_runtime_access" {
   expectFailure(files, /only the exact managed Alloy secret grants/u);
 });
 
+test('the App Engine Flex runtime must keep Logs Writer', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    'resource "google_project_iam_member" "grafana_agent_runtime_log_writer"',
+    'resource "google_project_iam_member" "removed_runtime_log_writer"',
+  );
+  expectFailure(files, /App Engine Flex Logs Writer/u);
+});
+
 test('runtime secret IAM must preserve bootstrap ordering', () => {
   const files = sourceFiles();
   files.bootstrap = files.bootstrap.replace(
