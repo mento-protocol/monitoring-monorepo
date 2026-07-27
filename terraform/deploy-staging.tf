@@ -152,3 +152,20 @@ resource "google_service_account_iam_member" "ci_default_compute_service_account
     google_service_account.metrics_bridge_deployer,
   ]
 }
+
+# `pnpm bridge:deploy` is a supported direct Cloud Run deployment path. Devs
+# already have Run Admin; bind Service Account User only on the service's
+# default compute identity so that path keeps working after the broad fallback
+# is removed.
+resource "google_service_account_iam_member" "dev_default_compute_service_account_user" {
+  for_each = toset(var.gcp_dev_members)
+
+  service_account_id = "projects/${google_project.monitoring.project_id}/serviceAccounts/${google_project.monitoring.number}-compute@developer.gserviceaccount.com"
+  role               = "roles/iam.serviceAccountUser"
+  member             = each.value
+
+  depends_on = [
+    google_project_service.compute,
+    google_project_iam_member.dev_run_admin,
+  ]
+}

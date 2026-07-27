@@ -62,9 +62,12 @@ uploaders — those callers plus both build candidates — receive bucket metada
 read plus object admin on the App Engine bucket. AppSpot receives object view.
 No staging grant is project-wide.
 
-The routine deployer also receives Service Account User on the exact default
-Compute Engine service account used by the unpinned Metrics Bridge Cloud Run
-service. The existing exact AppSpot binding continues to cover Aegis.
+The routine deployer and `gcp_dev_members` receive Service Account User on the
+exact default Compute Engine service account used by the unpinned Metrics
+Bridge Cloud Run service. This preserves both the automated Metrics Bridge
+rollout and the supported direct `pnpm bridge:deploy` path after the broad
+fallback is removed. The existing exact AppSpot binding continues to cover
+Aegis.
 
 This first phase is additive. Existing project-wide Storage Admin and routine
 Service Account User grants remain until real Metrics Bridge, Aegis, and Alloy

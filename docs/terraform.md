@@ -141,7 +141,10 @@ soft-delete retention, `force_destroy = false`, and Terraform
 objects; its two possible default build identities can view objects. App Engine
 uploaders have Object Admin only on the App Engine source bucket because the
 CLI can replace or clean up cached hash-named objects. AppSpot can view those
-objects.
+objects. The routine deployer and `gcp_dev_members` have Service Account User
+only on Metrics Bridge's default Compute Engine service account, preserving the
+automated and direct `pnpm bridge:deploy` Cloud Run paths after the broad
+project-level fallback is removed.
 
 The routing follow-up must move every checked-in `gcloud builds submit` to
 `--gcs-source-staging-dir` and every checked-in `gcloud app deploy` to
