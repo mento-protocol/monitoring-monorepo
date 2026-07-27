@@ -117,6 +117,30 @@ function expectFailure(files, expected) {
   );
 }
 
+function expectOpaqueExecutionFailure(contents, boundary) {
+  const filePath = "scripts/opaque-deploy.sh";
+  const discoveryErrors = [];
+  const records = discoverDeployStagingCallsites(
+    { [filePath]: contents },
+    discoveryErrors,
+  );
+  assert.equal(
+    records.length,
+    0,
+    `${boundary} must not create a trusted record`,
+  );
+  assert(
+    discoveryErrors.some(
+      (error) =>
+        error.includes(filePath) &&
+        error.includes("opaque shell") &&
+        error.includes(boundary),
+    ),
+    `${boundary} must report a discovery error, got:\n${discoveryErrors.join("\n")}`,
+  );
+  expectFailure({ ...files, [filePath]: contents }, "opaque shell");
+}
+
 const files = repositoryFiles();
 
 assert.equal(
@@ -444,6 +468,64 @@ printf '%s\\n' 'gcloud beta app deploy app.yaml'
   }).length,
   0,
   "quoted deploy text must not create executable callsites",
+);
+
+expectOpaqueExecutionFailure(
+  "#!/usr/bin/env bash\neval 'gcloud builds submit .'\n",
+  "eval",
+);
+expectOpaqueExecutionFailure(
+  "#!/usr/bin/env bash\neval 'gcloud --project=mento-monitoring builds submit .'\n",
+  "eval",
+);
+const duplicateOpaqueErrors = [];
+discoverDeployStagingCallsites(
+  {
+    "scripts/repeated-opaque-deploy.sh": `#!/usr/bin/env bash
+eval 'gcloud builds submit .'
+eval 'gcloud builds submit .'
+`,
+  },
+  duplicateOpaqueErrors,
+);
+assert.equal(
+  duplicateOpaqueErrors.filter((error) => error.includes("opaque shell eval"))
+    .length,
+  1,
+  "repeated opaque boundaries must report one diagnostic per file and surface",
+);
+expectOpaqueExecutionFailure(
+  "#!/usr/bin/env bash\nsh -c 'gcloud app deploy app.yaml'\n",
+  "sh -c",
+);
+expectOpaqueExecutionFailure(
+  "#!/usr/bin/env bash\nprintf 'gcloud builds submit .\\n' | xargs -I{} sh -c '{}'\n",
+  "xargs shell evaluation",
+);
+expectOpaqueExecutionFailure(
+  "#!/usr/bin/env bash\nprintf 'gcloud app deploy app.yaml\\n' > /tmp/deploy\nbash /tmp/deploy\n",
+  "generated /tmp/deploy",
+);
+
+const safeQuotedLogErrors = [];
+assert.equal(
+  discoverDeployStagingCallsites(
+    {
+      "scripts/log-only.sh": `#!/usr/bin/env bash
+echo "gcloud builds submit ."
+printf '%s\\n' 'gcloud app deploy app.yaml'
+command -v gcloud
+`,
+    },
+    safeQuotedLogErrors,
+  ).length,
+  0,
+  "quoted deploy text and gcloud lookup must not create executable callsites",
+);
+assert.deepEqual(
+  safeQuotedLogErrors,
+  [],
+  "quoted deploy text and gcloud lookup must not create opaque-execution errors",
 );
 
 const commentsOnly = {
