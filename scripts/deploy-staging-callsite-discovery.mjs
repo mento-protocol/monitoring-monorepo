@@ -64,7 +64,7 @@ function normalize(text) {
   return text
     .replace(/\\(.)/gu, "$1")
     .replace(/["'`]/gu, "")
-    .replace(/[\[\](){},:]/gu, " ")
+    .replace(/[[\](){},:]/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
 }
