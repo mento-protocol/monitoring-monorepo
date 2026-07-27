@@ -1,10 +1,10 @@
 # ── Peg policy source foundation ─────────────────────────────────────────────
 #
-# ADR 0048 keeps this source plane dormant until the protected identity cutover
-# is applied and proven. The PR introducing this file must stay unmerged until
-# legacy-authority removal, queue drain, and the final IAM audit are complete.
-# This stack creates no policy object and does not attach the runtime identity
-# to Cloud Run; later reviewed changes own those activation steps.
+# ADR 0048 required the protected identity cutover, legacy-authority removal,
+# run drain, and final IAM audit before this source could merge. Those
+# prerequisites are complete. This stack creates no policy object and does not
+# attach the runtime identity to Cloud Run; later reviewed changes own those
+# activation steps.
 
 resource "google_storage_bucket" "peg_policy" {
   name                        = "${google_project.monitoring.project_id}-peg-policy"
