@@ -3,7 +3,7 @@ title: Documentation Navigation Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-27
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -217,3 +217,41 @@ follow-up PR. If a fixture must change because the intended route or context
 contract changed, review that change separately and report both the
 historical-suite and current-suite interpretation instead of silently rewriting
 the baseline digest.
+
+### 2026-07 post-garden result
+
+The first run after all six baseline garden trackers closed is
+[`documentation-navigation-2026-07-post-garden.json`](documentation-navigation-2026-07-post-garden.json).
+It evaluated default-branch commit
+`c909129681b2e041f05f10e72e85a0ff7f98ec52` with `gpt-5.6-terra` at low
+effort.
+
+| Measure                             |   Frozen baseline | 2026-07 post-garden |
+| ----------------------------------- | ----------------: | ------------------: |
+| Routing accuracy                    |             94.4% |               88.9% |
+| Unqualified non-canonical sources   |                 0 |                   0 |
+| Answer evidence                     |              100% |                100% |
+| Shortest useful path                |             88.9% |               88.9% |
+| Bootstrap bytes                     |            42,681 |              27,305 |
+| Unique suite bytes                  | 245,723 / 272,000 |   249,421 / 260,000 |
+| Questions over the per-question cap |                 0 |                   0 |
+
+The current run missed `package-indexer-add-contract`, which the baseline also
+missed, and `operator-alerts-stack-boundary`. Each miss was escalated in a
+fresh, read-only `gpt-5.6-sol` targeted run at medium effort against the same
+commit. The
+[`package-indexer-add-contract` result](documentation-navigation-2026-07-post-garden-indexer-escalation.json)
+passed at 100% routing, evidence, and shortest-route accuracy with 28,502
+question-source bytes. It followed `indexer-envio/AGENTS.md` to the detailed
+procedure in `indexer-envio/README.md`. The
+[`operator-alerts-stack-boundary` result](documentation-navigation-2026-07-post-garden-alerts-escalation.json)
+passed at 100% routing and evidence accuracy with 15,935 question-source bytes;
+its extra downstream infra runbook lowered shortest-route accuracy without
+changing the accepted route from `alerts/AGENTS.md`. Both results had zero
+unqualified non-canonical sources and no question over the context cap.
+Independent review reached the same conclusion: both full-run misses were
+evaluator retrieval mistakes, so no documentation defect issue was required.
+
+Because two full runs have now missed `package-indexer-add-contract`, a third
+independent full-run miss must trigger a fresh review of the accepted route and
+fixture after the required targeted escalation.
