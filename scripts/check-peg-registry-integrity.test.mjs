@@ -605,6 +605,46 @@ test("validates retained previous policy internal topology during rollover", asy
   );
 });
 
+test("defaults listing confirmation only for the exact retained legacy policy", async () => {
+  const legacyVersion = "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f";
+  const committed = await checkFixture({
+    mutatePolicy: (policy) => {
+      assert.equal(policy.previous.version, legacyVersion);
+      for (const source of Object.values(
+        policy.previous.assets["europ-schuman"].sources,
+      )) {
+        assert.equal(source.listingAbsentConsecutiveChecks, undefined);
+      }
+    },
+  });
+  assert.deepEqual(
+    committed.errors,
+    [],
+    `expected exact legacy predecessor to use the compatibility default:\n${joinedErrors(committed)}`,
+  );
+
+  const futureOmission = await checkFixture({
+    mutatePolicy: (policy) => {
+      policy.previous.version = "europ-future-policy";
+    },
+  });
+  assert.match(
+    joinedErrors(futureOmission),
+    /listingAbsentConsecutiveChecks: missing or non-finite source policy/,
+  );
+
+  const activeOmission = await checkFixture({
+    mutatePolicy: (policy) => {
+      delete policy.active.assets["europ-schuman"].sources.bitvavo_eur
+        .listingAbsentConsecutiveChecks;
+    },
+  });
+  assert.match(
+    joinedErrors(activeOmission),
+    /listingAbsentConsecutiveChecks: missing or non-finite source policy/,
+  );
+});
+
 test("accepts complete A-to-B onboarding while active still matches registry", async () => {
   const result = await checkFixture({
     mutateRegistry: (registry) => {

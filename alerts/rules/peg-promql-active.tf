@@ -152,6 +152,38 @@ locals {
       asset.freshnessGraceSeconds,
     )
   }
+  # Listing confirmation is producer-side because a reset can occur between
+  # scrapes. Grafana evaluates only the latest exact-version state, bounded
+  # streak, and successful-check timestamp.
+  peg_active_listing_absent_promql = {
+    for key, item in local.peg_active_sources : key => format(
+      "mento_peg_listing_state{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\",state=\"absent\"} == 1 and on(asset,source,policy_version) mento_peg_listing_absent_consecutive_checks{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} >= %d and on(asset,source,policy_version) (time() - mento_peg_listing_checked_at{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)",
+      item.asset_id,
+      item.source_id,
+      item.asset_id,
+      item.source_id,
+      item.listing_absent_consecutive_checks,
+      item.asset_id,
+      item.source_id,
+      item.source.staleAfterSeconds,
+    )
+  }
+  peg_active_listing_age_promql = {
+    for key, item in local.peg_active_sources : key => format(
+      "time() - mento_peg_listing_checked_at{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} or on() vector(-1)",
+      item.asset_id,
+      item.source_id,
+    )
+  }
+  peg_active_indexed_pool_unreachable_promql = {
+    for asset_id, asset in local.peg_active_assets : asset_id => format(
+      "(mento_peg_indexed_pool_reachable{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} == bool 0 or absent(mento_peg_indexed_pool_reachable{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"})) and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)",
+      asset_id,
+      asset_id,
+      asset_id,
+      asset.freshnessGraceSeconds,
+    )
+  }
   peg_active_price_promql = {
     for key, item in local.peg_active_sources : key => format(
       "mento_peg_executable_px{asset=\"%s\",source=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} or on() vector(-1)",
