@@ -173,16 +173,17 @@ engineers must not derive it from current TVL, trading limits, or intuition.
 Recalculate after any signer-SLA, Safe, fee, pool, rate, reserve-access, or
 trading-limit change.
 
-## 6. Roll out producer first
+## 6. Roll out the first activation producer-first
 
-Use this repeatable sequence only after the one-time activation hold and the
-policy-only publication and runtime-pinning infrastructure tracked in
+Use this sequence only for the one-time first activation while
+`local.peg_alerts_enabled` is still `false`, and only after the policy
+publication and runtime-pinning infrastructure tracked in
 [Peg monitoring alert source validation and activation
 hold](peg-monitoring.md) are live. Until then, the dormant policy has no
 executable production publication path and these steps must not be presented
 as available commands.
 
-Use this order for a new asset or source topology:
+Use this order for the first activation topology:
 
 1. Stage any adapter, parser, or poller support while the source-controlled
    registry and policy both remain at topology A. Deploy that code-only bridge
@@ -232,10 +233,18 @@ dashboard consumer and only afterward roll back the producer. Removing producer
 metrics first can turn active no-data alerts into incidents or make retained
 rules unevaluable.
 
-The one-time identity bootstrap, dormant producer, and first alert activation
-hold are tracked in [Peg monitoring alert source validation and activation
-hold](peg-monitoring.md). Do not collapse those initial gates into this
-repeatable onboarding sequence.
+Do not reuse steps 2–9 after the first activation sets
+`local.peg_alerts_enabled` to `true`. A later policy change currently changes
+the private artifact and the enabled Grafana rule definitions in the same full
+`alerts-rules` plan. That can install new fail-closed rules before the producer
+selects the new policy. Turning the global guard back off would remove every
+live Peg consumer, and a targeted apply is forbidden.
+
+Subsequent asset and source rollovers remain **Blocked** under
+[issue #1444](https://github.com/mento-protocol/monitoring-monorepo/issues/1444)
+until a reviewed implementation adds either a separately applied policy
+publication boundary or per-policy consumer activation. That implementation
+must update this runbook before operators use A-to-B rollout steps.
 
 ## 7. Interpret scheduled re-census
 
@@ -281,27 +290,19 @@ coverage gates before restoring alert authority.
    to silence the alert.
 4. Census and validate a replacement. Stage and deploy its adapter support with
    registry and policy topology A unchanged, as in Section 6 stage 1.
-5. Add the replacement through the Section 6 additive transition: source
-   registry B contains the old and replacement sources, active policy B
-   exactly matches that union, and `previous` retains exact A. Complete stages
-   2 through 9, then, after acknowledgement, the full decision-history window,
-   and active plus retained-previous rule proof, apply cleanup that sets
-   `previous` to `null`. Active B still contains both sources.
-6. Retire the old source in a separate B-to-C removal rollover after B cleanup.
-   In one source change, make registry C and active policy C both omit the old
-   source and retain exact B as `previous`. Do not deploy the registry C bridge
-   image: keep the already deployed union registry B because it is the
-   topology superset that can serve both active C and retained B.
-7. Publish C through the policy-only protected apply, pin the runtime to C,
-   prove the producer and dashboard, and activate the C plus retained-B
-   Grafana consumers. After acknowledgement, the full decision-history window,
-   and rule proof, apply cleanup that sets `previous` to `null`.
-8. Only after that cleanup may the bridge image move from union registry B to
-   registry C. Re-run coverage, signer-SLA, drain-budget, producer, dashboard,
-   and rule checks before returning the asset to Live.
+5. Keep registry and policy topology A unchanged while the post-activation
+   rollout boundary in Section 6 is missing. Link the replacement evidence to
+   issue #1444; do not start an A-to-B policy change through the current full
+   stack.
+6. Use the recorded escalation, breaker, and exposure controls while monitoring
+   stays degraded. Do not delete the old source only to silence the alert.
 
-This order prevents a registry deploy from making both active and retained
-policy incompatible and prevents policy cleanup from opening a monitoring gap.
+The eventual replacement path must add the replacement through an additive
+A-to-B rollover, clear `previous` only after acknowledgement and a full
+decision-history window, and retire the old source through a later B-to-C
+rollover. Those transitions are design constraints, not executable production
+steps until the missing publication/consumer boundary lands and this section is
+updated in the same reviewed change.
 
 ## EUROP seeded record and mandatory blockers
 
