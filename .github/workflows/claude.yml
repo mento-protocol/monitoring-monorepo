@@ -63,7 +63,7 @@ jobs:
       # so upstream tag retargeting or a compromised release cannot silently run
       # new code here. Update via Dependabot (see .github/dependabot.yml) or by
       # running: gh api repos/<owner>/<repo>/git/ref/tags/<tag>
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
       - uses: anthropics/claude-code-action@12531344451323133b0493233c759991ac61da12 # v1.0.174
@@ -121,7 +121,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
       - uses: anthropics/claude-code-action@12531344451323133b0493233c759991ac61da12 # v1.0.174
