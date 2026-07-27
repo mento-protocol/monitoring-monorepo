@@ -34,9 +34,12 @@ function createPegRuntime(options: PegRuntimeOptions) {
 }
 
 async function policy() {
-  return parsePegPolicyBundle(
+  const parsed = parsePegPolicyBundle(
     JSON.parse(await readFile(POLICY_PATH, "utf8")) as unknown,
   );
+  // Most runtime cases exercise a steady-state policy. The checked-in bundle
+  // retains the exact pre-streak predecessor for this one rollout.
+  return { ...parsed, previous: null };
 }
 
 function policyResponse(value: Awaited<ReturnType<typeof policy>>): Response {

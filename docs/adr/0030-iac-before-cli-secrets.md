@@ -3,7 +3,7 @@ title: All secrets are managed by IaC; agents never touch them with CLI commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
@@ -44,6 +44,15 @@ stop and add the IaC path (or ask), rather than using a CLI workaround.
 - Secret changes ship as a Terraform diff + docs update in the same PR. Use
   `production-infra` for CI-applied stacks, a human-approved manual plan/apply
   for the `platform` stack, or the documented owning integration path.
+- Where the pinned provider supports write-only arguments, use sensitive,
+  ephemeral operator inputs and explicit non-secret rotation counters. The
+  platform Alloy path uses Google provider 6.50.x `secret_data_wo`; its values
+  must not enter saved plans, command arguments, logs, or Terraform state.
+  Keep `TF_LOG`, `TF_LOG_CORE`, `TF_LOG_PROVIDER*`, `TF_LOG_SDK`, and
+  `TF_LOG_SDK_PROTO` unset or `OFF`. Every other `TF_LOG_SDK_*`, including
+  `TF_LOG_SDK_PROTO_DATA_DIR`, must be unset or empty because `OFF` names a
+  protocol-dump directory there. Plan/apply only from clean current `main`, and
+  create a replacement secret version before disabling its predecessor.
 - The Vercel Blob OIDC variables are the one integration-owned exception, documented
   as such.
 

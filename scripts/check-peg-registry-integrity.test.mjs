@@ -707,6 +707,7 @@ test("policy version suffix binds each retained version's immutable content", as
 
 test("policy lineage retains the exact prior active version", () => {
   const { policy: base } = readProductionData();
+  base.previous = null;
   const next = clone(base);
   next.active.assets["europ-schuman"].warnDeviationBps += 1;
   sealPolicyVersion(next.active, "europ-v2");
@@ -851,6 +852,7 @@ test("CLI no-argument local inference fails closed without origin/main", () => {
 
 test("CLI initial policy introduction requires previous=null", () => {
   const data = readProductionData();
+  data.policy.previous = null;
   const directory = mkdtempSync(
     join(tmpdir(), "peg-integrity-bootstrap-test-"),
   );

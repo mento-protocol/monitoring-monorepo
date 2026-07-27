@@ -5,7 +5,7 @@ import {
 } from "./decision-packages.js";
 import type { PegPolicyVersion } from "./policy.js";
 import type { PegRegistry } from "./registry.js";
-import type { PegObservation } from "./types.js";
+import type { MarketState, PegObservation } from "./types.js";
 
 interface SinglePolicyPegPollCycleInput {
   registry: PegRegistry;
@@ -32,14 +32,20 @@ export type PegPollCycleInput =
   | MultiPolicyPegPollCycleInput;
 
 export interface PegPollSourceState {
-  // Provider attempt time, or the last counted deep-source cadence slot when
-  // no structural reference size was available for a provider request.
+  // Order-book attempt time, or the last counted deep-source cadence slot when
+  // no structural reference size was available for an order-book request.
   lastAttemptAt: number | null;
+  // Listing checks keep their own cadence so forced order-book refreshes do
+  // not defer absence confirmation.
+  listingLastAttemptAt: number | null;
   lastObservationAt: number | null;
   identitiesAtLastObservationAt: Set<string>;
   observation: PegObservation | null;
   referenceSize: number | null;
   conversionValidUntil: number | null;
+  listingState: MarketState | null;
+  listingCheckedAt: number | null;
+  listingAbsentConsecutiveChecks: number;
   blindConsecutivePolls: number;
 }
 
