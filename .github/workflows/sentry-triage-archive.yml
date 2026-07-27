@@ -76,6 +76,11 @@ jobs:
       (github.event_name == 'workflow_dispatch' ||
        (github.event.label.name == 'sentry:approved-archive' &&
         contains(github.event.issue.labels.*.name, 'sentry-triage')))
+    # sentry-pipeline Environment (issue #1289): its main-only deployment-branch
+    # policy makes SENTRY_ARCHIVE_TOKEN (write-scoped) access server-enforced — a
+    # branch-modified workflow_dispatch on a non-main ref is refused before this
+    # job runs, even if the `if:` main guard above is stripped on that branch.
+    environment: sentry-pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -6,8 +6,10 @@ import {
   computeHealthStatus,
   isOracleFresh,
   isVirtualPoolMedianInvalid,
+  oracleFreshnessTimestamp,
 } from "@/lib/health";
-import { useIsWeekend } from "@/hooks/use-is-weekend";
+import { useResolvedIsWeekend } from "@/hooks/use-is-weekend";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { useNetwork } from "@/components/network-provider";
 
 interface HealthPanelProps {
@@ -17,6 +19,7 @@ interface HealthPanelProps {
 type HealthPanelMode =
   | "virtual-oracle-median-incident"
   | "virtual-oracle-incident"
+  | "virtual-oracle-clock-pending"
   | "weekend"
   | "virtual"
   | "halted"
@@ -28,6 +31,7 @@ interface HealthPanelModeInput {
   showHalted: boolean;
   showVirtualOracleMedianIncident: boolean;
   showVirtualOracleIncident: boolean;
+  showVirtualOracleClockPending: boolean;
   showWeekendPause: boolean;
   weekendPause: boolean;
 }
@@ -38,6 +42,7 @@ function resolveHealthPanelMode({
   showHalted,
   showVirtualOracleMedianIncident,
   showVirtualOracleIncident,
+  showVirtualOracleClockPending,
   showWeekendPause,
   weekendPause,
 }: HealthPanelModeInput): HealthPanelMode | null {
@@ -46,6 +51,7 @@ function resolveHealthPanelMode({
   }
   if (showWeekendPause && isVirtual) return "weekend";
   if (showVirtualOracleIncident) return "virtual-oracle-incident";
+  if (showVirtualOracleClockPending) return "virtual-oracle-clock-pending";
   if (isVirtual) return "virtual";
   if (showHalted) return "halted";
   if (!hasHealthData) return "missing-data";
@@ -91,6 +97,13 @@ function HealthPanelContent({ mode }: { mode: HealthPanelMode }) {
             its reset window, so swaps may revert until a fresh report arrives.
           </span>
         </div>
+      );
+    case "virtual-oracle-clock-pending":
+      return (
+        <p className="text-sm text-slate-400">
+          VirtualPool oracle report is stale. Live browser time is required to
+          determine whether FX markets are closed or this is an active incident.
+        </p>
       );
     case "weekend":
       return (
@@ -146,6 +159,25 @@ function HealthPanelContent({ mode }: { mode: HealthPanelMode }) {
   }
 }
 
+function shouldShowVirtualOracleClockPending(args: {
+  pool: Pool;
+  isVirtual: boolean;
+  liveNowSeconds: number | null;
+  computed: ReturnType<typeof computeHealthStatus>;
+  oracleIsFresh: boolean;
+}): boolean {
+  const { pool, isVirtual, liveNowSeconds, computed, oracleIsFresh } = args;
+  return (
+    isVirtual &&
+    liveNowSeconds === null &&
+    computed === "N/A" &&
+    oracleFreshnessTimestamp(pool) > 0 &&
+    !oracleIsFresh &&
+    pool.wrappedExchangeDeprecated !== true &&
+    pool.vpDeprecationKnown !== false
+  );
+}
+
 /**
  * Exception-only panel — the pool header owns the primary health surface
  * (DeviationCell, Rebalance Status cell, metric grid). Rebalance diagnostics
@@ -156,8 +188,9 @@ function HealthPanelContent({ mode }: { mode: HealthPanelMode }) {
  */
 export function HealthPanel({ pool }: HealthPanelProps) {
   const { network } = useNetwork();
-  // SSR-safe weekend flag (server/client wall-clock days can differ). See useIsWeekend.
-  const isWeekendNow = useIsWeekend();
+  // Safety-sensitive health stays neutral until the browser resolves its clock.
+  const isWeekendNow = useResolvedIsWeekend();
+  const liveNowSeconds = useNowSeconds();
   const isVirtual = isVirtualPool(pool);
   // Trust only `hasHealthData === true` — `pool.healthStatus` is always
   // populated now (indexer's DEFAULT_ORACLE_FIELDS sets it to "N/A" even
@@ -165,21 +198,37 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   // the "not yet available" fallback message this panel is meant to show.
   const hasHealthData = pool.hasHealthData === true;
 
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);
-  const weekendPause = !oracleIsFresh && isWeekendNow;
+  const statusNowSeconds = liveNowSeconds ?? oracleFreshnessTimestamp(pool);
+  const oracleIsFresh = isOracleFresh(pool, statusNowSeconds, network.chainId);
+  const weekendPause = !oracleIsFresh && isWeekendNow === true;
 
   // Resolve the real status first. computeHealthStatus ranks HALTED ABOVE the
   // hasHealthData gate, so a tripped price breaker resolves to HALTED even when
   // health data isn't trusted yet — the halt must surface regardless. Keying on
   // the resolved status (not the raw flag) keeps it consistent with the fleet
-  // chip: stale / weekend pools resolve to CRITICAL / WEEKEND, not HALTED.
-  const computed = computeHealthStatus(pool, network.chainId);
+  // chip: unresolved stale health is N/A, then resolves to CRITICAL / WEEKEND.
+  const computed = computeHealthStatus(
+    pool,
+    network.chainId,
+    statusNowSeconds,
+    isWeekendNow,
+  );
   const showHalted = computed === "HALTED";
   const showVirtualOracleMedianIncident =
     isVirtual && computed === "CRITICAL" && isVirtualPoolMedianInvalid(pool);
   const showVirtualOracleIncident =
     isVirtual && computed === "CRITICAL" && !showVirtualOracleMedianIncident;
+  // A known, valid VirtualPool report can already be stale before hydration,
+  // while non-USD pairs still need the browser clock to distinguish a weekend
+  // pause from a critical incident. Keep that pending state distinct from
+  // genuinely inapplicable, untrusted, or deprecated VirtualPool health.
+  const showVirtualOracleClockPending = shouldShowVirtualOracleClockPending({
+    pool,
+    isVirtual,
+    liveNowSeconds,
+    computed,
+    oracleIsFresh,
+  });
   const showWeekendPause =
     computed === "WEEKEND" || (!isVirtual && weekendPause);
   // No-data pools otherwise resolve to a misleading CRITICAL from the indexer's
@@ -194,6 +243,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     showHalted,
     showVirtualOracleMedianIncident,
     showVirtualOracleIncident,
+    showVirtualOracleClockPending,
     showWeekendPause,
     weekendPause,
   });

@@ -227,7 +227,7 @@ or after a failed build. Always pass the explicit target:
 
 ```bash
 pnpm deploy:indexer:logs <TARGET_COMMIT> --build
-pnpm deploy:indexer:logs <TARGET_COMMIT> --level error,warn --since 2h
+pnpm deploy:indexer:logs <TARGET_COMMIT> --errors-only --since 2h
 pnpm deploy:indexer:perf <TARGET_COMMIT>
 ```
 

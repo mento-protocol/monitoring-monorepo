@@ -1,0 +1,104 @@
+{
+  "schema_version": "claude-runtime-document-registry:v1",
+  "documents": [
+    {
+      "path": ".claude/agents/dashboard-explorer.md",
+      "title": "Dashboard Explorer",
+      "canonical": false,
+      "status": "active",
+      "owner": "eng",
+      "scope": "ui-dashboard",
+      "doc_type": "role",
+      "garden_lane": "agent-entry-points",
+      "review_interval_days": 180,
+      "canonical_sources": [
+        "ui-dashboard/AGENTS.md",
+        "docs/pr-checklists/swr-polling-hasura.md"
+      ]
+    },
+    {
+      "path": ".claude/agents/indexer-explorer.md",
+      "title": "Indexer Explorer",
+      "canonical": false,
+      "status": "active",
+      "owner": "eng",
+      "scope": "indexer-envio",
+      "doc_type": "role",
+      "garden_lane": "agent-entry-points",
+      "review_interval_days": 180,
+      "canonical_sources": [
+        "indexer-envio/AGENTS.md",
+        "docs/pr-checklists/indexer-handler-invariants.md"
+      ]
+    },
+    {
+      "path": ".claude/agents/infra-reader.md",
+      "title": "Infra Reader",
+      "canonical": false,
+      "status": "active",
+      "owner": "eng",
+      "scope": "repo-wide",
+      "doc_type": "role",
+      "garden_lane": "agent-entry-points",
+      "review_interval_days": 180,
+      "canonical_sources": ["AGENTS.md", "docs/terraform.md"]
+    },
+    {
+      "path": ".claude/commands/autoreview.md",
+      "title": "Auto Review",
+      "canonical": false,
+      "status": "active",
+      "owner": "eng",
+      "scope": "repo-wide",
+      "doc_type": "command",
+      "garden_lane": "agent-entry-points",
+      "review_interval_days": 180,
+      "canonical_sources": [
+        "docs/notes/agent-quality-gate-mechanics.md",
+        "docs/notes/pr-operating-card.md"
+      ]
+    },
+    {
+      "path": ".claude/commands/babysit-indexer-deploy.md",
+      "title": "Babysit Indexer Deploy",
+      "canonical": false,
+      "status": "active",
+      "owner": "eng",
+      "scope": "repo-wide",
+      "doc_type": "command",
+      "garden_lane": "agent-entry-points",
+      "review_interval_days": 180,
+      "canonical_sources": [
+        ".agents/skills/deploy-indexer/SKILL.md",
+        "docs/deployment.md"
+      ]
+    },
+    {
+      "path": ".claude/commands/verify-ui.md",
+      "title": "Verify UI",
+      "canonical": false,
+      "status": "active",
+      "owner": "eng",
+      "scope": "ui-dashboard",
+      "doc_type": "command",
+      "garden_lane": "agent-entry-points",
+      "review_interval_days": 180,
+      "canonical_sources": ["docs/notes/dashboard-verification.md"]
+    },
+    {
+      "path": ".claude/claude-security-guidance.md",
+      "title": "Security guidance — Mento monitoring-monorepo",
+      "canonical": false,
+      "status": "active",
+      "owner": "eng",
+      "scope": "repo-wide",
+      "doc_type": "agent-instructions",
+      "garden_lane": "agent-entry-points",
+      "review_interval_days": 90,
+      "canonical_sources": [
+        "AGENTS.md",
+        "docs/pr-checklists/recurring-review-patterns.md"
+      ]
+    }
+  ]
+}

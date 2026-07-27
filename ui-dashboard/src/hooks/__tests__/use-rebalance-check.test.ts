@@ -18,18 +18,28 @@ vi.mock("swr", () => ({
   },
 }));
 
-// computeHealthStatus is pure and covered elsewhere; stub to CRITICAL so
-// shouldRunCheck's health-threshold gate passes.
+// computeHealthStatus is pure and covered elsewhere. Treat an unresolved
+// weekend snapshot as neutral so this test can verify it suppresses the RPC.
 vi.mock("@/lib/health", () => ({
-  computeHealthStatus: () => "CRITICAL",
+  computeHealthStatus: (
+    _pool: Pool,
+    _chainId: number | undefined,
+    _nowSeconds: number,
+    isWeekendNow: boolean | null,
+  ) => (isWeekendNow === null ? "N/A" : "CRITICAL"),
 }));
 
 import { useRebalanceCheck } from "../use-rebalance-check";
 
-function captureKey(pool: Pool, network: Network): string | null | undefined {
+function captureKey(
+  pool: Pool,
+  network: Network,
+  nowSeconds: number | null = 1_000,
+  isWeekendNow: boolean | null = false,
+): string | null | undefined {
   swrMock.mockClear();
   function Probe() {
-    useRebalanceCheck(pool, network);
+    useRebalanceCheck(pool, network, nowSeconds, isWeekendNow);
     return null;
   }
   const container = document.createElement("div");
@@ -86,6 +96,14 @@ describe("useRebalanceCheck RPC-availability gate", () => {
     expect(key).toContain(
       "strategy=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
+  });
+
+  it("skips the RPC while stale weekend health is unresolved", () => {
+    expect(captureKey(CRITICAL_POOL, NETWORK_WITH_RPC, 1_000, null)).toBeNull();
+  });
+
+  it("skips the RPC before the browser clock resolves", () => {
+    expect(captureKey(CRITICAL_POOL, NETWORK_WITH_RPC, null)).toBeNull();
   });
 
   it("skips fetching when the network has no rpcUrl (would 400 every refresh)", () => {

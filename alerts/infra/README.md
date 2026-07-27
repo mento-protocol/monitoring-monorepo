@@ -1,4 +1,4 @@
-<!-- agent-context: title="Mento Alerts Delivery Infrastructure" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=alerts/infra review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Mento Alerts Delivery Infrastructure" status=active owner=eng canonical=true last_verified=2026-07-26 doc_type=runbook scope=alerts/infra review_interval_days=90 garden_lane=operator-runbooks -->
 
 # Mento Alerts
 
@@ -123,6 +123,10 @@ chain key.
 
 ### Sentry Module
 
+- Pins `jianyuan/sentry@0.15.4` in both Terraform constraints and the
+  alerts-delivery lockfile. The scoped
+  [`sentry-bridge` runbook](channels/sentry-bridge/README.md) records the
+  upstream behavior audit and channel-name normalization invariant.
 - Two `sentry_alert` rules per Sentry project (auto-discovered):
   - Default alert → `#sentry-{project-slug}` Slack channel (issue lifecycle events).
   - Critical fan-out → `#alerts-critical` Slack channel (fatal first-seen/regression in production).

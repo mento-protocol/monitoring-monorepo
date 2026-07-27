@@ -1,0 +1,64 @@
+{
+  "browsers": [
+    "Chrome >= 111",
+    "Edge >= 111",
+    "Firefox >= 111",
+    "Safari >= 16.4"
+  ],
+  "clientFiles": ["src/**/*.{ts,tsx}", "*.{ts,tsx}"],
+  "serverAndTestIgnores": [
+    "next-env.d.ts",
+    "next.config.ts",
+    "playwright.config.ts",
+    "sentry.edge.config.ts",
+    "sentry.server.config.ts",
+    "vitest*.{ts,tsx}",
+    "src/app/api/**/route.ts",
+    "src/lib/homepage-og.ts",
+    "src/lib/pool-og.ts",
+    "**/__tests__/**",
+    "**/*.test.{ts,tsx}"
+  ],
+  "restrictions": [
+    {
+      "receiver": "array",
+      "property": "toSorted",
+      "message": "requires Firefox 115+; use sortedCopy() for arrays or an explicit typed-array copy and in-place sort."
+    },
+    {
+      "receiver": "array",
+      "property": "toReversed",
+      "message": "requires Firefox 115+; copy the array or typed array, then reverse the copy."
+    },
+    {
+      "receiver": "array",
+      "property": "toSpliced",
+      "message": "requires Firefox 115+; use a manual copy instead."
+    },
+    {
+      "receiver": "array",
+      "property": "with",
+      "message": "Array/TypedArray.prototype.with requires Firefox 115+; copy and assign by index instead."
+    },
+    {
+      "object": "Object",
+      "property": "groupBy",
+      "message": "Object.groupBy is outside the browser support floor; use an explicit reducer instead."
+    },
+    {
+      "object": "Map",
+      "property": "groupBy",
+      "message": "Map.groupBy is outside the browser support floor; use an explicit reducer instead."
+    },
+    {
+      "receiver": "string",
+      "property": "isWellFormed",
+      "message": "String.prototype.isWellFormed is outside the browser support floor; use the existing validation path instead."
+    },
+    {
+      "receiver": "string",
+      "property": "toWellFormed",
+      "message": "String.prototype.toWellFormed is outside the browser support floor; use the existing normalization path instead."
+    }
+  ]
+}

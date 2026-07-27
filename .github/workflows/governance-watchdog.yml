@@ -29,7 +29,8 @@ name: Governance Watchdog Infra
 #   - plan (on trusted main/dispatch) authenticates through the dedicated
 #     refresh WIF variables, impersonates
 #     `org-terraform-refresh-readonly@…seed` for backend and provider reads,
-#     and runs a full-refresh unlocked plan. Live proof remains pending.
+#     and runs a full-refresh unlocked plan. Run #30212385280 proved this route;
+#     drain and read-boundary audit remain before legacy authority removal.
 #
 # Plan/apply split:
 #   - `plan` job runs on every PR + push/dispatch to main. It runs

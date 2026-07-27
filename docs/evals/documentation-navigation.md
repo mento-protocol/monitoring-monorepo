@@ -3,7 +3,7 @@ title: Documentation Navigation Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-26
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -33,6 +33,9 @@ The versioned inputs are:
   envelope.
 - `documentation-navigation-baseline.json` — the evidence-backed run captured
   before the first six-lane semantic garden in issues #1348–#1353.
+- `documentation-navigation-baseline-fixtures.json` — the frozen fixture
+  contract used by that historical run. Current fixture changes never rewrite
+  either baseline artifact.
 
 The prompt deliberately omits accepted routes and historical-source traps. It
 starts from root `AGENTS.md` plus the generated `docs/README.md`, forbids the
@@ -52,7 +55,9 @@ The validator recomputes authority, bytes, hashes, line bounds, and scores from
 the Git commit named by the result. That keeps the pre-garden baseline
 reproducible after later documentation edits. Self-reported scores are never
 trusted. CI and the monthly scheduler both reject a missing, malformed, or
-failing committed baseline before treating it as completion evidence.
+failing committed baseline before treating it as historical comparison
+evidence. They validate it against the frozen baseline fixtures, not the
+current contract.
 
 `sources_requiring_verification` entries are historical qualification traps,
 not live routes. A trap may remain in the immutable fixture after its document
@@ -110,6 +115,14 @@ result, then validate it:
 pnpm docs:navigation-eval -- --validate /tmp/documentation-navigation-result.json
 ```
 
+Validate the committed historical result against its frozen contract:
+
+```bash
+pnpm docs:navigation-eval -- --validate \
+  docs/evals/documentation-navigation-baseline.json \
+  --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
+```
+
 For one failed or contested case, generate a bounded escalation prompt:
 
 ```bash
@@ -141,11 +154,9 @@ Scores stay separate so a cheap strength cannot hide an expensive failure:
   do not masquerade as a routing failure.
 - **Context bytes** — source bytes are recomputed per question and as a unique
   suite total. No question may exceed 45,000 additional source bytes and the
-  complete run may not exceed 272,000 unique source bytes, including bootstrap
-  sources (a temporary re-baseline from 260,000; #1504 tracks consolidating
-  the routed docs and restoring the tighter cap). Fixture validation also
-  proves that the cheapest accepted route for every question, and their
-  unique union, fit those caps before a run begins.
+  complete run may not exceed 260,000 unique source bytes, including bootstrap
+  sources. Fixture validation also proves that the cheapest accepted route for
+  every question, and their unique union, fit those caps before a run begins.
 
 The scorer intentionally does not claim to grade arbitrary prose for semantic
 correctness. Canonical routing plus exact evidence makes the answer reviewable;
@@ -179,8 +190,9 @@ step:
 - preserves an open issue unchanged across reruns and blocks a later month
   until the prior issue closes;
 - lists routing-sensitive paths changed since the committed baseline;
-- treats the committed July 2026 baseline as that month's completed run, so
-  the first post-merge schedule does not create a duplicate July issue.
+- validates the immutable baseline against its frozen fixture contract;
+- creates a current-contract issue when the current fixture digest differs
+  from the baseline, even during the same month.
 
 Only the workflow or a maintainer with label permissions may apply
 `source:audit`. Queue-state labels may change during claiming, but this durable
@@ -193,9 +205,15 @@ issues. The evaluation agent itself never edits documentation.
 ## Baseline and post-garden comparison
 
 The baseline captures the route quality before issues #1348–#1353 prune and
-consolidate the six documentation lanes. Keep that artifact immutable. After
-all six lane trackers close, run the same fixture version again and commit a
-dated post-garden result plus a short comparison. If a fixture must change
-because the intended route changed, review that contract change separately and
-report both the old-suite and new-suite interpretation instead of silently
-rewriting the baseline.
+consolidate the six documentation lanes. Keep both the result and its frozen
+fixture artifact immutable. Baseline validation classifies those frozen routes
+from `repository_base_commit`, so later retirement or authority changes in the
+working tree do not rewrite the historical contract. A contract-changing PR
+cannot commit its own
+post-change result: the evaluated commit must already be reachable from the
+default branch. After the change merges, the monthly issue runs the current
+fixture from clean `main`; commit its dated result plus a short comparison in a
+follow-up PR. If a fixture must change because the intended route or context
+contract changed, review that change separately and report both the
+historical-suite and current-suite interpretation instead of silently rewriting
+the baseline digest.

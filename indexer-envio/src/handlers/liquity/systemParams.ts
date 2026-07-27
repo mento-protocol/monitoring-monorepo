@@ -64,8 +64,8 @@ const systemParamsShape = S.schema({
 
 // Process-lifetime dedup so the dead-contract diagnostic fires once per
 // (chainId, systemParams), not once per event. A long-broken indexer would
-// otherwise drown its log stream — alert rules just need one loud line to
-// match on.
+// otherwise drown its log stream. This line is an operator diagnostic only;
+// paging requires an exported metric and Grafana rule, tracked in #1624.
 const diagnosedFailures = new Set<string>();
 
 async function logSystemParamsFailure(

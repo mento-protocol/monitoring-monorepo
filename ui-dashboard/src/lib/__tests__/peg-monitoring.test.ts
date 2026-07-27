@@ -10,12 +10,182 @@ import {
 } from "@/test-utils/peg-monitoring-fixture";
 
 describe("PegMonitoringResponseSchema", () => {
+  const FUTURE_POLICY_VERSION = "europ-2026-07-24-v1";
+  const DIFFERENT_FUTURE_POLICY_VERSION = "europ-2026-07-25-v1";
   it("preserves distinct observed and configured blind poll counts", () => {
     const parsed = PegMonitoringResponseSchema.parse(
       makePegMonitoringResponse(),
     );
     expect(parsed.packages[0]?.structural.blindConsecutivePolls).toBe(0);
     expect(parsed.packages[0]?.policy.blindConsecutivePolls).toBe(10);
+  });
+  it("defaults legacy listing absence confirmation to two checks", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const legacyPolicy: Record<string, unknown> = { ...source.policy };
+    delete legacyPolicy.listingAbsentConsecutiveChecks;
+
+    const parsed = PegMonitoringResponseSchema.parse({
+      ...response,
+      packages: [
+        {
+          ...item,
+          sources: [{ ...source, policy: legacyPolicy }],
+        },
+      ],
+    });
+
+    expect(
+      parsed.packages[0]?.sources[0]?.policy.listingAbsentConsecutiveChecks,
+    ).toBe(2);
+  });
+  it("defaults the produced legacy policy during a previous-slot rollover", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const legacyPolicy: Record<string, unknown> = { ...source.policy };
+    delete legacyPolicy.listingAbsentConsecutiveChecks;
+
+    const parsed = PegMonitoringResponseSchema.parse({
+      ...response,
+      approvedActivePolicyVersion: FUTURE_POLICY_VERSION,
+      policySlot: "previous",
+      packages: [
+        {
+          ...item,
+          sources: [{ ...source, policy: legacyPolicy }],
+        },
+      ],
+    });
+
+    expect(
+      parsed.packages[0]?.sources[0]?.policy.listingAbsentConsecutiveChecks,
+    ).toBe(2);
+  });
+  it("rejects a missing threshold from a future produced previous-slot policy", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const legacyPolicy: Record<string, unknown> = { ...source.policy };
+    delete legacyPolicy.listingAbsentConsecutiveChecks;
+
+    expect(
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        approvedActivePolicyVersion: FUTURE_POLICY_VERSION,
+        producedPolicyVersion: DIFFERENT_FUTURE_POLICY_VERSION,
+        policySlot: "previous",
+        packages: [
+          {
+            ...item,
+            sources: [{ ...source, policy: legacyPolicy }],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+  it("accepts the producer listing absence confirmation threshold", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+
+    const parsed = PegMonitoringResponseSchema.parse({
+      ...response,
+      approvedActivePolicyVersion: FUTURE_POLICY_VERSION,
+      producedPolicyVersion: FUTURE_POLICY_VERSION,
+      packages: [
+        {
+          ...item,
+          sources: [
+            {
+              ...source,
+              policy: {
+                ...source.policy,
+                listingAbsentConsecutiveChecks: 3,
+                staleAfterSeconds: 90,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      parsed.packages[0]?.sources[0]?.policy.listingAbsentConsecutiveChecks,
+    ).toBe(3);
+  });
+  it("rejects a missing listing absence confirmation threshold from a future policy", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const legacyPolicy: Record<string, unknown> = { ...source.policy };
+    delete legacyPolicy.listingAbsentConsecutiveChecks;
+
+    expect(
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        approvedActivePolicyVersion: FUTURE_POLICY_VERSION,
+        producedPolicyVersion: FUTURE_POLICY_VERSION,
+        packages: [
+          {
+            ...item,
+            sources: [{ ...source, policy: legacyPolicy }],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+  it("rejects invalid listing absence confirmation thresholds", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const valid = (listingAbsentConsecutiveChecks: number) =>
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: [
+              {
+                ...source,
+                policy: { ...source.policy, listingAbsentConsecutiveChecks },
+              },
+            ],
+          },
+        ],
+      }).success;
+
+    expect(valid(1)).toBe(false);
+    expect(valid(1_001)).toBe(false);
+    expect(valid(2.5)).toBe(false);
+    expect(valid(Number.POSITIVE_INFINITY)).toBe(false);
+  });
+  it("requires source staleness to cover the listing absence confirmation window", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+
+    expect(
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: [
+              {
+                ...source,
+                policy: {
+                  ...source.policy,
+                  listingAbsentConsecutiveChecks: 3,
+                  staleAfterSeconds: 89,
+                },
+              },
+            ],
+          },
+        ],
+      }).success,
+    ).toBe(false);
   });
   it("accepts inclusive structural-saturation bounds and rejects values outside them", () => {
     const response = makePegMonitoringResponse();
@@ -96,39 +266,102 @@ describe("PegMonitoringResponseSchema", () => {
       }).success,
     ).toBe(false);
   });
-  it("rejects non-null v1 listing evidence and source cadence beyond freshness grace", () => {
+  it("accepts the producer's paired listing evidence, including legacy nulls", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
     const source = item.sources[0]!;
-    const invalid = (next: unknown) =>
-      PegMonitoringResponseSchema.safeParse({ ...response, packages: [next] })
-        .success;
-    expect(
-      invalid({
-        ...item,
-        sources: [
-          { ...source, listingState: "listed" },
-          ...item.sources.slice(1),
-        ],
-      }),
-    ).toBe(false);
-    expect(
-      invalid({
-        ...item,
-        sources: [
+    const valid = (
+      listingState: "listed" | "halted" | "absent" | null,
+      healthy: boolean,
+    ) =>
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
           {
-            ...source,
-            listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
+            ...item,
+            sources: [
+              {
+                ...source,
+                listingState,
+                listingCheckedAt:
+                  listingState === null ? null : PEG_FIXTURE_PRODUCED_AT - 5,
+                healthy,
+              },
+              ...item.sources.slice(1),
+            ],
           },
-          ...item.sources.slice(1),
         ],
+      }).success;
+
+    expect(valid(null, true)).toBe(true);
+    expect(valid("listed", true)).toBe(true);
+    expect(valid("halted", false)).toBe(true);
+    expect(valid("absent", false)).toBe(true);
+  });
+  it("rejects incomplete, unsupported, and contradictory listing evidence", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const source = item.sources[0]!;
+    const valid = (sourceOverride: Record<string, unknown>) =>
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: [{ ...source, ...sourceOverride }],
+          },
+        ],
+      }).success;
+
+    expect(valid({ listingState: "listed", listingCheckedAt: null })).toBe(
+      false,
+    );
+    expect(
+      valid({
+        listingState: null,
+        listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
       }),
     ).toBe(false);
     expect(
-      invalid({
-        ...item,
-        policy: { ...item.policy, freshnessGraceSeconds: 60 },
+      valid({
+        listingState: "unsupported",
+        listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
       }),
+    ).toBe(false);
+    expect(
+      valid({
+        listingState: "listed",
+        listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 0.5,
+      }),
+    ).toBe(false);
+    expect(
+      valid({
+        listingState: "halted",
+        listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
+        healthy: true,
+      }),
+    ).toBe(false);
+    expect(
+      valid({
+        listingState: "absent",
+        listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 5,
+        healthy: true,
+      }),
+    ).toBe(false);
+  });
+  it("rejects source cadence beyond freshness grace", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    expect(
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            policy: { ...item.policy, freshnessGraceSeconds: 60 },
+          },
+        ],
+      }).success,
     ).toBe(false);
   });
   it("requires the producer's complete observation subset for healthy sources", () => {

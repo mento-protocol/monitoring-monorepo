@@ -117,12 +117,6 @@ resource "google_service_account_iam_member" "production_infra_applier_org_terra
   member             = "serviceAccount:$\{google_service_account.production_infra_applier.email}"
 }
 
-resource "google_service_account_iam_member" "ci_alerts_org_terraform_token_creator" {
-  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/$\{var.terraform_service_account}"
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:$\{google_service_account.metrics_bridge_deployer.email}"
-}
-
 resource "google_service_account" "terraform_refresh_readonly" {
   project    = "mento-terraform-seed-ffac"
   account_id = "terraform-refresh-readonly"

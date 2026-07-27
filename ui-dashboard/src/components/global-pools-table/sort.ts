@@ -1,14 +1,9 @@
-import {
-  computeEffectiveStatus,
-  computePoolUptimePct,
-  type HealthStatus,
-} from "@/lib/health";
+import * as poolHealth from "@/lib/health";
 import { sortedCopy } from "@/lib/immutable-sort";
 import type { Network } from "@/lib/networks";
 import type { SortDir } from "@/lib/table-sort";
 import { poolName, type OracleRateMap } from "@/lib/tokens";
 import type { Pool } from "@/lib/types";
-import { isWeekend } from "@/lib/weekend";
 import { hasFeeData } from "./formatting";
 
 /** A pool entry enriched with its originating network and oracle rates. */
@@ -29,13 +24,11 @@ export type GlobalSortKey =
   | "volume7d"
   | "totalVolume";
 
-// URL-settable sort keys. Excludes "tvlChangeWoW": the WoW delta renders as a
-// secondary line inside the TVL cell rather than as its own sortable header, so
-// it has no header to expose `aria-sort`. Keeping it out of this set means a
-// stale deep link (?poolsSort=tvlChangeWoW) falls back to the default "tvl
-// desc" instead of sorting by an invisible column. The comparator below still
-// handles it so it can be re-promoted to a sortable header without re-deriving
-// the sort logic.
+// URL-settable sort keys exclude "tvlChangeWoW": the WoW delta is a secondary
+// line inside the TVL cell with no sortable header or `aria-sort`. A stale deep
+// link (?poolsSort=tvlChangeWoW) therefore falls back to the default "tvl desc"
+// instead of sorting by an invisible column. The comparator still handles it
+// so a future sortable header can reuse the existing logic.
 export const GLOBAL_SORT_KEYS: ReadonlySet<GlobalSortKey> = new Set([
   "pool",
   "health",
@@ -47,9 +40,9 @@ export const GLOBAL_SORT_KEYS: ReadonlySet<GlobalSortKey> = new Set([
   "totalVolume",
 ]);
 
-// Higher rank = more severe. "desc" puts highest rank first → CRITICAL first.
-// Mirrors STATUS_RANK in lib/health.ts: HALTED outranks WEEKEND/WARN (a halted
-// pool deserves attention) but sits below CRITICAL.
+// Higher rank means greater severity; descending puts CRITICAL first.
+// This mirrors STATUS_RANK: HALTED outranks WEEKEND/WARN but remains below
+// CRITICAL.
 const HEALTH_ORDER: Record<string, number> = {
   "N/A": 0,
   OK: 1,
@@ -64,24 +57,11 @@ export function globalPoolKey(entry: GlobalPoolEntry): string {
   return `${entry.network.id}:${entry.pool.id}`;
 }
 
-function effectiveHealthStatus(
-  entry: GlobalPoolEntry,
-  nowSeconds: number,
-  isWeekendNow: boolean,
-): HealthStatus {
-  return computeEffectiveStatus(
-    entry.pool,
-    entry.network.chainId,
-    nowSeconds,
-    isWeekendNow,
-  );
-}
-
 export interface GlobalSortContext {
   tvlByKey: Map<string, number | null>;
   totalVolumeByKey: Map<string, number | null>;
-  nowSeconds?: number | undefined;
-  isWeekendNow?: boolean | undefined;
+  nowSeconds?: number | null | undefined;
+  isWeekendNow?: boolean | null | undefined;
   volume24hByKey?: Map<string, number | null | undefined> | undefined;
   volume7dByKey?: Map<string, number | null | undefined> | undefined;
   tvlChangeWoWByKey?: Map<string, number | null> | undefined;
@@ -95,7 +75,7 @@ export function sortGlobalPools(
     tvlByKey,
     totalVolumeByKey,
     nowSeconds = Math.floor(Date.now() / 1000),
-    isWeekendNow = isWeekend(),
+    isWeekendNow,
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
@@ -118,8 +98,8 @@ export function sortGlobalPools(
       }
       case "uptime": {
         // Unknown uptime sinks to the bottom regardless of direction.
-        const aUptime = computePoolUptimePct(a.pool, nowSeconds);
-        const bUptime = computePoolUptimePct(b.pool, nowSeconds);
+        const aUptime = uptimePct(a.pool, nowSeconds);
+        const bUptime = uptimePct(b.pool, nowSeconds);
         if (aUptime == null && bUptime == null) return 0;
         if (aUptime == null) return 1;
         if (bUptime == null) return -1;
@@ -181,4 +161,28 @@ export function sortGlobalPools(
     }
     return sortDir === "asc" ? cmp : -cmp;
   });
+}
+
+function uptimePct(pool: Pool, nowSeconds: number | null): number | null {
+  return poolHealth.computePoolUptimePct(pool, nowSeconds ?? 0);
+}
+
+function healthStatusNowSeconds(
+  entry: GlobalPoolEntry,
+  nowSeconds: number | null,
+): number {
+  return nowSeconds ?? poolHealth.oracleFreshnessTimestamp(entry.pool);
+}
+
+function effectiveHealthStatus(
+  entry: GlobalPoolEntry,
+  nowSeconds: number | null,
+  isWeekendNow?: boolean | null,
+): ReturnType<typeof poolHealth.computeEffectiveStatus> {
+  return poolHealth.computeEffectiveStatus(
+    entry.pool,
+    entry.network.chainId,
+    healthStatusNowSeconds(entry, nowSeconds),
+    isWeekendNow,
+  );
 }

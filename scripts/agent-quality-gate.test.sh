@@ -2222,6 +2222,19 @@ run_gate "scripts/deploy-indexer-status.sh"
 assert_contains "- bash -n scripts/deploy-indexer-status.sh (shell script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
+run_gate "scripts/deploy-indexer-logs.sh"
+assert_contains "- bash -n scripts/deploy-indexer-logs.sh (shell script changed)"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+
+run_gate "scripts/filter-envio-runtime-errors.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+
+run_gate "scripts/filter-envio-runtime-errors.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+
 run_gate "scripts/deploy-indexer-verify.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
@@ -3707,6 +3720,15 @@ assert_contains "- pnpm agent:context-check (documentation catalog metadata cont
 run_gate "scripts/docs-index-helpers.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 
+run_gate "scripts/claude-runtime-document-registry.mjs"
+assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
+assert_contains "- pnpm docs:index --check (documentation catalog helper changed)"
+assert_contains "- pnpm agent:context-check (documentation catalog metadata contract changed)"
+
+run_gate "docs/claude-runtime-document-registry.json"
+assert_contains "- pnpm docs:index --check (Claude runtime document registry changed)"
+assert_contains "- pnpm agent:context-check (Claude runtime document registry changed)"
+
 run_gate "scripts/docs-index.test.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 
@@ -3736,7 +3758,7 @@ run_gate "scripts/docs-navigation-eval.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
 assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
-assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json (documentation navigation evaluation changed)"
 assert_contains "- pnpm docs:index --check (documentation navigation evaluation consumes the catalog)"
 
 run_gate "scripts/docs-navigation-eval-helpers.mjs"
@@ -3758,19 +3780,19 @@ run_gate "docs/evals/documentation-navigation-fixtures.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation contract changed)"
 assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
-assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation contract changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json (documentation navigation evaluation contract changed)"
 
 run_gate "docs/evals/documentation-navigation-2026-08-post-garden.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation contract changed)"
 assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
-assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation evaluation contract changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json (documentation navigation evaluation contract changed)"
 
 run_gate "docs/evals/documentation-navigation-baseline.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation baseline changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation baseline changed)"
 assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
-assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json (documentation navigation baseline changed)"
+assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json (documentation navigation baseline changed)"
 
 run_gate "docs/notes/agent-quality-gate-mechanics.md"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (routing-sensitive source changed)"

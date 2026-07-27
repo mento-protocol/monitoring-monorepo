@@ -170,7 +170,7 @@ Current intentional silences are:
 
 - project-wide stylistic `react-doctor/design-*` rules;
 - `no-secrets-in-client-code` in tests/scripts with placeholder public data;
-- `js-tosorted-immutable` for the ES2017 compatibility workaround and
+- `js-tosorted-immutable` for the browser-floor compatibility workaround and
   `effect/no-event-handler` for debounced/URL-state false positives;
 - `knip/files` for scripts, runtime-loaded browser fixtures, mutation config,
   and generated GraphQL;

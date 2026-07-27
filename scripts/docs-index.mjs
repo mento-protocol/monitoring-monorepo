@@ -128,6 +128,7 @@ export function runDocsIndex(argv) {
     return hasBlockingProblems(inventory) ? 1 : 0;
   }
   if (options.mode === "print") {
+    printProblems(inventory);
     process.stdout.write(rendered);
     return hasBlockingProblems(inventory) ? 1 : 0;
   }

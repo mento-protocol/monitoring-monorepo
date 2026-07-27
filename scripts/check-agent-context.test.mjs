@@ -18,6 +18,7 @@ import {
   mkdtempSync,
   mkdirSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -34,6 +35,11 @@ import {
   parseFrontmatter,
   STALE_AFTER_DAYS,
 } from "./check-agent-context-helpers.mjs";
+import {
+  CLAUDE_RUNTIME_DOCUMENT_PATHS,
+  CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH,
+  CLAUDE_RUNTIME_DOCUMENT_REGISTRY_VERSION,
+} from "./claude-runtime-document-registry.mjs";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -567,6 +573,67 @@ test("supports a hidden root README agent-context marker", () => {
     output.includes("Agent context check passed"),
     `expected README marker to pass, got ${JSON.stringify(output)}`,
   );
+});
+
+test("context check rejects a symlinked Claude runtime document", () => {
+  const today = isoDateWithOffset(0);
+  const runtimeDocuments = CLAUDE_RUNTIME_DOCUMENT_PATHS.map((file) => ({
+    path: file,
+    title: path.posix.basename(file),
+    canonical: false,
+    status: "active",
+    owner: "eng",
+    scope: "repo-wide",
+    doc_type: "command",
+    garden_lane: "agent-entry-points",
+    review_interval_days: 180,
+    canonical_sources: ["AGENTS.md"],
+  }));
+  const extraFiles = Object.fromEntries(
+    CLAUDE_RUNTIME_DOCUMENT_PATHS.map((file) => [file, `# ${file}\n`]),
+  );
+  extraFiles[CLAUDE_RUNTIME_DOCUMENT_REGISTRY_PATH] = `${JSON.stringify(
+    {
+      schema_version: CLAUDE_RUNTIME_DOCUMENT_REGISTRY_VERSION,
+      documents: runtimeDocuments,
+    },
+    null,
+    2,
+  )}\n`;
+  const root = createContextCheckFixture(
+    `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${today} -->\n`,
+    extraFiles,
+  );
+  const runtimeDocument = CLAUDE_RUNTIME_DOCUMENT_PATHS[0];
+  const runtimePath = path.join(root, runtimeDocument);
+  try {
+    unlinkSync(runtimePath);
+    symlinkSync(path.join(root, "AGENTS.md"), runtimePath);
+    try {
+      execFileSync(process.execPath, [checkerScriptPath], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      throw new Error("expected context check to reject runtime symlink");
+    } catch (/** @type {unknown} */ err) {
+      const maybeError =
+        err && typeof err === "object"
+          ? /** @type {{stderr?: string, stdout?: string, message?: string}} */ (
+              err
+            )
+          : {};
+      const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
+      assert(
+        output.includes(
+          `${runtimeDocument}: runtime document is not a regular file`,
+        ),
+        `expected runtime regular-file failure, got ${JSON.stringify(output || maybeError.message)}`,
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("enrolls hidden canonical metadata on package README files", () => {
