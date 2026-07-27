@@ -14,9 +14,11 @@ garden_lane: adrs-architecture
 # ADR 0043 — The peg-monitor registry is service-local config, not published shared-config
 
 **Status:** Accepted (Jul 2026), in force. The registry and integrity gate
-landed in PR #1497; protected policy publication and alert activation remain
-separate rollout phases in
-[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
+landed in PR #1497. Source now defines the exact-version
+`Peg Indexed Pool Unreachable` operations rule required by this decision;
+protected policy publication, alert activation, and live proof remain separate
+rollout phases in
+[`docs/notes/peg-monitoring.md`](../notes/peg-monitoring.md).
 **Scope:** metrics-bridge / shared-config
 
 ## Context
@@ -126,6 +128,10 @@ unpublished.
   `metrics-bridge/src/peg/registry.ts` (implemented topology and schema)
 - `metrics-bridge/test/peg-registry.test.ts`
 - `scripts/check-peg-registry-integrity.mjs`
+- `alerts/rules/peg-promql-active.tf`,
+  `alerts/rules/peg-promql-previous.tf`, and
+  `alerts/rules/peg-rule-definitions.tf` (active and retained-previous indexed
+  pool reachability operations rules)
 - `metrics-bridge/Dockerfile` (service-local registry in the runtime image;
   gated policy excluded)
 - `aegis/config.yaml` (service-local monitoring-policy precedent)

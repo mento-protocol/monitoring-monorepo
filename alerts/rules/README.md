@@ -65,14 +65,27 @@ consecutive deep-poll count with policy; they do not infer 30-second poll
 history from Grafana's 60-second evaluation clock.
 
 The source is not live merely because it is merged. After every production
-precondition is verified, a reviewed source change may set the activation switch
-to `true`; the trusted-main plan, human-approved apply, and live Grafana proof
-remain required. Follow [`docs/notes/peg-monitoring.md`](../../docs/notes/peg-monitoring.md)
-for the current dependency boundary, exact source checks, activation sequence,
-and rollback order.
+precondition is verified, a reviewed source change may set the activation
+switch to `true`; the trusted-main plan, human-approved apply, and live Grafana
+proof remain required. Follow
+[`docs/notes/peg-monitoring.md`](../../docs/notes/peg-monitoring.md) for the
+current dependency boundary, exact source checks, activation sequence, and
+rollback order.
 
-Registry-rot and critical-path-unreachable rules are not part of the base
-ladder. They wait for authoritative listing-state metrics from the producer.
+Registry-rot rules cover every non-deep policy source, including display-only
+sources. Critical-path-unreachable rules cover only the policy-designated deep
+source. Both read the producer's current `absent` state and bounded consecutive
+absence gauge, then require a fresh authoritative listing timestamp. They do
+not infer checks from Grafana scrapes or gate on book health. Indexed-pool-
+unreachable rules separately cover ADR-0043 structural reachability while the
+exact-version asset poll remains fresh; the heartbeat rule remains the total
+loop-outage detector.
+
+All three rule classes use `for = "0s"`, `no_data_state = "OK"`, and the
+warning-only `#alerts-infra` contact point. Missing or stale listing evidence
+is unknown rather than delisting, and none of these rules pages. The
+[onboarding and re-census runbook](../../docs/notes/peg-monitoring-onboarding.md)
+owns source admission, exact-pair re-census, operator response, and cleanup.
 
 ## Producer-first rollout and rollback
 
@@ -86,8 +99,10 @@ never use that mute and require a complete active decision-history window
 before their protected apply can be approved.
 
 Reverse the dependency for rollback. If a service or indexer rollback would
-remove a series required by a no-data-alerting rule, merge and apply the rule
-revert first, confirm the rule is absent, and only then withdraw the producer.
+remove a series used by a rule, merge and apply the rule revert first, confirm
+the consumer is absent, and only then withdraw the producer metric. This order
+also applies to warning rules with `no_data_state = "OK"` so stale rule
+definitions do not conceal an incomplete rollback.
 The Polygon-specific producer checks and ordered steps are in
 [`docs/notes/polygon-monitoring.md`](../../docs/notes/polygon-monitoring.md).
 

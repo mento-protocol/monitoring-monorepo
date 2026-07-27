@@ -142,6 +142,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0047](0047-separated-terraform-ci-identities.md)   | Routine deploy, PR plan, trusted-main refresh, and production apply use separate identities |
 | [0048](0048-private-gcs-peg-policy-artifact.md)     | Peg policy uses private GCS after identity bootstrap and pins one immutable generation      |
 | [0050](0050-environment-scoped-pipeline-secrets.md) | Pipeline secrets are gated by a Terraform-managed, main-only GitHub Environment             |
+| [0053](0053-explicit-deployment-source-staging.md)  | Routine Cloud Build and App Engine deploys use explicit, bucket-scoped source staging       |
 
 ### governance-watchdog
 

@@ -78,6 +78,7 @@ Authority: canonical
 - [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md)
 - [`docs/notes/github-tooling-surfaces.md`](notes/github-tooling-surfaces.md)
 - [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md)
+- [`docs/notes/peg-monitoring-onboarding.md`](notes/peg-monitoring-onboarding.md)
 - [`docs/notes/peg-monitoring.md`](notes/peg-monitoring.md)
 - [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md)
 - [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md)
@@ -169,6 +170,7 @@ Authority: canonical
 - [`docs/adr/0050-environment-scoped-pipeline-secrets.md`](adr/0050-environment-scoped-pipeline-secrets.md) — Pipeline secrets are gated by a Terraform-managed GitHub Environment
 - [`docs/adr/0051-dashboard-volume-scale-bounds.md`](adr/0051-dashboard-volume-scale-bounds.md) — Dashboard volume composition has per-chain and total re-review bounds
 - [`docs/adr/0052-envio-logs-prometheus-grafana-alerting.md`](adr/0052-envio-logs-prometheus-grafana-alerting.md) — Envio logs diagnose; Prometheus and Grafana alert
+- [`docs/adr/0053-explicit-deployment-source-staging.md`](adr/0053-explicit-deployment-source-staging.md) — Routine GCP deploys use explicit source-staging buckets
 
 Authority: non-canonical
 

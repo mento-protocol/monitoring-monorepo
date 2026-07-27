@@ -14,6 +14,11 @@ resource "google_app_engine_application" "aegis" {
   }
 }
 
+# Project-wide Storage Admin remains temporary rollback access while the
+# explicit Cloud Build and App Engine staging paths complete live canaries.
+# deploy-staging.tf grants the dedicated Alloy builder its bucket-scoped Cloud
+# Build viewer and App Engine uploader permissions. Legacy default identities
+# retain only the rollback Secret Manager bindings declared below.
 locals {
   aegis_app_engine_default_service_account = "${google_project.monitoring.project_id}@appspot.gserviceaccount.com"
 

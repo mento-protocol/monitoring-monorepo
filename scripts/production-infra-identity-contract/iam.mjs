@@ -95,6 +95,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
     blocks: [
       "terraform/ci-wif.tf:google_project_iam_member.ci_deployer",
       "terraform/ci-wif.tf:google_service_account_iam_member.ci_appengine_default_service_account_user",
+      "terraform/deploy-staging.tf:google_service_account_iam_member.ci_default_compute_service_account_user",
     ],
   },
   {
@@ -186,6 +187,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       '"serviceAccount:${local.aegis_app_engine_default_service_account}"',
     blocks: [
       "terraform/aegis-bootstrap.tf:google_secret_manager_secret_iam_member.grafana_agent_appspot_accessor",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_appspot_object_viewer",
     ],
   },
   {
@@ -238,6 +240,12 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       "terraform/project-iam.tf:google_project_iam_member.dev_run_admin",
       "terraform/project-iam.tf:google_project_iam_member.dev_storage_admin",
       "terraform/project-iam.tf:google_service_account_iam_member.dev_appengine_default_service_account_user",
+      "terraform/deploy-staging.tf:google_service_account_iam_member.dev_default_compute_service_account_user",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_bucket_reader",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_object_admin",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_caller_bucket_reader",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_caller_object_creator",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer",
     ],
   },
 ];
@@ -298,6 +306,14 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/peg-policy.tf:google_storage_bucket_iam_member.peg_policy_access_logs_writer|eb88fef60df291d0ad86c9fcfe86a5334c67b5c64fb2eaca9a2e50700e417d1a",
   "terraform/peg-policy.tf:google_storage_bucket_iam_member.metrics_bridge_runtime_peg_policy_object_viewer|7e0c650e7170f1f41643cb32983f1dc714193b40338db9605b4cdd9bb2b159f2",
   "terraform/peg-policy.tf:google_storage_bucket_iam_member.peg_policy_publisher_object_admin|7d8203fe6dd3c3d5d1a2f754e5a0bdf09d1eb9d3b11f1a7839db9dbca380e524",
+  "terraform/deploy-staging.tf:google_service_account_iam_member.ci_default_compute_service_account_user|00dc24e7f8a41d04bed69c4aa2f22f05e538384da239b39cbce1c533dfb75ce5",
+  "terraform/deploy-staging.tf:google_service_account_iam_member.dev_default_compute_service_account_user|69411b48dc5c68cbdf44db133a283333939cf9497977acb0a3fbf5e12b703be9",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_appspot_object_viewer|c0d52c65b643e00d1e975719c1a12e7acb0bf67095ef3ad252a280c3e8fa7a80",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_bucket_reader|4cf45608033e66f0a77972f96e15b8bdd74a8f085c3d3e7e48c12cbb734c4fd7",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_object_admin|89d5d472e5a1067313e2b1cafa5baf10ec90c7a93f7d941d0aeaa38f4861c801",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_caller_bucket_reader|7f6df2c25b10621c2859f534dd6b08a7954ee54a9bffbd4fda07844baa561eb2",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_caller_object_creator|099993e1b824b00ce5c88941033c1b4be5152d93dd5734a98791c329d702f19a",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer|60cbb3346e381a7823e4d6db82626f2b7e543992c99064450ac6e86d6513e6ba",
   "terraform/gcp-project.tf:google_project_iam_member.terraform_owner|3280f80f6f5a6293d453a3d550eeeab7a818dbb8d313160fac41df4753012d4a",
   "terraform/metrics-bridge.tf:google_cloud_run_v2_service_iam_member.metrics_bridge_public|9bd48a6d3612b82847564ed91fdcd3199dfe565bde34d18eb5df2c4d635a8a4a",
   "terraform/project-iam.tf:google_project_iam_member.dev_appengine_admin|46e0559a495dac87da8892c4b007a3aea38193c9cf3a05aa8d256c4a52c0770d",

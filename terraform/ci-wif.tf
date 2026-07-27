@@ -196,29 +196,14 @@ resource "google_service_account_iam_member" "deployer_wif_binding" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.ref/refs/heads/main"
 }
 
-# Project-level grants the CI SA needs for the full deploy flow:
+# Project-level grants the CI SA currently needs for the full deploy flow:
 #   - cloudbuild.builds.editor  → submit Cloud Build jobs
-#   - storage.admin             → `gcloud builds submit` runs a project-wide
-#                                 `storage.buckets.list` probe before upload
-#                                 to resolve the default `<project>_cloudbuild`
-#                                 staging bucket. storage.admin grants list +
-#                                 object-write; scoping to one bucket doesn't
-#                                 work because the probe is project-scoped.
-#                                 Root cause of every failed bridge deploy
-#                                 since PR #206 (misleading "bucket forbidden
-#                                 / serviceusage.services.use" error —
-#                                 PR #216 tried the CLI's suggested role, it
-#                                 didn't work; this PR replaces it with the
-#                                 permissions actually exercised by the CLI).
-#                                 Broader than strictly needed — the CI SA
-#                                 could manage any GCS bucket in the project.
-#                                 Acceptable because `mento-monitoring` is a
-#                                 single-tenant project (only metrics-bridge
-#                                 lives here; Vercel + Upstash are off-project,
-#                                 Artifact Registry is covered by
-#                                 `artifactregistry.writer` separately).
-#                                 Tighten to a custom role if this project
-#                                 ever hosts sensitive GCS data.
+#   - storage.admin             → temporary rollback access while explicit
+#                                 source buckets and bucket-scoped grants in
+#                                 deploy-staging.tf complete live canaries.
+#                                 The routing follow-up names each bucket; a
+#                                 separate phase removes this project-wide role
+#                                 after all paths are proven.
 #   - logging.viewer            → stream Cloud Build logs back to the runner
 #                                 so `gcloud builds submit` blocks until the
 #                                 build finishes (otherwise it exits with
@@ -228,7 +213,10 @@ resource "google_service_account_iam_member" "deployer_wif_binding" {
 #                                 Logging (not the default GCS log bucket).
 #   - artifactregistry.writer   → push images to AR
 #   - run.admin                 → update the Cloud Run service revision
-#   - iam.serviceAccountUser    → "act-as" the runtime SA used by Cloud Run
+#   - iam.serviceAccountUser    → temporary project-wide fallback during the
+#                                 same canaries. deploy-staging.tf already
+#                                 grants exact act-as on AppSpot and the default
+#                                 compute SA for the two routine deploy paths.
 locals {
   ci_deployer_roles = [
     "roles/cloudbuild.builds.editor",
