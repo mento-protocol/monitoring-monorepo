@@ -3,12 +3,11 @@ terraform {
   required_providers {
     sentry = {
       source = "jianyuan/sentry"
-      # See root versions.tf for full context.
-      # 0.15.0-beta3 supports the `sentry_alert` supertype resource and the
-      # `sentry_project_issue_stream_monitor` data source. The deprecated
-      # `sentry_issue_alert` resource is no longer referenced by config, but
-      # may still exist in state until apply destroys it.
-      version = "0.15.0-beta3"
+      # Match the root's exact stable pin. Version 0.15.4 trims a leading `#`
+      # when comparing Sentry Slack action channel names (upstream PR #897),
+      # so the existing bare per-project names remain state-equivalent to
+      # Sentry's API response.
+      version = "0.15.4"
     }
 
     # restapi.slack is configured at the root in `alerts/infra/providers.tf`

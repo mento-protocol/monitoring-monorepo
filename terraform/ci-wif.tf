@@ -161,8 +161,8 @@ resource "google_service_account_iam_member" "production_infra_applier_wif_bindi
 }
 
 # The production applier can mint short-lived credentials for the existing
-# write-capable seed identity. Keep this separate from the legacy deployer
-# binding so the old path can remain available during the staged cutover.
+# write-capable seed identity. After the explicitly approved final-removal
+# apply, this is the only Terraform apply path to `org-terraform`.
 resource "google_service_account_iam_member" "production_infra_applier_org_terraform_token_creator" {
   service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/${var.terraform_service_account}"
   role               = "roles/iam.serviceAccountTokenCreator"
@@ -179,13 +179,14 @@ resource "google_service_account" "metrics_bridge_deployer" {
 }
 
 # Ref-gated: only workflow runs whose OIDC `ref` claim is `refs/heads/main`
-# can impersonate the write-capable deployer SA: routine service deploys plus
-# the transitional trusted-main Terraform plan and scheduled-drift consumers.
-# The repository gate is enforced upstream by the provider's
-# `attribute_condition` above (slug plus immutable repository ID); binding +
-# condition together enforce repository identity and ref. Dispatching a
-# deployer-consuming workflow from a non-main ref now fails at the auth step by
-# design; PR jobs use the read-only plan SA below.
+# can impersonate the write-capable deployer SA. The prerequisite refresh
+# routing cutover must move every trusted-main Terraform plan and drift
+# consumer away from this identity before this final-removal change merges;
+# afterward, only routine service deploys select it. The repository gate is
+# enforced upstream by the provider's `attribute_condition` above (slug plus
+# immutable repository ID); binding + condition together enforce repository
+# identity and ref. Dispatching a deployer-consuming workflow from a non-main
+# ref fails at the auth step by design; PR jobs use the read-only plan SA below.
 # Invariant: repo scope relies on the provider's `attribute_condition` above.
 # If that condition ever allows another repo, that repo's refs/heads/main
 # workflows would also match this binding. Review both resources together.
@@ -258,48 +259,6 @@ resource "google_service_account_iam_member" "ci_appengine_default_service_accou
     google_app_engine_application.aegis,
     google_project_iam_member.ci_deployer,
   ]
-}
-
-# Transition-only: allows the generic CI deployer SA to mint short-lived tokens
-# for `org-terraform`. Production apply jobs already use the dedicated applier,
-# and the state-only PR/Aegis/alerts-rules plans use their read-only chain. The
-# remaining consumers are the trusted-main pre-gate plans in
-# `alerts-infra.yml` and `governance-watchdog.yml` plus those Google-provider
-# legs in `terraform-drift.yml`. Removing this grant before the later refresh
-# cutover would make those consumers fail while impersonating `org-terraform`.
-#
-# `google_service_account_iam_member` is keyed on the (service_account_id,
-# role, member) triple — one Terraform resource per triple, not per
-# consumer. A second resource with the same triple wouldn't create a second
-# binding; it would shadow this one, and removing either would revoke the
-# underlying grant and break BOTH stacks until the next apply. So this
-# single resource covers every transitional consumer that still impersonates
-# `org-terraform` through the generic deployer.
-#
-# The binding lives on `org-terraform` in the seed project, NOT in
-# `mento-monitoring`. `google_service_account_iam_member` makes the target
-# explicit (vs. a project-level binding) so the blast radius is one SA, not
-# the whole seed project. `org-terraform` already has the rights it needs in
-# the seed project to grant this binding on itself.
-resource "google_service_account_iam_member" "ci_alerts_org_terraform_token_creator" {
-  # `service_account_id` must use the fully-qualified
-  # `projects/<project>/serviceAccounts/<email>` form — the google provider
-  # rejects the email-only form at apply-time with a regex validation
-  # error, even though `terraform validate` passes both. The project
-  # appearing twice (in the path AND embedded in the email) is unavoidable.
-  service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/${var.terraform_service_account}"
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
-}
-
-# Historical rename from `ci_alerts_infra_...`, made when `alerts/rules/`
-# joined `alerts/infra/` as a consumer of the same impersonation grant. The
-# current transitional consumer set is documented above. `moved` lets `apply`
-# pick up the rename without destroying and re-creating the underlying IAM
-# binding. Safe to remove after one full apply cycle has propagated the move.
-moved {
-  from = google_service_account_iam_member.ci_alerts_infra_org_terraform_token_creator
-  to   = google_service_account_iam_member.ci_alerts_org_terraform_token_creator
 }
 
 # ── Read-only Plan SA ────────────────────────────────────────────────────────

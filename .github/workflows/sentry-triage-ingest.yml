@@ -68,6 +68,11 @@ jobs:
     # with SENTRY_TRIAGE_TOKEN and `issues: write`. Same pattern as
     # terraform-deploy-queue-watch.yml.
     if: github.ref == 'refs/heads/main'
+    # sentry-pipeline Environment (issue #1289): its main-only deployment-branch
+    # policy makes SENTRY_TRIAGE_TOKEN access server-enforced — a branch-modified
+    # workflow_dispatch on a non-main ref is refused before this job runs, even if
+    # the `if:` main guard above is stripped on that branch.
+    environment: sentry-pipeline
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 15
     steps:

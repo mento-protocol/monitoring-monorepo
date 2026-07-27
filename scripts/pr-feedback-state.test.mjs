@@ -154,6 +154,90 @@ const PR_1544_CLEAN_CLAUDE_REVIEW = {
   ].join("\n"),
 };
 
+const PR_1595_HEAD = "d4bb77845e635c72b61fa56b375ec3f44b05702e";
+// Verbatim REST issuecomment 5069799124 from PR #1595. This free-form LGTM
+// shape is trusted only through the exact body, comment, PR, author, and head
+// compatibility record; the general parser remains fail closed.
+const PR_1595_CLEAN_CLAUDE_REVIEW = {
+  id: 5069799124,
+  html_url:
+    "https://github.com/mento-protocol/monitoring-monorepo/pull/1595#issuecomment-5069799124",
+  created_at: "2026-07-24T12:22:40Z",
+  updated_at: "2026-07-24T12:25:30Z",
+  user: { login: "claude[bot]", type: "Bot" },
+  body: [
+    "**Claude finished @chapati23's task in 2m 38s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30092850046)",
+    "",
+    "---",
+    "### Claude's Review",
+    "",
+    "**Verdict: LGTM**",
+    "",
+    'Careful, well-evidenced documentation pruning. I cross-checked every disposition in the "Details" table against the repo, and each claim holds up:',
+    "",
+    "- Deletions of `docs/BACKLOG.md`, `docs/CODE-REVIEW-UI-DASHBOARD.md`, `docs/monad-launch-plan.md`, `docs/multichain-indexer-analysis.md`, `docs/notes/review-process-metrics.md` all had prior `archived_reason` frontmatter already marking them superseded/complete; a repo-wide grep found no dangling references left behind except the intentional tombstone.",
+    "- ADR 0006 and ADR 0012 exist and back the claimed decision-preservation rationale for the two deleted analysis docs.",
+    "- The `RETIRED_VERIFICATION_SOURCE_TOMBSTONES` addition in `scripts/docs-navigation-eval-helpers.mjs:40` mirrors the existing pattern for the prior `docs/PLAN-celo-mainnet-indexer.md` tombstone exactly, and the navigation fixture's two `sources_requiring_verification` entries pointing at `docs/CODE-REVIEW-UI-DASHBOARD.md` are the ones it covers.",
+    '- `docs/notes/indexer-spec-followups.md`: the removed "stability-pool floor" item is legitimately shipped — `minBoldInSp`/`spHeadroom` exist across indexer handlers and dashboard code. The "ChainStat/GlobalStat" rewording to "indexer-side chain/global totals" is accurate — no such server-side entity exists; the dashboard aggregates totals client-side (`ui-dashboard/src/lib/homepage-og.ts`).',
+    '- `docs/notes/file-size-watch.md`: regenerated table has 34 data rows as claimed, and `scripts/file-size-watchlist.test.mjs` has 8 tests, matching the "8/8 passed" validation line.',
+    "- `docs/notes/review-process-metrics.md` deletion: the one useful standing guardrail (start a newly scoped evaluation rather than treating completed cohorts as recurring) survives in `docs/notes/quick-commands.md`; the completed-cohort evidence stays in the kept `docs/metrics/review-process-after-1045-comparison-2026-07-07.md`.",
+    "- `docs/README.md` catalog table edits are consistent with all deletions/updates and stay alphabetized within `notes-plans-archive`.",
+    "- `BACKLOG.md` frontmatter addition matches this repo's `AGENTS.md` rule that GitHub Issues are canonical and `BACKLOG.md` is transition storage only.",
+    "",
+    "**Findings roll-up**",
+    "",
+    "1. [P3] `docs/notes/file-size-watch.md:19-20` — the regeneration reflowed `` `node scripts/file-size-watchlist.mjs` `` across a hard line break inside the inline-code span. Renders fine, just a slightly unusual wrap; not worth a fix.",
+    '2. [P3] `docs/notes/file-size-watch.md:25-26` — the removed sentence explaining what the `Delta` column means (previously: "`Delta` compares raw lines with the previous report") was' +
+      "n't replaced; the column header alone is reasonably self-explanatory, so this is a very minor loss of context, not an error.",
+    "",
+    "No P1/P2 findings. I could not execute `node` scripts directly in this sandboxed environment (write/exec approval required beyond what's granted here), so I verified the regenerated content by static diff/grep inspection and cross-referencing source rather than re-running `file-size-watchlist.mjs`/`review-process-metrics.mjs` myself; the PR's own validation log already covers that.",
+  ].join("\n"),
+};
+
+const PR_1600_HEAD = "0ff2700ecbec8d2877caeeaa91bf423cf8fdc2f0";
+// Verbatim REST issuecomment 5073384440 from PR #1600. Keep this second
+// free-form shape bound to its exact body, comment, PR, author, and head.
+const PR_1600_CLEAN_CLAUDE_REVIEW = {
+  id: 5073384440,
+  html_url:
+    "https://github.com/mento-protocol/monitoring-monorepo/pull/1600#issuecomment-5073384440",
+  created_at: "2026-07-24T18:49:50Z",
+  updated_at: "2026-07-24T18:52:25Z",
+  user: { login: "claude[bot]", type: "Bot" },
+  body: [
+    "**Claude finished @chapati23's task in 2m 23s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30118424736)",
+    "",
+    "---",
+    "### Review: fix(deps): patch PostCSS source-map disclosure",
+    "",
+    "- [x] Gather context (diff, changed files)",
+    "- [x] Review lockfile/workspace overrides for correctness",
+    "- [x] Check consistency across all 4 dependency roots",
+    "- [x] Check for AGENTS.md / supply-chain convention compliance",
+    "- [x] Post findings",
+    "",
+    "**Verdict: LGTM**",
+    "",
+    "### Summary",
+    "",
+    "Clean, minimal, well-scoped security patch. I verified the change across all four dependency roots (`pnpm-workspace.yaml` + `pnpm-lock.yaml` at repo root, `governance-watchdog/`, `alerts/infra/oncall-announcer/`, `alerts/infra/onchain-event-handler/`):",
+    "",
+    "1. Every lockfile's `postcss@` resolution now points only to `8.5.18` — grepped all four lockfiles, no `8.5.1[0-7]` or earlier entries remain (confirms the PR's claim in \"Validation\").",
+    "2. The `postcss@<8.5.18: 8.5.18` override is present and correctly quoted/unquoted per each file's existing YAML convention (root quotes ranges containing `<`; the alerts roots leave them bare — pre-existing style, not introduced here).",
+    "3. The `minimumReleaseAgeExclude: postcss@8.5.18` addition follows the repo's established pattern for same-day security releases that predate the 3-day (`minimumReleaseAge: 4320`) gate — same shape as the existing `next@16.2.11` / `next-auth@5.0.0-beta.32` entries added for the July 2026 Next.js patch.",
+    "4. `governance-watchdog` and the two alerts functions have no `overrides` block in their own `package.json` (only in `pnpm-workspace.yaml`), so no package.json mirror was needed there — consistent with the changed-files list. `oncall-announcer` and `onchain-event-handler` correctly got the matching `package.json` override entries since those do mirror their standalone workspace config.",
+    "5. No other package.json in the monorepo declares `postcss` directly — all resolutions are transitive (tailwindcss/next/vite), so 4 lockfiles is the complete surface. No ADR needed (dependency version bump, not an architecture decision); no docs/runbook drift since no command/script/env var/workflow changed.",
+    "6. CI on this PR is green where completed (Supply Chain, Alerts Infra, Governance Watchdog Infra, Infra, Trunk, Bundle Size, Code Health all passed); `CI` and `Lighthouse CI` were still in progress at review time.",
+    "",
+    "### Findings",
+    "",
+    "No inline findings — nothing to flag at [P1]/[P2]/[P3].",
+    "",
+    "Note: automated Codex review was unavailable on this PR (usage limits reached per the bot comment above), so this pass is the only structured code review currently on the PR.",
+    " ([branch](https://github.com/mento-protocol/monitoring-monorepo/tree/fix/postcss-8.5.18))",
+  ].join("\n"),
+};
+
 function normalizedReadyStateForClaudeReview(
   comment,
   {
@@ -912,6 +996,113 @@ test("accepts the frozen PR #1544 Overall-verdict Claude review", () => {
   assertEqual(feedbackState.counts.topLevelBotComments, 1);
   assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
   assertEqual(feedbackState.counts.blockingFindings, 0);
+});
+
+test("accepts only the exact frozen PR #1595 free-form LGTM review", () => {
+  assertEqual(PR_1595_CLEAN_CLAUDE_REVIEW.body.length, 3293);
+  assertEqual(
+    createHash("sha256")
+      .update(PR_1595_CLEAN_CLAUDE_REVIEW.body, "utf8")
+      .digest("hex"),
+    "5d4832d96803f81363bc0842a4c1aed89e8fb526cb83834d3373aacd30c5be34",
+  );
+  const options = {
+    number: 1595,
+    title: "docs: garden notes and archive shard 1",
+    headRefOid: PR_1595_HEAD,
+    headUpdatedAt: "2026-07-24T12:22:17Z",
+    reactionCreatedAt: "2026-07-24T12:26:00Z",
+  };
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    PR_1595_CLEAN_CLAUDE_REVIEW,
+    options,
+  );
+  const feedbackState = summarizeFeedbackState(normalizedReadyState);
+
+  assertEqual(normalizedReadyState.ready, true);
+  assertEqual(feedbackState.ready, normalizedReadyState.required.ready);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  assertEqual(feedbackState.counts.blockingFindings, 0);
+
+  for (const mutation of [
+    {
+      ...PR_1595_CLEAN_CLAUDE_REVIEW,
+      id: PR_1595_CLEAN_CLAUDE_REVIEW.id + 1,
+    },
+    {
+      ...PR_1595_CLEAN_CLAUDE_REVIEW,
+      body: `${PR_1595_CLEAN_CLAUDE_REVIEW.body}\n`,
+    },
+  ]) {
+    const mutatedReadyState = normalizedReadyStateForClaudeReview(
+      mutation,
+      options,
+    );
+    const mutatedFeedbackState = summarizeFeedbackState(mutatedReadyState);
+    assertEqual(mutatedFeedbackState.ready, false);
+    assertEqual(mutatedFeedbackState.counts.blockingTopLevelBotComments, 1);
+  }
+
+  const wrongHeadReadyState = normalizedReadyStateForClaudeReview(
+    PR_1595_CLEAN_CLAUDE_REVIEW,
+    { ...options, headRefOid: "b".repeat(40) },
+  );
+  const wrongHeadFeedbackState = summarizeFeedbackState(wrongHeadReadyState);
+  assertEqual(wrongHeadFeedbackState.ready, false);
+  assertEqual(wrongHeadFeedbackState.counts.blockingTopLevelBotComments, 1);
+});
+
+test("accepts only the exact frozen PR #1600 free-form LGTM review", () => {
+  assertEqual(
+    createHash("sha256")
+      .update(PR_1600_CLEAN_CLAUDE_REVIEW.body, "utf8")
+      .digest("hex"),
+    "e0394033c85a77330e2ee53cab690a2069263c7e792ab3e443c17949bb728db4",
+  );
+  const options = {
+    number: 1600,
+    title: "fix(deps): patch PostCSS source-map disclosure",
+    headRefOid: PR_1600_HEAD,
+    headUpdatedAt: "2026-07-24T18:49:35Z",
+    reactionCreatedAt: "2026-07-24T18:53:00Z",
+  };
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    PR_1600_CLEAN_CLAUDE_REVIEW,
+    options,
+  );
+  const feedbackState = summarizeFeedbackState(normalizedReadyState);
+
+  assertEqual(normalizedReadyState.ready, true);
+  assertEqual(feedbackState.ready, normalizedReadyState.required.ready);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  assertEqual(feedbackState.counts.blockingFindings, 0);
+
+  for (const mutation of [
+    {
+      ...PR_1600_CLEAN_CLAUDE_REVIEW,
+      id: PR_1600_CLEAN_CLAUDE_REVIEW.id + 1,
+    },
+    {
+      ...PR_1600_CLEAN_CLAUDE_REVIEW,
+      body: `${PR_1600_CLEAN_CLAUDE_REVIEW.body}\n`,
+    },
+  ]) {
+    const mutatedReadyState = normalizedReadyStateForClaudeReview(
+      mutation,
+      options,
+    );
+    const mutatedFeedbackState = summarizeFeedbackState(mutatedReadyState);
+    assertEqual(mutatedFeedbackState.ready, false);
+    assertEqual(mutatedFeedbackState.counts.blockingTopLevelBotComments, 1);
+  }
+
+  const wrongHeadReadyState = normalizedReadyStateForClaudeReview(
+    PR_1600_CLEAN_CLAUDE_REVIEW,
+    { ...options, headRefOid: "b".repeat(40) },
+  );
+  const wrongHeadFeedbackState = summarizeFeedbackState(wrongHeadReadyState);
+  assertEqual(wrongHeadFeedbackState.ready, false);
+  assertEqual(wrongHeadFeedbackState.counts.blockingTopLevelBotComments, 1);
 });
 
 test("fails closed on single-field PR #1544 Overall-verdict mutations", () => {

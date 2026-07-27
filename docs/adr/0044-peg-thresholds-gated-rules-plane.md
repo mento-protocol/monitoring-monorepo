@@ -118,15 +118,14 @@ Phase 3 must implement the following protected artifact and rules contract:
     breach; this is a new idiom in the stack, adopted deliberately for
     thin-market series and documented in the rule file banner. Range
     functions ignore gaps, so the quantile counts as a duration fraction
-    only when a sample-coverage predicate also passes — `increase` over a
+    only when two sample-coverage predicates pass: `increase` over the
     monotonic per-source poll-success counter
-    (`mento_peg_poll_success_total`) compared against the expected poll
-    cadence. A timestamp-gauge `changes` undercounts polls that land
-    between scrapes, and raw `count_over_time` counts scrapes of a
-    retained gauge; only producer-side successes qualify, and failed polls
-    drop or stale the per-source series instead of holding last-good
-    values — after an API outage a sparse window with one fresh deviated
-    sample must not read as a sustained breach.
+    (`mento_peg_poll_success_total`) and the monotonic uncapped decision
+    counter (`mento_peg_usable_decision_total`), each compared against the
+    expected poll cadence. A timestamp-gauge `changes` undercounts polls
+    that land between scrapes, and raw `count_over_time` counts scrapes of
+    a retained gauge. Requiring both counters prevents capped or unchanged
+    successes plus one deviated sample from reading as a sustained breach.
   - Listing absence confirmation uses a producer-side bounded consecutive-check
     gauge. Inferring it from a timestamp gauge with `changes()` is
     forbidden: a listed or halted reset can occur between 30-second scrapes

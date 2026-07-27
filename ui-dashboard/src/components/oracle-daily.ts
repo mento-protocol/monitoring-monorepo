@@ -118,7 +118,7 @@ export interface OraclePlotData {
 
 // DESC rows (the ORACLE_PRICE_DAILY ordering — see config.ts) reversed to
 // chronological ASC for the chart's left-to-right line. Pure spread + reverse
-// (not `toReversed`) for the ES2017 target. Exported so the reversal is unit-
+// because `toReversed` is outside the browser floor. Exported so the reversal is unit-
 // tested directly (it's load-bearing: a missed reversal renders the chart
 // backwards / breaks the daily↔raw seam).
 export function chronological(

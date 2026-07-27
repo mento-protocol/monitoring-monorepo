@@ -90,7 +90,14 @@ describe("ResponsiveNav", () => {
       Array.from(panel?.querySelectorAll("a") ?? [], (link) =>
         link.getAttribute("href"),
       ),
-    ).toEqual(["/pools", "/volume", "/stables", "/bridge-flows", "/cdps"]);
+    ).toEqual([
+      "/pools",
+      "/volume",
+      "/stables",
+      "/bridge-flows",
+      "/cdps",
+      "/peg-monitoring",
+    ]);
   });
 
   it("closes the mobile menu on Escape and link activation", () => {

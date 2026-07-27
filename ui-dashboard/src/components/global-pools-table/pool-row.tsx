@@ -42,6 +42,7 @@ interface PoolRowProps {
   totalVolumeByKey: Map<string, number | null>;
   tvlChangeWoWByKey?: Map<string, number | null> | undefined;
   nowSeconds: number | null;
+  isWeekendNow: boolean | null;
   olsPoolKeys?: Set<string> | undefined;
   cdpPoolKeys?: Set<string> | undefined;
   reservePoolKeys?: Set<string> | undefined;
@@ -60,6 +61,7 @@ export function PoolRow({
   totalVolumeByKey,
   tvlChangeWoWByKey,
   nowSeconds,
+  isWeekendNow,
   olsPoolKeys,
   cdpPoolKeys,
   reservePoolKeys,
@@ -75,12 +77,14 @@ export function PoolRow({
     pool,
     network.chainId,
     statusNowSeconds,
+    isWeekendNow,
   );
   const limitStatus = resolveLimitStatus(pool);
   const effectiveStatus = computeEffectiveStatus(
     pool,
     network.chainId,
     statusNowSeconds,
+    isWeekendNow,
   );
   // Badges need a stable non-null clock during SSR to avoid oracle-staleness
   // hydration flips; tooltips receive raw null so they omit wall-clock durations.

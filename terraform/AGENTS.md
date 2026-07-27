@@ -45,22 +45,28 @@ garden_lane: agent-entry-points
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER`,
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
   `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
-  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The bootstrap must not route
-  workflows through the refresh selectors; a separate cutover-routing PR owns
-  that change while retaining the legacy Token Creator rollback grant.
+  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The four trusted-main plan
+  workflows and `terraform-drift.yml` route through the refresh selectors.
+  Routing is live, and run
+  [#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
+  completed the full-refresh proof. Before final-removal merges, drain the
+  affected runs and audit the read boundary.
 - Build trusted-main refresh access from curated non-basic project read roles;
   never use basic `roles/viewer`. Keep Secret Accessor limited to the exact
   Terraform-managed secrets and Storage Object Viewer limited to state and
   deployment-source buckets. Treat service data exposed by predefined readers
   (including logs, metrics, and artifacts) as part of the confidentiality
-  review. After the routing PR lands, prove the role set through its checked-in
-  `main` route with live full-refresh, unlocked plans for every CI-managed
-  Google-provider stack; add only the exact missing permission named by a
-  provider denial. Drain and audit those runs before authority removal.
-- Only a separate final removal PR may delete the routine deployer's
-  `org-terraform` Token Creator grant, and only through an explicitly approved
-  platform apply. Do not create the peg-policy project or bucket until that
-  removal is applied, all queued and active runs drain, and the final IAM audit
+  review. The merged `main` route completed full-refresh, unlocked plans for
+  every CI-managed Google-provider stack. Add only an exact missing permission
+  named by a provider denial. Before final authority removal merges, drain
+  every pre-routing and proof run and audit the read boundary.
+- The final-removal source omits the routine deployer's `org-terraform` Token
+  Creator grant. That source change does not remove the live grant. After
+  merge, cancel superseded runs, confirm every infrastructure run is terminal,
+  then run a clean current-`main` platform plan and apply only with explicit
+  human approval. Audit the final WIF and service-account IAM bindings before
+  declaring removal complete. Do not create the peg-policy project or bucket
+  until the removal is applied, all queued and active runs drain, and the audit
   confirms the old path is gone.
 
 ## Verification

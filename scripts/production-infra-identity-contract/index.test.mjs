@@ -22,6 +22,7 @@ import {
   validateProductionInfraIdentityContract,
 } from "./index.mjs";
 import "./routing.test.mjs";
+import "./refresh-routing.test.mjs";
 import "./security.test.mjs";
 import "./workflow.test.mjs";
 
@@ -225,7 +226,7 @@ module "identity_sink" {
   );
 }
 
-function testBootstrapLegacyBinding(validFiles) {
+function testLegacyBindingIsForbidden(validFiles) {
   const binding = `resource "google_service_account_iam_member" "ci_alerts_org_terraform_token_creator" {
   service_account_id = "projects/mento-terraform-seed-ffac/serviceAccounts/\${var.terraform_service_account}"
   role               = "roles/iam.serviceAccountTokenCreator"
@@ -233,44 +234,26 @@ function testBootstrapLegacyBinding(validFiles) {
 }
 `;
   expectContractFailure(
-    mutateFile(validFiles, "terraform/ci-wif.tf", binding, ""),
-    "bootstrap legacy deployer token creator: required resource",
+    {
+      ...validFiles,
+      "terraform/legacy-authority.tf": binding,
+    },
+    "routine deployer Token Creator grants are forbidden after cutover",
   );
   expectContractFailure(
-    mutateFile(
-      validFiles,
-      "terraform/ci-wif.tf",
-      binding,
-      binding.replace(
-        "${var.terraform_service_account}",
-        "org-terraform-wrong@example.invalid",
-      ),
-    ),
-    "bootstrap legacy deployer token creator: service_account_id must be exactly",
-  );
-  expectContractFailure(
-    mutateFile(
-      validFiles,
-      "terraform/ci-wif.tf",
-      binding,
-      binding.replace(
-        "roles/iam.serviceAccountTokenCreator",
-        "roles/iam.serviceAccountUser",
-      ),
-    ),
-    "bootstrap legacy deployer token creator: role must be exactly",
-  );
-  expectContractFailure(
-    mutateFile(
-      validFiles,
-      "terraform/ci-wif.tf",
-      binding,
-      binding.replace(
-        "google_service_account.metrics_bridge_deployer.email",
-        "google_service_account.production_infra_applier.email",
-      ),
-    ),
-    "bootstrap legacy deployer token creator: member must be exactly",
+    {
+      ...validFiles,
+      "terraform/legacy-authority.tf": binding
+        .replace(
+          "ci_alerts_org_terraform_token_creator",
+          "renamed_routine_deployer_token_creator",
+        )
+        .replace(
+          "${google_service_account.metrics_bridge_deployer.email}",
+          "metrics-bridge-deployer@mento-monitoring.iam.gserviceaccount.com",
+        ),
+    },
+    "routine deployer Token Creator grants are forbidden after cutover",
   );
 }
 
@@ -289,7 +272,7 @@ function runFixtureTests() {
   testHeredocParsing(validFiles);
   testProviderInventory(validFiles);
   testIdentityReferenceInventory(validFiles);
-  testBootstrapLegacyBinding(validFiles);
+  testLegacyBindingIsForbidden(validFiles);
 
   for (const weakenedCondition of [
     'assertion.repository == \\"mento-protocol/monitoring-monorepo\\" || true',
@@ -543,7 +526,7 @@ resource "google_service_account_iam_member" "refresh_can_write" {
       ".github/workflows/unlisted.yaml":
         "env:\n  BAD: ${{ vars['GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT'] }}\n",
     },
-    "must not be used during bootstrap",
+    "refresh identity variables are allowed only in exact trusted-main refresh routes",
   );
 
   expectContractFailure(
@@ -552,15 +535,15 @@ resource "google_service_account_iam_member" "refresh_can_write" {
       ".github/workflows/unlisted-refresh-provider.yml":
         "env:\n  BAD: ${{ vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER }}\n",
     },
-    "must not be used during bootstrap",
+    "refresh identity variables are allowed only in exact trusted-main refresh routes",
   );
 
   expectContractFailure(
     mutateFile(
       validFiles,
       ".github/workflows/alerts-infra.yml",
-      "  plan:\n    runs-on: ubuntu-latest",
-      "  plan:\n    env:\n      BAD: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}\n    runs-on: ubuntu-latest",
+      "    env:\n      TF_VAR_terraform_service_account:",
+      "    env:\n      BAD: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}\n      TF_VAR_terraform_service_account:",
     ),
     "must appear exactly once and only in the apply auth step",
   );

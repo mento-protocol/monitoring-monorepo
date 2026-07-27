@@ -24,7 +24,11 @@ Read-only exploration specialist for `ui-dashboard/`. Locate code, summarize wha
 
 - **Framework:** Next.js App Router, React, Tailwind CSS, Plotly.js, native
   GraphQL fetch helpers, and SWR. Read `package.json` for current versions.
-- **TS target:** `ES2017` (no polyfill — NEVER use `toSorted`, `findLast`, or any ES2023+ array method in client-shipped code)
+- **Browser API floor:** `ui-dashboard/browser-api-policy.json` owns the
+  closed client-side blocklist. `findLast`, `findLastIndex`, `flatMap`, and
+  `Promise.allSettled` are allowed. Do not infer a broad ban from the `ES2017`
+  TypeScript target; apply the exact receiver-aware restrictions documented in
+  `ui-dashboard/AGENTS.md`.
 - **SWR + Hasura discipline:** every polling hook MUST set `revalidateOnFocus: false` + `revalidateOnReconnect: false`. Defaults live at `useGQL` (`src/lib/graphql.ts`). `useGQL` and `useBridgeGQL` default to a 30s interval; the bridge wrapper owns an 8s timeout, while other fail-fast paths set a timeout below their interval. Distinguish `isLoading` from "data resolved to zero."
 - **Hasura 1000-row cap:** silent. Any UI `limit:` >1000 or a query feeding a lifetime aggregate is a bug — use pre-rolled snapshot/rollup entities or the pagination helpers in `src/lib/network-fetcher/pagination.ts`.
 - **Hasura `order_by`** with ≥2 fields MUST use array syntax `[{a: desc}, {b: asc}]` (object syntax silently drops fields).
@@ -43,5 +47,7 @@ Read-only exploration specialist for `ui-dashboard/`. Locate code, summarize wha
 - Always cite `file:line` for findings.
 - For "where does X" questions, return the page → component → hook → query chain.
 - For "is there a pattern for Y" questions, return the canonical implementation + at least one other site.
-- Flag SWR hooks missing the polling guards, mixed schema queries, route-private violations, or ES2023+ array methods if you spot them.
+- Flag SWR hooks missing the polling guards, mixed schema queries,
+  route-private violations, or client APIs in the closed browser policy if you
+  spot them.
 - Cap reports at ~400 words.

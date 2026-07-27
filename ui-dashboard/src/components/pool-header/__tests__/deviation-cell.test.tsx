@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+/** @vitest-environment jsdom */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup, renderToString } from "react-dom/server";
+import { act } from "react";
+import { hydrateRoot, type Root } from "react-dom/client";
+import { isWeekend } from "@/lib/weekend";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 
@@ -18,18 +23,43 @@ vi.mock("@/lib/weekend", () => ({
 // about the link see a plain `<span>` breach indicator. The "links to the
 // trip tx" tests override per-call.
 let nextTripTx: { startedByTxHash?: string }[] = [];
+let queriedTripKey: string | null = null;
 vi.mock("@/lib/graphql", () => ({
-  useGQL: () => ({
-    data: { DeviationThresholdBreach: nextTripTx },
-  }),
+  useGQL: (query: string | null) => {
+    queriedTripKey = query;
+    return {
+      data: { DeviationThresholdBreach: nextTripTx },
+    };
+  },
 }));
+
+const testClock = vi.hoisted(() => ({ nowSeconds: 0 as number | null }));
+
+vi.mock("@/hooks/use-now-seconds", async () => {
+  const { relativeTimeOrTimestamp, timestampOrUtc } =
+    await vi.importActual<typeof import("@/lib/format")>("@/lib/format");
+  const now = () => testClock.nowSeconds;
+  return {
+    useNowSeconds: now,
+    useSsrSafeRelative: (ts: string | null | undefined) =>
+      relativeTimeOrTimestamp(ts ?? "", now() ?? 0),
+    useSsrSafeTimestamp: (ts: string | null | undefined) =>
+      timestampOrUtc(ts ?? "", now() ?? 0),
+  };
+});
+
 function setTripTx(rows: { startedByTxHash?: string }[]) {
   nextTripTx = rows;
 }
 
-import { beforeEach } from "vitest";
 beforeEach(() => {
   nextTripTx = [];
+  queriedTripKey = null;
+  testClock.nowSeconds = Math.floor(Date.now() / 1000);
+});
+
+afterEach(() => {
+  vi.mocked(isWeekend).mockReturnValue(false);
 });
 
 import { DeviationCell } from "@/components/pool-header/deviation-cell";
@@ -69,6 +99,100 @@ const BASE_POOL: Pool = {
 };
 
 describe("DeviationCell — bar fill colors track health status", () => {
+  it("keeps stale deviation neutral through hydration before the live clock resolves", async () => {
+    vi.mocked(isWeekend).mockReturnValue(true);
+    const testNow = Math.floor(Date.now() / 1000);
+    testClock.nowSeconds = null;
+    const stalePool: Pool = {
+      ...BASE_POOL,
+      oracleTimestamp: String(testNow - 600),
+      lastOracleReportAt: String(testNow - 600),
+      oracleFreshnessCheckedAt: testNow,
+      deviationBreachStartedAt: String(testNow - 120),
+      priceDifference: "1000",
+    };
+    const serverHtml = renderToString(
+      <DeviationCell pool={stalePool} network={NETWORK} />,
+    );
+    expect(serverHtml).toContain("N/A");
+    expect(serverHtml).not.toContain("bg-emerald-500");
+    expect(serverHtml).not.toContain("bg-red-500");
+    expect(serverHtml).not.toMatch(/breach <time/);
+    expect(queriedTripKey).toBeNull();
+
+    vi.mocked(isWeekend).mockReturnValue(false);
+    const container = document.createElement("div");
+    container.innerHTML = serverHtml;
+    document.body.appendChild(container);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    let root: Root | null = null;
+    try {
+      await act(async () => {
+        root = hydrateRoot(
+          container,
+          <DeviationCell pool={stalePool} network={NETWORK} />,
+        );
+        await Promise.resolve();
+      });
+      const hasHydrationError = consoleError.mock.calls.some((call) =>
+        call.some((value) =>
+          /Hydration failed|didn't match|React error #418/i.test(String(value)),
+        ),
+      );
+      expect(hasHydrationError).toBe(false);
+      testClock.nowSeconds = testNow;
+      await act(async () => {
+        root?.render(<DeviationCell pool={stalePool} network={NETWORK} />);
+      });
+      expect(container.innerHTML).toContain("bg-red-500");
+    } finally {
+      consoleError.mockRestore();
+      await act(async () => {
+        root?.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it("preserves a confirmed oracle fault before the live clock resolves", () => {
+    testClock.nowSeconds = null;
+    const html = renderToStaticMarkup(
+      <DeviationCell
+        pool={{ ...BASE_POOL, oracleOk: false, priceDifference: "1000" }}
+        network={NETWORK}
+      />,
+    );
+
+    expect(html).toContain("bg-red-500");
+    expect(html).not.toContain(">N/A<");
+    expect(queriedTripKey).toBeNull();
+  });
+
+  it("preserves a sustained critical deviation before the live clock resolves", () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    testClock.nowSeconds = null;
+    const html = renderToStaticMarkup(
+      <DeviationCell
+        pool={{
+          ...BASE_POOL,
+          oracleTimestamp: String(nowSeconds - 60),
+          lastOracleReportAt: String(nowSeconds - 60),
+          oracleFreshnessCheckedAt: nowSeconds,
+          deviationBreachStartedAt: String(nowSeconds - 2 * 3600),
+          priceDifference: "6000",
+        }}
+        network={NETWORK}
+      />,
+    );
+
+    expect(html).toContain("bg-red-500");
+    expect(html).not.toContain(">N/A<");
+    expect(html).toMatch(/breach <time/);
+    expect(queriedTripKey).not.toBeNull();
+  });
+
   it("renders an emerald bar when deviation is well below the threshold (ratio < 0.8)", () => {
     const pool: Pool = { ...BASE_POOL, priceDifference: "3000" }; // ratio = 0.6
     const html = renderToStaticMarkup(

@@ -62,7 +62,7 @@ Then wait for the deployment to catch up and promote it:
 ```bash
 pnpm deploy:indexer:status "$COMMIT" --watch --compact
 pnpm deploy:indexer:logs "$COMMIT" --build
-pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h
+pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
@@ -95,7 +95,7 @@ pnpm deploy:indexer --yes
 ### After Redeployment Checklist
 
 1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch --compact` for low-noise agent output, `pnpm deploy:indexer:status "$COMMIT" --watch` for the full terminal table, or [envio.dev/app](https://envio.dev/app)).
-2. Inspect build and runtime errors with explicit commit-scoped logs (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --level error,warn --since 2h`).
+2. Inspect build logs and explicitly marked runtime errors with commit-scoped commands (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h`). Use `--level warn` separately when warnings are relevant; Envio can carry them as stdout records. Error-only inspection owns Envio's 100-record limit and fails closed when the page is full; narrow `--since` and retry until the result is complete.
 3. Capture a combined status/metrics/log snapshot for comparison (`pnpm deploy:indexer:perf "$COMMIT"`).
 4. Verify sync, metrics, endpoint resolution, core rows, and fail-closed Polygon replay semantics (`pnpm deploy:indexer:verify "$COMMIT"`). The verifier reads `indexer-envio/config/replay-integrity.json` from that exact commit, so a pre-invariant replay cannot pass merely because later rows look healthy. A caught-up status alone is only `SYNCED_PENDING_DATA_VERIFY`.
 5. Capture the current production commit for rollback, then promote the same caught-up, semantically verified commit (`pnpm deploy:indexer:promote "$COMMIT"`) and confirm its `prod_status=prod`. The `deploy-indexer` skill owns the exact prefix-safe query and guarded rollback command.
@@ -263,6 +263,7 @@ document the source of truth here, and wait for a human-approved plan/apply.
 | ------------------------------------- | ------------------------ | --------------------------------------------------------------------- |
 | `ENABLE_EXPERIMENTAL_COREPACK`        | Terraform resource       | Vercel Corepack opt-in so hosted builds honor pnpm 11                 |
 | `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Ethereum reserve-yield + Celo + Monad + Polygon) |
+| `METRICS_BRIDGE_URL`                  | Terraform Cloud Run URI  | Server-only Metrics Bridge origin for the peg-monitoring proxy        |
 | `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                                 |
 | `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                                  |
 | `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks             |
@@ -270,6 +271,12 @@ document the source of truth here, and wait for a human-approved plan/apply.
 | `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Dashboard-managed Redis token — auto-set                              |
 | `BLOB_STORE_ID`                       | Vercel store integration | Blob OIDC store id for backup and restore routes                      |
 | `BLOB_WEBHOOK_PUBLIC_KEY`             | Vercel store integration | Blob OIDC public key for the connected store                          |
+
+Terraform derives `METRICS_BRIDGE_URL` from
+`google_cloud_run_v2_service.metrics_bridge.uri`. A human-approved platform
+plan and apply own the Vercel environment update, and the dashboard deployment
+workflow owns the deployment that consumes it. The checked-in resource alone
+does not activate the proxy in production.
 
 ### Aggregator Integration Probes
 

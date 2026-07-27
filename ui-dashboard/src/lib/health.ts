@@ -375,6 +375,7 @@ function computeVirtualPoolHealthStatus(
   pool: PoolHealthState,
   chainId: number | undefined,
   nowSeconds: number,
+  isWeekendNow: boolean | null,
 ): HealthStatus {
   if (pool.wrappedExchangeDeprecated === true) return "N/A";
   if (pool.vpDeprecationKnown === false) return "N/A";
@@ -383,14 +384,16 @@ function computeVirtualPoolHealthStatus(
   if (medianValidity === null) return "N/A";
   if (!isVirtualPoolResetWindowStale(pool, nowSeconds)) return "N/A";
   const usdPeggedPair = isUsdPeggedVirtualPoolPair(pool, chainId);
-  return isWeekend() && usdPeggedPair === false ? "WEEKEND" : "CRITICAL";
+  if (isWeekendNow === null && usdPeggedPair === false) return "N/A";
+  return isWeekendNow && usdPeggedPair === false ? "WEEKEND" : "CRITICAL";
 }
 
 /**
  * Compute the health status for a pool. Returns:
- *  - "N/A" for VirtualPools (no oracle), and for FPMM pools whose indexer
- *    has flagged the deviation accrual as untrusted (`hasHealthData=false`
- *    — token decimals or threshold not yet read on chain)
+ *  - "N/A" for VirtualPools (no oracle), for stale FX-oracle state while the
+ *    browser weekend clock is unresolved (`isWeekendNow=null`), and for FPMM
+ *    pools whose indexer has flagged the deviation accrual as untrusted
+ *    (`hasHealthData=false` — token decimals or threshold not yet read on chain)
  *  - "WEEKEND" when the oracle is stale during FX market closure
  *  - "CRITICAL" when the oracle is stale (real incident) OR devRatio > 1.05
  *    sustained past `DEVIATION_BREACH_GRACE_SECONDS`
@@ -420,9 +423,15 @@ export function computeHealthStatus(
   pool: PoolHealthState,
   chainId?: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
+  isWeekendNow: boolean | null = isWeekend(),
 ): HealthStatus {
   if (isVirtualPool(pool)) {
-    return computeVirtualPoolHealthStatus(pool, chainId, nowSeconds);
+    return computeVirtualPoolHealthStatus(
+      pool,
+      chainId,
+      nowSeconds,
+      isWeekendNow,
+    );
   }
   // Oracle-staleness is an alertable freshness incident — keep it ABOVE
   // the hasHealthData gate so a stale-oracle pool doesn't get masked into
@@ -431,7 +440,8 @@ export function computeHealthStatus(
   const isOracleStale = !isOracleFresh(pool, nowSeconds, chainId);
   if (isOracleStale) {
     // Distinguish expected weekend staleness from a real incident
-    if (isWeekend()) return "WEEKEND";
+    if (isWeekendNow === null) return "N/A";
+    if (isWeekendNow) return "WEEKEND";
     return "CRITICAL";
   }
   if (pool.oracleOk === false) return "CRITICAL";
@@ -891,8 +901,9 @@ export function computeEffectiveStatus(
   },
   chainId?: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
+  isWeekendNow: boolean | null = isWeekend(),
 ): HealthStatus {
-  const health = computeHealthStatus(pool, chainId, nowSeconds);
+  const health = computeHealthStatus(pool, chainId, nowSeconds, isWeekendNow);
   const limit = resolveLimitStatus(pool);
   if (health === "N/A" && (limit === "OK" || limit === "N/A")) return "N/A";
   return worstStatus(health, limit);

@@ -9,6 +9,7 @@ import {
 import path from "node:path";
 
 import { parseFrontmatter } from "./check-agent-context-helpers.mjs";
+import { loadClaudeRuntimeDocumentRegistry } from "./claude-runtime-document-registry.mjs";
 
 export const DOCS_INDEX_PATH = "docs/README.md";
 
@@ -53,7 +54,6 @@ const PACKAGE_ROOTS = new Set([
   "terraform",
   "ui-dashboard",
 ]);
-
 const OPERATOR_NAME_PATTERN =
   /(?:deploy|deployment|rollback|terraform|quick[_-]commands|webhook[_-]state|adding[_-]events|from[_-]scratch)/i;
 
@@ -125,8 +125,8 @@ function firstHeading(content) {
 }
 
 function normalizedBoolean(value) {
-  if (value === "true") return true;
-  if (value === "false") return false;
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
   return null;
 }
 
@@ -215,9 +215,10 @@ export function classifyDocumentation(file, metadata = null) {
   const lane = metadata?.garden_lane || defaults.lane;
   const canonical = normalizedBoolean(metadata?.canonical);
   const rawInterval = metadata?.review_interval_days;
-  const reviewInterval = rawInterval
-    ? Number(rawInterval.replaceAll("_", ""))
-    : defaultReviewInterval(docType, canonical);
+  const reviewInterval =
+    rawInterval !== undefined && rawInterval !== null
+      ? Number(String(rawInterval).replaceAll("_", ""))
+      : defaultReviewInterval(docType, canonical);
   const errors = [];
   if (!DOCUMENT_TYPES.includes(docType)) {
     errors.push(`${file}: invalid doc_type '${docType}'`);
@@ -376,10 +377,18 @@ function requiredMetadataWarnings(file, metadata) {
   const hasContextMetadata = contextKeys.some((key) => key in metadata);
   if (!hasContextMetadata && !requiresManagedMetadata(file)) return warnings;
   for (const key of ["title", "status", "owner", "canonical"]) {
-    if (!metadata?.[key])
+    if (
+      metadata?.[key] === undefined ||
+      metadata?.[key] === null ||
+      metadata?.[key] === ""
+    )
       warnings.push(`${file}: managed document is missing '${key}'`);
   }
-  if (metadata.canonical && !["true", "false"].includes(metadata.canonical)) {
+  if (
+    metadata.canonical !== undefined &&
+    metadata.canonical !== null &&
+    normalizedBoolean(metadata.canonical) === null
+  ) {
     warnings.push(`${file}: canonical must be true or false`);
   }
   if (metadata.status && !DOCUMENT_STATUSES.includes(metadata.status)) {
@@ -411,6 +420,14 @@ export function buildDocumentationInventory({ repoRoot, files }) {
   const inboundSources = new Map();
   const documentSet = new Set(files);
   const linksBySource = new Map();
+  const claudeRuntimeRegistry = loadClaudeRuntimeDocumentRegistry({
+    repoRoot: normalizedRoot,
+    files,
+    parseDocumentationMetadata,
+    documentTypes: DOCUMENT_TYPES,
+    gardenLanes: GARDEN_LANES,
+  });
+  errors.push(...claudeRuntimeRegistry.errors);
 
   for (const file of files) {
     const absolute = path.join(normalizedRoot, file);
@@ -421,7 +438,9 @@ export function buildDocumentationInventory({ repoRoot, files }) {
       continue;
     }
     const content = readFileSync(absolute, "utf8");
-    const metadata = parseDocumentationMetadata(file, content);
+    const metadata =
+      claudeRuntimeRegistry.metadataByPath.get(file) ??
+      parseDocumentationMetadata(file, content);
     const classification = classifyDocumentation(file, metadata);
     errors.push(...classification.errors);
     warnings.push(...requiredMetadataWarnings(file, metadata));
@@ -434,6 +453,11 @@ export function buildDocumentationInventory({ repoRoot, files }) {
       status: lifecycle(metadata),
       owner: metadata?.owner || "unowned",
       last_verified: metadata?.last_verified || null,
+      canonical_sources: Array.isArray(metadata?.canonical_sources)
+        ? metadata.canonical_sources.filter(
+            (source) => typeof source === "string",
+          )
+        : [],
       ...classification,
       words: countWords(content),
       bytes: Buffer.byteLength(content),
@@ -509,6 +533,17 @@ function reviewCell(record) {
   return `${record.review_interval_days}d${verified}`;
 }
 
+function ownerCell(record) {
+  const sources = (record.canonical_sources || [])
+    .map(
+      (source) => `[\`${escapeCell(source)}\`](${relativeCatalogLink(source)})`,
+    )
+    .join("; ");
+  return sources
+    ? `${escapeCell(record.owner)}; Sources: ${sources}`
+    : escapeCell(record.owner);
+}
+
 export function renderDocumentationIndex(
   inventory,
   { lastVerified = "2026-07-17" } = {},
@@ -546,7 +581,7 @@ export function renderDocumentationIndex(
     for (const record of records) {
       const link = relativeCatalogLink(record.path);
       lines.push(
-        `| [\`${escapeCell(record.path)}\`](${link}) | ${escapeCell(record.title)} | ${record.authority} / ${record.status} | ${record.doc_type} / ${record.scope} | ${escapeCell(record.owner)} | ${reviewCell(record)} |`,
+        `| [\`${escapeCell(record.path)}\`](${link}) | ${escapeCell(record.title)} | ${record.authority} / ${record.status} | ${record.doc_type} / ${record.scope} | ${ownerCell(record)} | ${reviewCell(record)} |`,
       );
     }
     lines.push("");

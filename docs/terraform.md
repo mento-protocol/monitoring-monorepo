@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -12,8 +12,8 @@ garden_lane: operator-runbooks
 
 # Terraform Stacks
 
-`terraform.stacks.json` is the machine-readable registry for Terraform roots.
-Use it instead of inferring ownership from directory names.
+`terraform.stacks.json` is the source of truth for Terraform roots; do not infer
+ownership from directory names.
 
 | Stack                 | Path                         | State prefix          | Owns                                                                                                                                                                                                              | Plan/apply policy                                                                                                   |
 | --------------------- | ---------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -42,72 +42,56 @@ pnpm aegis:tf:plan
 pnpm gov-watchdog:tf:plan
 ```
 
-`pnpm tf validate` without a stack validates all registered stacks. It checks
-formatting for tracked and non-ignored untracked native Terraform sources, then
-runs `terraform init -backend=false` and `terraform validate`. Gitignored
-operator-held `*.tfvars` files are deliberately outside the source-format check.
+Without a stack, `pnpm tf validate` validates every registered stack. It formats
+tracked and non-ignored untracked Terraform, then runs backend-free init and
+validate. Gitignored operator `*.tfvars` stay outside that source check.
 
-For stacks where `terraform.stacks.json` declares
-`ci.apply == "push-main-production-infra-environment"`, local
-`pnpm tf apply <stack-id>` is guarded. It runs only when the checkout is on
-`main`, the worktree is clean, and `HEAD == origin/main`, unless the operator
-passes the deliberate override `--force-local-apply`. The expected safe path is
-to merge to `main` and let GitHub Actions apply through the `production-infra`
-Environment approval.
+For stacks with `ci.apply == "push-main-production-infra-environment"`, local
+apply requires a clean `main` at `origin/main` unless the operator deliberately
+passes `--force-local-apply`. Normally, merge and let GitHub Actions apply
+through `production-infra` approval.
 
 ## CI Model
 
-`.github/workflows/infra.yml` uses coarse YAML path filters to admit a run. The
-required `.github/workflows/ci.yml` sentinel runs on every PR and routes
-internally. Its change filter and `scripts/tf-stacks.mjs` use
-`terraform.stacks.json` to classify changed stacks and validate only their
-registered roots. The registry remains the ownership source of truth, but a new
-`changedPathPatterns` entry must also reach the infra admission filter and the
-CI internal filter until
+`.github/workflows/infra.yml` uses coarse admission filters. The required
+`.github/workflows/ci.yml` sentinel runs on every PR; its internal filter and
+`scripts/tf-stacks.mjs` use the registry to validate changed stack roots. Until
 [#1501](https://github.com/mento-protocol/monitoring-monorepo/issues/1501)
-replaces that duplication with enforced parity.
+enforces parity, add each new `changedPathPatterns` entry to both workflow
+filters too.
 
 `alerts-rules`, `alerts-delivery`, `aegis`, and `governance-watchdog` have CI
 apply behavior on `main`, gated by the `production-infra` GitHub Environment.
-Their plan jobs can run for workflow/notifier edits too, but the apply jobs only
-become eligible when stack-owned deployment inputs changed or a maintainer used
-`workflow_dispatch`. The platform stack remains manual-plan/manual-apply only.
-`terraform-drift.yml` runs a daily plan-only check for all four stacks. During
-the identity bootstrap, its Google-provider legs still use the legacy
-write-capable deployer. A separate routing PR moves trusted-main plans and
-scheduled drift to the refresh chain, retaining the legacy path for rollback
-until live proof and drain checks pass.
+Plans can also run for workflow/notifier edits. Applies require stack-owned
+deployment changes or maintainer `workflow_dispatch`. Platform remains manual.
+`terraform-drift.yml` runs daily plan-only checks for all four stacks.
+Trusted-`main` plans and drift use the read-only refresh chain, full refresh,
+and `-lock=false`. Run
+[#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
+proved that route for `alerts-delivery` and `governance-watchdog`. The legacy
+routine-deployer Token Creator grant remains rollback-only until affected runs
+drain and the read boundary is audited.
 
-Secret-bearing workflows use validation-safe placeholder `TF_VAR_*` values or
-guarded targets for eligible same-repo human PR plans. Fork, Dependabot, and
-`sentry-autofix/*` plans are skipped. Trusted push/dispatch plans and the
-environment-gated apply jobs retain the real secrets and are authoritative for
-full-stack, third-party-provider, and secret-value diffs. In particular,
-alerts-rules and alerts-delivery PR plans are intentionally partial; do not
-interpret them as full production plans.
+Eligible same-repo human PR plans use safe placeholder `TF_VAR_*` values or
+guarded targets; fork, Dependabot, and `sentry-autofix/*` plans are skipped.
+Trusted push/dispatch refresh and gated apply remain authoritative for
+full-stack, third-party-provider, and secret-value diffs. Alerts-rules and
+alerts-delivery PR plans are intentionally partial.
 See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
 for the exact placeholder and target boundaries.
 
-For a real `main` plan, the workflow posts a secretless Slack action summary
-before its apply waits for approval. GitHub evaluates Environment protection
-before starting the apply job, so the operator approves the commit and this
-earlier plan. The current apply job then creates and applies a later plan; its
-output was not available at approval time. Treat the gap as an explicit drift
-window.
+On `main`, the workflow posts a secretless Slack summary before approval.
+Environment protection blocks the apply job, so the operator approves the
+commit and earlier plan. Apply then creates and uses a later plan, leaving an
+explicit drift window.
 
-`Terraform Deploy Queue Watch` warns when a production Terraform workflow has
-had no job start for at least 60 minutes; it observes only and never cancels or
-approves runs. Inspect the whole workflow queue: cancel a predecessor only
-after confirming it is obsolete; otherwise let its reconciliation finish.
-Approval given before the apply job existed may need repeating after the plan
-creates that job. Follow every queued `main` run to a terminal state because
-later runs can pass the gate without an obvious second prompt. Never close
-drift from the first successful apply alone: verify the live resource and
-dispatch `terraform-drift.yml` from `main`. That workflow does not cover the
-manual-apply `platform` stack; recheck a `stack:platform` repo-setting drift
-issue (e.g. the default workflow-token permission) by dispatching
-`platform-settings-drift.yml` from `main` instead. Channel routing and
-notification boundaries live in
+`Terraform Deploy Queue Watch` only warns after 60 minutes without a job start;
+it never cancels or approves. Inspect the whole queue, cancel only an obsolete
+predecessor, repeat approval if the plan creates the apply job later, and follow
+every queued `main` run to terminal state. After apply, verify the live resource
+and dispatch `terraform-drift.yml` from `main`. For manual-only platform repo
+settings such as default workflow-token permission, dispatch
+`platform-settings-drift.yml` instead. Channel routing lives in
 [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md).
 
 ## Terraform CI identities
@@ -115,16 +99,15 @@ notification boundaries live in
 [ADR 0047](adr/0047-separated-terraform-ci-identities.md) owns the four lanes:
 routine deploy, state-only same-repo PR plan, read-only trusted-`main` refresh,
 and Environment-bound production apply. All three WIF providers bind repository
-slug plus immutable ID `1172025835`; apply also binds protected `main` and the
-`production-infra` subject, while refresh binds an exact `workflow_ref`
-allowlist. The bootstrap must not route workflows through either refresh
-variable.
+slug and immutable ID `1172025835`; apply also binds protected `main` and the
+`production-infra` subject, while refresh uses an exact `workflow_ref`
+allowlist. The identity contract restricts the four trusted-main plan workflows
+and `terraform-drift.yml` to both refresh selectors.
 
-Trusted-main plans use `-lock=false` and curated non-basic readers. Never add
-basic `roles/viewer`; keep object and secret payload access limited to state,
-deployment-source objects, and managed secrets. After routing, prove
-alerts-delivery and governance-watchdog with live full-refresh plans and add
-only permissions named by provider failures.
+Trusted-main plans use `-lock=false` and curated non-basic readers. Run
+#30212385280 completed the required full-refresh proof; the run-drain and
+read-boundary audits remain. Never add basic `roles/viewer`; limit object and
+secret payload reads to state, deployment source, and managed secrets.
 
 ADR 0047 also selects the final no-artifact apply contract: make a private plan
 after approval, run fail-closed policy over its JSON, then apply those exact
@@ -133,19 +116,14 @@ apply-time re-plan and drift window remain in force.
 
 ## Identity bootstrap, routing cutover, and authority removal
 
-Follow ADR 0047's full procedure:
+The bootstrap, refresh routing, and live full-refresh proof are complete.
+Before merging the final-removal source, drain every pre-routing and proof run
+and audit the read boundary. Source omission does not remove the live grant.
 
-1. Merge the bootstrap, cancel its queued infrastructure applies, then review
-   and explicitly approve a local platform plan/apply from clean current
-   `main`.
-2. Re-run alerts-delivery and governance-watchdog, verify the new apply path,
-   and retain the routine-deployer Token Creator grant for rollback.
-3. Land the separate refresh-routing PR, run the live plans above, drain every
-   old/proof run, and audit both paths.
-4. Only then land and explicitly apply the final legacy-authority removal.
-
-Do not create the peg-policy project or bucket until step 4 is applied, all
-runs drain, and the IAM audit proves the legacy path is gone.
+After merge, cancel superseded runs and wait for all infrastructure runs to
+finish. Then plan from clean current `main`, apply only with explicit human
+approval, and audit final IAM/WIF. Do not create the peg-policy project or
+bucket until that apply, queue drain, and audit prove the legacy path is gone.
 
 ## Platform GitHub Actions secrets and variables
 
@@ -156,7 +134,8 @@ optional input can plan deletion; inspect each one. It also owns
 `GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
 `GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
 `GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. Workflows read these as `vars`; never
-replace them with manual secrets or use the refresh selectors before routing.
+replace them with manual secrets or use the refresh selectors outside the four
+registered trusted-main plan workflows and `terraform-drift.yml`.
 Only `CLAUDE_CODE_OAUTH_TOKEN` currently has `prevent_destroy`; inspect every
 planned mirror deletion.
 Sentry credential routing lives in
@@ -164,7 +143,7 @@ Sentry credential routing lives in
 
 ## GitHub Environments
 
-Keep two production Environments. `production-infra` has a required reviewer,
+Keep three managed Environments. `production-infra` has a required reviewer,
 self-review allowed, admin bypass disabled, and protected-branch deployment; its
 workflows verify that state before cloud auth. With one maintainer this is
 operator acknowledgement, not independent or exact-plan review. [ADR
@@ -173,7 +152,21 @@ same-owner `CODEOWNERS` gate; revisit PR approval, latest-push approval, and
 disabled Environment self-review when a second active maintainer exists.
 
 `production-services` records routine deploys from protected `main` without a
-reviewer. Never recreate retired `Production`/`production` names or manage
+reviewer.
+
+`sentry-pipeline` (`terraform/github-environment.tf`, issue #1289,
+[ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) gates the Sentry
+triage/autofix pipeline's exclusive secrets. It has a main-only
+protected-branch deployment policy with admin bypass disabled
+(`can_admins_bypass = false`, #1289 — an admin cannot silently dispatch an
+off-main branch past the policy) and — deliberately, the pipeline is
+unattended — no reviewer or wait timer. Unlike the other two it is
+Terraform-managed; every platform apply reconciles its policy and secrets. Every secret-bearing Sentry job declares it, so those secrets are
+reachable only from `main` — server-enforced even on a branch-modified
+`workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level
+for `claude.yml`.
+
+Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow
 reference can auto-create an unprotected Environment, so establish its
 protection before merging the reference.

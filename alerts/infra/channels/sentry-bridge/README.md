@@ -1,4 +1,4 @@
-<!-- agent-context: title="Sentry Alerts Module" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=alerts/infra/channels/sentry-bridge review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Sentry Alerts Module" status=active owner=eng canonical=true last_verified=2026-07-26 doc_type=runbook scope=alerts/infra/channels/sentry-bridge review_interval_days=90 garden_lane=operator-runbooks -->
 
 # Sentry Alerts Module
 
@@ -15,10 +15,29 @@ For each Sentry project, the module creates:
 - a critical fan-out rule posting fatal first-seen and regression events from
   `production` to `#alerts-critical`.
 
-Both rules use the `sentry_alert` supertype. The stack is currently pinned to
-`jianyuan/sentry@0.15.0-beta3`; stable `0.15.4` is tracked separately in
-[#1472](https://github.com/mento-protocol/monitoring-monorepo/issues/1472) so
-the provider and lockfile change receive an authenticated drift review.
+Both rules use the `sentry_alert` supertype. The root and module constraints
+and the alerts-delivery lockfile pin `jianyuan/sentry@0.15.4` exactly.
+
+The beta3-to-0.15.4 audit covered all 45 upstream commits against this module's
+used surfaces: `sentry_alert`, `sentry_project_issue_stream_monitor`, and
+organization, integration, and project discovery:
+
+- [#897](https://github.com/jianyuan/terraform-provider-sentry/pull/897) trims
+  a leading `#` when comparing Slack action channel names, so bare and
+  `#`-prefixed forms are state-equivalent.
+- #872 makes `sentry_alert.trigger_conditions` optional and computed. This
+  module intentionally keeps both trigger lists explicit and pinned.
+- #878 decodes webhook actions on read. Any out-of-band webhook action exposed
+  by the live refresh plan is a stop-and-review condition.
+- #871 and #860 affect unused issue-priority and Microsoft Teams branches; they
+  do not touch repository configuration.
+
+The remaining changes require no repository-used schema or state migration.
+
+Keep the existing channel forms. Per-project rules use bare
+`sentry-<project-slug>` plus an exact `channel_id`; the critical rule keeps the
+validated `#alerts-critical` form because Sentry can accept a bare name while
+failing to deliver the notification.
 
 ## Preflight
 
@@ -100,6 +119,9 @@ to deploy unreviewed repository configuration.
 
 - `frequency_minutes = 5` prevents the same issue rule from re-firing within
   five minutes.
+- An authenticated full-refresh plan on the exact merged `main` candidate is
+  still required before applying a provider upgrade. A feature-branch
+  `-refresh=false` plan cannot prove live Sentry or Slack stability.
 - The critical fan-out intentionally excludes `reappeared_event`; repeated
   unresolved-issue notifications stay in the per-project channel.
 - Slack channels are archived, not deleted, when their Terraform resource is

@@ -26,14 +26,30 @@ const subscribe = (notify: () => void): (() => void) => {
  * never recomputes wall-clock state independently. `useSyncExternalStore` then
  * synchronously compares against the live clock immediately after hydration
  * and corrects any ISR-stale seed before keeping the hourly subscription.
- * This seeded path is intentionally limited to the informational weekend
- * banner; operator-safety state with async inputs must still render neutral
- * until those inputs resolve.
+ * Seed only synchronous clock-dependent view state whose other inputs are
+ * already available during SSR. Operator-safety state with async inputs must
+ * still render neutral until those inputs resolve.
  */
 export function useIsWeekend(initialIsWeekend = false): boolean {
   return useSyncExternalStore(
     subscribe,
     () => isWeekend(),
     () => initialIsWeekend,
+  );
+}
+
+/**
+ * Live FX-weekend flag for safety-sensitive status decisions.
+ *
+ * The clock is intentionally unresolved on the server and through hydration:
+ * treating it as a weekday would briefly label a stale FX oracle CRITICAL
+ * before the browser can classify the market closure. Consumers must render a
+ * neutral state for the null snapshot, then use the live browser value.
+ */
+export function useResolvedIsWeekend(): boolean | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => isWeekend(),
+    () => null,
   );
 }
