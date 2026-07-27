@@ -190,6 +190,7 @@ function context(
 function sourceState(lastAttemptAt: number): PegPollSourceState {
   return {
     lastAttemptAt,
+    listingLastAttemptAt: null,
     lastObservationAt: null,
     identitiesAtLastObservationAt: new Set(),
     observation: null,
