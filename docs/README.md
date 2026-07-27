@@ -78,6 +78,7 @@ Authority: canonical
 - [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md)
 - [`docs/notes/github-tooling-surfaces.md`](notes/github-tooling-surfaces.md)
 - [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md)
+- [`docs/notes/peg-monitoring-onboarding.md`](notes/peg-monitoring-onboarding.md)
 - [`docs/notes/peg-monitoring.md`](notes/peg-monitoring.md)
 - [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md)
 - [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md)
