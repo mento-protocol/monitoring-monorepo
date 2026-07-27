@@ -378,14 +378,22 @@ export function validateContract(files = readContractFiles()) {
       block.includes(EXPECTED_RUNTIME_EMAIL)
     );
   });
+  const runtimeProjectGrantNames = runtimeProjectGrants.map(
+    (match) => match[0],
+  );
+  const expectedRuntimeProjectGrantNames = [
+    'resource "google_project_iam_member" "grafana_agent_runtime_activation_reader"',
+    'resource "google_project_iam_member" "grafana_agent_runtime_log_writer"',
+  ];
   if (
-    runtimeProjectGrants.length !== 1 ||
-    !runtimeProjectGrants[0]?.[0].endsWith(
-      '"grafana_agent_runtime_activation_reader"',
+    runtimeProjectGrantNames.length !==
+      expectedRuntimeProjectGrantNames.length ||
+    !expectedRuntimeProjectGrantNames.every((name) =>
+      runtimeProjectGrantNames.includes(name),
     )
   ) {
     errors.push(
-      `${CONTRACT_FILES.bootstrap}: runtime project access must contain only the activation reader grant`,
+      `${CONTRACT_FILES.bootstrap}: runtime project access must contain only the activation reader and App Engine Flex Logs Writer grants`,
     );
   }
 
@@ -435,6 +443,24 @@ export function validateContract(files = readContractFiles()) {
     runtimeActivationGrant,
     /role\s*=\s*google_project_iam_custom_role\.grafana_agent_activation_reader\.name/u,
     `${CONTRACT_FILES.bootstrap}: runtime activation grant must use the exact custom role`,
+  );
+  const runtimeLogWriterGrant = requireBlock(
+    errors,
+    bootstrap,
+    'resource "google_project_iam_member" "grafana_agent_runtime_log_writer"',
+    CONTRACT_FILES.bootstrap,
+  );
+  requirePattern(
+    errors,
+    runtimeLogWriterGrant,
+    /role\s*=\s*"roles\/logging\.logWriter"/u,
+    `${CONTRACT_FILES.bootstrap}: App Engine Flex runtime must have only Logs Writer as its predefined project role`,
+  );
+  requirePattern(
+    errors,
+    runtimeLogWriterGrant,
+    /member\s*=\s*"serviceAccount:\$\{google_service_account\.grafana_agent_runtime\.email\}"/u,
+    `${CONTRACT_FILES.bootstrap}: Logs Writer must target the dedicated runtime account`,
   );
 
   const preflightRole = requireBlock(

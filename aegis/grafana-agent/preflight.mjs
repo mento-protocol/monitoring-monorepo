@@ -16,6 +16,7 @@ const BUILDER_PROJECT_ROLES = [
   'roles/logging.logWriter',
   'roles/storage.objectAdmin',
 ];
+const RUNTIME_PROJECT_ROLES = ['roles/logging.logWriter'];
 const ACTIVATION_ROLE_ID = 'grafanaAgentActivationReader';
 const ACTIVATION_PERMISSIONS = [
   'appengine.services.get',
@@ -281,7 +282,7 @@ export function runPreflight({
   assertExactProjectRoles(
     projectPolicy,
     runtimeMember,
-    [activationRoleName],
+    [activationRoleName, ...RUNTIME_PROJECT_ROLES],
     'runtime activation',
   );
   assertExactProjectRoles(
