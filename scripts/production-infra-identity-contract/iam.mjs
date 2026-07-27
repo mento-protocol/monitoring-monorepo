@@ -93,6 +93,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
     blocks: [
       "terraform/ci-wif.tf:google_project_iam_member.ci_deployer",
       "terraform/ci-wif.tf:google_service_account_iam_member.ci_appengine_default_service_account_user",
+      "terraform/deploy-staging.tf:google_service_account_iam_member.ci_default_compute_service_account_user",
     ],
   },
   {
@@ -155,6 +156,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       '"serviceAccount:${local.aegis_app_engine_default_service_account}"',
     blocks: [
       "terraform/aegis-bootstrap.tf:google_secret_manager_secret_iam_member.grafana_agent_appspot_accessor",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_appspot_object_viewer",
     ],
   },
   {
@@ -215,6 +217,11 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       "terraform/project-iam.tf:google_project_iam_member.dev_run_admin",
       "terraform/project-iam.tf:google_project_iam_member.dev_storage_admin",
       "terraform/project-iam.tf:google_service_account_iam_member.dev_appengine_default_service_account_user",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_bucket_reader",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_object_admin",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_caller_bucket_reader",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_caller_object_creator",
+      "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer",
     ],
   },
 ];
@@ -267,6 +274,13 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/ci-wif.tf:google_service_account_iam_member.terraform_refresh_readonly_wif_binding|a10d7bdebc3992fb450224b6850e35b442c174bc629d63826a39c89d29ebcb09",
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_plan_readonly|14bfbae95fdd8cf89f98a71d6b0ff755e291f25ed5d946d633614813734e4ac5",
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_refresh_readonly|f6756d526277862e2378cd24b6605b16725030c636d67e8a483411435ad6998f",
+  "terraform/deploy-staging.tf:google_service_account_iam_member.ci_default_compute_service_account_user|00dc24e7f8a41d04bed69c4aa2f22f05e538384da239b39cbce1c533dfb75ce5",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_appspot_object_viewer|58e3435279d7f963ff0a5240a21656567713b1084a21c92ee89a9376d56d1aac",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_bucket_reader|5d73115f051745aef473fb8ec7a97d4c77fddc0d01864e65732aa555fb0b31b3",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_object_admin|14bf0968da5978f1ebb31bbdb0920aa08002d9dc145d96b1b6975372d63e686d",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_caller_bucket_reader|7f6df2c25b10621c2859f534dd6b08a7954ee54a9bffbd4fda07844baa561eb2",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_caller_object_creator|099993e1b824b00ce5c88941033c1b4be5152d93dd5734a98791c329d702f19a",
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer|f029157f4db1a19bee061e8160aa6a886e0597ea52f89be07135a0c44586f929",
   "terraform/gcp-project.tf:google_project_iam_member.terraform_owner|3280f80f6f5a6293d453a3d550eeeab7a818dbb8d313160fac41df4753012d4a",
   "terraform/metrics-bridge.tf:google_cloud_run_v2_service_iam_member.metrics_bridge_public|9bd48a6d3612b82847564ed91fdcd3199dfe565bde34d18eb5df2c4d635a8a4a",
   "terraform/project-iam.tf:google_project_iam_member.dev_appengine_admin|46e0559a495dac87da8892c4b007a3aea38193c9cf3a05aa8d256c4a52c0770d",

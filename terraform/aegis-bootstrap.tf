@@ -14,6 +14,10 @@ resource "google_app_engine_application" "aegis" {
   }
 }
 
+# Storage Admin below is temporary rollback access while the explicit Cloud
+# Build and App Engine staging paths complete live canaries.
+# deploy-staging.tf already grants both candidate build identities their
+# bucket-scoped replacements.
 locals {
   aegis_app_engine_default_service_account = "${google_project.monitoring.project_id}@appspot.gserviceaccount.com"
 

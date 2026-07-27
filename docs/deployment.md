@@ -3,7 +3,7 @@ title: Deployment Guide
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-17
+last_verified: 2026-07-27
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -159,6 +159,36 @@ commit:
 
 4. Roll forward later by promoting the fixed deployment:
    `pnpm deploy:indexer:promote <fixed-sha>`.
+
+---
+
+## GCP service deployment source staging
+
+The platform stack owns two explicit source buckets for routine deploys:
+
+- Cloud Build uploads use
+  `gs://mento-monitoring-cloud-build-source/<service>`;
+- App Engine uploads use `gs://mento-monitoring-app-engine-source`.
+
+The follow-up routing change makes the Metrics Bridge workflow and
+`pnpm bridge:deploy` pass `--gcs-source-staging-dir`. It makes
+`pnpm aegis:deploy` and the nested Alloy build pass `--bucket`, while
+`pnpm aegis:agent:deploy` stages its outer build in the Cloud Build bucket.
+That follow-up also makes `pnpm tf:test` discover every executable callsite and
+reject a direct `gcloud builds submit` / `gcloud app deploy` path that omits
+the explicit bucket.
+
+This migration has a strict rollout order. First merge the infrastructure-only
+PR. Refresh current `main`, run a clean current-main platform plan, get explicit
+apply approval, apply, and verify both buckets, their bucket-scoped IAM, and the
+routine deployer's exact default-compute act-as grant. Only then merge the
+routing follow-up; that merge triggers the Metrics Bridge and Aegis workflows.
+Canary those two paths and `pnpm aegis:agent:deploy` before a separate platform
+change removes the temporary project-wide Storage Admin and Service Account
+User grants. Never combine that removal with creation of the private
+peg-policy bucket or its identities.
+[ADR 0053](adr/0053-explicit-deployment-source-staging.md) records the
+permission split and phase boundary.
 
 ---
 
