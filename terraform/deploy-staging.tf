@@ -137,6 +137,8 @@ resource "google_storage_bucket_iam_member" "app_engine_source_appspot_object_vi
   bucket = google_storage_bucket.app_engine_source_staging.name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${local.aegis_app_engine_default_service_account}"
+
+  depends_on = [google_app_engine_application.aegis]
 }
 
 # Preserve the routine Metrics Bridge rollout after phase 2 removes the
