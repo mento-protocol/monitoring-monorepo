@@ -6,6 +6,7 @@ import {
 
 const GCLOUD_GLOBAL_FLAGS_WITH_VALUE = new Set([
   "--account",
+  "--access-token-file",
   "--billing-project",
   "--configuration",
   "--flags-file",
@@ -40,6 +41,9 @@ const SHELL_COMMAND_PREFIXES = new Set([
 ]);
 const SHELL_COMMAND_WRAPPERS = new Set(["command", "env", "exec", "time"]);
 const SHELL_EXECUTABLES = new Set(["bash", "dash", "fish", "ksh", "sh", "zsh"]);
+const SHELL_SOURCE_COMMANDS = new Set([".", "source"]);
+const XARGS_OPTIONS_WITH_VALUE =
+  /^(?:-E|-I|-L|-n|-P|-s|--eof|--max-args|--max-chars|--max-lines|--max-procs|--replace)$/u;
 const DEPLOY_COMMAND_PATTERN =
   /\bgcloud(?:(?:\s+--[^\s]+)|(?:\s+(?:alpha|beta))|(?:\s+(?!(?:builds|app)\b)[^\s]+))*\s+(?:builds\s+submit|app\s+deploy)\b/u;
 
@@ -333,9 +337,50 @@ function opaqueExecutionError(filePath, surface, boundary) {
   return `${filePath}: ${surface}: opaque shell ${boundary} prevents deploy-staging discovery`;
 }
 
-function writtenShellPath(command) {
-  const match = command.match(/(?:>|>>)\s*(\/[^\s;|&]+)/u);
-  return match?.[1];
+function redirectedPath(tokens) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index] === ">" || tokens[index] === ">>") {
+      return tokens[index + 1]?.startsWith("/") ? tokens[index + 1] : undefined;
+    }
+    const match = tokens[index].match(/^>>?(\/.*)$/u);
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
+function shellInputPath(tokens, shellIndex) {
+  const input = tokens[shellIndex + 1];
+  if (input === "<") return tokens[shellIndex + 2];
+  if (input?.startsWith("<")) return input.slice(1);
+  return input?.startsWith("/") ? input : undefined;
+}
+
+function xargsTargetIndex(tokens, xargsIndex) {
+  let index = xargsIndex + 1;
+  while (tokens[index]?.startsWith("-")) {
+    const option = tokens[index];
+    if (option === "--") return index + 1;
+    if (
+      /^(?:-[EILnPs].+|--(?:eof|replace|max-(?:args|chars|lines|procs))=.+)$/u.test(
+        option,
+      )
+    ) {
+      index += 1;
+    } else if (XARGS_OPTIONS_WITH_VALUE.test(option)) {
+      index += 2;
+    } else {
+      index += 1;
+    }
+  }
+  return index;
+}
+
+function xargsGeneratedPath(tokens, xargsIndex, writtenPaths) {
+  const target = tokens[xargsTargetIndex(tokens, xargsIndex)];
+  if (!SHELL_EXECUTABLES.has(target) && !SHELL_SOURCE_COMMANDS.has(target)) {
+    return undefined;
+  }
+  return tokens.slice(0, xargsIndex).find((token) => writtenPaths.has(token));
 }
 
 function opaqueShellErrors(filePath, surface, contents, errors) {
@@ -346,7 +391,7 @@ function opaqueShellErrors(filePath, surface, contents, errors) {
   const recordOpaqueError = (boundary) =>
     opaqueErrors.add(opaqueExecutionError(filePath, surface, boundary));
   for (const command of commands) {
-    const outputPath = writtenShellPath(command);
+    const outputPath = redirectedPath(shellTokens(command));
     if (outputPath && DEPLOY_COMMAND_PATTERN.test(command)) {
       writtenPaths.add(outputPath);
     }
@@ -389,9 +434,22 @@ function opaqueShellErrors(filePath, surface, contents, errors) {
         recordOpaqueError("xargs shell evaluation");
       } else if (
         SHELL_EXECUTABLES.has(executable) &&
+        writtenPaths.has(shellInputPath(tokens, startIndex))
+      ) {
+        recordOpaqueError(`generated ${shellInputPath(tokens, startIndex)}`);
+      } else if (
+        SHELL_SOURCE_COMMANDS.has(executable) &&
         writtenPaths.has(tokens[startIndex + 1])
       ) {
         recordOpaqueError(`generated ${tokens[startIndex + 1]}`);
+      } else if (executable === "xargs") {
+        const generatedPath = xargsGeneratedPath(
+          tokens,
+          startIndex,
+          writtenPaths,
+        );
+        if (generatedPath)
+          recordOpaqueError(`xargs generated ${generatedPath}`);
       }
       commandStart = false;
     }

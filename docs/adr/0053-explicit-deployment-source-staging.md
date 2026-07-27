@@ -114,9 +114,10 @@ order makes both automatic deploys race missing infrastructure and fail closed.
 - The dedicated Alloy builder and Metrics Bridge's verified default Compute
   executor have the exact staging grants they need; the legacy default Cloud
   Build identity remains outside the staging-principal set.
-- A checked-in contract discovers every executable
-  submit/deploy callsite and rejects a new one unless it names the correct
-  staging bucket.
+- A checked-in contract inventories literal checked-in submit/deploy callsites
+  and rejects an unflagged call or supported opaque wrapper when the literal is
+  present. Dynamically constructed executables and paths are forbidden by this
+  workflow; static discovery cannot prove them.
 - Operators must preserve the phase boundary: merge and apply the additive
   infrastructure from current `main`, merge routing, run all deploy canaries,
   then remove broad roles in a separate approved platform apply. This ADR

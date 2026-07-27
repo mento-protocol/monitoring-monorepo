@@ -159,8 +159,10 @@ project-level fallback is removed.
 Metrics Bridge's default Compute executor has no App Engine source-bucket grant.
 
 Every checked-in `gcloud builds submit` uses `--gcs-source-staging-dir`; every
-checked-in `gcloud app deploy` uses `--bucket`. `pnpm tf:test` discovers these
-executable surfaces and rejects a new unflagged callsite.
+checked-in `gcloud app deploy` uses `--bucket`. `pnpm tf:test` inventories
+literal checked-in callsites and rejects unflagged calls or supported opaque
+wrappers when the literal is present. Dynamically constructed executables and
+paths are forbidden by this workflow; static discovery cannot prove them.
 
 The migration is deliberately additive. Merge the infrastructure-only PR,
 refresh current `main`, run a clean current-main platform plan, get explicit

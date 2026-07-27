@@ -362,6 +362,11 @@ for (const [contents, expected, message] of [
     ["builds-submit"],
     "global flags",
   ],
+  [
+    "gcloud --access-token-file /tmp/token builds submit .",
+    ["builds-submit"],
+    "separated access token file global flag",
+  ],
   ["gcloud --log-http builds submit .", ["builds-submit"], "boolean flags"],
   [
     "command gcloud --user-output-enabled app deploy app.yaml",
@@ -503,8 +508,24 @@ expectOpaqueExecutionFailure(
   "xargs shell evaluation",
 );
 expectOpaqueExecutionFailure(
-  "#!/usr/bin/env bash\nprintf 'gcloud app deploy app.yaml\\n' > /tmp/deploy\nbash /tmp/deploy\n",
+  '#!/usr/bin/env bash\nprintf \'gcloud app deploy app.yaml\\n\' > "/tmp/deploy script"\nbash "/tmp/deploy script"\n',
+  "generated /tmp/deploy script",
+);
+expectOpaqueExecutionFailure(
+  "#!/usr/bin/env bash\nprintf 'gcloud app deploy app.yaml\\n' > /tmp/deploy\nsource /tmp/deploy\n",
   "generated /tmp/deploy",
+);
+expectOpaqueExecutionFailure(
+  "#!/usr/bin/env bash\nprintf 'gcloud app deploy app.yaml\\n' > /tmp/deploy\n. /tmp/deploy\n",
+  "generated /tmp/deploy",
+);
+expectOpaqueExecutionFailure(
+  "#!/usr/bin/env bash\nprintf 'gcloud app deploy app.yaml\\n' > /tmp/deploy\nsh < /tmp/deploy\n",
+  "generated /tmp/deploy",
+);
+expectOpaqueExecutionFailure(
+  "#!/usr/bin/env bash\nprintf 'gcloud app deploy app.yaml\\n' > /tmp/deploy\nprintf '%s\\n' /tmp/deploy | xargs -I{} sh\n",
+  "xargs generated /tmp/deploy",
 );
 
 const safeQuotedLogErrors = [];

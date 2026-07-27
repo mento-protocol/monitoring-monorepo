@@ -173,9 +173,11 @@ The platform stack owns two explicit source buckets for routine deploys:
 The Metrics Bridge workflow and `pnpm bridge:deploy` pass
 `--gcs-source-staging-dir`. `pnpm aegis:deploy` and the nested Alloy build pass
 `--bucket`; the guarded `pnpm aegis:agent:deploy` wrapper stages its immutable
-snapshot in the Cloud Build bucket. `pnpm tf:test` discovers every executable
-callsite and rejects a direct `gcloud builds submit` / `gcloud app deploy` path
-that omits the explicit bucket.
+snapshot in the Cloud Build bucket. `pnpm tf:test` inventories literal
+checked-in `gcloud builds submit` / `gcloud app deploy` callsites and rejects
+unflagged calls or supported opaque wrappers when the literal is present.
+Dynamically constructed executables and paths are forbidden by this workflow;
+static discovery cannot prove them.
 
 This migration has a strict rollout order. First merge the infrastructure-only
 PR. Refresh current `main`, run a clean current-main platform plan, get explicit
