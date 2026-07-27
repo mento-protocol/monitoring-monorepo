@@ -353,8 +353,12 @@ test('legacy secret accessors cannot return', () => {
 
 test('deploy must verify the new version identity', () => {
   const files = sourceFiles();
+  const verification =
+    'node "$verifier_root/aegis/grafana-agent/preflight.mjs" \\\n' +
+    '    --project "$project" \\\n' +
+    '    --version "$version"';
   files.deploy = files.deploy.replace(
-    'node "$verifier_root/aegis/grafana-agent/preflight.mjs"',
+    verification,
     'echo "verification skipped"',
   );
   expectFailure(files, /immutable verifier snapshot/u);
@@ -399,7 +403,9 @@ test('Cloud Build source staging cannot broaden beyond runtime inputs', () => {
 test('traffic promotion must follow live version verification', () => {
   const files = sourceFiles();
   const verification =
-    'node "$verifier_root/aegis/grafana-agent/preflight.mjs"';
+    'node "$verifier_root/aegis/grafana-agent/preflight.mjs" \\\n' +
+    '    --project "$project" \\\n' +
+    '    --version "$version"';
   files.deploy = files.deploy.replace(verification, '');
   files.deploy += `\n${verification}\n`;
   expectFailure(files, /failed build or version verification must stop/u);
@@ -871,7 +877,10 @@ gcloud() {
     printf '%s\\n' STOPPED
   fi
 }
-rollback_cutover previous target`,
+node() {
+  printf 'node %s\\n' "$*" >>"$LOG_PATH"
+}
+rollback_cutover previous target /verification`,
       'bash',
       deployPath,
       path.join(tmpdir(), `alloy-rollback-${process.pid}.log`),
@@ -885,6 +894,11 @@ rollback_cutover previous target`,
   assert.ok(
     calls.indexOf('versions stop target') <
       calls.indexOf('versions start previous'),
+  );
+  assert.ok(
+    calls.indexOf(
+      'node /verification/aegis/grafana-agent/preflight.mjs --project mento-monitoring --version previous',
+    ) < calls.indexOf('versions start previous'),
   );
   assert.ok(
     calls.indexOf('versions start previous') <
@@ -976,7 +990,7 @@ gcloud() {
   printf '%s\\n' "$*" >>"$LOG_PATH"
   if [[ "$*" == *"versions stop target"* ]]; then return 1; fi
 }
-rollback_cutover previous target`,
+rollback_cutover previous target /verification`,
       'bash',
       deployPath,
       logPath,
@@ -1010,7 +1024,7 @@ gcloud() {
     return 1
   fi
 }
-rollback_cutover previous target`,
+rollback_cutover previous target /verification`,
       'bash',
       deployPath,
       logPath,
@@ -1044,7 +1058,7 @@ gcloud() {
   if [[ "$*" == *"versions list"* ]]; then printf '%s\\n' peer; fi
   if [[ "$*" == *"versions stop peer"* ]]; then return 1; fi
 }
-rollback_cutover previous target`,
+rollback_cutover previous target /verification`,
       'bash',
       deployPath,
       logPath,
@@ -1057,6 +1071,46 @@ rollback_cutover previous target`,
   assert.match(calls, /versions stop peer/u);
   assert.doesNotMatch(calls, /versions start previous/u);
   assert.match(result.stderr, /another collector could not be proven STOPPED/u);
+});
+
+test('rollback never restarts a previous collector that fails restart preflight', () => {
+  const deployPath = path.join(agentDir, 'deploy.sh');
+  const logPath = path.join(
+    tmpdir(),
+    `alloy-rollback-preflight-failure-${process.pid}.log`,
+  );
+  const result = spawnSync(
+    'bash',
+    [
+      '-c',
+      `source "$1"
+project=mento-monitoring
+LOG_PATH="$2"
+gcloud() {
+  printf '%s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"versions describe target"* ]]; then printf '%s\\n' STOPPED; fi
+}
+node() {
+  printf 'node %s\\n' "$*" >>"$LOG_PATH"
+  return 1
+}
+rollback_cutover previous target /verification`,
+      'bash',
+      deployPath,
+      logPath,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.notEqual(result.status, 0);
+  const calls = readFileSync(logPath, 'utf8');
+  rmSync(logPath, { force: true });
+  assert.match(
+    calls,
+    /preflight\.mjs --project mento-monitoring --version previous/u,
+  );
+  assert.doesNotMatch(calls, /versions start previous/u);
+  assert.doesNotMatch(calls, /services set-traffic grafana-agent/u);
+  assert.match(result.stderr, /failed pinned-identity and zero-traffic/u);
 });
 
 test('serving-version inventory failure cannot retire collectors or report success', () => {
@@ -1103,7 +1157,7 @@ test('printed rollback is ordered and short-circuits when target stop fails', ()
 project=mento-monitoring
 LOG_PATH="$2"
 command="$(print_manual_rollback_commands previous target)"
-[[ "$(grep -o '&&' <<<"$command" | wc -l | tr -d ' ')" == 8 ]]
+[[ "$(grep -o '&&' <<<"$command" | wc -l | tr -d ' ')" == 9 ]]
 gcloud() {
   printf '%s\\n' "$*" >>"$LOG_PATH"
   if [[ "$*" == *"versions stop target"* ]]; then return 1; fi
@@ -1178,6 +1232,9 @@ gcloud() {
   if [[ "$*" == *"versions list"* ]]; then printf '%s\\n' peer; fi
   if [[ "$*" == *"versions describe peer"* ]]; then printf '%s\\n' STOPPED; fi
 }
+pnpm() {
+  printf 'pnpm %s\\n' "$*" >>"$LOG_PATH"
+}
 eval "$command"`,
       'bash',
       deployPath,
@@ -1193,12 +1250,52 @@ eval "$command"`,
   );
   assert.ok(
     calls.indexOf('versions stop peer') <
+      calls.indexOf('aegis:agent:preflight -- --version previous'),
+  );
+  assert.ok(
+    calls.indexOf('aegis:agent:preflight -- --version previous') <
       calls.indexOf('versions start previous'),
   );
   assert.ok(
     calls.indexOf('versions start previous') <
       calls.indexOf('services set-traffic grafana-agent'),
   );
+});
+
+test('printed rollback never starts a previous collector that fails preflight', () => {
+  const deployPath = path.join(agentDir, 'deploy.sh');
+  const logPath = path.join(
+    tmpdir(),
+    `alloy-manual-preflight-failure-${process.pid}.log`,
+  );
+  const result = spawnSync(
+    'bash',
+    [
+      '-c',
+      `source "$1"
+project=mento-monitoring
+LOG_PATH="$2"
+command="$(print_manual_rollback_commands previous target)"
+gcloud() {
+  printf '%s\\n' "$*" >>"$LOG_PATH"
+  if [[ "$*" == *"versions describe target"* ]]; then printf '%s\\n' STOPPED; fi
+}
+pnpm() {
+  printf 'pnpm %s\\n' "$*" >>"$LOG_PATH"
+  return 1
+}
+if eval "$command"; then exit 90; fi
+if grep -Eq "versions start previous|services set-traffic" "$LOG_PATH"; then exit 91; fi`,
+      'bash',
+      deployPath,
+      logPath,
+    ],
+    { encoding: 'utf8' },
+  );
+  const calls = readFileSync(logPath, 'utf8');
+  rmSync(logPath, { force: true });
+  assert.equal(result.status, 0, `${result.stderr}\n${calls}`);
+  assert.match(calls, /aegis:agent:preflight -- --version previous/u);
 });
 
 test('post-confirmation source guard must precede Cloud Build submission', () => {
@@ -1248,6 +1345,47 @@ test('deploy must retain the explicit previous-version rollback command', () => 
     'echo rollback-skipped',
   );
   expectFailure(files, /printed rollback must short-circuit/u);
+});
+
+test('every automatic rollback call must carry the immutable verifier', () => {
+  const files = sourceFiles();
+  files.deploy += '\nrollback_cutover "$previous_version" "$version"\n';
+  expectFailure(
+    files,
+    /every automatic rollback path must pass the immutable verifier/u,
+  );
+});
+
+test('unguarded deploy restart surfaces cannot be added', () => {
+  const files = sourceFiles();
+  files.deploy +=
+    '\ngcloud app versions start "$previous_version" --project "$project"\n';
+  expectFailure(
+    files,
+    /every rollback restart surface must stay inside the guarded/u,
+  );
+});
+
+test('runbook restart must keep the inline previous-version preflight', () => {
+  const files = sourceFiles();
+  files.runbook = files.runbook.replace(
+    '  pnpm aegis:agent:preflight -- --version PREVIOUS && \\\n',
+    '',
+  );
+  expectFailure(
+    files,
+    /executable rollback must preflight PREVIOUS immediately/u,
+  );
+});
+
+test('runbook cannot add an unguarded previous-version restart', () => {
+  const files = sourceFiles();
+  files.runbook +=
+    '\ngcloud app versions start PREVIOUS --project mento-monitoring\n';
+  expectFailure(
+    files,
+    /executable rollback must preflight PREVIOUS immediately/u,
+  );
 });
 
 test('legacy CLI seed route cannot return', () => {
