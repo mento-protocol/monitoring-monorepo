@@ -95,6 +95,7 @@ no changes, and the final WIF/service-account audit found only
 
 | Stack                 | Secret classes                                                                                                                                                                                                                             | PR plan posture                                                                                                                                              | Migration notes                                                                                                                                                                                                                                                                                   |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `platform`            | Provider auth and repository/integration mirrors; Alloy runtime values (`grafana_agent_secret_values`)                                                                                                                                     | Manual plan/apply only; Alloy values are required operator-held ephemeral inputs                                                                             | Google provider 6.50.x writes the three Alloy versions through `secret_data_wo`; explicit non-secret counters control rotation. Plan/apply from clean current `main`, do not save the plan, and never use the retained legacy seed path.                                                          |
 | `alerts-rules`        | Provider auth (`grafana_service_account_token`); configured contact-point/runtime values (`slack_bot_token`, `splunk_on_call_alerts_webhook_url`)                                                                                          | Targeted secretless PR plan for `terraform_data.pr_plan_secretless_guard` plus global-policy rule groups; full notification graph only on trusted main/apply | The PR plan now avoids live Grafana data-source reads by using audited static UIDs for externally owned folders. It still skips contact points, notification policies, and rule groups with direct `notification_settings`, because placeholder Slack/Splunk values would create bogus diffs.     |
 | `alerts-delivery`     | Provider auth (`sentry_auth_token`, `slack_bot_token`, `quicknode_api_key`, `github_token`); configured runtime secrets (`quicknode_signing_secret`, Splunk On-Call API values); non-secret IDs (`billing_account`, channel/usergroup IDs) | Targeted secretless PR plan for `terraform_data.pr_plan_secretless_guard`; full graph only on trusted main/apply                                             | The handler module still depends on Slack channel outputs and placeholder-backed Secret Manager versions. Sentry/Slack/QuickNode/GitHub resources also need authenticated plan-time checks, so keep the sentinel until the stack is split or those providers support safe dummy/no-auth planning. |
 | `aegis`               | Provider auth (`grafana_service_account_token`)                                                                                                                                                                                            | Full config-vs-state plan with placeholder TF_VAR and `-refresh=false`                                                                                       | Same secretless Grafana-token posture as alerts-rules, but this stack has no PR-plan Grafana data-source reads that force authentication before the diff. Re-check this assumption on Grafana provider major-version bumps.                                                                       |
@@ -117,10 +118,23 @@ from state or saved plans. When a provider exposes write-only arguments or
 Terraform ephemeral value flows for the exact resource in use, prefer those over
 storing secret material in state.
 
+The platform Alloy path uses Google provider 6.50.x `secret_data_wo` with
+sensitive ephemeral inputs. Its wrapper refuses enabled `TF_LOG`,
+`TF_LOG_CORE`, `TF_LOG_PROVIDER*`, `TF_LOG_SDK`, and `TF_LOG_SDK_PROTO`.
+Those log-level settings may be unset or `OFF`; every other `TF_LOG_SDK_*`,
+including `TF_LOG_SDK_PROTO_DATA_DIR`, must be unset or empty because `OFF`
+would name a protocol-dump directory. Inert `TF_LOG_PATH` alone remains
+allowed. Plan/apply requires clean current `main`, and rotation creates the new
+Secret Manager version before disabling the old one. Platform Terraform runs
+from a temporary snapshot of the verified commit; gitignored tfvars remain
+external and are passed by absolute file path.
+
 Current residual state exposure:
 
 - Google Secret Manager version resources still use `secret_data` for Cloud
   Function runtime secrets.
+- Alloy's three Google Secret Manager versions use `secret_data_wo` with
+  sensitive, ephemeral inputs and therefore do not store their values in state.
 - GitHub Actions secret resources still use provider-managed secret values for
   repo secret mirrors.
 - Grafana, Sentry, Slack, QuickNode, and Splunk On-Call provider credentials are

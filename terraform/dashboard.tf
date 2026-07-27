@@ -13,6 +13,12 @@ locals {
   redis_rest_url = startswith(
     upstash_redis_database.address_labels.endpoint, "https://"
   ) ? upstash_redis_database.address_labels.endpoint : "https://${upstash_redis_database.address_labels.endpoint}"
+
+  # The platform wrapper executes committed Terraform from a temporary
+  # -chdir snapshot while keeping its process cwd at the repository root.
+  # Trust that cwd only when the registry proves it is this repository;
+  # direct runs from any other cwd fall back to the module parent.
+  repository_root = fileexists("${path.cwd}/terraform.stacks.json") ? abspath(path.cwd) : abspath("${path.module}/..")
 }
 
 # ── Vercel Project ────────────────────────────────────────────────────────────
@@ -292,6 +298,6 @@ resource "local_file" "vercel_project_json" {
     orgId       = var.vercel_team_id
     projectName = vercel_project.dashboard.name
   })
-  filename        = "${path.module}/../.vercel/project.json"
+  filename        = "${local.repository_root}/.vercel/project.json"
   file_permission = "0644"
 }

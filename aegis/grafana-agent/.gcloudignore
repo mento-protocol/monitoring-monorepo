@@ -1,1 +1,9 @@
-cloudbuild.yaml
+# Defense in depth for the immutable commit snapshot created by deploy.sh.
+# `gcloud builds submit` reads cloudbuild.yaml separately through --config;
+# only these four committed runtime files may enter source staging.
+**
+!Dockerfile
+!config.alloy
+!entrypoint.sh
+!grafana-agent.yaml
+!passive-health.sh

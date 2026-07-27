@@ -81,6 +81,13 @@ alerts-delivery PR plans are intentionally partial.
 See [`docs/notes/terraform-secret-strategy-2026-07.md`](notes/terraform-secret-strategy-2026-07.md)
 for the exact placeholder and target boundaries.
 
+Alloy's full write-only input, IAM, deploy, and rollback contract lives in
+[`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md). Platform
+plan/apply rejects unsafe logging, requires freshly fetched clean `main`, and
+runs its verified snapshot with gitignored tfvars outside. Review the manual
+plan and get explicit approval before apply; never seed via CLI or use
+`--migrate`.
+
 On `main`, the workflow posts a secretless Slack summary before approval.
 Environment protection blocks the apply job, so the operator approves the
 commit and earlier plan. Apply then creates and uses a later plan, leaving an
