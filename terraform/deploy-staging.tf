@@ -18,6 +18,8 @@ locals {
   )
 }
 
+# trunk-ignore(checkov/CKV_GCP_62): Cloud Audit Logs cover access; a second log bucket would outlive this reconstructible input.
+# trunk-ignore(checkov/CKV_GCP_78): unique build archives come from source control and expire quickly, so old object versions add cost without recovery value.
 resource "google_storage_bucket" "cloud_build_source_staging" {
   project                     = google_project.monitoring.project_id
   name                        = "${google_project.monitoring.project_id}-cloud-build-source"
@@ -50,6 +52,8 @@ resource "google_storage_bucket" "cloud_build_source_staging" {
   depends_on = [google_project_service.storage]
 }
 
+# trunk-ignore(checkov/CKV_GCP_62): Cloud Audit Logs cover access; a second log bucket would outlive this reconstructible input.
+# trunk-ignore(checkov/CKV_GCP_78): content-addressed cache objects come from source control and expire quickly, so old versions add no recovery value.
 resource "google_storage_bucket" "app_engine_source_staging" {
   project                     = google_project.monitoring.project_id
   name                        = "${google_project.monitoring.project_id}-app-engine-source"
