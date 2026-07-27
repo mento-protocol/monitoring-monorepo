@@ -17,6 +17,9 @@ const BUILDER_PROJECT_ROLES = [
   'roles/storage.objectAdmin',
 ];
 const RUNTIME_PROJECT_ROLES = ['roles/logging.logWriter'];
+const IMAGE_REPOSITORY = 'us.gcr.io';
+const IMAGE_REPOSITORY_LOCATION = 'us';
+const RUNTIME_IMAGE_ROLES = ['roles/artifactregistry.reader'];
 const ACTIVATION_ROLE_ID = 'grafanaAgentActivationReader';
 const ACTIVATION_PERMISSIONS = [
   'appengine.services.get',
@@ -27,6 +30,7 @@ const PREFLIGHT_PERMISSIONS = [
   'appengine.applications.get',
   'appengine.services.get',
   'appengine.versions.get',
+  'artifactregistry.repositories.getIamPolicy',
   'iam.roles.get',
   'iam.serviceAccounts.get',
   'iam.serviceAccounts.getIamPolicy',
@@ -142,6 +146,26 @@ function assertExactProjectRoles(policy, member, expectedRoles, label) {
       `${label} project roles must match the least-privilege contract; found ${actual.join(', ') || 'none'}`,
     );
   }
+}
+
+function assertExactUnconditionalRoles(policy, member, expectedRoles, label) {
+  const memberBindings = collectBindings(policy).filter((binding) =>
+    binding.members.includes(member),
+  );
+  const conditionalRoles = memberBindings
+    .filter((binding) => binding.condition != null)
+    .map((binding) => binding.role)
+    .sort();
+  if (conditionalRoles.length > 0) {
+    throw new Error(
+      `${label} must be unconditional; found conditions on ${conditionalRoles.join(', ')}`,
+    );
+  }
+  assertExactValues(
+    memberBindings.map((binding) => binding.role),
+    expectedRoles,
+    label,
+  );
 }
 
 function membersForRole(policy, role) {
@@ -290,6 +314,22 @@ export function runPreflight({
     builderMember,
     BUILDER_PROJECT_ROLES,
     'builder',
+  );
+  const imageRepositoryPolicy = runGcloud([
+    'artifacts',
+    'repositories',
+    'get-iam-policy',
+    IMAGE_REPOSITORY,
+    '--location',
+    IMAGE_REPOSITORY_LOCATION,
+    '--project',
+    project,
+  ]);
+  assertExactUnconditionalRoles(
+    imageRepositoryPolicy,
+    runtimeMember,
+    RUNTIME_IMAGE_ROLES,
+    'runtime image repository roles',
   );
 
   const activationRole = runGcloud([
