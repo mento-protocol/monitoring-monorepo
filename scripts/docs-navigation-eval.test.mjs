@@ -431,32 +431,47 @@ test("historical scoring requires a default-branch ancestor and survives deletio
     execFileSync("git", ["config", "user.email", "fixture@example.com"], {
       cwd: temp,
     });
-    const files = new Set(context.suite.bootstrap_sources);
+    const files = new Map(
+      context.suite.bootstrap_sources.map((file) => [file, true]),
+    );
     for (const question of context.suite.questions) {
-      for (const file of question.accepted_routes[0]) files.add(file);
+      for (const route of question.accepted_routes) {
+        for (const file of route) files.set(file, true);
+      }
+      for (const source of question.sources_requiring_verification) {
+        if (!files.has(source.path)) files.set(source.path, false);
+        for (const file of source.verify_against) files.set(file, true);
+      }
     }
-    const content = [
-      "---",
-      "title: Historical fixture",
-      "status: active",
-      "owner: eng",
-      "canonical: true",
-      "last_verified: 2026-07-21",
-      "doc_type: reference",
-      "scope: repo-wide",
-      "review_interval_days: 90",
-      "garden_lane: package-readmes-reference",
-      "---",
-      "",
-      "# Historical fixture",
-      "",
-      "Canonical evidence.",
-      "",
-    ].join("\n");
-    for (const file of files) {
+    const historicalContent = (canonical) =>
+      [
+        "---",
+        "title: Historical fixture",
+        "status: active",
+        "owner: eng",
+        `canonical: ${canonical}`,
+        "last_verified: 2026-07-21",
+        "doc_type: reference",
+        "scope: repo-wide",
+        "review_interval_days: 90",
+        "garden_lane: package-readmes-reference",
+        "---",
+        "",
+        "# Historical fixture",
+        "",
+        "Historical evidence.",
+        "",
+      ].join("\n");
+    const fixturePath = "docs/evals/fixtures.json";
+    mkdirSync(path.dirname(path.join(temp, fixturePath)), { recursive: true });
+    writeFileSync(
+      path.join(temp, fixturePath),
+      `${JSON.stringify(context.suite)}\n`,
+    );
+    for (const [file, canonical] of files) {
       const absolute = path.join(temp, file);
       mkdirSync(path.dirname(absolute), { recursive: true });
-      writeFileSync(absolute, content);
+      writeFileSync(absolute, historicalContent(canonical));
     }
     execFileSync("git", ["add", "."], { cwd: temp });
     execFileSync("git", ["commit", "-qm", "fixture"], { cwd: temp });
@@ -521,7 +536,7 @@ test("historical scoring requires a default-branch ancestor and survives deletio
         loaded_sources: question.accepted_routes[0].map(historicalSource),
       })),
     };
-    for (const file of files) rmSync(path.join(temp, file));
+    for (const file of files.keys()) rmSync(path.join(temp, file));
     const scored = scoreNavigationResult({
       suite: context.suite,
       result,
@@ -529,6 +544,45 @@ test("historical scoring requires a default-branch ancestor and survives deletio
     });
     assert.deepEqual(scored.errors, []);
     assert.equal(scored.report.passed, true);
+    assert.throws(
+      () =>
+        loadEvaluationContext({
+          repoRoot: temp,
+          fixturesPath: fixturePath,
+        }),
+      /navigation fixtures are invalid/,
+    );
+    const historicalContext = loadEvaluationContext(
+      {
+        repoRoot: temp,
+        fixturesPath: fixturePath,
+      },
+      { inventoryCommit: commit },
+    );
+    assert.deepEqual(
+      validateFixtureSuite(
+        historicalContext.suite,
+        historicalContext.inventory,
+      ),
+      [],
+    );
+    const historicalResultPath = path.join(temp, "historical-result.json");
+    writeFileSync(historicalResultPath, `${JSON.stringify(result)}\n`);
+    const historicalValidate = spawnSync(
+      process.execPath,
+      [
+        scriptPath,
+        "--validate",
+        historicalResultPath,
+        "--root",
+        temp,
+        "--fixtures",
+        fixturePath,
+      ],
+      { cwd: temp, encoding: "utf8" },
+    );
+    assert.equal(historicalValidate.status, 0, historicalValidate.stderr);
+    assert.equal(JSON.parse(historicalValidate.stdout).report.passed, true);
 
     result.run.repository_base_commit = branchOnlyCommit;
     const branchOnlyScored = scoreNavigationResult({

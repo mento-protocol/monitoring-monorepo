@@ -206,7 +206,10 @@ issues. The evaluation agent itself never edits documentation.
 
 The baseline captures the route quality before issues #1348–#1353 prune and
 consolidate the six documentation lanes. Keep both the result and its frozen
-fixture artifact immutable. A contract-changing PR cannot commit its own
+fixture artifact immutable. Baseline validation classifies those frozen routes
+from `repository_base_commit`, so later retirement or authority changes in the
+working tree do not rewrite the historical contract. A contract-changing PR
+cannot commit its own
 post-change result: the evaluated commit must already be reachable from the
 default branch. After the change merges, the monthly issue runs the current
 fixture from clean `main`; commit its dated result plus a short comparison in a
