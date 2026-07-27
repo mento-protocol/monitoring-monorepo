@@ -29,6 +29,8 @@ const SHELL_FILE_EXTENSIONS = [
   ".command",
   ".fish",
   ".ksh",
+  ".ps1",
+  ".psm1",
   ".sh",
   ".zsh",
 ];
@@ -150,6 +152,16 @@ assert.equal(
   shouldScanFile("scripts/new-deploy.command", { mode: 0o100644 }, false),
   true,
   "shell extensions must be scanned without a shebang",
+);
+assert.equal(
+  shouldScanFile("scripts/new-deploy.ps1", { mode: 0o100644 }, false),
+  true,
+  "PowerShell scripts must be scanned without an executable bit",
+);
+assert.equal(
+  shouldScanFile("scripts/new-deploy.psm1", { mode: 0o100644 }, false),
+  true,
+  "PowerShell modules must be scanned without an executable bit",
 );
 assert.equal(
   shouldScanFile("scripts/new-deploy.custom", { mode: 0o100644 }, true),
@@ -475,6 +487,16 @@ for (const [contents, message, filePath] of [
     "gcloud app deploy app.yaml",
     "executable custom extension candidate",
     "scripts/deploy.custom",
+  ],
+  [
+    "gcloud builds submit .",
+    "PowerShell script candidate",
+    "scripts/deploy.ps1",
+  ],
+  [
+    "function Deploy-App { gcloud app deploy app.yaml }",
+    "PowerShell module candidate",
+    "scripts/deploy.psm1",
   ],
 ]) {
   assertForbiddenSignature(contents, message, filePath);
