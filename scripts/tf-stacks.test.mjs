@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import "./deploy-staging-contract.test.mjs";
 import "./production-infra-identity-contract/index.test.mjs";
 import "./sentry-provider-contract.test.mjs";
 

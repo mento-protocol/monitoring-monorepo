@@ -13,4 +13,14 @@
 # a pinned or fail-closed identity design.
 steps:
   - name: gcr.io/cloud-builders/gcloud
-    args: [app, deploy, --quiet, grafana-agent.yaml]
+    args:
+      - app
+      - deploy
+      - --project=mento-monitoring
+      - --bucket=gs://mento-monitoring-app-engine-source
+      - --quiet
+      - grafana-agent.yaml
+options:
+  # Keep build logs out of Cloud Storage so the build identity only needs
+  # Cloud Logging access plus the explicit source-staging bucket grants.
+  logging: CLOUD_LOGGING_ONLY

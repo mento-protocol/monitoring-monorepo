@@ -13,9 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0053 — Routine GCP deploys use explicit source-staging buckets
 
-**Status:** Accepted (Jul 2026), phase A infrastructure source prepared;
-current-main apply, phase B routing, canaries, and broad-role removal remain
-separate gates.
+**Status:** Accepted (Jul 2026), split into separate infrastructure and routing
+changes; current-main apply, canaries, and broad-role removal remain separate
+operator gates.
 **Scope:** terraform/infra
 
 ## Context
@@ -49,7 +49,7 @@ Both buckets enforce public-access prevention, disable soft-delete retention,
 set `force_destroy = false`, and use Terraform `prevent_destroy`. Their
 contents are reconstructible deployment input, not durable records.
 
-The follow-up routing phase makes every executable deploy path name its bucket:
+The routing phase makes every executable deploy path name its bucket:
 
 - `gcloud builds submit` uses `--gcs-source-staging-dir`;
 - `gcloud app deploy` uses `--bucket`;
@@ -101,7 +101,7 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   short-lived source bucket.
 - Both candidate build identities have temporary read/upload coverage until
   live build metadata identifies the active identity.
-- The routing phase adds a checked-in contract that discovers every executable
+- A checked-in contract discovers every executable
   submit/deploy callsite and rejects a new one unless it names the correct
   staging bucket.
 - Operators must preserve the phase boundary: merge and apply the additive
@@ -113,6 +113,13 @@ order makes both automatic deploys race missing infrastructure and fail closed.
 
 - Bucket and IAM ownership:
   [`terraform/deploy-staging.tf`](../../terraform/deploy-staging.tf)
+- Executable-path enforcement:
+  [`scripts/deploy-staging-contract.mjs`](../../scripts/deploy-staging-contract.mjs)
+- Gcloud command routing:
+  [`.github/workflows/metrics-bridge.yml`](../../.github/workflows/metrics-bridge.yml),
+  [`scripts/deploy-bridge.sh`](../../scripts/deploy-bridge.sh),
+  [`aegis/bin/deploy.sh`](../../aegis/bin/deploy.sh), and
+  [`aegis/grafana-agent/cloudbuild.yaml`](../../aegis/grafana-agent/cloudbuild.yaml)
 - [Cloud Build source staging reference](https://cloud.google.com/sdk/gcloud/reference/builds/submit)
 - [App Engine deployment bucket reference](https://cloud.google.com/sdk/gcloud/reference/app/deploy)
 - [Cloud Storage IAM roles](https://cloud.google.com/storage/docs/access-control/iam-roles)

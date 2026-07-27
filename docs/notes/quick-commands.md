@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-27
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -127,11 +127,11 @@ pnpm aegis:build              # Build the Aegis service
 pnpm aegis:typecheck          # Typecheck the Aegis service
 pnpm aegis:test               # Jest tests
 pnpm aegis:lint               # ESLint baseline gate for Aegis
-pnpm aegis:deploy             # Build, stage a locked App Engine app, and deploy Aegis to mento-monitoring
+pnpm aegis:deploy             # Build and deploy Aegis through the explicit App Engine source bucket
 pnpm aegis:logs               # Tail Aegis App Engine logs from mento-monitoring
 # Alloy deploy requires existing enabled secrets and a verified runtime identity.
 # Bootstrap/rotation remains blocked by open owner-decision issue #1473; never run the legacy seed command.
-pnpm aegis:agent:deploy       # Deploy the already provisioned Alloy collector
+pnpm aegis:agent:deploy       # Deploy Alloy through explicit Cloud Build + App Engine source buckets
 pnpm aegis:tf:init
 pnpm aegis:tf:plan
 # Apply runs in CI on merge to main (aegis-terraform.yml; production-infra gate).

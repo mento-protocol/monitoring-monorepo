@@ -76,6 +76,7 @@ jobs:
           gcloud builds submit \
             --project="$GCP_PROJECT" \
             --config=cloudbuild.yaml \
+            --gcs-source-staging-dir="gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge" \
             --substitutions="_IMAGE=${TAG}" \
             --timeout=600s \
             .

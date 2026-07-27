@@ -335,7 +335,8 @@ pnpm aegis:logs
 Grafana Alloy deploys from the same project under the existing `grafana-agent`
 service/command names. Deploy only when its three Secret Manager values already
 have enabled versions and the effective App Engine runtime identity has been
-verified:
+verified. Both Aegis paths use the platform-owned App Engine source bucket;
+Alloy's outer Cloud Build uses its separate source bucket:
 
 ```bash
 pnpm aegis:agent:deploy
@@ -370,8 +371,8 @@ reviewing the plan first.
 Every push to `main` that touches `ui-dashboard/` auto-deploys to [monitoring.mento.org](https://monitoring.mento.org).
 
 Infrastructure (Vercel project, env vars, Upstash Redis, GCP project shape, CI
-WIF/IAM, Metrics Bridge Cloud Run shape, and Aegis bootstrap resources) is
-managed by the `platform` Terraform stack:
+WIF/IAM, routine-deploy source buckets, Metrics Bridge Cloud Run shape, and
+Aegis bootstrap resources) is managed by the `platform` Terraform stack:
 
 ```bash
 pnpm tf list        # show all registered Terraform stacks

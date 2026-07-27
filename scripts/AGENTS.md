@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-27
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -39,6 +39,10 @@ garden_lane: agent-entry-points
 - New Node root scripts must be covered by `pnpm lint:scripts`; new shell scripts
   must pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh`
   for behavior that syntax and lint checks cannot verify.
+- `pnpm tf:test` owns the deployment source-staging contract. Its discovery
+  must scan executable shell, package-script, workflow, and nested Cloud Build
+  surfaces so a new `gcloud builds submit` or `gcloud app deploy` path cannot
+  bypass the explicit bucket flags.
 
 ## Verification
 

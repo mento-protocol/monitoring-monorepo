@@ -73,7 +73,12 @@ terraform -chdir=terraform apply $TF_APPROVE \
   -target=google_project_service.run \
   -target=google_project_service.artifactregistry \
   -target=google_project_service.cloudbuild \
+  -target=google_project_service.storage \
   -target=google_artifact_registry_repository.metrics_bridge \
+  -target=google_storage_bucket.cloud_build_source_staging \
+  -target=google_storage_bucket_iam_member.cloud_build_source_caller_bucket_reader \
+  -target=google_storage_bucket_iam_member.cloud_build_source_caller_object_creator \
+  -target=google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer \
   -target=google_project_iam_member.dev_run_admin \
   -target=google_project_iam_member.dev_ar_writer \
   -target=google_project_iam_member.dev_cloudbuild_editor \
@@ -86,6 +91,7 @@ echo "Building container image via Cloud Build..."
 gcloud builds submit \
   --project="$PROJECT" \
   --config=cloudbuild.yaml \
+  --gcs-source-staging-dir="gs://${PROJECT}-cloud-build-source/metrics-bridge" \
   --substitutions="_IMAGE=${IMAGE}" \
   --timeout=600s \
   .

@@ -1,4 +1,4 @@
-<!-- agent-context: title="Grafana Alloy" status=active owner=eng canonical=true last_verified=2026-07-17 doc_type=runbook scope=aegis/grafana-agent review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Grafana Alloy" status=active owner=eng canonical=true last_verified=2026-07-27 doc_type=runbook scope=aegis/grafana-agent review_interval_days=90 garden_lane=operator-runbooks -->
 
 # Grafana Alloy
 
@@ -17,7 +17,9 @@ the legacy `grafana-agent` name so URLs and automation remain stable.
 - [`Dockerfile`](Dockerfile) uses the pinned official Alloy image, copies only
   the runtime configuration and entrypoint, and runs as a non-root user.
 - [`cloudbuild.yaml`](cloudbuild.yaml) deploys
-  [`grafana-agent.yaml`](grafana-agent.yaml) without reading secret values.
+  [`grafana-agent.yaml`](grafana-agent.yaml) without reading secret values. Its
+  nested App Engine deploy names the platform-owned source bucket and writes
+  build logs only to Cloud Logging.
 
 The runtime fetch keeps credentials out of the App Engine source staging
 bucket, the container image, and the Cloud Build VM. Alloy listens on App
@@ -62,8 +64,15 @@ pnpm aegis:agent:deploy
 
 The local operator needs permission to submit the Cloud Build job; the
 configured build identity performs the App Engine deployment. The build runs
-`gcloud app deploy grafana-agent.yaml`, App Engine builds the image, and the
-container fetches credentials when it starts.
+`gcloud app deploy --bucket=gs://mento-monitoring-app-engine-source
+grafana-agent.yaml`, App Engine builds the image, and the container fetches
+credentials when it starts. The outer `gcloud builds submit` stages under
+`gs://mento-monitoring-cloud-build-source/grafana-agent`.
+
+Do not deploy until the platform source buckets and bucket-scoped IAM from
+[ADR 0053](../../docs/adr/0053-explicit-deployment-source-staging.md) are live.
+During the migration, canary this nested path before removing the temporary
+project-wide Storage Admin grants.
 
 Credential bootstrap and rotation remain blocked on #1473. Never place the
 values in Git, Terraform state, build substitutions, source staging, or image

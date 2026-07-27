@@ -39,28 +39,28 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`.claude/commands/verify-ui.md`](../.claude/commands/verify-ui.md) | Verify UI | non-canonical / active | command / ui-dashboard | eng; Sources: [`docs/notes/dashboard-verification.md`](notes/dashboard-verification.md) | 180d |
 | [`.github/prompts/sentry-autofix.md`](../.github/prompts/sentry-autofix.md) | sentry-autofix.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
 | [`.github/prompts/sentry-triage.md`](../.github/prompts/sentry-triage.md) | sentry-triage.md | unmanaged / unmanaged | prompt / repo-wide | unowned | 180d |
-| [`aegis/AGENTS.md`](../aegis/AGENTS.md) | Aegis Instructions | canonical / active | agent-instructions / aegis | eng | 90d; verified 2026-07-23 |
+| [`aegis/AGENTS.md`](../aegis/AGENTS.md) | Aegis Instructions | canonical / active | agent-instructions / aegis | eng | 90d; verified 2026-07-27 |
 | [`AGENTS.md`](../AGENTS.md) | Monitoring Monorepo Instructions | canonical / active | agent-instructions / repo-wide | eng | 90d; verified 2026-07-26 |
 | [`alerts/AGENTS.md`](../alerts/AGENTS.md) | Alerts Instructions | canonical / active | agent-instructions / alerts | eng | 90d; verified 2026-07-23 |
 | [`indexer-envio/AGENTS.md`](../indexer-envio/AGENTS.md) | Envio Indexer Instructions | canonical / active | agent-instructions / indexer-envio | eng | 90d; verified 2026-07-23 |
 | [`integration-probes/AGENTS.md`](../integration-probes/AGENTS.md) | Integration Probes Instructions | canonical / active | agent-instructions / integration-probes | eng | 90d; verified 2026-07-23 |
 | [`metrics-bridge/AGENTS.md`](../metrics-bridge/AGENTS.md) | Metrics Bridge Instructions | canonical / active | agent-instructions / metrics-bridge | eng | 90d; verified 2026-07-23 |
-| [`scripts/AGENTS.md`](../scripts/AGENTS.md) | Scripts Instructions | canonical / active | agent-instructions / scripts | eng | 90d; verified 2026-07-23 |
+| [`scripts/AGENTS.md`](../scripts/AGENTS.md) | Scripts Instructions | canonical / active | agent-instructions / scripts | eng | 90d; verified 2026-07-27 |
 | [`shared-config/AGENTS.md`](../shared-config/AGENTS.md) | Shared Config Instructions | canonical / active | agent-instructions / shared-config | eng | 90d; verified 2026-07-23 |
-| [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-07-23 |
+| [`terraform/AGENTS.md`](../terraform/AGENTS.md) | Terraform Instructions | canonical / active | agent-instructions / terraform | eng | 90d; verified 2026-07-27 |
 | [`ui-dashboard/AGENTS.md`](../ui-dashboard/AGENTS.md) | Monitoring Dashboard Instructions | canonical / active | agent-instructions / ui-dashboard | eng | 90d; verified 2026-07-23 |
 
 ## operator-runbooks
 
 | Document | Title | Authority | Type / scope | Owner | Review |
 | --- | --- | --- | --- | --- | --- |
-| [`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md) | Grafana Alloy | canonical / active | runbook / aegis/grafana-agent | eng | 90d; verified 2026-07-17 |
+| [`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md) | Grafana Alloy | canonical / active | runbook / aegis/grafana-agent | eng | 90d; verified 2026-07-27 |
 | [`alerts/infra/channels/sentry-bridge/README.md`](../alerts/infra/channels/sentry-bridge/README.md) | Sentry Alerts Module | canonical / active | runbook / alerts/infra/channels/sentry-bridge | eng | 90d; verified 2026-07-26 |
 | [`alerts/infra/onchain-event-handler/README.md`](../alerts/infra/onchain-event-handler/README.md) | On-chain Event Handler Module | canonical / active | runbook / alerts/infra/onchain-event-handler | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/onchain-event-listeners/README.md`](../alerts/infra/onchain-event-listeners/README.md) | On-chain Event Listeners Module | canonical / active | runbook / alerts/infra/onchain-event-listeners | eng | 90d; verified 2026-07-22 |
 | [`alerts/infra/README.md`](../alerts/infra/README.md) | Mento Alerts Delivery Infrastructure | canonical / active | runbook / alerts/infra | eng | 90d; verified 2026-07-26 |
 | [`alerts/rules/README.md`](../alerts/rules/README.md) | Grafana Alert Rules | canonical / active | runbook / alerts/rules | eng | 90d; verified 2026-07-24 |
-| [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-17 |
+| [`docs/deployment.md`](deployment.md) | Deployment Guide | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-27 |
 | [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md) | Documentation Navigation Evaluation | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md) | Agent Issue Workflow | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) | Agent Quality Gate — Mechanics | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
@@ -75,13 +75,13 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/notes/polygon-monitoring.md`](notes/polygon-monitoring.md) | Polygon monitoring coverage and rollout | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md) | PR Operating Card | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md) | PR Ready State | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
-| [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-23 |
+| [`docs/notes/quick-commands.md`](notes/quick-commands.md) | Quick Commands | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-27 |
 | [`docs/notes/reserve-yield-indexer.md`](notes/reserve-yield-indexer.md) | Reserve-Yield Indexer Topology | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md) | Sentry Triage Pipeline | canonical / active | runbook / ci/process | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md) | GitHub-to-Slack notifications for Terraform-applying workflows | canonical / active | runbook / terraform/infra | eng | 30d; verified 2026-07-22 |
 | [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md) | Spoken Attention Nudge | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
 | [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md) | New Worktree / Clone Setup and Claude Code on the Web Setup | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-22 |
-| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-26 |
+| [`docs/terraform.md`](terraform.md) | Terraform Stacks | canonical / active | runbook / repo-wide | eng | 90d; verified 2026-07-27 |
 | [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md) | Adding Governance Watchdog Events | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md) | Governance Watchdog Bootstrap | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
 | [`governance-watchdog/README.md`](../governance-watchdog/README.md) | Governance Watchdog | canonical / active | runbook / governance-watchdog | eng | 90d; verified 2026-07-22 |
@@ -102,7 +102,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/pr-checklists/review-prompt-exclusions.md`](pr-checklists/review-prompt-exclusions.md) | Review Prompt Exclusions | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-26 |
 | [`docs/pr-checklists/stateful-data-ui.md`](pr-checklists/stateful-data-ui.md) | Stateful Data and UI Checklist | canonical / active | checklist / repo-wide | eng | 90d; verified 2026-07-23 |
 | [`docs/pr-checklists/swr-polling-hasura.md`](pr-checklists/swr-polling-hasura.md) | SWR and Hasura Polling Checklist | canonical / active | checklist / ui-dashboard | eng | 90d; verified 2026-07-23 |
-| [`docs/pr-checklists/terraform-cloudrun.md`](pr-checklists/terraform-cloudrun.md) | Terraform and Cloud Run Checklist | canonical / active | checklist / terraform/infra | eng | 90d; verified 2026-07-23 |
+| [`docs/pr-checklists/terraform-cloudrun.md`](pr-checklists/terraform-cloudrun.md) | Terraform and Cloud Run Checklist | canonical / active | checklist / terraform/infra | eng | 90d; verified 2026-07-27 |
 
 ## adrs-architecture
 
@@ -160,6 +160,7 @@ the rules in [`context-standards.md`](context-standards.md).
 | [`docs/adr/0050-environment-scoped-pipeline-secrets.md`](adr/0050-environment-scoped-pipeline-secrets.md) | Pipeline secrets are gated by a Terraform-managed GitHub Environment | canonical / active | adr / terraform / ci | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/0051-dashboard-volume-scale-bounds.md`](adr/0051-dashboard-volume-scale-bounds.md) | Dashboard volume composition has per-chain and total re-review bounds | canonical / active | adr / ui-dashboard | eng | 90d; verified 2026-07-26 |
 | [`docs/adr/0052-envio-logs-prometheus-grafana-alerting.md`](adr/0052-envio-logs-prometheus-grafana-alerting.md) | Envio logs diagnose; Prometheus and Grafana alert | canonical / active | adr / indexer-envio / alerts | eng | 90d; verified 2026-07-26 |
+| [`docs/adr/0053-explicit-deployment-source-staging.md`](adr/0053-explicit-deployment-source-staging.md) | Routine GCP deploys use explicit source-staging buckets | canonical / active | adr / terraform/infra | eng | 90d; verified 2026-07-27 |
 | [`docs/adr/README.md`](adr/README.md) | Architecture Decision Records | non-canonical / active | index / repo-wide | eng | 180d |
 
 ## package-readmes-reference
