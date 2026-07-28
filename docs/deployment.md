@@ -242,8 +242,9 @@ identity/topology data at the compiled loader's expected path. It never bakes
 `alerts/rules/peg-thresholds.json` into the image: page-affecting thresholds are
 fetched from the gated runtime artifact under
 [ADR 0044](adr/0044-peg-thresholds-gated-rules-plane.md). Its private,
-generation-pinned GCS transport and dormant activation boundary are fixed by
-[ADR 0048](adr/0048-private-gcs-peg-policy-artifact.md).
+generation-pinned GCS transport, project placement, and dormant activation
+boundary are fixed by
+[ADR 0054](adr/0054-same-project-peg-policy-artifact.md).
 
 ---
 

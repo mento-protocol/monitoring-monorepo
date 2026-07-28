@@ -78,8 +78,9 @@ contains `metrics-bridge/peg-registry.json` at the path resolved by the
 compiled registry loader, but it never contains `peg-thresholds.json`. Policy
 publication and activation remain behind the alerts-rules production-infra
 gate described by [ADR 0044](../docs/adr/0044-peg-thresholds-gated-rules-plane.md).
-Private transport, generation pinning, and the dormant activation boundary are
-fixed by [ADR 0048](../docs/adr/0048-private-gcs-peg-policy-artifact.md).
+Private transport, generation pinning, project placement, and the dormant
+activation boundary are fixed by
+[ADR 0054](../docs/adr/0054-same-project-peg-policy-artifact.md).
 
 ## RPC overrides
 
