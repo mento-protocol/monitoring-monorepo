@@ -162,7 +162,10 @@ The five approved checked-in `gcloud builds submit` / `gcloud app deploy`
 calls use their required source-staging flag/value. `pnpm tf:test` fails closed
 on any other literal deploy-shaped text in an executable surface, including
 text in a wrapper, generated script, Node/TypeScript source, Dockerfile, or
-Terraform configuration outside comments. Dynamically constructed executables
+Terraform configuration outside comments. Native PowerShell block comments and
+batch `REM`/`::` lines are deliberately not parsed or masked, so deploy-shaped
+text there also fails closed; inert examples belong only in
+`scripts/deploy-staging-contract.test.mjs`. Dynamically constructed executables
 and paths are forbidden by this workflow; static discovery cannot prove them.
 
 The migration is deliberately additive. Merge the infrastructure-only PR,

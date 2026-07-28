@@ -1176,11 +1176,26 @@ for (const [contents, message, filePath] of [
     "scripts/multiline-deploy.ps1",
   ],
   [
+    "<# gcloud builds submit . #>",
+    "PowerShell block comments fail closed",
+    "scripts/commented-deploy.ps1",
+  ],
+  [
     "function Deploy-App {\n  gcloud app `\n    deploy app.yaml\n}",
     "PowerShell module continuation",
     "scripts/multiline-deploy.psm1",
   ],
   ["gcloud builds submit .", "Windows batch candidate", "scripts/deploy.bat"],
+  [
+    "REM gcloud builds submit .",
+    "batch REM lines fail closed",
+    "scripts/commented-deploy.cmd",
+  ],
+  [
+    ":: gcloud app deploy app.yaml",
+    "batch double-colon lines fail closed",
+    "scripts/commented-deploy.bat",
+  ],
   [
     "gcloud app deploy app.yaml",
     "Windows command candidate",

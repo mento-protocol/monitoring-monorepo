@@ -107,7 +107,8 @@ order makes both automatic deploys race missing infrastructure and fail closed.
 - **Maintain a general shell parser for callsite discovery** — rejected because
   five approved calls do not justify owning shell-language semantics. The
   lexical contract instead rejects deploy-shaped text outside those exact
-  callsites; supporting inert examples would require a real shell AST.
+  callsites; supporting inert examples or masking native PowerShell block
+  comments and batch `REM`/`::` lines would require a real shell AST.
 
 ## Consequences
 
@@ -122,8 +123,12 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   callsites and their required source-staging flag/value. Any other literal
   deploy-shaped text in an executable surface fails closed, including text in a
   wrapper, generated script, Node/TypeScript source, Dockerfile, or Terraform
-  configuration outside comments. Dynamically constructed executables and paths
-  are forbidden by this workflow; static discovery cannot prove them.
+  configuration outside comments. Native PowerShell block comments and batch
+  `REM`/`::` lines are deliberately not parsed or masked, so deploy-shaped text
+  there also fails closed; inert examples belong only in
+  `scripts/deploy-staging-contract.test.mjs`. Dynamically constructed
+  executables and paths are forbidden by this workflow; static discovery cannot
+  prove them.
 - Operators must preserve the phase boundary: merge and apply the additive
   infrastructure from current `main`, merge routing, run all deploy canaries,
   then remove broad roles in a separate approved platform apply. This ADR

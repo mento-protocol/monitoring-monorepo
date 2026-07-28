@@ -178,8 +178,11 @@ checked-in `gcloud builds submit` / `gcloud app deploy` callsites and their
 required source-staging flag/value. Any other literal deploy-shaped text in an
 executable surface fails closed, including text in a wrapper, generated script,
 Node/TypeScript source, Dockerfile, or Terraform configuration outside
-comments. Dynamically constructed executables and paths are forbidden by this
-workflow; static discovery cannot prove them.
+comments. Native PowerShell block comments and batch `REM`/`::` lines are
+deliberately not parsed or masked, so deploy-shaped text there also fails
+closed; inert examples belong only in `scripts/deploy-staging-contract.test.mjs`.
+Dynamically constructed executables and paths are forbidden by this workflow;
+static discovery cannot prove them.
 
 This migration has a strict rollout order. First merge the infrastructure-only
 PR. Refresh current `main`, run a clean current-main platform plan, get explicit

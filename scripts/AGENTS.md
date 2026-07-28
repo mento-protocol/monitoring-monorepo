@@ -45,8 +45,11 @@ garden_lane: agent-entry-points
   deploy-shaped text in an executable shell, package-script, Node/TypeScript
   source, workflow, Dockerfile, or nested Cloud Build surface fails closed, as
   does deploy-shaped text in Terraform configuration outside comments. This
-  includes wrappers and generated scripts. Dynamically constructed executables
-  and paths remain forbidden but cannot be proven statically.
+  includes wrappers and generated scripts. Native PowerShell block comments and
+  batch `REM`/`::` lines are deliberately not parsed or masked, so deploy-shaped
+  text there also fails closed; inert examples belong only in
+  `scripts/deploy-staging-contract.test.mjs`. Dynamically constructed
+  executables and paths remain forbidden but cannot be proven statically.
 
 ## Verification
 

@@ -95,7 +95,10 @@ trimmed build context:
       their required source-staging flag/value. `pnpm tf:test` fails closed on
       any other literal deploy-shaped text in shell or Node/TypeScript source,
       package scripts, workflows, Dockerfiles, or Terraform configuration
-      outside comments.
+      outside comments. Native PowerShell block comments and batch `REM`/`::`
+      lines are deliberately not parsed or masked, so deploy-shaped text there
+      also fails closed; inert examples belong only in
+      `scripts/deploy-staging-contract.test.mjs`.
 - [ ] Bucket-scope upload IAM: Cloud Build callers get bucket read/object create,
       build identities get object view, and App Engine uploaders get bucket
       read/Object Admin.
