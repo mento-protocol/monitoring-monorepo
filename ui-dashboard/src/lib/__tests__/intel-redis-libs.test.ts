@@ -3,9 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Mock @/lib/redis so the intel-* libs never touch a real client.
 const hget = vi.fn();
 const hgetall = vi.fn();
+const hkeys = vi.fn();
+const hlen = vi.fn();
+const pipelineExec = vi.fn();
+const pipelineHstrlen = vi.fn();
+const pipeline = vi.fn(() => ({
+  exec: pipelineExec,
+  hstrlen: pipelineHstrlen,
+}));
 
 vi.mock("@/lib/redis", () => ({
-  getRedis: vi.fn(() => ({ hget, hgetall })),
+  getRedis: vi.fn(() => ({ hget, hgetall, hkeys, hlen, pipeline })),
 }));
 
 import {
@@ -26,7 +34,10 @@ import {
 import {
   getIntelEntity,
   getAllIntelEntities,
+  getIntelEntityDirectorySource,
   INTEL_ENTITIES_KEY,
+  INTEL_ENTITY_DIRECTORY_MAX_BYTES,
+  INTEL_ENTITY_DIRECTORY_MAX_RECORDS,
   INTEL_ENTITY_SLUG_RE,
 } from "@/lib/intel-entities";
 import {
@@ -37,6 +48,9 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  hkeys.mockResolvedValue([]);
+  hlen.mockResolvedValue(0);
+  pipelineExec.mockResolvedValue([]);
 });
 
 describe("intel-deep", () => {
@@ -237,6 +251,50 @@ describe("intel-entities", () => {
   it("getAllIntelEntities: falls back to {} on null", async () => {
     hgetall.mockResolvedValue(null);
     expect(await getAllIntelEntities()).toEqual({});
+  });
+
+  it("getIntelEntityDirectorySource reads full records below both limits", async () => {
+    const record = { slug: "binance", name: "Binance" };
+    hlen.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    hkeys.mockResolvedValueOnce(["binance"]).mockResolvedValueOnce([]);
+    pipelineExec.mockResolvedValue([128]);
+    hgetall
+      .mockResolvedValueOnce({ binance: record })
+      .mockResolvedValueOnce(null);
+
+    await expect(getIntelEntityDirectorySource()).resolves.toEqual({
+      entities: { binance: record },
+      limited: false,
+    });
+    expect(pipelineHstrlen).toHaveBeenCalledWith(INTEL_ENTITIES_KEY, "binance");
+    expect(hgetall).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fetch records above the entity-count limit", async () => {
+    hlen
+      .mockResolvedValueOnce(INTEL_ENTITY_DIRECTORY_MAX_RECORDS)
+      .mockResolvedValueOnce(1);
+
+    await expect(getIntelEntityDirectorySource()).resolves.toEqual({
+      entities: null,
+      limited: true,
+      reason: "record-count",
+    });
+    expect(hkeys).not.toHaveBeenCalled();
+    expect(hgetall).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch records above the stored-payload limit", async () => {
+    hlen.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    hkeys.mockResolvedValueOnce(["binance"]).mockResolvedValueOnce([]);
+    pipelineExec.mockResolvedValue([INTEL_ENTITY_DIRECTORY_MAX_BYTES + 1]);
+
+    await expect(getIntelEntityDirectorySource()).resolves.toEqual({
+      entities: null,
+      limited: true,
+      reason: "payload-bytes",
+    });
+    expect(hgetall).not.toHaveBeenCalled();
   });
 });
 

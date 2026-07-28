@@ -2,19 +2,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { IntelEntityRecord } from "@/lib/intel-entities";
 
-const { getAuthSession, getAllIntelEntities, notFound } = vi.hoisted(() => ({
-  getAuthSession: vi.fn(),
-  getAllIntelEntities: vi.fn(),
-  notFound: vi.fn((): never => {
-    throw new Error("NEXT_NOT_FOUND");
+const { getAuthSession, getIntelEntityDirectorySource, notFound } = vi.hoisted(
+  () => ({
+    getAuthSession: vi.fn(),
+    getIntelEntityDirectorySource: vi.fn(),
+    notFound: vi.fn((): never => {
+      throw new Error("NEXT_NOT_FOUND");
+    }),
   }),
-}));
+);
 
 vi.mock("@/auth", () => ({
   ALLOWED_DOMAIN: "@mentolabs.xyz",
   getAuthSession,
 }));
-vi.mock("@/lib/intel-entities", () => ({ getAllIntelEntities }));
+vi.mock("@/lib/intel-entities", () => ({
+  getIntelEntityDirectorySource,
+  INTEL_ENTITY_DIRECTORY_MAX_BYTES: 2 * 1024 * 1024,
+  INTEL_ENTITY_DIRECTORY_MAX_RECORDS: 1_000,
+}));
 vi.mock("next/navigation", () => ({ notFound }));
 vi.mock("../_components/entity-search", () => ({
   EntitySearch: ({
@@ -55,9 +61,12 @@ describe("EntitiesPage", () => {
     getAuthSession.mockResolvedValue({
       user: { email: "analyst@mentolabs.xyz" },
     });
-    getAllIntelEntities.mockResolvedValue({
-      zeta: entity("zeta", "Zeta"),
-      binance: entity("binance", "Binance"),
+    getIntelEntityDirectorySource.mockResolvedValue({
+      entities: {
+        zeta: entity("zeta", "Zeta"),
+        binance: entity("binance", "Binance"),
+      },
+      limited: false,
     });
   });
 
@@ -76,6 +85,20 @@ describe("EntitiesPage", () => {
     });
 
     await expect(EntitiesPage()).rejects.toThrow("NEXT_NOT_FOUND");
-    expect(getAllIntelEntities).not.toHaveBeenCalled();
+    expect(getIntelEntityDirectorySource).not.toHaveBeenCalled();
+  });
+
+  it("renders an explicit degraded state when the Redis read cap is exceeded", async () => {
+    getIntelEntityDirectorySource.mockResolvedValue({
+      entities: null,
+      limited: true,
+      reason: "payload-bytes",
+    });
+
+    const html = renderToStaticMarkup(await EntitiesPage());
+
+    expect(html).toContain("Entity directory temporarily unavailable");
+    expect(html).toContain("1,000 records or 2 MiB");
+    expect(html).not.toContain('data-testid="entity-search"');
   });
 });
