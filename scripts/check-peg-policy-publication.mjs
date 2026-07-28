@@ -38,6 +38,32 @@ const EXPECTED_IDENTITIES = new Set([
   "org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com",
   "peg-policy-publisher@mento-monitoring.iam.gserviceaccount.com",
 ]);
+const PEG_POLICY_BASE64_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const PEG_POLICY_MD5_BASE64_PADDING = "==";
+const PEG_POLICY_MD5_BASE64_EXPRESSION = `join("", concat(flatten([for offset in range(0, 30, 3) : [substr(local.peg_policy_base64_alphabet, floor(parseint(substr(local.peg_policy_source_md5_hex, offset, 3), 16) / 64), 1), substr(local.peg_policy_base64_alphabet, parseint(substr(local.peg_policy_source_md5_hex, offset, 3), 16) % 64, 1),]]), [substr(local.peg_policy_base64_alphabet, floor(parseint(substr(local.peg_policy_source_md5_hex, 30, 2), 16) / 4), 1), substr(local.peg_policy_base64_alphabet, (parseint(substr(local.peg_policy_source_md5_hex, 30, 2), 16) % 4) * 16, 1), "${PEG_POLICY_MD5_BASE64_PADDING}",],))`;
+
+export function pegPolicyMd5HexToBase64(md5Hex) {
+  if (!/^[0-9a-f]{32}$/u.test(md5Hex)) {
+    throw new TypeError("MD5 must be exactly 32 lowercase hexadecimal digits");
+  }
+
+  const encoded = [];
+  for (let offset = 0; offset < 30; offset += 3) {
+    const chunk = Number.parseInt(md5Hex.slice(offset, offset + 3), 16);
+    encoded.push(
+      PEG_POLICY_BASE64_ALPHABET[Math.floor(chunk / 64)],
+      PEG_POLICY_BASE64_ALPHABET[chunk % 64],
+    );
+  }
+  const tail = Number.parseInt(md5Hex.slice(30), 16);
+  encoded.push(
+    PEG_POLICY_BASE64_ALPHABET[Math.floor(tail / 4)],
+    PEG_POLICY_BASE64_ALPHABET[(tail % 4) * 16],
+    PEG_POLICY_MD5_BASE64_PADDING,
+  );
+  return encoded.join("");
+}
 
 function blockFor(blocks, key, errors) {
   const block = blocks.find((candidate) => topLevelBlockKey(candidate) === key);
@@ -293,14 +319,14 @@ function validatePolicy(blocks, errors) {
   expectString(
     locals,
     "peg_policy_base64_alphabet",
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    PEG_POLICY_BASE64_ALPHABET,
     errors,
     "Peg policy locals",
   );
   expectExactMultilineLocalExpression(
     locals,
     "peg_policy_source_md5_base64",
-    'join("", concat(flatten([for offset in range(0, 30, 3) : [substr(local.peg_policy_base64_alphabet, floor(parseint(substr(local.peg_policy_source_md5_hex, offset, 3), 16) / 64), 1), substr(local.peg_policy_base64_alphabet, parseint(substr(local.peg_policy_source_md5_hex, offset, 3), 16) % 64, 1),]]), [substr(local.peg_policy_base64_alphabet, floor(parseint(substr(local.peg_policy_source_md5_hex, 30, 2), 16) / 4), 1), substr(local.peg_policy_base64_alphabet, (parseint(substr(local.peg_policy_source_md5_hex, 30, 2), 16) % 4) * 16, 1), "=",],))',
+    PEG_POLICY_MD5_BASE64_EXPRESSION,
     errors,
     "Peg policy locals",
   );

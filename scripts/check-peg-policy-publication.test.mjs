@@ -1,12 +1,32 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
+  pegPolicyMd5HexToBase64,
   readPegPolicyPublication,
   validatePegPolicyPublication,
 } from "./check-peg-policy-publication.mjs";
 
 const validFiles = readPegPolicyPublication();
 assert.doesNotThrow(() => validatePegPolicyPublication(validFiles));
+
+const emptyMd5Hex = "d41d8cd98f00b204e9800998ecf8427e";
+const emptyMd5Base64 = "1B2M2Y8AsgTpgAmY7PhCfg==";
+assert.equal(pegPolicyMd5HexToBase64(emptyMd5Hex), emptyMd5Base64);
+assert.equal(
+  Buffer.from(pegPolicyMd5HexToBase64(emptyMd5Hex), "base64").toString("hex"),
+  emptyMd5Hex,
+);
+
+const policySource = readFileSync(
+  new URL("../alerts/rules/peg-thresholds.json", import.meta.url),
+);
+const policySourceMd5Hex = createHash("md5").update(policySource).digest("hex");
+assert.equal(
+  pegPolicyMd5HexToBase64(policySourceMd5Hex),
+  createHash("md5").update(policySource).digest("base64"),
+);
 
 function withMutation(file, replacement, expectedError) {
   const files = { ...validFiles, [file]: replacement(validFiles[file]) };
@@ -78,6 +98,11 @@ withMutation(
 withMutation(
   "policy.tf",
   (value) => value.replace("range(0, 30, 3)", "range(0, 27, 3)"),
+  /Peg policy locals: peg_policy_source_md5_base64 must be exactly/u,
+);
+withMutation(
+  "policy.tf",
+  (value) => value.replace('      "==",', '      "=",'),
   /Peg policy locals: peg_policy_source_md5_base64 must be exactly/u,
 );
 withMutation(

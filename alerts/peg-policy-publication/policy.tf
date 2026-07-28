@@ -14,7 +14,7 @@ locals {
     [
       substr(local.peg_policy_base64_alphabet, floor(parseint(substr(local.peg_policy_source_md5_hex, 30, 2), 16) / 4), 1),
       substr(local.peg_policy_base64_alphabet, (parseint(substr(local.peg_policy_source_md5_hex, 30, 2), 16) % 4) * 16, 1),
-      "=",
+      "==",
     ],
   ))
 }
