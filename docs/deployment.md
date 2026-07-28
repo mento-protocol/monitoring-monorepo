@@ -175,16 +175,9 @@ The Metrics Bridge workflow and `pnpm bridge:deploy` pass
 `--bucket`; the guarded `pnpm aegis:agent:deploy` wrapper stages its immutable
 snapshot in the Cloud Build bucket. `pnpm tf:test` allows exactly five literal
 checked-in `gcloud builds submit` / `gcloud app deploy` callsites and their
-required source-staging flag/value. Discovery rejects additional deploy records
-recovered from shell-like surfaces, wrappers, generated scripts, Dockerfiles,
-structured configuration, and Terraform outside comments. Node/TypeScript
-recovery covers direct call/new expressions with inline literals or supported
-`const`/object aliases, plus static tagged templates. Indirect
-`Function.prototype.call`/`apply`, dynamically constructed executables, and
-dynamic paths are forbidden but outside the static proof. Native PowerShell
-block comments and batch `REM`/`::` lines are deliberately not masked, so
-deploy-shaped text there fails closed; inert examples belong only in
-`scripts/deploy-staging-contract.test.mjs`.
+required source-staging flag/value. [ADR 0053](adr/0053-explicit-deployment-source-staging.md)
+defines the supported static discovery syntax and its deliberate indirect and
+dynamic proof limits.
 
 This migration has a strict rollout order. First merge the infrastructure-only
 PR. Refresh current `main`, run a clean current-main platform plan, get explicit
@@ -196,8 +189,7 @@ Canary those two paths and `pnpm aegis:agent:deploy` before a separate platform
 change removes the temporary project-wide Storage Admin and Service Account
 User grants. Never combine that removal with creation of the private
 peg-policy bucket or its identities.
-[ADR 0053](adr/0053-explicit-deployment-source-staging.md) records the
-permission split and phase boundary.
+The ADR also records the permission split and phase boundary.
 
 ---
 

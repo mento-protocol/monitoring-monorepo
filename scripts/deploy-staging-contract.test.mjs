@@ -1259,6 +1259,11 @@ for (const [contents, message, filePath] of [
     "scripts/commented-deploy.bat",
   ],
   [
+    "echo setup # & gcloud builds submit .",
+    "hash text in batch sources remains executable",
+    "scripts/hash-deploy.cmd",
+  ],
+  [
     "gcloud app deploy app.yaml",
     "Windows command candidate",
     "scripts/deploy.cmd",
@@ -1325,6 +1330,76 @@ assert.deepEqual(
   }).map(({ kind }) => kind),
   ["builds-submit"],
   "GitHub Actions universal shell scanning must recognize cmd caret escapes",
+);
+
+for (const filePath of [
+  ".github/workflows/hash-deploy.yml",
+  ".github/actions/deploy/action.yml",
+]) {
+  const contents = filePath.startsWith(".github/workflows/")
+    ? `jobs:
+  deploy:
+    steps:
+      - shell: cmd
+        run: |
+          echo setup # & gcloud builds submit .
+`
+    : `runs:
+  using: composite
+  steps:
+    - shell: cmd
+      run: |
+        echo setup # & gcloud builds submit .
+`;
+  assertForbiddenSignature(
+    contents,
+    "hash text in cmd workflow surfaces remains executable",
+    filePath,
+  );
+}
+
+assert.equal(
+  discoverDeployStagingCallsites({
+    ".github/workflows/bash-comment.yml": `jobs:
+  deploy:
+    steps:
+      - shell: bash
+        run: |
+          echo setup # & gcloud builds submit .
+`,
+  }).length,
+  0,
+  "hash text in a statically selected bash step must remain a comment",
+);
+
+assert.deepEqual(
+  discoverDeployStagingCallsites({
+    ".github/workflows/windows-bash-deploy.yml": `jobs:
+  deploy:
+    runs-on: windows-latest
+    steps:
+      - shell: bash
+        run: GCLOUD.CMD builds submit .
+`,
+  }).map(({ kind }) => kind),
+  ["builds-submit"],
+  "a statically selected bash shell must retain Windows executable matching",
+);
+
+assert.deepEqual(
+  discoverDeployStagingCallsites({
+    ".github/workflows/inherited-cmd-hash.yml": `jobs:
+  deploy:
+    defaults:
+      run:
+        shell: cmd
+    steps:
+      - run: |
+          echo setup # & gcloud builds submit .
+`,
+  }).map(({ kind }) => kind),
+  ["builds-submit"],
+  "inherited workflow shells must retain the conservative cmd hash scan",
 );
 
 assertForbiddenSignature(

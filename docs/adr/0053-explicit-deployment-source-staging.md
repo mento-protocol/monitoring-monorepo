@@ -129,8 +129,10 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   templates. Indirect `Function.prototype.call`/`apply`, dynamically constructed
   executables, and dynamic paths are forbidden but outside the static proof.
   Native PowerShell block comments and batch `REM`/`::` lines are deliberately
-  not masked, so deploy-shaped text there fails closed; inert examples belong
-  only in `scripts/deploy-staging-contract.test.mjs`.
+  not masked, so deploy-shaped text there fails closed. A statically selected
+  cmd shell preserves `#` as executable text; known Unix and PowerShell shells
+  retain their native `#` comment behavior. Inert examples belong only in
+  `scripts/deploy-staging-contract.test.mjs`.
 - Operators must preserve the phase boundary: merge and apply the additive
   infrastructure from current `main`, merge routing, run all deploy canaries,
   then remove broad roles in a separate approved platform apply. This ADR

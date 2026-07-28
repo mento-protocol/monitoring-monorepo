@@ -60,17 +60,17 @@ function isBatchSource(filePath) {
   return /\.(?:bat|cmd)$/iu.test(stripDeployStagingTemplateSuffix(filePath));
 }
 
-function visitYaml(value, path, callback, key) {
-  callback(value, path, key);
+function visitYaml(value, path, callback, key, parent) {
+  callback(value, path, key, parent);
   if (Array.isArray(value)) {
     value.forEach((entry, index) =>
-      visitYaml(entry, `${path}[${index}]`, callback, index),
+      visitYaml(entry, `${path}[${index}]`, callback, index, value),
     );
     return;
   }
   if (!isMapping(value)) return;
   for (const [key, entry] of Object.entries(value)) {
-    visitYaml(entry, path ? `${path}.${key}` : key, callback, key);
+    visitYaml(entry, path ? `${path}.${key}` : key, callback, key, value);
   }
 }
 
@@ -97,6 +97,7 @@ function logicalLines(
   filePath,
   contents,
   shellMode = shellModeForFile(filePath),
+  preserveHashText = shellMode === "cmd",
 ) {
   const lines = [];
   let pending = "";
@@ -109,7 +110,9 @@ function logicalLines(
           ? /\^\s*$/u
           : /\\\s*$/u;
   for (const line of contents.split(/\r?\n/u)) {
-    const code = stripShellComment(line);
+    // `#` starts a comment in the supported Unix and PowerShell modes, but it
+    // is ordinary executable text in cmd.exe.
+    const code = preserveHashText ? line : stripShellComment(line);
     const continued = continuation.test(code);
     // Shell, PowerShell, and batch files join an escaped newline without
     // inserting a character. Keeping that exact behavior catches static
@@ -228,60 +231,97 @@ function lexicalDeployRecords(filePath, surface, contents, shellMode) {
   const resolvedShellMode = shellMode ?? shellModeForFile(filePath);
   const windowsShell =
     resolvedShellMode === "powershell" || resolvedShellMode === "cmd";
-  const scans =
+  const scanPasses =
     resolvedShellMode === "github-actions"
       ? [
-          { matcher: GCLOUD, stripBackslashEscapes: true },
           {
-            matcher: GCLOUD_WINDOWS,
-            stripBackslashEscapes: false,
-            stripCmdCaretEscapes: true,
+            preserveHashText: false,
+            scans: [{ matcher: GCLOUD, stripBackslashEscapes: true }],
+          },
+          {
+            preserveHashText: true,
+            scans: [
+              {
+                matcher: GCLOUD_WINDOWS,
+                stripBackslashEscapes: false,
+                stripCmdCaretEscapes: true,
+              },
+            ],
           },
         ]
-      : windowsShell
+      : resolvedShellMode === "github-actions-unix"
         ? [
             {
-              matcher: GCLOUD_WINDOWS,
-              stripBackslashEscapes: false,
-              stripCmdCaretEscapes: resolvedShellMode === "cmd",
+              preserveHashText: false,
+              scans: [
+                {
+                  // A statically selected Unix shell can still run on a
+                  // case-insensitive Windows runner.
+                  matcher: GCLOUD_WINDOWS,
+                  stripBackslashEscapes: true,
+                },
+              ],
             },
           ]
-        : [{ matcher: GCLOUD, stripBackslashEscapes: true }];
+        : [
+            {
+              preserveHashText: resolvedShellMode === "cmd",
+              scans: windowsShell
+                ? [
+                    {
+                      matcher: GCLOUD_WINDOWS,
+                      stripBackslashEscapes: false,
+                      stripCmdCaretEscapes: resolvedShellMode === "cmd",
+                    },
+                  ]
+                : [{ matcher: GCLOUD, stripBackslashEscapes: true }],
+            },
+          ];
   if (!windowsShell && surface === "programmatic") {
-    scans.push({
+    scanPasses[0].scans.push({
       matcher: GCLOUD_PROGRAMMATIC_CMD,
       stripBackslashEscapes: false,
     });
   }
-  for (const line of logicalLines(filePath, contents, resolvedShellMode)) {
-    for (const fragment of topLevelFragments(line)) {
-      const seen = new Set();
-      for (const {
-        matcher,
-        stripBackslashEscapes,
-        stripCmdCaretEscapes = false,
-      } of scans) {
-        const normalizedFragment = normalize(
-          fragment,
+  const seen = new Set();
+  for (const { preserveHashText, scans } of scanPasses) {
+    const lines = logicalLines(
+      filePath,
+      contents,
+      resolvedShellMode,
+      preserveHashText,
+    );
+    for (const [lineIndex, line] of lines.entries()) {
+      for (const [fragmentIndex, fragment] of topLevelFragments(
+        line,
+      ).entries()) {
+        for (const {
+          matcher,
           stripBackslashEscapes,
-          stripCmdCaretEscapes,
-        );
-        for (const match of normalizedFragment.matchAll(matcher)) {
-          const suffix = normalizedFragment.slice(
-            (match.index ?? 0) + match[0].length,
+          stripCmdCaretEscapes = false,
+        } of scans) {
+          const normalizedFragment = normalize(
+            fragment,
+            stripBackslashEscapes,
+            stripCmdCaretEscapes,
           );
-          const kind = kindAfterGcloud(suffix);
-          if (!kind) continue;
-          const key = `${kind}\0${match[0]}\0${suffix}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          records.push({
-            filePath,
-            surface,
-            kind,
-            normalized: `${match[0]}${suffix}`,
-            raw: fragment,
-          });
+          for (const match of normalizedFragment.matchAll(matcher)) {
+            const suffix = normalizedFragment.slice(
+              (match.index ?? 0) + match[0].length,
+            );
+            const kind = kindAfterGcloud(suffix);
+            if (!kind) continue;
+            const key = `${lineIndex}\0${fragmentIndex}\0${kind}\0${match[0]}\0${suffix}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            records.push({
+              filePath,
+              surface,
+              kind,
+              normalized: `${match[0]}${suffix}`,
+              raw: fragment,
+            });
+          }
         }
       }
     }
@@ -805,7 +845,25 @@ function structuredEntryPointRecords(filePath, path, value) {
   );
 }
 
-function structuredStringRecords(filePath, path, value, key) {
+function workflowShellMode(shell) {
+  if (typeof shell !== "string" || shell.includes("${{")) {
+    return "github-actions";
+  }
+  if (/(?:^|[\s/\\])(?:pwsh|powershell)(?:\.exe)?(?:\s|$)/iu.test(shell)) {
+    return "powershell";
+  }
+  if (/(?:^|[\s/\\])cmd(?:\.exe)?(?:\s|$)/iu.test(shell)) {
+    return "cmd";
+  }
+  if (
+    /(?:^|[\s/\\])(?:bash|dash|fish|ksh|sh|zsh)(?:\.exe)?(?:\s|$)/iu.test(shell)
+  ) {
+    return "github-actions-unix";
+  }
+  return "github-actions";
+}
+
+function structuredStringRecords(filePath, path, value, key, parent) {
   const sourcePath = stripDeployStagingTemplateSuffix(filePath);
   const lowercasePath = sourcePath.toLowerCase();
   const basename = lowercasePath.split("/").at(-1);
@@ -818,11 +876,14 @@ function structuredStringRecords(filePath, path, value, key) {
     return lexicalDeployRecords(filePath, path, value);
   }
 
-  // A workflow or composite action may select its shell at the step, job,
-  // workflow, runner, or expression level. Join every supported continuation
-  // character in one conservative pass. This catches each literal deploy once
-  // without interpreting shell inheritance or custom wrapper commands.
-  return lexicalDeployRecords(filePath, path, value, "github-actions");
+  // Honor a statically selected step shell. Implicit, inherited, expression,
+  // and unknown custom shells keep the conservative universal scan.
+  return lexicalDeployRecords(
+    filePath,
+    path,
+    value,
+    workflowShellMode(parent?.shell),
+  );
 }
 
 function structuredRecords(filePath, contents, errors) {
@@ -834,9 +895,11 @@ function structuredRecords(filePath, contents, errors) {
   const document = parseDeployStagingStructuredFile(filePath, contents, errors);
   if (document === undefined) return [];
   const records = [];
-  visitYaml(document, "", (value, path, key) => {
+  visitYaml(document, "", (value, path, key, parent) => {
     if (typeof value === "string") {
-      records.push(...structuredStringRecords(filePath, path, value, key));
+      records.push(
+        ...structuredStringRecords(filePath, path, value, key, parent),
+      );
     }
     if (
       Array.isArray(value) &&

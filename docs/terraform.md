@@ -159,16 +159,9 @@ project-level fallback is removed.
 Metrics Bridge's default Compute executor has no App Engine source-bucket grant.
 
 The five approved checked-in `gcloud builds submit` / `gcloud app deploy`
-calls use their required source-staging flag/value. `pnpm tf:test` rejects
-additional deploy records recovered from shell-like surfaces, wrappers,
-generated scripts, Dockerfiles, structured configuration, and Terraform outside
-comments. Node/TypeScript recovery covers direct call/new expressions with
-inline literals or supported `const`/object aliases, plus static tagged
-templates. Indirect `Function.prototype.call`/`apply`, dynamically constructed
-executables, and dynamic paths are forbidden but outside the static proof.
-Native PowerShell block comments and batch `REM`/`::` lines are deliberately not
-masked, so deploy-shaped text there fails closed; inert examples belong only in
-`scripts/deploy-staging-contract.test.mjs`.
+calls use their required source-staging flag/value. `pnpm tf:test` enforces that
+inventory; [ADR 0053](adr/0053-explicit-deployment-source-staging.md) defines
+the supported static syntax and deliberate proof limits.
 
 The migration is deliberately additive. Merge the infrastructure-only PR,
 refresh current `main`, run a clean current-main platform plan, get explicit
