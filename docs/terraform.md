@@ -45,6 +45,11 @@ pnpm peg-policy:init
 pnpm peg-policy:plan
 ```
 
+`pnpm peg-policy:plan` defaults to the publisher identity and therefore fails
+closed for local operators: only `production-infra-applier` may impersonate
+that identity. For a local read-only plan, set
+`TF_VAR_terraform_service_account=org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com`.
+
 Without a stack, `pnpm tf validate` validates every registered stack. It formats
 tracked and non-ignored untracked Terraform, then runs backend-free init and
 validate. Gitignored operator `*.tfvars` stay outside that source check.
