@@ -137,19 +137,20 @@ export function EntitySearch({
   const [page, setPage] = useState<number>(() =>
     readPageFromParams(readInitParams(searchParams)),
   );
+  const normalizedQuery = query.trim();
 
   const updateQuery = useCallback((next: string) => {
     setQuery(next);
     setPage(1);
-    writeUrl(next, 1);
+    writeUrl(next.trim(), 1);
   }, []);
 
   const updatePage = useCallback(
     (next: number) => {
       setPage(next);
-      writeUrl(query, next);
+      writeUrl(normalizedQuery, next);
     },
-    [query],
+    [normalizedQuery],
   );
 
   // `setQuery` and `setPage` below dispatch from a single popstate event, so
@@ -172,7 +173,7 @@ export function EntitySearch({
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  const lower = query.trim().toLowerCase();
+  const lower = normalizedQuery.toLowerCase();
   const filtered = lower
     ? items.filter((item) => item.searchText.includes(lower))
     : items;
@@ -195,11 +196,11 @@ export function EntitySearch({
     const params = new URLSearchParams(window.location.search);
     const rawQuery = params.get("q");
     const rawPage = params.get("page");
-    const expectedQuery = query ? query : null;
+    const expectedQuery = normalizedQuery || null;
     const expectedPage = clampedPage <= 1 ? null : String(clampedPage);
     if (rawQuery === expectedQuery && rawPage === expectedPage) return;
-    writeUrl(query, clampedPage);
-  }, [query, clampedPage]);
+    writeUrl(normalizedQuery, clampedPage);
+  }, [normalizedQuery, clampedPage]);
   const visible = filtered.slice(
     (clampedPage - 1) * PAGE_SIZE,
     clampedPage * PAGE_SIZE,
@@ -219,7 +220,7 @@ export function EntitySearch({
       </div>
       <p className="mb-2 text-xs text-slate-400">
         {filtered.length.toLocaleString()} entities
-        {query ? ` matching "${query}"` : ""}
+        {normalizedQuery ? ` matching "${normalizedQuery}"` : ""}
         <span className="block sm:inline">
           {" "}
           · Address search covers up to {addressSearchLimit.toLocaleString()}{" "}

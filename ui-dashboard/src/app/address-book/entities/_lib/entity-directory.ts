@@ -12,17 +12,20 @@ export type EntityDirectoryItem = {
   searchText: string;
 };
 
-function entityTagLabels(entity: IntelEntityRecord): string[] {
+function trimmedString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function entityTagLabels(populatedTags: unknown): string[] {
+  if (!Array.isArray(populatedTags)) return [];
   const labels: string[] = [];
-  for (const tag of entity.populatedTags ?? []) {
-    const legacyTag = tag as typeof tag & {
-      name?: string;
-      slug?: string;
-    };
+  for (const tag of populatedTags) {
+    if (typeof tag !== "object" || tag === null) continue;
+    const legacyTag = tag as Record<string, unknown>;
     const label =
-      legacyTag.label?.trim() ||
-      legacyTag.name?.trim() ||
-      legacyTag.slug?.trim();
+      trimmedString(legacyTag.label) ||
+      trimmedString(legacyTag.name) ||
+      trimmedString(legacyTag.slug);
     if (label) labels.push(label);
   }
   return labels;
@@ -33,11 +36,15 @@ export function buildEntityDirectoryItems(
 ): EntityDirectoryItem[] {
   return Object.entries(entities)
     .map(([key, entity]) => {
-      const slug = entity.slug?.trim() || key;
-      const name = entity.name?.trim() || slug;
-      const type = entity.type?.trim() || null;
-      const tags = entityTagLabels(entity);
-      const addresses = parseEntityAddresses(entity.addresses);
+      const record =
+        typeof entity === "object" && entity !== null
+          ? (entity as Partial<IntelEntityRecord>)
+          : {};
+      const slug = trimmedString(record.slug) || key;
+      const name = trimmedString(record.name) || slug;
+      const type = trimmedString(record.type) || null;
+      const tags = entityTagLabels(record.populatedTags);
+      const addresses = parseEntityAddresses(record.addresses);
 
       return {
         slug,

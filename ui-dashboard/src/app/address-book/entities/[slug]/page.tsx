@@ -9,6 +9,7 @@ import {
   parseEntityAddresses,
   type EntityAddress,
 } from "../_lib/entity-addresses";
+import { ENTITY_ADDRESS_SEARCH_LIMIT } from "../_lib/entity-directory";
 import { buildExternalLinks, type ExternalLink } from "./_lib/entity-helpers";
 
 export const metadata = {
@@ -92,12 +93,10 @@ function EntityTags({
   );
 }
 
-const MAX_VISIBLE_ADDRESSES = 50;
-
 function KnownAddresses({ addresses }: { addresses: EntityAddress[] }) {
   if (addresses.length === 0) return null;
 
-  const visible = addresses.slice(0, MAX_VISIBLE_ADDRESSES);
+  const visible = addresses.slice(0, ENTITY_ADDRESS_SEARCH_LIMIT);
   const hiddenCount = addresses.length - visible.length;
 
   return (
@@ -138,8 +137,9 @@ function KnownAddresses({ addresses }: { addresses: EntityAddress[] }) {
       </ul>
       {hiddenCount > 0 && (
         <p className="border-t border-slate-800 px-5 py-3 text-xs text-slate-400">
-          Showing the first {MAX_VISIBLE_ADDRESSES.toLocaleString()} addresses.{" "}
-          {hiddenCount.toLocaleString()} more are stored in this entity profile.
+          Showing the first {ENTITY_ADDRESS_SEARCH_LIMIT.toLocaleString()}{" "}
+          addresses. {hiddenCount.toLocaleString()} more are stored in this
+          entity profile.
         </p>
       )}
     </section>

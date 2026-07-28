@@ -199,6 +199,20 @@ describe("EntitySearch — URL state", () => {
     expect(firstVisibleSlug()).toBe("beta-zero");
   });
 
+  it("normalizes whitespace before writing or describing search state", () => {
+    render();
+
+    typeSearch("   ");
+    expect(window.location.search).toBe("");
+    expect(container?.textContent).not.toContain('matching "   "');
+    expect(firstVisibleSlug()).toBe("alpha-000");
+
+    typeSearch("  Gamma Exchange  ");
+    expect(window.location.search).toBe("?q=Gamma+Exchange");
+    expect(container?.textContent).toContain('matching "Gamma Exchange"');
+    expect(firstVisibleSlug()).toBe("gamma-zero");
+  });
+
   it("clicking Next writes ?page=2 and back to Prev strips it", () => {
     render();
     clickButton("Next");

@@ -79,6 +79,38 @@ describe("buildEntityDirectoryItems", () => {
     expect(item?.searchText).toContain("protocol-treasury");
   });
 
+  it("ignores malformed Redis fields instead of failing the directory", () => {
+    const malformed = {
+      slug: 123,
+      name: {},
+      type: [],
+      addresses: null,
+      populatedTags: [
+        null,
+        { label: 3, name: "  Valid fallback  " },
+        { slug: false },
+      ],
+    } as unknown as IntelEntityRecord;
+    const nonArrayTags = {
+      ...entity({ slug: "non-array-tags" }),
+      populatedTags: { label: "not-an-array" },
+    } as unknown as IntelEntityRecord;
+
+    const items = buildEntityDirectoryItems({
+      malformed,
+      "non-array-tags": nonArrayTags,
+    });
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      slug: "malformed",
+      name: "malformed",
+      type: null,
+      tags: ["Valid fallback"],
+    });
+    expect(items[1]?.tags).toEqual([]);
+  });
+
   it("bounds the addresses serialized into client-side search text", () => {
     const addresses = Array.from({ length: 51 }, (_, index) => ({
       address: `0x${index.toString(16).padStart(40, "0")}`,
