@@ -33,6 +33,7 @@ const SHELL_FILE_EXTENSIONS = [
   ".cmd",
   ".fish",
   ".ksh",
+  ".mk",
   ".ps1",
   ".psm1",
   ".sh",
@@ -178,6 +179,11 @@ assert.equal(
   "Windows script extensions must be matched case-insensitively",
 );
 assert.equal(
+  shouldScanFile("scripts/deploy.mk", { mode: 0o100644 }, false),
+  true,
+  "Makefile fragments must be scanned without a shebang or executable bit",
+);
+assert.equal(
   shouldScanFile("scripts/new-deploy.ps1", { mode: 0o100644 }, false),
   true,
   "PowerShell scripts must be scanned without an executable bit",
@@ -221,6 +227,11 @@ assert.equal(
   shouldScanFile("templates/deploy.cmd.tftpl", { mode: 0o100644 }, false),
   true,
   "Windows command templates must be scanned without an executable bit",
+);
+assert.equal(
+  shouldScanFile("templates/deploy.mk.tftpl", { mode: 0o100644 }, false),
+  true,
+  "Makefile fragment templates must be scanned without an executable bit",
 );
 assert.equal(
   shouldScanFile("templates/deploy.mjs.tftpl", { mode: 0o100644 }, false),
@@ -1214,6 +1225,11 @@ for (const [contents, message, filePath] of [
     "gcloud builds submit .",
     "nested extensionless candidate",
     "packages/foo/scripts/deploy",
+  ],
+  [
+    "deploy:\n\tgcloud builds submit .",
+    "Makefile fragment candidate",
+    "scripts/deploy.mk",
   ],
   ["gcloud app deploy app.yaml", "root extensionless candidate", "deploy"],
   ["gcloud builds submit .", "tools extensionless candidate", "tools/deploy"],
