@@ -99,7 +99,8 @@ boundaries.
   authoritative and exact. Metrics Bridge always uses the dedicated runtime
   identity, while its paired `PEG_POLICY_*` values stay absent until the
   reviewed source literal `local.peg_policy_runtime_generation` is changed
-  from `null` to the protected publisher's positive generation output. Never
+  from `null` for first activation or the current quoted generation for a
+  rollover to the protected publisher's positive generation output. Never
   supply a URL or auth-mode variable: Terraform derives the canonical pinned
   GCS URL and `gcp-metadata` mode together. The protected org-Terraform project
   Owner and organization IAM administrators are accepted control-plane

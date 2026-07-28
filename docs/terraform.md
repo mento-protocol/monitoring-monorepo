@@ -133,8 +133,9 @@ Creator grant. The Peg-policy foundation creates no policy object. Metrics
 Bridge uses the dedicated runtime identity, but the paired policy environment
 values remain absent until a later reviewed change replaces the committed
 `local.peg_policy_runtime_generation = null` literal with the protected
-publisher's exact positive output. Terraform derives the canonical pinned URL
-and `gcp-metadata` mode from that one literal; publication and alert activation
+publisher's exact quoted positive output. Later rollovers replace the current
+quoted literal the same way. Terraform derives the canonical pinned URL and
+`gcp-metadata` mode from that one literal; publication and alert activation
 remain separate reviewed steps. Both policy buckets and both policy service
 accounts live in `mento-monitoring`; they depend on its existing Storage and
 IAM APIs. The runtime has a direct bucket-scoped Object Viewer grant and the

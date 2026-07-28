@@ -69,7 +69,9 @@ Platform Terraform attaches Cloud Run to
 grant is only the private policy bucket's Object Viewer role. The platform
 accepts no production policy URL or auth-mode input: a reviewed
 `local.peg_policy_runtime_generation` literal derives both values together.
-It stays `null` until protected publication reports a real generation.
+It stays `null` until protected publication reports a real generation; each
+later rollover replaces the current quoted generation literal in a reviewed
+platform change.
 
 Policy versions are content-addressed: the final 32 lowercase hexadecimal
 characters must match the canonical policy-content SHA-256 prefix. Canonical

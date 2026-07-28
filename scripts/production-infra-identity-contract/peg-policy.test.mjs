@@ -26,6 +26,28 @@ function expectFailure(files, expected) {
 const validFiles = validFixtureFiles();
 assert.deepEqual(validateProductionInfraIdentityContract(validFiles), []);
 
+const activeGenerationFiles = mutate(
+  validFiles,
+  "terraform/peg-policy.tf",
+  "  peg_policy_runtime_generation = null",
+  '  peg_policy_runtime_generation = "1750000000000000"',
+);
+assert.deepEqual(
+  validateProductionInfraIdentityContract(activeGenerationFiles),
+  [],
+);
+
+const maximumGenerationFiles = mutate(
+  validFiles,
+  "terraform/peg-policy.tf",
+  "  peg_policy_runtime_generation = null",
+  '  peg_policy_runtime_generation = "9223372036854775807"',
+);
+assert.deepEqual(
+  validateProductionInfraIdentityContract(maximumGenerationFiles),
+  [],
+);
+
 for (const [from, to, expected, occurrence = 0] of [
   [
     '  name                        = "${google_project.monitoring.project_id}-peg-policy"',
@@ -356,12 +378,6 @@ expectFailure(
 for (const [filePath, from, to, expected] of [
   [
     "terraform/peg-policy.tf",
-    "  peg_policy_runtime_generation = null",
-    '  peg_policy_runtime_generation = ""',
-    "Peg policy runtime attachment: generation default: must be exactly source-controlled",
-  ],
-  [
-    "terraform/peg-policy.tf",
     "https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}",
     "https://storage.googleapis.com/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}",
     "Peg policy runtime attachment: canonical URL: must be exactly source-controlled",
@@ -393,6 +409,51 @@ for (const [filePath, from, to, expected] of [
 ]) {
   expectFailure(mutate(validFiles, filePath, from, to), expected);
 }
+
+for (const invalidGeneration of [
+  '""',
+  '"0"',
+  '"01"',
+  '"-1"',
+  '"1.5"',
+  '"9223372036854775808"',
+  "1750000000000000",
+  "local.published_generation",
+  "var.peg_policy_runtime_generation",
+]) {
+  expectFailure(
+    mutate(validFiles, "terraform/peg-policy.tf", "null", invalidGeneration),
+    "Peg policy runtime attachment: generation must be exactly null or a quoted positive decimal GCS generation within signed 64-bit range",
+  );
+}
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/peg-policy.tf",
+    '  peg_policy_runtime_url = local.peg_policy_runtime_generation == null ? null : "https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}"',
+    '  peg_policy_runtime_url = "https://invalid.example/policy.json"\n\n  decoy = local.peg_policy_runtime_generation == null ? null : "https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}"',
+  ),
+  "Peg policy runtime attachment: canonical URL: must be exactly source-controlled",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/peg-policy.tf",
+    `  peg_policy_runtime_env = local.peg_policy_runtime_generation == null ? {} : {
+    PEG_POLICY_URL       = local.peg_policy_runtime_url
+    PEG_POLICY_AUTH_MODE = "gcp-metadata"
+  }`,
+    `  peg_policy_runtime_env = {}
+
+  decoy_env = local.peg_policy_runtime_generation == null ? {} : {
+    PEG_POLICY_URL       = local.peg_policy_runtime_url
+    PEG_POLICY_AUTH_MODE = "gcp-metadata"
+  }`,
+  ),
+  "Peg policy runtime attachment: paired environment: must be exactly source-controlled",
+);
 
 expectFailure(
   {

@@ -427,15 +427,35 @@ const PEG_POLICY_RUNTIME_GENERATION_CONDITION =
   'local.peg_policy_runtime_generation == null ? true : (can(regex("^[1-9][0-9]*$", local.peg_policy_runtime_generation)) && can(tonumber(local.peg_policy_runtime_generation)) && tonumber(local.peg_policy_runtime_generation) <= 9223372036854775807)';
 const PEG_POLICY_RUNTIME_URL =
   '"https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}"';
+const MAX_GCS_GENERATION = 9_223_372_036_854_775_807n;
+const POSITIVE_DECIMAL = /^[1-9][0-9]*$/u;
+const RUNTIME_GENERATION_LITERAL_ERROR =
+  "generation must be exactly null or a quoted positive decimal GCS generation within signed 64-bit range";
+const PEG_POLICY_RUNTIME_ENV_SOURCE =
+  /^\s*peg_policy_runtime_env\s*=\s*local\.peg_policy_runtime_generation\s*==\s*null\s*\?\s*\{\}\s*:\s*\{\s*PEG_POLICY_URL\s*=\s*local\.peg_policy_runtime_url\s*PEG_POLICY_AUTH_MODE\s*=\s*"gcp-metadata"\s*\}/mu;
 
-function normalizedSource(value) {
-  return value.replace(/\s+/gu, " ").trim();
+function assignmentCount(source, attribute) {
+  return [...source.matchAll(new RegExp(`^\\s*${attribute}\\s*=`, "gmu"))]
+    .length;
 }
 
-function expectRuntimeSource(source, expected, errors, label) {
-  if (!normalizedSource(source).includes(normalizedSource(expected))) {
-    errors.push(`${label}: must be exactly source-controlled`);
-  }
+function hasExactRuntimeExpression(block, source, attribute, expected) {
+  return (
+    assignmentCount(source, attribute) === 1 &&
+    attributeExpression(block, attribute) === expected
+  );
+}
+
+function isValidRuntimeGenerationLiteral(block) {
+  const source = attributeExpression(block, "peg_policy_runtime_generation");
+  if (source === "null") return true;
+
+  const generation = stringAttribute(block, "peg_policy_runtime_generation");
+  return (
+    typeof generation === "string" &&
+    POSITIVE_DECIMAL.test(generation) &&
+    BigInt(generation) <= MAX_GCS_GENERATION
+  );
 }
 
 function validatePegPolicyRuntimeAttachment(files, topLevelBlocks, errors) {
@@ -450,24 +470,30 @@ function validatePegPolicyRuntimeAttachment(files, topLevelBlocks, errors) {
     errors.push(`${label}: must declare exactly one runtime locals block`);
   } else {
     const source = runtimeLocals[0].code;
-    expectRuntimeSource(
-      source,
-      "peg_policy_runtime_generation = null",
-      errors,
-      `${label}: generation default`,
-    );
-    expectRuntimeSource(
-      source,
-      `peg_policy_runtime_url = local.peg_policy_runtime_generation == null ? null : ${PEG_POLICY_RUNTIME_URL}`,
-      errors,
-      `${label}: canonical URL`,
-    );
-    expectRuntimeSource(
-      source,
-      `peg_policy_runtime_env = local.peg_policy_runtime_generation == null ? {} : { PEG_POLICY_URL = local.peg_policy_runtime_url PEG_POLICY_AUTH_MODE = "gcp-metadata" }`,
-      errors,
-      `${label}: paired environment`,
-    );
+    if (
+      assignmentCount(source, "peg_policy_runtime_generation") !== 1 ||
+      !isValidRuntimeGenerationLiteral(runtimeLocals[0])
+    ) {
+      errors.push(`${label}: ${RUNTIME_GENERATION_LITERAL_ERROR}`);
+    }
+    if (
+      !hasExactRuntimeExpression(
+        runtimeLocals[0],
+        source,
+        "peg_policy_runtime_url",
+        `local.peg_policy_runtime_generation == null ? null : ${PEG_POLICY_RUNTIME_URL}`,
+      )
+    ) {
+      errors.push(`${label}: canonical URL: must be exactly source-controlled`);
+    }
+    if (
+      assignmentCount(source, "peg_policy_runtime_env") !== 1 ||
+      !PEG_POLICY_RUNTIME_ENV_SOURCE.test(source)
+    ) {
+      errors.push(
+        `${label}: paired environment: must be exactly source-controlled`,
+      );
+    }
   }
 
   const externalGenerationInputs = topLevelBlocks.filter(
