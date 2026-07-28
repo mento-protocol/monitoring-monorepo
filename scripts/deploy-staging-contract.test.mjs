@@ -747,7 +747,12 @@ source.indexOf(spec["command"], spec["args"]);
   ],
   [
     `const options = {
-  cmd: ["gcloud", "app", "deploy", "app.yaml"],
+  cmd: [
+    "gcloud",
+    "app",
+    "deploy",
+    "app.yaml",
+  ],
 };
 source.indexOf(options["cmd"]);
 `,
