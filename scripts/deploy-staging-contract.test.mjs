@@ -153,6 +153,50 @@ function expectFailure(files, expected) {
 
 const files = repositoryFiles();
 
+const rootGcloudIgnoreEntries = files[".gcloudignore"]
+  .split(/\r?\n/u)
+  .map((line) => line.trim())
+  .filter((line) => line && !line.startsWith("# "));
+assert.equal(
+  rootGcloudIgnoreEntries[0],
+  "*",
+  ".gcloudignore must default-deny the direct Cloud Build source archive",
+);
+assert.deepEqual(
+  rootGcloudIgnoreEntries.filter(
+    (line) => line.startsWith("!") && !line.startsWith("#!"),
+  ),
+  [
+    "!.gcloudignore",
+    "!cloudbuild.yaml",
+    "!package.json",
+    "!pnpm-lock.yaml",
+    "!pnpm-workspace.yaml",
+    "!patches/",
+    "!patches/**",
+    "!metrics-bridge/",
+    "!metrics-bridge/**",
+    "!shared-config/",
+    "!shared-config/**",
+  ],
+  ".gcloudignore must allow only Metrics Bridge build inputs",
+);
+assert(
+  rootGcloudIgnoreEntries.includes("#!include:.gitignore"),
+  ".gcloudignore must reapply repository-local output exclusions",
+);
+for (const entry of [
+  "*.env",
+  "*.env.*",
+  "terraform.tfvars",
+  "gha-creds-*.json",
+]) {
+  assert(
+    rootGcloudIgnoreEntries.includes(entry),
+    `.gcloudignore must exclude direct-deploy credentials via ${entry}`,
+  );
+}
+
 assert.equal(
   shouldScanFile("scripts/new-deploy.bash", { mode: 0o100755 }, false),
   true,
