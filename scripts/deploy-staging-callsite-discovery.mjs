@@ -33,6 +33,17 @@ const PROGRAMMATIC_EXECUTION_MEMBERS = new Set([
   "spawn",
   "spawnSync",
 ]);
+const DEPLOY_STAGING_TEMPLATE_SUFFIXES = [".tftpl", ".tpl"];
+
+export function stripDeployStagingTemplateSuffix(filePath) {
+  const lowercasePath = filePath.toLowerCase();
+  for (const suffix of DEPLOY_STAGING_TEMPLATE_SUFFIXES) {
+    if (lowercasePath.endsWith(suffix)) {
+      return filePath.slice(0, -suffix.length);
+    }
+  }
+  return filePath;
+}
 
 export function isGcloudExecutable(value) {
   const basename = value.split(/[/\\]/u).at(-1) ?? "";
@@ -40,11 +51,11 @@ export function isGcloudExecutable(value) {
 }
 
 function isPowerShellSource(filePath) {
-  return /\.(?:ps1|psm1)$/iu.test(filePath);
+  return /\.(?:ps1|psm1)$/iu.test(stripDeployStagingTemplateSuffix(filePath));
 }
 
 function isBatchSource(filePath) {
-  return /\.(?:bat|cmd)$/iu.test(filePath);
+  return /\.(?:bat|cmd)$/iu.test(stripDeployStagingTemplateSuffix(filePath));
 }
 
 function visitYaml(value, path, callback, key) {
@@ -277,11 +288,14 @@ function lexicalDeployRecords(filePath, surface, contents, shellMode) {
 }
 
 function isProgrammaticSource(filePath) {
-  return /\.(?:[cm]?[jt]s|[jt]sx)$/iu.test(filePath);
+  return /\.(?:[cm]?[jt]s|[jt]sx)$/iu.test(
+    stripDeployStagingTemplateSuffix(filePath),
+  );
 }
 
 function programmaticScriptKind(filePath) {
-  const lowercasePath = filePath.toLowerCase();
+  const lowercasePath =
+    stripDeployStagingTemplateSuffix(filePath).toLowerCase();
   if (lowercasePath.endsWith(".tsx")) return ts.ScriptKind.TSX;
   if (lowercasePath.endsWith(".jsx")) return ts.ScriptKind.JSX;
   if (/\.(?:cts|mts|ts)$/u.test(lowercasePath)) return ts.ScriptKind.TS;
@@ -602,12 +616,13 @@ function staticStringArrayProperty(node, propertyName, resolveIdentifier) {
 
 function programmaticDeployRecords(filePath, contents, errors) {
   if (!GCLOUD_TEXT.test(contents)) return [];
+  const sourcePath = stripDeployStagingTemplateSuffix(filePath);
   const sourceFile = ts.createSourceFile(
-    filePath,
+    sourcePath,
     contents,
     ts.ScriptTarget.Latest,
     true,
-    programmaticScriptKind(filePath),
+    programmaticScriptKind(sourcePath),
   );
   if (sourceFile.parseDiagnostics.length > 0) {
     const message = ts.flattenDiagnosticMessageText(
@@ -788,7 +803,8 @@ function structuredEntryPointRecords(filePath, path, value) {
 }
 
 function structuredStringRecords(filePath, path, value, key) {
-  const lowercasePath = filePath.toLowerCase();
+  const sourcePath = stripDeployStagingTemplateSuffix(filePath);
+  const lowercasePath = sourcePath.toLowerCase();
   const basename = lowercasePath.split("/").at(-1);
   const compositeAction =
     basename === "action.yml" || basename === "action.yaml";
@@ -845,11 +861,13 @@ function discoverDeployStagingFile(filePath, contents) {
 
   const records = [];
   const errors = [];
-  const lowercasePath = filePath.toLowerCase();
+  const sourcePath = stripDeployStagingTemplateSuffix(filePath);
+  const lowercasePath = sourcePath.toLowerCase();
+  const templated = sourcePath !== filePath;
   // The centralized fixture deliberately contains forbidden examples. It is
   // the one non-production executable surface excluded from self-scanning.
   if (filePath !== CONTRACT_FIXTURE) {
-    if (lowercasePath.endsWith(".tf")) {
+    if (!templated && lowercasePath.endsWith(".tf")) {
       records.push(
         ...lexicalDeployRecords(
           filePath,
@@ -857,7 +875,7 @@ function discoverDeployStagingFile(filePath, contents) {
           commentMaskedHcl(contents),
         ),
       );
-    } else if (lowercasePath.endsWith("package.json")) {
+    } else if (!templated && lowercasePath.endsWith("package.json")) {
       const packageJson = parseDeployStagingStructuredFile(
         filePath,
         contents,
@@ -873,9 +891,10 @@ function discoverDeployStagingFile(filePath, contents) {
         }
       }
     } else if (
-      lowercasePath.endsWith(".yml") ||
-      lowercasePath.endsWith(".yaml") ||
-      lowercasePath.endsWith(".json")
+      !templated &&
+      (lowercasePath.endsWith(".yml") ||
+        lowercasePath.endsWith(".yaml") ||
+        lowercasePath.endsWith(".json"))
     ) {
       records.push(...structuredRecords(filePath, contents, errors));
     } else if (isProgrammaticSource(filePath)) {

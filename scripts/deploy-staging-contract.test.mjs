@@ -17,6 +17,7 @@ import {
   assertDeployStagingContract,
   discoverDeployStagingCallsites,
   recordHasDeployStagingFlag,
+  stripDeployStagingTemplateSuffix,
   validateDeployStagingContract,
 } from "./deploy-staging-contract.mjs";
 
@@ -50,14 +51,16 @@ const SCRIPT_SOURCE_FILE_EXTENSIONS = [
 ];
 
 function isDockerfile(filePath) {
-  const basename = path.basename(filePath);
+  const basename = path.basename(stripDeployStagingTemplateSuffix(filePath));
   return basename === "Dockerfile" || basename.startsWith("Dockerfile.");
 }
 
 function isCandidate(filePath) {
-  const lowercasePath = filePath.toLowerCase();
+  const sourcePath = stripDeployStagingTemplateSuffix(filePath);
+  const lowercasePath = sourcePath.toLowerCase();
+  const templated = sourcePath !== filePath;
   return (
-    lowercasePath.endsWith(".tf") ||
+    (!templated && lowercasePath.endsWith(".tf")) ||
     SHELL_FILE_EXTENSIONS.some((extension) =>
       lowercasePath.endsWith(extension),
     ) ||
@@ -65,11 +68,11 @@ function isCandidate(filePath) {
       lowercasePath.endsWith(extension),
     ) ||
     isDockerfile(filePath) ||
-    lowercasePath.endsWith(".yml") ||
-    lowercasePath.endsWith(".yaml") ||
-    lowercasePath.endsWith(".json") ||
-    lowercasePath.endsWith("package.json") ||
-    path.extname(filePath) === ""
+    (!templated && lowercasePath.endsWith(".yml")) ||
+    (!templated && lowercasePath.endsWith(".yaml")) ||
+    (!templated && lowercasePath.endsWith(".json")) ||
+    (!templated && lowercasePath.endsWith("package.json")) ||
+    (sourcePath === filePath && path.extname(sourcePath) === "")
   );
 }
 
@@ -208,6 +211,65 @@ assert.equal(
   isCandidate("images/bridge/Dockerfile.release"),
   true,
   "named Dockerfiles must be scanned for deploy callsites",
+);
+assert.equal(
+  shouldScanFile("templates/deploy.sh.tftpl", { mode: 0o100644 }, false),
+  true,
+  "shell templates must be scanned without an executable bit",
+);
+assert.equal(
+  shouldScanFile("templates/deploy.cmd.tftpl", { mode: 0o100644 }, false),
+  true,
+  "Windows command templates must be scanned without an executable bit",
+);
+assert.equal(
+  shouldScanFile("templates/deploy.mjs.tftpl", { mode: 0o100644 }, false),
+  true,
+  "Node source templates must be scanned without an executable bit",
+);
+assert.equal(
+  shouldScanFile("templates/filter-function.js.tpl", { mode: 0o100644 }, false),
+  true,
+  "Node source .tpl templates must be scanned without an executable bit",
+);
+assert.equal(
+  shouldScanFile(
+    "templates/Dockerfile.release.tftpl",
+    { mode: 0o100644 },
+    false,
+  ),
+  true,
+  "Dockerfile templates must be scanned without an executable bit",
+);
+assert.equal(
+  isCandidate("templates/deploy.tftpl"),
+  false,
+  "untyped templates must not be scanned as executable surfaces",
+);
+assert.equal(
+  isCandidate("templates/deploy.sh.tftpl.bak"),
+  false,
+  "near-miss template names must not be scanned as executable surfaces",
+);
+assert.equal(
+  isCandidate("templates/deploy.tf.tftpl"),
+  false,
+  "templated Terraform files must not be scanned as executable surfaces",
+);
+assert.equal(
+  isCandidate("templates/deploy.md.tftpl"),
+  false,
+  "Markdown templates must not be scanned as executable surfaces",
+);
+assert.equal(
+  isCandidate("templates/deploy.yml.tftpl"),
+  false,
+  "templated YAML files must not be scanned without structured semantics",
+);
+assert.equal(
+  isCandidate("templates/deploy.sh.tmpl"),
+  false,
+  "unsupported template suffixes must not be scanned as executable surfaces",
 );
 
 expectFailure(
@@ -1524,6 +1586,34 @@ assertForbiddenSignature(
   "FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:stable\nRUN gcloud app deploy app.yaml\n",
   "named Dockerfile",
   "images/deployer/Dockerfile.release",
+);
+assertForbiddenSignature(
+  "gcloud builds \\\n  submit .\n",
+  "shell template",
+  "templates/deploy.sh.tftpl",
+);
+assertForbiddenSignature(
+  "gcloud builds ^\n  submit .\n",
+  "Windows command template",
+  "templates/deploy.cmd.tftpl",
+);
+assertForbiddenSignature(
+  "FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:stable\nRUN gcloud app deploy app.yaml\n",
+  "Dockerfile template",
+  "templates/Dockerfile.release.tftpl",
+);
+assertForbiddenSignature(
+  `const command = "gcloud";
+const args = ["builds", "submit", "."];
+execFileSync(command, args);
+`,
+  "Node source template",
+  "templates/deploy.mjs.tftpl",
+);
+assertForbiddenSignature(
+  'const command = "gcloud";\nconst args = ["builds", "submit", "."];\nexecFileSync(command, args);\n',
+  "Node source .tpl template",
+  "templates/deploy.mjs.tpl",
 );
 
 for (const [contents, message] of [

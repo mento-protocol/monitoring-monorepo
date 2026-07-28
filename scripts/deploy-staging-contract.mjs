@@ -12,7 +12,10 @@ import {
   parseDeployStagingStructuredFile,
 } from "./deploy-staging-callsite-discovery.mjs";
 
-export { discoverDeployStagingCallsites } from "./deploy-staging-callsite-discovery.mjs";
+export {
+  discoverDeployStagingCallsites,
+  stripDeployStagingTemplateSuffix,
+} from "./deploy-staging-callsite-discovery.mjs";
 
 const TERRAFORM_FILE = "terraform/deploy-staging.tf";
 
