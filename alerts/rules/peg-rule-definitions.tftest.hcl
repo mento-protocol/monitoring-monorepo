@@ -1,6 +1,6 @@
 mock_provider "grafana" {}
 
-run "peg_rule_definitions_create_one_enabled_consumer_set" {
+run "peg_rule_definitions_preserve_consumer_guard_invariant" {
   command = plan
 
   variables {
@@ -10,17 +10,17 @@ run "peg_rule_definitions_create_one_enabled_consumer_set" {
   }
 
   assert {
-    condition     = local.peg_alerts_enabled == true && length(local.peg_alert_instances) == 1
-    error_message = "Peg Grafana consumers must use one enabled singleton instance."
+    condition     = local.peg_alerts_enabled ? length(local.peg_alert_instances) == 1 : length(local.peg_alert_instances) == 0
+    error_message = "Peg Grafana consumers must use one instance when enabled and none when disabled."
   }
 
   assert {
-    condition     = length(grafana_folder.peg_monitoring) == 1 && length(grafana_rule_group.peg_monitoring) == 1
-    error_message = "Peg activation must create exactly one Grafana folder and rule group."
+    condition     = local.peg_alerts_enabled ? length(grafana_folder.peg_monitoring) == 1 && length(grafana_rule_group.peg_monitoring) == 1 : length(grafana_folder.peg_monitoring) == 0 && length(grafana_rule_group.peg_monitoring) == 0
+    error_message = "Peg Grafana folder and rule group counts must follow the source-controlled consumer guard."
   }
 
   assert {
     condition     = length(local.peg_rule_definitions) > 0
-    error_message = "Peg rule definitions must evaluate with the enabled consumer set."
+    error_message = "Peg rule definitions must evaluate with the source-controlled consumer guard."
   }
 }
