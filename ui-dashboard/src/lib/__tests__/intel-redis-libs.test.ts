@@ -272,8 +272,8 @@ describe("intel-entities", () => {
 
   it("does not fetch records above the entity-count limit", async () => {
     hlen
-      .mockResolvedValueOnce(INTEL_ENTITY_DIRECTORY_MAX_RECORDS)
-      .mockResolvedValueOnce(1);
+      .mockResolvedValueOnce(INTEL_ENTITY_DIRECTORY_MAX_RECORDS + 1)
+      .mockResolvedValueOnce(0);
 
     await expect(getIntelEntityDirectorySource()).resolves.toEqual({
       entities: null,
@@ -282,6 +282,25 @@ describe("intel-entities", () => {
     });
     expect(hkeys).not.toHaveBeenCalled();
     expect(hgetall).not.toHaveBeenCalled();
+  });
+
+  it("measures overlapping current and legacy records only once", async () => {
+    const currentRecord = { slug: "binance", name: "Current Binance" };
+    hlen.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+    hkeys.mockResolvedValueOnce(["binance"]).mockResolvedValueOnce(["Binance"]);
+    pipelineExec.mockResolvedValue([128]);
+    hgetall
+      .mockResolvedValueOnce({ binance: currentRecord })
+      .mockResolvedValueOnce({
+        Binance: { slug: "binance", name: "Legacy Binance" },
+      });
+
+    await expect(getIntelEntityDirectorySource()).resolves.toEqual({
+      entities: { binance: currentRecord },
+      limited: false,
+    });
+    expect(pipelineHstrlen).toHaveBeenCalledTimes(1);
+    expect(pipelineHstrlen).toHaveBeenCalledWith(INTEL_ENTITIES_KEY, "binance");
   });
 
   it("does not fetch records above the stored-payload limit", async () => {

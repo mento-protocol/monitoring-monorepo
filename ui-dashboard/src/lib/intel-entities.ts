@@ -81,7 +81,10 @@ export async function getIntelEntityDirectorySource(): Promise<IntelEntityDirect
     redis.hlen(HASH_KEY),
     redis.hlen(LEGACY_HASH_KEY),
   ]);
-  if (intelCount + legacyCount > INTEL_ENTITY_DIRECTORY_MAX_RECORDS) {
+  if (
+    intelCount > INTEL_ENTITY_DIRECTORY_MAX_RECORDS ||
+    legacyCount > INTEL_ENTITY_DIRECTORY_MAX_RECORDS
+  ) {
     return { entities: null, limited: true, reason: "record-count" };
   }
 
@@ -89,10 +92,18 @@ export async function getIntelEntityDirectorySource(): Promise<IntelEntityDirect
     redis.hkeys(HASH_KEY),
     redis.hkeys(LEGACY_HASH_KEY),
   ]);
-  const fields = [
-    ...intelFields.map((field) => [HASH_KEY, field] as const),
-    ...legacyFields.map((field) => [LEGACY_HASH_KEY, field] as const),
-  ];
+  const fieldsByCanonicalSlug = new Map<string, readonly [string, string]>();
+  for (const field of legacyFields) {
+    fieldsByCanonicalSlug.set(field.toLowerCase(), [LEGACY_HASH_KEY, field]);
+  }
+  for (const field of intelFields) {
+    fieldsByCanonicalSlug.set(field.toLowerCase(), [HASH_KEY, field]);
+  }
+  if (fieldsByCanonicalSlug.size > INTEL_ENTITY_DIRECTORY_MAX_RECORDS) {
+    return { entities: null, limited: true, reason: "record-count" };
+  }
+
+  const fields = Array.from(fieldsByCanonicalSlug.values());
   const pipeline = redis.pipeline();
   for (const [key, field] of fields) pipeline.hstrlen(key, field);
   const sizes = fields.length === 0 ? [] : await pipeline.exec<number[]>();
