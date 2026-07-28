@@ -80,7 +80,7 @@ boundaries.
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER`,
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
   `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
-  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The four trusted-main plan
+  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The five trusted-main plan
   workflows and `terraform-drift.yml` route through the refresh selectors.
   Routing is live, and run
   [#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
