@@ -41,11 +41,13 @@ change concerns preview protection, verify on localhost and use the trusted CI
 preview/Lighthouse checks as deployment proof. Changes to preview access must
 exercise the preview with the workflow's configured bypass path.
 
-Confirm `.vercel/project.json` names `monitoring-dashboard` before using the
-Vercel CLI. Never run `vercel curl --yes` unlinked: it can create/link a project
-and a Deployment Protection bypass secret. If this happens, record project and
-secret IDs; preserve Terraform targets. Delete remote resources only with human
-approval; remove only the confirmed accidental local link.
+Before Vercel CLI use, run
+`vercel project inspect monitoring-dashboard --scope mentolabs`; require
+`mentolabs/monitoring-dashboard` and its ID to match `.vercel/project.json`.
+Never run `vercel curl --yes` unlinked: it can create/link a project and
+protection bypass secret. If so, record project, organization, and bypass-secret
+IDs; preserve Terraform targets. Remote deletion needs human approval; remove
+only confirmed accidental local links.
 
 Interactive `next dev` can rewrite `next-env.d.ts` to import
 `./.next/dev/types/routes.d.ts`. Restore the production
