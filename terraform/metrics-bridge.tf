@@ -72,10 +72,10 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
         name  = "POLL_INTERVAL_MS"
         value = "30000"
       }
-      # The paired policy configuration stays absent until a protected
-      # publication reports a concrete immutable generation. Terraform derives
-      # both values from that one reviewed literal; it never accepts a caller
-      # supplied policy URL or production auth mode.
+      # The paired policy configuration stays absent while the source-controlled
+      # generation is null. Terraform derives both values from one reviewed
+      # literal; it never accepts a caller-supplied policy URL or production
+      # auth mode.
       dynamic "env" {
         for_each = local.peg_policy_runtime_env
         content {
@@ -115,13 +115,11 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
     }
 
     # The deploy path stamps image, client metadata, and service-level scaling
-    # defaults. The null generation is dormant, so retain the revision drift
-    # ignore until a reviewed concrete generation attaches the policy and
-    # removes this entry in the same change. Per-revision template[0].scaling
-    # and service-level scaling_mode remain managed.
+    # defaults. Revision changes remain managed so this reviewed generation
+    # handoff creates a new revision. Per-revision template[0].scaling and
+    # service-level scaling_mode remain managed.
     ignore_changes = [
       template[0].containers[0].image,
-      template[0].revision,
       client,
       client_version,
       scaling[0].manual_instance_count,

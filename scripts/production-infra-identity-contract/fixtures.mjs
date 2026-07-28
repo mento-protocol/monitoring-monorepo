@@ -623,6 +623,9 @@ export function validFixtureFiles() {
     "terraform/metrics-bridge.tf": readFileSync(
       new URL("../../terraform/metrics-bridge.tf", import.meta.url),
       "utf8",
+    ).replace(
+      "      template[0].containers[0].image,\n      client,",
+      "      template[0].containers[0].image,\n      template[0].revision,\n      client,",
     ),
     "terraform/deploy-staging.tf": pegPolicyDeployStagingFixture,
     "terraform/peg-policy.tf": pegPolicyFixture,

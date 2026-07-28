@@ -200,17 +200,18 @@ permission split and phase boundary.
 configuration for the protected, versioned peg-policy artifact. The platform
 Terraform stack owns both Cloud Run values when runtime activation is approved;
 do not add or change them with an ad hoc
-`gcloud run services update --set-env-vars` command. Until then, both remain
-absent and the Peg poller stays dormant.
+`gcloud run services update --set-env-vars` command. They remain absent only
+while the source-controlled generation is `null`; the reviewed first activation
+sets a concrete generation and attaches both values together.
 
 The platform does not accept a policy URL or auth mode as an input. It commits
-`local.peg_policy_runtime_generation = null` in `terraform/peg-policy.tf` and
-derives the exact private GCS JSON media URL plus
+one `local.peg_policy_runtime_generation` literal in `terraform/peg-policy.tf`
+and derives the exact private GCS JSON media URL plus
 `PEG_POLICY_AUTH_MODE=gcp-metadata` from that one value. `null` is the only
-dormant state. Every active value must be a quoted positive decimal GCS
-generation within signed 64-bit range. Blank, zero, leading-zero, non-numeric,
-over-range, mutable, or differently encoded inputs fail the platform contract
-or plan.
+dormant state before first activation. The current runtime attachment uses a
+quoted positive decimal GCS generation within signed 64-bit range. Blank, zero,
+leading-zero, non-numeric, over-range, mutable, or differently encoded inputs
+fail the platform contract or plan.
 
 After the separately reviewed protected publication finishes, retrieve its
 provider-observed generation from the publication root:
@@ -225,10 +226,10 @@ In a separate reviewed platform change, replace the current source literal
 `peg_policy_runtime_generation = "1750000000000000"`. Do not pass it with
 `-var`, set a Cloud Run environment value manually, or substitute the
 publication URL. The platform code reconstructs the canonical URL, so the
-reviewed plan shows the paired attachment and a fresh Cloud Run revision. While
-the literal is `null`, retain `template[0].revision` in `ignore_changes` so
-routine deploy drift stays safe. Remove that entry only in the same reviewed
-change that replaces `null` or an older pin with a concrete generation.
+reviewed plan shows the paired attachment and a fresh Cloud Run revision. The
+first activation also removes `template[0].revision` from `ignore_changes`;
+later concrete-to-concrete rollovers leave it managed so each handoff creates a
+new revision.
 
 ### Runtime-pin rollback
 

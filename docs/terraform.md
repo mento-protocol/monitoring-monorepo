@@ -139,13 +139,14 @@ Routing and IAM audit complete. Removal: `0 added, 1 changed, 1 destroyed`;
 plan clean; IAM has no `metrics-bridge-deployer` Token Creator grant. Platform
 owns private buckets and identities; protected `peg-policy-publication` writes
 the policy object.
-Metrics Bridge uses the dedicated runtime identity; `PEG_POLICY_*` remains
-absent when `local.peg_policy_runtime_generation = null`. Reviewed activation
-changes that literal to the protected publisher's exact quoted positive output;
-publication does not attach Cloud Run or activate Grafana. Terraform derives the
-pinned URL and `gcp-metadata` mode from that literal. `null` retains
-`template[0].revision` in `ignore_changes`; a concrete generation removes it and
-creates a Cloud Run revision. Buckets, runtime, and publisher are in
+Metrics Bridge uses the dedicated runtime identity. `PEG_POLICY_*` is absent
+only when `local.peg_policy_runtime_generation = null`; the reviewed first
+activation changes that literal to the protected publisher's exact quoted
+positive output. Publication does not attach Cloud Run or activate Grafana.
+Terraform derives the pinned URL and `gcp-metadata` mode from that literal.
+`null` retains `template[0].revision` in `ignore_changes`; first activation
+removes it, and later concrete pins keep revision changes managed so each
+handoff creates a Cloud Run revision. Buckets, runtime, and publisher are in
 `mento-monitoring`; publication plan and reader are in the seed project. Only
 the exact publication workflow selects that read-only chain. Runtime and reader
 have direct bucket-scoped Object Viewer; publisher has direct Object Admin.
@@ -160,7 +161,8 @@ activation.
 
 ### Peg policy bucket controller recovery
 
-Publication is paused. Follow the explicitly approved recovery and proof in
+The one-time recovery is complete. Any future recovery must follow the
+explicitly approved procedure and proof in
 [ADR 0055](adr/0055-peg-policy-bucket-controller-recovery.md) from clean current
 `main`. Never use `roles/storage.admin`.
 

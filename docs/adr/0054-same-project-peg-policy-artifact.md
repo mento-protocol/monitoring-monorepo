@@ -100,10 +100,12 @@ paused until this recovery completes.
   `alerts/peg-policy-publication` root creates a policy object only through its
   manual protected workflow. The dormant runtime attachment assigns the
   dedicated reader identity to Metrics Bridge, but keeps its paired policy
-  values absent while `local.peg_policy_runtime_generation` is `null`. Neither
-  merge starts Peg polling or activates alerts. That null state retains the
-  Cloud Run template-revision drift ignore; a concrete generation removes it in
-  the same reviewed change to mint the attachment revision.
+  values absent while `local.peg_policy_runtime_generation` is `null`. Those
+  foundation and publication merges do not start Peg polling or activate
+  alerts. A separate reviewed runtime activation replaces `null` with the
+  published generation and removes the Cloud Run template-revision drift ignore
+  to mint the attachment revision; later rollovers keep revision changes
+  managed.
 
 ## Evidence
 

@@ -74,9 +74,10 @@ The `template[0].revision` drift ignore remains while the generation literal is
 a Cloud Run revision. The platform
 accepts no production policy URL or auth-mode input: a reviewed
 `local.peg_policy_runtime_generation` literal derives both values together.
-It stays `null` until protected publication reports a real generation; each
-later rollover replaces the current quoted generation literal in a reviewed
-platform change.
+It stays `null` only until protected publication reports the first real
+generation. After activation it remains concrete; each later rollover replaces
+the current quoted generation literal in a reviewed platform change and creates
+a new Cloud Run revision.
 
 Policy versions are content-addressed: the final 32 lowercase hexadecimal
 characters must match the canonical policy-content SHA-256 prefix. Canonical
