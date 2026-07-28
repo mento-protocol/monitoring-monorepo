@@ -2335,6 +2335,15 @@ assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/t
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform stack wrapper changed)"
 assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform stack wrapper changed)"
 
+for deploy_staging_contract_path in \
+  scripts/deploy-staging-callsite-discovery.mjs \
+  scripts/deploy-staging-contract.mjs \
+  scripts/deploy-staging-contract.test.mjs; do
+  run_gate "$deploy_staging_contract_path"
+  assert_contains "- pnpm lint:scripts (root build script changed)"
+  assert_contains "- pnpm tf:test (deployment source-staging contract changed)"
+done
+
 run_gate "scripts/terraform-fmt-check.mjs"
 assert_contains "- node scripts/terraform-fmt-check.test.mjs (Terraform format helper changed)"
 assert_contains "- pnpm tf:test (Terraform format helper changed)"

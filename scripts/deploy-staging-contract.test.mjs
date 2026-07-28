@@ -1302,6 +1302,40 @@ assert.equal(
   1,
   "tagged templates with literal-only interpolations must stay discoverable",
 );
+const constTaggedTemplateRecord = discoverDeployStagingCallsites({
+  "scripts/const-tagged-template.mjs": `const group = "builds";
+await $\`gcloud \${group} submit .\`;
+`,
+})[0];
+assert(
+  constTaggedTemplateRecord,
+  "tagged templates with const interpolations must be discovered",
+);
+const constTaggedFlagRecord = discoverDeployStagingCallsites({
+  "scripts/const-tagged-flag.mjs": `const group = "builds";
+const staging =
+  "--gcs-source-staging-dir=gs://trusted";
+await $\`gcloud \${group} submit \${staging} .\`;
+`,
+})[0];
+assert(
+  constTaggedFlagRecord,
+  "tagged templates with const flag interpolations must be discovered",
+);
+assert.equal(
+  constTaggedFlagRecord.flagTrusted,
+  false,
+  "resolved tagged-template records must carry untrusted flag provenance",
+);
+assert.equal(
+  recordHasDeployStagingFlag(
+    constTaggedFlagRecord,
+    "gcs-source-staging-dir",
+    "gs://trusted",
+  ),
+  false,
+  "resolved tagged-template constants must not prove a required staging flag",
+);
 assert.equal(
   discoverDeployStagingCallsites({
     "scripts/lowercase-windows-command-string.mjs":

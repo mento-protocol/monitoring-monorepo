@@ -2282,6 +2282,9 @@ while IFS= read -r path; do
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack wrapper changed"
           add_registered_terraform_validate_commands "Terraform stack wrapper changed"
           ;;
+        scripts/deploy-staging-callsite-discovery.mjs|scripts/deploy-staging-contract.mjs|scripts/deploy-staging-contract.test.mjs)
+          add_command "pnpm tf:test" "deployment source-staging contract changed"
+          ;;
         scripts/terraform-fmt-check.mjs)
           add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper changed"
           add_command "pnpm tf:test" "Terraform format helper changed"

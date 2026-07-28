@@ -306,6 +306,7 @@ function hasStructuredFlag(args, flag, value) {
 }
 
 export function recordHasDeployStagingFlag(record, flag, value) {
+  if (record.flagTrusted === false) return false;
   if (record.args) {
     return (
       record.argsTrusted !== false &&

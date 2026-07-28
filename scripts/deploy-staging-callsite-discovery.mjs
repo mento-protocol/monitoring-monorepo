@@ -630,7 +630,9 @@ function programmaticDeployRecords(filePath, contents, errors) {
     if (ts.isTaggedTemplateExpression(node)) {
       // A tag is an executable wrapper. Treat unknown tags like unknown calls:
       // they may execute the command or generate a script that does.
-      const templateText = staticString(node.template);
+      const literalTemplateText = staticString(node.template);
+      const templateText =
+        literalTemplateText ?? staticString(node.template, resolveIdentifier);
       if (templateText !== undefined) {
         const existingKinds = new Set(
           lexicalDeployRecords(filePath, "shell", node.getText(sourceFile)).map(
@@ -643,7 +645,12 @@ function programmaticDeployRecords(filePath, contents, errors) {
           flattenStaticShellTemplate(templateText),
         );
         for (const record of templateRecords) {
-          if (!existingKinds.has(record.kind)) records.push(record);
+          if (!existingKinds.has(record.kind)) {
+            records.push({
+              ...record,
+              flagTrusted: literalTemplateText !== undefined,
+            });
+          }
         }
       }
     }
