@@ -121,16 +121,6 @@ const registeredGrafanaDashboardModule = `module "grafana_dashboard" {
 }
 `;
 
-const registeredDevStorageAdmin = `resource "google_project_iam_member" "dev_storage_admin" {
-  for_each = toset(var.gcp_dev_members)
-  project  = google_project.monitoring.project_id
-  role     = "roles/storage.admin"
-  member   = each.value
-
-  depends_on = [google_project_iam_member.terraform_owner]
-}
-`;
-
 const registeredMetricsBridgeDeployer = `resource "google_service_account" "metrics_bridge_deployer" {
   project      = google_project.monitoring.project_id
   account_id   = "metrics-bridge-deployer"
@@ -155,7 +145,6 @@ const registeredAegisLocals = `locals {
     "roles/artifactregistry.writer",
     "roles/cloudbuild.builds.editor",
     "roles/logging.logWriter",
-    "roles/storage.objectAdmin",
   ])
 
   grafana_agent_secret_ids_by_key = {
@@ -171,12 +160,6 @@ assert.deepEqual(
       "aegis/terraform/main.tf",
       registeredGrafanaDashboardModule,
     ),
-  ),
-  [],
-);
-assert.deepEqual(
-  validateProductionInfraIdentityContract(
-    withTerraformFile("terraform/project-iam.tf", registeredDevStorageAdmin),
   ),
   [],
 );
@@ -602,17 +585,6 @@ expectFailure(
 );
 
 expectFailure(
-  withTerraformFile(
-    "terraform/project-iam.tf",
-    registeredDevStorageAdmin.replace(
-      "toset(var.gcp_dev_members)",
-      'toset([join("", ["serviceAccount:production-infra-", "applier@mento-terraform-seed-ffac.iam.gserviceaccount.com"])])',
-    ),
-  ),
-  "IAM grant sinks must match its exact audited shape",
-);
-
-expectFailure(
   withAppendedTerraform(
     "terraform/ci-wif.tf",
     registeredMetricsBridgeDeployer
@@ -660,7 +632,7 @@ expectFailure(
 );
 
 const composedCiRoleFiles = liveRepositoryFiles();
-const ciDeployerRole = '    "roles/storage.admin",';
+const ciDeployerRole = '    "roles/run.admin",';
 assert(composedCiRoleFiles["terraform/ci-wif.tf"].includes(ciDeployerRole));
 composedCiRoleFiles["terraform/ci-wif.tf"] = composedCiRoleFiles[
   "terraform/ci-wif.tf"

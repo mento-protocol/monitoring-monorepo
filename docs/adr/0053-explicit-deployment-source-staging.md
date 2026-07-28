@@ -78,11 +78,12 @@ rollout and the supported direct `pnpm bridge:deploy` path after the broad
 fallback is removed. The existing exact AppSpot binding continues to cover
 Aegis.
 
-This first phase is additive. Existing project-wide Storage Admin and routine
-Service Account User grants remain until real Metrics Bridge, Aegis, and Alloy
-deploys prove the explicit paths. A later reviewed phase removes those broad
-grants and audits effective project, bucket, inherited, and service-account
-IAM. It must finish before the protected peg-policy bucket is created.
+This first phase is additive. Existing project-wide Storage Admin, Storage
+Object Admin, and routine Service Account User grants remain until all five
+deployment paths prove the explicit routes. ADR 0054 owns the later reviewed
+same-project Peg-policy foundation: it removes those broad grants and requires
+an effective project, bucket, inherited, and service-account IAM audit after
+apply.
 
 Land the infrastructure as its own PR. After it merges, refresh current `main`,
 run a clean current-main platform plan, get explicit apply approval, apply, and
@@ -134,8 +135,9 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   retain their native `#` comment behavior. Inert examples belong only in
   `scripts/deploy-staging-contract.test.mjs`.
 - Operators must preserve the phase boundary: merge and apply the additive
-  infrastructure from current `main`, merge routing, run all deploy canaries,
-  then remove broad roles in a separate approved platform apply. This ADR
+  infrastructure from current `main`, merge routing, and run all five deploy
+  canaries. ADR 0054 then removes broad roles with the dormant same-project
+  Peg-policy foundation and requires an effective-IAM audit. This ADR itself
   creates no peg-policy bucket or identity.
 
 ## Evidence

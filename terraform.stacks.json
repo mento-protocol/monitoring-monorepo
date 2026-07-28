@@ -6,7 +6,7 @@
       "id": "platform",
       "name": "Platform",
       "path": "terraform",
-      "description": "Dashboard Vercel project, Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, separated CI Workload Identity Federation identities, project IAM, and repo-level GitHub Actions secrets and variables.",
+      "description": "Dashboard Vercel project, Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, separated CI Workload Identity Federation identities, project IAM, repo-level GitHub Actions secrets and variables, and a dormant unapplied Peg-policy GCS source foundation.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",

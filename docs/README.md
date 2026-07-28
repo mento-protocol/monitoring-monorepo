@@ -165,12 +165,13 @@ Authority: canonical
 - [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) — Peg paging measures executable sell price; the deep venue pages alone
 - [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) — Oracle freshness is reconstructed from persisted report events
 - [`docs/adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) — Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities
-- [`docs/adr/0048-private-gcs-peg-policy-artifact.md`](adr/0048-private-gcs-peg-policy-artifact.md) — Peg policy is a generation-pinned private GCS artifact
+- [`docs/adr/0048-private-gcs-peg-policy-artifact.md`](adr/0048-private-gcs-peg-policy-artifact.md) — Peg policy is a generation-pinned private GCS artifact (archived)
 - [`docs/adr/0049-peg-decision-package-read-model.md`](adr/0049-peg-decision-package-read-model.md) — Peg decisions use a bounded Metrics Bridge read model
 - [`docs/adr/0050-environment-scoped-pipeline-secrets.md`](adr/0050-environment-scoped-pipeline-secrets.md) — Pipeline secrets are gated by a Terraform-managed GitHub Environment
 - [`docs/adr/0051-dashboard-volume-scale-bounds.md`](adr/0051-dashboard-volume-scale-bounds.md) — Dashboard volume composition has per-chain and total re-review bounds
 - [`docs/adr/0052-envio-logs-prometheus-grafana-alerting.md`](adr/0052-envio-logs-prometheus-grafana-alerting.md) — Envio logs diagnose; Prometheus and Grafana alert
 - [`docs/adr/0053-explicit-deployment-source-staging.md`](adr/0053-explicit-deployment-source-staging.md) — Routine GCP deploys use explicit source-staging buckets
+- [`docs/adr/0054-same-project-peg-policy-artifact.md`](adr/0054-same-project-peg-policy-artifact.md) — Peg policy stays private in the monitoring project
 
 Authority: non-canonical
 

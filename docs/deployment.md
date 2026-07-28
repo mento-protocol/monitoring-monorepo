@@ -179,17 +179,13 @@ required source-staging flag/value. [ADR 0053](adr/0053-explicit-deployment-sour
 defines the supported static discovery syntax and its deliberate indirect and
 dynamic proof limits.
 
-This migration has a strict rollout order. First merge the infrastructure-only
-PR. Refresh current `main`, run a clean current-main platform plan, get explicit
-apply approval, apply, and verify both buckets, their bucket-scoped IAM, and the
-exact default-Compute act-as grants for the routine deployer and
-`gcp_dev_members`. Only then merge the routing follow-up; that merge triggers
-the Metrics Bridge and Aegis workflows.
-Canary those two paths and `pnpm aegis:agent:deploy` before a separate platform
-change removes the temporary project-wide Storage Admin and Service Account
-User grants. Never combine that removal with creation of the private
-peg-policy bucket or its identities.
-The ADR also records the permission split and phase boundary.
+Apply and verify the source buckets, scoped IAM, and default-Compute act-as
+grants before routing. Routing triggers the Metrics Bridge and Aegis workflows.
+Canary all five paths, including `pnpm aegis:agent:deploy`, before applying the
+policy foundation. That apply removes broad Storage Admin, Storage Object
+Admin, and Service Account User grants and requires an effective-IAM audit.
+[ADR 0053](adr/0053-explicit-deployment-source-staging.md) records the
+permission split and phase boundary.
 
 ---
 
@@ -200,7 +196,16 @@ configuration for the protected, versioned peg-policy artifact. The platform
 Terraform stack will own both Cloud Run values when that artifact plane is
 provisioned; do not add or change them with an ad hoc
 `gcloud run services update --set-env-vars` command. Until then, both remain
-absent and only the isolated Peg poller stays dormant.
+absent and the Peg poller stays dormant.
+
+The dormant source foundation places the policy and access logs in
+`mento-monitoring`. The Metrics Bridge runtime and publisher identities also
+live there, with direct bucket-scoped Viewer and Object Admin grants. Before
+applying current `main`, #1659 must merge and all five paths must pass canaries.
+The apply creates the policy foundation and removes broad Storage Admin, Storage
+Object Admin, and Service Account User fallbacks. Audit effective IAM afterward
+and again before activation. The org-Terraform Owner path and organization IAM
+admins are accepted control-plane exceptions.
 
 Production mode is `gcp-metadata`. The URL must use the exact GCS JSON download
 host and path, a canonical percent-encoded object component, `alt=media`, and
@@ -232,8 +237,9 @@ identity/topology data at the compiled loader's expected path. It never bakes
 `alerts/rules/peg-thresholds.json` into the image: page-affecting thresholds are
 fetched from the gated runtime artifact under
 [ADR 0044](adr/0044-peg-thresholds-gated-rules-plane.md). Its private,
-generation-pinned GCS transport and dormant activation boundary are fixed by
-[ADR 0048](adr/0048-private-gcs-peg-policy-artifact.md).
+generation-pinned GCS transport, project placement, and dormant activation
+boundary are fixed by
+[ADR 0054](adr/0054-same-project-peg-policy-artifact.md).
 
 ---
 
