@@ -63,8 +63,7 @@
         ".github/workflows/ci.yml",
         ".github/workflows/infra.yml",
         ".github/workflows/peg-policy-publication.yml"
-      ],
-      "aliases": ["pnpm peg-policy:init", "pnpm peg-policy:plan"]
+      ]
     },
     {
       "id": "alerts-rules",

@@ -35,7 +35,7 @@ const EXPECTED_TOP_LEVEL_BLOCKS = new Set([
 ]);
 const EXPECTED_IDENTITIES = new Set([
   "org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com",
-  "org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com",
+  "peg-policy-publication-reader@mento-terraform-seed-ffac.iam.gserviceaccount.com",
   "peg-policy-publisher@mento-monitoring.iam.gserviceaccount.com",
 ]);
 const PEG_POLICY_BASE64_ALPHABET =
@@ -273,14 +273,14 @@ function validateVariable(blocks, errors) {
   expectExpression(
     validation,
     "condition",
-    'var.terraform_service_account == "org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com" || var.terraform_service_account == "peg-policy-publisher@mento-monitoring.iam.gserviceaccount.com"',
+    'var.terraform_service_account == "peg-policy-publication-reader@mento-terraform-seed-ffac.iam.gserviceaccount.com" || var.terraform_service_account == "peg-policy-publisher@mento-monitoring.iam.gserviceaccount.com"',
     errors,
     "provider identity variable",
   );
   expectString(
     validation,
     "error_message",
-    "terraform_service_account must be the refresh reader or the Peg policy publisher.",
+    "terraform_service_account must be the Peg policy publication reader or publisher.",
     errors,
     "provider identity variable",
   );

@@ -213,7 +213,10 @@ versioned object. Dispatch its `plan` operation from `main`, inspect the
 read-only result, then dispatch `apply` and approve `production-infra`. Copy
 only its generation-pinned output into the later reviewed runtime-activation
 change. The publication workflow does not set either Cloud Run value or alter
-Grafana.
+Grafana. Its WIF-facing plan identity is bound to that exact workflow and may
+impersonate only the publication reader. That reader can view only the
+Terraform state and policy buckets; the shared refresh identity cannot read
+policy objects.
 
 Production mode is `gcp-metadata`. The URL must use the exact GCS JSON download
 host and path, a canonical percent-encoded object component, `alt=media`, and

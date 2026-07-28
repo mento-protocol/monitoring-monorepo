@@ -1,5 +1,5 @@
 ---
-title: Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities
+title: Terraform CI separates routine deploy, PR plan, trusted-main refresh, Peg publication plan, and production apply identities
 status: active
 owner: eng
 canonical: true
@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0047 — Terraform CI separates routine deploy, PR plan, trusted-main refresh, and production apply identities
+# ADR 0047 — Terraform CI separates routine deploy, PR plan, trusted-main refresh, Peg publication plan, and production apply identities
 
 **Status:** Accepted (Jul 2026), live cutover and final authority removal
 complete.
@@ -41,14 +41,15 @@ produce a principal in the same pool namespace.
 
 ## Decision
 
-Keep four separate authentication chains:
+Keep five separate authentication chains:
 
-| Lane                             | GitHub selector                                                                                          | WIF-facing identity                       | Downstream authority                                                                                             |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Routine service deploy           | Existing `secrets.GCP_WORKLOAD_IDENTITY_PROVIDER` and `secrets.GCP_SERVICE_ACCOUNT`                      | `metrics-bridge-deployer`                 | Direct service-deploy roles in the monitoring project; no `org-terraform` impersonation after cutover            |
-| Same-repo PR plan                | Existing plan selector                                                                                   | `metrics-bridge-plan-readonly`            | `org-terraform-plan-readonly` with read-only state access; no live-project roles                                 |
-| Trusted-`main` refresh and drift | `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER` and `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT` | Seed-project `terraform-refresh-readonly` | `org-terraform-refresh-readonly` with read-only state and explicitly granted live-resource reads; no write roles |
-| Production Terraform apply       | `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`   | Seed-project `production-infra-applier`   | Service-account-scoped Token Creator on `org-terraform`, reachable only through the dedicated production pool    |
+| Lane                             | GitHub selector                                                                                          | WIF-facing identity                        | Downstream authority                                                                                             |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Routine service deploy           | Existing `secrets.GCP_WORKLOAD_IDENTITY_PROVIDER` and `secrets.GCP_SERVICE_ACCOUNT`                      | `metrics-bridge-deployer`                  | Direct service-deploy roles in the monitoring project; no `org-terraform` impersonation after cutover            |
+| Same-repo PR plan                | Existing plan selector                                                                                   | `metrics-bridge-plan-readonly`             | `org-terraform-plan-readonly` with read-only state access; no live-project roles                                 |
+| Trusted-`main` refresh and drift | `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER` and `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT` | Seed-project `terraform-refresh-readonly`  | `org-terraform-refresh-readonly` with read-only state and explicitly granted live-resource reads; no write roles |
+| Peg policy publication plan      | Refresh provider plus `vars.GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT`                             | Seed-project `peg-policy-publication-plan` | `peg-policy-publication-reader` with Object Viewer on only state and policy objects                              |
+| Production Terraform apply       | `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`   | Seed-project `production-infra-applier`    | Service-account-scoped Token Creator on `org-terraform`, reachable only through the dedicated production pool    |
 
 All three GitHub providers require the repository slug and GitHub's immutable
 repository ID `1172025835`. The numeric ID prevents a renamed or deleted
@@ -72,8 +73,8 @@ both outside the routine deployer's monitoring-project
 
 The refresh provider also has its own `github-terraform-refresh` pool and
 accepts only protected-`main` tokens whose signed `workflow_ref` names one of
-the four Terraform apply workflows or `terraform-drift.yml`. Other `main`
-workflows cannot select the refresh identity through the generic pool.
+the four Terraform apply workflows, `terraform-drift.yml`, or the policy
+publication workflow. Other `main` workflows cannot enter that pool.
 
 The trusted-`main` refresh chain remains read-only. Its backend plans use
 `-lock=false` because state-bucket `roles/storage.objectViewer` cannot create
@@ -81,6 +82,14 @@ or delete the GCS lock object. The alerts-delivery and governance-watchdog
 stacks own their random project IDs, so those stacks also own the live-read
 grants for `org-terraform-refresh-readonly`; the platform stack must not guess
 those IDs.
+
+Policy publication has its own two-hop read chain inside that pool. An exact
+`workflow_ref` binding lets only `peg-policy-publication.yml@main` select the
+plan identity, which may impersonate only the reader. The reader can view only
+the state and policy buckets; the shared refresh identity cannot read policy
+objects. The shared refresh identity's own WIF binding lists only the five
+regular refresh and drift workflow refs, so admitting publication to the pool
+does not let it select that broader identity.
 
 Full-fidelity refresh requires more than project metadata. Each target project
 grants a curated set of non-basic read roles for the services Terraform
@@ -117,7 +126,7 @@ audited procedure:
    variable context may predate the identity bootstrap.
 2. Run an explicitly approved local platform plan and apply. This creates the
    dedicated pool/provider, production applier, trusted-main refresh chain,
-   state access, and the four repository variables named above.
+   state access, and the original four production/refresh repository variables.
 3. Re-run the alerts-delivery and governance-watchdog `main` workflows, review
    their plans, and approve the live-read grant applies.
 4. Verify those runs and the new production apply authentication path. Keep

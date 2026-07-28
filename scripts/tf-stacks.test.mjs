@@ -206,11 +206,21 @@ function assertApplyRefused(result) {
   );
 }
 
-function assertWorkflowOnlyApplyRefused(result, stackId, workflowPath) {
+function assertWorkflowOnlyStatefulCommandRefused(
+  result,
+  command,
+  stackId,
+  workflowPath,
+) {
   assertIncludes(
     result.stderr,
-    `refusing local Terraform apply for workflow-only stack ${stackId}`,
+    `refusing local Terraform ${command} for workflow-only stack ${stackId}`,
     "refusal should identify the workflow-only stack",
+  );
+  assertIncludes(
+    result.stderr,
+    `Local wrapper plans and applies are disabled for ${stackId}`,
+    "refusal should explain the stateful local-command boundary",
   );
   assertIncludes(
     result.stderr,
@@ -218,8 +228,8 @@ function assertWorkflowOnlyApplyRefused(result, stackId, workflowPath) {
     "refusal should direct the operator to the protected workflow",
   );
   assert(
-    !result.stderr.includes("Override for a deliberate local apply"),
-    "workflow-only stacks must not advertise a local override",
+    result.stderr.includes(`pnpm tf validate ${stackId}`),
+    "refusal should direct operators to credential-free local validation",
   );
 }
 
@@ -436,6 +446,29 @@ function runApplyGuardTests(tempDir) {
   assertApplyCallWithoutForce(fakeTools.terraformLog);
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
+  result = runFail(["plan", "peg-policy-publication", "-out=tfplan"], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_BRANCH: "feature/peg-policy-publication",
+      TF_STACKS_TEST_FAIL_ON_GIT: "1",
+    },
+  });
+  assertWorkflowOnlyStatefulCommandRefused(
+    result,
+    "plan",
+    "peg-policy-publication",
+    ".github/workflows/peg-policy-publication.yml",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "publication plan must not run terraform",
+  );
+  assertNoGitCalls(
+    fakeTools.gitLog,
+    "publication plan must stop before git safety checks",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
   result = runFail(["apply", "peg-policy-publication", "-auto-approve"], {
     env: {
       ...baseEnv,
@@ -443,8 +476,9 @@ function runApplyGuardTests(tempDir) {
       TF_STACKS_TEST_FAIL_ON_GIT: "1",
     },
   });
-  assertWorkflowOnlyApplyRefused(
+  assertWorkflowOnlyStatefulCommandRefused(
     result,
+    "apply",
     "peg-policy-publication",
     ".github/workflows/peg-policy-publication.yml",
   );
@@ -468,8 +502,9 @@ function runApplyGuardTests(tempDir) {
       },
     },
   );
-  assertWorkflowOnlyApplyRefused(
+  assertWorkflowOnlyStatefulCommandRefused(
     result,
+    "apply",
     "peg-policy-publication",
     ".github/workflows/peg-policy-publication.yml",
   );

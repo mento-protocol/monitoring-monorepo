@@ -41,14 +41,7 @@ pnpm alerts:rules:plan
 pnpm alerts:infra:plan
 pnpm aegis:tf:plan
 pnpm gov-watchdog:tf:plan
-pnpm peg-policy:init
-pnpm peg-policy:plan
 ```
-
-`pnpm peg-policy:plan` defaults to the publisher identity and therefore fails
-closed for local operators: only `production-infra-applier` may impersonate
-that identity. For a local read-only plan, set
-`TF_VAR_terraform_service_account=org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com`.
 
 Without a stack, `pnpm tf validate` validates every registered stack. It formats
 tracked and non-ignored untracked Terraform, then runs backend-free init and
@@ -59,10 +52,11 @@ apply requires a clean `main` at `origin/main` unless the operator deliberately
 passes `--force-local-apply`. Normally, merge and let GitHub Actions apply
 through `production-infra` approval.
 
-`peg-policy-publication` never permits local apply, including with
-`--force-local-apply`. After the foundation is live, dispatch `Peg Policy
-Publication` from `main`: inspect its read-only plan, then choose `apply` and
-approve the `production-infra` Environment. Its output supplies one
+`peg-policy-publication` permits only backend-free local validation with
+`pnpm tf validate peg-policy-publication`. Local plan and apply are disabled,
+including `--force-local-apply`. After the foundation is live, dispatch `Peg
+Policy Publication` from `main`: inspect its read-only plan, then choose `apply`
+and approve the `production-infra` Environment. Its output supplies one
 generation-pinned URL for a later runtime-activation change.
 
 ## CI Model
@@ -118,13 +112,14 @@ settings such as default workflow-token permission, dispatch
 
 ## Terraform CI identities
 
-[ADR 0047](adr/0047-separated-terraform-ci-identities.md) owns the four lanes:
+[ADR 0047](adr/0047-separated-terraform-ci-identities.md) owns the five lanes:
 routine deploy, state-only same-repo PR plan, read-only trusted-`main` refresh,
-and Environment-bound production apply. All three WIF providers bind repository
-slug and immutable ID `1172025835`; apply also binds protected `main` and the
-`production-infra` subject, while refresh uses an exact `workflow_ref`
-allowlist. The identity contract restricts the five trusted-main plan workflows
-and `terraform-drift.yml` to both refresh selectors.
+the workflow-only Peg policy publication plan, and Environment-bound production
+apply. All three WIF providers bind repository slug and immutable ID
+`1172025835`; apply also binds protected `main` and the `production-infra`
+subject, while refresh uses an exact `workflow_ref` allowlist. The identity
+contract gives the publication workflow its dedicated plan account and keeps
+the other trusted-main plans on the shared refresh account.
 
 Trusted-main plans use `-lock=false` and curated non-basic readers. Run
 #30212385280 completed the required full-refresh proof; the later run-drain and
@@ -146,10 +141,11 @@ reported no changes, and live IAM contains no `metrics-bridge-deployer` Token
 Creator grant. The platform foundation owns the private buckets and identities;
 the separate `peg-policy-publication` root writes the policy object only through
 its manual protected workflow. It does not attach the runtime identity to Cloud
-Run or activate Grafana. Both policy buckets and both policy service accounts
-live in `mento-monitoring`; they depend on its existing Storage and IAM APIs.
-The runtime has a direct bucket-scoped Object Viewer grant and the publisher
-has a direct bucket-scoped Object Admin grant.
+Run or activate Grafana. Both policy buckets, the runtime, and the publisher
+live in `mento-monitoring`. The publication plan and reader identities live in
+the seed project. Only the exact publication workflow may select that read-only
+chain. The runtime and publication reader have direct bucket-scoped Object
+Viewer grants; the publisher has direct bucket-scoped Object Admin.
 
 The authoritative bucket policies make direct grants exact. Project and
 organization grants still inherit into the bucket. The protected org-Terraform

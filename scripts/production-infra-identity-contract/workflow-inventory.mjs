@@ -439,7 +439,8 @@ function pegPolicyPublicationPlanJobInventory() {
         with: {
           workload_identity_provider:
             "${{ vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER }}",
-          service_account: "${{ vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT }}",
+          service_account:
+            "${{ vars.GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT }}",
         },
       },
       {
@@ -451,14 +452,14 @@ function pegPolicyPublicationPlanJobInventory() {
       },
       {
         name: "Init read-only backend",
-        run: 'terraform init -input=false -backend-config="impersonate_service_account=org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"',
+        run: 'terraform init -input=false -backend-config="impersonate_service_account=peg-policy-publication-reader@mento-terraform-seed-ffac.iam.gserviceaccount.com"',
       },
       {
         name: "Plan",
         id: "plan",
         env: {
           TF_VAR_terraform_service_account:
-            "org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com",
+            "peg-policy-publication-reader@mento-terraform-seed-ffac.iam.gserviceaccount.com",
         },
         run: PEG_POLICY_PUBLICATION_PLAN_COMMAND,
       },
@@ -598,7 +599,11 @@ function pegPolicyPublicationWorkflowInventory() {
             uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
             with: {
               "persist-credentials": false,
+              "fetch-depth": 0,
             },
+          },
+          {
+            uses: "./.github/actions/pnpm-install",
           },
           {
             uses: "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e",

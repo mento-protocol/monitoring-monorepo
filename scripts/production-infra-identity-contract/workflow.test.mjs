@@ -144,6 +144,16 @@ expectFailure(
   replaceWorkflowFile(
     validFiles,
     pegPolicyPublicationWorkflow,
+    "${{ vars.GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT }}",
+    "${{ vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT }}",
+  ),
+  "must match the exact manual publication workflow inventory",
+);
+
+expectFailure(
+  replaceWorkflowFile(
+    validFiles,
+    pegPolicyPublicationWorkflow,
     "inputs.operation == 'apply'",
     "inputs.operation != 'apply'",
   ),

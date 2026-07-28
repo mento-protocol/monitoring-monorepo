@@ -66,8 +66,6 @@ const IDENTITY_REFERENCE_SPECIFICATIONS = [
       "terraform/ci-wif.tf:resource.google_service_account.org_terraform_refresh_readonly",
       "terraform/ci-wif.tf:resource.google_storage_bucket_iam_member.state_bucket_refresh_readonly",
       "terraform/ci-wif.tf:resource.google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator",
-      "terraform/peg-policy.tf:data.google_iam_policy.peg_policy",
-      "alerts/peg-policy-publication/variables.tf:variable.terraform_service_account",
       "alerts/infra/main.tf:resource.google_project_iam_member.terraform_refresh_readonly",
       "alerts/infra/onchain-event-handler/main.tf:resource.google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
       "alerts/infra/onchain-event-handler/main.tf:resource.google_secret_manager_secret_iam_member.terraform_refresh_readonly",

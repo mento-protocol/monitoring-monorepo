@@ -3,6 +3,7 @@ import { load as loadYaml } from "js-yaml";
 import {
   APPLY_WORKFLOWS,
   MANUAL_PUBLICATION_WORKFLOWS,
+  PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT_VARIABLE,
   PRODUCTION_PROVIDER_VARIABLE,
   PRODUCTION_SERVICE_ACCOUNT_VARIABLE,
   REFRESH_PROVIDER_VARIABLE,
@@ -475,6 +476,15 @@ export function validateWorkflowContract(files, errors) {
           parsedWorkflow,
           "vars",
           REFRESH_SERVICE_ACCOUNT_VARIABLE,
+        ),
+        sourcePublicationServiceAccount: variableOccurrences(
+          code,
+          PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT_VARIABLE,
+        ).length,
+        decodedPublicationServiceAccount: decodedContextVariableOccurrenceCount(
+          parsedWorkflow,
+          "vars",
+          PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT_VARIABLE,
         ),
         selectorCount: decodedContextVariableOccurrenceCount,
       },
