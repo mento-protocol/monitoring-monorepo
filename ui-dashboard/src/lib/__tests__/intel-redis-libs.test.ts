@@ -3,10 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Mock @/lib/redis so the intel-* libs never touch a real client.
 const hget = vi.fn();
 const hgetall = vi.fn();
-const hkeys = vi.fn();
 
 vi.mock("@/lib/redis", () => ({
-  getRedis: vi.fn(() => ({ hget, hgetall, hkeys })),
+  getRedis: vi.fn(() => ({ hget, hgetall })),
 }));
 
 import {
@@ -27,7 +26,6 @@ import {
 import {
   getIntelEntity,
   getAllIntelEntities,
-  hkeysIntelEntities,
   INTEL_ENTITIES_KEY,
   INTEL_ENTITY_SLUG_RE,
 } from "@/lib/intel-entities";
@@ -239,13 +237,6 @@ describe("intel-entities", () => {
   it("getAllIntelEntities: falls back to {} on null", async () => {
     hgetall.mockResolvedValue(null);
     expect(await getAllIntelEntities()).toEqual({});
-  });
-
-  it("hkeysIntelEntities: returns list of slug keys", async () => {
-    hkeys.mockResolvedValue(["binance", "coinbase"]);
-    const result = await hkeysIntelEntities();
-    expect(hkeys).toHaveBeenCalledWith(INTEL_ENTITIES_KEY);
-    expect(result).toEqual(["binance", "coinbase"]);
   });
 });
 

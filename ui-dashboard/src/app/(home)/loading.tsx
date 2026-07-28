@@ -13,8 +13,9 @@ const SHIMMER = "animate-pulse rounded bg-slate-800/50";
 // The group changes no URL — it just makes this the nearest Suspense boundary
 // for `(home)/page.tsx` only. Every other route falls back to the generic
 // `app/loading.tsx` (`PageShellSkeleton`) it used before this change, so a
-// homepage-shaped skeleton can't leak onto `/entities`, `/integrations`,
-// `/sign-in`, or any other segment that suspends without a nearer loading.tsx.
+// homepage-shaped skeleton can't leak onto `/address-book/entities`,
+// `/integrations`, `/sign-in`, or any other segment that suspends without a
+// nearer loading.tsx.
 // `/pools` is the one exception: it has its own shape-matched
 // `pools/loading.tsx`.
 

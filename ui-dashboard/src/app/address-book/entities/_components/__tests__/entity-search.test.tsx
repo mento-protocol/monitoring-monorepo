@@ -44,7 +44,8 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import { EntitySearch } from "@/app/entities/_components/entity-search";
+import { EntitySearch } from "@/app/address-book/entities/_components/entity-search";
+import type { EntityDirectoryItem } from "@/app/address-book/entities/_lib/entity-directory";
 
 let container: HTMLElement | null = null;
 let root: Root | null = null;
@@ -58,11 +59,22 @@ const SLUGS = [
   "beta-one",
   "gamma-zero",
 ];
+const ITEMS: EntityDirectoryItem[] = SLUGS.map((slug) => ({
+  slug,
+  name: slug === "gamma-zero" ? "Gamma Exchange" : slug,
+  type: null,
+  addressCount: 0,
+  tags: [],
+  searchText:
+    slug === "gamma-zero"
+      ? `${slug}\ngamma exchange\n0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
+      : slug,
+}));
 
 function setUrl(qs: string): void {
   const search = qs ? `?${qs}` : "";
   mockSearchParams = new URLSearchParams(qs);
-  window.history.replaceState({}, "", `/entities${search}`);
+  window.history.replaceState({}, "", `/address-book/entities${search}`);
 }
 
 function render(): void {
@@ -70,7 +82,7 @@ function render(): void {
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root?.render(<EntitySearch slugs={SLUGS} />);
+    root?.render(<EntitySearch items={ITEMS} addressSearchLimit={50} />);
   });
 }
 
@@ -110,8 +122,10 @@ function pageStatus(): string {
 }
 
 function firstVisibleSlug(): string {
-  const link = container?.querySelector<HTMLAnchorElement>("ul a");
-  return link?.textContent?.trim() ?? "";
+  return (
+    container?.querySelector<HTMLTableRowElement>("tbody tr")?.dataset
+      .entitySlug ?? ""
+  );
 }
 
 beforeEach(() => {
@@ -131,6 +145,19 @@ afterEach(() => {
 });
 
 describe("EntitySearch — URL state", () => {
+  it("uses the same compact search and table treatment as Addresses", () => {
+    render();
+    const input = searchInput();
+    expect(input.classList.contains("max-w-sm")).toBe(true);
+    expect(input.classList.contains("focus:ring-1")).toBe(true);
+    expect(container?.querySelector("ul")).toBeNull();
+    expect(
+      Array.from(container?.querySelectorAll("thead th") ?? []).map((header) =>
+        header.textContent?.trim(),
+      ),
+    ).toEqual(["Entity", "Type", "Tags", "Addresses", "Slug"]);
+  });
+
   it("lazy-inits page from ?page=", () => {
     setUrl("page=2");
     render();
@@ -143,6 +170,15 @@ describe("EntitySearch — URL state", () => {
     render();
     expect(searchInput().value).toBe("beta");
     expect(firstVisibleSlug()).toBe("beta-zero");
+  });
+
+  it("searches enriched entity names and known addresses", () => {
+    render();
+    typeSearch("Gamma Exchange");
+    expect(firstVisibleSlug()).toBe("gamma-zero");
+
+    typeSearch("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(firstVisibleSlug()).toBe("gamma-zero");
   });
 
   it("lazy-inits q and page together from URL", () => {
@@ -211,7 +247,7 @@ describe("EntitySearch — URL state", () => {
     render();
     expect(searchInput().value).toBe("");
     // Simulate a back/forward landing on a different URL state.
-    window.history.replaceState({}, "", "/entities?q=gamma");
+    window.history.replaceState({}, "", "/address-book/entities?q=gamma");
     act(() => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });

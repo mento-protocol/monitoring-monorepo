@@ -1,8 +1,4 @@
-import {
-  hgetWithLegacy,
-  hgetallWithLegacy,
-  hkeysWithLegacy,
-} from "./intel-legacy-fallback";
+import { hgetWithLegacy, hgetallWithLegacy } from "./intel-legacy-fallback";
 
 export const INTEL_ENTITIES_KEY = "intel_entities";
 const HASH_KEY = INTEL_ENTITIES_KEY;
@@ -54,8 +50,4 @@ export async function getAllIntelEntities(): Promise<
   Record<string, IntelEntityRecord>
 > {
   return hgetallWithLegacy<IntelEntityRecord>(HASH_KEY, LEGACY_HASH_KEY);
-}
-
-export async function hkeysIntelEntities(): Promise<string[]> {
-  return hkeysWithLegacy(HASH_KEY, LEGACY_HASH_KEY);
 }

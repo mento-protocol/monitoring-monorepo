@@ -29,7 +29,6 @@ const AUTH_NAV_LINKS: readonly NavLinkItem[] = [
   { href: "/integrations", label: "Integrations", kind: "section" },
   { href: "/revenue", label: "Revenue", kind: "section" },
   { href: "/address-book", label: "Addresses", kind: "section" },
-  { href: "/entities", label: "Entities", kind: "section" },
 ];
 
 type NavLinksProps = {
