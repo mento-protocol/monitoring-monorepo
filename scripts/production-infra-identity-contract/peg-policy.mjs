@@ -25,6 +25,7 @@ export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
     allowedBlocks: new Set([
       "terraform/peg-policy.tf:resource.google_service_account.metrics_bridge_runtime",
       "terraform/peg-policy.tf:data.google_iam_policy.peg_policy",
+      "terraform/metrics-bridge.tf:resource.google_cloud_run_v2_service.metrics_bridge",
     ]),
   },
   {
@@ -422,6 +423,162 @@ function rejectBroadProjectFallbacks(topLevelBlocks, errors) {
   }
 }
 
+const PEG_POLICY_RUNTIME_GENERATION_CONDITION =
+  'local.peg_policy_runtime_generation == null ? true : (can(regex("^[1-9][0-9]*$", local.peg_policy_runtime_generation)) && can(tonumber(local.peg_policy_runtime_generation)) && tonumber(local.peg_policy_runtime_generation) <= 9223372036854775807)';
+const PEG_POLICY_RUNTIME_URL =
+  '"https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}"';
+
+function normalizedSource(value) {
+  return value.replace(/\s+/gu, " ").trim();
+}
+
+function expectRuntimeSource(source, expected, errors, label) {
+  if (!normalizedSource(source).includes(normalizedSource(expected))) {
+    errors.push(`${label}: must be exactly source-controlled`);
+  }
+}
+
+function validatePegPolicyRuntimeAttachment(files, topLevelBlocks, errors) {
+  const label = "terraform: Peg policy runtime attachment";
+  const runtimeLocals = topLevelBlocks.filter(
+    (block) =>
+      block.filePath === "terraform/peg-policy.tf" &&
+      block.kind === "locals" &&
+      block.code.includes("peg_policy_runtime_generation"),
+  );
+  if (runtimeLocals.length !== 1) {
+    errors.push(`${label}: must declare exactly one runtime locals block`);
+  } else {
+    const source = runtimeLocals[0].code;
+    expectRuntimeSource(
+      source,
+      "peg_policy_runtime_generation = null",
+      errors,
+      `${label}: generation default`,
+    );
+    expectRuntimeSource(
+      source,
+      `peg_policy_runtime_url = local.peg_policy_runtime_generation == null ? null : ${PEG_POLICY_RUNTIME_URL}`,
+      errors,
+      `${label}: canonical URL`,
+    );
+    expectRuntimeSource(
+      source,
+      `peg_policy_runtime_env = local.peg_policy_runtime_generation == null ? {} : { PEG_POLICY_URL = local.peg_policy_runtime_url PEG_POLICY_AUTH_MODE = "gcp-metadata" }`,
+      errors,
+      `${label}: paired environment`,
+    );
+  }
+
+  const externalGenerationInputs = topLevelBlocks.filter(
+    (block) =>
+      block.kind === "variable" &&
+      block.labels[0] === "peg_policy_runtime_generation",
+  );
+  if (externalGenerationInputs.length > 0) {
+    errors.push(
+      `${label}: runtime generation must be a reviewed source literal, not an external variable`,
+    );
+  }
+
+  const policyPairOccurrences = Object.values(files)
+    .filter((source) => typeof source === "string")
+    .join("\n")
+    .match(/\bPEG_POLICY_(?:URL|AUTH_MODE)\b/gu);
+  if ((policyPairOccurrences?.length ?? 0) !== 2) {
+    errors.push(
+      `${label}: PEG_POLICY_URL and PEG_POLICY_AUTH_MODE must appear only in the paired runtime map`,
+    );
+  }
+
+  const runtime = requireBlock(
+    topLevelBlocks.filter((block) => block.kind === "resource"),
+    "terraform/metrics-bridge.tf",
+    "google_cloud_run_v2_service",
+    "metrics_bridge",
+    errors,
+    label,
+  );
+  if (!runtime) return;
+  if (
+    !sameSortedValues(extractExpressionList(runtime, "depends_on"), [
+      "google_project_service.run",
+      "google_storage_bucket_iam_policy.peg_policy",
+    ])
+  ) {
+    errors.push(`${label}: must depend on Cloud Run and the policy IAM grant`);
+  }
+
+  const templates = nestedBlocks(runtime, "template");
+  if (templates.length !== 1) {
+    errors.push(`${label}: must contain exactly one Cloud Run template`);
+    return;
+  }
+  expectExpression(
+    templates[0],
+    "service_account",
+    "google_service_account.metrics_bridge_runtime.email",
+    errors,
+    label,
+  );
+  const containers = nestedBlocks(templates[0], "containers");
+  if (containers.length !== 1) {
+    errors.push(`${label}: must contain exactly one Cloud Run container`);
+    return;
+  }
+  const policyEnv = nestedBlocks(containers[0], 'dynamic "env"');
+  if (policyEnv.length !== 1) {
+    errors.push(`${label}: must contain exactly one paired policy env block`);
+  } else {
+    expectExpression(
+      policyEnv[0],
+      "for_each",
+      "local.peg_policy_runtime_env",
+      errors,
+      label,
+    );
+    const contents = nestedBlocks(policyEnv[0], "content");
+    if (contents.length !== 1) {
+      errors.push(
+        `${label}: policy env block must contain exactly one content block`,
+      );
+    } else {
+      expectExpression(contents[0], "name", "env.key", errors, label);
+      expectExpression(contents[0], "value", "env.value", errors, label);
+    }
+  }
+
+  const lifecycles = nestedBlocks(runtime, "lifecycle");
+  if (lifecycles.length !== 1) {
+    errors.push(`${label}: must contain exactly one lifecycle block`);
+    return;
+  }
+  if (lifecycles[0].code.includes("template[0].revision")) {
+    errors.push(
+      `${label}: must not ignore template revision while applying the identity and policy pair`,
+    );
+  }
+  const preconditions = nestedBlocks(lifecycles[0], "precondition");
+  if (preconditions.length !== 1) {
+    errors.push(`${label}: must contain exactly one generation precondition`);
+  } else {
+    expectExpression(
+      preconditions[0],
+      "condition",
+      PEG_POLICY_RUNTIME_GENERATION_CONDITION,
+      errors,
+      label,
+    );
+    expectString(
+      preconditions[0],
+      "error_message",
+      "peg_policy_runtime_generation must be null or a positive GCS generation within signed 64-bit range.",
+      errors,
+      label,
+    );
+  }
+}
+
 export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
   const resources = topLevelBlocks.filter((block) => block.kind === "resource");
   validateBucket(
@@ -547,4 +704,5 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
   }
   rejectUnsafeAdditions(files, topLevelBlocks, errors);
   rejectBroadProjectFallbacks(topLevelBlocks, errors);
+  validatePegPolicyRuntimeAttachment(files, topLevelBlocks, errors);
 }

@@ -201,6 +201,29 @@ provisioned; do not add or change them with an ad hoc
 `gcloud run services update --set-env-vars` command. Until then, both remain
 absent and the Peg poller stays dormant.
 
+The platform does not accept a policy URL or auth mode as an input. It commits
+`local.peg_policy_runtime_generation = null` in `terraform/peg-policy.tf` and
+derives the exact private GCS JSON media URL plus
+`PEG_POLICY_AUTH_MODE=gcp-metadata` from that one value. `null` is the only
+dormant state. Blank, zero, non-numeric, over-range, mutable, or differently
+encoded inputs fail the platform contract or plan.
+
+After the separately reviewed protected publication finishes, retrieve its
+provider-observed generation from the publication root:
+
+```bash
+terraform -chdir=alerts/peg-policy-publication output -raw peg_policy_generation
+```
+
+In a separate reviewed platform change, replace the `null` literal in
+`terraform/peg-policy.tf` with that exact positive decimal output, for example
+`peg_policy_runtime_generation = "1750000000000000"`. Do not pass it with
+`-var`, set a Cloud Run environment value manually, or substitute the
+publication URL. The platform code reconstructs the canonical URL, so the
+reviewed plan shows the paired attachment and a fresh Cloud Run revision. After
+runtime proof, land the separate stabilization change that restores the normal
+`template[0].revision` drift ignore before routine deploys resume.
+
 The dormant source foundation places the policy and access logs in
 `mento-monitoring`. The Metrics Bridge runtime and publisher identities also
 live there, with direct bucket-scoped Viewer and Object Admin grants. Before

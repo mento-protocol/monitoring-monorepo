@@ -1,8 +1,27 @@
-# ── Peg policy source foundation ─────────────────────────────────────────────
+# ── Peg policy source foundation and dormant runtime handoff ──────────────────
 #
-# ADR 0054 keeps the policy artifact in the monitoring project. This stack
-# creates no policy object and does not attach the runtime identity to Cloud
-# Run; later reviewed changes own those activation steps.
+# ADR 0054 keeps the policy artifact in the monitoring project. Policy
+# publication remains a separate protected action. The committed generation
+# below is deliberately null until that action reports a real GCS generation;
+# changing it is the separately reviewed runtime-attachment handoff.
+
+locals {
+  # Do not replace this with a variable, a mutable object URL, or a placeholder.
+  # After protected publication, set this source-controlled literal to the
+  # positive peg_policy_generation output and review the resulting platform
+  # plan. Null keeps both PEG_POLICY_* values absent and the peg loop dormant.
+  peg_policy_runtime_generation = null
+
+  peg_policy_runtime_url = local.peg_policy_runtime_generation == null ? null : "https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}"
+
+  # One map owns both raw values. A generation therefore attaches the exact URL
+  # and metadata mode together; no external input can select a different host,
+  # object, auth mode, or mutable URL.
+  peg_policy_runtime_env = local.peg_policy_runtime_generation == null ? {} : {
+    PEG_POLICY_URL       = local.peg_policy_runtime_url
+    PEG_POLICY_AUTH_MODE = "gcp-metadata"
+  }
+}
 
 resource "google_storage_bucket" "peg_policy" {
   name                        = "${google_project.monitoring.project_id}-peg-policy"

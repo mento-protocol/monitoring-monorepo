@@ -203,9 +203,12 @@ Use this order for the first activation topology:
    remains pinned to A. The registry superset can serve A; verify that A keeps
    polling before changing the runtime pin.
 5. Through the owning platform path, pin the runtime to the exact B generation
-   and verify metadata authentication. During rollout, old A-registry replicas
-   serve retained A while B-registry replicas serve active B and retained A.
-   An unpinned `current.json` URL or a provider-CLI overwrite is forbidden.
+   by replacing the source-controlled
+   `local.peg_policy_runtime_generation = null` literal with the protected
+   publisher's exact positive output, then verify metadata authentication.
+   During rollout, old A-registry replicas serve retained A while B-registry
+   replicas serve active B and retained A. An unpinned `current.json` URL, a
+   `-var` override, or a provider-CLI overwrite is forbidden.
 6. Verify that Metrics Bridge selects and acknowledges the exact policy
    version. Prove authoritative listing state, producer-side bounded absence
    streak, executable-price metrics, structural metrics, and the ADR-0049

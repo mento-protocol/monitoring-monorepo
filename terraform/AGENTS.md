@@ -94,17 +94,22 @@ boundaries.
   review. The merged `main` route completed full-refresh, unlocked plans for
   every CI-managed Google-provider stack. Add only an exact missing permission
   named by a provider denial.
-- The Peg-policy foundation remains source-only and creates no policy object or
-  Cloud Run runtime attachment. Both buckets and both policy identities live in
-  `mento-monitoring`; direct bucket grants stay authoritative and exact. The
-  protected org-Terraform project Owner and organization IAM administrators are
-  accepted control-plane exceptions; inherited grants still apply. Do not apply
-  this foundation until #1659's additive staging foundation has merged and its
-  five deploy paths have passed canaries. This branch removes broad Storage
-  Admin, Storage Object Admin, and Service Account User fallback grants with
-  the dormant policy foundation; audit effective readers, writers, and IAM
-  administrators after that apply and before activation. Access logs are audit
-  telemetry, never an authorization control.
+- The Peg-policy foundation creates no policy object. Both buckets and both
+  policy identities live in `mento-monitoring`; direct bucket grants stay
+  authoritative and exact. Metrics Bridge always uses the dedicated runtime
+  identity, while its paired `PEG_POLICY_*` values stay absent until the
+  reviewed source literal `local.peg_policy_runtime_generation` is changed
+  from `null` to the protected publisher's positive generation output. Never
+  supply a URL or auth-mode variable: Terraform derives the canonical pinned
+  GCS URL and `gcp-metadata` mode together. The protected org-Terraform project
+  Owner and organization IAM administrators are accepted control-plane
+  exceptions; inherited grants still apply. Do not apply this foundation until
+  #1659's additive staging foundation has merged and its five deploy paths have
+  passed canaries. This branch removes broad Storage Admin, Storage Object
+  Admin, and Service Account User fallback grants with the dormant policy
+  foundation; audit effective readers, writers, and IAM administrators after
+  that apply and before activation. Access logs are audit telemetry, never an
+  authorization control.
 
 ## Verification
 

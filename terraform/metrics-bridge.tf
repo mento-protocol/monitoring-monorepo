@@ -28,7 +28,10 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
   location            = var.gcp_region
   deletion_protection = true
 
-  depends_on = [google_project_service.run]
+  depends_on = [
+    google_project_service.run,
+    google_storage_bucket_iam_policy.peg_policy,
+  ]
 
   # Keep the optional parent block present so the child ignore paths below can
   # preserve zero-valued defaults stamped by gcloud. `scaling_mode` stays
@@ -36,6 +39,12 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
   scaling {}
 
   template {
+    # This identity has only the direct, bucket-scoped Object Viewer grant in
+    # terraform/peg-policy.tf. It is intentionally attached even while the
+    # policy pair is absent, so a later reviewed generation handoff needs no
+    # unauthenticated or ad-hoc Cloud Run configuration.
+    service_account = google_service_account.metrics_bridge_runtime.email
+
     scaling {
       min_instance_count = 1
       max_instance_count = 1
@@ -63,6 +72,17 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
         name  = "POLL_INTERVAL_MS"
         value = "30000"
       }
+      # The paired policy configuration stays absent until a protected
+      # publication reports a concrete immutable generation. Terraform derives
+      # both values from that one reviewed literal; it never accepts a caller
+      # supplied policy URL or production auth mode.
+      dynamic "env" {
+        for_each = local.peg_policy_runtime_env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
       # Probes hit /health (NOT /healthz — Cloud Run v2 reserves /healthz at
       # the frontend, so exposing it externally returns a Google-branded 404).
       # Liveness restarts the container if /health returns 503 (stale poll).
@@ -85,12 +105,24 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
   }
 
   lifecycle {
-    # The deploy path stamps image, revision suffix, client metadata, and
-    # service-level scaling defaults. Per-revision template[0].scaling and
-    # service-level scaling_mode remain managed.
+    # Null is the intentional dormant state. Any non-null value must be the
+    # positive signed-64-bit generation emitted by the protected publisher.
+    # The generated URL below always carries that generation, so a mutable,
+    # blank, or mismatched pair cannot reach a Cloud Run plan.
+    precondition {
+      condition     = local.peg_policy_runtime_generation == null ? true : (can(regex("^[1-9][0-9]*$", local.peg_policy_runtime_generation)) && can(tonumber(local.peg_policy_runtime_generation)) && tonumber(local.peg_policy_runtime_generation) <= 9223372036854775807)
+      error_message = "peg_policy_runtime_generation must be null or a positive GCS generation within signed 64-bit range."
+    }
+
+    # The deploy path stamps image, client metadata, and service-level scaling
+    # defaults. This attachment deliberately leaves template revision
+    # unmanaged by ignore_changes so the identity and paired policy env produce
+    # a fresh Cloud Run revision. Restore the revision ignore only in the
+    # reviewed post-activation stabilization change after live proof. Per-
+    # revision template[0].scaling and service-level scaling_mode remain
+    # managed.
     ignore_changes = [
       template[0].containers[0].image,
-      template[0].revision,
       client,
       client_version,
       scaling[0].manual_instance_count,

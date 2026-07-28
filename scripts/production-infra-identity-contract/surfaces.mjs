@@ -79,7 +79,7 @@ const IDENTITY_BEARING_RESOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/github-variables.tf:github_actions_variable.sentry_autofix_enabled|0b1f2a6adc979710e7b04515085fb6fdd4a55fc02c906f17c2e385076d546cf2",
   "terraform/github-variables.tf:github_actions_variable.sentry_triage_enabled|56e47749f31de18624497eab72f093197f04a0e2ae710dc6e5dedad80505a624",
   "terraform/github-variables.tf:github_actions_variable.terraform_apply_slack_channel|a32ea4ca4434941b67d81cf81556f9a876a63e5599a59b336ef0e8c56841dff2",
-  "terraform/metrics-bridge.tf:google_cloud_run_v2_service.metrics_bridge|63d0737277d00de634ea35707e1ad0ef2379e7323f63caa734ec29a5fe1e81bd",
+  "terraform/metrics-bridge.tf:google_cloud_run_v2_service.metrics_bridge|ead64cf129289f6e590c12b6fd297cf66b22de9c73612019267d3bd153c48951",
 ];
 
 const OUTPUT_BLOCK_SHAPE_SPECIFICATIONS = [

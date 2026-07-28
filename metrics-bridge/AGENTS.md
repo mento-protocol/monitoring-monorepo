@@ -64,6 +64,13 @@ it. A blank, malformed, missing, or mismatched pair belongs to the peg loop's
 bounded error channel and must not abort startup or affect the primary Hasura
 poller.
 
+Platform Terraform attaches Cloud Run to
+`metrics-bridge-runtime@mento-monitoring.iam.gserviceaccount.com`, whose direct
+grant is only the private policy bucket's Object Viewer role. The platform
+accepts no production policy URL or auth-mode input: a reviewed
+`local.peg_policy_runtime_generation` literal derives both values together.
+It stays `null` until protected publication reports a real generation.
+
 Policy versions are content-addressed: the final 32 lowercase hexadecimal
 characters must match the canonical policy-content SHA-256 prefix. Canonical
 JSON recursively sorts object keys by Unicode code point and preserves array

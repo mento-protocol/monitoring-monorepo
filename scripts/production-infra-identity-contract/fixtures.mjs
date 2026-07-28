@@ -194,6 +194,17 @@ resource "github_actions_variable" "gcp_terraform_refresh_workload_identity_prov
 const pegPolicyVariablesFixture = "";
 
 const pegPolicyFixture = `
+locals {
+  peg_policy_runtime_generation = null
+
+  peg_policy_runtime_url = local.peg_policy_runtime_generation == null ? null : "https://storage.googleapis.com/download/storage/v1/b/\${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=\${local.peg_policy_runtime_generation}"
+
+  peg_policy_runtime_env = local.peg_policy_runtime_generation == null ? {} : {
+    PEG_POLICY_URL       = local.peg_policy_runtime_url
+    PEG_POLICY_AUTH_MODE = "gcp-metadata"
+  }
+}
+
 resource "google_storage_bucket" "peg_policy" {
   name                        = "\${google_project.monitoring.project_id}-peg-policy"
   project                     = google_project.monitoring.project_id
@@ -491,6 +502,10 @@ export function validFixtureFiles() {
     "terraform/ci-wif.tf": productionTerraformFixture,
     "terraform/gcp-project.tf": storageApiFixture,
     "terraform/github-variables.tf": githubVariablesFixture,
+    "terraform/metrics-bridge.tf": readFileSync(
+      new URL("../../terraform/metrics-bridge.tf", import.meta.url),
+      "utf8",
+    ),
     "terraform/peg-policy.tf": pegPolicyFixture,
     "terraform/variables.tf": pegPolicyVariablesFixture,
     "alerts/infra/main.tf": targetProjectFixture("local.project_id"),

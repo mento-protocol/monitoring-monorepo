@@ -71,8 +71,11 @@ before production use.
 - A future broad project or inherited storage grant also reaches this bucket;
   that is an accepted risk for trusted identities and a required IAM-audit
   check before activation.
-- The source foundation creates no policy object and no Cloud Run attachment.
-  A merge alone does not start Peg polling or activate alerts.
+- The source foundation creates no policy object. The later runtime attachment
+  assigns the dedicated reader identity to Metrics Bridge, but its paired
+  policy values remain absent while the reviewed
+  `local.peg_policy_runtime_generation` literal is `null`. A merge alone does
+  not start Peg polling or activate alerts.
 
 ## Evidence
 

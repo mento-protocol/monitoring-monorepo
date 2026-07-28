@@ -129,12 +129,16 @@ The bootstrap, refresh routing, live full-refresh proof, legacy-authority
 removal, run drain, and final IAM/WIF audit are complete. The approved removal
 apply completed with `0 added, 1 changed, 1 destroyed`, a full post-apply plan
 reported no changes, and live IAM contains no `metrics-bridge-deployer` Token
-Creator grant. The Peg-policy foundation stays source-only. It creates no
-policy object and does not attach the runtime identity to Cloud Run; policy
-publication and activation remain separate reviewed steps. Both policy buckets
-and both policy service accounts live in `mento-monitoring`; they depend on its
-existing Storage and IAM APIs. The runtime has a direct bucket-scoped Object
-Viewer grant and the publisher has a direct bucket-scoped Object Admin grant.
+Creator grant. The Peg-policy foundation creates no policy object. Metrics
+Bridge uses the dedicated runtime identity, but the paired policy environment
+values remain absent until a later reviewed change replaces the committed
+`local.peg_policy_runtime_generation = null` literal with the protected
+publisher's exact positive output. Terraform derives the canonical pinned URL
+and `gcp-metadata` mode from that one literal; publication and alert activation
+remain separate reviewed steps. Both policy buckets and both policy service
+accounts live in `mento-monitoring`; they depend on its existing Storage and
+IAM APIs. The runtime has a direct bucket-scoped Object Viewer grant and the
+publisher has a direct bucket-scoped Object Admin grant.
 
 The authoritative bucket policies make direct grants exact. Project and
 organization grants still inherit into the bucket. The protected org-Terraform
