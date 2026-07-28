@@ -201,7 +201,7 @@ optional input can plan deletion; inspect each one. It also owns
 `GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
 `GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
 `GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. Workflows read these as `vars`; never
-replace them with manual secrets or use the refresh selectors outside the four
+replace them with manual secrets or use the refresh selectors outside the five
 registered trusted-main plan workflows and `terraform-drift.yml`.
 Only `CLAUDE_CODE_OAUTH_TOKEN` currently has `prevent_destroy`; inspect every
 planned mirror deletion.

@@ -294,7 +294,12 @@ test("prompt is deterministic and never leaks routes or qualification traps", ()
   assert.match(first, /Do not use network access/);
   assert.match(first, /at most 21 lines/);
   assert.match(first, /45,000 UTF-8 bytes/);
-  assert.match(first, /260,000 UTF-8 bytes/);
+  assert.match(
+    first,
+    new RegExp(
+      `${context.suite.targets.max_total_unique_source_bytes.toLocaleString("en-US")} UTF-8 bytes`,
+    ),
+  );
   assert.match(first, /documentation-navigation-\*\.json/);
   assert.match(first, /result schema remains allowed/);
   assert.match(first, /do not\s+repeat them in an answer's `loaded_sources`/);
