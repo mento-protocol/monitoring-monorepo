@@ -137,4 +137,19 @@ describe("buildEntityDirectoryItems", () => {
       addressCount: 0,
     });
   });
+
+  it("uses the canonical hash key for links when a stored slug disagrees", () => {
+    const items = buildEntityDirectoryItems({
+      "canonical-slug": entity({
+        slug: "stale-stored-slug",
+        name: "Legacy Entity",
+      }),
+    });
+
+    expect(items[0]).toMatchObject({
+      slug: "canonical-slug",
+      name: "Legacy Entity",
+    });
+    expect(items[0]?.searchText).toContain("stale-stored-slug");
+  });
 });

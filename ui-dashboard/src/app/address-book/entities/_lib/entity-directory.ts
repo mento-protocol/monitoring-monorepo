@@ -40,7 +40,8 @@ export function buildEntityDirectoryItems(
         typeof entity === "object" && entity !== null
           ? (entity as Partial<IntelEntityRecord>)
           : {};
-      const slug = trimmedString(record.slug) || key;
+      const slug = key;
+      const storedSlug = trimmedString(record.slug);
       const name = trimmedString(record.name) || slug;
       const type = trimmedString(record.type) || null;
       const tags = entityTagLabels(record.populatedTags);
@@ -55,6 +56,7 @@ export function buildEntityDirectoryItems(
         searchText: [
           name,
           slug,
+          storedSlug,
           type ?? "",
           ...tags,
           ...addresses
