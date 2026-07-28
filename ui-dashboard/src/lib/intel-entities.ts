@@ -46,6 +46,63 @@ export type IntelEntityDirectorySource =
       reason: "record-count" | "payload-bytes";
     };
 
+type EntityHashField = readonly [string, string];
+
+function selectDirectoryFields(
+  intelFields: string[],
+  legacyFields: string[],
+): EntityHashField[] | null {
+  const fieldsByCanonicalSlug = new Map<string, EntityHashField>();
+  for (const field of legacyFields) {
+    fieldsByCanonicalSlug.set(field.toLowerCase(), [LEGACY_HASH_KEY, field]);
+  }
+  for (const field of intelFields) {
+    fieldsByCanonicalSlug.set(field.toLowerCase(), [HASH_KEY, field]);
+  }
+  if (fieldsByCanonicalSlug.size > INTEL_ENTITY_DIRECTORY_MAX_RECORDS) {
+    return null;
+  }
+  return Array.from(fieldsByCanonicalSlug.values());
+}
+
+async function fetchDirectoryFields(
+  redis: ReturnType<typeof getRedis>,
+  fields: EntityHashField[],
+): Promise<Record<string, IntelEntityRecord>> {
+  const intelFieldsToFetch: string[] = [];
+  const legacyFieldsToFetch: string[] = [];
+  for (const [key, field] of fields) {
+    if (key === HASH_KEY) intelFieldsToFetch.push(field);
+    else legacyFieldsToFetch.push(field);
+  }
+  const [fromIntel, fromLegacy] = await Promise.all([
+    intelFieldsToFetch.length > 0
+      ? redis.hmget<Record<string, IntelEntityRecord>>(
+          HASH_KEY,
+          ...intelFieldsToFetch,
+        )
+      : {},
+    legacyFieldsToFetch.length > 0
+      ? redis.hmget<Record<string, IntelEntityRecord>>(
+          LEGACY_HASH_KEY,
+          ...legacyFieldsToFetch,
+        )
+      : {},
+  ]);
+  const entities: Record<string, IntelEntityRecord> = {};
+  for (const [key, value] of Object.entries(
+    (fromLegacy ?? {}) as Record<string, IntelEntityRecord>,
+  )) {
+    entities[key.toLowerCase()] = value;
+  }
+  for (const [key, value] of Object.entries(
+    (fromIntel ?? {}) as Record<string, IntelEntityRecord>,
+  )) {
+    entities[key.toLowerCase()] = value;
+  }
+  return entities;
+}
+
 /**
  * Slug validation regex shared by the entity + entity-cps API routes.
  * Arkham slugs can contain dots (e.g. `crypto.com`) — extraction stores
@@ -92,18 +149,11 @@ export async function getIntelEntityDirectorySource(): Promise<IntelEntityDirect
     redis.hkeys(HASH_KEY),
     redis.hkeys(LEGACY_HASH_KEY),
   ]);
-  const fieldsByCanonicalSlug = new Map<string, readonly [string, string]>();
-  for (const field of legacyFields) {
-    fieldsByCanonicalSlug.set(field.toLowerCase(), [LEGACY_HASH_KEY, field]);
-  }
-  for (const field of intelFields) {
-    fieldsByCanonicalSlug.set(field.toLowerCase(), [HASH_KEY, field]);
-  }
-  if (fieldsByCanonicalSlug.size > INTEL_ENTITY_DIRECTORY_MAX_RECORDS) {
+  const fields = selectDirectoryFields(intelFields, legacyFields);
+  if (!fields) {
     return { entities: null, limited: true, reason: "record-count" };
   }
 
-  const fields = Array.from(fieldsByCanonicalSlug.values());
   const pipeline = redis.pipeline();
   for (const [key, field] of fields) pipeline.hstrlen(key, field);
   const sizes = fields.length === 0 ? [] : await pipeline.exec<number[]>();
@@ -112,5 +162,8 @@ export async function getIntelEntityDirectorySource(): Promise<IntelEntityDirect
     return { entities: null, limited: true, reason: "payload-bytes" };
   }
 
-  return { entities: await getAllIntelEntities(), limited: false };
+  return {
+    entities: await fetchDirectoryFields(redis, fields),
+    limited: false,
+  };
 }

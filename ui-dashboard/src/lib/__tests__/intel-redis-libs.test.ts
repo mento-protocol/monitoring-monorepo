@@ -5,6 +5,7 @@ const hget = vi.fn();
 const hgetall = vi.fn();
 const hkeys = vi.fn();
 const hlen = vi.fn();
+const hmget = vi.fn();
 const pipelineExec = vi.fn();
 const pipelineHstrlen = vi.fn();
 const pipeline = vi.fn(() => ({
@@ -13,7 +14,7 @@ const pipeline = vi.fn(() => ({
 }));
 
 vi.mock("@/lib/redis", () => ({
-  getRedis: vi.fn(() => ({ hget, hgetall, hkeys, hlen, pipeline })),
+  getRedis: vi.fn(() => ({ hget, hgetall, hkeys, hlen, hmget, pipeline })),
 }));
 
 import {
@@ -50,6 +51,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   hkeys.mockResolvedValue([]);
   hlen.mockResolvedValue(0);
+  hmget.mockResolvedValue({});
   pipelineExec.mockResolvedValue([]);
 });
 
@@ -258,16 +260,15 @@ describe("intel-entities", () => {
     hlen.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
     hkeys.mockResolvedValueOnce(["binance"]).mockResolvedValueOnce([]);
     pipelineExec.mockResolvedValue([128]);
-    hgetall
-      .mockResolvedValueOnce({ binance: record })
-      .mockResolvedValueOnce(null);
+    hmget.mockResolvedValue({ binance: record });
 
     await expect(getIntelEntityDirectorySource()).resolves.toEqual({
       entities: { binance: record },
       limited: false,
     });
     expect(pipelineHstrlen).toHaveBeenCalledWith(INTEL_ENTITIES_KEY, "binance");
-    expect(hgetall).toHaveBeenCalledTimes(2);
+    expect(hmget).toHaveBeenCalledWith(INTEL_ENTITIES_KEY, "binance");
+    expect(hgetall).not.toHaveBeenCalled();
   });
 
   it("does not fetch records above the entity-count limit", async () => {
@@ -289,11 +290,7 @@ describe("intel-entities", () => {
     hlen.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
     hkeys.mockResolvedValueOnce(["binance"]).mockResolvedValueOnce(["Binance"]);
     pipelineExec.mockResolvedValue([128]);
-    hgetall
-      .mockResolvedValueOnce({ binance: currentRecord })
-      .mockResolvedValueOnce({
-        Binance: { slug: "binance", name: "Legacy Binance" },
-      });
+    hmget.mockResolvedValue({ binance: currentRecord });
 
     await expect(getIntelEntityDirectorySource()).resolves.toEqual({
       entities: { binance: currentRecord },
@@ -301,6 +298,34 @@ describe("intel-entities", () => {
     });
     expect(pipelineHstrlen).toHaveBeenCalledTimes(1);
     expect(pipelineHstrlen).toHaveBeenCalledWith(INTEL_ENTITIES_KEY, "binance");
+    expect(hmget).toHaveBeenCalledTimes(1);
+    expect(hmget).toHaveBeenCalledWith(INTEL_ENTITIES_KEY, "binance");
+  });
+
+  it("fetches only the selected fields from both hashes", async () => {
+    const currentRecord = { slug: "binance", name: "Binance" };
+    const legacyRecord = { slug: "kraken", name: "Kraken" };
+    hlen.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+    hkeys.mockResolvedValueOnce(["binance"]).mockResolvedValueOnce(["Kraken"]);
+    pipelineExec.mockResolvedValue([64, 96]);
+    hmget.mockImplementation((key: string) =>
+      Promise.resolve(
+        key === INTEL_ENTITIES_KEY
+          ? { binance: currentRecord }
+          : { Kraken: legacyRecord },
+      ),
+    );
+
+    await expect(getIntelEntityDirectorySource()).resolves.toEqual({
+      entities: {
+        binance: currentRecord,
+        kraken: legacyRecord,
+      },
+      limited: false,
+    });
+    expect(hmget).toHaveBeenCalledWith(INTEL_ENTITIES_KEY, "binance");
+    expect(hmget).toHaveBeenCalledWith("arkham_entities", "Kraken");
+    expect(hgetall).not.toHaveBeenCalled();
   });
 
   it("does not fetch records above the stored-payload limit", async () => {
