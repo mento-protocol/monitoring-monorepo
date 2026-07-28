@@ -3,8 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { TagPills } from "@/components/tag-pills";
+import type { EntityDirectoryItem } from "../_lib/entity-directory";
 
 const PAGE_SIZE = 100;
+const TABLE_HEADERS = ["Entity", "Type", "Tags", "Addresses", "Slug"] as const;
 
 function readQueryFromParams(params: URLSearchParams): string {
   return params.get("q") ?? "";
@@ -39,7 +42,91 @@ function readInitParams(searchParams: URLSearchParams): URLSearchParams {
   return searchParams;
 }
 
-export function EntitySearch({ slugs }: { slugs: string[] }) {
+function EntityDirectoryRow({ item }: { item: EntityDirectoryItem }) {
+  return (
+    <tr
+      data-entity-slug={item.slug}
+      className="group relative border-b border-slate-800 transition-colors last:border-b-0 hover:bg-slate-800/30"
+    >
+      <td className="px-4 py-3">
+        <Link
+          href={`/address-book/entities/${item.slug}`}
+          aria-label={`Open ${item.name}`}
+          className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+        />
+        <span className="relative z-10 block max-w-[240px] truncate font-medium text-slate-300 pointer-events-none group-hover:text-white">
+          {item.name}
+        </span>
+      </td>
+      <td className="relative z-10 px-4 py-3 pointer-events-none">
+        {item.type ? (
+          <span className="inline-flex items-center rounded-full bg-slate-700 px-2 py-0.5 text-xs font-medium text-slate-300 whitespace-nowrap">
+            {item.type}
+          </span>
+        ) : (
+          <span className="text-slate-600">—</span>
+        )}
+      </td>
+      <td className="relative z-10 max-w-[280px] px-4 py-3 pointer-events-none">
+        {item.tags.length > 0 ? (
+          <TagPills tags={item.tags} />
+        ) : (
+          <span className="text-slate-600">—</span>
+        )}
+      </td>
+      <td className="relative z-10 px-4 py-3 text-right tabular-nums text-slate-300 pointer-events-none">
+        {item.addressCount.toLocaleString()}
+      </td>
+      <td className="relative z-10 max-w-[240px] truncate px-4 py-3 font-mono text-xs text-slate-400 pointer-events-none">
+        {item.slug}
+      </td>
+    </tr>
+  );
+}
+
+function EntityDirectoryResults({ items }: { items: EntityDirectoryItem[] }) {
+  if (items.length === 0) {
+    return (
+      <p className="rounded-lg border border-slate-800 px-4 py-8 text-center text-sm text-slate-400">
+        No entities match your search.
+      </p>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-slate-800">
+      <table className="w-full min-w-[720px] text-left text-sm">
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            {TABLE_HEADERS.map((header) => (
+              <th
+                key={header}
+                className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 ${
+                  header === "Addresses" ? "text-right" : ""
+                }`}
+              >
+                {header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <EntityDirectoryRow key={item.slug} item={item} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function EntitySearch({
+  items,
+  addressSearchLimit,
+}: {
+  items: EntityDirectoryItem[];
+  addressSearchLimit: number;
+}) {
   // SSR-pass only; layout already wraps in <Suspense> (`app/layout.tsx:56`).
   // react-doctor-disable-next-line react-doctor/nextjs-no-use-search-params-without-suspense
   const searchParams = useSearchParams();
@@ -50,19 +137,20 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
   const [page, setPage] = useState<number>(() =>
     readPageFromParams(readInitParams(searchParams)),
   );
+  const normalizedQuery = query.trim();
 
   const updateQuery = useCallback((next: string) => {
     setQuery(next);
     setPage(1);
-    writeUrl(next, 1);
+    writeUrl(next.trim(), 1);
   }, []);
 
   const updatePage = useCallback(
     (next: number) => {
       setPage(next);
-      writeUrl(query, next);
+      writeUrl(normalizedQuery, next);
     },
-    [query],
+    [normalizedQuery],
   );
 
   // `setQuery` and `setPage` below dispatch from a single popstate event, so
@@ -85,10 +173,10 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  const lower = query.toLowerCase();
-  const filtered = query
-    ? slugs.filter((s) => s.toLowerCase().includes(lower))
-    : slugs;
+  const lower = normalizedQuery.toLowerCase();
+  const filtered = lower
+    ? items.filter((item) => item.searchText.includes(lower))
+    : items;
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const clampedPage = Math.max(1, Math.min(page, totalPages));
@@ -108,11 +196,11 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
     const params = new URLSearchParams(window.location.search);
     const rawQuery = params.get("q");
     const rawPage = params.get("page");
-    const expectedQuery = query ? query : null;
+    const expectedQuery = normalizedQuery || null;
     const expectedPage = clampedPage <= 1 ? null : String(clampedPage);
     if (rawQuery === expectedQuery && rawPage === expectedPage) return;
-    writeUrl(query, clampedPage);
-  }, [query, clampedPage]);
+    writeUrl(normalizedQuery, clampedPage);
+  }, [normalizedQuery, clampedPage]);
   const visible = filtered.slice(
     (clampedPage - 1) * PAGE_SIZE,
     clampedPage * PAGE_SIZE,
@@ -120,30 +208,26 @@ export function EntitySearch({ slugs }: { slugs: string[] }) {
 
   return (
     <div>
-      <input
-        type="search"
-        aria-label="Search entities"
-        placeholder="Search entities…"
-        value={query}
-        onChange={(e) => updateQuery(e.target.value)}
-        className="mb-4 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-white placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none"
-      />
-      <p className="mb-2 text-xs text-slate-500">
+      <div className="mb-4">
+        <input
+          type="search"
+          aria-label="Search entities"
+          placeholder="Search by name, slug, type, tag, or address…"
+          value={query}
+          onChange={(e) => updateQuery(e.target.value)}
+          className="w-full max-w-sm rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        />
+      </div>
+      <p className="mb-2 text-xs text-slate-400" role="status">
         {filtered.length.toLocaleString()} entities
-        {query ? ` matching "${query}"` : ""}
+        {normalizedQuery ? ` matching "${normalizedQuery}"` : ""}
+        <span className="block sm:inline">
+          {" "}
+          · Address search covers up to {addressSearchLimit.toLocaleString()}{" "}
+          addresses per entity.
+        </span>
       </p>
-      <ul className="space-y-1">
-        {visible.map((slug) => (
-          <li key={slug}>
-            <Link
-              href={`/entities/${slug}`}
-              className="block rounded-md px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
-            >
-              {slug}
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <EntityDirectoryResults items={visible} />
       <EntityPager
         page={clampedPage}
         totalPages={totalPages}
@@ -167,7 +251,7 @@ function EntityPager({
     "rounded border border-slate-600 px-2.5 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600 hover:border-indigo-500 hover:text-indigo-400";
   return (
     <div className="mt-4 flex items-center justify-between">
-      <span className="text-xs text-slate-500">
+      <span className="text-xs text-slate-400">
         Page {page} of {totalPages}
       </span>
       <div className="flex gap-1.5">

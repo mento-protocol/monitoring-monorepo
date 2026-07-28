@@ -65,25 +65,3 @@ export async function hgetallWithLegacy<T>(
   }
   return merged;
 }
-
-/**
- * Union of field names across intel + legacy arkham hashes, normalized to
- * lowercase. Used by paginated directory listings (e.g. `/entities`) so
- * legacy data stays browsable until the rename migration runs.
- */
-export async function hkeysWithLegacy(
-  intelKey: string,
-  legacyKey: string,
-): Promise<string[]> {
-  const redis = getRedis();
-  const [fromIntel, fromLegacy] = await Promise.all([
-    redis.hkeys(intelKey),
-    redis.hkeys(legacyKey),
-  ]);
-  return Array.from(
-    new Set([
-      ...fromIntel.map((k) => k.toLowerCase()),
-      ...fromLegacy.map((k) => k.toLowerCase()),
-    ]),
-  );
-}
