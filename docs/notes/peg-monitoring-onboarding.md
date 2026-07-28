@@ -194,7 +194,9 @@ Use this order for the first activation topology:
    Record rejected-source evidence in that change. Never merge a registry-only
    or policy-only source state; the integrity contract requires exact
    active-registry parity. Do not deploy the registry B image yet.
-3. Through the separately reviewed `Peg Policy Publication` workflow, inspect
+3. After the bucket-controller recovery in
+   [ADR 0055](../adr/0055-peg-policy-bucket-controller-recovery.md), through
+   the separately reviewed `Peg Policy Publication` workflow, inspect
    its read-only `main` plan and then approve its `production-infra` apply to
    publish B as the immutable private GCS generation described by
    [ADR 0054](../adr/0054-same-project-peg-policy-artifact.md). Keep the runtime

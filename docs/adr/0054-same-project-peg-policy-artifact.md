@@ -13,7 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0054 — Peg policy stays private in the monitoring project
 
-**Status:** Accepted (Jul 2026), dormant and unapplied.
+**Status:** Accepted (Jul 2026), live foundation; controller amendment in
+[ADR 0055](0055-peg-policy-bucket-controller-recovery.md). Publication is
+paused pending that recovery.
 **Scope:** metrics-bridge / alerts / terraform/infra
 
 ## Context
@@ -46,17 +48,29 @@ before production use.
   cannot read policy objects. The protected production applier has the only
   direct Token Creator grant on the publisher; inherited and effective IAM
   remains audited.
-- Use authoritative bucket IAM policies. The existing protected org-Terraform
-  project Owner manages bucket metadata and IAM, so no extra custom controller
-  role is needed.
+- Use authoritative bucket IAM policies. This ADR originally decided that the
+  protected org-Terraform project Owner made an additional controller
+  unnecessary. The post-apply lockout amended that controller decision;
+  [ADR 0055](0055-peg-policy-bucket-controller-recovery.md) now governs the
+  narrow controller and its recovery bootstrap.
 - Accept and audit effective project-level and inherited access for trusted
   operators. Direct bucket grants remain least-privilege evidence; they do not
   override wider accepted project or organization grants.
-- Do not apply current `main` until #1659 has merged and all five deploy paths
-  have passed canaries. That apply creates the dormant policy foundation,
-  removes broad project-wide Storage Admin, Storage Object Admin, and Service
-  Account User fallback grants, and requires an effective-IAM audit. Publication,
-  runtime attachment, and alert activation remain separate reviewed steps.
+- Keep the protected org-Terraform project Owner and organization IAM admins as
+  audited control-plane exceptions. Publication, runtime attachment, and alert
+  activation remain separate reviewed steps.
+
+## Amendment — ADR 0055
+
+The same-project placement, direct object grants, and source-only boundary
+remain in force. After the foundation applied, Terraform could not reconcile
+the two authoritative bucket IAM policies through the assumed Owner path.
+[ADR 0055](0055-peg-policy-bucket-controller-recovery.md) corrects only that
+controller decision: it adds the narrow normal controller, permits one
+explicitly approved and time-bounded project-level bootstrap when recovery
+requires it, and requires removing that bootstrap immediately after both
+policies reconcile. The foundation is applied; policy publication remains
+paused until this recovery completes.
 
 ## Alternatives considered
 
@@ -72,6 +86,8 @@ before production use.
 ## Consequences
 
 - The policy keeps its integrity controls without a separate project.
+- [ADR 0055](0055-peg-policy-bucket-controller-recovery.md) adds the narrow
+  normal path to reconcile both authoritative bucket policies.
 - Policy planning uses a workflow-specific read chain instead of extending the
   shared Terraform refresh identity.
 - A future broad project or inherited storage grant also reaches this bucket;
@@ -85,6 +101,7 @@ before production use.
 ## Evidence
 
 - Policy foundation: [`terraform/peg-policy.tf`](../../terraform/peg-policy.tf)
+- Controller recovery: [ADR 0055](0055-peg-policy-bucket-controller-recovery.md)
 - Policy publication root: [`alerts/peg-policy-publication/`](../../alerts/peg-policy-publication/)
 - Deployment-source rollout: [ADR 0053](0053-explicit-deployment-source-staging.md)
 - Runtime validation: `metrics-bridge/src/peg/policy-client.ts`

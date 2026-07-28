@@ -3,7 +3,7 @@ title: Terraform Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-28
 doc_type: agent-instructions
 scope: terraform
 review_interval_days: 90
@@ -16,7 +16,7 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, private Peg-policy storage in that project, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, the separated Terraform/service-deploy Workload Identity Federation chains, repo-level GitHub Actions secrets and variables owned by the platform stack, and the dormant, unapplied Peg-policy GCS source foundation. Alloy values are required sensitive, ephemeral operator inputs that terminate at Google provider 6.50.x write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, private Peg-policy storage in that project, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, the separated Terraform/service-deploy Workload Identity Federation chains, repo-level GitHub Actions secrets and variables owned by the platform stack, and the applied Peg-policy GCS source foundation. Policy publication remains paused until the controller recovery in [`ADR 0055`](../docs/adr/0055-peg-policy-bucket-controller-recovery.md) completes. Alloy values are required sensitive, ephemeral operator inputs that terminate at Google provider 6.50.x write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
 
 Alloy's runtime project authority is the custom
 `grafanaAgentActivationReader` role with exactly `appengine.services.get` and
@@ -101,13 +101,19 @@ boundaries.
   Cloud Run runtime attachment. Both buckets, the runtime, and publisher live
   in `mento-monitoring`; the workflow-only plan and reader identities live in
   the seed project. The shared refresh identity must not read policy objects.
-  Direct bucket grants stay authoritative and exact. The protected
-  org-Terraform project Owner and organization IAM administrators are accepted
-  control-plane exceptions; inherited grants still apply. Do not apply current
-  `main` until #1659 has merged and its five deploy paths have passed canaries.
-  That apply creates the dormant policy foundation and removes broad Storage
-  Admin, Storage Object Admin, and Service Account User fallback grants; audit
-  effective readers, writers, and IAM administrators afterward and before
+  Direct bucket grants stay authoritative and exact. The org-Terraform service
+  account normally reconciles both authoritative policies through the narrow
+  `pegPolicyBucketController` binding with bucket get/update and IAM-policy
+  get/set only. The protected org-Terraform project Owner and organization IAM
+  administrators are audited emergency exceptions; inherited grants still
+  apply. Do not retain a project-level controller grant or use broad Storage
+  Admin, Storage Object Admin, or Service Account User fallbacks. An explicitly
+  approved, time-bounded emergency bootstrap may grant only
+  `pegPolicyBucketController` at project level until both policies reconcile;
+  remove it immediately, verify its absence, and run a clean full plan. The
+  recovery sequence is in [`docs/terraform.md`](../docs/terraform.md) and
+  [ADR 0055](../docs/adr/0055-peg-policy-bucket-controller-recovery.md). Audit
+  effective readers, writers, and IAM administrators after applies and before
   activation. Access logs are audit
   telemetry, never an authorization control.
 
