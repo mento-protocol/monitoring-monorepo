@@ -88,11 +88,13 @@ function logicalLines(
   const lines = [];
   let pending = "";
   const continuation =
-    shellMode === "powershell"
-      ? /`\s*$/u
-      : shellMode === "cmd"
-        ? /\^\s*$/u
-        : /\\\s*$/u;
+    shellMode === "github-actions"
+      ? /(?:\\|`|\^)\s*$/u
+      : shellMode === "powershell"
+        ? /`\s*$/u
+        : shellMode === "cmd"
+          ? /\^\s*$/u
+          : /\\\s*$/u;
   for (const line of contents.split(/\r?\n/u)) {
     const code = stripShellComment(line);
     const continued = continuation.test(code);
@@ -204,10 +206,17 @@ function kindAfterGcloud(text) {
 function lexicalDeployRecords(filePath, surface, contents, shellMode) {
   const records = [];
   const resolvedShellMode = shellMode ?? shellModeForFile(filePath);
-  const windowsShell = resolvedShellMode !== "unix";
-  const scans = windowsShell
-    ? [{ matcher: GCLOUD_WINDOWS, stripBackslashEscapes: false }]
-    : [{ matcher: GCLOUD, stripBackslashEscapes: true }];
+  const windowsShell =
+    resolvedShellMode === "powershell" || resolvedShellMode === "cmd";
+  const scans =
+    resolvedShellMode === "github-actions"
+      ? [
+          { matcher: GCLOUD, stripBackslashEscapes: true },
+          { matcher: GCLOUD_WINDOWS, stripBackslashEscapes: false },
+        ]
+      : windowsShell
+        ? [{ matcher: GCLOUD_WINDOWS, stripBackslashEscapes: false }]
+        : [{ matcher: GCLOUD, stripBackslashEscapes: true }];
   if (!windowsShell && surface === "programmatic") {
     scans.push({
       matcher: GCLOUD_PROGRAMMATIC_CMD,
@@ -754,23 +763,22 @@ function structuredEntryPointRecords(filePath, path, value) {
 }
 
 function structuredStringRecords(filePath, path, value, key) {
+  const lowercasePath = filePath.toLowerCase();
+  const basename = lowercasePath.split("/").at(-1);
+  const compositeAction =
+    basename === "action.yml" || basename === "action.yaml";
   if (
     key !== "run" ||
-    !filePath.toLowerCase().startsWith(".github/workflows/")
+    (!lowercasePath.startsWith(".github/workflows/") && !compositeAction)
   ) {
     return lexicalDeployRecords(filePath, path, value);
   }
 
-  // A workflow may select its shell at the step, job, workflow, runner, or
-  // expression level. Scan each supported continuation form and keep the mode
-  // that discovers the most literal deploys. This stays fail-closed without
-  // interpreting GitHub Actions shell inheritance or custom wrapper commands.
-  let records = [];
-  for (const shellMode of ["unix", "powershell", "cmd"]) {
-    const candidate = lexicalDeployRecords(filePath, path, value, shellMode);
-    if (candidate.length > records.length) records = candidate;
-  }
-  return records;
+  // A workflow or composite action may select its shell at the step, job,
+  // workflow, runner, or expression level. Join every supported continuation
+  // character in one conservative pass. This catches each literal deploy once
+  // without interpreting shell inheritance or custom wrapper commands.
+  return lexicalDeployRecords(filePath, path, value, "github-actions");
 }
 
 function structuredRecords(filePath, contents, errors) {

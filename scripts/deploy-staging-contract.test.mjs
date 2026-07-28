@@ -542,6 +542,95 @@ assert.deepEqual(
   "multi-shell workflow scanning must not duplicate a single-line deploy",
 );
 
+for (const [filePath, shell, continuation, message] of [
+  [
+    ".github/actions/deploy/action.yml",
+    "pwsh",
+    "`",
+    "nested pwsh composite-action continuations",
+  ],
+  [
+    ".github/actions/deploy/action.yaml",
+    "cmd",
+    "^",
+    "nested cmd composite-action continuations",
+  ],
+  ["action.yml", "pwsh", "`", "root pwsh composite-action continuations"],
+  ["action.yaml", "cmd", "^", "root cmd composite-action continuations"],
+]) {
+  assert.deepEqual(
+    discoverDeployStagingCallsites({
+      [filePath]: `runs:
+  using: composite
+  steps:
+    - shell: ${shell}
+      run: |
+        gcloud builds ${continuation}
+          submit .
+`,
+    }).map(({ kind }) => kind),
+    ["builds-submit"],
+    `${message} must join their native continuation character`,
+  );
+}
+
+assert.deepEqual(
+  discoverDeployStagingCallsites({
+    ".github/actions/deploy/action.yaml": `runs:
+  using: composite
+  steps:
+    - run: gcloud builds submit .
+`,
+  }).map(({ kind }) => kind),
+  ["builds-submit"],
+  "multi-shell composite-action scanning must not duplicate a single-line deploy",
+);
+
+assert.deepEqual(
+  discoverDeployStagingCallsites({
+    ".github/workflows/escaped-deploy.yml": `jobs:
+  deploy:
+    steps:
+      - run: g\\cloud builds submit .
+`,
+  }).map(({ kind }) => kind),
+  ["builds-submit"],
+  "multi-shell workflow scanning must retain Unix backslash-escaped executable detection",
+);
+
+assert.deepEqual(
+  discoverDeployStagingCallsites({
+    "action.yml": `runs:
+  using: composite
+  steps:
+    - shell: cmd
+      run: |
+        GCLOUD.CMD app ^
+          deploy app.yaml
+`,
+  }).map(({ kind }) => kind),
+  ["app-deploy"],
+  "multi-shell composite scanning must retain case-insensitive Windows launcher detection",
+);
+
+assert.deepEqual(
+  discoverDeployStagingCallsites({
+    ".github/workflows/mixed-shell-deploy.yml": `jobs:
+  deploy:
+    steps:
+      - run: |
+          gcloud builds \`
+            submit .
+          gcloud app ^
+            deploy app.yaml
+`,
+  })
+    .map(({ kind }) => kind)
+    .sort(),
+  ["app-deploy", "builds-submit"],
+  "multi-shell scanning must retain distinct deploys found by different continuation modes",
+);
+
 function assertForbiddenSignature(
   contents,
   message,
