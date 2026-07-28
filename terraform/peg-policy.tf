@@ -127,6 +127,9 @@ data "google_iam_policy" "peg_policy" {
     role = "roles/storage.objectViewer"
     members = [
       "serviceAccount:${google_service_account.metrics_bridge_runtime.email}",
+      # Only the protected manual publication plan may refresh the current
+      # object. Shared trusted-main refresh workflows cannot read policy bytes.
+      "serviceAccount:${google_service_account.peg_policy_publication_reader.email}",
     ]
   }
 

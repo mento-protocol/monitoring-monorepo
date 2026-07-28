@@ -3,7 +3,7 @@ title: Deployment Guide
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -193,19 +193,30 @@ permission split and phase boundary.
 
 `PEG_POLICY_URL` and `PEG_POLICY_AUTH_MODE` are paired raw runtime
 configuration for the protected, versioned peg-policy artifact. The platform
-Terraform stack will own both Cloud Run values when that artifact plane is
-provisioned; do not add or change them with an ad hoc
+Terraform stack owns both Cloud Run values when runtime activation is approved;
+do not add or change them with an ad hoc
 `gcloud run services update --set-env-vars` command. Until then, both remain
 absent and the Peg poller stays dormant.
 
-The dormant source foundation places the policy and access logs in
+The platform foundation places the policy and access logs in
 `mento-monitoring`. The Metrics Bridge runtime and publisher identities also
 live there, with direct bucket-scoped Viewer and Object Admin grants. Before
 applying current `main`, #1659 must merge and all five paths must pass canaries.
-The apply creates the policy foundation and removes broad Storage Admin, Storage
-Object Admin, and Service Account User fallbacks. Audit effective IAM afterward
-and again before activation. The org-Terraform Owner path and organization IAM
-admins are accepted control-plane exceptions.
+That apply creates the policy foundation and removes broad Storage Admin,
+Storage Object Admin, and Service Account User fallbacks. Audit effective
+readers, writers, and IAM administrators after that apply and again before
+runtime activation. The protected org-Terraform Owner path and organization
+IAM admins are accepted control-plane exceptions.
+
+The manual `Peg Policy Publication` workflow writes the current policy as a
+versioned object. Dispatch its `plan` operation from `main`, inspect the
+read-only result, then dispatch `apply` and approve `production-infra`. Copy
+only its generation-pinned output into the later reviewed runtime-activation
+change. The publication workflow does not set either Cloud Run value or alter
+Grafana. Its WIF-facing plan identity is bound to that exact workflow and may
+impersonate only the publication reader. That reader can view only the
+Terraform state and policy buckets; the shared refresh identity cannot read
+policy objects.
 
 Production mode is `gcp-metadata`. The URL must use the exact GCS JSON download
 host and path, a canonical percent-encoded object component, `alt=media`, and

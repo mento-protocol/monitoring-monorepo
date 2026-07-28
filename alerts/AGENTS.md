@@ -16,12 +16,13 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`alerts/` is the domain folder for all alert plumbing. Two independent Terraform stacks live here:
+`alerts/` is the domain folder for all alert plumbing. Three independent Terraform stacks live here:
 
 - **`alerts/rules/`** — protocol Grafana metric alert rules + global Grafana notification policy/contact points/templates/mute timings. Grafana provider only. Changes daily (threshold tuning).
 - **`alerts/infra/`** — event-driven alert delivery: QuickNode webhooks → Cloud Function (TS) → Slack channels (on-chain multisig events) + Sentry → Slack bridge (app errors) + Splunk On-Call rotation announcer → Slack #eng / @support-engineer + GCP project. Multi-provider. Changes monthly.
+- **`alerts/peg-policy-publication/`** — publishes `rules/peg-thresholds.json` as one immutable, private GCS generation through a manual `production-infra`-gated workflow. It owns no Cloud Run configuration or Grafana resources.
 
-Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for infra). Keep them separate roots — cadence + blast-radius asymmetry. Stack ownership is registered in `terraform.stacks.json` and summarized in `docs/terraform.md`.
+Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for infra, and `prefix=peg-policy-publication` for policy publication). Keep them separate roots — cadence + blast-radius asymmetry. Stack ownership is registered in `terraform.stacks.json` and summarized in `docs/terraform.md`.
 
 Operator runbooks: [`alerts/infra/README.md`](infra/README.md) for event-driven
 delivery and [`alerts/rules/README.md`](rules/README.md) for Grafana rules and

@@ -53,10 +53,10 @@ on separate identities:
   the repository slug and immutable repository ID `1172025835`.
 - PR plans use the state-only plan chain. It receives neither project/service
   read roles nor live secret/object access.
-- The checked-in workflows route trusted-main plans and scheduled drift through
-  `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER` and
+- The regular checked-in workflows route trusted-main plans and scheduled drift
+  through `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER` and
   `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The dedicated pool accepts only
-  the five named Terraform workflows on `main`. The downstream
+  the five named plan workflows plus drift on `main`. The downstream
   `org-terraform-refresh-readonly` identity has state Object Viewer, a curated
   non-basic project read-role set, Secret Accessor on only Terraform-managed
   secrets, and Storage Object Viewer on only Cloud Function deployment-source
@@ -64,6 +64,10 @@ on separate identities:
   Storage Bucket Viewer; each owning stack enumerates its additional
   service-specific readers. The run drain, read-boundary audit, legacy-grant
   removal, and final IAM/WIF audit are complete.
+- Peg policy publication reuses the refresh provider but selects
+  `vars.GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT`. Its exact workflow
+  binding reaches a reader limited to state and policy objects; the shared
+  refresh identity cannot read policy objects.
 - Production applies select
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. The dedicated pool accepts only

@@ -1,0 +1,184 @@
+name: Peg Policy Publication
+
+# Pull requests validate this root without cloud credentials or a backend. A
+# manual main-branch dispatch first produces a read-only refresh plan; only a
+# requested apply with changes reaches the production-infra Environment. That
+# Environment approval covers the commit and immediately prior plan, not the
+# apply-time plan recreated by Terraform (ADR 0047's documented drift window).
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Produce a protected plan, or plan then apply after production-infra approval
+        required: true
+        type: choice
+        default: plan
+        options: [plan, apply]
+  pull_request:
+    branches: [main]
+    paths:
+      - alerts/peg-policy-publication/**
+      - alerts/rules/peg-thresholds.json
+      - metrics-bridge/peg-registry.json
+      - scripts/check-peg-policy-publication.mjs
+      - scripts/check-peg-registry-integrity.mjs
+      - .github/workflows/peg-policy-publication.yml
+  # Deliberately no push trigger: policy publication stays an explicit,
+  # production-infra-gated operation after its documented rollout gates.
+
+permissions: read-all
+
+# Keep one manual publication active at a time. Waiting protected runs remain
+# queued instead of being cancelled.
+concurrency:
+  # PR validation is disposable per ref. Manual production runs serialize by
+  # waiting for the active run to finish.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # GitHub's documented `max` queue preserves all protected dispatches.
+  # trunk-ignore(actionlint/syntax-check)
+  queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
+
+jobs:
+  validate:
+    name: Terraform Validate (Peg policy publication)
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: alerts/peg-policy-publication
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Policy lineage compares against the real PR base. A depth-one
+          # checkout contains only GitHub's merge commit.
+          fetch-depth: 0
+      - uses: ./.github/actions/pnpm-install
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+      - name: Format check
+        run: terraform fmt -check -recursive
+      - name: Init without backend
+        run: terraform init -backend=false -input=false
+      - name: Validate
+        run: terraform validate -no-color
+      - name: Validate Peg registry and publication boundary
+        working-directory: ${{ github.workspace }}
+        run: |
+          node scripts/check-peg-registry-integrity.mjs
+          node scripts/check-peg-policy-publication.mjs
+
+  plan:
+    # autofix-ci-trust: this job only runs for manual main dispatches, never a
+    # pull-request event, so autofix branch code cannot receive refresh credentials.
+    name: Read-only Peg policy publication plan
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: alerts/peg-policy-publication
+    outputs:
+      has-changes: ${{ steps.detect.outputs.has-changes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Authenticate trusted-main refresh to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+      - name: Init read-only backend
+        run: terraform init -input=false -backend-config="impersonate_service_account=peg-policy-publication-reader@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+      - name: Plan
+        id: plan
+        env:
+          TF_VAR_terraform_service_account: peg-policy-publication-reader@mento-terraform-seed-ffac.iam.gserviceaccount.com
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -no-color -input=false -lock=false > /tmp/tf-plan.raw 2>&1
+          EXITCODE=$?
+          set -e
+          "$GITHUB_WORKSPACE/scripts/sanitize-terraform-output.sh" /tmp/tf-plan.raw /tmp/tf-plan.txt
+          cat /tmp/tf-plan.txt
+          echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
+          case "$EXITCODE" in
+            0|2) ;;
+            *) echo "::error::terraform plan failed with exit code $EXITCODE"; exit 1 ;;
+          esac
+      - name: Detect changes
+        id: detect
+        env:
+          EXITCODE: ${{ steps.plan.outputs.exitcode }}
+        run: |
+          if [ "$EXITCODE" = "2" ]; then
+            echo "has-changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  apply:
+    # autofix-ci-trust: this job only runs for manual main dispatches and also
+    # requires the protected production-infra Environment before credentials.
+    name: Protected Peg policy publication apply
+    needs: plan
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.operation == 'apply' && needs.plan.outputs.has-changes == 'true'
+    environment:
+      name: production-infra
+      url: https://console.cloud.google.com/home/dashboard?project=mento-monitoring
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+      deployments: read
+    defaults:
+      run:
+        working-directory: alerts/peg-policy-publication
+    env:
+      TF_VAR_terraform_service_account: peg-policy-publisher@mento-monitoring.iam.gserviceaccount.com
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify production-infra environment protection
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_ENVIRONMENT_NAME: production-infra
+        run: node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.6
+          terraform_wrapper: false
+      - name: Init
+        run: terraform init -input=false
+      - name: Apply
+        run: terraform apply -auto-approve -no-color -input=false -lock-timeout=10m
+      - name: Record published generation handoff
+        if: success()
+        run: |
+          {
+            echo '## Peg policy publication'
+            echo
+            echo '```json'
+            terraform output -json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

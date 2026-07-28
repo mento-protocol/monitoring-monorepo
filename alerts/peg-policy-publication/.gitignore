@@ -1,0 +1,13 @@
+# Terraform state — managed remotely in GCS.
+terraform.tfstate
+terraform.tfstate.backup
+
+# Variable values may contain credentials.
+terraform.tfvars
+*.auto.tfvars
+*.tfvars.json
+
+# Local Terraform provider and wrapper caches.
+.terraform/
+.terraform-agent-gate/
+.terraform-tf-wrapper/

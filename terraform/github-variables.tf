@@ -53,6 +53,19 @@ resource "github_actions_variable" "gcp_terraform_refresh_workload_identity_prov
   ]
 }
 
+resource "github_actions_variable" "gcp_peg_policy_publication_plan_service_account" {
+  repository    = "monitoring-monorepo"
+  variable_name = "GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT"
+  value         = google_service_account.peg_policy_publication_plan.email
+
+  depends_on = [
+    google_service_account_iam_member.peg_policy_publication_plan_wif_binding,
+    google_service_account_iam_member.peg_policy_publication_plan_reader_token_creator,
+    google_storage_bucket_iam_member.state_bucket_peg_policy_publication_reader,
+    google_storage_bucket_iam_policy.peg_policy,
+  ]
+}
+
 # Terraform-apply Slack channel routing
 # ───────────────────────────────────────
 #

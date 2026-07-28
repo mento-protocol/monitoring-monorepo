@@ -87,7 +87,7 @@ resource "google_iam_workload_identity_pool_provider" "github_terraform_refresh"
   project                            = google_project.monitoring.project_id
   workload_identity_pool_id          = google_iam_workload_identity_pool.github_terraform_refresh.workload_identity_pool_id
   workload_identity_pool_provider_id = "github"
-  attribute_condition                = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\")"
+  attribute_condition                = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main\")"
   attribute_mapping = {
     "google.subject"          = "assertion.sub"
     "attribute.repository"    = "assertion.repository"
@@ -122,10 +122,22 @@ resource "google_service_account" "terraform_refresh_readonly" {
   account_id = "terraform-refresh-readonly"
 }
 
+locals {
+  terraform_refresh_workflow_refs = toset([
+    "mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main",
+    "mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main",
+    "mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main",
+    "mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main",
+    "mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main",
+  ])
+}
+
 resource "google_service_account_iam_member" "terraform_refresh_readonly_wif_binding" {
+  for_each = local.terraform_refresh_workflow_refs
+
   service_account_id = google_service_account.terraform_refresh_readonly.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/$\{google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.ref/refs/heads/main"
+  member             = "principalSet://iam.googleapis.com/$\{google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.workflow_ref/$\{each.value}"
 }
 
 resource "google_service_account" "org_terraform_refresh_readonly" {
@@ -143,6 +155,34 @@ resource "google_storage_bucket_iam_member" "state_bucket_refresh_readonly" {
   bucket = "mento-terraform-tfstate-6ed6"
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:$\{google_service_account.org_terraform_refresh_readonly.email}"
+}
+
+resource "google_service_account" "peg_policy_publication_plan" {
+  project    = "mento-terraform-seed-ffac"
+  account_id = "peg-policy-publication-plan"
+}
+
+resource "google_service_account_iam_member" "peg_policy_publication_plan_wif_binding" {
+  service_account_id = google_service_account.peg_policy_publication_plan.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/$\{google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.workflow_ref/mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main"
+}
+
+resource "google_service_account" "peg_policy_publication_reader" {
+  project    = "mento-terraform-seed-ffac"
+  account_id = "peg-policy-publication-reader"
+}
+
+resource "google_storage_bucket_iam_member" "state_bucket_peg_policy_publication_reader" {
+  bucket = "mento-terraform-tfstate-6ed6"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:$\{google_service_account.peg_policy_publication_reader.email}"
+}
+
+resource "google_service_account_iam_member" "peg_policy_publication_plan_reader_token_creator" {
+  service_account_id = google_service_account.peg_policy_publication_reader.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:$\{google_service_account.peg_policy_publication_plan.email}"
 }
 `.replaceAll("$\\{", "${");
 
@@ -187,6 +227,18 @@ resource "github_actions_variable" "gcp_terraform_refresh_workload_identity_prov
     google_service_account_iam_member.terraform_refresh_readonly_wif_binding,
     google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator,
     google_storage_bucket_iam_member.state_bucket_refresh_readonly,
+  ]
+}
+resource "github_actions_variable" "gcp_peg_policy_publication_plan_service_account" {
+  repository    = "monitoring-monorepo"
+  variable_name = "GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT"
+  value         = google_service_account.peg_policy_publication_plan.email
+
+  depends_on = [
+    google_service_account_iam_member.peg_policy_publication_plan_wif_binding,
+    google_service_account_iam_member.peg_policy_publication_plan_reader_token_creator,
+    google_storage_bucket_iam_member.state_bucket_peg_policy_publication_reader,
+    google_storage_bucket_iam_policy.peg_policy,
   ]
 }
 `;
@@ -312,6 +364,7 @@ data "google_iam_policy" "peg_policy" {
     role = "roles/storage.objectViewer"
     members = [
       "serviceAccount:\${google_service_account.metrics_bridge_runtime.email}",
+      "serviceAccount:\${google_service_account.peg_policy_publication_reader.email}",
     ]
   }
 
@@ -565,6 +618,17 @@ export function validFixtureFiles() {
     ),
     ".github/workflows/governance-watchdog.yml": applyWorkflowFixture(
       ".github/workflows/governance-watchdog.yml",
+    ),
+    ".github/workflows/infra.yml": readFileSync(
+      new URL("../../.github/workflows/infra.yml", import.meta.url),
+      "utf8",
+    ),
+    ".github/workflows/peg-policy-publication.yml": readFileSync(
+      new URL(
+        "../../.github/workflows/peg-policy-publication.yml",
+        import.meta.url,
+      ),
+      "utf8",
     ),
     ".github/workflows/metrics-bridge.yml": `jobs:
   deploy:

@@ -3,7 +3,7 @@ title: Peg monitoring alert source validation and activation hold
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-07-28
 doc_type: runbook
 scope: alerts/peg-monitoring
 review_interval_days: 90
@@ -30,10 +30,10 @@ The source-owned surfaces are:
 
 ## Current boundary
 
-This source packet does not publish or authenticate the private policy
-artifact, change a GitHub Actions workflow or Terraform identity, deploy the
-producer, apply Grafana resources, or prove live telemetry. Its Grafana
-consumers are absent by default because the source-controlled
+This source packet does not deploy the producer, apply Grafana resources, or
+prove live telemetry. `terraform/peg-policy.tf` owns the policy identities and
+bucket IAM. The separate manual `Peg Policy Publication` root consumes the
+publisher identity to publish the private artifact. Its Grafana consumers are absent by default because the source-controlled
 `local.peg_alerts_enabled` switch is `false`. That single Terraform local gates
 the Peg folder, templates, contact points, and rule group; it is not a workflow,
 variable, or policy-artifact switch.

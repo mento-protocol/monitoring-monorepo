@@ -1,5 +1,6 @@
 import {
   COMMON_REFRESH_PROJECT_ROLES,
+  SHARED_REFRESH_WORKFLOW_REFS,
   REFRESH_TARGET_EMAIL,
   SEED_PROJECT_ID,
 } from "./constants.mjs";
@@ -183,8 +184,19 @@ export function validateRefreshIdentity(files, blocks, errors) {
     "terraform: refresh WIF binding",
   );
   if (wifBinding) {
-    expectNoResourceMultiplicity(
+    const workflowRefs = extractStringSet(
+      requireFile(files, "terraform/ci-wif.tf", errors),
+      "terraform_refresh_workflow_refs",
+    );
+    if (!sameSortedValues(workflowRefs, SHARED_REFRESH_WORKFLOW_REFS)) {
+      errors.push(
+        "terraform: refresh WIF binding: terraform_refresh_workflow_refs must contain only the regular refresh and drift workflows",
+      );
+    }
+    expectExpression(
       wifBinding,
+      "for_each",
+      "local.terraform_refresh_workflow_refs",
       errors,
       "terraform: refresh WIF binding",
     );
@@ -205,7 +217,7 @@ export function validateRefreshIdentity(files, blocks, errors) {
     expectString(
       wifBinding,
       "member",
-      "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.ref/refs/heads/main",
+      "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.workflow_ref/${each.value}",
       errors,
       "terraform: refresh WIF binding",
     );

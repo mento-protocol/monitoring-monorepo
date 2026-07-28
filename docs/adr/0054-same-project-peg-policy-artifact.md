@@ -38,10 +38,14 @@ before production use.
 - Keep the policy private, versioned, generation-pinned, public-access
   prevented, and protected from Terraform destroy. Keep the access-log bucket
   and its 90-day live and 30-day archived retention.
-- Keep both policy identities in `mento-monitoring`. The runtime receives only
-  bucket-scoped Object Viewer. The publisher receives only bucket-scoped Object
-  Admin. The protected production applier has the only direct Token Creator
-  grant on the publisher.
+- Keep the runtime and publisher in `mento-monitoring`. The runtime receives
+  only bucket-scoped Object Viewer; the publisher receives only bucket-scoped
+  Object Admin. Keep the workflow-only publication plan and reader identities
+  in the seed project. The plan identity may impersonate only the reader, which
+  can view only Terraform state and policy objects. The shared refresh identity
+  cannot read policy objects. The protected production applier has the only
+  direct Token Creator grant on the publisher; inherited and effective IAM
+  remains audited.
 - Use authoritative bucket IAM policies. The existing protected org-Terraform
   project Owner manages bucket metadata and IAM, so no extra custom controller
   role is needed.
@@ -68,15 +72,20 @@ before production use.
 ## Consequences
 
 - The policy keeps its integrity controls without a separate project.
+- Policy planning uses a workflow-specific read chain instead of extending the
+  shared Terraform refresh identity.
 - A future broad project or inherited storage grant also reaches this bucket;
   that is an accepted risk for trusted identities and a required IAM-audit
   check before activation.
 - The source foundation creates no policy object and no Cloud Run attachment.
-  A merge alone does not start Peg polling or activate alerts.
+  The separate `alerts/peg-policy-publication` root creates a policy object
+  only through its manual protected workflow. Neither merge starts Peg polling
+  or activates alerts.
 
 ## Evidence
 
 - Policy foundation: [`terraform/peg-policy.tf`](../../terraform/peg-policy.tf)
+- Policy publication root: [`alerts/peg-policy-publication/`](../../alerts/peg-policy-publication/)
 - Deployment-source rollout: [ADR 0053](0053-explicit-deployment-source-staging.md)
 - Runtime validation: `metrics-bridge/src/peg/policy-client.ts`
 - Issue: [#1444](https://github.com/mento-protocol/monitoring-monorepo/issues/1444)

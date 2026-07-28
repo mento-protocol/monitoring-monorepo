@@ -107,7 +107,7 @@ resource "google_iam_workload_identity_pool_provider" "github_production_infra" 
 # Keep refresh federation in its own pool. IAM subjects are pool-scoped, so a
 # binding to the generic `github-actions` pool would let any accepted main-ref
 # workflow select the refresh service account directly. This provider accepts
-# only the five reviewed Terraform workflow files on main.
+# only the reviewed Terraform workflow files on main.
 resource "google_iam_workload_identity_pool" "github_terraform_refresh" {
   project                   = google_project.monitoring.project_id
   workload_identity_pool_id = "github-terraform-refresh"
@@ -126,7 +126,7 @@ resource "google_iam_workload_identity_pool_provider" "github_terraform_refresh"
   # `workflow_ref` is signed by GitHub and identifies the workflow file plus
   # the ref that supplied it. Keep the repository ID, slug, and ref checks
   # explicit so renames, forks, and non-main workflow definitions fail closed.
-  attribute_condition = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\")"
+  attribute_condition = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main\")"
 
   attribute_mapping = {
     "google.subject"          = "assertion.sub"
@@ -312,13 +312,28 @@ resource "google_service_account" "terraform_refresh_readonly" {
   description  = "Main-ref GitHub Actions identity for full-refresh Terraform plans; has no write roles."
 }
 
-# The dedicated provider admits only the intended Terraform workflow files on
-# main. A generic service deploy or another main-ref workflow cannot select
-# this identity.
+# The refresh provider also admits the Peg publication workflow for its
+# dedicated plan identity. Keep the shared refresh identity limited to the
+# regular refresh and drift workflows instead of trusting every pool token.
+locals {
+  terraform_refresh_workflow_refs = toset([
+    "mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main",
+    "mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main",
+    "mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main",
+    "mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main",
+    "mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main",
+  ])
+}
+
+# Limit this shared identity to the regular refresh and drift workflow refs.
+# The provider also admits Peg publication tokens, but those tokens can select
+# only the dedicated publication identity below.
 resource "google_service_account_iam_member" "terraform_refresh_readonly_wif_binding" {
+  for_each = local.terraform_refresh_workflow_refs
+
   service_account_id = google_service_account.terraform_refresh_readonly.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.ref/refs/heads/main"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.workflow_ref/${each.value}"
 }
 
 resource "google_service_account" "org_terraform_refresh_readonly" {
@@ -340,4 +355,41 @@ resource "google_service_account_iam_member" "ci_refresh_readonly_org_terraform_
   service_account_id = google_service_account.org_terraform_refresh_readonly.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.terraform_refresh_readonly.email}"
+}
+
+# The page-affecting Peg policy is outside the shared trusted-main refresh
+# payload boundary. Only its protected manual publication workflow can select
+# this WIF-facing identity, which can impersonate only the dedicated reader.
+resource "google_service_account" "peg_policy_publication_plan" {
+  project      = "mento-terraform-seed-ffac"
+  account_id   = "peg-policy-publication-plan"
+  display_name = "Peg policy publication plan"
+  description  = "Exact-workflow GitHub Actions identity for read-only Peg policy publication plans."
+}
+
+resource "google_service_account_iam_member" "peg_policy_publication_plan_wif_binding" {
+  service_account_id = google_service_account.peg_policy_publication_plan.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.workflow_ref/mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main"
+}
+
+resource "google_service_account" "peg_policy_publication_reader" {
+  project      = "mento-terraform-seed-ffac"
+  account_id   = "peg-policy-publication-reader"
+  display_name = "Peg policy publication reader"
+  description  = "Read-only state and policy-object target for the protected Peg policy publication plan."
+}
+
+# This reader cannot create or delete the GCS backend lock object, so the
+# protected publication plan keeps `-lock=false`.
+resource "google_storage_bucket_iam_member" "state_bucket_peg_policy_publication_reader" {
+  bucket = "mento-terraform-tfstate-6ed6"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.peg_policy_publication_reader.email}"
+}
+
+resource "google_service_account_iam_member" "peg_policy_publication_plan_reader_token_creator" {
+  service_account_id = google_service_account.peg_policy_publication_reader.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.peg_policy_publication_plan.email}"
 }
