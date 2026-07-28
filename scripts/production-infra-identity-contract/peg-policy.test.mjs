@@ -26,22 +26,32 @@ function expectFailure(files, expected) {
 const validFiles = validFixtureFiles();
 assert.deepEqual(validateProductionInfraIdentityContract(validFiles), []);
 
-const activeGenerationFiles = mutate(
+function withConcreteGeneration(files, generation) {
+  return mutate(
+    mutate(
+      files,
+      "terraform/peg-policy.tf",
+      "  peg_policy_runtime_generation = null",
+      `  peg_policy_runtime_generation = "${generation}"`,
+    ),
+    "terraform/metrics-bridge.tf",
+    "      template[0].revision,\n",
+    "",
+  );
+}
+
+const activeGenerationFiles = withConcreteGeneration(
   validFiles,
-  "terraform/peg-policy.tf",
-  "  peg_policy_runtime_generation = null",
-  '  peg_policy_runtime_generation = "1750000000000000"',
+  "1750000000000000",
 );
 assert.deepEqual(
   validateProductionInfraIdentityContract(activeGenerationFiles),
   [],
 );
 
-const maximumGenerationFiles = mutate(
+const maximumGenerationFiles = withConcreteGeneration(
   validFiles,
-  "terraform/peg-policy.tf",
-  "  peg_policy_runtime_generation = null",
-  '  peg_policy_runtime_generation = "9223372036854775807"',
+  "9223372036854775807",
 );
 assert.deepEqual(
   validateProductionInfraIdentityContract(maximumGenerationFiles),
@@ -416,6 +426,7 @@ for (const invalidGeneration of [
   '"01"',
   '"-1"',
   '"1.5"',
+  '"\\u0031"',
   '"9223372036854775808"',
   "1750000000000000",
   "local.published_generation",
@@ -426,6 +437,26 @@ for (const invalidGeneration of [
     "Peg policy runtime attachment: generation must be exactly null or a quoted positive decimal GCS generation within signed 64-bit range",
   );
 }
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/deploy-staging.tf",
+    "google_service_account.metrics_bridge_runtime.name",
+    '"projects/${google_project.monitoring.project_id}/serviceAccounts/${google_project.monitoring.number}-compute@developer.gserviceaccount.com"',
+  ),
+  "Peg policy runtime act-as grants must not target the default Compute service account",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/deploy-staging.tf",
+    "google_service_account_iam_member.ci_default_compute_service_account_user",
+    "google_service_account_iam_member.other_service_account_user",
+  ),
+  "Peg policy runtime act-as state move google_service_account_iam_member.ci_default_compute_service_account_user: must be declared exactly once",
+);
 
 expectFailure(
   mutate(
@@ -471,10 +502,20 @@ expectFailure(
   mutate(
     validFiles,
     "terraform/metrics-bridge.tf",
+    "      template[0].revision,\n",
+    "",
+  ),
+  "Peg policy runtime attachment: must ignore template revision while generation is null",
+);
+
+expectFailure(
+  mutate(
+    withConcreteGeneration(validFiles, "1750000000000000"),
+    "terraform/metrics-bridge.tf",
     "      client,",
     "      template[0].revision,\n      client,",
   ),
-  "Peg policy runtime attachment: must not ignore template revision while applying the identity and policy pair",
+  "Peg policy runtime attachment: must not ignore template revision while applying a concrete generation",
 );
 
 process.stdout.write("Peg policy identity contract tests passed.\n");

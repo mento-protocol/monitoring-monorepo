@@ -3,7 +3,7 @@ title: Terraform Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-28
 doc_type: agent-instructions
 scope: terraform
 review_interval_days: 90
@@ -64,7 +64,10 @@ boundaries.
 - For deploy-owned Cloud Run images, retain the necessary
   `lifecycle.ignore_changes` for the image and provider bookkeeping drift. If a
   change alters Terraform-owned template shape (env, probes, resources, or
-  template scaling), re-audit or remove `template[0].revision` for that PR.
+  template scaling), re-audit `template[0].revision` for that PR. The Peg
+  runtime attachment retains it while
+  `local.peg_policy_runtime_generation` is `null`, and removes it only in the
+  same reviewed change that sets a concrete generation.
 - Project-level IAM changes must be ordered behind required bootstrap/API enablement dependencies.
 - Keep routine Cloud Build and App Engine uploads on the explicit buckets and
   scoped roles in
@@ -102,15 +105,17 @@ boundaries.
   from `null` for first activation or the current quoted generation for a
   rollover to the protected publisher's positive generation output. Never
   supply a URL or auth-mode variable: Terraform derives the canonical pinned
-  GCS URL and `gcp-metadata` mode together. The protected org-Terraform project
-  Owner and organization IAM administrators are accepted control-plane
-  exceptions; inherited grants still apply. Do not apply this foundation until
-  #1659's additive staging foundation has merged and its five deploy paths have
-  passed canaries. This branch removes broad Storage Admin, Storage Object
-  Admin, and Service Account User fallback grants with the dormant policy
-  foundation; audit effective readers, writers, and IAM administrators after
-  that apply and before activation. Access logs are audit telemetry, never an
-  authorization control.
+  GCS URL and `gcp-metadata` mode together. The routine deployer and
+  `gcp_dev_members` receive Service Account User only on that runtime identity;
+  never restore a project-wide or default-Compute grant. The protected
+  org-Terraform project Owner and organization IAM administrators are accepted
+  control-plane exceptions; inherited grants still apply. Do not apply this
+  foundation until #1659's additive staging foundation has merged and its five
+  deploy paths have passed canaries. This branch removes broad Storage Admin,
+  Storage Object Admin, and Service Account User fallback grants with the
+  dormant policy foundation; audit effective readers, writers, and IAM
+  administrators after that apply and before activation. Access logs are audit
+  telemetry, never an authorization control.
 
 ## Verification
 

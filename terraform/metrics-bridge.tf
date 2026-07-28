@@ -115,14 +115,13 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
     }
 
     # The deploy path stamps image, client metadata, and service-level scaling
-    # defaults. This attachment deliberately leaves template revision
-    # unmanaged by ignore_changes so the identity and paired policy env produce
-    # a fresh Cloud Run revision. Restore the revision ignore only in the
-    # reviewed post-activation stabilization change after live proof. Per-
-    # revision template[0].scaling and service-level scaling_mode remain
-    # managed.
+    # defaults. The null generation is dormant, so retain the revision drift
+    # ignore until a reviewed concrete generation attaches the policy and
+    # removes this entry in the same change. Per-revision template[0].scaling
+    # and service-level scaling_mode remain managed.
     ignore_changes = [
       template[0].containers[0].image,
+      template[0].revision,
       client,
       client_version,
       scaling[0].manual_instance_count,

@@ -3,7 +3,7 @@ title: Metrics Bridge Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-28
 doc_type: agent-instructions
 scope: metrics-bridge
 review_interval_days: 90
@@ -67,6 +67,11 @@ poller.
 Platform Terraform attaches Cloud Run to
 `metrics-bridge-runtime@mento-monitoring.iam.gserviceaccount.com`, whose direct
 grant is only the private policy bucket's Object Viewer role. The platform
+grants the routine deployer and `gcp_dev_members` Service Account User only on
+that identity, never project-wide or on the default Compute service account.
+The `template[0].revision` drift ignore remains while the generation literal is
+`null`, then the same reviewed concrete-generation change removes it to create
+a Cloud Run revision. The platform
 accepts no production policy URL or auth-mode input: a reviewed
 `local.peg_policy_runtime_generation` literal derives both values together.
 It stays `null` until protected publication reports a real generation; each

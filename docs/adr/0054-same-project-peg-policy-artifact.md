@@ -41,6 +41,9 @@ before production use.
 - Keep both policy identities in `mento-monitoring`. The runtime receives only
   bucket-scoped Object Viewer. The publisher receives only bucket-scoped Object
   Admin. Only the protected production applier can impersonate the publisher.
+- Give the routine deployer and `gcp_dev_members` Service Account User only on
+  the dedicated runtime identity. Do not retain a default-Compute or
+  project-wide Service Account User fallback.
 - Use authoritative bucket IAM policies. The existing protected org-Terraform
   project Owner manages bucket metadata and IAM, so no extra custom controller
   role is needed.
@@ -75,7 +78,9 @@ before production use.
   assigns the dedicated reader identity to Metrics Bridge, but its paired
   policy values remain absent while the reviewed
   `local.peg_policy_runtime_generation` literal is `null`. A merge alone does
-  not start Peg polling or activate alerts.
+  not start Peg polling or activate alerts. That null state retains the Cloud
+  Run template-revision drift ignore; a concrete generation removes it in the
+  same reviewed change to mint the attachment revision.
 
 ## Evidence
 

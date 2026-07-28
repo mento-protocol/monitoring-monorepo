@@ -3,7 +3,7 @@ title: Deployment Guide
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -181,9 +181,10 @@ the explicit bucket.
 This migration has a strict rollout order. First merge the infrastructure-only
 PR. Refresh current `main`, run a clean current-main platform plan, get explicit
 apply approval, apply, and verify both buckets, their bucket-scoped IAM, and the
-exact default-Compute act-as grants for the routine deployer and
-`gcp_dev_members`. Only then merge the routing follow-up; that merge triggers
-the Metrics Bridge and Aegis workflows.
+exact dedicated Metrics Bridge runtime act-as grants for the routine deployer
+and `gcp_dev_members`. Those identities must have no default-Compute or
+project-wide Service Account User grant. Only then merge the routing follow-up;
+that merge triggers the Metrics Bridge and Aegis workflows.
 Canary all five deployment paths before the same-project Peg-policy foundation
 removes the temporary project-wide Storage Admin, Storage Object Admin, and
 Service Account User grants. That foundation then needs an effective-IAM audit.
@@ -223,9 +224,27 @@ In a separate reviewed platform change, replace the current source literal
 `peg_policy_runtime_generation = "1750000000000000"`. Do not pass it with
 `-var`, set a Cloud Run environment value manually, or substitute the
 publication URL. The platform code reconstructs the canonical URL, so the
-reviewed plan shows the paired attachment and a fresh Cloud Run revision. After
-runtime proof, land the separate stabilization change that restores the normal
-`template[0].revision` drift ignore before routine deploys resume.
+reviewed plan shows the paired attachment and a fresh Cloud Run revision. While
+the literal is `null`, retain `template[0].revision` in `ignore_changes` so
+routine deploy drift stays safe. Remove that entry only in the same reviewed
+change that replaces `null` or an older pin with a concrete generation.
+
+### Runtime-pin rollback
+
+Keep a failed runtime pinned; never set the generation back to `null`. Retrieve
+the last known-good positive generation from the protected publication record
+and select only one with recorded producer, API, and metrics proof. In a
+reviewed platform change, replace the current quoted source literal with that
+exact quoted generation. Leave `template[0].revision` unmanaged in this
+concrete-to-concrete change so Cloud Run mints the rollback revision.
+
+Run a clean current-main platform plan, review the literal, pinned URL, runtime
+identity, paired environment, and new Cloud Run revision, then obtain explicit
+approval for the platform apply. After the apply, verify the selected revision,
+the runtime service account, producer policy acknowledgement, `/health` and
+policy API responses, and the expected `mento_peg_policy_version`,
+`mento_peg_source_healthy`, and `mento_peg_last_poll` metrics. Never unpin the
+runtime or manually edit Cloud Run environment values during rollback.
 
 The dormant source foundation places the policy and access logs in
 `mento-monitoring`. The Metrics Bridge runtime and publisher identities also

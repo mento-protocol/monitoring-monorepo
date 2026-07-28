@@ -3,7 +3,7 @@ title: Terraform and Cloud Run Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 doc_type: checklist
 scope: terraform/infra
 review_interval_days: 90
@@ -47,7 +47,7 @@ For every `google_cloud_run_v2_service`:
 
 - [ ] Probe paths use `/health`, NOT `/healthz`. Cloud Run v2 reserves `/healthz` at the frontend, so external `/healthz` returns a Google-branded 404
 - [ ] Memory ≥ `512Mi` if `cpu_idle = false` (always-allocated CPU floor)
-- [ ] `lifecycle.ignore_changes` covers `template[0].containers[0].image` and provider-visible Cloud Run API bookkeeping drift (`client`, `client_version`, `scaling[0].manual_instance_count`, `scaling[0].min_instance_count`, `template[0].revision`) when rollouts happen out-of-band via `gcloud run services update` (otherwise `terraform apply` reverts the image or re-applies cosmetic deploy metadata). Child ignore paths under the optional service-level `scaling` block require an explicit parent `scaling {}` block in configuration; without it, Terraform cannot match `scaling[0]` and plans to remove deploy-stamped zero defaults. Do not ignore the whole service-level `scaling` block, because `scaling_mode` is real runtime state. If a PR intentionally changes Terraform-owned template shape (`env`, probes, resources, or template scaling), re-audit/remove any `template[0].revision` ignore entry for that PR so Cloud Run can mint a fresh revision instead of pinning the old live revision.
+- [ ] `lifecycle.ignore_changes` covers `template[0].containers[0].image` and provider-visible Cloud Run API bookkeeping drift (`client`, `client_version`, `scaling[0].manual_instance_count`, `scaling[0].min_instance_count`, `template[0].revision`) when rollouts happen out-of-band via `gcloud run services update` (otherwise `terraform apply` reverts the image or re-applies cosmetic deploy metadata). Child ignore paths under the optional service-level `scaling` block require an explicit parent `scaling {}` block in configuration; without it, Terraform cannot match `scaling[0]` and plans to remove deploy-stamped zero defaults. Do not ignore the whole service-level `scaling` block, because `scaling_mode` is real runtime state. If a PR intentionally changes Terraform-owned template shape (`env`, probes, resources, or template scaling), re-audit/remove any `template[0].revision` ignore entry for that PR so Cloud Run can mint a fresh revision instead of pinning the old live revision. The Peg runtime attachment is paired with its source literal: retain that ignore while `local.peg_policy_runtime_generation` is `null`, and remove it only in the same reviewed change that selects a concrete generation.
 - [ ] Default/bootstrap `image` MUST be pinned and respond to the configured
       probe path. The current digest-pinned `gcr.io/cloudrun/hello` image uses a
       catch-all handler and therefore serves `/health`; re-verify this contract

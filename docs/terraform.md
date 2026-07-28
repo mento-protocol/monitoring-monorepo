@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -136,10 +136,12 @@ values remain absent until a later reviewed change replaces the committed
 publisher's exact quoted positive output. Later rollovers replace the current
 quoted literal the same way. Terraform derives the canonical pinned URL and
 `gcp-metadata` mode from that one literal; publication and alert activation
-remain separate reviewed steps. Both policy buckets and both policy service
-accounts live in `mento-monitoring`; they depend on its existing Storage and
-IAM APIs. The runtime has a direct bucket-scoped Object Viewer grant and the
-publisher has a direct bucket-scoped Object Admin grant.
+remain separate reviewed steps. While the literal is `null`, Terraform retains
+`template[0].revision` in `ignore_changes`; the concrete-generation change
+removes it so Cloud Run creates a revision. Both policy buckets and both policy
+service accounts live in `mento-monitoring`; they depend on its existing
+Storage and IAM APIs. The runtime has a direct bucket-scoped Object Viewer
+grant and the publisher has a direct bucket-scoped Object Admin grant.
 
 The authoritative bucket policies make direct grants exact. Project and
 organization grants still inherit into the bucket. The protected org-Terraform
@@ -170,10 +172,11 @@ verified default Compute executor
 the Alloy builder is also an App Engine uploader. App Engine uploaders have
 Object Admin only on the App Engine source bucket because the CLI can replace
 or clean up cached hash-named objects. AppSpot can view those objects. The
-routine deployer and `gcp_dev_members` have Service Account User only on
-Metrics Bridge's default Compute Engine service account, preserving the
-automated and direct `pnpm bridge:deploy` Cloud Run paths after the broad
-project-level fallback is removed.
+routine deployer and `gcp_dev_members` have Service Account User only on the
+dedicated Metrics Bridge runtime identity, preserving the automated and direct
+`pnpm bridge:deploy` Cloud Run paths after the broad project-level fallback is
+removed. They have no default-Compute or project-wide Service Account User
+grant.
 
 Metrics Bridge's default Compute executor has no App Engine source-bucket grant.
 

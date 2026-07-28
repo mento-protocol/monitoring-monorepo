@@ -1,6 +1,7 @@
 import {
   attributeExpression,
   blockKey,
+  commentMaskedHcl,
   expectExpression,
   expectNoResourceMultiplicity,
   expectString,
@@ -16,6 +17,10 @@ import {
 
 export const PEG_POLICY_PRODUCTION_APPLIER_GRANT_KEY =
   "terraform/peg-policy.tf:google_service_account_iam_member.production_infra_applier_peg_policy_publisher_token_creator";
+const PEG_POLICY_RUNTIME_SERVICE_ACCOUNT_USER_GRANT_KEYS = [
+  "terraform/deploy-staging.tf:google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user",
+  "terraform/deploy-staging.tf:google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
+];
 
 export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
   {
@@ -26,6 +31,8 @@ export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
       "terraform/peg-policy.tf:resource.google_service_account.metrics_bridge_runtime",
       "terraform/peg-policy.tf:data.google_iam_policy.peg_policy",
       "terraform/metrics-bridge.tf:resource.google_cloud_run_v2_service.metrics_bridge",
+      "terraform/deploy-staging.tf:resource.google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user",
+      "terraform/deploy-staging.tf:resource.google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
     ]),
   },
   {
@@ -322,8 +329,10 @@ function rejectUnsafeAdditions(files, topLevelBlocks, errors) {
           "google_service_account.metrics_bridge_runtime.",
         ) ||
           block.code.includes("metrics-bridge-runtime@")) &&
-        blockKey(block) !==
+        ![
           "terraform/peg-policy.tf:google_storage_bucket_iam_policy.peg_policy",
+          ...PEG_POLICY_RUNTIME_SERVICE_ACCOUNT_USER_GRANT_KEYS,
+        ].includes(blockKey(block)),
     )
     .map(blockKey);
   if (runtimeUnexpected.length > 0) {
@@ -346,6 +355,107 @@ function rejectUnsafeAdditions(files, topLevelBlocks, errors) {
     errors.push(
       `terraform: Peg policy publisher identity: unexpected IAM grants are forbidden: ${publisherUnexpected.join(", ")}`,
     );
+  }
+}
+
+function validateRuntimeServiceAccountUserGrants(topLevelBlocks, errors) {
+  const resources = topLevelBlocks.filter((block) => block.kind === "resource");
+  const specifications = [
+    {
+      name: "ci_metrics_bridge_runtime_service_account_user",
+      member:
+        '"serviceAccount:${google_service_account.metrics_bridge_deployer.email}"',
+      dependsOn: [
+        "google_service_account.metrics_bridge_deployer",
+        "google_service_account.metrics_bridge_runtime",
+      ],
+    },
+    {
+      name: "dev_metrics_bridge_runtime_service_account_user",
+      member: "each.value",
+      forEach: "toset(var.gcp_dev_members)",
+      dependsOn: [
+        "google_project_iam_member.dev_run_admin",
+        "google_service_account.metrics_bridge_runtime",
+      ],
+    },
+  ];
+  for (const specification of specifications) {
+    const label = `terraform: Peg policy runtime act-as grant ${specification.name}`;
+    const grant = requireBlock(
+      resources,
+      "terraform/deploy-staging.tf",
+      "google_service_account_iam_member",
+      specification.name,
+      errors,
+      label,
+    );
+    if (!grant) continue;
+    if (!specification.forEach) {
+      expectNoResourceMultiplicity(grant, errors, label);
+    }
+    expectExpression(
+      grant,
+      "service_account_id",
+      "google_service_account.metrics_bridge_runtime.name",
+      errors,
+      label,
+    );
+    expectString(grant, "role", "roles/iam.serviceAccountUser", errors, label);
+    expectExpression(grant, "member", specification.member, errors, label);
+    if (specification.forEach) {
+      expectExpression(grant, "for_each", specification.forEach, errors, label);
+    }
+    if (
+      !sameSortedValues(
+        extractExpressionList(grant, "depends_on"),
+        specification.dependsOn,
+      )
+    ) {
+      errors.push(
+        `${label}: depends_on must contain only the required identities`,
+      );
+    }
+  }
+
+  const defaultComputeGrants = resources
+    .filter(
+      (block) =>
+        block.filePath === "terraform/deploy-staging.tf" &&
+        block.type === "google_service_account_iam_member" &&
+        stringAttribute(block, "role") === "roles/iam.serviceAccountUser" &&
+        block.code.includes("-compute@developer.gserviceaccount.com"),
+    )
+    .map(blockKey)
+    .sort();
+  if (defaultComputeGrants.length > 0) {
+    errors.push(
+      `terraform: Peg policy runtime act-as grants must not target the default Compute service account: ${defaultComputeGrants.join(", ")}`,
+    );
+  }
+
+  for (const { from, to } of [
+    {
+      from: "google_service_account_iam_member.ci_default_compute_service_account_user",
+      to: "google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user",
+    },
+    {
+      from: "google_service_account_iam_member.dev_default_compute_service_account_user",
+      to: "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
+    },
+  ]) {
+    const label = `terraform: Peg policy runtime act-as state move ${from}`;
+    const matchingMoves = topLevelBlocks.filter(
+      (block) =>
+        block.filePath === "terraform/deploy-staging.tf" &&
+        block.kind === "moved" &&
+        attributeExpression(block, "from") === from,
+    );
+    if (matchingMoves.length !== 1) {
+      errors.push(`${label}: must be declared exactly once`);
+      continue;
+    }
+    expectExpression(matchingMoves[0], "to", to, errors, label);
   }
 }
 
@@ -429,6 +539,7 @@ const PEG_POLICY_RUNTIME_URL =
   '"https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}"';
 const MAX_GCS_GENERATION = 9_223_372_036_854_775_807n;
 const POSITIVE_DECIMAL = /^[1-9][0-9]*$/u;
+const QUOTED_POSITIVE_DECIMAL = /^"[1-9][0-9]*"$/u;
 const RUNTIME_GENERATION_LITERAL_ERROR =
   "generation must be exactly null or a quoted positive decimal GCS generation within signed 64-bit range";
 const PEG_POLICY_RUNTIME_ENV_SOURCE =
@@ -449,6 +560,8 @@ function hasExactRuntimeExpression(block, source, attribute, expected) {
 function isValidRuntimeGenerationLiteral(block) {
   const source = attributeExpression(block, "peg_policy_runtime_generation");
   if (source === "null") return true;
+
+  if (!QUOTED_POSITIVE_DECIMAL.test(source ?? "")) return false;
 
   const generation = stringAttribute(block, "peg_policy_runtime_generation");
   return (
@@ -579,9 +692,25 @@ function validatePegPolicyRuntimeAttachment(files, topLevelBlocks, errors) {
     errors.push(`${label}: must contain exactly one lifecycle block`);
     return;
   }
-  if (lifecycles[0].code.includes("template[0].revision")) {
+  const ignoresTemplateRevision = commentMaskedHcl(lifecycles[0].code).includes(
+    "template[0].revision",
+  );
+  if (
+    attributeExpression(runtimeLocals[0], "peg_policy_runtime_generation") ===
+      "null" &&
+    !ignoresTemplateRevision
+  ) {
     errors.push(
-      `${label}: must not ignore template revision while applying the identity and policy pair`,
+      `${label}: must ignore template revision while generation is null`,
+    );
+  }
+  if (
+    attributeExpression(runtimeLocals[0], "peg_policy_runtime_generation") !==
+      "null" &&
+    ignoresTemplateRevision
+  ) {
+    errors.push(
+      `${label}: must not ignore template revision while applying a concrete generation`,
     );
   }
   const preconditions = nestedBlocks(lifecycles[0], "precondition");
@@ -730,5 +859,6 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
   }
   rejectUnsafeAdditions(files, topLevelBlocks, errors);
   rejectBroadProjectFallbacks(topLevelBlocks, errors);
+  validateRuntimeServiceAccountUserGrants(topLevelBlocks, errors);
   validatePegPolicyRuntimeAttachment(files, topLevelBlocks, errors);
 }
