@@ -22,7 +22,7 @@ The architecture is fixed by ADRs
 [0043](../adr/0043-peg-registry-service-local.md),
 [0044](../adr/0044-peg-thresholds-gated-rules-plane.md),
 [0045](../adr/0045-peg-paging-semantics.md),
-[0048](../adr/0048-private-gcs-peg-policy-artifact.md), and
+[0054](../adr/0054-same-project-peg-policy-artifact.md), and
 [0049](../adr/0049-peg-decision-package-read-model.md).
 
 ## Completion states
@@ -196,7 +196,8 @@ Use this order for the first activation topology:
    active-registry parity. Do not deploy the registry B image yet.
 3. Through a separately reviewed protected alerts-rules apply whose diff
    contains the policy object and no Grafana consumers, publish B as the
-   immutable private GCS generation described by ADR 0048. Keep the runtime
+   immutable private GCS generation described by
+   [ADR 0054](../adr/0054-same-project-peg-policy-artifact.md). Keep the runtime
    pinned to A.
 4. Deploy the bridge revision containing union registry B while the runtime
    remains pinned to A. The registry superset can serve A; verify that A keeps

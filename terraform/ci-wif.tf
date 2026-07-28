@@ -198,12 +198,6 @@ resource "google_service_account_iam_member" "deployer_wif_binding" {
 
 # Project-level grants the CI SA currently needs for the full deploy flow:
 #   - cloudbuild.builds.editor  → submit Cloud Build jobs
-#   - storage.admin             → temporary rollback access while explicit
-#                                 source buckets and bucket-scoped grants in
-#                                 deploy-staging.tf complete live canaries.
-#                                 The routing follow-up names each bucket; a
-#                                 separate phase removes this project-wide role
-#                                 after all paths are proven.
 #   - logging.viewer            → stream Cloud Build logs back to the runner
 #                                 so `gcloud builds submit` blocks until the
 #                                 build finishes (otherwise it exits with
@@ -213,19 +207,16 @@ resource "google_service_account_iam_member" "deployer_wif_binding" {
 #                                 Logging (not the default GCS log bucket).
 #   - artifactregistry.writer   → push images to AR
 #   - run.admin                 → update the Cloud Run service revision
-#   - iam.serviceAccountUser    → temporary project-wide fallback during the
-#                                 same canaries. deploy-staging.tf already
-#                                 grants exact act-as on AppSpot and the default
-#                                 compute SA for the two routine deploy paths.
+# deploy-staging.tf grants exact source-bucket and act-as access for the
+# routine deploy paths. This branch removes the former project-wide Storage
+# Admin and Service Account User fallbacks after #1659's canaries pass.
 locals {
   ci_deployer_roles = [
     "roles/cloudbuild.builds.editor",
-    "roles/storage.admin",
     "roles/logging.viewer",
     "roles/artifactregistry.writer",
     "roles/run.admin",
     "roles/appengine.appAdmin",
-    "roles/iam.serviceAccountUser",
   ]
 }
 

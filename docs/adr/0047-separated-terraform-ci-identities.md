@@ -160,10 +160,13 @@ jobs, and both cancellation APIs rejected it as already completed or not
 queued. This display-only wrapper carries no cloud credentials or deployment
 state.
 
-The cutover boundary barred a dedicated Peg-policy project or bucket while the
-legacy path remained. That boundary is now satisfied. A later reviewed change
-may create the policy foundation only through its own full plan and explicit
-human-approved apply.
+The cutover boundary originally barred the Peg-policy foundation while the
+legacy path remained. ADR 0054 now requires #1659's additive staging foundation
+to merge and its five deployment paths to pass canaries. The same-project
+foundation then removes broad Storage Admin, Storage Object Admin, and Service
+Account User grants and requires an effective-IAM audit after apply. A later
+reviewed change may create that foundation only through its own full plan and
+explicit human-approved apply.
 
 ### Final apply-plan contract
 
