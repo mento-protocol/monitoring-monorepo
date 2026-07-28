@@ -49,8 +49,8 @@ Interactive `next dev` can rewrite `next-env.d.ts` to import
 
 Logged-out checks must use an isolated browser context or clear both
 `authjs.session-token` and `__Secure-authjs.session-token` for `127.0.0.1`.
-Public pages show `Sign in`; protected pages (`/address-book`, `/entities`,
-`/integrations`, and `/revenue`) redirect to
+Public pages show `Sign in`; protected pages (`/address-book` and its nested
+`/address-book/entities` section, `/integrations`, and `/revenue`) redirect to
 `/sign-in?callbackUrl=...` when auth is configured.
 
 For a simulated authenticated session:

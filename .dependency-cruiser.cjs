@@ -214,10 +214,11 @@ module.exports = {
     // route's own subtree, so within-route imports (page.tsx → same-route
     // _components/, _tabs/ → same-route _components/, etc.) remain allowed.
     //
-    // address-book: two rules, one per sub-route, so that
-    // `address-book/AddressBookClient.tsx` cannot import
-    // `address-book/[address]/_components/` (and vice versa). Excluding the
-    // whole `address-book/` subtree in a single rule would allow that leakage.
+    // address-book: separate rules for the shared list/entities section,
+    // address detail, and entity directory. The root `_components/` directory
+    // is shared by `/address-book` and `/address-book/entities`, while
+    // `[address]/_components/` and `entities/_components/` stay private to
+    // their owning sub-routes.
     //
     // Pre-inventory (PR #444): zero cross-route violations; rules ship at error.
     {
@@ -259,7 +260,7 @@ module.exports = {
       name: "dashboard-route-private-address-book-root",
       severity: "error",
       comment:
-        "ui-dashboard/src/app/address-book/_components/ is private to the address-book list route. The detail route (address-book/[address]/) must not import it, nor may any other file outside app/address-book/ (excluding the [address] sub-route).",
+        "ui-dashboard/src/app/address-book/_components/ is shared by the address-book list and entities section. The detail route (address-book/[address]/) must not import it, nor may any file outside app/address-book/.",
       from: {
         path: "^ui-dashboard/src/",
         pathNot: "^ui-dashboard/src/app/address-book/(?!\\[address\\])[^/]",
@@ -277,6 +278,19 @@ module.exports = {
       },
       to: {
         path: "^ui-dashboard/src/app/address-book/\\[address\\]/_components/",
+      },
+    },
+    {
+      name: "dashboard-route-private-address-book-entities",
+      severity: "error",
+      comment:
+        "ui-dashboard/src/app/address-book/entities/_components/ is private to the entity-directory route. No code outside app/address-book/entities/ — including lib/, components/, or sibling routes — may import from it.",
+      from: {
+        path: "^ui-dashboard/src/",
+        pathNot: "^ui-dashboard/src/app/address-book/entities/",
+      },
+      to: {
+        path: "^ui-dashboard/src/app/address-book/entities/_components/",
       },
     },
     {

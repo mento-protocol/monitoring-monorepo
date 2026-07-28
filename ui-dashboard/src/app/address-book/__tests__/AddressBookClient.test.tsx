@@ -428,6 +428,14 @@ describe("AddressBookClient — initial render", () => {
     expect(container.textContent).toContain(
       "Contract and custom labels across every chain",
     );
+    expect(
+      container
+        .querySelector('a[href="/address-book"]')
+        ?.getAttribute("aria-current"),
+    ).toBe("page");
+    expect(
+      container.querySelector('a[href="/address-book/entities"]'),
+    ).not.toBeNull();
   });
 
   it("hides edit controls when canEdit=false (read-only middleware bypass)", () => {

@@ -1,27 +1,34 @@
-import { notFound } from "next/navigation";
-import { ALLOWED_DOMAIN, getAuthSession } from "@/auth";
-import { hkeysIntelEntities } from "@/lib/intel-entities";
-import { EntitySearch } from "./_components/entity-search";
+import { permanentRedirect } from "next/navigation";
 
-export const metadata = { title: "Entities — Mento Monitoring" };
-export const dynamic = "force-dynamic";
+export const metadata = {
+  title: "Entities — Address Book — Mento Monitoring",
+  description:
+    "Browse enriched entity profiles and their known blockchain addresses.",
+  robots: { index: false, follow: false },
+};
 
-export default async function EntitiesPage() {
-  const session = await getAuthSession();
-  const email = session?.user?.email?.toLowerCase();
-  if (!email?.endsWith(ALLOWED_DOMAIN)) notFound();
-  // Sort server-side: Redis HKEYS returns fields in storage order, which is
-  // not stable across requests (rehash, growth). Without sorting, paginated
-  // navigation can reshuffle between page loads and miss/repeat entities.
-  const slugs = (await hkeysIntelEntities()).slice().sort();
+type Props = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
-  return (
-    <div className="mx-auto max-w-2xl space-y-6 px-4 py-8">
-      <div>
-        <h1 className="text-2xl font-semibold text-white">Entities</h1>
-        <p className="mt-1 text-sm text-slate-400">Enriched entity profiles.</p>
-      </div>
-      <EntitySearch slugs={slugs} />
-    </div>
+function appendSearchParams(
+  destination: string,
+  values: Record<string, string | string[] | undefined>,
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) {
+    if (Array.isArray(value)) {
+      for (const item of value) params.append(key, item);
+    } else if (value !== undefined) {
+      params.set(key, value);
+    }
+  }
+  const query = params.toString();
+  return query ? `${destination}?${query}` : destination;
+}
+
+export default async function LegacyEntitiesPage({ searchParams }: Props) {
+  permanentRedirect(
+    appendSearchParams("/address-book/entities", await searchParams),
   );
 }

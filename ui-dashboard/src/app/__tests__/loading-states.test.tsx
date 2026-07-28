@@ -9,6 +9,8 @@ import HomeLoading from "@/app/(home)/loading";
 import PoolsLoading from "@/app/pools/loading";
 import PoolDetailLoading from "@/app/pool/[poolId]/loading";
 import AddressBookLoading from "@/app/address-book/loading";
+import EntityDirectoryLoading from "@/app/address-book/entities/loading";
+import EntityDetailLoading from "@/app/address-book/entities/[slug]/loading";
 import VolumeLoading from "@/app/volume/loading";
 import { ROW_CHART_HEIGHT_PX } from "@/lib/plot";
 import { POOLS_TABLE_SKELETON_ROWS } from "@/components/pools-table-skeleton";
@@ -153,6 +155,16 @@ describe("route-level loading UIs", () => {
 
   it("PoolsLoading renders exactly one polite live region", () => {
     render(<PoolsLoading />);
+    expect(countLiveRegions()).toBe(1);
+  });
+
+  it("EntityDirectoryLoading renders exactly one polite live region", () => {
+    render(<EntityDirectoryLoading />);
+    expect(countLiveRegions()).toBe(1);
+  });
+
+  it("EntityDetailLoading renders exactly one polite live region", () => {
+    render(<EntityDetailLoading />);
     expect(countLiveRegions()).toBe(1);
   });
 

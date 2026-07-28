@@ -36,7 +36,8 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import { EntitySearch } from "@/app/entities/_components/entity-search";
+import { EntitySearch } from "@/app/address-book/entities/_components/entity-search";
+import type { EntityDirectoryItem } from "@/app/address-book/entities/_lib/entity-directory";
 
 const SLUGS = [
   ...Array.from(
@@ -46,6 +47,14 @@ const SLUGS = [
   "beta-zero",
   "gamma-zero",
 ];
+const ITEMS: EntityDirectoryItem[] = SLUGS.map((slug) => ({
+  slug,
+  name: slug,
+  type: null,
+  addressCount: 0,
+  tags: [],
+  searchText: slug,
+}));
 
 beforeEach(() => {
   mockSearchParams = new URLSearchParams();
@@ -54,22 +63,28 @@ beforeEach(() => {
 describe("EntitySearch — SSR pass reads URL via useSearchParams", () => {
   it("renders the URL-derived query as the input's defaultValue", () => {
     mockSearchParams = new URLSearchParams("q=gamma");
-    const html = renderToStaticMarkup(<EntitySearch slugs={SLUGS} />);
+    const html = renderToStaticMarkup(
+      <EntitySearch items={ITEMS} addressSearchLimit={50} />,
+    );
     expect(html).toMatch(/value="gamma"/);
-    expect(html).toMatch(/\/entities\/gamma-zero/);
+    expect(html).toMatch(/\/address-book\/entities\/gamma-zero/);
   });
 
   it("renders the URL-derived page so deep links land on the right slice", () => {
     mockSearchParams = new URLSearchParams("page=2");
-    const html = renderToStaticMarkup(<EntitySearch slugs={SLUGS} />);
+    const html = renderToStaticMarkup(
+      <EntitySearch items={ITEMS} addressSearchLimit={50} />,
+    );
     expect(html).toMatch(/Page 2 of 2/);
-    expect(html).toMatch(/\/entities\/alpha-100/);
+    expect(html).toMatch(/\/address-book\/entities\/alpha-100/);
   });
 
   it("falls back to defaults when URL has no params", () => {
-    const html = renderToStaticMarkup(<EntitySearch slugs={SLUGS} />);
+    const html = renderToStaticMarkup(
+      <EntitySearch items={ITEMS} addressSearchLimit={50} />,
+    );
     expect(html).toMatch(/value=""/);
     expect(html).toMatch(/Page 1 of 2/);
-    expect(html).toMatch(/\/entities\/alpha-000/);
+    expect(html).toMatch(/\/address-book\/entities\/alpha-000/);
   });
 });

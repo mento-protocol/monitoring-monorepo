@@ -9,6 +9,7 @@ import { explorerAddressUrl } from "@/lib/tokens";
 import { NETWORKS, DEFAULT_NETWORK } from "@/lib/networks";
 import { buildAddressBookRows } from "@/lib/address-book";
 import { AddressTableRow } from "./_components/address-table-row";
+import { AddressBookSectionNav } from "./_components/address-book-section-nav";
 import { ImportDialog } from "./_components/import-dialog";
 import {
   buildContractRows,
@@ -253,7 +254,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
   );
 
   return (
-    <div className="space-y-6">
+    <main className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-bold text-white">Address Book</h1>
@@ -286,6 +287,8 @@ export default function AddressBookPage(props: AddressBookPageProps) {
           </div>
         )}
       </div>
+
+      <AddressBookSectionNav active="addresses" />
 
       {canEdit && importError && (
         <p
@@ -498,7 +501,7 @@ export default function AddressBookPage(props: AddressBookPageProps) {
           externallyDisabledReport={isReportMutationPending(editTarget.address)}
         />
       )}
-    </div>
+    </main>
   );
 }
 /* eslint-enable complexity, max-lines-per-function */

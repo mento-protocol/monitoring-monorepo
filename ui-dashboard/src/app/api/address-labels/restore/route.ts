@@ -15,6 +15,7 @@ import {
 } from "@/lib/address-labels/backup-format";
 import type { AddressLabelsSnapshot } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
+import { MAX_SNAPSHOT_HASH_BYTES } from "@/lib/snapshot-limits";
 import {
   validateIntelDeepRecords,
   validateIntelEntityCpsRecords,
@@ -29,7 +30,7 @@ export const maxDuration = 300;
 // ~10 MB, so 16 MB is comfortable headroom; v1 monolithic blobs ran up to
 // the older 32 MB cap before the per-hash format landed — we keep the
 // higher cap for legacy-blob restore paths only.
-export const MAX_RESTORE_BLOB_BYTES = 16 * 1024 * 1024;
+export const MAX_RESTORE_BLOB_BYTES = MAX_SNAPSHOT_HASH_BYTES;
 const MAX_LEGACY_BLOB_BYTES = 32 * 1024 * 1024;
 
 // Mapping from v2 manifest `name` to the AddressLabelsSnapshot field name.

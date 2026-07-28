@@ -8,6 +8,8 @@ const authConfigured = !!(
 
 const PROTECTED_PAGE_PREFIXES = [
   "/address-book",
+  // Legacy entity URLs redirect into the nested Address Book section, but
+  // remain protected so signed-out users cannot use redirects to probe slugs.
   "/entities",
   "/integrations",
   "/revenue",
