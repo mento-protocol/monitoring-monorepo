@@ -1,11 +1,12 @@
 import { hgetWithLegacy, hgetallWithLegacy } from "./intel-legacy-fallback";
 import { getRedis } from "./redis";
+import { MAX_SNAPSHOT_HASH_BYTES } from "./snapshot-limits";
 
 export const INTEL_ENTITIES_KEY = "intel_entities";
 const HASH_KEY = INTEL_ENTITIES_KEY;
 const LEGACY_HASH_KEY = "arkham_entities";
 export const INTEL_ENTITY_DIRECTORY_MAX_RECORDS = 1_000;
-export const INTEL_ENTITY_DIRECTORY_MAX_BYTES = 2 * 1024 * 1024;
+export const INTEL_ENTITY_DIRECTORY_MAX_BYTES = MAX_SNAPSHOT_HASH_BYTES;
 
 // Types
 
@@ -124,15 +125,16 @@ export async function getAllIntelEntities(): Promise<
 }
 
 /**
- * Admit the full entity snapshots only while their combined Redis footprint
- * stays within the directory's explicit server-side bounds. HLEN and HSTRLEN
- * inspect metadata without transferring the stored JSON values; HGETALL runs
- * only after both the record-count and payload-byte checks pass.
+ * Admit the selected entity snapshots only while their combined Redis
+ * footprint stays within the directory's explicit server-side bounds. HLEN
+ * and HSTRLEN inspect metadata without transferring the stored JSON values;
+ * HMGET fetches the winning current-or-legacy fields only after both checks
+ * pass.
  */
 export async function getIntelEntityDirectorySource(): Promise<IntelEntityDirectorySource> {
   const redis = getRedis();
   // The early-return guard is the result of these metadata reads; it cannot
-  // run before them, and it keeps the much larger HGETALL behind the cap.
+  // run before them, and it keeps the much larger record fetch behind the cap.
   // react-doctor-disable-next-line react-doctor/async-defer-await
   const [intelCount, legacyCount] = await Promise.all([
     redis.hlen(HASH_KEY),

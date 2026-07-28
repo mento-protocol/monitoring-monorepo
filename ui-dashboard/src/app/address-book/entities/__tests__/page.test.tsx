@@ -18,7 +18,7 @@ vi.mock("@/auth", () => ({
 }));
 vi.mock("@/lib/intel-entities", () => ({
   getIntelEntityDirectorySource,
-  INTEL_ENTITY_DIRECTORY_MAX_BYTES: 2 * 1024 * 1024,
+  INTEL_ENTITY_DIRECTORY_MAX_BYTES: 16 * 1024 * 1024,
   INTEL_ENTITY_DIRECTORY_MAX_RECORDS: 1_000,
 }));
 vi.mock("next/navigation", () => ({ notFound }));
@@ -98,7 +98,7 @@ describe("EntitiesPage", () => {
     const html = renderToStaticMarkup(await EntitiesPage());
 
     expect(html).toContain("Entity directory temporarily unavailable");
-    expect(html).toContain("1,000 records or 2 MiB");
+    expect(html).toContain("1,000 records or 16 MiB");
     expect(html).not.toContain('data-testid="entity-search"');
   });
 });
