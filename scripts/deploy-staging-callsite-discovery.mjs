@@ -47,17 +47,17 @@ function isBatchSource(filePath) {
   return /\.(?:bat|cmd)$/iu.test(filePath);
 }
 
-function visitYaml(value, path, callback) {
-  callback(value, path);
+function visitYaml(value, path, callback, key) {
+  callback(value, path, key);
   if (Array.isArray(value)) {
     value.forEach((entry, index) =>
-      visitYaml(entry, `${path}[${index}]`, callback),
+      visitYaml(entry, `${path}[${index}]`, callback, index),
     );
     return;
   }
   if (!isMapping(value)) return;
   for (const [key, entry] of Object.entries(value)) {
-    visitYaml(entry, path ? `${path}.${key}` : key, callback);
+    visitYaml(entry, path ? `${path}.${key}` : key, callback, key);
   }
 }
 
@@ -74,14 +74,25 @@ export function parseDeployStagingStructuredFile(filePath, contents, errors) {
   }
 }
 
-function logicalLines(filePath, contents) {
+function shellModeForFile(filePath) {
+  if (isPowerShellSource(filePath)) return "powershell";
+  if (isBatchSource(filePath)) return "cmd";
+  return "unix";
+}
+
+function logicalLines(
+  filePath,
+  contents,
+  shellMode = shellModeForFile(filePath),
+) {
   const lines = [];
   let pending = "";
-  const continuation = isPowerShellSource(filePath)
-    ? /`\s*$/u
-    : isBatchSource(filePath)
-      ? /\^\s*$/u
-      : /\\\s*$/u;
+  const continuation =
+    shellMode === "powershell"
+      ? /`\s*$/u
+      : shellMode === "cmd"
+        ? /\^\s*$/u
+        : /\\\s*$/u;
   for (const line of contents.split(/\r?\n/u)) {
     const code = stripShellComment(line);
     const continued = continuation.test(code);
@@ -190,9 +201,10 @@ function kindAfterGcloud(text) {
   return undefined;
 }
 
-function lexicalDeployRecords(filePath, surface, contents) {
+function lexicalDeployRecords(filePath, surface, contents, shellMode) {
   const records = [];
-  const windowsShell = isBatchSource(filePath) || isPowerShellSource(filePath);
+  const resolvedShellMode = shellMode ?? shellModeForFile(filePath);
+  const windowsShell = resolvedShellMode !== "unix";
   const scans = windowsShell
     ? [{ matcher: GCLOUD_WINDOWS, stripBackslashEscapes: false }]
     : [{ matcher: GCLOUD, stripBackslashEscapes: true }];
@@ -202,7 +214,7 @@ function lexicalDeployRecords(filePath, surface, contents) {
       stripBackslashEscapes: false,
     });
   }
-  for (const line of logicalLines(filePath, contents)) {
+  for (const line of logicalLines(filePath, contents, resolvedShellMode)) {
     for (const fragment of topLevelFragments(line)) {
       const seen = new Set();
       for (const { matcher, stripBackslashEscapes } of scans) {
@@ -446,6 +458,16 @@ function staticStringArray(node, resolveIdentifier, aggregate = false) {
   const values = [];
   let trusted = !aggregate;
   for (const element of expression.elements) {
+    if (ts.isSpreadElement(element)) {
+      const spread = staticStringArray(element.expression, resolveIdentifier);
+      if (spread === undefined) return undefined;
+      values.push(...spread.values);
+      // A spread is useful for conservative deploy discovery, but it is a
+      // broader evaluation surface than an inline literal argument. Never let
+      // it prove that an approved callsite carries the required staging flag.
+      trusted = false;
+      continue;
+    }
     const value = staticString(element, resolveIdentifier);
     if (value === undefined) return undefined;
     // Identifier resolution can pass through a mutable const-bound object
@@ -731,6 +753,26 @@ function structuredEntryPointRecords(filePath, path, value) {
   );
 }
 
+function structuredStringRecords(filePath, path, value, key) {
+  if (
+    key !== "run" ||
+    !filePath.toLowerCase().startsWith(".github/workflows/")
+  ) {
+    return lexicalDeployRecords(filePath, path, value);
+  }
+
+  // A workflow may select its shell at the step, job, workflow, runner, or
+  // expression level. Scan each supported continuation form and keep the mode
+  // that discovers the most literal deploys. This stays fail-closed without
+  // interpreting GitHub Actions shell inheritance or custom wrapper commands.
+  let records = [];
+  for (const shellMode of ["unix", "powershell", "cmd"]) {
+    const candidate = lexicalDeployRecords(filePath, path, value, shellMode);
+    if (candidate.length > records.length) records = candidate;
+  }
+  return records;
+}
+
 function structuredRecords(filePath, contents, errors) {
   // JSON configuration files such as tsconfig may intentionally use comments.
   // They cannot contain a deploy signature when they do not contain gcloud.
@@ -740,9 +782,9 @@ function structuredRecords(filePath, contents, errors) {
   const document = parseDeployStagingStructuredFile(filePath, contents, errors);
   if (document === undefined) return [];
   const records = [];
-  visitYaml(document, "", (value, path) => {
+  visitYaml(document, "", (value, path, key) => {
     if (typeof value === "string") {
-      records.push(...lexicalDeployRecords(filePath, path, value));
+      records.push(...structuredStringRecords(filePath, path, value, key));
     }
     if (
       Array.isArray(value) &&

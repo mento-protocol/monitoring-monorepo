@@ -491,6 +491,57 @@ assert.deepEqual(
   "nested Cloud Build JSON build submissions must be discovered",
 );
 
+for (const [shell, continuation, message] of [
+  ["pwsh", "`", "pwsh workflow continuations"],
+  ["PowerShell", "`", "PowerShell workflow continuations"],
+  ["pwsh -NoProfile -File {0}", "`", "custom pwsh workflow continuations"],
+  ["/usr/bin/env pwsh -File {0}", "`", "wrapped pwsh workflow continuations"],
+  ["cmd", "^", "cmd workflow continuations"],
+  ['cmd.exe /D /C "CALL {0}"', "^", "custom cmd workflow continuations"],
+  ["env cmd /D /C {0}", "^", "wrapped cmd workflow continuations"],
+]) {
+  assert.deepEqual(
+    discoverDeployStagingCallsites({
+      ".github/workflows/deploy.yml": `jobs:
+  deploy:
+    steps:
+      - shell: ${shell}
+        run: |
+          gcloud builds ${continuation}
+            submit .
+`,
+    }).map(({ kind }) => kind),
+    ["builds-submit"],
+    `${message} must join their native continuation character`,
+  );
+}
+
+assert.deepEqual(
+  discoverDeployStagingCallsites({
+    ".github/workflows/deploy.yml": `jobs:
+  deploy:
+    steps:
+      - run: |
+          gcloud builds \`
+            submit .
+`,
+  }).map(({ kind }) => kind),
+  ["builds-submit"],
+  "workflow run blocks must scan every supported continuation form when shell selection is implicit",
+);
+
+assert.deepEqual(
+  discoverDeployStagingCallsites({
+    ".github/workflows/deploy.yml": `jobs:
+  deploy:
+    steps:
+      - run: gcloud builds submit .
+`,
+  }).map(({ kind }) => kind),
+  ["builds-submit"],
+  "multi-shell workflow scanning must not duplicate a single-line deploy",
+);
+
 function assertForbiddenSignature(
   contents,
   message,
@@ -582,6 +633,17 @@ function deploy() {
 Bun.spawn(command);
 `,
     "const command-vector aliases must be discovered",
+  ],
+  [
+    `const suffix = ["submit", "."];
+execFileSync("gcloud", ["builds", ...suffix]);
+`,
+    "const argv array spreads must be flattened when statically evaluable",
+  ],
+  [
+    `Bun.spawn(["gcloud", ...["app", "deploy", "app.yaml"]]);
+`,
+    "literal command-vector array spreads must be flattened",
   ],
   [
     `const options = {
@@ -805,10 +867,10 @@ execFileSync("gcloud", ["builds", dynamic, "."]);
     "array holes must not be evaluated",
   ],
   [
-    `const extra = ["submit", "."];
+    `const extra = getArgs();
 execFileSync("gcloud", ["builds", ...extra]);
 `,
-    "array spreads must not be evaluated",
+    "dynamic array spreads must not be evaluated",
   ],
   [
     `const args = getArgs();
@@ -885,6 +947,32 @@ assert.equal(
   ),
   true,
   "literal argv arrays must remain trusted staging evidence",
+);
+const spreadArgsRecord = discoverDeployStagingCallsites({
+  "scripts/spread-argv.mjs": `execFileSync(
+  "gcloud",
+  [
+    "builds",
+    "submit",
+    ...["--gcs-source-staging-dir=gs://trusted", "."],
+  ],
+);
+`,
+})[0];
+assert(spreadArgsRecord, "static spread argv must still be detected");
+assert.equal(
+  spreadArgsRecord.argsTrusted,
+  false,
+  "spread argv must carry untrusted provenance",
+);
+assert.equal(
+  recordHasDeployStagingFlag(
+    spreadArgsRecord,
+    "gcs-source-staging-dir",
+    "gs://trusted",
+  ),
+  false,
+  "spread argv must not satisfy the staging-flag requirement",
 );
 const mutableArgsRecord = discoverDeployStagingCallsites({
   "scripts/mutable-const-argv.mjs": `const args = [
