@@ -1,7 +1,22 @@
 locals {
-  peg_policy_bucket = "mento-monitoring-peg-policy"
-  peg_policy_object = "peg-policy/current.json"
-  peg_policy_source = file("${path.module}/../rules/peg-thresholds.json")
+  peg_policy_bucket          = "mento-monitoring-peg-policy"
+  peg_policy_object          = "peg-policy/current.json"
+  peg_policy_source          = file("${path.module}/../rules/peg-thresholds.json")
+  peg_policy_source_md5_hex  = md5(local.peg_policy_source)
+  peg_policy_base64_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  peg_policy_source_md5_base64 = join("", concat(
+    flatten([
+      for offset in range(0, 30, 3) : [
+        substr(local.peg_policy_base64_alphabet, floor(parseint(substr(local.peg_policy_source_md5_hex, offset, 3), 16) / 64), 1),
+        substr(local.peg_policy_base64_alphabet, parseint(substr(local.peg_policy_source_md5_hex, offset, 3), 16) % 64, 1),
+      ]
+    ]),
+    [
+      substr(local.peg_policy_base64_alphabet, floor(parseint(substr(local.peg_policy_source_md5_hex, 30, 2), 16) / 4), 1),
+      substr(local.peg_policy_base64_alphabet, (parseint(substr(local.peg_policy_source_md5_hex, 30, 2), 16) % 4) * 16, 1),
+      "=",
+    ],
+  ))
 }
 
 # The same object name is intentional: versioning in the private foundation
@@ -13,11 +28,14 @@ resource "google_storage_bucket_object" "peg_policy" {
   content       = local.peg_policy_source
   content_type  = "application/json"
   cache_control = "no-store"
-  # Pinned Google provider v6.50 compares this known content hash with the
-  # current object, so a manual plan exposes an out-of-band overwrite. Its
-  # replacement-oriented `source_md5hash` alternative conflicts with this
-  # resource's no-destroy lifecycle and must not be substituted casually.
-  detect_md5hash  = md5(local.peg_policy_source)
+  # Google provider v6.50 compares this known content hash with the current
+  # object, so a manual plan exposes an out-of-band byte overwrite. It expects
+  # the MD5 bytes encoded as Base64, not Terraform md5()'s hexadecimal text.
+  # Terraform has no hexdecode(), so the source-derived local converts each
+  # MD5 nibble group to the required Base64 value. `source_md5hash` is
+  # replacement-oriented and would conflict with prevent_destroy. Do not
+  # substitute it for this drift check.
+  detect_md5hash  = local.peg_policy_source_md5_base64
   deletion_policy = "ABANDON"
 
   lifecycle {

@@ -65,6 +65,20 @@ function forbidPattern(contents, pattern, errors, label) {
     errors.push(`${label} is forbidden`);
 }
 
+function expectExactMultilineLocalExpression(
+  block,
+  name,
+  expected,
+  errors,
+  label,
+) {
+  const normalized = commentMaskedHcl(block?.code ?? "").replace(/\s+/gu, "");
+  const expectedAssignment = `${name}=${expected.replace(/\s+/gu, "")}}`;
+  if (normalized.split(expectedAssignment).length !== 2) {
+    errors.push(`${label}: ${name} must be exactly ${expected}`);
+  }
+}
+
 function expectNoProvisioner(block, errors, label) {
   if (/^\s*provisioner(?:\s|")/mu.test(commentMaskedHcl(block?.code ?? ""))) {
     errors.push(`${label}: imperative provisioners are forbidden`);
@@ -269,6 +283,27 @@ function validatePolicy(blocks, errors) {
     errors,
     "Peg policy locals",
   );
+  expectExpression(
+    locals,
+    "peg_policy_source_md5_hex",
+    "md5(local.peg_policy_source)",
+    errors,
+    "Peg policy locals",
+  );
+  expectString(
+    locals,
+    "peg_policy_base64_alphabet",
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    errors,
+    "Peg policy locals",
+  );
+  expectExactMultilineLocalExpression(
+    locals,
+    "peg_policy_source_md5_base64",
+    'join("", concat(flatten([for offset in range(0, 30, 3) : [substr(local.peg_policy_base64_alphabet, floor(parseint(substr(local.peg_policy_source_md5_hex, offset, 3), 16) / 64), 1), substr(local.peg_policy_base64_alphabet, parseint(substr(local.peg_policy_source_md5_hex, offset, 3), 16) % 64, 1),]]), [substr(local.peg_policy_base64_alphabet, floor(parseint(substr(local.peg_policy_source_md5_hex, 30, 2), 16) / 4), 1), substr(local.peg_policy_base64_alphabet, (parseint(substr(local.peg_policy_source_md5_hex, 30, 2), 16) % 4) * 16, 1), "=",],))',
+    errors,
+    "Peg policy locals",
+  );
 
   const policy = blockFor(
     blocks,
@@ -313,7 +348,7 @@ function validatePolicy(blocks, errors) {
   expectExpression(
     policy,
     "detect_md5hash",
-    "md5(local.peg_policy_source)",
+    "local.peg_policy_source_md5_base64",
     errors,
     "Peg policy object",
   );

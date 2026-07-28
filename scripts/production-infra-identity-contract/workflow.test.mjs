@@ -7,6 +7,7 @@ import { validateWorkflowContract } from "./workflow.mjs";
 const workflowPath = ".github/workflows/alerts-rules.yml";
 const pegPolicyPublicationWorkflow =
   ".github/workflows/peg-policy-publication.yml";
+const infraWorkflow = ".github/workflows/infra.yml";
 const validCheckoutStep = `      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false`;
@@ -108,6 +109,26 @@ function liveWorkflowFiles() {
 const validFiles = validFixtureFiles();
 assert.deepEqual(validate(validFiles), []);
 assert.deepEqual(validate(liveWorkflowFiles()), []);
+
+expectFailure(
+  replaceWorkflowFile(
+    validFiles,
+    infraWorkflow,
+    "          persist-credentials: false",
+    "          persist-credentials: true",
+  ),
+  "PR-controlled discover checkout must use the pinned action with fetch-depth: 0 and persist-credentials: false",
+);
+
+expectFailure(
+  replaceWorkflowFile(
+    validFiles,
+    infraWorkflow,
+    "        with:\n          persist-credentials: false\n      - uses: hashicorp/setup-terraform",
+    "      - uses: hashicorp/setup-terraform",
+  ),
+  "PR-controlled validate checkout must use the pinned action with persist-credentials: false",
+);
 
 expectFailure(
   replaceWorkflowFile(

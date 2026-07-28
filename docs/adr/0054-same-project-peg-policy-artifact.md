@@ -41,7 +41,7 @@ before production use.
 - Keep both policy identities in `mento-monitoring`. The runtime receives only
   bucket-scoped Object Viewer. The publisher receives only bucket-scoped Object
   Admin. The protected production applier has the only direct Token Creator
-  grant on the publisher.
+  grant on the publisher; inherited and effective IAM remains audited.
 - Use authoritative bucket IAM policies. The existing protected org-Terraform
   project Owner manages bucket metadata and IAM, so no extra custom controller
   role is needed.

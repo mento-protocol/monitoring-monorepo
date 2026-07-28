@@ -70,6 +70,20 @@ withMutation(
   "policy.tf",
   (value) =>
     value.replace(
+      "local.peg_policy_source_md5_base64",
+      "md5(local.peg_policy_source)",
+    ),
+  /Peg policy object: detect_md5hash must be exactly/u,
+);
+withMutation(
+  "policy.tf",
+  (value) => value.replace("range(0, 30, 3)", "range(0, 27, 3)"),
+  /Peg policy locals: peg_policy_source_md5_base64 must be exactly/u,
+);
+withMutation(
+  "policy.tf",
+  (value) =>
+    value.replace(
       "  lifecycle {",
       '  source = "untrusted-policy.json"\n\n  lifecycle {',
     ),
@@ -117,8 +131,8 @@ withMutation(
   "policy.tf",
   (value) =>
     value.replace(
-      'peg_policy_bucket = "mento-monitoring-peg-policy"',
-      'peg_policy_bucket = "wrong"\n# peg_policy_bucket = "mento-monitoring-peg-policy"',
+      'peg_policy_bucket          = "mento-monitoring-peg-policy"',
+      'peg_policy_bucket          = "wrong"\n# peg_policy_bucket = "mento-monitoring-peg-policy"',
     ),
   /Peg policy locals: peg_policy_bucket must be exactly/u,
 );
@@ -131,8 +145,8 @@ withMutation(
   "policy.tf",
   (value) =>
     value.replace(
-      'peg_policy_object = "peg-policy/current.json"',
-      'peg_policy_object = "wrong"\n# peg_policy_object = "peg-policy/current.json"',
+      'peg_policy_object          = "peg-policy/current.json"',
+      'peg_policy_object          = "wrong"\n# peg_policy_object = "peg-policy/current.json"',
     ),
   /Peg policy locals: peg_policy_object must be exactly/u,
 );

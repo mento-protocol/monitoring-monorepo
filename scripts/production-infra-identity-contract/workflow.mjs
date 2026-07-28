@@ -210,6 +210,7 @@ const CHECKOUT_ACTION_PATTERN = /^actions\/checkout@[0-9a-f]{40}$/u;
 const CHECKOUT_STEP_KEYS = new Set(["uses", "with"]);
 const PROTECTION_STEP_KEYS = new Set(["env", "name", "run"]);
 const AUTH_STEP_KEYS = new Set(["name", "uses", "with"]);
+const INFRA_WORKFLOW = ".github/workflows/infra.yml";
 
 function hasOnlyKeys(mapping, allowedKeys) {
   return (
@@ -303,6 +304,49 @@ function hasExactSemanticCheckoutStep(step) {
   );
 }
 
+function hasExactInfraCheckoutStep(step, expectedInputs) {
+  if (
+    !hasOnlyKeys(step, CHECKOUT_STEP_KEYS) ||
+    typeof step.uses !== "string" ||
+    !CHECKOUT_ACTION_PATTERN.test(step.uses) ||
+    !isMapping(step.with)
+  ) {
+    return false;
+  }
+
+  const entries = Object.entries(expectedInputs);
+  return (
+    Object.keys(step.with).length === entries.length &&
+    entries.every(([key, value]) => step.with[key] === value)
+  );
+}
+
+function validateInfraValidationCheckouts(parsedWorkflow, errors) {
+  const jobs = parsedWorkflow.jobs;
+  const discoverCheckout = jobs?.discover?.steps?.[0];
+  const validateCheckout = jobs?.validate?.steps?.[0];
+
+  if (
+    !hasExactInfraCheckoutStep(discoverCheckout, {
+      "fetch-depth": 0,
+      "persist-credentials": false,
+    })
+  ) {
+    errors.push(
+      `${INFRA_WORKFLOW}: PR-controlled discover checkout must use the pinned action with fetch-depth: 0 and persist-credentials: false`,
+    );
+  }
+  if (
+    !hasExactInfraCheckoutStep(validateCheckout, {
+      "persist-credentials": false,
+    })
+  ) {
+    errors.push(
+      `${INFRA_WORKFLOW}: PR-controlled validate checkout must use the pinned action with persist-credentials: false`,
+    );
+  }
+}
+
 function hasSafeParentEnvironment(parsedWorkflow, parsedApplyJob) {
   if (Object.hasOwn(parsedWorkflow, "env")) return false;
   if (!Object.hasOwn(parsedApplyJob, "env")) return true;
@@ -380,6 +424,7 @@ export function validateWorkflowContract(files, errors) {
     ...APPLY_WORKFLOWS,
     ...MANUAL_PUBLICATION_WORKFLOWS,
     ...SERVICE_AND_DRIFT_WORKFLOWS,
+    INFRA_WORKFLOW,
   ]) {
     requireFile(files, workflowPath, errors);
   }
@@ -405,6 +450,10 @@ export function validateWorkflowContract(files, errors) {
     }
 
     validateWorkflowInventory(workflowPath, parsedWorkflow, errors);
+
+    if (workflowPath === INFRA_WORKFLOW) {
+      validateInfraValidationCheckouts(parsedWorkflow, errors);
+    }
 
     const code = stripYamlComments(files[workflowPath]);
     validateRefreshRouting(

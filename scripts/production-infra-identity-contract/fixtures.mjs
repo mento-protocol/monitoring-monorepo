@@ -567,6 +567,10 @@ export function validFixtureFiles() {
     ".github/workflows/governance-watchdog.yml": applyWorkflowFixture(
       ".github/workflows/governance-watchdog.yml",
     ),
+    ".github/workflows/infra.yml": readFileSync(
+      new URL("../../.github/workflows/infra.yml", import.meta.url),
+      "utf8",
+    ),
     ".github/workflows/peg-policy-publication.yml": readFileSync(
       new URL(
         "../../.github/workflows/peg-policy-publication.yml",

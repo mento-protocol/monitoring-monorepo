@@ -11,6 +11,10 @@ terraform {
   }
 
   required_providers {
+    # Upgrade gate: this root intentionally stays on v6.50 because its
+    # deprecated detect_md5hash behavior closes out-of-band object-byte drift.
+    # Re-review the exact provider source and this reconciliation contract
+    # before changing the Google provider version.
     google = {
       source  = "hashicorp/google"
       version = "~> 6.50.0"

@@ -10,7 +10,7 @@ const TERRAFORM_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/onchain-event-handler/versions.tf:terraform|4d5c657d6e411bc267e9cc798aeefd52012417d9d7145a7dd7569daab4575c1a",
   "alerts/infra/onchain-event-listeners/versions.tf:terraform|639e43b0ef64ab9fd28776cb56f025901206283cc96b4426ed259a1c5261885d",
   "alerts/infra/versions.tf:terraform|43068686a391cb1096f1dfea0e89c8797bcd6a4f7bdea7f8c6d72d5679b6918b",
-  "alerts/peg-policy-publication/versions.tf:terraform|235cbb0879681ba655358869445ff138c0566e4600af187ab3a21f3c0f21b43d",
+  "alerts/peg-policy-publication/versions.tf:terraform|9e866e59018984202299064a496a9ce65e9e904fe44111e237add5020f017588",
   "alerts/rules/versions.tf:terraform|dc025ec58d779e88576b1e298ce04afe84e91147c73e0dbe1609763c5c836dfa",
   "governance-watchdog/infra/versions.tf:terraform|e0a15645d55984ee2013ba6342c89743251029192fb312512e8b89003651cb1f",
   "terraform/providers.tf:terraform|220c27447f2c9496849dee19feda26c30ff93815e2e7eb7b93351b8c4f33cea7",
