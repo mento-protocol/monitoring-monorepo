@@ -76,6 +76,9 @@ try {
     ".github/workflows/**",
     "scripts/**/*.mjs",
     "scripts/**/*.sh",
+    "aegis/bin/deploy.sh",
+    "aegis/grafana-agent/deploy.sh",
+    "aegis/grafana-agent/cloudbuild.yaml",
   ]) {
     assert(
       rootScripts.includes(requiredPattern),
@@ -105,6 +108,9 @@ try {
     "scripts/production-infra-identity-contract/identity.mjs",
     "scripts/sanitize-terraform-output.sh",
     "scripts/verify-github-environment-protection.mjs",
+    "aegis/bin/deploy.sh",
+    "aegis/grafana-agent/deploy.sh",
+    "aegis/grafana-agent/cloudbuild.yaml",
   ]) {
     assertRoutesIdentityContract(changedPath);
   }

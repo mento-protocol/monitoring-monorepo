@@ -2282,9 +2282,6 @@ while IFS= read -r path; do
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack wrapper changed"
           add_registered_terraform_validate_commands "Terraform stack wrapper changed"
           ;;
-        scripts/deploy-staging-callsite-discovery.mjs|scripts/deploy-staging-contract.mjs|scripts/deploy-staging-contract.test.mjs)
-          add_command "pnpm tf:test" "deployment source-staging contract changed"
-          ;;
         scripts/terraform-fmt-check.mjs)
           add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper changed"
           add_command "pnpm tf:test" "Terraform format helper changed"
@@ -2476,6 +2473,13 @@ while IFS= read -r path; do
           add_adr_reminder "top-level package.json changed — ADR reminder (a new package/service likely needs an ADR)"
           ;;
       esac
+      ;;
+  esac
+  # Keep the deployment source-staging contract's complete callsite inventory
+  # and its implementation on the same fail-closed validation path.
+  case "$path" in
+    .github/workflows/metrics-bridge.yml|scripts/deploy-bridge.sh|aegis/grafana-agent/deploy.sh|aegis/bin/deploy.sh|aegis/grafana-agent/cloudbuild.yaml|scripts/deploy-staging-callsite-discovery.mjs|scripts/deploy-staging-contract.mjs|scripts/deploy-staging-contract.test.mjs)
+      add_command "pnpm tf:test" "deployment source-staging contract changed"
       ;;
   esac
   # `pnpm tf:test` owns the fail-closed production identity contract. Route
