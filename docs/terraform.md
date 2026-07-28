@@ -54,11 +54,12 @@ through `production-infra` approval.
 
 `peg-policy-publication` permits only backend-free local validation with
 `pnpm tf validate peg-policy-publication`. Local plan and apply are disabled,
-including `--force-local-apply`. The foundation is applied, but publication is
-paused pending the controller recovery below. After that recovery, dispatch
-`Peg Policy Publication` from `main`: inspect its read-only plan, then choose
-`apply` and approve the `production-infra` Environment. Its output supplies one
-generation-pinned URL for a later runtime-activation change.
+including `--force-local-apply`. Controller recovery and first publication are
+complete: `mento-monitoring-peg-policy/peg-policy/current.json` is generation
+`1785276001213660` and the runtime attachment pins it. For a future publication,
+dispatch `Peg Policy Publication` from `main`, inspect its read-only plan, then
+choose `apply` and approve the `production-infra` Environment. Its output feeds
+a separately reviewed runtime rollover.
 
 ## CI Model
 
@@ -139,14 +140,15 @@ Routing and IAM audit complete. Removal: `0 added, 1 changed, 1 destroyed`;
 plan clean; IAM has no `metrics-bridge-deployer` Token Creator grant. Platform
 owns private buckets and identities; protected `peg-policy-publication` writes
 the policy object.
-Metrics Bridge uses the dedicated runtime identity. `PEG_POLICY_*` is absent
-only when `local.peg_policy_runtime_generation = null`; the reviewed first
-activation changes that literal to the protected publisher's exact quoted
-positive output. Publication does not attach Cloud Run or activate Grafana.
-Terraform derives the pinned URL and `gcp-metadata` mode from that literal.
-`null` retains `template[0].revision` in `ignore_changes`; first activation
-removes it, and later concrete pins keep revision changes managed so each
-handoff creates a Cloud Run revision. Buckets, runtime, and publisher are in
+Metrics Bridge uses the dedicated runtime identity and pins generation
+`1785276001213660` through paired `PEG_POLICY_*` values. Publication itself
+attaches neither Cloud Run nor Grafana consumers. The reviewed runtime
+activation attached Cloud Run; the separate alerts-rules source change and
+approved apply activate Grafana. Terraform derives the pinned URL and
+`gcp-metadata` mode from that literal.
+`null` retains `template[0].revision` in `ignore_changes`; the completed first
+activation removed it, and later concrete pins keep revision changes managed so
+each handoff creates a Cloud Run revision. Buckets, runtime, and publisher are in
 `mento-monitoring`; publication plan and reader are in the seed project. Only
 the exact publication workflow selects that read-only chain. Runtime and reader
 have direct bucket-scoped Object Viewer; publisher has direct Object Admin.

@@ -1139,7 +1139,7 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
   );
 });
 
-test("Peg Grafana consumers stay behind the default-off source activation guard", () => {
+test("Peg Grafana consumers use a literal source activation guard", () => {
   const rulesDir = path.resolve(__dirname, "..", "alerts/rules");
   const policyLocals = readFileSync(
     path.join(rulesDir, "peg-policy-locals.tf"),
@@ -1180,10 +1180,10 @@ test("Peg Grafana consumers stay behind the default-off source activation guard"
     path.join(rulesDir, "peg-rule-definitions.tf"),
     "utf8",
   );
-  const assertDefaultOff = (source) => {
+  const assertLiteralActivation = (source) => {
     assert(
-      /\bpeg_alerts_enabled\s*=\s*false\b/.test(source),
-      "peg alert activation must default to false in source-controlled Terraform",
+      /\bpeg_alerts_enabled\s*=\s*(?:true|false)\b/.test(source),
+      "peg alert activation must be a literal true or false in source-controlled Terraform",
     );
   };
   const assertGuardedResource = (file, marker, source) => {
@@ -1206,12 +1206,12 @@ test("Peg Grafana consumers stay behind the default-off source activation guard"
     throw new Error(message);
   };
 
-  assertDefaultOff(policyLocals);
+  assertLiteralActivation(policyLocals);
   assert(
     /peg_alert_instances\s*=\s*local\.peg_alerts_enabled\s*\?\s*\{\s*"peg-monitoring"\s*=\s*true\s*\}\s*:\s*\{\}/s.test(
       policyLocals,
     ),
-    "peg alert instances must be one stable singleton map derived from the default-off switch",
+    "peg alert instances must be one stable singleton map derived from the literal source switch",
   );
   assert(
     guardedResources.length === 9,
@@ -1228,13 +1228,13 @@ test("Peg Grafana consumers stay behind the default-off source activation guard"
   );
   expectFailure(
     () =>
-      assertDefaultOff(
+      assertLiteralActivation(
         policyLocals.replace(
-          "peg_alerts_enabled = false",
-          "peg_alerts_enabled = true",
+          /\bpeg_alerts_enabled\s*=\s*(?:true|false)\b/,
+          "peg_alerts_enabled = var.peg_alerts_enabled",
         ),
       ),
-    "activation guard test must reject a forced-open default",
+    "activation guard test must reject variable-controlled activation",
   );
   expectFailure(
     () =>

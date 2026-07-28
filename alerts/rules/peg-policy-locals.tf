@@ -10,9 +10,9 @@
 
 locals {
   # This source-controlled switch is the only production activation boundary
-  # for Peg Grafana consumers. Keep it false until the runbook's production
-  # preconditions have been verified and a reviewed source change enables it.
-  peg_alerts_enabled = false
+  # for Peg Grafana consumers. This reviewed source change enables it; the
+  # runbook's producer preconditions still gate the protected apply.
+  peg_alerts_enabled = true
   peg_alert_instances = local.peg_alerts_enabled ? {
     "peg-monitoring" = true
   } : {}

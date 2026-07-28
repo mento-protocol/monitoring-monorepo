@@ -259,18 +259,21 @@ emergency exceptions. Do not retain a project-level controller grant or use
 broad Storage Admin, Storage Object Admin, or Service Account User fallbacks.
 An explicitly approved, time-bounded emergency controller bootstrap may be
 used only until both bucket policies reconcile; remove it immediately, verify
-its absence, and run a clean plan. The foundation is applied, but publication
-is paused pending that recovery. The canonical sequence is in
+its absence, and run a clean plan. That recovery and bootstrap removal are
+complete. The protected workflow published
+`mento-monitoring-peg-policy/peg-policy/current.json` at generation
+`1785276001213660`; Metrics Bridge pins it on
+`metrics-bridge-r-47264e8-30405040839`. The canonical recovery procedure is in
 [`docs/terraform.md`](terraform.md) and [ADR 0055](adr/0055-peg-policy-bucket-controller-recovery.md).
-Audit effective readers, writers, and IAM administrators after applies and
-again before runtime activation.
+Audit effective readers, writers, and IAM administrators after future applies
+and before runtime rollovers.
 
-The manual `Peg Policy Publication` workflow writes the current policy as a
-versioned object. Dispatch its `plan` operation from `main`, inspect the
-read-only result, then dispatch `apply` and approve `production-infra`. Copy
-only its generation-pinned output into the later reviewed runtime-activation
-change. The publication workflow does not set either Cloud Run value or alter
-Grafana. Its WIF-facing plan identity is bound to that exact workflow and may
+The manual `Peg Policy Publication` workflow writes each policy as a versioned
+object. For a future publication, dispatch its `plan` operation from `main`,
+inspect the read-only result, then dispatch `apply` and approve
+`production-infra`. Copy only its generation-pinned output into the later
+reviewed runtime-rollover change. The publication workflow does not set either
+Cloud Run value or alter Grafana. Its WIF-facing plan identity is bound to that exact workflow and may
 impersonate only the publication reader. That reader can view only the
 Terraform state and policy buckets; the shared refresh identity cannot read
 policy objects.
