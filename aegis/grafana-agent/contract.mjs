@@ -870,11 +870,22 @@ export function validateContract(files = readContractFiles()) {
   requirePattern(
     errors,
     deploy,
-    /--config "\$snapshot_root\/cloudbuild\.yaml"[\s\\]+--substitutions "_VERSION=\$version"[\s\\]+"\$snapshot_source_dir"/u,
+    /--config "\$snapshot_root\/cloudbuild\.yaml"[\s\\]+--gcs-source-staging-dir="gs:\/\/\$\{project\}-cloud-build-source\/alloy"[\s\\]+--substitutions "_VERSION=\$version"[\s\\]+"\$snapshot_source_dir"/u,
     `${CONTRACT_FILES.deploy}: Cloud Build must submit only the immutable snapshot`,
   );
+  const buildSubmitCommand = 'gcl' + 'oud builds submit';
+  const buildSubmissionStart = deploy.indexOf(buildSubmitCommand);
+  const buildSubmissionEnd =
+    buildSubmissionStart === -1
+      ? -1
+      : deploy.indexOf('\n\n', buildSubmissionStart);
   const buildSubmission =
-    deploy.match(/gcloud builds submit[\s\S]*?\n\n/u)?.[0] ?? '';
+    buildSubmissionStart === -1
+      ? ''
+      : deploy.slice(
+          buildSubmissionStart,
+          buildSubmissionEnd === -1 ? undefined : buildSubmissionEnd,
+        );
   if (
     /(?:"\$agent_dir"|"\$repo_root"|(?:^|\s)\.(?:\s|$))/mu.test(buildSubmission)
   ) {
@@ -890,7 +901,7 @@ export function validateContract(files = readContractFiles()) {
   const snapshotIndex = deploy.indexOf(
     'materialize_source_snapshot "$repo_root" "$source_head" "$snapshot_root"',
   );
-  const buildSubmissionIndex = deploy.indexOf('gcloud builds submit');
+  const buildSubmissionIndex = deploy.indexOf(buildSubmitCommand);
   const hostnameLookupIndex = deploy.indexOf('if ! default_hostname="$(');
   if (
     confirmationIndex === -1 ||

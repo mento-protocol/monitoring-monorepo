@@ -83,9 +83,12 @@ boundaries.
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER`,
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`,
   `vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER`, and
-  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The four trusted-main plan
-  workflows and `terraform-drift.yml` route through the refresh selectors.
-  Routing is live, and run
+  `vars.GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT`. The five trusted-main plan
+  workflows and `terraform-drift.yml` enter the refresh provider. Policy
+  publication selects its dedicated plan account; the other workflows select
+  the shared refresh account. The shared account's WIF binding must list only
+  those five regular workflow refs; a pool-wide main-ref binding would let
+  publication bypass its dedicated chain. Routing is live, and run
   [#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
   completed the full-refresh proof. The legacy-authority removal, run drain,
   and final IAM/WIF audit are complete.
@@ -97,24 +100,27 @@ boundaries.
   review. The merged `main` route completed full-refresh, unlocked plans for
   every CI-managed Google-provider stack. Add only an exact missing permission
   named by a provider denial.
-- The Peg-policy foundation creates no policy object. Both buckets and both
-  policy identities live in `mento-monitoring`; direct bucket grants stay
+- The Peg-policy foundation creates no policy object. Both buckets, the
+  runtime, and publisher live in `mento-monitoring`; the workflow-only plan and
+  reader identities live in the seed project. The shared refresh identity must
+  not read policy objects, while the runtime and publication reader have the
+  exact bucket-scoped Object Viewer grants. Direct bucket grants stay
   authoritative and exact. Metrics Bridge always uses the dedicated runtime
   identity, while its paired `PEG_POLICY_*` values stay absent until the
-  reviewed source literal `local.peg_policy_runtime_generation` is changed
-  from `null` for first activation or the current quoted generation for a
-  rollover to the protected publisher's positive generation output. Never
-  supply a URL or auth-mode variable: Terraform derives the canonical pinned
-  GCS URL and `gcp-metadata` mode together. The routine deployer and
-  `gcp_dev_members` receive Service Account User only on that runtime identity;
-  never restore a project-wide or default-Compute grant. The protected
-  org-Terraform project Owner and organization IAM administrators are accepted
-  control-plane exceptions; inherited grants still apply. Do not apply this
-  foundation until #1659's additive staging foundation has merged and its five
-  deploy paths have passed canaries. This branch removes broad Storage Admin,
-  Storage Object Admin, and Service Account User fallback grants with the
-  dormant policy foundation; audit effective readers, writers, and IAM
-  administrators after that apply and before activation. Access logs are audit
+  reviewed source literal `local.peg_policy_runtime_generation` is changed from
+  `null` for first activation or the current quoted generation for a rollover
+  to the protected publisher's positive generation output. Never supply a URL
+  or auth-mode variable: Terraform derives the canonical pinned GCS URL and
+  `gcp-metadata` mode together. The routine deployer and `gcp_dev_members`
+  receive Service Account User only on that runtime identity; never restore a
+  project-wide or default-Compute grant. The protected org-Terraform project
+  Owner and organization IAM administrators are accepted control-plane
+  exceptions; inherited grants still apply. Do not apply current `main` until
+  #1659's additive staging foundation has merged and its five deploy paths have
+  passed canaries. That apply creates the dormant policy foundation and removes
+  broad Storage Admin, Storage Object Admin, and Service Account User fallback
+  grants; audit effective readers, writers, and IAM administrators afterward
+  and before activation. Access logs are audit
   telemetry, never an authorization control.
 
 ## Verification

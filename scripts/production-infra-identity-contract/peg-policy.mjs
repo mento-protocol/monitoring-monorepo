@@ -21,6 +21,12 @@ const PEG_POLICY_RUNTIME_SERVICE_ACCOUNT_USER_GRANT_KEYS = [
   "terraform/deploy-staging.tf:google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user",
   "terraform/deploy-staging.tf:google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
 ];
+export const PEG_POLICY_PUBLICATION_PLAN_WIF_GRANT_KEY =
+  "terraform/ci-wif.tf:google_service_account_iam_member.peg_policy_publication_plan_wif_binding";
+export const PEG_POLICY_PUBLICATION_PLAN_TOKEN_CREATOR_GRANT_KEY =
+  "terraform/ci-wif.tf:google_service_account_iam_member.peg_policy_publication_plan_reader_token_creator";
+export const PEG_POLICY_PUBLICATION_READER_STATE_GRANT_KEY =
+  "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_peg_policy_publication_reader";
 
 export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
   {
@@ -43,6 +49,42 @@ export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
       "terraform/peg-policy.tf:resource.google_service_account.peg_policy_publisher",
       "terraform/peg-policy.tf:data.google_iam_policy.peg_policy",
       "terraform/peg-policy.tf:resource.google_service_account_iam_member.production_infra_applier_peg_policy_publisher_token_creator",
+      "alerts/peg-policy-publication/variables.tf:variable.terraform_service_account",
+    ]),
+  },
+  {
+    label: "terraform: Peg policy publication plan identity",
+    terraformName: "peg_policy_publication_plan",
+    accountId: "peg-policy-publication-plan",
+    allowedBlocks: new Set([
+      "terraform/ci-wif.tf:resource.google_service_account.peg_policy_publication_plan",
+      PEG_POLICY_PUBLICATION_PLAN_WIF_GRANT_KEY.replace(
+        ":google_",
+        ":resource.google_",
+      ),
+      PEG_POLICY_PUBLICATION_PLAN_TOKEN_CREATOR_GRANT_KEY.replace(
+        ":google_",
+        ":resource.google_",
+      ),
+      "terraform/github-variables.tf:resource.github_actions_variable.gcp_peg_policy_publication_plan_service_account",
+    ]),
+  },
+  {
+    label: "terraform: Peg policy publication reader identity",
+    terraformName: "peg_policy_publication_reader",
+    accountId: "peg-policy-publication-reader",
+    allowedBlocks: new Set([
+      "terraform/ci-wif.tf:resource.google_service_account.peg_policy_publication_reader",
+      PEG_POLICY_PUBLICATION_READER_STATE_GRANT_KEY.replace(
+        ":google_",
+        ":resource.google_",
+      ),
+      PEG_POLICY_PUBLICATION_PLAN_TOKEN_CREATOR_GRANT_KEY.replace(
+        ":google_",
+        ":resource.google_",
+      ),
+      "terraform/peg-policy.tf:data.google_iam_policy.peg_policy",
+      "alerts/peg-policy-publication/variables.tf:variable.terraform_service_account",
     ]),
   },
 ];
@@ -93,7 +135,11 @@ function validateExactBindings(data, expectedBindings, errors, label) {
     );
     return;
   }
-  for (const { role, member } of expectedBindings) {
+  for (const {
+    role,
+    member,
+    members: expectedMembers = [member],
+  } of expectedBindings) {
     const matching = bindings.filter(
       (binding) =>
         normalizeExpression(attributeExpression(binding, "role")) === role,
@@ -103,9 +149,11 @@ function validateExactBindings(data, expectedBindings, errors, label) {
       continue;
     }
     const binding = matching[0];
-    const members = exactStringList(binding, "members");
-    if (!sameSortedValues(members, [member])) {
-      errors.push(`${label}: ${role} members must contain only ${member}`);
+    const actualMembers = exactStringList(binding, "members");
+    if (!sameSortedValues(actualMembers, expectedMembers)) {
+      errors.push(
+        `${label}: ${role} members must contain only ${expectedMembers.join(", ")}`,
+      );
     }
     if (nestedBlocks(binding, "condition").length !== 0) {
       errors.push(`${label}: bindings must not be conditional`);
@@ -354,6 +402,262 @@ function rejectUnsafeAdditions(files, topLevelBlocks, errors) {
   if (publisherUnexpected.length > 0) {
     errors.push(
       `terraform: Peg policy publisher identity: unexpected IAM grants are forbidden: ${publisherUnexpected.join(", ")}`,
+    );
+  }
+  const publicationPlanUnexpected = iamBlocks
+    .filter(
+      (block) =>
+        (block.code.includes(
+          "google_service_account.peg_policy_publication_plan.",
+        ) ||
+          block.code.includes("peg-policy-publication-plan@")) &&
+        ![
+          PEG_POLICY_PUBLICATION_PLAN_WIF_GRANT_KEY,
+          PEG_POLICY_PUBLICATION_PLAN_TOKEN_CREATOR_GRANT_KEY,
+        ].includes(blockKey(block)),
+    )
+    .map(blockKey);
+  if (publicationPlanUnexpected.length > 0) {
+    errors.push(
+      `terraform: Peg policy publication plan identity: unexpected IAM grants are forbidden: ${publicationPlanUnexpected.join(", ")}`,
+    );
+  }
+  const publicationReaderUnexpected = iamBlocks
+    .filter(
+      (block) =>
+        (block.code.includes(
+          "google_service_account.peg_policy_publication_reader.",
+        ) ||
+          block.code.includes("peg-policy-publication-reader@")) &&
+        ![
+          PEG_POLICY_PUBLICATION_READER_STATE_GRANT_KEY,
+          "terraform/peg-policy.tf:google_storage_bucket_iam_policy.peg_policy",
+          PEG_POLICY_PUBLICATION_PLAN_TOKEN_CREATOR_GRANT_KEY,
+        ].includes(blockKey(block)),
+    )
+    .map(blockKey);
+  if (publicationReaderUnexpected.length > 0) {
+    errors.push(
+      `terraform: Peg policy publication reader identity: unexpected IAM grants are forbidden: ${publicationReaderUnexpected.join(", ")}`,
+    );
+  }
+}
+
+function validatePegPolicyPublicationPlanIdentity(resources, errors) {
+  const plan = requireBlock(
+    resources,
+    "terraform/ci-wif.tf",
+    "google_service_account",
+    "peg_policy_publication_plan",
+    errors,
+    "terraform: Peg policy publication plan identity",
+  );
+  if (plan) {
+    expectNoResourceMultiplicity(
+      plan,
+      errors,
+      "terraform: Peg policy publication plan identity",
+    );
+    expectString(
+      plan,
+      "project",
+      "mento-terraform-seed-ffac",
+      errors,
+      "terraform: Peg policy publication plan identity",
+    );
+    expectString(
+      plan,
+      "account_id",
+      "peg-policy-publication-plan",
+      errors,
+      "terraform: Peg policy publication plan identity",
+    );
+  }
+  const reader = requireBlock(
+    resources,
+    "terraform/ci-wif.tf",
+    "google_service_account",
+    "peg_policy_publication_reader",
+    errors,
+    "terraform: Peg policy publication reader identity",
+  );
+  if (reader) {
+    expectNoResourceMultiplicity(
+      reader,
+      errors,
+      "terraform: Peg policy publication reader identity",
+    );
+    expectString(
+      reader,
+      "project",
+      "mento-terraform-seed-ffac",
+      errors,
+      "terraform: Peg policy publication reader identity",
+    );
+    expectString(
+      reader,
+      "account_id",
+      "peg-policy-publication-reader",
+      errors,
+      "terraform: Peg policy publication reader identity",
+    );
+  }
+  const wif = requireBlock(
+    resources,
+    "terraform/ci-wif.tf",
+    "google_service_account_iam_member",
+    "peg_policy_publication_plan_wif_binding",
+    errors,
+    "terraform: Peg policy publication plan WIF binding",
+  );
+  if (wif) {
+    expectNoResourceMultiplicity(
+      wif,
+      errors,
+      "terraform: Peg policy publication plan WIF binding",
+    );
+    expectExpression(
+      wif,
+      "service_account_id",
+      "google_service_account.peg_policy_publication_plan.name",
+      errors,
+      "terraform: Peg policy publication plan WIF binding",
+    );
+    expectString(
+      wif,
+      "role",
+      "roles/iam.workloadIdentityUser",
+      errors,
+      "terraform: Peg policy publication plan WIF binding",
+    );
+    expectString(
+      wif,
+      "member",
+      "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.workflow_ref/mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main",
+      errors,
+      "terraform: Peg policy publication plan WIF binding",
+    );
+  }
+  const state = requireBlock(
+    resources,
+    "terraform/ci-wif.tf",
+    "google_storage_bucket_iam_member",
+    "state_bucket_peg_policy_publication_reader",
+    errors,
+    "terraform: Peg policy publication reader state grant",
+  );
+  if (state) {
+    expectNoResourceMultiplicity(
+      state,
+      errors,
+      "terraform: Peg policy publication reader state grant",
+    );
+    expectString(
+      state,
+      "bucket",
+      "mento-terraform-tfstate-6ed6",
+      errors,
+      "terraform: Peg policy publication reader state grant",
+    );
+    expectString(
+      state,
+      "role",
+      "roles/storage.objectViewer",
+      errors,
+      "terraform: Peg policy publication reader state grant",
+    );
+    expectString(
+      state,
+      "member",
+      "serviceAccount:${google_service_account.peg_policy_publication_reader.email}",
+      errors,
+      "terraform: Peg policy publication reader state grant",
+    );
+  }
+  const tokenCreator = requireBlock(
+    resources,
+    "terraform/ci-wif.tf",
+    "google_service_account_iam_member",
+    "peg_policy_publication_plan_reader_token_creator",
+    errors,
+    "terraform: Peg policy publication plan Token Creator",
+  );
+  if (tokenCreator) {
+    expectNoResourceMultiplicity(
+      tokenCreator,
+      errors,
+      "terraform: Peg policy publication plan Token Creator",
+    );
+    expectExpression(
+      tokenCreator,
+      "service_account_id",
+      "google_service_account.peg_policy_publication_reader.name",
+      errors,
+      "terraform: Peg policy publication plan Token Creator",
+    );
+    expectString(
+      tokenCreator,
+      "role",
+      "roles/iam.serviceAccountTokenCreator",
+      errors,
+      "terraform: Peg policy publication plan Token Creator",
+    );
+    expectString(
+      tokenCreator,
+      "member",
+      "serviceAccount:${google_service_account.peg_policy_publication_plan.email}",
+      errors,
+      "terraform: Peg policy publication plan Token Creator",
+    );
+  }
+}
+
+function validatePegPolicyPublicationPlanVariable(resources, errors) {
+  const variable = requireBlock(
+    resources,
+    "terraform/github-variables.tf",
+    "github_actions_variable",
+    "gcp_peg_policy_publication_plan_service_account",
+    errors,
+    "terraform: GitHub variable GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT",
+  );
+  if (!variable) return;
+  expectNoResourceMultiplicity(
+    variable,
+    errors,
+    "terraform: GitHub variable GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT",
+  );
+  expectString(
+    variable,
+    "repository",
+    "monitoring-monorepo",
+    errors,
+    "terraform: GitHub variable GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT",
+  );
+  expectString(
+    variable,
+    "variable_name",
+    "GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT",
+    errors,
+    "terraform: GitHub variable GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT",
+  );
+  expectExpression(
+    variable,
+    "value",
+    "google_service_account.peg_policy_publication_plan.email",
+    errors,
+    "terraform: GitHub variable GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT",
+  );
+  if (
+    !sameSortedValues(extractExpressionList(variable, "depends_on"), [
+      "google_service_account_iam_member.peg_policy_publication_plan_wif_binding",
+      "google_service_account_iam_member.peg_policy_publication_plan_reader_token_creator",
+      "google_storage_bucket_iam_member.state_bucket_peg_policy_publication_reader",
+      "google_storage_bucket_iam_policy.peg_policy",
+    ])
+  ) {
+    errors.push(
+      "terraform: GitHub variable GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT: depends_on must contain the exact publication plan IAM chain",
     );
   }
 }
@@ -782,6 +1086,8 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
     "metrics-bridge-runtime",
     errors,
   );
+  validatePegPolicyPublicationPlanIdentity(resources, errors);
+  validatePegPolicyPublicationPlanVariable(resources, errors);
   validateServiceAccount(
     resources,
     "peg_policy_publisher",
@@ -808,8 +1114,10 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
       expectedBindings: [
         {
           role: '"roles/storage.objectViewer"',
-          member:
+          members: [
             "serviceAccount:${google_service_account.metrics_bridge_runtime.email}",
+            "serviceAccount:${google_service_account.peg_policy_publication_reader.email}",
+          ],
         },
         {
           role: '"roles/storage.objectAdmin"',

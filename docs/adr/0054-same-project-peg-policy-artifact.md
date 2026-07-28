@@ -38,9 +38,14 @@ before production use.
 - Keep the policy private, versioned, generation-pinned, public-access
   prevented, and protected from Terraform destroy. Keep the access-log bucket
   and its 90-day live and 30-day archived retention.
-- Keep both policy identities in `mento-monitoring`. The runtime receives only
-  bucket-scoped Object Viewer. The publisher receives only bucket-scoped Object
-  Admin. Only the protected production applier can impersonate the publisher.
+- Keep the runtime and publisher in `mento-monitoring`. The runtime receives
+  only bucket-scoped Object Viewer; the publisher receives only bucket-scoped
+  Object Admin. Keep the workflow-only publication plan and reader identities
+  in the seed project. The plan identity may impersonate only the reader, which
+  can view only Terraform state and policy objects. The shared refresh identity
+  cannot read policy objects. The protected production applier has the only
+  direct Token Creator grant on the publisher; inherited and effective IAM
+  remains audited.
 - Give the routine deployer and `gcp_dev_members` Service Account User only on
   the dedicated runtime identity. Do not retain a default-Compute or
   project-wide Service Account User fallback.
@@ -50,11 +55,10 @@ before production use.
 - Accept and audit effective project-level and inherited access for trusted
   operators. Direct bucket grants remain least-privilege evidence; they do not
   override wider accepted project or organization grants.
-- Do not apply this branch until #1659's additive deployment-source staging
-  foundation has merged and all five deploy paths have passed their canaries.
-  This branch then removes the broad project-wide Storage Admin, Storage Object
-  Admin, and Service Account User fallback grants while creating the dormant
-  policy foundation. Run the effective-IAM audit after that apply. Publication,
+- Do not apply current `main` until #1659 has merged and all five deploy paths
+  have passed canaries. That apply creates the dormant policy foundation,
+  removes broad project-wide Storage Admin, Storage Object Admin, and Service
+  Account User fallback grants, and requires an effective-IAM audit. Publication,
   runtime attachment, and alert activation remain separate reviewed steps.
 
 ## Alternatives considered
@@ -71,20 +75,24 @@ before production use.
 ## Consequences
 
 - The policy keeps its integrity controls without a separate project.
+- Policy planning uses a workflow-specific read chain instead of extending the
+  shared Terraform refresh identity.
 - A future broad project or inherited storage grant also reaches this bucket;
   that is an accepted risk for trusted identities and a required IAM-audit
   check before activation.
-- The source foundation creates no policy object. The later runtime attachment
-  assigns the dedicated reader identity to Metrics Bridge, but its paired
-  policy values remain absent while the reviewed
-  `local.peg_policy_runtime_generation` literal is `null`. A merge alone does
-  not start Peg polling or activate alerts. That null state retains the Cloud
-  Run template-revision drift ignore; a concrete generation removes it in the
-  same reviewed change to mint the attachment revision.
+- The source foundation creates no policy object. The separate
+  `alerts/peg-policy-publication` root creates a policy object only through its
+  manual protected workflow. The dormant runtime attachment assigns the
+  dedicated reader identity to Metrics Bridge, but keeps its paired policy
+  values absent while `local.peg_policy_runtime_generation` is `null`. Neither
+  merge starts Peg polling or activates alerts. That null state retains the
+  Cloud Run template-revision drift ignore; a concrete generation removes it in
+  the same reviewed change to mint the attachment revision.
 
 ## Evidence
 
 - Policy foundation: [`terraform/peg-policy.tf`](../../terraform/peg-policy.tf)
+- Policy publication root: [`alerts/peg-policy-publication/`](../../alerts/peg-policy-publication/)
 - Deployment-source rollout: [ADR 0053](0053-explicit-deployment-source-staging.md)
 - Runtime validation: `metrics-bridge/src/peg/policy-client.ts`
 - Issue: [#1444](https://github.com/mento-protocol/monitoring-monorepo/issues/1444)

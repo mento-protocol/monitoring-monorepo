@@ -5,6 +5,12 @@ export const APPLY_WORKFLOWS = [
   ".github/workflows/governance-watchdog.yml",
 ];
 
+// Publication uses a manual refresh-plan followed by a protected apply instead
+// of the regular PR-plan and push-main apply sequence.
+export const MANUAL_PUBLICATION_WORKFLOWS = [
+  ".github/workflows/peg-policy-publication.yml",
+];
+
 export const SERVICE_AND_DRIFT_WORKFLOWS = [
   ".github/workflows/metrics-bridge.yml",
   ".github/workflows/aegis-app-engine.yml",
@@ -19,6 +25,8 @@ export const REFRESH_PROVIDER_VARIABLE =
   "GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER";
 export const REFRESH_SERVICE_ACCOUNT_VARIABLE =
   "GCP_TERRAFORM_REFRESH_SERVICE_ACCOUNT";
+export const PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT_VARIABLE =
+  "GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT";
 
 export const PRODUCTION_SUBJECT =
   "repo:mento-protocol/monitoring-monorepo:environment:production-infra";
@@ -80,7 +88,11 @@ export const REFRESH_WORKFLOW_REFS = [
   "mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main",
   "mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main",
   "mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main",
+  "mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main",
 ];
+export const SHARED_REFRESH_WORKFLOW_REFS = REFRESH_WORKFLOW_REFS.filter(
+  (workflowRef) => !workflowRef.includes("/peg-policy-publication.yml@"),
+);
 export const REFRESH_PROVIDER_CONDITION = `assertion.repository_id == "${GITHUB_REPOSITORY_ID}" && assertion.repository == "mento-protocol/monitoring-monorepo" && assertion.ref == "refs/heads/main" && (${REFRESH_WORKFLOW_REFS.map((workflowRef) => `assertion.workflow_ref == "${workflowRef}"`).join(" || ")})`;
 
 export const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";

@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-27
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -39,6 +39,13 @@ garden_lane: agent-entry-points
 - New Node root scripts must be covered by `pnpm lint:scripts`; new shell scripts
   must pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh`
   for behavior that syntax and lint checks cannot verify.
+- `pnpm tf:test` owns the deployment source-staging contract. It allows exactly
+  five literal checked-in `gcloud builds submit` / `gcloud app deploy`
+  callsites, including their source-staging flag and value.
+  [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
+  supported static syntax and explicit proof limits. Keep indirect or dynamic
+  deploy forms forbidden and inert examples confined to
+  `scripts/deploy-staging-contract.test.mjs`.
 
 ## Verification
 

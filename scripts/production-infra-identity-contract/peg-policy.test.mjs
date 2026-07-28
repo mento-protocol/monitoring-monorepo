@@ -236,6 +236,58 @@ expectFailure(
 );
 
 expectFailure(
+  mutate(
+    validFiles,
+    "terraform/peg-policy.tf",
+    '      "serviceAccount:${google_service_account.peg_policy_publication_reader.email}",',
+    '      "serviceAccount:org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com",',
+  ),
+  'Peg policy peg_policy authoritative IAM policy: "roles/storage.objectViewer" members must contain only',
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/ci-wif.tf",
+    "attribute.workflow_ref/mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main",
+    "attribute.ref/refs/heads/main",
+  ),
+  "Peg policy publication plan WIF binding: member must be exactly",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/ci-wif.tf",
+    '    "mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main",',
+    `    "mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main",
+    "mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main",`,
+  ),
+  "terraform_refresh_workflow_refs must contain only the regular refresh and drift workflows",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/ci-wif.tf",
+    "attribute.workflow_ref/${each.value}",
+    "attribute.ref/refs/heads/main",
+  ),
+  "terraform: refresh WIF binding: member must be exactly",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/ci-wif.tf",
+    "serviceAccount:${google_service_account.peg_policy_publication_reader.email}",
+    "serviceAccount:org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com",
+    0,
+  ),
+  "Peg policy publication reader state grant: member must be exactly",
+);
+
+expectFailure(
   {
     ...validFiles,
     "terraform/peg-policy-publisher-extra.tf": `

@@ -3,7 +3,7 @@ title: Aegis Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-27
 doc_type: agent-instructions
 scope: aegis
 review_interval_days: 90
@@ -27,7 +27,10 @@ garden_lane: agent-entry-points
   `PHPm`, etc.). Legacy aliases such as `cXXX`, `PUSO`, and `eXOF` should not
   be used for new Aegis stable-token metrics unless an external contract/config
   key explicitly requires them.
-- Keep App Engine deploy changes in sync with `aegis-app-engine.yml` and `aegis/bin/deploy.sh`.
+- Keep App Engine deploy changes in sync with `aegis-app-engine.yml` and
+  `aegis/bin/deploy.sh`. Direct and nested deploys must retain the explicit
+  App Engine source bucket from
+  [`ADR 0053`](../docs/adr/0053-explicit-deployment-source-staging.md).
 - Terraform changes under `aegis/terraform/` need plan-before-apply discipline; never apply without explicit approval.
 - Foundry helper-contract changes require `forge test`.
 

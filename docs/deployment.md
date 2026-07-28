@@ -170,13 +170,14 @@ The platform stack owns two explicit source buckets for routine deploys:
   `gs://mento-monitoring-cloud-build-source/<service>`;
 - App Engine uploads use `gs://mento-monitoring-app-engine-source`.
 
-The follow-up routing change makes the Metrics Bridge workflow and
-`pnpm bridge:deploy` pass `--gcs-source-staging-dir`. It makes
-`pnpm aegis:deploy` and the nested Alloy build pass `--bucket`, while
-`pnpm aegis:agent:deploy` stages its outer build in the Cloud Build bucket.
-That follow-up also makes `pnpm tf:test` discover every executable callsite and
-reject a direct `gcloud builds submit` / `gcloud app deploy` path that omits
-the explicit bucket.
+The Metrics Bridge workflow and `pnpm bridge:deploy` pass
+`--gcs-source-staging-dir`. `pnpm aegis:deploy` and the nested Alloy build pass
+`--bucket`; the guarded `pnpm aegis:agent:deploy` wrapper stages its immutable
+snapshot in the Cloud Build bucket. `pnpm tf:test` allows exactly five literal
+checked-in `gcloud builds submit` / `gcloud app deploy` callsites and their
+required source-staging flag/value. [ADR 0053](adr/0053-explicit-deployment-source-staging.md)
+defines the supported static discovery syntax and its deliberate indirect and
+dynamic proof limits.
 
 This migration has a strict rollout order. First merge the infrastructure-only
 PR. Refresh current `main`, run a clean current-main platform plan, get explicit
@@ -185,9 +186,9 @@ exact dedicated Metrics Bridge runtime act-as grants for the routine deployer
 and `gcp_dev_members`. Those identities must have no default-Compute or
 project-wide Service Account User grant. Only then merge the routing follow-up;
 that merge triggers the Metrics Bridge and Aegis workflows.
-Canary all five deployment paths before the same-project Peg-policy foundation
-removes the temporary project-wide Storage Admin, Storage Object Admin, and
-Service Account User grants. That foundation then needs an effective-IAM audit.
+Canary all five paths, including `pnpm aegis:agent:deploy`, before applying the
+policy foundation. That apply removes broad Storage Admin, Storage Object
+Admin, and Service Account User grants and requires an effective-IAM audit.
 [ADR 0053](adr/0053-explicit-deployment-source-staging.md) records the
 permission split and phase boundary.
 
@@ -197,8 +198,8 @@ permission split and phase boundary.
 
 `PEG_POLICY_URL` and `PEG_POLICY_AUTH_MODE` are paired raw runtime
 configuration for the protected, versioned peg-policy artifact. The platform
-Terraform stack will own both Cloud Run values when that artifact plane is
-provisioned; do not add or change them with an ad hoc
+Terraform stack owns both Cloud Run values when runtime activation is approved;
+do not add or change them with an ad hoc
 `gcloud run services update --set-env-vars` command. Until then, both remain
 absent and the Peg poller stays dormant.
 
@@ -246,16 +247,25 @@ policy API responses, and the expected `mento_peg_policy_version`,
 `mento_peg_source_healthy`, and `mento_peg_last_poll` metrics. Never unpin the
 runtime or manually edit Cloud Run environment values during rollback.
 
-The dormant source foundation places the policy and access logs in
+The platform foundation places the policy and access logs in
 `mento-monitoring`. The Metrics Bridge runtime and publisher identities also
 live there, with direct bucket-scoped Viewer and Object Admin grants. Before
-applying this branch, #1659's additive staging foundation must merge and all
-five deployment paths must pass canaries. This branch removes broad
-project-wide Storage Admin, Storage Object Admin, and Service Account User
-fallback grants with the policy foundation. Audit effective readers, writers,
-and IAM administrators after that apply and again before activating the
-runtime. The protected org-Terraform Owner path and organization IAM admins
-are accepted control-plane exceptions.
+applying current `main`, #1659 must merge and all five paths must pass canaries.
+That apply creates the policy foundation and removes broad Storage Admin,
+Storage Object Admin, and Service Account User fallbacks. Audit effective
+readers, writers, and IAM administrators after that apply and again before
+runtime activation. The protected org-Terraform Owner path and organization
+IAM admins are accepted control-plane exceptions.
+
+The manual `Peg Policy Publication` workflow writes the current policy as a
+versioned object. Dispatch its `plan` operation from `main`, inspect the
+read-only result, then dispatch `apply` and approve `production-infra`. Copy
+only its generation-pinned output into the later reviewed runtime-activation
+change. The publication workflow does not set either Cloud Run value or alter
+Grafana. Its WIF-facing plan identity is bound to that exact workflow and may
+impersonate only the publication reader. That reader can view only the
+Terraform state and policy buckets; the shared refresh identity cannot read
+policy objects.
 
 Production mode is `gcp-metadata`. The URL must use the exact GCS JSON download
 host and path, a canonical percent-encoded object component, `alt=media`, and

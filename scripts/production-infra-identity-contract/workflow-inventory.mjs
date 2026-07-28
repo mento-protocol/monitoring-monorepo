@@ -102,6 +102,15 @@ const APPLY_CONFIG_BY_WORKFLOW = {
   },
 };
 
+const PEG_POLICY_PUBLICATION_WORKFLOW =
+  ".github/workflows/peg-policy-publication.yml";
+const PEG_POLICY_PUBLICATION_CONSOLE_URL =
+  "https://console.cloud.google.com/home/dashboard?project=mento-monitoring";
+const PROTECTED_APPLY_WORKFLOWS = [
+  ...Object.keys(APPLY_CONFIG_BY_WORKFLOW),
+  PEG_POLICY_PUBLICATION_WORKFLOW,
+];
+
 const JOB_ENVIRONMENT_INVENTORY = new Map([
   [
     ".github/workflows/alerts-rules.yml#apply",
@@ -129,6 +138,13 @@ const JOB_ENVIRONMENT_INVENTORY = new Map([
     {
       name: "production-infra",
       url: PRODUCTION_CONSOLE_URL,
+    },
+  ],
+  [
+    ".github/workflows/peg-policy-publication.yml#apply",
+    {
+      name: "production-infra",
+      url: "https://console.cloud.google.com/home/dashboard?project=mento-monitoring",
     },
   ],
   [
@@ -350,7 +366,281 @@ function postAuthApplySteps(config) {
   ];
 }
 
+const PEG_POLICY_PUBLICATION_HANDOFF_COMMAND = [
+  "{",
+  "  echo '## Peg policy publication'",
+  "  echo",
+  "  echo '```json'",
+  "  terraform output -json",
+  "  echo '```'",
+  '} >> "$GITHUB_STEP_SUMMARY"',
+  "",
+].join("\n");
+
+const PEG_POLICY_PUBLICATION_PLAN_COMMAND = [
+  "set +e",
+  "terraform plan -detailed-exitcode -no-color -input=false -lock=false > /tmp/tf-plan.raw 2>&1",
+  "EXITCODE=$?",
+  "set -e",
+  '"$GITHUB_WORKSPACE/scripts/sanitize-terraform-output.sh" /tmp/tf-plan.raw /tmp/tf-plan.txt',
+  "cat /tmp/tf-plan.txt",
+  'echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"',
+  'case "$EXITCODE" in',
+  "  0|2) ;;",
+  '  *) echo "::error::terraform plan failed with exit code $EXITCODE"; exit 1 ;;',
+  "esac",
+  "",
+].join("\n");
+
+const PEG_POLICY_PUBLICATION_DETECT_CHANGES_COMMAND = [
+  'if [ "$EXITCODE" = "2" ]; then',
+  '  echo "has-changes=true" >> "$GITHUB_OUTPUT"',
+  "else",
+  '  echo "has-changes=false" >> "$GITHUB_OUTPUT"',
+  "fi",
+  "",
+].join("\n");
+
+const PEG_POLICY_PUBLICATION_VALIDATE_COMMAND = [
+  "node scripts/check-peg-registry-integrity.mjs",
+  "node scripts/check-peg-policy-publication.mjs",
+  "",
+].join("\n");
+
+function pegPolicyPublicationPlanJobInventory() {
+  return {
+    name: "Read-only Peg policy publication plan",
+    needs: "validate",
+    if: "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
+    "runs-on": "blacksmith-4vcpu-ubuntu-2404-arm",
+    "timeout-minutes": 15,
+    permissions: {
+      contents: "read",
+      "id-token": "write",
+    },
+    defaults: {
+      run: {
+        "working-directory": "alerts/peg-policy-publication",
+      },
+    },
+    outputs: {
+      "has-changes": "${{ steps.detect.outputs.has-changes }}",
+    },
+    steps: [
+      {
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        with: {
+          "persist-credentials": false,
+        },
+      },
+      {
+        name: "Authenticate trusted-main refresh to Google Cloud",
+        uses: "google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093",
+        with: {
+          workload_identity_provider:
+            "${{ vars.GCP_TERRAFORM_REFRESH_WORKLOAD_IDENTITY_PROVIDER }}",
+          service_account:
+            "${{ vars.GCP_PEG_POLICY_PUBLICATION_PLAN_SERVICE_ACCOUNT }}",
+        },
+      },
+      {
+        uses: "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e",
+        with: {
+          terraform_version: "1.14.6",
+          terraform_wrapper: false,
+        },
+      },
+      {
+        name: "Init read-only backend",
+        run: 'terraform init -input=false -backend-config="impersonate_service_account=peg-policy-publication-reader@mento-terraform-seed-ffac.iam.gserviceaccount.com"',
+      },
+      {
+        name: "Plan",
+        id: "plan",
+        env: {
+          TF_VAR_terraform_service_account:
+            "peg-policy-publication-reader@mento-terraform-seed-ffac.iam.gserviceaccount.com",
+        },
+        run: PEG_POLICY_PUBLICATION_PLAN_COMMAND,
+      },
+      {
+        name: "Detect changes",
+        id: "detect",
+        env: {
+          EXITCODE: "${{ steps.plan.outputs.exitcode }}",
+        },
+        run: PEG_POLICY_PUBLICATION_DETECT_CHANGES_COMMAND,
+      },
+    ],
+  };
+}
+
+function pegPolicyPublicationApplyJobInventory() {
+  return {
+    name: "Protected Peg policy publication apply",
+    needs: "plan",
+    if: "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.operation == 'apply' && needs.plan.outputs.has-changes == 'true'",
+    environment: {
+      name: "production-infra",
+      url: PEG_POLICY_PUBLICATION_CONSOLE_URL,
+    },
+    "runs-on": "blacksmith-4vcpu-ubuntu-2404-arm",
+    "timeout-minutes": 20,
+    permissions: {
+      contents: "read",
+      "id-token": "write",
+      actions: "read",
+      deployments: "read",
+    },
+    defaults: {
+      run: {
+        "working-directory": "alerts/peg-policy-publication",
+      },
+    },
+    env: {
+      TF_VAR_terraform_service_account:
+        "peg-policy-publisher@mento-monitoring.iam.gserviceaccount.com",
+    },
+    steps: [
+      {
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        with: {
+          "persist-credentials": false,
+        },
+      },
+      {
+        name: "Verify production-infra environment protection",
+        env: {
+          GITHUB_TOKEN: AUTOMATIC_GITHUB_CREDENTIAL,
+          GITHUB_ENVIRONMENT_NAME: "production-infra",
+        },
+        run: 'node "$GITHUB_WORKSPACE/scripts/verify-github-environment-protection.mjs"',
+      },
+      {
+        name: "Authenticate to Google Cloud",
+        uses: "google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093",
+        with: {
+          workload_identity_provider:
+            "${{ vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER }}",
+          service_account: "${{ vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT }}",
+        },
+      },
+      {
+        uses: "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e",
+        with: {
+          terraform_version: "1.14.6",
+          terraform_wrapper: false,
+        },
+      },
+      {
+        name: "Init",
+        run: "terraform init -input=false",
+      },
+      {
+        name: "Apply",
+        run: "terraform apply -auto-approve -no-color -input=false -lock-timeout=10m",
+      },
+      {
+        name: "Record published generation handoff",
+        if: "success()",
+        run: PEG_POLICY_PUBLICATION_HANDOFF_COMMAND,
+      },
+    ],
+  };
+}
+
+function pegPolicyPublicationWorkflowInventory() {
+  return {
+    name: "Peg Policy Publication",
+    on: {
+      workflow_dispatch: {
+        inputs: {
+          operation: {
+            description:
+              "Produce a protected plan, or plan then apply after production-infra approval",
+            required: true,
+            type: "choice",
+            default: "plan",
+            options: ["plan", "apply"],
+          },
+        },
+      },
+      pull_request: {
+        branches: ["main"],
+        paths: [
+          "alerts/peg-policy-publication/**",
+          "alerts/rules/peg-thresholds.json",
+          "metrics-bridge/peg-registry.json",
+          "scripts/check-peg-policy-publication.mjs",
+          "scripts/check-peg-registry-integrity.mjs",
+          ".github/workflows/peg-policy-publication.yml",
+        ],
+      },
+    },
+    permissions: "read-all",
+    concurrency: {
+      group:
+        "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}",
+      "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+      queue: "${{ github.event_name == 'pull_request' && 'single' || 'max' }}",
+    },
+    jobs: {
+      validate: {
+        name: "Terraform Validate (Peg policy publication)",
+        "runs-on": "blacksmith-4vcpu-ubuntu-2404-arm",
+        "timeout-minutes": 10,
+        defaults: {
+          run: {
+            "working-directory": "alerts/peg-policy-publication",
+          },
+        },
+        steps: [
+          {
+            uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            with: {
+              "persist-credentials": false,
+              "fetch-depth": 0,
+            },
+          },
+          {
+            uses: "./.github/actions/pnpm-install",
+          },
+          {
+            uses: "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e",
+            with: {
+              terraform_version: "1.14.6",
+              terraform_wrapper: false,
+            },
+          },
+          {
+            name: "Format check",
+            run: "terraform fmt -check -recursive",
+          },
+          {
+            name: "Init without backend",
+            run: "terraform init -backend=false -input=false",
+          },
+          {
+            name: "Validate",
+            run: "terraform validate -no-color",
+          },
+          {
+            name: "Validate Peg registry and publication boundary",
+            "working-directory": "${{ github.workspace }}",
+            run: PEG_POLICY_PUBLICATION_VALIDATE_COMMAND,
+          },
+        ],
+      },
+      plan: pegPolicyPublicationPlanJobInventory(),
+      apply: pegPolicyPublicationApplyJobInventory(),
+    },
+  };
+}
+
 export function protectedApplyJobInventory(workflowPath) {
+  if (workflowPath === PEG_POLICY_PUBLICATION_WORKFLOW) {
+    return pegPolicyPublicationApplyJobInventory();
+  }
   const config = APPLY_CONFIG_BY_WORKFLOW[workflowPath];
   if (!config) return undefined;
 
@@ -416,6 +706,20 @@ export function validateWorkflowInventory(
   parsedWorkflow,
   errors,
 ) {
+  if (workflowPath === PEG_POLICY_PUBLICATION_WORKFLOW) {
+    if (
+      !isDeepStrictEqual(
+        parsedWorkflow,
+        pegPolicyPublicationWorkflowInventory(),
+      )
+    ) {
+      errors.push(
+        `${workflowPath}: must match the exact manual publication workflow inventory`,
+      );
+    }
+    return;
+  }
+
   const jobs = isMapping(parsedWorkflow.jobs) ? parsedWorkflow.jobs : {};
   const expectedEnvironmentEntries = [...JOB_ENVIRONMENT_INVENTORY].filter(
     ([key]) => key.startsWith(`${workflowPath}#`),
@@ -473,7 +777,7 @@ function postAuthLocalDependencyPaths() {
   const relativeRepositoryPathPattern =
     /(?<![A-Za-z0-9_/.])(?:\.\/)?((?:scripts|\.github\/actions)\/[A-Za-z0-9._/-]+)/gu;
 
-  for (const workflowPath of Object.keys(APPLY_CONFIG_BY_WORKFLOW)) {
+  for (const workflowPath of PROTECTED_APPLY_WORKFLOWS) {
     const steps = protectedApplyJobInventory(workflowPath).steps;
     const authIndex = steps.findIndex(
       (step) =>

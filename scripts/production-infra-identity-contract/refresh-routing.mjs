@@ -1,5 +1,6 @@
 import {
   APPLY_WORKFLOWS,
+  MANUAL_PUBLICATION_WORKFLOWS,
   DRIFT_REFRESH_CONDITION,
   GOOGLE_AUTH_ACTION,
   GOOGLE_PROVIDER_REFRESH_WORKFLOWS,
@@ -74,10 +75,33 @@ function selectorsAreScoped(workflowPath, counts, errors) {
     counts.decodedProvider,
     counts.decodedServiceAccount,
   ];
+  const publicationUses = [
+    counts.sourcePublicationServiceAccount,
+    counts.decodedPublicationServiceAccount,
+  ];
+  if (MANUAL_PUBLICATION_WORKFLOWS.includes(workflowPath)) {
+    if (
+      counts.sourceProvider !== 1 ||
+      counts.decodedProvider !== 1 ||
+      counts.sourceServiceAccount !== 0 ||
+      counts.decodedServiceAccount !== 0 ||
+      publicationUses.some((count) => count !== 1)
+    ) {
+      errors.push(
+        `${workflowPath}: publication plan must use the refresh provider and its dedicated plan service-account variable exactly once`,
+      );
+    }
+    return true;
+  }
   if (!REFRESH_WORKFLOWS.has(workflowPath)) {
     if (uses.some(Boolean)) {
       errors.push(
         `${workflowPath}: refresh identity variables are allowed only in exact trusted-main refresh routes`,
+      );
+    }
+    if (publicationUses.some(Boolean)) {
+      errors.push(
+        `${workflowPath}: publication plan identity variable is allowed only in the protected publication workflow`,
       );
     }
     return false;
@@ -85,6 +109,11 @@ function selectorsAreScoped(workflowPath, counts, errors) {
   if (uses.some((count) => count !== 1)) {
     errors.push(
       `${workflowPath}: both refresh identity variables must appear exactly once in the registered refresh auth step`,
+    );
+  }
+  if (publicationUses.some(Boolean)) {
+    errors.push(
+      `${workflowPath}: publication plan identity variable is allowed only in the protected publication workflow`,
     );
   }
   return true;
@@ -299,6 +328,8 @@ export function validateRefreshRouting(
     errors.push(`${workflowPath}: workflow jobs must be a mapping`);
   } else if (workflowPath === DRIFT_WORKFLOW) {
     validateDrift(workflowPath, parsedWorkflow, counts, errors);
+  } else if (MANUAL_PUBLICATION_WORKFLOWS.includes(workflowPath)) {
+    // The publication checker owns its deliberately manual plan/apply shape.
   } else {
     validatePlan(workflowPath, parsedWorkflow, counts, errors);
   }

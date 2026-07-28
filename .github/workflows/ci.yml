@@ -3,8 +3,9 @@ name: CI
 # Aggregate workflow fanning out to package-scoped quality jobs gated on
 # path changes. The `ci` sentinel aggregates the results so branch
 # protection needs only one required check (`CI / ci`) instead of one per
-# package. A PR that only touches ui-dashboard/ runs only the `ui` job;
-# irrelevant jobs skip cleanly (GitHub hides them from the checks list).
+# package. A PR that only touches ui-dashboard/ runs the `ui` job and the
+# unconditional production-infrastructure contract; other irrelevant jobs skip
+# cleanly (GitHub hides them from the checks list).
 #
 # Third-party actions are pinned to commit SHAs per the policy in
 # .github/workflows/claude.yml — update via Dependabot
@@ -172,15 +173,21 @@ jobs:
             terraform:
               - terraform/**
               - alerts/rules/**
+              - alerts/peg-policy-publication/**
               - alerts/infra/**
               - aegis/terraform/**
               - governance-watchdog/**
               - terraform.stacks.json
+              - scripts/check-peg-policy-publication.mjs
+              - scripts/check-peg-policy-publication.test.mjs
+              - scripts/production-infra-identity-contract/**
               - scripts/terraform-fmt-check.mjs
               - scripts/tf-stacks.mjs
+              - scripts/tf-stacks.test.mjs
               - .github/workflows/alerts-infra.yml
               - .github/workflows/infra.yml
               - .github/workflows/ci.yml
+              - .github/workflows/peg-policy-publication.yml
             alerts:
               - alerts/infra/onchain-event-handler/**
               - alerts/infra/oncall-announcer/**
@@ -241,12 +248,16 @@ jobs:
               - "**/vitest.hermetic-setup.ts"
               - "**/vitest.config.ts"
               - "**/vitest.mutation.config.ts"
-              # The production infrastructure identity contract reads every
-              # registered Terraform root. Keep its `pnpm tf:test` runner
-              # reachable when a PR changes only protected infrastructure.
+              # These deployment and Terraform inputs also exercise root-script
+              # regression suites. The dedicated unconditional job below owns
+              # `pnpm tf:test` for the production-infrastructure contract.
               - terraform/**
               - aegis/terraform/**
+              - aegis/bin/deploy.sh
+              - aegis/grafana-agent/deploy.sh
+              - aegis/grafana-agent/cloudbuild.yaml
               - alerts/infra/**
+              - alerts/peg-policy-publication/**
               - governance-watchdog/infra/**
               # Alert-rules lint inputs: the scripts job parses alerts/rules
               # PromQL and cross-checks metric names against the metrics-bridge
@@ -1004,8 +1015,6 @@ jobs:
         # Verifies deploy wrappers run deploy-sensitive commands from the same
         # repo root that scripts/lib/deploy-guard.sh checked for cleanliness.
         run: node scripts/check-deploy-root-anchors.test.mjs
-      - name: Terraform stack registry suite
-        run: pnpm tf:test
       - name: GitHub environment protection suite
         run: node scripts/verify-github-environment-protection.test.mjs
       - name: ESLint baseline-diff semantic suite
@@ -1059,6 +1068,25 @@ jobs:
         # itself only runs weekly via supply-chain.yml; this required job is
         # what catches a regression in the script on every PR.
         run: node scripts/override-prune-report.test.mjs
+      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+        if: always()
+
+  production-infra-contract:
+    name: Production infrastructure contract
+    # This required job is deliberately unconditional: tf:test validates
+    # deployment and production-infrastructure contracts for every candidate.
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/pnpm-install
+      - name: Terraform production infrastructure contract
+        run: pnpm tf:test
       - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
@@ -1205,6 +1233,7 @@ jobs:
         terraform,
         deps,
         scripts,
+        production-infra-contract,
         autoreview-suite,
         autoreview-root-runtime,
         version-skew,

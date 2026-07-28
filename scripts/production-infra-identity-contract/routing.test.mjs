@@ -76,6 +76,9 @@ try {
     ".github/workflows/**",
     "scripts/**/*.mjs",
     "scripts/**/*.sh",
+    "aegis/bin/deploy.sh",
+    "aegis/grafana-agent/deploy.sh",
+    "aegis/grafana-agent/cloudbuild.yaml",
   ]) {
     assert(
       rootScripts.includes(requiredPattern),
@@ -88,11 +91,55 @@ try {
     /needs\.changes\.outputs\.rootScripts == 'true'/u,
     "ci.yml scripts job must run when rootScripts changes",
   );
+  const productionInfraContract = ciWorkflow.jobs["production-infra-contract"];
   assert(
-    ciWorkflow.jobs.scripts.steps.some(
+    productionInfraContract,
+    "ci.yml must define the production-infra-contract job",
+  );
+  assert.equal(
+    productionInfraContract.if,
+    undefined,
+    "production-infra-contract must not be path-filtered or skipped",
+  );
+  assert.deepEqual(
+    productionInfraContract.permissions,
+    { contents: "read", actions: "read" },
+    "production-infra-contract must keep the PR-head test job read-only",
+  );
+  assert(
+    productionInfraContract.steps.some(
+      (step) =>
+        step.uses ===
+          "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" &&
+        step.with?.["persist-credentials"] === false,
+    ),
+    "production-infra-contract must use credential-free pinned checkout",
+  );
+  assert(
+    productionInfraContract.steps.some(
+      (step) => step.uses === "./.github/actions/pnpm-install",
+    ),
+    "production-infra-contract must install dependencies locally",
+  );
+  assert(
+    productionInfraContract.steps.some(
       (step) => String(step.run).trim() === "pnpm tf:test",
     ),
-    "ci.yml scripts job must run pnpm tf:test",
+    "production-infra-contract must run pnpm tf:test",
+  );
+  assert(
+    ciWorkflow.jobs.ci.needs.includes("production-infra-contract"),
+    "ci sentinel must require production-infra-contract",
+  );
+  const allGreenStep = ciWorkflow.jobs.ci.steps.find((step) =>
+    step.uses?.startsWith("re-actors/alls-green@"),
+  );
+  assert(allGreenStep, "ci sentinel must use the all-green aggregation step");
+  assert(
+    !String(allGreenStep.with?.["allowed-skips"] ?? "").includes(
+      "production-infra-contract",
+    ),
+    "ci sentinel must not allow production-infra-contract to skip",
   );
 
   for (const changedPath of [
@@ -105,6 +152,9 @@ try {
     "scripts/production-infra-identity-contract/identity.mjs",
     "scripts/sanitize-terraform-output.sh",
     "scripts/verify-github-environment-protection.mjs",
+    "aegis/bin/deploy.sh",
+    "aegis/grafana-agent/deploy.sh",
+    "aegis/grafana-agent/cloudbuild.yaml",
   ]) {
     assertRoutesIdentityContract(changedPath);
   }

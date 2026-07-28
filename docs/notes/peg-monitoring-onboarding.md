@@ -179,9 +179,9 @@ Use this sequence only for the one-time first activation while
 `local.peg_alerts_enabled` is still `false`, and only after the policy
 publication and runtime-pinning infrastructure tracked in
 [Peg monitoring alert source validation and activation
-hold](peg-monitoring.md) are live. Until then, the dormant policy has no
-executable production publication path and these steps must not be presented
-as available commands.
+hold](peg-monitoring.md) are live. The manual `Peg Policy Publication` workflow
+now provides the publication path; it still does not activate the runtime or
+Grafana consumers.
 
 Use this order for the first activation topology:
 
@@ -194,9 +194,9 @@ Use this order for the first activation topology:
    Record rejected-source evidence in that change. Never merge a registry-only
    or policy-only source state; the integrity contract requires exact
    active-registry parity. Do not deploy the registry B image yet.
-3. Through a separately reviewed protected alerts-rules apply whose diff
-   contains the policy object and no Grafana consumers, publish B as the
-   immutable private GCS generation described by
+3. Through the separately reviewed `Peg Policy Publication` workflow, inspect
+   its read-only `main` plan and then approve its `production-infra` apply to
+   publish B as the immutable private GCS generation described by
    [ADR 0054](../adr/0054-same-project-peg-policy-artifact.md). Keep the runtime
    pinned to A.
 4. Deploy the bridge revision containing union registry B while the runtime
@@ -254,11 +254,10 @@ the private artifact and the enabled Grafana rule definitions in the same full
 selects the new policy. Turning the global guard back off would remove every
 live Peg consumer, and a targeted apply is forbidden.
 
-Subsequent asset and source rollovers remain **Blocked** under
-[issue #1444](https://github.com/mento-protocol/monitoring-monorepo/issues/1444)
-until a reviewed implementation adds either a separately applied policy
-publication boundary or per-policy consumer activation. That implementation
-must update this runbook before operators use A-to-B rollout steps.
+The separate policy-publication boundary is now available for staged A-to-B
+rollovers. Per-policy consumer activation remains out of scope: when Grafana
+consumers are already enabled, do not combine a policy rollover with consumer
+changes or bypass the protected publication and runtime-pinning sequence.
 
 ## 7. Interpret scheduled re-census
 
@@ -304,19 +303,17 @@ coverage gates before restoring alert authority.
    to silence the alert.
 4. Census and validate a replacement. Stage and deploy its adapter support with
    registry and policy topology A unchanged, as in Section 6 stage 1.
-5. Keep registry and policy topology A unchanged while the post-activation
-   rollout boundary in Section 6 is missing. Link the replacement evidence to
-   issue #1444; do not start an A-to-B policy change through the current full
-   stack.
+5. Keep registry and policy topology A unchanged until the replacement's
+   additive A-to-B publication, runtime pin, and producer proof are scheduled.
+   Do not change Grafana consumers through the publication workflow.
 6. Use the recorded escalation, breaker, and exposure controls while monitoring
    stays degraded. Do not delete the old source only to silence the alert.
 
-The eventual replacement path must add the replacement through an additive
-A-to-B rollover, clear `previous` only after acknowledgement and a full
-decision-history window, and retire the old source through a later B-to-C
-rollover. Those transitions are design constraints, not executable production
-steps until the missing publication/consumer boundary lands and this section is
-updated in the same reviewed change.
+The replacement path adds the replacement through an additive A-to-B rollover,
+clears `previous` only after acknowledgement and a full decision-history
+window, and retires the old source through a later B-to-C rollover. Use the
+protected publication and runtime-pinning sequence in Section 6; consumer
+activation stays a separate reviewed change.
 
 ## EUROP seeded record and mandatory blockers
 

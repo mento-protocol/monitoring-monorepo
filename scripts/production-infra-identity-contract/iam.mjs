@@ -34,9 +34,16 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
   },
   {
     expression:
-      '"principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.ref/refs/heads/main"',
+      '"principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.workflow_ref/${each.value}"',
     blocks: [
       "terraform/ci-wif.tf:google_service_account_iam_member.terraform_refresh_readonly_wif_binding",
+    ],
+  },
+  {
+    expression:
+      '"principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_terraform_refresh.name}/attribute.workflow_ref/mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main"',
+    blocks: [
+      "terraform/ci-wif.tf:google_service_account_iam_member.peg_policy_publication_plan_wif_binding",
     ],
   },
   {
@@ -113,6 +120,20 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       '"serviceAccount:${google_service_account.org_terraform_refresh_readonly.email}"',
     blocks: [
       "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_refresh_readonly",
+    ],
+  },
+  {
+    expression:
+      '"serviceAccount:${google_service_account.peg_policy_publication_plan.email}"',
+    blocks: [
+      "terraform/ci-wif.tf:google_service_account_iam_member.peg_policy_publication_plan_reader_token_creator",
+    ],
+  },
+  {
+    expression:
+      '"serviceAccount:${google_service_account.peg_policy_publication_reader.email}"',
+    blocks: [
+      "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_peg_policy_publication_reader",
     ],
   },
   {
@@ -261,11 +282,14 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/ci-wif.tf:google_service_account_iam_member.ci_plan_readonly_org_terraform_plan_readonly_token_creator|12f23643afcc9349e76c1c0c2972acb6145adf62388c784b6f3602c530474541",
   "terraform/ci-wif.tf:google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator|4a6e6bd58072639804c56a55a26356285a19b8d8eec83ac8732102e988e6979c",
   "terraform/ci-wif.tf:google_service_account_iam_member.deployer_wif_binding|4c3302eaade9e7dccb17daed9e44c4e3c3645a9d0d4a1fa67606d9632c544218",
+  "terraform/ci-wif.tf:google_service_account_iam_member.peg_policy_publication_plan_reader_token_creator|fa1bca24f14b75f12bd1826c88052ea121d6527e126d467ce4ff4aa3efb7c403",
+  "terraform/ci-wif.tf:google_service_account_iam_member.peg_policy_publication_plan_wif_binding|573e6d5566f8af9ffc6eaa9da069bd2344aed205a99bca9d18f3402a8aa01a0d",
   "terraform/ci-wif.tf:google_service_account_iam_member.plan_readonly_wif_binding|c9a6cbe51dba7d93657c8452632749d9565d1b1c6a17eee214ea936b4ef66c63",
   "terraform/ci-wif.tf:google_service_account_iam_member.production_infra_applier_org_terraform_token_creator|9e881005142ca12c27f535de78917f7d6adf29adcf693bf1791a5a71b628a0a6",
   "terraform/ci-wif.tf:google_service_account_iam_member.production_infra_applier_wif_binding|579a866f0b22a52d882c5a4b5782d3f4777e5ed3da4447632e531eee1bc9a446",
-  "terraform/ci-wif.tf:google_service_account_iam_member.terraform_refresh_readonly_wif_binding|a10d7bdebc3992fb450224b6850e35b442c174bc629d63826a39c89d29ebcb09",
+  "terraform/ci-wif.tf:google_service_account_iam_member.terraform_refresh_readonly_wif_binding|92a8039e8bb19949c5e3379a3093d76677f782f60f1334f4444a3d6c1da0990d",
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_plan_readonly|14bfbae95fdd8cf89f98a71d6b0ff755e291f25ed5d946d633614813734e4ac5",
+  "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_peg_policy_publication_reader|357fe9e393bb6cd1329ed632e9a7ed60e49055e6cb2abb9d1bb55387928e137a",
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_refresh_readonly|f6756d526277862e2378cd24b6605b16725030c636d67e8a483411435ad6998f",
   "terraform/peg-policy.tf:google_service_account_iam_member.production_infra_applier_peg_policy_publisher_token_creator|57bfe37a62371790fdc30f70fd393423464366d169fb74214c499e801ee67d98",
   "terraform/peg-policy.tf:google_storage_bucket_iam_policy.peg_policy_access_logs|e7abbe2a07d3a595e4fe2daa4a17a2173d5b41fbb778ab870f4fc35df25f6ed7",
@@ -312,6 +336,8 @@ const IDENTITY_SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/ci-wif.tf:google_service_account.metrics_bridge_plan_readonly|24628df00c7031ae0ca5ee2a6fa559b6f257cdb519619b9fe0f885c8715960b0",
   "terraform/ci-wif.tf:google_service_account.org_terraform_plan_readonly|f8085c49ff045f8b86710a39f32df57a597725a83997c589e3bd48e6ce406dc1",
   "terraform/ci-wif.tf:google_service_account.org_terraform_refresh_readonly|67d108a7649109cdeb3cd63eabd144d5623049b5e848543d611b694c1efb3684,8a129ed148c03bbf7a5b1c2e1e81b977e3a37bd0e09124d9e24c9e51c1a1894a",
+  "terraform/ci-wif.tf:google_service_account.peg_policy_publication_plan|d9da5eae0f5780adb88305ab91c70f4dcd3d82461fa25ba98c967c2983ffb8ec,36b94440cdd6d1f34f4e63c94201748a3b5237c2bcb16e21d5eb9cc2edf0e974",
+  "terraform/ci-wif.tf:google_service_account.peg_policy_publication_reader|99513117a555159c40cab2f1e78d5aa034d1e64f8e8da49e3368add680df1500,130bdd40b07455b068006dfe6533ed51f555ce9be6a5f6c3e7958f9e2cba3501",
   "terraform/ci-wif.tf:google_service_account.production_infra_applier|02bb20c0c7f7c5550ff341f77f85dcfa00cd0b4615936eb6a1e18ea6923c11d5,53ab416891c6eeba7ad063fd45341139fba6a8e7d341a5e45242b7be76f08e1f",
   "terraform/ci-wif.tf:google_service_account.terraform_refresh_readonly|c51792f5180d455dd87e9acbea26fa08a50b24a91bc4e4a93e01149f80007b66,73b3810af667664ebddf1aa217846be5cffe9340970a7d0a53d3d4e7a4fb2b05",
   "terraform/peg-policy.tf:google_service_account.metrics_bridge_runtime|a96ee5a36934ee2d1d7e3ce6fd72dd28f0e02461e1a370b787cddce42dac85be",
