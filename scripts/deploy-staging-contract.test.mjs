@@ -523,6 +523,27 @@ childProcess.execFileSync(command, args);
     "const executable and argv aliases through member callees must be discovered",
   ],
   [
+    `const command = "gcloud";
+const args = ["app", "deploy", "app.yaml"];
+childProcess["execFileSync"](command, args);
+`,
+    "const executable and argv aliases through statically named computed member callees must be discovered",
+  ],
+  [
+    `const command = "gcloud";
+const args = ["builds", "submit", "."];
+childProcess[\`execFileSync\`](command, args);
+`,
+    "no-substitution template member callees must be discovered",
+  ],
+  [
+    `const command = "gcloud";
+const args = ["builds", "submit", "."];
+childProcess[("execFileSync")](command, args);
+`,
+    "parenthesized computed member callees must be discovered",
+  ],
+  [
     `const baseArgs = ["builds", "submit", "."];
 const args = baseArgs;
 execFileSync("gcloud", args);
@@ -620,12 +641,36 @@ execFileSync(command, ["builds", "submit", "."]);
   assertProgrammaticConstCallsite(contents, message);
 }
 
+assertForbiddenSignature(
+  `const command = "gcloud";
+const args = ["builds", "submit", "."];
+childProcess["execFileSync" as const](command, args);
+`,
+  "TypeScript asserted computed member callees must be discovered",
+  "scripts/const-deploy.ts",
+);
+
 for (const [contents, message] of [
   [
     `let args = ["builds", "submit", "."];
 execFileSync("gcloud", args);
 `,
     "let aliases must not be evaluated",
+  ],
+  [
+    `const method = "execFileSync";
+const command = "gcloud";
+const args = ["builds", "submit", "."];
+childProcess[method](command, args);
+`,
+    "dynamically named computed member callees must not be evaluated",
+  ],
+  [
+    `const command = "gcloud";
+const args = ["builds", "submit", "."];
+childProcess["debug"](command, args);
+`,
+    "unknown statically named computed member callees must not be evaluated",
   ],
   [
     `var args = ["builds", "submit", "."];

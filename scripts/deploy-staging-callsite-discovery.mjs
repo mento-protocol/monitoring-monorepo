@@ -269,9 +269,21 @@ function acceptsResolvedCommandReferences(node) {
   const expression = unwrapStaticExpression(node.expression);
   return (
     expression !== undefined &&
-    (ts.isIdentifier(expression) ||
-      (ts.isPropertyAccessExpression(expression) &&
-        PROGRAMMATIC_EXECUTION_MEMBERS.has(expression.name.text)))
+    (ts.isIdentifier(expression) || isProgrammaticExecutionMember(expression))
+  );
+}
+
+function isProgrammaticExecutionMember(expression) {
+  if (ts.isPropertyAccessExpression(expression)) {
+    return PROGRAMMATIC_EXECUTION_MEMBERS.has(expression.name.text);
+  }
+  if (!ts.isElementAccessExpression(expression)) return false;
+  const member = unwrapStaticExpression(expression.argumentExpression);
+  return (
+    member !== undefined &&
+    (ts.isStringLiteral(member) ||
+      ts.isNoSubstitutionTemplateLiteral(member)) &&
+    PROGRAMMATIC_EXECUTION_MEMBERS.has(member.text)
   );
 }
 
