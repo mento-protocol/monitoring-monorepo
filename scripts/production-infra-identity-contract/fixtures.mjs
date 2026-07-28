@@ -246,6 +246,17 @@ resource "github_actions_variable" "gcp_peg_policy_publication_plan_service_acco
 const pegPolicyVariablesFixture = "";
 
 const pegPolicyFixture = `
+locals {
+  peg_policy_runtime_generation = null
+
+  peg_policy_runtime_url = local.peg_policy_runtime_generation == null ? null : "https://storage.googleapis.com/download/storage/v1/b/\${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=\${local.peg_policy_runtime_generation}"
+
+  peg_policy_runtime_env = local.peg_policy_runtime_generation == null ? {} : {
+    PEG_POLICY_URL       = local.peg_policy_runtime_url
+    PEG_POLICY_AUTH_MODE = "gcp-metadata"
+  }
+}
+
 resource "google_storage_bucket" "peg_policy" {
   name                        = "\${google_project.monitoring.project_id}-peg-policy"
   project                     = google_project.monitoring.project_id
@@ -423,6 +434,42 @@ resource "google_service_account_iam_member" "production_infra_applier_peg_polic
 }
 `;
 
+const pegPolicyDeployStagingFixture = `
+resource "google_service_account_iam_member" "ci_metrics_bridge_runtime_service_account_user" {
+  service_account_id = google_service_account.metrics_bridge_runtime.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:\${google_service_account.metrics_bridge_deployer.email}"
+
+  depends_on = [
+    google_service_account.metrics_bridge_deployer,
+    google_service_account.metrics_bridge_runtime,
+  ]
+}
+
+resource "google_service_account_iam_member" "dev_metrics_bridge_runtime_service_account_user" {
+  for_each = toset(var.gcp_dev_members)
+
+  service_account_id = google_service_account.metrics_bridge_runtime.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = each.value
+
+  depends_on = [
+    google_project_iam_member.dev_run_admin,
+    google_service_account.metrics_bridge_runtime,
+  ]
+}
+
+moved {
+  from = google_service_account_iam_member.ci_default_compute_service_account_user
+  to   = google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user
+}
+
+moved {
+  from = google_service_account_iam_member.dev_default_compute_service_account_user
+  to   = google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user
+}
+`;
+
 const storageApiFixture = `
 resource "google_project_service" "storage" {
   project                    = google_project.monitoring.project_id
@@ -573,6 +620,14 @@ export function validFixtureFiles() {
     "terraform/ci-wif.tf": productionTerraformFixture,
     "terraform/gcp-project.tf": storageApiFixture,
     "terraform/github-variables.tf": githubVariablesFixture,
+    "terraform/metrics-bridge.tf": readFileSync(
+      new URL("../../terraform/metrics-bridge.tf", import.meta.url),
+      "utf8",
+    ).replace(
+      "      template[0].containers[0].image,\n      client,",
+      "      template[0].containers[0].image,\n      template[0].revision,\n      client,",
+    ),
+    "terraform/deploy-staging.tf": pegPolicyDeployStagingFixture,
     "terraform/peg-policy.tf": pegPolicyFixture,
     "terraform/variables.tf": pegPolicyVariablesFixture,
     "alerts/infra/main.tf": targetProjectFixture("local.project_id"),

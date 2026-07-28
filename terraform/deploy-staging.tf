@@ -166,32 +166,45 @@ resource "google_storage_bucket_iam_member" "app_engine_source_appspot_object_vi
 }
 
 # Preserve the routine Metrics Bridge rollout after phase 2 removes the
-# project-wide Service Account User grant. Cloud Run uses the project's default
-# compute service account because the service does not pin another identity.
-resource "google_service_account_iam_member" "ci_default_compute_service_account_user" {
-  service_account_id = "projects/${google_project.monitoring.project_id}/serviceAccounts/${google_project.monitoring.number}-compute@developer.gserviceaccount.com"
+# project-wide Service Account User grant. Cloud Run pins the dedicated runtime
+# identity, so the deployer can act only as that service account.
+resource "google_service_account_iam_member" "ci_metrics_bridge_runtime_service_account_user" {
+  service_account_id = google_service_account.metrics_bridge_runtime.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
 
   depends_on = [
-    google_project_service.compute,
     google_service_account.metrics_bridge_deployer,
+    google_service_account.metrics_bridge_runtime,
   ]
 }
 
 # `pnpm bridge:deploy` is a supported direct Cloud Run deployment path. Devs
-# already have Run Admin; bind Service Account User only on the service's
-# default compute identity so that path keeps working after the broad fallback
-# is removed.
-resource "google_service_account_iam_member" "dev_default_compute_service_account_user" {
+# already have Run Admin; bind Service Account User only on the dedicated
+# runtime identity so that path keeps working after the broad fallback is
+# removed.
+resource "google_service_account_iam_member" "dev_metrics_bridge_runtime_service_account_user" {
   for_each = toset(var.gcp_dev_members)
 
-  service_account_id = "projects/${google_project.monitoring.project_id}/serviceAccounts/${google_project.monitoring.number}-compute@developer.gserviceaccount.com"
+  service_account_id = google_service_account.metrics_bridge_runtime.name
   role               = "roles/iam.serviceAccountUser"
   member             = each.value
 
   depends_on = [
-    google_project_service.compute,
     google_project_iam_member.dev_run_admin,
+    google_service_account.metrics_bridge_runtime,
   ]
+}
+
+# The target account changes as well as the resource names, so Terraform plans
+# the required replacement instead of treating these scoped grants as unrelated
+# additions and removals.
+moved {
+  from = google_service_account_iam_member.ci_default_compute_service_account_user
+  to   = google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user
+}
+
+moved {
+  from = google_service_account_iam_member.dev_default_compute_service_account_user
+  to   = google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user
 }

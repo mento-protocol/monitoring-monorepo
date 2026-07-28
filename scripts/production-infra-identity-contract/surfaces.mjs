@@ -82,7 +82,7 @@ const IDENTITY_BEARING_RESOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/github-variables.tf:github_actions_variable.sentry_autofix_enabled|0b1f2a6adc979710e7b04515085fb6fdd4a55fc02c906f17c2e385076d546cf2",
   "terraform/github-variables.tf:github_actions_variable.sentry_triage_enabled|56e47749f31de18624497eab72f093197f04a0e2ae710dc6e5dedad80505a624",
   "terraform/github-variables.tf:github_actions_variable.terraform_apply_slack_channel|a32ea4ca4434941b67d81cf81556f9a876a63e5599a59b336ef0e8c56841dff2",
-  "terraform/metrics-bridge.tf:google_cloud_run_v2_service.metrics_bridge|63d0737277d00de634ea35707e1ad0ef2379e7323f63caa734ec29a5fe1e81bd",
+  "terraform/metrics-bridge.tf:google_cloud_run_v2_service.metrics_bridge|e3d55ebb73863c25bbf8987609436eb3aac812b7b760e1f0632a01300bf61546,8dd71d49aac0c7da8192d5b12fe8eea7609e7f009a11690bcdee3b5849d7249a",
 ];
 
 const OUTPUT_BLOCK_SHAPE_SPECIFICATIONS = [
@@ -281,7 +281,7 @@ const RESOURCE_DATA_BLOCK_KEY_GROUPS = [
   "terraform/agent-readonly.tf|google_organization_iam_member.agent_readonly_org_roles,google_project_iam_member.agent_readonly_storage_object_viewer,google_project_service.cloudasset,google_project_service.cloudresourcemanager,google_project_service.serviceusage,google_service_account.agent_readonly,google_service_account_iam_member.agent_readonly_token_creators",
   "terraform/ci-wif.tf|google_iam_workload_identity_pool.github_actions,google_iam_workload_identity_pool.github_production_infra,google_iam_workload_identity_pool.github_terraform_refresh,google_iam_workload_identity_pool_provider.github,google_iam_workload_identity_pool_provider.github_production_infra,google_iam_workload_identity_pool_provider.github_terraform_refresh,google_project_iam_member.ci_deployer,google_service_account.metrics_bridge_deployer,google_service_account.metrics_bridge_plan_readonly,google_service_account.org_terraform_plan_readonly,google_service_account.org_terraform_refresh_readonly,google_service_account.peg_policy_publication_plan,google_service_account.peg_policy_publication_reader,google_service_account.production_infra_applier,google_service_account.terraform_refresh_readonly,google_service_account_iam_member.ci_appengine_default_service_account_user,google_service_account_iam_member.ci_plan_readonly_org_terraform_plan_readonly_token_creator,google_service_account_iam_member.ci_refresh_readonly_org_terraform_refresh_readonly_token_creator,google_service_account_iam_member.deployer_wif_binding,google_service_account_iam_member.peg_policy_publication_plan_reader_token_creator,google_service_account_iam_member.peg_policy_publication_plan_wif_binding,google_service_account_iam_member.plan_readonly_wif_binding,google_service_account_iam_member.production_infra_applier_org_terraform_token_creator,google_service_account_iam_member.production_infra_applier_wif_binding,google_service_account_iam_member.terraform_refresh_readonly_wif_binding,google_storage_bucket_iam_member.state_bucket_peg_policy_publication_reader,google_storage_bucket_iam_member.state_bucket_plan_readonly,google_storage_bucket_iam_member.state_bucket_refresh_readonly",
   "terraform/dashboard.tf|local_file.vercel_project_json,upstash_redis_database.address_labels,vercel_project.dashboard,vercel_project_domain.monitoring,vercel_project_environment_variable.arkham_api_key,vercel_project_environment_variable.auth_google_id,vercel_project_environment_variable.auth_google_secret,vercel_project_environment_variable.auth_redirect_proxy_url,vercel_project_environment_variable.auth_secret,vercel_project_environment_variable.auth_secret_prev,vercel_project_environment_variable.cron_secret,vercel_project_environment_variable.dune_api_key,vercel_project_environment_variable.enable_experimental_corepack,vercel_project_environment_variable.hasura_celo_sepolia_url,vercel_project_environment_variable.hasura_testnet_url,vercel_project_environment_variable.hasura_url,vercel_project_environment_variable.metrics_bridge_url,vercel_project_environment_variable.redis_token,vercel_project_environment_variable.redis_url,vercel_project_environment_variable.show_testnet_networks",
-  "terraform/deploy-staging.tf|google_service_account_iam_member.ci_default_compute_service_account_user,google_service_account_iam_member.dev_default_compute_service_account_user,google_storage_bucket.app_engine_source_staging,google_storage_bucket.cloud_build_source_staging,google_storage_bucket_iam_member.app_engine_source_appspot_object_viewer,google_storage_bucket_iam_member.app_engine_source_uploader_bucket_reader,google_storage_bucket_iam_member.app_engine_source_uploader_object_admin,google_storage_bucket_iam_member.cloud_build_source_caller_bucket_reader,google_storage_bucket_iam_member.cloud_build_source_caller_object_creator,google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer",
+  "terraform/deploy-staging.tf|google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user,google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user,google_storage_bucket.app_engine_source_staging,google_storage_bucket.cloud_build_source_staging,google_storage_bucket_iam_member.app_engine_source_appspot_object_viewer,google_storage_bucket_iam_member.app_engine_source_uploader_bucket_reader,google_storage_bucket_iam_member.app_engine_source_uploader_object_admin,google_storage_bucket_iam_member.cloud_build_source_caller_bucket_reader,google_storage_bucket_iam_member.cloud_build_source_caller_object_creator,google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer",
   "terraform/gcp-project.tf|google_project.monitoring,google_project_iam_member.terraform_owner,google_project_service.appengine,google_project_service.appengineflex,google_project_service.artifactregistry,google_project_service.cloudbuild,google_project_service.compute,google_project_service.iam,google_project_service.iamcredentials,google_project_service.run,google_project_service.secretmanager,google_project_service.storage,google_project_service.sts",
   "terraform/github-actions-permissions.tf|github_workflow_repository_permissions.default_read",
   "terraform/github-environment.tf|github_actions_environment_secret.autofix_app_private_key,github_actions_environment_secret.platform_settings_audit_token,github_actions_environment_secret.sentry_archive_token,github_actions_environment_secret.sentry_projection_token,github_actions_environment_secret.sentry_triage_token,github_repository_environment.production_infra,github_repository_environment.production_services,github_repository_environment.sentry_pipeline,github_repository_environment_deployment_policy.production_infra_main,github_repository_environment_deployment_policy.production_services_main,github_repository_environment_deployment_policy.sentry_pipeline_main",
@@ -339,11 +339,15 @@ function buildShapeRegistry(specifications, label) {
   for (const specification of specifications) {
     const separator = specification.lastIndexOf("|");
     const key = specification.slice(0, separator);
-    const hash = specification.slice(separator + 1);
-    if (separator < 1 || !/^[0-9a-f]{64}$/u.test(hash) || registry.has(key)) {
+    const hashes = specification.slice(separator + 1).split(",");
+    if (
+      separator < 1 ||
+      hashes.some((hash) => !/^[0-9a-f]{64}$/u.test(hash)) ||
+      registry.has(key)
+    ) {
       throw new Error(`invalid ${label} shape registry entry: ${key}`);
     }
-    registry.set(key, hash);
+    registry.set(key, new Set(hashes));
   }
   return registry;
 }
@@ -450,7 +454,7 @@ function validateExactInventory(
       unregistered.add(key);
     } else {
       const actual = contentShape(block.text);
-      if (actual !== expected) {
+      if (!expected.has(actual)) {
         errors.push(
           `${key}: ${label} must match its exact audited shape (found ${actual})`,
         );
