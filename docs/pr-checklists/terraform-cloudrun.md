@@ -91,6 +91,14 @@ trimmed build context:
       `gcloud builds submit --config=cloudbuild.yaml ...`. Local package tests and
       `pnpm install` prove dependency resolution, but they do not prove a reduced
       Cloud Build upload/Docker context contains the same files.
+- [ ] The approved `gcloud builds submit` / `gcloud app deploy` callsites use
+      their required source-staging flag/value. Run `pnpm tf:test`; apply
+      [ADR 0053](../adr/0053-explicit-deployment-source-staging.md) for the
+      supported static syntax and deliberate proof limits.
+- [ ] Bucket-scope upload IAM: Cloud Build callers get bucket read/object create,
+      build identities get object view, and App Engine uploaders get bucket
+      read/Object Admin.
+- [ ] Use `CLOUD_LOGGING_ONLY` unless a retained log bucket exists.
 
 ## 5. IAM ordering + dependencies
 
@@ -118,6 +126,8 @@ New GCP project, Cloud Function, or versioned-bucket stacks ship WITH retention 
 
 - [ ] Gen2 Cloud Functions / Cloud Build stacks own their auto-created `gcf-artifacts` repo in Terraform (one-time `import` block, deleted right after the adopting apply) with `cleanup_policies`: `DELETE` older-than + `KEEP` most-recent-versions. Checkov's CMEK finding (CKV_GCP_84) gets an inline skip — the repo is Cloud-Functions-managed and CMEK would force recreation
 - [ ] Versioned GCS buckets have a `lifecycle_rule`. Use age-based `days_since_noncurrent_time` with `with_state = "ARCHIVED"`, NOT `num_newer_versions`, when object names embed a content hash — each deploy writes a new name, so an old name's archived generation never gains newer versions and a generation-count condition never fires (it also counts the live version)
+- [ ] Reconstructible source buckets set age expiry, explicit soft delete,
+      `force_destroy = false`, and `prevent_destroy`.
 
 ## 8. Pre-apply rituals
 

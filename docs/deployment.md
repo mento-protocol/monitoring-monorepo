@@ -170,23 +170,20 @@ The platform stack owns two explicit source buckets for routine deploys:
   `gs://mento-monitoring-cloud-build-source/<service>`;
 - App Engine uploads use `gs://mento-monitoring-app-engine-source`.
 
-The follow-up routing change makes the Metrics Bridge workflow and
-`pnpm bridge:deploy` pass `--gcs-source-staging-dir`. It makes
-`pnpm aegis:deploy` and the nested Alloy build pass `--bucket`, while
-`pnpm aegis:agent:deploy` stages its outer build in the Cloud Build bucket.
-That follow-up also makes `pnpm tf:test` discover every executable callsite and
-reject a direct `gcloud builds submit` / `gcloud app deploy` path that omits
-the explicit bucket.
+The Metrics Bridge workflow and `pnpm bridge:deploy` pass
+`--gcs-source-staging-dir`. `pnpm aegis:deploy` and the nested Alloy build pass
+`--bucket`; the guarded `pnpm aegis:agent:deploy` wrapper stages its immutable
+snapshot in the Cloud Build bucket. `pnpm tf:test` allows exactly five literal
+checked-in `gcloud builds submit` / `gcloud app deploy` callsites and their
+required source-staging flag/value. [ADR 0053](adr/0053-explicit-deployment-source-staging.md)
+defines the supported static discovery syntax and its deliberate indirect and
+dynamic proof limits.
 
-This migration has a strict rollout order. First merge the infrastructure-only
-PR. Refresh current `main`, run a clean current-main platform plan, get explicit
-apply approval, apply, and verify both buckets, their bucket-scoped IAM, and the
-exact default-Compute act-as grants for the routine deployer and
-`gcp_dev_members`. Only then merge the routing follow-up; that merge triggers
-the Metrics Bridge and Aegis workflows.
-Canary all five deployment paths before the same-project Peg-policy foundation
-removes the temporary project-wide Storage Admin, Storage Object Admin, and
-Service Account User grants. That foundation then needs an effective-IAM audit.
+Apply and verify the source buckets, scoped IAM, and default-Compute act-as
+grants before routing. Routing triggers the Metrics Bridge and Aegis workflows.
+Canary all five paths, including `pnpm aegis:agent:deploy`, before applying the
+policy foundation. That apply removes broad Storage Admin, Storage Object
+Admin, and Service Account User grants and requires an effective-IAM audit.
 [ADR 0053](adr/0053-explicit-deployment-source-staging.md) records the
 permission split and phase boundary.
 
@@ -204,13 +201,11 @@ absent and the Peg poller stays dormant.
 The dormant source foundation places the policy and access logs in
 `mento-monitoring`. The Metrics Bridge runtime and publisher identities also
 live there, with direct bucket-scoped Viewer and Object Admin grants. Before
-applying this branch, #1659's additive staging foundation must merge and all
-five deployment paths must pass canaries. This branch removes broad
-project-wide Storage Admin, Storage Object Admin, and Service Account User
-fallback grants with the policy foundation. Audit effective readers, writers,
-and IAM administrators after that apply and again before activating the
-runtime. The protected org-Terraform Owner path and organization IAM admins
-are accepted control-plane exceptions.
+applying current `main`, #1659 must merge and all five paths must pass canaries.
+The apply creates the policy foundation and removes broad Storage Admin, Storage
+Object Admin, and Service Account User fallbacks. Audit effective IAM afterward
+and again before activation. The org-Terraform Owner path and organization IAM
+admins are accepted control-plane exceptions.
 
 Production mode is `gcp-metadata`. The URL must use the exact GCS JSON download
 host and path, a canonical percent-encoded object component, `alt=media`, and

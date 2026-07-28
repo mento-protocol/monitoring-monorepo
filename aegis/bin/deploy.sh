@@ -137,5 +137,8 @@ cat >"$deploy_dir/.gcloudignore" <<'EOF'
 node_modules/
 EOF
 
-# Deploy aegis to the monitoring project.
-gcloud app deploy "$deploy_dir/app.yaml" --project mento-monitoring --quiet
+# Deploy aegis through the explicit App Engine source-staging bucket.
+gcloud app deploy "$deploy_dir/app.yaml" \
+  --project=mento-monitoring \
+  --bucket=gs://mento-monitoring-app-engine-source \
+  --quiet
