@@ -3,7 +3,7 @@ title: Stateful Data and UI Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-07-28
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -112,6 +112,9 @@ If the PR touches a table with pagination, sort, filter, search, or linked chart
 - [ ] Does search operate on current page, fetched window, or full dataset?
 - [ ] Is that behavior documented in code comments and PR notes?
 - [ ] If bounded, is the cap explicit and user-visible?
+- [ ] Does each datastore read cap use production size or an operational
+      contract such as backup/restore, not fixture size?
+- [ ] Does a production-scale fixture verify both sides of the cap?
 - [ ] If unbounded, can the backend/query path actually support it?
 - [ ] If filter options are data-driven, what happens when the selected option
       disappears during refresh or partial failure? Reset to a valid state

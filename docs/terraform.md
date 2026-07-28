@@ -54,9 +54,10 @@ through `production-infra` approval.
 
 `peg-policy-publication` permits only backend-free local validation with
 `pnpm tf validate peg-policy-publication`. Local plan and apply are disabled,
-including `--force-local-apply`. After the foundation is live, dispatch `Peg
-Policy Publication` from `main`: inspect its read-only plan, then choose `apply`
-and approve the `production-infra` Environment. Its output supplies one
+including `--force-local-apply`. The foundation is applied, but publication is
+paused pending the controller recovery below. After that recovery, dispatch
+`Peg Policy Publication` from `main`: inspect its read-only plan, then choose
+`apply` and approve the `production-infra` Environment. Its output supplies one
 generation-pinned URL for a later runtime-activation change.
 
 ## CI Model
@@ -134,35 +135,34 @@ apply-time re-plan and drift window remain in force.
 
 ## Identity bootstrap, routing cutover, and authority removal
 
-The bootstrap, refresh routing, live full-refresh proof, legacy-authority
-removal, run drain, and final IAM/WIF audit are complete. The approved removal
-apply completed with `0 added, 1 changed, 1 destroyed`, a full post-apply plan
-reported no changes, and live IAM contains no `metrics-bridge-deployer` Token
-Creator grant. The platform foundation owns the private buckets and identities;
-the separate `peg-policy-publication` root writes the policy object only through
-its manual protected workflow. Metrics Bridge uses the dedicated runtime
-identity, but its paired policy environment remains absent while
-`local.peg_policy_runtime_generation = null`. A later reviewed activation
-change selects the protected publisher's exact quoted positive output; routine
-publication does not activate Cloud Run or Grafana. Terraform derives the
-canonical pinned URL and `gcp-metadata` mode from that one literal. While it is
-`null`, Terraform retains `template[0].revision` in `ignore_changes`; the
-concrete-generation change removes it so Cloud Run creates a revision. Both
-policy buckets, the runtime, and publisher live in `mento-monitoring`. The
-publication plan and reader identities live in the seed project. Only the exact
-publication workflow may select that read-only chain. The runtime and
-publication reader have direct bucket-scoped Object Viewer grants; the
-publisher has direct bucket-scoped Object Admin.
+Routing and IAM audit complete. Removal: `0 added, 1 changed, 1 destroyed`;
+plan clean; IAM has no `metrics-bridge-deployer` Token Creator grant. Platform
+owns private buckets and identities; protected `peg-policy-publication` writes
+the policy object.
+Metrics Bridge uses the dedicated runtime identity; `PEG_POLICY_*` remains
+absent when `local.peg_policy_runtime_generation = null`. Reviewed activation
+changes that literal to the protected publisher's exact quoted positive output;
+publication does not attach Cloud Run or activate Grafana. Terraform derives the
+pinned URL and `gcp-metadata` mode from that literal. `null` retains
+`template[0].revision` in `ignore_changes`; a concrete generation removes it and
+creates a Cloud Run revision. Buckets, runtime, and publisher are in
+`mento-monitoring`; publication plan and reader are in the seed project. Only
+the exact publication workflow selects that read-only chain. Runtime and reader
+have direct bucket-scoped Object Viewer; publisher has direct Object Admin.
 
-The authoritative bucket policies make direct grants exact. Project and
-organization grants still inherit into the bucket. The protected org-Terraform
-service account already has project Owner and can manage IAM and bucket
-metadata; organization IAM admins are also control-plane exceptions. Apply
-current `main` only after #1659 has merged and all five deploy paths have passed
-canaries. That approved platform apply confirms the foundation, creates the
-dormant policy foundation, and removes broad Storage Admin, Storage Object
-Admin, and Service Account User fallback grants. Audit effective readers,
-writers, and IAM administrators after that apply and again before activation.
+Authoritative bucket policies keep direct grants exact.
+`pegPolicyBucketController` gives org-Terraform only bucket get/update and
+IAM-policy get/set on both buckets. Project and organization grants still
+inherit; project Owner and organization IAM admins are emergency paths. Never
+retain a project-level controller or use broad Storage Admin, Storage Object
+Admin, or Service Account User. Audit effective access after applies and before
+activation.
+
+### Peg policy bucket controller recovery
+
+Publication is paused. Follow the explicitly approved recovery and proof in
+[ADR 0055](adr/0055-peg-policy-bucket-controller-recovery.md) from clean current
+`main`. Never use `roles/storage.admin`.
 
 ## Routine deployment source staging
 

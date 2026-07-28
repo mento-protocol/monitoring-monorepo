@@ -81,9 +81,10 @@ Aegis.
 This first phase is additive. Existing project-wide Storage Admin, Storage
 Object Admin, and routine Service Account User grants remain until all five
 deployment paths prove the explicit routes. ADR 0054 owns the later reviewed
-same-project Peg-policy foundation: it removes those broad grants and requires
-an effective project, bucket, inherited, and service-account IAM audit after
-apply.
+same-project Peg-policy foundation. Its applied foundation removed those broad
+grants and requires an effective project, bucket, inherited, and
+service-account IAM audit after applies. ADR 0055 owns the narrow controller
+recovery required before policy publication resumes.
 
 Land the infrastructure as its own PR. After it merges, refresh current `main`,
 run a clean current-main platform plan, get explicit apply approval, apply, and
@@ -136,9 +137,9 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   `scripts/deploy-staging-contract.test.mjs`.
 - Operators must preserve the phase boundary: merge and apply the additive
   infrastructure from current `main`, merge routing, and run all five deploy
-  canaries. ADR 0054 then removes broad roles with the dormant same-project
-  Peg-policy foundation and requires an effective-IAM audit. This ADR itself
-  creates no peg-policy bucket or identity.
+  canaries. The applied same-project Peg-policy foundation removed broad roles
+  and requires an effective-IAM audit; ADR 0055 now governs its controller
+  recovery. This ADR itself creates no peg-policy bucket or identity.
 
 ## Evidence
 

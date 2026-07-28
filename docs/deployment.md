@@ -249,13 +249,20 @@ runtime or manually edit Cloud Run environment values during rollback.
 
 The platform foundation places the policy and access logs in
 `mento-monitoring`. The Metrics Bridge runtime and publisher identities also
-live there, with direct bucket-scoped Viewer and Object Admin grants. Before
-applying current `main`, #1659 must merge and all five paths must pass canaries.
-That apply creates the policy foundation and removes broad Storage Admin,
-Storage Object Admin, and Service Account User fallbacks. Audit effective
-readers, writers, and IAM administrators after that apply and again before
-runtime activation. The protected org-Terraform Owner path and organization
-IAM admins are accepted control-plane exceptions.
+live there, with direct bucket-scoped Viewer and Object Admin grants. The
+org-Terraform service account normally reconciles both authoritative bucket
+policies through the narrow `pegPolicyBucketController` binding. Its four
+permissions cover bucket get and update plus IAM-policy get and set. The
+protected org-Terraform Owner path and organization IAM admins remain audited
+emergency exceptions. Do not retain a project-level controller grant or use
+broad Storage Admin, Storage Object Admin, or Service Account User fallbacks.
+An explicitly approved, time-bounded emergency controller bootstrap may be
+used only until both bucket policies reconcile; remove it immediately, verify
+its absence, and run a clean plan. The foundation is applied, but publication
+is paused pending that recovery. The canonical sequence is in
+[`docs/terraform.md`](terraform.md) and [ADR 0055](adr/0055-peg-policy-bucket-controller-recovery.md).
+Audit effective readers, writers, and IAM administrators after applies and
+again before runtime activation.
 
 The manual `Peg Policy Publication` workflow writes the current policy as a
 versioned object. Dispatch its `plan` operation from `main`, inspect the

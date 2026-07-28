@@ -27,6 +27,14 @@ export const PEG_POLICY_PUBLICATION_PLAN_TOKEN_CREATOR_GRANT_KEY =
   "terraform/ci-wif.tf:google_service_account_iam_member.peg_policy_publication_plan_reader_token_creator";
 export const PEG_POLICY_PUBLICATION_READER_STATE_GRANT_KEY =
   "terraform/ci-wif.tf:google_storage_bucket_iam_member.state_bucket_peg_policy_publication_reader";
+export const PEG_POLICY_BUCKET_CONTROLLER_ROLE_KEY =
+  "terraform/peg-policy.tf:resource.google_project_iam_custom_role.peg_policy_bucket_controller";
+
+const PEG_POLICY_BUCKET_CONTROLLER_ROLE =
+  "google_project_iam_custom_role.peg_policy_bucket_controller.name";
+const PEG_POLICY_BUCKET_CONTROLLER_ROLE_ID = "pegPolicyBucketController";
+const PEG_POLICY_BUCKET_CONTROLLER_MEMBER =
+  "serviceAccount:${var.terraform_service_account}";
 
 export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
   {
@@ -290,6 +298,44 @@ function validateServiceAccount(blocks, name, accountId, errors) {
   }
 }
 
+function validateBucketControllerRole(blocks, errors) {
+  const label = "terraform: Peg policy bucket controller role";
+  const role = requireBlock(
+    blocks,
+    "terraform/peg-policy.tf",
+    "google_project_iam_custom_role",
+    "peg_policy_bucket_controller",
+    errors,
+    label,
+  );
+  if (!role) return;
+  expectNoResourceMultiplicity(role, errors, label);
+  expectExpression(role, "project", MONITORING_PROJECT, errors, label);
+  expectString(role, "role_id", "pegPolicyBucketController", errors, label);
+  expectString(role, "title", "Peg Policy Bucket Controller", errors, label);
+  if (
+    !sameSortedValues(exactStringList(role, "permissions"), [
+      "storage.buckets.get",
+      "storage.buckets.getIamPolicy",
+      "storage.buckets.setIamPolicy",
+      "storage.buckets.update",
+    ])
+  ) {
+    errors.push(
+      `${label}: permissions must contain only the bucket IAM reconciliation permissions`,
+    );
+  }
+  if (
+    !sameSortedValues(extractExpressionList(role, "depends_on"), [
+      "google_project_service.iam",
+    ])
+  ) {
+    errors.push(
+      `${label}: depends_on must contain only the monitoring IAM API`,
+    );
+  }
+}
+
 function validateAuthoritativePolicy(
   blocks,
   { name, expectedBindings, dependsOn = [] },
@@ -362,6 +408,25 @@ function rejectUnsafeAdditions(files, topLevelBlocks, errors) {
   if (forbiddenBucketIam.length > 0) {
     errors.push(
       `terraform: Peg buckets must use only authoritative IAM policies: ${forbiddenBucketIam.join(", ")}`,
+    );
+  }
+
+  const controllerRoleUnexpected = topLevelBlocks
+    .filter(
+      (block) =>
+        (block.code.includes(PEG_POLICY_BUCKET_CONTROLLER_ROLE) ||
+          block.code.includes(PEG_POLICY_BUCKET_CONTROLLER_ROLE_ID)) &&
+        ![
+          PEG_POLICY_BUCKET_CONTROLLER_ROLE_KEY,
+          "terraform/peg-policy.tf:data.google_iam_policy.peg_policy",
+          "terraform/peg-policy.tf:data.google_iam_policy.peg_policy_access_logs",
+        ].includes(topLevelBlockKey(block)),
+    )
+    .map(topLevelBlockKey)
+    .sort();
+  if (controllerRoleUnexpected.length > 0) {
+    errors.push(
+      `terraform: Peg policy bucket controller role may be used only by the authoritative bucket policies: ${controllerRoleUnexpected.join(", ")}`,
     );
   }
 
@@ -1088,6 +1153,7 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
   );
   validatePegPolicyPublicationPlanIdentity(resources, errors);
   validatePegPolicyPublicationPlanVariable(resources, errors);
+  validateBucketControllerRole(resources, errors);
   validateServiceAccount(
     resources,
     "peg_policy_publisher",
@@ -1102,6 +1168,10 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
         {
           role: '"roles/storage.objectCreator"',
           member: "group:cloud-storage-analytics@google.com",
+        },
+        {
+          role: PEG_POLICY_BUCKET_CONTROLLER_ROLE,
+          member: PEG_POLICY_BUCKET_CONTROLLER_MEMBER,
         },
       ],
     },
@@ -1123,6 +1193,10 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
           role: '"roles/storage.objectAdmin"',
           member:
             "serviceAccount:${google_service_account.peg_policy_publisher.email}",
+        },
+        {
+          role: PEG_POLICY_BUCKET_CONTROLLER_ROLE,
+          member: PEG_POLICY_BUCKET_CONTROLLER_MEMBER,
         },
       ],
       dependsOn: ["google_storage_bucket_iam_policy.peg_policy_access_logs"],

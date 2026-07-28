@@ -16,7 +16,7 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, private Peg-policy storage in that project, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, the separated Terraform/service-deploy Workload Identity Federation chains, repo-level GitHub Actions secrets and variables owned by the platform stack, and the dormant, unapplied Peg-policy GCS source foundation. Alloy values are required sensitive, ephemeral operator inputs that terminate at Google provider 6.50.x write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, private Peg-policy storage in that project, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, the separated Terraform/service-deploy Workload Identity Federation chains, repo-level GitHub Actions secrets and variables owned by the platform stack, and the applied Peg-policy GCS source foundation. Policy publication remains paused until the controller recovery in [`ADR 0055`](../docs/adr/0055-peg-policy-bucket-controller-recovery.md) completes. Alloy values are required sensitive, ephemeral operator inputs that terminate at Google provider 6.50.x write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
 
 Alloy's runtime project authority is the custom
 `grafanaAgentActivationReader` role with exactly `appengine.services.get` and
@@ -103,24 +103,29 @@ boundaries.
 - The Peg-policy foundation creates no policy object. Both buckets, the
   runtime, and publisher live in `mento-monitoring`; the workflow-only plan and
   reader identities live in the seed project. The shared refresh identity must
-  not read policy objects, while the runtime and publication reader have the
-  exact bucket-scoped Object Viewer grants. Direct bucket grants stay
-  authoritative and exact. Metrics Bridge always uses the dedicated runtime
-  identity, while its paired `PEG_POLICY_*` values stay absent until the
-  reviewed source literal `local.peg_policy_runtime_generation` is changed from
-  `null` for first activation or the current quoted generation for a rollover
-  to the protected publisher's positive generation output. Never supply a URL
-  or auth-mode variable: Terraform derives the canonical pinned GCS URL and
-  `gcp-metadata` mode together. The routine deployer and `gcp_dev_members`
-  receive Service Account User only on that runtime identity; never restore a
-  project-wide or default-Compute grant. The protected org-Terraform project
-  Owner and organization IAM administrators are accepted control-plane
-  exceptions; inherited grants still apply. Do not apply current `main` until
-  #1659's additive staging foundation has merged and its five deploy paths have
-  passed canaries. That apply creates the dormant policy foundation and removes
-  broad Storage Admin, Storage Object Admin, and Service Account User fallback
-  grants; audit effective readers, writers, and IAM administrators afterward
-  and before activation. Access logs are audit
+  not read policy objects, while the runtime and publication reader have exact
+  bucket-scoped Object Viewer grants. Direct bucket grants stay authoritative
+  and exact. The org-Terraform account normally reconciles both policies through
+  `pegPolicyBucketController` with only bucket get/update and IAM-policy get/set.
+  The protected org-Terraform project Owner and organization IAM administrators
+  are audited emergency exceptions; inherited grants still apply. Do not retain
+  a project-level controller grant or broad Storage Admin, Storage Object Admin,
+  or Service Account User fallbacks. An explicitly approved, time-bounded
+  emergency bootstrap may grant only `pegPolicyBucketController` at project level
+  until both policies reconcile; remove it immediately, verify its absence, and
+  run a clean full plan. The recovery sequence is in
+  [`docs/terraform.md`](../docs/terraform.md) and
+  [ADR 0055](../docs/adr/0055-peg-policy-bucket-controller-recovery.md).
+  Metrics Bridge always uses the dedicated runtime identity, while paired
+  `PEG_POLICY_*` values stay absent until the reviewed source literal
+  `local.peg_policy_runtime_generation` changes from `null` to the protected
+  publisher's current quoted positive generation for activation or rollover.
+  Never supply a URL or auth-mode variable: Terraform derives the canonical
+  pinned GCS URL and `gcp-metadata` mode together. The routine deployer and
+  `gcp_dev_members` receive Service Account User only on that runtime identity;
+  never restore a project-wide or default-Compute grant. Audit effective
+  readers, writers, and IAM administrators after applies and before activation.
+  Access logs are audit
   telemetry, never an authorization control.
 
 ## Verification
