@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { load as loadYaml } from "js-yaml";
 import {
   APPLY_WORKFLOWS,
+  MANUAL_PUBLICATION_WORKFLOWS,
   PRODUCTION_PROVIDER_VARIABLE,
   PRODUCTION_SERVICE_ACCOUNT_VARIABLE,
   REFRESH_PROVIDER_VARIABLE,
@@ -377,6 +378,7 @@ function decodedContextVariableOccurrenceCount(
 export function validateWorkflowContract(files, errors) {
   for (const workflowPath of [
     ...APPLY_WORKFLOWS,
+    ...MANUAL_PUBLICATION_WORKFLOWS,
     ...SERVICE_AND_DRIFT_WORKFLOWS,
   ]) {
     requireFile(files, workflowPath, errors);
@@ -449,7 +451,10 @@ export function validateWorkflowContract(files, errors) {
       PRODUCTION_SERVICE_ACCOUNT_VARIABLE,
     );
 
-    if (!APPLY_WORKFLOWS.includes(workflowPath)) {
+    if (
+      !APPLY_WORKFLOWS.includes(workflowPath) &&
+      !MANUAL_PUBLICATION_WORKFLOWS.includes(workflowPath)
+    ) {
       if (
         providerUses.length > 0 ||
         serviceAccountUses.length > 0 ||

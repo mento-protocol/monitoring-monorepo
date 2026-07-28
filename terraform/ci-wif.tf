@@ -107,7 +107,7 @@ resource "google_iam_workload_identity_pool_provider" "github_production_infra" 
 # Keep refresh federation in its own pool. IAM subjects are pool-scoped, so a
 # binding to the generic `github-actions` pool would let any accepted main-ref
 # workflow select the refresh service account directly. This provider accepts
-# only the five reviewed Terraform workflow files on main.
+# only the reviewed Terraform workflow files on main.
 resource "google_iam_workload_identity_pool" "github_terraform_refresh" {
   project                   = google_project.monitoring.project_id
   workload_identity_pool_id = "github-terraform-refresh"
@@ -126,7 +126,7 @@ resource "google_iam_workload_identity_pool_provider" "github_terraform_refresh"
   # `workflow_ref` is signed by GitHub and identifies the workflow file plus
   # the ref that supplied it. Keep the repository ID, slug, and ref checks
   # explicit so renames, forks, and non-main workflow definitions fail closed.
-  attribute_condition = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\")"
+  attribute_condition = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main\")"
 
   attribute_mapping = {
     "google.subject"          = "assertion.sub"

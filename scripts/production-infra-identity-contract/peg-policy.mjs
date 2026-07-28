@@ -35,6 +35,7 @@ export const PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS = [
       "terraform/peg-policy.tf:resource.google_service_account.peg_policy_publisher",
       "terraform/peg-policy.tf:data.google_iam_policy.peg_policy",
       "terraform/peg-policy.tf:resource.google_service_account_iam_member.production_infra_applier_peg_policy_publisher_token_creator",
+      "alerts/peg-policy-publication/variables.tf:variable.terraform_service_account",
     ]),
   },
 ];
@@ -85,7 +86,11 @@ function validateExactBindings(data, expectedBindings, errors, label) {
     );
     return;
   }
-  for (const { role, member } of expectedBindings) {
+  for (const {
+    role,
+    member,
+    members: expectedMembers = [member],
+  } of expectedBindings) {
     const matching = bindings.filter(
       (binding) =>
         normalizeExpression(attributeExpression(binding, "role")) === role,
@@ -95,9 +100,11 @@ function validateExactBindings(data, expectedBindings, errors, label) {
       continue;
     }
     const binding = matching[0];
-    const members = exactStringList(binding, "members");
-    if (!sameSortedValues(members, [member])) {
-      errors.push(`${label}: ${role} members must contain only ${member}`);
+    const actualMembers = exactStringList(binding, "members");
+    if (!sameSortedValues(actualMembers, expectedMembers)) {
+      errors.push(
+        `${label}: ${role} members must contain only ${expectedMembers.join(", ")}`,
+      );
     }
     if (nestedBlocks(binding, "condition").length !== 0) {
       errors.push(`${label}: bindings must not be conditional`);
@@ -496,8 +503,10 @@ export function validatePegPolicyFoundation(files, topLevelBlocks, errors) {
       expectedBindings: [
         {
           role: '"roles/storage.objectViewer"',
-          member:
+          members: [
             "serviceAccount:${google_service_account.metrics_bridge_runtime.email}",
+            "serviceAccount:org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com",
+          ],
         },
         {
           role: '"roles/storage.objectAdmin"',

@@ -5,6 +5,8 @@ import { validFixtureFiles } from "./fixtures.mjs";
 import { validateWorkflowContract } from "./workflow.mjs";
 
 const workflowPath = ".github/workflows/alerts-rules.yml";
+const pegPolicyPublicationWorkflow =
+  ".github/workflows/peg-policy-publication.yml";
 const validCheckoutStep = `      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false`;
@@ -65,6 +67,18 @@ function replaceWorkflow(files, from, to) {
   };
 }
 
+function replaceWorkflowFile(files, filePath, from, to) {
+  const contents = files[filePath];
+  assert(
+    contents.includes(from),
+    `${filePath}: fixture mutation source missing:\n${from}`,
+  );
+  return {
+    ...files,
+    [filePath]: contents.replace(from, to),
+  };
+}
+
 function liveWorkflowFiles() {
   const workflowDirectory = new URL(
     "../../.github/workflows/",
@@ -94,6 +108,26 @@ function liveWorkflowFiles() {
 const validFiles = validFixtureFiles();
 assert.deepEqual(validate(validFiles), []);
 assert.deepEqual(validate(liveWorkflowFiles()), []);
+
+expectFailure(
+  replaceWorkflowFile(
+    validFiles,
+    pegPolicyPublicationWorkflow,
+    "  pull_request:\n",
+    "  push:\n    branches: [main]\n  pull_request:\n",
+  ),
+  "must match the exact manual publication workflow inventory",
+);
+
+expectFailure(
+  replaceWorkflowFile(
+    validFiles,
+    pegPolicyPublicationWorkflow,
+    "inputs.operation == 'apply'",
+    "inputs.operation != 'apply'",
+  ),
+  "must match the exact manual publication workflow inventory",
+);
 
 expectFailure(
   replaceWorkflow(

@@ -75,11 +75,11 @@ runtime reject chained rollovers.
 
 The service validates and fetches thresholds at runtime. The Docker image
 contains `metrics-bridge/peg-registry.json` at the path resolved by the
-compiled registry loader, but it never contains `peg-thresholds.json`. Policy
-publication and activation remain behind the alerts-rules production-infra
-gate described by [ADR 0044](../docs/adr/0044-peg-thresholds-gated-rules-plane.md).
-Private transport, generation pinning, project placement, and the dormant
-activation boundary are fixed by
+compiled registry loader, but it never contains `peg-thresholds.json`. The
+manual `Peg Policy Publication` workflow publishes the protected artifact;
+runtime activation remains a separate reviewed `production-infra` change.
+Private transport, generation pinning, project placement, and the activation
+boundary are fixed by
 [ADR 0054](../docs/adr/0054-same-project-peg-policy-artifact.md).
 
 ## RPC overrides

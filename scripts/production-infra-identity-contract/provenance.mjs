@@ -8,6 +8,7 @@ import { attributeExpression } from "./hcl.mjs";
 // indirection are immutable unless this registry is deliberately updated.
 const SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "aegis/terraform:variable.grafana_service_account_token|24069e465ae3350a94c66f8a86e7621e3daac29a1bff0dc712df81188eeb619c",
+  "alerts/peg-policy-publication:variable.terraform_service_account|eca86000777feab89cdea95f9249bcdeab27829cd0662404dec2e92ee22b9083",
   "alerts/infra:local.common_labels|e4ef4e31e239e0f74e116f6c4f7350d6d9839a519516ddc8b1ab9536742fc9e8",
   "alerts/infra:local.multisigs_by_chain|e4ef4e31e239e0f74e116f6c4f7350d6d9839a519516ddc8b1ab9536742fc9e8",
   "alerts/infra:local.multisigs_by_chain_network|e4ef4e31e239e0f74e116f6c4f7350d6d9839a519516ddc8b1ab9536742fc9e8",

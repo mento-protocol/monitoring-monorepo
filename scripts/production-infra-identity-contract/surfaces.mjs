@@ -10,6 +10,7 @@ const TERRAFORM_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/onchain-event-handler/versions.tf:terraform|4d5c657d6e411bc267e9cc798aeefd52012417d9d7145a7dd7569daab4575c1a",
   "alerts/infra/onchain-event-listeners/versions.tf:terraform|639e43b0ef64ab9fd28776cb56f025901206283cc96b4426ed259a1c5261885d",
   "alerts/infra/versions.tf:terraform|43068686a391cb1096f1dfea0e89c8797bcd6a4f7bdea7f8c6d72d5679b6918b",
+  "alerts/peg-policy-publication/versions.tf:terraform|235cbb0879681ba655358869445ff138c0566e4600af187ab3a21f3c0f21b43d",
   "alerts/rules/versions.tf:terraform|dc025ec58d779e88576b1e298ce04afe84e91147c73e0dbe1609763c5c836dfa",
   "governance-watchdog/infra/versions.tf:terraform|e0a15645d55984ee2013ba6342c89743251029192fb312512e8b89003651cb1f",
   "terraform/providers.tf:terraform|220c27447f2c9496849dee19feda26c30ff93815e2e7eb7b93351b8c4f33cea7",
@@ -23,6 +24,7 @@ const PROVIDER_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/providers.tf:provider.restapi.quicknode|90ac712a36e6674df8c8362fde76c2e36a2eeee3ed9af2a6cd1b8e38bc3a7f4b",
   "alerts/infra/providers.tf:provider.restapi.slack|8b4bc87d91939de3aab9a7286ca993d5bf86856916c5452737b1ef97483853ee",
   "alerts/infra/providers.tf:provider.sentry.default|b2aa881260c48ac077bcf602c8402af90fa21ca827774ed3910cee4d533553ef",
+  "alerts/peg-policy-publication/providers.tf:provider.google.default|d504d67989f8b1036909142aadb75aee86e1311b498dcae0f4a6d201138f6c32",
   "alerts/rules/main.tf:provider.grafana.default|8ce3e748c35b50a9d27fe5118e60c999e3012842147da9588e6502622a401111",
   "governance-watchdog/infra/versions.tf:provider.github.default|6175691b02d1184daf09c0c985de6c3ca3569547cf4caf36e5f35bb98c72ef27",
   "governance-watchdog/infra/versions.tf:provider.google.default|810621661fa6842f458292353eb5361b08f74662ce43a63aced8828e0a16b6ca",
@@ -83,6 +85,10 @@ const IDENTITY_BEARING_RESOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
 ];
 
 const OUTPUT_BLOCK_SHAPE_SPECIFICATIONS = [
+  "alerts/peg-policy-publication/outputs.tf:output.peg_policy_bucket|d823461777e322e9f59bcc751cc5fddc71cea813249369a5e64a444f4142e72f",
+  "alerts/peg-policy-publication/outputs.tf:output.peg_policy_object_name|1493e69b923e302f9d59a0e6c60f48e78e8caa5a6bf62d2946d54748fc1524f1",
+  "alerts/peg-policy-publication/outputs.tf:output.peg_policy_generation|715aa1193f115084ebb737a032ef860d70b11dbccc9d42514dddbf183701265f",
+  "alerts/peg-policy-publication/outputs.tf:output.peg_policy_url|05b08682699f1969c39c75e7e3b36510ca2fbdbbb8b73d484fce03f7dda50a91",
   "alerts/infra/channels/sentry-bridge/outputs.tf:output.sentry_organization|4eeed5d709a92cf472542b2c62835f830521ae613a202777488a4cc2421c7db9",
   "alerts/infra/channels/sentry-bridge/outputs.tf:output.sentry_projects|d79f63cfe072a41f7a80da9fd6ce305530a6a7717543cb2e20034de9765d4614",
   "alerts/infra/channels/sentry-bridge/outputs.tf:output.slack_channels|b116fb603ebdfa1df44ed2645de2c8060399a119d32480b553e8d8841fa36cbe",
@@ -220,6 +226,7 @@ const SECRET_PAYLOAD_SINK_BLOCK_SHAPE_SPECIFICATIONS = [
 ];
 
 const RESOURCE_DATA_BLOCK_KEY_GROUPS = [
+  "alerts/peg-policy-publication/policy.tf|google_storage_bucket_object.peg_policy",
   "aegis/terraform/grafana-dashboard/dashboard.tf|grafana_dashboard.aegis",
   "aegis/terraform/grafana-folders.tf|grafana_folder.aegis",
   "alerts/infra/channels/sentry-bridge/data.tf|data.sentry_all_projects.all,data.sentry_organization.main,data.sentry_organization_integration.slack,data.sentry_project_issue_stream_monitor.default",

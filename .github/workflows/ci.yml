@@ -173,15 +173,21 @@ jobs:
             terraform:
               - terraform/**
               - alerts/rules/**
+              - alerts/peg-policy-publication/**
               - alerts/infra/**
               - aegis/terraform/**
               - governance-watchdog/**
               - terraform.stacks.json
+              - scripts/check-peg-policy-publication.mjs
+              - scripts/check-peg-policy-publication.test.mjs
+              - scripts/production-infra-identity-contract/**
               - scripts/terraform-fmt-check.mjs
               - scripts/tf-stacks.mjs
+              - scripts/tf-stacks.test.mjs
               - .github/workflows/alerts-infra.yml
               - .github/workflows/infra.yml
               - .github/workflows/ci.yml
+              - .github/workflows/peg-policy-publication.yml
             alerts:
               - alerts/infra/onchain-event-handler/**
               - alerts/infra/oncall-announcer/**
@@ -251,6 +257,7 @@ jobs:
               - aegis/grafana-agent/deploy.sh
               - aegis/grafana-agent/cloudbuild.yaml
               - alerts/infra/**
+              - alerts/peg-policy-publication/**
               - governance-watchdog/infra/**
               # Alert-rules lint inputs: the scripts job parses alerts/rules
               # PromQL and cross-checks metric names against the metrics-bridge

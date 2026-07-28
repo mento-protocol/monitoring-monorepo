@@ -1,5 +1,6 @@
 import {
   APPLY_WORKFLOWS,
+  MANUAL_PUBLICATION_WORKFLOWS,
   DRIFT_REFRESH_CONDITION,
   GOOGLE_AUTH_ACTION,
   GOOGLE_PROVIDER_REFRESH_WORKFLOWS,
@@ -26,7 +27,11 @@ import {
 } from "./workflow-inventory.mjs";
 
 const DRIFT_WORKFLOW = ".github/workflows/terraform-drift.yml";
-const REFRESH_WORKFLOWS = new Set([...APPLY_WORKFLOWS, DRIFT_WORKFLOW]);
+const REFRESH_WORKFLOWS = new Set([
+  ...APPLY_WORKFLOWS,
+  ...MANUAL_PUBLICATION_WORKFLOWS,
+  DRIFT_WORKFLOW,
+]);
 
 function authMatches(step, provider, serviceAccount, condition) {
   return (
@@ -299,6 +304,8 @@ export function validateRefreshRouting(
     errors.push(`${workflowPath}: workflow jobs must be a mapping`);
   } else if (workflowPath === DRIFT_WORKFLOW) {
     validateDrift(workflowPath, parsedWorkflow, counts, errors);
+  } else if (MANUAL_PUBLICATION_WORKFLOWS.includes(workflowPath)) {
+    // The publication checker owns its deliberately manual plan/apply shape.
   } else {
     validatePlan(workflowPath, parsedWorkflow, counts, errors);
   }

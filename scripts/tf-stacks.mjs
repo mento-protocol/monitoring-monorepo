@@ -24,6 +24,9 @@ const AUTO_APPLY_CI_POLICY = "push-main-production-infra-environment";
 const FORCE_LOCAL_APPLY_ARG = "--force-local-apply";
 const ORIGIN_MAIN_FETCH_REFSPEC = "refs/heads/main:refs/remotes/origin/main";
 const WRITE_ONLY_SECRET_STACKS = new Set(["platform"]);
+const WORKFLOW_ONLY_LOCAL_APPLY_STACKS = new Map([
+  ["peg-policy-publication", ".github/workflows/peg-policy-publication.yml"],
+]);
 
 function usage(exitCode = 0) {
   const out = exitCode === 0 ? process.stdout : process.stderr;
@@ -378,6 +381,20 @@ function localApplySafetyStatus() {
 }
 
 function assertTrustedCheckoutAllowed(stack, command, forceLocalApply) {
+  const protectedWorkflow =
+    command === "apply"
+      ? WORKFLOW_ONLY_LOCAL_APPLY_STACKS.get(stack.id)
+      : undefined;
+  if (protectedWorkflow) {
+    throw new Error(
+      [
+        `refusing local Terraform apply for workflow-only stack ${stack.id}`,
+        `Local wrapper applies are disabled for ${stack.id}, including ${FORCE_LOCAL_APPLY_ARG}.`,
+        `Expected safe path: dispatch ${protectedWorkflow} from main.`,
+      ].join("\n"),
+    );
+  }
+
   const isManualSecretCommand =
     WRITE_ONLY_SECRET_STACKS.has(stack.id) &&
     ["plan", "apply"].includes(command);

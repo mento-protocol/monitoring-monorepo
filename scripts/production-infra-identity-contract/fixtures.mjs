@@ -87,7 +87,7 @@ resource "google_iam_workload_identity_pool_provider" "github_terraform_refresh"
   project                            = google_project.monitoring.project_id
   workload_identity_pool_id          = google_iam_workload_identity_pool.github_terraform_refresh.workload_identity_pool_id
   workload_identity_pool_provider_id = "github"
-  attribute_condition                = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\")"
+  attribute_condition                = "assertion.repository_id == \"1172025835\" && assertion.repository == \"mento-protocol/monitoring-monorepo\" && assertion.ref == \"refs/heads/main\" && (assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/aegis-terraform.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-infra.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/alerts-rules.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/governance-watchdog.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/terraform-drift.yml@refs/heads/main\" || assertion.workflow_ref == \"mento-protocol/monitoring-monorepo/.github/workflows/peg-policy-publication.yml@refs/heads/main\")"
   attribute_mapping = {
     "google.subject"          = "assertion.sub"
     "attribute.repository"    = "assertion.repository"
@@ -312,6 +312,7 @@ data "google_iam_policy" "peg_policy" {
     role = "roles/storage.objectViewer"
     members = [
       "serviceAccount:\${google_service_account.metrics_bridge_runtime.email}",
+      "serviceAccount:org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com",
     ]
   }
 
@@ -565,6 +566,13 @@ export function validFixtureFiles() {
     ),
     ".github/workflows/governance-watchdog.yml": applyWorkflowFixture(
       ".github/workflows/governance-watchdog.yml",
+    ),
+    ".github/workflows/peg-policy-publication.yml": readFileSync(
+      new URL(
+        "../../.github/workflows/peg-policy-publication.yml",
+        import.meta.url,
+      ),
+      "utf8",
     ),
     ".github/workflows/metrics-bridge.yml": `jobs:
   deploy:

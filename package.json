@@ -105,6 +105,8 @@
     "alerts:rules:lint": "node scripts/alert-rules-lint.mjs",
     "alerts:rules:lint:test": "node scripts/alert-rules-lint.test.mjs",
     "alerts:rules:plan": "pnpm tf plan alerts-rules",
+    "peg-policy:init": "terraform -chdir=alerts/peg-policy-publication init",
+    "peg-policy:plan": "pnpm tf plan peg-policy-publication",
     "alerts:infra:init": "terraform -chdir=alerts/infra init",
     "alerts:infra:plan": "pnpm tf plan alerts-delivery",
     "alerts:handler:build": "pnpm --filter @mento-protocol/alerts-onchain-event-handler build",

@@ -127,6 +127,9 @@ data "google_iam_policy" "peg_policy" {
     role = "roles/storage.objectViewer"
     members = [
       "serviceAccount:${google_service_account.metrics_bridge_runtime.email}",
+      # The manual publication plan may refresh the current object but cannot
+      # write it, impersonate the publisher, or configure a runtime consumer.
+      "serviceAccount:org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com",
     ]
   }
 

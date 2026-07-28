@@ -72,11 +72,14 @@ before production use.
   that is an accepted risk for trusted identities and a required IAM-audit
   check before activation.
 - The source foundation creates no policy object and no Cloud Run attachment.
-  A merge alone does not start Peg polling or activate alerts.
+  The separate `alerts/peg-policy-publication` root creates a policy object
+  only through its manual protected workflow. Neither merge starts Peg polling
+  or activates alerts.
 
 ## Evidence
 
 - Policy foundation: [`terraform/peg-policy.tf`](../../terraform/peg-policy.tf)
+- Policy publication root: [`alerts/peg-policy-publication/`](../../alerts/peg-policy-publication/)
 - Deployment-source rollout: [ADR 0053](0053-explicit-deployment-source-staging.md)
 - Runtime validation: `metrics-bridge/src/peg/policy-client.ts`
 - Issue: [#1444](https://github.com/mento-protocol/monitoring-monorepo/issues/1444)

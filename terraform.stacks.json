@@ -30,6 +30,43 @@
       "aliases": ["pnpm infra:init", "pnpm infra:plan", "pnpm infra:apply"]
     },
     {
+      "id": "peg-policy-publication",
+      "name": "Peg Policy Publication",
+      "path": "alerts/peg-policy-publication",
+      "description": "Manual protected publication of immutable Peg policy generations from alerts/rules/peg-thresholds.json. It owns no Grafana resources or runtime attachment.",
+      "state": {
+        "backend": "gcs",
+        "bucket": "mento-terraform-tfstate-6ed6",
+        "prefix": "peg-policy-publication"
+      },
+      "providers": ["google"],
+      "ci": {
+        "validate": "changed-paths",
+        "plan": "manual-main-refresh",
+        "apply": "manual-production-infra-environment"
+      },
+      "applyPolicy": "ci-production-infra-environment-approved",
+      "changedPathPatterns": [
+        "alerts/peg-policy-publication/**",
+        "alerts/rules/peg-thresholds.json",
+        "metrics-bridge/peg-registry.json",
+        "terraform/peg-policy.tf",
+        "terraform/ci-wif.tf",
+        "terraform.stacks.json",
+        "scripts/check-peg-policy-publication.mjs",
+        "scripts/check-peg-policy-publication.test.mjs",
+        "scripts/check-peg-registry-integrity.mjs",
+        "scripts/production-infra-identity-contract/**",
+        "scripts/terraform-fmt-check.mjs",
+        "scripts/tf-stacks.mjs",
+        "scripts/tf-stacks.test.mjs",
+        ".github/workflows/ci.yml",
+        ".github/workflows/infra.yml",
+        ".github/workflows/peg-policy-publication.yml"
+      ],
+      "aliases": ["pnpm peg-policy:init", "pnpm peg-policy:plan"]
+    },
+    {
       "id": "alerts-rules",
       "name": "Alerts Rules",
       "path": "alerts/rules",

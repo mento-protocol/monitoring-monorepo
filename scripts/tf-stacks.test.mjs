@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import "./deploy-staging-contract.test.mjs";
 import "./production-infra-identity-contract/index.test.mjs";
 import "./sentry-provider-contract.test.mjs";
+import "./check-peg-policy-publication.test.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -202,6 +203,23 @@ function assertApplyRefused(result) {
     result.stderr,
     "Override for a deliberate local apply: pass --force-local-apply.",
     "refusal should explain the override",
+  );
+}
+
+function assertWorkflowOnlyApplyRefused(result, stackId, workflowPath) {
+  assertIncludes(
+    result.stderr,
+    `refusing local Terraform apply for workflow-only stack ${stackId}`,
+    "refusal should identify the workflow-only stack",
+  );
+  assertIncludes(
+    result.stderr,
+    `Expected safe path: dispatch ${workflowPath} from main.`,
+    "refusal should direct the operator to the protected workflow",
+  );
+  assert(
+    !result.stderr.includes("Override for a deliberate local apply"),
+    "workflow-only stacks must not advertise a local override",
   );
 }
 
@@ -416,6 +434,53 @@ function runApplyGuardTests(tempDir) {
     "forced apply should skip git safety checks",
   );
   assertApplyCallWithoutForce(fakeTools.terraformLog);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["apply", "peg-policy-publication", "-auto-approve"], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_BRANCH: "feature/peg-policy-publication",
+      TF_STACKS_TEST_FAIL_ON_GIT: "1",
+    },
+  });
+  assertWorkflowOnlyApplyRefused(
+    result,
+    "peg-policy-publication",
+    ".github/workflows/peg-policy-publication.yml",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "publication apply must not run terraform",
+  );
+  assertNoGitCalls(
+    fakeTools.gitLog,
+    "publication apply must stop before git safety checks",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(
+    ["apply", "peg-policy-publication", "--force-local-apply", "-auto-approve"],
+    {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_BRANCH: "feature/forced-peg-policy-publication",
+        TF_STACKS_TEST_FAIL_ON_GIT: "1",
+      },
+    },
+  );
+  assertWorkflowOnlyApplyRefused(
+    result,
+    "peg-policy-publication",
+    ".github/workflows/peg-policy-publication.yml",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "forced publication apply must not run terraform",
+  );
+  assertNoGitCalls(
+    fakeTools.gitLog,
+    "forced publication apply must stop before git safety checks",
+  );
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
   run(["apply", "alerts-rules", "-auto-approve"], {
@@ -951,7 +1016,7 @@ try {
   writeFileSync(pathsFile, "terraform.stacks.json\n");
   matrix = JSON.parse(run(["changed", "--paths-file", pathsFile, "--json"]));
   assert(
-    matrix.include.length === 5,
+    matrix.include.length === registry.stacks.length,
     "registry change should validate every stack",
   );
 
