@@ -257,11 +257,33 @@ function unwrapStaticExpression(node) {
   return expression;
 }
 
+function staticMemberReference(node) {
+  const expression = unwrapStaticExpression(node);
+  if (expression === undefined) return undefined;
+  if (ts.isPropertyAccessExpression(expression)) {
+    return {
+      object: expression.expression,
+      propertyName: expression.name.text,
+    };
+  }
+  if (!ts.isElementAccessExpression(expression)) return undefined;
+  const property = unwrapStaticExpression(expression.argumentExpression);
+  if (
+    property === undefined ||
+    (!ts.isStringLiteral(property) &&
+      !ts.isNoSubstitutionTemplateLiteral(property))
+  ) {
+    return undefined;
+  }
+  return { object: expression.expression, propertyName: property.text };
+}
+
 function isStaticReference(node) {
   const expression = unwrapStaticExpression(node);
   return (
     expression !== undefined &&
-    (ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression))
+    (ts.isIdentifier(expression) ||
+      staticMemberReference(expression) !== undefined)
   );
 }
 
@@ -361,10 +383,11 @@ function staticString(node, resolveIdentifier) {
       resolved.release();
     }
   }
-  if (ts.isPropertyAccessExpression(expression)) {
+  const member = staticMemberReference(expression);
+  if (member !== undefined) {
     return staticStringProperty(
-      expression.expression,
-      expression.name.text,
+      member.object,
+      member.propertyName,
       resolveIdentifier,
     );
   }
@@ -411,10 +434,11 @@ function staticStringArray(node, resolveIdentifier, aggregate = false) {
       resolved.release();
     }
   }
-  if (ts.isPropertyAccessExpression(expression)) {
+  const member = staticMemberReference(expression);
+  if (member !== undefined) {
     return staticStringArrayProperty(
-      expression.expression,
-      expression.name.text,
+      member.object,
+      member.propertyName,
       resolveIdentifier,
     );
   }

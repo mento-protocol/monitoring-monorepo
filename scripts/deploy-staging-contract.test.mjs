@@ -592,6 +592,14 @@ run(options);
     "const object cmd aliases must be discovered",
   ],
   [
+    `const options = {
+  cmd: ["gcloud", "app", "deploy", "app.yaml"],
+};
+Bun.spawn(options["cmd"]);
+`,
+    "quoted object command-vector aliases must be discovered",
+  ],
+  [
     `const spec = {
   command: "gcloud",
   args: ["builds", "submit", "."],
@@ -599,6 +607,15 @@ run(options);
 execFileSync(spec.command, spec.args);
 `,
     "const object property aliases must be discovered",
+  ],
+  [
+    `const spec = {
+  command: "gcloud",
+  args: ["builds", "submit", "."],
+};
+execFileSync(spec["command"], spec["args"]);
+`,
+    "quoted object property aliases must be discovered",
   ],
   [
     `run({ command: "gcloud", args: ["builds", "submit", "."] });
@@ -647,6 +664,16 @@ const args = ["builds", "submit", "."];
 childProcess["execFileSync" as const](command, args);
 `,
   "TypeScript asserted computed member callees must be discovered",
+  "scripts/const-deploy.ts",
+);
+assertForbiddenSignature(
+  `const spec = {
+  command: "gcloud",
+  args: ["builds", "submit", "."],
+};
+execFileSync(spec[("command" as const)], spec[\`args\`]);
+`,
+  "TypeScript-wrapped quoted object property aliases must be discovered",
   "scripts/const-deploy.ts",
 );
 
@@ -708,6 +735,33 @@ logger.debug(command, args);
 source.indexOf(spec.command, spec.args);
 `,
     "const property aliases passed to inert member methods must not be executable",
+  ],
+  [
+    `const spec = {
+  command: "gcloud",
+  args: ["builds", "submit", "."],
+};
+source.indexOf(spec["command"], spec["args"]);
+`,
+    "quoted property aliases passed to inert member methods must not be executable",
+  ],
+  [
+    `const options = {
+  cmd: ["gcloud", "app", "deploy", "app.yaml"],
+};
+source.indexOf(options["cmd"]);
+`,
+    "quoted command-vector aliases passed to inert member methods must not be executable",
+  ],
+  [
+    `const property = "command";
+const spec = {
+  command: "gcloud",
+  args: ["builds", "submit", "."],
+};
+execFileSync(spec[property], spec["args"]);
+`,
+    "dynamically named object properties must not be evaluated",
   ],
   [
     `import args from "./args.mjs";
