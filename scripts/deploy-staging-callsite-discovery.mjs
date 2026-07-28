@@ -111,11 +111,18 @@ function logicalLines(
   return lines;
 }
 
-function normalize(text, stripBackslashEscapes = true) {
+function normalize(
+  text,
+  stripBackslashEscapes = true,
+  stripCmdCaretEscapes = false,
+) {
   const unescaped = stripBackslashEscapes
     ? text.replace(/\\(.)/gu, "$1")
     : text;
-  return unescaped
+  const cmdNormalized = stripCmdCaretEscapes
+    ? unescaped.replace(/(?<!\^)\^([^^])/gu, "$1")
+    : unescaped;
+  return cmdNormalized
     .replace(/["'`]/gu, "")
     .replace(/[[\](){},:]/gu, " ")
     .replace(/\s+/gu, " ")
@@ -212,10 +219,20 @@ function lexicalDeployRecords(filePath, surface, contents, shellMode) {
     resolvedShellMode === "github-actions"
       ? [
           { matcher: GCLOUD, stripBackslashEscapes: true },
-          { matcher: GCLOUD_WINDOWS, stripBackslashEscapes: false },
+          {
+            matcher: GCLOUD_WINDOWS,
+            stripBackslashEscapes: false,
+            stripCmdCaretEscapes: true,
+          },
         ]
       : windowsShell
-        ? [{ matcher: GCLOUD_WINDOWS, stripBackslashEscapes: false }]
+        ? [
+            {
+              matcher: GCLOUD_WINDOWS,
+              stripBackslashEscapes: false,
+              stripCmdCaretEscapes: resolvedShellMode === "cmd",
+            },
+          ]
         : [{ matcher: GCLOUD, stripBackslashEscapes: true }];
   if (!windowsShell && surface === "programmatic") {
     scans.push({
@@ -226,8 +243,16 @@ function lexicalDeployRecords(filePath, surface, contents, shellMode) {
   for (const line of logicalLines(filePath, contents, resolvedShellMode)) {
     for (const fragment of topLevelFragments(line)) {
       const seen = new Set();
-      for (const { matcher, stripBackslashEscapes } of scans) {
-        const normalizedFragment = normalize(fragment, stripBackslashEscapes);
+      for (const {
+        matcher,
+        stripBackslashEscapes,
+        stripCmdCaretEscapes = false,
+      } of scans) {
+        const normalizedFragment = normalize(
+          fragment,
+          stripBackslashEscapes,
+          stripCmdCaretEscapes,
+        );
         for (const match of normalizedFragment.matchAll(matcher)) {
           const suffix = normalizedFragment.slice(
             (match.index ?? 0) + match[0].length,

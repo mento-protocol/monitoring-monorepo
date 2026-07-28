@@ -1202,6 +1202,21 @@ for (const [contents, message, filePath] of [
     "scripts/windows-launcher-deploy.cmd",
   ],
   [
+    "gclou^d builds submit .",
+    "inline cmd caret escaped gcloud launcher",
+    "scripts/windows-inline-caret-deploy.cmd",
+  ],
+  [
+    "gclou^d app deploy app.yaml",
+    "inline batch caret escaped gcloud launcher",
+    "scripts/windows-inline-caret-deploy.bat",
+  ],
+  [
+    "gcloud.c^md builds submit .",
+    "inline cmd caret escaped gcloud.cmd launcher",
+    "scripts/windows-inline-caret-launcher-deploy.cmd",
+  ],
+  [
     "C:\\SDK\\GCLOUD.CMD builds submit .",
     "mixed-case absolute Windows gcloud launcher path",
     "scripts/windows-path-launcher-deploy.CMD",
@@ -1214,6 +1229,26 @@ for (const [contents, message, filePath] of [
 ]) {
   assertForbiddenSignature(contents, message, filePath);
 }
+
+assert.equal(
+  discoverDeployStagingCallsites({
+    "scripts/windows-double-caret-deploy.cmd": "gclou^^d builds submit .",
+  }).length,
+  0,
+  "double cmd carets must preserve a literal caret and remain a near miss",
+);
+
+assert.deepEqual(
+  discoverDeployStagingCallsites({
+    ".github/workflows/deploy.yml": `jobs:
+  deploy:
+    steps:
+      - run: gclou^d builds submit .
+`,
+  }).map(({ kind }) => kind),
+  ["builds-submit"],
+  "GitHub Actions universal shell scanning must recognize cmd caret escapes",
+);
 
 assertForbiddenSignature(
   JSON.stringify({ scripts: { deploy: "gcloud builds submit ." } }),
