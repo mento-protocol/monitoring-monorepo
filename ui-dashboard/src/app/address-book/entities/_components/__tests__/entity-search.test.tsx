@@ -209,7 +209,9 @@ describe("EntitySearch — URL state", () => {
 
     typeSearch("  Gamma Exchange  ");
     expect(window.location.search).toBe("?q=Gamma+Exchange");
-    expect(container?.textContent).toContain('matching "Gamma Exchange"');
+    expect(container?.querySelector('[role="status"]')?.textContent).toContain(
+      'matching "Gamma Exchange"',
+    );
     expect(firstVisibleSlug()).toBe("gamma-zero");
   });
 

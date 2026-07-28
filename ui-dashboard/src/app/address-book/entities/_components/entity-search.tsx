@@ -218,7 +218,7 @@ export function EntitySearch({
           className="w-full max-w-sm rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
         />
       </div>
-      <p className="mb-2 text-xs text-slate-400">
+      <p className="mb-2 text-xs text-slate-400" role="status">
         {filtered.length.toLocaleString()} entities
         {normalizedQuery ? ` matching "${normalizedQuery}"` : ""}
         <span className="block sm:inline">
