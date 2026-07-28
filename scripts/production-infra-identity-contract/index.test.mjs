@@ -21,6 +21,7 @@ import {
   assertProductionInfraIdentityContract,
   validateProductionInfraIdentityContract,
 } from "./index.mjs";
+import "./peg-policy.test.mjs";
 import "./routing.test.mjs";
 import "./refresh-routing.test.mjs";
 import "./security.test.mjs";

@@ -16,7 +16,7 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, the separated Terraform/service-deploy Workload Identity Federation chains, and repo-level GitHub Actions secrets and variables owned by the platform stack. Alloy values are required sensitive, ephemeral operator inputs that terminate at Google provider 6.50.x write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, the isolated Peg-policy storage project, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, the separated Terraform/service-deploy Workload Identity Federation chains, repo-level GitHub Actions secrets and variables owned by the platform stack, and the dormant, unapplied Peg-policy GCS source foundation. Alloy values are required sensitive, ephemeral operator inputs that terminate at Google provider 6.50.x write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
 
 Alloy's runtime project authority is the custom
 `grafanaAgentActivationReader` role with exactly `appengine.services.get` and
@@ -84,8 +84,8 @@ boundaries.
   workflows and `terraform-drift.yml` route through the refresh selectors.
   Routing is live, and run
   [#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
-  completed the full-refresh proof. Before final-removal merges, drain the
-  affected runs and audit the read boundary.
+  completed the full-refresh proof. The legacy-authority removal, run drain,
+  and final IAM/WIF audit are complete.
 - Build trusted-main refresh access from curated non-basic project read roles;
   never use basic `roles/viewer`. Keep Secret Accessor limited to the exact
   Terraform-managed secrets and Storage Object Viewer limited to state and
@@ -93,16 +93,19 @@ boundaries.
   (including logs, metrics, and artifacts) as part of the confidentiality
   review. The merged `main` route completed full-refresh, unlocked plans for
   every CI-managed Google-provider stack. Add only an exact missing permission
-  named by a provider denial. Before final authority removal merges, drain
-  every pre-routing and proof run and audit the read boundary.
-- The final-removal source omits the routine deployer's `org-terraform` Token
-  Creator grant. That source change does not remove the live grant. After
-  merge, cancel superseded runs, confirm every infrastructure run is terminal,
-  then run a clean current-`main` platform plan and apply only with explicit
-  human approval. Audit the final WIF and service-account IAM bindings before
-  declaring removal complete. Do not create the peg-policy project or bucket
-  until the removal is applied, all queued and active runs drain, and the audit
-  confirms the old path is gone.
+  named by a provider denial.
+- The Peg-policy foundation remains source-only and creates no policy object or
+  Cloud Run runtime attachment. It places both buckets and the publisher in the
+  dedicated `mento-monitoring-peg-policy` project; the cross-project runtime
+  reader stays in `mento-monitoring`. Explicitly enable only Storage and IAM in
+  the dedicated project. Keep both bucket policies authoritative and give no
+  dedicated-project access to routine deploy, PR-plan, trusted-main refresh, or
+  developer identities. The protected org-Terraform owner is an intentional
+  control-plane exception that can change IAM and bucket metadata. Organization
+  IAM admins remain control-plane exceptions and inherited organization grants
+  still apply. Audit effective readers, writers, and IAM administrators before
+  apply and activation. Access logs are audit telemetry, never an authorization
+  control.
 
 ## Verification
 

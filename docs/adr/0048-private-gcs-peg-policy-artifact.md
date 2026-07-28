@@ -3,7 +3,7 @@ title: Peg policy is a generation-pinned private GCS artifact
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-27
 scope: metrics-bridge / alerts / terraform/infra
 date: 2026-07
 doc_type: adr
@@ -13,8 +13,8 @@ garden_lane: adrs-architecture
 
 # ADR 0048 — Peg policy is a generation-pinned private GCS artifact
 
-**Status:** Accepted (Jul 2026), dormant runtime support only. Production
-hosting and activation wait for ADR 0047's remaining identity-cutover gates.
+**Status:** Accepted (Jul 2026), dormant runtime support and unapplied source
+foundation only. Production hosting and activation remain separate steps.
 **Scope:** metrics-bridge / alerts / terraform/infra
 
 ## Context
@@ -30,11 +30,9 @@ different bytes under one runtime configuration after an overwrite or
 rollback.
 
 ADR 0047 separates routine deploy, PR-plan, trusted-main refresh, and
-production-apply authority. Its remaining gates are the read-boundary audit,
-terminal pre-routing and proof runs, the final legacy-authority removal apply,
-and the final IAM audit. Provisioning the policy plane before those gates pass
-would create infrastructure inside the authority window that the cutover is
-designed to close.
+production-apply authority. The legacy authority removal, run drain, and IAM
+audit are complete. The policy plane still requires its own reviewed,
+human-approved platform plan and apply before it exists in production.
 
 ## Decision
 
@@ -42,11 +40,46 @@ designed to close.
   `PEG_POLICY_URL` nor `PEG_POLICY_AUTH_MODE` in this change. The isolated Peg
   loop stays dormant while both values are absent; a missing, invalid, or
   mismatched pair fails only that loop.
-- A later platform change owns a dedicated private GCS bucket, object
-  versioning and retention, public-access prevention, uniform bucket-level
-  access, destructive-change protection, and a dedicated Metrics Bridge
-  runtime service account. That account receives only
-  `roles/storage.objectViewer` on the policy bucket.
+- The dormant Terraform source foundation creates the
+  `mento-monitoring-peg-policy` project under the monitoring project's
+  organization and billing account. Terraform explicitly manages only Storage
+  and IAM service enablement there; Google project-bootstrap services are not
+  part of the application surface. The policy bucket, access-log bucket, and
+  publisher service account live in that project. The runtime service account
+  remains in `mento-monitoring` for its later Cloud Run attachment and receives
+  one cross-project bucket grant. Routine deploy, PR-plan, trusted-main refresh,
+  and developer identities receive no role in the dedicated project.
+- The policy bucket uses versioning, public-access prevention, uniform
+  bucket-level access, and Terraform destructive-change protection. Cloud
+  Storage automatically deletes a generation only after it has stayed
+  noncurrent for 30 days. That lifecycle rule does not stop the publisher's
+  `roles/storage.objectAdmin` grant from deleting current or retained objects
+  directly. The exact direct bucket policy grants the runtime only
+  `roles/storage.objectViewer` and the publisher only
+  `roles/storage.objectAdmin`.
+- Protected org-Terraform bootstraps the dedicated project with a direct
+  project Owner grant. A bucket-scoped custom role also lets it read and
+  replace each bucket policy and update bucket metadata. That metadata authority
+  includes retention, versioning, logging, uniform-access, and public-access
+  settings; Terraform review and reconciliation protect those settings, not the
+  custom role itself. The Owner grant can also change project IAM. These are
+  intentional protected control-plane exceptions.
+- The dedicated project records `ADMIN_READ`, `DATA_READ`, and `DATA_WRITE`
+  audit logs for `allServices`, without exempted members. Audit coverage starts
+  after the protected Owner bootstrap so subsequent project configuration and
+  policy-plane access are attributable.
+- The access-log bucket's exact direct policy contains only the protected
+  controller and the Google Storage analytics writer. It retains LIVE objects
+  for 90 days and noncurrent ARCHIVED objects for 30 days. Logs are audit
+  telemetry, never an authorization control.
+- Project separation removes monitoring-project roles and service agents from
+  the policy plane, but organization-level grants still inherit. The accepted
+  exceptions are the protected org-Terraform path and organization IAM
+  administrators. The current organization policy also gives org-Terraform
+  inherited `roles/storage.objectViewer`. The policy is non-secret, so that
+  audited protected read path is acceptable; an inherited routine writer is
+  not. Audit effective readers, writers, and IAM administrators before apply
+  and activation.
 - The alerts-rules stack owns `peg-policy/current.json`. Its bytes come
   directly from `alerts/rules/peg-thresholds.json`, so the protected apply that
   owns paging policy also creates each new GCS object generation.
@@ -94,11 +127,23 @@ designed to close.
   alerts apply.
 - **Default Cloud Run identity** — rejected because a dedicated bucket-scoped
   reader makes runtime authority explicit.
+- **Buckets in `mento-monitoring`** — rejected because monitoring service
+  agents and broad operational roles would inherit access to the policy plane.
+- **Tag-scoped IAM deny policy** — rejected because tag attachment and
+  propagation add a brittle create-time and recovery dependency. A small
+  dedicated project gives the isolation boundary with ordinary project and
+  bucket IAM.
 
 ## Consequences
 
 - This runtime capability can merge and deploy without activating Peg polling.
-- Infrastructure work remains blocked on ADR 0047's final cutover evidence.
+- The foundation remains source-only and runtime-dormant. The dedicated project
+  is the effective-isolation control; it does not make organization inheritance
+  disappear.
+- Before apply and activation, audit effective readers, writers, and IAM
+  administrators of the dedicated project and both buckets. Any inherited
+  routine writer blocks rollout. Access logs help investigate access; they
+  never authorize or block policy publication or reads.
 - A policy change needs a reviewed artifact generation and an explicit pinned
   runtime-configuration change. The bridge keeps producing the retained
   version until that change lands.
@@ -117,3 +162,6 @@ designed to close.
 - Future owning surfaces:
   `terraform/`, `alerts/rules/`, and the protected Terraform workflows after
   ADR 0047's final cutover.
+- Source foundation:
+  `terraform/peg-policy.tf` and the production-infrastructure identity
+  contract.

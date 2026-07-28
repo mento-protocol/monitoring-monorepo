@@ -3,7 +3,7 @@ title: Terraform secret strategy hardening
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-27
 doc_type: reference
 scope: terraform/infra
 review_interval_days: 90
@@ -47,11 +47,10 @@ service deploy, same-repo PR plan, trusted-main refresh, and production apply
 on separate identities:
 
 - Routine services use the general repository WIF provider and
-  `metrics-bridge-deployer`. The final-removal source no longer declares its
-  ability to impersonate `org-terraform`, but the live grant remains until an
-  explicitly approved platform apply removes it and the final IAM audit proves
-  it is gone. The provider requires both the repository slug and immutable
-  repository ID `1172025835`.
+  `metrics-bridge-deployer`. Source and live IAM no longer let it impersonate
+  `org-terraform`; the 2026-07-27 approved removal apply and final audit found
+  only `production-infra-applier` on Token Creator. The provider requires both
+  the repository slug and immutable repository ID `1172025835`.
 - PR plans use the state-only plan chain. It receives neither project/service
   read roles nor live secret/object access.
 - The checked-in workflows route trusted-main plans and scheduled drift through
@@ -63,8 +62,8 @@ on separate identities:
   secrets, and Storage Object Viewer on only Cloud Function deployment-source
   buckets. The project-read core includes Browser, IAM Security Reviewer, and
   Storage Bucket Viewer; each owning stack enumerates its additional
-  service-specific readers. The legacy routine-deployer Token Creator grant
-  remains rollback-only until run drain and read-boundary audit complete.
+  service-specific readers. The run drain, read-boundary audit, legacy-grant
+  removal, and final IAM/WIF audit are complete.
 - Production applies select
   `vars.GCP_PRODUCTION_INFRA_WORKLOAD_IDENTITY_PROVIDER` and
   `vars.GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT`. The dedicated pool accepts only
@@ -86,13 +85,11 @@ mutation permissions and is unreachable from PR refs.
 Run
 [#30212385280](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/30212385280)
 completed live full-refresh, unlocked plans for `alerts-delivery` and
-`governance-watchdog` through the checked-in route. Drain the pre-routing and
-proof runs and audit the read boundary before the prepared final-removal source
-may merge.
-After merge, cancel superseded runs, confirm every infrastructure run is
-terminal, run a platform plan from clean current `main`, and apply only with
-explicit human approval. The final WIF and service-account IAM audit must prove
-the legacy Token Creator grant is gone.
+`governance-watchdog` through the checked-in route. The pre-routing/proof-run
+drain and read-boundary audit later completed. The approved 2026-07-27 platform
+apply removed the legacy Token Creator grant, a full post-apply plan reported
+no changes, and the final WIF/service-account audit found only
+`production-infra-applier` on `org-terraform` Token Creator.
 
 ## Stack inventory
 

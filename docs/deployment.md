@@ -202,6 +202,15 @@ provisioned; do not add or change them with an ad hoc
 `gcloud run services update --set-env-vars` command. Until then, both remain
 absent and only the isolated Peg poller stays dormant.
 
+The dormant source foundation places the policy and access logs in the
+dedicated `mento-monitoring-peg-policy` project. The Metrics Bridge runtime
+identity stays in `mento-monitoring` and later reads the policy through one
+cross-project bucket grant. Before applying the foundation or activating the
+runtime, audit effective readers, writers, and IAM administrators in the
+dedicated project. The protected org-Terraform Owner/controller path and
+organization IAM admins are intentional control-plane exceptions; routine
+deploy, plan, refresh, and developer identities must have no access.
+
 Production mode is `gcp-metadata`. The URL must use the exact GCS JSON download
 host and path, a canonical percent-encoded object component, `alt=media`, and
 an immutable pinned `generation`. `none` exists only for deliberate local or

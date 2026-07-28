@@ -3,7 +3,7 @@ title: Peg monitoring for oracle-less stablecoins (EUROP first)
 status: active
 owner: eng
 canonical: false
-last_verified: 2026-07-25
+last_verified: 2026-07-27
 doc_type: plan
 scope: repo-wide
 review_interval_days: 365
@@ -18,7 +18,7 @@ review_interval_days: 365
 > [0045](adr/0045-peg-paging-semantics.md), and
 > [0048](adr/0048-private-gcs-peg-policy-artifact.md). Market figures below are a
 > 2026-07-22 snapshot — re-verify before relying on them. Rollout status below
-> was checked against `main` and the linked pull requests on 2026-07-25.
+> was checked against `main` and the linked pull requests on 2026-07-27.
 
 ## Problem
 
@@ -212,7 +212,7 @@ coverage), Bit2Me (stale). Structural: EURm/EUROP `SwapEvent` +
 `cex-book+indexed-pool` (all paths reachable). Bridge egress must allow
 `api.kraken.com`, `api.bitvavo.com` (+ aggregator hosts for display).
 
-## Rollout status (verified 2026-07-25)
+## Rollout status (verified 2026-07-27)
 
 1. **Design — merged:** PR
    [#1445](https://github.com/mento-protocol/monitoring-monorepo/pull/1445)
@@ -231,11 +231,11 @@ coverage), Bit2Me (stale). Structural: EURm/EUROP `SwapEvent` +
    PR
    [#1581](https://github.com/mento-protocol/monitoring-monorepo/pull/1581)
    added the full source-only deviation, premium, structural, blindness,
-   source-health, heartbeat, rollover, and routing ladder. Open PR
+   source-health, heartbeat, rollover, and routing ladder. PR
    [#1584](https://github.com/mento-protocol/monitoring-monorepo/pull/1584)
-   adds private generation-pinned policy reads; PR
+   added private generation-pinned policy reads. PR
    [#1606](https://github.com/mento-protocol/monitoring-monorepo/pull/1606)
-   adds the dormant Terraform identity and bucket foundation; stacked PRs
+   adds the dormant, unapplied Terraform identity and bucket foundation; stacked PRs
    [#1601](https://github.com/mento-protocol/monitoring-monorepo/pull/1601)
    and
    [#1603](https://github.com/mento-protocol/monitoring-monorepo/pull/1603)
