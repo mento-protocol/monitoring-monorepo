@@ -205,9 +205,14 @@ Use this order for the first activation topology:
    remains pinned to A. The registry superset can serve A; verify that A keeps
    polling before changing the runtime pin.
 5. Through the owning platform path, pin the runtime to the exact B generation
-   and verify metadata authentication. During rollout, old A-registry replicas
-   serve retained A while B-registry replicas serve active B and retained A.
-   An unpinned `current.json` URL or a provider-CLI overwrite is forbidden.
+   by replacing the current source-controlled
+   `local.peg_policy_runtime_generation` literal (`null` for first activation)
+   with the protected publisher's exact quoted positive output and removing
+   `template[0].revision` from `ignore_changes` in the same reviewed change,
+   then verify metadata authentication.
+   During rollout, old A-registry replicas serve retained A while B-registry
+   replicas serve active B and retained A. An unpinned `current.json` URL, a
+   `-var` override, or a provider-CLI overwrite is forbidden.
 6. Verify that Metrics Bridge selects and acknowledges the exact policy
    version. Prove authoritative listing state, producer-side bounded absence
    streak, executable-price metrics, structural metrics, and the ADR-0049
@@ -235,6 +240,14 @@ Grafana consumers before withdrawing a producer metric. Then remove the
 dashboard consumer and only afterward roll back the producer. Removing producer
 metrics first can turn active no-data alerts into incidents or make retained
 rules unevaluable.
+
+For a failed active runtime pin, keep the runtime pinned and select the last
+known-good published generation with recorded producer, API, and metric proof.
+Replace the concrete source literal with that exact quoted generation in a
+reviewed platform change, keep `template[0].revision` removed, review and apply
+the platform plan, then verify the new revision, producer acknowledgement,
+`/health`, policy API, and Peg metrics. Never set the literal to `null` or edit
+Cloud Run environment values manually.
 
 Do not reuse steps 2–9 after the first activation sets
 `local.peg_alerts_enabled` to `true`. A later policy change currently changes

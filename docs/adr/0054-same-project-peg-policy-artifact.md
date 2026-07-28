@@ -48,10 +48,13 @@ before production use.
   cannot read policy objects. The protected production applier has the only
   direct Token Creator grant on the publisher; inherited and effective IAM
   remains audited.
+- Give the routine deployer and `gcp_dev_members` Service Account User only on
+  the dedicated runtime identity. Do not retain a default-Compute or
+  project-wide Service Account User fallback.
 - Use authoritative bucket IAM policies. This ADR originally decided that the
   protected org-Terraform project Owner made an additional controller
   unnecessary. The post-apply lockout amended that controller decision;
-  [ADR 0055](0055-peg-policy-bucket-controller-recovery.md) now governs the
+  [ADR 0055](0055-peg-policy-bucket-controller-recovery.md) governs the
   narrow controller and its recovery bootstrap.
 - Accept and audit effective project-level and inherited access for trusted
   operators. Direct bucket grants remain least-privilege evidence; they do not
@@ -93,10 +96,16 @@ paused until this recovery completes.
 - A future broad project or inherited storage grant also reaches this bucket;
   that is an accepted risk for trusted identities and a required IAM-audit
   check before activation.
-- The source foundation creates no policy object and no Cloud Run attachment.
-  The separate `alerts/peg-policy-publication` root creates a policy object
-  only through its manual protected workflow. Neither merge starts Peg polling
-  or activates alerts.
+- The source foundation creates no policy object. The separate
+  `alerts/peg-policy-publication` root creates a policy object only through its
+  manual protected workflow. The dormant runtime attachment assigns the
+  dedicated reader identity to Metrics Bridge, but keeps its paired policy
+  values absent while `local.peg_policy_runtime_generation` is `null`. Those
+  foundation and publication merges do not start Peg polling or activate
+  alerts. A separate reviewed runtime activation replaces `null` with the
+  published generation and removes the Cloud Run template-revision drift ignore
+  to mint the attachment revision; later rollovers keep revision changes
+  managed.
 
 ## Evidence
 

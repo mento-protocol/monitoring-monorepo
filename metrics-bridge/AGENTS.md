@@ -3,7 +3,7 @@ title: Metrics Bridge Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-28
 doc_type: agent-instructions
 scope: metrics-bridge
 review_interval_days: 90
@@ -63,6 +63,21 @@ local or test HTTPS artifacts and requires the code-only
 it. A blank, malformed, missing, or mismatched pair belongs to the peg loop's
 bounded error channel and must not abort startup or affect the primary Hasura
 poller.
+
+Platform Terraform attaches Cloud Run to
+`metrics-bridge-runtime@mento-monitoring.iam.gserviceaccount.com`, whose direct
+grant is only the private policy bucket's Object Viewer role. The platform
+grants the routine deployer and `gcp_dev_members` Service Account User only on
+that identity, never project-wide or on the default Compute service account.
+The `template[0].revision` drift ignore remains while the generation literal is
+`null`, then the same reviewed concrete-generation change removes it to create
+a Cloud Run revision. The platform
+accepts no production policy URL or auth-mode input: a reviewed
+`local.peg_policy_runtime_generation` literal derives both values together.
+It stays `null` only until protected publication reports the first real
+generation. After activation it remains concrete; each later rollover replaces
+the current quoted generation literal in a reviewed platform change and creates
+a new Cloud Run revision.
 
 Policy versions are content-addressed: the final 32 lowercase hexadecimal
 characters must match the canonical policy-content SHA-256 prefix. Canonical

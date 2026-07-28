@@ -179,8 +179,13 @@ required source-staging flag/value. [ADR 0053](adr/0053-explicit-deployment-sour
 defines the supported static discovery syntax and its deliberate indirect and
 dynamic proof limits.
 
-Apply and verify the source buckets, scoped IAM, and default-Compute act-as
-grants before routing. Routing triggers the Metrics Bridge and Aegis workflows.
+This migration has a strict rollout order. First merge the infrastructure-only
+PR. Refresh current `main`, run a clean current-main platform plan, get explicit
+apply approval, apply, and verify both buckets, their bucket-scoped IAM, and the
+exact dedicated Metrics Bridge runtime act-as grants for the routine deployer
+and `gcp_dev_members`. Those identities must have no default-Compute or
+project-wide Service Account User grant. Only then merge the routing follow-up;
+that merge triggers the Metrics Bridge and Aegis workflows.
 Canary all five paths, including `pnpm aegis:agent:deploy`, before applying the
 policy foundation. That apply removes broad Storage Admin, Storage Object
 Admin, and Service Account User grants and requires an effective-IAM audit.
@@ -195,8 +200,53 @@ permission split and phase boundary.
 configuration for the protected, versioned peg-policy artifact. The platform
 Terraform stack owns both Cloud Run values when runtime activation is approved;
 do not add or change them with an ad hoc
-`gcloud run services update --set-env-vars` command. Until then, both remain
-absent and the Peg poller stays dormant.
+`gcloud run services update --set-env-vars` command. They remain absent only
+while the source-controlled generation is `null`; the reviewed first activation
+sets a concrete generation and attaches both values together.
+
+The platform does not accept a policy URL or auth mode as an input. It commits
+one `local.peg_policy_runtime_generation` literal in `terraform/peg-policy.tf`
+and derives the exact private GCS JSON media URL plus
+`PEG_POLICY_AUTH_MODE=gcp-metadata` from that one value. `null` is the only
+dormant state before first activation. The current runtime attachment uses a
+quoted positive decimal GCS generation within signed 64-bit range. Blank, zero,
+leading-zero, non-numeric, over-range, mutable, or differently encoded inputs
+fail the platform contract or plan.
+
+After the separately reviewed protected publication finishes, retrieve its
+provider-observed generation from the publication root:
+
+```bash
+terraform -chdir=alerts/peg-policy-publication output -raw peg_policy_generation
+```
+
+In a separate reviewed platform change, replace the current source literal
+(`null` for first activation, the current quoted generation for a rollover) in
+`terraform/peg-policy.tf` with that exact positive decimal output, for example
+`peg_policy_runtime_generation = "1750000000000000"`. Do not pass it with
+`-var`, set a Cloud Run environment value manually, or substitute the
+publication URL. The platform code reconstructs the canonical URL, so the
+reviewed plan shows the paired attachment and a fresh Cloud Run revision. The
+first activation also removes `template[0].revision` from `ignore_changes`;
+later concrete-to-concrete rollovers leave it managed so each handoff creates a
+new revision.
+
+### Runtime-pin rollback
+
+Keep a failed runtime pinned; never set the generation back to `null`. Retrieve
+the last known-good positive generation from the protected publication record
+and select only one with recorded producer, API, and metrics proof. In a
+reviewed platform change, replace the current quoted source literal with that
+exact quoted generation. Leave `template[0].revision` unmanaged in this
+concrete-to-concrete change so Cloud Run mints the rollback revision.
+
+Run a clean current-main platform plan, review the literal, pinned URL, runtime
+identity, paired environment, and new Cloud Run revision, then obtain explicit
+approval for the platform apply. After the apply, verify the selected revision,
+the runtime service account, producer policy acknowledgement, `/health` and
+policy API responses, and the expected `mento_peg_policy_version`,
+`mento_peg_source_healthy`, and `mento_peg_last_poll` metrics. Never unpin the
+runtime or manually edit Cloud Run environment values during rollback.
 
 The platform foundation places the policy and access logs in
 `mento-monitoring`. The Metrics Bridge runtime and publisher identities also

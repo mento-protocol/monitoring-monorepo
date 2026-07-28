@@ -135,16 +135,21 @@ apply-time re-plan and drift window remain in force.
 
 ## Identity bootstrap, routing cutover, and authority removal
 
-Bootstrap, refresh routing, live full-refresh proof, legacy-authority removal,
-run drain, and the final IAM/WIF audit are complete. The removal apply reported
-`0 added, 1 changed, 1 destroyed`; its post-apply plan was clean, and live IAM has no
-`metrics-bridge-deployer` Token Creator grant. The platform stack owns the
-private buckets and identities. The protected publication root only writes the
-policy object; it does not attach Cloud Run or activate Grafana. Buckets and
-the runtime and publisher identities live in `mento-monitoring`; the plan and
-publication-reader identities live in the seed project. Only the exact
-publication workflow may use that read-only chain. Runtime and publication
-readers have direct Object Viewer; the publisher has direct Object Admin.
+Routing and IAM audit complete. Removal: `0 added, 1 changed, 1 destroyed`;
+plan clean; IAM has no `metrics-bridge-deployer` Token Creator grant. Platform
+owns private buckets and identities; protected `peg-policy-publication` writes
+the policy object.
+Metrics Bridge uses the dedicated runtime identity. `PEG_POLICY_*` is absent
+only when `local.peg_policy_runtime_generation = null`; the reviewed first
+activation changes that literal to the protected publisher's exact quoted
+positive output. Publication does not attach Cloud Run or activate Grafana.
+Terraform derives the pinned URL and `gcp-metadata` mode from that literal.
+`null` retains `template[0].revision` in `ignore_changes`; first activation
+removes it, and later concrete pins keep revision changes managed so each
+handoff creates a Cloud Run revision. Buckets, runtime, and publisher are in
+`mento-monitoring`; publication plan and reader are in the seed project. Only
+the exact publication workflow selects that read-only chain. Runtime and reader
+have direct bucket-scoped Object Viewer; publisher has direct Object Admin.
 
 Authoritative bucket policies keep direct grants exact.
 `pegPolicyBucketController` gives org-Terraform only bucket get/update and
@@ -156,7 +161,8 @@ activation.
 
 ### Peg policy bucket controller recovery
 
-Publication is paused. Follow the explicitly approved recovery and proof in
+The one-time recovery is complete. Any future recovery must follow the
+explicitly approved procedure and proof in
 [ADR 0055](adr/0055-peg-policy-bucket-controller-recovery.md) from clean current
 `main`. Never use `roles/storage.admin`.
 
@@ -179,10 +185,11 @@ verified default Compute executor
 the Alloy builder is also an App Engine uploader. App Engine uploaders have
 Object Admin only on the App Engine source bucket because the CLI can replace
 or clean up cached hash-named objects. AppSpot can view those objects. The
-routine deployer and `gcp_dev_members` have Service Account User only on
-Metrics Bridge's default Compute Engine service account, preserving the
-automated and direct `pnpm bridge:deploy` Cloud Run paths after the broad
-project-level fallback is removed.
+routine deployer and `gcp_dev_members` have Service Account User only on the
+dedicated Metrics Bridge runtime identity, preserving the automated and direct
+`pnpm bridge:deploy` Cloud Run paths after the broad project-level fallback is
+removed. They have no default-Compute or project-wide Service Account User
+grant.
 
 Metrics Bridge's default Compute executor has no App Engine source-bucket grant.
 

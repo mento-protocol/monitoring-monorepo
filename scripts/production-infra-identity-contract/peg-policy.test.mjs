@@ -26,6 +26,38 @@ function expectFailure(files, expected) {
 const validFiles = validFixtureFiles();
 assert.deepEqual(validateProductionInfraIdentityContract(validFiles), []);
 
+function withConcreteGeneration(files, generation) {
+  return mutate(
+    mutate(
+      files,
+      "terraform/peg-policy.tf",
+      "  peg_policy_runtime_generation = null",
+      `  peg_policy_runtime_generation = "${generation}"`,
+    ),
+    "terraform/metrics-bridge.tf",
+    "      template[0].revision,\n",
+    "",
+  );
+}
+
+const activeGenerationFiles = withConcreteGeneration(
+  validFiles,
+  "1750000000000000",
+);
+assert.deepEqual(
+  validateProductionInfraIdentityContract(activeGenerationFiles),
+  [],
+);
+
+const maximumGenerationFiles = withConcreteGeneration(
+  validFiles,
+  "9223372036854775807",
+);
+assert.deepEqual(
+  validateProductionInfraIdentityContract(maximumGenerationFiles),
+  [],
+);
+
 for (const [from, to, expected, occurrence = 0] of [
   [
     '  name                        = "${google_project.monitoring.project_id}-peg-policy"',
@@ -464,6 +496,139 @@ expectFailure(
     '    log_object_prefix = "other/"',
   ),
   "Peg policy peg_policy bucket: log_object_prefix must be exactly",
+);
+
+for (const [filePath, from, to, expected] of [
+  [
+    "terraform/peg-policy.tf",
+    "https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}",
+    "https://storage.googleapis.com/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}",
+    "Peg policy runtime attachment: canonical URL: must be exactly source-controlled",
+  ],
+  [
+    "terraform/peg-policy.tf",
+    '    PEG_POLICY_AUTH_MODE = "gcp-metadata"',
+    '    PEG_POLICY_AUTH_MODE = "none"',
+    "Peg policy runtime attachment: paired environment: must be exactly source-controlled",
+  ],
+  [
+    "terraform/metrics-bridge.tf",
+    "    service_account = google_service_account.metrics_bridge_runtime.email",
+    "    service_account = google_service_account.metrics_bridge_deployer.email",
+    "Peg policy runtime attachment: service_account must be exactly",
+  ],
+  [
+    "terraform/metrics-bridge.tf",
+    "        for_each = local.peg_policy_runtime_env",
+    "        for_each = {}",
+    "Peg policy runtime attachment: for_each must be exactly",
+  ],
+  [
+    "terraform/metrics-bridge.tf",
+    '      condition     = local.peg_policy_runtime_generation == null ? true : (can(regex("^[1-9][0-9]*$", local.peg_policy_runtime_generation)) && can(tonumber(local.peg_policy_runtime_generation)) && tonumber(local.peg_policy_runtime_generation) <= 9223372036854775807)',
+    "      condition     = true",
+    "Peg policy runtime attachment: condition must be exactly",
+  ],
+]) {
+  expectFailure(mutate(validFiles, filePath, from, to), expected);
+}
+
+for (const invalidGeneration of [
+  '""',
+  '"0"',
+  '"01"',
+  '"-1"',
+  '"1.5"',
+  '"\\u0031"',
+  '"9223372036854775808"',
+  "1750000000000000",
+  "local.published_generation",
+  "var.peg_policy_runtime_generation",
+]) {
+  expectFailure(
+    mutate(validFiles, "terraform/peg-policy.tf", "null", invalidGeneration),
+    "Peg policy runtime attachment: generation must be exactly null or a quoted positive decimal GCS generation within signed 64-bit range",
+  );
+}
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/deploy-staging.tf",
+    "google_service_account.metrics_bridge_runtime.name",
+    '"projects/${google_project.monitoring.project_id}/serviceAccounts/${google_project.monitoring.number}-compute@developer.gserviceaccount.com"',
+  ),
+  "Peg policy runtime act-as grants must not target the default Compute service account",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/deploy-staging.tf",
+    "google_service_account_iam_member.ci_default_compute_service_account_user",
+    "google_service_account_iam_member.other_service_account_user",
+  ),
+  "Peg policy runtime act-as state move google_service_account_iam_member.ci_default_compute_service_account_user: must be declared exactly once",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/peg-policy.tf",
+    '  peg_policy_runtime_url = local.peg_policy_runtime_generation == null ? null : "https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}"',
+    '  peg_policy_runtime_url = "https://invalid.example/policy.json"\n\n  decoy = local.peg_policy_runtime_generation == null ? null : "https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}"',
+  ),
+  "Peg policy runtime attachment: canonical URL: must be exactly source-controlled",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/peg-policy.tf",
+    `  peg_policy_runtime_env = local.peg_policy_runtime_generation == null ? {} : {
+    PEG_POLICY_URL       = local.peg_policy_runtime_url
+    PEG_POLICY_AUTH_MODE = "gcp-metadata"
+  }`,
+    `  peg_policy_runtime_env = {}
+
+  decoy_env = local.peg_policy_runtime_generation == null ? {} : {
+    PEG_POLICY_URL       = local.peg_policy_runtime_url
+    PEG_POLICY_AUTH_MODE = "gcp-metadata"
+  }`,
+  ),
+  "Peg policy runtime attachment: paired environment: must be exactly source-controlled",
+);
+
+expectFailure(
+  {
+    ...validFiles,
+    "terraform/peg-policy-runtime-input.tf": `
+variable "peg_policy_runtime_generation" {
+  type = string
+}
+`,
+  },
+  "Peg policy runtime attachment: runtime generation must be a reviewed source literal, not an external variable",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/metrics-bridge.tf",
+    "      template[0].revision,\n",
+    "",
+  ),
+  "Peg policy runtime attachment: must ignore template revision while generation is null",
+);
+
+expectFailure(
+  mutate(
+    withConcreteGeneration(validFiles, "1750000000000000"),
+    "terraform/metrics-bridge.tf",
+    "      client,",
+    "      template[0].revision,\n      client,",
+  ),
+  "Peg policy runtime attachment: must not ignore template revision while applying a concrete generation",
 );
 
 process.stdout.write("Peg policy identity contract tests passed.\n");
