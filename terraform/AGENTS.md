@@ -99,11 +99,11 @@ boundaries.
   `mento-monitoring`; direct bucket grants stay authoritative and exact. The
   protected org-Terraform project Owner and organization IAM administrators are
   accepted control-plane exceptions; inherited grants still apply. Do not apply
-  this foundation until #1659's additive staging foundation has merged and its
-  five deploy paths have passed canaries. This branch removes broad Storage
-  Admin, Storage Object Admin, and Service Account User fallback grants with
-  the dormant policy foundation; audit effective readers, writers, and IAM
-  administrators after that apply and before activation. Access logs are audit
+  current `main` until #1659 has merged and its five deploy paths have passed
+  canaries. That apply creates the dormant policy foundation and removes broad
+  Storage Admin, Storage Object Admin, and Service Account User fallback grants;
+  audit effective readers, writers, and IAM administrators afterward and before
+  activation. Access logs are audit
   telemetry, never an authorization control.
 
 ## Verification

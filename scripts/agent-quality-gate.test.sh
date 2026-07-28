@@ -2335,6 +2335,26 @@ assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/t
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform stack wrapper changed)"
 assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform stack wrapper changed)"
 
+for deploy_staging_contract_case in \
+  '.github/workflows/metrics-bridge.yml|docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)' \
+  'scripts/deploy-bridge.sh|node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)' \
+  'aegis/grafana-agent/deploy.sh|docs/pr-checklists/ci-workflow-gates.md (Aegis deploy path changed)' \
+  'aegis/bin/deploy.sh|docs/pr-checklists/ci-workflow-gates.md (Aegis deploy path changed)' \
+  'aegis/grafana-agent/cloudbuild.yaml|docs/pr-checklists/ci-workflow-gates.md (Aegis deploy path changed)' \
+  'scripts/deploy-staging-callsite-discovery.mjs|pnpm lint:scripts (root build script changed)' \
+  'scripts/deploy-staging-contract.mjs|pnpm lint:scripts (root build script changed)' \
+  'scripts/deploy-staging-contract.test.mjs|pnpm lint:scripts (root build script changed)'; do
+  IFS='|' read -r deploy_staging_contract_path existing_mapping <<< "$deploy_staging_contract_case"
+  run_gate "$deploy_staging_contract_path"
+  assert_contains "- $existing_mapping"
+  assert_occurrences 1 "- pnpm tf:test ("
+done
+
+# The production infrastructure contract is not path-scoped: an ordinary
+# application change must still route exactly one canonical tf:test command.
+run_gate "ui-dashboard/src/deploy.ts"
+assert_occurrences 1 "- pnpm tf:test (non-empty change set validates production infrastructure contract)"
+
 run_gate "scripts/terraform-fmt-check.mjs"
 assert_contains "- node scripts/terraform-fmt-check.test.mjs (Terraform format helper changed)"
 assert_contains "- pnpm tf:test (Terraform format helper changed)"

@@ -136,15 +136,13 @@ and both policy service accounts live in `mento-monitoring`; they depend on its
 existing Storage and IAM APIs. The runtime has a direct bucket-scoped Object
 Viewer grant and the publisher has a direct bucket-scoped Object Admin grant.
 
-The authoritative bucket policies make direct grants exact. Project and
-organization grants still inherit into the bucket. The protected org-Terraform
-service account already has project Owner and can manage IAM and bucket
-metadata; organization IAM admins are also control-plane exceptions. Before
-applying this branch, #1659's additive staging foundation must merge and all
-five deploy paths must pass canaries. This branch removes broad project-wide
-Storage Admin, Storage Object Admin, and Service Account User fallback grants
-with the dormant policy foundation. Audit effective readers, writers, and IAM
-administrators after that apply and again before activation.
+Authoritative bucket policies make direct grants exact; project and
+organization grants still inherit. The org-Terraform project Owner and
+organization IAM admins are accepted control-plane exceptions. Apply current
+`main` only after #1659 merges and all five deploy paths pass canaries. The
+apply creates the dormant policy foundation and removes broad Storage Admin,
+Storage Object Admin, and Service Account User fallbacks. Audit effective IAM
+afterward and again before activation.
 
 ## Routine deployment source staging
 
@@ -172,19 +170,15 @@ project-level fallback is removed.
 
 Metrics Bridge's default Compute executor has no App Engine source-bucket grant.
 
-The routing follow-up must move every checked-in `gcloud builds submit` to
-`--gcs-source-staging-dir` and every checked-in `gcloud app deploy` to
-`--bucket`. That follow-up also extends `pnpm tf:test` to discover these
-executable surfaces and reject a new unflagged callsite.
+The five approved checked-in `gcloud builds submit` / `gcloud app deploy`
+calls use their required source-staging flag/value. `pnpm tf:test` enforces that
+inventory; [ADR 0053](adr/0053-explicit-deployment-source-staging.md) defines
+the supported static syntax and deliberate proof limits.
 
-The migration is deliberately additive. Merge the infrastructure-only PR,
-refresh current `main`, run a clean current-main platform plan, get explicit
-apply approval, apply, and verify the live buckets and IAM. Only then merge the
-command-routing follow-up, whose merge triggers the automatic Metrics Bridge
-and Aegis workflows. Canary all five deployment paths. ADR 0054 then removes
-project-wide Storage Admin, Storage Object Admin, and Service Account User with
-the dormant same-project Peg-policy foundation, followed by an effective-IAM
-audit.
+Apply and verify the source buckets and scoped IAM before routing. Routing
+triggers the Metrics Bridge and Aegis workflows; canary all five paths before
+applying ADR 0054's policy foundation and broad-role removal. Audit effective
+IAM afterward.
 
 ## Platform GitHub Actions secrets and variables
 

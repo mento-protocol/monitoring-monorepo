@@ -40,18 +40,18 @@ before production use.
   and its 90-day live and 30-day archived retention.
 - Keep both policy identities in `mento-monitoring`. The runtime receives only
   bucket-scoped Object Viewer. The publisher receives only bucket-scoped Object
-  Admin. Only the protected production applier can impersonate the publisher.
+  Admin. The protected production applier has the only direct Token Creator
+  grant on the publisher.
 - Use authoritative bucket IAM policies. The existing protected org-Terraform
   project Owner manages bucket metadata and IAM, so no extra custom controller
   role is needed.
 - Accept and audit effective project-level and inherited access for trusted
   operators. Direct bucket grants remain least-privilege evidence; they do not
   override wider accepted project or organization grants.
-- Do not apply this branch until #1659's additive deployment-source staging
-  foundation has merged and all five deploy paths have passed their canaries.
-  This branch then removes the broad project-wide Storage Admin, Storage Object
-  Admin, and Service Account User fallback grants while creating the dormant
-  policy foundation. Run the effective-IAM audit after that apply. Publication,
+- Do not apply current `main` until #1659 has merged and all five deploy paths
+  have passed canaries. That apply creates the dormant policy foundation,
+  removes broad project-wide Storage Admin, Storage Object Admin, and Service
+  Account User fallback grants, and requires an effective-IAM audit. Publication,
   runtime attachment, and alert activation remain separate reviewed steps.
 
 ## Alternatives considered

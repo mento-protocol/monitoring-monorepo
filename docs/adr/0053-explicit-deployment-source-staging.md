@@ -13,9 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0053 — Routine GCP deploys use explicit source-staging buckets
 
-**Status:** Accepted (Jul 2026), phase A infrastructure source prepared;
-current-main apply, phase B routing, canaries, and broad-role removal remain
-separate gates.
+**Status:** Accepted (Jul 2026). The additive infrastructure prerequisite is
+applied and routing is implemented in source; live canaries and broad-role
+removal remain separate future gates.
 **Scope:** terraform/infra
 
 ## Context
@@ -53,7 +53,7 @@ Both buckets enforce public-access prevention, disable soft-delete retention,
 set `force_destroy = false`, and use Terraform `prevent_destroy`. Their
 contents are reconstructible deployment input, not durable records.
 
-The follow-up routing phase makes every executable deploy path name its bucket:
+The routing phase makes every executable deploy path name its bucket:
 
 - `gcloud builds submit` uses `--gcs-source-staging-dir`;
 - `gcloud app deploy` uses `--bucket`;
@@ -105,6 +105,12 @@ order makes both automatic deploys race missing infrastructure and fail closed.
 - **Remove the broad grants in the same apply** — rejected because the
   replacement paths need live canary proof first and Terraform cannot prove
   the external deploy behavior.
+- **Maintain general shell and JavaScript invocation parsers for callsite
+  discovery** — rejected because five approved calls do not justify owning
+  those language semantics. The bounded lexical and AST recovery covers the
+  checked-in direct forms. It does not interpret indirect
+  `Function.prototype.call`/`apply`; supporting those forms, inert examples, or
+  native comment masking would expand the partial parser.
 
 ## Consequences
 
@@ -115,9 +121,19 @@ order makes both automatic deploys race missing infrastructure and fail closed.
 - The dedicated Alloy builder and Metrics Bridge's verified default Compute
   executor have the exact staging grants they need; the legacy default Cloud
   Build identity remains outside the staging-principal set.
-- The routing phase adds a checked-in contract that discovers every executable
-  submit/deploy callsite and rejects a new one unless it names the correct
-  staging bucket.
+- A checked-in contract allows exactly five literal checked-in submit/deploy
+  callsites and their required source-staging flag/value. Discovery rejects
+  additional deploy records recovered from shell-like surfaces, wrappers,
+  generated scripts, Dockerfiles, structured configuration, and Terraform
+  outside comments. Node/TypeScript recovery covers direct call/new expressions
+  with inline literals or supported `const`/object aliases, plus static tagged
+  templates. Indirect `Function.prototype.call`/`apply`, dynamically constructed
+  executables, and dynamic paths are forbidden but outside the static proof.
+  Native PowerShell block comments and batch `REM`/`::` lines are deliberately
+  not masked, so deploy-shaped text there fails closed. A statically selected
+  cmd shell preserves `#` as executable text; known Unix and PowerShell shells
+  retain their native `#` comment behavior. Inert examples belong only in
+  `scripts/deploy-staging-contract.test.mjs`.
 - Operators must preserve the phase boundary: merge and apply the additive
   infrastructure from current `main`, merge routing, and run all five deploy
   canaries. ADR 0054 then removes broad roles with the dormant same-project

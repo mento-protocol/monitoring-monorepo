@@ -2498,6 +2498,15 @@ while IFS= read -r path; do
   fi
 done < "$changed_paths_file"
 
+# The Terraform test suite validates production infrastructure and deployment
+# contracts that can be affected indirectly. Every non-empty change set in this
+# checkout therefore runs it once, regardless of its changed paths. Gate unit
+# tests invoke this script against isolated fixture repositories; those fixtures
+# do not own this repository-specific contract.
+if [[ "$script_source_dir" == "$repo_root/scripts" ]]; then
+  add_command "pnpm tf:test" "non-empty change set validates production infrastructure contract"
+fi
+
 if [[ "$routing_sensitive_paths_changed" == "true" ]]; then
   add_command "pnpm docs:navigation-eval -- --check-fixtures" "routing-sensitive source changed"
 fi

@@ -412,6 +412,7 @@ main() {
   if ! gcloud builds submit \
     --project "$project" \
     --config "$snapshot_root/cloudbuild.yaml" \
+    --gcs-source-staging-dir="gs://${project}-cloud-build-source/alloy" \
     --substitutions "_VERSION=$version" \
     "$snapshot_source_dir"; then
     echo "Cloud Build failed; checking for a partially created passive target." >&2
