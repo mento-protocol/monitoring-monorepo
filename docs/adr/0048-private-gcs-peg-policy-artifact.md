@@ -1,9 +1,10 @@
 ---
 title: Peg policy is a generation-pinned private GCS artifact
-status: active
+status: archived
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-07-28
+superseded_by: ADR-0054
 scope: metrics-bridge / alerts / terraform/infra
 date: 2026-07
 doc_type: adr
@@ -13,8 +14,10 @@ garden_lane: adrs-architecture
 
 # ADR 0048 — Peg policy is a generation-pinned private GCS artifact
 
-**Status:** Accepted (Jul 2026), dormant runtime support and unapplied source
-foundation only. Production hosting and activation remain separate steps.
+**Status:** Superseded by [ADR 0054](0054-same-project-peg-policy-artifact.md)
+(Jul 2026). This record preserves the
+original private, generation-pinned artifact decision. ADR 0054 keeps those
+controls and replaces the dedicated-project hosting decision.
 **Scope:** metrics-bridge / alerts / terraform/infra
 
 ## Context

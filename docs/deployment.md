@@ -184,10 +184,9 @@ apply approval, apply, and verify both buckets, their bucket-scoped IAM, and the
 exact default-Compute act-as grants for the routine deployer and
 `gcp_dev_members`. Only then merge the routing follow-up; that merge triggers
 the Metrics Bridge and Aegis workflows.
-Canary those two paths and `pnpm aegis:agent:deploy` before a separate platform
-change removes the temporary project-wide Storage Admin and Service Account
-User grants. Never combine that removal with creation of the private
-peg-policy bucket or its identities.
+Canary all five deployment paths before the same-project Peg-policy foundation
+removes the temporary project-wide Storage Admin, Storage Object Admin, and
+Service Account User grants. That foundation then needs an effective-IAM audit.
 [ADR 0053](adr/0053-explicit-deployment-source-staging.md) records the
 permission split and phase boundary.
 
@@ -200,16 +199,18 @@ configuration for the protected, versioned peg-policy artifact. The platform
 Terraform stack will own both Cloud Run values when that artifact plane is
 provisioned; do not add or change them with an ad hoc
 `gcloud run services update --set-env-vars` command. Until then, both remain
-absent and only the isolated Peg poller stays dormant.
+absent and the Peg poller stays dormant.
 
-The dormant source foundation places the policy and access logs in the
-dedicated `mento-monitoring-peg-policy` project. The Metrics Bridge runtime
-identity stays in `mento-monitoring` and later reads the policy through one
-cross-project bucket grant. Before applying the foundation or activating the
-runtime, audit effective readers, writers, and IAM administrators in the
-dedicated project. The protected org-Terraform Owner/controller path and
-organization IAM admins are intentional control-plane exceptions; routine
-deploy, plan, refresh, and developer identities must have no access.
+The dormant source foundation places the policy and access logs in
+`mento-monitoring`. The Metrics Bridge runtime and publisher identities also
+live there, with direct bucket-scoped Viewer and Object Admin grants. Before
+applying this branch, #1659's additive staging foundation must merge and all
+five deployment paths must pass canaries. This branch removes broad
+project-wide Storage Admin, Storage Object Admin, and Service Account User
+fallback grants with the policy foundation. Audit effective readers, writers,
+and IAM administrators after that apply and again before activating the
+runtime. The protected org-Terraform Owner path and organization IAM admins
+are accepted control-plane exceptions.
 
 Production mode is `gcp-metadata`. The URL must use the exact GCS JSON download
 host and path, a canonical percent-encoded object component, `alt=media`, and

@@ -191,81 +191,12 @@ resource "github_actions_variable" "gcp_terraform_refresh_workload_identity_prov
 }
 `;
 
-const pegPolicyVariablesFixture = `
-variable "gcp_peg_policy_project_id" {
-  description = "GCP project ID for the isolated Peg-policy storage project."
-  type        = string
-  default     = "mento-monitoring-peg-policy"
-
-  validation {
-    condition     = length(var.gcp_peg_policy_project_id) > 0 && can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.gcp_peg_policy_project_id)) && !strcontains(var.gcp_peg_policy_project_id, "google") && !strcontains(var.gcp_peg_policy_project_id, "ssl")
-    error_message = "gcp_peg_policy_project_id must be nonempty and a valid GCP project ID: 6-30 lowercase letters, digits, or hyphens; start with a letter; end with a letter or digit; and contain neither 'google' nor 'ssl'."
-  }
-}
-`;
+const pegPolicyVariablesFixture = "";
 
 const pegPolicyFixture = `
-resource "google_project" "peg_policy" {
-  name            = "Mento Peg Policy"
-  project_id      = var.gcp_peg_policy_project_id
-  org_id          = var.gcp_org_id
-  billing_account = var.gcp_billing_account
-  auto_create_network = false
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-# trunk-ignore(checkov/CKV_GCP_117): protected Terraform needs Owner to bootstrap the dedicated project's IAM and buckets.
-# trunk-ignore(checkov/CKV_GCP_42): the bootstrap Owner is an intentional, production-gated control-plane exception.
-# trunk-ignore(checkov/CKV_GCP_49): the exception is scoped to the dedicated project and protected Terraform identity.
-resource "google_project_iam_member" "peg_policy_terraform_owner" {
-  project = google_project.peg_policy.project_id
-  role    = "roles/owner"
-  member  = "serviceAccount:\${var.terraform_service_account}"
-}
-
-resource "google_project_iam_audit_config" "peg_policy" {
-  project = google_project.peg_policy.project_id
-  service = "allServices"
-
-  audit_log_config {
-    log_type = "ADMIN_READ"
-  }
-
-  audit_log_config {
-    log_type = "DATA_READ"
-  }
-
-  audit_log_config {
-    log_type = "DATA_WRITE"
-  }
-
-  depends_on = [google_project_iam_member.peg_policy_terraform_owner]
-}
-
-resource "google_project_service" "peg_policy_storage" {
-  project                    = google_project.peg_policy.project_id
-  service                    = "storage.googleapis.com"
-  disable_on_destroy         = false
-  disable_dependent_services = false
-
-  depends_on = [google_project_iam_audit_config.peg_policy]
-}
-
-resource "google_project_service" "peg_policy_iam" {
-  project                    = google_project.peg_policy.project_id
-  service                    = "iam.googleapis.com"
-  disable_on_destroy         = false
-  disable_dependent_services = false
-
-  depends_on = [google_project_iam_audit_config.peg_policy]
-}
-
 resource "google_storage_bucket" "peg_policy" {
-  name                        = google_project.peg_policy.project_id
-  project                     = google_project.peg_policy.project_id
+  name                        = "\${google_project.monitoring.project_id}-peg-policy"
+  project                     = google_project.monitoring.project_id
   location                    = var.gcp_region
   force_destroy               = false
   uniform_bucket_level_access = true
@@ -295,15 +226,15 @@ resource "google_storage_bucket" "peg_policy" {
   }
 
   depends_on = [
-    google_project_service.peg_policy_storage,
+    google_project_service.storage,
     google_storage_bucket_iam_policy.peg_policy_access_logs,
   ]
 }
 
 # trunk-ignore(checkov/CKV_GCP_62): a bucket cannot write access logs to itself.
 resource "google_storage_bucket" "peg_policy_access_logs" {
-  name                        = "\${google_project.peg_policy.project_id}-access-logs"
-  project                     = google_project.peg_policy.project_id
+  name                        = "\${google_project.monitoring.project_id}-peg-policy-access-logs"
+  project                     = google_project.monitoring.project_id
   location                    = var.gcp_region
   force_destroy               = false
   uniform_bucket_level_access = true
@@ -337,32 +268,10 @@ resource "google_storage_bucket" "peg_policy_access_logs" {
     prevent_destroy = true
   }
 
-  depends_on = [google_project_service.peg_policy_storage]
-}
-
-resource "google_project_iam_custom_role" "peg_policy_bucket_controller" {
-  project     = google_project.peg_policy.project_id
-  role_id     = "pegPolicyBucketController"
-  title       = "Peg policy bucket controller"
-  description = "Protected Terraform control of Peg bucket metadata, configuration, and authoritative IAM."
-  permissions = [
-    "storage.buckets.get",
-    "storage.buckets.getIamPolicy",
-    "storage.buckets.setIamPolicy",
-    "storage.buckets.update",
-  ]
-
-  depends_on = [google_project_service.peg_policy_iam]
+  depends_on = [google_project_service.storage]
 }
 
 data "google_iam_policy" "peg_policy_access_logs" {
-  binding {
-    role = google_project_iam_custom_role.peg_policy_bucket_controller.name
-    members = [
-      "serviceAccount:\${var.terraform_service_account}",
-    ]
-  }
-
   binding {
     role = "roles/storage.objectCreator"
     members = [
@@ -390,22 +299,15 @@ resource "google_service_account" "metrics_bridge_runtime" {
 }
 
 resource "google_service_account" "peg_policy_publisher" {
-  project      = google_project.peg_policy.project_id
+  project      = google_project.monitoring.project_id
   account_id   = "peg-policy-publisher"
   display_name = "Peg policy publisher"
   description  = "Protected Terraform publisher for private Peg policy generations."
 
-  depends_on = [google_project_service.peg_policy_iam]
+  depends_on = [google_project_service.iam]
 }
 
 data "google_iam_policy" "peg_policy" {
-  binding {
-    role = google_project_iam_custom_role.peg_policy_bucket_controller.name
-    members = [
-      "serviceAccount:\${var.terraform_service_account}",
-    ]
-  }
-
   binding {
     role = "roles/storage.objectViewer"
     members = [
