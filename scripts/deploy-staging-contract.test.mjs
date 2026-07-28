@@ -717,6 +717,28 @@ function assertForbiddenSignature(
   );
 }
 
+function assertSingleStructuredSignature(
+  contents,
+  message,
+  filePath,
+  kind,
+  surface,
+) {
+  const records = discoverDeployStagingCallsites({ [filePath]: contents });
+  assert.deepEqual(
+    records.map((record) => ({
+      kind: record.kind,
+      surface: record.surface,
+    })),
+    [{ kind, surface }],
+    `${message}: structured invocation must produce one owned record`,
+  );
+  expectFailure(
+    { ...files, [filePath]: contents },
+    "executable callsite inventory must be exactly",
+  );
+}
+
 function assertProgrammaticConstCallsite(contents, message) {
   assertForbiddenSignature(contents, message, "scripts/const-deploy.mjs");
 }
@@ -1428,10 +1450,56 @@ assertForbiddenSignature(
   "YAML argv array",
   "new-cloudbuild.yaml",
 );
-assertForbiddenSignature(
+assertSingleStructuredSignature(
   JSON.stringify({ entrypoint: "gcloud", args: ["app", "deploy", "app.yaml"] }),
   "JSON entrypoint and argv array",
   "new-cloudbuild.json",
+  "app-deploy",
+  "entrypoint+args",
+);
+assertSingleStructuredSignature(
+  JSON.stringify({
+    steps: [
+      {
+        name: "gcr.io/cloud-builders/gcloud",
+        entrypoint: "gcloud",
+        args: ["app", "deploy", "app.yaml"],
+      },
+    ],
+  }),
+  "Cloud Build entrypoint override and argv array",
+  "cloudbuild-overlap.json",
+  "app-deploy",
+  "steps[0].entrypoint+args",
+);
+assertSingleStructuredSignature(
+  `apiVersion: batch/v1
+kind: Job
+spec:
+  template:
+    spec:
+      containers:
+        - name: deploy
+          image: google/cloud-sdk
+          command: ["gcloud"]
+          args: ["builds", "submit", "."]
+`,
+  "Kubernetes command and args arrays",
+  "new-deploy-job.yaml",
+  "builds-submit",
+  "spec.template.spec.containers[0].command+args",
+);
+assertSingleStructuredSignature(
+  `services:
+  deploy:
+    image: google/cloud-sdk
+    entrypoint: ["gcloud"]
+    command: ["app", "deploy", "app.yaml"]
+`,
+  "Compose entrypoint and command arrays",
+  "compose.yaml",
+  "app-deploy",
+  "services.deploy.entrypoint+command",
 );
 assertForbiddenSignature(
   `resource "terraform_data" "unregistered_deploy" {

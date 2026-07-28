@@ -814,6 +814,7 @@ function structuredGcloudRecord(filePath, path, value) {
   if (
     !isMapping(value) ||
     !/^gcr\.io\/cloud-builders\/gcloud(?::|@|$)/u.test(value.name) ||
+    value.entrypoint !== undefined ||
     !Array.isArray(value.args)
   ) {
     return undefined;
@@ -830,19 +831,62 @@ function structuredGcloudRecord(filePath, path, value) {
   };
 }
 
-function structuredEntryPointRecords(filePath, path, value) {
+function structuredCommandPart(value) {
+  if (typeof value === "string") return value;
   if (
-    !isMapping(value) ||
-    typeof value.entrypoint !== "string" ||
-    !Array.isArray(value.args)
+    Array.isArray(value) &&
+    value.every((entry) => typeof entry === "string")
   ) {
-    return [];
+    return value.join(" ");
   }
+  return undefined;
+}
+
+function structuredCommandVector(value) {
+  if (!isMapping(value)) return undefined;
+  const entrypoint = structuredCommandPart(value.entrypoint);
+  const command = structuredCommandPart(value.command);
+  const args = structuredCommandPart(value.args);
+
+  if (entrypoint !== undefined && command !== undefined) {
+    return {
+      keys: new Set([
+        "entrypoint",
+        "command",
+        ...(args === undefined ? [] : ["args"]),
+      ]),
+      text: [entrypoint, command, args].filter(Boolean).join(" "),
+    };
+  }
+  if (entrypoint !== undefined && args !== undefined) {
+    return {
+      keys: new Set(["entrypoint", "args"]),
+      text: `${entrypoint} ${args}`,
+    };
+  }
+  if (command !== undefined && args !== undefined) {
+    return {
+      keys: new Set(["command", "args"]),
+      text: `${command} ${args}`,
+    };
+  }
+  return undefined;
+}
+
+function structuredCommandVectorRecords(filePath, path, value) {
+  const vector = structuredCommandVector(value);
+  if (!vector) return [];
+  const componentPath = [...vector.keys].join("+");
   return lexicalDeployRecords(
     filePath,
-    `${path}.entrypoint+args`,
-    `${value.entrypoint} ${value.args.map(String).join(" ")}`,
+    path ? `${path}.${componentPath}` : componentPath,
+    vector.text,
   );
+}
+
+function isStructuredCommandComponent(key, parent) {
+  const vector = structuredCommandVector(parent);
+  return vector?.keys.has(String(key)) ?? false;
 }
 
 function workflowShellMode(shell) {
@@ -896,12 +940,14 @@ function structuredRecords(filePath, contents, errors) {
   if (document === undefined) return [];
   const records = [];
   visitYaml(document, "", (value, path, key, parent) => {
-    if (typeof value === "string") {
+    const commandComponent = isStructuredCommandComponent(key, parent);
+    if (typeof value === "string" && !commandComponent) {
       records.push(
         ...structuredStringRecords(filePath, path, value, key, parent),
       );
     }
     if (
+      !commandComponent &&
       Array.isArray(value) &&
       value.every((entry) => typeof entry === "string")
     ) {
@@ -909,7 +955,7 @@ function structuredRecords(filePath, contents, errors) {
     }
     const gcloud = structuredGcloudRecord(filePath, path, value);
     if (gcloud) records.push(gcloud);
-    records.push(...structuredEntryPointRecords(filePath, path, value));
+    records.push(...structuredCommandVectorRecords(filePath, path, value));
   });
   return records;
 }
