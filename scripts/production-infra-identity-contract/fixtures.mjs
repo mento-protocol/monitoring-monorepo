@@ -330,6 +330,13 @@ data "google_iam_policy" "peg_policy_access_logs" {
       "group:cloud-storage-analytics@google.com",
     ]
   }
+
+  binding {
+    role = google_project_iam_custom_role.peg_policy_bucket_controller.name
+    members = [
+      "serviceAccount:\${var.terraform_service_account}",
+    ]
+  }
 }
 
 resource "google_storage_bucket_iam_policy" "peg_policy_access_logs" {
@@ -359,6 +366,21 @@ resource "google_service_account" "peg_policy_publisher" {
   depends_on = [google_project_service.iam]
 }
 
+resource "google_project_iam_custom_role" "peg_policy_bucket_controller" {
+  project     = google_project.monitoring.project_id
+  role_id     = "pegPolicyBucketController"
+  title       = "Peg Policy Bucket Controller"
+  description = "Allows Terraform to reconcile the authoritative Peg policy bucket IAM policies."
+  permissions = [
+    "storage.buckets.get",
+    "storage.buckets.getIamPolicy",
+    "storage.buckets.setIamPolicy",
+    "storage.buckets.update",
+  ]
+
+  depends_on = [google_project_service.iam]
+}
+
 data "google_iam_policy" "peg_policy" {
   binding {
     role = "roles/storage.objectViewer"
@@ -372,6 +394,13 @@ data "google_iam_policy" "peg_policy" {
     role = "roles/storage.objectAdmin"
     members = [
       "serviceAccount:\${google_service_account.peg_policy_publisher.email}",
+    ]
+  }
+
+  binding {
+    role = google_project_iam_custom_role.peg_policy_bucket_controller.name
+    members = [
+      "serviceAccount:\${var.terraform_service_account}",
     ]
   }
 }

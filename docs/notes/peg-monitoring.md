@@ -32,8 +32,10 @@ The source-owned surfaces are:
 
 This source packet does not deploy the producer, apply Grafana resources, or
 prove live telemetry. `terraform/peg-policy.tf` owns the policy identities and
-bucket IAM. The separate manual `Peg Policy Publication` root consumes the
-publisher identity to publish the private artifact. Its Grafana consumers are absent by default because the source-controlled
+bucket IAM. The foundation is applied, but the separate manual `Peg Policy
+Publication` root is paused pending the bucket-controller recovery in
+[ADR 0055](../adr/0055-peg-policy-bucket-controller-recovery.md). Its Grafana
+consumers are absent by default because the source-controlled
 `local.peg_alerts_enabled` switch is `false`. That single Terraform local gates
 the Peg folder, templates, contact points, and rule group; it is not a workflow,
 variable, or policy-artifact switch.

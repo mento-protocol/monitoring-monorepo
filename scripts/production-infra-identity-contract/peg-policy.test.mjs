@@ -97,6 +97,32 @@ for (const [from, to, expected, occurrence = 0] of [
     1,
   ],
   [
+    '  role_id     = "pegPolicyBucketController"',
+    '  role_id     = "pegPolicyBucketAdmin"',
+    "Peg policy bucket controller role: role_id must be exactly",
+  ],
+  [
+    "  project     = google_project.monitoring.project_id",
+    "  project     = var.gcp_project_id",
+    "Peg policy bucket controller role: project must be exactly",
+  ],
+  [
+    '  title       = "Peg Policy Bucket Controller"',
+    '  title       = "Peg Policy Bucket Admin"',
+    "Peg policy bucket controller role: title must be exactly",
+  ],
+  [
+    '    "storage.buckets.update",',
+    '    "storage.buckets.delete",',
+    "Peg policy bucket controller role: permissions must contain only",
+  ],
+  [
+    "  depends_on = [google_project_service.iam]",
+    "  depends_on = [google_project_service.storage]",
+    "Peg policy bucket controller role: depends_on must contain only",
+    2,
+  ],
+  [
     '    role = "roles/storage.objectViewer"',
     '    role = "roles/storage.admin"',
     'Peg policy peg_policy authoritative IAM policy: must contain exactly one "roles/storage.objectViewer" binding',
@@ -200,7 +226,7 @@ expectFailure(
     members = ["group:eng@mentolabs.xyz"]
   }`,
   ),
-  "Peg policy peg_policy authoritative IAM policy: must contain exactly 2 bindings",
+  "Peg policy peg_policy authoritative IAM policy: must contain exactly 3 bindings",
 );
 
 expectFailure(
@@ -211,6 +237,41 @@ expectFailure(
     '      "serviceAccount:org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com",',
   ),
   'Peg policy peg_policy authoritative IAM policy: "roles/storage.objectViewer" members must contain only',
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/peg-policy.tf",
+    '      "serviceAccount:${var.terraform_service_account}",',
+    '      "serviceAccount:other@mento-monitoring.iam.gserviceaccount.com",',
+  ),
+  "Peg policy peg_policy_access_logs authoritative IAM policy: google_project_iam_custom_role.peg_policy_bucket_controller.name members must contain only",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/peg-policy.tf",
+    '      "serviceAccount:${var.terraform_service_account}",',
+    '      "serviceAccount:other@mento-monitoring.iam.gserviceaccount.com",',
+    1,
+  ),
+  "Peg policy peg_policy authoritative IAM policy: google_project_iam_custom_role.peg_policy_bucket_controller.name members must contain only",
+);
+
+expectFailure(
+  {
+    ...validFiles,
+    "terraform/peg-policy-controller-extra.tf": `
+resource "google_project_iam_member" "peg_policy_controller_extra" {
+  project = google_project.monitoring.project_id
+  role    = google_project_iam_custom_role.peg_policy_bucket_controller.name
+  member  = "serviceAccount:other@mento-monitoring.iam.gserviceaccount.com"
+}
+`,
+  },
+  "Peg policy bucket controller role may be used only by the authoritative bucket policies",
 );
 
 expectFailure(
