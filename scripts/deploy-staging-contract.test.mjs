@@ -1441,7 +1441,7 @@ assertForbiddenSignature(
   ],
 });
 `,
-  "multiline unknown object-form wrapper fails closed",
+  "multiline unknown direct object-form wrappers must be discovered",
   "scripts/unknown-object-command-vector-deploy.mjs",
 );
 assertForbiddenSignature(
@@ -1462,7 +1462,7 @@ assertForbiddenSignature(
   `await deploy\`gcloud builds
 submit .\`;
 `,
-  "multiline unknown tagged wrapper fails closed",
+  "multiline unknown static tagged wrappers must be discovered",
   "scripts/unknown-tagged-template-deploy.mjs",
 );
 assertForbiddenSignature(
@@ -1554,7 +1554,7 @@ assertForbiddenSignature(
   ".",
 ]);
 `,
-  "multiline unknown programmatic wrapper fails closed",
+  "multiline unknown direct programmatic wrappers must be discovered",
   "scripts/unknown-wrapper-deploy.mjs",
 );
 assertForbiddenSignature(

@@ -104,11 +104,12 @@ order makes both automatic deploys race missing infrastructure and fail closed.
 - **Remove the broad grants in the same apply** — rejected because the
   replacement paths need live canary proof first and Terraform cannot prove
   the external deploy behavior.
-- **Maintain a general shell parser for callsite discovery** — rejected because
-  five approved calls do not justify owning shell-language semantics. The
-  lexical contract instead rejects deploy-shaped text outside those exact
-  callsites; supporting inert examples or masking native PowerShell block
-  comments and batch `REM`/`::` lines would require a real shell AST.
+- **Maintain general shell and JavaScript invocation parsers for callsite
+  discovery** — rejected because five approved calls do not justify owning
+  those language semantics. The bounded lexical and AST recovery covers the
+  checked-in direct forms. It does not interpret indirect
+  `Function.prototype.call`/`apply`; supporting those forms, inert examples, or
+  native comment masking would expand the partial parser.
 
 ## Consequences
 
@@ -120,15 +121,16 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   executor have the exact staging grants they need; the legacy default Cloud
   Build identity remains outside the staging-principal set.
 - A checked-in contract allows exactly five literal checked-in submit/deploy
-  callsites and their required source-staging flag/value. Any other literal
-  deploy-shaped text in an executable surface fails closed, including text in a
-  wrapper, generated script, Node/TypeScript source, Dockerfile, or Terraform
-  configuration outside comments. Native PowerShell block comments and batch
-  `REM`/`::` lines are deliberately not parsed or masked, so deploy-shaped text
-  there also fails closed; inert examples belong only in
-  `scripts/deploy-staging-contract.test.mjs`. Dynamically constructed
-  executables and paths are forbidden by this workflow; static discovery cannot
-  prove them.
+  callsites and their required source-staging flag/value. Discovery rejects
+  additional deploy records recovered from shell-like surfaces, wrappers,
+  generated scripts, Dockerfiles, structured configuration, and Terraform
+  outside comments. Node/TypeScript recovery covers direct call/new expressions
+  with inline literals or supported `const`/object aliases, plus static tagged
+  templates. Indirect `Function.prototype.call`/`apply`, dynamically constructed
+  executables, and dynamic paths are forbidden but outside the static proof.
+  Native PowerShell block comments and batch `REM`/`::` lines are deliberately
+  not masked, so deploy-shaped text there fails closed; inert examples belong
+  only in `scripts/deploy-staging-contract.test.mjs`.
 - Operators must preserve the phase boundary: merge and apply the additive
   infrastructure from current `main`, merge routing, run all deploy canaries,
   then remove broad roles in a separate approved platform apply. This ADR

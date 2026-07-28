@@ -41,15 +41,17 @@ garden_lane: agent-entry-points
   for behavior that syntax and lint checks cannot verify.
 - `pnpm tf:test` owns the deployment source-staging contract. It allows exactly
   five literal checked-in `gcloud builds submit` / `gcloud app deploy`
-  callsites, including their source-staging flag and value. Any other literal
-  deploy-shaped text in an executable shell, package-script, Node/TypeScript
-  source, workflow, Dockerfile, or nested Cloud Build surface fails closed, as
-  does deploy-shaped text in Terraform configuration outside comments. This
-  includes wrappers and generated scripts. Native PowerShell block comments and
-  batch `REM`/`::` lines are deliberately not parsed or masked, so deploy-shaped
-  text there also fails closed; inert examples belong only in
-  `scripts/deploy-staging-contract.test.mjs`. Dynamically constructed
-  executables and paths remain forbidden but cannot be proven statically.
+  callsites, including their source-staging flag and value. Discovery rejects
+  additional deploy records recovered from executable shell, package-script,
+  workflow, Dockerfile, nested Cloud Build, generated-script, and Terraform
+  surfaces. In Node/TypeScript, static recovery covers direct call/new
+  expressions with inline literals or supported `const`/object aliases, plus
+  static tagged-template commands. Indirect `Function.prototype.call`/`apply`,
+  dynamically constructed executables, and dynamic paths remain forbidden but
+  are outside this static proof. Native PowerShell block comments and batch
+  `REM`/`::` lines are deliberately not parsed or masked, so deploy-shaped text
+  there fails closed; inert examples belong only in
+  `scripts/deploy-staging-contract.test.mjs`.
 
 ## Verification
 

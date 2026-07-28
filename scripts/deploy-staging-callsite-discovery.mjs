@@ -4,10 +4,12 @@ import { commentMaskedHcl } from "./production-infra-identity-contract/hcl.mjs";
 import { stripShellComment } from "./production-infra-identity-contract/workflow-inventory.mjs";
 import { isMapping } from "./production-infra-identity-contract/workflow-inventory.mjs";
 
-// This is deliberately a lexical guard, not a shell parser. The source-staging
-// boundary has five approved literal deploy callsites. Any other literal
-// deploy-shaped text in an executable surface is an unsafe new path, including
-// text passed through a shell wrapper or generated script.
+// This is a lexical guard with bounded AST recovery, not a general shell or
+// JavaScript invocation parser. The source-staging boundary has five approved
+// literal deploy callsites. Discovery covers shell-like surfaces and direct
+// Node/TypeScript call/new expressions or static tagged templates. Indirect
+// Function.prototype.call/apply and dynamic execution remain forbidden but are
+// outside this static proof.
 const DEPLOY_KINDS = [
   { group: "builds", command: "submit", kind: "builds-submit" },
   { group: "app", command: "deploy", kind: "app-deploy" },
@@ -639,9 +641,9 @@ function programmaticDeployRecords(filePath, contents, errors) {
   const records = [];
   const visit = (node) => {
     if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
-      // The existing line-level guard deliberately rejects literal deploy
-      // shapes even through unknown wrappers. Keep that fail-closed policy
-      // while using the AST only to recover shapes split across lines.
+      // The line-level guard rejects visible literal deploy shapes even through
+      // unknown wrappers. The AST recovers supported direct invocation shapes
+      // split across lines; it does not interpret indirect call/apply forms.
       const callText = node.getText(sourceFile);
       const existingKinds = new Set(
         lexicalDeployRecords(filePath, "shell", callText).map(
@@ -658,8 +660,9 @@ function programmaticDeployRecords(filePath, contents, errors) {
         );
       if (firstArgument !== undefined) {
         // Resolved aliases passed to arbitrary member methods may be inert
-        // data. Literal expressions stay fail-closed for every callee; aliases
-        // require either a direct call or a known command-execution member.
+        // data. Literal expressions stay fail-closed for every direct callee;
+        // aliases require either a direct call or a known command-execution
+        // member.
         const acceptsFirstArgument =
           !isStaticReference(invocationArguments[0]) ||
           acceptsResolvedCommandReferences(node);

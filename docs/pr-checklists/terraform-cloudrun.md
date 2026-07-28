@@ -92,13 +92,16 @@ trimmed build context:
       `pnpm install` prove dependency resolution, but they do not prove a reduced
       Cloud Build upload/Docker context contains the same files.
 - [ ] The approved `gcloud builds submit` / `gcloud app deploy` callsites use
-      their required source-staging flag/value. `pnpm tf:test` fails closed on
-      any other literal deploy-shaped text in shell or Node/TypeScript source,
-      package scripts, workflows, Dockerfiles, or Terraform configuration
-      outside comments. Native PowerShell block comments and batch `REM`/`::`
-      lines are deliberately not parsed or masked, so deploy-shaped text there
-      also fails closed; inert examples belong only in
-      `scripts/deploy-staging-contract.test.mjs`.
+      their required source-staging flag/value. `pnpm tf:test` rejects additional
+      deploy records recovered from shell-like surfaces, package scripts,
+      workflows, Dockerfiles, structured configuration, and Terraform outside
+      comments. Node/TypeScript recovery covers direct call/new expressions with
+      inline literals or supported `const`/object aliases, plus static tagged
+      templates. Indirect `Function.prototype.call`/`apply`, dynamically
+      constructed executables, and dynamic paths are forbidden but outside the
+      static proof. Native PowerShell block comments and batch `REM`/`::` lines
+      are deliberately not masked, so deploy-shaped text there fails closed;
+      inert examples belong only in `scripts/deploy-staging-contract.test.mjs`.
 - [ ] Bucket-scope upload IAM: Cloud Build callers get bucket read/object create,
       build identities get object view, and App Engine uploaders get bucket
       read/Object Admin.
