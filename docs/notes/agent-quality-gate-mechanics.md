@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-28
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -71,6 +71,11 @@ scheduled evaluation. Review the output, then run:
 ```bash
 pnpm agent:quality-gate --run
 ```
+
+Every non-empty candidate change set also runs `pnpm tf:test`. The required
+`Production infrastructure contract` CI job runs the same command without a
+path condition, so production-infrastructure and deployment contracts cannot
+skip on an unrelated path.
 
 Execution stays local: lint, typecheck, tests, codegen,
 Trunk, and formatting/validation commands. Terraform formatting receives an explicit Git-visible source

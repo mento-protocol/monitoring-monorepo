@@ -2475,13 +2475,6 @@ while IFS= read -r path; do
       esac
       ;;
   esac
-  # Keep the deployment source-staging contract's complete callsite inventory
-  # and its implementation on the same fail-closed validation path.
-  case "$path" in
-    .github/workflows/metrics-bridge.yml|scripts/deploy-bridge.sh|aegis/grafana-agent/deploy.sh|aegis/bin/deploy.sh|aegis/grafana-agent/cloudbuild.yaml|scripts/deploy-staging-callsite-discovery.mjs|scripts/deploy-staging-contract.mjs|scripts/deploy-staging-contract.test.mjs)
-      add_command "pnpm tf:test" "deployment source-staging contract changed"
-      ;;
-  esac
   # `pnpm tf:test` owns the fail-closed production identity contract. Route
   # every complete-inventory input plus the contract implementation itself.
   # Keep this after the specialized cases so ci.yml/infra.yml retain their
@@ -2504,6 +2497,15 @@ while IFS= read -r path; do
     done
   fi
 done < "$changed_paths_file"
+
+# The Terraform test suite validates production infrastructure and deployment
+# contracts that can be affected indirectly. Every non-empty change set in this
+# checkout therefore runs it once, regardless of its changed paths. Gate unit
+# tests invoke this script against isolated fixture repositories; those fixtures
+# do not own this repository-specific contract.
+if [[ "$script_source_dir" == "$repo_root/scripts" ]]; then
+  add_command "pnpm tf:test" "non-empty change set validates production infrastructure contract"
+fi
 
 if [[ "$routing_sensitive_paths_changed" == "true" ]]; then
   add_command "pnpm docs:navigation-eval -- --check-fixtures" "routing-sensitive source changed"

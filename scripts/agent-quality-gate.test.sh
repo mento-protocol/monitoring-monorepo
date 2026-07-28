@@ -2347,8 +2347,13 @@ for deploy_staging_contract_case in \
   IFS='|' read -r deploy_staging_contract_path existing_mapping <<< "$deploy_staging_contract_case"
   run_gate "$deploy_staging_contract_path"
   assert_contains "- $existing_mapping"
-  assert_occurrences 1 "- pnpm tf:test (deployment source-staging contract changed)"
+  assert_occurrences 1 "- pnpm tf:test ("
 done
+
+# The production infrastructure contract is not path-scoped: an ordinary
+# application change must still route exactly one canonical tf:test command.
+run_gate "ui-dashboard/src/deploy.ts"
+assert_occurrences 1 "- pnpm tf:test (non-empty change set validates production infrastructure contract)"
 
 run_gate "scripts/terraform-fmt-check.mjs"
 assert_contains "- node scripts/terraform-fmt-check.test.mjs (Terraform format helper changed)"
