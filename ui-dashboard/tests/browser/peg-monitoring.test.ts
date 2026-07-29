@@ -118,7 +118,7 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
   ).toBeVisible();
   await expect(
     page.getByText(
-      "0.25% (25 bps) below target or 0.25% (25 bps) above target over 10 minutes.",
+      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target, or when the decision market's buy/sell spread exceeds 30 bps.",
       { exact: true },
     ),
   ).toBeVisible();

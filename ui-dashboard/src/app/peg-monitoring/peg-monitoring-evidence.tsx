@@ -229,9 +229,17 @@ function AlertSettings({
         <div className="pb-3">
           <dt className="text-xs font-medium text-slate-300">Warning</dt>
           <dd className="mt-1 text-sm leading-6 text-slate-100">
+            A warning fires after {formatDuration(policy.warnSustainSeconds)}{" "}
+            when the price is{" "}
             {formatThreshold(asset.downsideWarningThresholdBps)} below target or{" "}
             {formatThreshold(asset.premiumWarningThresholdBps)} above target
-            over {formatDuration(policy.warnSustainSeconds)}.
+            {source !== null && (
+              <>
+                , or when the decision market's buy/sell spread exceeds{" "}
+                {formatBps(source.policy.spreadEnvelopeBps)}
+              </>
+            )}
+            .
           </dd>
         </div>
         <div className="py-3">

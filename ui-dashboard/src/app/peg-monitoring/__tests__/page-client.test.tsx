@@ -120,7 +120,7 @@ describe("PegMonitoringPageClient", () => {
       "A 50,000 EUROP sale would get about 0.9965 EUR per EUROP.",
     );
     expect(container.textContent).toContain(
-      "0.25% (25 bps) below target or 0.25% (25 bps) above target over 10 minutes.",
+      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target, or when the decision market's buy/sell spread exceeds 30 bps.",
     );
     expect(container.textContent).toContain(
       "Also page immediately when the full-size sale price is missing for 10 consecutive checks and another risk signal is active: high pool inflow, an unusually wide buy/sell spread, or a partial-fill price below the critical limit.",
@@ -134,6 +134,37 @@ describe("PegMonitoringPageClient", () => {
     expect(otherMarkets?.hasAttribute("open")).toBe(false);
     expect(technical?.hasAttribute("open")).toBe(false);
     expect(technical?.textContent).toContain("Schema");
+  });
+  it("keeps alert settings available when the decision market is absent", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.filter(
+              (source) => source.id !== item.policy.deepVenueSource,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+
+    const settings = container.querySelector(
+      '[data-testid="peg-alert-settings-europ-schuman"]',
+    );
+    expect(settings?.textContent).toContain(
+      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target.",
+    );
+    expect(settings?.textContent).not.toContain(
+      "decision market's buy/sell spread exceeds",
+    );
   });
   it("keeps the ticking age outside the live status while announcing semantic state", () => {
     state.current = {
