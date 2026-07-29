@@ -889,6 +889,62 @@ describe("presentPegMonitoring", () => {
     expect(presentation.closestWarning?.warningDistanceBps).toBeCloseTo(-5);
   });
 
+  it("uses the nearer directional warning boundary for an asset at target", () => {
+    const response = healthyResponse();
+    const item = response.packages[0]!;
+    const atTarget = {
+      ...item,
+      asset: "at-target",
+      policy: {
+        ...item.policy,
+        warnDeviationBps: 100,
+        criticalDeviationBps: 150,
+        premiumWarnBps: 10,
+      },
+      sources: item.sources.map((source) =>
+        source.id === item.policy.deepVenueSource
+          ? {
+              ...source,
+              executablePrice: item.policy.target,
+              deviationBps: 0,
+              premiumBps: 0,
+            }
+          : source,
+      ),
+    };
+    const twentyBpsFromWarning = {
+      ...item,
+      asset: "twenty-bps-from-warning",
+      sources: item.sources.map((source) =>
+        source.id === item.policy.deepVenueSource
+          ? {
+              ...source,
+              executablePrice: 0.9995,
+              deviationBps: 5,
+              premiumBps: 0,
+            }
+          : source,
+      ),
+    };
+    const presentation = presentPegMonitoring(
+      {
+        ...response,
+        packages: [twentyBpsFromWarning, atTarget],
+      },
+      CURRENT_CONTEXT,
+    );
+    const atTargetPresentation = presentation.assets.find(
+      ({ asset }) => asset.asset === "at-target",
+    );
+
+    expect(atTargetPresentation).toMatchObject({
+      direction: "at target",
+      warningThresholdBps: 10,
+      warningDistanceBps: 10,
+    });
+    expect(presentation.closestWarning?.asset.asset).toBe("at-target");
+  });
+
   it("ranks mixed packages by severity and treats stale or previous packages as uncertain", () => {
     const response = healthyResponse();
     const item = response.packages[0]!;
