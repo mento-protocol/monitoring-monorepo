@@ -124,9 +124,15 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
   await expect(aggregate).toContainText(
     "No fresh monitoring package has arrived",
   );
+  await expect(aggregate).not.toContainText(/\b\d+[smh] old/);
+  await expect(page.getByTestId("peg-aggregate-age")).toContainText(
+    /Last confirmed package \d+[smh] old/,
+  );
   await expect(
     page.getByText("Last confirmed conclusion", { exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Stale — last confirmed package.")).toBeVisible();
-  await expect(page.getByText(/^Last confirmed package \d/)).toBeVisible();
+  await expect(
+    page.getByText(/^Last confirmed package \d+[smh] ago$/),
+  ).toBeVisible();
 });

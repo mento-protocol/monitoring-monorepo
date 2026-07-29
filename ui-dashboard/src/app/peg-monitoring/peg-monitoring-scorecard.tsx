@@ -355,32 +355,43 @@ export function PegMonitoringScorecard({
     stale,
   );
   const aggregateDetail = stale
-    ? `No fresh monitoring package has arrived; the last confirmed package is ${formatAge(ageMs)} old.`
+    ? "No fresh monitoring package has arrived; values below are the last confirmed measurements."
     : presentation.aggregate.detail;
   return (
     <section aria-label="Peg decision scorecard" className="space-y-5">
       <div
-        data-testid="peg-aggregate-status"
-        role="status"
-        aria-label={
-          aggregateDetail
-            ? `${presentation.aggregate.label}. ${aggregateDetail}`
-            : presentation.aggregate.label
-        }
         className={`rounded-xl border px-5 py-4 ${toneClasses[presentation.aggregate.tone]}`}
       >
-        {aggregateDetail ? (
-          <>
-            <p className="text-lg font-semibold">
-              {presentation.aggregate.label}
-            </p>
-            <p className="mt-1 text-sm font-normal text-slate-300">
-              {aggregateDetail}
-            </p>
-          </>
-        ) : (
-          presentation.aggregate.label
-        )}
+        <div
+          data-testid="peg-aggregate-status"
+          role="status"
+          aria-label={
+            aggregateDetail
+              ? `${presentation.aggregate.label}. ${aggregateDetail}`
+              : presentation.aggregate.label
+          }
+        >
+          {aggregateDetail ? (
+            <>
+              <p className="text-lg font-semibold">
+                {presentation.aggregate.label}
+              </p>
+              <p className="mt-1 text-sm font-normal text-slate-300">
+                {aggregateDetail}
+              </p>
+            </>
+          ) : (
+            presentation.aggregate.label
+          )}
+        </div>
+        {stale ? (
+          <p
+            data-testid="peg-aggregate-age"
+            className="mt-1 text-sm font-normal text-slate-300"
+          >
+            Last confirmed package {formatAge(ageMs)} old.
+          </p>
+        ) : null}
       </div>
       <div
         data-testid="peg-headline-cards"

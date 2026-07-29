@@ -115,6 +115,26 @@ describe("PegMonitoringPageClient", () => {
     );
     expect(staleAge?.textContent).toContain("Produced 1m ago;");
     expect(staleLiveStatus?.contains(staleAge ?? null)).toBe(false);
+
+    const aggregateStatus = container.querySelector(
+      '[data-testid="peg-aggregate-status"]',
+    );
+    const aggregateAge = container.querySelector(
+      '[data-testid="peg-aggregate-age"]',
+    );
+    const aggregateText = aggregateStatus?.textContent;
+    expect(aggregateText).toContain("Latest data is stale");
+    expect(aggregateText).toContain(
+      "values below are the last confirmed measurements",
+    );
+    expect(aggregateText).not.toMatch(/\b\d+[smh]\b/);
+    expect(aggregateStatus?.contains(aggregateAge ?? null)).toBe(false);
+
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(aggregateStatus?.textContent).toBe(aggregateText);
+    expect(
+      container.querySelector('[data-testid="peg-aggregate-age"]')?.textContent,
+    ).toContain("2m old");
   });
   it("renders previous-policy, partial source evidence, disabled breaker, and null breaker distinctly", () => {
     const response = makePegMonitoringResponse();
@@ -223,7 +243,7 @@ describe("PegMonitoringPageClient", () => {
       '[data-testid="peg-aggregate-status"]',
     );
     expect(aggregate?.textContent).toContain("Critical condition detected");
-    expect(aggregate?.className).toContain("border-red");
+    expect(aggregate?.parentElement?.className).toContain("border-red");
     expect(container.textContent).toContain(
       "Critical condition in the current package",
     );
