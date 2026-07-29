@@ -16,6 +16,7 @@ import {
   isSettledAuditComment,
   isUsableBaseline,
   lastSeenMoved,
+  reconcileToTarget,
   parseArgs,
   parseStubMetadata,
   resolveArchiveToken,
@@ -147,71 +148,138 @@ function makeStub({
   };
 }
 
-/** The shape the stub should have once settlement has written everything: closed,
- * approval consumed, terminal marker applied. `settlementHeld` checks exactly
- * this, so the default third read models a settlement nothing interfered with. */
-function settledSnapshot(base) {
-  const names = (base.labels ?? [])
-    .map((l) => (typeof l === "string" ? l : l?.name))
-    .filter(Boolean)
-    .filter((n) => n !== "sentry:approved-archive");
-  return {
-    ...base,
-    state: "CLOSED",
-    labels: [...names, "sentry:archived"].map((name) => ({ name })),
-  };
-}
-
+/**
+ * A stateful in-memory GitHub issue, because the reconciler decides from LIVE
+ * reads. A canned-snapshot fake cannot test it — reads have to reflect the
+ * writes, or "re-read and correct what is actually wrong" has nothing to
+ * observe. This also lets a test assert the FINAL state, which is the real
+ * convergence question, rather than a sequence of calls.
+ *
+ * `failOn` throws instead of applying (a clean failure). `ambiguousOn` applies
+ * the mutation and THEN throws — the lost-response shape that breaks every
+ * did-we-do-it flag, and the one this round exists to handle.
+ * `concurrentReopenBeforeView` runs ingest's whole reopen against the model
+ * just before the Nth read returns, modelling the other workflow interleaving.
+ */
 function makeRunGh({
   stub,
-  settleStub = null,
   approvalLabelGone = false,
-  // The post-settlement verification read. Defaults to "our writes landed and
-  // nothing else touched the stub"; a test overrides it to model ingest's
-  // regression reopen completing inside the settlement window.
-  verifyStub = null,
+  failOn = () => null,
+  ambiguousOn = () => null,
+  // Reports success WITHOUT applying — a write that is accepted and does not
+  // take effect. The mirror image of ambiguousOn, and the only thing the
+  // post-correction verification read can catch.
+  noopOn = () => false,
+  concurrentReopenBeforeView = null,
 }) {
   const calls = [];
   let views = 0;
-  const runGh = async (args) => {
-    calls.push(args);
-    const [a0, a1] = args;
-    if (a0 === "issue" && a1 === "view") {
-      // View 0 is runArchive's pre-mutation read; view 1 is settleQueueStub's
-      // pre-CAS re-read (settleStub models labels shed between the two); view 2
-      // is the post-settlement verification.
-      const base = settleStub ?? stub;
-      const snapshot =
-        views === 0
-          ? stub
-          : views === 1
-            ? base
-            : (verifyStub ?? settledSnapshot(base));
-      views += 1;
-      return JSON.stringify(snapshot);
+  const model = {
+    number: stub.number,
+    title: stub.title,
+    url: stub.url,
+    body: stub.body,
+    state: stub.state,
+    labels: (stub.labels ?? [])
+      .map((l) => (typeof l === "string" ? l : l?.name))
+      .filter(Boolean),
+    comments: [...(stub.comments ?? [])],
+  };
+
+  // Exactly what scripts/sentry-triage-ingest.mjs reopenQueueIssue does.
+  const ingestReopen = () => {
+    model.labels = model.labels.filter(
+      (n) => !REOPEN_SHED_LABELS_FIXTURE.includes(n),
+    );
+    if (!model.labels.includes("sentry:needs-triage")) {
+      model.labels.push("sentry:needs-triage");
     }
+    model.state = "OPEN";
+  };
+
+  const snapshot = () => ({
+    ...model,
+    labels: model.labels.map((name) => ({ name })),
+  });
+
+  const apply = (args) => {
+    const [a0, a1] = args;
     if (a0 === "label" && a1 === "create") return "";
-    // The approval-marker compare-and-swap. `approvalLabelGone` models the loser
-    // of the race: ingest's regression reopen already shed the label, so GitHub
-    // answers 404 exactly as `gh api` surfaces it.
     if (a0 === "api" && a1 === "-X") {
-      if (approvalLabelGone) {
+      const name = String(args[3]).split("/labels/")[1];
+      if (approvalLabelGone || !model.labels.includes(name)) {
         throw new Error(
           `gh ${args.join(" ")} failed with exit 1:\ngh: Not Found (HTTP 404)`,
         );
       }
+      model.labels = model.labels.filter((n) => n !== name);
       return "";
     }
-    if (
-      a0 === "issue" &&
-      (a1 === "comment" || a1 === "edit" || a1 === "close" || a1 === "reopen")
-    ) {
+    if (a0 === "issue" && a1 === "close") {
+      model.state = "CLOSED";
+      return "";
+    }
+    if (a0 === "issue" && a1 === "reopen") {
+      model.state = "OPEN";
+      return "";
+    }
+    if (a0 === "issue" && a1 === "comment") {
+      model.comments.push({
+        body: args[args.indexOf("--body") + 1],
+        author: { login: "github-actions" },
+      });
+      return "";
+    }
+    if (a0 === "issue" && a1 === "edit") {
+      if (args.includes("--body")) {
+        model.body = args[args.indexOf("--body") + 1];
+      }
+      if (args.includes("--add-label")) {
+        for (const n of args[args.indexOf("--add-label") + 1].split(",")) {
+          if (!model.labels.includes(n)) model.labels.push(n);
+        }
+      }
+      if (args.includes("--remove-label")) {
+        const drop = args[args.indexOf("--remove-label") + 1].split(",");
+        model.labels = model.labels.filter((n) => !drop.includes(n));
+      }
       return "";
     }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
-  return { runGh, calls };
+
+  const runGh = async (args) => {
+    calls.push(args);
+    if (args[0] === "issue" && args[1] === "view") {
+      views += 1;
+      if (concurrentReopenBeforeView === views) ingestReopen();
+      return JSON.stringify(snapshot());
+    }
+    const clean = failOn(args);
+    if (clean) throw new Error(clean);
+    const ambiguous = ambiguousOn(args);
+    if (ambiguous) {
+      apply(args); // the mutation LANDS…
+      throw new Error(ambiguous); // …and the response is lost.
+    }
+    if (noopOn(args)) return ""; // accepted, never applied
+    return apply(args);
+  };
+  return { runGh, calls, model };
 }
+
+/** Mirrors REOPEN_SHED_LABELS so the fake sheds exactly what ingest sheds. */
+const REOPEN_SHED_LABELS_FIXTURE = [
+  "sentry:verdict-code-fix",
+  "sentry:verdict-config-fix",
+  "sentry:verdict-upstream",
+  "sentry:verdict-needs-human",
+  "sentry:projected",
+  "sentry:fix-pr-opened",
+  "sentry:fix-refused",
+  "sentry:approved-archive",
+  "sentry:archived",
+];
 
 function jsonResponse(
   obj,
@@ -246,6 +314,8 @@ function makeFetch({
   readbackThrows = null,
   // The compensation's restore PUT fails.
   restoreThrows = null,
+  // The archive PUT lands and THEN throws — the lost-response shape.
+  ambiguousArchivePut = null,
 } = {}) {
   const calls = [];
   let putDone = false;
@@ -283,6 +353,7 @@ function makeFetch({
     }
     if (method === "PUT" && /\/issues\/[^/]+\/$/.test(url)) {
       if (putDone && restoreThrows) throw new Error(restoreThrows);
+      const wasFirstPut = !putDone;
       if (archive.ok && body) {
         currentIssue = {
           ...currentIssue,
@@ -291,6 +362,12 @@ function makeFetch({
         };
         if (lastSeenAfterPut !== null) currentIssue.lastSeen = lastSeenAfterPut;
         putDone = true;
+      }
+      // Ambiguous success: Sentry applied the archive above, then the response
+      // was lost. The caller sees a rejection it cannot distinguish from a PUT
+      // that never landed.
+      if (wasFirstPut && ambiguousArchivePut) {
+        throw new Error(ambiguousArchivePut);
       }
       return jsonResponse(
         {},
@@ -895,12 +972,11 @@ await test("runArchive reverts the Sentry archive when a regression reopens the 
   // be closed/relabeled off the stale approval, AND the archive we just made
   // must be UNDONE so the regression stays surfaced.
   const stub = makeStub();
-  const reopened = makeStub({ state: "OPEN" });
-  reopened.labels = [
-    { name: "sentry-triage" },
-    { name: "sentry:needs-triage" },
-  ];
-  const { runGh, calls: ghCalls } = makeRunGh({ stub, settleStub: reopened });
+  // Ingest's reopen lands just before settlement's pre-CAS read (view 2).
+  const { runGh, calls: ghCalls } = makeRunGh({
+    stub,
+    concurrentReopenBeforeView: 2,
+  });
   const { fetchImpl, calls: fetchCalls } = makeFetch();
 
   const result = await runArchive(baseOptions(), {
@@ -925,12 +1001,7 @@ await test("runArchive restores the exact prior archive mode on mid-flight rever
   // until-escalating). A mid-flight reopen must restore archived_forever, not
   // force unresolved.
   const stub = makeStub();
-  const reopened = makeStub({ state: "OPEN" });
-  reopened.labels = [
-    { name: "sentry-triage" },
-    { name: "sentry:needs-triage" },
-  ];
-  const { runGh } = makeRunGh({ stub, settleStub: reopened });
+  const { runGh } = makeRunGh({ stub, concurrentReopenBeforeView: 2 });
   const { fetchImpl, calls: fetchCalls } = makeFetch({
     issue: { status: "ignored", substatus: "archived_forever" },
   });
@@ -955,12 +1026,7 @@ await test("runArchive does not revert when the issue was already archived befor
   // If the issue was ALREADY archived_until_escalating (we issued no PUT) and
   // the stub is reopened mid-flight, there is nothing we archived to undo.
   const stub = makeStub();
-  const reopened = makeStub({ state: "OPEN" });
-  reopened.labels = [
-    { name: "sentry-triage" },
-    { name: "sentry:needs-triage" },
-  ];
-  const { runGh } = makeRunGh({ stub, settleStub: reopened });
+  const { runGh } = makeRunGh({ stub, concurrentReopenBeforeView: 2 });
   const { fetchImpl, calls: fetchCalls } = makeFetch({
     issue: { status: "ignored", substatus: "archived_until_escalating" },
   });
@@ -1033,19 +1099,11 @@ await test("a failed close leaves the stub open without approval or archived mar
   // the archive this run made is compensated, so Sentry is not left archived
   // off an approval nobody can spend again.
   const stub = makeStub();
-  const calls = [];
-  const runGh = async (args) => {
-    calls.push(args);
-    const [a0, a1] = args;
-    if (a0 === "issue" && a1 === "view") return JSON.stringify(stub);
-    if (a0 === "label" && a1 === "create") return "";
-    if (a0 === "api" && a1 === "-X") return "";
-    if (a0 === "issue" && a1 === "close") {
-      throw new Error("gh issue close failed: HTTP 500");
-    }
-    if (a0 === "issue" && (a1 === "comment" || a1 === "edit")) return "";
-    throw new Error(`unexpected gh call: ${args.join(" ")}`);
-  };
+  const { runGh, calls, model } = makeRunGh({
+    stub,
+    failOn: (args) =>
+      args[1] === "close" ? "gh issue close failed: HTTP 500" : null,
+  });
   const { fetchImpl, calls: fetchCalls } = makeFetch();
 
   await assertRejects(
@@ -1054,25 +1112,14 @@ await test("a failed close leaves the stub open without approval or archived mar
   );
 
   assert(casCall(calls), "the approval marker was consumed before the close");
-  assert(
-    !labelEditCall(calls),
-    "sentry:archived must not be applied without a close",
-  );
-  // Observable compensation, not just the throw: the Sentry archive is undone…
+  // Convergence is a question about FINAL state, not the call sequence.
+  assertEqual(model.state, "OPEN");
+  assertEqual(model.labels.includes("sentry:archived"), false);
+  assertEqual(model.labels.includes("sentry:approved-archive"), false);
+  assertEqual(parseArchiveBaseline(model.body), null, "baseline rolled back");
   const puts = fetchCalls.filter((c) => c.method === "PUT");
   assertEqual(puts.length, 2);
   assertDeepEqual(puts[1].body, { status: "unresolved" });
-  // …and the baseline this run wrote is rolled back with it, so no stub carries
-  // a baseline describing an archive that no longer exists.
-  const bodyEdits = calls.filter(
-    (a) => a[0] === "issue" && a[1] === "edit" && a.includes("--body"),
-  );
-  assertEqual(bodyEdits.length, 2);
-  assertEqual(
-    bodyEdits[1][bodyEdits[1].indexOf("--body") + 1],
-    stub.body,
-    "the pre-archive body is restored",
-  );
 });
 
 await test("a settlement failure after the CAS reverts the Sentry archive", async () => {
@@ -1084,24 +1131,13 @@ await test("a settlement failure after the CAS reverts the Sentry archive", asyn
   // any event that landed in the archive window (issue #1371). BOTH sides must
   // be undone — Sentry AND the queue — and the run must still fail RED.
   const stub = makeStub();
-  const calls = [];
-  const runGh = async (args) => {
-    calls.push(args);
-    const [a0, a1] = args;
-    if (a0 === "issue" && a1 === "view") return JSON.stringify(stub);
-    if (a0 === "label" && a1 === "create") return "";
-    if (a0 === "api" && a1 === "-X") return "";
-    if (a0 === "issue" && a1 === "edit" && args.includes("--add-label")) {
-      throw new Error("gh issue edit failed: HTTP 502");
-    }
-    if (
-      a0 === "issue" &&
-      (a1 === "comment" || a1 === "close" || a1 === "edit" || a1 === "reopen")
-    ) {
-      return "";
-    }
-    throw new Error(`unexpected gh call: ${args.join(" ")}`);
-  };
+  const { runGh, calls, model } = makeRunGh({
+    stub,
+    failOn: (args) =>
+      args[1] === "edit" && args.includes("--add-label")
+        ? "gh issue edit failed: HTTP 502"
+        : null,
+  });
   const { fetchImpl, calls: fetchCalls } = makeFetch();
 
   await assertRejects(
@@ -1114,26 +1150,13 @@ await test("a settlement failure after the CAS reverts the Sentry archive", asyn
   const puts = fetchCalls.filter((c) => c.method === "PUT");
   assertEqual(puts.length, 2);
   assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
-  // Restores the captured pre-archive state, same compensation the mid-flight
-  // reopen paths use.
   assertDeepEqual(puts[1].body, { status: "unresolved" });
   // Reverting Sentry alone would be a HALF rollback: the stub would sit CLOSED
   // without sentry:archived, which is precisely the shape ingest cannot read a
-  // baseline from. The close this run performed must be undone too.
-  assert(
-    ghCall(calls, "reopen"),
-    "a stub this run closed must be reopened when settlement fails",
-  );
-  const bodyEdits = calls.filter(
-    (a) => a[0] === "issue" && a[1] === "edit" && a.includes("--body"),
-  );
-  assertEqual(
-    bodyEdits[bodyEdits.length - 1][
-      bodyEdits[bodyEdits.length - 1].indexOf("--body") + 1
-    ],
-    stub.body,
-    "the pre-archive body is restored too",
-  );
+  // baseline from. Both halves converge.
+  assertEqual(model.state, "OPEN");
+  assertEqual(model.labels.includes("sentry:archived"), false);
+  assertEqual(parseArchiveBaseline(model.body), null, "baseline rolled back");
 });
 
 await test("settlementHeld requires closed + queue marker + verdict + archived", () => {
@@ -1171,13 +1194,10 @@ await test("a reopen that lands after the CAS undoes the settlement, both sides"
   // and sentry:archived lands on a stub ingest just reopened for a live
   // regression — with Sentry left archived.
   const stub = makeStub();
-  const reopenedByIngest = {
-    ...makeStub({ state: "OPEN" }),
-    labels: [{ name: "sentry-triage" }, { name: "sentry:needs-triage" }],
-  };
-  const { runGh, calls: ghCalls } = makeRunGh({
+  const { runGh, model } = makeRunGh({
     stub,
-    verifyStub: reopenedByIngest,
+    // Ingest's whole reopen completes just before the post-settlement read.
+    concurrentReopenBeforeView: 3,
   });
   const { fetchImpl, calls: fetchCalls } = makeFetch();
 
@@ -1193,15 +1213,200 @@ await test("a reopen that lands after the CAS undoes the settlement, both sides"
   assertEqual(puts.length, 2);
   assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
   assertDeepEqual(puts[1].body, { status: "unresolved" });
-  // …and the queue side too: the terminal marker comes back off, and the stub
-  // this run closed is reopened so the regression stays visible.
-  const removal = labelEditCall(ghCalls, "--remove-label");
-  assert(removal, "sentry:archived is removed again");
-  assertEqual(
-    removal[removal.indexOf("--remove-label") + 1],
-    "sentry:archived",
+  // …and the queue converges on what ingest wanted: open, needing triage, with
+  // no terminal marker and no baseline describing an archive that was undone.
+  assertEqual(model.state, "OPEN");
+  assertEqual(model.labels.includes("sentry:archived"), false);
+  assert(
+    model.labels.includes("sentry:needs-triage"),
+    "ingest's reopen stands",
   );
-  assert(ghCall(ghCalls, "reopen"), "the stub is reopened for the regression");
+  assertEqual(parseArchiveBaseline(model.body), null, "baseline rolled back");
+});
+
+// ---------------------------------------------------------------------------
+// Ambiguous success: the mutation LANDS and the response is lost. Every
+// did-we-do-it flag is wrong here, which is why rollback reconciles against
+// live state instead of replaying a log of what we believe we did.
+// ---------------------------------------------------------------------------
+
+await test("a lost response on the close still converges", async () => {
+  // `gh issue close` closes the stub, then the connection drops. A
+  // closedByThisRun flag is never set, so flag-based repair skipped the reopen
+  // and left a CLOSED stub with no sentry:archived — silently back on the
+  // closedAt fallback, and not even visibly stranded.
+  const stub = makeStub();
+  const { runGh, model } = makeRunGh({
+    stub,
+    ambiguousOn: (args) =>
+      args[1] === "close" ? "gh issue close: connection reset" : null,
+  });
+  const { fetchImpl, calls: fetchCalls } = makeFetch();
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /connection reset/,
+  );
+
+  assertEqual(model.state, "OPEN", "the landed close is observed and undone");
+  assertEqual(model.labels.includes("sentry:archived"), false);
+  assertEqual(parseArchiveBaseline(model.body), null);
+  assertDeepEqual(
+    fetchCalls.filter((c) => c.method === "PUT")[1].body,
+    { status: "unresolved" },
+    "Sentry is rolled back too",
+  );
+});
+
+await test("a lost response on the archive PUT still converges", async () => {
+  // Sentry archives the issue, then the response is lost. The PUT used to sit
+  // outside the compensating scope entirely, so nothing ran: the issue stayed
+  // archived with the approval still spendable, and a dispatch retry took the
+  // alreadyArchived path and re-baselined off retry-time lastSeen.
+  const stub = makeStub();
+  const { runGh, model } = makeRunGh({ stub });
+  const { fetchImpl, calls: fetchCalls } = makeFetch({
+    ambiguousArchivePut: "Sentry archive request: socket hang up",
+  });
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /socket hang up/,
+  );
+
+  // The archive landed, so reconciliation must find and undo it.
+  const puts = fetchCalls.filter((c) => c.method === "PUT");
+  assertEqual(puts.length, 2);
+  assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
+  assertDeepEqual(puts[1].body, { status: "unresolved" });
+  // Settlement never started, so the queue is untouched and the approval — the
+  // thing that makes a retry dangerous — is still there for a clean re-run.
+  assertEqual(model.state, "OPEN");
+  assert(model.labels.includes("sentry:approved-archive"));
+});
+
+await test("a lost response on the terminal label still converges", async () => {
+  const stub = makeStub();
+  const { runGh, model } = makeRunGh({
+    stub,
+    ambiguousOn: (args) =>
+      args[1] === "edit" && args.includes("--add-label")
+        ? "gh issue edit: gateway timeout"
+        : null,
+  });
+  const { fetchImpl } = makeFetch();
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /gateway timeout/,
+  );
+
+  // Both the landed label AND the landed close are observed and undone.
+  assertEqual(model.labels.includes("sentry:archived"), false);
+  assertEqual(model.state, "OPEN");
+  assertEqual(parseArchiveBaseline(model.body), null);
+});
+
+await test("a lost response on the body edit still converges", async () => {
+  const stub = makeStub();
+  const { runGh, model } = makeRunGh({
+    stub,
+    ambiguousOn: (args) =>
+      args[1] === "edit" && args.includes("--body")
+        ? "gh issue edit: connection reset"
+        : null,
+  });
+  const { fetchImpl } = makeFetch();
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /connection reset/,
+  );
+
+  // The baseline landed; it must not survive a rolled-back archive, or the next
+  // run compares a live regression against a timestamp nothing stands behind.
+  assertEqual(parseArchiveBaseline(model.body), null);
+  assertEqual(model.body, stub.body);
+  assertEqual(model.state, "OPEN");
+});
+
+await test("reconciliation is idempotent — a second pass changes nothing", async () => {
+  // The correctness bar for anything that reconciles: converged state is a fixed
+  // point. Run the reconciler again against the state the first pass produced.
+  const stub = makeStub();
+  const { runGh, model } = makeRunGh({
+    stub,
+    ambiguousOn: (args) =>
+      args[1] === "close" ? "gh issue close: connection reset" : null,
+  });
+  const { fetchImpl } = makeFetch();
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /connection reset/,
+  );
+  const settled = JSON.stringify(model);
+
+  const report = await reconcileToTarget(
+    { runGh, fetchImpl },
+    {
+      repo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 42,
+      sentry: {
+        baseUrl: "https://us.sentry.io",
+        org: "mento-labs",
+        token: TOKEN,
+      },
+      issueId: "6197137101",
+      preArchive: { status: "unresolved", lastSeen: BASELINE_LAST_SEEN },
+      target: {
+        state: "OPEN",
+        body: stub.body,
+        hadArchivedLabel: false,
+      },
+    },
+  );
+
+  assertEqual(report.converged, true);
+  assertEqual(report.queue, "already-consistent");
+  assertEqual(JSON.stringify(model), settled, "no further writes");
+});
+
+await test("a rollback that cannot converge fails RED naming both systems", async () => {
+  // The honest failure mode: reconciliation tried, live state still disagrees.
+  // The operator needs one line that says what BOTH systems were observed to
+  // hold, which is what the runbook entry points at.
+  //
+  // The reopen is ACCEPTED and does not take effect — the one shape only the
+  // post-correction verification read catches, since the correction itself
+  // reports success. A correction that throws is caught by the loop instead.
+  const stub = makeStub();
+  const { runGh } = makeRunGh({
+    stub,
+    ambiguousOn: (args) =>
+      args[1] === "close" ? "gh issue close: connection reset" : null,
+    noopOn: (args) => args[1] === "reopen",
+  });
+  const { fetchImpl } = makeFetch();
+  const stderr = [];
+  const write = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  try {
+    await assertRejects(
+      runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+      /connection reset/,
+    );
+  } finally {
+    process.stderr.write = write;
+  }
+  const errorLine = stderr.find((l) => l.includes("::error::"));
+  assert(errorLine, "a non-converged rollback must be loud");
+  assert(errorLine.includes("did NOT converge"), "says it did not converge");
+  assert(errorLine.includes("Sentry:"), "names the Sentry disposition");
+  assert(errorLine.includes("queue:"), "names the queue disposition");
 });
 
 await test("a stub that arrived closed is not reopened by the repair", async () => {
@@ -1209,24 +1414,13 @@ await test("a stub that arrived closed is not reopened by the repair", async () 
   // one the verdict path closed) must stay closed — reopening it would be a
   // fresh side effect the run never had the right to make.
   const stub = makeStub({ state: "CLOSED" });
-  const calls = [];
-  const runGh = async (args) => {
-    calls.push(args);
-    const [a0, a1] = args;
-    if (a0 === "issue" && a1 === "view") return JSON.stringify(stub);
-    if (a0 === "label" && a1 === "create") return "";
-    if (a0 === "api" && a1 === "-X") return "";
-    if (a0 === "issue" && a1 === "edit" && args.includes("--add-label")) {
-      throw new Error("gh issue edit failed: HTTP 502");
-    }
-    if (
-      a0 === "issue" &&
-      (a1 === "comment" || a1 === "close" || a1 === "edit" || a1 === "reopen")
-    ) {
-      return "";
-    }
-    throw new Error(`unexpected gh call: ${args.join(" ")}`);
-  };
+  const { runGh, calls, model } = makeRunGh({
+    stub,
+    failOn: (args) =>
+      args[1] === "edit" && args.includes("--add-label")
+        ? "gh issue edit failed: HTTP 502"
+        : null,
+  });
   const { fetchImpl } = makeFetch();
 
   await assertRejects(
@@ -1236,30 +1430,20 @@ await test("a stub that arrived closed is not reopened by the repair", async () 
 
   assert(!ghCall(calls, "close"), "nothing to close");
   assert(!ghCall(calls, "reopen"), "and therefore nothing to reopen");
+  assertEqual(model.state, "CLOSED", "a stub that arrived closed stays closed");
 });
 
 await test("a settlement failure reverts nothing when this run did not archive", async () => {
   // The issue was already archived_until_escalating, so this run issued no PUT
   // and has nothing to undo — the compensation must not invent a mutation.
   const stub = makeStub();
-  const calls = [];
-  const runGh = async (args) => {
-    calls.push(args);
-    const [a0, a1] = args;
-    if (a0 === "issue" && a1 === "view") return JSON.stringify(stub);
-    if (a0 === "label" && a1 === "create") return "";
-    if (a0 === "api" && a1 === "-X") return "";
-    if (a0 === "issue" && a1 === "edit" && args.includes("--add-label")) {
-      throw new Error("gh issue edit failed: HTTP 502");
-    }
-    if (
-      a0 === "issue" &&
-      (a1 === "comment" || a1 === "close" || a1 === "edit" || a1 === "reopen")
-    ) {
-      return "";
-    }
-    throw new Error(`unexpected gh call: ${args.join(" ")}`);
-  };
+  const { runGh, model } = makeRunGh({
+    stub,
+    failOn: (args) =>
+      args[1] === "edit" && args.includes("--add-label")
+        ? "gh issue edit failed: HTTP 502"
+        : null,
+  });
   const { fetchImpl, calls: fetchCalls } = makeFetch({
     issue: { status: "ignored", substatus: "archived_until_escalating" },
   });
@@ -1275,7 +1459,7 @@ await test("a settlement failure reverts nothing when this run did not archive",
   );
   // The QUEUE side is still rolled back — that half does not depend on whether
   // this run was the one that archived Sentry.
-  assert(ghCall(calls, "reopen"), "the close this run made is still undone");
+  assertEqual(model.state, "OPEN", "the close this run made is still undone");
 });
 
 // ---------------------------------------------------------------------------

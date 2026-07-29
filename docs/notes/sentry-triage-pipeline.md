@@ -284,6 +284,33 @@ No stage picks that up: ingest skips an open match, the triage agent selects on
 That is deliberate, since the alternative ordering closes stubs over live
 regressions, but it is a stranded state, not a self-healing one.
 
+**Rollback reconciles; it does not replay.** Every failure from the Sentry PUT
+onward re-reads both systems and corrects only what live state actually shows to
+be wrong — Sentry back to its pre-run status if and only if it still holds
+exactly what this run would have written, the stub reopened if it is closed now
+and was open before, the body stamp and the terminal label removed if present.
+Nothing consults a record of what the run believes it did, because a rejected
+command is not proof its remote mutation did not happen: `gh issue close` can
+close the stub and then lose its response, and a PUT can archive and then lose
+its response. Any did-we-do-it flag is wrong in exactly those cases, and they
+are the cases that matter. Reconciling is idempotent by construction — a second
+pass finds nothing to correct — and it re-reads once more afterwards, because a
+correction can be accepted and still not take effect. When that final read still
+disagrees the run fails RED with one `::error::` naming what both systems were
+observed to hold.
+
+**Known residual: a run that dies cannot compensate itself.** Reconciliation
+needs the process to survive. If the runner is cancelled or killed between the
+archive PUT and the rollback — job timeout, OOM, a cancelled workflow — nothing
+runs, and the Sentry issue can be left `archived_until_escalating` while the
+stub still carries `sentry:approved-archive`. A later `workflow_dispatch` then
+takes the already-archived path and records ITS OWN read time as the baseline,
+absorbing anything that landed in the dead run's window. Closing this would take
+a durable intent record written before the PUT, which is not what this change
+does. The mitigation today is operational: a killed archive run leaves an
+approved, open, unarchived-looking stub and a red or cancelled run in Actions —
+check the Sentry issue before re-approving.
+
 **The archive records a freshness baseline.** Sentry's `substatus` lags a fresh
 event, so the regressed/escalating refusal can pass while an event is already in
 flight. The script captures the `lastSeen` it read before the mutation, re-reads
@@ -463,13 +490,14 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
 - **A red archive run whose stub is open, verdicted, and carries neither
   `sentry:approved-archive` nor `sentry:archived` failed after it consumed the
   approval.** Nothing retries this on its own, and no re-dispatch is possible —
-  the guard needs the label the run spent. The script already reverted its
-  Sentry archive, reopened the stub if it had closed it, and restored the stub
-  body it had stamped, so read the run log to confirm all three. An `::error::`
-  line saying the revert or the queue repair failed means fix that side by hand
-  first: take the Sentry issue off `archived_until_escalating`, and check the
-  stub body carries no `archive_baseline_last_seen`. Then choose the outcome
-  explicitly — nothing chooses it for you:
+  the guard needs the label the run spent. The run already reconciled both
+  systems back to their pre-run state, so look for its one summary line. A
+  `::notice::Rolled back …` line means both sides converged and there is nothing
+  to repair. An `::error::… did NOT converge` line names what Sentry and the
+  stub were each observed to hold — fix that side by hand first: take the Sentry
+  issue off `archived_until_escalating`, and check the stub body carries no
+  `archive_baseline_last_seen`. Then choose the outcome explicitly — nothing
+  chooses it for you:
   - to archive it after all, re-apply `sentry:approved-archive`;
   - to send it back through triage, add `sentry:needs-triage` **and** remove the
     `sentry:verdict-*` label. Leaving the approval off is not enough on its own:
@@ -479,6 +507,13 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
   means something moved the Sentry issue off `archived_until_escalating` while
   the run held it. Inspect that issue directly; the queue stub's state is
   correct but says nothing about where Sentry ended up.
+- **A cancelled or killed archive run leaves nothing behind to fix it.**
+  Rollback runs in-process, so a job that dies mid-archive never reconciles —
+  see the known residual above. Before re-applying `sentry:approved-archive` to
+  a stub whose last archive run was cancelled, timed out, or shows no summary
+  line, open the Sentry issue and confirm it is not already
+  `archived_until_escalating`. Re-approving over a silent archive is what
+  re-baselines off the retry's own read time and buries the window's events.
 - Do not manually close a pending queue issue to hide a failure. Fix the
   workflow or make a documented human disposition.
 
