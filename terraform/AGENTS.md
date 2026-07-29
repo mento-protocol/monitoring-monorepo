@@ -89,8 +89,11 @@ image pull depend on the exact boundaries.
   expose — logs, metrics, artifacts — as part of the confidentiality review.
   Add only an exact missing permission named by a provider denial.
 - Peg policy: the runtime attachment pins the current generation as a reviewed
-  source literal and the Grafana consumers are live, so rule and threshold
-  changes take the ordinary plan → approved-apply path. Never retain a
+  source literal and the Grafana consumers are live. Grafana rule changes take
+  the ordinary plan → approved-apply path; `peg-thresholds.json` rollovers
+  instead go through the manual protected `Peg Policy Publication` workflow and
+  a separate reviewed platform change that re-pins the generation
+  ([`docs/deployment.md`](../docs/deployment.md)). Never retain a
   project-level controller grant or broad Storage Admin, Storage Object Admin,
   or Service Account User fallbacks. An approved,
   time-bounded emergency bootstrap may grant only `pegPolicyBucketController` at
