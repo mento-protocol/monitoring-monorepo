@@ -243,6 +243,17 @@ function AlertSettings({
         </div>
         <div className="py-3">
           <dt className="text-xs font-medium text-slate-300">
+            Immediate critical page
+          </dt>
+          <dd className="mt-1 text-sm leading-6 text-slate-100">
+            Also page immediately when the full-size sale price is missing for{" "}
+            {policy.blindConsecutivePolls} consecutive checks and another risk
+            signal is active: high pool inflow, an unusually wide buy/sell
+            spread, or a partial-fill price below the critical limit.
+          </dd>
+        </div>
+        <div className="py-3">
+          <dt className="text-xs font-medium text-slate-300">
             Readings required
           </dt>
           <dd className="mt-1 text-sm leading-6 text-slate-100">

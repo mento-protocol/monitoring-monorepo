@@ -123,6 +123,9 @@ describe("PegMonitoringPageClient", () => {
       "0.25% (25 bps) below target or 0.25% (25 bps) above target over 10 minutes.",
     );
     expect(container.textContent).toContain(
+      "Also page immediately when the full-size sale price is missing for 10 consecutive checks and another risk signal is active: high pool inflow, an unusually wide buy/sell spread, or a partial-fill price below the critical limit.",
+    );
+    expect(container.textContent).toContain(
       "80% of usable readings must cross the limit",
     );
     expect(container.textContent).toContain(

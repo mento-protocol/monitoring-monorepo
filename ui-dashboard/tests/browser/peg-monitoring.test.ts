@@ -124,6 +124,12 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
   ).toBeVisible();
   await expect(
     page.getByText(
+      "Also page immediately when the full-size sale price is missing for 10 consecutive checks and another risk signal is active: high pool inflow, an unusually wide buy/sell spread, or a partial-fill price below the critical limit.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
       "Net pool inflow is at 42% of the active on-chain trading limit. Warn at 80%.",
       { exact: true },
     ),
