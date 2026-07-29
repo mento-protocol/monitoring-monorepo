@@ -921,6 +921,80 @@ await test("a live regression on a CLOSED stub reopens it", async () => {
   );
 });
 
+await test("a failed read cannot abort the live-regression reopen", async () => {
+  // The label edit has already landed by this point, so bailing out on a
+  // transient read leaves exactly the invisible stub the reopen exists to
+  // prevent — closed, needs-triage, approval and verdict shed — and past the
+  // point the caller's reconciler can help, since settlement never ran and it
+  // holds no target. The read may only refine the decision, never skip it.
+  const stub = makeStub({ state: "CLOSED" });
+  let views = 0;
+  const { runGh, model } = makeRunGh({
+    stub,
+    failOn: (args) => {
+      if (args[0] === "issue" && args[1] === "view") {
+        views += 1;
+        // View 1 is runArchive's read; view 2 is the reopen's re-read.
+        if (views === 2) return "gh issue view failed: HTTP 500";
+      }
+      return null;
+    },
+  });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "skipped-regressed");
+  assertEqual(
+    model.state,
+    "OPEN",
+    "the transition happens off the pre-run observation when the read fails",
+  );
+  assert(model.labels.includes("sentry:needs-triage"));
+});
+
+await test("the settlement body write rebases onto the live body", async () => {
+  // gh issue edit --body replaces the WHOLE body, so building it from the
+  // pre-CAS snapshot silently deletes an authorised edit made since that read —
+  // and the post-settlement verification only checks the baseline, so it cannot
+  // see the loss. Round 12 fixed this on the rollback path; this is its sibling.
+  const stub = makeStub();
+  const edited = stubBody({
+    permalink: "https://mento-labs.sentry.io/issues/6197137101/?edited=1",
+  });
+  const { runGh, model } = makeRunGh({
+    stub,
+    beforeCall: (args) => {
+      // A human edits the body between the pre-CAS read and the body write.
+      if (args[0] === "api" && args[2] === "DELETE") model.body = edited;
+    },
+  });
+  const { fetchImpl } = makeFetch();
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "archived");
+  assert(
+    model.body.includes("?edited=1"),
+    "the concurrent edit survives the settlement write",
+  );
+  assertEqual(
+    parseArchiveBaseline(model.body).lastSeen,
+    BASELINE_LAST_SEEN,
+    "and the baseline is still recorded on top of it",
+  );
+});
+
 await test("runArchive re-archives an issue in a different archive mode", async () => {
   // Archived_forever (or any non-escalating mode) must still get the corrective
   // PUT so the escalation-reopen safety loop holds.
@@ -1264,8 +1338,10 @@ await test("a reopen that lands after the CAS undoes the queue settlement", asyn
   const stub = makeStub();
   const { runGh, model } = makeRunGh({
     stub,
-    // Ingest's whole reopen completes just before the post-settlement read.
-    concurrentReopenBeforeView: 3,
+    // Views: 1 runArchive's read, 2 settlement's pre-CAS read, 3 the body-write
+    // rebase read, 4 the post-settlement verification. Land ingest's whole
+    // reopen just before that verification, which is the read that must catch it.
+    concurrentReopenBeforeView: 4,
   });
   const { fetchImpl, calls: fetchCalls } = makeFetch();
 

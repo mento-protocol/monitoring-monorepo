@@ -1204,7 +1204,14 @@ async function settleQueueStub(
   // subcommands), and this deterministic zero-LLM step is the only writer that
   // ever rewrites one. Refuse rather than settle if the body has no yaml block
   // to extend: a body this cannot parse is one ingest cannot read back.
-  const nextBody = withArchiveBaseline(live.body, {
+  // Rebase the baseline onto the body as it is NOW, not onto the pre-CAS
+  // snapshot. `gh issue edit --body` replaces the whole body, so writing the
+  // snapshot back silently deletes any authorised edit made since that read —
+  // and the post-settlement verification only checks the baseline, so it cannot
+  // see the loss. Same treatment the rollback path already uses in
+  // `reconcileToTarget`; this was its sibling and was missed.
+  const bodySource = await readQueueIssue(runGh, repo, queueIssue);
+  const nextBody = withArchiveBaseline(bodySource.body, {
     lastSeen: baselineLastSeen,
     sentryIssueId,
   });
@@ -1458,8 +1465,27 @@ export async function runArchive(options, deps = {}) {
     // makes the stub selectable, so if the label edit above had failed we want
     // it still closed and the whole idempotent sequence retried, rather than
     // open without `sentry:needs-triage`.
-    const liveStub = await readQueueIssue(runGh, repo, queueIssue);
-    if (liveStub.state === "CLOSED") {
+    //
+    // The read must never ABORT the transition. The label edit above has already
+    // landed, so bailing out here on a transient read failure leaves exactly the
+    // invisible stub this reopen exists to prevent: closed, needs-triage,
+    // approval and verdict already shed, and past the point where the caller's
+    // reconciler can help (settlement never ran, so it holds no target). Fall
+    // back to the pre-run observation instead — still an observation, just an
+    // older one — so a failed read degrades the precision of the decision rather
+    // than skipping it.
+    let mustReopen = stub.state === "CLOSED";
+    try {
+      const liveStub = await readQueueIssue(runGh, repo, queueIssue);
+      mustReopen = liveStub.state === "CLOSED";
+    } catch (err) {
+      process.stderr.write(
+        `::notice::Could not re-read #${queueIssue} before reopening (${
+          err instanceof Error ? err.message : String(err)
+        }); falling back to its pre-run state (${stub.state}).\n`,
+      );
+    }
+    if (mustReopen) {
       process.stderr.write(
         `::notice::Reopening closed stub #${queueIssue} so the live regression is visible to triage.\n`,
       );

@@ -551,15 +551,26 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
 - **A red archive run whose stub is open, verdicted, and carries neither
   `sentry:approved-archive` nor `sentry:archived` failed after it consumed the
   approval.** Nothing retries this on its own, and no re-dispatch is possible —
-  the guard needs the label the run spent. **The Sentry issue is archived and
-  stays archived — that is by design, not damage:** it is
-  `archived_until_escalating`, the outcome the approver asked for, and escalation
-  undoes it automatically. Only the stub was rolled back, so look for the run's
-  one summary line. A `::notice::Rolled the queue stub … back` line means it
-  converged and there is nothing to repair. An `::error::… did NOT converge` line
-  names what the stub was observed to hold — fix it by hand: check the body
-  carries the baseline it had BEFORE this run (or none, if it had none). Then
-  choose the outcome explicitly — nothing chooses it for you:
+  the guard needs the label the run spent. Only the stub was rolled back, so
+  start from the run's one summary line — and read what it says about **Sentry**
+  before assuming anything, because two dispositions produce this same stub
+  shape:
+  - **"stays archived_until_escalating"** — the archive landed. That is by
+    design, not damage: it is the outcome the approver asked for, and escalation
+    undoes it automatically. Carry on with the options below.
+  - **"is in an UNKNOWN state"** — the PUT returned a 5xx or lost its response,
+    so it may never have applied. **Open the Sentry issue and read its state
+    before doing anything else.** If it is not archived, nothing was archived:
+    the stub is simply unsettled, and the fix is a fresh approval once you are
+    satisfied the issue should still be archived. If it is archived, treat it as
+    the case above.
+
+  Then check convergence. A `::notice::Rolled the queue stub … back` line means
+  the stub converged and there is nothing to repair. An
+  `::error::… did NOT converge` line names what it was observed to hold — fix
+  that by hand: check the body carries the baseline it had BEFORE this run (or
+  none, if it had none). Then choose the outcome explicitly — nothing chooses it
+  for you:
   - to leave it archived, do nothing; the ledger entry is the only thing missing;
   - to settle the ledger, re-apply `sentry:approved-archive` — but expect a
     refusal, and read it rather than working around it. The rollback removed the
@@ -576,6 +587,7 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
     while the issue stays archived it matches neither ingest query, so nothing
     re-surfaces it. Un-archiving is what puts it back in front of the pipeline,
     after which the next archive records a baseline it can stand behind.
+
 - An archive **refusal** comment that says the archive could NOT be reverted is a
   different case from the above: the freshness refusal is the one path that does
   revert Sentry, and something moved the issue off `archived_until_escalating`
