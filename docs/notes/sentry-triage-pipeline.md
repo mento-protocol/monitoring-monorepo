@@ -282,11 +282,21 @@ event, so the regressed/escalating refusal can pass while an event is already in
 flight. The script captures the `lastSeen` it read before the mutation, re-reads
 it once after the PUT, and — if it moved — restores the Sentry issue, comments,
 and exits 0 without settling. The baseline also lands in the audit comment as a
-machine-readable `archive_baseline_last_seen` (plus the Sentry issue id), which
-is what ingest's reopen gate compares against. That matters because the
-archive's close necessarily postdates any event that arrived inside the mutation
-window: a `closed_at` comparison would evaluate false for that event forever and
-bury it until some later event happened to arrive.
+machine-readable `archive_baseline_last_seen` plus the Sentry issue id it
+mutated, which is what ingest's reopen gate compares against. That matters
+because the archive's close necessarily postdates any event that arrived inside
+the mutation window: a `closed_at` comparison would evaluate false for that event
+forever and bury it until some later event happened to arrive.
+
+Both sides fence that comment the same way the verdict contract fences its own:
+the archive leg posts it — and treats it as the at-most-once key for the audit —
+only under the Actions identity, with `<!-- sentry-triage-archive:v1 -->` as its
+first line, and ingest reads a baseline out of nothing else. Author alone is too
+coarse in a public repo: the triage agent's verdict comment is LLM-authored yet
+posted with `github.token`, so it clears an author-only fence. Ingest then
+requires the recorded issue id to match the Sentry issue the stub tracks; a
+baseline naming another issue, or naming none, describes some other archive and
+reopens the stub for re-triage instead of gating it.
 
 The baseline is therefore load-bearing, and the archive fails **closed** without
 one. If Sentry's pre-mutation `lastSeen` does not parse, the run refuses before

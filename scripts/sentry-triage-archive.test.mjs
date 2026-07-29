@@ -10,6 +10,7 @@ import {
   isNotFoundError,
   isNumericId,
   isSafeSentryPermalink,
+  isSettledAuditComment,
   isUsableBaseline,
   lastSeenMoved,
   parseArgs,
@@ -1308,7 +1309,135 @@ await test("an unreadable post-PUT lastSeen reverts and refuses", async () => {
   );
 });
 
+// ---------------------------------------------------------------------------
+// Audit-comment idempotency fence. The marker alone is not proof the audit was
+// written: this repo is public, so anyone can post a comment containing it, and
+// a stub archived before the baseline contract existed carries a marker with no
+// baseline at all. Either would suppress the post while the run still closed the
+// stub and applied sentry:archived — leaving ingest nothing to read.
+// ---------------------------------------------------------------------------
+
+/** A genuine audit comment as the archive leg emits it. */
+function auditComment({
+  sentryIssueId = "6197137101",
+  baselineLastSeen = BASELINE_LAST_SEEN,
+  login = "github-actions",
+} = {}) {
+  return {
+    body: buildAuditComment({
+      approver: APPROVER,
+      shortId: "GOVERNANCE-MENTO-ORG-51",
+      sentryIssueId,
+      permalink: null,
+      timestampIso: "2026-07-18T12:00:00.000Z",
+      alreadyArchived: false,
+      baselineLastSeen,
+    }),
+    author: { login },
+  };
+}
+
+await test("isSettledAuditComment fences on author, marker, baseline and issue id", () => {
+  assertEqual(isSettledAuditComment(auditComment(), "6197137101"), true);
+  // REST author shape is accepted too (`gh api` renders it as `user`).
+  assertEqual(
+    isSettledAuditComment(
+      {
+        ...auditComment(),
+        author: undefined,
+        user: { login: "github-actions[bot]" },
+      },
+      "6197137101",
+    ),
+    true,
+  );
+  // A drive-by commenter can paste the whole audit body verbatim.
+  assertEqual(
+    isSettledAuditComment(auditComment({ login: "drive-by" }), "6197137101"),
+    false,
+  );
+  // Marker must LEAD the body, exactly as buildAuditComment emits it.
+  assertEqual(
+    isSettledAuditComment(
+      {
+        body: `chatter\n${auditComment().body}`,
+        author: { login: "github-actions" },
+      },
+      "6197137101",
+    ),
+    false,
+  );
+  // Marker with no baseline (a stub archived before the contract existed).
+  assertEqual(
+    isSettledAuditComment(
+      {
+        body: `${ARCHIVE_COMMENT_MARKER}\n\nprevious audit`,
+        author: { login: "github-actions" },
+      },
+      "6197137101",
+    ),
+    false,
+  );
+  // Unparsable baseline is not a usable record either.
+  assertEqual(
+    isSettledAuditComment(
+      auditComment({ baselineLastSeen: "not-a-date" }),
+      "6197137101",
+    ),
+    false,
+  );
+  // Bound to the issue being archived, not just to any archive.
+  assertEqual(
+    isSettledAuditComment(auditComment({ sentryIssueId: "999" }), "6197137101"),
+    false,
+  );
+  assertEqual(
+    isSettledAuditComment(auditComment({ sentryIssueId: "nope" }), ""),
+    false,
+  );
+});
+
 await test("runArchive does not double-post the audit comment on retry", async () => {
+  const stub = makeStub({ state: "CLOSED", comments: [auditComment()] });
+  const { runGh, calls: ghCalls } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "ignored", substatus: "archived_until_escalating" },
+  });
+
+  await runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW });
+
+  assert(!ghCall(ghCalls, "comment"), "must not re-post the audit comment");
+  assert(!ghCall(ghCalls, "close"), "must not re-close an already-closed stub");
+  assert(ghCall(ghCalls, "edit"), "label swap still runs idempotently");
+});
+
+await test("a marker-bearing untrusted comment does not suppress the audit post", async () => {
+  // Driven end to end: without the author fence the audit is skipped while the
+  // stub is still closed and labeled sentry:archived, so ingest reads no
+  // baseline off it and falls back to closedAt — race B, reinstated silently.
+  const stub = makeStub({ comments: [auditComment({ login: "drive-by" })] });
+  const { runGh, calls: ghCalls } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch();
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "archived");
+  const comment = ghCall(ghCalls, "comment");
+  assert(comment, "the audit comment must still be posted");
+  const body = comment[comment.indexOf("--body") + 1];
+  const parsed = parseArchiveBaseline(body);
+  assert(parsed, "the posted audit carries a baseline");
+  assertEqual(parsed.lastSeen, BASELINE_LAST_SEEN);
+  assert(ghCall(ghCalls, "close"), "the stub still settles");
+});
+
+await test("a marker comment without a usable baseline does not suppress the audit post", async () => {
+  // A stub archived before this contract existed carries the marker and nothing
+  // else. Re-archiving it must write a baseline, not inherit the gap.
   const stub = makeStub({
     state: "CLOSED",
     comments: [
@@ -1325,9 +1454,28 @@ await test("runArchive does not double-post the audit comment on retry", async (
 
   await runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW });
 
-  assert(!ghCall(ghCalls, "comment"), "must not re-post the audit comment");
-  assert(!ghCall(ghCalls, "close"), "must not re-close an already-closed stub");
-  assert(ghCall(ghCalls, "edit"), "label swap still runs idempotently");
+  const comment = ghCall(ghCalls, "comment");
+  assert(comment, "posts a fresh, baseline-bearing audit comment");
+  assertEqual(
+    parseArchiveBaseline(comment[comment.indexOf("--body") + 1]).lastSeen,
+    BASELINE_LAST_SEEN,
+  );
+  assert(ghCall(ghCalls, "edit"), "sentry:archived is applied alongside it");
+});
+
+await test("an audit comment for a different Sentry issue does not suppress the post", async () => {
+  const stub = makeStub({ comments: [auditComment({ sentryIssueId: "999" })] });
+  const { runGh, calls: ghCalls } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch();
+
+  await runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW });
+
+  const comment = ghCall(ghCalls, "comment");
+  assert(comment, "a foreign baseline is not this issue's audit record");
+  assertEqual(
+    parseArchiveBaseline(comment[comment.indexOf("--body") + 1]).sentryIssueId,
+    "6197137101",
+  );
 });
 
 // ---------------------------------------------------------------------------

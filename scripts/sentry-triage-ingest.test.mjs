@@ -34,6 +34,7 @@ import {
   truncateTitle,
   VERDICT_LABELS,
 } from "./sentry-triage-ingest.mjs";
+import { ARCHIVE_COMMENT_MARKER } from "./sentry-triage-project-core.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -569,6 +570,8 @@ await test("dedup: archived stub reopens when lastSeen is newer than the archive
     isRegressed: true,
     lastSeen: "2026-07-17T07:59:30Z",
     archiveBaseline: "2026-07-17T07:59:00Z",
+    archiveBaselineIssueId: "6197137101",
+    sentryIssueId: "6197137101",
   });
   assertEqual(decision.action, "reopen");
 });
@@ -579,11 +582,54 @@ await test("dedup: archived stub stays closed when the baseline is newer than la
     isRegressed: true,
     lastSeen: "2026-07-17T07:00:00Z",
     archiveBaseline: "2026-07-17T07:59:00Z",
+    archiveBaselineIssueId: "6197137101",
+    sentryIssueId: "6197137101",
   });
   assertEqual(decision.action, "skip");
   assertEqual(
     decision.reason,
     "archived, no events since the archive baseline",
+  );
+});
+
+await test("dedup: a baseline bound to another Sentry issue cannot gate the decision", () => {
+  // The archive leg records the id it mutated beside the timestamp. A baseline
+  // naming a different id — or naming none, which is what an injected one looks
+  // like — is evidence about some other issue, so it must not suppress this
+  // issue's reopen. Fails OPEN toward re-triage, like every other ambiguity
+  // here: a wrongly skipped regression is silent, a wrongly reopened one merely
+  // re-triages (and the reopen sheds sentry:archived, so it cannot loop).
+  const skipShaped = {
+    existingIssue: archivedStub("2026-07-17T08:00:00Z"),
+    isRegressed: true,
+    lastSeen: "2026-07-17T07:00:00Z",
+    archiveBaseline: "2026-07-17T07:59:00Z",
+  };
+  // Same inputs WITH a bound id would skip (previous test) — only the binding
+  // differs here.
+  assertEqual(
+    decideDedupAction({
+      ...skipShaped,
+      archiveBaselineIssueId: "999",
+      sentryIssueId: "6197137101",
+    }).action,
+    "reopen",
+  );
+  assertEqual(
+    decideDedupAction({
+      ...skipShaped,
+      archiveBaselineIssueId: "",
+      sentryIssueId: "6197137101",
+    }).action,
+    "reopen",
+  );
+  assertEqual(
+    decideDedupAction({
+      ...skipShaped,
+      archiveBaselineIssueId: "6197137101",
+      sentryIssueId: "",
+    }).action,
+    "reopen",
   );
 });
 
@@ -671,7 +717,13 @@ await test("parseArchiveBaseline reads the yaml fields and tolerates junk", () =
 
 await test("findArchiveBaseline takes the newest bot-authored baseline only", () => {
   const auditComment = (lastSeen) =>
-    ["```yaml", `archive_baseline_last_seen: "${lastSeen}"`, "```"].join("\n");
+    [
+      ARCHIVE_COMMENT_MARKER,
+      "",
+      "```yaml",
+      `archive_baseline_last_seen: "${lastSeen}"`,
+      "```",
+    ].join("\n");
   // This repo is public: a drive-by commenter must not be able to post a
   // far-future baseline and suppress every future regression reopen.
   assertEqual(
@@ -696,6 +748,48 @@ await test("findArchiveBaseline takes the newest bot-authored baseline only", ()
     "2026-07-19T00:00:00Z",
   );
   assertEqual(findArchiveBaseline([]), null);
+});
+
+await test("findArchiveBaseline ignores a trusted comment without the archive marker", () => {
+  // The Stage B triage agent's verdict comment is LLM-authored but posted with
+  // github.token, so it clears the author fence — and its yaml block is
+  // untrusted agent text composed after reading this public stub. Only the
+  // archive leg emits the marker, so the marker is the fence that keeps one
+  // induced yaml line from suppressing every future regression reopen.
+  const yamlOnly = [
+    "```yaml",
+    'archive_baseline_last_seen: "2099-01-01T00:00:00Z"',
+    'archive_baseline_sentry_issue_id: "6197137101"',
+    "```",
+  ].join("\n");
+  assertEqual(
+    findArchiveBaseline([
+      { body: yamlOnly, author: { login: "github-actions" } },
+    ]),
+    null,
+  );
+  // A verdict comment carrying the fields further down its body is likewise not
+  // an audit record — the marker must LEAD, exactly as buildAuditComment emits
+  // it and exactly as selectVerdictComment requires of a verdict comment.
+  assertEqual(
+    findArchiveBaseline([
+      {
+        body: `<!-- sentry-triage-verdict:v1 -->\n\n${ARCHIVE_COMMENT_MARKER}\n${yamlOnly}`,
+        author: { login: "github-actions" },
+      },
+    ]),
+    null,
+  );
+  // The real audit comment still reads back.
+  assertEqual(
+    findArchiveBaseline([
+      {
+        body: `${ARCHIVE_COMMENT_MARKER}\n\n${yamlOnly}`,
+        author: { login: "github-actions" },
+      },
+    ]).sentryIssueId,
+    "6197137101",
+  );
 });
 
 await test("regressed comment matches the contract phrasing", () => {
@@ -1244,6 +1338,50 @@ await test("an archived stub's baseline is fetched and drives the reopen decisio
   assertDeepEqual(baselineLookups, [200]);
   assertEqual(result.reopened, 1);
   assertEqual(reopenCount, 1);
+});
+
+await test("the baseline only gates a decision when it names this Sentry issue", async () => {
+  // Wiring check: runIngest must hand decideDedupAction the id the archive
+  // recorded AND the id of the Sentry issue in hand. The event predates the
+  // baseline, so a BOUND baseline skips; the identical run with a foreign id
+  // reopens instead of letting another issue's archive speak for this one.
+  const runWithBaselineId = async (baselineIssueId) => {
+    const sentryIssue = mapSentryIssue({
+      id: 9,
+      shortId: "X-9",
+      title: "Regressed bug",
+      lastSeen: "2026-07-19T11:58:00Z",
+    });
+    return runIngest(
+      { repo: "owner/repo", trackerIssue: 1282 },
+      {
+        fetchMergedSentryIssues: async () =>
+          mergeSentryIssues([], [sentryIssue]),
+        listQueueIssues: async () => [
+          {
+            number: 200,
+            title: buildQueueTitle("X-9", "unknown", "error"),
+            state: "CLOSED",
+            closedAt: "2026-07-19T12:00:00Z",
+            labels: ["sentry-triage", "sentry:archived"],
+          },
+        ],
+        ensureLabels: async () => {},
+        createIssue: async () => {},
+        reopenIssue: async () => {},
+        resolveArchiveBaseline: async () => ({
+          lastSeen: "2026-07-19T11:59:00Z",
+          sentryIssueId: baselineIssueId,
+        }),
+        postRunRecord: async () => {},
+        now: () => new Date("2026-07-20T05:30:00.000Z"),
+      },
+    );
+  };
+
+  assertEqual((await runWithBaselineId("9")).skippedExisting, 1);
+  assertEqual((await runWithBaselineId("404")).reopened, 1);
+  assertEqual((await runWithBaselineId("")).reopened, 1);
 });
 
 await test("a stub without sentry:archived never costs a baseline fetch", async () => {

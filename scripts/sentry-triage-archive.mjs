@@ -29,9 +29,14 @@ import {
   ARCHIVED_LABEL,
   LABEL_DEFINITIONS,
   neutralizeUntrusted,
+  parseArchiveBaseline,
   REOPEN_SHED_LABELS,
   truncateTitle,
 } from "./sentry-triage-ingest.mjs";
+import {
+  ARCHIVE_COMMENT_MARKER,
+  isTrustedComment,
+} from "./sentry-triage-project-core.mjs";
 
 const NEEDS_TRIAGE_LABEL = "sentry:needs-triage";
 
@@ -40,8 +45,9 @@ export const DEFAULT_ORG = "mento-labs";
 export const DEFAULT_SENTRY_BASE_URL = "https://us.sentry.io";
 
 // Fixed marker line on the queue-stub audit comment; also the idempotency key
-// that stops a workflow_dispatch retry from double-posting the audit.
-export const ARCHIVE_COMMENT_MARKER = "<!-- sentry-triage-archive:v1 -->";
+// that stops a workflow_dispatch retry from double-posting the audit. Owned by
+// the pure contract module because ingest fences its baseline reader on it too.
+export { ARCHIVE_COMMENT_MARKER };
 
 // The ONLY Sentry status this automation may set (ADR 0036 trust boundary):
 // archived-until-escalating. Never `resolved`, never a bare `ignored` without
@@ -398,6 +404,42 @@ export function lastSeenMoved(baseline, latest) {
  * closes. So an unusable baseline gates the mutation instead of riding along. */
 export function isUsableBaseline(lastSeen) {
   return !Number.isNaN(Date.parse(lastSeen ?? ""));
+}
+
+/**
+ * True when `comment` is THIS pipeline's settled audit comment for the Sentry
+ * issue being archived — the at-most-once key for the audit post.
+ *
+ * Bare marker containment is not enough on two counts, both observed. This repo
+ * is public, so any account can post a comment containing the marker string; a
+ * containment check would let that drive-by suppress the audit while the run
+ * still closed the stub and applied `sentry:archived`, leaving ingest with no
+ * baseline to read and race B wide open for that stub. And an audit comment
+ * carrying no parseable baseline — a stub archived before this contract existed
+ * — is not the record this check is supposed to find, since the whole point of
+ * the post is the machine-readable baseline ingest reads back. So: trusted
+ * author (the ambient GH_TOKEN Actions identity, the only writer of this
+ * comment), marker leading the body exactly as `buildAuditComment` emits it, a
+ * baseline that parses as a real date, and that baseline bound to the id this
+ * run is archiving.
+ *
+ * A STALE but valid baseline from an earlier archive round still suppresses the
+ * post, deliberately: it is older than the one this run would write, and an
+ * older baseline can only make ingest reopen MORE eagerly, so the at-most-once
+ * property is kept without trading it for a chance to bury an event.
+ */
+export function isSettledAuditComment(comment, sentryIssueId) {
+  if (!isTrustedComment(comment)) return false;
+  const body = comment?.body;
+  if (typeof body !== "string" || !body.startsWith(ARCHIVE_COMMENT_MARKER)) {
+    return false;
+  }
+  const baseline = parseArchiveBaseline(body);
+  if (!baseline || !isUsableBaseline(baseline.lastSeen)) return false;
+  return (
+    baseline.sentryIssueId !== "" &&
+    baseline.sentryIssueId === String(sentryIssueId ?? "")
+  );
 }
 
 /** Fixed refusal comment for the fresh-event path (no marker — this stub is not
@@ -765,10 +807,11 @@ async function settleQueueStub(
   // archive first, then rethrow: a failed settlement must still fail the run.
   try {
     // Idempotency: a workflow_dispatch retry must not double-post the audit.
-    const alreadyAudited = (live.comments ?? []).some(
-      (comment) =>
-        typeof comment?.body === "string" &&
-        comment.body.includes(ARCHIVE_COMMENT_MARKER),
+    // Only a genuine audit record counts (see isSettledAuditComment) — a
+    // marker-shaped drive-by comment must not suppress the post, or the stub
+    // would settle as archived carrying no baseline for ingest to read.
+    const alreadyAudited = (live.comments ?? []).some((comment) =>
+      isSettledAuditComment(comment, sentryIssueId),
     );
     if (!alreadyAudited) {
       await runGh([
