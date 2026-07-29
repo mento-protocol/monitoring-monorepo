@@ -3,7 +3,7 @@ title: Codex Agent Skills
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-29
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -40,6 +40,18 @@ note as their single owner instead of copying implementation details here.
 Autoreview is source review only: mapped quality gates, browser checks,
 generated-artifact checks, runtime verification, and final PR readiness remain
 separate.
+
+## Claude global-store shadowing
+
+In Claude Code sessions a user-global skill wins over a repo skill with the
+same name. Today that shadows this repo's `ship` and `babysit-pr`: Claude
+sessions load the user's generic implementations, while the repo copies stay
+canonical for Codex and carry the repo-specific cloud capability-gate
+adaptations (whose rules also live in
+[`github-tooling-surfaces.md`](github-tooling-surfaces.md), so Claude sessions
+lose no binding rule). This split is accepted deliberately; do not "fix" it by
+renaming either side. The user's global `forensic-report` copy was archived on
+2026-07-29 so the repo skill resolves everywhere.
 
 ## Codex Cloud routing
 

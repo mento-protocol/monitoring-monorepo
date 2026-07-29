@@ -1,4 +1,4 @@
-project_doc_max_bytes = 28_672
+project_doc_max_bytes = 18_944
 
 [mcp_servers.chrome-devtools]
 args = ["chrome-devtools-mcp@latest"]
