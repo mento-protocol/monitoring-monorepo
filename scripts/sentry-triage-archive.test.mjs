@@ -12,6 +12,7 @@ import {
   describeSentryDisposition,
   isDefiniteRejection,
   isNotFoundError,
+  isSelectableForTriage,
   isNumericId,
   settlementHeld,
   isSafeSentryPermalink,
@@ -957,6 +958,129 @@ await test("a failed read cannot abort the live-regression reopen", async () => 
     "the transition happens off the pre-run observation when the read fails",
   );
   assert(model.labels.includes("sentry:needs-triage"));
+});
+
+await test("isSelectableForTriage is exactly Stage B's selector pair", () => {
+  const ok = {
+    state: "OPEN",
+    labels: ["sentry-triage", "sentry:needs-triage"],
+  };
+  assertEqual(isSelectableForTriage(ok), true);
+  assertEqual(isSelectableForTriage({ ...ok, state: "CLOSED" }), false);
+  assertEqual(
+    isSelectableForTriage({ ...ok, labels: ["sentry-triage"] }),
+    false,
+  );
+  assertEqual(isSelectableForTriage({}), false);
+  assertEqual(isSelectableForTriage(), false);
+});
+
+await test("a genuinely failing reopen strands the stub and fails RED", async () => {
+  // The third failure layer at this spot: the label edit has already stripped
+  // approval, verdict and archive markers and added needs-triage, so a closed
+  // stub here is invisible to Stage B (open-only selector) and to ingest (its
+  // closedAt postdates the sticky regression). Checking the END state catches
+  // this without anyone having predicted a failing reopen WRITE specifically.
+  const stub = makeStub({ state: "CLOSED" });
+  const { runGh, model } = makeRunGh({
+    stub,
+    failOn: (args) =>
+      args[1] === "reopen" ? "gh issue reopen: HTTP 500" : null,
+  });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+  const stderr = [];
+  const write = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  try {
+    await assertRejects(
+      runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+      /not selectable for triage/,
+    );
+  } finally {
+    process.stderr.write = write;
+  }
+
+  assertEqual(model.state, "CLOSED", "the stub really is stranded");
+  const errorLine = stderr.find((l) => l.includes("::error::"));
+  assert(errorLine, "a stranded stub must be loud");
+  assert(errorLine.includes("STRANDED"), "says the stub is stranded");
+  assert(errorLine.includes("state=CLOSED"), "names the observed state");
+  assert(
+    errorLine.includes("Reopen it by hand"),
+    "tells the operator what to do",
+  );
+});
+
+await test("a reopen that fails once is retried and converges", async () => {
+  // The retry is the cheap part; the verification is what makes it safe to stop.
+  const stub = makeStub({ state: "CLOSED" });
+  let reopens = 0;
+  const { runGh, model } = makeRunGh({
+    stub,
+    failOn: (args) => {
+      if (args[1] === "reopen") {
+        reopens += 1;
+        if (reopens === 1) return "gh issue reopen: connection reset";
+      }
+      return null;
+    },
+  });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "skipped-regressed");
+  assertEqual(model.state, "OPEN");
+  assert(model.labels.includes("sentry:needs-triage"));
+  assertEqual(
+    reopens,
+    2,
+    "it retried rather than failing on the first refusal",
+  );
+});
+
+await test("a needs-triage label stripped mid-flight is restored", async () => {
+  // The invariant is the PAIR. A concurrent actor removing the label between the
+  // edit and the verification leaves an open stub Stage B still cannot see, so
+  // driving only the state would not be enough.
+  const stub = makeStub({ state: "CLOSED" });
+  let stripped = false;
+  const { runGh, model } = makeRunGh({
+    stub,
+    beforeCall: (args) => {
+      if (!stripped && args[1] === "reopen") {
+        model.labels = model.labels.filter((n) => n !== "sentry:needs-triage");
+        stripped = true;
+      }
+    },
+  });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "skipped-regressed");
+  assertEqual(model.state, "OPEN");
+  assert(
+    model.labels.includes("sentry:needs-triage"),
+    "the label is put back so the pair holds",
+  );
 });
 
 await test("the settlement body write rebases onto the live body", async () => {

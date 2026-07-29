@@ -874,6 +874,121 @@ export function settlementHeld({ state, labels, body } = {}, expected = null) {
   );
 }
 
+/** The pair Stage B's selector matches: `--state open` AND
+ * `sentry:needs-triage`. A stub missing either is invisible to triage, and — if
+ * its `closedAt` postdates the regression — to ingest as well. */
+export function isSelectableForTriage({ state, labels } = {}) {
+  return (
+    String(state ?? "").toUpperCase() !== "CLOSED" &&
+    (Array.isArray(labels) ? labels : []).includes(NEEDS_TRIAGE_LABEL)
+  );
+}
+
+/**
+ * Drive a stub to the selectable pair and VERIFY it got there, or fail loudly.
+ *
+ * This exists because checking each write's return value kept missing a layer:
+ * the reopen was absent, then a failed read aborted it, then the reopen write
+ * itself could fail — three rounds, one location, each fix covering only the
+ * failure mode in front of it. Asserting the END STATE covers all of them and
+ * whatever comes next, because it observes the thing that actually matters
+ * rather than the success of the steps meant to produce it.
+ *
+ * Observe, correct what is wrong, observe again. Both corrections are idempotent
+ * so a retry is safe and cheap, and it runs before failing. When the final
+ * observation still disagrees — or could never be taken — the stub is stranded
+ * and only a human can free it, so this throws and the run goes RED with an
+ * `::error::` naming what was actually seen.
+ *
+ * `fallbackState` is the caller's pre-run observation, used only to decide
+ * whether to attempt a reopen when a read fails; it never satisfies the
+ * invariant, which requires a real confirming read.
+ */
+export async function ensureSelectableForTriage(
+  runGh,
+  { repo, queueIssue, fallbackState = "CLOSED", attempts = 2 },
+) {
+  let observed = null;
+  let readError = null;
+
+  const observe = async () => {
+    try {
+      const live = await readQueueIssue(runGh, repo, queueIssue);
+      observed = live;
+      readError = null;
+      return live;
+    } catch (err) {
+      readError = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `::notice::Could not read #${queueIssue} while re-queuing it for triage (${readError}); correcting from its pre-run state (${fallbackState}) and re-checking.\n`,
+      );
+      return null;
+    }
+  };
+
+  for (let round = 1; round <= attempts; round += 1) {
+    const live = await observe();
+    if (live && isSelectableForTriage(live)) return;
+
+    // Correct whatever is — or, with no read, may be — wrong. Both writes are
+    // idempotent, so a repeat costs nothing and a lost response is harmless.
+    const looksClosed = live
+      ? live.state === "CLOSED"
+      : String(fallbackState ?? "").toUpperCase() === "CLOSED";
+    const missingLabel = live
+      ? !live.labels.includes(NEEDS_TRIAGE_LABEL)
+      : false;
+    if (looksClosed) {
+      try {
+        process.stderr.write(
+          `::notice::Reopening #${queueIssue} so the live regression is visible to triage (round ${round}).\n`,
+        );
+        await runGh(["issue", "reopen", String(queueIssue), "-R", repo]);
+      } catch (err) {
+        process.stderr.write(
+          `::notice::Reopen of #${queueIssue} reported a failure (${
+            err instanceof Error ? err.message : String(err)
+          }); the verification read decides.\n`,
+        );
+      }
+    }
+    if (missingLabel) {
+      try {
+        await runGh([
+          "issue",
+          "edit",
+          String(queueIssue),
+          "-R",
+          repo,
+          "--add-label",
+          NEEDS_TRIAGE_LABEL,
+        ]);
+      } catch (err) {
+        process.stderr.write(
+          `::notice::Re-adding ${NEEDS_TRIAGE_LABEL} to #${queueIssue} reported a failure (${
+            err instanceof Error ? err.message : String(err)
+          }); the verification read decides.\n`,
+        );
+      }
+    }
+  }
+
+  // The mandatory final verification, on the main path — never skippable, and
+  // never reached by a correction whose result nobody looked at.
+  const finalLive = await observe();
+  if (finalLive && isSelectableForTriage(finalLive)) return;
+
+  const seen = observed
+    ? `state=${observed.state}, labels=${observed.labels.join("|")}`
+    : `unreadable (${readError})`;
+  process.stderr.write(
+    `::error::Queue stub #${queueIssue} could not be confirmed open and carrying ${NEEDS_TRIAGE_LABEL} after refusing to archive over a live regression (${seen}). It is STRANDED — Stage B selects only open stubs, and ingest will skip it while its closedAt postdates the regression. Reopen it by hand.\n`,
+  );
+  throw new Error(
+    `Queue stub #${queueIssue} is not selectable for triage after a live-regression refusal (${seen}).`,
+  );
+}
+
 /**
  * Roll the QUEUE STUB back to the state observed before this run started
  * mutating, by RECONCILING against live state rather than replaying a log of
@@ -1453,44 +1568,23 @@ export async function runArchive(options, deps = {}) {
       "--remove-label",
       REOPEN_SHED_LABELS.join(","),
     ]);
-    // Re-queuing means nothing while the stub is CLOSED. The triage selector
-    // filters on `--state open` (.github/workflows/sentry-triage-agent.yml), and
-    // ingest leaves a closed stub alone whenever this occurrence's `lastSeen` is
-    // not newer than the later `closedAt` — so a stub Stage B already closed
-    // would sit closed wearing `sentry:needs-triage`, seen by nothing, over a
-    // regression we KNOW is live. Decide from observed state rather than from
-    // what this run assumes: re-read and reopen only if it is closed now.
+    // THE INVARIANT for this path: when it returns, the stub is OPEN and carries
+    // `sentry:needs-triage` — the exact pair Stage B's selector matches
+    // (.github/workflows/sentry-triage-agent.yml). Anything else is invisible:
+    // the selector filters on `--state open`, and ingest leaves a closed stub
+    // alone whenever this occurrence's `lastSeen` is not newer than the later
+    // `closedAt`, so a regression we KNOW is live would sit unseen indefinitely.
     //
-    // Reopen LAST, matching ingest's reopen ordering: the state change is what
-    // makes the stub selectable, so if the label edit above had failed we want
-    // it still closed and the whole idempotent sequence retried, rather than
-    // open without `sentry:needs-triage`.
-    //
-    // The read must never ABORT the transition. The label edit above has already
-    // landed, so bailing out here on a transient read failure leaves exactly the
-    // invisible stub this reopen exists to prevent: closed, needs-triage,
-    // approval and verdict already shed, and past the point where the caller's
-    // reconciler can help (settlement never ran, so it holds no target). Fall
-    // back to the pre-run observation instead — still an observation, just an
-    // older one — so a failed read degrades the precision of the decision rather
-    // than skipping it.
-    let mustReopen = stub.state === "CLOSED";
-    try {
-      const liveStub = await readQueueIssue(runGh, repo, queueIssue);
-      mustReopen = liveStub.state === "CLOSED";
-    } catch (err) {
-      process.stderr.write(
-        `::notice::Could not re-read #${queueIssue} before reopening (${
-          err instanceof Error ? err.message : String(err)
-        }); falling back to its pre-run state (${stub.state}).\n`,
-      );
-    }
-    if (mustReopen) {
-      process.stderr.write(
-        `::notice::Reopening closed stub #${queueIssue} so the live regression is visible to triage.\n`,
-      );
-      await runGh(["issue", "reopen", String(queueIssue), "-R", repo]);
-    }
+    // Enforced by checking the END STATE, not each write's return. Three rounds
+    // fixed this spot one layer at a time — the missing reopen, then a read that
+    // aborted it, then a reopen write that could fail — because each fix only
+    // covered the failure in front of it. A verified end state covers a failed
+    // read, a failed write, a lost response, and whatever the next layer is.
+    await ensureSelectableForTriage(runGh, {
+      repo,
+      queueIssue,
+      fallbackState: stub.state,
+    });
     return {
       issue: queueIssue,
       shortId: meta.shortId,
