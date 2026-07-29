@@ -47,7 +47,13 @@ For a narrow verify (specific page or feature), skip the list and go directly to
    Then check `list_console_messages(types: ["error"])` for 500s, unhandled
    exceptions, and React errors.
 
-5. **Report** a concise pass/fail summary. If something failed, include what you expected vs what you saw.
+5. **Exercise changed behavior.** When the change alters interactive behavior
+   (sort, click, tab, filter, form) or layout, drive that interaction with
+   `click`/`evaluate_script` and confirm the resulting state; for layout work,
+   re-check the affected routes at the relevant breakpoints with `resize_page`.
+   A content-and-console pass alone does not cover interaction changes.
+
+6. **Report** a concise pass/fail summary. If something failed, include what you expected vs what you saw.
 
 ## Auth-state checks
 

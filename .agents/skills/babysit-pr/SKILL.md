@@ -126,7 +126,10 @@ Before reporting all-clear, rerun both projections in that order — feedback
 ledger clean first, then current-head readiness. If an optional review-producing
 workflow finishes while watching, rerun feedback-state to catch late findings.
 Only report all-clear when the feedback ledger has no required blocker and
-ready-state `ready` is `true` for the current head. The Codex approval exception
+ready-state `ready` is `true` for the current head. Report it with evidence,
+never bare: the PR URL, the current head SHA, required-check state, and the
+probes' blocker/thread/unreplied counts, so the user can assess that specific
+merge. The Codex approval exception
 is only the exact head-scoped break-glass contract in
 [`docs/notes/pr-ready-state.md`](../../../docs/notes/pr-ready-state.md); it
 waives no other gate.
