@@ -410,7 +410,8 @@ export function buildFreshEventRefusalComment(shortId) {
     "archive was running, so the archive was reverted. Closing this stub over an",
     "event Sentry has not yet flagged would hide it: the close would postdate the",
     "event and the regression-reopen gate would never fire for it. The stub stays",
-    "open; re-run the archive once the new activity has been triaged.",
+    "open and the `sentry:approved-archive` approval was removed; archiving again",
+    "needs a fresh human approval once the new activity has been triaged.",
   ].join("\n");
 }
 
@@ -438,8 +439,9 @@ export function buildUnreadableFreshnessRefusalComment(shortId) {
     "**Not archived.** Sentry stopped reporting a usable `lastSeen` for",
     `\`${safeShortId}\` immediately after the archive, so this run cannot confirm`,
     "that no event landed while it ran. The field parsed moments earlier, so the",
-    "read-back is anomalous. The archive was reverted and the stub left open;",
-    "re-run it once Sentry reports the issue normally.",
+    "read-back is anomalous. The archive was reverted, the stub left open, and the",
+    "`sentry:approved-archive` approval removed; re-approve once Sentry reports",
+    "the issue normally.",
   ].join("\n");
 }
 
@@ -703,6 +705,7 @@ async function settleQueueStub(
     timestampIso,
     alreadyArchived,
     baselineLastSeen,
+    revertArchive,
   },
 ) {
   // Time-of-check/time-of-use guard (2 of 2). Re-read the LIVE stub immediately
@@ -738,7 +741,8 @@ async function settleQueueStub(
   // ingest/triage cycle treats it as an ordinary open stub. The cost is that a
   // transient close failure is no longer retryable via workflow_dispatch — the
   // retry guard needs the approval label — which is the right trade against
-  // silently burying a live regression.
+  // silently burying a live regression, and the Sentry-side mutation is
+  // compensated below so the unretryable run leaves nothing archived.
   if (!(await consumeApprovalLabel(runGh, repo, queueIssue))) {
     process.stderr.write(
       `::notice::Issue #${queueIssue} no longer carried ${APPROVED_ARCHIVE_LABEL} when settlement tried to consume it (a concurrent regression reopen won the race); leaving it for re-triage instead of closing.\n`,
@@ -746,60 +750,93 @@ async function settleQueueStub(
     return { settled: false };
   }
 
-  // Idempotency: a workflow_dispatch retry must not double-post the audit.
-  const alreadyAudited = (live.comments ?? []).some(
-    (comment) =>
-      typeof comment?.body === "string" &&
-      comment.body.includes(ARCHIVE_COMMENT_MARKER),
-  );
-  if (!alreadyAudited) {
-    await runGh([
-      "issue",
-      "comment",
-      String(queueIssue),
-      "-R",
-      repo,
-      "--body",
-      buildAuditComment({
-        approver,
-        shortId: meta.shortId,
-        sentryIssueId,
-        permalink: meta.permalink,
-        timestampIso,
-        alreadyArchived,
-        baselineLastSeen,
-      }),
-    ]);
-  } else {
-    process.stderr.write(
-      `::notice::Audit comment already present on issue #${queueIssue}; not re-posting.\n`,
+  // Past the CAS this run holds a partial commit: the approval marker is gone,
+  // so a workflow_dispatch retry can no longer re-drive the settlement (its
+  // guard needs that label). A throw from here propagates straight out of
+  // runArchive, PAST the mid-flight-reopen compensation — which only fires on a
+  // `{ settled: false }` return — leaving the Sentry issue archived off an
+  // approval nobody can spend again. The sharpest case is a close that SUCCEEDS
+  // and the terminal `sentry:archived` edit that then fails: ingest only reads
+  // this stub's audit-comment baseline when the stub carries `sentry:archived`
+  // (scripts/sentry-triage-ingest.mjs, `needsBaseline`), so without that label a
+  // later regression falls back to the `closedAt` comparison the baseline exists
+  // to replace, and an event that landed inside the archive window is buried
+  // permanently — issue #1371, reinstated silently. So undo THIS run's Sentry
+  // archive first, then rethrow: a failed settlement must still fail the run.
+  try {
+    // Idempotency: a workflow_dispatch retry must not double-post the audit.
+    const alreadyAudited = (live.comments ?? []).some(
+      (comment) =>
+        typeof comment?.body === "string" &&
+        comment.body.includes(ARCHIVE_COMMENT_MARKER),
     );
-  }
+    if (!alreadyAudited) {
+      await runGh([
+        "issue",
+        "comment",
+        String(queueIssue),
+        "-R",
+        repo,
+        "--body",
+        buildAuditComment({
+          approver,
+          shortId: meta.shortId,
+          sentryIssueId,
+          permalink: meta.permalink,
+          timestampIso,
+          alreadyArchived,
+          baselineLastSeen,
+        }),
+      ]);
+    } else {
+      process.stderr.write(
+        `::notice::Audit comment already present on issue #${queueIssue}; not re-posting.\n`,
+      );
+    }
 
-  // A stub already CLOSED (a retry, or a previously-verdict-closed stub) skips
-  // the close.
-  if (live.state !== "CLOSED") {
+    // A stub already CLOSED (a retry, or a previously-verdict-closed stub) skips
+    // the close.
+    if (live.state !== "CLOSED") {
+      await runGh([
+        "issue",
+        "close",
+        String(queueIssue),
+        "-R",
+        repo,
+        "--reason",
+        "completed",
+      ]);
+    }
+
+    // Terminal marker LAST. Idempotent: --add-label no-ops if already present.
     await runGh([
       "issue",
-      "close",
+      "edit",
       String(queueIssue),
       "-R",
       repo,
-      "--reason",
-      "completed",
+      "--add-label",
+      ARCHIVED_LABEL,
     ]);
+  } catch (err) {
+    try {
+      const outcome = await revertArchive();
+      process.stderr.write(
+        outcome.restored
+          ? `::notice::Queue settlement for #${queueIssue} failed after the approval marker was consumed; reverted our archive of ${meta.shortId} (${sentryIssueId}) to its prior state so nothing stays archived off a spent approval.\n`
+          : `::notice::Queue settlement for #${queueIssue} failed after the approval marker was consumed; left Sentry issue ${sentryIssueId} untouched (this run did not archive it, or another actor already moved it).\n`,
+      );
+    } catch (restoreErr) {
+      const message =
+        restoreErr instanceof Error ? restoreErr.message : String(restoreErr);
+      // Loud, then rethrow the ORIGINAL failure — it is the diagnostic an
+      // operator needs first, and the run fails either way.
+      process.stderr.write(
+        `::error::Queue settlement for #${queueIssue} failed AND the Sentry archive of ${meta.shortId} (${sentryIssueId}) could not be reverted (${message}); the issue is left archived_until_escalating and needs a manual check.\n`,
+      );
+    }
+    throw err;
   }
-
-  // Terminal marker LAST. Idempotent: --add-label no-ops if already present.
-  await runGh([
-    "issue",
-    "edit",
-    String(queueIssue),
-    "-R",
-    repo,
-    "--add-label",
-    ARCHIVED_LABEL,
-  ]);
   return { settled: true };
 }
 
@@ -981,6 +1018,26 @@ export async function runArchive(options, deps = {}) {
           ? buildUnreadableFreshnessRefusalComment(meta.shortId)
           : buildFreshEventRefusalComment(meta.shortId),
       ]);
+      // Shed the human approval, exactly as the live-regression path above does
+      // and for the same authority reason (scripts/sentry-triage-ingest.mjs,
+      // REOPEN_SHED_LABELS): the archive workflow's dispatch guard requires only
+      // sentry:approved-archive, so leaving it here would let a bare
+      // workflow_dispatch retry re-archive with no fresh human review. That
+      // retry would then read the very event that caused THIS refusal as its own
+      // baseline — Sentry's substatus still lags, so the live-regression guard
+      // passes — and record it as `baselineLastSeen`, after which ingest's
+      // `lastSeen` > baseline reopen gate can never fire for that event. The
+      // verdict labels stay: this is a freshness refusal, not a Sentry-declared
+      // regression, so the stub needs a fresh approval, not a full re-triage.
+      await runGh([
+        "issue",
+        "edit",
+        String(queueIssue),
+        "-R",
+        repo,
+        "--remove-label",
+        APPROVED_ARCHIVE_LABEL,
+      ]);
       return {
         issue: queueIssue,
         shortId: meta.shortId,
@@ -1004,6 +1061,19 @@ export async function runArchive(options, deps = {}) {
     });
   }
 
+  // Undo THIS run's Sentry archive. A no-op when the issue was already archived
+  // before the run — we mutated nothing to undo. Handed to settleQueueStub so a
+  // failure after the approval-marker CAS compensates the Sentry side before it
+  // rethrows; the mid-flight-reopen path below runs the same restore inline.
+  const revertArchive = async () =>
+    alreadyArchived
+      ? { restored: false, reason: "not-ours" }
+      : restoreArchivedIssue(fetchImpl, {
+          ...sentry,
+          issueId,
+          preArchive: current,
+        });
+
   const settle = await settleQueueStub(runGh, {
     repo,
     queueIssue,
@@ -1013,6 +1083,7 @@ export async function runArchive(options, deps = {}) {
     timestampIso: now().toISOString(),
     alreadyArchived,
     baselineLastSeen,
+    revertArchive,
   });
 
   if (!settle.settled) {

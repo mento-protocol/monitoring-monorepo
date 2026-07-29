@@ -935,7 +935,9 @@ await test("a failed close leaves the stub open without approval or archived mar
   // close failure can no longer be retried via workflow_dispatch (its guard
   // needs that label). The property that survives: the stub is left OPEN with
   // neither the approval marker (nothing re-triggers the labeled workflow) nor
-  // sentry:archived, so the next ingest/triage cycle handles it normally.
+  // sentry:archived, so the next ingest/triage cycle handles it normally — and
+  // the archive this run made is compensated, so Sentry is not left archived
+  // off an approval nobody can spend again.
   const stub = makeStub();
   const calls = [];
   const runGh = async (args) => {
@@ -950,7 +952,7 @@ await test("a failed close leaves the stub open without approval or archived mar
     if (a0 === "issue" && (a1 === "comment" || a1 === "edit")) return "";
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
-  const { fetchImpl } = makeFetch();
+  const { fetchImpl, calls: fetchCalls } = makeFetch();
 
   await assertRejects(
     runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
@@ -960,6 +962,78 @@ await test("a failed close leaves the stub open without approval or archived mar
   assert(casCall(calls), "the approval marker was consumed before the close");
   const editCall = calls.find((a) => a[0] === "issue" && a[1] === "edit");
   assert(!editCall, "sentry:archived must not be applied without a close");
+  const puts = fetchCalls.filter((c) => c.method === "PUT");
+  assertEqual(puts.length, 2);
+  assertDeepEqual(puts[1].body, { status: "unresolved" });
+});
+
+await test("a settlement failure after the CAS reverts the Sentry archive", async () => {
+  // The sharpest post-CAS partial commit: the close SUCCEEDS and the terminal
+  // sentry:archived edit then fails. Ingest only reads this stub's audit
+  // baseline when the stub carries sentry:archived, so an uncompensated failure
+  // here would leave a CLOSED, archived-in-Sentry stub whose baseline nothing
+  // reads — sending the reopen gate back to the closedAt comparison and burying
+  // any event that landed in the archive window (issue #1371). The archive must
+  // be undone and the run must still fail RED.
+  const stub = makeStub();
+  const calls = [];
+  const runGh = async (args) => {
+    calls.push(args);
+    const [a0, a1] = args;
+    if (a0 === "issue" && a1 === "view") return JSON.stringify(stub);
+    if (a0 === "label" && a1 === "create") return "";
+    if (a0 === "api" && a1 === "-X") return "";
+    if (a0 === "issue" && a1 === "edit") {
+      throw new Error("gh issue edit failed: HTTP 502");
+    }
+    if (a0 === "issue" && (a1 === "comment" || a1 === "close")) return "";
+    throw new Error(`unexpected gh call: ${args.join(" ")}`);
+  };
+  const { fetchImpl, calls: fetchCalls } = makeFetch();
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /HTTP 502/,
+  );
+
+  assert(casCall(calls), "the CAS won before the failing step");
+  assert(ghCall(calls, "close"), "the close ran before the failing step");
+  const puts = fetchCalls.filter((c) => c.method === "PUT");
+  assertEqual(puts.length, 2);
+  assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
+  // Restores the captured pre-archive state, same compensation the mid-flight
+  // reopen paths use.
+  assertDeepEqual(puts[1].body, { status: "unresolved" });
+});
+
+await test("a settlement failure reverts nothing when this run did not archive", async () => {
+  // The issue was already archived_until_escalating, so this run issued no PUT
+  // and has nothing to undo — the compensation must not invent a mutation.
+  const stub = makeStub();
+  const runGh = async (args) => {
+    const [a0, a1] = args;
+    if (a0 === "issue" && a1 === "view") return JSON.stringify(stub);
+    if (a0 === "label" && a1 === "create") return "";
+    if (a0 === "api" && a1 === "-X") return "";
+    if (a0 === "issue" && a1 === "edit") {
+      throw new Error("gh issue edit failed: HTTP 502");
+    }
+    if (a0 === "issue" && (a1 === "comment" || a1 === "close")) return "";
+    throw new Error(`unexpected gh call: ${args.join(" ")}`);
+  };
+  const { fetchImpl, calls: fetchCalls } = makeFetch({
+    issue: { status: "ignored", substatus: "archived_until_escalating" },
+  });
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /HTTP 502/,
+  );
+
+  assert(
+    !fetchCalls.some((c) => c.method === "PUT"),
+    "no Sentry mutation to make and none to revert",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1078,7 +1152,10 @@ await test("an event landing inside the mutation window reverts and refuses", as
   assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
   assertDeepEqual(puts[1].body, { status: "unresolved" });
   assert(!ghCall(ghCalls, "close"), "must not close over the fresh event");
-  assert(!casCall(ghCalls), "must not consume the human approval");
+  assert(
+    !casCall(ghCalls),
+    "settlement never ran, so the approval is not consumed by the CAS",
+  );
   assert(
     !fetchCalls.some((c) => c.method === "POST"),
     "no Sentry link-back for an archive that was reverted",
@@ -1088,6 +1165,18 @@ await test("an event landing inside the mutation window reverts and refuses", as
   assert(
     comment[comment.indexOf("--body") + 1].includes("Not archived."),
     "the refusal explains why",
+  );
+  // The dispatch guard only requires sentry:approved-archive, so leaving it
+  // would let a bare retry archive over this same event with no fresh review.
+  const edit = ghCall(ghCalls, "edit");
+  assert(edit, "sheds the approval so a retry needs a fresh human approval");
+  assertEqual(
+    edit[edit.indexOf("--remove-label") + 1],
+    "sentry:approved-archive",
+  );
+  assert(
+    !edit.includes("--add-label"),
+    "a freshness refusal is not a re-triage — the verdict labels stay",
   );
 });
 
@@ -1190,7 +1279,10 @@ await test("an unreadable post-PUT lastSeen reverts and refuses", async () => {
   assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
   assertDeepEqual(puts[1].body, { status: "unresolved" });
   assert(!ghCall(ghCalls, "close"), "the stub stays open");
-  assert(!casCall(ghCalls), "the human approval must survive for a retry");
+  assert(
+    !casCall(ghCalls),
+    "settlement never ran, so the approval is not consumed by the CAS",
+  );
   const comment = ghCall(ghCalls, "comment");
   assert(comment, "explains the refusal on the stub");
   const body = comment[comment.indexOf("--body") + 1];
@@ -1201,6 +1293,18 @@ await test("an unreadable post-PUT lastSeen reverts and refuses", async () => {
   assert(
     !body.includes("A new Sentry event"),
     "must not claim an event landed — that is not what we observed",
+  );
+  // Same authority boundary as the fresh-event path: an unproven window must
+  // not stay retryable off the old approval.
+  const edit = ghCall(ghCalls, "edit");
+  assert(edit, "sheds the approval so a retry needs a fresh human approval");
+  assertEqual(
+    edit[edit.indexOf("--remove-label") + 1],
+    "sentry:approved-archive",
+  );
+  assert(
+    !edit.includes("--add-label"),
+    "a freshness refusal is not a re-triage — the verdict labels stay",
   );
 });
 
