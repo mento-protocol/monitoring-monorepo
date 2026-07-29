@@ -43,9 +43,11 @@ export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_ORG = "mento-labs";
 export const DEFAULT_SENTRY_BASE_URL = "https://us.sentry.io";
 
-// Fixed marker line on the queue-stub audit comment; also the idempotency key
-// that stops a workflow_dispatch retry from double-posting the audit. Owned by
-// the pure contract module because ingest fences its baseline reader on it too.
+// Fixed marker line on the queue-stub audit comment; part of the idempotency key
+// that stops a workflow_dispatch retry from double-posting the audit note (see
+// isSettledAuditComment, which also scopes on the archive generation). Only this
+// module reads or writes it — ingest takes the baseline from the stub BODY and
+// has no comment reader at all.
 export { ARCHIVE_COMMENT_MARKER };
 
 // The ONLY Sentry status this automation may set (ADR 0036 trust boundary):
@@ -181,8 +183,9 @@ export function sanitizeApprover(login) {
   return /^[A-Za-z0-9-]{1,39}$/.test(v) ? v : "an authorized user";
 }
 
-/** Bound + neutralize a value before it renders inside the audit comment's yaml
- * block, then quote it — same treatment the ingest gives its own yaml scalars. */
+/** Bound + neutralize a value before it renders into the audit note or a refusal
+ * comment, then quote it — same treatment the ingest gives its own yaml scalars,
+ * which is where the name comes from. */
 function yamlScalar(value) {
   return JSON.stringify(truncateTitle(neutralizeUntrusted(value), 90));
 }
@@ -196,16 +199,18 @@ function auditBaselineToken(baselineLastSeen) {
 }
 
 /** The queue-stub audit comment: a fixed marker line, the approver, a UTC
- * timestamp, what was archived, the permalink, the machine-readable freshness
- * baseline, and the escalation-auto-reopen note. `shortId` is neutralized +
+ * timestamp, what was archived, the permalink, the freshness baseline in prose,
+ * and the escalation-auto-reopen note. `shortId` is neutralized +
  * backtick-defanged as defense in depth even though it is Sentry-assigned;
  * `sentryIssueId` is numeric-validated upstream.
  *
- * The yaml block is the ingest's contract, not decoration: `baselineLastSeen`
- * is the Sentry `lastSeen` observed immediately before the archive mutation, and
- * `decideDedupAction` compares a later regression against it instead of this
- * stub's `closedAt` (issue #1371). Same yaml-in-body convention as the ingest's
- * `buildIssueBody`. */
+ * This note is for HUMANS. Nothing machine-readable lives here: the baseline
+ * ingest actually consumes is written into the stub BODY (see the body write in
+ * settleQueueStub), because the triage agent can post comments under this same
+ * bot identity and so no fence applied to a comment is worth anything. The
+ * rendered baseline does carry one machine use, but only within this module —
+ * `isSettledAuditComment` matches it to scope the note's dedup to one archive
+ * generation. */
 export function buildAuditComment({
   approver,
   shortId,
@@ -374,7 +379,7 @@ export function isAlreadyArchived(issue) {
  * consumes Sentry's own escalation flag; the window where a regression has
  * landed but Sentry has not yet flipped the substatus is covered separately by
  * the freshness baseline (`lastSeenMoved` below plus the baseline recorded in
- * the audit comment), since the flag alone lags the event.
+ * the stub BODY), since the flag alone lags the event.
  */
 export function isActivelyRegressing(issue) {
   const status = String(issue?.status ?? "").toLowerCase();
@@ -406,9 +411,9 @@ export function lastSeenMoved(baseline, latest) {
 }
 
 /** A baseline is usable only when it is a real date. Anything else would land
- * in the audit comment as junk, and ingest's `decideDedupAction` would silently
- * fall back to comparing against `closedAt` — the exact race the baseline
- * closes. So an unusable baseline gates the mutation instead of riding along. */
+ * in the stub body as junk, and ingest's `decideDedupAction` would silently fall
+ * back to comparing against `closedAt` — the exact race the baseline closes. So
+ * an unusable baseline gates the mutation instead of riding along. */
 export function isUsableBaseline(lastSeen) {
   return !Number.isNaN(Date.parse(lastSeen ?? ""));
 }
@@ -1165,9 +1170,10 @@ async function settleQueueStub(
   // verdict label and never regains `sentry:needs-triage`, so the triage agent's
   // selector skips it too; and the approval is spent, so workflow_dispatch
   // refuses it. It sits there until a human re-approves. That is the accepted
-  // cost of not silently burying a live regression, and it is bounded: the catch
-  // below reverts this run's Sentry archive and rethrows, so the run fails RED
-  // and nothing is left archived off a spent approval.
+  // cost of not silently burying a live regression, and it is bounded: the run
+  // fails RED and the queue side is rolled back. Sentry deliberately stays
+  // archived_until_escalating — the outcome the approver asked for, which
+  // escalation undoes on its own (see reconcileToTarget).
   if (!(await consumeApprovalLabel(runGh, repo, queueIssue))) {
     process.stderr.write(
       `::notice::Issue #${queueIssue} no longer carried ${APPROVED_ARCHIVE_LABEL} when settlement tried to consume it (a concurrent regression reopen won the race); leaving it for re-triage instead of closing.\n`,
@@ -1177,14 +1183,13 @@ async function settleQueueStub(
 
   // Past the CAS this run holds a partial commit: the approval marker is gone,
   // so a workflow_dispatch retry can no longer re-drive the settlement (its
-  // guard needs that label). Any failure from here has to undo BOTH sides —
-  // see the catch. The sharpest case is a close that SUCCEEDS and the terminal
-  // `sentry:archived` edit that then fails: ingest only reads this stub's
-  // audit-comment baseline when the stub carries `sentry:archived`
-  // (scripts/sentry-triage-ingest.mjs, `needsBaseline`), so a stub left CLOSED
-  // without it falls back to the `closedAt` comparison the baseline exists to
-  // replace, and an event that landed inside the archive window is buried
-  // permanently — issue #1371, reinstated silently.
+  // guard needs that label). Any failure from here rolls the QUEUE back — see
+  // reconcileToTarget, which deliberately leaves Sentry archived. The sharpest
+  // case is a close that SUCCEEDS and the terminal `sentry:archived` edit that
+  // then fails: that leaves a CLOSED stub whose `closedAt` postdates any event
+  // from the archive window, so ingest compares against `closedAt` and buries it
+  // — issue #1371, reinstated silently. Reopening such a stub is the correction
+  // the reconciler makes from observed state.
 
   // Write the freshness baseline into the stub BODY first, before anything
   // marks the stub settled. Ordering is the invariant: a stub that is CLOSED
@@ -1377,12 +1382,12 @@ export async function runArchive(options, deps = {}) {
   const current = await fetchSentryIssue(fetchImpl, { ...sentry, issueId });
   // Freshness baseline (issue #1371): the last event Sentry had recorded when
   // this run decided to archive. It is re-checked after the PUT and written into
-  // the audit comment, where ingest's regression-reopen gate reads it instead of
-  // the stub's `closedAt`.
+  // the stub BODY, where ingest's regression-reopen gate reads it instead of the
+  // stub's `closedAt`.
   const baselineLastSeen = current?.lastSeen ?? null;
 
   // Fail CLOSED on an unusable baseline, BEFORE any mutation. Archiving without
-  // one would record junk in the audit comment, ingest would silently fall back
+  // one would record junk in the stub body, ingest would silently fall back
   // to the `closedAt` comparison, and the race this baseline closes would be
   // wide open again — invisibly, because nothing downstream can tell a missing
   // baseline from a stub archived before the contract existed. Refuse instead:
@@ -1498,10 +1503,30 @@ export async function runArchive(options, deps = {}) {
       ]);
       return true;
     } catch (err) {
+      // A reported failure is not proof the label survived — GitHub can remove
+      // it and lose the response, the same ambiguity the queue reconciler exists
+      // to handle, and this was the last path exempt from it. Verify against
+      // live labels: gone means the disarm succeeded whatever the CLI said, and
+      // reporting failure there would demand manual repair of a state that had
+      // already converged.
+      const reported = err instanceof Error ? err.message : String(err);
+      try {
+        const live = await readQueueIssue(runGh, repo, queueIssue);
+        if (!live.labels.includes(APPROVED_ARCHIVE_LABEL)) {
+          process.stderr.write(
+            `::notice::Shedding ${APPROVED_ARCHIVE_LABEL} from #${queueIssue} reported an error (${reported}) that the live labels disprove; the approval is gone.\n`,
+          );
+          return true;
+        }
+      } catch (readErr) {
+        process.stderr.write(
+          `::notice::Could not re-read #${queueIssue} to confirm the approval label (${
+            readErr instanceof Error ? readErr.message : String(readErr)
+          }); treating the disarm as failed.\n`,
+        );
+      }
       process.stderr.write(
-        `::error::Could not shed ${APPROVED_ARCHIVE_LABEL} from #${queueIssue} after a failed archive (${
-          err instanceof Error ? err.message : String(err)
-        }); a workflow_dispatch retry could re-archive and re-baseline over an untriaged event. Remove the label by hand.\n`,
+        `::error::Could not shed ${APPROVED_ARCHIVE_LABEL} from #${queueIssue} after a failed archive (${reported}); a workflow_dispatch retry could re-archive and re-baseline over an untriaged event. Remove the label by hand.\n`,
       );
       return false;
     }

@@ -1953,6 +1953,96 @@ await test("the disarm rule covers every non-clean exit uniformly", () => {
   assertEqual(sentryMayBeArchived("not-attempted"), false);
 });
 
+await test("a lost response on the disarm converges instead of demanding repair", async () => {
+  // GitHub removes the label and the CLI loses the response. Taking that
+  // rejection as proof the label survived reported the approval as still
+  // spendable and demanded manual repair of a state that had already converged
+  // — the last path exempt from the ambiguous-remote-write rule the queue
+  // reconciler exists for.
+  const stub = makeStub();
+  const { runGh, model } = makeRunGh({
+    stub,
+    ambiguousOn: (args) =>
+      args[1] === "edit" && args.includes("--remove-label")
+        ? "gh issue edit: connection reset"
+        : null,
+  });
+  const { fetchImpl } = makeFetch({
+    lastSeenAfterPut: "2026-07-19T11:59:45.000Z",
+  });
+  const stderr = [];
+  const write = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  let result;
+  try {
+    result = await runArchive(baseOptions(), {
+      runGh,
+      fetchImpl,
+      now: FIXED_NOW,
+    });
+  } finally {
+    process.stderr.write = write;
+  }
+
+  // The refusal stands as a policy outcome, not an operational failure.
+  assertEqual(result.status, "reverted-fresh-events");
+  assertEqual(
+    model.labels.includes("sentry:approved-archive"),
+    false,
+    "the label really is gone",
+  );
+  assert(
+    stderr.some((l) => l.includes("that the live labels disprove")),
+    "the discrepancy is logged",
+  );
+  assert(
+    !stderr.some((l) => l.includes("Remove the label by hand")),
+    "and no manual repair is demanded for a converged state",
+  );
+});
+
+await test("a disarm that genuinely fails still demands manual repair", async () => {
+  // The complement: the label is still there on the re-read, so the hazard is
+  // real and the existing ::error:: must survive.
+  const stub = makeStub();
+  const { runGh, model } = makeRunGh({
+    stub,
+    failOn: (args) =>
+      args[1] === "edit" && args.includes("--remove-label")
+        ? "gh issue edit: HTTP 500"
+        : null,
+  });
+  const { fetchImpl } = makeFetch({
+    lastSeenAfterPut: "2026-07-19T11:59:45.000Z",
+  });
+  const stderr = [];
+  const write = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  try {
+    await assertRejects(
+      runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+      /could not be shed|compensation was incomplete/,
+    );
+  } finally {
+    process.stderr.write = write;
+  }
+
+  assert(
+    model.labels.includes("sentry:approved-archive"),
+    "the label really did survive",
+  );
+  assert(
+    stderr.some((l) => l.includes("Remove the label by hand")),
+    "a genuine failure still demands manual repair",
+  );
+});
+
 await test("a definite rejection keeps the approval re-dispatchable", async () => {
   // The complement of the rule: Sentry refused the PUT, so nothing is archived,
   // nothing can be re-baselined, and burning the approval would make an operator
