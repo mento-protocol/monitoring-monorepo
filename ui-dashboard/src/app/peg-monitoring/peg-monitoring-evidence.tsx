@@ -347,10 +347,11 @@ type SafetyState = {
 
 function poolCheckState(
   asset: PegAssetPresentation,
+  structuralEvidenceCurrent: boolean,
   stale: boolean,
 ): SafetyState {
   const structural = asset.asset.structural;
-  if (!asset.structuralEvidenceCurrent)
+  if (!structuralEvidenceCurrent)
     return {
       label: "Check expired",
       tone: "warn",
@@ -397,7 +398,11 @@ function SafetyChecks({
   asset: PegAssetPresentation;
   stale: boolean;
 }): React.JSX.Element {
-  const poolState = poolCheckState(asset, stale);
+  // Once a package is stale, this section describes what its confirmed
+  // structural check found. Its age must not replace that result with a new,
+  // synthetic expiry state while the user is reading retained evidence.
+  const structuralEvidenceCurrent = stale || asset.structuralEvidenceCurrent;
+  const poolState = poolCheckState(asset, structuralEvidenceCurrent, stale);
   return (
     <section
       data-testid={`peg-safety-checks-${asset.asset.asset}`}
@@ -430,7 +435,7 @@ function SafetyChecks({
         {asset.asset.monitors.map((monitor) => {
           const safeguard = safeguardState(
             monitor,
-            asset.structuralEvidenceCurrent,
+            structuralEvidenceCurrent,
             stale,
           );
           return (

@@ -274,6 +274,75 @@ describe("PegMonitoringPageClient", () => {
     );
     expect(decisionMarket?.textContent).not.toContain("Unavailable");
   });
+  it("keeps confirmed structural results visible after the package becomes stale", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const monitor = item.monitors[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            policy: { ...item.policy, freshnessGraceSeconds: 60 },
+            structural: { ...item.structural, indexedPoolReachable: false },
+            monitors: [
+              {
+                ...monitor,
+                breaker: { ...monitor.breaker!, enabled: false },
+              },
+            ],
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+    act(() => vi.advanceTimersByTime(100_000));
+    const safety = container.querySelector(
+      '[data-testid="peg-safety-checks-europ-schuman"]',
+    );
+    expect(container.textContent).toContain(
+      "Data is stale — showing the last confirmed check",
+    );
+    expect(safety?.textContent).toContain("Pool unavailable");
+    expect(safety?.textContent).toContain("Disabled");
+    expect(safety?.textContent).not.toContain("Check expired");
+  });
+  it("labels capped supporting-market prices as partial fills", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.map((source) =>
+              source.id === "kraken_eur"
+                ? { ...source, capped: true, filledFraction: 0.4 }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+    const supporting = container.querySelector(
+      '[data-testid="peg-supporting-source-kraken_eur"]',
+    );
+    expect(supporting?.textContent).toContain(
+      "partial fill: 40% of the test sale",
+    );
+    expect(supporting?.textContent).not.toContain(
+      "for a 50,000 EUROP test sale",
+    );
+  });
   it("expires source evidence while its package is still current", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;

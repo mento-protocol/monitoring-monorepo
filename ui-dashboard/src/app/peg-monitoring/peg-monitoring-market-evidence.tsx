@@ -109,9 +109,11 @@ function SupportingSource({
           {stale ? "At the last confirmed check: " : ""}
           {formatNumber(source.executablePrice)} {priceCurrency} per{" "}
           {source.baseCurrency}
-          {source.referenceSize === null
-            ? ""
-            : ` for a ${formatNumber(source.referenceSize)} ${source.baseCurrency} test sale`}
+          {source.capped
+            ? ` · partial fill: ${formatFraction(source.filledFraction)} of the test sale`
+            : source.referenceSize === null
+              ? ""
+              : ` for a ${formatNumber(source.referenceSize)} ${source.baseCurrency} test sale`}
           {checkedAge === null ? "" : ` · checked ${checkedAge} ago`}
         </p>
       )}
