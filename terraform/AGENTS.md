@@ -16,7 +16,7 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, private Peg-policy storage in that project, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, the separated Terraform/service-deploy Workload Identity Federation chains, repo-level GitHub Actions secrets and variables owned by the platform stack, and the applied Peg-policy GCS source foundation. Policy publication remains paused until the controller recovery in [`ADR 0055`](../docs/adr/0055-peg-policy-bucket-controller-recovery.md) completes. Alloy values are required sensitive, ephemeral operator inputs that terminate at Google provider 6.50.x write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
+`terraform/` is the `platform` stack registered in `terraform.stacks.json`. It manages production infrastructure for the monitoring dashboard, Upstash, the monitoring GCP project/APIs, private Peg-policy storage in that project, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, the separated Terraform/service-deploy Workload Identity Federation chains, repo-level GitHub Actions secrets and variables owned by the platform stack, and the applied Peg-policy GCS source foundation. Controller recovery and protected policy publication are complete; the current runtime attachment pins `mento-monitoring-peg-policy/peg-policy/current.json` generation `1785276001213660`. Alert activation still requires its trusted-main plan, human-approved apply, and Grafana/routing proof. Alloy values are required sensitive, ephemeral operator inputs that terminate at Google provider 6.50.x write-only Secret Manager arguments; only their explicit rotation counters are non-secret. Alert ownership lives in `alerts/` (`alerts/rules/` for protocol Grafana rules, Aegis service/testnet-health rules, and global routing; `alerts/infra/` for event-driven delivery) while `aegis/terraform/` owns the Aegis dashboard and folder.
 
 Alloy's runtime project authority is the custom
 `grafanaAgentActivationReader` role with exactly `appengine.services.get` and
@@ -116,15 +116,15 @@ boundaries.
   run a clean full plan. The recovery sequence is in
   [`docs/terraform.md`](../docs/terraform.md) and
   [ADR 0055](../docs/adr/0055-peg-policy-bucket-controller-recovery.md).
-  Metrics Bridge always uses the dedicated runtime identity, while paired
-  `PEG_POLICY_*` values stay absent until the reviewed source literal
-  `local.peg_policy_runtime_generation` changes from `null` to the protected
-  publisher's current quoted positive generation for activation or rollover.
-  Never supply a URL or auth-mode variable: Terraform derives the canonical
-  pinned GCS URL and `gcp-metadata` mode together. The routine deployer and
+  Metrics Bridge uses the dedicated runtime identity and currently pins
+  generation `1785276001213660` through paired `PEG_POLICY_*` values. A future
+  rollover replaces the current quoted positive generation in the reviewed
+  source literal; never supply a URL or auth-mode variable. Terraform derives
+  the canonical pinned GCS URL and `gcp-metadata` mode together. The routine deployer and
   `gcp_dev_members` receive Service Account User only on that runtime identity;
   never restore a project-wide or default-Compute grant. Audit effective
-  readers, writers, and IAM administrators after applies and before activation.
+  readers, writers, and IAM administrators after applies and before future
+  rollovers.
   Access logs are audit
   telemetry, never an authorization control.
 

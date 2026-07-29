@@ -1,5 +1,5 @@
 ---
-title: Peg monitoring alert source validation and activation hold
+title: Peg monitoring alert source validation and activation
 status: active
 owner: eng
 canonical: true
@@ -10,7 +10,7 @@ review_interval_days: 90
 garden_lane: operator-runbooks
 ---
 
-# Peg monitoring alert source validation and activation hold
+# Peg monitoring alert source validation and activation
 
 The peg alert ladder is source configuration only until every production
 precondition in this runbook passes. A merged rule definition, a successful
@@ -30,32 +30,40 @@ The source-owned surfaces are:
 
 ## Current boundary
 
-This source packet does not deploy the producer, apply Grafana resources, or
-prove live telemetry. `terraform/peg-policy.tf` owns the policy identities and
-bucket IAM. The foundation is applied, but the separate manual `Peg Policy
-Publication` root is paused pending the bucket-controller recovery in
-[ADR 0055](../adr/0055-peg-policy-bucket-controller-recovery.md). Its Grafana
-consumers are absent by default because the source-controlled
-`local.peg_alerts_enabled` switch is `false`. That single Terraform local gates
-the Peg folder, templates, contact points, and rule group; it is not a workflow,
-variable, or policy-artifact switch.
+This source packet does not apply Grafana resources or, by itself, prove live
+consumer behavior. The activation evidence records live producer and query
+checks; live consumer states still require the protected apply.
+`terraform/peg-policy.tf` owns the policy identities and bucket IAM. Controller
+recovery and bootstrap-grant removal are complete.
+The protected `Peg Policy Publication` root published
+`mento-monitoring-peg-policy/peg-policy/current.json` at generation
+`1785276001213660`. Authenticated, generation-pinned delivery and live producer
+telemetry are proven on `metrics-bridge-r-47264e8-30405040839`, which serves
+active policy `europ-2026-07-22-v1-f6cdaa2681ab92ce9d90572a4d29d32f`. The
+production dashboard prerequisite is also proven at
+`https://monitoring.mento.org/peg-monitoring`: the live current package renders
+without console errors. The reviewed source activation sets the
+source-controlled `local.peg_alerts_enabled` switch to the literal `true`. That
+single Terraform local gates the Peg folder, templates, contact points, and
+rule group; it is not a workflow, variable, or policy-artifact switch. This
+source change does not prove the consumers exist in Grafana or that their
+queries have live data.
 
 The production identity bootstrap in
-[#1566](https://github.com/mento-protocol/monitoring-monorepo/pull/1566) must be
-merged and its separately reviewed Terraform apply must complete before this
-alert stack is eligible for a trusted-main apply. The producer changes in
-[#1568](https://github.com/mento-protocol/monitoring-monorepo/pull/1568) are
-merged and deployed. They remain intentionally dormant until authenticated
-policy delivery is live, so this milestone alone does not provide the required
-`mento_peg_usable_decision_total` input or satisfy activation precondition 3
-below.
+[#1566](https://github.com/mento-protocol/monitoring-monorepo/pull/1566) is
+merged and its separately reviewed Terraform apply is complete. The producer
+changes in [#1568](https://github.com/mento-protocol/monitoring-monorepo/pull/1568)
+are merged and deployed. The runtime now fetches the authenticated
+generation-pinned policy and exposes the active `policy_version`. The activation
+PR records a full producer-floor window and production evaluation of all 61
+unique generated query expressions. The protected-main plan, human-approved
+apply, and post-apply Grafana proof follow the source merge.
 
-The listing-confirmation producer and consumer source now includes
+The live listing-confirmation producer and consumer source includes
 `mento_peg_listing_state`, `mento_peg_listing_checked_at`, and the bounded
-`mento_peg_listing_absent_consecutive_checks` gauge. This does not prove those
-series are live: protected policy publication, runtime activation, a
-human-approved Grafana application, and live evidence remain separate gates.
-Listing state must never be inferred from source health.
+`mento_peg_listing_absent_consecutive_checks` gauge. A human-approved Grafana
+application and Grafana query evidence remain separate gates. Listing state
+must never be inferred from source health.
 
 ## Rule inventory
 
@@ -158,12 +166,12 @@ are true:
 
 6. Every exact generated query evaluates in the production Grafana data source
    without `Error` or unexplained `NoData`.
-7. After preconditions 1–6 are verified, a reviewed source change flips
-   `local.peg_alerts_enabled` to `true`. Do not make this activation change
-   earlier or through a workflow, Terraform variable, GitHub variable, or
-   policy-artifact field.
-8. After the reviewed source flip reaches protected `main`, a human reviews the
-   trusted-main plan and explicitly approves the `production-infra` apply.
+7. The reviewed source change sets `local.peg_alerts_enabled` to the literal
+   `true`. Do not control activation through a workflow, Terraform variable,
+   GitHub variable, or policy-artifact field. This source activation does not
+   waive preconditions 1–6.
+8. After the reviewed source change reaches protected `main`, a human reviews
+   the trusted-main plan and explicitly approves the `production-infra` apply.
 
 Active blindness and heartbeat rules use `no_data_state = "Alerting"`.
 Applying while production peg samples are absent can create incidents by
@@ -180,7 +188,8 @@ explicit approval.
 
 ## Rollback
 
-Remove or disable the Grafana consumers first through a reviewed,
-human-approved alerts-rules change. Confirm the rules are absent before
+First make a reviewed source change that sets `local.peg_alerts_enabled` to the
+literal `false`. Obtain the human-approved `alerts-rules` apply and confirm the
+Peg folder, contact points, templates, and rule group are absent before
 withdrawing any producer series they require. Never remove the producer first:
 active blindness and heartbeat intentionally fail closed on missing data.

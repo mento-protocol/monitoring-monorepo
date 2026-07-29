@@ -13,9 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0054 — Peg policy stays private in the monitoring project
 
-**Status:** Accepted (Jul 2026), live foundation; controller amendment in
-[ADR 0055](0055-peg-policy-bucket-controller-recovery.md). Publication is
-paused pending that recovery.
+**Status:** Accepted (Jul 2026), in force. The controller recovery in
+[ADR 0055](0055-peg-policy-bucket-controller-recovery.md), first protected
+publication, and generation-pinned runtime attachment are complete.
 **Scope:** metrics-bridge / alerts / terraform/infra
 
 ## Context
@@ -72,8 +72,9 @@ the two authoritative bucket IAM policies through the assumed Owner path.
 controller decision: it adds the narrow normal controller, permits one
 explicitly approved and time-bounded project-level bootstrap when recovery
 requires it, and requires removing that bootstrap immediately after both
-policies reconcile. The foundation is applied; policy publication remains
-paused until this recovery completes.
+policies reconcile. Recovery and bootstrap removal are complete; the protected
+workflow has published the policy and the runtime has its generation-pinned
+attachment.
 
 ## Alternatives considered
 
@@ -98,14 +99,12 @@ paused until this recovery completes.
   check before activation.
 - The source foundation creates no policy object. The separate
   `alerts/peg-policy-publication` root creates a policy object only through its
-  manual protected workflow. The dormant runtime attachment assigns the
-  dedicated reader identity to Metrics Bridge, but keeps its paired policy
-  values absent while `local.peg_policy_runtime_generation` is `null`. Those
-  foundation and publication merges do not start Peg polling or activate
-  alerts. A separate reviewed runtime activation replaces `null` with the
-  published generation and removes the Cloud Run template-revision drift ignore
-  to mint the attachment revision; later rollovers keep revision changes
-  managed.
+  manual protected workflow. The first publication created
+  `mento-monitoring-peg-policy/peg-policy/current.json` generation
+  `1785276001213660`; the reviewed runtime attachment pins it and mints
+  `metrics-bridge-r-47264e8-30405040839`. Future rollovers replace the current
+  quoted generation in a reviewed runtime change and keep revision changes
+  managed. Publication and runtime attachment do not apply Grafana consumers.
 
 ## Evidence
 

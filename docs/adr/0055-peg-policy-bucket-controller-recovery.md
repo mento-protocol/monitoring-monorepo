@@ -13,8 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0055 — Peg policy bucket controller recovers authoritative IAM reconciliation
 
-**Status:** Accepted (Jul 2026), recovery pending; foundation applied and
-publication paused.
+**Status:** Accepted (Jul 2026), recovery complete. The temporary bootstrap was
+removed after reconciliation; protected publication and the generation-pinned
+runtime attachment then completed.
 **Scope:** terraform/infra
 
 ## Context
@@ -54,8 +55,9 @@ recovery exception, not a retained project-level grant.
   full platform stack, remove the binding immediately after both bucket policies
   reconcile, verify its absence, and run a clean full plan.
 - Do not use `roles/storage.admin`, Storage Object Admin, or Service Account
-  User as a bootstrap or fallback. Do not resume policy publication, runtime
-  attachment, or alert activation until recovery records the clean plan.
+  User as a bootstrap or fallback. For any future recovery, do not resume
+  policy publication, runtime attachment, or alert activation until it records
+  the clean plan.
 
 ## Recovery procedure
 
@@ -109,8 +111,9 @@ check, and clean plan as recovery evidence.
 - The one-time bootstrap remains an operator action outside Terraform state,
   so its removal, live absence check, and clean full plan are mandatory
   evidence.
-- The production foundation stays applied but policy publication remains paused
-  until the recovery sequence is complete.
+- The completed recovery preserved least privilege and unlocked protected policy
+  publication and runtime attachment; Grafana activation remains a separate
+  reviewed apply.
 
 ## Evidence
 

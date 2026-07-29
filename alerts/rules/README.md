@@ -54,20 +54,19 @@ CI runs this in the `CI / Lint + test root scripts` job, along with
 ## Peg alert ladder
 
 The source-generated peg ladder reads `peg-thresholds.json` once and generates
-exact-version active and retained-previous rule sets. Its folder, templates,
-contact points, and rule group remain absent while the source-controlled
-`local.peg_alerts_enabled` switch is `false`. When a reviewed activation change
-sets it to `true`, market warnings route to `#alerts-pools`, producer and source
-warnings route to `#alerts-infra`, and critical rules route to both Splunk
-On-Call and `#alerts-critical`. Peg rules use direct rule-level contact points
-and never inherit the FX-weekend mute. Blind rules compare the producer's exact
+exact-version active and retained-previous rule sets. A reviewed source change
+sets the singleton `local.peg_alerts_enabled` switch to the literal `true`,
+which creates its folder, templates, contact points, and rule group. Market
+warnings route to `#alerts-pools`, producer and source warnings route to
+`#alerts-infra`, and critical rules route to both Splunk On-Call and
+`#alerts-critical`. Peg rules use direct rule-level contact points and never
+inherit the FX-weekend mute. Blind rules compare the producer's exact
 consecutive deep-poll count with policy; they do not infer 30-second poll
 history from Grafana's 60-second evaluation clock.
 
-The source is not live merely because it is merged. After every production
-precondition is verified, a reviewed source change may set the activation
-switch to `true`; the trusted-main plan, human-approved apply, and live Grafana
-proof remain required. Follow
+The reviewed source activation is not live merely because it is merged. The
+current producer preconditions still gate the trusted-main plan and
+human-approved apply; live Grafana proof remains required after apply. Follow
 [`docs/notes/peg-monitoring.md`](../../docs/notes/peg-monitoring.md) for the
 current dependency boundary, exact source checks, activation sequence, and
 rollback order.
@@ -98,11 +97,12 @@ timings, including the FX-weekend mute, are not deployment silences. Peg rules
 never use that mute and require a complete active decision-history window
 before their protected apply can be approved.
 
-Reverse the dependency for rollback. If a service or indexer rollback would
-remove a series used by a rule, merge and apply the rule revert first, confirm
-the consumer is absent, and only then withdraw the producer metric. This order
-also applies to warning rules with `no_data_state = "OK"` so stale rule
-definitions do not conceal an incomplete rollback.
+Reverse the dependency for rollback. First merge a reviewed source change that
+sets `local.peg_alerts_enabled` to `false`, then obtain the human-approved
+`alerts-rules` apply and confirm the Peg consumers are absent. Only then
+withdraw a producer metric or roll back its service/indexer. This order also
+applies to warning rules with `no_data_state = "OK"` so stale rule definitions
+do not conceal an incomplete rollback.
 The Polygon-specific producer checks and ordered steps are in
 [`docs/notes/polygon-monitoring.md`](../../docs/notes/polygon-monitoring.md).
 

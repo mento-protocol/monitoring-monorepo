@@ -175,13 +175,12 @@ trading-limit change.
 
 ## 6. Roll out the first activation producer-first
 
-Use this sequence only for the one-time first activation while
-`local.peg_alerts_enabled` is still `false`, and only after the policy
-publication and runtime-pinning infrastructure tracked in
-[Peg monitoring alert source validation and activation
-hold](peg-monitoring.md) are live. The manual `Peg Policy Publication` workflow
-now provides the publication path; it still does not activate the runtime or
-Grafana consumers.
+Use this sequence for the one-time first activation. It starts while
+`local.peg_alerts_enabled` is `false` and ends with step 9's reviewed source
+flip. The verified current boundary is in [Peg monitoring alert source
+validation and activation](peg-monitoring.md). The manual `Peg Policy
+Publication` workflow publishes policy only; runtime attachment and Grafana
+consumers remain separate steps.
 
 Use this order for the first activation topology:
 
@@ -194,9 +193,7 @@ Use this order for the first activation topology:
    Record rejected-source evidence in that change. Never merge a registry-only
    or policy-only source state; the integrity contract requires exact
    active-registry parity. Do not deploy the registry B image yet.
-3. After the bucket-controller recovery in
-   [ADR 0055](../adr/0055-peg-policy-bucket-controller-recovery.md), through
-   the separately reviewed `Peg Policy Publication` workflow, inspect
+3. Through the separately reviewed `Peg Policy Publication` workflow, inspect
    its read-only `main` plan and then approve its `production-infra` apply to
    publish B as the immutable private GCS generation described by
    [ADR 0054](../adr/0054-same-project-peg-policy-artifact.md). Keep the runtime
@@ -223,7 +220,11 @@ Use this order for the first activation topology:
    Keep the asset Configured while producer evidence is absent or stale.
 8. Provision the dashboard's server-only bridge URL through IaC, deploy the
    dashboard, and browser-verify current, stale-last-confirmed, and unavailable
-   behavior against the same policy version.
+   behavior against the same policy version. For this first activation,
+   `https://monitoring.mento.org/peg-monitoring` has a live current package and
+   no console errors. The focused Playwright flow proves the retained-stale
+   transition, and the page-client regression covers unavailable state and
+   recovery.
 9. Only after producer and dashboard proof, merge a reviewed source change that
    sets `local.peg_alerts_enabled` to `true`. Do not open the consumers through
    a workflow, Terraform variable, GitHub variable, or policy artifact. After
