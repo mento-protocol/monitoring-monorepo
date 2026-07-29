@@ -106,9 +106,12 @@ test("intercepts peg monitoring, retains stale evidence, and keeps regional load
       `${name} changed more than its text-height allowance`,
     ).toBeLessThanOrEqual(verticalTolerance);
   }
-  await expect(
-    page.getByRole("link", { name: /Open Peg Monitoring/ }),
-  ).toHaveAttribute("rel", /noopener/);
+  const grafanaLink = page.getByRole("link", { name: /Open Peg Monitoring/ });
+  await expect(grafanaLink).toHaveAttribute(
+    "href",
+    "https://clabsmento.grafana.net/alerting/list?search=Peg",
+  );
+  await expect(grafanaLink).toHaveAttribute("rel", /noopener/);
   await expect(
     page.getByRole("link", { name: "Peg monitoring", exact: true }),
   ).toBeVisible();
