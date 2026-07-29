@@ -975,6 +975,69 @@ await test("isSelectableForTriage is exactly Stage B's selector pair", () => {
   assertEqual(isSelectableForTriage(), false);
 });
 
+await test("a failing refusal comment cannot abort the state transition", async () => {
+  // The comment is cosmetic. Letting it throw skipped the label swap AND the
+  // verifier, leaving a closed stub with its stale approval and verdict — and
+  // ingest keeps skipping it because the sticky regression predates closedAt.
+  // A guard that only runs on the happy path guards nothing.
+  const stub = makeStub({ state: "CLOSED" });
+  const { runGh, model } = makeRunGh({
+    stub,
+    failOn: (args) =>
+      args[1] === "comment" ? "gh issue comment: HTTP 500" : null,
+  });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "skipped-regressed");
+  assertEqual(model.state, "OPEN");
+  assert(model.labels.includes("sentry:needs-triage"));
+  assertEqual(model.labels.includes("sentry:approved-archive"), false);
+  assertEqual(model.labels.includes("sentry:verdict-upstream"), false);
+});
+
+await test("a failing re-queue label edit still reaches the verifier, then fails RED", async () => {
+  // The label edit throwing skipped the verifier entirely. Now it is recorded
+  // and execution continues: the verifier drives the stub to selectable — it
+  // re-adds needs-triage itself — and only then does the run go RED for the
+  // markers it could not shed. Safe first, loud second.
+  const stub = makeStub({ state: "CLOSED" });
+  const { runGh, model } = makeRunGh({
+    stub,
+    failOn: (args) =>
+      args[1] === "edit" && args.includes("--remove-label")
+        ? "gh issue edit: HTTP 500"
+        : null,
+  });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /shedding its stale approval\/verdict markers failed/,
+  );
+
+  // The stub is selectable despite the failed edit — that is the placement fix.
+  assertEqual(model.state, "OPEN");
+  assert(
+    model.labels.includes("sentry:needs-triage"),
+    "the verifier re-added the label the failed edit never applied",
+  );
+  // And the RED run names what is still wrong.
+  assert(
+    model.labels.includes("sentry:approved-archive"),
+    "the stale markers really did survive, which is why the run is red",
+  );
+});
+
 await test("a genuinely failing reopen strands the stub and fails RED", async () => {
   // The third failure layer at this spot: the label edit has already stripped
   // approval, verdict and archive markers and added needs-triage, so a closed

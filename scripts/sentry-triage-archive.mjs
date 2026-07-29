@@ -1548,26 +1548,53 @@ export async function runArchive(options, deps = {}) {
     process.stderr.write(
       `::notice::Sentry issue ${meta.shortId} (${issueId}) is a live regression/escalation; refusing to archive over it and re-queuing the stub for triage.\n`,
     );
-    await runGh([
-      "issue",
-      "comment",
-      String(queueIssue),
-      "-R",
-      repo,
-      "--body",
-      buildRegressionRefusalComment(meta.shortId),
-    ]);
-    await runGh([
-      "issue",
-      "edit",
-      String(queueIssue),
-      "-R",
-      repo,
-      "--add-label",
-      NEEDS_TRIAGE_LABEL,
-      "--remove-label",
-      REOPEN_SHED_LABELS.join(","),
-    ]);
+    // The refusal comment is COSMETIC and therefore best-effort. Anything that
+    // can throw ahead of the verifier can skip it, and a guard that only runs on
+    // the happy path guards nothing — so a note must never be able to abort a
+    // state transition.
+    try {
+      await runGh([
+        "issue",
+        "comment",
+        String(queueIssue),
+        "-R",
+        repo,
+        "--body",
+        buildRegressionRefusalComment(meta.shortId),
+      ]);
+    } catch (err) {
+      process.stderr.write(
+        `::notice::Could not post the regression refusal comment on #${queueIssue} (${
+          err instanceof Error ? err.message : String(err)
+        }); the label and state changes below carry the meaning.\n`,
+      );
+    }
+
+    // Re-queue: add needs-triage, shed the stale approval/verdict/archive
+    // markers. A failure here must NOT propagate past the verifier below — that
+    // is exactly what let a throw skip the guard. Record it and keep going; the
+    // verifier re-adds needs-triage itself, so the stub still becomes
+    // selectable, and the unshed markers surface as a RED run afterwards.
+    let requeueError = null;
+    try {
+      await runGh([
+        "issue",
+        "edit",
+        String(queueIssue),
+        "-R",
+        repo,
+        "--add-label",
+        NEEDS_TRIAGE_LABEL,
+        "--remove-label",
+        REOPEN_SHED_LABELS.join(","),
+      ]);
+    } catch (err) {
+      requeueError = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `::notice::Re-queue label edit on #${queueIssue} reported a failure (${requeueError}); the end-state verification below still runs.\n`,
+      );
+    }
+
     // THE INVARIANT for this path: when it returns, the stub is OPEN and carries
     // `sentry:needs-triage` — the exact pair Stage B's selector matches
     // (.github/workflows/sentry-triage-agent.yml). Anything else is invisible:
@@ -1575,16 +1602,25 @@ export async function runArchive(options, deps = {}) {
     // alone whenever this occurrence's `lastSeen` is not newer than the later
     // `closedAt`, so a regression we KNOW is live would sit unseen indefinitely.
     //
-    // Enforced by checking the END STATE, not each write's return. Three rounds
-    // fixed this spot one layer at a time — the missing reopen, then a read that
-    // aborted it, then a reopen write that could fail — because each fix only
-    // covered the failure in front of it. A verified end state covers a failed
-    // read, a failed write, a lost response, and whatever the next layer is.
+    // Enforced by checking the END STATE, not each write's return, and reached
+    // from EVERY exit above rather than only the successful one. Four rounds
+    // fixed this spot one layer at a time — the missing reopen, a read that
+    // aborted it, a reopen write that could fail, and then the verifier itself
+    // being skippable — because each fix covered only the failure in front of
+    // it. Nothing between entering this branch and here can throw past it now.
     await ensureSelectableForTriage(runGh, {
       repo,
       queueIssue,
       fallbackState: stub.state,
     });
+
+    // Selectable, but the stale markers are still on it. Loud, after the stub is
+    // safe — never instead of making it safe.
+    if (requeueError) {
+      throw new Error(
+        `Queue stub #${queueIssue} was made selectable for triage, but shedding its stale approval/verdict markers failed (${requeueError}); it still carries them.`,
+      );
+    }
     return {
       issue: queueIssue,
       shortId: meta.shortId,
