@@ -2,6 +2,7 @@
 import {
   buildClaimComment,
   chooseUntriedCandidate,
+  githubProjectScopeHint,
   isClaimable,
   isReleasable,
   isRecoverableClaimRaceError,
@@ -75,6 +76,67 @@ test("parses repeated, comma-separated, and URL issue references", () => {
       "https://github.com/mento-protocol/monitoring-monorepo/issues/904",
     ]),
     [901, 902, 903, 904],
+  );
+});
+
+test("project scope failures name the read-write gh refresh command", () => {
+  const hint = githubProjectScopeHint(
+    "The 'projectV2' field requires one of the following scopes: ['read:project']",
+    {},
+  );
+  assert(
+    hint.includes("gh auth refresh -h github.com -s project"),
+    "missing refresh command",
+  );
+  assert(
+    hint.includes("`read:project` alone"),
+    "missing read-only scope warning",
+  );
+});
+
+test("project mutation scope failures receive the same guidance", () => {
+  assert(
+    githubProjectScopeHint(
+      "This mutation requires one of the following scopes: ['project']",
+      {},
+    ).includes("read/write `project` scope"),
+    "missing mutation scope guidance",
+  );
+});
+
+test("project scope hints ignore scopes that are only granted", () => {
+  assertEqual(
+    githubProjectScopeHint(
+      "The 'repository' field requires one of the following scopes: ['repo']\nThe active token has scopes: ['read:project']",
+    ),
+    "",
+  );
+});
+
+test("environment-provided credentials receive replacement guidance", () => {
+  const stderr =
+    "The 'projectV2' field requires one of the following scopes: ['read:project']";
+  for (const env of [{ GH_TOKEN: "token" }, { GITHUB_TOKEN: "token" }]) {
+    const hint = githubProjectScopeHint(stderr, env);
+    assert(
+      hint.includes(
+        "Replace the environment-provided GH_TOKEN or GITHUB_TOKEN",
+      ),
+      "missing environment credential guidance",
+    );
+    assert(
+      !hint.includes("gh auth refresh -h github.com -s project"),
+      "stored-credential refresh command should be omitted",
+    );
+  }
+});
+
+test("unrelated gh failures do not receive project scope guidance", () => {
+  assertEqual(
+    githubProjectScopeHint(
+      "error connecting to api.github.com; check your internet connection",
+    ),
+    "",
   );
 });
 

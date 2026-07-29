@@ -244,6 +244,27 @@ function formatGh(args) {
   return `gh ${args.map((arg) => quoteArg(String(arg))).join(" ")}`;
 }
 
+export function githubProjectScopeHint(stderr, env = process.env) {
+  const requiredScopes = String(stderr).match(
+    /requires one of the following scopes?\s*:\s*\[([^\r\n]{0,240}?)\]/i,
+  )?.[1];
+  if (
+    !requiredScopes ||
+    !/\b(?:read:project|project)\b/i.test(requiredScopes)
+  ) {
+    return "";
+  }
+  const credentialGuidance =
+    env.GH_TOKEN || env.GITHUB_TOKEN
+      ? "Replace the environment-provided GH_TOKEN or GITHUB_TOKEN with one carrying the read/write `project` scope; `gh auth refresh` does not update environment-provided tokens."
+      : "Refresh it with: gh auth refresh -h github.com -s project";
+  return [
+    "GitHub Project V2 operations require the active gh credential's read/write `project` scope.",
+    credentialGuidance,
+    "`read:project` alone can query a project but cannot run claim, review, or sync mutations.",
+  ].join("\n");
+}
+
 function runGh(args, { dryRun = false, mutates = false } = {}) {
   if (dryRun && mutates) {
     process.stderr.write(`[dry-run] ${formatGh(args)}\n`);
@@ -295,9 +316,10 @@ function runGh(args, { dryRun = false, mutates = false } = {}) {
     child.on("close", (status) => {
       if (failed) return;
       if (status !== 0) {
+        const scopeHint = githubProjectScopeHint(stderr);
         reject(
           new Error(
-            `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}`,
+            `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}${scopeHint ? `\n${scopeHint}\n` : ""}`,
           ),
         );
         return;
