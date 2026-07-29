@@ -140,12 +140,17 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
 - **dRPC public JSON-RPC batches are capped at three calls.** The repo applies
   `{ batchSize: 3 }` to exact `drpc.org` hosts; do not replace it with viem's
   default 1,000-call batch.
-- The bounded bootstrap above is the only oracle RPC a feed may run: the first
-  tracked `OracleReported` or `OracleReportRemoved` performs one exact-boundary
-  `getTimestamps` call, and raw global/token expiry comes from that same
-  boundary into `OracleExpiryState`. Never-tracked feeds perform no expiry RPC,
-  and traffic-scaled `medianTimestamp` or `reportExpiry` calls must never
-  return.
+- Within the SortedOracles replay handlers (`OracleReported`,
+  `OracleReportRemoved`, `MedianUpdated`), the bounded bootstrap above is the
+  only oracle RPC a feed may run: the first tracked `OracleReported` or
+  `OracleReportRemoved` performs one exact-boundary `getTimestamps` call, and
+  raw global/token expiry comes from that same boundary into
+  `OracleExpiryState`. Never-tracked feeds perform no expiry RPC, and
+  traffic-scaled `medianTimestamp` or `reportExpiry` calls must never return
+  to those handlers. Bounded reads elsewhere — the FPMM factory's
+  deployment-time `reportExpiry`/`numReporters`/`medianTimestamp` bootstrap
+  and state-sync's recovery `medianTimestamp` — are legitimate and out of
+  scope for this rule.
 - A missing or malformed bootstrap fails the event before any entity write and
   taints the running deployment; that candidate needs a clean replay, not a
   promotion.

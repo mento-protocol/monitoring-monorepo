@@ -42,7 +42,10 @@ In a Claude cloud session, resolve the same fields over MCP
 same-repository (`headRepository.nameWithOwner` equals the session-attached
 repo), local `git rev-parse HEAD` must equal the MCP-resolved `headRefOid`
 before editing, and the verified proxy `origin` serves as both `HEAD_REMOTE`
-and `BASE_REMOTE`. Cross-repository (fork) PRs stop on that surface.
+and `BASE_REMOTE`. Cross-repository (fork) PRs stop on that surface. For the
+post-push guard there, re-resolve with `pull_request_read` method `get` in
+place of `gh pr view` and require the returned `headRefOid` to equal local
+`HEAD`.
 
 For an explicit target, accept a bare number or PR URL. Derive and preserve
 `BASE_REPO` (`owner/name`) from the resolved PR URL before changing checkouts.
