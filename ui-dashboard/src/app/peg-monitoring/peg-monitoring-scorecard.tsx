@@ -11,6 +11,15 @@ const toneClasses: Record<PegPresentationTone | "uncertain", string> = {
   critical: "border-red-500/30 bg-red-950/30 text-red-100",
   uncertain: "border-amber-500/30 bg-amber-950/30 text-amber-100",
 };
+const markerClasses: Record<PegAssetPresentation["thresholdTone"], string> = {
+  healthy:
+    "border-emerald-50 bg-emerald-600 shadow-[0_0_0_4px_rgba(5,150,105,0.2)]",
+  warning:
+    "border-amber-50 bg-amber-500 shadow-[0_0_0_4px_rgba(245,158,11,0.2)]",
+  critical: "border-red-50 bg-red-600 shadow-[0_0_0_4px_rgba(220,38,38,0.2)]",
+  uncertain:
+    "border-slate-100 bg-slate-500 shadow-[0_0_0_4px_rgba(100,116,139,0.2)]",
+};
 const conciseBps = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
@@ -26,16 +35,23 @@ function HealthLabel({
 }: {
   asset: PegAssetPresentation;
 }): React.JSX.Element {
-  const label = asset.uncertain
-    ? "Status uncertain"
-    : asset.tone === "healthy"
-      ? "Healthy"
-      : asset.tone === "critical"
-        ? "Action required"
-        : "Warning";
+  const label = asset.currentCritical
+    ? "Critical"
+    : asset.uncertain
+      ? "Status uncertain"
+      : asset.tone === "healthy"
+        ? "Healthy"
+        : asset.tone === "critical"
+          ? "Critical"
+          : "Warning";
+  const tone = asset.currentCritical
+    ? "critical"
+    : asset.uncertain
+      ? "uncertain"
+      : asset.tone;
   return (
     <span
-      className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${toneClasses[asset.uncertain ? "uncertain" : asset.tone]}`}
+      className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${toneClasses[tone]}`}
     >
       {label}
     </span>
@@ -43,9 +59,9 @@ function HealthLabel({
 }
 
 function decisionText(asset: PegAssetPresentation): string {
+  if (asset.currentCritical) return "Critical condition in the current package";
   if (asset.uncertain) return "Current status cannot be confirmed";
-  if (asset.tone === "critical")
-    return "Action required from the current measurement";
+  if (asset.tone === "critical") return "Critical condition detected";
   if (asset.tone === "warning")
     return "Review the current measurement and evidence";
   return "Within the current measurement thresholds";
@@ -64,9 +80,9 @@ function DistanceRail({
 }: {
   asset: PegAssetPresentation;
 }): React.JSX.Element {
-  const downsideWarning = asset.asset.policy.warnDeviationBps;
-  const downsideCritical = asset.asset.policy.criticalDeviationBps;
-  const premiumWarning = asset.asset.policy.premiumWarnBps;
+  const downsideWarning = asset.downsideWarningThresholdBps;
+  const downsideCritical = asset.downsideCriticalThresholdBps;
+  const premiumWarning = asset.premiumWarningThresholdBps;
   const rangeMax =
     Math.max(1, downsideWarning, downsideCritical, premiumWarning) * 1.25;
   const value = asset.distanceBps ?? 0;
@@ -118,7 +134,7 @@ function DistanceRail({
           <span
             aria-hidden="true"
             data-testid={`peg-current-${asset.asset.asset}`}
-            className="absolute -top-1.5 h-6 w-6 -translate-x-1/2 rounded-full border-4 border-emerald-50 bg-emerald-600 shadow-[0_0_0_4px_rgba(5,150,105,0.2)]"
+            className={`absolute -top-1.5 h-6 w-6 -translate-x-1/2 rounded-full border-4 ${markerClasses[asset.thresholdTone]}`}
             style={{ left: `${marker}%` }}
           />
         )}
@@ -257,15 +273,17 @@ function AssetScorecard({
         </div>
         <DistanceRail asset={asset} />
         <div
-          className={`rounded-lg border p-4 ${toneClasses[asset.uncertain ? "uncertain" : asset.tone]}`}
+          className={`rounded-lg border p-4 ${toneClasses[asset.currentCritical ? "critical" : asset.uncertain ? "uncertain" : asset.tone]}`}
         >
           <p className="text-xs font-semibold uppercase tracking-wide">
-            Current conclusion
+            {stale ? "Last confirmed conclusion" : "Current conclusion"}
           </p>
           <p className="mt-2 text-sm font-medium">{decisionText(asset)}</p>
           {asset.reasons[0] ? (
             <p className="mt-2 text-xs leading-5 text-slate-300">
-              {asset.uncertaintyReason ?? asset.reasons[0]}
+              {asset.currentCritical
+                ? asset.reasons[0]
+                : (asset.uncertaintyReason ?? asset.reasons[0])}
             </p>
           ) : null}
         </div>

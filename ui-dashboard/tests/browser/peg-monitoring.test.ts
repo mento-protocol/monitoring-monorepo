@@ -124,6 +124,9 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
   await expect(aggregate).toContainText(
     "No fresh monitoring package has arrived",
   );
+  await expect(
+    page.getByText("Last confirmed conclusion", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Stale — last confirmed package.")).toBeVisible();
   await expect(page.getByText(/^Last confirmed package \d/)).toBeVisible();
 });

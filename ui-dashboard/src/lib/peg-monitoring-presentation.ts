@@ -14,10 +14,14 @@ export type PegAssetPresentation = {
   deepSource: PegSource | null;
   distanceBps: number | null;
   direction: "below" | "above" | "at target" | null;
+  downsideWarningThresholdBps: number;
+  downsideCriticalThresholdBps: number;
+  premiumWarningThresholdBps: number;
   warningThresholdBps: number | null;
   warningDistanceBps: number | null;
   thresholdTone: PegThresholdTone;
   tone: PegPresentationTone;
+  currentCritical: boolean;
   reasons: string[];
   uncertain: boolean;
   uncertaintyReason: string | null;
@@ -29,7 +33,7 @@ export type PegMonitoringPresentation = {
     tone: PegPresentationTone | "uncertain";
     label:
       | "All pegs healthy"
-      | "Peg action required"
+      | "Critical condition detected"
       | "Some pegs need attention"
       | "Latest data is stale"
       | "Policy update pending"
@@ -53,6 +57,7 @@ type SourceSelection = {
 
 type SafetySignals = {
   tone: PegPresentationTone;
+  currentCritical: boolean;
   reasons: string[];
   uncertain: boolean;
   uncertaintyReason: string | null;
@@ -62,9 +67,19 @@ type DistanceGeometry = Pick<
   PegAssetPresentation,
   | "distanceBps"
   | "direction"
+  | "downsideWarningThresholdBps"
+  | "downsideCriticalThresholdBps"
+  | "premiumWarningThresholdBps"
   | "warningThresholdBps"
   | "warningDistanceBps"
   | "thresholdTone"
+>;
+
+type EffectiveThresholds = Pick<
+  PegAssetPresentation,
+  | "downsideWarningThresholdBps"
+  | "downsideCriticalThresholdBps"
+  | "premiumWarningThresholdBps"
 >;
 
 const severity = { healthy: 0, warning: 1, critical: 2 } as const;
@@ -82,6 +97,8 @@ function sourceHasUnavailableEvidence(source: PegSource | null): boolean {
     source === null ||
     !source.healthy ||
     source.executablePrice === null ||
+    source.deviationBps === null ||
+    source.premiumBps === null ||
     source.capped === true ||
     source.listingState === "halted" ||
     source.listingState === "absent" ||
@@ -134,18 +151,34 @@ function hasUnavailableStructuralEvidence(item: PegAssetPackage): boolean {
   );
 }
 
+function effectiveThresholds(
+  item: PegAssetPackage,
+  source: PegSource | null,
+): EffectiveThresholds {
+  const conversionAllowance = source?.policy.conversionErrorBps ?? 0;
+  return {
+    downsideWarningThresholdBps:
+      item.policy.warnDeviationBps + conversionAllowance,
+    downsideCriticalThresholdBps:
+      item.policy.criticalDeviationBps + conversionAllowance,
+    premiumWarningThresholdBps:
+      item.policy.premiumWarnBps + conversionAllowance,
+  };
+}
+
 function isSourceWarning(
   item: PegAssetPackage,
   source: PegSource | null,
 ): boolean {
   if (source === null || sourceHasUnavailableEvidence(source)) return true;
+  const thresholds = effectiveThresholds(item, source);
   return (
     (source.deviationBps !== null &&
-      source.deviationBps >= item.policy.warnDeviationBps) ||
+      source.deviationBps >= thresholds.downsideWarningThresholdBps) ||
     (source.premiumBps !== null &&
-      source.premiumBps >= item.policy.premiumWarnBps) ||
+      source.premiumBps >= thresholds.premiumWarningThresholdBps) ||
     (source.spreadBps !== null &&
-      source.spreadBps >= source.policy.spreadEnvelopeBps)
+      source.spreadBps > source.policy.spreadEnvelopeBps)
   );
 }
 
@@ -153,10 +186,11 @@ function isDeepCritical(
   item: PegAssetPackage,
   source: PegSource | null,
 ): boolean {
+  const thresholds = effectiveThresholds(item, source);
   return (
     source?.deviationBps !== null &&
     source !== null &&
-    source.deviationBps >= item.policy.criticalDeviationBps
+    source.deviationBps >= thresholds.downsideCriticalThresholdBps
   );
 }
 
@@ -203,7 +237,9 @@ function safetyReasons(input: {
 }): string[] {
   const reasons: string[] = [];
   if (input.deepCritical)
-    reasons.push("Deep-source downside has reached the critical threshold.");
+    reasons.push(
+      "The latest deep-market price crossed the critical threshold. The alert only fires if enough readings stay there long enough.",
+    );
   if (input.unsafeBreaker)
     reasons.push("A monitored breaker is disabled or tripped.");
   if (input.structuralUnavailable)
@@ -251,6 +287,7 @@ function classifySafety(
           policyWarning
         ? "warning"
         : "healthy",
+    currentCritical: critical && !policyWarning,
     uncertain:
       structuralUnavailable ||
       sourceUnavailable ||
@@ -277,11 +314,6 @@ function classifySafety(
   };
 }
 
-function distanceBps(source: PegSource | null, target: number): number | null {
-  if (source?.executablePrice === null || source === null) return null;
-  return Math.abs((source.executablePrice / target - 1) * 10_000);
-}
-
 function signedDistanceBps(
   source: PegSource | null,
   target: number,
@@ -296,6 +328,16 @@ function directionFrom(
   if (signedDistance === null) return null;
   if (signedDistance === 0) return "at target";
   return signedDistance < 0 ? "below" : "above";
+}
+
+function decisionDistanceBps(
+  source: PegSource | null,
+  direction: PegAssetPresentation["direction"],
+): number | null {
+  if (source === null || direction === null) return null;
+  if (direction === "below") return source.deviationBps;
+  if (direction === "above") return source.premiumBps;
+  return 0;
 }
 
 function thresholdTone(input: {
@@ -321,26 +363,28 @@ function describeDistance(
   item: PegAssetPackage,
   selection: SourceSelection,
 ): DistanceGeometry {
+  const thresholds = effectiveThresholds(item, selection.deepSource);
   const signedDistance = signedDistanceBps(
     selection.decisionSource,
     item.policy.target,
   );
   const direction = directionFrom(signedDistance);
-  const currentDistanceBps = distanceBps(
+  const currentDistanceBps = decisionDistanceBps(
     selection.decisionSource,
-    item.policy.target,
+    direction,
   );
   const warningThresholdBps =
     direction === null
       ? null
       : direction === "above"
-        ? item.policy.premiumWarnBps
-        : item.policy.warnDeviationBps;
+        ? thresholds.premiumWarningThresholdBps
+        : thresholds.downsideWarningThresholdBps;
   const warningDistanceBps =
     currentDistanceBps === null || warningThresholdBps === null
       ? null
       : warningThresholdBps - currentDistanceBps;
   return {
+    ...thresholds,
     distanceBps: currentDistanceBps,
     direction,
     warningThresholdBps,
@@ -350,7 +394,7 @@ function describeDistance(
       direction,
       distanceBps: currentDistanceBps,
       warningDistanceBps,
-      criticalDeviationBps: item.policy.criticalDeviationBps,
+      criticalDeviationBps: thresholds.downsideCriticalThresholdBps,
     }),
   };
 }
@@ -378,12 +422,12 @@ function aggregatePresentation(
   context: PackageContext,
 ) {
   const confirmedCritical = assets.find(
-    ({ tone, uncertain }) => tone === "critical" && !uncertain,
+    ({ currentCritical }) => currentCritical,
   );
   if (confirmedCritical)
     return {
       tone: "critical" as const,
-      label: "Peg action required" as const,
+      label: "Critical condition detected" as const,
       detail:
         confirmedCritical.reasons[0] ??
         `${confirmedCritical.assetName} crossed a critical threshold.`,
@@ -454,16 +498,16 @@ function selectFurthest(
 function selectClosestWarning(
   assets: PegAssetPresentation[],
 ): PegAssetPresentation | null {
-  return assets.reduce<PegAssetPresentation | null>(
-    (closest, asset) =>
-      asset.distanceBps !== null &&
-      (closest === null ||
-        (asset.warningDistanceBps ?? Number.POSITIVE_INFINITY) <
-          (closest.warningDistanceBps ?? Number.POSITIVE_INFINITY))
-        ? asset
-        : closest,
-    null,
-  );
+  return assets.reduce<PegAssetPresentation | null>((closest, asset) => {
+    if (asset.warningDistanceBps === null) return closest;
+    if (
+      closest === null ||
+      closest.warningDistanceBps === null ||
+      Math.abs(asset.warningDistanceBps) < Math.abs(closest.warningDistanceBps)
+    )
+      return asset;
+    return closest;
+  }, null);
 }
 
 export function presentPegMonitoring(

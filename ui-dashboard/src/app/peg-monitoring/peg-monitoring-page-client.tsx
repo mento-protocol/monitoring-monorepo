@@ -42,8 +42,8 @@ function Header(): React.JSX.Element {
         </h1>
       </div>
       <p className="max-w-3xl text-sm leading-6 text-slate-400">
-        See whether a monitored asset is off peg or nearing action from its
-        current measurement and supporting evidence.
+        See whether a monitored asset is off peg or nearing a warning threshold
+        from its current measurement and supporting evidence.
       </p>
     </header>
   );

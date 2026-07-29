@@ -77,6 +77,7 @@ describe("PegMonitoringPageClient", () => {
     state.current = { ...state.current, hasError: true };
     render();
     expect(container.textContent).toContain("Stale — last confirmed package");
+    expect(container.textContent).toContain("Last confirmed conclusion");
     expect(container.textContent).toContain("europ-schuman / EUR");
     state.current = { data: null, isLoading: false, hasError: true };
     render();
@@ -188,6 +189,120 @@ describe("PegMonitoringPageClient", () => {
     render();
 
     expect(container.textContent).toContain("1 of 2 breakers OK");
+  });
+  it("keeps a current critical condition red when another check is incomplete", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            structural: { ...item.structural, blind: true },
+            sources: item.sources.map((source) =>
+              source.id === item.policy.deepVenueSource
+                ? {
+                    ...source,
+                    executablePrice: 0.995,
+                    deviationBps: item.policy.criticalDeviationBps,
+                    premiumBps: 0,
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+
+    const aggregate = container.querySelector(
+      '[data-testid="peg-aggregate-status"]',
+    );
+    expect(aggregate?.textContent).toContain("Critical condition detected");
+    expect(aggregate?.className).toContain("border-red");
+    expect(container.textContent).toContain(
+      "Critical condition in the current package",
+    );
+    expect(container.textContent).toContain(
+      "The alert only fires if enough readings stay there long enough.",
+    );
+    expect(container.textContent).not.toContain("Action required");
+    expect(
+      container.querySelector('[data-testid="peg-current-europ-schuman"]')
+        ?.className,
+    ).toContain("bg-red-600");
+  });
+  it("renders source-adjusted thresholds on the centered distance rail", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.map((source) =>
+              source.id === item.policy.deepVenueSource
+                ? {
+                    ...source,
+                    policy: { ...source.policy, conversionErrorBps: 30 },
+                    executablePrice: 0.9975,
+                    deviationBps: 25,
+                    premiumBps: 0,
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+
+    const rail = container.querySelector(
+      '[role="img"][aria-label*="Downside warning begins at 55 bps"]',
+    );
+    expect(rail?.getAttribute("aria-label")).toContain(
+      "downside critical at 80 bps",
+    );
+    expect(rail?.getAttribute("aria-label")).toContain(
+      "premium warning at 55 bps",
+    );
+    expect(container.textContent).toContain("30 bps remaining");
+    expect(
+      container.querySelector('[data-testid="peg-current-europ-schuman"]')
+        ?.className,
+    ).toContain("bg-emerald-600");
+
+    state.current = {
+      ...state.current,
+      data: {
+        ...state.current.data!,
+        packages: state.current.data!.packages.map((asset) => ({
+          ...asset,
+          sources: asset.sources.map((source) =>
+            source.id === asset.policy.deepVenueSource
+              ? {
+                  ...source,
+                  executablePrice: 0.9945,
+                  deviationBps: 55,
+                }
+              : source,
+          ),
+        })),
+      },
+    };
+    render();
+    expect(
+      container.querySelector('[data-testid="peg-current-europ-schuman"]')
+        ?.className,
+    ).toContain("bg-amber-500");
   });
   it("renders non-null listing evidence from a schema-version-1 package", () => {
     const response = makePegMonitoringResponse();
