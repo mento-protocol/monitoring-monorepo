@@ -288,6 +288,63 @@ SortedOracles_isOldestReportExpired{rateFeed="CELOBRL",rateFeedValue="0xe8537a3d
 1. Ensure that it worked by reviewing the main Aegis dashboard in Grafana
 1. If anything went wrong, roll back your changes to `dashboard.tf` and keep editing until you get it right :)
 
+## RPC error handling
+
+Every call attempts the chain's primary `httpRpcUrl` first. Aegis classifies a
+caught error before deciding whether to retry the fallback or count it.
+
+- **Transport errors** (network down, HTTP 5xx, timeout, connection refused)
+  mean the endpoint is unhealthy. They trigger the single fallback retry and, if
+  every configured endpoint fails, increment `view_call_rpc_errors_total`.
+- **Deterministic errors** (contract revert, any ABI/encoding/argument error,
+  invalid address) mean the call itself is broken and would reproduce on every
+  healthy endpoint. They do not retry the fallback and do not increment the
+  counter; the error is logged and `query()` returns `undefined`, the same as a
+  parse failure.
+
+Detection walks the full error chain with `BaseError.walk()` and treats a cause
+as deterministic when it is a `ContractFunctionRevertedError`, its `.name`
+matches `/^Abi[A-Za-z]*Error$/` (the whole viem `Abi*` family) or
+`/^Invalid(?:Abi|Array|Definition|Address)[A-Za-z]*Error$/`, or it is an
+`RpcRequestError` carrying JSON-RPC code 3 or an "execution reverted"/"revert"
+message. An error that is not a viem `BaseError` at all defaults to transport,
+so genuine outages are still captured.
+
+`ContractFunctionExecutionError` is not a determinism signal: viem's
+`readContract` wraps nearly all failures in it, transport ones included. Only
+the walked causes above decide, never the outermost class. This keeps Grafana
+from reading a misconfigured metric or a reverting contract as an RPC outage.
+
+`view_call_rpc_errors_total` (labels `contract`, `functionName`, `chain`)
+therefore increments only when every endpoint fails with a transport error —
+not on a successful fallback retry, and not on deterministic failures. Grafana
+can then separate "primary was down but the fallback covered it" (counter flat,
+values fresh) from "both unreachable" (counter climbs, metric goes stale).
+Staleness alerting on `isOldestReportExpired` and
+`view_call_query_duration{status="error"}` stays the primary on-call signal;
+this counter is the diagnostic that names the failing endpoint. Its labels are
+the same closed, configuration-driven set as `view_call_query_duration`; never
+add `message`, `error`, or another dynamic string, because unbounded
+cardinality breaks Prometheus.
+
+To add a fallback, set `fallbackHttpRpcUrl` on the chain entry in
+`config.yaml`:
+
+```yaml
+chains:
+  - id: celo
+    label: celo
+    httpRpcUrl: https://forno.celo.org
+    fallbackHttpRpcUrl: https://rpc.ankr.com/celo
+```
+
+Verify the URL against the chain's real concurrent polling shape before
+committing; an `eth_blockNumber` smoke test does not expose burst throttling.
+Testnets and low-metric-count chains normally stay single-endpoint — add an
+independent-provider fallback when production logs show throttling or
+availability failures. Polygon Amoy is the current exception: its six-call
+oracle/breaker burst uses PublicNode first and dRPC as the single fallback.
+
 ## Terraform for Grafana
 
 We use `aegis/terraform` to deploy the Aegis Grafana dashboard and folder.

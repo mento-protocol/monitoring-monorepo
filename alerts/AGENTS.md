@@ -57,15 +57,3 @@ routing.
 - `pnpm agent:quality-gate` for any combined edit — path-aware routing.
 
 For Cloud Function deploy verification, follow `docs/pr-checklists/terraform-cloudrun.md`.
-
-<!--
-TODO(test-coverage): the `source_hash` + `var.chain_key` plumbing in
-`alerts/infra/onchain-event-listeners/main.tf` (the QuickNode webhook
-state-rm dance) is currently only covered by `pnpm alerts:infra:plan`
-diffing. Vitest can't reach Terraform-side logic cleanly. If we need
-true regression coverage there, options are: (1) a `terraform test`
-HCL block exercising the `local-exec` provisioner against a fake
-state, or (2) a snapshot test against `terraform plan -out` JSON. Both
-are out of scope for the onchain-event-handler test suite — track
-separately if drift becomes a real issue.
--->

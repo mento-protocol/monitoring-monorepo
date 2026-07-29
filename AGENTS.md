@@ -3,7 +3,7 @@ title: Monitoring Monorepo Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-29
 doc_type: agent-instructions
 scope: repo-wide
 review_interval_days: 90
@@ -63,52 +63,13 @@ rule are in
 ## PR Workflow
 
 GitHub Issues are the canonical active-work queue; `BACKLOG.md` is transition
-storage only. Claim before substantive edits, then follow the
-[operating card](docs/notes/pr-operating-card.md) through implementation,
-review, shipping, readiness, and merge sync:
+storage only. Claim before substantive edits, then work the
+[operating card](docs/notes/pr-operating-card.md) end to end. Never merge
+without the user's explicit approval for that specific merge.
 
-```bash
-pnpm issue:claim --count 3 --agent codex
-pnpm agent:quality-gate
-pnpm agent:quality-gate --run
-```
-
-Claude cloud sessions run issue helpers only behind the capability gate;
-otherwise use the MCP workboard fallback in
+Claude cloud sessions run the issue and PR helpers only behind the capability
+gate; otherwise use the MCP workboard fallback and its qualified all-clear in
 [`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
-For non-trivial batches, use the card's surface-correct autoreview flow. Inside
-an active Codex session that means a verified prepared bundle and one
-fresh-context reviewer; a bare deterministic review is not the semantic
-closeout. Autoreview proves source review only, so mapped tests, browser checks,
-generated artifacts, and runtime evidence still apply.
-
-Open every PR through the `ship` skill, ready for review unless the user
-explicitly requests a draft or required validation is intentionally pending.
-The body starts with `## The Problem` (at most three plain-language bullets)
-then `## The Solution` (approach before implementation detail). Use `Closes
-#N` only when the issue's Done means is complete; otherwise use `Refs #N`.
-Knowingly deferred valid work needs a linked issue before the deferral reply.
-
-Reply to every review item before resolving it:
-
-- `Fixed in <commit> — <what changed>`
-- `Won't fix: <technical reason why>`
-
-Never force-push or amend while babysitting. Before all-clear, require a clean
-feedback ledger followed by current-head readiness:
-
-```bash
-pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
-pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
-```
-
-The current-head `chatgpt-codex-connector[bot]` description approval is part of
-readiness. Never merge without the user's explicit approval for that specific
-merge. Claude cloud sessions use these helpers only behind the capability gate;
-the MCP fallback and its qualified all-clear live in
-[`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
-Label, workboard, Claim ID, release, and merge-sync depth lives in
-[`docs/notes/agent-issue-workflow.md`](docs/notes/agent-issue-workflow.md).
 
 ## Prose Style
 
