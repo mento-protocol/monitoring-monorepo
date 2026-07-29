@@ -133,6 +133,17 @@ function stubBody({
   ].join("\n");
 }
 
+/** A stub body as a genuine retry finds it: carrying a freshness baseline bound
+ * to the Sentry issue, written by the archive that already ran. An
+ * already-archived run over a body WITHOUT one is refused, so every
+ * already-archived fixture that means to exercise something else needs this. */
+function settledStubBody(lastSeen = BASELINE_LAST_SEEN) {
+  return withArchiveBaseline(stubBody(), {
+    lastSeen,
+    sentryIssueId: "6197137101",
+  });
+}
+
 function makeStub({
   number = 42,
   body = stubBody(),
@@ -812,7 +823,7 @@ await test("runArchive happy path archives and settles the queue stub", async ()
 });
 
 await test("runArchive is idempotent when the issue is already archived", async () => {
-  const stub = makeStub();
+  const stub = makeStub({ body: settledStubBody() });
   const { runGh, calls: ghCalls } = makeRunGh({ stub });
   const { fetchImpl, calls: fetchCalls } = makeFetch({
     issue: { status: "ignored", substatus: "archived_until_escalating" },
@@ -1043,7 +1054,7 @@ await test("a mid-flight reopen does not undo a corrective re-archive", async ()
 await test("runArchive does not revert when the issue was already archived before the run", async () => {
   // If the issue was ALREADY archived_until_escalating (we issued no PUT) and
   // the stub is reopened mid-flight, there is nothing we archived to undo.
-  const stub = makeStub();
+  const stub = makeStub({ body: settledStubBody() });
   const { runGh } = makeRunGh({ stub, concurrentReopenBeforeView: 2 });
   const { fetchImpl, calls: fetchCalls } = makeFetch({
     issue: { status: "ignored", substatus: "archived_until_escalating" },
@@ -1495,6 +1506,90 @@ await test("a quiet retry over an existing archive is a no-op on the baseline", 
       .length,
     1,
     "the retry adds no second audit note for the same archive",
+  );
+});
+
+await test("a retry refuses when the stub records NO bound baseline", async () => {
+  // The complement of the stale check. A run can archive Sentry and then fail
+  // before writing the body baseline; rollback deliberately leaves none, and the
+  // runbook permits re-approving. On that retry there is nothing to compare
+  // against, and adopting the retry's own read would absorb everything that
+  // arrived between the first archive and the re-approval — which ingest never
+  // reopens for, because it cannot see an archived issue at all.
+  const stub = makeStub({ state: "CLOSED" }); // default body: no baseline
+  stub.labels.push({ name: "sentry:archived" });
+  const { runGh, calls, model } = makeRunGh({ stub });
+  const { fetchImpl, calls: fetchCalls } = makeFetch({
+    issue: {
+      status: "ignored",
+      substatus: "archived_until_escalating",
+      lastSeen: "2026-07-19T12:30:00.000Z",
+    },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "skipped-unbaselined-retry");
+  assert(!fetchCalls.some((c) => c.method === "PUT"), "no Sentry mutation");
+  assert(!bodyEditCall(calls), "no baseline is invented from this run's read");
+  assertEqual(parseArchiveBaseline(model.body), null);
+  assert(!ghCall(calls, "close"), "the ledger is not settled");
+  const comment = ghCall(calls, "comment");
+  assert(comment, "the refusal is written where an operator will see it");
+  assert(
+    comment[comment.indexOf("--body") + 1].includes(
+      "records no freshness baseline",
+    ),
+    "and names the missing baseline",
+  );
+  // The shared post-condition disarms: Sentry may be archived, so no bare
+  // re-dispatch may walk back in.
+  assertEqual(model.labels.includes("sentry:approved-archive"), false);
+});
+
+await test("an unusable or foreign baseline counts as absent", async () => {
+  // "Bound" means all three: present, a real date, and naming THIS issue. A
+  // baseline failing any of them is not evidence about this archive, so it must
+  // refuse exactly as a missing one does — otherwise the stale comparison runs
+  // against a value it cannot trust and silently passes.
+  const refuseWith = async (body) => {
+    const stub = makeStub({ state: "CLOSED", body });
+    stub.labels.push({ name: "sentry:archived" });
+    const { runGh } = makeRunGh({ stub });
+    const { fetchImpl } = makeFetch({
+      issue: { status: "ignored", substatus: "archived_until_escalating" },
+    });
+    const result = await runArchive(baseOptions(), {
+      runGh,
+      fetchImpl,
+      now: FIXED_NOW,
+    });
+    return result.status;
+  };
+
+  assertEqual(
+    await refuseWith(
+      withArchiveBaseline(stubBody(), {
+        lastSeen: BASELINE_LAST_SEEN,
+        sentryIssueId: "999",
+      }),
+    ),
+    "skipped-unbaselined-retry",
+    "another issue's baseline is not this issue's evidence",
+  );
+  assertEqual(
+    await refuseWith(
+      withArchiveBaseline(stubBody(), {
+        lastSeen: "not-a-date",
+        sentryIssueId: "6197137101",
+      }),
+    ),
+    "skipped-unbaselined-retry",
+    "an unparsable timestamp cannot be compared against",
   );
 });
 
@@ -1985,7 +2080,7 @@ await test("a stub that arrived closed is not reopened by the repair", async () 
 await test("a settlement failure reverts nothing when this run did not archive", async () => {
   // The issue was already archived_until_escalating, so this run issued no PUT
   // and has nothing to undo — the compensation must not invent a mutation.
-  const stub = makeStub();
+  const stub = makeStub({ body: settledStubBody() });
   const { runGh, model } = makeRunGh({
     stub,
     failOn: (args) =>
@@ -2571,7 +2666,11 @@ await test("isSettledAuditComment fences on author, marker, id AND archive gener
 });
 
 await test("runArchive does not double-post the audit comment on retry", async () => {
-  const stub = makeStub({ state: "CLOSED", comments: [auditComment()] });
+  const stub = makeStub({
+    state: "CLOSED",
+    body: settledStubBody(),
+    comments: [auditComment()],
+  });
   const { runGh, calls: ghCalls } = makeRunGh({ stub });
   const { fetchImpl } = makeFetch({
     issue: { status: "ignored", substatus: "archived_until_escalating" },
@@ -2607,7 +2706,11 @@ await test("a forged marker comment cannot suppress the baseline write", async (
 });
 
 await test("a genuine bot-authored marker comment still suppresses the duplicate note", async () => {
-  const stub = makeStub({ state: "CLOSED", comments: [auditComment()] });
+  const stub = makeStub({
+    state: "CLOSED",
+    body: settledStubBody(),
+    comments: [auditComment()],
+  });
   const { runGh, calls: ghCalls } = makeRunGh({ stub });
   const { fetchImpl } = makeFetch({
     issue: { status: "ignored", substatus: "archived_until_escalating" },

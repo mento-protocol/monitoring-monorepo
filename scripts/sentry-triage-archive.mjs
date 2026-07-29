@@ -506,6 +506,26 @@ export function buildUnreadableFreshnessRefusalComment(
   ].join("\n");
 }
 
+/** Fixed refusal comment for a re-approval over an archive the stub records no
+ * bound baseline for. Nothing was mutated on this path. */
+export function buildUnbaselinedRetryRefusalComment(shortId, observed) {
+  const safeShortId = truncateTitle(neutralizeUntrusted(shortId), 90);
+  return [
+    `**Not archived.** \`${safeShortId}\` is already archived in Sentry, but this`,
+    "stub records no freshness baseline for it — so there is nothing to compare",
+    `its current last event (${yamlScalar(observed ?? "")}) against.`,
+    "",
+    "Recording that timestamp now would adopt it as the baseline and hide",
+    "everything that arrived since the archive: an archived issue matches neither",
+    "ingest query, so the reopen gate would never fire for those events. There is",
+    "no trustworthy value to reconstruct the baseline from, so nothing was",
+    "changed and the `sentry:approved-archive` label was removed.",
+    "",
+    "Un-archive the Sentry issue and let it re-triage. That puts it back in front",
+    "of ingest, and the next archive records a baseline it can stand behind.",
+  ].join("\n");
+}
+
 /** Fixed refusal comment for a re-approval over an archive whose recorded
  * baseline Sentry has already moved past. Nothing was mutated on this path. */
 export function buildStaleRetryRefusalComment(shortId, recorded, observed) {
@@ -1490,44 +1510,75 @@ export async function runArchive(options, deps = {}) {
     // FIRST run's freshness read while Sentry's substatus still lagged. Ingest
     // would then skip that event when the regression finally surfaces.
     //
-    // A visible refusal is the whole mechanism, and it needs no bookkeeping. The
-    // usable-baseline gate above already proved this run's `lastSeen` parses, so
-    // against the stub's recorded baseline there are only two cases: equal,
-    // where re-stamping is a no-op, or newer, which IS the untriaged event —
-    // refuse. (Older would mean a stale read replica; stamping the older value
-    // only makes ingest reopen more eagerly, the safe direction.) It lives
-    // inside `perform` so its refusal exits through the shared post-condition
-    // rather than carrying a disarm of its own.
-    const recordedBaseline = alreadyArchived
-      ? parseArchiveBaseline(stub.body)
-      : null;
-    if (
-      recordedBaseline &&
-      isUsableBaseline(recordedBaseline.lastSeen) &&
-      lastSeenMoved(recordedBaseline.lastSeen, current?.lastSeen)
-    ) {
-      process.stderr.write(
-        `::notice::Sentry issue ${meta.shortId} (${issueId}) is already archived and its lastSeen (${current?.lastSeen}) has moved past the baseline this stub recorded (${recordedBaseline.lastSeen}); refusing to re-stamp a newer baseline over an untriaged event.\n`,
-      );
-      await runGh([
-        "issue",
-        "comment",
-        String(queueIssue),
-        "-R",
-        repo,
-        "--body",
-        buildStaleRetryRefusalComment(
-          meta.shortId,
-          recordedBaseline.lastSeen,
-          current?.lastSeen,
-        ),
-      ]);
-      return {
-        issue: queueIssue,
-        shortId: meta.shortId,
-        sentryIssueId: issueId,
-        status: "skipped-stale-retry",
-      };
+    // A visible refusal is the whole mechanism, and it needs no bookkeeping. It
+    // lives inside `perform` so its refusals exit through the shared
+    // post-condition rather than carrying a disarm of their own.
+    //
+    // ABSENT and STALE both refuse. Absent is the complement the stale check
+    // alone left open: when a run archives Sentry and then fails before writing
+    // the body baseline, rollback deliberately leaves none, and the runbook
+    // permits re-approving. On that retry there is nothing to compare against,
+    // and initialising a baseline from the retry's own read would absorb every
+    // event that arrived between the first archive and the re-approval — which
+    // ingest never reopens for, since it cannot see an archived issue at all.
+    // There is no trustworthy value to reconstruct one from; that is exactly why
+    // refusing is right. A baseline naming a different Sentry issue is not this
+    // issue's evidence either, so it counts as absent.
+    //
+    // With a bound baseline in hand only two cases remain: equal, where
+    // re-stamping is a no-op, or newer, which IS the untriaged event. (Older
+    // would mean a stale read replica; stamping the older value only makes
+    // ingest reopen more eagerly, the safe direction.)
+    if (alreadyArchived) {
+      const recordedBaseline = parseArchiveBaseline(stub.body);
+      const bound =
+        !!recordedBaseline &&
+        isUsableBaseline(recordedBaseline.lastSeen) &&
+        recordedBaseline.sentryIssueId === String(issueId);
+      if (!bound) {
+        process.stderr.write(
+          `::notice::Sentry issue ${meta.shortId} (${issueId}) is already archived but stub #${queueIssue} records no freshness baseline bound to it; refusing rather than initialising one from this run's read, which would absorb anything that arrived since the archive.\n`,
+        );
+        await runGh([
+          "issue",
+          "comment",
+          String(queueIssue),
+          "-R",
+          repo,
+          "--body",
+          buildUnbaselinedRetryRefusalComment(meta.shortId, current?.lastSeen),
+        ]);
+        return {
+          issue: queueIssue,
+          shortId: meta.shortId,
+          sentryIssueId: issueId,
+          status: "skipped-unbaselined-retry",
+        };
+      }
+      if (lastSeenMoved(recordedBaseline.lastSeen, current?.lastSeen)) {
+        process.stderr.write(
+          `::notice::Sentry issue ${meta.shortId} (${issueId}) is already archived and its lastSeen (${current?.lastSeen}) has moved past the baseline this stub recorded (${recordedBaseline.lastSeen}); refusing to re-stamp a newer baseline over an untriaged event.\n`,
+        );
+        await runGh([
+          "issue",
+          "comment",
+          String(queueIssue),
+          "-R",
+          repo,
+          "--body",
+          buildStaleRetryRefusalComment(
+            meta.shortId,
+            recordedBaseline.lastSeen,
+            current?.lastSeen,
+          ),
+        ]);
+        return {
+          issue: queueIssue,
+          shortId: meta.shortId,
+          sentryIssueId: issueId,
+          status: "skipped-stale-retry",
+        };
+      }
     }
 
     if (alreadyArchived) {

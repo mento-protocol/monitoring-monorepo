@@ -299,13 +299,23 @@ through `is:regressed`, the event would vanish from both systems. Only the queue
 stub is rolled back.
 
 That makes re-approval the standard recovery, so it carries its own guard. A run
-over an issue that is ALREADY archived compares Sentry's current `lastSeen`
-against the baseline the stub recorded, and refuses when it has moved: settling
-would stamp the newer timestamp as the baseline, and the reopen gate would then
-never fire for the event in between — which is invisible to ingest anyway, since
-both its queries match only unresolved issues. Nothing is mutated on that path,
-the approval label is removed so a bare re-dispatch cannot skip the decision, and
-the refusal is written on the stub.
+over an issue that is ALREADY archived needs a baseline it can stand behind, and
+refuses in both directions where it has none:
+
+- **Stale** — the stub records a bound baseline and Sentry's `lastSeen` has moved
+  past it (`skipped-stale-retry`). Settling would stamp the newer timestamp, and
+  the reopen gate would never fire for the event in between.
+- **Absent** — the stub records no baseline bound to this Sentry issue
+  (`skipped-unbaselined-retry`). This is the state rollback deliberately leaves
+  when a run archived Sentry and then failed before writing one, so it is the
+  common case on re-approval. Adopting the retry's own read would take every
+  event since the archive as "already accounted for". A baseline that is
+  unparsable or names another issue counts as absent for the same reason.
+
+Neither path mutates anything; both remove the approval so a bare re-dispatch
+cannot skip the decision, and both write the refusal on the stub. Recovery is to
+un-archive the Sentry issue and let it re-triage — the event is invisible to
+ingest while it stays archived, since both queries match only unresolved issues.
 
 **Queue rollback reconciles; it does not replay.** Every failure from the Sentry
 PUT onward re-reads the stub and corrects only what live state actually shows to
@@ -547,12 +557,21 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
   carries the baseline it had BEFORE this run (or none, if it had none). Then
   choose the outcome explicitly — nothing chooses it for you:
   - to leave it archived, do nothing; the ledger entry is the only thing missing;
-  - to archive it again and settle the ledger, re-apply
-    `sentry:approved-archive`;
-  - to send it back through triage, add `sentry:needs-triage` **and** remove the
-    `sentry:verdict-*` label. Leaving the approval off is not enough on its own:
-    ingest skips an open stub, and the triage agent selects on
-    `sentry:needs-triage`, which nothing here restores.
+  - to settle the ledger, re-apply `sentry:approved-archive` — but expect a
+    refusal, and read it rather than working around it. The rollback removed the
+    baseline this run wrote, so unless an EARLIER archive left one the retry
+    lands on an already-archived issue with nothing to compare against and
+    refuses as `skipped-unbaselined-retry`: comment on the stub, approval
+    removed again, nothing mutated. That is correct — there is no trustworthy
+    value to adopt, and taking the retry's own read would hide every event since
+    the archive. The way through is the next option;
+  - to send it back through triage, add `sentry:needs-triage`, remove the
+    `sentry:verdict-*` label, **and un-archive the Sentry issue**. Leaving the
+    approval off is not enough on its own: ingest skips an open stub, the triage
+    agent selects on `sentry:needs-triage`, which nothing here restores, and
+    while the issue stays archived it matches neither ingest query, so nothing
+    re-surfaces it. Un-archiving is what puts it back in front of the pipeline,
+    after which the next archive records a baseline it can stand behind.
 - An archive **refusal** comment that says the archive could NOT be reverted is a
   different case from the above: the freshness refusal is the one path that does
   revert Sentry, and something moved the issue off `archived_until_escalating`
@@ -569,6 +588,14 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
   re-apply it: that event is archived and invisible to ingest, so decide first —
   un-archive the Sentry issue and let it re-triage, or confirm the newer activity
   is understood and then re-approve.
+- **A re-approval refused as `skipped-unbaselined-retry`** means the Sentry issue
+  is already archived and the stub records no baseline bound to it — normally
+  because the previous run archived Sentry and failed before writing one, and the
+  rollback removed it. Nothing was changed and the approval was removed again.
+  Re-applying it just refuses again, by design: there is no trustworthy value to
+  compare against, and adopting the current `lastSeen` would treat everything
+  since the archive as already accounted for. Un-archive the Sentry issue and let
+  it re-triage; the next archive then records a baseline it can stand behind.
 - **Trust the run's summary line about Sentry, not an assumption.** It says one
   of: the issue stays `archived_until_escalating` (the approved outcome), was
   NOT archived because the update was rejected, is in an UNKNOWN state because
