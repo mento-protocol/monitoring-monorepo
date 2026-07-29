@@ -110,8 +110,9 @@ bulk:
   `closed_at`: reopen it, remove stale verdict/projection/archive labels, and
   restore `sentry:needs-triage`;
 - closed match carrying `sentry:archived`: compare `lastSeen` against the
-  archive freshness baseline instead of `closed_at` (see the archive section
-  below), falling back to `closed_at` when no parseable baseline exists;
+  archive freshness baseline in the stub's own body instead of `closed_at` (see
+  the archive section below), falling back to `closed_at` when the body carries
+  no parseable baseline;
 - other closed match: leave it closed.
 
 Missing or invalid timestamps fail toward re-triage. The strict timestamp gate
@@ -286,23 +287,35 @@ regressions, but it is a stranded state, not a self-healing one.
 **The archive records a freshness baseline.** Sentry's `substatus` lags a fresh
 event, so the regressed/escalating refusal can pass while an event is already in
 flight. The script captures the `lastSeen` it read before the mutation, re-reads
-it once after the PUT, and — if it moved — restores the Sentry issue, comments,
-and exits 0 without settling. The baseline also lands in the audit comment as a
-machine-readable `archive_baseline_last_seen` plus the Sentry issue id it
-mutated, which is what ingest's reopen gate compares against. That matters
-because the archive's close necessarily postdates any event that arrived inside
-the mutation window: a `closed_at` comparison would evaluate false for that event
-forever and bury it until some later event happened to arrive.
+it once after the PUT, and — if it moved, or if that read-back fails or does not
+parse — restores the Sentry issue, sheds the approval, and refuses without
+settling. That matters because the archive's close necessarily postdates any
+event that arrived inside the mutation window: a `closed_at` comparison would
+evaluate false for that event forever and bury it until some later event
+happened to arrive.
 
-Both sides fence that comment the same way the verdict contract fences its own:
-the archive leg posts it — and treats it as the at-most-once key for the audit —
-only under the Actions identity, with `<!-- sentry-triage-archive:v1 -->` as its
-first line, and ingest reads a baseline out of nothing else. Author alone is too
-coarse in a public repo: the triage agent's verdict comment is LLM-authored yet
-posted with `github.token`, so it clears an author-only fence. Ingest then
-requires the recorded issue id to match the Sentry issue the stub tracks; a
-baseline naming another issue, or naming none, describes some other archive and
-reopens the stub for re-triage instead of gating it.
+**The baseline lives in the stub BODY, never in a comment.** It is written into
+the same yaml block ingest creates the stub with, as
+`archive_baseline_last_seen` plus the Sentry issue id it mutated, and the write
+happens before anything marks the stub settled. Placement is the entire trust
+boundary here, and it is structural rather than cryptographic. The Stage B
+triage agent is an LLM reading attacker-controlled Sentry payloads, and
+`.github/workflows/sentry-triage-agent.yml` grants it
+`Bash(gh issue comment <its stub>:*)` — its comments post as
+`github-actions[bot]`, on that exact stub. So no author, marker, or issue-id
+check applied to a **comment** is worth anything: a prompt-injected payload
+satisfies all three and plants a far-future baseline, after which every later
+regression of that Sentry issue is skipped indefinitely. The agent's allowlist
+contains no tool that edits an issue body, the autofix agent gets no shell at
+all, and the archive leg's deterministic zero-LLM step is the only writer that
+ever rewrites one. Moving the field removes the forgery surface instead of
+authenticating inside it, which a shared secret could only match, never beat.
+
+Ingest still requires the recorded issue id to match the Sentry issue the stub
+tracks; a baseline naming another issue, or naming none, describes some other
+archive and reopens the stub for re-triage instead of gating it. Because the
+dedup scan already fetches every stub body, reading the baseline costs no extra
+request — and there is no comment list to page through.
 
 The baseline is therefore load-bearing, and the archive fails **closed** without
 one. If Sentry's pre-mutation `lastSeen` does not parse, the run refuses before
@@ -451,12 +464,17 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
   `sentry:approved-archive` nor `sentry:archived` failed after it consumed the
   approval.** Nothing retries this on its own, and no re-dispatch is possible —
   the guard needs the label the run spent. The script already reverted its
-  Sentry archive, so read the run log to confirm that revert: on the
-  `::error::` line saying the revert itself failed, check the Sentry issue by
-  hand and take it off `archived_until_escalating` before doing anything else.
-  Then re-apply `sentry:approved-archive` to re-run the archive, or leave it off
-  and let the stub go back through triage. Re-approving is a fresh human
-  decision by design, not a formality.
+  Sentry archive, reopened the stub if it had closed it, and restored the stub
+  body it had stamped, so read the run log to confirm all three. An `::error::`
+  line saying the revert or the queue repair failed means fix that side by hand
+  first: take the Sentry issue off `archived_until_escalating`, and check the
+  stub body carries no `archive_baseline_last_seen`. Then choose the outcome
+  explicitly — nothing chooses it for you:
+  - to archive it after all, re-apply `sentry:approved-archive`;
+  - to send it back through triage, add `sentry:needs-triage` **and** remove the
+    `sentry:verdict-*` label. Leaving the approval off is not enough on its own:
+    ingest skips an open stub, and the triage agent selects on
+    `sentry:needs-triage`, which nothing here restores.
 - An archive refusal comment that says the archive **could NOT be reverted**
   means something moved the Sentry issue off `archived_until_escalating` while
   the run held it. Inspect that issue directly; the queue stub's state is

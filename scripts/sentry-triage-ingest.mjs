@@ -17,11 +17,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import {
-  ARCHIVE_COMMENT_MARKER,
-  extractYamlBlock,
-  isTrustedComment,
-} from "./sentry-triage-project-core.mjs";
+import { extractYamlBlock } from "./sentry-triage-project-core.mjs";
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_ORG = "mento-labs";
@@ -61,15 +57,6 @@ export function resolveLookbackDays(cliValue, env = process.env) {
     );
   }
   return days;
-}
-
-/** `ghPaginate` hit its page bound. Its own type so a caller can distinguish a
- * truncated read (resolvable) from a transport failure (not). */
-export class PaginationLimitError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "PaginationLimitError";
-  }
 }
 
 export const RUN_RECORD_MARKER = "<!-- sentry-triage-ingest:run-record:v1 -->";
@@ -267,20 +254,36 @@ export const FIX_REFUSED_LABEL = "sentry:fix-refused";
 export const APPROVED_ARCHIVE_LABEL = "sentry:approved-archive";
 export const ARCHIVED_LABEL = "sentry:archived";
 
-// Archive freshness baseline (issue #1371). The archive script records, in the
-// yaml block of its audit comment on the queue stub, the Sentry `lastSeen` it
-// observed immediately BEFORE it mutated the issue, plus the Sentry issue id it
-// mutated. `decideDedupAction` compares a regression's `lastSeen` against that
-// instant instead of the stub's `closedAt`: the close necessarily postdates any
-// event that landed while the archive ran, so a `closedAt` comparison would
-// evaluate false for that event permanently and bury a real regression until
-// some later event happened to arrive. These field names are the shared
-// contract with scripts/sentry-triage-archive.mjs (which imports them).
+// Archive freshness baseline (issue #1371). The archive script records the
+// Sentry `lastSeen` it observed immediately BEFORE it mutated the issue, plus
+// the Sentry issue id it mutated. `decideDedupAction` compares a regression's
+// `lastSeen` against that instant instead of the stub's `closedAt`: the close
+// necessarily postdates any event that landed while the archive ran, so a
+// `closedAt` comparison would evaluate false for that event permanently and bury
+// a real regression until some later event happened to arrive. These field names
+// are the shared contract with scripts/sentry-triage-archive.mjs.
+//
+// The baseline lives in the queue stub's BODY, in the same yaml block ingest
+// writes at creation — never in a comment. That placement IS the trust boundary,
+// and it is structural rather than cryptographic. The Stage B triage agent is an
+// LLM reading attacker-controlled Sentry payloads, and
+// .github/workflows/sentry-triage-agent.yml grants it
+// `Bash(gh issue comment <matrix.issue>:*)` — its comments post as
+// `github-actions[bot]`, on this exact stub. So no author check, marker check, or
+// id check applied to a COMMENT can be trusted: a prompt-injected payload can
+// satisfy all of them and plant a far-future baseline, after which every later
+// regression of that Sentry issue is skipped indefinitely. The agent's allowlist
+// grants no tool that edits an issue body (`Read,Grep,Glob` + three scoped
+// `gh issue` subcommands; the autofix agent gets file-edit tools and no shell at
+// all), and no script or workflow step ever rewrites a stub body except the
+// archive leg's own deterministic, zero-LLM write. Moving the field into the body
+// therefore removes the forgery surface instead of trying to authenticate inside
+// it, which a shared-secret signature could only match, never beat.
 export const ARCHIVE_BASELINE_FIELD = "archive_baseline_last_seen";
 export const ARCHIVE_BASELINE_ID_FIELD = "archive_baseline_sentry_issue_id";
 
-/** Read one scalar out of an audit-comment yaml block. Keys are fixed literals
- * (no regex injection) written one per line as `key: "value"`. */
+/** Read one scalar out of a stub's yaml block. Keys are fixed literals (no regex
+ * injection) written one per line as `key: "value"`. */
 function readBaselineField(block, key) {
   const match = new RegExp(`^${key}:[ \\t]*(.+)$`, "m").exec(
     String(block ?? ""),
@@ -293,13 +296,14 @@ function readBaselineField(block, key) {
 }
 
 /**
- * Parse the archive freshness baseline out of ONE comment body. Returns null
- * when the comment carries no baseline field. The timestamp comes back RAW —
- * validity is the caller's `Date.parse` gate — so a garbage value degrades to
- * the `closedAt` fallback instead of throwing.
+ * Parse the archive freshness baseline out of a queue stub's BODY. Returns null
+ * when the body carries no baseline field — the normal state for a stub that has
+ * never been archived. The timestamp comes back RAW; validity is the caller's
+ * `Date.parse` gate, so a garbage value degrades to the `closedAt` fallback
+ * instead of throwing.
  */
-export function parseArchiveBaseline(commentBody) {
-  const block = extractYamlBlock(commentBody);
+export function parseArchiveBaseline(issueBody) {
+  const block = extractYamlBlock(issueBody);
   if (!block) return null;
   const lastSeen = readBaselineField(block, ARCHIVE_BASELINE_FIELD);
   if (!lastSeen) return null;
@@ -310,35 +314,34 @@ export function parseArchiveBaseline(commentBody) {
 }
 
 /**
- * Newest archive baseline across a stub's comments, behind the SAME two fences
- * `selectVerdictComment` applies (scripts/sentry-triage-project-core.mjs): the
- * comment must be authored by the pipeline's own Actions bot AND lead with
- * ARCHIVE_COMMENT_MARKER.
+ * Return `body` with the archive baseline fields set inside its existing yaml
+ * block, replacing any previous values (a re-archive supersedes). Used by the
+ * archive leg's body rewrite; kept here so the writer and the reader above stay
+ * one edit apart.
  *
- * Authorship alone is not a fence here. This repo is public, and the Stage B
- * triage agent's verdict comment is LLM-authored yet posted with `github.token`
- * (.github/workflows/sentry-triage-agent.yml), so it reads as bot-authored while
- * its yaml block is untrusted agent text the agent composes after reading the
- * stub — meaning a drive-by commenter could steer one extra yaml line into a
- * trusted comment. Since the last match wins, a far-future baseline landing that
- * way would make every later regression of that Sentry issue skip forever: the
- * exact "bury a real regression" outcome this baseline exists to prevent. Only
- * the archive leg emits the marker, and only under the ambient GH_TOKEN, so
- * requiring it restores the fence. Comments arrive oldest-first, so the last
- * match still wins (a re-archive supersedes).
+ * Returns null when the body has no yaml block to extend — the archive treats
+ * that as a hard refusal rather than inventing structure, since a stub whose
+ * body it cannot parse is one ingest cannot read a baseline back out of either.
  */
-export function findArchiveBaseline(comments) {
-  let found = null;
-  for (const comment of comments ?? []) {
-    if (!isTrustedComment(comment)) continue;
-    const body = comment?.body;
-    if (typeof body !== "string" || !body.startsWith(ARCHIVE_COMMENT_MARKER)) {
-      continue;
-    }
-    const parsed = parseArchiveBaseline(body);
-    if (parsed) found = parsed;
-  }
-  return found;
+export function withArchiveBaseline(body, { lastSeen, sentryIssueId }) {
+  const source = String(body ?? "");
+  const block = extractYamlBlock(source);
+  if (!block) return null;
+  const stripped = block
+    .split("\n")
+    .filter(
+      (line) =>
+        !new RegExp(
+          `^(${ARCHIVE_BASELINE_FIELD}|${ARCHIVE_BASELINE_ID_FIELD}):`,
+        ).test(line.trim()),
+    )
+    .join("\n");
+  const rebuilt = [
+    stripped,
+    `${ARCHIVE_BASELINE_FIELD}: ${JSON.stringify(String(lastSeen ?? ""))}`,
+    `${ARCHIVE_BASELINE_ID_FIELD}: ${JSON.stringify(String(sentryIssueId ?? ""))}`,
+  ].join("\n");
+  return source.replace(block, rebuilt);
 }
 
 // Stage B's verdict namespace, derived from the definitions above so the two
@@ -434,12 +437,6 @@ export function indexQueueIssuesByShortId(issues) {
  * the reopen sheds `sentry:archived` (REOPEN_SHED_LABELS), so the stub takes the
  * ordinary `closedAt` path from then on.
  *
- * `archiveBaselineUnreadable` says the stub's comment list could not be read to
- * the end (see `fetchArchiveBaseline`), so no statement about the baseline is
- * possible — including "there isn't one". Falling back to `closedAt` there would
- * turn an unreadable list into a silent skip, which is the burial this whole
- * mechanism prevents, so an archived stub reopens instead. The reopen sheds
- * `sentry:archived`, so it cannot loop.
  */
 export function decideDedupAction({
   existingIssue,
@@ -447,7 +444,6 @@ export function decideDedupAction({
   lastSeen,
   archiveBaseline = null,
   archiveBaselineIssueId = null,
-  archiveBaselineUnreadable = false,
   sentryIssueId = null,
 }) {
   if (!existingIssue) return { action: "create" };
@@ -463,7 +459,6 @@ export function decideDedupAction({
   if (Number.isNaN(lastSeenMs)) return { action: "reopen" };
 
   const isArchived = (existingIssue.labels ?? []).includes(ARCHIVED_LABEL);
-  if (isArchived && archiveBaselineUnreadable) return { action: "reopen" };
   const baselineMs = Date.parse(archiveBaseline ?? "");
   if (isArchived && !Number.isNaN(baselineMs)) {
     const recordedId = String(archiveBaselineIssueId ?? "").trim();
@@ -817,8 +812,10 @@ async function ensureLabelsExist(options) {
 
 // Normalize a REST-API issue (lowercase `state`, `pull_request` marker on
 // PRs, `closed_at` for the regression-reopen timestamp gate, `labels` so the
-// archive-baseline branch can recognize a `sentry:archived` stub) into the
-// shape decideDedupAction expects. Exported for tests.
+// archive-baseline branch can recognize a `sentry:archived` stub, and `body`
+// which carries that baseline) into the shape decideDedupAction expects. The
+// REST list returns all four, so reading a baseline costs no extra request.
+// Exported for tests.
 export function normalizeRestIssues(pages) {
   return (pages ?? [])
     .flat()
@@ -828,6 +825,7 @@ export function normalizeRestIssues(pages) {
       title: issue.title ?? "",
       state: String(issue.state ?? "").toUpperCase(),
       closedAt: issue.closed_at ?? null,
+      body: issue.body ?? "",
       labels: (issue.labels ?? [])
         .map((label) => (typeof label === "string" ? label : label?.name))
         .filter(Boolean),
@@ -842,10 +840,6 @@ export function normalizeRestIssues(pages) {
  * result cap (the Codex 1000-cap fix), and terminates on the first short or
  * empty page. Fails loud past `maxPages` instead of silently truncating.
  * Returns an array of pages; `runner` is injectable for tests.
- *
- * The overflow is a distinct error TYPE, not a message to match: a caller that
- * can resolve a truncated read safely (`fetchArchiveBaseline`) must be able to
- * tell it apart from a transport failure, which it cannot resolve.
  */
 export async function ghPaginate(
   path,
@@ -855,7 +849,7 @@ export async function ghPaginate(
   const pages = [];
   for (let page = 1; ; page += 1) {
     if (page > maxPages) {
-      throw new PaginationLimitError(
+      throw new Error(
         `GitHub pagination exceeded ${maxPages} pages for ${path}; refusing to continue silently`,
       );
     }
@@ -967,46 +961,6 @@ async function reopenQueueIssue(options, existingIssue, sentryIssue) {
   );
 }
 
-// Page bound for a stub's comment scan: 20 pages x 100 = 2000 comments. A queue
-// stub is bot-driven and carries a handful, so this is enormous headroom — but
-// the repo is PUBLIC, so the list length is attacker-influenced and cannot be
-// left on ghPaginate's 200-page default. At that default an inflated list throws
-// on every run, the per-issue catch swallows it, and the stub's reopen path is
-// disabled for good: exactly the silent burial #1371 closes. Bounded here and
-// resolved toward reopen instead.
-export const ARCHIVE_BASELINE_MAX_COMMENT_PAGES = 20;
-
-/**
- * Read the archive freshness baseline off one queue stub. Only called for a
- * CLOSED, regressed, `sentry:archived` stub, so the extra comment fetch is
- * bounded to the handful of stubs the archive leg has actually settled.
- *
- * Returns `{ unreadable: true }` when the comment list runs past the page bound.
- * The baseline is only trustworthy as the LAST matching comment, so a truncated
- * read cannot report "no baseline" either — it can report nothing at all, and
- * the caller turns that into a reopen. Any other failure still propagates: the
- * caller counts it as a per-issue error and retries next run, which is safer
- * than degrading to the `closedAt` comparison this baseline replaces.
- */
-async function fetchArchiveBaseline(options, existingIssue) {
-  let pages;
-  try {
-    pages = await ghPaginate(
-      `repos/${options.repo}/issues/${existingIssue.number}/comments`,
-      { maxPages: ARCHIVE_BASELINE_MAX_COMMENT_PAGES },
-    );
-  } catch (err) {
-    if (!(err instanceof PaginationLimitError)) throw err;
-    process.stderr.write(
-      `::warning::Queue issue #${existingIssue.number} has more than ${
-        ARCHIVE_BASELINE_MAX_COMMENT_PAGES * 100
-      } comments; cannot read its archive baseline, so reopening for re-triage rather than skipping.\n`,
-    );
-    return { unreadable: true };
-  }
-  return findArchiveBaseline(pages.flat());
-}
-
 async function fetchTrackerComments(options) {
   // Same manual page loop as the dedup scan — parseable on any gh version
   // and safe past the 100-comment pagination boundary.
@@ -1066,7 +1020,6 @@ export async function runIngest(options, deps = {}) {
     createIssue = createQueueIssue,
     reopenIssue = reopenQueueIssue,
     postRunRecord = defaultPostRunRecord,
-    resolveArchiveBaseline = fetchArchiveBaseline,
     now = () => new Date(),
   } = deps;
 
@@ -1092,20 +1045,15 @@ export async function runIngest(options, deps = {}) {
       // Only an archived, closed, regressed stub needs its audit comment read
       // (issue #1371) — everything else decides off the labels/timestamps we
       // already have.
-      const needsBaseline =
-        sentryIssue.isRegressed &&
-        existingIssue?.state === "CLOSED" &&
-        (existingIssue.labels ?? []).includes(ARCHIVED_LABEL);
-      const baseline = needsBaseline
-        ? await resolveArchiveBaseline(options, existingIssue)
-        : null;
+      // The baseline rides in the stub BODY, which the dedup scan already
+      // fetched — no per-stub comment read, and no forgeable comment surface.
+      const baseline = parseArchiveBaseline(existingIssue?.body);
       const decision = decideDedupAction({
         existingIssue,
         isRegressed: sentryIssue.isRegressed,
         lastSeen: sentryIssue.lastSeen,
         archiveBaseline: baseline?.lastSeen ?? null,
         archiveBaselineIssueId: baseline?.sentryIssueId ?? null,
-        archiveBaselineUnreadable: baseline?.unreadable === true,
         sentryIssueId: sentryIssue.id,
       });
       if (decision.action === "skip") {
