@@ -659,6 +659,7 @@ test("an over-budget answer is measured and fails", () => {
   const answer = result.answers[0];
   for (const large of [
     "docs/notes/agent-quality-gate-mechanics.md",
+    "docs/notes/sentry-triage-pipeline.md",
     "docs/context-standards.md",
   ]) {
     answer.loaded_sources.push(source(large));

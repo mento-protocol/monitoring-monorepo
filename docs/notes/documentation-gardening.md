@@ -3,7 +3,7 @@ title: Documentation gardening
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-29
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -133,6 +133,28 @@ Every document receives one evidence-backed disposition: **Keep**,
 Run `pnpm docs:index --check` after a gardening batch. If classification changed,
 regenerate the catalog with `pnpm docs:index --write` and review the generated
 diff before committing it.
+
+### Anti-reinflation: agent entry points and operator runbooks
+
+Consolidation in these two lanes tightens pointers. It never copies an
+authority's content into a router — a consolidation shard once re-inserted
+command blocks a cleanup PR had removed (#1531).
+
+- A shard that would grow a canonical agent file justifies every added line
+  against the three placement rules in
+  [`docs/context-standards.md`](../context-standards.md#placement-rules):
+  current operating rules only, at most a one-line gist where the file already
+  links an owning authority, and constraints or enforcing checks in place of
+  restated code behavior.
+- **Merge** across these lanes moves content to its narrowest owner and leaves a
+  pointer behind. Duplicating the owner's text into the router is not a merge.
+- Prefer **Tighten** over **Update** when a section restates an authority; the
+  correct edit is usually a shorter pointer, not a fresher copy.
+- Run `pnpm agent:context-budget --strict` before opening the gardening PR.
+  Its caps are fixed constants (measured maximum plus ~35%, lowered manually
+  when files shrink, never raised), so a passing check is not permission to
+  consume freed headroom: a shard that grows a canonical file needs the same
+  per-line justification even while the check passes.
 
 ## Fresh-agent navigation evaluation
 

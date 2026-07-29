@@ -34,8 +34,8 @@ Two facts shape every tool choice in this skill:
 
 1. **Mento is multi-chain and growing.** Celo (`42220`), Monad (`143`),
    Polygon (`137`), and Ethereum (`1`) are live in the production indexer.
-   Ethereum currently carries reserve-yield monitoring. Never hardcode `42220`;
-   thread the target chain id through every chain-scoped call.
+   Ethereum currently carries reserve-yield monitoring. **Never hardcode
+   `42220`**; thread the target chain id through every chain-scoped call.
 2. **One key, many chains.** If someone controls a private key on Celo, the same EOA almost always has a history on other EVM chains (Ethereum, Base, Arbitrum, …). That cross-chain footprint is usually where the _identity_ lives — ENS, OpenSea, CEX deposits, prior bots — because the richest attribution tools (Arkham, Nansen, EigenPhi, MetaSleuth) index Ethereum/L2s but **not** Celo.
 
 So split the work into two legs and pick tools per leg:
@@ -43,20 +43,24 @@ So split the work into two legs and pick tools per leg:
 - **On-chain behaviour leg** (what the address _does_ — swaps, storage, capital, venues): use chain-native sources for Celo, Monad, or Polygon (the Mento Envio indexer where promoted, Blockscout/Polygonscan, Dune chain tables, GeckoTerminal / DexScreener, `cast` against the chain's RPC). These are the sources that actually see the target chain.
 - **Cross-chain identity leg** (who is _behind_ the address): pivot the operator EOA onto the chains the heavyweight attributors cover and let them work there.
 
-**Corollary — never drop a source just because it lacks Celo.** A Celo-blind tool (Nansen, EigenPhi, GoPlus, Across, …) can still be the right tool for the identity leg or for supported Mento chains such as Polygon. The **Tooling matrix** near the end of this file records what each source covers and which leg it serves — consult it instead of assuming "no Celo = useless".
+**Corollary — never drop a source just because it lacks Celo.** A Celo-blind tool (Nansen, EigenPhi, GoPlus, Across, …) can still be the right tool for the identity leg or for supported Mento chains such as Polygon. `references/tooling-matrix.md` records what each source covers and which leg it serves — consult it instead of assuming "no Celo = useless".
+
+**Contract-target identity rule.** The same 20-byte address on another chain is
+usually an unrelated account. So a cross-chain hit keyed on a **contract**
+target's own address — including an `intel_*` cache hit — mis-attributes the
+report. Identify the deployer/operator EOA first and run the identity leg on
+**that** EOA. Only treat a same-address cross-chain hit as the target when
+CREATE2/bytecode evidence proves the address is intentionally shared. For an
+**EOA** target, a hit on the target's own address is fair game.
 
 ## Output
 
 Two artefacts:
 
 1. **Local draft** at `.investigations/<address>-<slug>.md` (slug = first-3 words of derived display name, lowercase, kebab-cased). The `.investigations/` folder is gitignored — never commit drafts.
-2. **Optional production upload**: the exact optimistic-concurrency (CAS) Lua
-   upsert owned by `upsertReport()` in
-   `ui-dashboard/src/lib/address-reports.ts`, executed against the `reports`
-   hash through `mcp__upstash__redis_database_run_redis_commands`. Re-read
-   immediately before upload, pass the expected base version, and stop on a
-   conflict. The canonical skill stamps `source: "Codex"`; its Claude mirror
-   stamps `source: "claude"`.
+2. **Optional production upload** to the `reports` hash via the exact
+   optimistic-concurrency (CAS) Lua upsert owned by `upsertReport()` in
+   `ui-dashboard/src/lib/address-reports.ts`. See Step 10.
 
 ## Output template
 
@@ -66,365 +70,48 @@ the body once, then mirror its named H2 sections, order, evidence blocks,
 confidence tags, and two-line provenance footer exactly. The template is the
 spec: do not invent, drop, or reorder sections. Keep "Related addresses /
 fleet" even when clustering found nothing and record that result in one line.
+Match the template's evidence-anchored, plain-language tone and aim for
+**1,500–2,500 words** in the finished report.
+
+Existing production reports can help calibrate tone, but they are historical
+data and may predate this contract. `template.md` is the sole structural
+authority. Never copy a seed report's facts, section omissions, provider
+assumptions, or provenance into a new investigation.
 
 ## Procedure (how to fill the template)
 
-Run these in order. Each step maps onto a section of the template — fill that section as evidence comes in, don't wait until the end.
+Run these in order. Each step maps onto a section of the template — fill that
+section as evidence comes in, don't wait until the end. A step whose heading
+names a file under `references/` keeps its deep procedure there; every other
+step carries its full procedure here.
 
-### Step 1 — Bootstrap
+### Step 1 — Bootstrap → `references/chain-setup.md`
 
-```bash
-ADDR=$(echo "0x…" | tr 'A-Z' 'a-z')   # always lowercase the storage key
-CHAIN=celo                            # default; override if user said otherwise
-DATE=$(date -u +%F)
-mkdir -p .investigations
+Lowercase the address, set `CHAIN`, and derive `CHAIN_ID` / `RPC` / `DUNE_NS` / `DL_NS` from it in **one** case switch so a non-Celo investigation can't silently read Celo data. Capture provenance up front — `HEAD_BLOCK`, RPC endpoint, `cast --version`, and the UTC timestamp of each Sim/DefiLlama query — because mutable-state reads are only reproducible pinned to a block. Then discover the `address-labels` database by exact name (never hardcode its opaque id) and `HGET` both `reports` and `labels` for the address: an existing report means you're updating, and an existing label sets the H1 nickname.
 
-# Derive EVERY chain-scoped knob from $CHAIN in ONE place so they never drift apart —
-# a non-Celo investigation must not silently read Celo data. Thread these everywhere:
-#   CHAIN_ID → Hasura `chainId` filters + Sim `--chain-ids`
-#   RPC      → every `cast` call (head block, storage, codehash, sanctions oracle)
-#   DUNE_NS  → value to hand-substitute for the `<chain>.` table prefix in the DuneSQL examples
-#              (the dune CLI doesn't shell-interpolate inside a SQL string, so swap it in manually)
-#   DL_NS    → DefiLlama coin-price slug (Step 5.5); may differ from the chain name — verify on DefiLlama
-case "$CHAIN" in
-  celo)     CHAIN_ID=42220; RPC=https://forno.celo.org;    DUNE_NS=celo;     DL_NS=celo ;;
-  monad)    CHAIN_ID=143;   RPC=https://rpc2.monad.xyz;          DUNE_NS=monad;    DL_NS=monad ;;
-  polygon)  CHAIN_ID=137;   RPC=https://polygon.drpc.org;        DUNE_NS=polygon;  DL_NS=polygon ;;
-  ethereum) CHAIN_ID=1;     RPC=https://ethereum.publicnode.com; DUNE_NS=ethereum; DL_NS=ethereum ;;
-  *) echo "Unsupported CHAIN=$CHAIN — add a case arm with its CHAIN_ID / RPC / DUNE_NS / DL_NS." >&2; exit 1 ;;
-esac
-```
+### Step 1.5 — Check Upstash caches first → `references/chain-setup.md`
 
-**Capture provenance up front** — mutable-state reads (storage, balances, prices) are only reproducible if pinned to a block. Record these and put them in the report's provenance footer:
+Five Arkham-derived caches live in that same database — three address-keyed (`intel_deep`, `intel_transfers`, `intel_wealth`) and two entity-slug-keyed (`intel_entities`, `intel_entity_cps`, joined via `intel_deep`'s `arkhamEntity.id`). Prefer a current cache hit over a live call. **These caches ARE the cross-chain identity leg**: they see the chains Arkham covers, not Celo/Monad, so for a Celo-native address an empty result is itself the finding, not a failure. Consume them subject to the contract-target identity rule above.
 
-```bash
-HEAD_BLOCK=$(cast block-number --rpc-url $RPC)   # $RPC from Step 1's case switch; the block reads are "as of"
-cast --version                                   # tool version, for the footer
-# Note the RPC endpoint, $HEAD_BLOCK, and the UTC timestamp of each Sim/DefiLlama query.
-```
+### Step 1.6 — Mento indexer fingerprint → `references/indexer-queries.md`
 
-For the attribution-anchoring storage reads in Step 3, pin them with `cast call "$ADDR" "<sig>" --block "$HEAD_BLOCK" --rpc-url "$RPC"` (quote the `<sig>` placeholder so bash doesn't read it as a redirection) so a future reader gets the same bytes.
-
-Discover the production database with
-`mcp__upstash__redis_database_list_databases`: require exactly one database
-named `address-labels`, then carry its returned opaque id as `DATABASE_ID`.
-Never hardcode or derive that id. Check whether a report already exists (we may
-be updating, not creating):
-
-```js
-mcp__upstash__redis_database_run_redis_commands({
-  database_id: DATABASE_ID,
-  commands: [["HGET", "reports", "<addrLower>"]],
-});
-```
-
-If a report exists, parse it for `version` and `createdAt` — you'll preserve them on upload.
-
-Also pull any existing label so the H1 nickname matches what's in the address book:
-
-```js
-commands: [["HGET", "labels", "<addrLower>"]];
-```
-
-### Step 1.5 — Check Upstash caches first
-
-Before making any live Arkham calls, check the five existing caches. Prefer a
-current cache hit; use the live connector only when it is available and the
-result needs refreshing.
-
-```js
-// All five caches live in the same address-labels database.
-// DATABASE_ID is the exact-name match discovered in Step 1.
-
-// 1. Full enrichment (multi-chain address_enriched + counterparties)
-mcp__upstash__redis_database_run_redis_commands({
-  database_id: DATABASE_ID,
-  commands: [["HGET", "intel_deep", "<addrLower>"]],
-});
-
-// 2. Transfer history (transfers?base=<addr>&limit=1000)
-mcp__upstash__redis_database_run_redis_commands({
-  database_id: DATABASE_ID,
-  commands: [["HGET", "intel_transfers", "<addrLower>"]],
-});
-
-// 3. Wealth snapshot (balances + portfolio 0d/30d/90d/180d)
-mcp__upstash__redis_database_run_redis_commands({
-  database_id: DATABASE_ID,
-  commands: [["HGET", "intel_wealth", "<addrLower>"]],
-});
-```
-
-**If all three hit:** use the cached data for Steps 2–5 and skip the live Arkham API calls entirely.
-
-If a cache entry is stale and the live connector is available, refresh it;
-otherwise record the cache timestamp and its limitation.
-
-**Entity cache path:** if `intel_deep` returns an entity slug (look for `arkhamEntity.id` or a similar slug field in the payload), check the entity-level caches too:
-
-```js
-// 4. Entity profile (fetched from /intelligence/entity/{slug})
-mcp__upstash__redis_database_run_redis_commands({
-  database_id: DATABASE_ID,
-  commands: [["HGET", "intel_entities", "<entitySlug>"]],
-});
-
-// 5. Entity counterparties (/counterparties/entity/{slug})
-mcp__upstash__redis_database_run_redis_commands({
-  database_id: DATABASE_ID,
-  commands: [["HGET", "intel_entity_cps", "<entitySlug>"]],
-});
-```
-
-**These caches ARE the cross-chain identity leg** (see the chain doctrine): they're populated from the target's activity on chains Arkham covers — i.e. NOT Celo/Monad. For a Celo-native address they're often empty, and that emptiness is itself the finding ("no Ethereum/L2 footprint Arkham can see"). When they hit, they're the fastest path to who's behind the address — **but only consume a hit keyed on the target's own address as identity for an EOA target.** For a CONTRACT target, the same 20-byte address on the chains these caches cover is usually an unrelated account, so a target-address cache hit would mis-attribute the report; run the identity leg on the deployer/operator EOA instead (Step 2), unless shared-deployment is proven.
-
-**Don't treat the payloads as opaque blobs** — the typed accessors in `ui-dashboard/src/lib/` give exact field paths:
-
-- `intel_deep` (`intel-deep.ts`): `enriched[chain].arkhamEntity.id` is the **entity slug** — the join key into `intel_entities` / `intel_entity_cps` (those hashes are slug-keyed, not address-keyed). `candidate.sources` tells you _why_ it was cached (`cluster-…-caller` / `top-trader` / `top-bridger` / `tier1-attested`) — a free prior classification. `counterparties[chain]` has the top USD counterparties per chain.
-- Use `intel-legacy-fallback.ts` `hgetWithLegacy` semantics — older entries may sit under `arkham_*` legacy keys.
-
-### Step 1.6 — Mento indexer fingerprint (our own multichain source)
-
-**This is the primary on-chain-behaviour source for the target chain.** The
-production Envio endpoint covers Celo (`42220`), Monad (`143`), Polygon (`137`),
-and Ethereum (`1`, currently reserve-yield entities). Because Arkham/Nansen are
-blind on Celo and Monad, this is where "what did this address do with Mento"
-gets answered on those chains. Always verify the requested chain is live before
-treating an empty result as evidence. Query it before the funder graph.
-
-```bash
-HASURA=https://indexer.hyperindex.xyz/2f3dd15/v1/graphql   # public, no key, POST application/json
-# Sanity-check the deployment is serving before trusting any EMPTY result — parallel Envio
-# deploys can prune an entry mid-serve, so a 404/empty endpoint is NOT a "no activity" finding:
-# (a) Liveness: confirm the endpoint serves at all.
-curl -s "$HASURA" -H 'content-type: application/json' \
-  --data '{"query":"{ SwapEvent(limit:1){ id } }"}' | jq .
-# (b) Chain coverage: probe a SPREAD of activity areas for $CHAIN_ID — swaps, LP, supply, rebalances, and
-#     bridges — so a quiet/new chain whose activity is non-swap isn't mis-marked. (BridgeTransfer keys on
-#     sourceChainId/destChainId, not chainId.)
-curl -s "$HASURA" -H 'content-type: application/json' \
-  --data "{\"query\":\"{ SwapEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} LiquidityEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StableSupplyChangeEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} RebalanceEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} BridgeTransfer(where:{_or:[{sourceChainId:{_eq:$CHAIN_ID}},{destChainId:{_eq:$CHAIN_ID}}]},limit:1){id} SusdsPosition(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} SusdsYieldMovement(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StethPosition(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StethYieldMovement(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} }\"}" | jq .
-# Ethereum reserve-yield coverage includes both sUSDS and stETH positions and
-# movement history; omitting either family can turn real activity into false EMPTY.
-# Mark the indexer NOT-COVERED for $CHAIN only if EVERY entity above (and the full Step 1.6 battery) is
-# empty AND $CHAIN isn't in the indexer's configured network list — see the `networks:` section of
-# `indexer-envio/config.multichain.mainnet.yaml`. Otherwise an empty result is EMPTY (a real signal).
-```
-
-Run a small battery keyed on the target address (all fields verified against `indexer-envio/schema.graphql`). `caller` = `tx.from` (the signing EOA — the volume-attribution primary key); `sender`/`brokerCaller` = `msg.sender` to the pool/broker (often a router); `txTo` = entry-point contract (identifies the aggregator router). All three are in each row, so you disambiguate EOA-vs-router on the spot.
-
-**Scope every query to the target chain.** Add `chainId: { _eq: <CHAIN_ID> }` to the `where` of each entity that carries it (every swap/rollup/rebalance/LP entity below does; `BridgeTransfer` does not). Without it, a multi-chain address silently merges its Celo, Monad, and Polygon footprints and misreports volume/activity. Drop the filter only when you deliberately want the all-chain Mento footprint.
-
-**Pick the filter field for the target type.** `caller` is `tx.from` — correct for an **EOA target**. For a **contract target** (router / aggregator / rebalancer / the bot contract itself), `tx.from` is the _operator EOA_, not the contract, so a `caller`-only filter returns a false-EMPTY even though the contract is all over the data. Filter on `sender` / `txTo` / `recipient` / `brokerCaller` instead, or `_in` across roles when the address could appear as either. The examples below show `caller`; swap the field to match the target.
-
-```graphql
-# Lifetime rollups (fast path — swap volume, cadence, routers, protocol-actor flag)
-{
-  TraderDailySnapshot(
-    where: { trader: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
-    order_by: { timestamp: desc }
-    limit: 1000
-  ) {
-    chainId
-    timestamp
-    swapCount
-    uniquePools
-    volumeUsdWei
-    feesPaidUsdWei
-    aggregatorKeys
-    isProtocolActor
-  }
-}
-{
-  BrokerTraderDailySnapshot(
-    where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
-    order_by: { timestamp: desc }
-    limit: 1000
-  ) {
-    chainId
-    timestamp
-    swapCount
-    volumeUsdWei
-    aggregatorKeys
-    isProtocolActor
-  }
-} # v2 path, Celo only
-# Raw per-swap detail (v3 pools + v2 broker)
-{
-  SwapEvent(
-    where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
-    order_by: [{ blockTimestamp: desc }, { id: desc }] # id tiebreaker → deterministic offset pagination
-    limit: 1000
-  ) {
-    txHash
-    blockTimestamp
-    chainId
-    poolId
-    caller
-    sender
-    recipient
-    txTo
-    amount0In
-    amount1In
-    amount0Out
-    amount1Out
-    volumeUsdWei
-  }
-}
-{
-  BrokerSwapEvent(
-    where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> }, routedViaV3Router: { _eq: false } }
-    order_by: [{ blockTimestamp: desc }, { id: desc }] # id tiebreaker → deterministic offset pagination
-    limit: 1000
-  ) {
-    txHash
-    blockTimestamp
-    chainId
-    caller
-    brokerCaller
-    txTo
-    tokenIn
-    tokenOut
-    amountIn
-    amountOut
-    volumeUsdWei
-    exchangeId
-  }
-}
-
-# Role-specific: MEV keeper? CDP actor? LP? mint/burn? bridger?
-{
-  RebalanceEvent(where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ blockTimestamp: desc }, { id: desc }], limit: 1000) {
-    txHash
-    poolId
-    sender
-    caller
-    notionalUsd
-    rewardUsd
-    effectivenessRatio
-  }
-}
-{
-  Trove(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
-    id
-    coll
-    debt
-    status
-  }
-}
-{
-  # CDP operation HISTORY (open/adjust/close), not just currently-owned troves — a target that opened then
-  # closed owns no Trove now but is all over TroveOperationEvent. NOTE: the indexer records LIQUIDATE in a
-  # separate LiquidationEvent (keyed by trove/instance, not owner address), so liquidations are NOT in this
-  # entity — check LiquidationEvent by troveId if the target's trove may have been liquidated.
-  TroveOperationEvent(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ timestamp: desc }, { id: desc }], limit: 1000) {
-    id
-    troveId
-    operation
-    collChange
-    debtChange
-  }
-}
-{
-  LiquidityPosition(where: { address: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
-    poolId
-  }
-}
-{
-  # sUSDS current position (Ethereum-only in this indexer).
-  SusdsPosition(where: { wallet: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
-    id
-  }
-}
-{
-  SusdsYieldMovement(
-    where: { _and: [{ _or: [{ from: { _eq: "0xtarget" } }, { to: { _eq: "0xtarget" } }] }, { chainId: { _eq: <CHAIN_ID> } }] }
-    order_by: [{ blockNumber: desc }, { id: desc }]
-    limit: 1000
-  ) {
-    id
-    txHash
-  }
-}
-{
-  # stETH current position plus historical movements (Ethereum-only).
-  StethPosition(where: { wallet: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
-    id
-  }
-}
-{
-  StethYieldMovement(
-    where: { _and: [{ _or: [{ from: { _eq: "0xtarget" } }, { to: { _eq: "0xtarget" } }] }, { chainId: { _eq: <CHAIN_ID> } }] }
-    order_by: [{ blockNumber: desc }, { id: desc }]
-    limit: 1000
-  ) {
-    id
-    txHash
-  }
-}
-{
-  # Filter on caller (signer) OR counterparty (mint recipient / burn holder) — the target may be the
-  # recipient/holder rather than the tx signer, which a caller-only filter would miss.
-  StableSupplyChangeEvent(where: { _and: [{ _or: [{ caller: { _eq: "0xtarget" } }, { counterparty: { _eq: "0xtarget" } }] }, { chainId: { _eq: <CHAIN_ID> } }] }, limit: 1000) {
-    txHash
-    kind
-    amount
-  }
-}
-{
-  # BridgeBridger is a cross-chain identity aggregate keyed by sender (sourceChainsUsed is a
-  # JSON array) — it has NO chainId field, so do not add a chainId filter here.
-  BridgeBridger(where: { sender: { _eq: "0xtarget" } }) {
-    id
-  }
-}
-{
-  # BridgeTransfer carries sourceChainId/destChainId (not chainId). Scope to the target chain via either
-  # endpoint AND keep the sender/recipient role predicate; drop the chain clause only for the all-chain view.
-  BridgeTransfer(
-    where: {
-      _and: [
-        { _or: [{ sender: { _eq: "0xtarget" } }, { recipient: { _eq: "0xtarget" } }] }
-        { _or: [{ sourceChainId: { _eq: <CHAIN_ID> } }, { destChainId: { _eq: <CHAIN_ID> } }] }
-      ]
-    }
-    limit: 1000
-  ) {
-    sentTxHash
-    sender
-    recipient
-    amount
-  }
-}
-```
-
-Hard constraints (from `docs/pr-checklists/swr-polling-hasura.md`):
-
-- **1000-row cap** per response; **no `_aggregate`** on hosted Hasura. For lifetime totals, page with `offset`/`limit` or narrow with `where`, then **sum client-side**. When paging, `order_by` must end in a unique tiebreaker (`{ id: desc }`) — ordering by `blockTimestamp`/`timestamp` alone is non-deterministic when rows share a block, so plain offset pagination would skip and duplicate rows.
-- `volumeUsdWei` is 0 when neither leg is USD-pegged (non-stable FX pairs) — don't read that as "no volume".
-- `BrokerSwapEvent` with `routedViaV3Router:true` are v3 siblings already counted in `SwapEvent` — filter them out (`_eq:false`) to avoid double-counting.
-- `RebalanceEvent.notionalUsd`/`rewardUsd` use an empty-string sentinel when pre-reserve RPC failed — handle "" distinctly from "0".
-
-A non-empty result here, scoped to the actual target chain, is far stronger than anything the Celo-blind attributors can give — and a verified-live **empty** result is a real signal ("never interacted with Mento v2/v3 on this chain"), not a tooling gap.
+The production Envio endpoint is the **primary on-chain-behaviour source** for the target chain, and the only one that answers "what did this address do with Mento" on Celo and Monad. Probe liveness and per-chain coverage before trusting any empty result — a pruned deployment is not a "no activity" finding — then run the address battery with `chainId` scoped to the target chain and the filter field matched to the target type (`caller` for an EOA; `sender`/`txTo`/`recipient`/`brokerCaller` for a contract, or a `caller`-only filter returns a false EMPTY). A verified-live empty result is a real signal. Query this before the funder graph.
 
 ### Step 2 — Cast of characters (multi-chain attribution + funder graph)
 
-**Known-infra check first.** Before walking the funder graph or decompiling anything, match the target and its counterparties against the repo's canonical registries so you never mislabel protocol infrastructure as a suspicious actor (prefer on-chain facts over behavioural guesses):
+**Known-infra check first.** Before walking the funder graph or decompiling anything, match the target and its counterparties against the repo's canonical registries so you never mislabel protocol infrastructure as a suspicious actor:
 
 - `indexer-envio/config/aggregators.json` + shared-config `getAggregatorName(chainId, addr)` → instant match to `mento-router-v2` / `squid` / `lifi` / `0x` / `openocean`, **and** to any named MEV fleet cluster already documented there (those carry a pre-written narrative you can reuse verbatim in Steps 3/6/8).
 - shared-config `chainAddressLabels(chainId)` / `tokenSymbol()` (from `@mento-protocol/contracts`) → labels broker / reserve / pools / stables / fee recipients, and gives correct explorer links via `explorerAddressUrl`.
-- `indexer-envio/config/oracle-reporters.json` + `protocolActors.json` + active `PoolLiquidityStrategy` rows → flags Chainlink feeds / reporters / listed rebalancers as infra. If the target is an active strategy row (or the legacy `Pool.rebalancerAddress` pointer during schema rollout), it's an authorised protocol strategy contract, not an independent bot.
+- `indexer-envio/config/oracle-reporters.json` + `protocolActors.json` + active `PoolLiquidityStrategy` rows → flags Chainlink feeds / reporters / listed rebalancers as infra. An active strategy row means an authorised protocol strategy contract, not an independent bot.
 
-Then attribution. Use the `arkham` skill (project-scoped) for the **cross-chain identity leg** — Step 1.5 caches first; live calls only if the key is valid. Remember the doctrine: Arkham/Nansen don't cover Celo or Monad, so the play is:
+Then attribution, via the `arkham` skill (project-scoped) for the identity leg:
 
-1. Branch on target type before any cross-chain enrichment:
-   - **EOA target** → run `address_enriched/all` on it. Zero hits for a Celo-native EOA is a signal, not a failure.
-   - **CONTRACT target** → do **NOT** run `address_enriched/all` on the contract address as an identity source yet. The same 20-byte address on Ethereum/L2 is almost always an unrelated EOA/contract (addresses aren't shared across chains unless deployed deterministically), so an Arkham hit there would record a false identity. Identify the deployer/operator EOA first (item 5 below), then run the identity leg on THAT EOA. Only treat a same-address cross-chain hit as the target if CREATE2/bytecode evidence proves the address is intentionally shared.
-2. Walk inbound funders on the target chain. Two pitfalls to handle explicitly:
-   - **Sim's Activity API returns NEWEST first**, not oldest. Don't take the top result and call it the FIRST funder — paginate to the tail (or use a `block_time ASC` DuneSQL query) before treating any counterparty as the original funder. A recent counterparty mistaken for the original funder permanently mis-attributes the report.
-   - **Sim's `--chain-ids` defaults to all configured chains** when omitted. For an EVM address that's been used on Ethereum / Base / Arbitrum / etc., the "first receive" without a chain filter can come from a totally different chain than the target. Always pass `--chain-ids $CHAIN_ID` so the funder graph is scoped to the chain the contract actually lives on.
-
-   Example — first inbound transfer on Celo, oldest first via DuneSQL (Sim CLI doesn't expose an `--asc` flag at the time of writing):
+1. **Branch on target type before any cross-chain enrichment** — see the contract-target identity rule above. EOA target → run `address_enriched/all` on it. Contract target → identify the deployer/operator EOA first, then run the identity leg on that EOA.
+2. Walk inbound funders on the target chain. Three pitfalls, all of which permanently mis-attribute a report:
+   - **Sim's Activity API returns NEWEST first.** Don't take the top result and call it the FIRST funder — paginate to the tail, or use a `block_time ASC` DuneSQL query.
+   - **Sim's `--chain-ids` defaults to all configured chains** when omitted, so a "first receive" can come from a different chain entirely. Always pass `--chain-ids $CHAIN_ID`.
+   - **The native-`value` query has an ERC20 blind spot.** If funding arrived as a stablecoin, an oldest-first scan of `value > 0` misses it — repeat the scan over ERC20 `Transfer` logs (Dune) or Sim token transfers before naming a funder.
 
    ```sql
    SELECT block_time, "from", value, hash
@@ -435,260 +122,85 @@ Then attribution. Use the `arkham` skill (project-scoped) for the **cross-chain 
    LIMIT 5;
    ```
 
-   That funder is usually the operator EOA. **If funding arrived as an ERC20** (e.g. a stablecoin), this
-   native-`value` query misses it — run the same oldest-first scan over token transfers (the chain's
-   ERC20 `Transfer` logs in Dune, or Sim token transfers) before concluding who the funder is.
+3. Run `address_enriched/all` on the operator EOA **across all chains** — this is where personas (ENS / OpenSea / prior bots / CEX deposits) surface, and often the whole attribution.
+4. Trace one more hop back: who funded the operator? **Mento's own bridge is Wormhole NTT**, not the generic Ethereum bridges. Check indexer `BridgeTransfer` / `BridgeBridger` first, then confirm via **Wormholescan** (free, no key): `GET https://api.wormholescan.io/api/v1/operations?address=0x…&appId=NATIVE_TOKEN_TRANSFER` — Wormhole uses its own chain ids (Celo=14, Monad=48), NOT EVM chain ids. Match counterparties against `indexer-envio/config/nttAddresses.json` so NTT infra is labelled a bridge flow, not a funder. For non-Mento inbound bridges: **LayerZeroScan** covers Celo (`GET https://scan.layerzero-api.com/v1/messages/wallet/{eoa}`, Celo EID=30125); Across/deBridge cover **Monad only**.
+5. For contracts: pull the deployer (the `from` of the contract-creation tx) — it may differ from the operator. Note both rows in the table; the deployer seeds Step 2.5.
+6. **ENS de-anon pivot.** A Celo address's ENS primary name lives in the **Ethereum L1** reverse registry — forno can't answer it. Resolve via `viem` `getEnsName({ address, coinType })` against an L1 RPC with the ENSIP-11 coinType **`0x80000000 | $CHAIN_ID`** (Celo `42220` → `0x8000A4EC`, namespace `a4ec.reverse`; Monad `143` → `0x8000008F`). **A common doc example mis-states Celo as `0x8000A4DC`, which decodes to chain 42204 — wrong.** Also try the default L1 reverse record: viem's `getEnsName` defaults to Ethereum coinType `60`, which many owners set regardless of chain. Call it once with the default and once with the chain-specific coinType. Mostly negatives for bot EOAs; one hit is gold.
 
-3. Run `address_enriched/all` on the operator EOA **across all chains** — this is the cross-chain identity leg, where personas (ENS / OpenSea / prior bots / CEX deposits) surface. The same key is usually active on Ethereum/L2s even when the target contract is Celo-native; that footprint is often the whole attribution.
-4. Trace one more hop back: who funded the operator? **Mento's own bridge is Wormhole NTT**, not the generic Ethereum bridges:
-   - Check the indexer `BridgeTransfer` / `BridgeBridger` from Step 1.6 first.
-   - Confirm/extend via **Wormholescan** (free, no key): `GET https://api.wormholescan.io/api/v1/operations?address=0x…&appId=NATIVE_TOKEN_TRANSFER` — note Wormhole uses its own chain ids (Celo=14, Monad=48), NOT EVM chain ids.
-   - Match any counterparty against `indexer-envio/config/nttAddresses.json` (`nttManagerProxy` / `transceiverProxy` / `helper` / `tokenAddress`) so a transfer to/from NTT infra is labelled a bridge flow, not a real funder.
-   - For NON-Mento inbound bridges, reach for the right tracer per the Tooling matrix: **LayerZeroScan** covers Celo (`GET https://scan.layerzero-api.com/v1/messages/wallet/{eoa}`, Celo EID=30125); Across/deBridge cover **Monad only** (not Celo) so use them on the Monad leg.
-5. For contracts: also pull the deployer (the `from` of the contract-creation tx) — it may differ from the operator. Note both rows in the table. (The deployer is the seed for the fleet clustering in Step 2.5.)
-6. **ENS de-anon pivot** (the seed's `idontloseiwin.eth` is exactly this). A Celo address's ENS primary name lives in the **Ethereum L1** reverse registry, not on Celo — forno can't answer it. Resolve via `viem` `getEnsName({ address, coinType })` against an L1 RPC with the **chain-correct ENSIP-11 coinType** `0x80000000 | $CHAIN_ID` (Celo `42220` → `0x8000A4EC`, namespace `a4ec.reverse`; Monad `143` → `0x8000008F`; etc.). Watch out: a common doc example mis-states Celo as `0x8000A4DC`, which decodes to chain 42204 — wrong. Also try the default L1 reverse record — viem's `getEnsName` defaults to the **Ethereum coinType `60`** (`evmChainIdToCoinType` → `60` for mainnet), which many owners set regardless of chain; call it once with the default and once with the chain-specific coinType above. Mostly negatives for bot EOAs; one hit is gold.
-
-For each address you add to the Cast: include age (days since first activity), multichain footprint (which chains it's been seen on), a one-line "what it does" note, and a **confidence tier** on the attribution claim (see "Confidence tiers" below).
+For each address you add to the Cast: age (days since first activity), multichain footprint, a one-line "what it does" note, and a **confidence tier**.
 
 ### Step 2.5 — Operator-fleet clustering (find the OTHER bots)
 
-The skill historically walked exactly one hop to the funder and stopped. The highest-confidence attribution signal is **linkage**: what else did this operator deploy, fund, or run identical bytecode for. All three heuristics run on Dune `celo.*` (the existing `dune` skill — no new credential; identical on `monad.*` for Monad) plus `cast`. Feed the results into the "Related addresses / fleet" table.
+The highest-confidence attribution signal is **linkage**: what else did this operator deploy, fund, or run identical bytecode for. Three heuristics, all on Dune `<chain>.*` (existing `dune` skill, no new credential) plus `cast`; feed results into the template's "Related addresses / fleet" table.
 
 ```sql
 -- (1) DEPLOYER FAN-OUT: every contract a deployer created.
 --     For CREATE2 the trace "from" is the FACTORY — recurse to the factory's own deployer.
 SELECT address, block_time, length(code) AS code_len, tx_hash
 FROM <chain>.creation_traces WHERE "from" = <deployer> ORDER BY block_time ASC;
-
 -- (2) COMMON-FUNDER CLUSTERING: every sibling EOA the operator's gas-refill EOA funded.
 SELECT "to" AS funded, count(*) n, min(block_time) first_fund
 FROM <chain>.transactions WHERE "from" = <funder> AND value > 0 GROUP BY 1 ORDER BY n DESC;
+-- (3) CODEHASH CLUSTERING: byte-identical bots, across different deployers/factories. Pre-filter
+--     creation_traces candidates by length(code), then confirm the runtime codehash by keccak match:
+--       CODE=$(cast code "$ADDR" --rpc-url "$RPC"); cast keccak "$CODE"
 ```
 
-```bash
-# (3) CODEHASH CLUSTERING: byte-identical bots, even across different deployers/factories.
-CODE=$(cast code "$ADDR" --rpc-url "$RPC"); cast keccak "$CODE"   # runtime codehash ($ADDR/$RPC from Step 1, scoped to $CHAIN)
-# Pre-filter candidates from creation_traces by length(code), then confirm by keccak match.
-```
-
-**Mandatory false-positive gates** — write these into the method, an unverified link is worse than none:
+**Mandatory false-positive gates** — an unverified link is worse than none:
 
 - `value > 0` on funder edges; **never** treat a CEX hot wallet or a public CREATE2 factory as a "funder" — they fan out to thousands and create a garbage super-cluster.
 - EIP-1167 minimal-proxy clones share a codehash that differs only by the embedded impl address — cluster on the **impl**, not the clone shell.
 - Require a **second independent signal** (codehash + funder, or + activity-clock from Step 3) before asserting a link. Tag each link with a confidence tier.
 - **Never auto-merge.** Propose links a human ratifies; the report states the evidence, not a verdict.
 
-### Step 3 — What it does
+### Step 3 — What it does → `references/contract-analysis.md`
 
-**For a contract target** — read public storage directly. Most arb / MEV contracts leave trivial getters in (router addresses, allowlists, fee tiers, hardcoded principals). Use the chain's full-node RPC (NOT HyperRPC — `eth_call` requires a full node):
-
-```bash
-# Reuse $RPC from Step 1 (already scoped to $CHAIN — full node, NOT HyperRPC, since eth_call needs one).
-cast call $ADDR "router()(address)" --block $HEAD_BLOCK --rpc-url $RPC
-cast call $ADDR "routerSushi()(address)" --block $HEAD_BLOCK --rpc-url $RPC
-cast call $ADDR "lastAddress()(address)" --block $HEAD_BLOCK --rpc-url $RPC
-# … etc, try every name a typical arb contract uses. Pin --block $HEAD_BLOCK (from Step 1) so these
-# reads stay reproducible and match the provenance footer — without it you capture current state.
-```
-
-If the contract is verified (sourcify or Celoscan): pull source, name the patterns. If unverified: look at the top selectors by frequency on Celoscan / explorer; OpenChain-decode any matching ones (`https://openchain.xyz/signatures?function=0x…`).
-
-Before concluding "no interesting getters", do three things:
-
-1. **Proxy check** (zero new dependency). Read the standard slots — a non-zero value means you've been reading an empty shell and must analyse the _implementation_ instead:
-
-   ```bash
-   # EIP-1967 impl / admin / beacon, then EIP-1822 (UUPS). For impl/admin/EIP-1822, non-zero → last 20
-   # bytes IS the address to analyse. The BEACON slot is different: its last 20 bytes are the BEACON
-   # contract, not the impl — call beacon.implementation() and analyse THAT (see below).
-   cast storage $ADDR 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --block $HEAD_BLOCK --rpc-url $RPC  # impl
-   cast storage $ADDR 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103 --block $HEAD_BLOCK --rpc-url $RPC  # admin
-   cast storage $ADDR 0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50 --block $HEAD_BLOCK --rpc-url $RPC  # beacon
-   cast storage $ADDR 0xc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf7 --block $HEAD_BLOCK --rpc-url $RPC  # EIP-1822
-   # If the beacon slot was non-zero, resolve the real implementation from the beacon contract:
-   BEACON=0x…   # last 20 bytes of the beacon slot value above
-   cast call "$BEACON" "implementation()(address)" --block "$HEAD_BLOCK" --rpc-url "$RPC"
-   ```
-
-2. **Verified-source check before decompiling** — exact source beats pseudo-source. Sourcify is multichain, free, no key: `GET https://sourcify.dev/server/v2/contract/$CHAIN_ID/{addr}?fields=all` (use `$CHAIN_ID` from Step 1 — `42220` for Celo, `143` Monad, etc.; cross-check the chain's explorer: Celoscan / Monadscan / Polygonscan / Etherscan).
-3. **Decompile if unverified** — these are chain-agnostic (they operate on raw bytecode, so Celo non-indexing is irrelevant): Dedaub API (`https://api.dedaub.com`, free tier, async POST→poll) for readable pseudo-Solidity, or local **heimdall-rs** (`heimdall decompile/cfg`, MIT, nothing leaves the machine — use for sensitive targets). Enumerate the full selector surface first with WhatsABI (`@shazow/whatsabi`, autoloads over a provider on `$RPC` — the target chain's, not forno, or it reads bytecode/proxy slots on the wrong chain — and follows EIP-1967 proxies), then resolve names via the OpenChain DB. This is the only way to describe what a closed-source proprietary bot actually does.
-
-**For an EOA target** — behavioural profile. Top counterparties (`dune sim evm activity` filtered by counterparty), top tokens held (`dune sim evm balances`), tx-time distribution if relevant. Add these cheap, Celo-native behavioural fingerprints (all free via the `dune` skill on `celo.*` or `cast`):
-
-```sql
--- ACTIVITY CLOCK: flat 24h = automated bot; a dead-hours gap = operator's local night.
--- Report as a UTC band, never a country. MUST be an EOA ("from"); a contract returns 0 rows (use <chain>.traces).
-SELECT hour(block_time) utc_hour, count(*) FROM <chain>.transactions WHERE "from" = <eoa> GROUP BY 1 ORDER BY 1;
-
--- AGE / FIRST-SEEN: first + last activity on THIS chain. NOTE: do NOT infer cross-chain reuse from nonce —
---   EVM nonces are chain-LOCAL, so a key with Ethereum/Base history still starts at nonce 0 on its first
---   Celo tx (max_nonce ≈ count-1 given complete data; a gap just means missing/filtered rows, not other-chain
---   activity). To find the operator's other-chain footprint use the Arkham/Sim identity leg (Step 2), not nonce.
-SELECT min(block_time) AS first_seen, max(block_time) AS last_seen, count(*) AS tx_count FROM <chain>.transactions WHERE "from" = <eoa>;
-
--- APPROVAL GRAPH: topic1=owner (delegation OUT → routers it trusts), topic2=spender (delegation IN → who can move its funds).
-SELECT * FROM <chain>.logs
-WHERE topic0 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925   -- Approval
-  AND topic1 = <32-byte left-padded owner> LIMIT 100;   -- events are grant HISTORY; for live use eth_call allowance()
-```
-
-If the target is a **Gnosis Safe** (cheap codehash/proxy check), pull the real human signers and policy — `cast call "$ADDR" 'getOwners()(address[])' --block "$HEAD_BLOCK" --rpc-url "$RPC"` and `cast call "$ADDR" 'getThreshold()(uint256)' --block "$HEAD_BLOCK" --rpc-url "$RPC"` (two complete commands, block-pinned for reproducibility; use the in-scope `$ADDR`/`$RPC`, not a bare `<safe>` token) — and link Safes by intersecting owner sets. Free hosted Safe tx-service (keyless reads) is per-chain — `https://api.safe.global/tx-service/<safe-slug>/api/v1/safes/<safe>/`, where `<safe-slug>` is the chain's Safe short-name (celo→`celo`, polygon→`pol`, ethereum→`eth`); not every chain has one (Monad doesn't), so don't copy the `celo` slug for a non-Celo target. This exposes the people behind a treasury/managed-bot the proxy address would otherwise hide.
+For a **contract target**, read public storage directly with block-pinned `cast call` against the chain's full node (`eth_call` needs one, so not HyperRPC) — most arb/MEV contracts leave trivial getters in. Before concluding "no interesting getters": check the EIP-1967 impl/admin/beacon and EIP-1822 slots (a non-zero value means you've been reading an empty shell, and the **beacon slot's last 20 bytes are the beacon, not the implementation** — call `beacon.implementation()`), check Sourcify for verified source, then decompile with Dedaub / heimdall-rs / WhatsABI. For an **EOA target**, build a behavioural profile: top counterparties, top tokens, and the activity-clock / first-seen / approval-graph fingerprints. If the target is a Gnosis Safe, pull `getOwners()` and `getThreshold()` and link Safes by intersecting owner sets.
 
 ### Step 4 — Transaction anatomy
 
-Pick a representative tx — preferably a recent successful one with the typical calldata shape. Use `cast tx <hash> --rpc-url $RPC` for the raw shape, then decode the top-level selector via OpenChain.
+Pick a representative tx — a recent successful one with the typical calldata shape. Use `cast tx <hash> --rpc-url $RPC` for the raw shape, then decode the top-level selector via OpenChain.
 
-**For internal calls and raw state deltas, use Blockscout — not `cast`.**
-`forno.celo.org` (and most public full nodes) exposes no trace methods. The
-free Blockscout v2 API returns paginated, flat internal-transaction records and
-raw state changes; it does not return a nested call tree or dollar-valued flow.
-Point `BS` at the target chain's Blockscout instance:
+**For internal calls and raw state deltas, use Blockscout — not `cast`.** `forno.celo.org` (and most public full nodes) **exposes no trace methods**. The free Blockscout v2 API returns paginated, flat internal-transaction records and raw state changes; it does not return a nested call tree or dollar-valued flow. Pick the base per chain (`celo` → `https://celo.blockscout.com/api/v2`, `polygon` → `https://polygon.blockscout.com/api/v2`; Monad has none), then:
 
 ```bash
-# Pick the Blockscout v2 base for $CHAIN. Not every chain has one (e.g. Monad — see fallback below).
-case "$CHAIN" in
-  celo)    BS=https://celo.blockscout.com/api/v2 ;;
-  polygon) BS=https://polygon.blockscout.com/api/v2 ;;
-  *)       BS=""; echo "No Blockscout instance mapped for $CHAIN — use the RPC-native debug_traceTransaction fallback below." >&2 ;;
-esac
-if [ -n "$BS" ]; then   # skip when no Blockscout for $CHAIN — use the RPC-native fallback below instead
-  curl -s "$BS/transactions/$TX/internal-transactions" | jq '{next_page_params, items: [.items[] | {type, from:.from.hash, to:.to.hash, value, error}]}'
-  curl -s "$BS/transactions/$TX/state-changes"         | jq '{next_page_params, items: [.items[] | {addr:.address.hash, type, change}]}'
-fi
+curl -s "$BS/transactions/$TX/internal-transactions" | jq '{next_page_params, items: [.items[] | {type, from:.from.hash, to:.to.hash, value, error}]}'
+curl -s "$BS/transactions/$TX/state-changes"         | jq '{next_page_params, items: [.items[] | {addr:.address.hash, type, change}]}'
 ```
 
-Follow `next_page_params` until exhausted. Expect internal transactions to be
-empty on simple transfers. Reconstruct nesting only from trace evidence, and
-price raw token/native deltas separately at the transaction timestamp. Keep
-`cast tx` + OpenChain for the top-level selector. On chains without Blockscout,
-use `debug_traceTransaction` only against an archive endpoint that supports it.
+Follow `next_page_params` until exhausted; expect internal transactions to be empty on simple transfers. Reconstruct nesting only from trace evidence, and price raw token/native deltas separately at the transaction timestamp. On chains without Blockscout, use `debug_traceTransaction` only against an archive endpoint that supports it.
 
-> **Do NOT use `cast run` on Celo.** It chokes on Celo's CIP-64 fee-currency tx type `0x7b` (the _dominant_ tx type since Gingerbread) with `unknown variant 0x7b`, failing on essentially every Mento-active block — and forno is non-archive anyway. For a full trace prefer Blockscout (above) or an RPC-native `debug_traceTransaction` against a Celo archive endpoint that understands CIP-64 (dRPC / QuickNode / Tenderly on `42220`).
+> **Do NOT use `cast run` on Celo.** It chokes on Celo's CIP-64 fee-currency tx type `0x7b` — the _dominant_ tx type since Gingerbread — with `unknown variant 0x7b`, failing on essentially every Mento-active block; forno is non-archive anyway. For a full trace prefer Blockscout or an RPC-native `debug_traceTransaction` against a Celo archive endpoint that understands CIP-64 (dRPC / QuickNode / Tenderly on `42220`).
 
-**Revert rate — measure, don't assume.** The old "~30–50% reverts is normal for sniping" is Ethereum-PGA reasoning that does **not** transfer to Celo. Since 2025-03 Celo is an OP-Stack L2 with a single sequencer: no public mempool, no Flashbots/PBS bundle market, ordering is sequencer-internal priority-fee. So the revert mechanism is different (priority-fee "first-spammed-first-served" backrunning, not competitive sandwich PGA wars). Compute the actual revert rate for _this_ target from its tx history and interpret it against that model. Monad's ordering differs again (own consensus / FastLane) — don't copy Celo's framing onto Monad.
+**Revert rate — measure, don't assume.** Since 2025-03 Celo is an OP-Stack L2 with a single sequencer: no public mempool, no Flashbots/PBS bundle market, ordering is sequencer-internal priority-fee. The revert mechanism is therefore priority-fee "first-spammed-first-served" backrunning, not competitive sandwich PGA wars, and Ethereum-PGA revert-rate rules of thumb don't transfer. Compute the actual revert rate for _this_ target and interpret it against that model. Monad's ordering differs again (own consensus / FastLane) — don't copy Celo's framing onto Monad.
 
-### Step 5 — Capital and scale
+### Step 5 — Capital and scale → `references/pricing.md`
 
-Pass the chain hint through to Sim — Mento is on Celo (`42220`) but the skill also runs against Monad (`143`) and any future chain. Hardcoding `--chain-ids 42220` would return empty / unrelated holdings for a Monad principal:
+Snapshot holdings with `dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID`, paginating on `--offset` until `next_offset` is absent, and run it a second time with `--exclude-unpriced=false` for the scam/noise inventory. Sum supported USD values and inventory unpriced assets separately: a missing or low-confidence price is evidence needing corroboration, not proof of a scam.
 
-```bash
-# $CHAIN_ID is from Step 1's case switch (Celo 42220 / Monad 143 / …) — do NOT re-hardcode it.
-# Hardcoding 42220 would return empty / unrelated holdings for a Monad (or other-chain) principal.
-dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID -o json | jq '.balances | length'
-dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID -o json | jq '.balances[] | {symbol, amount, value_usd}'
-# For a scam/noise inventory, include unpriced assets instead of accepting the default exclusion:
-dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID --exclude-unpriced=false -o json | jq '.balances[]'
-```
+### Step 5.5 — Historical USD valuation → `references/pricing.md`
 
-These responses are paginated. Collect the first page's `.balances`, then repeat
-the same command with `--offset <next_offset>` and append each page until
-`next_offset` is absent/null. Do this independently for the priced and
-`--exclude-unpriced=false` runs before summing or classifying holdings.
-
-Sum supported USD values and inventory unpriced assets separately. A missing or
-low-confidence DefiLlama price is evidence that needs corroboration, not proof
-that the token is a scam or has no liquidity. Confirm material holdings with
-pool/liquidity and transfer evidence before including or excluding them from
-operating capital. For tx volume, use a chain explorer or indexed history.
-
-### Step 5.5 — Historical USD valuation (DefiLlama coins API — free, no Pro key)
-
-Sim's `value_usd` is _current spot_. A forensic claim like "moved $2M in March" is wrong if the token has since mooned or rugged — value flows **at the time they happened**. DefiLlama's coin price oracle does this, and it lives on the FREE `coins.llama.fi` host: the DefiLlama **Pro** subscription adds nothing to this skill (its Pro-only endpoints — bridges, token-liquidity-by-slug, treasury, unlocks, active users — are protocol-aggregate data, not address-level), so do **not** gate any of this behind a Pro key.
-
-Key format is `$DL_NS:<lowercaseTokenAddress>`, where `$DL_NS` comes from
-Step 1 (including `monad`). Verify novel chains against DefiLlama. Do not
-hardcode `celo:` for another chain. Native CELO uses its ERC20 wrapper, e.g.
-`celo:0x471ece3750da237f93b8e339c536989b8978a438`.
-
-**Historical price at a tx's block time** (Unix seconds — derive from the block: `cast block <n> -f timestamp --rpc-url $RPC`):
-
-```bash
-TS=1742000000   # block timestamp, unix seconds
-curl -s "https://coins.llama.fi/prices/historical/$TS/$DL_NS:<tokenLower>" | jq '.coins'
-# -> { "celo:0x…": { "decimals": 18, "symbol": "…", "price": 0.0629, "confidence": 0.99, "timestamp": … } }
-```
-
-USD value of a raw transfer = `(rawAmount / 10^decimals) * price`. Batch tokens in one call by comma-joining keys: `…/historical/$TS/$DL_NS:0xAAA,$DL_NS:0xBBB`. Use this to put a defensible dollar figure on the representative tx in Step 4 and on flow totals.
-
-**Current price** (same response shape) for the Step 5 holdings snapshot:
-`https://coins.llama.fi/prices/current/$DL_NS:<tokenLower>`. Treat `confidence`
-as price-source reliability. Missing/low-confidence data requires
-corroboration; it is not a deterministic scam or liquidity verdict.
-
-Caveats — surface them in the report when they bite:
-
-- Coverage is token-specific even on supported chains. If a key returns
-  nothing, corroborate with Sim and venue liquidity and disclose the pricing
-  gap rather than silently reporting zero.
-- `coins.llama.fi` is not on the default sandbox network allowlist. It's a read-only public GET — allowlist the host or run the single command unsandboxed.
+Sim's `value_usd` is current spot, so "moved $2M in March" is wrong the moment the token moves. Price flows at the time they happened via DefiLlama's free coins.llama.fi oracle, keyed `$DL_NS:{tokenLower}`; no Pro key is needed or useful here. Note that the coins.llama.fi host is **not on the default sandbox network allowlist** — allowlist it or run the single read-only GET unsandboxed.
 
 ### Step 6 — Why \_\_\_, why these venues
 
 Free-form prose, but be specific. Don't say "arbitrage" — say which mispricing (`Mento broker is oracle-priced, Uniswap V3 is AMM-priced — the spread between them is the alpha`). Don't say "MEV" — say which kind (statistical arb / sandwich / liquidation / JIT).
 
-**Name the venue, don't guess it.** Resolve any non-Mento pool or token through
-two free APIs. Both GeckoTerminal and DexScreener cover the current target
-chains; verify their network lists before trusting a negative.
+**Name the venue, don't guess it.** Resolve any non-Mento pool or token through GeckoTerminal (`https://api.geckoterminal.com/api/v2/networks/$GT_NS/pools/{poolAddr}`, header `accept: application/json;version=20230302`) and DexScreener (`https://api.dexscreener.com/token-pairs/v1/$DS_NS/{tokenAddr}`). Both use their **own** network slugs, not chain ids (`celo`/`celo`, `monad`/`monad`, `polygon_pos`/`polygon`, `eth`/`ethereum`) — select both in one case switch on `$CHAIN` and verify against `api.geckoterminal.com/api/v2/networks` before trusting a negative, since a chain may be on one and not the other. Use the chain-scoped `token-pairs/v1` endpoint so a same-address token on another chain can't lend its venue or TVL to your report. GeckoTerminal's public limit is roughly 10 requests/minute; pace and cache rather than reading a rate-limit response as empty coverage.
 
-```bash
-# GeckoTerminal + DexScreener each use their OWN network slugs (NOT chain ids) — select both per $CHAIN
-# in one switch, like $BS in Step 4. Verify against api.geckoterminal.com/api/v2/networks and
-# DexScreener's docs (a chain may be on one but not the other).
-case "$CHAIN" in
-  celo)     GT_NS=celo;        DS_NS=celo ;;
-  monad)    GT_NS=monad;       DS_NS=monad ;;
-  polygon)  GT_NS=polygon_pos; DS_NS=polygon ;;
-  ethereum) GT_NS=eth;         DS_NS=ethereum ;;
-  *)        GT_NS=""; DS_NS=""; echo "No GeckoTerminal/DexScreener slug mapped for $CHAIN — verify their network lists, then set GT_NS/DS_NS or skip." >&2 ;;
-esac
-[ -n "$GT_NS" ] && curl -s -H 'accept: application/json;version=20230302' "https://api.geckoterminal.com/api/v2/networks/$GT_NS/pools/{poolAddr}"
-[ -n "$DS_NS" ] && curl -s "https://api.dexscreener.com/token-pairs/v1/$DS_NS/{tokenAddr}"           # chain-scoped: pairs for this token on $CHAIN only; skipped when no DS slug
-# The chain-scoped token-pairs/v1 endpoint avoids the old /latest/dex/tokens form, which returned the
-# token's pairs on ALL chains and risked naming a different chain's venue/TVL for a same-address token.
-```
-
-(Use `networks/$GT_NS/tokens/{addr}` for token price/FDV in Steps 5/5.5 too. Set `GT_NS` to match `$CHAIN` — GeckoTerminal uses its own slugs, so confirm against `/api/v2/networks` rather than assuming the chain name.)
-GeckoTerminal's public limit is approximately 10 requests/minute; pace and
-cache lookups rather than treating rate-limit responses as empty coverage.
-
-**MEV classification across chains.** Borrow the standard taxonomy (arb /
-sandwich / backrun / JIT / liquidation), then derive the classification from
-the indexer and Dune's unified `dex.trades` table filtered by `blockchain`.
-Group cycles by transaction. For sandwiches, use a curated sandwich dataset
-where supported; otherwise prove ordering with transaction position, event
-index, and trace evidence—block number alone cannot order transactions. Use an
-Ethereum/L2 EigenPhi or zeromev result only as cross-chain corroboration.
+**MEV classification across chains.** Borrow the standard taxonomy (arb / sandwich / backrun / JIT / liquidation), then derive the classification from the indexer and Dune's unified `dex.trades` table filtered by `blockchain`, grouping cycles by transaction. For sandwiches, use a curated sandwich dataset where supported; otherwise prove ordering with transaction position, event index, and trace evidence — block number alone cannot order transactions. Use an Ethereum/L2 EigenPhi or zeromev result only as cross-chain corroboration.
 
 ### Step 7 — Coverage and dead ends
 
-Generalise the old "Arkham coverage" candour into a per-source audit trail — a future reader needs to know not just what you found but what you _looked at_ and why a lead was dead. Render it as a table, one row per source attempted, marked `HIT` / `EMPTY` / `NOT-COVERED` / `NOT-ATTEMPTED` with a one-line why:
-
-| Source               | Result      | Note                                                        |
-| -------------------- | ----------- | ----------------------------------------------------------- |
-| Arkham (cache/live)  | NOT-COVERED | Celo not indexed; operator EOA also clean on covered chains |
-| Mento Envio indexer  | HIT         | 4.2k SwapEvents, isProtocolActor=false                      |
-| Sim / Dune           | HIT         | …                                                           |
-| Sourcify / Celoscan  | EMPTY       | unverified — decompiled instead                             |
-| Sanctions (Step 7.5) | EMPTY       | not OFAC-listed on Celo oracle or static list               |
-| …                    | …           | …                                                           |
+A per-source audit trail: a future reader needs to know what you _looked at_ and why a lead was dead, not just what you found. Render it as the table `template.md` shows — one row per source attempted, marked `HIT` / `EMPTY` / `NOT-COVERED` / `NOT-ATTEMPTED` with a one-line why.
 
 The distinction between `EMPTY` (source covers this chain, found nothing) and `NOT-COVERED` (source can't see this chain) is the whole point — don't collapse them into "nothing found".
 
 ### Step 7.5 — Sanctions & risk screening
 
-A forensic product should screen every target. Primary, zero new dependency — the Chainalysis OFAC oracle is live on Celo and reuses the `cast`/forno tooling already in Steps 3/4:
+Screen every target. Primary path, zero new dependency: the Chainalysis OFAC oracle is live on Celo at `0x40C57923924B5c5c5455c48D93317139ADDaC8fb` and reuses the `cast` tooling from Steps 3/4 — `cast call 0x40C57923924B5c5c5455c48D93317139ADDaC8fb 'isSanctioned(address)(bool)' "$ADDR" --block "$HEAD_BLOCK" --rpc-url "$RPC"`, repeated for each Step-2 funder/counterparty. It is not deployed on every chain (e.g. Monad), so only call it where it exists on `$CHAIN`.
 
-```bash
-# The Chainalysis oracle lives at this address on Celo (and several other EVM chains) but is NOT
-# guaranteed everywhere (e.g. Monad). Only call it where it's deployed on $CHAIN; elsewhere rely on the
-# chain-agnostic TRM + static-OFAC paths below. Run on the target AND each Step-2 funder/counterparty.
-if [ "$CHAIN" = celo ]; then   # extend once you've verified the oracle is deployed on another target chain
-  cast call 0x40C57923924B5c5c5455c48D93317139ADDaC8fb 'isSanctioned(address)(bool)' "$ADDR" --block "$HEAD_BLOCK" --rpc-url "$RPC"
-  # repeat for each Step-2 funder/counterparty, e.g.: for a in "$ADDR" "${FUNDERS[@]}"; do cast call 0x40C5…c8fb 'isSanctioned(address)(bool)' "$a" --block "$HEAD_BLOCK" --rpc-url "$RPC"; done
-fi
-```
-
-Caveat to write into the report: the **per-chain Celo oracle's SDN set is not identical to Ethereum's** — a `false` on Celo is not an authoritative global negative. For a definitive verdict also hit the chain-agnostic free path (works for any `0x` address regardless of chain): TRM's keyless `POST https://api.trmlabs.com/public/v1/sanctions/screening` `[{"address":"0x…"}]`, or set-membership against an actual static OFAC list file, e.g. `raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/main/data/sanctioned_addresses_ETH.txt` (one 0x address per line; covers EVM addresses regardless of target chain). For scam/phishing (not sanctions), cross-check counterparties against the Scam Sniffer blacklist and — on chains it covers (Monad `143`, not Celo) — GoPlus; see the Tooling matrix for coverage. Most Mento targets return clean; the value is the rare hit and a citable verified negative for the audit trail.
+**Caveat to write into the report: the per-chain Celo oracle's SDN set is not identical to Ethereum's — a `false` on Celo is not an authoritative global negative.** For a definitive verdict also hit a chain-agnostic free path: TRM's keyless `POST https://api.trmlabs.com/public/v1/sanctions/screening` with `[{"address":"0x…"}]`, or set-membership against a static OFAC list file (`raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/main/data/sanctioned_addresses_ETH.txt`, one 0x address per line, EVM-wide). For scam/phishing rather than sanctions, cross-check counterparties against the Scam Sniffer blacklist and — on chains it covers (Monad `143`, not Celo) — GoPlus. Most Mento targets return clean; the value is the rare hit and a citable verified negative.
 
 ### Step 8 — Bottom line
 
@@ -696,7 +208,7 @@ Five bullets, one sentence each: Who / What / Where / How much / Goal. This is t
 
 ### Step 8.5 — Adversarial verification gate (before save/upload)
 
-Invert your own confirmation bias right where this skill's own docs flag the most common error. Lightweight but mandatory — leave a one-line trace in the report ("Top alternative considered: …, rejected because …"):
+Invert your own confirmation bias. Lightweight but mandatory — leave a one-line trace in the report ("Top alternative considered: …, rejected because …"):
 
 - **State the top alternative hypothesis** and hunt disconfirming evidence (arb bot vs MM rebalancer vs exchange sweep vs protocol keeper). Does your evidence _entail_ the headline, or merely fail to contradict it?
 - **Re-confirm the original funder** is genuinely the oldest inbound (Sim returns newest-first — the classic mis-attribution), and that `--chain-ids` was scoped to the target chain on every funder query.
@@ -715,128 +227,28 @@ _Provenance: <chain> head block <N> (hash <0x…>), RPC <endpoint>, cast <versio
 _Investigation date: YYYY-MM-DD._
 ```
 
-### Step 10 — Push to production (only on user confirmation)
+### Step 10 — Push to production → `references/upload.md`
 
-By default the skill stops at the local draft and asks the user to review. On
-`--upload` (or explicit equivalent), use the dashboard route's exact CAS Lua
-upsert. Never use an older last-writer-wins copy or a split
-read-modify-write sequence.
+By default the skill stops at the local draft and asks the user to review; upload only on `--upload` or an explicit equivalent. Three safety properties are non-negotiable and live here, not only in the reference file:
 
-Keep `mcp__upstash__redis_database_run_redis_commands` out of repo-shared auto-allow lists. The MCP approval prompt is the production write guard for this path.
+- Keep `mcp__upstash__redis_database_run_redis_commands` out of repo-shared auto-allow lists. **The MCP approval prompt is the production write guard for this path.**
+- **Derive `AUTHOR_EMAIL` from `git config user.email` at runtime** — never hardcode it, or every teammate's reports get mis-attributed and PII lands in git. `git config` is local and unauthenticated, so **show the derived email and have the user confirm** it matches their workspace identity before sending the EVAL.
+- Re-read the record immediately before writing and pass the derived expected version to the CAS Lua upsert: `""` means **create-only** (fail if another writer creates it first); otherwise the fresh base version. On a conflict, stop, show it, and ask — **never auto-retry with a new base version.**
 
-**Derive the uploader's email at runtime, not from a hardcoded value.** The skill is committed and runs from any teammate's checkout; hardcoding one email would mis-attribute every other person's reports and leak PII into git. Pull from `git config user.email`:
-
-```bash
-AUTHOR_EMAIL=$(git config --get user.email)
-if [ -z "$AUTHOR_EMAIL" ]; then
-  echo "git config user.email is unset — set it before uploading" >&2
-  exit 1
-fi
-```
-
-`git config user.email` is local + unauthenticated — a teammate with a stale or impersonated config could persist wrong audit metadata. The dashboard's editor route stamps `authorEmail` from the Google-Workspace-authenticated session for that reason; the skill bypasses the route to keep atomicity (see Lua section below) and so loses the session-auth check. Mitigation: **always show the derived email and ask the user to confirm it matches their workspace identity before sending the EVAL**. If the email is wrong, abort and tell them to fix `git config user.email` (or upload via the editor UI). For a stricter audit trail, route the upload through the editor instead.
-
-**Validate inputs before building the payload.** The skill bypasses the API route, so it also bypasses `sanitizeReportInput` and `isValidAddress` — mirror their checks here or risk persisting a blank report or a Redis key that isn't an `0x` address (ENS, typo, truncation):
+The payload the script stamps `createdAt` / `updatedAt` / `version` onto:
 
 ```js
-// 1. Address — must match isValidAddress (`/^0x[a-fA-F0-9]{40}$/`)
-const addrLower = String(addrInput).toLowerCase();
-if (!/^0x[a-f0-9]{40}$/.test(addrLower)) {
-  throw new Error("address must be a 0x-prefixed 40-hex string");
-}
-
-// 2. Body — non-empty after trim, ≤ 50KB. Mirrors `sanitizeReportInput`
-//    in `ui-dashboard/src/lib/address-reports-shared.ts`.
-const body = readFile(".investigations/<addr>-<slug>.md");
-if (body.trim() === "")
-  throw new Error("body is empty / whitespace-only — refusing to upload");
-if (body.length > 50000) throw new Error("body exceeds 50KB cap");
-```
-
-**Build the partial payload** (Lua script stamps `createdAt` / `updatedAt` / `version`):
-
-```js
-const title = extractTitleFromH1(body); // text after the ` — ` separator, ≤200 chars
 const partial = {
   body,
   ...(title ? { title: title.slice(0, 200) } : {}),
-  authorEmail: AUTHOR_EMAIL, // from git config user.email at runtime
+  authorEmail: AUTHOR_EMAIL, // from git config user.email, confirmed with the user
   source: "Codex", // the Claude mirror uses "claude"
 };
 ```
 
-**Write it via the owner implementation.** Immediately before uploading, HGET
-the current record again. Capture the unwrapped HGET value as `currentValue`;
-abort on malformed JSON instead of treating it as an absent report. Derive the
-exact expected-version argument before invoking EVAL:
-
-```js
-const current =
-  currentValue == null
-    ? null
-    : typeof currentValue === "string"
-      ? JSON.parse(currentValue)
-      : currentValue;
-if (
-  current !== null &&
-  (typeof current !== "object" || Array.isArray(current))
-) {
-  throw new Error("stored report is not an object — refusing to upload");
-}
-
-const storedVersion = current?.version;
-const expectedVersion =
-  current === null
-    ? "" // create-only: fail if another writer creates it first
-    : String(
-        typeof storedVersion === "number" &&
-          Number.isFinite(storedVersion) &&
-          storedVersion > 0
-          ? Math.floor(storedVersion)
-          : 1, // legacy, missing, null, or invalid versions normalize to 1
-      );
-```
-
-Copy the current `UPSERT_SCRIPT` from
-`ui-dashboard/src/lib/address-reports.ts` exactly; that file owns the matching
-server-side normalization, expected-version check, and response envelope.
-
-```js
-mcp__upstash__redis_database_run_redis_commands({
-  database_id: DATABASE_ID,
-  commands: [
-    [
-      "EVAL",
-      UPSERT_SCRIPT,
-      "1",
-      "reports",
-      addrLower,
-      JSON.stringify(partial),
-      new Date().toISOString(),
-      expectedVersion, // "" for create-only; otherwise the fresh base version
-    ],
-  ],
-});
-```
-
-Parse the returned `{ok, report}` envelope. If `ok !== true`, stop, show the
-version conflict, re-read the editor's newer report, and ask before reconciling;
-never retry with a new base version automatically.
-
-**Verify:**
-
-```js
-mcp__upstash__redis_database_run_redis_commands({
-  database_id: DATABASE_ID,
-  commands: [["HGET", "reports", addrLower]],
-});
-```
-
-The address-book index endpoint reads from the same hash on every request, so the 📄 indicator + the report editor will pick up the new content on the next page load — no SWR mutate hook needed from this side.
-
 ## Confidence tiers
 
-Replace the old binary "skip if weak" with a per-claim grade on **load-bearing attribution claims only** (Cast of characters rows, fleet links, Bottom line) — not every sentence. This lets the report keep a useful "likely but unproven" lead instead of discarding it, as long as it's labelled honestly:
+Grade **load-bearing attribution claims only** — Cast of characters rows, fleet links, Bottom line — not every sentence. Grading lets the report keep a useful "likely but unproven" lead instead of discarding it, as long as it's labelled honestly:
 
 - **CONFIRMED** — a deterministic on-chain fact (creation-tx `from`, a storage read, a codehash match, a decoded selector) or external ground truth (an ENS reverse record). No hedging words.
 - **PROBABLE** — a funder-graph or behavioural inference corroborated by **≥2 independent signals** (e.g. codehash + common-funder, or activity-clock + approval-graph).
@@ -844,67 +256,14 @@ Replace the old binary "skip if weak" with a per-claim grade on **load-bearing a
 
 Tag inline, e.g. **Operator EOA** `0x…` **[PROBABLE: codehash + funder]**. A claim that can't reach POSSIBLE doesn't belong in the report at all.
 
-## Schema invariants (mirror these — the API enforces the same rules)
+## Output contract (the API enforces the same rules)
 
 - `body`: required, non-empty, ≤ 50,000 characters (50KB)
 - `title`: optional, ≤ 200 characters, dropped if empty after trim
 - `source`: `"Codex"` in this canonical skill and `"claude"` in its Claude mirror
 - `version`: starts at 1, increments on each write; preserve `createdAt` from the prior write if updating
 
-These match `MAX_BODY_LENGTH` / `MAX_TITLE_LENGTH` in `ui-dashboard/src/lib/address-reports-shared.ts`. If those constants change, mirror the changes here — the skill must not write a payload the API would reject on a manual edit.
-
-## Tooling matrix (by chain + leg)
-
-Pick the tool that covers the chain and investigation leg. **A blank in the
-Celo column does not mean "useless"**—it may still serve the cross-chain
-identity leg. Provider coverage changes; re-check before relying on a negative.
-
-**On-chain behaviour leg — Celo/Monad/Polygon-native (free, the workhorses):**
-
-| Source                       | Celo              | Monad | Access            | Answers                                                     |
-| ---------------------------- | ----------------- | ----- | ----------------- | ----------------------------------------------------------- |
-| Mento Envio indexer          | ✅                | ✅    | free, no key      | per-address Mento swaps/rebalances/LP/CDP/bridge (Step 1.6) |
-| Blockscout v2 REST/MCP       | ✅                | —     | free, no key      | flat internal calls + raw state changes (Step 4)            |
-| Dune `celo.*`/`monad.*`      | ✅                | ✅    | existing Dune key | funder graph, fleet clustering, fingerprints, `dex.trades`  |
-| Sim (Dune Sim)               | ✅                | ✅    | existing key      | real-time balances/activity                                 |
-| GeckoTerminal                | ✅                | ✅    | free, no key      | pool/token → dex, pair, TVL, volume (Step 6)                |
-| DexScreener                  | ✅                | ✅    | free, no key      | token → all pairs, liquidity, volume                        |
-| DefiLlama coins              | ✅                | ✅    | free, no key      | historical + current USD price when the token is covered    |
-| Sourcify                     | ✅                | ✅    | free, no key      | verified source (Step 3)                                    |
-| `cast` vs forno              | ✅                | n/a   | free              | storage/getter reads, codehash — **no trace methods**       |
-| Dedaub / heimdall / WhatsABI | bytecode-agnostic |       | free / OSS        | decompile unverified contracts (Step 3)                     |
-
-**Cross-chain identity leg — Celo-blind but valuable on the operator's other-chain footprint:**
-
-| Source              | Celo | Where it works        | Access                      | Use                                               |
-| ------------------- | ---- | --------------------- | --------------------------- | ------------------------------------------------- |
-| Arkham (cache)      | ❌   | ETH + most L2s        | cache / live when available | entity/persona of operator EOA                    |
-| Nansen              | ❌   | ETH/L2s; Monad labels | paid ($49+/mo)              | labels/Smart-Money on the identity leg + Monad    |
-| EigenPhi / zeromev  | ❌   | ETH (+BSC)            | free/paid                   | MEV classification of operator's ETH strategy     |
-| MetaSleuth/BlockSec | ✅\* | many chains           | paid ($599/mo)              | labels incl. Celo — only if free paths fall short |
-| The Graph subgraphs | ⚠️   | per-subgraph          | paid + free tier            | non-Mento DEX history (Envio covers Mento first)  |
-
-**Bridge leg:**
-
-| Source            | Celo | Monad | Access       | Use                                      |
-| ----------------- | ---- | ----- | ------------ | ---------------------------------------- |
-| Mento NTT cfg     | ✅   | ✅    | repo file    | classify NTT infra (`nttAddresses.json`) |
-| Wormholescan      | ✅   | ✅    | free, no key | Mento's own bridge (NTT) by address      |
-| LayerZeroScan     | ✅   | —     | free, no key | LZ/OFT funding paths by address          |
-| Across / deBridge | ❌   | ✅    | free API     | bridge funder on the **Monad** leg only  |
-
-**Risk / sanctions leg:**
-
-| Source             | Celo | Access            | Use                                           |
-| ------------------ | ---- | ----------------- | --------------------------------------------- |
-| Chainalysis oracle | ✅   | free `cast call`  | OFAC screen (per-chain SDN set; Step 7.5)     |
-| TRM screening      | any  | free, keyless     | chain-agnostic sanctions verdict              |
-| OFAC static list   | any  | free GitHub fetch | offline 0x-membership backstop                |
-| GoPlus             | ❌   | free (Monad 143)  | token/address risk on Monad+                  |
-| Scam Sniffer list  | ❌†  | free GitHub fetch | EVM-wide drainer flag (a hit ≠ Celo activity) |
-
-\* MetaSleuth/Tenderly/Phalcon/GoldRush etc. genuinely cover Celo but add a new paid/keyed dependency that overlaps the free workhorses — deferred, revisit per-target only if a free path proves inadequate.
-† Scam Sniffer's data is ~85% Ethereum; a hit is a global drainer flag, not proof of Celo activity. Frame honestly.
+These match `MAX_BODY_LENGTH` / `MAX_TITLE_LENGTH` in `ui-dashboard/src/lib/address-reports-shared.ts`, and the address key must satisfy `isValidAddress` in `ui-dashboard/src/lib/validators.ts`. If those constants change, mirror the changes here — the skill must not write a payload the API would reject on a manual edit.
 
 ## Reference: production database
 
@@ -915,25 +274,17 @@ Terraform owns the database; this skill owns only the `reports` hash workflow.
 database name: address-labels
 hash:        reports
 key shape:   <lowercase 0x address>
-value shape: JSON-stringified AddressReport (see schema above)
+value shape: JSON-stringified AddressReport (see the output contract above)
 ```
 
 The `address-labels` Upstash database also holds the `labels` hash (custom address labels) and `minipay:*` keys (the MiniPay tagging cron's bookkeeping). Don't touch those from this skill.
-
-## Tone reference
-
-Existing production reports can help calibrate an evidence-anchored,
-plain-language tone, but they are historical data and may predate this
-contract. `template.md` is the sole structural authority. Never copy a seed
-report's facts, section omissions, provider assumptions, or provenance into a
-new investigation.
 
 ## Rules
 
 - **Never commit a draft.** `.investigations/` is gitignored for a reason. If a report belongs in the team's history, it lives in the production `reports` hash + the daily Vercel Blob backup, NOT in git.
 - **Never write a label or the `labels` hash from this skill.** Labels are a separate concern; the `arkham` skill or the address-book modal handles those.
 - **Never push to prod without explicit user confirmation.** Local draft is the default; upload only on `--upload` or after the user says "ship it" / "upload it" / equivalent.
-- **Mirror the schema invariants.** Don't write a payload the API would reject — that includes the body length cap, title length cap, version monotonicity, and `createdAt` preservation on update.
+- **Mirror the output contract.** Don't write a payload the API would reject — that includes the body length cap, title length cap, version monotonicity, and `createdAt` preservation on update.
 - **Cite evidence.** Every claim about an address gets a tx hash, an Arkham response, a Sim balance snapshot, an indexer row, or a storage read backing it. "Probably MEV" is not enough; "selector `0x49aa2402` calls into a contract whose public `routerUniswap()` returns Uniswap V3 SwapRouter02 (factory `0xafe208a3…` matches official UniV3 on Celo)" is.
 - **Grade, don't hedge.** Tag load-bearing attribution claims with a confidence tier (CONFIRMED / PROBABLE / POSSIBLE) instead of weasel words. A claim that can't reach POSSIBLE doesn't ship; if the whole attribution is sub-POSSIBLE, write a label + notes blurb instead of a durable report. Run the Step 8.5 adversarial gate before saving.
-- **Think multi-chain; never disable a source just because it lacks Celo.** The target chain (Celo, Monad, or Polygon) drives the behaviour leg; the operator's cross-chain footprint drives the identity leg. A Celo-blind tool can be the right tool for the identity leg or a supported non-Celo chain — consult the Tooling matrix instead of dropping it. Thread the target chain id through every chain-scoped call; never hardcode `42220`.
+- **Think multi-chain; never disable a source just because it lacks Celo.** The target chain (Celo, Monad, or Polygon) drives the behaviour leg; the operator's cross-chain footprint drives the identity leg. A Celo-blind tool can be the right tool for the identity leg or a supported non-Celo chain — consult `references/tooling-matrix.md` instead of dropping it. Thread the target chain id through every chain-scoped call; never hardcode `42220`.

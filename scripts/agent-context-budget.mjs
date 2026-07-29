@@ -7,9 +7,9 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 export const DEFAULT_LIMIT_BYTES = 32 * 1024;
-export const MAX_ROUTE_LIMIT_BYTES = 28 * 1024;
-export const ROOT_INSTRUCTION_LIMIT_BYTES = 12 * 1024;
-export const SCOPED_INSTRUCTION_LIMIT_BYTES = 16 * 1024;
+export const MAX_ROUTE_LIMIT_BYTES = 18_944;
+export const ROOT_INSTRUCTION_LIMIT_BYTES = 10 * 1024;
+export const SCOPED_INSTRUCTION_LIMIT_BYTES = 9 * 1024;
 export const WARNING_PERCENT = 90;
 
 const CHAIN_SEPARATOR_BYTES = Buffer.byteLength("\n\n");
