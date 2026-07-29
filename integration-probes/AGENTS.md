@@ -3,7 +3,7 @@ title: Integration Probes Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-29
 doc_type: agent-instructions
 scope: integration-probes
 review_interval_days: 90
@@ -59,12 +59,9 @@ pnpm --filter @mento-protocol/integration-probes knip
   follow Fly's quote and distributions APIs and pass only if the distributions
   response exposes a registered Mento v3 pool address. Celo LI.FI checks do not
   use Fly fallback evidence; they must return direct Mento address evidence.
-- LI.FI quote attempts are capped at 180 per scheduled run, and repeated
-  request/HTTP errors during route discovery are capped at two attempts per
-  route, so an aggregator outage or discovery loop cannot starve the scheduled
-  writer. Budgeted adapters run pair probes serially so downstream follow-up
-  requests, such as LI.FI-to-Fly evidence checks, cannot be starved by other
-  in-flight pair probes.
+- Per-run request budgets, the per-route discovery error cap, and serial pair
+  probes for budgeted adapters are load-bearing anti-starvation guards; do not
+  loosen them without live scheduled-probe evidence.
 - Squid quote probes are capped and paced between requests because bursty
   route checks can trigger 429s. Do not remove or lower the request delay
   without live route evidence that the scheduled probe remains healthy.
@@ -87,26 +84,6 @@ pnpm --filter @mento-protocol/integration-probes knip
 - `integration-probes:latest` expires after 3 days so failed scheduled probes
   degrade the dashboard instead of showing stale health forever. Dated history
   keys expire after 90 days.
-
-## Env Vars
-
-- `INTEGRATION_PROBES_HASURA_URL` overrides `NEXT_PUBLIC_HASURA_URL` for the
-  pool discovery query.
-- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are required only
-  when writing snapshots.
-- Adapter credentials are optional at the infrastructure layer and should
-  surface as `needs_key` when missing: `LIFI_API_KEY`, `OPENOCEAN_API_KEY`,
-  `ZEROX_API_KEY`, `ONEINCH_API_KEY`, `SQUID_INTEGRATOR_ID`, and
-  `SOCKET_API_KEY`.
-- `LIFI_API_KEY` authenticates LI.FI/Jumper quote probes with
-  `x-lifi-api-key`; keep it server-side and Terraform-managed.
-- `FLYTRADE_API_KEY` authenticates the Fly.trade follow-up requests behind
-  Monad LI.FI routes with the `apikey` header against the authenticated
-  `api.magpiefi.xyz` origin; without it the probe falls back to the public
-  `api.fly.trade` origin. It is optional (not part of `credentialEnv`), so a
-  missing key never renders LI.FI as `needs_key`. Keep it server-side and
-  Terraform-managed.
-- `SQUID_INTEGRATOR_ID` authenticates Squid quote probes with
-  `x-integrator-id`; keep it server-side and Terraform-managed.
-- `SQUID_CELO_RPC_URL` optionally overrides the default Forno Celo RPC used for
-  Squid Uniswap-liquidity discovery sizing. It is not a credential.
+- Adapter credentials are optional and must surface as `needs_key` when
+  missing. Keep every key server-side and Terraform-managed; the variable
+  reference is [`README.md`](README.md).

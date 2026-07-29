@@ -1,4 +1,4 @@
-<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-07-29 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
 
 # alerts/rules
 
@@ -64,12 +64,15 @@ inherit the FX-weekend mute. Blind rules compare the producer's exact
 consecutive deep-poll count with policy; they do not infer 30-second poll
 history from Grafana's 60-second evaluation clock.
 
-The reviewed source activation is not live merely because it is merged. The
-current producer preconditions still gate the trusted-main plan and
-human-approved apply; live Grafana proof remains required after apply. Follow
+The Peg activation apply is complete and its rules are live in Grafana
+([#1680](https://github.com/mento-protocol/monitoring-monorepo/pull/1680),
+[#1685](https://github.com/mento-protocol/monitoring-monorepo/pull/1685)).
+Later rule changes take the ordinary trusted-main plan and human-approved
+apply; `peg-thresholds.json` rollovers go through the protected publication
+and generation-pin sequence in
+[`docs/deployment.md`](../../docs/deployment.md). Follow
 [`docs/notes/peg-monitoring.md`](../../docs/notes/peg-monitoring.md) for the
-current dependency boundary, exact source checks, activation sequence, and
-rollback order.
+dependency boundary, exact source checks, and rollback order.
 
 Registry-rot rules cover every non-deep policy source, including display-only
 sources. Critical-path-unreachable rules cover only the policy-designated deep

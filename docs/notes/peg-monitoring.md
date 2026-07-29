@@ -3,7 +3,7 @@ title: Peg monitoring alert source validation and activation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-28
+last_verified: 2026-07-29
 doc_type: runbook
 scope: alerts/peg-monitoring
 review_interval_days: 90
@@ -30,9 +30,11 @@ The source-owned surfaces are:
 
 ## Current boundary
 
-This source packet does not apply Grafana resources or, by itself, prove live
-consumer behavior. The activation evidence records live producer and query
-checks; live consumer states still require the protected apply.
+This source packet does not apply Grafana resources by itself. The activation
+apply is complete: the Peg folder, templates, contact points, and rule group
+are live in Grafana for both the active and retained policy versions
+([#1680](https://github.com/mento-protocol/monitoring-monorepo/pull/1680),
+[#1685](https://github.com/mento-protocol/monitoring-monorepo/pull/1685)).
 `terraform/peg-policy.tf` owns the policy identities and bucket IAM. Controller
 recovery and bootstrap-grant removal are complete.
 The protected `Peg Policy Publication` root published
@@ -57,7 +59,7 @@ are merged and deployed. The runtime now fetches the authenticated
 generation-pinned policy and exposes the active `policy_version`. The activation
 PR records a full producer-floor window and production evaluation of all 61
 unique generated query expressions. The protected-main plan, human-approved
-apply, and post-apply Grafana proof follow the source merge.
+apply, and post-apply Grafana proof are complete.
 
 The live listing-confirmation producer and consumer source includes
 `mento_peg_listing_state`, `mento_peg_listing_checked_at`, and the bounded
