@@ -83,13 +83,17 @@ describe("presentPegMonitoring", () => {
     });
 
     expect(atBoundary.aggregate.label).toBe("All pegs healthy");
-    expect(atBoundary.assets[0]?.decisionSource).not.toBeNull();
+    expect(atBoundary.assets[0]).toMatchObject({
+      decisionSource: expect.any(Object),
+      usableSourceCount: 3,
+    });
     expect(expired.aggregate.label).toBe("Price check unavailable");
     expect(expired.assets[0]).toMatchObject({
       decisionSource: null,
       distanceBps: null,
       thresholdTone: "uncertain",
       uncertain: true,
+      usableSourceCount: 2,
       uncertaintyReason:
         "The policy-selected market observation is older than its allowed freshness window.",
     });

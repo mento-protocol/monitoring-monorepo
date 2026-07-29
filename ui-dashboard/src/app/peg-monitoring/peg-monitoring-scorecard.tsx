@@ -175,7 +175,6 @@ function HealthSummary({
   asset: PegAssetPresentation;
 }): React.JSX.Element {
   const source = asset.decisionSource;
-  const coverage = asset.asset.sources.filter(({ healthy }) => healthy).length;
   const pools = asset.asset.monitors.filter(
     ({ indexedPoolReachable }) => indexedPoolReachable,
   ).length;
@@ -186,8 +185,8 @@ function HealthSummary({
   const breakerCount = asset.asset.monitors.length;
   const sourceCoverage =
     asset.asset.sources.length === 1
-      ? `${coverage} source healthy`
-      : `${coverage} of ${asset.asset.sources.length} sources healthy`;
+      ? `${asset.usableSourceCount} source usable`
+      : `${asset.usableSourceCount} of ${asset.asset.sources.length} sources usable`;
   const poolHealth =
     asset.asset.monitors.length === 1
       ? `${pools} pool reachable`

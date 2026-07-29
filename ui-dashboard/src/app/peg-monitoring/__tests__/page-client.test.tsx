@@ -166,10 +166,17 @@ describe("PegMonitoringPageClient", () => {
     render();
     expect(container.textContent).toContain("Current package");
     expect(container.textContent).toContain("All pegs healthy");
+    expect(container.textContent).toContain("3 of 3 sources usable");
 
     act(() => vi.advanceTimersByTime(10_000));
     expect(container.textContent).toContain("Current package");
     expect(container.textContent).toContain("Price check unavailable");
+    expect(container.textContent).toContain("2 of 3 sources usable");
+    expect(container.textContent).not.toContain("3 of 3 sources healthy");
+    const marketLabel = Array.from(container.querySelectorAll("dt")).find(
+      ({ textContent }) => textContent === "Market",
+    );
+    expect(marketLabel?.nextElementSibling?.textContent).toBe("Unavailable");
     expect(container.textContent).toContain(
       "The policy-selected market observation is older than its allowed freshness window.",
     );

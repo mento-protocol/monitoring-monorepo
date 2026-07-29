@@ -65,6 +65,9 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
   await expect(page.getByText("Furthest from target")).toHaveCount(0);
   await expect(page.getByText("Data freshness")).toBeVisible();
   await expect(page.getByText("Fresh", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("3 of 3 sources usable", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByTestId("peg-target-europ-schuman")).toHaveAttribute(
     "style",
     /left: 50%/,

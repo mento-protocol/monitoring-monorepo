@@ -12,6 +12,7 @@ export type PegAssetPresentation = {
   assetName: string;
   decisionSource: PegSource | null;
   deepSource: PegSource | null;
+  usableSourceCount: number;
   distanceBps: number | null;
   direction: "below" | "above" | "at target" | null;
   downsideWarningThresholdBps: number;
@@ -436,6 +437,9 @@ function buildAssetPresentation(
     ),
     decisionSource: selection.decisionSource,
     deepSource: selection.deepSource,
+    usableSourceCount: item.sources.filter(
+      (source) => !sourceHasUnavailableEvidence(source, context.nowMs),
+    ).length,
     ...describeDistance(item, selection),
     ...classifySafety(item, selection, context),
   };
