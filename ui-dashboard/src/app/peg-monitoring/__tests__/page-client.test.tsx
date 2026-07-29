@@ -359,6 +359,52 @@ describe("PegMonitoringPageClient", () => {
         ?.className,
     ).toContain("bg-red-600");
   });
+  it("renders confirmed blind-while-stressed evidence as critical", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            structural: {
+              ...item.structural,
+              blind: true,
+              blindConsecutivePolls: item.policy.blindConsecutivePolls,
+            },
+            sources: item.sources.map((source) =>
+              source.id === item.policy.deepVenueSource
+                ? {
+                    ...source,
+                    capped: true,
+                    executablePrice:
+                      item.policy.target *
+                      (1 -
+                        (item.policy.criticalDeviationBps +
+                          source.policy.conversionErrorBps) /
+                          10_000),
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+
+    const aggregate = container.querySelector(
+      '[data-testid="peg-aggregate-status"]',
+    );
+    expect(aggregate?.textContent).toContain("Critical condition detected");
+    expect(aggregate?.parentElement?.className).toContain("border-red");
+    expect(container.textContent).toContain(
+      "available partial price crossed the critical downside limit",
+    );
+  });
   it("renders source-adjusted thresholds on the centered distance rail", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;

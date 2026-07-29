@@ -213,6 +213,52 @@ function isDeepCritical(
   );
 }
 
+function blindWhileStressedReason(
+  item: PegAssetPackage,
+  source: PegSource | null,
+  nowMs: number,
+  structuralExpired: boolean,
+): string | null {
+  // The paging rule deliberately uses the confirmed streak. The producer
+  // resets it on the same poll that restores a usable full-size price.
+  if (
+    structuralExpired ||
+    item.structural.blindConsecutivePolls < item.policy.blindConsecutivePolls
+  )
+    return null;
+
+  const structuralStress =
+    item.structural.structuralSaturation !== null &&
+    item.structural.structuralSaturation >=
+      item.policy.structuralWarnFraction &&
+    item.structural.indexedPoolReachable;
+  const blindReason = `The deep market could not price the full test amount for ${item.policy.blindConsecutivePolls} consecutive checks`;
+  if (structuralStress)
+    return `${blindReason}, while on-chain pool activity crossed its warning limit.`;
+
+  const sourceIsCurrent =
+    source !== null &&
+    source.observationAt !== null &&
+    !sourceEvidenceExpired(source, nowMs);
+  const spreadStress =
+    sourceIsCurrent &&
+    source.spreadBps !== null &&
+    source.spreadBps > source.policy.spreadEnvelopeBps;
+  if (spreadStress)
+    return `${blindReason}, while its buy and sell prices moved too far apart.`;
+
+  const cappedCriticalShortfall =
+    sourceIsCurrent &&
+    source.capped === true &&
+    source.executablePrice !== null &&
+    ((item.policy.target - source.executablePrice) / item.policy.target) *
+      10_000 >=
+      item.policy.criticalDeviationBps + source.policy.conversionErrorBps;
+  return cappedCriticalShortfall
+    ? `${blindReason}, while its available partial price crossed the critical downside limit.`
+    : null;
+}
+
 function hasUnsafeBreaker(item: PegAssetPackage): boolean {
   return item.monitors.some(
     ({ breaker }) =>
@@ -260,9 +306,12 @@ function safetyReasons(input: {
   packageIsStale: boolean;
   usesPreviousPolicy: boolean;
   deepCritical: boolean;
+  blindWhileStressedReason: string | null;
   unsafeBreaker: boolean;
 }): string[] {
   const reasons: string[] = [];
+  if (input.blindWhileStressedReason)
+    reasons.push(input.blindWhileStressedReason);
   if (input.deepCritical)
     reasons.push(
       "The latest deep-market price crossed the critical threshold. The alert only fires if enough readings stay there long enough.",
@@ -309,9 +358,16 @@ function classifySafety(
   const sourceWarning = isSourceWarning(item, selection.decisionSource);
   const breakerUnavailable = hasUnavailableBreaker(item);
   const deepCritical = isDeepCritical(item, selection.decisionSource);
+  const confirmedBlindWhileStressedReason = blindWhileStressedReason(
+    item,
+    selection.deepSource,
+    context.nowMs,
+    structuralExpired,
+  );
   const unsafeBreaker = hasUnsafeBreaker(item);
   const policyWarning = context.packageIsStale || context.usesPreviousPolicy;
-  const critical = deepCritical || unsafeBreaker;
+  const critical =
+    deepCritical || confirmedBlindWhileStressedReason !== null || unsafeBreaker;
   return {
     tone: critical
       ? "critical"
@@ -347,6 +403,7 @@ function classifySafety(
       packageIsStale: context.packageIsStale,
       usesPreviousPolicy: context.usesPreviousPolicy,
       deepCritical,
+      blindWhileStressedReason: confirmedBlindWhileStressedReason,
       unsafeBreaker,
     }),
   };

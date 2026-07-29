@@ -183,6 +183,182 @@ describe("presentPegMonitoring", () => {
     );
   });
 
+  it("matches every confirmed blind-while-stressed critical alert leg", () => {
+    const response = healthyResponse();
+    const item = response.packages[0]!;
+    const confirmedBlindStreak = {
+      ...item.structural,
+      // The alert contract intentionally keys off the confirmed streak rather
+      // than the separate instantaneous blind gauge.
+      blind: false,
+      blindConsecutivePolls: item.policy.blindConsecutivePolls,
+    };
+    const withSources = (
+      update: (
+        source: (typeof item.sources)[number],
+      ) => (typeof item.sources)[number],
+    ) =>
+      item.sources.map((source) =>
+        source.id === item.policy.deepVenueSource ? update(source) : source,
+      );
+    const presentations = [
+      presentPegMonitoring(
+        {
+          ...response,
+          packages: [
+            {
+              ...item,
+              structural: {
+                ...confirmedBlindStreak,
+                structuralSaturation: item.policy.structuralWarnFraction,
+                indexedPoolReachable: true,
+              },
+            },
+          ],
+        },
+        CURRENT_CONTEXT,
+      ),
+      presentPegMonitoring(
+        {
+          ...response,
+          packages: [
+            {
+              ...item,
+              structural: confirmedBlindStreak,
+              sources: withSources((source) => ({
+                ...source,
+                spreadBps: source.policy.spreadEnvelopeBps + 0.01,
+              })),
+            },
+          ],
+        },
+        CURRENT_CONTEXT,
+      ),
+      presentPegMonitoring(
+        {
+          ...response,
+          packages: [
+            {
+              ...item,
+              structural: confirmedBlindStreak,
+              sources: withSources((source) => ({
+                ...source,
+                capped: true,
+                executablePrice:
+                  item.policy.target *
+                  (1 -
+                    (item.policy.criticalDeviationBps +
+                      source.policy.conversionErrorBps) /
+                      10_000),
+              })),
+            },
+          ],
+        },
+        CURRENT_CONTEXT,
+      ),
+    ];
+
+    const expectedDetails = [
+      "on-chain pool activity crossed its warning limit",
+      "buy and sell prices moved too far apart",
+      "available partial price crossed the critical downside limit",
+    ];
+    for (const [index, presentation] of presentations.entries()) {
+      expect(presentation.aggregate).toMatchObject({
+        tone: "critical",
+        label: "Critical condition detected",
+      });
+      expect(presentation.aggregate.detail).toContain(
+        `${item.policy.blindConsecutivePolls} consecutive checks`,
+      );
+      expect(presentation.aggregate.detail).toContain(expectedDetails[index]);
+      expect(presentation.assets[0]).toMatchObject({
+        tone: "critical",
+        currentCritical: true,
+      });
+    }
+    expect(presentations.map(({ assets }) => assets[0]?.uncertain)).toEqual([
+      false,
+      false,
+      true,
+    ]);
+    expect(presentations[2]?.assets[0]?.decisionSource).toBeNull();
+  });
+
+  it("keeps blind-while-stressed alert boundaries fail closed", () => {
+    const response = healthyResponse();
+    const item = response.packages[0]!;
+    const deepSource = item.sources.find(
+      ({ id }) => id === item.policy.deepVenueSource,
+    )!;
+    const withBlindStress = (
+      blindConsecutivePolls: number,
+      spreadBps: number,
+    ) => ({
+      ...response,
+      packages: [
+        {
+          ...item,
+          structural: {
+            ...item.structural,
+            blind: true,
+            blindConsecutivePolls,
+          },
+          sources: item.sources.map((source) =>
+            source.id === item.policy.deepVenueSource
+              ? { ...source, spreadBps }
+              : source,
+          ),
+        },
+      ],
+    });
+    const belowBlindLimit = presentPegMonitoring(
+      withBlindStress(
+        item.policy.blindConsecutivePolls - 1,
+        deepSource.policy.spreadEnvelopeBps + 0.01,
+      ),
+      CURRENT_CONTEXT,
+    );
+    const atSpreadBoundary = presentPegMonitoring(
+      withBlindStress(
+        item.policy.blindConsecutivePolls,
+        deepSource.policy.spreadEnvelopeBps,
+      ),
+      CURRENT_CONTEXT,
+    );
+    const atFreshnessBoundary = presentPegMonitoring(
+      withBlindStress(
+        item.policy.blindConsecutivePolls,
+        deepSource.policy.spreadEnvelopeBps + 0.01,
+      ),
+      {
+        ...CURRENT_CONTEXT,
+        nowMs:
+          (deepSource.observationAt! + deepSource.policy.staleAfterSeconds) *
+          1_000,
+      },
+    );
+    const afterFreshnessBoundary = presentPegMonitoring(
+      withBlindStress(
+        item.policy.blindConsecutivePolls,
+        deepSource.policy.spreadEnvelopeBps + 0.01,
+      ),
+      {
+        ...CURRENT_CONTEXT,
+        nowMs:
+          (deepSource.observationAt! +
+            deepSource.policy.staleAfterSeconds +
+            1) *
+          1_000,
+      },
+    );
+
+    expect(belowBlindLimit.assets[0]?.currentCritical).toBe(false);
+    expect(atSpreadBoundary.assets[0]?.currentCritical).toBe(false);
+    expect(atFreshnessBoundary.assets[0]?.currentCritical).toBe(true);
+    expect(afterFreshnessBoundary.assets[0]?.currentCritical).toBe(false);
+  });
+
   it("uses the directional warning threshold for an above-target measurement", () => {
     const response = healthyResponse();
     const item = response.packages[0]!;
