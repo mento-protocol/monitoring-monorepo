@@ -211,14 +211,16 @@ double-count it. A static pool-reserve snapshot caps loss only when every
 enabled strategy proves unavailable during the response interval.
 
 For each sequentially reachable swap, call
-`FPMM.getAmountOut(portion, monitoredToken)` from the modeled state. Advance
-pool, limit, and strategy state after every successful swap or rebalance. The
-quote already applies the total fee; do not subtract `F` a second time. Define
-loss as **net** quote-asset outflow across a documented protected-system
-boundary: include quote inputs and outputs, mint/burn, and actual strategy
-transfers. Do not use a gross output sum. The model must place flows across the
-relevant window boundaries and cannot replace a sequence with one oversized
-swap when reserves or a strategy can change state.
+`FPMM.getAmountOut(amountIn, tokenIn)` from the modeled state, using that
+transition's actual input amount and token. A monitored-to-quote leg uses the
+monitored token; a reverse leg uses the quote token. Advance pool, limit, and
+strategy state after every successful swap or rebalance. The quote already
+applies the total fee; do not subtract `F` a second time. Define loss as
+**net** quote-asset outflow across a documented protected-system boundary:
+include quote inputs and outputs, mint/burn, and actual strategy transfers. Do
+not use a gross output sum. The model must place flows across the relevant
+window boundaries and cannot replace a sequence with one oversized swap when
+reserves or a strategy can change state.
 
 Record the calls or deterministic calculation. If an exact quote cannot be
 reproduced, use the manual par purchase value plus a documented conservative
