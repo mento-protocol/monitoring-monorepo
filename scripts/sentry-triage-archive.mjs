@@ -763,61 +763,52 @@ export function settlementHeld({ state, labels } = {}) {
 }
 
 /**
- * Roll back to the state observed before this run started mutating, by
- * RECONCILING against live state rather than replaying a log of what we believe
- * we did.
+ * Roll the QUEUE STUB back to the state observed before this run started
+ * mutating, by RECONCILING against live state rather than replaying a log of
+ * what we believe we did.
  *
  * The distinction is the whole point. Every earlier version of this compensation
  * inferred what had happened from which line threw, and that inference is false
  * whenever a request succeeds server-side and its response is lost: `gh issue
- * close` can close the stub and then fail, and a PUT can archive the issue and
- * then fail. A did-we-close flag is unset in exactly those cases, so the repair
- * skipped the reopen and left a CLOSED stub without `sentry:archived` — back on
- * the `closedAt` fallback, invisibly. A rejected command is not proof its remote
- * mutation did not happen.
+ * close` can close the stub and then fail. A did-we-close flag is unset in
+ * exactly that case, so the repair skipped the reopen and left a CLOSED stub
+ * without `sentry:archived` — back on the `closedAt` fallback, invisibly. A
+ * rejected command is not proof its remote mutation did not happen.
  *
- * So: re-read both systems, compare against `target` (the pre-mutation
- * OBSERVATION, not a record of our intentions), and issue only the corrections
- * live state actually calls for. That makes this idempotent by construction —
- * a second run finds nothing to correct — and safe to call on any failure path,
- * including ones where nothing was written.
+ * So: re-read the stub, compare against `target` (the pre-mutation OBSERVATION,
+ * not a record of our intentions), and issue only the corrections live state
+ * actually calls for. Idempotent by construction — a second run finds nothing to
+ * correct — and safe to call on any failure path, including ones where nothing
+ * was written.
+ *
+ * SENTRY IS DELIBERATELY NOT ROLLED BACK HERE. Automation may only ever set
+ * `archived_until_escalating` (ADR 0036), which is self-healing: escalation
+ * resurfaces the issue on its own. A settlement that failed after the PUT
+ * therefore leaves Sentry in exactly the state a SUCCESSFUL archive would have
+ * produced — the state a human already approved. Reverting it bought nothing and
+ * cost a check-then-PUT race against Sentry's own transitions, where the GET can
+ * still read `archived_until_escalating` while Sentry is concurrently flipping a
+ * freshly-escalated issue to `unresolved/regressed`; the PUT then erases that
+ * regression signal, and since ingest finds old issues only through
+ * `is:regressed`, the event vanishes from both systems. Removing the revert
+ * removes that failure mode instead of guarding it.
  *
  * Returns a report; the caller decides how loud to be. Never throws on a
  * mismatch it cannot fix: it reports, so the original error stays the headline.
  */
+/** The baseline a body carries, as a comparable scalar. Two bodies with the same
+ * baseline are equivalent for reconciliation even if they differ elsewhere. */
+function baselineOf(body) {
+  const parsed = parseArchiveBaseline(body);
+  return parsed ? `${parsed.lastSeen}|${parsed.sentryIssueId}` : "";
+}
+
 export async function reconcileToTarget(
-  { runGh, fetchImpl },
-  { repo, queueIssue, sentry, issueId, preArchive, target },
+  { runGh },
+  { repo, queueIssue, target },
 ) {
-  const report = { sentry: null, queue: null, converged: true, errors: [] };
+  const report = { queue: null, converged: true, errors: [] };
 
-  // --- Sentry half -------------------------------------------------------
-  // Restore only when the issue currently holds EXACTLY what this run would
-  // have written (restoreArchivedIssue re-reads and enforces that itself), and
-  // only when the pre-run observation says we were the ones who wrote it. An
-  // issue already archived_until_escalating before we started is not ours to
-  // move, no matter how the run ended.
-  if (issueId && !isAlreadyArchived(preArchive)) {
-    try {
-      const outcome = await restoreArchivedIssue(fetchImpl, {
-        ...sentry,
-        issueId,
-        preArchive,
-      });
-      report.sentry = outcome.restored
-        ? "restored"
-        : (outcome.reason ?? "noop");
-    } catch (err) {
-      report.converged = false;
-      report.errors.push(
-        `Sentry restore failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  } else {
-    report.sentry = "not-ours";
-  }
-
-  // --- Queue half --------------------------------------------------------
   // `target` is absent only when this run never read the stub inside
   // settlement, which means it never wrote to it either — that is a fact about
   // the code path, not an inference about a remote call.
@@ -838,13 +829,16 @@ export async function reconcileToTarget(
   }
 
   const corrections = [];
-  // Body: drop a baseline stamp that is present but should not be. A baseline
-  // left on a stub whose archive was rolled back would have the next run compare
-  // a live regression against a timestamp nothing stands behind.
+  // Body: restore the exact pre-mutation baseline whenever its VALUE changed,
+  // not merely when the target had none. A re-approved stub already carries a
+  // baseline from its previous archive, and a failed run would otherwise leave
+  // its newer timestamp behind — which, on a stub that still carries
+  // `sentry:archived`, ingest trusts, and a regression predating that timestamp
+  // is then skipped. Comparing the parsed baselines rather than whole bodies
+  // keeps this from clobbering an unrelated concurrent body edit.
   if (
-    parseArchiveBaseline(live.body) &&
-    !parseArchiveBaseline(target.body) &&
-    typeof target.body === "string"
+    typeof target.body === "string" &&
+    baselineOf(live.body) !== baselineOf(target.body)
   ) {
     corrections.push({
       what: "body",
@@ -906,11 +900,8 @@ export async function reconcileToTarget(
     try {
       const after = await readQueueIssue(runGh, repo, queueIssue);
       const stillWrong = [];
-      if (
-        parseArchiveBaseline(after.body) &&
-        !parseArchiveBaseline(target.body)
-      )
-        stillWrong.push("body still carries a baseline");
+      if (baselineOf(after.body) !== baselineOf(target.body))
+        stillWrong.push("body baseline still diverges");
       if (after.labels.includes(ARCHIVED_LABEL) && !target.hadArchivedLabel)
         stillWrong.push(`still labeled ${ARCHIVED_LABEL}`);
       if (after.state === "CLOSED" && target.state !== "CLOSED")
@@ -937,14 +928,14 @@ export async function reconcileToTarget(
 function reportReconciliation(report, { queueIssue, shortId, issueId, why }) {
   if (report.converged) {
     process.stderr.write(
-      `::notice::Rolled back #${queueIssue} / ${shortId} (${issueId}) after ${why} — Sentry: ${report.sentry}, queue: ${report.queue}.\n`,
+      `::notice::Rolled the queue stub #${queueIssue} / ${shortId} (${issueId}) back after ${why} — queue: ${report.queue}. Sentry stays archived_until_escalating by design (ADR 0036): that is the approved outcome and it self-heals on escalation.\n`,
     );
     return;
   }
   process.stderr.write(
-    `::error::Rollback of #${queueIssue} / ${shortId} (${issueId}) after ${why} did NOT converge. Sentry: ${
-      report.sentry ?? "unknown"
-    }; queue: ${report.queue ?? "unknown"}. ${report.errors.join("; ")}. Check both systems by hand.\n`,
+    `::error::Queue rollback of #${queueIssue} / ${shortId} (${issueId}) after ${why} did NOT converge (${
+      report.queue ?? "unknown"
+    }): ${report.errors.join("; ")}. Sentry issue ${issueId} is left archived_until_escalating (by design). Fix the stub by hand.\n`,
   );
 }
 
@@ -1065,37 +1056,6 @@ async function settleQueueStub(
     nextBody,
   ]);
 
-  // Idempotency: a workflow_dispatch retry must not double-post the audit
-  // note. This governs a human-readable comment only — the baseline above is
-  // what machines read — so a forged marker comment can at worst suppress a
-  // duplicate note.
-  const alreadyAudited = (live.comments ?? []).some((comment) =>
-    isSettledAuditComment(comment, sentryIssueId),
-  );
-  if (!alreadyAudited) {
-    await runGh([
-      "issue",
-      "comment",
-      String(queueIssue),
-      "-R",
-      repo,
-      "--body",
-      buildAuditComment({
-        approver,
-        shortId: meta.shortId,
-        sentryIssueId,
-        permalink: meta.permalink,
-        timestampIso,
-        alreadyArchived,
-        baselineLastSeen,
-      }),
-    ]);
-  } else {
-    process.stderr.write(
-      `::notice::Audit comment already present on issue #${queueIssue}; not re-posting.\n`,
-    );
-  }
-
   // A stub already CLOSED (a retry, or a previously-verdict-closed stub) skips
   // the close. Nothing records that we closed it — `target.state` already says
   // what it was, and the reconciler compares that against live state, which is
@@ -1136,8 +1096,55 @@ async function settleQueueStub(
     process.stderr.write(
       `::notice::Issue #${queueIssue} did not hold the settled shape after settlement (state=${verify.state}, labels=${verify.labels.join("|")}); a concurrent regression reopen landed inside the settlement window.\n`,
     );
-    // The caller's reconciler rolls BOTH systems back against live state.
+    // The caller's reconciler rolls the queue stub back against live state.
     return { settled: false };
+  }
+
+  // Audit note LAST, after everything failure-prone has converged. Posting it
+  // earlier meant a comment could land, the close or the label write then fail,
+  // and a stale comment would claim the issue was archived — after which a later
+  // successful re-approval saw the marker, suppressed the real audit, and left
+  // the durable record showing the FAILED attempt's approver, timestamp and
+  // baseline. Ordering removes that; tracking-and-deleting the comment would
+  // just be more compensation, which is the thing this whole change is moving
+  // away from.
+  //
+  // Deliberately best-effort: the settlement is already correct and verified, so
+  // a failed note must not roll back a legitimate archive. The machine-readable
+  // record lives in the body; this is the human-facing one.
+  const alreadyAudited = (verify.comments ?? []).some((comment) =>
+    isSettledAuditComment(comment, sentryIssueId),
+  );
+  if (alreadyAudited) {
+    process.stderr.write(
+      `::notice::Audit comment already present on issue #${queueIssue}; not re-posting.\n`,
+    );
+  } else {
+    try {
+      await runGh([
+        "issue",
+        "comment",
+        String(queueIssue),
+        "-R",
+        repo,
+        "--body",
+        buildAuditComment({
+          approver,
+          shortId: meta.shortId,
+          sentryIssueId,
+          permalink: meta.permalink,
+          timestampIso,
+          alreadyArchived,
+          baselineLastSeen,
+        }),
+      ]);
+    } catch (err) {
+      process.stderr.write(
+        `::warning::Issue #${queueIssue} settled correctly but its audit note could not be posted (${
+          err instanceof Error ? err.message : String(err)
+        }); the machine-readable baseline is in the issue body.\n`,
+      );
+    }
   }
   return { settled: true };
 }
@@ -1282,15 +1289,8 @@ export async function runArchive(options, deps = {}) {
   let settleTarget = null;
   const reconcile = async (why) => {
     const report = await reconcileToTarget(
-      { runGh, fetchImpl },
-      {
-        repo,
-        queueIssue,
-        sentry,
-        issueId,
-        preArchive: current,
-        target: settleTarget,
-      },
+      { runGh },
+      { repo, queueIssue, target: settleTarget },
     );
     reportReconciliation(report, {
       queueIssue,
@@ -1463,21 +1463,20 @@ export async function runArchive(options, deps = {}) {
     if (!settle.settled) {
       // A regression reopened the stub during the Sentry I/O — observed at the
       // pre-settlement re-read, by losing the approval-marker CAS, or by the
-      // post-settlement verification. Roll both systems back against live state.
+      // post-settlement verification. Roll the QUEUE back; Sentry stays
+      // archived_until_escalating, which is what the human approved and what
+      // escalation undoes on its own.
       const report = await reconcile("concurrent regression reopen");
       if (!report.converged) {
         throw new Error(
-          `Stub #${queueIssue} was reopened mid-flight and the rollback did not converge: ${report.errors.join("; ")}`,
+          `Stub #${queueIssue} was reopened mid-flight and the queue rollback did not converge: ${report.errors.join("; ")}`,
         );
       }
       return {
         issue: queueIssue,
         shortId: meta.shortId,
         sentryIssueId: issueId,
-        status:
-          report.sentry === "restored"
-            ? "reverted-reopened"
-            : "unsettled-reopened",
+        status: "unsettled-reopened",
       };
     }
   } catch (err) {
@@ -1488,11 +1487,11 @@ export async function runArchive(options, deps = {}) {
       await reconcile("settlement failure");
     } catch (reconcileErr) {
       process.stderr.write(
-        `::error::Rollback of #${queueIssue} itself threw (${
+        `::error::Queue rollback of #${queueIssue} itself threw (${
           reconcileErr instanceof Error
             ? reconcileErr.message
             : String(reconcileErr)
-        }); check Sentry issue ${issueId} and the stub by hand.\n`,
+        }); check the stub by hand.\n`,
       );
     }
     throw err;

@@ -252,12 +252,13 @@ refuses a currently regressed/escalating issue, and uses the documented issue
 update API to set `archived_until_escalating`. It then records the approver
 and timestamp, applies `sentry:archived`, and closes the queue issue.
 
-If approval disappears during the mutation window, the script attempts to
-restore the Sentry issue to unresolved and leaves the queue issue available for
-fresh triage. A later Sentry escalation also reopens and cleans the queue stub.
-The best-effort Sentry link-back note uses an endpoint absent from the public
-API reference; note failure is logged but never masks an otherwise successful
-archive.
+If approval disappears during the mutation window, the script rolls the queue
+stub back and leaves it available for fresh triage. It does NOT un-archive the
+Sentry issue: `archived_until_escalating` is the approved outcome and it
+self-heals on escalation (see below). A later Sentry escalation also reopens and
+cleans the queue stub. The best-effort Sentry link-back note uses an endpoint
+absent from the public API reference; note failure is logged but never masks an
+otherwise successful archive.
 
 Ingest and archive run in separate concurrency groups, so two narrow races
 remain after the label re-reads above. Both are closed mechanically (issue
@@ -284,32 +285,49 @@ No stage picks that up: ingest skips an open match, the triage agent selects on
 That is deliberate, since the alternative ordering closes stubs over live
 regressions, but it is a stranded state, not a self-healing one.
 
-**Rollback reconciles; it does not replay.** Every failure from the Sentry PUT
-onward re-reads both systems and corrects only what live state actually shows to
-be wrong — Sentry back to its pre-run status if and only if it still holds
-exactly what this run would have written, the stub reopened if it is closed now
-and was open before, the body stamp and the terminal label removed if present.
-Nothing consults a record of what the run believes it did, because a rejected
-command is not proof its remote mutation did not happen: `gh issue close` can
-close the stub and then lose its response, and a PUT can archive and then lose
-its response. Any did-we-do-it flag is wrong in exactly those cases, and they
-are the cases that matter. Reconciling is idempotent by construction — a second
-pass finds nothing to correct — and it re-reads once more afterwards, because a
-correction can be accepted and still not take effect. When that final read still
-disagrees the run fails RED with one `::error::` naming what both systems were
-observed to hold.
+**A failed settlement leaves Sentry archived, on purpose.** Automation may only
+ever set `archived_until_escalating` (ADR 0036), and that state is self-healing:
+escalation resurfaces the issue by itself. So a run that archived successfully
+and then failed to settle its queue stub has left Sentry in exactly the state a
+SUCCESSFUL archive would have produced — the state a human already approved.
+Reverting it bought nothing and cost a check-then-PUT race against Sentry's own
+transitions: the check can still read `archived_until_escalating` while Sentry is
+concurrently flipping a freshly-escalated issue to `unresolved/regressed`, and
+the PUT then erases that regression signal. Since ingest finds old issues only
+through `is:regressed`, the event would vanish from both systems. Only the queue
+stub is rolled back.
 
-**Known residual: a run that dies cannot compensate itself.** Reconciliation
-needs the process to survive. If the runner is cancelled or killed between the
-archive PUT and the rollback — job timeout, OOM, a cancelled workflow — nothing
-runs, and the Sentry issue can be left `archived_until_escalating` while the
-stub still carries `sentry:approved-archive`. A later `workflow_dispatch` then
-takes the already-archived path and records ITS OWN read time as the baseline,
-absorbing anything that landed in the dead run's window. Closing this would take
-a durable intent record written before the PUT, which is not what this change
-does. The mitigation today is operational: a killed archive run leaves an
-approved, open, unarchived-looking stub and a red or cancelled run in Actions —
-check the Sentry issue before re-approving.
+**Queue rollback reconciles; it does not replay.** Every failure from the Sentry
+PUT onward re-reads the stub and corrects only what live state actually shows to
+be wrong — reopened if it is closed now and was open before, the terminal label
+removed if present, and the body restored whenever its recorded baseline differs
+from the pre-run one. Nothing consults a record of what the run believes it did,
+because a rejected command is not proof its remote mutation did not happen: `gh
+issue close` can close the stub and then lose its response. Any did-we-do-it flag
+is wrong in exactly that case, and it is the case that matters. Reconciling is
+idempotent by construction — a second pass finds nothing to correct — and it
+re-reads once more afterwards, because a correction can be accepted and still not
+take effect. When that final read still disagrees the run fails RED with one
+`::error::` naming the stub's observed state.
+
+The audit note is posted LAST, after the close, the terminal label and the
+verification have all converged. Ordering rather than compensation: a note that
+landed before a failing close would claim the issue was archived, and a later
+successful re-approval would see that marker, suppress the real audit, and leave
+the durable record showing the failed attempt's approver, timestamp and baseline.
+A note that fails on its own is logged and tolerated — the settlement is already
+correct, and the machine-readable record lives in the body.
+
+**Known residual: a run that dies cannot roll back its own queue writes.**
+Reconciliation needs the process to survive. If the runner is cancelled or killed
+mid-settlement — job timeout, OOM, a cancelled workflow — the stub can be left
+part-settled, and the Sentry issue archived while the stub still carries
+`sentry:approved-archive`. A later `workflow_dispatch` then takes the
+already-archived path and records ITS OWN read time as the baseline, absorbing
+anything that landed in the dead run's window. Closing this would take a durable
+intent record written before the PUT, which is not what this change does. The
+mitigation is operational: a killed archive run leaves a red or cancelled run in
+Actions — check the Sentry issue before re-approving.
 
 **The archive records a freshness baseline.** Sentry's `substatus` lags a fresh
 event, so the regressed/escalating refusal can pass while an event is already in
@@ -320,6 +338,16 @@ settling. That matters because the archive's close necessarily postdates any
 event that arrived inside the mutation window: a `closed_at` comparison would
 evaluate false for that event forever and bury it until some later event
 happened to arrive.
+
+This refusal is the ONE path that still reverts the Sentry archive, and the
+asymmetry is deliberate. A failed settlement leaves an archive whose premise
+still holds — the human approved it and nothing contradicted that. A freshness
+refusal is the opposite: it is positive evidence that an event landed which the
+approver never saw, so the approval's premise is void. Leaving the archive there
+would bury that event, because an `archived_until_escalating` issue matches
+neither ingest query (both are `is:unresolved`) and a single already-counted
+event does not reliably trip Sentry's escalation forecast. Reverting puts it back
+in front of both.
 
 **The baseline lives in the stub BODY, never in a comment.** It is written into
 the same yaml block ingest creates the stub with, as
@@ -490,23 +518,27 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
 - **A red archive run whose stub is open, verdicted, and carries neither
   `sentry:approved-archive` nor `sentry:archived` failed after it consumed the
   approval.** Nothing retries this on its own, and no re-dispatch is possible —
-  the guard needs the label the run spent. The run already reconciled both
-  systems back to their pre-run state, so look for its one summary line. A
-  `::notice::Rolled back …` line means both sides converged and there is nothing
-  to repair. An `::error::… did NOT converge` line names what Sentry and the
-  stub were each observed to hold — fix that side by hand first: take the Sentry
-  issue off `archived_until_escalating`, and check the stub body carries no
-  `archive_baseline_last_seen`. Then choose the outcome explicitly — nothing
-  chooses it for you:
-  - to archive it after all, re-apply `sentry:approved-archive`;
+  the guard needs the label the run spent. **The Sentry issue is archived and
+  stays archived — that is by design, not damage:** it is
+  `archived_until_escalating`, the outcome the approver asked for, and escalation
+  undoes it automatically. Only the stub was rolled back, so look for the run's
+  one summary line. A `::notice::Rolled the queue stub … back` line means it
+  converged and there is nothing to repair. An `::error::… did NOT converge` line
+  names what the stub was observed to hold — fix it by hand: check the body
+  carries the baseline it had BEFORE this run (or none, if it had none). Then
+  choose the outcome explicitly — nothing chooses it for you:
+  - to leave it archived, do nothing; the ledger entry is the only thing missing;
+  - to archive it again and settle the ledger, re-apply
+    `sentry:approved-archive`;
   - to send it back through triage, add `sentry:needs-triage` **and** remove the
     `sentry:verdict-*` label. Leaving the approval off is not enough on its own:
     ingest skips an open stub, and the triage agent selects on
     `sentry:needs-triage`, which nothing here restores.
-- An archive refusal comment that says the archive **could NOT be reverted**
-  means something moved the Sentry issue off `archived_until_escalating` while
-  the run held it. Inspect that issue directly; the queue stub's state is
-  correct but says nothing about where Sentry ended up.
+- An archive **refusal** comment that says the archive could NOT be reverted is a
+  different case from the above: the freshness refusal is the one path that does
+  revert Sentry, and something moved the issue off `archived_until_escalating`
+  before it could. Inspect that issue directly; the stub's state is correct but
+  says nothing about where Sentry ended up.
 - **A cancelled or killed archive run leaves nothing behind to fix it.**
   Rollback runs in-process, so a job that dies mid-archive never reconciles —
   see the known residual above. Before re-applying `sentry:approved-archive` to
