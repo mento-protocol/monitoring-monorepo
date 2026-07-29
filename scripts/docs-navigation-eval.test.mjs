@@ -159,6 +159,88 @@ function score(result) {
   });
 }
 
+// The scorer sums an answer's context spend from the real bytes each loaded
+// source has at repository_base_commit, and rejects reported bytes or sha256
+// that disagree with that file, so a synthetic oversized source cannot push an
+// answer over budget — only real documentation can. Two rules keep that
+// derivation stable while the documentation around it changes:
+//
+//   - Size and order every candidate by `source`, which reads
+//     repository_base_commit. Inventory records describe the worktree instead,
+//     so on any revision that resizes a document they would choose candidates
+//     from one revision and load them from another.
+//   - Prefer documents the rest of the result already loads.
+//     total_unique_source_bytes counts each path once, so those cost nothing
+//     suite-wide and leave the remaining headroom to documentation that
+//     legitimately grows. Unused documents cost their full size, so fall back
+//     to them, smallest first, only when the shared union cannot reach the
+//     budget.
+function loadSourcesUntilOverBudget(result, answer) {
+  const budget = context.suite.targets.max_question_source_bytes;
+  const alreadyLoaded = new Set(
+    answer.loaded_sources.map((entry) => entry.path),
+  );
+  const excluded = new Set([
+    ...context.suite.bootstrap_sources,
+    ...context.suite.forbidden_sources,
+  ]);
+  const eligible = (pathname) =>
+    records.get(pathname)?.authority === "canonical" &&
+    !alreadyLoaded.has(pathname) &&
+    !excluded.has(pathname) &&
+    !isNavigationEvalAnswerArtifact(pathname);
+
+  let bytes = answer.loaded_sources.reduce(
+    (sum, entry) => sum + entry.bytes,
+    0,
+  );
+  const load = (entry) => {
+    answer.loaded_sources.push(entry);
+    answer.authority_qualifications.push(qualification(entry.path));
+    bytes += entry.bytes;
+    return bytes > budget;
+  };
+
+  const shared = new Set();
+  for (const other of result.answers) {
+    if (other === answer) continue;
+    for (const entry of other.loaded_sources) {
+      if (eligible(entry.path)) shared.add(entry.path);
+    }
+  }
+  const sharedSources = [...shared]
+    .map(source)
+    .sort(
+      (left, right) =>
+        right.bytes - left.bytes || left.path.localeCompare(right.path),
+    );
+  for (const entry of sharedSources) {
+    if (load(entry)) return;
+  }
+
+  const unusedSources = [];
+  for (const record of context.inventory.records) {
+    if (shared.has(record.path) || !eligible(record.path)) continue;
+    try {
+      unusedSources.push(source(record.path));
+    } catch {
+      // The inventory also lists untracked documents, which do not exist at
+      // the commit the scorer measures.
+    }
+  }
+  unusedSources.sort(
+    (left, right) =>
+      left.bytes - right.bytes || left.path.localeCompare(right.path),
+  );
+  for (const entry of unusedSources) {
+    if (load(entry)) return;
+  }
+
+  assert.fail(
+    `answer ${answer.question_id} reached only ${bytes} bytes across every canonical document, so it cannot exceed max_question_source_bytes (${budget}); the over-budget case is no longer constructible from this corpus`,
+  );
+}
+
 function issueFor(month, digest, overrides = {}) {
   return {
     number: 77,
@@ -655,18 +737,27 @@ test("historical scoring requires a default-branch ancestor and survives deletio
 });
 
 test("an over-budget answer is measured and fails", () => {
+  const budget = context.suite.targets.max_question_source_bytes;
+  assert.equal(score(validResult()).report.context.questions_over_budget, 0);
+
   const result = validResult();
   const answer = result.answers[0];
-  for (const large of [
-    "docs/notes/agent-quality-gate-mechanics.md",
-    "docs/notes/sentry-triage-pipeline.md",
-    "docs/context-standards.md",
-  ]) {
-    answer.loaded_sources.push(source(large));
-    answer.authority_qualifications.push(qualification(large));
-  }
+  loadSourcesUntilOverBudget(result, answer);
   const scored = score(result);
+  assert.deepEqual(scored.errors, []);
+  const measured = scored.report.questions.find(
+    (question) => question.question_id === answer.question_id,
+  );
+  assert.ok(
+    measured.source_bytes > budget,
+    `scorer measured ${measured.source_bytes} bytes for ${answer.question_id}, which does not exceed max_question_source_bytes (${budget})`,
+  );
   assert.equal(scored.report.context.questions_over_budget, 1);
+  assert.ok(
+    scored.report.context.total_unique_source_bytes <=
+      scored.report.context.max_total_unique_source_bytes,
+    `the over-budget answer also breached max_total_unique_source_bytes (${scored.report.context.total_unique_source_bytes} > ${scored.report.context.max_total_unique_source_bytes}), so this no longer isolates the per-question budget`,
+  );
   assert.equal(scored.report.passed, false);
 });
 
