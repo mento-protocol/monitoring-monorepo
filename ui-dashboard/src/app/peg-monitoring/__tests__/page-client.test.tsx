@@ -158,6 +158,36 @@ describe("PegMonitoringPageClient", () => {
     );
     expect(disabled?.className).toContain("text-red-300");
     expect(container.textContent).toContain("Breaker unavailable");
+    expect(container.textContent).toContain("0 of 2 breakers OK");
+  });
+  it("keeps unavailable breakers in the health-summary denominator", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const monitor = item.monitors[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            monitors: [
+              monitor,
+              {
+                ...monitor,
+                rateFeedId: "0x6666666666666666666666666666666666666666",
+                breaker: null,
+              },
+            ],
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+
+    expect(container.textContent).toContain("1 of 2 breakers OK");
   });
   it("renders non-null listing evidence from a schema-version-1 package", () => {
     const response = makePegMonitoringResponse();

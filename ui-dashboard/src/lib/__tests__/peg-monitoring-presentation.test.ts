@@ -209,13 +209,117 @@ describe("presentPegMonitoring", () => {
       { packageIsStale: false, usesPreviousPolicy: false },
     );
 
-    expect(presentation.aggregate.label).toBe("Current status uncertain");
+    expect(presentation.aggregate.label).toBe("Price check unavailable");
     expect(presentation.assets[0]).toMatchObject({
       tone: "warning",
       uncertain: true,
       thresholdTone: "uncertain",
       decisionSource: null,
       distanceBps: null,
+    });
+    expect(presentation.furthest).toBeNull();
+    expect(presentation.closestWarning).toBeNull();
+  });
+
+  it("treats a confirmed structural threshold breach as a warning rather than uncertainty", () => {
+    const response = healthyResponse();
+    const item = response.packages[0]!;
+    const packageThreshold = presentPegMonitoring(
+      {
+        ...response,
+        packages: [
+          {
+            ...item,
+            structural: {
+              ...item.structural,
+              structuralSaturation: item.policy.structuralWarnFraction,
+            },
+          },
+        ],
+      },
+      { packageIsStale: false, usesPreviousPolicy: false },
+    );
+    const monitorThreshold = presentPegMonitoring(
+      {
+        ...response,
+        packages: [
+          {
+            ...item,
+            monitors: item.monitors.map((monitor) => ({
+              ...monitor,
+              structuralSaturation: item.policy.structuralWarnFraction,
+            })),
+          },
+        ],
+      },
+      { packageIsStale: false, usesPreviousPolicy: false },
+    );
+    const incompleteQuery = presentPegMonitoring(
+      {
+        ...response,
+        packages: [
+          {
+            ...item,
+            structural: {
+              ...item.structural,
+              structuralQuerySaturated: true,
+            },
+          },
+        ],
+      },
+      { packageIsStale: false, usesPreviousPolicy: false },
+    );
+
+    expect(packageThreshold.aggregate.label).toBe("Some pegs need attention");
+    expect(packageThreshold.assets[0]).toMatchObject({
+      tone: "warning",
+      uncertain: false,
+    });
+    expect(monitorThreshold.assets[0]).toMatchObject({
+      tone: "warning",
+      uncertain: false,
+    });
+    expect(incompleteQuery.aggregate.label).toBe(
+      "Monitoring checks incomplete",
+    );
+    expect(incompleteQuery.assets[0]).toMatchObject({
+      tone: "warning",
+      uncertain: true,
+    });
+  });
+
+  it("does not use a capped deep observation as decision evidence", () => {
+    const response = healthyResponse();
+    const item = response.packages[0]!;
+    const presentation = presentPegMonitoring(
+      {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.map((source) =>
+              source.id === item.policy.deepVenueSource
+                ? {
+                    ...source,
+                    capped: true,
+                    executablePrice: 0.99,
+                    deviationBps: item.policy.criticalDeviationBps * 2,
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      { packageIsStale: false, usesPreviousPolicy: false },
+    );
+
+    expect(presentation.aggregate.label).toBe("Price check unavailable");
+    expect(presentation.assets[0]).toMatchObject({
+      tone: "warning",
+      uncertain: true,
+      decisionSource: null,
+      distanceBps: null,
+      direction: null,
     });
     expect(presentation.furthest).toBeNull();
     expect(presentation.closestWarning).toBeNull();
@@ -237,7 +341,7 @@ describe("presentPegMonitoring", () => {
       { packageIsStale: false, usesPreviousPolicy: false },
     );
 
-    expect(presentation.aggregate.label).toBe("Current status uncertain");
+    expect(presentation.aggregate.label).toBe("Price check unavailable");
     expect(presentation.assets[0]).toMatchObject({
       tone: "warning",
       uncertain: true,
@@ -320,19 +424,24 @@ describe("presentPegMonitoring", () => {
 
     expect(mixed.aggregate.label).toBe("Peg action required");
     expect(mixed.assets[0]?.asset.asset).toBe("eurox-schuman");
-    expect(stale.aggregate.label).toBe("Current status uncertain");
-    expect(stale.assets[0]).toMatchObject({ tone: "warning", uncertain: true });
-    expect(previous.aggregate.label).toBe("Current status uncertain");
+    expect(stale.aggregate.label).toBe("Latest data is stale");
+    expect(stale.assets[0]).toMatchObject({
+      tone: "warning",
+      uncertain: true,
+      thresholdTone: "healthy",
+    });
+    expect(previous.aggregate.label).toBe("Policy update pending");
     expect(previous.assets[0]).toMatchObject({
       tone: "warning",
       uncertain: true,
+      thresholdTone: "healthy",
     });
-    expect(staleCritical.aggregate.label).toBe("Current status uncertain");
+    expect(staleCritical.aggregate.label).toBe("Latest data is stale");
     expect(staleCritical.assets[0]).toMatchObject({
       tone: "critical",
       uncertain: true,
     });
-    expect(previousCritical.aggregate.label).toBe("Current status uncertain");
+    expect(previousCritical.aggregate.label).toBe("Policy update pending");
     expect(previousCritical.assets[0]).toMatchObject({
       tone: "critical",
       uncertain: true,

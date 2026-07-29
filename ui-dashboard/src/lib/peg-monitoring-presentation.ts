@@ -20,6 +20,7 @@ export type PegAssetPresentation = {
   tone: PegPresentationTone;
   reasons: string[];
   uncertain: boolean;
+  uncertaintyReason: string | null;
 };
 
 export type PegMonitoringPresentation = {
@@ -30,7 +31,11 @@ export type PegMonitoringPresentation = {
       | "All pegs healthy"
       | "Peg action required"
       | "Some pegs need attention"
-      | "Current status uncertain";
+      | "Latest data is stale"
+      | "Policy update pending"
+      | "Price check unavailable"
+      | "Monitoring checks incomplete";
+    detail: string | null;
   };
   furthest: PegAssetPresentation | null;
   closestWarning: PegAssetPresentation | null;
@@ -50,6 +55,7 @@ type SafetySignals = {
   tone: PegPresentationTone;
   reasons: string[];
   uncertain: boolean;
+  uncertaintyReason: string | null;
 };
 
 type DistanceGeometry = Pick<
@@ -76,6 +82,7 @@ function sourceHasUnavailableEvidence(source: PegSource | null): boolean {
     source === null ||
     !source.healthy ||
     source.executablePrice === null ||
+    source.capped === true ||
     source.listingState === "halted" ||
     source.listingState === "absent" ||
     source.venueState === "halted"
@@ -110,6 +117,19 @@ function isStructuralWarning(item: PegAssetPackage): boolean {
         monitor.structuralQuerySaturated ||
         (monitor.structuralSaturation !== null &&
           monitor.structuralSaturation >= item.policy.structuralWarnFraction),
+    )
+  );
+}
+
+function hasUnavailableStructuralEvidence(item: PegAssetPackage): boolean {
+  const structural = item.structural;
+  return (
+    structural.blind ||
+    !structural.indexedPoolReachable ||
+    structural.structuralQuerySaturated ||
+    item.monitors.some(
+      (monitor) =>
+        !monitor.indexedPoolReachable || monitor.structuralQuerySaturated,
     )
   );
 }
@@ -151,8 +171,28 @@ function hasUnavailableBreaker(item: PegAssetPackage): boolean {
   return item.monitors.some(({ breaker }) => breaker === null);
 }
 
+function uncertaintyReason(input: {
+  packageIsStale: boolean;
+  usesPreviousPolicy: boolean;
+  sourceUnavailable: boolean;
+  structuralUnavailable: boolean;
+  breakerUnavailable: boolean;
+}): string | null {
+  if (input.packageIsStale) return "No fresh monitoring package is available.";
+  if (input.usesPreviousPolicy)
+    return "The latest complete package uses the previous approved policy.";
+  if (input.sourceUnavailable)
+    return "The policy-selected market has no usable full-size price.";
+  if (input.structuralUnavailable)
+    return "Structural or pool evidence is unavailable or incomplete.";
+  if (input.breakerUnavailable)
+    return "A monitored breaker check is unavailable.";
+  return null;
+}
+
 function safetyReasons(input: {
   structuralWarning: boolean;
+  structuralUnavailable: boolean;
   sourceUnavailable: boolean;
   sourceWarning: boolean;
   breakerUnavailable: boolean;
@@ -166,10 +206,12 @@ function safetyReasons(input: {
     reasons.push("Deep-source downside has reached the critical threshold.");
   if (input.unsafeBreaker)
     reasons.push("A monitored breaker is disabled or tripped.");
-  if (input.structuralWarning)
+  if (input.structuralUnavailable)
     reasons.push(
-      "Current structural or pool evidence is unavailable or crossed its warning threshold.",
+      "Current structural or pool evidence is unavailable or incomplete.",
     );
+  else if (input.structuralWarning)
+    reasons.push("Structural saturation crossed its warning threshold.");
   if (input.sourceUnavailable)
     reasons.push("The deep market source is unavailable or unhealthy.");
   else if (input.sourceWarning)
@@ -189,10 +231,14 @@ function classifySafety(
   context: PackageContext,
 ): SafetySignals {
   const structuralWarning = isStructuralWarning(item);
+  const structuralUnavailable = hasUnavailableStructuralEvidence(item);
   const sourceUnavailable = sourceHasUnavailableEvidence(deepSource);
   const sourceWarning = isSourceWarning(item, deepSource);
   const breakerUnavailable = hasUnavailableBreaker(item);
-  const deepCritical = isDeepCritical(item, deepSource);
+  const deepCritical = isDeepCritical(
+    item,
+    sourceUnavailable ? null : deepSource,
+  );
   const unsafeBreaker = hasUnsafeBreaker(item);
   const policyWarning = context.packageIsStale || context.usesPreviousPolicy;
   const critical = deepCritical || unsafeBreaker;
@@ -206,12 +252,20 @@ function classifySafety(
         ? "warning"
         : "healthy",
     uncertain:
-      structuralWarning ||
+      structuralUnavailable ||
       sourceUnavailable ||
       breakerUnavailable ||
       policyWarning,
+    uncertaintyReason: uncertaintyReason({
+      packageIsStale: context.packageIsStale,
+      usesPreviousPolicy: context.usesPreviousPolicy,
+      sourceUnavailable,
+      structuralUnavailable,
+      breakerUnavailable,
+    }),
     reasons: safetyReasons({
       structuralWarning,
+      structuralUnavailable,
       sourceUnavailable,
       sourceWarning,
       breakerUnavailable,
@@ -246,18 +300,12 @@ function directionFrom(
 
 function thresholdTone(input: {
   deepSource: PegSource | null;
-  context: PackageContext;
   direction: PegAssetPresentation["direction"];
   distanceBps: number | null;
   warningDistanceBps: number | null;
   criticalDeviationBps: number;
 }): PegThresholdTone {
-  if (
-    sourceHasUnavailableEvidence(input.deepSource) ||
-    input.context.packageIsStale ||
-    input.context.usesPreviousPolicy
-  )
-    return "uncertain";
+  if (sourceHasUnavailableEvidence(input.deepSource)) return "uncertain";
   if (
     input.direction === "below" &&
     input.distanceBps !== null &&
@@ -272,7 +320,6 @@ function thresholdTone(input: {
 function describeDistance(
   item: PegAssetPackage,
   selection: SourceSelection,
-  context: PackageContext,
 ): DistanceGeometry {
   const signedDistance = signedDistanceBps(
     selection.decisionSource,
@@ -300,7 +347,6 @@ function describeDistance(
     warningDistanceBps,
     thresholdTone: thresholdTone({
       deepSource: selection.deepSource,
-      context,
       direction,
       distanceBps: currentDistanceBps,
       warningDistanceBps,
@@ -322,28 +368,63 @@ function buildAssetPresentation(
     ),
     decisionSource: selection.decisionSource,
     deepSource: selection.deepSource,
-    ...describeDistance(item, selection, context),
+    ...describeDistance(item, selection),
     ...classifySafety(item, selection.deepSource, context),
   };
 }
 
-function aggregatePresentation(assets: PegAssetPresentation[]) {
-  const confirmedCritical = assets.some(
+function aggregatePresentation(
+  assets: PegAssetPresentation[],
+  context: PackageContext,
+) {
+  const confirmedCritical = assets.find(
     ({ tone, uncertain }) => tone === "critical" && !uncertain,
   );
   if (confirmedCritical)
-    return { tone: "critical" as const, label: "Peg action required" as const };
-  if (assets.some(({ uncertain }) => uncertain))
+    return {
+      tone: "critical" as const,
+      label: "Peg action required" as const,
+      detail:
+        confirmedCritical.reasons[0] ??
+        `${confirmedCritical.assetName} crossed a critical threshold.`,
+    };
+  if (context.packageIsStale)
     return {
       tone: "uncertain" as const,
-      label: "Current status uncertain" as const,
+      label: "Latest data is stale" as const,
+      detail:
+        "No fresh monitoring package is available; values below are the last confirmed measurements.",
     };
-  if (assets.some(({ tone }) => tone === "warning"))
+  if (context.usesPreviousPolicy)
+    return {
+      tone: "uncertain" as const,
+      label: "Policy update pending" as const,
+      detail: "The latest complete package uses the previous approved policy.",
+    };
+  const uncertainAsset = assets.find(({ uncertain }) => uncertain);
+  if (uncertainAsset)
+    return {
+      tone: "uncertain" as const,
+      label:
+        uncertainAsset.decisionSource === null
+          ? ("Price check unavailable" as const)
+          : ("Monitoring checks incomplete" as const),
+      detail: `${uncertainAsset.assetName}: ${uncertainAsset.uncertaintyReason ?? "One or more monitoring checks are unavailable."}`,
+    };
+  const warningAsset = assets.find(({ tone }) => tone === "warning");
+  if (warningAsset)
     return {
       tone: "warning" as const,
       label: "Some pegs need attention" as const,
+      detail:
+        warningAsset.reasons[0] ??
+        `${warningAsset.assetName} crossed a warning threshold.`,
     };
-  return { tone: "healthy" as const, label: "All pegs healthy" as const };
+  return {
+    tone: "healthy" as const,
+    label: "All pegs healthy" as const,
+    detail: null,
+  };
 }
 
 function sortBySeverityAndDistance(
@@ -394,7 +475,7 @@ export function presentPegMonitoring(
   );
   return {
     assets,
-    aggregate: aggregatePresentation(assets),
+    aggregate: aggregatePresentation(assets, context),
     furthest: selectFurthest(assets),
     closestWarning: selectClosestWarning(assets),
   };

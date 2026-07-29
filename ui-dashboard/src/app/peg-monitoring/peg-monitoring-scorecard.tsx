@@ -64,18 +64,23 @@ function DistanceRail({
 }: {
   asset: PegAssetPresentation;
 }): React.JSX.Element {
-  const warning =
-    asset.warningThresholdBps ?? asset.asset.policy.warnDeviationBps;
-  const critical = asset.asset.policy.criticalDeviationBps;
-  const premiumDirection = asset.direction === "above";
-  const rangeMax = Math.max(1, (premiumDirection ? warning : critical) * 1.25);
+  const downsideWarning = asset.asset.policy.warnDeviationBps;
+  const downsideCritical = asset.asset.policy.criticalDeviationBps;
+  const premiumWarning = asset.asset.policy.premiumWarnBps;
+  const rangeMax =
+    Math.max(1, downsideWarning, downsideCritical, premiumWarning) * 1.25;
   const value = asset.distanceBps ?? 0;
-  const marker = Math.min(100, Math.max(0, (value / rangeMax) * 100));
-  const warningMarker = Math.min(100, (warning / rangeMax) * 100);
-  const criticalMarker = Math.min(100, (critical / rangeMax) * 100);
-  const thresholdDescription = premiumDirection
-    ? `Premium warning begins at ${formatScorecardBps(warning)}.`
-    : `Warning begins at ${formatScorecardBps(warning)} and critical at ${formatScorecardBps(critical)}.`;
+  const directionSign =
+    asset.direction === "below" ? -1 : asset.direction === "above" ? 1 : 0;
+  const marker = Math.min(
+    100,
+    Math.max(0, 50 + directionSign * (value / rangeMax) * 50),
+  );
+  const downsideWarningMarker = 50 - (downsideWarning / rangeMax) * 50;
+  const downsideCriticalMarker = 50 - (downsideCritical / rangeMax) * 50;
+  const premiumWarningMarker = 50 + (premiumWarning / rangeMax) * 50;
+  const thresholdDescription = `Downside warning begins at ${formatScorecardBps(downsideWarning)}, downside critical at ${formatScorecardBps(downsideCritical)}, and premium warning at ${formatScorecardBps(premiumWarning)}.`;
+  const railBackground = `linear-gradient(to right, rgb(127 29 29 / 0.95) 0%, rgb(127 29 29 / 0.95) ${downsideCriticalMarker}%, rgb(120 53 15 / 0.9) ${downsideCriticalMarker}%, rgb(120 53 15 / 0.9) ${downsideWarningMarker}%, rgb(6 78 59 / 0.86) ${downsideWarningMarker}%, rgb(6 78 59 / 0.86) ${premiumWarningMarker}%, rgb(120 53 15 / 0.9) ${premiumWarningMarker}%, rgb(120 53 15 / 0.9) 100%)`;
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between gap-3">
@@ -89,36 +94,61 @@ function DistanceRail({
       <div
         role="img"
         aria-label={`${asset.assetName} distance from target: ${distanceText(asset)}. ${thresholdDescription}`}
-        className="relative h-3 overflow-visible rounded-full border border-slate-700 bg-gradient-to-r from-emerald-950 via-amber-900 to-red-950"
+        className="relative h-3 overflow-visible rounded-full border border-slate-700"
+        style={{ background: railBackground }}
       >
         <span
-          className="absolute inset-y-0 border-l border-amber-200/60"
-          style={{ left: `${warningMarker}%` }}
+          className="absolute inset-y-0 border-l border-red-200/60"
+          style={{ left: `${downsideCriticalMarker}%` }}
         />
-        {premiumDirection ? null : (
-          <span
-            className="absolute inset-y-0 border-l border-red-200/60"
-            style={{ left: `${criticalMarker}%` }}
-          />
-        )}
+        <span
+          className="absolute inset-y-0 border-l border-amber-200/60"
+          style={{ left: `${downsideWarningMarker}%` }}
+        />
+        <span
+          data-testid={`peg-target-${asset.asset.asset}`}
+          className="absolute -inset-y-1 border-l-2 border-white"
+          style={{ left: "50%" }}
+        />
+        <span
+          className="absolute inset-y-0 border-l border-amber-200/60"
+          style={{ left: `${premiumWarningMarker}%` }}
+        />
         {asset.distanceBps === null ? null : (
           <span
             aria-hidden="true"
-            className="absolute -top-1 h-5 w-1 rounded bg-white shadow-[0_0_0_2px_rgba(15,23,42,0.9)]"
-            style={{ left: `calc(${marker}% - 2px)` }}
+            data-testid={`peg-current-${asset.asset.asset}`}
+            className="absolute -top-1.5 h-6 w-6 -translate-x-1/2 rounded-full border-4 border-emerald-50 bg-emerald-600 shadow-[0_0_0_4px_rgba(5,150,105,0.2)]"
+            style={{ left: `${marker}%` }}
           />
         )}
       </div>
-      <p className="flex justify-between text-[11px] text-slate-400">
-        <span>Target</span>
-        <span>
-          {premiumDirection ? "Premium warning" : "Warning"}{" "}
-          {formatScorecardBps(warning)}
+      <div className="relative h-6 text-[10px] text-slate-400">
+        <span
+          className="absolute -translate-x-1/2 whitespace-nowrap"
+          style={{ left: `${downsideCriticalMarker}%` }}
+        >
+          −{formatScorecardBps(downsideCritical)}
         </span>
-        {premiumDirection ? null : (
-          <span>Critical {formatScorecardBps(critical)}</span>
-        )}
-      </p>
+        <span
+          className="absolute -translate-x-1/2 whitespace-nowrap"
+          style={{ left: `${downsideWarningMarker}%` }}
+        >
+          −{formatScorecardBps(downsideWarning)}
+        </span>
+        <span
+          className="absolute -translate-x-1/2 whitespace-nowrap text-slate-200"
+          style={{ left: "50%" }}
+        >
+          Target
+        </span>
+        <span
+          className="absolute -translate-x-1/2 whitespace-nowrap"
+          style={{ left: `${premiumWarningMarker}%` }}
+        >
+          +{formatScorecardBps(premiumWarning)}
+        </span>
+      </div>
     </div>
   );
 }
@@ -137,9 +167,7 @@ function HealthSummary({
     ({ breaker }) =>
       breaker !== null && breaker.enabled && breaker.status === "OK",
   ).length;
-  const breakerCount = asset.asset.monitors.filter(
-    ({ breaker }) => breaker !== null,
-  ).length;
+  const breakerCount = asset.asset.monitors.length;
   const sourceCoverage =
     asset.asset.sources.length === 1
       ? `${coverage} source healthy`
@@ -150,9 +178,9 @@ function HealthSummary({
       : `${pools} of ${asset.asset.monitors.length} pools reachable`;
   const breakerHealth =
     breakerCount === 0
-      ? "No breaker data"
-      : breakerCount === 1
-        ? `${breakers} breaker OK`
+      ? "No monitored breakers"
+      : breakerCount === 1 && breakers === 1
+        ? "1 breaker OK"
         : `${breakers} of ${breakerCount} breakers OK`;
   return (
     <dl className="mt-5 grid gap-2 border-t border-slate-800 pt-4 sm:grid-cols-4">
@@ -188,8 +216,10 @@ function HealthSummary({
 
 function AssetScorecard({
   asset,
+  stale,
 }: {
   asset: PegAssetPresentation;
+  stale: boolean;
 }): React.JSX.Element {
   const source = asset.decisionSource;
   return (
@@ -217,7 +247,9 @@ function AssetScorecard({
             </span>
           </p>
           <p className="mt-2 text-xs text-slate-400">
-            Current executable price{" "}
+            {stale
+              ? "Last confirmed executable price"
+              : "Current executable price"}{" "}
             {source
               ? `from ${source.provider} ${source.pair}`
               : "is unavailable"}
@@ -233,7 +265,7 @@ function AssetScorecard({
           <p className="mt-2 text-sm font-medium">{decisionText(asset)}</p>
           {asset.reasons[0] ? (
             <p className="mt-2 text-xs leading-5 text-slate-300">
-              {asset.reasons[0]}
+              {asset.uncertaintyReason ?? asset.reasons[0]}
             </p>
           ) : null}
         </div>
@@ -267,6 +299,7 @@ function HeadlineCard({
 
 function closestWarningHeadline(
   closest: PegAssetPresentation | null,
+  stale: boolean,
 ): Pick<
   React.ComponentProps<typeof HeadlineCard>,
   "value" | "detail" | "tone"
@@ -285,7 +318,7 @@ function closestWarningHeadline(
         : `${formatScorecardBps(closest.warningDistanceBps)} remaining`;
   return {
     value,
-    detail: `${closest.assetName} relative to its warning threshold`,
+    detail: `${closest.assetName} ${stale ? "last confirmed" : "current"} measurement`,
     tone: closest.thresholdTone,
   };
 }
@@ -299,43 +332,53 @@ export function PegMonitoringScorecard({
   ageMs: number;
   stale: boolean;
 }): React.JSX.Element {
-  const furthest = presentation.furthest;
-  const closestHeadline = closestWarningHeadline(presentation.closestWarning);
+  const closestHeadline = closestWarningHeadline(
+    presentation.closestWarning,
+    stale,
+  );
+  const aggregateDetail = stale
+    ? `No fresh monitoring package has arrived; the last confirmed package is ${formatAge(ageMs)} old.`
+    : presentation.aggregate.detail;
   return (
     <section aria-label="Peg decision scorecard" className="space-y-5">
       <div
         data-testid="peg-aggregate-status"
         role="status"
-        aria-label={presentation.aggregate.label}
-        className={`rounded-xl border px-5 py-4 text-lg font-semibold ${toneClasses[presentation.aggregate.tone]}`}
+        aria-label={
+          aggregateDetail
+            ? `${presentation.aggregate.label}. ${aggregateDetail}`
+            : presentation.aggregate.label
+        }
+        className={`rounded-xl border px-5 py-4 ${toneClasses[presentation.aggregate.tone]}`}
       >
-        {presentation.aggregate.label}
+        {aggregateDetail ? (
+          <>
+            <p className="text-lg font-semibold">
+              {presentation.aggregate.label}
+            </p>
+            <p className="mt-1 text-sm font-normal text-slate-300">
+              {aggregateDetail}
+            </p>
+          </>
+        ) : (
+          presentation.aggregate.label
+        )}
       </div>
       <div
         data-testid="peg-headline-cards"
-        className="grid gap-3 md:grid-cols-3"
+        className="grid gap-3 md:grid-cols-2"
       >
-        <HeadlineCard
-          label="Furthest from target"
-          value={furthest ? distanceText(furthest) : "Unavailable"}
-          detail={
-            furthest
-              ? `${furthest.assetName} current executable measurement`
-              : "No executable price is available"
-          }
-          tone={furthest?.thresholdTone ?? "uncertain"}
-        />
-        <HeadlineCard label="Closest to warning" {...closestHeadline} />
+        <HeadlineCard label="Nearest warning" {...closestHeadline} />
         <HeadlineCard
           label="Data freshness"
-          value={stale ? "Stale" : "Current"}
+          value={stale ? "Stale" : "Fresh"}
           detail={`${stale ? "Last confirmed package" : "Package produced"} ${formatAge(ageMs)} ago`}
           tone={stale ? "warning" : "healthy"}
         />
       </div>
       <div className="space-y-4">
         {presentation.assets.map((asset) => (
-          <AssetScorecard key={asset.asset.asset} asset={asset} />
+          <AssetScorecard key={asset.asset.asset} asset={asset} stale={stale} />
         ))}
       </div>
     </section>

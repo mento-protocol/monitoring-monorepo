@@ -1,4 +1,4 @@
-const cards = ["furthest", "warning", "freshness"];
+const cards = ["warning", "freshness"];
 const evidenceItems = ["market", "sources", "pool", "breaker"];
 
 function Bar({ className }: { className: string }): React.JSX.Element {
@@ -19,7 +19,7 @@ export function PegMonitoringLoading(): React.JSX.Element {
       </div>
       <div
         data-testid="peg-skeleton-headlines"
-        className="grid gap-3 md:grid-cols-3"
+        className="grid gap-3 md:grid-cols-2"
       >
         {cards.map((card) => (
           <div

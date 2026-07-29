@@ -61,9 +61,23 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
   await expect(aggregate).toBeVisible();
   await expect(aggregate).toHaveText("All pegs healthy");
   await expect(aggregate.locator("*")).toHaveCount(0);
-  await expect(page.getByText("Furthest from target")).toBeVisible();
-  await expect(page.getByText("Closest to warning")).toBeVisible();
+  await expect(page.getByText("Nearest warning")).toBeVisible();
+  await expect(page.getByText("Furthest from target")).toHaveCount(0);
   await expect(page.getByText("Data freshness")).toBeVisible();
+  await expect(page.getByText("Fresh", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("peg-target-europ-schuman")).toHaveAttribute(
+    "style",
+    /left: 50%/,
+  );
+  const currentMarker = page.getByTestId("peg-current-europ-schuman");
+  const targetMarker = page.getByTestId("peg-target-europ-schuman");
+  const [currentMarkerBox, targetMarkerBox] = await Promise.all([
+    currentMarker.boundingBox(),
+    targetMarker.boundingBox(),
+  ]);
+  expect(currentMarkerBox).not.toBeNull();
+  expect(targetMarkerBox).not.toBeNull();
+  expect(currentMarkerBox!.x).toBeLessThan(targetMarkerBox!.x);
   const [loadedHeadlineBox, loadedScorecardBox] = await Promise.all([
     page.getByTestId("peg-headline-cards").boundingBox(),
     page.getByTestId("peg-scorecard-europ-schuman").boundingBox(),
@@ -106,6 +120,10 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
     page.getByRole("link", { name: "Peg monitoring", exact: true }),
   ).toBeVisible();
   await page.clock.runFor(30_000);
+  await expect(aggregate).toContainText("Latest data is stale");
+  await expect(aggregate).toContainText(
+    "No fresh monitoring package has arrived",
+  );
   await expect(page.getByText("Stale — last confirmed package.")).toBeVisible();
   await expect(page.getByText(/^Last confirmed package \d/)).toBeVisible();
 });

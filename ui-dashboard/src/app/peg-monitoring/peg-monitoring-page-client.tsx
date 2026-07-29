@@ -242,7 +242,7 @@ function Monitor({ monitor }: { monitor: PegMonitor }): React.JSX.Element {
     <article className="rounded-lg border border-slate-800 bg-slate-950/35 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs text-slate-500">Chain {monitor.chainId}</p>
+          <p className="text-xs text-slate-400">Chain {monitor.chainId}</p>
           <Link
             href={`${buildPoolDetailHref(`${monitor.chainId}-${monitor.poolAddress}`)}?tab=oracle`}
             className="mt-1 inline-flex font-mono text-sm text-indigo-400 hover:text-indigo-300"
@@ -325,7 +325,7 @@ function Source({ source }: { source: PegSource }): React.JSX.Element {
           <h4 className="font-medium text-white">
             {source.provider} · {source.pair}
           </h4>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-400">
             {source.id} · {source.registryRole} role · {source.authority}{" "}
             authority
           </p>
@@ -419,7 +419,7 @@ function Package({
           <h2 id={heading} className="text-xl font-semibold text-white">
             {item.asset} / {item.peg}
           </h2>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-400">
             {item.coverageClass} · {item.sources.length} sources ·{" "}
             {item.monitors.length} monitors
           </p>
