@@ -82,6 +82,7 @@ test("parses repeated, comma-separated, and URL issue references", () => {
 test("project scope failures name the read-write gh refresh command", () => {
   const hint = githubProjectScopeHint(
     "The 'projectV2' field requires one of the following scopes: ['read:project']",
+    {},
   );
   assert(
     hint.includes("gh auth refresh -h github.com -s project"),
@@ -97,6 +98,7 @@ test("project mutation scope failures receive the same guidance", () => {
   assert(
     githubProjectScopeHint(
       "This mutation requires one of the following scopes: ['project']",
+      {},
     ).includes("read/write `project` scope"),
     "missing mutation scope guidance",
   );
