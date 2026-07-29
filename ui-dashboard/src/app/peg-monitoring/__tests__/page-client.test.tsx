@@ -629,6 +629,46 @@ describe("PegMonitoringPageClient", () => {
         ?.className,
     ).toContain("bg-red-600");
   });
+  it("leads critical evidence with the critical cause when another check is incomplete", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            structural: {
+              ...item.structural,
+              structuralQuerySaturated: true,
+            },
+            sources: item.sources.map((source) =>
+              source.id === item.policy.deepVenueSource
+                ? {
+                    ...source,
+                    executablePrice: 0.995,
+                    deviationBps: item.policy.criticalDeviationBps,
+                    premiumBps: 0,
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+
+    const evidenceAlert = container.querySelector(
+      '[data-testid="peg-evidence-policy"] [role="alert"]',
+    );
+    expect(evidenceAlert?.textContent).toContain(
+      "The alert only fires if enough readings stay there long enough.",
+    );
+    expect(evidenceAlert?.textContent).not.toContain("result limit");
+  });
   it("renders confirmed blind-while-stressed evidence as critical", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
@@ -860,6 +900,60 @@ describe("PegMonitoringPageClient", () => {
     expect(safety?.textContent).toContain(
       "The indexed pool could not be reached.",
     );
+    expect(safety?.textContent).not.toContain("Check incomplete");
+  });
+  it("prioritizes breaker faults over a saturated monitor query while keeping pool reachability first", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const monitor = item.monitors[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            monitors: [
+              {
+                ...monitor,
+                structuralQuerySaturated: true,
+                breaker: { ...monitor.breaker!, enabled: false },
+              },
+              {
+                ...monitor,
+                rateFeedId: "0x6666666666666666666666666666666666666666",
+                structuralQuerySaturated: true,
+                breaker: { ...monitor.breaker!, status: "TRIPPED" },
+              },
+              {
+                ...monitor,
+                rateFeedId: "0x8888888888888888888888888888888888888888",
+                structuralQuerySaturated: true,
+                breaker: null,
+              },
+              {
+                ...monitor,
+                poolAddress: "0x7777777777777777777777777777777777777777",
+                indexedPoolReachable: false,
+                structuralQuerySaturated: true,
+                breaker: { ...monitor.breaker!, enabled: false },
+              },
+            ],
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+
+    const safety = container.querySelector(
+      '[data-testid="peg-safety-checks-europ-schuman"]',
+    );
+    expect(safety?.textContent).toContain("Disabled");
+    expect(safety?.textContent).toContain("Triggered");
+    expect(safety?.textContent).toContain("Unavailable");
+    expect(safety?.textContent).toContain("Pool unavailable");
     expect(safety?.textContent).not.toContain("Check incomplete");
   });
   it("labels a current trading-limit breach as a warning in the safety summary", () => {

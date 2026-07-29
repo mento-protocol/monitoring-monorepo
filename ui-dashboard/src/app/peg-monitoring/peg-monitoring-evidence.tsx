@@ -305,14 +305,6 @@ function safeguardState(
         ? "At the last confirmed check, pool data was unavailable."
         : "Pool data is unavailable, so this safety check cannot confirm current conditions.",
     };
-  if (monitor.structuralQuerySaturated)
-    return {
-      label: "Check incomplete",
-      tone: "warn",
-      text: stale
-        ? "At the last confirmed check, the pool query reached its result limit."
-        : "The pool query reached its result limit, so this safety check is incomplete.",
-    };
   if (monitor.breaker === null)
     return {
       label: "Unavailable",
@@ -336,6 +328,14 @@ function safeguardState(
       text: stale
         ? "The trade safeguard was triggered at the last confirmed check."
         : "The trade safeguard has triggered.",
+    };
+  if (monitor.structuralQuerySaturated)
+    return {
+      label: "Check incomplete",
+      tone: "warn",
+      text: stale
+        ? "At the last confirmed check, the pool query reached its result limit."
+        : "The pool query reached its result limit, so this safety check is incomplete.",
     };
   if (stale)
     return {
@@ -486,8 +486,11 @@ function AssetEvidence({
   confirmedAtMs: number;
   stale: boolean;
 }): React.JSX.Element {
-  const notice =
-    asset.currentCritical || asset.uncertain || asset.tone === "warning"
+  const notice = asset.currentCritical
+    ? (asset.reasons[0] ??
+      asset.uncertaintyReason ??
+      "A critical monitoring condition is active.")
+    : asset.uncertain || asset.tone === "warning"
       ? (asset.uncertaintyReason ?? asset.reasons[0])
       : null;
   return (
