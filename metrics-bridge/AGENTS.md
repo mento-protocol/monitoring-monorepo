@@ -3,7 +3,7 @@ title: Metrics Bridge Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-28
+last_verified: 2026-07-29
 doc_type: agent-instructions
 scope: metrics-bridge
 review_interval_days: 90
@@ -54,48 +54,25 @@ and `build`. For Cloud Run/runtime changes, apply
 ## Peg policy bootstrap
 
 `PEG_POLICY_URL` and `PEG_POLICY_AUTH_MODE` are paired raw configuration for
-the IaC-published, versioned peg-policy artifact. When both are absent, the peg
-loop remains intentionally dormant until the protected artifact plane is
-provisioned. Production mode is `gcp-metadata` and accepts only the canonical,
-generation-pinned GCS JSON download endpoint. `none` is limited to deliberate
-local or test HTTPS artifacts and requires the code-only
-`allowUnauthenticatedPolicy` option; environment configuration cannot enable
-it. A blank, malformed, missing, or mismatched pair belongs to the peg loop's
-bounded error channel and must not abort startup or affect the primary Hasura
-poller.
+the IaC-published, versioned peg-policy artifact; when both are absent the peg
+loop stays intentionally dormant. A blank, malformed, missing, or mismatched
+pair belongs to the peg loop's bounded error channel: it degrades peg coverage
+only, never startup or the primary Hasura poller.
 
-Platform Terraform attaches Cloud Run to
-`metrics-bridge-runtime@mento-monitoring.iam.gserviceaccount.com`, whose direct
-grant is only the private policy bucket's Object Viewer role. The platform
-grants the routine deployer and `gcp_dev_members` Service Account User only on
-that identity, never project-wide or on the default Compute service account.
-The `template[0].revision` drift ignore remains while the generation literal is
-`null`, then the same reviewed concrete-generation change removes it to create
-a Cloud Run revision. The platform
-accepts no production policy URL or auth-mode input: a reviewed
-`local.peg_policy_runtime_generation` literal derives both values together.
-It stays `null` only until protected publication reports the first real
-generation. After activation it remains concrete; each later rollover replaces
-the current quoted generation literal in a reviewed platform change and creates
-a new Cloud Run revision.
+Production runs `gcp-metadata` against the generation-pinned GCS endpoint that
+platform Terraform derives from a reviewed source literal — never an
+env-supplied URL or auth mode. `none` is code-only for local or test artifacts
+and needs the `allowUnauthenticatedPolicy` option; environment configuration
+cannot enable it.
 
-Policy versions are content-addressed: the final 32 lowercase hexadecimal
-characters must match the canonical policy-content SHA-256 prefix. Canonical
-JSON recursively sorts object keys by Unicode code point and preserves array
-order. Do not reuse a version prefix or hand-edit its suffix; runtime and CI
-verify the binding and require a rollover to retain the exact base-branch
-active policy as `previous`. After producer ACK, land a reviewed
-`previous=null` artifact update before a second active rollover; CI and the
-runtime reject chained rollovers.
-
-The service validates and fetches thresholds at runtime. The Docker image
-contains `metrics-bridge/peg-registry.json` at the path resolved by the
-compiled registry loader, but it never contains `peg-thresholds.json`. The
-manual `Peg Policy Publication` workflow publishes the protected artifact;
-runtime activation remains a separate reviewed `production-infra` change.
-Private transport, generation pinning, project placement, and the activation
-boundary are fixed by
-[ADR 0054](../docs/adr/0054-same-project-peg-policy-artifact.md).
+Policy versions are content-addressed, and a rollover must retain the exact
+prior active version as `previous`; CI and the runtime verify that binding and
+reject a second rollover until an ACK cleanup sets `previous` back to `null`.
+Do not reuse a version prefix or hand-edit its suffix. Private transport,
+generation pinning, project placement, and the activation boundary are fixed by
+[ADR 0054](../docs/adr/0054-same-project-peg-policy-artifact.md); the runtime
+identity's IAM belongs to
+[`terraform/AGENTS.md`](../terraform/AGENTS.md).
 
 ## RPC overrides
 

@@ -124,12 +124,10 @@ enumeration, Hasura row caps, and effect-layer boundaries:
 
 Read
 [`../docs/notes/liquity-monitoring-invariants.md`](../docs/notes/liquity-monitoring-invariants.md)
-before changing Liquity handlers, schema, queries, or KPIs. The deployed
-ActivePool does not emit debt updates; `systemDebt` is coordinated between
-open-trove transition deltas and observed DefaultPool redistribution deltas.
-Never replace it with cached `activePoolDebt + defaultPoolDebt`. Rebalance
-redemptions are a subset discriminated by transaction target, not a distinct
-event type.
+before changing Liquity handlers, schema, queries, or KPIs. Never replace
+`systemDebt` with cached `activePoolDebt + defaultPoolDebt`; the deployed
+ActivePool emits no debt updates. Rebalance redemptions are a subset
+discriminated by transaction target, not a distinct event type.
 
 ## Observability
 
