@@ -145,19 +145,27 @@ jobs:
   #     id-token, no packages — the agent holds no write credential beyond
   #     commenting/labeling on THIS repo.
   #   - --allowedTools is an explicit allowlist: repo READ tools (Read/Grep/Glob),
-  #     Sentry READ tools only, and three scoped `gh issue` subcommands. view/list
-  #     are read-only and stay repo-wide (duplicate search needs them); the
-  #     agent's ONLY write is `gh issue comment`, pinned to this matrix job's
-  #     queue-issue number at the permission layer, so an injected instruction
-  #     cannot retarget other issues. (Prefix-match residual: a number that
-  #     string-extends the queue issue's digits, e.g. 123 → 1234, would still
-  #     match — accepted.) The label swap is NOT delegated to the agent: a
-  #     deterministic step below parses the verdict out of the comment and
-  #     applies the label itself. No bare Bash, no `gh api`, no `gh issue edit`,
-  #     no Write/Edit, no Sentry write/execute tools, no WebFetch/WebSearch.
+  #     Sentry READ tools only, two read-only `gh issue` subcommands, and one
+  #     write wrapper. view/list stay repo-wide (duplicate search needs them);
+  #     the agent's ONLY write is scripts/sentry-triage-agent-comment.mjs, which
+  #     takes its target issue from SENTRY_TRIAGE_COMMENT_ISSUE (job env) and
+  #     accepts no issue argument — so the permission layer's string-prefix match
+  #     can only extend the wrapper's ARGUMENTS, never the write target. That
+  #     replaces the old `Bash(gh issue comment <n>:*)` grant, whose prefix match
+  #     also admitted 1234, 12345, … (issue #1288). The wrapper additionally
+  #     stamps every agent comment with the `sentry-triage-agent-authored:v1`
+  #     marker and requires it to start with the verdict marker, so agent text
+  #     stays distinguishable from deterministic-script text even though both
+  #     post as `github-actions[bot]`. The label swap is NOT delegated to the
+  #     agent: a deterministic step below parses the verdict out of the comment
+  #     and applies the label itself. No bare Bash, no `gh api`, no
+  #     `gh issue edit`, no `gh issue comment`, no Write/Edit, no Sentry
+  #     write/execute tools, no WebFetch/WebSearch.
   #   - SENTRY_TRIAGE_TOKEN is set as job env (see the env: note below) and is
   #     consumed via ${VAR} expansion in --mcp-config; it is never echoed and
-  #     never placed in a command.
+  #     never placed in a command. The wrapper drops it (and every other secret
+  #     bar gh's own credential) from the `gh` subprocess env, and refuses a
+  #     body containing any known token value.
   # ---------------------------------------------------------------------------
   triage:
     needs: select
@@ -177,22 +185,38 @@ jobs:
     permissions:
       contents: read
       issues: write
-    # Job-level (NOT step-level) env: claude-code-action is a composite action
-    # whose internal run step has its own env: block that shadows caller
-    # step-level env vars — its action.yml explicitly instructs custom env vars
-    # to be set at job level or via $GITHUB_ENV so they reach the Claude
-    # subprocess. Job env is exported to every step process of this job.
-    #   - GH_TOKEN: gh CLI auth for the agent's scoped `gh issue …` commands
-    #     (this job's GITHUB_TOKEN: issues:write + contents:read only).
+    # Job-level (NOT step-level) env: claude-code-action is a composite action,
+    # and GitHub Actions does not pass a CALLER step's env: into a composite
+    # action's steps at all; the action's internal run step additionally
+    # declares its own env: block. Its action.yml says so in as many words for
+    # its own MCP vars — "this step's env: block shadows the calling workflow's
+    # job-level env vars … Set these in your workflow's job-level env: or via a
+    # prior step that writes to $GITHUB_ENV". RE-VERIFIED for issue #1288
+    # against the version pinned below, v1.0.179 (b76a0776): there is still no
+    # per-step env passthrough and no first-class MCP env input, and
+    # $GITHUB_ENV would expose the value to every LATER step instead of fewer,
+    # so SENTRY_TRIAGE_TOKEN cannot move to step scope. Re-check on the next
+    # major action bump; do not re-open the question without testing a version.
+    #   - GH_TOKEN: gh CLI auth for the agent's read-only `gh issue view/list`
+    #     (this job's GITHUB_TOKEN: issues:write + contents:read only) and for
+    #     the deterministic steps below.
     #   - SENTRY_TRIAGE_TOKEN: consumed by ${SENTRY_TRIAGE_TOKEN} expansion in
     #     --mcp-config when the CLI launches the stdio Sentry MCP server
     #     (expansion of inline --mcp-config env values verified against the
     #     CLI). Never echoed. Accepted residual: like GH_TOKEN, it is visible
-    #     to the agent's allowlisted Bash subprocesses; the token is read-only
-    #     scoped, and any misuse lands in the auditable queue-issue comment.
+    #     to the agent's allowlisted Bash subprocesses. Containment is the
+    #     comment wrapper (issue #1288): it is the agent's only write path, it
+    #     refuses a body containing either token value, and it hands `gh` an
+    #     allowlisted env that carries neither this token nor the Claude OAuth
+    #     token. The token itself is read-only scoped.
+    #   - SENTRY_TRIAGE_COMMENT_ISSUE: the wrapper's write target. Job env
+    #     because a caller step's env: would not reach the agent's subprocess
+    #     (see above). It is the matrix value, already ^[0-9]+$-validated in the
+    #     select job, and no model output can influence it.
     env:
       GH_TOKEN: ${{ github.token }}
       SENTRY_TRIAGE_TOKEN: ${{ secrets.SENTRY_TRIAGE_TOKEN }}
+      SENTRY_TRIAGE_COMMENT_ISSUE: ${{ matrix.issue }}
     steps:
       # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
       # silently run new code. Bump via Dependabot (.github/dependabot.yml).
@@ -243,7 +267,7 @@ jobs:
             --max-turns 50
             --setting-sources user
             --mcp-config '{"mcpServers":{"sentry":{"command":"npx","args":["-y","@sentry/mcp-server@0.37.0"],"env":{"SENTRY_ACCESS_TOKEN":"${SENTRY_TRIAGE_TOKEN}","SENTRY_HOST":"us.sentry.io"}}}}'
-            --allowedTools 'Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue comment ${{ matrix.issue }}:*),mcp__sentry__find_organizations,mcp__sentry__find_projects,mcp__sentry__get_issue_details,mcp__sentry__get_event_stacktrace,mcp__sentry__get_issue_tag_values,mcp__sentry__get_issue_activity,mcp__sentry__search_issues,mcp__sentry__search_events,mcp__sentry__search_issue_events,mcp__sentry__get_sentry_resource'
+            --allowedTools 'Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(node scripts/sentry-triage-agent-comment.mjs:*),mcp__sentry__find_organizations,mcp__sentry__find_projects,mcp__sentry__get_issue_details,mcp__sentry__get_event_stacktrace,mcp__sentry__get_issue_tag_values,mcp__sentry__get_issue_activity,mcp__sentry__search_issues,mcp__sentry__search_events,mcp__sentry__search_issue_events,mcp__sentry__get_sentry_resource'
 
       - name: Apply verdict label (deterministic)
         id: verdict

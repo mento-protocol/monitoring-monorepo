@@ -157,6 +157,18 @@ three `hypotheses`, an `investigated` list, and an
 `escalation_reason`. A missing or placeholder `human_question` is invalid:
 an escalation must be decision-ready, not “please look.”
 
+The agent posts that comment through `scripts/sentry-triage-agent-comment.mjs`,
+its only write path. The wrapper takes the target issue from the workflow-set
+`SENTRY_TRIAGE_COMMENT_ISSUE` and accepts no issue argument, so no model output
+can name a different issue. It refuses a body that does not start with the
+verdict marker, a body containing the value of any credential in the
+environment, and a body carrying its own authorship marker. It appends
+`<!-- sentry-triage-agent-authored:v1 -->` and posts with `gh --body-file` from
+`$RUNNER_TEMP`, handing `gh` an allowlisted environment that carries neither the
+Sentry token nor the Claude OAuth token. Deterministic scripts and the agent
+share the `github-actions[bot]` identity, so that marker — and the required
+verdict-marker prefix — are what separate agent text from pipeline text.
+
 The deterministic parser accepts only comments from
 `github-actions[bot]`. After a regression reopen, it accepts only a verdict
 newer than the latest pipeline-authored regression comment. It then applies

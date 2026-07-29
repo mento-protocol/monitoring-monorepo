@@ -3615,9 +3615,16 @@ assert_contains "- pnpm sentry:project:test (Sentry triage projection helper cha
 
 run_gate "scripts/sentry-triage-project-core.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage projection helper changed)"
 
 run_gate "scripts/sentry-triage-project.test.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+
+run_gate "scripts/sentry-triage-agent-comment.mjs"
+assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"
+
+run_gate "scripts/sentry-triage-agent-comment.test.mjs"
+assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"
 
 run_gate "scripts/sentry-triage-archive.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
