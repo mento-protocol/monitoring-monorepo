@@ -148,13 +148,19 @@ function fixtureSourcePaths(suite, questions = suite?.questions ?? []) {
   return paths;
 }
 
-function historicalInventoryMap(repoRoot, commit, paths, errors) {
+function historicalInventoryMap(
+  repoRoot,
+  commit,
+  paths,
+  errors,
+  readSource = readSourceAtCommit,
+) {
   const records = new Map();
   for (const file of paths) {
     if (!isDocumentationPath(file)) continue;
     let content;
     try {
-      content = readSourceAtCommit(repoRoot, commit, file);
+      content = readSource(repoRoot, commit, file);
     } catch {
       continue;
     }
@@ -224,6 +230,7 @@ function validateLoadedSources({
   errors,
   repoRoot,
   baseCommit,
+  readSource = readSourceAtCommit,
 }) {
   if (!Array.isArray(sources) || sources.length === 0) {
     errors.push(`${label} must list at least one loaded source`);
@@ -264,7 +271,7 @@ function validateLoadedSources({
     }
     let content;
     try {
-      content = readSourceAtCommit(repoRoot, baseCommit, source.path);
+      content = readSource(repoRoot, baseCommit, source.path);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
       continue;
@@ -563,11 +570,17 @@ export function validateNavigationResultShape(
   return errors;
 }
 
+// `readSource` resolves one declared source to its bytes at the evaluated
+// commit. The default reads the repository, which is what makes a result unable
+// to lie about what it loaded, so production callers must leave it alone. Tests
+// of the scoring arithmetic pass a fixture corpus instead, so their sizes are
+// chosen rather than inherited from whatever the documentation weighs today.
 export function scoreNavigationResult({
   suite,
   result,
   repoRoot,
   questionId = null,
+  readSource = readSourceAtCommit,
 }) {
   const evaluatedQuestions = questionId
     ? suite.questions.filter((question) => question.id === questionId)
@@ -635,6 +648,7 @@ export function scoreNavigationResult({
     sourceCommit,
     resultSourcePaths(suite, result, evaluatedQuestions),
     errors,
+    readSource,
   );
   if (run.fresh_context !== true)
     errors.push("result.run.fresh_context must be true");
@@ -647,6 +661,7 @@ export function scoreNavigationResult({
     errors,
     repoRoot,
     baseCommit: sourceCommit,
+    readSource,
   });
   const expectedBootstrap = new Set(suite.bootstrap_sources);
   if (
@@ -706,6 +721,7 @@ export function scoreNavigationResult({
       errors,
       repoRoot,
       baseCommit: sourceCommit,
+      readSource,
     });
     for (const file of loaded.paths) {
       if (bootstrap.paths.has(file)) {
