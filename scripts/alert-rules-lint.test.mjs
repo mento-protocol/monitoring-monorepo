@@ -946,7 +946,7 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
   }
   assert(
     source.includes(
-      'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} <= %d)',
+      'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} >= bool %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_active_policy_version}\\"} <= %d)',
     ) &&
       source.includes(
         'mento_peg_blind_consecutive_polls{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"} <= %d)',
@@ -961,7 +961,7 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
       source.includes(
         'max_over_time(mento_peg_last_poll{asset=\\"%s\\",policy_version=\\"${local.peg_previous_policy_version}\\"}[%ds]) > bool %d',
       ),
-    "blindness must use the producer-side consecutive-poll count while heartbeat remains fail-closed",
+    "active blindness must retain a healthy false series with bool while missing or stale inputs remain NoData, and previous policy semantics stay unchanged",
   );
   assert(
     source.includes(

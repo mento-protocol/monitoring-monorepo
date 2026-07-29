@@ -96,7 +96,7 @@ locals {
   }
   peg_active_blind_warning_promql = {
     for asset_id, asset in local.peg_active_assets : asset_id => format(
-      "mento_peg_blind_consecutive_polls{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} >= %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)",
+      "mento_peg_blind_consecutive_polls{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} >= bool %d and on(asset,policy_version) (time() - mento_peg_last_poll{asset=\"%s\",policy_version=\"${local.peg_active_policy_version}\"} <= %d)",
       asset_id,
       asset.blindConsecutivePolls,
       asset_id,
