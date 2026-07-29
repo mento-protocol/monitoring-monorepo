@@ -165,6 +165,16 @@ support incident-specific diagnostics, but must never reduce persistent
 admission capacity. Disabled zero-valued windows do not constrain the minimum.
 If no positive limit is enforced, onboarding fails.
 
+`D_net(S)`, `A_max`, and `G_mono` bound only cumulative fee-adjusted FPMM swap
+netflow. `FPMM.swap` applies TradingLimitsV2, while `FPMM.rebalance` does not.
+Never use these values as a whole-system quote-asset loss cap. An Open strategy
+contraction can transfer the debt token from the pool to its permissionless
+caller, and a Reserve strategy expansion can mint the debt token into the pool.
+Model each strategy rebalance as a separate transition and include its actual
+protected-boundary transfers, even when its configured incentive is zero. A
+strategy being unreachable at the pin because of its price threshold is a
+pinned diagnostic, not a durable exclusion.
+
 Read both fees at the same pin and set `F = lpFee + protocolFee` in basis
 points. Require `0 <= F < Q`, use `C = D_net(S)`, `Q = 10,000`, and use only
 the verified `d_FPMM` as `d`; never convert capacity through decimal floats or
@@ -196,6 +206,12 @@ leave the modeled envelope without enforced fail-closed revocation or
 reapproval, maximize across its reachable range or keep the asset **Blocked**.
 Without that proof or model, or with a positive effective rebate, mark the asset
 **Blocked**.
+
+Bind either an enforced no-change or no-arbitrage rate condition while trading
+remains bidirectional, or an enforced maximum number of successful rate
+transitions during `S`. Without one, alternating tradable rates plus signed
+counterflows can accumulate quote-asset loss while returning netflow to the same
+state.
 
 At the pin, enumerate every enabled strategy from
 `LiquidityStrategyUpdated` history through that block; do not rely on one
