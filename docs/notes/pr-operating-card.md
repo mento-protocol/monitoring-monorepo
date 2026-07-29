@@ -62,10 +62,10 @@ authority.
    deploys and never applies Terraform. It **refuses package-script,
    package-manager, or lockfile changes until their lifecycle risk is reviewed
    and explicitly acknowledged** — do not bypass the refusal; review the surface
-   and pass the acknowledgement flag. Do not run a competing dashboard server,
-   browser suite, or second gate in the same worktree. Background the `--run`
-   gate and the `git push`; a 600s foreground kill discards the freshness stamp.
-   Authority:
+   and pass `--allow-package-script-changes`. Do not run a competing dashboard
+   server, browser suite, or second gate in the same worktree. Background the
+   `--run` gate and the `git push`; a 600s foreground kill discards the freshness
+   stamp. Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 4. **Autoreview.** Freeze the scope baseline first — the initial request,
@@ -148,9 +148,11 @@ Solution` (approach before implementation detail). PRs open **ready for
    feedback ledger must be clean **first**, then the subsequent current-head
    `pr:ready-state` must report ready — including the current-head
    `chatgpt-codex-connector[bot]` PR-description approval, unless a documented
-   break-glass signal applies. Do not block on slow optional bots that branch
-   protection does not require, and do not post routine or duplicate
-   `@codex review` requests. Authority:
+   human break-glass comment applies:
+   `/pr-ready-override gate=codex-description-approval head=<full-head-sha>
+reason=<why this is safe>`. Do not block on slow optional bots that branch
+   protection does not require, and do not post routine or duplicate `@codex
+review` requests. Authority:
    [`pr-ready-state.md`](pr-ready-state.md).
 
 8. **Merge hygiene.** **Never merge a PR without the user's explicit, direct

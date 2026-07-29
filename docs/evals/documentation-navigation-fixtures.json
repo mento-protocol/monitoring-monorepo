@@ -7,7 +7,8 @@
     "answer_evidence_percent": 100,
     "questions_over_context_budget": 0,
     "max_question_source_bytes": 45000,
-    "max_total_unique_source_bytes": 263000
+    "max_total_unique_source_bytes": 262000,
+    "min_total_unique_source_headroom_bytes": 32768
   },
   "bootstrap_sources": ["AGENTS.md", "docs/README.md"],
   "forbidden_sources": [
@@ -159,7 +160,10 @@
       "id": "pr-hazard-package-script-refusal",
       "category": "pr-hazards",
       "question": "Why does the agent quality gate refuse to run after package scripts or lockfiles change, and what explicit flag is required after reviewing that lifecycle surface?",
-      "accepted_routes": [["docs/notes/agent-quality-gate-mechanics.md"]],
+      "accepted_routes": [
+        ["docs/notes/agent-quality-gate-mechanics.md"],
+        ["docs/notes/pr-operating-card.md"]
+      ],
       "sources_requiring_verification": [
         {
           "path": "docs/PLAN-ai-review-process.md",
@@ -185,7 +189,10 @@
       "id": "commands-pr-readiness",
       "category": "commands",
       "question": "What exact shared probe must run before declaring a PR all clear, and which current-head Codex approval or break-glass signal is required?",
-      "accepted_routes": [["docs/notes/pr-ready-state.md"]],
+      "accepted_routes": [
+        ["docs/notes/pr-ready-state.md"],
+        ["docs/notes/pr-operating-card.md"]
+      ],
       "sources_requiring_verification": [
         {
           "path": "docs/PLAN-ai-review-process.md",

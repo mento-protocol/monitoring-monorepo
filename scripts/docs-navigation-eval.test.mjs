@@ -51,7 +51,14 @@ const committedBaseline = JSON.parse(
     "utf8",
   ),
 );
-const repoBaseCommit = committedBaseline.run.repository_base_commit;
+const repoBaseCommit = execFileSync(
+  "git",
+  ["merge-base", "HEAD", "origin/main"],
+  {
+    cwd: repoRoot,
+    encoding: "utf8",
+  },
+).trim();
 const scriptPath = fileURLToPath(
   new URL("./docs-navigation-eval.mjs", import.meta.url),
 );
@@ -108,7 +115,20 @@ function validResult() {
       bootstrap_sources: context.suite.bootstrap_sources.map(source),
     },
     answers: context.suite.questions.map((question) => {
-      const route = question.accepted_routes[0];
+      const route = [...question.accepted_routes]
+        .map((candidate) => ({
+          route: candidate,
+          bytes: candidate.reduce(
+            (sum, pathname) => sum + records.get(pathname).bytes,
+            0,
+          ),
+        }))
+        .sort(
+          (left, right) =>
+            left.bytes - right.bytes ||
+            left.route.length - right.route.length ||
+            left.route.join("\n").localeCompare(right.route.join("\n")),
+        )[0].route;
       return {
         question_id: question.id,
         chosen_documents: [...route],
@@ -232,14 +252,26 @@ test("fixture validation requires an explicit context-breach target", () => {
 
 test("fixture byte budgets can contain every cheapest accepted route", () => {
   const floor = navigationContextFloor(context.suite, context.inventory);
+  const reserve = context.suite.targets.min_total_unique_source_headroom_bytes;
   assert.ok(
     floor.max_question_route_bytes <
       context.suite.targets.max_question_source_bytes,
   );
   assert.ok(
-    floor.total_unique_route_bytes <
-      context.suite.targets.max_total_unique_source_bytes,
+    context.suite.targets.max_total_unique_source_bytes -
+      floor.total_unique_route_bytes >=
+      reserve,
   );
+  assert.equal(reserve, 32_768);
+  const selectedRoutes = new Map(
+    floor.questions.map((question) => [question.question_id, question.route]),
+  );
+  assert.deepEqual(selectedRoutes.get("pr-hazard-package-script-refusal"), [
+    "docs/notes/pr-operating-card.md",
+  ]);
+  assert.deepEqual(selectedRoutes.get("commands-pr-readiness"), [
+    "docs/notes/pr-operating-card.md",
+  ]);
 
   const questionTooTight = structuredClone(context.suite);
   questionTooTight.targets.max_question_source_bytes =
@@ -255,6 +287,23 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
   assert.match(
     validateFixtureSuite(suiteTooTight, context.inventory).join("\n"),
     /cheapest accepted route union needs/,
+  );
+
+  const missingReserve = structuredClone(context.suite);
+  delete missingReserve.targets.min_total_unique_source_headroom_bytes;
+  assert.match(
+    validateFixtureSuite(missingReserve, context.inventory).join("\n"),
+    /min_total_unique_source_headroom_bytes must be a positive integer/,
+  );
+
+  const reserveTooHigh = structuredClone(context.suite);
+  reserveTooHigh.targets.min_total_unique_source_headroom_bytes =
+    context.suite.targets.max_total_unique_source_bytes -
+    floor.total_unique_route_bytes +
+    1;
+  assert.match(
+    validateFixtureSuite(reserveTooHigh, context.inventory).join("\n"),
+    /cheapest accepted route union leaves .* bytes of headroom/,
   );
 });
 
@@ -608,9 +657,13 @@ test("historical scoring requires a default-branch ancestor and survives deletio
 test("an over-budget answer is measured and fails", () => {
   const result = validResult();
   const answer = result.answers[0];
-  const large = "docs/notes/sentry-triage-pipeline.md";
-  answer.loaded_sources.push(source(large));
-  answer.authority_qualifications.push(qualification(large));
+  for (const large of [
+    "docs/notes/agent-quality-gate-mechanics.md",
+    "docs/context-standards.md",
+  ]) {
+    answer.loaded_sources.push(source(large));
+    answer.authority_qualifications.push(qualification(large));
+  }
   const scored = score(result);
   assert.equal(scored.report.context.questions_over_budget, 1);
   assert.equal(scored.report.passed, false);
@@ -635,6 +688,9 @@ test("a qualified historical source requires loaded canonical verification", () 
   const answer = result.answers.find(
     (candidate) => candidate.question_id === "commands-pr-readiness",
   );
+  const currentAuthority = "docs/notes/pr-ready-state.md";
+  answer.loaded_sources.push(source(currentAuthority));
+  answer.authority_qualifications.push(qualification(currentAuthority));
   const historical = "docs/PLAN-ai-review-process.md";
   answer.loaded_sources.push(source(historical));
   answer.authority_qualifications.push(
@@ -1078,7 +1134,15 @@ test("CLI checks fixtures and validates a structured result", () => {
   const checked = JSON.parse(check.stdout);
   assert.equal(checked.question_count, 18);
   assert.ok(checked.context_floor.max_question_headroom_bytes > 0);
-  assert.ok(checked.context_floor.total_unique_headroom_bytes > 0);
+  assert.equal(
+    checked.context_floor.min_total_unique_source_headroom_bytes,
+    32_768,
+  );
+  assert.ok(checked.context_floor.total_unique_reserve_surplus_bytes >= 0);
+  assert.ok(
+    checked.context_floor.total_unique_headroom_bytes >=
+      checked.context_floor.min_total_unique_source_headroom_bytes,
+  );
 
   const temp = mkdtempSync(path.join(tmpdir(), "docs-navigation-eval-"));
   try {

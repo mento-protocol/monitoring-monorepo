@@ -110,7 +110,11 @@ export function navigationContextFloor(suite, inventory) {
   };
 }
 
-export function validateFixtureSuite(suite, inventory) {
+export function validateFixtureSuite(
+  suite,
+  inventory,
+  { requireHeadroomReserve = true } = {},
+) {
   const errors = [];
   const records = inventoryMap(inventory);
   if (!isObject(suite)) return ["fixture suite must be a JSON object"];
@@ -156,6 +160,15 @@ export function validateFixtureSuite(suite, inventory) {
       if (!Number.isSafeInteger(targets[field]) || targets[field] <= 0) {
         errors.push(`${field} must be a positive integer`);
       }
+    }
+    const reserve = targets.min_total_unique_source_headroom_bytes;
+    if (
+      (requireHeadroomReserve || reserve !== undefined) &&
+      (!Number.isSafeInteger(reserve) || reserve <= 0)
+    ) {
+      errors.push(
+        "min_total_unique_source_headroom_bytes must be a positive integer",
+      );
     }
   }
 
@@ -313,6 +326,15 @@ export function validateFixtureSuite(suite, inventory) {
     ) {
       errors.push(
         `cheapest accepted route union needs ${floor.total_unique_route_bytes} bytes; max_total_unique_source_bytes is ${targets.max_total_unique_source_bytes}`,
+      );
+    }
+    if (
+      Number.isSafeInteger(targets.min_total_unique_source_headroom_bytes) &&
+      targets.max_total_unique_source_bytes - floor.total_unique_route_bytes <
+        targets.min_total_unique_source_headroom_bytes
+    ) {
+      errors.push(
+        `cheapest accepted route union leaves ${targets.max_total_unique_source_bytes - floor.total_unique_route_bytes} bytes of headroom; min_total_unique_source_headroom_bytes is ${targets.min_total_unique_source_headroom_bytes}`,
       );
     }
   }

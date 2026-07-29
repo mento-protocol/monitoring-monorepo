@@ -3,7 +3,7 @@ title: Documentation Navigation Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-07-29
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -35,7 +35,8 @@ The versioned inputs are:
   before the first six-lane semantic garden in issues #1348–#1353.
 - `documentation-navigation-baseline-fixtures.json` — the frozen fixture
   contract used by that historical run. Current fixture changes never rewrite
-  either baseline artifact.
+  either baseline artifact. This pre-garden contract predates the live
+  headroom-reserve target and remains valid without it.
 
 The prompt deliberately omits accepted routes and historical-source traps. It
 starts from root `AGENTS.md` plus the generated `docs/README.md`, forbids the
@@ -155,8 +156,21 @@ Scores stay separate so a cheap strength cannot hide an expensive failure:
 - **Context bytes** — source bytes are recomputed per question and as a unique
   suite total. No question may exceed 45,000 additional source bytes and the
   complete run may not exceed 262,000 unique source bytes, including bootstrap
-  sources. Fixture validation also proves that the cheapest accepted route for
-  every question, and their unique union, fit those caps before a run begins.
+  sources. The live fixture reserves at least 32,768 bytes below the suite cap,
+  so normal documentation growth cannot consume the last few bytes unnoticed.
+  Fixture validation proves that the cheapest accepted route for every
+  question fits the per-question cap and that their unique union fits both the
+  suite cap and its reserve before a run begins.
+
+The 32 KiB reserve is an authoring margin, not extra model context. Do not raise
+the 262,000-byte cap to absorb normal documentation growth. Restore the reserve
+by routing questions through narrower canonical sources that still contain the
+required answer, and keep deeper authority as an accepted alternative when it
+remains valid. The first enforcement pass applied that rule to the two largest
+single-question selections: package-script refusal and PR readiness now share
+the PR operating card as their narrow route. Run
+`pnpm docs:navigation-eval -- --check-fixtures --json` to inspect the selected
+floor, required reserve, and remaining surplus.
 
 The scorer intentionally does not claim to grade arbitrary prose for semantic
 correctness. Canonical routing plus exact evidence makes the answer reviewable;

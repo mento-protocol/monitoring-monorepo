@@ -223,7 +223,14 @@ export function loadEvaluationContext(
       `documentation inventory failed:\n${inventory.errors.join("\n")}`,
     );
   }
-  const fixtureErrors = validateFixtureSuite(suite, inventory);
+  const baselineFixturesPath = path.resolve(
+    repoRoot,
+    options.baselineFixturesPath ?? DEFAULT_BASELINE_FIXTURES,
+  );
+  const fixtureErrors = validateFixtureSuite(suite, inventory, {
+    // The immutable pre-garden contract predates the live reserve target.
+    requireHeadroomReserve: fixturesPath !== baselineFixturesPath,
+  });
   if (fixtureErrors.length > 0) {
     throw new Error(
       `navigation fixtures are invalid:\n${fixtureErrors.join("\n")}`,
@@ -261,7 +268,9 @@ function validateHistoricalBaseline({ baselineSuite, baseline, repoRoot }) {
   const fixtureErrors =
     historicalInventory.errors.length > 0
       ? historicalInventory.errors
-      : validateFixtureSuite(baselineSuite, historicalInventory);
+      : validateFixtureSuite(baselineSuite, historicalInventory, {
+          requireHeadroomReserve: false,
+        });
   if (fixtureErrors.length > 0) {
     throw new Error(
       `committed navigation baseline fixtures are invalid:\n${fixtureErrors.join("\n")}`,
@@ -405,6 +414,12 @@ async function main() {
         total_unique_headroom_bytes:
           context.suite.targets.max_total_unique_source_bytes -
           contextFloor.total_unique_route_bytes,
+        min_total_unique_source_headroom_bytes:
+          context.suite.targets.min_total_unique_source_headroom_bytes,
+        total_unique_reserve_surplus_bytes:
+          context.suite.targets.max_total_unique_source_bytes -
+          contextFloor.total_unique_route_bytes -
+          context.suite.targets.min_total_unique_source_headroom_bytes,
       },
     };
     printObject(result, options.json);
