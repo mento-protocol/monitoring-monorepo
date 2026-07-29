@@ -150,9 +150,11 @@ command blocks a cleanup PR had removed (#1531).
   pointer behind. Duplicating the owner's text into the router is not a merge.
 - Prefer **Tighten** over **Update** when a section restates an authority; the
   correct edit is usually a shorter pointer, not a fresher copy.
-- Run `pnpm agent:context-budget --strict` before opening the gardening PR. The
-  caps ratchet down as files shrink, so a shard that consumes headroom needs the
-  same per-line justification even while the check still passes.
+- Run `pnpm agent:context-budget --strict` before opening the gardening PR.
+  Its caps are fixed constants (measured maximum plus ~35%, lowered manually
+  when files shrink, never raised), so a passing check is not permission to
+  consume freed headroom: a shard that grows a canonical file needs the same
+  per-line justification even while the check passes.
 
 ## Fresh-agent navigation evaluation
 

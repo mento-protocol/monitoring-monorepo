@@ -43,15 +43,14 @@ separate.
 
 ## Claude global-store shadowing
 
-In Claude Code sessions a user-global skill wins over a repo skill with the
-same name. Today that shadows this repo's `ship` and `babysit-pr`: Claude
-sessions load the user's generic implementations, while the repo copies stay
-canonical for Codex and carry the repo-specific cloud capability-gate
-adaptations (whose rules also live in
-[`github-tooling-surfaces.md`](github-tooling-surfaces.md), so Claude sessions
-lose no binding rule). This split is accepted deliberately; do not "fix" it by
-renaming either side. The user's global `forensic-report` copy was archived on
-2026-07-29 so the repo skill resolves everywhere.
+In a Claude Code session, a user-global skill wins over a repo skill with the
+same name, so personal `ship` or `babysit-pr` implementations shadow the repo
+copies when present. That is accepted: the repo copies stay canonical for
+Codex and for the cloud capability-gate adaptations, whose binding rules also
+live in [`github-tooling-surfaces.md`](github-tooling-surfaces.md), so a
+shadowed Claude session loses no rule. Do not resolve the collision by
+renaming either side; the running session's skill listing, not this note, is
+the runtime truth for which copy loaded.
 
 ## Codex Cloud routing
 

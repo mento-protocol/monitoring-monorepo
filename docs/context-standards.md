@@ -127,9 +127,11 @@ frontmatter for other managed Markdown.
   change.
 - Where a file already links an owning authority, keep at most a one-line gist.
   Never restate that authority's procedure, command block, or rule list.
-- Do not describe what code does. State the non-obvious constraint, and where a
-  linter, test, or CI gate enforces it, name the enforcing check instead of
-  restating its logic.
+- In agent instruction files (`AGENTS.md` and scoped routers), do not describe
+  what code does. State the non-obvious constraint, and where a linter, test,
+  or CI gate enforces it, name the enforcing check instead of restating its
+  logic. Reference documents such as `SPEC.md` and package READMEs still own
+  behavior and architecture descriptions.
 
 ## Change-coupled drift audit
 
