@@ -136,7 +136,9 @@ delivery time alone.
 
 Read every trading-limit input live at one pinned block and record:
 
-- monitored-token decimals;
+- `d_FPMM` from
+  `FPMM.getTradingLimits(monitoredToken).config.decimals`, plus an independent
+  `ERC20.decimals()` read; require an exact match or mark the asset **Blocked**;
 - positive enforced L0 and L1 limits in TradingLimitsV2's 15-decimal internal
   scale, converted to token units;
 - each window duration and current `netflow` and `lastUpdated` state;
@@ -169,40 +171,61 @@ windows do not constrain the minimum. If no positive limit is enforced,
 onboarding fails.
 
 Read both fees at the same pin and set `F = lpFee + protocolFee` in basis
-points. Require `0 <= F < Q`. For `C = D_net(S)`, monitored-token decimals
-`d`, and `Q = 10,000`, calculate the largest raw token input whose fee-adjusted
-fixed-15 netflow does not exceed `C` with integer arithmetic:
+points. Require `0 <= F < Q`, use `C = D_net(S)`, `Q = 10,000`, and use only
+the verified `d_FPMM` as `d`; never convert capacity through decimal floats or
+apply the fee before fixed-15 scaling.
+
+For `d <= 15`, calculate:
 
 ```text
 A_max = floor(C * Q / (Q - F))
-G_raw = ceil((A_max + 1) * 10^d / 10^15) - 1
-
-scale(x, d) = floor(x * 10^15 / 10^d)
-scale(G_raw, d) - floor(scale(G_raw, d) * F / Q) <= C
+G_mono = floor(A_max / 10^(15 - d))
 ```
 
-`G_raw` is the exact conservative gross-up for the contract's order of
-operations, including tokens with more than 15 decimals. Do not convert the
-capacity through decimal floats or apply the fee before fixed-15 scaling.
+`G_mono` bounds monotone monitored-token inflow only. For `d > 15`, default to
+**Blocked**. An exception needs a reviewed, independently enforceable bound
+`N` on successful calls that covers every swap during `S`, including zero-netflow
+and batched calls. With `k = 10^(d - 15)`, calculate
+`G_N = k * A_max + N * (k - 1)`. Do not quote `G_N` as one swap; model every
+successful transition sequentially.
 
-Quote each sequentially reachable portion of `G_raw` with
-`FPMM.getAmountOut(portion, monitoredToken)`, starting from the pinned state
-and advancing the modeled reserve and rebalance state after each portion. The
-quote already applies the total fee; do not subtract `F` a second time. The
-model must place flows across the relevant window boundaries and cannot replace
-a sequence with one oversized swap when a reserve or rebalance strategy can
-change state.
-Sum the quote-asset outputs. A static pool-reserve snapshot can cap loss only
-when every enabled liquidity or reserve strategy is proved unable to make that
-liquidity available during the response interval. A Reserve strategy can
-replenish or mint debt assets, so static reserves alone do not cap loss.
+Signed netflow permits counterflows to reopen capacity. Before relying on a
+monotone bound, require either a proof that no reachable reverse swap,
+rebalance, incentive-bearing transfer, or rate transition can leave the system
+at the same or lower signed netflow with more accumulated net quote-asset loss
+than the monotone path, or an exhaustive bounded bidirectional state-machine
+model covering limit resets and cooldowns. Without that proof or model, or
+with a positive effective rebate, mark the asset **Blocked**.
+
+At the pin, enumerate every enabled strategy from
+`LiquidityStrategyUpdated` history through that block; do not rely on one
+`rebalancerAddress`.
+For each strategy, record the per-pool
+`liquiditySourceIncentiveExpansion`, `liquiditySourceIncentiveContraction`,
+`protocolIncentiveExpansion`, `protocolIncentiveContraction`,
+`protocolFeeRecipient`, cooldown, reachability, source liquidity, and actual
+transfers. Mark the asset **Blocked** if any strategy cannot be conservatively
+reproduced. `FPMM.rebalanceIncentive` is an exchange-rate discount/tolerance,
+not a separate payout: model its effect through actual transfers and never
+double-count it. A static pool-reserve snapshot caps loss only when every
+enabled strategy proves unavailable during the response interval.
+
+For each sequentially reachable swap, call
+`FPMM.getAmountOut(portion, monitoredToken)` from the modeled state. Advance
+pool, limit, and strategy state after every successful swap or rebalance. The
+quote already applies the total fee; do not subtract `F` a second time. Define
+loss as **net** quote-asset outflow across a documented protected-system
+boundary: include quote inputs and outputs, mint/burn, and actual strategy
+transfers. Do not use a gross output sum. The model must place flows across the
+relevant window boundaries and cannot replace a sequence with one oversized
+swap when reserves or a strategy can change state.
 
 Record the calls or deterministic calculation. If an exact quote cannot be
 reproduced, use the manual par purchase value plus a documented conservative
 margin and keep the limitation explicit. The gate passes only when:
 
 ```text
-worst_case_quote_outflow(G_raw, sequential state model) <= B
+worst_case_net_quote_outflow(sequential state model) <= B
 ```
 
 The accountable treasury/risk owner must supply and approve `B`. Monitoring
