@@ -187,8 +187,9 @@ function HealthSummary({
     asset.asset.sources.length === 1
       ? `${asset.usableSourceCount} source usable`
       : `${asset.usableSourceCount} of ${asset.asset.sources.length} sources usable`;
-  const poolHealth =
-    asset.asset.monitors.length === 1
+  const poolHealth = !asset.structuralEvidenceCurrent
+    ? "Check expired"
+    : asset.asset.monitors.length === 1
       ? `${pools} pool reachable`
       : `${pools} of ${asset.asset.monitors.length} pools reachable`;
   const breakerHealth =

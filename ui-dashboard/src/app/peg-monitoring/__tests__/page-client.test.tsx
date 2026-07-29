@@ -184,6 +184,61 @@ describe("PegMonitoringPageClient", () => {
       container.querySelector('[data-testid="peg-current-europ-schuman"]'),
     ).toBeNull();
   });
+  it("expires structural checks while price evidence and the package remain current", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            policy: { ...item.policy, freshnessGraceSeconds: 60 },
+            sources: item.sources.map((source) => ({
+              ...source,
+              executablePrice:
+                source.id === item.policy.deepVenueSource
+                  ? 0.999
+                  : source.executablePrice,
+              deviationBps:
+                source.id === item.policy.deepVenueSource
+                  ? 10
+                  : source.deviationBps,
+              premiumBps:
+                source.id === item.policy.deepVenueSource
+                  ? 0
+                  : source.premiumBps,
+              policy: {
+                ...source.policy,
+                pollIntervalSeconds: Math.min(
+                  source.policy.pollIntervalSeconds,
+                  60,
+                ),
+              },
+            })),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+    expect(container.textContent).toContain("All pegs healthy");
+    expect(container.textContent).toContain("1 pool reachable");
+
+    act(() => vi.advanceTimersByTime(50_000));
+    expect(container.textContent).toContain("Current package");
+    expect(container.textContent).toContain("Monitoring checks incomplete");
+    expect(container.textContent).toContain("Check expired");
+    expect(container.textContent).toContain("3 of 3 sources usable");
+    expect(container.textContent).toContain(
+      "The structural checks are older than the policy's freshness window.",
+    );
+    expect(
+      container.querySelector('[data-testid="peg-current-europ-schuman"]'),
+    ).not.toBeNull();
+  });
   it("renders previous-policy, partial source evidence, disabled breaker, and null breaker distinctly", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;

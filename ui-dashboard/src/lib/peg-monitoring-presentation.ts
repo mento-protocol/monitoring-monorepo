@@ -12,6 +12,7 @@ export type PegAssetPresentation = {
   assetName: string;
   decisionSource: PegSource | null;
   deepSource: PegSource | null;
+  structuralEvidenceCurrent: boolean;
   usableSourceCount: number;
   distanceBps: number | null;
   direction: "below" | "above" | "at target" | null;
@@ -228,6 +229,7 @@ function uncertaintyReason(input: {
   usesPreviousPolicy: boolean;
   sourceUnavailable: boolean;
   sourceExpired: boolean;
+  structuralExpired: boolean;
   structuralUnavailable: boolean;
   breakerUnavailable: boolean;
 }): string | null {
@@ -238,6 +240,8 @@ function uncertaintyReason(input: {
     return "The policy-selected market observation is older than its allowed freshness window.";
   if (input.sourceUnavailable)
     return "The policy-selected market has no usable full-size price.";
+  if (input.structuralExpired)
+    return "The structural checks are older than the policy's freshness window.";
   if (input.structuralUnavailable)
     return "Structural or pool evidence is unavailable or incomplete.";
   if (input.breakerUnavailable)
@@ -247,6 +251,7 @@ function uncertaintyReason(input: {
 
 function safetyReasons(input: {
   structuralWarning: boolean;
+  structuralExpired: boolean;
   structuralUnavailable: boolean;
   sourceUnavailable: boolean;
   sourceExpired: boolean;
@@ -264,7 +269,11 @@ function safetyReasons(input: {
     );
   if (input.unsafeBreaker)
     reasons.push("A monitored breaker is disabled or tripped.");
-  if (input.structuralUnavailable)
+  if (input.structuralExpired)
+    reasons.push(
+      "The structural checks are older than the policy's freshness window.",
+    );
+  else if (input.structuralUnavailable)
     reasons.push(
       "Current structural or pool evidence is unavailable or incomplete.",
     );
@@ -291,9 +300,11 @@ function classifySafety(
   item: PegAssetPackage,
   selection: SourceSelection,
   context: PackageContext,
+  structuralExpired: boolean,
 ): SafetySignals {
-  const structuralWarning = isStructuralWarning(item);
-  const structuralUnavailable = hasUnavailableStructuralEvidence(item);
+  const structuralWarning = !structuralExpired && isStructuralWarning(item);
+  const structuralUnavailable =
+    structuralExpired || hasUnavailableStructuralEvidence(item);
   const sourceUnavailable = selection.decisionSource === null;
   const sourceWarning = isSourceWarning(item, selection.decisionSource);
   const breakerUnavailable = hasUnavailableBreaker(item);
@@ -321,11 +332,13 @@ function classifySafety(
       usesPreviousPolicy: context.usesPreviousPolicy,
       sourceUnavailable,
       sourceExpired: selection.sourceExpired,
+      structuralExpired,
       structuralUnavailable,
       breakerUnavailable,
     }),
     reasons: safetyReasons({
       structuralWarning,
+      structuralExpired,
       structuralUnavailable,
       sourceUnavailable,
       sourceExpired: selection.sourceExpired,
@@ -427,8 +440,11 @@ function describeDistance(
 function buildAssetPresentation(
   item: PegAssetPackage,
   context: PackageContext,
+  producedAtMs: number,
 ): PegAssetPresentation {
   const selection = selectSources(item, context.nowMs);
+  const structuralExpired =
+    context.nowMs - producedAtMs > item.policy.freshnessGraceSeconds * 1_000;
   return {
     asset: item,
     assetName: assetName(
@@ -437,11 +453,12 @@ function buildAssetPresentation(
     ),
     decisionSource: selection.decisionSource,
     deepSource: selection.deepSource,
+    structuralEvidenceCurrent: !structuralExpired,
     usableSourceCount: item.sources.filter(
       (source) => !sourceHasUnavailableEvidence(source, context.nowMs),
     ).length,
     ...describeDistance(item, selection),
-    ...classifySafety(item, selection, context),
+    ...classifySafety(item, selection, context, structuralExpired),
   };
 }
 
@@ -543,7 +560,9 @@ export function presentPegMonitoring(
   context: PackageContext,
 ): PegMonitoringPresentation {
   const assets = sortBySeverityAndDistance(
-    data.packages.map((item) => buildAssetPresentation(item, context)),
+    data.packages.map((item) =>
+      buildAssetPresentation(item, context, data.producedAt * 1_000),
+    ),
   );
   return {
     assets,

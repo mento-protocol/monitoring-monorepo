@@ -99,6 +99,49 @@ describe("presentPegMonitoring", () => {
     });
   });
 
+  it("expires structural evidence strictly after the asset freshness grace", () => {
+    const response = healthyResponse();
+    const item = response.packages[0]!;
+    const shortGrace = {
+      ...response,
+      packages: [
+        {
+          ...item,
+          policy: { ...item.policy, freshnessGraceSeconds: 60 },
+          sources: item.sources.map((source) => ({
+            ...source,
+            policy: {
+              ...source.policy,
+              pollIntervalSeconds: Math.min(
+                source.policy.pollIntervalSeconds,
+                60,
+              ),
+            },
+          })),
+        },
+      ],
+    };
+    const atBoundary = presentPegMonitoring(shortGrace, {
+      ...CURRENT_CONTEXT,
+      nowMs: (response.producedAt + 60) * 1_000,
+    });
+    const expired = presentPegMonitoring(shortGrace, {
+      ...CURRENT_CONTEXT,
+      nowMs: (response.producedAt + 61) * 1_000,
+    });
+
+    expect(atBoundary.aggregate.label).toBe("All pegs healthy");
+    expect(atBoundary.assets[0]?.structuralEvidenceCurrent).toBe(true);
+    expect(expired.aggregate.label).toBe("Monitoring checks incomplete");
+    expect(expired.assets[0]).toMatchObject({
+      decisionSource: expect.any(Object),
+      structuralEvidenceCurrent: false,
+      uncertain: true,
+      uncertaintyReason:
+        "The structural checks are older than the policy's freshness window.",
+    });
+  });
+
   it("marks a current deep critical reading and disabled breaker as a critical condition", () => {
     const response = healthyResponse();
     const item = response.packages[0]!;
