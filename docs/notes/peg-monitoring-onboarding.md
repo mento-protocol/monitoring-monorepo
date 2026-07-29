@@ -141,34 +141,29 @@ Read every trading-limit input live at one pinned block and record:
   `ERC20.decimals()` read; require an exact match or mark the asset **Blocked**;
 - positive enforced L0 and L1 limits in TradingLimitsV2's 15-decimal internal
   scale, converted to token units;
-- each window duration and current `netflow` and `lastUpdated` state;
+- each window duration and pinned `netflow` and `lastUpdated` state for
+  incident-specific diagnostics;
 - pool reserves, manual rate, fee parameters, and the exact quote method;
 - the approved end-to-end signer response SLA `S`; and
 - the treasury/risk-approved survivable quote-asset loss budget `B`.
 
-For each positive enforced window `i`, keep the limit `L_i` and the signed
-`netflow` value `n_i` in TradingLimitsV2's fixed-15 internal scale.
-`D_net(S)` is a bound on this fee-adjusted netflow, not a raw monitored-token
-amount. Let `W_i` be the window duration and evaluate its state at the pinned
-incident start time `t`:
+For persistent **Live** admission, prove the TradingLimitsV2 contract invariant
+`-L_i <= n_i <= L_i` for every positive enforced window `i`; otherwise mark the
+asset **Blocked**. Keep `L_i`, `n_i`, and window duration `W_i` in the contract's
+fixed-15 internal scale. `D_net(S)` is a bound on fee-adjusted netflow, not a
+raw monitored-token amount:
 
 ```text
-active_i = t <= lastUpdated_i + W_i
-R_i = max(0, L_i - n_i)       when active_i
-R_i = L_i                     when not active_i
-D_i(S) = R_i + L_i * ceil(S / W_i)
-D_net(S) = min(D_i(S) for every positive enforced window i)
+D_live,i(S) = 2L_i + L_i * ceil(S / W_i)
+D_net(S) = min(D_live,i(S) for every positive enforced window i)
 ```
 
-An active negative netflow increases the first partial-window capacity; for
-example, `n_i = -L_i` leaves `2L_i`. An expired window has `L_i` available
-because TradingLimitsV2 resets it on the next nonzero flow. The following full
-windows cover a boundary immediately after the incident begins. At equality,
-the old window remains active; reset requires strict expiry. If the pinned
-`netflow` or timestamp is unavailable or cannot be trusted, use
-`2L_i + L_i * ceil(S / W_i)` for that window instead. Disabled zero-valued
-windows do not constrain the minimum. If no positive limit is enforced,
-onboarding fails.
+`2L_i` covers the reachable active state `n_i = -L_i`; the ceiling term covers
+a reset immediately after the incident begins. At equality the old window is
+still active, and reset requires strict expiry. Pinned `n_i` and timestamps can
+support incident-specific diagnostics, but must never reduce persistent
+admission capacity. Disabled zero-valued windows do not constrain the minimum.
+If no positive limit is enforced, onboarding fails.
 
 Read both fees at the same pin and set `F = lpFee + protocolFee` in basis
 points. Require `0 <= F < Q`, use `C = D_net(S)`, `Q = 10,000`, and use only
@@ -193,9 +188,14 @@ Signed netflow permits counterflows to reopen capacity. Before relying on a
 monotone bound, require either a proof that no reachable reverse swap,
 rebalance, incentive-bearing transfer, or rate transition can leave the system
 at the same or lower signed netflow with more accumulated net quote-asset loss
-than the monotone path, or an exhaustive bounded bidirectional state-machine
-model covering limit resets and cooldowns. Without that proof or model, or
-with a positive effective rebate, mark the asset **Blocked**.
+than the monotone path, or a bounded bidirectional sequential state model.
+That model must start from every reachable pre-incident **Live** state, not
+only the pin, and maximize loss across mutable pool reserve, rate, limit,
+enabled strategy, cooldown, and source-liquidity state. If a mutable state can
+leave the modeled envelope without enforced fail-closed revocation or
+reapproval, maximize across its reachable range or keep the asset **Blocked**.
+Without that proof or model, or with a positive effective rebate, mark the
+asset **Blocked**.
 
 At the pin, enumerate every enabled strategy from
 `LiquidityStrategyUpdated` history through that block; do not rely on one
