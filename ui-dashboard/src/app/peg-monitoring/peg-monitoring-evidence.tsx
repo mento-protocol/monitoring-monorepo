@@ -9,6 +9,7 @@ import type {
   PegAssetPresentation,
   PegMonitoringPresentation,
 } from "@/lib/peg-monitoring-presentation";
+import { sourceHasUnavailableEvidence } from "@/lib/peg-monitoring-presentation-safety";
 import { buildPoolDetailHref } from "@/lib/routing";
 import {
   StatusPill,
@@ -144,14 +145,22 @@ function PreviousPolicyNotice({
 function DecisionMarket({
   asset,
   nowMs,
+  confirmedAtMs,
   stale,
 }: {
   asset: PegAssetPresentation;
   nowMs: number;
+  confirmedAtMs: number;
   stale: boolean;
 }): React.JSX.Element {
   const source = asset.deepSource;
-  const usable = asset.decisionSource !== null;
+  // A stale package remains evidence of the last confirmed check. Evaluate its
+  // source freshness at the package timestamp, rather than against the moving
+  // browser clock, just as we do for supporting markets.
+  const usable = !sourceHasUnavailableEvidence(
+    source,
+    stale ? confirmedAtMs : nowMs,
+  );
   return (
     <section
       data-testid={`peg-decision-market-${asset.asset.asset}`}
@@ -347,14 +356,6 @@ function poolCheckState(
       tone: "warn",
       text: "The last pool inflow check is too old to use.",
     };
-  if (structural.structuralQuerySaturated)
-    return {
-      label: "Check incomplete",
-      tone: "warn",
-      text: stale
-        ? "At the last confirmed check, the pool query reached its result limit."
-        : "The pool query reached its result limit, so the inflow check is incomplete.",
-    };
   if (!structural.indexedPoolReachable)
     return {
       label: "Pool unavailable",
@@ -362,6 +363,14 @@ function poolCheckState(
       text: stale
         ? "At the last confirmed check, the indexed pool could not be reached."
         : "The indexed pool could not be reached.",
+    };
+  if (structural.structuralQuerySaturated)
+    return {
+      label: "Check incomplete",
+      tone: "warn",
+      text: stale
+        ? "At the last confirmed check, the pool query reached its result limit."
+        : "The pool query reached its result limit, so the inflow check is incomplete.",
     };
 
   const saturation = structural.structuralSaturation;
@@ -374,8 +383,10 @@ function poolCheckState(
       : stale
         ? `At the last confirmed check, net pool inflow was at ${formatFraction(saturation)} of the active on-chain trading limit. Warn at ${warnAt}.`
         : `Net pool inflow is at ${formatFraction(saturation)} of the active on-chain trading limit. Warn at ${warnAt}.`;
-  return stale
-    ? { label: "Last confirmed", tone: "neutral", text }
+  if (stale) return { label: "Last confirmed", tone: "neutral", text };
+  return saturation !== null &&
+    saturation >= asset.asset.policy.structuralWarnFraction
+    ? { label: "Inflow warning", tone: "warn", text }
     : { label: "Reachable", tone: "good", text };
 }
 
@@ -492,7 +503,12 @@ function AssetEvidence({
         </div>
       ) : null}
       <div className="grid gap-4 lg:grid-cols-2">
-        <DecisionMarket asset={asset} nowMs={nowMs} stale={stale} />
+        <DecisionMarket
+          asset={asset}
+          nowMs={nowMs}
+          confirmedAtMs={confirmedAtMs}
+          stale={stale}
+        />
         <AlertSettings asset={asset} />
         <SafetyChecks asset={asset} stale={stale} />
       </div>

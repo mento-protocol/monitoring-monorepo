@@ -233,6 +233,47 @@ describe("PegMonitoringPageClient", () => {
     expect(supportingSource?.textContent).toContain("Last confirmed");
     expect(supportingSource?.textContent).not.toContain("Unavailable");
   });
+  it("keeps the decision-market sale measurement from the last confirmed package", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    vi.setSystemTime(PEG_FIXTURE_PRODUCED_AT * 1_000 + 50_000);
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.map((source) =>
+              source.id === item.policy.deepVenueSource
+                ? {
+                    ...source,
+                    policy: { ...source.policy, staleAfterSeconds: 30 },
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+    expect(container.textContent).toContain("Price check unavailable");
+
+    act(() => vi.advanceTimersByTime(50_000));
+    const decisionMarket = container.querySelector(
+      '[data-testid="peg-decision-market-europ-schuman"]',
+    );
+    expect(container.textContent).toContain(
+      "Data is stale — showing the last confirmed check",
+    );
+    expect(decisionMarket?.textContent).toContain("Last confirmed");
+    expect(decisionMarket?.textContent).toContain(
+      "At the last confirmed check, a 50,000 EUROP sale would have received about 0.9965 EUR per EUROP.",
+    );
+    expect(decisionMarket?.textContent).not.toContain("Unavailable");
+  });
   it("expires source evidence while its package is still current", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
@@ -717,6 +758,67 @@ describe("PegMonitoringPageClient", () => {
     };
     render();
     expect(container.textContent).not.toContain("Price conversion:");
+  });
+  it("prioritizes an unreachable pool over a saturated query in the safety summary", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            structural: {
+              ...item.structural,
+              indexedPoolReachable: false,
+              structuralQuerySaturated: true,
+            },
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+    const safety = container.querySelector(
+      '[data-testid="peg-safety-checks-europ-schuman"]',
+    );
+    expect(safety?.textContent).toContain("Pool unavailable");
+    expect(safety?.textContent).toContain(
+      "The indexed pool could not be reached.",
+    );
+    expect(safety?.textContent).not.toContain("Check incomplete");
+  });
+  it("labels a current trading-limit breach as a warning in the safety summary", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            structural: {
+              ...item.structural,
+              structuralSaturation: item.policy.structuralWarnFraction,
+            },
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+    const safety = container.querySelector(
+      '[data-testid="peg-safety-checks-europ-schuman"]',
+    );
+    expect(safety?.textContent).toContain("Inflow warning");
+    expect(safety?.textContent).toContain(
+      "Net pool inflow is at 80% of the active on-chain trading limit. Warn at 80%.",
+    );
+    expect(safety?.textContent).not.toContain("Reachable");
   });
   it("renders two monitors for one pool without duplicate React keys", () => {
     const response = makePegMonitoringResponse();
