@@ -17,6 +17,11 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import {
+  extractYamlBlock,
+  isTrustedComment,
+} from "./sentry-triage-project-core.mjs";
+
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_ORG = "mento-labs";
 export const DEFAULT_SENTRY_BASE_URL = "https://us.sentry.io";
@@ -252,6 +257,65 @@ export const FIX_REFUSED_LABEL = "sentry:fix-refused";
 export const APPROVED_ARCHIVE_LABEL = "sentry:approved-archive";
 export const ARCHIVED_LABEL = "sentry:archived";
 
+// Archive freshness baseline (issue #1371). The archive script records, in the
+// yaml block of its audit comment on the queue stub, the Sentry `lastSeen` it
+// observed immediately BEFORE it mutated the issue, plus the Sentry issue id it
+// mutated. `decideDedupAction` compares a regression's `lastSeen` against that
+// instant instead of the stub's `closedAt`: the close necessarily postdates any
+// event that landed while the archive ran, so a `closedAt` comparison would
+// evaluate false for that event permanently and bury a real regression until
+// some later event happened to arrive. These field names are the shared
+// contract with scripts/sentry-triage-archive.mjs (which imports them).
+export const ARCHIVE_BASELINE_FIELD = "archive_baseline_last_seen";
+export const ARCHIVE_BASELINE_ID_FIELD = "archive_baseline_sentry_issue_id";
+
+/** Read one scalar out of an audit-comment yaml block. Keys are fixed literals
+ * (no regex injection) written one per line as `key: "value"`. */
+function readBaselineField(block, key) {
+  const match = new RegExp(`^${key}:[ \\t]*(.+)$`, "m").exec(
+    String(block ?? ""),
+  );
+  if (!match) return "";
+  return match[1]
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .trim();
+}
+
+/**
+ * Parse the archive freshness baseline out of ONE comment body. Returns null
+ * when the comment carries no baseline field. The timestamp comes back RAW —
+ * validity is the caller's `Date.parse` gate — so a garbage value degrades to
+ * the `closedAt` fallback instead of throwing.
+ */
+export function parseArchiveBaseline(commentBody) {
+  const block = extractYamlBlock(commentBody);
+  if (!block) return null;
+  const lastSeen = readBaselineField(block, ARCHIVE_BASELINE_FIELD);
+  if (!lastSeen) return null;
+  return {
+    lastSeen,
+    sentryIssueId: readBaselineField(block, ARCHIVE_BASELINE_ID_FIELD),
+  };
+}
+
+/**
+ * Newest archive baseline across a stub's comments. This repo is public, so the
+ * same authorship fence the verdict parser applies holds here: only comments
+ * from the pipeline's own Actions bot count, or a drive-by commenter could post
+ * a far-future baseline and suppress every future regression reopen. Comments
+ * arrive oldest-first, so the last match wins (a re-archive supersedes).
+ */
+export function findArchiveBaseline(comments) {
+  let found = null;
+  for (const comment of comments ?? []) {
+    if (!isTrustedComment(comment)) continue;
+    const parsed = parseArchiveBaseline(comment?.body);
+    if (parsed) found = parsed;
+  }
+  return found;
+}
+
 // Stage B's verdict namespace, derived from the definitions above so the two
 // can't drift. A reopened regression must shed its previous verdict — the
 // old verdict described the old occurrence, and downstream consumers filter
@@ -316,8 +380,21 @@ export function indexQueueIssuesByShortId(issues) {
  * unparsable timestamps fail open toward triage (reopen): a wrongly
  * skipped regression is silent, a wrongly reopened one merely re-triages.
  * Closed match, not regressed -> skip (stays closed). No match -> create.
+ *
+ * An ARCHIVED stub (`sentry:archived`) compares against `archiveBaseline` — the
+ * Sentry `lastSeen` the archive leg observed just before it mutated the issue —
+ * instead of `closedAt` (issue #1371). The archive's close postdates any event
+ * that landed inside its mutation window, so `closedAt` would hide that event
+ * forever. A missing, unparsable, or non-date baseline falls back to the
+ * `closedAt` comparison, which keeps every stub archived before this contract
+ * existed working exactly as before.
  */
-export function decideDedupAction({ existingIssue, isRegressed, lastSeen }) {
+export function decideDedupAction({
+  existingIssue,
+  isRegressed,
+  lastSeen,
+  archiveBaseline = null,
+}) {
   if (!existingIssue) return { action: "create" };
   if (existingIssue.state === "OPEN") {
     return { action: "skip", reason: "already open" };
@@ -328,9 +405,19 @@ export function decideDedupAction({ existingIssue, isRegressed, lastSeen }) {
   // would order "…00.500Z" BEFORE "…00Z".
   const closedAtMs = Date.parse(existingIssue.closedAt ?? "");
   const lastSeenMs = Date.parse(lastSeen ?? "");
-  if (Number.isNaN(closedAtMs) || Number.isNaN(lastSeenMs)) {
-    return { action: "reopen" };
+  if (Number.isNaN(lastSeenMs)) return { action: "reopen" };
+
+  const isArchived = (existingIssue.labels ?? []).includes(ARCHIVED_LABEL);
+  const baselineMs = Date.parse(archiveBaseline ?? "");
+  if (isArchived && !Number.isNaN(baselineMs)) {
+    if (lastSeenMs > baselineMs) return { action: "reopen" };
+    return {
+      action: "skip",
+      reason: "archived, no events since the archive baseline",
+    };
   }
+
+  if (Number.isNaN(closedAtMs)) return { action: "reopen" };
   if (lastSeenMs > closedAtMs) return { action: "reopen" };
   return { action: "skip", reason: "closed, no events since close" };
 }
@@ -670,8 +757,9 @@ async function ensureLabelsExist(options) {
 }
 
 // Normalize a REST-API issue (lowercase `state`, `pull_request` marker on
-// PRs, `closed_at` for the regression-reopen timestamp gate) into the shape
-// decideDedupAction expects. Exported for tests.
+// PRs, `closed_at` for the regression-reopen timestamp gate, `labels` so the
+// archive-baseline branch can recognize a `sentry:archived` stub) into the
+// shape decideDedupAction expects. Exported for tests.
 export function normalizeRestIssues(pages) {
   return (pages ?? [])
     .flat()
@@ -681,6 +769,9 @@ export function normalizeRestIssues(pages) {
       title: issue.title ?? "",
       state: String(issue.state ?? "").toUpperCase(),
       closedAt: issue.closed_at ?? null,
+      labels: (issue.labels ?? [])
+        .map((label) => (typeof label === "string" ? label : label?.name))
+        .filter(Boolean),
     }));
 }
 
@@ -813,6 +904,21 @@ async function reopenQueueIssue(options, existingIssue, sentryIssue) {
   );
 }
 
+/**
+ * Read the archive freshness baseline off one queue stub. Only called for a
+ * CLOSED, regressed, `sentry:archived` stub, so the extra comment fetch is
+ * bounded to the handful of stubs the archive leg has actually settled. A fetch
+ * failure propagates: the caller counts it as a per-issue error and retries next
+ * run, which is safer than degrading to the `closedAt` comparison this baseline
+ * exists to replace.
+ */
+async function fetchArchiveBaseline(options, existingIssue) {
+  const pages = await ghPaginate(
+    `repos/${options.repo}/issues/${existingIssue.number}/comments`,
+  );
+  return findArchiveBaseline(pages.flat());
+}
+
 async function fetchTrackerComments(options) {
   // Same manual page loop as the dedup scan — parseable on any gh version
   // and safe past the 100-comment pagination boundary.
@@ -872,6 +978,7 @@ export async function runIngest(options, deps = {}) {
     createIssue = createQueueIssue,
     reopenIssue = reopenQueueIssue,
     postRunRecord = defaultPostRunRecord,
+    resolveArchiveBaseline = fetchArchiveBaseline,
     now = () => new Date(),
   } = deps;
 
@@ -894,10 +1001,21 @@ export async function runIngest(options, deps = {}) {
   for (const sentryIssue of merged.values()) {
     try {
       const existingIssue = existingByShortId.get(sentryIssue.shortId) ?? null;
+      // Only an archived, closed, regressed stub needs its audit comment read
+      // (issue #1371) — everything else decides off the labels/timestamps we
+      // already have.
+      const needsBaseline =
+        sentryIssue.isRegressed &&
+        existingIssue?.state === "CLOSED" &&
+        (existingIssue.labels ?? []).includes(ARCHIVED_LABEL);
+      const baseline = needsBaseline
+        ? await resolveArchiveBaseline(options, existingIssue)
+        : null;
       const decision = decideDedupAction({
         existingIssue,
         isRegressed: sentryIssue.isRegressed,
         lastSeen: sentryIssue.lastSeen,
+        archiveBaseline: baseline?.lastSeen ?? null,
       });
       if (decision.action === "skip") {
         counts.skippedExisting += 1;

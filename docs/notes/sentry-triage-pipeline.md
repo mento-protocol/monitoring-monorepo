@@ -109,6 +109,9 @@ bulk:
 - closed match with a regression whose `lastSeen` is newer than
   `closed_at`: reopen it, remove stale verdict/projection/archive labels, and
   restore `sentry:needs-triage`;
+- closed match carrying `sentry:archived`: compare `lastSeen` against the
+  archive freshness baseline instead of `closed_at` (see the archive section
+  below), falling back to `closed_at` when no parseable baseline exists;
 - other closed match: leave it closed.
 
 Missing or invalid timestamps fail toward re-triage. The strict timestamp gate
@@ -254,6 +257,37 @@ fresh triage. A later Sentry escalation also reopens and cleans the queue stub.
 The best-effort Sentry link-back note uses an endpoint absent from the public
 API reference; note failure is logged but never masks an otherwise successful
 archive.
+
+Ingest and archive run in separate concurrency groups, so two narrow races
+remain after the label re-reads above. Both are closed mechanically (issue
+#1371); a shared `concurrency:` group is deliberately NOT the fix, because
+GitHub keeps only one pending run per group and would silently drop a second
+human-approved archive queued behind a running ingest.
+
+**Consuming the approval is a compare-and-swap.** Settlement deletes
+`sentry:approved-archive` through
+`DELETE /repos/{repo}/issues/{n}/labels/sentry:approved-archive` — not
+`gh issue edit --remove-label`, which swallows the 404 — and only closes the
+stub if that delete succeeded. The label is the single token both writers
+contend for: ingest's regression reopen sheds it too, so a 404 means this run
+lost, and it aborts settlement and runs the same Sentry restore as the
+label-shed path. The cost of consuming before the close: a transient close
+failure can no longer be retried by `workflow_dispatch`, whose guard needs the
+approval label. It leaves the stub open with neither that label nor
+`sentry:archived`, so nothing re-triggers and the next ingest/triage cycle
+treats it as an ordinary open stub.
+
+**The archive records a freshness baseline.** Sentry's `substatus` lags a fresh
+event, so the regressed/escalating refusal can pass while an event is already in
+flight. The script captures the `lastSeen` it read before the mutation, re-reads
+it once after the PUT, and — if it moved — restores the Sentry issue, comments,
+and exits 0 without settling. The baseline also lands in the audit comment as a
+machine-readable `archive_baseline_last_seen` (plus the Sentry issue id), which
+is what ingest's reopen gate compares against. That matters because the
+archive's close necessarily postdates any event that arrived inside the mutation
+window: a `closed_at` comparison would evaluate false for that event forever and
+bury it until some later event happened to arrive. A missing or unparsable
+baseline falls back to `closed_at`.
 
 ## Operator runbook
 

@@ -7,8 +7,10 @@ import {
   buildRestorePayload,
   isActivelyRegressing,
   isAlreadyArchived,
+  isNotFoundError,
   isNumericId,
   isSafeSentryPermalink,
+  lastSeenMoved,
   parseArgs,
   parseStubMetadata,
   resolveArchiveToken,
@@ -18,6 +20,7 @@ import {
   sanitizeApprover,
   stubIsArchivable,
 } from "./sentry-triage-archive.mjs";
+import { parseArchiveBaseline } from "./sentry-triage-ingest.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -139,7 +142,7 @@ function makeStub({
   };
 }
 
-function makeRunGh({ stub, settleStub = null }) {
+function makeRunGh({ stub, settleStub = null, approvalLabelGone = false }) {
   const calls = [];
   let views = 0;
   const runGh = async (args) => {
@@ -154,6 +157,17 @@ function makeRunGh({ stub, settleStub = null }) {
       return JSON.stringify(snapshot);
     }
     if (a0 === "label" && a1 === "create") return "";
+    // The approval-marker compare-and-swap. `approvalLabelGone` models the loser
+    // of the race: ingest's regression reopen already shed the label, so GitHub
+    // answers 404 exactly as `gh api` surfaces it.
+    if (a0 === "api" && a1 === "-X") {
+      if (approvalLabelGone) {
+        throw new Error(
+          `gh ${args.join(" ")} failed with exit 1:\ngh: Not Found (HTTP 404)`,
+        );
+      }
+      return "";
+    }
     if (
       a0 === "issue" &&
       (a1 === "comment" || a1 === "edit" || a1 === "close")
@@ -178,15 +192,21 @@ function jsonResponse(
   };
 }
 
+const BASELINE_LAST_SEEN = "2026-07-19T11:59:00.000Z";
+
 function makeFetch({
-  issue = { status: "unresolved" },
+  issue = { status: "unresolved", lastSeen: BASELINE_LAST_SEEN },
   archive = { ok: true },
   linkback = { ok: true },
   resolveShortId = { groupId: "6197137101" },
+  // ISO timestamp a Sentry event stamps onto the issue during the archive PUT,
+  // modelling an event that lands inside the mutation window (issue #1371).
+  eventDuringArchive = null,
 } = {}) {
   const calls = [];
   // Stateful: a successful PUT transitions the issue so a later GET (the
-  // idempotency re-check / compensation re-fetch) observes the new state.
+  // freshness re-check / idempotency re-check / compensation re-fetch) observes
+  // the new state. Non-status fields (notably `lastSeen`) carry over.
   let currentIssue = { ...issue };
   const fetchImpl = async (url, init = {}) => {
     const method = init.method ?? "GET";
@@ -203,7 +223,12 @@ function makeFetch({
     }
     if (method === "PUT" && /\/issues\/[^/]+\/$/.test(url)) {
       if (archive.ok && body) {
-        currentIssue = { status: body.status, substatus: body.substatus };
+        currentIssue = {
+          ...currentIssue,
+          status: body.status,
+          substatus: body.substatus,
+        };
+        if (eventDuringArchive) currentIssue.lastSeen = eventDuringArchive;
       }
       return jsonResponse(
         {},
@@ -534,6 +559,11 @@ function ghCall(calls, sub) {
   return calls.find((args) => args[0] === "issue" && args[1] === sub);
 }
 
+/** The approval-marker compare-and-swap: `gh api -X DELETE .../labels/<name>`. */
+function casCall(calls) {
+  return calls.find((args) => args[0] === "api" && args[2] === "DELETE");
+}
+
 await test("runArchive happy path archives and settles the queue stub", async () => {
   const stub = makeStub();
   const { runGh, calls: ghCalls } = makeRunGh({ stub });
@@ -560,10 +590,16 @@ await test("runArchive happy path archives and settles the queue stub", async ()
   const put = fetchCalls.find((c) => c.method === "PUT");
   assertDeepEqual(put.body, ARCHIVE_PAYLOAD);
 
-  // gh: label self-heal + audit comment + label swap + close.
+  // gh: label self-heal + approval CAS + audit comment + close + terminal marker.
   assert(
     ghCalls.some((a) => a[0] === "label" && a[1] === "create"),
     "labels are self-healed",
+  );
+  const cas = casCall(ghCalls);
+  assert(cas, "the approval marker is consumed via an observable DELETE");
+  assertEqual(
+    cas[3],
+    "repos/mento-protocol/monitoring-monorepo/issues/42/labels/sentry:approved-archive",
   );
   const comment = ghCall(ghCalls, "comment");
   assert(comment, "audit comment posted");
@@ -573,12 +609,19 @@ await test("runArchive happy path archives and settles the queue stub", async ()
   );
   const edit = ghCall(ghCalls, "edit");
   assertEqual(edit[edit.indexOf("--add-label") + 1], "sentry:archived");
-  assertEqual(
-    edit[edit.indexOf("--remove-label") + 1],
-    "sentry:approved-archive",
+  assert(
+    !edit.includes("--remove-label"),
+    "the approval marker is consumed by the CAS, not by the label edit",
   );
   const close = ghCall(ghCalls, "close");
   assertEqual(close[close.indexOf("--reason") + 1], "completed");
+
+  // Ordering is the whole point of the CAS: consume the approval BEFORE the
+  // close, so a reopen that lands in the window loses the race observably.
+  assert(
+    ghCalls.indexOf(cas) < ghCalls.indexOf(close),
+    "the CAS must precede the close",
+  );
 
   // The Sentry token must never appear in a gh argument.
   assert(
@@ -883,11 +926,12 @@ await test("runArchive tolerates a non-ok link-back response", async () => {
   assertEqual(result.status, "archived");
 });
 
-await test("runArchive keeps the approval label when the stub close fails", async () => {
-  // A transient close failure must NOT have already removed
-  // sentry:approved-archive — otherwise the workflow_dispatch retry guard would
-  // refuse the stranded open stub. The close runs BEFORE the label swap, so a
-  // failed close means the approval-consuming edit never ran.
+await test("a failed close leaves the stub open without approval or archived markers", async () => {
+  // The CAS consumes sentry:approved-archive before the close, so a transient
+  // close failure can no longer be retried via workflow_dispatch (its guard
+  // needs that label). The property that survives: the stub is left OPEN with
+  // neither the approval marker (nothing re-triggers the labeled workflow) nor
+  // sentry:archived, so the next ingest/triage cycle handles it normally.
   const stub = makeStub();
   const calls = [];
   const runGh = async (args) => {
@@ -895,6 +939,7 @@ await test("runArchive keeps the approval label when the stub close fails", asyn
     const [a0, a1] = args;
     if (a0 === "issue" && a1 === "view") return JSON.stringify(stub);
     if (a0 === "label" && a1 === "create") return "";
+    if (a0 === "api" && a1 === "-X") return "";
     if (a0 === "issue" && a1 === "close") {
       throw new Error("gh issue close failed: HTTP 500");
     }
@@ -908,11 +953,189 @@ await test("runArchive keeps the approval label when the stub close fails", asyn
     /close failed/,
   );
 
+  assert(casCall(calls), "the approval marker was consumed before the close");
   const editCall = calls.find((a) => a[0] === "issue" && a[1] === "edit");
-  assert(
-    !editCall,
-    "the approval-removing label swap must not run before a successful close",
+  assert(!editCall, "sentry:archived must not be applied without a close");
+});
+
+// ---------------------------------------------------------------------------
+// Approval-marker compare-and-swap (issue #1371, race A).
+// ---------------------------------------------------------------------------
+
+await test("isNotFoundError recognizes a gh 404 and nothing else", () => {
+  assertEqual(
+    isNotFoundError(
+      new Error("gh api failed with exit 1:\ngh: Not Found (HTTP 404)"),
+    ),
+    true,
   );
+  assertEqual(
+    isNotFoundError(new Error("HTTP 500 Internal Server Error")),
+    false,
+  );
+  assertEqual(isNotFoundError(new Error("connection reset")), false);
+  assertEqual(isNotFoundError("not an error"), false);
+});
+
+await test("losing the approval CAS aborts settlement and reverts the archive", async () => {
+  // The pre-settlement re-read still shows a fully-labeled stub, but ingest's
+  // regression reopen sheds sentry:approved-archive in the sub-second window
+  // before the close. The DELETE 404s, so this run lost: nothing is closed or
+  // marked archived, and the Sentry archive it just made is undone.
+  const stub = makeStub();
+  const { runGh, calls: ghCalls } = makeRunGh({
+    stub,
+    approvalLabelGone: true,
+  });
+  const { fetchImpl, calls: fetchCalls } = makeFetch();
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "reverted-reopened");
+  assert(casCall(ghCalls), "the CAS was attempted");
+  assert(!ghCall(ghCalls, "close"), "must not close after losing the CAS");
+  assert(!ghCall(ghCalls, "edit"), "must not apply sentry:archived");
+  assert(!ghCall(ghCalls, "comment"), "must not post an audit comment");
+  const puts = fetchCalls.filter((c) => c.method === "PUT");
+  assertEqual(puts.length, 2);
+  assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
+  assertDeepEqual(puts[1].body, { status: "unresolved" });
+});
+
+await test("a non-404 CAS failure stays loud", async () => {
+  const stub = makeStub();
+  const runGh = async (args) => {
+    const [a0, a1] = args;
+    if (a0 === "issue" && a1 === "view") return JSON.stringify(stub);
+    if (a0 === "label" && a1 === "create") return "";
+    if (a0 === "api" && a1 === "-X") {
+      throw new Error("gh api failed with exit 1:\ngh: HTTP 503");
+    }
+    throw new Error(`unexpected gh call: ${args.join(" ")}`);
+  };
+  const { fetchImpl } = makeFetch();
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /503/,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Post-mutation freshness re-check (issue #1371, race B).
+// ---------------------------------------------------------------------------
+
+await test("lastSeenMoved compares timestamps and ignores unparsable input", () => {
+  assertEqual(
+    lastSeenMoved("2026-07-19T11:59:00Z", "2026-07-19T11:59:30Z"),
+    true,
+  );
+  // Fractional seconds must compare numerically, not lexically.
+  assertEqual(
+    lastSeenMoved("2026-07-19T11:59:00Z", "2026-07-19T11:59:00.500Z"),
+    true,
+  );
+  assertEqual(
+    lastSeenMoved("2026-07-19T11:59:00Z", "2026-07-19T11:59:00Z"),
+    false,
+  );
+  assertEqual(
+    lastSeenMoved("2026-07-19T11:59:30Z", "2026-07-19T11:59:00Z"),
+    false,
+  );
+  assertEqual(lastSeenMoved(null, "2026-07-19T11:59:30Z"), false);
+  assertEqual(lastSeenMoved("2026-07-19T11:59:00Z", undefined), false);
+  assertEqual(lastSeenMoved("garbage", "also garbage"), false);
+});
+
+await test("an event landing inside the mutation window reverts and refuses", async () => {
+  // Sentry's substatus lags a fresh event, so the live-regression guard passes
+  // while an event is already in flight. The post-PUT lastSeen moved, so the
+  // archive is undone and the stub is left open — closing it here would put the
+  // close after the event and the reopen gate would never fire for it.
+  const stub = makeStub();
+  const { runGh, calls: ghCalls } = makeRunGh({ stub });
+  const { fetchImpl, calls: fetchCalls } = makeFetch({
+    eventDuringArchive: "2026-07-19T11:59:45.000Z",
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "reverted-fresh-events");
+  const puts = fetchCalls.filter((c) => c.method === "PUT");
+  assertEqual(puts.length, 2);
+  assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
+  assertDeepEqual(puts[1].body, { status: "unresolved" });
+  assert(!ghCall(ghCalls, "close"), "must not close over the fresh event");
+  assert(!casCall(ghCalls), "must not consume the human approval");
+  assert(
+    !fetchCalls.some((c) => c.method === "POST"),
+    "no Sentry link-back for an archive that was reverted",
+  );
+  const comment = ghCall(ghCalls, "comment");
+  assert(comment, "posts a refusal comment");
+  assert(
+    comment[comment.indexOf("--body") + 1].includes("Not archived."),
+    "the refusal explains why",
+  );
+});
+
+await test("an unchanged lastSeen proceeds to a normal settlement", async () => {
+  const stub = makeStub();
+  const { runGh, calls: ghCalls } = makeRunGh({ stub });
+  const { fetchImpl, calls: fetchCalls } = makeFetch();
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "archived");
+  assertEqual(fetchCalls.filter((c) => c.method === "PUT").length, 1);
+  assert(ghCall(ghCalls, "close"), "the stub settles normally");
+});
+
+await test("the audit comment's baseline round-trips through the ingest parser", async () => {
+  const stub = makeStub();
+  const { runGh, calls: ghCalls } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch();
+
+  await runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW });
+
+  const comment = ghCall(ghCalls, "comment");
+  const body = comment[comment.indexOf("--body") + 1];
+  const parsed = parseArchiveBaseline(body);
+  assert(parsed, "the audit comment must carry a parseable baseline");
+  assertEqual(parsed.lastSeen, BASELINE_LAST_SEEN);
+  assertEqual(parsed.sentryIssueId, "6197137101");
+  // The baseline is the pre-mutation lastSeen, which is what the ingest reopen
+  // gate needs — not the close timestamp.
+  assertEqual(
+    Date.parse(parsed.lastSeen) < Date.parse(FIXED_NOW().toISOString()),
+    true,
+  );
+});
+
+await test("a missing Sentry lastSeen records an empty, ignorable baseline", async () => {
+  // Degrades to the closedAt fallback on the ingest side rather than writing a
+  // bogus timestamp that would suppress a real reopen.
+  const stub = makeStub();
+  const { runGh, calls: ghCalls } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch({ issue: { status: "unresolved" } });
+
+  await runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW });
+
+  const comment = ghCall(ghCalls, "comment");
+  const body = comment[comment.indexOf("--body") + 1];
+  assertEqual(parseArchiveBaseline(body), null);
 });
 
 await test("runArchive does not double-post the audit comment on retry", async () => {
