@@ -26,7 +26,7 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 
 ## Version baseline
 
-- Treat this repo as HyperIndex V3-first. Verify the exact installed package with `pnpm --filter @mento-protocol/indexer-envio exec envio --version`; the pinned version in `indexer-envio/package.json` is `envio@3.2.1`.
+- Treat this repo as HyperIndex V3-first. Resolve the exact installed package with `pnpm --filter @mento-protocol/indexer-envio exec envio --version` instead of trusting a version literal in docs, notes, or memory.
 - V3 preload optimization is always on. There is no `preload_handlers:` config flag, and loader-era patterns should be translated into normal handler code.
 - V3 handlers run twice: a concurrent preload pass for reads/effects, then an
   ordered processing pass for writes. Before changing a handler or RPC effect,
@@ -40,20 +40,12 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 
 - Org: `mento-protocol`, indexer: `mento`
 - Deploy branch: `envio` (multichain Celo + Monad + Polygon, plus Ethereum reserve-yield events)
-- Wrapper scripts (always prefer these over raw CLI inside this repo):
-
-```bash
-pnpm deploy:indexer [--yes]         # Push HEAD to `envio` → Envio auto-builds
-pnpm deploy:indexer:status [<commit>] [--watch] [--compact] [--json]
-pnpm deploy:indexer:metrics [<commit>] [--json]
-pnpm deploy:indexer:info [<commit>]
-pnpm deploy:indexer:perf [<commit>] [--json]
-pnpm deploy:indexer:verify [<commit>] [--prod] [--json]
-pnpm deploy:indexer:promote [<commit>]
-pnpm deploy:indexer:logs [<commit>] [--follow] [--errors-only] [--build]
-pnpm deploy:indexer:rollback <commit> [--dry-run]
-```
-
+- Always prefer the repo wrappers over the raw CLI so org/indexer defaults and
+  guards stay centralized: `pnpm deploy:indexer` plus
+  `pnpm deploy:indexer:{status,metrics,info,perf,verify,promote,logs,rollback}`.
+  The companion wrappers take a `<commit>` (optional except for `rollback`);
+  `pnpm deploy:indexer` itself always deploys the checked-out `HEAD` and takes
+  no commit argument. Check each script for its flags.
 - Dashboard: <https://envio.dev/app/mento-protocol/mento>
 
 ## Deployment lifecycle
@@ -111,88 +103,42 @@ Progress math for a per-chain % estimate: `(latest_processed_block - start_block
 ## Logs
 
 ```bash
-pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # explicitly marked runtime errors
-pnpm deploy:indexer:logs <commit> --build        # registered build logs
-pnpm deploy:indexer:logs <commit> --follow       # tail every 10s
+pnpm deploy:indexer:logs <commit> --errors-only --since 2h
 ```
 
-`envio-cloud` defaults to 100 log lines and supports `--limit` up to 100. The
-wrapper normally passes that flag through. `--errors-only` owns the limit,
-queries the maximum 100-record page, and fails closed if Envio fills it because
-the rest of the requested window cannot be inspected. Narrow `--since` and
-retry; do not combine `--limit` with `--errors-only`. The mode uses the
-wrapper's local JSON filter because Envio's `--level error` can retain
-stdout-carried records;
-`--level` remains useful for broad provider-level inspection. `--build` selects
-build-time logs. If the target never registers, do not substitute an
+`--errors-only` owns the limit: it queries Envio's maximum 100-record page and
+**fails closed** when Envio fills it, because the rest of the requested window
+cannot be inspected. Narrow `--since` and retry; do not combine `--limit` with
+`--errors-only`. The mode uses the wrapper's local JSON filter because Envio's
+`--level error` can retain stdout-carried records; `--level` remains useful for
+broad provider-level inspection. `--build` selects build-time logs and
+`--follow` tails every 10s. If the target never registers, do not substitute an
 unscoped older deployment's logs; use the registration diagnostic and Envio UI.
 
 ## `envio-cloud` CLI
 
-```bash
-pnpm exec envio-cloud --help
-pnpm exec envio-cloud indexer get mento mento-protocol -o json
-pnpm exec envio-cloud deployment status mento <commit> mento-protocol -o json
-pnpm exec envio-cloud deployment endpoint mento <commit> mento-protocol
-pnpm exec envio-cloud indexer env list mento mento-protocol
-```
-
 Use the workspace-pinned CLI and its current `--help`; `envio-cloud` is still
-pre-1.0. Prefer repo wrappers for deploy, verify, promote, rollback, logs,
-metrics, and info so org/indexer defaults and guards stay centralized.
+pre-1.0. Prefer the repo wrappers for deploy, verify, promote, rollback, logs,
+metrics, and info, and reach for raw subcommands (`indexer get`,
+`deployment status`, `deployment endpoint`, `indexer env list`) only for reads
+the wrappers do not cover — for example
+`pnpm exec envio-cloud indexer get mento mento-protocol -o json`.
+
 `envio-cloud indexer env list` masks values by default. Its `--show-values`
 form reveals raw `ENVIO_*` secrets; run that only when explicitly required and
 never paste or quote the output in chat, PRs, logs, or docs.
 
 For CI, set `ENVIO_GITHUB_TOKEN` to skip interactive login.
 
-## Local dev (`envio` CLI)
+## Local dev and performance
 
-Run from `indexer-envio/`:
+Local dev commands (codegen, `envio dev`, the Docker Postgres+Hasura stack,
+tests) are owned by `indexer-envio/AGENTS.md` and the package README; run
+`pnpm indexer:codegen` after schema, config, or handler-reachability edits.
 
-```bash
-pnpm codegen          # Regenerate types from schema.graphql + config.*.yaml — always run after schema/config edits
-pnpm dev              # `envio dev`: Docker up (Postgres+Hasura) + hot-reload indexer
-pnpm start            # `envio start`: starts without hot reload; current v3 CLI also runs codegen
-pnpm stop             # Stop Docker and drop the local DB
-pnpm test             # vitest (`vitest run`)
-```
-
-Testnet config is selected via the env-wrapped script in `scripts/run-envio-with-env.mjs`; mainnet uses `config.multichain.mainnet.yaml` by default.
-
-## Local performance triage before hosted re-sync
-
-Before pushing a handler/schema/config change that may trigger an expensive hosted replay, do a cheap local perf pass:
-
-```bash
-cd indexer-envio
-INDEXER_PERF=1 INDEXER_PERF_LOG_INTERVAL_EVENTS=5000 \
-ENVIO_INDEXER_PORT=9898 \
-pnpm dev --config config.multichain.mainnet.yaml --restart
-```
-
-In another shell:
-
-```bash
-pnpm exec envio metrics
-pnpm exec envio metrics runtime
-pnpm exec envio tools search-docs "getWhere multiple fields"
-curl -s http://127.0.0.1:9898/console/state
-curl -s http://127.0.0.1:9898/metrics | rg 'envio_(preload|processing|effect|storage|fetching|progress)'
-```
-
-Notes:
-
-- `envio metrics` reads the running indexer's Prometheus endpoint at `127.0.0.1:9898/metrics`; set `ENVIO_INDEXER_PORT` (or legacy `METRICS_PORT`) if using a different port.
-- `envio metrics runtime` reads the running indexer's `/metrics/runtime` endpoint; use it alongside Prometheus metrics when handler/effect timing is the question.
-- `envio tools search-docs <query>` and `envio tools fetch-docs <url>` are available in `envio@3.2.1`; prefer them over web search for quick HyperIndex API checks.
-- `https://envio.dev/console` can inspect the local dev server; the local server exposes `/console/state` and CORS-allows the Envio app.
-- Public docs may lag the installed CLI. In `envio@3.2.1`, `envio metrics` and `envio metrics runtime` exist; `envio benchmark-summary` does not.
-- Watch these generic metrics first: `envio_processing_handler_seconds`, `envio_preload_handler_seconds`, `envio_preload_handler_seconds_total`, `envio_effect_call_seconds_total`, `envio_effect_call_total`, `envio_effect_active_calls`, `envio_effect_queue*`, `envio_storage_load_seconds_total`, `envio_storage_write_seconds`, `envio_fetching_block_range_*`, `envio_progress_events`.
-- Combine Envio metrics with this repo's `INDEXER_PERF=1` logs. The repo profiler adds handler/effect/entity summaries and a derived `hit~` count (`effect requests - effect handler executions`) that helps detect preload/cache reuse.
-- Apply `docs/pr-checklists/indexer-handler-invariants.md` before moving any
-  effect or preload guard; it distinguishes batchable calls from ordered-state
-  exceptions and owns the required regression coverage.
+Before pushing a handler/schema/config change that may trigger an expensive
+hosted replay, do a cheap local perf pass: [`performance.md`](performance.md)
+has the run commands, the metrics to watch first, and the profiler notes.
 
 ## Gotchas
 
@@ -205,22 +151,8 @@ Notes:
 - **Don't set generic `ENVIO_RPC_URL` in multichain mode** — it routes every chain to the same RPC. Use `ENVIO_RPC_URL_<chainId>` (e.g. `ENVIO_RPC_URL_42220`).
 - **Celo Sepolia / Monad Testnet may fall back to RPC** instead of HyperSync. Slower but works; set `ENVIO_API_TOKEN` for HyperRPC access on testnets.
 - **HyperRPC does NOT support `eth_call`** — only event sync (HyperSync) + a subset of chain-info methods (`eth_blockNumber` etc.). Contract reads in handlers (`client.readContract`, `getBreakers()`, `getReserves()`, etc.) MUST use a full-node RPC (`forno.celo.org` for Celo, `rpc2.monad.xyz` / quiknode for Monad). The constraint is hard-documented in `indexer-envio/src/rpc/client.ts` near `RPC_CONFIG_BY_CHAIN`. Don't suggest "switch to HyperRPC for archive depth" as a perf lever — it won't run the call shape we need at all.
-- **dRPC public JSON-RPC batches are capped at three calls.** The repo applies
-  `{ batchSize: 3 }` to exact `drpc.org` hosts; do not replace it with viem's
-  default 1,000-call batch. The first tracked `OracleReported` or
-  `OracleReportRemoved` for a feed performs one exact-boundary `getTimestamps`
-  bootstrap. A feed with referencing pool state persisted before the block uses
-  the parent boundary. Otherwise use exact block-close timestamps and expiry,
-  absorbing that block's logs so a report before deployment or feed self-heal
-  cannot be lost. Raw global/token expiry comes from the same boundary.
-  Later blocks update persisted `OracleFeedState` in log order, while
-  `MedianUpdated` consumes that state. Never restore traffic-scaled
-  `medianTimestamp` or `reportExpiry` calls. Bootstrap raw global/token expiry
-  once into `OracleExpiryState`, then apply both expiry events in block/log
-  order; a zero token value must derive the persisted global fallback, never a
-  block-close RPC that can import a later same-block log. Never-tracked feeds
-  perform no expiry RPC. A missing or malformed bootstrap fails before writes
-  and taints the candidate for a clean replay.
+- **dRPC batch caps and the SortedOracles bootstrap are checklist-owned.** Apply
+  `docs/pr-checklists/indexer-handler-invariants.md` before touching those RPC paths.
 - **Effect rate limits are global to each created effect object.** A provider-
   specific cap in this multichain indexer must be routed through distinct
   chain/provider-scoped effect objects. Keep preload and processing on the same
@@ -238,25 +170,21 @@ Notes:
 
 ## Monitoring playbook (agentic)
 
-When asked to "monitor the latest deployment until ready to promote":
+"Monitor the latest deployment until ready to promote" runs the Phase 2–3
+contract in [`../deploy-indexer/SKILL.md`](../deploy-indexer/SKILL.md): find the
+newest `prod_status !== "prod"` entry with
+`pnpm exec envio-cloud indexer get mento mento-protocol -o json` (three live
+entries means there is no room for a new deployment; no record for
+`git rev-parse origin/envio` means the build is still pending or failed), watch
+it with `pnpm deploy:indexer:status <commit> --watch --compact`, classify
+caught-up as `SYNCED_PENDING_DATA_VERIFY`, then run
+`pnpm deploy:indexer:verify <commit>`.
 
-1. `pnpm exec envio-cloud indexer get mento mento-protocol -o json` — required to surface `deployments[]` + `prod_status`. Filter for the newest entry where `prod_status !== "prod"`. (`pnpm deploy:indexer:info <commit>` is the wrapper for inspecting a specific known commit, not for the "find newest pending" step.) If no pending deployment exists, count `deployments[]` first: three live entries means Envio has no room for a new deployment and you must delete, or ask the user to delete, an obsolete non-prod deployment before retrying. If fewer than three deployments exist, cross-check `git rev-parse origin/envio` — if the branch HEAD commit has no deployment record, the build is still pending (or failed → check `--build` logs).
-2. Run `pnpm deploy:indexer:status <commit> --watch --compact`; the wrapper
-   owns registration diagnostics and polling. Enforce the separate sync
-   deadline in the active agent/monitor.
-3. Caught-up condition: every chain in `data[]` has a non-empty `timestamp_caught_up_to_head_or_endblock`; classify this as `SYNCED_PENDING_DATA_VERIFY`.
-4. Run `pnpm deploy:indexer:verify <commit>` to batch status, metrics, endpoint resolution, core rows, and Polygon replay semantics before promotion. Polygon semantic failures are never waived by `--allow-syncing`.
-5. A passing verifier yields `VERIFIED_PENDING_PROMOTION`, not permission to
-   run the promote wrapper by itself. If this monitor belongs to an active
-   `/deploy-indexer` run, return control to Phase 4 so it captures prior prod
-   and completes promotion, propagation, and UI verification after explicit
-   authorization.
-6. Otherwise treat the candidate's provenance as unclassified. With explicit
-   production authorization, route it through
-   `/deploy-indexer --resume-preload <commit>`; that guarded continuation binds
-   protected main to the canonical repository, checks tree equality, reconfirms
-   sync, and executes Phases 3–6. Never suggest a bare
-   `pnpm deploy:indexer:promote` command as monitor closeout.
+A passing verifier yields `VERIFIED_PENDING_PROMOTION`, not permission to
+promote: return control to the active `/deploy-indexer` run, or route an
+unclassified candidate through `/deploy-indexer --resume-preload <commit>` after
+explicit production authorization. Never suggest a bare
+`pnpm deploy:indexer:promote` as monitor closeout.
 
 ## Useful links
 

@@ -20,24 +20,12 @@ repo command, not a hand-rolled interpretation of green checks.
 
 ## Surface Detection
 
-Pick the path before the first GitHub call; the full gh→MCP mapping and the
-reasoning live in
-[`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md).
-
-- **Local session or Codex Cloud** (no `CLAUDE_CODE_REMOTE`): gh works. Use
-  the sections below as written — `pnpm pr:ready-state` is the readiness
-  source of truth.
-- **Claude cloud session** (`CLAUDE_CODE_REMOTE` set): the platform's GitHub
-  credential proxy blocks gh's API paths regardless of tokens or allowlist
-  entries, and `pnpm pr:ready-state` cannot run. Follow
-  [Cloud Watch Loop](#cloud-watch-loop-claude-cloud-sessions) instead. Do not
-  trust `gh auth status` as a capability signal; only a successful
-  `gh api repos/<owner>/<repo>` call proves the gh path works. Exception: in
-  a cloud variant where that repo-scoped REST call succeeds, a minimal
-  GraphQL query (`gh api graphql -f query='query{viewer{login}}'`) succeeds,
-  **and** gh supports `gh api --slurp`, the gh-first path above is available
-  and preferred — the same capability gate `.claude/babysit-pr.sh` probes
-  before choosing gh mode.
+Pick the path before the first GitHub call. Local sessions and Codex Cloud use
+the gh commands below. A Claude cloud session (`CLAUDE_CODE_REMOTE` set)
+follows [`cloud-watch-loop.md`](cloud-watch-loop.md) unless it passes the gh
+capability gate in
+[`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md),
+which owns that gate and the full gh→MCP mapping.
 
 ## Resolve Target
 
@@ -48,21 +36,16 @@ capture the PR URL, head repository, branch, and commit:
 gh pr view --json number,url,title,headRefName,headRefOid,baseRefName,headRepository,headRepositoryOwner,isCrossRepository
 ```
 
-In a Claude cloud session, resolve the same fields over MCP instead:
-`list_pull_requests` filtered by the current head branch when no number was
-given, or `pull_request_read` method `get` for a known number (it returns the
-head/base refs, head SHA, and repository slugs). The remote-name binding guard
-cannot run there — the checkout's `origin` is the platform's git credential
-proxy, not a repository URL — so bind by content instead: require the
-MCP-resolved PR to be same-repository (`headRepository.nameWithOwner` equals
-the session-attached repo), require local `git rev-parse HEAD` to equal the
-MCP-resolved `headRefOid` before editing, and use the verified proxy `origin`
-as `HEAD_REMOTE`. Cross-repository (fork) PRs stop on this surface: the proxy
-remote cannot be bound to a fork. The clean-tree guard below runs unchanged;
-for the post-push guard, re-resolve with `pull_request_read` method `get` in
+In a Claude cloud session, resolve the same fields over MCP
+(`list_pull_requests` filtered by head branch, or `pull_request_read` method
+`get`) and bind by content rather than by remote name: the PR must be
+same-repository (`headRepository.nameWithOwner` equals the session-attached
+repo), local `git rev-parse HEAD` must equal the MCP-resolved `headRefOid`
+before editing, and the verified proxy `origin` serves as both `HEAD_REMOTE`
+and `BASE_REMOTE`. Cross-repository (fork) PRs stop on that surface. For the
+post-push guard there, re-resolve with `pull_request_read` method `get` in
 place of `gh pr view` and require the returned `headRefOid` to equal local
-`HEAD`. Base-branch fetches for conflict handling use the same verified proxy
-`origin` as `BASE_REMOTE` (same-repository PRs only).
+`HEAD`.
 
 For an explicit target, accept a bare number or PR URL. Derive and preserve
 `BASE_REPO` (`owner/name`) from the resolved PR URL before changing checkouts.
@@ -89,93 +72,27 @@ and require the new `headRefOid` to equal local `HEAD` before returning to the
 watch loop. Never rely on the current branch name, implicit push target, or
 repository inferred from the active checkout.
 
-Before the first review pass, freeze the request, target/owner, changed files,
-and non-test changed-line count as the scope baseline. Classify later additions
-as in-scope, follow-up, or stop; create an issue before deferring valid work.
-An explicit user correction updates the request baseline. Before the next push,
-update the PR description so current-head reviewers do not enforce superseded
-behavior.
-
 ## Feedback and Watch Loop
 
-Use the normalized feedback projection instead of ad hoc API scraping:
+Use the normalized feedback projection instead of ad hoc API scraping, then the
+shared readiness probe for the final decision:
 
 ```bash
 pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
-```
-
-Inspect `requiredFeedbackBlockers`, `unresolvedReviewThreads`,
-`unrepliedRootReviewComments`, `blockingTopLevelBotComments`,
-`topLevelBotComments`, and `findings`. Informational deployment/status bot
-comments are context, not blockers.
-
-Use the shared readiness probe for the final decision:
-
-```bash
 pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
-```
-
-For a foreground wait, use:
-
-```bash
+# Foreground wait:
 pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --watch --compact --until-ready
 ```
+
+[`docs/notes/pr-ready-state.md`](../../../docs/notes/pr-ready-state.md) owns the
+projection fields and how to triage them; informational deployment/status bot
+comments are context, not blockers.
 
 Keep a practical one-hour wall-clock deadline unless the user asked for a
 different budget. Report state changes only when something becomes actionable:
 required CI failure, merge conflict, unreplied review comment, unresolved
 thread, Codex approval missing after current-head review, all-clear, merged, or
 closed.
-
-## Cloud Watch Loop (Claude cloud sessions)
-
-Do not foreground-poll and never sleep-poll. Instead:
-
-1. Subscribe to PR events (`subscribe_pr_activity`) so comments, reviews, and
-   CI failures arrive as webhook activity.
-2. Arm a scheduled self check-in (for example `send_later`) before ending
-   the turn, at a cadence short enough to catch quiet transitions inside the
-   babysitting window — every 15–20 minutes against the default one-hour
-   deadline; webhook events do not cover CI success, new pushes, or
-   merge-conflict transitions, so a check-in that only fires at the deadline
-   would miss a mid-window green. Re-arming is bounded by the same
-   babysitting deadline as the local loop (one hour unless the user set a
-   different budget): at the deadline, report the current state and stop or
-   escalate instead of re-arming silently. Stop when the PR is merged or
-   closed.
-3. On every event or check-in, run the MCP emulation of the readiness sweep
-   (tool mapping in
-   [`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)):
-   - PR state via `pull_request_read` method `get`, including
-     `mergeable_state`, draft state, and current head SHA;
-   - head check runs via methods `get_check_runs` and `get_status`;
-   - unresolved review threads via method `get_review_comments` (page to the
-     end);
-   - unreplied root review comments and top-level comments via methods
-     `get_review_comments`, `get_reviews`, and `get_comments`;
-   - the latest per-reviewer review state from `get_reviews`: an outstanding
-     `CHANGES_REQUESTED` is a required blocker until approved or dismissed —
-     GitHub's aggregate review decision persists across new pushes, so do
-     not discard it for being on an older commit. Whether
-     an approval is required at all (`REVIEW_REQUIRED`) rides on branch
-     protection, which MCP cannot read — name it unverified;
-   - the Codex current-head signal from Codex's visible reviews/comments for
-     the current head. The reaction-backed PR-description approval gate is
-     not readable over MCP; report it as unverified rather than assumed.
-4. Blocker handling, reply shapes, and Codex-request discipline are identical
-   to the local path (see below); use the MCP write tools
-   (`add_reply_to_pull_request_comment` for inline review comments,
-   `add_issue_comment` for top-level PR conversation comments,
-   `resolve_review_thread`, `update_pull_request`) in place of `gh`
-   commands. Reply before resolving, always.
-5. Label any all-clear as **MCP-emulated readiness**, never as
-   probe-verified: `pnpm pr:ready-state` did not run, and the Codex approval
-   gate plus required-context classification are approximations. An
-   MCP-emulated all-clear is a status report, not a terminal state: keep the
-   step-2 loop armed, name the gates the sweep could not verify (for example
-   the Codex reaction approval) as unverified rather than clear, and hand
-   the final probe-verified readiness decision to a gh-capable surface
-   (local babysitter or CI).
 
 ## Act On Required Blockers
 
@@ -189,20 +106,15 @@ item required.
   that remote-tracking ref into the already-published PR branch. Resolve, run
   focused validation, commit, and push through `HEAD_REMOTE`. Do not rebase a
   published PR because the resulting force-push violates this workflow.
-- Feedback blocker: triage every normalized finding, implement valid fixes,
-  and sweep review bodies, top-level comments, threads, annotations, and
-  failing logs before all-clear. Reply before resolving a thread, using:
-  - Fixed: `Fixed in <commit> — <what changed>`
-  - Won't fix: `Won't fix: <technical reason why>`
-- Codex approval missing or stale: wait for the automatic current-head review.
-  Never post a duplicate request while state is `requested`, `in_flight`, or
-  `approved`; use one manual request only when the normal automatic-review
-  window ended with no current-head signal.
-
-Batch sibling findings before pushing. Run the mapped quality gate once for
-each fix batch and `pnpm agent:autoreview` for a non-trivial batch. If two
-review-triggered patch cycles have completed, pause for scope reclassification
-instead of automatically starting a third.
+- Feedback blocker: triage every normalized finding, implement valid fixes, and
+  sweep review bodies, top-level comments, threads, annotations, and failing
+  logs before all-clear. Reply before resolving a thread. The reply forms,
+  scope-baseline discipline, batch cadence, and Codex-request rules are
+  step 6 of
+  [`docs/notes/pr-operating-card.md`](../../../docs/notes/pr-operating-card.md).
+- An explicit user correction updates the request baseline: before the next
+  push, update the PR description so current-head reviewers do not enforce
+  superseded behavior.
 
 Never force-push or amend while babysitting. If target binding fails, move to a
 clean dedicated checkout and repeat the guard before editing; do not continue
@@ -210,22 +122,14 @@ in the unbound checkout.
 
 ## Final Sweep
 
-Before reporting all-clear, rerun both projections:
-
-```bash
-pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
-pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
-```
-
-If an optional review-producing workflow finishes while watching, rerun
-feedback-state to catch late findings. Only report all-clear when the feedback
-ledger has no required blocker and ready-state `ready` is `true` for the
-current head. The Codex approval exception is only the exact head-scoped
-break-glass contract in `docs/notes/pr-ready-state.md`; it waives no other
-gate. Include the PR URL, head SHA, required blocker count, unresolved thread
-count, unreplied review-comment count, required-check state, and optional lag.
-
-In a Claude cloud session without the capability gate, rerun the full MCP
-emulation checklist from
-[Cloud Watch Loop](#cloud-watch-loop-claude-cloud-sessions) instead, report
-the same fields, and label the result MCP-emulated.
+Before reporting all-clear, rerun both projections in that order — feedback
+ledger clean first, then current-head readiness. If an optional review-producing
+workflow finishes while watching, rerun feedback-state to catch late findings.
+Only report all-clear when the feedback ledger has no required blocker and
+ready-state `ready` is `true` for the current head. Report it with evidence,
+never bare: the PR URL, the current head SHA, required-check state, and the
+probes' blocker/thread/unreplied counts, so the user can assess that specific
+merge. The Codex approval exception
+is only the exact head-scoped break-glass contract in
+[`docs/notes/pr-ready-state.md`](../../../docs/notes/pr-ready-state.md); it
+waives no other gate.
