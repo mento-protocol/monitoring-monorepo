@@ -281,6 +281,31 @@ module "oncall_announcer" {
   ]
 }
 
+##########################################
+# Sentry Triage Ingest Dead-Man Switch   #
+##########################################
+
+# Deliberately outside GitHub Actions: a scheduler that dies silently cannot
+# report its own death, so the watcher must not run on the thing it watches.
+# Holds no GitHub credential — the repository is public and the workflow-runs
+# read needs no scope (issue #1281).
+module "sentry_ingest_watcher" {
+  source = "./sentry-ingest-watcher"
+
+  project_id                    = local.project_id
+  region                        = var.region
+  common_labels                 = local.common_labels
+  project_service_account_email = google_service_account.project_sa.email
+  cloudbuild_builder_dependency = google_project_iam_member.cloudbuild_builder.id
+
+  metric_type = local.sentry_ingest_freshness_metric_type
+
+  depends_on = [
+    module.project_factory,
+    google_service_account.project_sa
+  ]
+}
+
 #####################################################################
 # GitHub Actions secrets — TF_VAR_* values for the alerts-infra
 # workflow's plan/apply jobs (.github/workflows/alerts-infra.yml).

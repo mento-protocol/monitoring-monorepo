@@ -71,6 +71,7 @@ const IDENTITY_REFERENCE_SPECIFICATIONS = [
       "alerts/infra/onchain-event-handler/main.tf:resource.google_secret_manager_secret_iam_member.terraform_refresh_readonly",
       "alerts/infra/oncall-announcer/main.tf:resource.google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
       "alerts/infra/oncall-announcer/main.tf:resource.google_secret_manager_secret_iam_member.terraform_refresh_readonly",
+      "alerts/infra/sentry-ingest-watcher/main.tf:resource.google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
       "governance-watchdog/infra/main.tf:resource.google_project_iam_member.terraform_refresh_readonly",
       "governance-watchdog/infra/storage.tf:resource.google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
       "governance-watchdog/infra/terraform-refresh.tf:resource.google_secret_manager_secret_iam_member.terraform_refresh_readonly",

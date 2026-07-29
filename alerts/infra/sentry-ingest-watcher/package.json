@@ -1,0 +1,17 @@
+{
+  "name": "@mento-protocol/alerts-sentry-ingest-watcher",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Publishes Sentry triage ingest freshness to Cloud Monitoring as an out-of-band dead-man switch",
+  "main": "index.mjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test \"*.test.mjs\""
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "5.0.5"
+  }
+}

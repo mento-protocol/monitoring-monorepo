@@ -80,6 +80,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       "alerts/infra/onchain-event-handler/main.tf:google_secret_manager_secret_iam_member.runtime_quicknode_signing_secret",
       "alerts/infra/onchain-event-handler/main.tf:google_secret_manager_secret_iam_member.runtime_slack_bot_token",
       "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.runtime_replay_nonce_creator",
+      "alerts/infra/sentry-ingest-watcher/main.tf:google_project_iam_member.runtime_metric_writer",
     ],
   },
   {
@@ -162,6 +163,8 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
     blocks: [
       "alerts/infra/oncall-announcer/main.tf:google_cloud_run_v2_service_iam_member.scheduler_cloud_run_invoker",
       "alerts/infra/oncall-announcer/main.tf:google_cloudfunctions2_function_iam_member.scheduler_function_invoker",
+      "alerts/infra/sentry-ingest-watcher/main.tf:google_cloud_run_v2_service_iam_member.scheduler_cloud_run_invoker",
+      "alerts/infra/sentry-ingest-watcher/main.tf:google_cloudfunctions2_function_iam_member.scheduler_function_invoker",
     ],
   },
   {
@@ -193,6 +196,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
     blocks: [
       "alerts/infra/oncall-announcer/main.tf:google_storage_bucket_iam_member.cloud_build_storage_access",
       "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.cloud_build_storage_access",
+      "alerts/infra/sentry-ingest-watcher/main.tf:google_storage_bucket_iam_member.cloud_build_storage_access",
     ],
   },
   {
@@ -210,6 +214,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       "alerts/infra/oncall-announcer/main.tf:google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
       "alerts/infra/onchain-event-handler/main.tf:google_secret_manager_secret_iam_member.terraform_refresh_readonly",
       "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
+      "alerts/infra/sentry-ingest-watcher/main.tf:google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
       "governance-watchdog/infra/main.tf:google_project_iam_member.terraform_refresh_readonly",
       "governance-watchdog/infra/storage.tf:google_storage_bucket_iam_member.terraform_refresh_readonly_function_source",
       "governance-watchdog/infra/terraform-refresh.tf:google_secret_manager_secret_iam_member.terraform_refresh_readonly",
@@ -257,6 +262,11 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.cloud_build_storage_access|3a4cc296770d3636d5dae0f915528437d136b899d9cb4ec54774f8fb7c1cd05e",
   "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.runtime_replay_nonce_creator|960cee568e9d8c2a3bb4417ecb364c1fd37facddb674dbac47806c2a344832e4",
   "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.terraform_refresh_readonly_function_source|eaa0d305087e4047469f000516b1143d9f78701d3c1d43498fd7c9f12aacc951",
+  "alerts/infra/sentry-ingest-watcher/main.tf:google_cloud_run_v2_service_iam_member.scheduler_cloud_run_invoker|05ee863fb8bc0067f44653114ebf219670a64435195f9fedd2651f798f974035",
+  "alerts/infra/sentry-ingest-watcher/main.tf:google_cloudfunctions2_function_iam_member.scheduler_function_invoker|bab098a73d6dc7ef44a7a3ac1ce62339b68300fcb74b876eb9552ea3d8e8abb3",
+  "alerts/infra/sentry-ingest-watcher/main.tf:google_project_iam_member.runtime_metric_writer|3c59d8555b08f79200d1fbad1c54a15886507149f38e8741a14cac66d4582a84",
+  "alerts/infra/sentry-ingest-watcher/main.tf:google_storage_bucket_iam_member.cloud_build_storage_access|3a4cc296770d3636d5dae0f915528437d136b899d9cb4ec54774f8fb7c1cd05e",
+  "alerts/infra/sentry-ingest-watcher/main.tf:google_storage_bucket_iam_member.terraform_refresh_readonly_function_source|eaa0d305087e4047469f000516b1143d9f78701d3c1d43498fd7c9f12aacc951",
   "governance-watchdog/infra/cloud_function.tf:google_cloud_run_v2_service_iam_member.cloud_function_invoker|1baacd2d37d9f4329b95dcf03f6a20ea0d8d5c52c1ca8fcdf2f92d09ba42e993",
   "governance-watchdog/infra/cloud_function.tf:google_project_iam_member.secret_accessor|4918cf5acf2e8c25e97db6237fb0d4d015f49ee07b711e397f2387cb3e37fe34",
   "governance-watchdog/infra/cloudbuild.tf:google_project_iam_member.cloudbuild_builder|c4fb4b2d1b66eaf281d33105a8735cabc1cc997d2d58ab1dbdacee2d96a8b01b",
@@ -319,6 +329,7 @@ const MODULE_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/main.tf:module.onchain_event_listeners|a48ff45e601e93a881fa4e87f73f704761de0f6724c1437c70d95f7e231b3f0f",
   "alerts/infra/main.tf:module.project_factory|d2f60b3af4237c2c4e2135bc15cd026a3be8d5c477e4b31f58d13765f721153c",
   "alerts/infra/main.tf:module.sentry_bridge|86ac2b1628c5579c58defcbd8ef54dc978c6f44cd622ccc488db77b11e7dd225",
+  "alerts/infra/main.tf:module.sentry_ingest_watcher|cfab056d2bd1347d6114d5adb4e002cd2b74ea3dcd03127eb265426c33fcfa7d",
   "alerts/infra/main.tf:module.slack_channels|c3eaa2c32b7fbea2e34c5df9baec7a198d39a6fe8a9452e37adb2af7149c096c",
   "governance-watchdog/infra/main.tf:module.governance_watchdog|b7ae97cf278cdd1108b54f83143b099d94b0e7b514c6e6dac526dfa7ba94c80f",
 ];
@@ -328,6 +339,8 @@ const IDENTITY_SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/oncall-announcer/main.tf:google_service_account.function_runtime|fa16e6ee0550b30720312a6109ffe44112d0dfe41baef39ce66fdb95825465d4",
   "alerts/infra/oncall-announcer/main.tf:google_service_account.scheduler|098c4d6b3ddac9c9d5451aef0a303140417c56cd4475fc9ff1d17f042856b97e",
   "alerts/infra/onchain-event-handler/main.tf:google_service_account.function_runtime|a3b17fdfa196314caf2c19ac627d5442f254c5d9118d2e207226c32b9b8582f0",
+  "alerts/infra/sentry-ingest-watcher/main.tf:google_service_account.function_runtime|89b24592c858a2b280a7e0a9f7e16f95154aa67280a7d4bd685ca92205febbb2",
+  "alerts/infra/sentry-ingest-watcher/main.tf:google_service_account.scheduler|584cc58e1bc9e28720846d958babd5a29afa2656b736e8fd59ee486bd99352df",
   "governance-watchdog/infra/scheduler.tf:google_service_account.scheduler_invoker|70e455ebc7e41da7dc0078fb00d6643af9c0634982262d3c5cd340eac7cd227e",
   "terraform/aegis-bootstrap.tf:google_service_account.grafana_agent_builder|5771d741295744c2da543de15ca4c4a6aae93325d52451e0f764c6c83833b5e4",
   "terraform/aegis-bootstrap.tf:google_service_account.grafana_agent_runtime|994b37f38438e2180e0db4d60b1b84e704ea99b16db9dc7da86a8659840951d6",

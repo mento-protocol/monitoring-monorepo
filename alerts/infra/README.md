@@ -18,7 +18,8 @@ Terraform-managed alert infrastructure for monitoring Mento's infrastructure acr
 │   └── slack-channels/     # Slack channels for on-chain multisig events
 ├── onchain-event-listeners/ # QuickNode webhook management for on-chain events
 ├── oncall-announcer/        # Splunk On-Call rotation announcements to Slack
-└── onchain-event-handler/   # Cloud Function for processing webhooks (TS + TF paired)
+├── onchain-event-handler/   # Cloud Function for processing webhooks (TS + TF paired)
+└── sentry-ingest-watcher/   # Dead-man switch for the Sentry triage pipeline (ESM + TF paired)
 ```
 
 ## 🏗️ Architecture
@@ -40,6 +41,9 @@ graph LR
     G -->|chat.postMessage<br/>usergroups.users.update| I[Slack<br/>#eng + @support-engineer]
     F -->|failed attempt log| J[GCP Monitoring]
     J -->|notification| K[Slack<br/>#alerts-infra]
+    L[Cloud Scheduler] -->|HTTP POST<br/>OIDC| M[Cloud Function<br/>sentry-ingest-watcher]
+    M -->|unauthenticated GET<br/>workflow runs| N[GitHub API]
+    M -->|freshness gauge| J
 ```
 
 ### Component Overview
@@ -49,7 +53,8 @@ graph LR
 3. **Slack Channels**: Receives formatted alerts and event notifications
 4. **On-call Announcer**: Polls Splunk On-Call, posts rotations to `#eng`, and keeps `@support-engineer` membership to the current engineer
 5. **Operational Alerting**: Sends scheduler failures and dropped on-chain events to `#alerts-infra`
-6. **Terraform**: Manages all infrastructure as code
+6. **Sentry Ingest Watcher**: Publishes how long ago the Sentry triage ingest workflow last succeeded, and alerts when that number gets too large or stops arriving
+7. **Terraform**: Manages all infrastructure as code
 
 ### Security
 
@@ -160,6 +165,75 @@ chain key.
   attempt, including function 5xx responses, IAM failures, timeouts, and
   unreachable targets
 
+### Sentry Ingest Watcher
+
+Dead-man switch for the Sentry triage pipeline (issue #1281, ADR 0036). It
+exists because a self-report from a dead scheduler never arrives — a previous
+cloud-routine experiment ran for weeks producing nothing and nobody noticed.
+
+- Cloud Scheduler calls the `sentry-ingest-watcher` Cloud Function hourly,
+  entirely outside GitHub Actions
+- The function reads the newest successful `sentry-triage-ingest.yml` run
+  **unauthenticated**. The repository is public and the endpoint needs no
+  scope, so one call per hour stays far inside the 60/hr anonymous limit.
+  **Do not add a token** — a watcher holding a credential is a credential on a
+  service whose only job is to notice silence
+- It publishes the age of that run as
+  `custom.googleapis.com/sentry_triage/ingest_freshness_seconds` (GAUGE, INT64,
+  `global` resource). Its runtime identity holds exactly one permission,
+  `roles/monitoring.metricWriter`
+- When GitHub is unreachable or answers with something it cannot parse, the
+  function publishes **nothing** and returns 5xx. Guessing a value would look
+  fresh; silence is the honest signal
+- `sentry-triage-ingest-stale` alerts `#alerts-infra` when the gauge exceeds
+  26h (ingest runs 2x/day and GitHub's scheduler drifts up to ~3h, so 26h
+  clears normal drift) **or** when the gauge stops arriving for 3h. The
+  missing-data half is the point: a watcher that can fail quietly reproduces
+  the incident it exists to prevent
+- The pure helpers are unit-tested with `pnpm alerts:watcher:test`. The
+  function's own code imports nothing beyond them; `package.json` pins only
+  the Cloud Functions runtime shim, at the exact version the other two
+  functions run, so there is no package-local lockfile to keep in sync
+
+Ingest is the only stage watched. The triage-agent, autofix, and archive legs
+legitimately no-op for days when the queue is empty, so alerting on their
+silence would be noise. Ingest runs every day regardless of queue state, which
+is what makes its silence unambiguous.
+
+#### After apply: prove the switch fires
+
+Cloud Monitoring cannot alert on a time series that has never existed, so both
+steps below are required before treating this as armed.
+
+1. Confirm the first publish. Run the scheduler job once and check the gauge
+   exists:
+
+   ```bash
+   PROJECT_ID=$(terraform -chdir=alerts/infra output -json sentry_ingest_watcher | jq -r .function_logs | sed 's/.*project=//')
+   gcloud scheduler jobs run sentry-ingest-freshness-check \
+     --location europe-west1 --project "$PROJECT_ID"
+   gcloud logging read \
+     'jsonPayload.message="sentry_ingest_watcher.published"' \
+     --project "$PROJECT_ID" --limit 1 --freshness 10m
+   ```
+
+2. Prove the alert path with a deliberately stale value. Write one point at 48h
+   — past the 26h threshold — and wait for the `#alerts-infra` message. Nothing
+   in Terraform changes, and the next hourly run overwrites the gauge with the
+   real value:
+
+   ```bash
+   curl -sS -X POST \
+     -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+     -H "Content-Type: application/json" \
+     "https://monitoring.googleapis.com/v3/projects/$PROJECT_ID/timeSeries" \
+     -d "{\"timeSeries\":[{\"metric\":{\"type\":\"custom.googleapis.com/sentry_triage/ingest_freshness_seconds\"},\"resource\":{\"type\":\"global\",\"labels\":{\"project_id\":\"$PROJECT_ID\"}},\"points\":[{\"interval\":{\"endTime\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"},\"value\":{\"int64Value\":\"172800\"}}]}]}"
+   ```
+
+   The policy aligns on 7200s windows, so allow up to two hours for the
+   incident to open. Do not sign this off on a passing plan alone — an
+   untested dead-man switch is the failure mode being guarded against.
+
 ### Operational Alerting
 
 - Terraform creates the GCP Monitoring Slack notification channel for
@@ -171,6 +245,8 @@ chain key.
   after 30 minutes without another matching failure
 - On-chain handler drop and processing-budget policies share the same
   `#alerts-infra` destination
+- `sentry-triage-ingest-stale` shares that destination too, and is the only
+  policy here that treats missing data as a firing condition
 
 ### QuickNode Webhooks
 

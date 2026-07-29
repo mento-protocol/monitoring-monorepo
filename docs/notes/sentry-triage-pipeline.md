@@ -32,6 +32,19 @@ enabling or operating a later stage.
 | Deterministic settlement | `scripts/sentry-triage-project-core.mjs`, `scripts/sentry-triage-project.mjs`      | After each triage batch                                | Verdict labels, queue closure, and optional owning-repo issue projection |
 | Autofix                  | `.github/workflows/sentry-autofix.yml`, `.github/prompts/sentry-autofix.md`        | 08:30 UTC weekdays; manual dispatch from `main`        | A scoped branch and PR for eligible local code fixes                     |
 | Archive                  | `.github/workflows/sentry-triage-archive.yml`, `scripts/sentry-triage-archive.mjs` | Human approval label or manual dispatch from `main`    | Sentry `archived_until_escalating` state and a queue audit record        |
+| Staleness watch          | `alerts/infra/sentry-ingest-watcher/`, `alerts/infra/monitoring.tf`                | Hourly Cloud Scheduler job, outside GitHub Actions     | A Cloud Monitoring freshness gauge; alerts `#alerts-infra`               |
+
+Staleness watch is the only row that does not run in GitHub Actions, and that
+is the whole point: a scheduler that dies silently cannot report its own death.
+It reads the newest successful ingest run over the **unauthenticated** GitHub
+API — the repository is public and the endpoint needs no scope, so it holds no
+credential, deliberately. `sentry-triage-ingest-stale` fires when the last
+successful ingest is older than 26h **or** when the gauge stops arriving, and
+the function publishes nothing rather than guessing when GitHub is unreachable.
+Ingest is the correct single canary: the triage, autofix, and archive legs
+legitimately no-op for days when the queue is empty. Operator detail, including
+how to prove the alert fires after an apply, lives in
+[`alerts/infra/README.md`](../../alerts/infra/README.md).
 
 The workflows own permissions, concurrency, branch guards, and exact
 invocations. The scripts own parsing, idempotency, and state transitions. The

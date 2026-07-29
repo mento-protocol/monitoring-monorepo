@@ -323,6 +323,16 @@ export function validateRefreshIdentity(files, blocks, errors) {
     validateBucketGrant(
       blocks,
       {
+        filePath: "alerts/infra/sentry-ingest-watcher/main.tf",
+        name: "terraform_refresh_readonly_function_source",
+        bucket: "google_storage_bucket.function_bucket.name",
+        member: `serviceAccount:${REFRESH_TARGET_EMAIL}`,
+      },
+      errors,
+    ),
+    validateBucketGrant(
+      blocks,
+      {
         filePath: "governance-watchdog/infra/storage.tf",
         name: "terraform_refresh_readonly_function_source",
         bucket: "google_storage_bucket.watchdog_notifications_function.name",

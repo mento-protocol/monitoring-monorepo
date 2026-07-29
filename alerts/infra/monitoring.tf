@@ -10,6 +10,16 @@ locals {
     ? "projects/${local.project_id}/notificationChannels/${var.slack_notification_channel_id}"
     : google_monitoring_notification_channel.alerts_infra_slack[0].name
   )
+
+  sentry_ingest_freshness_metric_type = "custom.googleapis.com/sentry_triage/ingest_freshness_seconds"
+
+  # Ingest runs 2x/day and GitHub's scheduler drifts up to ~3h on this repo, so
+  # 26h clears normal drift without hiding an outage.
+  sentry_ingest_freshness_threshold_seconds = 26 * 60 * 60
+
+  # Two watcher runs land in every alignment bucket, so one missed hourly run
+  # still leaves a point and cannot be mistaken for missing data.
+  sentry_ingest_freshness_alignment_period = "7200s"
 }
 
 resource "google_monitoring_notification_channel" "alerts_infra_slack" {
@@ -267,4 +277,132 @@ resource "google_monitoring_alert_policy" "oncall_announcer_scheduler_errors_pol
   }
 
   depends_on = [module.project_factory]
+}
+
+############################################
+# Sentry triage ingest dead-man switch     #
+############################################
+
+# The freshness gauge published hourly by the sentry-ingest-watcher Cloud
+# Function. Declared here rather than left to Cloud Monitoring's implicit
+# descriptor creation so the alert policy below binds to a reviewed shape.
+resource "google_monitoring_metric_descriptor" "sentry_ingest_freshness" {
+  project      = local.project_id
+  type         = local.sentry_ingest_freshness_metric_type
+  metric_kind  = "GAUGE"
+  value_type   = "INT64"
+  unit         = "s"
+  display_name = "Sentry triage ingest freshness"
+  description  = "Seconds since the newest successful sentry-triage-ingest.yml workflow run, published by the sentry-ingest-watcher Cloud Function."
+
+  depends_on = [module.project_factory]
+}
+
+# The dead-man switch itself. Both conditions matter and the second is the
+# reason this exists:
+#
+#   1. The gauge exceeds 26h — ingest stopped producing successful runs.
+#   2. The gauge stops arriving — the watcher itself died, or it refused to
+#      publish because GitHub was unreachable or answered with something it
+#      could not parse. The function never guesses a value in those cases, so
+#      silence is the signal.
+#
+# `EVALUATION_MISSING_DATA_ACTIVE` is the Cloud Monitoring equivalent of the
+# Grafana `no_data_state = "Alerting"` on "Aegis does not report new data"
+# (alerts/rules/rules-aegis-service.tf). It covers gaps inside the retention
+# window; `condition_absent` covers a series that stops entirely. A watcher
+# that can fail quietly reproduces the incident this switch exists to prevent.
+#
+# Neither condition can fire before the series exists at all, so confirm the
+# first successful publish after apply — see alerts/infra/README.md.
+resource "google_monitoring_alert_policy" "sentry_ingest_staleness_policy" {
+  project      = local.project_id
+  display_name = "sentry-triage-ingest-stale"
+  combiner     = "OR"
+  enabled      = true
+  severity     = "WARNING"
+
+  documentation {
+    content   = <<-EOT
+      ## Sentry triage ingest has gone quiet
+
+      No successful `sentry-triage-ingest.yml` run completed in the last 26h,
+      or the watcher stopped reporting. Either way the Sentry triage pipeline
+      is not turning new Sentry issues into queue issues, and nothing else will
+      say so — the pipeline cannot report its own silence.
+
+      Check, in order:
+
+      1. Recent runs of the ingest workflow:
+         https://github.com/mento-protocol/monitoring-monorepo/actions/workflows/sentry-triage-ingest.yml
+      2. The kill switch `vars.SENTRY_TRIAGE_ENABLED` and the
+         `SENTRY_TRIAGE_TOKEN` secret — both fail safe to a no-op.
+      3. The watcher itself, when the gauge is absent rather than high:
+         https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_run_revision%22%20AND%20resource.labels.service_name%3D%22${module.sentry_ingest_watcher.function_name}%22%20AND%20severity%3E%3DERROR;duration=PT24H
+      4. Scheduler attempts:
+         https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_scheduler_job%22%20AND%20resource.labels.job_id%3D%22${module.sentry_ingest_watcher.scheduler_job_name}%22;duration=PT24H
+
+      Runbook: `docs/notes/sentry-triage-pipeline.md`.
+    EOT
+    mime_type = "text/markdown"
+  }
+
+  conditions {
+    display_name = "No successful ingest run in 26h"
+
+    condition_threshold {
+      filter = <<EOF
+        resource.type = "global" AND
+        metric.type   = "${local.sentry_ingest_freshness_metric_type}"
+      EOF
+
+      duration        = "0s"
+      comparison      = "COMPARISON_GT"
+      threshold_value = local.sentry_ingest_freshness_threshold_seconds
+
+      aggregations {
+        alignment_period   = local.sentry_ingest_freshness_alignment_period
+        per_series_aligner = "ALIGN_MAX"
+      }
+
+      trigger {
+        count = 1
+      }
+
+      evaluation_missing_data = "EVALUATION_MISSING_DATA_ACTIVE"
+    }
+  }
+
+  conditions {
+    display_name = "Watcher stopped publishing ingest freshness"
+
+    condition_absent {
+      filter = <<EOF
+        resource.type = "global" AND
+        metric.type   = "${local.sentry_ingest_freshness_metric_type}"
+      EOF
+
+      duration = "10800s"
+
+      aggregations {
+        alignment_period   = local.sentry_ingest_freshness_alignment_period
+        per_series_aligner = "ALIGN_MAX"
+      }
+
+      trigger {
+        count = 1
+      }
+    }
+  }
+
+  notification_channels = [local.alerts_infra_notification_channel]
+
+  alert_strategy {
+    auto_close = "86400s"
+  }
+
+  depends_on = [
+    module.project_factory,
+    google_monitoring_metric_descriptor.sentry_ingest_freshness,
+  ]
 }
