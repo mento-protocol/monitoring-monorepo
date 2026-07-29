@@ -3,7 +3,7 @@ title: Monitoring Dashboard Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-29
 doc_type: agent-instructions
 scope: ui-dashboard
 review_interval_days: 90
@@ -49,27 +49,16 @@ Keep runtime Zod guards for hosted-Hasura rollout drift.
 
 ## Browser Target — Explicit Runtime Floor, No Blocklist Polyfills
 
-Client code is transpiled to ES2017. The app adds no polyfill for the closed
-blocklist below; Next.js still injects selected framework polyfills such as
-`fetch`, `URL`, and `Object.assign`. The runtime support floor is Chrome 111+,
-Edge 111+, Firefox 111+, and Safari 16.4+, pinned in `package.json`. APIs
-available across that floor are allowed, including `Array.prototype.at`,
-`findLast`, `findLastIndex`, `flatMap`, and `Promise.allSettled`.
-
-Lint blocks this closed set of known hazards in client-shipped code:
-`Array.prototype.toSorted`, `toReversed`, `toSpliced`, and `with`;
-`TypedArray.prototype.toSorted`, `toReversed`, and `with`;
-`Object.groupBy`, `Map.groupBy`, `String.prototype.isWellFormed`, and
-`String.prototype.toWellFormed`. Use `sortedCopy` from
-`@/lib/immutable-sort` for immutable sorting. Any module imported directly or
-transitively by a `"use client"` component ships to the browser; the lint rule
-exempts explicit server-only routes, OG helpers, and tests. The blocklist is
-not an exhaustive compatibility checker for every JavaScript built-in; update
-the policy and its regression fixtures before adding another API outside the
-browser floor.
-
-See [ADR 0023](../docs/adr/0023-es2017-no-polyfill.md) before changing the
-transpilation target, browser floor, polyfill posture, or restriction.
+Client code is transpiled to ES2017 and the app adds no blocklist polyfill. The
+runtime floor is Chrome 111+, Edge 111+, Firefox 111+, and Safari 16.4+, pinned
+in `package.json`. Lint owns the closed blocklist of post-floor APIs in
+client-shipped code — any module a `"use client"` component imports directly or
+transitively ships to the browser — so use `sortedCopy` from
+`@/lib/immutable-sort` for immutable sorting. The blocklist is not an exhaustive
+compatibility checker: update the policy and its regression fixtures before
+adding an API outside the floor, and read
+[ADR 0023](../docs/adr/0023-es2017-no-polyfill.md) before changing the
+transpilation target, floor, or polyfill posture.
 
 ## Browser and Quality Verification
 
@@ -89,45 +78,32 @@ use only a narrowly justified inline suppression.
 
 Apply
 [`../docs/pr-checklists/swr-polling-hasura.md`](../docs/pr-checklists/swr-polling-hasura.md)
-for every Hasura-polling hook. In particular:
-
-- keep focus and reconnect revalidation disabled in `useGQL`, keep retry
-  behavior visibility-aware, and use an explicit abort timeout below the
-  refresh interval only for polling paths that must fail or degrade quickly;
-- distinguish loading (`data === undefined && !error`) from resolved zero or
-  empty data;
-- use pre-rolled entities for lifetime aggregates. Hosted Hasura caps rows at
-  1,000 and disables `_aggregate`; multi-field `order_by` uses array syntax;
-- isolate new schema fields so an older hosted schema degrades only the new
-  annotation during deploy/resync.
-
-FX durations use trading-seconds and live paths call
-`tradingSecondsInRange`; threshold-derived history uses the threshold captured
-at event time. The stateful checklist owns the full time-unit contract.
+to every Hasura-polling hook; it owns revalidation, retry, loading-versus-empty
+semantics, row caps, and schema-rollout isolation. Two domain facts it does not
+carry: lifetime aggregates read pre-rolled entities, and FX durations use
+trading-seconds — live paths call `tradingSecondsInRange`, and
+threshold-derived history uses the threshold captured at event time.
 
 ## Interaction, URL, and Accessibility Invariants
 
-- Async mutations require a synchronous in-flight ref guard in addition to
-  disabled React state; wire abort cleanup and suppress teardown-only errors.
-- URL state that does not require server involvement uses
-  `history.replaceState`. Initialize from `useSearchParams`, use
-  `window.location.search` after mount/action time, and preserve sibling params
-  when history-only and router-backed writers coexist. Apply the URL section of
-  the stateful checklist.
+- Async mutations need a synchronous in-flight ref guard alongside disabled
+  React state; wire abort cleanup and suppress teardown-only errors.
+- Server-free URL state uses `history.replaceState`: initialize from
+  `useSearchParams`, read `window.location.search` after mount or action time,
+  and preserve sibling params when history-only and router-backed writers
+  coexist.
 - Dynamic status uses `role="status"` or `role="alert"`; sortable headers expose
   `aria-sort`. Add deterministic axe coverage for new shared semantic controls.
-- Source files have a 600-line soft cap and 1,000-line lint cap. Split route
-  pages into `_lib`, `_components`, or `_tabs` before crossing the soft cap;
-  see
-  [`../docs/pr-checklists/recurring-review-patterns.md`](../docs/pr-checklists/recurring-review-patterns.md).
+- Source files have a 600-line soft cap and 1,000-line lint cap; split route
+  pages into `_lib`, `_components`, or `_tabs` before crossing the soft cap.
 
 ## Server Boundaries and CSP
 
 Apply the dashboard server/client and Security/CSP sections of
 [`../docs/pr-checklists/recurring-review-patterns.md`](../docs/pr-checklists/recurring-review-patterns.md).
 Client-hook modules cannot enter OG, API, or server-route import graphs; shared
-constants belong in zero-dependency modules. CSP is set only by middleware with
-a per-request nonce. Keep `script-src` free of unsafe inline/eval, retain
+constants belong in zero-dependency modules. Only middleware sets CSP, with a
+per-request nonce. Keep `script-src` free of unsafe inline/eval, retain
 attribute-style support in `style-src`, and update CSP tests with every
 `connect-src` change.
 

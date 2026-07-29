@@ -193,8 +193,13 @@ Authority: canonical
 - [`docs/README.md`](README.md)
 - [`indexer-envio/README.md`](../indexer-envio/README.md)
 - [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md)
+- [`integration-probes/README.md`](../integration-probes/README.md)
 - [`README.md`](../README.md)
 - [`SPEC.md`](../SPEC.md)
+
+Authority: non-canonical
+
+- [`docs/notes/autoreview-runtime-trust.md`](notes/autoreview-runtime-trust.md)
 
 ## notes-plans-archive
 

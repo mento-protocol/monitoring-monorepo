@@ -31,7 +31,7 @@ garden_lane: agent-entry-points
   code paths.
 - Do not hand-edit `dist/` as the source of truth. Update `src/` or JSON inputs, then run the package build.
 - Avoid importing runtime-heavy packages here. `shared-config` is consumed by client bundle code and should stay low-dependency.
-- Public npm releases are tag-driven through `.github/workflows/publish-config.yml`; publish tags must be `config-v<shared-config/package.json version>` and reference a commit reachable from `origin/main`. Manual `workflow_dispatch` runs validate and pack the package but do not publish. npm trusted publishing cannot create a brand-new package, so an npm org/package maintainer must seed `@mento-protocol/config` once through an approved maintainer publish before configuring trusted publishing for GitHub Actions with workflow filename `publish-config.yml`, allowed action `npm publish`, repository `mento-protocol/monitoring-monorepo`. Keep the publish job on GitHub-hosted runners because npm trusted publishing does not support self-hosted or third-party runners.
+- Public npm releases are tag-driven through `.github/workflows/publish-config.yml`; publish tags must be `config-v<shared-config/package.json version>` and reference a commit reachable from `origin/main`. Manual `workflow_dispatch` runs validate and pack the package but do not publish. Keep the publish job on GitHub-hosted runners because npm trusted publishing does not support self-hosted or third-party runners.
 - The package's Node engine follows the repo `.node-version` throughout the pre-1.0 release line. Do not lower the engine floor without adding a matching consumer and publish verification matrix.
 
 ## Verification

@@ -3,7 +3,7 @@ title: Peg monitoring onboarding and re-census
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-28
+last_verified: 2026-07-29
 doc_type: runbook
 scope: metrics-bridge / alerts / ui-dashboard
 review_interval_days: 90
@@ -136,42 +136,125 @@ delivery time alone.
 
 Read every trading-limit input live at one pinned block and record:
 
-- monitored-token decimals;
+- `d_FPMM` from
+  `FPMM.getTradingLimits(monitoredToken).config.decimals`, plus an independent
+  `ERC20.decimals()` read; require an exact match or mark the asset **Blocked**;
 - positive enforced L0 and L1 limits in TradingLimitsV2's 15-decimal internal
   scale, converted to token units;
-- each window duration and current `netflow` and `lastUpdated` state;
+- each window duration and pinned `netflow` and `lastUpdated` state for
+  incident-specific diagnostics;
 - pool reserves, manual rate, fee parameters, and the exact quote method;
 - the approved end-to-end signer response SLA `S`; and
 - the treasury/risk-approved survivable quote-asset loss budget `B`.
 
-For each positive enforced window `i` with token limit `L_i` and duration
-`W_i`, calculate the conservative unknown-boundary token-inflow bound:
+For persistent **Live** admission, prove the TradingLimitsV2 contract invariant
+`-L_i <= n_i <= L_i` for every positive enforced window `i`; otherwise mark the
+asset **Blocked**. Keep `L_i`, `n_i`, and window duration `W_i` in the contract's
+fixed-15 internal scale. `D_net(S)` is a bound on fee-adjusted netflow, not a
+raw monitored-token amount:
 
 ```text
-D_i(S) = L_i * (ceil(S / W_i) + 1)
-D_token(S) = min(D_i(S) for every positive enforced window i)
+D_live,i(S) = 2L_i + L_i * ceil(S / W_i)
+D_net(S) = min(D_live,i(S) for every positive enforced window i)
 ```
 
-The extra window is mandatory because an incident can begin immediately before
-a lazy window reset and consume capacity on both sides of the boundary.
-Disabled zero-valued windows do not constrain the minimum. If no positive
-limit is enforced, onboarding fails.
+`2L_i` covers the reachable active state `n_i = -L_i`; the ceiling term covers
+a reset immediately after the incident begins. At equality the old window is
+still active, and reset requires strict expiry. Pinned `n_i` and timestamps can
+support incident-specific diagnostics, but must never reduce persistent
+admission capacity. Disabled zero-valued windows do not constrain the minimum.
+If no positive limit is enforced, onboarding fails.
 
-Convert `D_token(S)` into quote-asset outflow with the deployed pool's exact
-pricing and fee logic at the pinned block. Record the call or deterministic
-calculation and cap only at liquidity that is provably unavailable to the
-drain. If an exact quote cannot be reproduced, use the manual par purchase
-value plus a documented conservative margin and keep the limitation explicit.
-The gate passes only when:
+`D_net(S)`, `A_max`, and `G_mono` bound only cumulative fee-adjusted FPMM swap
+netflow. `FPMM.swap` applies TradingLimitsV2, while `FPMM.rebalance` does not.
+Never use these values as a whole-system quote-asset loss cap. An Open strategy
+contraction can transfer the debt token from the pool to its permissionless
+caller, and a Reserve strategy expansion can mint the debt token into the pool.
+Model each strategy rebalance as a separate transition and include its actual
+protected-boundary transfers, even when its configured incentive is zero. A
+strategy being unreachable at the pin because of its price threshold is a
+pinned diagnostic, not a durable exclusion.
+
+Read both fees at the same pin and set `F = lpFee + protocolFee` in basis
+points. Require `0 <= F < Q`, use `C = D_net(S)`, `Q = 10,000`, and use only
+the verified `d_FPMM` as `d`; never convert capacity through decimal floats or
+apply the fee before fixed-15 scaling.
+
+For `d <= 15`, calculate:
 
 ```text
-worst_case_quote_outflow(D_token(S)) <= B
+A_max = floor(C * Q / (Q - F))
+G_mono = floor(A_max / 10^(15 - d))
+```
+
+`G_mono` bounds monotone monitored-token inflow only. For `d > 15`, default to
+**Blocked**. An exception needs a reviewed, independently enforceable bound
+`N` on successful calls that covers every swap during `S`, including zero-netflow
+and batched calls. With `k = 10^(d - 15)`, calculate
+`G_N = k * A_max + N * (k - 1)`. Do not quote `G_N` as one swap; model every
+successful transition sequentially.
+
+Signed netflow permits counterflows to reopen capacity. Before relying on a
+monotone bound, require either a proof that no reachable reverse swap,
+rebalance, incentive-bearing transfer, or rate transition can leave the system
+at the same or lower signed netflow with more accumulated net quote-asset loss
+than the monotone path, or a bounded bidirectional sequential state model.
+That model must start from every reachable pre-incident **Live** state, not
+only the pin, and maximize loss across mutable pool reserve, rate, fee, limit,
+enabled strategy, cooldown, and source-liquidity state. If a mutable state can
+leave the modeled envelope without enforced fail-closed revocation or
+reapproval, maximize across its reachable range or keep the asset **Blocked**.
+Without that proof or model, or with a positive effective rebate, mark the asset
+**Blocked**.
+
+Bind either an enforced no-change or no-arbitrage rate condition while trading
+remains bidirectional, or an enforced maximum number of successful rate
+transitions during `S`. Without one, alternating tradable rates plus signed
+counterflows can accumulate quote-asset loss while returning netflow to the same
+state.
+
+At the pin, enumerate every enabled strategy from
+`LiquidityStrategyUpdated` history through that block; do not rely on one
+`rebalancerAddress`.
+For each strategy, record the per-pool
+`liquiditySourceIncentiveExpansion`, `liquiditySourceIncentiveContraction`,
+`protocolIncentiveExpansion`, `protocolIncentiveContraction`,
+`protocolFeeRecipient`, cooldown, reachability, source liquidity, and actual
+transfers. Mark the asset **Blocked** if any strategy cannot be conservatively
+reproduced. `FPMM.rebalanceIncentive` is an exchange-rate discount/tolerance,
+not a separate payout: model its effect through actual transfers and never
+double-count it. A static pool-reserve snapshot caps loss only when every
+enabled strategy proves unavailable during the response interval.
+
+For each sequentially reachable swap, call
+`FPMM.getAmountOut(amountIn, tokenIn)` from the modeled state, using that
+transition's actual input amount and token. A monitored-to-quote leg uses the
+monitored token; a reverse leg uses the quote token. Advance pool, limit, and
+strategy state after every successful swap or rebalance. The quote already
+applies the total fee; do not subtract `F` a second time. Define loss as
+**net** quote-asset outflow across a documented protected-system boundary:
+include quote inputs and outputs, mint/burn, and actual strategy transfers. Do
+not use a gross output sum. The model must place flows across the relevant
+window boundaries and cannot replace a sequence with one oversized swap when
+reserves or a strategy can change state.
+
+Record the calls or deterministic calculation. If an exact quote cannot be
+reproduced, use the manual par purchase value plus a documented conservative
+margin and keep the limitation explicit. The gate passes only when:
+
+```text
+worst_case_net_quote_outflow(sequential state model) <= B
 ```
 
 The accountable treasury/risk owner must supply and approve `B`. Monitoring
 engineers must not derive it from current TVL, trading limits, or intuition.
-Recalculate after any signer-SLA, Safe, fee, pool, rate, reserve-access, or
-trading-limit change.
+Persistent **Live** admission is a fail-closed certificate over the approved
+Safe and signer coverage, escalation route, execution proof, `S`, `B`, and
+modeled on-chain state ranges. Give every human attestation an explicit expiry.
+Before serving **Live**, require every certificate input to remain within its
+approved range and every attestation to remain current; otherwise serve
+**Blocked** until reapproval repeats the pinned reads and loss calculation. If
+that validity check cannot be enforced, onboarding remains **Blocked**.
 
 ## 6. Roll out the first activation producer-first
 

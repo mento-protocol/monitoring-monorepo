@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-29
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -104,60 +104,15 @@ terminal state so late feedback is not missed.
 
 ### Bounded clean-Claude protocol
 
-`pr:feedback-state` accepts one bounded clean-Claude grammar plus one exact
-observed-payload compatibility exception. A Claude comment that makes a
-clean-verdict claim fails closed unless its complete protocol matches.
-
-The legacy `Verdict: LGTM` plus `Findings` and `Roll-up` protocol requires:
-
-- The optional Claude completion line may include only its fixed GitHub Actions
-  `View job` suffix; other suffixes fail closed.
-- An optional `Review: <title>` must equal the PR title after whitespace and
-  CommonMark ASCII-punctuation escape normalization. Title words are labels,
-  not finding evidence.
-- An optional `What I checked` block needs one or more checked (`[x]`) bounded
-  single-line subjects from the neutral-topic grammar (optionally joined by
-  `and`) or the narrow legacy matcher. Unknown prose, inline-code labels,
-  declarative claims, unchecked entries, and mixed safe/actionable checklists
-  fail closed.
-- Non-empty `Findings` then `Roll-up` sections are mandatory. Generalized
-  entries require an explicit `[P3]` clean marker, approved positive evidence,
-  and plain-text syntax; only exact observed legacy Markdown lines use the
-  compatibility matcher. Unknown prose, Markdown/HTML syntax, actionable
-  suffixes, negation, hedging, malformed or duplicate headings, higher
-  priorities, and mixed clean/actionable items remain blocking. Markdown
-  code-block indentation on any non-empty protocol line also fails closed.
-
-The parser validates title, checklist, Findings, and Roll-up as separate
-structural regions. Do not broaden the Findings/Roll-up positive-evidence
-allowlist merely to accept a new title or checklist subject.
-
-`Overall verdict: LGTM` is an observed-payload compatibility registry, not a
-reusable prose grammar. A registered payload must first match this structural
-envelope:
-
-- The fixed Claude completion line with its GitHub Actions `View job` suffix,
-  followed by `Code Review — PR #<current-number>`.
-- A fully checked checklist in exact order: gather context, understand the
-  request, one or more ``Review `<repo-relative-path>` changes`` entries,
-  then post findings. Review targets cannot be absolute paths or contain
-  traversal.
-- The exact clean verdict, a non-empty `Summary`, then
-  `Verification notes (no issues found)` with sequential numbered notes. Each
-  note needs a bold label and non-empty evidence.
-- A final `No P1/P2/P3 findings` conclusion with nothing after it.
-
-After structural validation, the parser hashes the raw UTF-8 body without
-trimming, newline conversion, or other normalization. It accepts a match only
-when the digest is registered for the same Claude author, PR number, comment
-ID, and current head SHA. The registry currently contains
-[PR #1544 comment 5060594122](https://github.com/mento-protocol/monitoring-monorepo/pull/1544#issuecomment-5060594122):
-digest `039923882eee9f880165543ef85e1ca251d84b995a78647b41c2b788d02a4885`,
-comment ID `5060594122`, and head
-`aab83bc74ae0585147a058d92f1f13afac7be109`.
-
-Unseen `Overall verdict` payloads fail closed pending deliberate registration.
-Any body or binding change, including line-ending changes, remains blocking.
+`pr:feedback-state` accepts a clean verdict from Claude only through a bounded
+parser over registered comment shapes. Anything ambiguous or unregistered fails
+closed: unknown prose, Markdown or HTML syntax, hedging, negation, malformed
+headings, and mixed clean/actionable items stay blocking. A small compatibility
+registry holds exact observed payloads, each bound to its Claude author, PR
+number, comment ID, head SHA, and a digest of the untrimmed raw body, so any
+body or binding change — including line endings — blocks again. The exact
+grammar and registry live in `scripts/pr-feedback-state-claude.mjs`; do not
+broaden them to accept a new title or checklist subject.
 
 ## Expected CLI contract
 
@@ -317,8 +272,8 @@ Field expectations:
 
 ## Agent workflow
 
-1. Sweep feedback surfaces and reply to all review comments.
-   Use `Fixed in <commit> — <what changed>` or
+1. Sweep feedback surfaces and build the feedback ledger before editing, then
+   reply to every review comment. Use `Fixed in <commit> — <what changed>` or
    `Won't fix: <technical reason why>`; never resolve a thread before replying.
 2. Freeze the original request, target/owner, changed files, and non-test
    changed-line count as the scope baseline. Batch review fixes locally,
@@ -326,22 +281,21 @@ Field expectations:
    follow-up, or stop; open an issue before deferring valid follow-up work, warn
    near twice the baseline, and pause for reclassification after two
    review-triggered patch cycles rather than starting a third automatically.
-3. Run the mapped local gate once for the batch.
+3. Run `pnpm agent:quality-gate --run` once for the batch; it owns test
+   execution.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
-   run `pnpm agent:autoreview` as a structured source-review closeout. Verify
-   accepted findings before editing and rerun focused checks plus autoreview if
-   those fixes change the batch. The exact target, prepared-bundle, isolation,
-   and trust contracts live in
-   [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md); keep
-   behavioral and runtime verification in the validation record.
-
-5. Run `pnpm --silent pr:feedback-state --pr <number> --repo <BASE_OWNER/REPO>
---json` for the feedback sweep. After its ledger is clean, run
-   `pnpm pr:ready-state --pr <number> --repo <BASE_OWNER/REPO> --json` for the
-   final required-readiness decision. For a foreground wait loop, use
-   `pnpm pr:ready-state --pr <number> --repo <BASE_OWNER/REPO> --watch
---compact --until-ready`. Bind `--repo` to the base repository — checkout
-   inference can select the wrong same-number PR on fork PRs.
+   run `pnpm agent:autoreview` as a structured source-review closeout at the
+   batch boundary rather than as an inner loop. Verify accepted findings before
+   editing and rerun focused checks plus autoreview if those fixes change the
+   batch. The exact target, prepared-bundle, isolation, and trust contracts live
+   in [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md);
+   keep behavioral and runtime verification in the validation record.
+5. Run the suggested invocation pair above: `pnpm --silent pr:feedback-state`
+   for the feedback sweep, then, once its ledger is clean, `pnpm pr:ready-state`
+   for the final required-readiness decision. Add `--watch --compact
+--until-ready` to the readiness call for a foreground wait loop. Bind
+   `--repo` to the base repository — checkout inference can select the wrong
+   same-number PR on fork PRs.
 6. If feedback-state `ready` is false, inspect and handle
    `requiredFeedbackBlockers`, `unresolvedReviewThreads`,
    `unrepliedRootReviewComments`, `blockingTopLevelBotComments`, and any
@@ -374,21 +328,3 @@ settings must change, or the gate must be intentionally overridden with the
 head-scoped comment syntax above. If the limit reply is only historical and the
 current head is `requested` or `in_flight` for another Codex signal, keep
 watching until Codex approves, posts new feedback, or the signal becomes stale.
-
-## Babysitting Speed Discipline
-
-- Build a feedback ledger before editing, then batch sibling fixes before the
-  next push.
-- Avoid broad bot review as an inner loop; use review at batch boundaries.
-- Use `pnpm agent:autoreview` for local structured closeout on non-trivial
-  batches before pushing, not as a replacement for `pr:ready-state`.
-- Keep the frozen scope baseline visible through review; pause after two patch
-  cycles or when scope approaches twice the baseline.
-- Run tests through `pnpm agent:quality-gate --run`; autoreview no longer has a
-  parallel-test execution mode.
-- Cap manual Codex fallback to one request per head.
-- If `codexReviewSignal` is `requested` or `in_flight`, wait instead of posting
-  another `@codex review`.
-- Declare all-clear only after the feedback ledger is clean and the
-  required-only readiness result is ready; optional reviewer lag does not need
-  to clear first.
