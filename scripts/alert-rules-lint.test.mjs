@@ -1178,6 +1178,47 @@ test("Peg Slack pages mention @support-engineer only while critical alerts are f
   );
 });
 
+test("Peg support-engineer input remains managed when the on-call announcer is disabled", () => {
+  const infra = readFileSync(
+    path.resolve(__dirname, "..", "alerts/infra/main.tf"),
+    "utf8",
+  );
+  const sharedSecrets = infra.slice(
+    infra.indexOf("alerts_infra_ci_shared_secret_names"),
+    infra.indexOf("alerts_infra_ci_oncall_secret_names"),
+  );
+  const oncallSecrets = infra.slice(
+    infra.indexOf("alerts_infra_ci_oncall_secret_names"),
+    infra.indexOf("alerts_infra_ci_monitoring_secret_names"),
+  );
+  const infraVariables = readFileSync(
+    path.resolve(__dirname, "..", "alerts/infra/variables.tf"),
+    "utf8",
+  );
+  const supportUsergroupVariable = infraVariables.slice(
+    infraVariables.indexOf('variable "oncall_support_usergroup_id"'),
+    infraVariables.indexOf('variable "slack_notification_channel_id"'),
+  );
+
+  assert(
+    sharedSecrets.includes('"TF_VAR_ONCALL_SUPPORT_USERGROUP_ID"'),
+    "the support-engineer usergroup must be in the unconditional shared-secret set",
+  );
+  assert(
+    !oncallSecrets.includes('"TF_VAR_ONCALL_SUPPORT_USERGROUP_ID"'),
+    "the optional announcer secret set must not own the shared support-engineer usergroup",
+  );
+  assert(
+    infra.includes("local.alerts_infra_ci_shared_secret_names,"),
+    "the managed-secret union must include the shared support-engineer usergroup",
+  );
+  assert(
+    !supportUsergroupVariable.includes('default     = ""') &&
+      supportUsergroupVariable.includes('can(regex("^S[A-Z0-9]{8,}$"'),
+    "the shared support-engineer usergroup must remain a required valid Slack ID",
+  );
+});
+
 test("Peg Grafana consumers use a literal source activation guard", () => {
   const rulesDir = path.resolve(__dirname, "..", "alerts/rules");
   const policyLocals = readFileSync(

@@ -118,13 +118,12 @@ variable "oncall_slack_channel_id" {
 }
 
 variable "oncall_support_usergroup_id" {
-  description = "Slack usergroup ID for @support-engineer. Required when the on-call announcer is enabled."
+  description = "Slack usergroup ID for @support-engineer. Used for critical Peg alert pages and by the on-call announcer when it is enabled."
   type        = string
-  default     = ""
 
   validation {
-    condition     = var.oncall_support_usergroup_id == "" || can(regex("^S[A-Z0-9]{8,}$", var.oncall_support_usergroup_id))
-    error_message = "oncall_support_usergroup_id must be empty or a Slack usergroup ID such as S0123ABC456."
+    condition     = can(regex("^S[A-Z0-9]{8,}$", var.oncall_support_usergroup_id))
+    error_message = "oncall_support_usergroup_id must be a Slack usergroup ID such as S0123ABC456."
   }
 }
 

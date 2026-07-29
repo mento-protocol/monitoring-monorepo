@@ -334,9 +334,14 @@ locals {
     # new one fully propagates).
     "TF_VAR_GITHUB_TOKEN",
   ])
+  # This ID is shared by the on-call announcer and critical Peg alert pages.
+  # Keep its GitHub Actions mirror independent of the optional announcer so an
+  # alerts-infra apply cannot remove an input that alerts-rules always needs.
+  alerts_infra_ci_shared_secret_names = toset([
+    "TF_VAR_ONCALL_SUPPORT_USERGROUP_ID",
+  ])
   alerts_infra_ci_oncall_secret_names = local.oncall_announcer_enabled ? toset([
     "TF_VAR_ONCALL_SLACK_CHANNEL_ID",
-    "TF_VAR_ONCALL_SUPPORT_USERGROUP_ID",
     "TF_VAR_SPLUNK_ON_CALL_API_ID",
     "TF_VAR_SPLUNK_ON_CALL_API_KEY",
   ]) : toset([])
@@ -345,6 +350,7 @@ locals {
   ]) : toset([])
   alerts_infra_ci_secret_names = setunion(
     local.alerts_infra_ci_base_secret_names,
+    local.alerts_infra_ci_shared_secret_names,
     local.alerts_infra_ci_oncall_secret_names,
     local.alerts_infra_ci_monitoring_secret_names,
   )
