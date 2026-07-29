@@ -244,6 +244,21 @@ function formatGh(args) {
   return `gh ${args.map((arg) => quoteArg(String(arg))).join(" ")}`;
 }
 
+export function githubProjectScopeHint(stderr) {
+  if (
+    !/(?:requires one of the following|required) scopes?[\s\S]{0,240}\b(?:read:project|project)\b/i.test(
+      String(stderr),
+    )
+  ) {
+    return "";
+  }
+  return [
+    "GitHub Project V2 operations require the active gh credential's read/write `project` scope.",
+    "Refresh it with: gh auth refresh -h github.com -s project",
+    "`read:project` alone can query a project but cannot run claim, review, or sync mutations.",
+  ].join("\n");
+}
+
 function runGh(args, { dryRun = false, mutates = false } = {}) {
   if (dryRun && mutates) {
     process.stderr.write(`[dry-run] ${formatGh(args)}\n`);
@@ -295,9 +310,10 @@ function runGh(args, { dryRun = false, mutates = false } = {}) {
     child.on("close", (status) => {
       if (failed) return;
       if (status !== 0) {
+        const scopeHint = githubProjectScopeHint(stderr);
         reject(
           new Error(
-            `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}`,
+            `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}${scopeHint ? `\n${scopeHint}\n` : ""}`,
           ),
         );
         return;
