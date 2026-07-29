@@ -3,7 +3,7 @@ title: Indexer Handler Invariants
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-07-29
 doc_type: checklist
 scope: indexer-envio
 review_interval_days: 90
@@ -134,6 +134,21 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
 - Multi-getter effects use `Promise.allSettled` and distinct sentinels:
   `-1` means not attempted/retry; `-2` means the getter is absent/stop retrying.
   Every RPC helper catches synchronous `getRpcClient` failures.
+
+### dRPC batching and oracle-bootstrap RPC
+
+- **dRPC public JSON-RPC batches are capped at three calls.** The repo applies
+  `{ batchSize: 3 }` to exact `drpc.org` hosts; do not replace it with viem's
+  default 1,000-call batch.
+- The bounded bootstrap above is the only oracle RPC a feed may run: the first
+  tracked `OracleReported` or `OracleReportRemoved` performs one exact-boundary
+  `getTimestamps` call, and raw global/token expiry comes from that same
+  boundary into `OracleExpiryState`. Never-tracked feeds perform no expiry RPC,
+  and traffic-scaled `medianTimestamp` or `reportExpiry` calls must never
+  return.
+- A missing or malformed bootstrap fails the event before any entity write and
+  taints the running deployment; that candidate needs a clean replay, not a
+  promotion.
 
 ## Self-heal coordination
 

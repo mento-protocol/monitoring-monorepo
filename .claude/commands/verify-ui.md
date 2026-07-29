@@ -17,7 +17,7 @@ When the user asks for a broad verify (no specific page), hit these in order and
 3. **Pool detail** `/pool/{id}` — pick any active pool from `/pools`. Verify TVL/volume charts, oracle freshness, rebalance history, swap table
 4. **Volume** `/volume` — global volume, flow insights, and chain filter
 5. **Stables** `/stables` — supply/custody across configured chains
-6. **Bridge Flows** `/bridge-flows` — Wormhole NTT transfers (see below)
+6. **Bridge Flows** `/bridge-flows` — Wormhole NTT transfers
 7. **CDPs** `/cdps` — CDP overview and current position health
 8. **Integrations** `/integrations` — auth-gated adapter coverage by chain
 9. **Revenue** `/revenue` — auth-gated KPI tiles + historical chart
@@ -41,20 +41,13 @@ For a narrow verify (specific page or feature), skip the list and go directly to
    as the dev server. Session-dependent surfaces should be checked in both
    states.
 
-4. **Verify content** using `evaluate_script` for targeted checks (~50 tokens each):
-   - Page heading and key text rendered correctly
-   - Data values are non-empty and plausible (not "$0.00" or "..." everywhere)
-   - No "No pools found" or similar empty-state messages when data is expected
+4. **Verify content and errors.** Confirm the page heading and key text render,
+   data values are non-empty and plausible (not "$0.00" or "..." everywhere),
+   and no empty state such as "No pools found" appears where data is expected.
+   Then check `list_console_messages(types: ["error"])` for 500s, unhandled
+   exceptions, and React errors.
 
-5. **Check for errors** with `list_console_messages(types: ["error"])`. Report any 500s, unhandled exceptions, or React errors.
-
-6. **Take a snapshot** only if something looks wrong or you need to investigate further. Prefer `take_snapshot(filePath)` to save tokens, then grep the file for what you need.
-
-7. **If testing interactions** (sort, click, tab switch), use `click(uid, includeSnapshot=true)` for action + verification in a single call.
-
-8. **If testing responsive layout**, use `resize_page` + `evaluate_script` to check column visibility at each breakpoint (desktop 1440, tablet 768, mobile 375).
-
-9. **Report** a concise pass/fail summary. If something failed, include what you expected vs what you saw.
+5. **Report** a concise pass/fail summary. If something failed, include what you expected vs what you saw.
 
 ## Auth-state checks
 
@@ -66,33 +59,9 @@ For a narrow verify (specific page or feature), skip the list and go directly to
 - `/volume`: logged-out users see total volume only; logged-in users can see
   the Organic/All control. Verify whichever of those states the change affects.
 
-## Page-specific checks
+## Route-specific assertions
 
-### Polygon coverage
-
-- `/pools` and `/volume`: select Polygon, verify the URL contains `chain=137`, only Polygon rows/series remain, refresh preserves the selection, and selecting All removes the default query parameter without an RSC refetch.
-- Polygon pool detail: EURm/EUROP renders every active strategy (Open and Reserve once the promoted schema/data are available); during schema rollout, the page degrades to the legacy pointer without blanking the rest of the pool.
-- `/stables`: Polygon USDm and EURm appear as distinct chain-qualified burning-mode supplies rather than being merged with another chain's token row.
-- `/integrations`: Polygon appears for every configured adapter and empty/error states remain distinct from unsupported coverage.
-
-### `/bridge-flows`
-
-- **KPI row (3 tiles):** `Total Bridge Transfers` (BreakdownTile w/ 24h/7d/30d breakdown), `Pending` (number or "1,000+"), `Avg deliver time` (h/m/s). None should be "—" or "…" on a healthy load.
-- **Charts row (3 columns):** `Bridged Volume (USD)` time-series chart with 7d/30d/all range buttons, `Token Breakdown` donut, `Top Bridgers` ranked list with address links.
-- **Recent transfers table (25 rows):** columns Provider, Route, Status, Token, Amount (USD), Amount, Sender, Receiver, Txs, Time. Per-cell click targets:
-  - **Wormholescan** (`wormholescan.io/#/tx/{sentTxHash}`): Provider badge, Amount (USD), Amount, and the `wh` pill in the Txs column
-  - **Chain explorer** (Celoscan / Monadscan / Polygonscan): Token cell (`token contract`), Sender, Receiver, and the `src` pill in the Txs column
-- **Key interactions to spot-check:**
-  - Set source or destination to Polygon → URL contains `source=137` or `destination=137`, the opposite filter/status survives, and pagination resets to page 1
-  - Refresh/back/forward preserves source, destination, status, and page; malformed/default parameters canonicalize out of the URL
-  - Click a sortable header (e.g. "Amount (USD)") → rows re-sort, arrow flips on second click
-  - Click an `AddressLink` → opens the correct explorer (Celoscan for 42220, MonadExplorer for 143, Polygonscan for 137)
-  - Click the Wormholescan `wh` pill → opens `wormholescan.io/#/tx/{sentTxHash}?network=Mainnet` (NOT the digest)
-- **STUCK overlay:** the status badge should read "Stuck" in red once a row remains `SENT` for more than 1h, `ATTESTED` for more than 15m, or `QUEUED_INBOUND` for more than 24h.
-- **Empty / error states:** an error from one query should NOT blank the whole page — each KPI/chart/table gates on its own backing query.
-
-## Token budget guidelines
-
-- Routine check (page loads, data renders): ~100-200 tokens via evaluate_script
-- Interaction check (click, sort, navigate): ~1800 tokens via click+snapshot
-- Full page audit (all content + console + Lighthouse): ~2000-3000 tokens
+`docs/notes/dashboard-verification.md` owns the per-route assertions for
+Polygon coverage and `/bridge-flows` (KPI row, charts, per-cell explorer
+targets, filter/sort interactions, STUCK overlay). Apply them whenever the
+change touches those surfaces.
