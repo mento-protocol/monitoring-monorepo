@@ -5,9 +5,23 @@ import {
 } from "../../src/test-utils/peg-monitoring-fixture";
 
 const now = PEG_FIXTURE_PRODUCED_AT;
-const payload = makePegMonitoringResponse();
+const initialPayload = makePegMonitoringResponse();
+const initialPackage = initialPayload.packages[0]!;
+const payload = {
+  ...initialPayload,
+  packages: [
+    {
+      ...initialPackage,
+      sources: initialPackage.sources.map((source) =>
+        source.id === initialPackage.policy.deepVenueSource
+          ? { ...source, executablePrice: 0.999, deviationBps: 10 }
+          : source,
+      ),
+    },
+  ],
+};
 
-test("intercepts peg monitoring, retains stale evidence, and keeps regional loading geometry", async ({
+test("shows a decision scorecard, keeps evidence on demand, and retains stale evidence", async ({
   page,
 }) => {
   await page.clock.install({ time: new Date(now * 1000 + 20_000) });
@@ -31,81 +45,57 @@ test("intercepts peg monitoring, retains stale evidence, and keeps regional load
     });
   });
   await page.goto("/peg-monitoring");
-  const skeleton = page.locator('[aria-label="Loading peg monitoring"]');
-  await expect(skeleton).toBeVisible();
-  const regions = [
-    ["status", "peg-skeleton-status", "peg-status", 8],
-    ["snapshot", "peg-skeleton-snapshot", "peg-snapshot", 12],
-    [
-      "package header",
-      "peg-skeleton-package-header",
-      "peg-package-0-header",
-      8,
-    ],
-    [
-      "structural evidence",
-      "peg-skeleton-structural",
-      "peg-package-0-structural",
-      12,
-    ],
-    ["policy context", "peg-skeleton-policy", "peg-package-0-policy", 16],
-    [
-      "pool and breaker evidence",
-      "peg-skeleton-monitors",
-      "peg-package-0-monitors",
-      16,
-    ],
-    [
-      "market-source evidence",
-      "peg-skeleton-sources",
-      "peg-package-0-sources",
-      16,
-    ],
-  ] as const;
-  const skeletonRects = await Promise.all(
-    regions.map(([, skeletonTestId]) =>
-      page.getByTestId(skeletonTestId).boundingBox(),
-    ),
-  );
+  await expect(
+    page.locator('[aria-label="Loading peg monitoring"]'),
+  ).toBeVisible();
+  const loadingHeadlines = page.getByTestId("peg-skeleton-headlines");
+  const loadingScorecard = page.getByTestId("peg-skeleton-scorecard");
+  await expect(loadingHeadlines).toBeVisible();
+  const [loadingHeadlineBox, loadingScorecardBox] = await Promise.all([
+    loadingHeadlines.boundingBox(),
+    loadingScorecard.boundingBox(),
+  ]);
   releaseFirstResponse();
-  await expect(page.getByText(/^Current package ·/)).toBeVisible();
-  const convertedSource = payload.packages[0]?.sources.find(
-    ({ convertVia }) => convertVia !== null,
-  );
-  expect(convertedSource?.convertVia).not.toBeNull();
+
+  const aggregate = page.getByTestId("peg-aggregate-status");
+  await expect(aggregate).toBeVisible();
+  await expect(aggregate).toHaveText("All pegs healthy");
+  await expect(aggregate.locator("*")).toHaveCount(0);
+  await expect(page.getByText("Furthest from target")).toBeVisible();
+  await expect(page.getByText("Closest to warning")).toBeVisible();
+  await expect(page.getByText("Data freshness")).toBeVisible();
+  const [loadedHeadlineBox, loadedScorecardBox] = await Promise.all([
+    page.getByTestId("peg-headline-cards").boundingBox(),
+    page.getByTestId("peg-scorecard-europ-schuman").boundingBox(),
+  ]);
+  expect(loadingHeadlineBox).not.toBeNull();
+  expect(loadingScorecardBox).not.toBeNull();
+  expect(loadedHeadlineBox).not.toBeNull();
+  expect(loadedScorecardBox).not.toBeNull();
+  if (
+    loadingHeadlineBox === null ||
+    loadingScorecardBox === null ||
+    loadedHeadlineBox === null ||
+    loadedScorecardBox === null
+  )
+    throw new Error("Peg skeleton or loaded scorecard geometry is unavailable");
+  expect(
+    Math.abs(loadingHeadlineBox.height - loadedHeadlineBox.height),
+  ).toBeLessThanOrEqual(48);
+  expect(
+    Math.abs(loadingScorecardBox.height - loadedScorecardBox.height),
+  ).toBeLessThanOrEqual(64);
+
+  const evidence = page.getByTestId("peg-evidence-policy");
+  await expect(evidence).not.toHaveAttribute("open", "");
+  await evidence.getByText("Evidence and policy", { exact: true }).click();
+  await expect(evidence).toHaveAttribute("open", "");
   await expect(
     page.getByText(
       "Price conversion: USD → EUR via feed 0xec5748…c318ca · chain 137",
     ),
   ).toBeVisible();
-  await expect(page.getByText("Complete within page limit")).toBeVisible();
-  const loadedRects = await Promise.all(
-    regions.map(([, , loadedTestId]) =>
-      page.getByTestId(loadedTestId).boundingBox(),
-    ),
-  );
-  for (const [index, [name, , , verticalTolerance]] of regions.entries()) {
-    const skeletonRect = skeletonRects[index];
-    const loadedRect = loadedRects[index];
-    expect(skeletonRect).not.toBeNull();
-    expect(loadedRect).not.toBeNull();
-    expect(
-      Math.abs(skeletonRect!.x - loadedRect!.x),
-      `${name} has a different left edge`,
-    ).toBeLessThanOrEqual(1);
-    expect(
-      Math.abs(skeletonRect!.width - loadedRect!.width),
-      `${name} has a different width`,
-    ).toBeLessThanOrEqual(1);
-    expect(
-      Math.abs(skeletonRect!.y - loadedRect!.y),
-      `${name} moved more than its text-height allowance`,
-    ).toBeLessThanOrEqual(verticalTolerance);
-    expect(
-      Math.abs(skeletonRect!.height - loadedRect!.height),
-      `${name} changed more than its text-height allowance`,
-    ).toBeLessThanOrEqual(verticalTolerance);
-  }
+
   const grafanaLink = page.getByRole("link", { name: /Open Peg Monitoring/ });
   await expect(grafanaLink).toHaveAttribute(
     "href",
@@ -117,4 +107,5 @@ test("intercepts peg monitoring, retains stale evidence, and keeps regional load
   ).toBeVisible();
   await page.clock.runFor(30_000);
   await expect(page.getByText("Stale — last confirmed package.")).toBeVisible();
+  await expect(page.getByText(/^Last confirmed package \d/)).toBeVisible();
 });

@@ -13,6 +13,7 @@ import {
   type PegMonitoringViewState,
   type PegSource,
 } from "@/lib/peg-monitoring";
+import { presentPegMonitoring } from "@/lib/peg-monitoring-presentation";
 import { buildPoolDetailHref } from "@/lib/routing";
 import {
   EvidenceItem,
@@ -27,31 +28,23 @@ import {
   titleCase,
 } from "./peg-monitoring-evidence-primitives";
 import { PegMonitoringLoading } from "./peg-monitoring-loading";
+import { PegMonitoringScorecard } from "./peg-monitoring-scorecard";
 
 function Header(): React.JSX.Element {
   return (
     <header className="space-y-3">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-400">
-          Incident evidence
+          Peg monitoring
         </p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
-          Peg monitoring
+          Peg status
         </h1>
       </div>
       <p className="max-w-3xl text-sm leading-6 text-slate-400">
-        Current executable-price, market, structural, and breaker evidence from
-        the Metrics Bridge decision package. Grafana remains authoritative for
-        duration windows, coverage, pending and firing state, and history.
+        See whether a monitored asset is off peg or nearing action from its
+        current measurement and supporting evidence.
       </p>
-      <a
-        href={PEG_GRAFANA_ALERTS_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex text-sm font-medium text-indigo-400 transition-colors hover:text-indigo-300"
-      >
-        Open Peg Monitoring rules and history in Grafana ↗
-      </a>
     </header>
   );
 }
@@ -477,8 +470,18 @@ export function PegMonitoringPageClient(): React.JSX.Element {
     ...result,
     nowMs: Math.max(now, Date.now()),
   });
+  const presentation =
+    state.kind === "current" || state.kind === "stale"
+      ? presentPegMonitoring(state.data, {
+          packageIsStale: state.kind === "stale",
+          usesPreviousPolicy:
+            state.data.policySlot === "previous" ||
+            state.data.producedPolicyVersion !==
+              state.data.approvedActivePolicyVersion,
+        })
+      : null;
   return (
-    <div data-testid="peg-monitoring-page" className="space-y-8">
+    <main data-testid="peg-monitoring-page" className="space-y-8">
       <Header />
       {state.kind === "loading" ? (
         <PegMonitoringLoading />
@@ -486,15 +489,36 @@ export function PegMonitoringPageClient(): React.JSX.Element {
         <ErrorBox message="Peg monitoring is unavailable. No confirmed decision package can be shown." />
       ) : (
         <div className="space-y-6">
-          <SnapshotStatus state={state} />
-          <Snapshot data={state.data} />
-          <div className="space-y-5">
-            {state.data.packages.map((item, index) => (
-              <Package key={item.asset} item={item} index={index} />
-            ))}
-          </div>
+          <PegMonitoringScorecard
+            presentation={presentation!}
+            ageMs={state.ageMs}
+            stale={state.kind === "stale"}
+          />
+          <details
+            data-testid="peg-evidence-policy"
+            className="rounded-xl border border-slate-800 bg-slate-950/35 p-4 sm:p-6"
+          >
+            <summary className="cursor-pointer text-lg font-semibold text-white">
+              Evidence and policy
+            </summary>
+            <div className="mt-6 space-y-5">
+              <SnapshotStatus state={state} />
+              <Snapshot data={state.data} />
+              {state.data.packages.map((item, index) => (
+                <Package key={item.asset} item={item} index={index} />
+              ))}
+              <a
+                href={PEG_GRAFANA_ALERTS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex text-sm font-medium text-indigo-400 transition-colors hover:text-indigo-300"
+              >
+                Open Peg Monitoring rules and history in Grafana ↗
+              </a>
+            </div>
+          </details>
         </div>
       )}
-    </div>
+    </main>
   );
 }

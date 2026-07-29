@@ -1,138 +1,82 @@
-const LOADING_MONITOR_KEYS = [
-  "t",
-  "u",
-  "v",
-  "w",
-  "x",
-  "y",
-  "z",
-  "aa",
-  "ab",
-  "ac",
-];
-const LOADING_SOURCE_KEYS = ["bitvavo-eur", "kraken-eur", "kraken-usd"];
-const LOADING_SOURCE_EVIDENCE_KEYS = [
-  "ac",
-  "ad",
-  "ae",
-  "af",
-  "ag",
-  "ah",
-  "ai",
-  "aj",
-  "ak",
-  "al",
-];
+const cards = ["furthest", "warning", "freshness"];
+const evidenceItems = ["market", "sources", "pool", "breaker"];
 
-function LoadingMonitors(): React.JSX.Element {
-  return (
-    <section data-testid="peg-skeleton-monitors" className="space-y-3">
-      <div className="h-5 w-48 animate-pulse rounded bg-slate-800" />
-      <article className="space-y-4 rounded-lg border border-slate-800 bg-slate-950/35 p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-2">
-            <div className="h-4 w-16 animate-pulse rounded bg-slate-800" />
-            <div className="h-5 w-36 animate-pulse rounded bg-slate-800" />
-          </div>
-          <div className="h-7 w-24 animate-pulse rounded-full bg-slate-800" />
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {LOADING_MONITOR_KEYS.map((key) => (
-            <div
-              key={key}
-              className={`${key === "ab" || key === "ac" ? "h-16" : "h-24"} animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40`}
-            />
-          ))}
-        </div>
-      </article>
-    </section>
-  );
-}
-
-function LoadingSources(): React.JSX.Element {
-  return (
-    <section data-testid="peg-skeleton-sources" className="space-y-3">
-      <div className="h-5 w-44 animate-pulse rounded bg-slate-800" />
-      {LOADING_SOURCE_KEYS.map((sourceKey) => (
-        <article
-          key={sourceKey}
-          className="space-y-4 rounded-lg border border-slate-800 bg-slate-950/35 p-4"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-2">
-              <div className="h-5 w-40 animate-pulse rounded bg-slate-800" />
-              <div className="h-4 w-52 animate-pulse rounded bg-slate-800" />
-            </div>
-            <div className="h-7 w-44 animate-pulse rounded-full bg-slate-800" />
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            {LOADING_SOURCE_EVIDENCE_KEYS.map((key) => (
-              <div
-                key={`${sourceKey}-${key}`}
-                // The converted source policy carries both the listing threshold
-                // and conversion provenance, which occupy two extra lines.
-                className={`${sourceKey === "kraken-usd" && key === "al" ? "h-32" : "h-20"} animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40`}
-              />
-            ))}
-          </div>
-        </article>
-      ))}
-    </section>
-  );
+function Bar({ className }: { className: string }): React.JSX.Element {
+  return <div className={`rounded bg-slate-800 ${className}`} />;
 }
 
 export function PegMonitoringLoading(): React.JSX.Element {
   return (
-    <section aria-label="Loading peg monitoring" className="space-y-6">
+    <section
+      aria-label="Loading peg monitoring"
+      className="space-y-5 animate-pulse"
+    >
       <div
         data-testid="peg-skeleton-status"
-        className="h-12 animate-pulse rounded-lg border border-slate-800 bg-slate-900/45"
-      />
-      <div data-testid="peg-skeleton-snapshot" className="space-y-3">
-        <div className="h-7 w-28 animate-pulse rounded bg-slate-800" />
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {["a", "b", "c", "d", "e"].map((key) => (
-            <div
-              key={key}
-              className="h-28 animate-pulse rounded-md border border-slate-800 bg-slate-950/40"
-            />
-          ))}
-        </div>
+        className="rounded-xl border border-slate-800 bg-slate-900/45 p-5"
+      >
+        <Bar className="h-5 w-44" />
       </div>
       <div
-        data-testid="peg-skeleton-package"
-        className="space-y-6 rounded-xl border border-slate-800 bg-slate-900/45 p-4 sm:p-6"
+        data-testid="peg-skeleton-headlines"
+        className="grid gap-3 md:grid-cols-3"
       >
-        <div
-          data-testid="peg-skeleton-package-header"
-          className="flex flex-wrap items-start justify-between gap-4"
-        >
-          <div className="h-12 w-1/3 animate-pulse rounded bg-slate-800" />
+        {cards.map((card) => (
+          <div
+            key={card}
+            className="space-y-5 rounded-xl border border-slate-800 bg-slate-900/45 p-5"
+          >
+            <Bar className="h-3 w-32" />
+            <Bar className="h-7 w-3/4" />
+            <Bar className="h-3 w-2/3" />
+          </div>
+        ))}
+      </div>
+      <article
+        data-testid="peg-skeleton-scorecard"
+        className="rounded-xl border border-slate-800 bg-slate-900/45 p-5"
+      >
+        <div className="grid gap-6 xl:grid-cols-[minmax(13rem,0.8fr)_minmax(20rem,1.4fr)_minmax(13rem,0.8fr)] xl:items-center">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <Bar className="h-6 w-36" />
+              <Bar className="h-7 w-20 rounded-full" />
+            </div>
+            <Bar className="h-9 w-44" />
+            <Bar className="h-3 w-56 max-w-full" />
+          </div>
+          <div className="space-y-3">
+            <div className="flex justify-between gap-3">
+              <Bar className="h-4 w-28" />
+              <Bar className="h-4 w-36" />
+            </div>
+            <Bar className="h-3 w-full rounded-full" />
+            <div className="flex justify-between gap-3">
+              <Bar className="h-3 w-12" />
+              <Bar className="h-3 w-24" />
+              <Bar className="h-3 w-24" />
+            </div>
+          </div>
+          <div className="space-y-4 rounded-lg border border-slate-800 p-4">
+            <Bar className="h-3 w-32" />
+            <Bar className="h-5 w-full" />
+            <Bar className="h-3 w-3/4" />
+          </div>
         </div>
-        <section data-testid="peg-skeleton-structural" className="space-y-3">
-          <div className="h-5 w-40 animate-pulse rounded bg-slate-800" />
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
-            {["f", "g", "h", "i", "j", "k"].map((key) => (
-              <div
-                key={key}
-                className="h-20 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
-              />
-            ))}
-          </div>
-        </section>
-        <section data-testid="peg-skeleton-policy" className="space-y-3">
-          <div className="h-5 w-48 animate-pulse rounded bg-slate-800" />
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {["l", "m", "n", "o", "p", "q", "r", "s"].map((key) => (
-              <div
-                key={key}
-                className="h-20 animate-pulse rounded-md border border-slate-800/80 bg-slate-950/40"
-              />
-            ))}
-          </div>
-        </section>
-        <LoadingMonitors />
-        <LoadingSources />
+        <div className="mt-5 grid gap-4 border-t border-slate-800 pt-4 sm:grid-cols-4">
+          {evidenceItems.map((item) => (
+            <div key={item} className="space-y-2">
+              <Bar className="h-3 w-20" />
+              <Bar className="h-4 w-32 max-w-full" />
+            </div>
+          ))}
+        </div>
+      </article>
+      <div
+        data-testid="peg-skeleton-evidence"
+        className="rounded-xl border border-slate-800 bg-slate-950/35 p-5"
+      >
+        <Bar className="h-5 w-40" />
       </div>
     </section>
   );
