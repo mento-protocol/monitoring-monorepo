@@ -20,9 +20,13 @@ on:
     # script consumes `sentry:approved-archive` as a compare-and-swap BEFORE it
     # closes the stub (issue #1371), so once settlement is past that point the
     # label is gone and this dispatch can no longer re-drive the run. A failure
-    # after the CAS reverts the Sentry archive and fails RED; recovery needs a
-    # human to apply a FRESH approval. That is the authority model holding, not
-    # a gap — see docs/notes/sentry-triage-pipeline.md.
+    # after the CAS rolls the QUEUE STUB back and fails RED; it does NOT
+    # un-archive the Sentry issue, because archived_until_escalating is the
+    # outcome the approver asked for and it self-heals on escalation (ADR 0036).
+    # Recovery needs a human to apply a FRESH approval — the authority model
+    # holding, not a gap. That re-approval is itself refused if Sentry's
+    # lastSeen has moved past the baseline the stub recorded.
+    # See docs/notes/sentry-triage-pipeline.md.
     types: [labeled]
   workflow_dispatch:
     # checkov:skip=CKV_GHA_7: issue_number is a single-issue selector, validated

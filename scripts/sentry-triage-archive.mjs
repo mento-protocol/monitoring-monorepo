@@ -187,6 +187,14 @@ function yamlScalar(value) {
   return JSON.stringify(truncateTitle(neutralizeUntrusted(value), 90));
 }
 
+/** The baseline as it renders inside the audit note. `isSettledAuditComment`
+ * matches on this exact token to scope its dedup to one archive generation, so
+ * the emitter and the matcher must share it — a drift between them would either
+ * double-post every audit or suppress every one. */
+function auditBaselineToken(baselineLastSeen) {
+  return `\`${yamlScalar(baselineLastSeen ?? "")}\``;
+}
+
 /** The queue-stub audit comment: a fixed marker line, the approver, a UTC
  * timestamp, what was archived, the permalink, the machine-readable freshness
  * baseline, and the escalation-auto-reopen note. `shortId` is neutralized +
@@ -226,7 +234,7 @@ export function buildAuditComment({
   // comment cannot hold it, because the triage LLM can post comments under this
   // same bot identity (see isSettledAuditComment).
   lines.push(
-    `- Freshness baseline recorded in the issue body: \`${yamlScalar(baselineLastSeen ?? "")}\`.`,
+    `- Freshness baseline recorded in the issue body: ${auditBaselineToken(baselineLastSeen)}.`,
     "",
     "Never hard-resolved: the issue stays archived only until it escalates. If",
     "it escalates/regresses in Sentry, Stage A's regression-reopen path reopens",
@@ -421,13 +429,22 @@ export function isUsableBaseline(lastSeen) {
  * The author + marker + id checks stay anyway: they cost nothing and keep a
  * drive-by from suppressing the note on a stub it does not even name.
  */
-export function isSettledAuditComment(comment, sentryIssueId) {
+export function isSettledAuditComment(comment, { sentryIssueId, baseline }) {
   if (!isTrustedComment(comment)) return false;
   const body = comment?.body;
   if (typeof body !== "string" || !body.startsWith(ARCHIVE_COMMENT_MARKER)) {
     return false;
   }
-  return body.includes(`(id ${String(sentryIssueId ?? "")})`);
+  if (!body.includes(`(id ${String(sentryIssueId ?? "")})`)) return false;
+  // Scope to THIS archive, not to the Sentry issue. A stub can be archived,
+  // regress, be reopened by ingest (which keeps its comments), be re-triaged and
+  // re-approved, and archived again — at which point the previous archive's
+  // marker and issue id both still match, and keying on those alone suppressed
+  // the new audit, losing the new approver, timestamp and disposition. The
+  // freshness baseline advances with every genuine re-archive (a regression
+  // implies a newer event), so it is the generation token; a true retry of the
+  // SAME archive carries the same baseline and still dedups.
+  return body.includes(auditBaselineToken(baseline));
 }
 
 /** What the compensation actually did, for the human reading the stub.
@@ -486,6 +503,25 @@ export function buildUnreadableFreshnessRefusalComment(
     `read-back is anomalous. ${describeRestore(restored)} The stub stays open and`,
     "the `sentry:approved-archive` approval was removed; re-approve once Sentry",
     "reports the issue normally.",
+  ].join("\n");
+}
+
+/** Fixed refusal comment for a re-approval over an archive whose recorded
+ * baseline Sentry has already moved past. Nothing was mutated on this path. */
+export function buildStaleRetryRefusalComment(shortId, recorded, observed) {
+  const safeShortId = truncateTitle(neutralizeUntrusted(shortId), 90);
+  return [
+    `**Not archived.** \`${safeShortId}\` is already archived in Sentry, and its`,
+    `last event (${yamlScalar(observed ?? "")}) is newer than the freshness`,
+    `baseline this stub recorded (${yamlScalar(recorded ?? "")}). Settling now`,
+    "would stamp the newer timestamp as the baseline, and the reopen gate would",
+    "then never fire for the event in between — it would be archived and",
+    "invisible to both ingest queries, which only match unresolved issues.",
+    "",
+    "Nothing was changed. Un-archive the Sentry issue and let it re-triage, or",
+    "confirm the newer activity is understood before re-approving. The",
+    "`sentry:approved-archive` label was removed so a bare re-dispatch cannot",
+    "skip that decision.",
   ].join("\n");
 }
 
@@ -704,6 +740,19 @@ async function ensureArchiveLabels(runGh, repo) {
   }
 }
 
+/**
+ * True when `archiveIssue` failed because Sentry ANSWERED and refused — the
+ * error it throws for a non-2xx names the status. That is a definite "nothing
+ * was archived". A transport error, timeout or aborted socket produces no such
+ * message and must stay unknown: the write may have applied with only the
+ * response lost, and claiming either outcome would mislead an operator.
+ */
+export function isDefiniteRejection(err) {
+  return /^Sentry archive request failed: \d{3}\b/.test(
+    err instanceof Error ? err.message : "",
+  );
+}
+
 /** A `gh api -X DELETE .../labels/<name>` that 404s means the label is no
  * longer on the issue — the only realistic 404 here, since the issue and repo
  * were both read successfully moments earlier. */
@@ -834,12 +883,27 @@ export async function reconcileToTarget(
   // baseline from its previous archive, and a failed run would otherwise leave
   // its newer timestamp behind — which, on a stub that still carries
   // `sentry:archived`, ingest trusts, and a regression predating that timestamp
-  // is then skipped. Comparing the parsed baselines rather than whole bodies
-  // keeps this from clobbering an unrelated concurrent body edit.
+  // is then skipped.
+  //
+  // Detect on the parsed baseline, and WRITE by rebuilding just those two fields
+  // on top of the LIVE body. Writing back the whole snapshot would erase any
+  // unrelated edit made after it — a human correcting the permalink, say — which
+  // is a silent data loss the detection was already careful to avoid causing.
   if (
     typeof target.body === "string" &&
     baselineOf(live.body) !== baselineOf(target.body)
   ) {
+    const restoredBody = withArchiveBaseline(
+      live.body,
+      parseArchiveBaseline(target.body),
+    );
+    if (restoredBody === null) {
+      // No yaml block live to rebuild into. Fall back to the snapshot rather
+      // than leave a wrong baseline standing, and say so.
+      process.stderr.write(
+        `::warning::Issue #${queueIssue} has no parseable yaml block to rebuild its baseline into; restoring the pre-run body wholesale, which discards any concurrent body edit.\n`,
+      );
+    }
     corrections.push({
       what: "body",
       args: [
@@ -849,7 +913,7 @@ export async function reconcileToTarget(
         "-R",
         repo,
         "--body",
-        target.body,
+        restoredBody ?? target.body,
       ],
     });
   }
@@ -877,13 +941,18 @@ export async function reconcileToTarget(
     });
   }
 
+  // Correction errors are PROVISIONAL, not verdicts. A corrective write can be
+  // accepted and still lose its response — the very ambiguity this reconciler
+  // exists to handle — so a rejection here proves nothing about the final state.
+  // The authoritative read below decides. Letting the catch decide turned
+  // successful recoveries into red runs telling operators to repair by hand.
+  const provisional = [];
   for (const correction of corrections) {
     try {
       await runGh(correction.args);
     } catch (err) {
-      report.converged = false;
-      report.errors.push(
-        `Queue ${correction.what} correction failed: ${
+      provisional.push(
+        `Queue ${correction.what} correction reported failure: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -894,8 +963,7 @@ export async function reconcileToTarget(
     : "already-consistent";
 
   // --- Verify ------------------------------------------------------------
-  // A correction can itself be lost, so confirm by reading, not by assuming the
-  // writes above landed.
+  // The single source of truth for `converged`.
   if (corrections.length) {
     try {
       const after = await readQueueIssue(runGh, repo, queueIssue);
@@ -908,14 +976,27 @@ export async function reconcileToTarget(
         stillWrong.push("still closed");
       if (stillWrong.length) {
         report.converged = false;
-        report.errors.push(`Queue still diverges: ${stillWrong.join(", ")}`);
+        report.errors.push(
+          `Queue still diverges: ${stillWrong.join(", ")}`,
+          ...provisional,
+        );
+      } else if (provisional.length) {
+        // Reported failure, confirmed success: the writes landed and their
+        // responses were lost. Worth a line, not a red run.
+        process.stderr.write(
+          `::notice::Queue rollback of #${queueIssue} reported errors the verification read disproved (${provisional.join(
+            "; ",
+          )}); the final state matches the target.\n`,
+        );
       }
     } catch (err) {
+      // Cannot confirm, so cannot claim convergence.
       report.converged = false;
       report.errors.push(
         `Queue verification read failed: ${
           err instanceof Error ? err.message : String(err)
         }`,
+        ...provisional,
       );
     }
   }
@@ -923,19 +1004,42 @@ export async function reconcileToTarget(
   return report;
 }
 
-/** One `::error::` naming what BOTH systems were observed to hold, so the
- * runbook's recovery entry has something real to point at. */
-function reportReconciliation(report, { queueIssue, shortId, issueId, why }) {
+/**
+ * How this run left Sentry, stated only as far as it actually knows. The
+ * summary line is what the runbook tells operators to trust, so it must never
+ * assert "archived" on a run whose PUT was rejected or never issued.
+ */
+export function describeSentryDisposition(archiveState, issueId) {
+  switch (archiveState) {
+    case "pre-existing":
+    case "confirmed":
+      return `Sentry issue ${issueId} stays archived_until_escalating by design (ADR 0036): that is the approved outcome and it self-heals on escalation.`;
+    case "rejected":
+      return `Sentry issue ${issueId} was NOT archived — the update was rejected, so there is no Sentry change to undo.`;
+    case "unknown":
+      return `Sentry issue ${issueId} is in an UNKNOWN state: the archive request did not complete cleanly, so it may or may not have applied. Read the issue before acting on it.`;
+    default:
+      return `Sentry issue ${issueId} was never touched by this run.`;
+  }
+}
+
+/** One line naming what the queue was observed to hold and what this run knows
+ * about Sentry, so the runbook's recovery entry has something real to point at. */
+function reportReconciliation(
+  report,
+  { queueIssue, shortId, issueId, why, archiveState },
+) {
+  const sentry = describeSentryDisposition(archiveState, issueId);
   if (report.converged) {
     process.stderr.write(
-      `::notice::Rolled the queue stub #${queueIssue} / ${shortId} (${issueId}) back after ${why} — queue: ${report.queue}. Sentry stays archived_until_escalating by design (ADR 0036): that is the approved outcome and it self-heals on escalation.\n`,
+      `::notice::Rolled the queue stub #${queueIssue} / ${shortId} back after ${why} — queue: ${report.queue}. ${sentry}\n`,
     );
     return;
   }
   process.stderr.write(
-    `::error::Queue rollback of #${queueIssue} / ${shortId} (${issueId}) after ${why} did NOT converge (${
+    `::error::Queue rollback of #${queueIssue} / ${shortId} after ${why} did NOT converge (${
       report.queue ?? "unknown"
-    }): ${report.errors.join("; ")}. Sentry issue ${issueId} is left archived_until_escalating (by design). Fix the stub by hand.\n`,
+    }): ${report.errors.join("; ")}. ${sentry} Fix the stub by hand.\n`,
   );
 }
 
@@ -1113,7 +1217,10 @@ async function settleQueueStub(
   // a failed note must not roll back a legitimate archive. The machine-readable
   // record lives in the body; this is the human-facing one.
   const alreadyAudited = (verify.comments ?? []).some((comment) =>
-    isSettledAuditComment(comment, sentryIssueId),
+    isSettledAuditComment(comment, {
+      sentryIssueId,
+      baseline: baselineLastSeen,
+    }),
   );
   if (alreadyAudited) {
     process.stderr.write(
@@ -1283,6 +1390,66 @@ export async function runArchive(options, deps = {}) {
   // and skip the redundant PUT); the queue-stub settle still runs.
   const alreadyArchived = isAlreadyArchived(current);
 
+  // A retry over an existing archive must NOT re-stamp the baseline. Queue-only
+  // rollback leaves Sentry archived and the runbook tells the operator to
+  // re-approve, so this path is the normal recovery — and stamping the
+  // retry-time `lastSeen` would absorb any event that arrived after the FIRST
+  // run's freshness read while Sentry's substatus still lagged. Ingest would
+  // then skip that event when the regression finally surfaces.
+  //
+  // A visible refusal is the whole mechanism, and it needs no bookkeeping. The
+  // usable-baseline gate above already proved this run's `lastSeen` parses, so
+  // against the stub's recorded baseline there are only two cases: equal, where
+  // re-stamping is a no-op, or newer, which IS the untriaged event — refuse.
+  // (Older would mean a stale read replica; stamping the older value only makes
+  // ingest reopen more eagerly, which is the safe direction.) So there is
+  // nothing to "preserve" beyond refusing, and no branch that would be
+  // unobservable if it were wrong.
+  const recordedBaseline = alreadyArchived
+    ? parseArchiveBaseline(stub.body)
+    : null;
+  if (recordedBaseline && isUsableBaseline(recordedBaseline.lastSeen)) {
+    if (lastSeenMoved(recordedBaseline.lastSeen, current?.lastSeen)) {
+      process.stderr.write(
+        `::notice::Sentry issue ${meta.shortId} (${issueId}) is already archived and its lastSeen (${current?.lastSeen}) has moved past the baseline this stub recorded (${recordedBaseline.lastSeen}); refusing to re-stamp a newer baseline over an untriaged event.\n`,
+      );
+      await runGh([
+        "issue",
+        "comment",
+        String(queueIssue),
+        "-R",
+        repo,
+        "--body",
+        buildStaleRetryRefusalComment(
+          meta.shortId,
+          recordedBaseline.lastSeen,
+          current?.lastSeen,
+        ),
+      ]);
+      // Shed the approval so a bare re-dispatch cannot walk straight back in.
+      await runGh([
+        "issue",
+        "edit",
+        String(queueIssue),
+        "-R",
+        repo,
+        "--remove-label",
+        APPROVED_ARCHIVE_LABEL,
+      ]);
+      return {
+        issue: queueIssue,
+        shortId: meta.shortId,
+        sentryIssueId: issueId,
+        status: "skipped-stale-retry",
+      };
+    }
+  }
+
+  // What this run KNOWS about Sentry, so the summary line never asserts an
+  // archive that a rejected PUT never made. "unknown" is a real answer and the
+  // only honest one when the request did not complete cleanly.
+  let archiveState = alreadyArchived ? "pre-existing" : "not-attempted";
+
   // Pre-mutation observation of the stub, filled in by settleQueueStub's own
   // pre-CAS read. Stays null if settlement never got that far, which is a fact
   // about the code path (no queue write can precede that read), not a guess.
@@ -1297,6 +1464,7 @@ export async function runArchive(options, deps = {}) {
       shortId: meta.shortId,
       issueId,
       why,
+      archiveState,
     });
     return report;
   };
@@ -1312,7 +1480,17 @@ export async function runArchive(options, deps = {}) {
         `::notice::Sentry issue ${meta.shortId} (${issueId}) is already archived_until_escalating (${issueId}); treating as success.\n`,
       );
     } else {
-      await archiveIssue(fetchImpl, { ...sentry, issueId });
+      // Record what we learn from the PUT. A definite non-2xx means Sentry
+      // rejected it and nothing was archived; any other failure (transport,
+      // timeout) leaves it genuinely unknown, because the write may have landed
+      // and only the response been lost.
+      try {
+        await archiveIssue(fetchImpl, { ...sentry, issueId });
+        archiveState = "confirmed";
+      } catch (err) {
+        archiveState = isDefiniteRejection(err) ? "rejected" : "unknown";
+        throw err;
+      }
 
       // Post-mutation freshness re-check (issue #1371). Sentry's substatus lags a
       // fresh event, so the guard above can pass while an event is already in

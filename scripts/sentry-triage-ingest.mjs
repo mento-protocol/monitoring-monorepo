@@ -319,11 +319,16 @@ export function parseArchiveBaseline(issueBody) {
  * archive leg's body rewrite; kept here so the writer and the reader above stay
  * one edit apart.
  *
+ * A NULL baseline strips the two fields instead of setting them. The archive's
+ * rollback needs that: it must put the baseline back the way it found it while
+ * leaving every other part of the body — including edits a human made after the
+ * run's snapshot — exactly as it is live.
+ *
  * Returns null when the body has no yaml block to extend — the archive treats
  * that as a hard refusal rather than inventing structure, since a stub whose
  * body it cannot parse is one ingest cannot read a baseline back out of either.
  */
-export function withArchiveBaseline(body, { lastSeen, sentryIssueId }) {
+export function withArchiveBaseline(body, baseline) {
   const source = String(body ?? "");
   const block = extractYamlBlock(source);
   if (!block) return null;
@@ -336,11 +341,13 @@ export function withArchiveBaseline(body, { lastSeen, sentryIssueId }) {
         ).test(line.trim()),
     )
     .join("\n");
-  const rebuilt = [
-    stripped,
-    `${ARCHIVE_BASELINE_FIELD}: ${JSON.stringify(String(lastSeen ?? ""))}`,
-    `${ARCHIVE_BASELINE_ID_FIELD}: ${JSON.stringify(String(sentryIssueId ?? ""))}`,
-  ].join("\n");
+  const rebuilt = baseline
+    ? [
+        stripped,
+        `${ARCHIVE_BASELINE_FIELD}: ${JSON.stringify(String(baseline.lastSeen ?? ""))}`,
+        `${ARCHIVE_BASELINE_ID_FIELD}: ${JSON.stringify(String(baseline.sentryIssueId ?? ""))}`,
+      ].join("\n")
+    : stripped;
   return source.replace(block, rebuilt);
 }
 

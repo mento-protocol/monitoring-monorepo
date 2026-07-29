@@ -9,6 +9,8 @@ import {
   buildRestorePayload,
   isActivelyRegressing,
   isAlreadyArchived,
+  describeSentryDisposition,
+  isDefiniteRejection,
   isNotFoundError,
   isNumericId,
   settlementHeld,
@@ -173,6 +175,9 @@ function makeRunGh({
   // take effect. The mirror image of ambiguousOn, and the only thing the
   // post-correction verification read can catch.
   noopOn = () => false,
+  // Runs before a call is applied, so a test can model another actor mutating
+  // the stub between this run's writes.
+  beforeCall = () => {},
   concurrentReopenBeforeView = null,
 }) {
   const calls = [];
@@ -253,6 +258,7 @@ function makeRunGh({
 
   const runGh = async (args) => {
     calls.push(args);
+    beforeCall(args);
     if (args[0] === "issue" && args[1] === "view") {
       views += 1;
       if (concurrentReopenBeforeView === views) ingestReopen();
@@ -1436,6 +1442,256 @@ await test("a failed audit note does not roll back a converged settlement", asyn
   assert(parseArchiveBaseline(model.body), "the machine record survives");
 });
 
+await test("a quiet retry over an existing archive is a no-op on the baseline", async () => {
+  // Queue-only rollback leaves Sentry archived and the runbook says re-approve,
+  // so this is the NORMAL recovery. When nothing new landed, Sentry's lastSeen
+  // still equals the recorded baseline, so settling again re-stamps the same
+  // value and the audit note dedups. The dangerous case — lastSeen having moved
+  // — is the refusal below; this pins that the quiet case stays inert.
+  const recorded = "2026-07-19T11:59:00.000Z";
+  const stub = makeStub({
+    state: "CLOSED",
+    comments: [auditComment({ baselineLastSeen: recorded })],
+    body: withArchiveBaseline(stubBody(), {
+      lastSeen: recorded,
+      sentryIssueId: "6197137101",
+    }),
+  });
+  stub.labels.push({ name: "sentry:archived" });
+  const { runGh, model } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch({
+    issue: {
+      status: "ignored",
+      substatus: "archived_until_escalating",
+      lastSeen: recorded,
+    },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "already-archived");
+  assertEqual(parseArchiveBaseline(model.body).lastSeen, recorded);
+  assertEqual(
+    model.comments.filter((c) => c.body.includes(ARCHIVE_COMMENT_MARKER))
+      .length,
+    1,
+    "the retry adds no second audit note for the same archive",
+  );
+});
+
+await test("a retry refuses outright when Sentry moved past the recorded baseline", async () => {
+  // Positive evidence of an untriaged event. Stamping the newer timestamp would
+  // bury it: an archived issue matches neither ingest query, so nothing would
+  // ever reopen the stub for it.
+  const recorded = "2026-07-19T11:59:00.000Z";
+  const stub = makeStub({
+    state: "CLOSED",
+    body: withArchiveBaseline(stubBody(), {
+      lastSeen: recorded,
+      sentryIssueId: "6197137101",
+    }),
+  });
+  stub.labels.push({ name: "sentry:archived" });
+  const { runGh, calls, model } = makeRunGh({ stub });
+  const { fetchImpl, calls: fetchCalls } = makeFetch({
+    issue: {
+      status: "ignored",
+      substatus: "archived_until_escalating",
+      lastSeen: "2026-07-19T12:30:00.000Z",
+    },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "skipped-stale-retry");
+  assert(!fetchCalls.some((c) => c.method === "PUT"), "no Sentry mutation");
+  assert(!bodyEditCall(calls), "the baseline is not re-stamped");
+  assertEqual(
+    parseArchiveBaseline(model.body).lastSeen,
+    recorded,
+    "the recorded baseline survives untouched",
+  );
+  // Visible to a human, and disarmed against a bare re-dispatch.
+  const comment = ghCall(calls, "comment");
+  assert(comment, "the refusal is written where an operator will see it");
+  assert(
+    comment[comment.indexOf("--body") + 1].includes("Not archived."),
+    "and says plainly that nothing was archived",
+  );
+  assertEqual(model.labels.includes("sentry:approved-archive"), false);
+});
+
+await test("a re-archive after a regression posts its own audit note", async () => {
+  // The stub was archived, regressed, reopened by ingest (comments survive),
+  // re-triaged and re-approved. Keying dedup on the Sentry issue id alone made
+  // the previous archive's note suppress this one, losing the new approver,
+  // timestamp and disposition.
+  const stalePreviousArchive = auditComment({
+    baselineLastSeen: "2026-07-01T00:00:00.000Z",
+  });
+  const stub = makeStub({ comments: [stalePreviousArchive] });
+  const { runGh, calls, model } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch();
+
+  await runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW });
+
+  const notes = model.comments.filter((c) =>
+    c.body.includes(ARCHIVE_COMMENT_MARKER),
+  );
+  assertEqual(notes.length, 2, "the new archive records its own audit");
+  const posted = ghCall(calls, "comment");
+  assert(posted, "a note was posted despite the older marker");
+  assert(
+    posted[posted.indexOf("--body") + 1].includes(BASELINE_LAST_SEEN),
+    "and it carries THIS archive's baseline",
+  );
+});
+
+await test("a lost response on a correction converges instead of failing red", async () => {
+  // The corrective write is accepted and its response lost — the same ambiguity
+  // the reconciler exists for. Deciding `converged` in the catch turned a
+  // successful recovery into a red run telling the operator to repair by hand.
+  const stub = makeStub();
+  const { runGh } = makeRunGh({
+    stub,
+    ambiguousOn: (args) =>
+      args[1] === "close"
+        ? "gh issue close: connection reset"
+        : args[1] === "reopen"
+          ? "gh issue reopen: connection reset"
+          : null,
+  });
+  const { fetchImpl } = makeFetch();
+  const stderr = [];
+  const write = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  try {
+    await assertRejects(
+      runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+      /connection reset/,
+    );
+  } finally {
+    process.stderr.write = write;
+  }
+
+  assert(
+    !stderr.some((l) => l.includes("did NOT converge")),
+    "the verification read disproves the reported correction failure",
+  );
+  assert(
+    stderr.some((l) => l.includes("the verification read disproved")),
+    "and the discrepancy is still logged",
+  );
+});
+
+await test("baseline rollback preserves a concurrent body edit", async () => {
+  // The correction rebuilds only the two baseline fields on top of the LIVE
+  // body. Writing back the whole snapshot erased any unrelated edit made after
+  // it — silent data loss, in the very code that was careful not to cause it.
+  const stub = makeStub();
+  const edited = stubBody({
+    permalink: "https://mento-labs.sentry.io/issues/6197137101/?edited=1",
+  });
+  const { runGh, model } = makeRunGh({
+    stub,
+    // A human edits the body between the settlement's write and the rollback.
+    beforeCall: (args) => {
+      if (args[0] === "issue" && args[1] === "close") {
+        model.body = withArchiveBaseline(edited, {
+          lastSeen: BASELINE_LAST_SEEN,
+          sentryIssueId: "6197137101",
+        });
+      }
+    },
+    failOn: (args) =>
+      args[1] === "close" ? "gh issue close failed: HTTP 500" : null,
+  });
+  const { fetchImpl } = makeFetch();
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /close failed/,
+  );
+
+  assertEqual(parseArchiveBaseline(model.body), null, "the baseline is undone");
+  assert(
+    model.body.includes("?edited=1"),
+    "the concurrent edit survives the rollback",
+  );
+});
+
+await test("a rejected archive PUT is never summarised as archived", async () => {
+  // The runbook tells operators to trust the summary line. Asserting a
+  // successful archive on a run whose PUT Sentry refused is worse than silence.
+  assertEqual(
+    describeSentryDisposition("confirmed", "9").includes(
+      "stays archived_until_escalating",
+    ),
+    true,
+  );
+  assertEqual(
+    describeSentryDisposition("pre-existing", "9").includes(
+      "stays archived_until_escalating",
+    ),
+    true,
+  );
+  const rejected = describeSentryDisposition("rejected", "9");
+  assert(rejected.includes("was NOT archived"), "a refusal says so");
+  assert(!rejected.includes("stays archived"), "and never claims otherwise");
+  const unknown = describeSentryDisposition("unknown", "9");
+  assert(unknown.includes("UNKNOWN"), "an incomplete request is unknown");
+  assert(unknown.includes("Read the issue"), "and tells the operator to look");
+  assert(
+    describeSentryDisposition("not-attempted", "9").includes("never touched"),
+    "a pre-PUT failure touched nothing",
+  );
+
+  // isDefiniteRejection separates the two: Sentry answered, versus we never got
+  // an answer and the write may have landed.
+  assertEqual(
+    isDefiniteRejection(
+      new Error("Sentry archive request failed: 403 Forbidden (9)"),
+    ),
+    true,
+  );
+  assertEqual(isDefiniteRejection(new Error("socket hang up")), false);
+  assertEqual(isDefiniteRejection(new Error("fetch failed")), false);
+});
+
+await test("a rejected PUT reports 'not archived' end to end", async () => {
+  const stub = makeStub();
+  const { runGh } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch({ archive: { ok: false, status: 403 } });
+  const stderr = [];
+  const write = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  try {
+    await assertRejects(
+      runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+      /403/,
+    );
+  } finally {
+    process.stderr.write = write;
+  }
+  const summary = stderr.find((l) => l.includes("Rolled the queue stub"));
+  assert(summary, "the run still summarises what it did");
+  assert(summary.includes("was NOT archived"), "and does not claim an archive");
+});
+
 await test("reconciliation is idempotent — a second pass changes nothing", async () => {
   // The correctness bar for anything that reconciles: converged state is a fixed
   // point. Run the reconciler again against the state the first pass produced.
@@ -2065,10 +2321,11 @@ function auditComment({
   };
 }
 
-await test("isSettledAuditComment fences the duplicate-note check on author, marker and id", () => {
-  // This governs a HUMAN-READABLE note only now — the baseline moved to the
-  // body — so its worst failure is a duplicate comment, not a wrong decision.
-  assertEqual(isSettledAuditComment(auditComment(), "6197137101"), true);
+await test("isSettledAuditComment fences on author, marker, id AND archive generation", () => {
+  // This governs a HUMAN-READABLE note only — the baseline moved to the body —
+  // so its worst failure is a duplicate or a missing note, not a wrong decision.
+  const key = { sentryIssueId: "6197137101", baseline: BASELINE_LAST_SEEN };
+  assertEqual(isSettledAuditComment(auditComment(), key), true);
   // REST author shape is accepted too (`gh api` renders it as `user`).
   assertEqual(
     isSettledAuditComment(
@@ -2077,13 +2334,13 @@ await test("isSettledAuditComment fences the duplicate-note check on author, mar
         author: undefined,
         user: { login: "github-actions[bot]" },
       },
-      "6197137101",
+      key,
     ),
     true,
   );
   // A drive-by commenter can paste the whole audit body verbatim.
   assertEqual(
-    isSettledAuditComment(auditComment({ login: "drive-by" }), "6197137101"),
+    isSettledAuditComment(auditComment({ login: "drive-by" }), key),
     false,
   );
   // Marker must LEAD the body, exactly as buildAuditComment emits it.
@@ -2093,7 +2350,7 @@ await test("isSettledAuditComment fences the duplicate-note check on author, mar
         body: `chatter\n${auditComment().body}`,
         author: { login: "github-actions" },
       },
-      "6197137101",
+      key,
     ),
     false,
   );
@@ -2104,13 +2361,24 @@ await test("isSettledAuditComment fences the duplicate-note check on author, mar
         body: `${ARCHIVE_COMMENT_MARKER}\n\nprevious audit`,
         author: { login: "github-actions" },
       },
-      "6197137101",
+      key,
     ),
     false,
   );
   // Bound to the issue being archived, not just to any archive.
   assertEqual(
-    isSettledAuditComment(auditComment({ sentryIssueId: "999" }), "6197137101"),
+    isSettledAuditComment(auditComment({ sentryIssueId: "999" }), key),
+    false,
+  );
+  // …and to THIS archive. A stub archived, regressed, reopened by ingest (which
+  // keeps its comments), re-triaged, re-approved and archived again would
+  // otherwise match the PREVIOUS archive's note and suppress the new one,
+  // losing the new approver, timestamp and disposition.
+  assertEqual(
+    isSettledAuditComment(
+      auditComment({ baselineLastSeen: "2026-07-01T00:00:00.000Z" }),
+      key,
+    ),
     false,
   );
 });
