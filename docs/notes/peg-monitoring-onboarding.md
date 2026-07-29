@@ -3,7 +3,7 @@ title: Peg monitoring onboarding and re-census
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-28
+last_verified: 2026-07-29
 doc_type: runbook
 scope: metrics-bridge / alerts / ui-dashboard
 review_interval_days: 90
@@ -144,28 +144,65 @@ Read every trading-limit input live at one pinned block and record:
 - the approved end-to-end signer response SLA `S`; and
 - the treasury/risk-approved survivable quote-asset loss budget `B`.
 
-For each positive enforced window `i` with token limit `L_i` and duration
-`W_i`, calculate the conservative unknown-boundary token-inflow bound:
+For each positive enforced window `i`, keep the limit `L_i` and the signed
+`netflow` value `n_i` in TradingLimitsV2's fixed-15 internal scale.
+`D_net(S)` is a bound on this fee-adjusted netflow, not a raw monitored-token
+amount. Let `W_i` be the window duration and evaluate its state at the pinned
+incident start time `t`:
 
 ```text
-D_i(S) = L_i * (ceil(S / W_i) + 1)
-D_token(S) = min(D_i(S) for every positive enforced window i)
+active_i = t <= lastUpdated_i + W_i
+R_i = max(0, L_i - n_i)       when active_i
+R_i = L_i                     when not active_i
+D_i(S) = R_i + L_i * ceil(S / W_i)
+D_net(S) = min(D_i(S) for every positive enforced window i)
 ```
 
-The extra window is mandatory because an incident can begin immediately before
-a lazy window reset and consume capacity on both sides of the boundary.
-Disabled zero-valued windows do not constrain the minimum. If no positive
-limit is enforced, onboarding fails.
+An active negative netflow increases the first partial-window capacity; for
+example, `n_i = -L_i` leaves `2L_i`. An expired window has `L_i` available
+because TradingLimitsV2 resets it on the next nonzero flow. The following full
+windows cover a boundary immediately after the incident begins. At equality,
+the old window remains active; reset requires strict expiry. If the pinned
+`netflow` or timestamp is unavailable or cannot be trusted, use
+`2L_i + L_i * ceil(S / W_i)` for that window instead. Disabled zero-valued
+windows do not constrain the minimum. If no positive limit is enforced,
+onboarding fails.
 
-Convert `D_token(S)` into quote-asset outflow with the deployed pool's exact
-pricing and fee logic at the pinned block. Record the call or deterministic
-calculation and cap only at liquidity that is provably unavailable to the
-drain. If an exact quote cannot be reproduced, use the manual par purchase
-value plus a documented conservative margin and keep the limitation explicit.
-The gate passes only when:
+Read both fees at the same pin and set `F = lpFee + protocolFee` in basis
+points. Require `0 <= F < Q`. For `C = D_net(S)`, monitored-token decimals
+`d`, and `Q = 10,000`, calculate the largest raw token input whose fee-adjusted
+fixed-15 netflow does not exceed `C` with integer arithmetic:
 
 ```text
-worst_case_quote_outflow(D_token(S)) <= B
+A_max = floor(C * Q / (Q - F))
+G_raw = ceil((A_max + 1) * 10^d / 10^15) - 1
+
+scale(x, d) = floor(x * 10^15 / 10^d)
+scale(G_raw, d) - floor(scale(G_raw, d) * F / Q) <= C
+```
+
+`G_raw` is the exact conservative gross-up for the contract's order of
+operations, including tokens with more than 15 decimals. Do not convert the
+capacity through decimal floats or apply the fee before fixed-15 scaling.
+
+Quote each sequentially reachable portion of `G_raw` with
+`FPMM.getAmountOut(portion, monitoredToken)`, starting from the pinned state
+and advancing the modeled reserve and rebalance state after each portion. The
+quote already applies the total fee; do not subtract `F` a second time. The
+model must place flows across the relevant window boundaries and cannot replace
+a sequence with one oversized swap when a reserve or rebalance strategy can
+change state.
+Sum the quote-asset outputs. A static pool-reserve snapshot can cap loss only
+when every enabled liquidity or reserve strategy is proved unable to make that
+liquidity available during the response interval. A Reserve strategy can
+replenish or mint debt assets, so static reserves alone do not cap loss.
+
+Record the calls or deterministic calculation. If an exact quote cannot be
+reproduced, use the manual par purchase value plus a documented conservative
+margin and keep the limitation explicit. The gate passes only when:
+
+```text
+worst_case_quote_outflow(G_raw, sequential state model) <= B
 ```
 
 The accountable treasury/risk owner must supply and approve `B`. Monitoring
