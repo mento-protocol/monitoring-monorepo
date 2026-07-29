@@ -538,10 +538,13 @@ export function buildStaleRetryRefusalComment(shortId, recorded, observed) {
     "then never fire for the event in between — it would be archived and",
     "invisible to both ingest queries, which only match unresolved issues.",
     "",
-    "Nothing was changed. Un-archive the Sentry issue and let it re-triage, or",
-    "confirm the newer activity is understood before re-approving. The",
-    "`sentry:approved-archive` label was removed so a bare re-dispatch cannot",
-    "skip that decision.",
+    "Nothing was changed, and the `sentry:approved-archive` label was removed.",
+    "Re-applying it will refuse again — the recorded baseline is still older and",
+    "the issue is still archived, so nothing about the comparison changes.",
+    "",
+    "Un-archive the Sentry issue instead. That puts it back in front of ingest,",
+    "which re-queues it for triage, and the approval that follows records a",
+    "baseline covering the newer activity.",
   ].join("\n");
 }
 
@@ -760,13 +763,6 @@ async function ensureArchiveLabels(runGh, repo) {
   }
 }
 
-/**
- * True when `archiveIssue` failed because Sentry ANSWERED and refused — the
- * error it throws for a non-2xx names the status. That is a definite "nothing
- * was archived". A transport error, timeout or aborted socket produces no such
- * message and must stay unknown: the write may have applied with only the
- * response lost, and claiming either outcome would mislead an operator.
- */
 /** Outcomes where the archive stands and the ledger is settled. Everything else
  * — refusals, unsettled reopens, throws — must leave the approval spent. */
 const CLEAN_ARCHIVE_STATUSES = new Set(["archived", "already-archived"]);
@@ -783,8 +779,22 @@ export function sentryMayBeArchived(archiveState) {
   );
 }
 
+/**
+ * True only when Sentry ANSWERED and declined — a 4xx, where the server
+ * evaluated the request and refused it, so the mutation definitely did not
+ * apply.
+ *
+ * A 5xx is NOT a rejection. Sentry may have applied the PUT before its server
+ * or proxy failed, so the outcome is ambiguous and must be `unknown`, which
+ * routes through `sentryMayBeArchived` and spends the approval. Transport
+ * errors, timeouts and aborted sockets produce no status line at all and are
+ * likewise unknown. Reading any error as proof the mutation did not happen is
+ * the same false inference this whole area was rebuilt to remove; it survived
+ * here longest because this is the one place that classifies an error rather
+ * than reacting to live state.
+ */
 export function isDefiniteRejection(err) {
-  return /^Sentry archive request failed: \d{3}\b/.test(
+  return /^Sentry archive request failed: 4\d{2}\b/.test(
     err instanceof Error ? err.message : "",
   );
 }
@@ -1586,10 +1596,10 @@ export async function runArchive(options, deps = {}) {
         `::notice::Sentry issue ${meta.shortId} (${issueId}) is already archived_until_escalating (${issueId}); treating as success.\n`,
       );
     } else {
-      // Record what we learn from the PUT. A definite non-2xx means Sentry
-      // rejected it and nothing was archived; any other failure (transport,
-      // timeout) leaves it genuinely unknown, because the write may have landed
-      // and only the response been lost.
+      // Record what we learn from the PUT. Only a 4xx means Sentry evaluated the
+      // request and refused it, so nothing was archived; a 5xx, a timeout or a
+      // dropped socket leaves it genuinely unknown, because the write may have
+      // landed and only the response been lost.
       try {
         await archiveIssue(fetchImpl, { ...sentry, issueId });
         archiveState = "confirmed";

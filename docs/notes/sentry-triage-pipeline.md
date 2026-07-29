@@ -581,13 +581,17 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
   Rollback runs in-process, so a job that dies mid-archive never reconciles —
   see the known residual above. Before re-applying `sentry:approved-archive` to
   a stub whose last archive run was cancelled, timed out, or shows no summary
-  line, open the Sentry issue and check its state for yourself.
+  line, open the Sentry issue and check its state for yourself. If it is already
+  `archived_until_escalating`, re-applying the approval will refuse (the stub
+  carries no baseline for it); un-archive the issue and let the normal cycle run
+  instead.
 - **A re-approval refused as `skipped-stale-retry`** means the Sentry issue is
   already archived and has recorded events newer than the baseline on the stub.
-  Nothing was changed and the approval label was removed again. Do not simply
-  re-apply it: that event is archived and invisible to ingest, so decide first —
-  un-archive the Sentry issue and let it re-triage, or confirm the newer activity
-  is understood and then re-approve.
+  Nothing was changed and the approval label was removed again. Re-applying it
+  refuses again — the baseline is still older and the issue is still archived, so
+  nothing about the comparison changes. Un-archive the Sentry issue instead: that
+  puts it back in front of ingest, which re-queues it for triage, and the
+  approval that follows records a baseline covering the newer activity.
 - **A re-approval refused as `skipped-unbaselined-retry`** means the Sentry issue
   is already archived and the stub records no baseline bound to it — normally
   because the previous run archived Sentry and failed before writing one, and the

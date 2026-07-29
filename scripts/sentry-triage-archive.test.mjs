@@ -1632,9 +1632,18 @@ await test("a retry refuses outright when Sentry moved past the recorded baselin
   // Visible to a human, and disarmed against a bare re-dispatch.
   const comment = ghCall(calls, "comment");
   assert(comment, "the refusal is written where an operator will see it");
+  const body = comment[comment.indexOf("--body") + 1];
+  assert(body.includes("Not archived."), "says plainly nothing was archived");
+  // …and points somewhere that actually works. Telling the operator to
+  // re-approve loops: the baseline is still older and the issue still archived,
+  // so the same guard refuses again and removes the label again.
   assert(
-    comment[comment.indexOf("--body") + 1].includes("Not archived."),
-    "and says plainly that nothing was archived",
+    body.includes("Re-applying it will refuse again"),
+    "names the loop instead of sending the operator into it",
+  );
+  assert(
+    body.includes("Un-archive the Sentry issue"),
+    "and gives the exit that works",
   );
   assertEqual(model.labels.includes("sentry:approved-archive"), false);
 });
@@ -1767,16 +1776,66 @@ await test("a rejected archive PUT is never summarised as archived", async () =>
     "a pre-PUT failure touched nothing",
   );
 
-  // isDefiniteRejection separates the two: Sentry answered, versus we never got
-  // an answer and the write may have landed.
-  assertEqual(
-    isDefiniteRejection(
-      new Error("Sentry archive request failed: 403 Forbidden (9)"),
-    ),
-    true,
-  );
+  // isDefiniteRejection separates "Sentry evaluated this and declined" from
+  // "we never learned whether it applied".
+  for (const status of [400, 401, 403, 404, 409, 429]) {
+    assertEqual(
+      isDefiniteRejection(
+        new Error(`Sentry archive request failed: ${status} Nope (9)`),
+      ),
+      true,
+      `${status} is a refusal`,
+    );
+  }
+  // A 5xx is NOT a refusal: Sentry may have applied the PUT before its server or
+  // proxy failed, so the outcome is ambiguous and must disarm the approval.
+  for (const status of [500, 502, 503, 504]) {
+    assertEqual(
+      isDefiniteRejection(
+        new Error(`Sentry archive request failed: ${status} Bad Gateway (9)`),
+      ),
+      false,
+      `${status} is ambiguous, not a refusal`,
+    );
+  }
   assertEqual(isDefiniteRejection(new Error("socket hang up")), false);
   assertEqual(isDefiniteRejection(new Error("fetch failed")), false);
+});
+
+await test("a 5xx on the archive PUT reports unknown and spends the approval", async () => {
+  // The last place that inferred an outcome from an error rather than from live
+  // state. A 502 left the approval spendable and told the operator nothing was
+  // archived — while Sentry may well have applied the write.
+  const stub = makeStub();
+  const { runGh, model } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch({ archive: { ok: false, status: 502 } });
+  const stderr = [];
+  const write = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  try {
+    await assertRejects(
+      runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+      /502/,
+    );
+  } finally {
+    process.stderr.write = write;
+  }
+
+  assertEqual(
+    model.labels.includes("sentry:approved-archive"),
+    false,
+    "an ambiguous PUT must not leave a spendable approval",
+  );
+  const summary = stderr.find((l) => l.includes("Rolled the queue stub"));
+  assert(summary, "the run still summarises what it did");
+  assert(summary.includes("UNKNOWN"), "and calls the Sentry state unknown");
+  assert(
+    !summary.includes("was NOT archived"),
+    "it must not claim the archive did not happen",
+  );
 });
 
 await test("a rejected PUT reports 'not archived' end to end", async () => {
