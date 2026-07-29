@@ -466,13 +466,15 @@ export function PegMonitoringPageClient(): React.JSX.Element {
     const timer = window.setInterval(() => setNow(Date.now()), 10_000);
     return () => window.clearInterval(timer);
   }, []);
+  const nowMs = Math.max(now, Date.now());
   const state = classifyPegMonitoringState({
     ...result,
-    nowMs: Math.max(now, Date.now()),
+    nowMs,
   });
   const presentation =
     state.kind === "current" || state.kind === "stale"
       ? presentPegMonitoring(state.data, {
+          nowMs,
           packageIsStale: state.kind === "stale",
           usesPreviousPolicy:
             state.data.policySlot === "previous" ||

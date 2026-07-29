@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { presentPegMonitoring } from "../peg-monitoring-presentation";
-import { makePegMonitoringResponse } from "@/test-utils/peg-monitoring-fixture";
+import {
+  makePegMonitoringResponse,
+  PEG_FIXTURE_PRODUCED_AT,
+} from "@/test-utils/peg-monitoring-fixture";
+
+const CURRENT_CONTEXT = {
+  nowMs: PEG_FIXTURE_PRODUCED_AT * 1_000,
+  packageIsStale: false,
+  usesPreviousPolicy: false,
+} as const;
 
 function healthyResponse() {
   const response = makePegMonitoringResponse();
@@ -32,16 +41,57 @@ function healthyResponse() {
 
 describe("presentPegMonitoring", () => {
   it("derives a healthy decision from the deep source without treating legacy listing or inactive structural windows as unhealthy", () => {
-    const presentation = presentPegMonitoring(healthyResponse(), {
-      packageIsStale: false,
-      usesPreviousPolicy: false,
-    });
+    const presentation = presentPegMonitoring(
+      healthyResponse(),
+      CURRENT_CONTEXT,
+    );
 
     expect(presentation.aggregate.label).toBe("All pegs healthy");
     expect(presentation.assets[0]).toMatchObject({
       assetName: "EUROP",
       tone: "healthy",
       direction: "below",
+    });
+  });
+
+  it("expires deep-source evidence strictly after its own freshness limit", () => {
+    const response = healthyResponse();
+    const item = response.packages[0]!;
+    const sourceProduced40SecondsEarlier = {
+      ...response,
+      packages: [
+        {
+          ...item,
+          sources: item.sources.map((source) =>
+            source.id === item.policy.deepVenueSource
+              ? {
+                  ...source,
+                  observationAt: response.producedAt - 40,
+                }
+              : source,
+          ),
+        },
+      ],
+    };
+    const atBoundary = presentPegMonitoring(sourceProduced40SecondsEarlier, {
+      ...CURRENT_CONTEXT,
+      nowMs: (response.producedAt + 80) * 1_000,
+    });
+    const expired = presentPegMonitoring(sourceProduced40SecondsEarlier, {
+      ...CURRENT_CONTEXT,
+      nowMs: (response.producedAt + 81) * 1_000,
+    });
+
+    expect(atBoundary.aggregate.label).toBe("All pegs healthy");
+    expect(atBoundary.assets[0]?.decisionSource).not.toBeNull();
+    expect(expired.aggregate.label).toBe("Price check unavailable");
+    expect(expired.assets[0]).toMatchObject({
+      decisionSource: null,
+      distanceBps: null,
+      thresholdTone: "uncertain",
+      uncertain: true,
+      uncertaintyReason:
+        "The policy-selected market observation is older than its allowed freshness window.",
     });
   });
 
@@ -72,7 +122,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(critical.aggregate.label).toBe("Critical condition detected");
@@ -108,7 +158,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(presentation.aggregate.label).toBe("Some pegs need attention");
@@ -143,18 +193,18 @@ describe("presentPegMonitoring", () => {
       ],
     });
 
-    const belowAdjustedWarning = presentPegMonitoring(withDistance(25), {
-      packageIsStale: false,
-      usesPreviousPolicy: false,
-    });
-    const adjustedWarning = presentPegMonitoring(withDistance(55), {
-      packageIsStale: false,
-      usesPreviousPolicy: false,
-    });
-    const adjustedCritical = presentPegMonitoring(withDistance(80), {
-      packageIsStale: false,
-      usesPreviousPolicy: false,
-    });
+    const belowAdjustedWarning = presentPegMonitoring(
+      withDistance(25),
+      CURRENT_CONTEXT,
+    );
+    const adjustedWarning = presentPegMonitoring(
+      withDistance(55),
+      CURRENT_CONTEXT,
+    );
+    const adjustedCritical = presentPegMonitoring(
+      withDistance(80),
+      CURRENT_CONTEXT,
+    );
 
     expect(belowAdjustedWarning.assets[0]).toMatchObject({
       tone: "healthy",
@@ -197,14 +247,14 @@ describe("presentPegMonitoring", () => {
       ({ id }) => id === item.policy.deepVenueSource,
     )!.policy.spreadEnvelopeBps;
 
-    const atBoundary = presentPegMonitoring(withSpread(envelope), {
-      packageIsStale: false,
-      usesPreviousPolicy: false,
-    });
-    const beyondBoundary = presentPegMonitoring(withSpread(envelope + 0.01), {
-      packageIsStale: false,
-      usesPreviousPolicy: false,
-    });
+    const atBoundary = presentPegMonitoring(
+      withSpread(envelope),
+      CURRENT_CONTEXT,
+    );
+    const beyondBoundary = presentPegMonitoring(
+      withSpread(envelope + 0.01),
+      CURRENT_CONTEXT,
+    );
 
     expect(atBoundary.aggregate.label).toBe("All pegs healthy");
     expect(atBoundary.assets[0]?.tone).toBe("healthy");
@@ -238,7 +288,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(presentation.assets[0]).toMatchObject({
@@ -269,7 +319,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(presentation.assets[0]).toMatchObject({
@@ -302,7 +352,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(presentation.aggregate.label).toBe("Price check unavailable");
@@ -333,7 +383,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
     const monitorThreshold = presentPegMonitoring(
       {
@@ -348,7 +398,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
     const incompleteQuery = presentPegMonitoring(
       {
@@ -363,7 +413,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(packageThreshold.aggregate.label).toBe("Some pegs need attention");
@@ -406,7 +456,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(presentation.aggregate.label).toBe("Price check unavailable");
@@ -443,7 +493,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(presentation.aggregate.label).toBe("Price check unavailable");
@@ -468,7 +518,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(presentation.aggregate.label).toBe("Price check unavailable");
@@ -498,7 +548,7 @@ describe("presentPegMonitoring", () => {
     };
     const presentation = presentPegMonitoring(
       { ...response, packages: [healthyItem, structuralWarningItem] },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(presentation.assets[0]?.asset.asset).toBe("eurox-schuman");
@@ -530,7 +580,7 @@ describe("presentPegMonitoring", () => {
           crossedBy("near-warning", 30),
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(presentation.closestWarning?.asset.asset).toBe("near-warning");
@@ -555,23 +605,23 @@ describe("presentPegMonitoring", () => {
     };
     const mixed = presentPegMonitoring(
       { ...response, packages: [item, criticalItem] },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
     const stale = presentPegMonitoring(response, {
+      ...CURRENT_CONTEXT,
       packageIsStale: true,
-      usesPreviousPolicy: false,
     });
     const previous = presentPegMonitoring(response, {
-      packageIsStale: false,
+      ...CURRENT_CONTEXT,
       usesPreviousPolicy: true,
     });
     const staleCritical = presentPegMonitoring(
       { ...response, packages: [criticalItem] },
-      { packageIsStale: true, usesPreviousPolicy: false },
+      { ...CURRENT_CONTEXT, packageIsStale: true },
     );
     const previousCritical = presentPegMonitoring(
       { ...response, packages: [criticalItem] },
-      { packageIsStale: false, usesPreviousPolicy: true },
+      { ...CURRENT_CONTEXT, usesPreviousPolicy: true },
     );
     const confirmedCriticalWithUncertainSibling = presentPegMonitoring(
       {
@@ -585,7 +635,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
     const currentCriticalWithIncompleteChecks = presentPegMonitoring(
       {
@@ -597,7 +647,7 @@ describe("presentPegMonitoring", () => {
           },
         ],
       },
-      { packageIsStale: false, usesPreviousPolicy: false },
+      CURRENT_CONTEXT,
     );
 
     expect(mixed.aggregate.label).toBe("Critical condition detected");

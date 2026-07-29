@@ -46,6 +46,7 @@ export type PegMonitoringPresentation = {
 };
 
 type PackageContext = {
+  nowMs: number;
   packageIsStale: boolean;
   usesPreviousPolicy: boolean;
 };
@@ -53,6 +54,7 @@ type PackageContext = {
 type SourceSelection = {
   deepSource: PegSource | null;
   decisionSource: PegSource | null;
+  sourceExpired: boolean;
 };
 
 type SafetySignals = {
@@ -92,10 +94,23 @@ function assetName(item: PegAssetPackage, source: PegSource | null): string {
   );
 }
 
-function sourceHasUnavailableEvidence(source: PegSource | null): boolean {
+function sourceEvidenceExpired(source: PegSource | null, nowMs: number) {
+  if (source === null || source.observationAt === null) return false;
+  return (
+    nowMs - source.observationAt * 1_000 >
+    source.policy.staleAfterSeconds * 1_000
+  );
+}
+
+function sourceHasUnavailableEvidence(
+  source: PegSource | null,
+  nowMs: number,
+): boolean {
   return (
     source === null ||
     !source.healthy ||
+    source.observationAt === null ||
+    sourceEvidenceExpired(source, nowMs) ||
     source.executablePrice === null ||
     source.deviationBps === null ||
     source.premiumBps === null ||
@@ -106,15 +121,17 @@ function sourceHasUnavailableEvidence(source: PegSource | null): boolean {
   );
 }
 
-function selectSources(item: PegAssetPackage): SourceSelection {
+function selectSources(item: PegAssetPackage, nowMs: number): SourceSelection {
   const deepSource =
     item.sources.find((source) => source.id === item.policy.deepVenueSource) ??
     null;
+  const sourceExpired = sourceEvidenceExpired(deepSource, nowMs);
   return {
     deepSource,
-    decisionSource: sourceHasUnavailableEvidence(deepSource)
+    decisionSource: sourceHasUnavailableEvidence(deepSource, nowMs)
       ? null
       : deepSource,
+    sourceExpired,
   };
 }
 
@@ -170,7 +187,7 @@ function isSourceWarning(
   item: PegAssetPackage,
   source: PegSource | null,
 ): boolean {
-  if (source === null || sourceHasUnavailableEvidence(source)) return true;
+  if (source === null) return true;
   const thresholds = effectiveThresholds(item, source);
   return (
     (source.deviationBps !== null &&
@@ -209,12 +226,15 @@ function uncertaintyReason(input: {
   packageIsStale: boolean;
   usesPreviousPolicy: boolean;
   sourceUnavailable: boolean;
+  sourceExpired: boolean;
   structuralUnavailable: boolean;
   breakerUnavailable: boolean;
 }): string | null {
   if (input.packageIsStale) return "No fresh monitoring package is available.";
   if (input.usesPreviousPolicy)
     return "The latest complete package uses the previous approved policy.";
+  if (input.sourceExpired)
+    return "The policy-selected market observation is older than its allowed freshness window.";
   if (input.sourceUnavailable)
     return "The policy-selected market has no usable full-size price.";
   if (input.structuralUnavailable)
@@ -228,6 +248,7 @@ function safetyReasons(input: {
   structuralWarning: boolean;
   structuralUnavailable: boolean;
   sourceUnavailable: boolean;
+  sourceExpired: boolean;
   sourceWarning: boolean;
   breakerUnavailable: boolean;
   packageIsStale: boolean;
@@ -249,7 +270,11 @@ function safetyReasons(input: {
   else if (input.structuralWarning)
     reasons.push("Structural saturation crossed its warning threshold.");
   if (input.sourceUnavailable)
-    reasons.push("The deep market source is unavailable or unhealthy.");
+    reasons.push(
+      input.sourceExpired
+        ? "The deep market observation is older than its allowed freshness window."
+        : "The deep market source is unavailable or unhealthy.",
+    );
   else if (input.sourceWarning)
     reasons.push("The deep market measurement crossed a warning threshold.");
   if (input.breakerUnavailable)
@@ -263,18 +288,15 @@ function safetyReasons(input: {
 
 function classifySafety(
   item: PegAssetPackage,
-  deepSource: PegSource | null,
+  selection: SourceSelection,
   context: PackageContext,
 ): SafetySignals {
   const structuralWarning = isStructuralWarning(item);
   const structuralUnavailable = hasUnavailableStructuralEvidence(item);
-  const sourceUnavailable = sourceHasUnavailableEvidence(deepSource);
-  const sourceWarning = isSourceWarning(item, deepSource);
+  const sourceUnavailable = selection.decisionSource === null;
+  const sourceWarning = isSourceWarning(item, selection.decisionSource);
   const breakerUnavailable = hasUnavailableBreaker(item);
-  const deepCritical = isDeepCritical(
-    item,
-    sourceUnavailable ? null : deepSource,
-  );
+  const deepCritical = isDeepCritical(item, selection.decisionSource);
   const unsafeBreaker = hasUnsafeBreaker(item);
   const policyWarning = context.packageIsStale || context.usesPreviousPolicy;
   const critical = deepCritical || unsafeBreaker;
@@ -297,6 +319,7 @@ function classifySafety(
       packageIsStale: context.packageIsStale,
       usesPreviousPolicy: context.usesPreviousPolicy,
       sourceUnavailable,
+      sourceExpired: selection.sourceExpired,
       structuralUnavailable,
       breakerUnavailable,
     }),
@@ -304,6 +327,7 @@ function classifySafety(
       structuralWarning,
       structuralUnavailable,
       sourceUnavailable,
+      sourceExpired: selection.sourceExpired,
       sourceWarning,
       breakerUnavailable,
       packageIsStale: context.packageIsStale,
@@ -341,13 +365,13 @@ function decisionDistanceBps(
 }
 
 function thresholdTone(input: {
-  deepSource: PegSource | null;
+  decisionSource: PegSource | null;
   direction: PegAssetPresentation["direction"];
   distanceBps: number | null;
   warningDistanceBps: number | null;
   criticalDeviationBps: number;
 }): PegThresholdTone {
-  if (sourceHasUnavailableEvidence(input.deepSource)) return "uncertain";
+  if (input.decisionSource === null) return "uncertain";
   if (
     input.direction === "below" &&
     input.distanceBps !== null &&
@@ -390,7 +414,7 @@ function describeDistance(
     warningThresholdBps,
     warningDistanceBps,
     thresholdTone: thresholdTone({
-      deepSource: selection.deepSource,
+      decisionSource: selection.decisionSource,
       direction,
       distanceBps: currentDistanceBps,
       warningDistanceBps,
@@ -403,7 +427,7 @@ function buildAssetPresentation(
   item: PegAssetPackage,
   context: PackageContext,
 ): PegAssetPresentation {
-  const selection = selectSources(item);
+  const selection = selectSources(item, context.nowMs);
   return {
     asset: item,
     assetName: assetName(
@@ -413,7 +437,7 @@ function buildAssetPresentation(
     decisionSource: selection.decisionSource,
     deepSource: selection.deepSource,
     ...describeDistance(item, selection),
-    ...classifySafety(item, selection.deepSource, context),
+    ...classifySafety(item, selection, context),
   };
 }
 

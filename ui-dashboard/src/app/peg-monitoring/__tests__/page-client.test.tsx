@@ -136,6 +136,47 @@ describe("PegMonitoringPageClient", () => {
       container.querySelector('[data-testid="peg-aggregate-age"]')?.textContent,
     ).toContain("2m old");
   });
+  it("expires source evidence while its package is still current", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.map((source) =>
+              source.id === item.policy.deepVenueSource
+                ? {
+                    ...source,
+                    executablePrice: 0.999,
+                    deviationBps: 10,
+                    premiumBps: 0,
+                    observationAt: response.producedAt - 100,
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+    expect(container.textContent).toContain("Current package");
+    expect(container.textContent).toContain("All pegs healthy");
+
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(container.textContent).toContain("Current package");
+    expect(container.textContent).toContain("Price check unavailable");
+    expect(container.textContent).toContain(
+      "The policy-selected market observation is older than its allowed freshness window.",
+    );
+    expect(
+      container.querySelector('[data-testid="peg-current-europ-schuman"]'),
+    ).toBeNull();
+  });
   it("renders previous-policy, partial source evidence, disabled breaker, and null breaker distinctly", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
