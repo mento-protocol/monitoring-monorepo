@@ -190,12 +190,12 @@ rebalance, incentive-bearing transfer, or rate transition can leave the system
 at the same or lower signed netflow with more accumulated net quote-asset loss
 than the monotone path, or a bounded bidirectional sequential state model.
 That model must start from every reachable pre-incident **Live** state, not
-only the pin, and maximize loss across mutable pool reserve, rate, limit,
+only the pin, and maximize loss across mutable pool reserve, rate, fee, limit,
 enabled strategy, cooldown, and source-liquidity state. If a mutable state can
 leave the modeled envelope without enforced fail-closed revocation or
 reapproval, maximize across its reachable range or keep the asset **Blocked**.
-Without that proof or model, or with a positive effective rebate, mark the
-asset **Blocked**.
+Without that proof or model, or with a positive effective rebate, mark the asset
+**Blocked**.
 
 At the pin, enumerate every enabled strategy from
 `LiquidityStrategyUpdated` history through that block; do not rely on one
@@ -232,8 +232,13 @@ worst_case_net_quote_outflow(sequential state model) <= B
 
 The accountable treasury/risk owner must supply and approve `B`. Monitoring
 engineers must not derive it from current TVL, trading limits, or intuition.
-Recalculate after any signer-SLA, Safe, fee, pool, rate, reserve-access, or
-trading-limit change.
+Persistent **Live** admission is a fail-closed certificate over the approved
+Safe and signer coverage, escalation route, execution proof, `S`, `B`, and
+modeled on-chain state ranges. Give every human attestation an explicit expiry.
+Before serving **Live**, require every certificate input to remain within its
+approved range and every attestation to remain current; otherwise serve
+**Blocked** until reapproval repeats the pinned reads and loss calculation. If
+that validity check cannot be enforced, onboarding remains **Blocked**.
 
 ## 6. Roll out the first activation producer-first
 
