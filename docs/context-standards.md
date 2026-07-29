@@ -3,7 +3,7 @@ title: Agent Context Standards
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-07-29
 doc_type: reference
 scope: repo-wide
 review_interval_days: 90
@@ -122,6 +122,16 @@ frontmatter for other managed Markdown.
 - Put repeatable procedures in `.agents/skills`, not in long root prose.
 - Put verification personas in `.agents/roles`; roles are opt-in and do not run automatically.
 - Keep root `AGENTS.md` small enough that every line earns its default-token cost.
+- State current operating rules only. Status narration, completed-migration
+  notes, run links, and dated proof belong in the ADR or PR that shipped the
+  change.
+- Where a file already links an owning authority, keep at most a one-line gist.
+  Never restate that authority's procedure, command block, or rule list.
+- In agent instruction files (`AGENTS.md` and scoped routers), do not describe
+  what code does. State the non-obvious constraint, and where a linter, test,
+  or CI gate enforces it, name the enforcing check instead of restating its
+  logic. Reference documents such as `SPEC.md` and package READMEs still own
+  behavior and architecture descriptions.
 
 ## Change-coupled drift audit
 
@@ -144,11 +154,14 @@ Run `pnpm agent:context-check` to verify managed metadata (including the
 `last_verified` staleness window), scoped AGENTS coverage, skill mirrors, and
 Cloud Run revision suffix guardrails. Run `pnpm docs:index --check` for catalog
 drift and broken internal links. Run `pnpm agent:context-budget --strict` to
-enforce a 12 KiB root-file cap, 16 KiB per scoped file, and 28 KiB per combined
+enforce a 10 KiB root-file cap, 9 KiB per scoped file, and 18.5 KiB per combined
 root-to-directory route. The report warns at 90% and includes the blank-line
 separators Codex inserts between layered files. These limits deliberately stay
 below Codex's truncation boundary; route detail into the narrowest canonical
-note, checklist, or skill instead of raising them. Skill
+note, checklist, or skill instead of raising them. Each cap is the measured
+maximum plus about 35% headroom, rounded up to a 512-byte step, and ratchets
+down only; `project_doc_max_bytes` in `.codex/config.toml` tracks the route cap.
+Skill
 mirrors must match their canonical `.agents/skills` source except for documented
 runtime-specific provenance literals, such as forensic-report writes using
 `source: "Codex"` in the Codex skill and `source: "claude"` in the Claude skill.
