@@ -159,86 +159,177 @@ function score(result) {
   });
 }
 
-// The scorer sums an answer's context spend from the real bytes each loaded
-// source has at repository_base_commit, and rejects reported bytes or sha256
-// that disagree with that file, so a synthetic oversized source cannot push an
-// answer over budget — only real documentation can. Two rules keep that
-// derivation stable while the documentation around it changes:
-//
-//   - Size and order every candidate by `source`, which reads
-//     repository_base_commit. Inventory records describe the worktree instead,
-//     so on any revision that resizes a document they would choose candidates
-//     from one revision and load them from another.
-//   - Prefer documents the rest of the result already loads.
-//     total_unique_source_bytes counts each path once, so those cost nothing
-//     suite-wide and leave the remaining headroom to documentation that
-//     legitimately grows. Unused documents cost their full size, so fall back
-//     to them, smallest first, only when the shared union cannot reach the
-//     budget.
-function loadSourcesUntilOverBudget(result, answer) {
-  const budget = context.suite.targets.max_question_source_bytes;
-  const alreadyLoaded = new Set(
-    answer.loaded_sources.map((entry) => entry.path),
-  );
-  const excluded = new Set([
-    ...context.suite.bootstrap_sources,
-    ...context.suite.forbidden_sources,
-  ]);
-  const eligible = (pathname) =>
-    records.get(pathname)?.authority === "canonical" &&
-    !alreadyLoaded.has(pathname) &&
-    !excluded.has(pathname) &&
-    !isNavigationEvalAnswerArtifact(pathname);
+// The scorer measures an answer's context spend from the bytes each declared
+// source really has at repository_base_commit, so any budget case built out of
+// live documentation flips meaning the moment someone trims or grows a file.
+// Budget assertions therefore run against a fixture corpus injected through the
+// scorer's `readSource` dependency: the fixture suite still supplies the paths
+// and routes, and this corpus supplies every byte the scorer measures. The real
+// git read stays the default, so the production guarantee is untouched, and
+// "wrong source bytes or hashes are rejected" still proves it.
+const FIXTURE_DOCUMENT_BYTES = 1_024;
+const FIXTURE_PADDING_DOCUMENT = "docs/notes/navigation-scoring-padding.md";
 
-  let bytes = answer.loaded_sources.reduce(
-    (sum, entry) => sum + entry.bytes,
-    0,
+function fixtureDocumentHeader(canonical) {
+  return [
+    "---",
+    "title: Navigation scoring fixture",
+    "status: active",
+    "owner: eng",
+    `canonical: ${canonical}`,
+    "last_verified: 2026-07-21",
+    "doc_type: reference",
+    "scope: repo-wide",
+    "review_interval_days: 90",
+    "garden_lane: package-readmes-reference",
+    "---",
+    "",
+    "# Navigation scoring fixture",
+    "",
+    "Synthetic evidence.",
+    "",
+  ].join("\n");
+}
+
+const FIXTURE_DOCUMENT_MIN_BYTES = fixtureDocumentHeader(false).length + 1;
+
+function fixtureDocument(canonical, bytes) {
+  const header = fixtureDocumentHeader(canonical);
+  assert.ok(
+    bytes > header.length,
+    `a fixture document needs more than ${header.length} bytes, not ${bytes}`,
   );
-  const load = (entry) => {
-    answer.loaded_sources.push(entry);
-    answer.authority_qualifications.push(qualification(entry.path));
-    bytes += entry.bytes;
-    return bytes > budget;
+  return Buffer.from(
+    `${header}${"x".repeat(bytes - header.length - 1)}\n`,
+    "utf8",
+  );
+}
+
+function fixtureCorpus(suite) {
+  const canonicalByPath = new Map(
+    suite.bootstrap_sources.map((file) => [file, true]),
+  );
+  for (const question of suite.questions) {
+    for (const route of question.accepted_routes) {
+      for (const file of route) canonicalByPath.set(file, true);
+    }
+    for (const verification of question.sources_requiring_verification) {
+      if (!canonicalByPath.has(verification.path)) {
+        canonicalByPath.set(verification.path, false);
+      }
+      for (const file of verification.verify_against) {
+        canonicalByPath.set(file, true);
+      }
+    }
+  }
+  const contents = new Map();
+  for (const [file, canonical] of canonicalByPath) {
+    contents.set(file, fixtureDocument(canonical, FIXTURE_DOCUMENT_BYTES));
+  }
+  return contents;
+}
+
+function fixtureSource(contents, pathname) {
+  const content = contents.get(pathname);
+  return {
+    path: pathname,
+    bytes: content.length,
+    sha256: createHash("sha256").update(content).digest("hex"),
   };
+}
 
-  const shared = new Set();
-  for (const other of result.answers) {
-    if (other === answer) continue;
-    for (const entry of other.loaded_sources) {
-      if (eligible(entry.path)) shared.add(entry.path);
-    }
-  }
-  const sharedSources = [...shared]
-    .map(source)
-    .sort(
-      (left, right) =>
-        right.bytes - left.bytes || left.path.localeCompare(right.path),
+function fixtureReader(contents) {
+  return (_repoRoot, commit, file) => {
+    const content = contents.get(file);
+    if (!content) throw new Error(`cannot read ${file} at commit ${commit}`);
+    return content;
+  };
+}
+
+function fixtureResult(contents) {
+  return {
+    schema_version: 1,
+    suite_id: context.suite.suite_id,
+    fixture_digest: fixtureDigest(context.suite),
+    run: {
+      agent: "fixture-agent",
+      model: "fixture-model",
+      effort: "low",
+      executed_at: "2026-07-21T00:00:00.000Z",
+      repository_base_commit: repoBaseCommit,
+      fresh_context: true,
+      read_only: true,
+      bootstrap_sources: context.suite.bootstrap_sources.map((pathname) =>
+        fixtureSource(contents, pathname),
+      ),
+    },
+    answers: context.suite.questions.map((question) => {
+      const route = question.accepted_routes[0];
+      return {
+        question_id: question.id,
+        chosen_documents: [...route],
+        answer:
+          "The cited canonical documentation supplies the current route and evidence.",
+        evidence: route.map((pathname) => ({
+          path: pathname,
+          line_start: 1,
+          line_end: 1,
+          supports:
+            "The canonical document is the expected authority for this question.",
+        })),
+        authority_qualifications: route.map((pathname) => ({
+          path: pathname,
+          authority: "canonical",
+          qualification: "",
+          verified_against: [],
+        })),
+        loaded_sources: route.map((pathname) =>
+          fixtureSource(contents, pathname),
+        ),
+      };
+    }),
+  };
+}
+
+// Score the fixture suite against a synthetic corpus whose first answer spends
+// exactly `questionBytes`, or its route alone when that is null.
+function scoreFixtureQuestionBytes(questionBytes) {
+  const contents = fixtureCorpus(context.suite);
+  const result = fixtureResult(contents);
+  const answer = result.answers[0];
+  if (questionBytes !== null) {
+    const routeBytes = answer.loaded_sources.reduce(
+      (sum, entry) => sum + entry.bytes,
+      0,
     );
-  for (const entry of sharedSources) {
-    if (load(entry)) return;
+    const paddingBytes = questionBytes - routeBytes;
+    assert.ok(
+      paddingBytes >= FIXTURE_DOCUMENT_MIN_BYTES,
+      `answer ${answer.question_id} already spends ${routeBytes} of the ${questionBytes} bytes under test, so this budget case is no longer constructible from the fixture corpus`,
+    );
+    contents.set(FIXTURE_PADDING_DOCUMENT, fixtureDocument(true, paddingBytes));
+    answer.loaded_sources.push(
+      fixtureSource(contents, FIXTURE_PADDING_DOCUMENT),
+    );
+    answer.authority_qualifications.push({
+      path: FIXTURE_PADDING_DOCUMENT,
+      authority: "canonical",
+      qualification: "",
+      verified_against: [],
+    });
   }
-
-  const unusedSources = [];
-  for (const record of context.inventory.records) {
-    if (shared.has(record.path) || !eligible(record.path)) continue;
-    try {
-      unusedSources.push(source(record.path));
-    } catch {
-      // The inventory also lists untracked documents, which do not exist at
-      // the commit the scorer measures.
-    }
-  }
-  unusedSources.sort(
-    (left, right) =>
-      left.bytes - right.bytes || left.path.localeCompare(right.path),
-  );
-  for (const entry of unusedSources) {
-    if (load(entry)) return;
-  }
-
-  assert.fail(
-    `answer ${answer.question_id} reached only ${bytes} bytes across every canonical document, so it cannot exceed max_question_source_bytes (${budget}); the over-budget case is no longer constructible from this corpus`,
-  );
+  const scored = scoreNavigationResult({
+    suite: context.suite,
+    result,
+    repoRoot,
+    readSource: fixtureReader(contents),
+  });
+  return {
+    scored,
+    measured: scored.report.questions.find(
+      (question) => question.question_id === answer.question_id,
+    ),
+  };
 }
 
 function issueFor(month, digest, overrides = {}) {
@@ -738,27 +829,28 @@ test("historical scoring requires a default-branch ancestor and survives deletio
 
 test("an over-budget answer is measured and fails", () => {
   const budget = context.suite.targets.max_question_source_bytes;
-  assert.equal(score(validResult()).report.context.questions_over_budget, 0);
 
-  const result = validResult();
-  const answer = result.answers[0];
-  loadSourcesUntilOverBudget(result, answer);
-  const scored = score(result);
-  assert.deepEqual(scored.errors, []);
-  const measured = scored.report.questions.find(
-    (question) => question.question_id === answer.question_id,
-  );
+  const clean = scoreFixtureQuestionBytes(null);
+  assert.deepEqual(clean.scored.errors, []);
+  assert.equal(clean.scored.report.context.questions_over_budget, 0);
+  assert.equal(clean.scored.report.passed, true);
+
+  const atBudget = scoreFixtureQuestionBytes(budget);
+  assert.deepEqual(atBudget.scored.errors, []);
+  assert.equal(atBudget.measured.source_bytes, budget);
+  assert.equal(atBudget.scored.report.context.questions_over_budget, 0);
+  assert.equal(atBudget.scored.report.passed, true);
+
+  const overBudget = scoreFixtureQuestionBytes(budget + 1);
+  assert.deepEqual(overBudget.scored.errors, []);
+  assert.equal(overBudget.measured.source_bytes, budget + 1);
+  assert.equal(overBudget.scored.report.context.questions_over_budget, 1);
   assert.ok(
-    measured.source_bytes > budget,
-    `scorer measured ${measured.source_bytes} bytes for ${answer.question_id}, which does not exceed max_question_source_bytes (${budget})`,
+    overBudget.scored.report.context.total_unique_source_bytes <=
+      overBudget.scored.report.context.max_total_unique_source_bytes,
+    `the over-budget answer also breached max_total_unique_source_bytes (${overBudget.scored.report.context.total_unique_source_bytes} > ${overBudget.scored.report.context.max_total_unique_source_bytes}), so this no longer isolates the per-question budget`,
   );
-  assert.equal(scored.report.context.questions_over_budget, 1);
-  assert.ok(
-    scored.report.context.total_unique_source_bytes <=
-      scored.report.context.max_total_unique_source_bytes,
-    `the over-budget answer also breached max_total_unique_source_bytes (${scored.report.context.total_unique_source_bytes} > ${scored.report.context.max_total_unique_source_bytes}), so this no longer isolates the per-question budget`,
-  );
-  assert.equal(scored.report.passed, false);
+  assert.equal(overBudget.scored.report.passed, false);
 });
 
 test("unqualified non-canonical reliance is counted and fails", () => {
