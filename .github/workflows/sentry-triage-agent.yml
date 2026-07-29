@@ -164,8 +164,18 @@ jobs:
   #   - SENTRY_TRIAGE_TOKEN is set as job env (see the env: note below) and is
   #     consumed via ${VAR} expansion in --mcp-config; it is never echoed and
   #     never placed in a command. The wrapper drops it (and every other secret
-  #     bar gh's own credential) from the `gh` subprocess env, and refuses a
-  #     body containing any known token value.
+  #     bar gh's own credential) from the `gh` subprocess env.
+  #   - NOT CONTAINED, stated plainly: SENTRY_TRIAGE_TOKEN and the Claude OAuth
+  #     token are live in the agent's OWN Bash process env, so a successful
+  #     prompt injection can exfiltrate either into a public queue comment. The
+  #     wrapper refuses a body reproducing a token verbatim, but that is hygiene
+  #     against an accident, NOT a leak control: the agent writes the shell
+  #     command, and bash expands and transforms `$VAR` before the wrapper
+  #     receives argv, so a spliced or split value passes. Closing this needs
+  #     the credential out of the agent's process env — per-step env forwarding
+  #     the pinned action does not support, or a credential broker the MCP
+  #     server talks to. Both tokens are read-only / inference scoped and any
+  #     use lands in an auditable public comment.
   # ---------------------------------------------------------------------------
   triage:
     needs: select
@@ -203,12 +213,14 @@ jobs:
     #   - SENTRY_TRIAGE_TOKEN: consumed by ${SENTRY_TRIAGE_TOKEN} expansion in
     #     --mcp-config when the CLI launches the stdio Sentry MCP server
     #     (expansion of inline --mcp-config env values verified against the
-    #     CLI). Never echoed. Accepted residual: like GH_TOKEN, it is visible
-    #     to the agent's allowlisted Bash subprocesses. Containment is the
-    #     comment wrapper (issue #1288): it is the agent's only write path, it
-    #     refuses a body containing either token value, and it hands `gh` an
-    #     allowlisted env that carries neither this token nor the Claude OAuth
-    #     token. The token itself is read-only scoped.
+    #     CLI). Never echoed. Accepted residual, unchanged by #1288: like
+    #     GH_TOKEN it is visible to the agent's allowlisted Bash subprocesses,
+    #     and an injected agent can exfiltrate it through its own write path —
+    #     see the "NOT CONTAINED" bullet in the job banner for why no check
+    #     inside the wrapper can stop that. What #1288 did buy: the write target
+    #     cannot be model-controlled, agent comments cannot impersonate the
+    #     pipeline's control comments, and `gh` itself no longer receives this
+    #     token. The token is read-only scoped.
     #   - SENTRY_TRIAGE_COMMENT_ISSUE: the wrapper's write target. Job env
     #     because a caller step's env: would not reach the agent's subprocess
     #     (see above). It is the matrix value, already ^[0-9]+$-validated in the

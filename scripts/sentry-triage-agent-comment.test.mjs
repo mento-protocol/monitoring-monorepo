@@ -162,9 +162,17 @@ test("--body is required, non-empty, and single", () => {
   assert.deepEqual(parseArgs(["--body", "x"]), { body: "x" });
 });
 
-// ── exfiltration refusal ─────────────────────────────────────────────────────
+// ── credential hygiene guard ─────────────────────────────────────────────────
+//
+// These cover ACCIDENTAL inclusion — prose that reproduces a credential because
+// the agent quoted an environment value, a config dump, or a failed command's
+// output. They are NOT evidence of a containment control and must not be read
+// as one: the agent writes the shell command, so the shell can splice or
+// substitute the value before this script ever receives argv. The last test in
+// this block pins that limit. Closing it means getting the credential out of
+// the agent's process env, which is outside this script.
 
-test("a body containing the Sentry token value is refused", async () => {
+test("a body that accidentally reproduces the Sentry token is refused", async () => {
   const err = await refusal({
     argv: ["--body", `${VERDICT_BODY}\n\nnote: ${SENTRY_TOKEN}`],
   });
@@ -175,7 +183,7 @@ test("a body containing the Sentry token value is refused", async () => {
   );
 });
 
-test("a body containing the GH_TOKEN value is refused", async () => {
+test("a body that accidentally reproduces GH_TOKEN is refused", async () => {
   const err = await refusal({
     argv: ["--body", `${VERDICT_BODY}\n\n${GH_TOKEN}`],
   });
@@ -183,19 +191,36 @@ test("a body containing the GH_TOKEN value is refused", async () => {
   assert.ok(!err.message.includes(GH_TOKEN));
 });
 
-test("a body containing the Claude OAuth token value is refused", async () => {
+test("a body that accidentally reproduces the Claude OAuth token is refused", async () => {
   const err = await refusal({
     argv: ["--body", `${VERDICT_BODY}\n\n${OAUTH_TOKEN}`],
   });
   assert.match(err.message, /CLAUDE_CODE_OAUTH_TOKEN/);
 });
 
-test("the token only has to appear somewhere in the body", () => {
+test("the verbatim value only has to appear somewhere in the body", () => {
   const secrets = collectSecretValues(baseEnv());
   assert.throws(
     () => assertBodyPostable(`${VERDICT_MARKER} ${SENTRY_TOKEN} tail`, secrets),
     /SENTRY_TRIAGE_TOKEN/,
   );
+});
+
+test("DOCUMENTED LIMIT: the guard is not containment — a shell-transformed token passes", () => {
+  const secrets = collectSecretValues(baseEnv());
+  // What `--body "…${SENTRY_TRIAGE_TOKEN:0:4}x${SENTRY_TRIAGE_TOKEN:4}"` hands
+  // this script: the whole token with one removable character spliced in. Bash
+  // did that expansion; argv is all we ever see. Splitting the value across two
+  // lines defeats the scan just as easily. Asserted, not fixed — exact-value
+  // scanning is the wrong layer when the adversary controls the shell.
+  const spliced = `${SENTRY_TOKEN.slice(0, 4)}x${SENTRY_TOKEN.slice(4)}`;
+  const split = `${SENTRY_TOKEN.slice(0, 10)}\n${SENTRY_TOKEN.slice(10)}`;
+  for (const evaded of [spliced, split]) {
+    assert.doesNotThrow(
+      () => assertBodyPostable(`${VERDICT_MARKER}\n\n${evaded}`, secrets),
+      "the guard is documented as hygiene-only; do not assert containment here",
+    );
+  }
 });
 
 test("short env values are not treated as secrets", () => {

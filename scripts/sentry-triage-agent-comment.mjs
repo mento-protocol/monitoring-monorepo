@@ -12,7 +12,7 @@
  * (`Bash(node scripts/sentry-triage-agent-comment.mjs:*)`) can only extend the
  * ARGUMENTS, which cannot retarget the write.
  *
- * Three further fences, all failing closed:
+ * Two further fences, both failing closed:
  *
  *   1. AUTHORSHIP MARKER. Deterministic pipeline scripts and this agent both
  *      post as `github-actions[bot]`, so the pipeline's trusted-author fence
@@ -24,15 +24,28 @@
  *      prefix-anchored control comments (regression reopen, projection
  *      pointer, autofix pointer) and is always positively identifiable as
  *      agent-authored.
- *   2. TOKEN SCRUB. The `gh` child process gets a strict env ALLOWLIST — the
- *      Sentry read token, the Claude OAuth token and everything else in the
- *      agent step's environment are dropped. GH_TOKEN is the one credential
- *      re-bound deliberately: it is `gh`'s only auth channel, so it cannot be
- *      removed, but it is injected explicitly rather than inherited wholesale.
- *   3. EXFILTRATION REFUSAL. The agent's shell expands `$VAR` before this
- *      script sees it, so `--body "$SENTRY_TRIAGE_TOKEN"` is the obvious exfil
- *      route. A body containing the value of any known secret env var is
- *      refused, and the refusal names the VARIABLE, never the value.
+ *   2. SUBPROCESS ENV SCRUB. The `gh` child process gets a strict env
+ *      ALLOWLIST — the Sentry read token, the Claude OAuth token and everything
+ *      else in the agent step's environment are dropped. GH_TOKEN is the one
+ *      credential re-bound deliberately: it is `gh`'s only auth channel, so it
+ *      cannot be removed, but it is injected explicitly rather than inherited
+ *      wholesale. This bounds what `gh` holds; it does not bound what the AGENT
+ *      holds (see below).
+ *
+ * And one HYGIENE GUARD that is explicitly NOT a security control. A body
+ * containing the verbatim value of a known secret env var is refused, naming
+ * the VARIABLE and never the value. That catches the common accident — prose
+ * that reproduces a credential because the agent quoted an environment value,
+ * a config dump, or a failed command's output. It does NOT stop deliberate
+ * exfiltration and must never be described as if it does: the agent writes the
+ * shell command, and the shell expands and transforms `$VAR` BEFORE this
+ * script receives argv, so `--body "…${SENTRY_TRIAGE_TOKEN:0:4}x${SENTRY_TRIAGE_TOKEN:4}"`
+ * — or any substring split or substitution — arrives as a value this scan
+ * cannot match. Exact-value scanning is structurally the wrong layer when the
+ * adversary controls the shell. The real residual is recorded in the workflow's
+ * containment banner and in docs/notes/sentry-triage-pipeline.md; closing it
+ * means removing the credential from the agent's process env, which no check
+ * inside this script can do.
  *
  * The body is posted with `gh --body-file` from `$RUNNER_TEMP`, so it never
  * appears in `gh`'s argv.
@@ -54,9 +67,11 @@ export { AGENT_COMMENT_MARKER, VERDICT_MARKER };
  * whole point of this script. */
 export const ISSUE_ENV_VAR = "SENTRY_TRIAGE_COMMENT_ISSUE";
 
-/** Env vars whose VALUES must never appear in an agent-authored body. Covers
- * this workflow's own secrets plus the tokens claude-code-action puts in the
- * CLI subprocess env (which the agent's Bash therefore inherits). */
+/** Env vars whose verbatim value in a body is treated as an accident worth
+ * refusing. Covers this workflow's own secrets plus the tokens
+ * claude-code-action puts in the CLI subprocess env (which the agent's Bash
+ * therefore inherits). Hygiene only — a deliberately transformed value passes
+ * (see the header). */
 export const SECRET_ENV_VARS = [
   "SENTRY_TRIAGE_TOKEN",
   "GH_TOKEN",
@@ -136,7 +151,8 @@ export function resolveTarget(env) {
   return { issue, repo, tempDir };
 }
 
-/** The secret values present in this environment, as {name, value} pairs. */
+/** The secret values present in this environment, as {name, value} pairs. Used
+ * only for the verbatim-match hygiene guard. */
 export function collectSecretValues(env) {
   return SECRET_ENV_VARS.filter(
     (name) =>
@@ -144,10 +160,14 @@ export function collectSecretValues(env) {
   ).map((name) => ({ name, value: env[name] }));
 }
 
-/** Refuse a body that leaks a credential, forges the authorship marker, or is
- * not the verdict comment this agent exists to post. Throws; the message never
- * contains a secret value. */
+/** Refuse a body that forges the authorship marker or is not the verdict
+ * comment this agent exists to post (both structural fences), and — as a
+ * hygiene guard, NOT a containment control — a body that reproduces a
+ * credential verbatim. Throws; the message never contains a secret value. */
 export function assertBodyPostable(body, secrets) {
+  // Hygiene only. A body assembled from shell-transformed pieces of a token
+  // never matches here, and cannot be made to: the transformation happens
+  // upstream of this process. See the header.
   for (const { name, value } of secrets) {
     if (body.includes(value)) {
       throw new Error(

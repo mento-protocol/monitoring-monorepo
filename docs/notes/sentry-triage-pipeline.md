@@ -161,13 +161,28 @@ The agent posts that comment through `scripts/sentry-triage-agent-comment.mjs`,
 its only write path. The wrapper takes the target issue from the workflow-set
 `SENTRY_TRIAGE_COMMENT_ISSUE` and accepts no issue argument, so no model output
 can name a different issue. It refuses a body that does not start with the
-verdict marker, a body containing the value of any credential in the
-environment, and a body carrying its own authorship marker. It appends
+verdict marker and a body carrying its own authorship marker; it appends
 `<!-- sentry-triage-agent-authored:v1 -->` and posts with `gh --body-file` from
 `$RUNNER_TEMP`, handing `gh` an allowlisted environment that carries neither the
 Sentry token nor the Claude OAuth token. Deterministic scripts and the agent
 share the `github-actions[bot]` identity, so that marker — and the required
 verdict-marker prefix — are what separate agent text from pipeline text.
+
+**Credential exfiltration is not contained here, and the wrapper does not claim
+to contain it.** `SENTRY_TRIAGE_TOKEN` must sit in job env for the Sentry MCP
+server's `${VAR}` expansion, and `claude-code-action` puts the Claude OAuth
+token in the same process env, so both are live in the agent's Bash. A
+successful prompt injection can put either in a public queue comment. The
+wrapper refuses a body reproducing a token verbatim, which catches the common
+accident — prose that quotes an environment value or a failed command's output
+— but it is not a leak control: the agent writes the shell command, and bash
+expands and transforms `$VAR` before the wrapper sees argv, so a spliced or
+split value passes. Exact-value scanning is the wrong layer when the adversary
+controls the shell. Closing this needs the credential out of the agent's process
+env: per-step or first-class MCP env forwarding, which `claude-code-action` does
+not offer at the pinned v1.0.179, or a local credential broker the MCP server
+talks to so the agent holds no Sentry token at all. Both tokens are read-only or
+inference scoped, and any use lands in an auditable public comment.
 
 The deterministic parser accepts only comments from
 `github-actions[bot]`. After a regression reopen, it accepts only a verdict
