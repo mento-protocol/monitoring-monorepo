@@ -20,6 +20,9 @@ resource "grafana_message_template" "peg_slack_message" {
   name     = "Peg - Slack Message"
   template = <<-EOT
 {{ define "peg.slack.message" }}
+{{ if and (len .Alerts.Firing) (eq .CommonLabels.severity "critical") -}}
+<!subteam^${var.oncall_support_usergroup_id}> Please investigate this critical Peg alert.
+{{ end -}}
 {{ range .Alerts.Firing -}}
 *FIRING: {{ with .Labels.alertname }}{{ . }}{{ else }}Peg monitoring{{ end }}* — `{{ with .Labels.asset }}{{ . }}{{ else }}unknown asset{{ end }}`{{ with .Labels.source }} / `{{ . }}`{{ end }}
 {{ with .Annotations.summary }}{{ . }}{{ end }}

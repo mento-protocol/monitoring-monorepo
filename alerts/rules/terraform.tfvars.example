@@ -8,6 +8,10 @@
 # The bot must be invited to every channel it posts to: /invite @Grafana Alerts.
 slack_bot_token = "xoxb-REPLACE_ME"
 
+# Slack usergroup ID for @support-engineer. Firing critical Peg alerts mention
+# this group in #alerts-critical.
+oncall_support_usergroup_id = "S012345678"
+
 # ── Grafana ───────────────────────────────────────────────────────────────────
 # Service account token for the Grafana Cloud stack. Create at:
 #   Grafana Cloud → Administration → Service accounts → Add token.

@@ -6,6 +6,7 @@ run "peg_rule_definitions_preserve_consumer_guard_invariant" {
   variables {
     grafana_service_account_token     = "test-grafana-token"
     slack_bot_token                   = "xoxb-test-token"
+    oncall_support_usergroup_id       = "S012345678"
     splunk_on_call_alerts_webhook_url = "https://example.invalid/splunk-on-call"
   }
 

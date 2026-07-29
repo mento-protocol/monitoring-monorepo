@@ -64,7 +64,7 @@ describe("PegMonitoringPageClient", () => {
       hasError: false,
     };
     render();
-    expect(container.textContent).toContain("Current package");
+    expect(container.textContent).toContain("Data is current");
     expect(
       container.querySelector(
         `a[href="/pool/${PEG_FIXTURE_CHAIN_ID}-${PEG_FIXTURE_POOL_ADDRESS}?tab=oracle"]`,
@@ -76,7 +76,9 @@ describe("PegMonitoringPageClient", () => {
     expect(grafana?.getAttribute("rel")).toContain("noopener");
     state.current = { ...state.current, hasError: true };
     render();
-    expect(container.textContent).toContain("Stale — last confirmed package");
+    expect(container.textContent).toContain(
+      "Data is stale — showing the last confirmed check",
+    );
     expect(container.textContent).toContain("Last confirmed conclusion");
     expect(container.textContent).toContain("europ-schuman / EUR");
     state.current = { data: null, isLoading: false, hasError: true };
@@ -88,7 +90,47 @@ describe("PegMonitoringPageClient", () => {
       hasError: false,
     };
     render();
-    expect(container.textContent).toContain("Current package");
+    expect(container.textContent).toContain("Data is current");
+  });
+  it("puts plain decision evidence first and keeps supporting and technical detail collapsed", () => {
+    state.current = {
+      data: makePegMonitoringResponse(),
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+
+    const evidence = container.querySelector(
+      '[data-testid="peg-evidence-policy"]',
+    );
+    const otherMarkets = container.querySelector(
+      '[data-testid="peg-other-markets-europ-schuman"]',
+    );
+    const technical = container.querySelector(
+      '[data-testid="peg-technical-record"]',
+    );
+    expect(evidence?.querySelector("summary")?.textContent).toContain(
+      "How this status was checked",
+    );
+    expect(container.textContent).toContain(
+      "This is the market used to set the status above.",
+    );
+    expect(container.textContent).toContain(
+      "A 50,000 EUROP sale would get about 0.9965 EUR per EUROP.",
+    );
+    expect(container.textContent).toContain(
+      "0.25% (25 bps) below target or 0.25% (25 bps) above target over 10 minutes.",
+    );
+    expect(container.textContent).toContain(
+      "80% of usable readings must cross the limit",
+    );
+    expect(container.textContent).toContain(
+      "Net pool inflow is at 42% of the active on-chain trading limit. Warn at 80%.",
+    );
+    expect(otherMarkets?.hasAttribute("open")).toBe(false);
+    expect(technical?.hasAttribute("open")).toBe(false);
+    expect(technical?.textContent).toContain("Schema");
   });
   it("keeps the ticking age outside the live status while announcing semantic state", () => {
     state.current = {
@@ -100,8 +142,8 @@ describe("PegMonitoringPageClient", () => {
     const status = container.querySelector('[data-testid="peg-status"]');
     const liveStatus = status?.querySelector('[role="status"]');
     const age = status?.querySelector('[data-testid="peg-status-age"]');
-    expect(liveStatus?.textContent).toBe("Current package");
-    expect(age?.textContent).toContain("produced 20s ago");
+    expect(liveStatus?.textContent).toBe("Data is current");
+    expect(age?.textContent).toContain("Produced 20s ago");
     expect(liveStatus?.contains(age ?? null)).toBe(false);
 
     act(() => vi.advanceTimersByTime(80_000));
@@ -111,10 +153,18 @@ describe("PegMonitoringPageClient", () => {
       '[data-testid="peg-status-age"]',
     );
     expect(staleLiveStatus?.textContent).toContain(
-      "Stale — last confirmed package.",
+      "Data is stale — showing the last confirmed check",
     );
-    expect(staleAge?.textContent).toContain("Produced 1m ago;");
+    expect(staleAge?.textContent).toContain("Produced 1m ago.");
     expect(staleLiveStatus?.contains(staleAge ?? null)).toBe(false);
+    expect(container.textContent).toContain(
+      "At the last confirmed check, a 50,000 EUROP sale would have received about 0.9965 EUR per EUROP.",
+    );
+    expect(
+      Array.from(container.querySelectorAll("span")).some(
+        ({ textContent }) => textContent === "Last confirmed",
+      ),
+    ).toBe(true);
 
     const aggregateStatus = container.querySelector(
       '[data-testid="peg-aggregate-status"]',
@@ -135,6 +185,53 @@ describe("PegMonitoringPageClient", () => {
     expect(
       container.querySelector('[data-testid="peg-aggregate-age"]')?.textContent,
     ).toContain("2m old");
+  });
+  it("uses live supporting-source freshness until the package becomes stale, then keeps the confirmed result", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    vi.setSystemTime(PEG_FIXTURE_PRODUCED_AT * 1_000 + 50_000);
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.map((source) =>
+              source.id === "kraken_eur"
+                ? {
+                    ...source,
+                    policy: {
+                      ...source.policy,
+                      pollIntervalSeconds: 15,
+                      staleAfterSeconds: 30,
+                    },
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+
+    let supportingSource = container.querySelector(
+      '[data-testid="peg-supporting-source-kraken_eur"]',
+    );
+    expect(container.textContent).toContain("Data is current");
+    expect(supportingSource?.textContent).toContain("Unavailable");
+
+    act(() => vi.advanceTimersByTime(50_000));
+    supportingSource = container.querySelector(
+      '[data-testid="peg-supporting-source-kraken_eur"]',
+    );
+    expect(container.textContent).toContain(
+      "Data is stale — showing the last confirmed check",
+    );
+    expect(supportingSource?.textContent).toContain("Last confirmed");
+    expect(supportingSource?.textContent).not.toContain("Unavailable");
   });
   it("expires source evidence while its package is still current", () => {
     const response = makePegMonitoringResponse();
@@ -164,12 +261,12 @@ describe("PegMonitoringPageClient", () => {
     };
 
     render();
-    expect(container.textContent).toContain("Current package");
+    expect(container.textContent).toContain("Data is current");
     expect(container.textContent).toContain("All pegs healthy");
     expect(container.textContent).toContain("3 of 3 sources usable");
 
     act(() => vi.advanceTimersByTime(10_000));
-    expect(container.textContent).toContain("Current package");
+    expect(container.textContent).toContain("Data is current");
     expect(container.textContent).toContain("Price check unavailable");
     expect(container.textContent).toContain("2 of 3 sources usable");
     expect(container.textContent).not.toContain("3 of 3 sources healthy");
@@ -228,7 +325,7 @@ describe("PegMonitoringPageClient", () => {
     expect(container.textContent).toContain("1 pool reachable");
 
     act(() => vi.advanceTimersByTime(50_000));
-    expect(container.textContent).toContain("Current package");
+    expect(container.textContent).toContain("Data is current");
     expect(container.textContent).toContain("Monitoring checks incomplete");
     expect(container.textContent).toContain("Check expired");
     expect(container.textContent).toContain("3 of 3 sources usable");
@@ -335,13 +432,13 @@ describe("PegMonitoringPageClient", () => {
       hasError: false,
     };
     render();
-    expect(container.textContent).toContain("Previous-policy fallback");
+    expect(container.textContent).toContain("Using the previous alert policy");
     expect(container.textContent).toContain("Unhealthy");
     const disabled = Array.from(container.querySelectorAll("span")).find(
       (element) => element.textContent === "Disabled",
     );
     expect(disabled?.className).toContain("text-red-300");
-    expect(container.textContent).toContain("Breaker unavailable");
+    expect(container.textContent).toContain("Safeguard unavailable");
     expect(container.textContent).toContain("0 of 2 breakers OK");
   });
   it("keeps unavailable breakers in the health-summary denominator", () => {
@@ -557,8 +654,8 @@ describe("PegMonitoringPageClient", () => {
       hasError: false,
     };
     render();
-    expect(container.textContent).toContain("Listing: halted");
-    expect(container.textContent).toContain("Listing checked");
+    expect(container.textContent).toContain("Trading halted");
+    expect(container.textContent).toContain("Trading availability checked");
     expect(container.textContent).toContain("2027-01-15T07:59:55 UTC");
     expect(container.textContent).toContain("missing after 2 checks");
     expect(container.textContent).not.toMatch(/current .*streak/i);
@@ -596,8 +693,11 @@ describe("PegMonitoringPageClient", () => {
     expect(container.textContent).toContain("USD → EUR");
     expect(container.textContent).toContain("0xec5748…c318ca");
     expect(container.textContent).toContain("chain 137");
-    expect(container.textContent).toContain("Saturated — partial-query risk");
+    expect(container.textContent).toContain("Partial — result limit reached");
     expect(container.textContent).toContain("Complete within page limit");
+    expect(container.textContent).toContain(
+      "The pool query reached its result limit, so this safety check is incomplete.",
+    );
 
     state.current = {
       data: {
@@ -645,9 +745,11 @@ describe("PegMonitoringPageClient", () => {
       hasError: false,
     };
     render();
-    expect(container.querySelectorAll('a[href*="?tab=oracle"]')).toHaveLength(
-      2,
-    );
+    expect(
+      container
+        .querySelector('[data-testid="peg-technical-record"]')
+        ?.querySelectorAll('a[href*="?tab=oracle"]'),
+    ).toHaveLength(2);
     const errors = error.mock.calls.map((call) => call.map(String).join(" "));
     try {
       expect(

@@ -64,7 +64,9 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
   await expect(page.getByText("Nearest warning")).toBeVisible();
   await expect(page.getByText("Furthest from target")).toHaveCount(0);
   await expect(page.getByText("Data freshness")).toBeVisible();
-  await expect(page.getByText("Fresh", { exact: true })).toBeVisible();
+  await expect(
+    page.getByTestId("peg-headline-cards").getByText("Fresh", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByText("3 of 3 sources usable", { exact: true }),
   ).toBeVisible();
@@ -105,15 +107,51 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
 
   const evidence = page.getByTestId("peg-evidence-policy");
   await expect(evidence).not.toHaveAttribute("open", "");
-  await evidence.getByText("Evidence and policy", { exact: true }).click();
+  await evidence
+    .getByText("How this status was checked", { exact: true })
+    .click();
   await expect(evidence).toHaveAttribute("open", "");
+  await expect(
+    page.getByText("A 50,000 EUROP sale would get about 0.999 EUR per EUROP.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "0.25% (25 bps) below target or 0.25% (25 bps) above target over 10 minutes.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Net pool inflow is at 42% of the active on-chain trading limit. Warn at 80%.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+
+  const otherMarkets = page.getByTestId("peg-other-markets-europ-schuman");
+  const technicalRecord = page.getByTestId("peg-technical-record");
+  await expect(otherMarkets).not.toHaveAttribute("open", "");
+  await expect(technicalRecord).not.toHaveAttribute("open", "");
+  await otherMarkets.getByText("Other market checks (2)").click();
+  await expect(
+    page.getByText(
+      "Converted from USD to EUR using rate feed 0xec5748…c318ca on chain 137.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Price conversion:", { exact: false }),
+  ).not.toBeVisible();
+  await technicalRecord.getByText("Technical record", { exact: true }).click();
   await expect(
     page.getByText(
       "Price conversion: USD → EUR via feed 0xec5748…c318ca · chain 137",
     ),
   ).toBeVisible();
 
-  const grafanaLink = page.getByRole("link", { name: /Open Peg Monitoring/ });
+  const grafanaLink = page.getByRole("link", {
+    name: /View alert rules and history/,
+  });
   await expect(grafanaLink).toHaveAttribute(
     "href",
     "https://clabsmento.grafana.net/alerting/list?search=Peg",
@@ -134,8 +172,52 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
   await expect(
     page.getByText("Last confirmed conclusion", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("Stale — last confirmed package.")).toBeVisible();
+  await expect(
+    page.getByText("Data is stale — showing the last confirmed check"),
+  ).toBeVisible();
   await expect(
     page.getByText(/^Last confirmed package \d+[smh] ago$/),
   ).toBeVisible();
+});
+
+test("keeps the evidence hierarchy progressive and overflow-free on mobile", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date(now * 1000 + 20_000) });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/peg-monitoring", async (route) => {
+    await route.fulfill({ json: payload });
+  });
+  await page.goto("/peg-monitoring");
+
+  const evidence = page.getByTestId("peg-evidence-policy");
+  await evidence
+    .getByText("How this status was checked", { exact: true })
+    .click();
+  await expect(
+    page.getByText("This is the market used to set the status above.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  const otherMarkets = page.getByTestId("peg-other-markets-europ-schuman");
+  const technicalRecord = page.getByTestId("peg-technical-record");
+  await expect(otherMarkets).not.toHaveAttribute("open", "");
+  await expect(technicalRecord).not.toHaveAttribute("open", "");
+  await expect(page.getByText("Schema", { exact: true })).not.toBeVisible();
+
+  await otherMarkets.getByText("Other market checks (2)").click();
+  await expect(
+    page.getByText(
+      "Converted from USD to EUR using rate feed 0xec5748…c318ca on chain 137.",
+    ),
+  ).toBeVisible();
+  await technicalRecord.getByText("Technical record", { exact: true }).click();
+  await expect(page.getByText("Schema", { exact: true })).toBeVisible();
+
+  const horizontalOverflow = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth,
+  );
+  expect(horizontalOverflow).toBeLessThanOrEqual(1);
 });

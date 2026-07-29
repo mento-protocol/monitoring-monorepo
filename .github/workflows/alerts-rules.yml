@@ -210,6 +210,7 @@ jobs:
           {
             printf '%s\n' 'TF_VAR_grafana_service_account_token=pr-plan-dummy-grafana-token'
             printf '%s\n' 'TF_VAR_slack_bot_token=xoxb-pr-plan-dummy-token'
+            printf '%s\n' 'TF_VAR_oncall_support_usergroup_id=S012345678'
             printf '%s\n' 'TF_VAR_splunk_on_call_alerts_webhook_url=https://example.invalid/pr-plan-splunk-on-call-webhook'
           } >> "$GITHUB_ENV"
 
@@ -221,11 +222,13 @@ jobs:
         env:
           INPUT_GRAFANA_SERVICE_ACCOUNT_TOKEN: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
           INPUT_SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+          INPUT_ONCALL_SUPPORT_USERGROUP_ID: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
           INPUT_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
         run: |
           {
             printf '%s\n' "TF_VAR_grafana_service_account_token=${INPUT_GRAFANA_SERVICE_ACCOUNT_TOKEN}"
             printf '%s\n' "TF_VAR_slack_bot_token=${INPUT_SLACK_BOT_TOKEN}"
+            printf '%s\n' "TF_VAR_oncall_support_usergroup_id=${INPUT_ONCALL_SUPPORT_USERGROUP_ID}"
             printf '%s\n' "TF_VAR_splunk_on_call_alerts_webhook_url=${INPUT_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL}"
           } >> "$GITHUB_ENV"
 
@@ -558,6 +561,7 @@ jobs:
       # the provider blocks against these values to talk to Grafana/Slack/etc.
       TF_VAR_grafana_service_account_token: ${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
+      TF_VAR_oncall_support_usergroup_id: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -1139,6 +1139,45 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
   );
 });
 
+test("Peg Slack pages mention @support-engineer only while critical alerts are firing", () => {
+  const templates = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/peg-message-templates.tf"),
+    "utf8",
+  );
+  const slackMessageTemplate = templates.slice(
+    templates.indexOf(
+      'resource "grafana_message_template" "peg_slack_message"',
+    ),
+    templates.indexOf(
+      'resource "grafana_message_template" "peg_victorops_title"',
+    ),
+  );
+  const victorOpsTemplates = templates.slice(
+    templates.indexOf(
+      'resource "grafana_message_template" "peg_victorops_title"',
+    ),
+  );
+  const supportMention = "<!subteam^${var.oncall_support_usergroup_id}>";
+  const guardedMention = [
+    '{{ if and (len .Alerts.Firing) (eq .CommonLabels.severity "critical") -}}',
+    `${supportMention} Please investigate this critical Peg alert.`,
+    "{{ end -}}",
+  ].join("\n");
+
+  assert(
+    slackMessageTemplate.includes(guardedMention),
+    "the Slack support mention must require both a firing alert and common critical severity",
+  );
+  assert(
+    (slackMessageTemplate.match(/<!subteam\^/gu) ?? []).length === 1,
+    "the Slack support usergroup must be mentioned exactly once",
+  );
+  assert(
+    !victorOpsTemplates.includes("<!subteam^"),
+    "the Slack usergroup mention must not enter Splunk On-Call payloads",
+  );
+});
+
 test("Peg Grafana consumers use a literal source activation guard", () => {
   const rulesDir = path.resolve(__dirname, "..", "alerts/rules");
   const policyLocals = readFileSync(
