@@ -379,16 +379,25 @@ export function isActivelyRegressing(issue) {
  * not `isActivelyRegressing` — is what catches an event that arrived while the
  * archive ran (issue #1371).
  *
- * Unparsable on either side returns false (proceed): we cannot establish that
- * anything moved, and the ingest side already falls back to its `closedAt`
- * comparison when the recorded baseline is not a date. Sentry always returns
- * `lastSeen` on the issue-detail route, so this is a residual, not a path.
+ * Strictly a comparison: an unparsable side is not a move, so this returns
+ * false. That is NOT a decision to proceed. Both call sites gate parsability
+ * themselves and refuse — `isUsableBaseline` before the PUT, an explicit
+ * `Date.parse` check on the read-back after it — because an unusable baseline
+ * sends ingest back to the `closedAt` comparison this mechanism replaces.
  */
 export function lastSeenMoved(baseline, latest) {
   const baselineMs = Date.parse(baseline ?? "");
   const latestMs = Date.parse(latest ?? "");
   if (Number.isNaN(baselineMs) || Number.isNaN(latestMs)) return false;
   return latestMs > baselineMs;
+}
+
+/** A baseline is usable only when it is a real date. Anything else would land
+ * in the audit comment as junk, and ingest's `decideDedupAction` would silently
+ * fall back to comparing against `closedAt` — the exact race the baseline
+ * closes. So an unusable baseline gates the mutation instead of riding along. */
+export function isUsableBaseline(lastSeen) {
+  return !Number.isNaN(Date.parse(lastSeen ?? ""));
 }
 
 /** Fixed refusal comment for the fresh-event path (no marker — this stub is not
@@ -402,6 +411,35 @@ export function buildFreshEventRefusalComment(shortId) {
     "event Sentry has not yet flagged would hide it: the close would postdate the",
     "event and the regression-reopen gate would never fire for it. The stub stays",
     "open; re-run the archive once the new activity has been triaged.",
+  ].join("\n");
+}
+
+/** Fixed refusal comment for a Sentry `lastSeen` that does not parse BEFORE the
+ * mutation. Nothing is mutated on this path, so the stub keeps its approval and
+ * stays re-dispatchable. */
+export function buildMissingBaselineRefusalComment(shortId) {
+  const safeShortId = truncateTitle(neutralizeUntrusted(shortId), 90);
+  return [
+    `**Not archived.** Sentry returned no usable \`lastSeen\` for \`${safeShortId}\`,`,
+    "so this run cannot record the freshness baseline the archive depends on.",
+    "Without it the regression-reopen gate falls back to comparing against this",
+    "stub's close time, and any event landing while the archive runs would be",
+    "hidden permanently. Nothing was changed in Sentry or on this stub; re-run",
+    "the archive once Sentry reports the issue normally.",
+  ].join("\n");
+}
+
+/** Fixed refusal comment for a `lastSeen` that stops parsing AFTER the mutation
+ * (the archive is reverted). Deliberately distinct from the fresh-event comment:
+ * we do not know an event landed, only that we can no longer prove none did. */
+export function buildUnreadableFreshnessRefusalComment(shortId) {
+  const safeShortId = truncateTitle(neutralizeUntrusted(shortId), 90);
+  return [
+    "**Not archived.** Sentry stopped reporting a usable `lastSeen` for",
+    `\`${safeShortId}\` immediately after the archive, so this run cannot confirm`,
+    "that no event landed while it ran. The field parsed moments earlier, so the",
+    "read-back is anomalous. The archive was reverted and the stub left open;",
+    "re-run it once Sentry reports the issue normally.",
   ].join("\n");
 }
 
@@ -827,6 +865,34 @@ export async function runArchive(options, deps = {}) {
   // the stub's `closedAt`.
   const baselineLastSeen = current?.lastSeen ?? null;
 
+  // Fail CLOSED on an unusable baseline, BEFORE any mutation. Archiving without
+  // one would record junk in the audit comment, ingest would silently fall back
+  // to the `closedAt` comparison, and the race this baseline closes would be
+  // wide open again — invisibly, because nothing downstream can tell a missing
+  // baseline from a stub archived before the contract existed. Refuse instead:
+  // no Sentry PUT, no queue mutation (the approval label survives, so the stub
+  // stays re-dispatchable), comment + exit 0 like the other policy refusals.
+  if (!isUsableBaseline(baselineLastSeen)) {
+    process.stderr.write(
+      `::notice::Sentry returned no parsable lastSeen for ${meta.shortId} (${issueId}); refusing to archive without a freshness baseline (ingest would fall back to closedAt and could bury a regression).\n`,
+    );
+    await runGh([
+      "issue",
+      "comment",
+      String(queueIssue),
+      "-R",
+      repo,
+      "--body",
+      buildMissingBaselineRefusalComment(meta.shortId),
+    ]);
+    return {
+      issue: queueIssue,
+      shortId: meta.shortId,
+      sentryIssueId: issueId,
+      status: "skipped-no-baseline",
+    };
+  }
+
   // Live-regression guard. If Sentry has flagged the issue as regressed/
   // escalating, DO NOT archive: closing the stub after that regression's
   // lastSeen would make ingest's reopen gate skip it permanently (see
@@ -884,16 +950,25 @@ export async function runArchive(options, deps = {}) {
     // the regression-reopen gate would never fire for it. Revert and refuse
     // (comment + exit 0; a policy refusal is not a failed run).
     const after = await fetchSentryIssue(fetchImpl, { ...sentry, issueId });
-    if (lastSeenMoved(baselineLastSeen, after?.lastSeen)) {
+    const afterLastSeen = after?.lastSeen ?? null;
+    // An unreadable read-back is ALSO a refusal, not a "nothing moved". The
+    // field parsed a moment ago (the pre-PUT gate proved it), so a malformed one
+    // now is anomalous and cannot establish that no event landed. Separate from
+    // the moved case so the two reasons stay distinguishable in the logs.
+    const unreadable = !isUsableBaseline(afterLastSeen);
+    if (unreadable || lastSeenMoved(baselineLastSeen, afterLastSeen)) {
       const outcome = await restoreArchivedIssue(fetchImpl, {
         ...sentry,
         issueId,
         preArchive: current,
       });
+      const disposition = outcome.restored
+        ? "reverted the archive"
+        : "left Sentry untouched (another actor had already moved the issue off archived_until_escalating)";
       process.stderr.write(
-        outcome.restored
-          ? `::notice::A Sentry event for ${meta.shortId} (${issueId}) landed during the archive (lastSeen ${baselineLastSeen} -> ${after?.lastSeen}); reverted the archive and left the stub open.\n`
-          : `::notice::A Sentry event for ${meta.shortId} (${issueId}) landed during the archive, but the issue was already moved off archived_until_escalating by another actor; leaving Sentry untouched and the stub open.\n`,
+        unreadable
+          ? `::notice::Sentry returned no parsable lastSeen for ${meta.shortId} (${issueId}) immediately after the archive PUT; cannot confirm that no event landed, so ${disposition} and left the stub open.\n`
+          : `::notice::A Sentry event for ${meta.shortId} (${issueId}) landed during the archive (lastSeen ${baselineLastSeen} -> ${afterLastSeen}); ${disposition} and left the stub open.\n`,
       );
       await runGh([
         "issue",
@@ -902,15 +977,17 @@ export async function runArchive(options, deps = {}) {
         "-R",
         repo,
         "--body",
-        buildFreshEventRefusalComment(meta.shortId),
+        unreadable
+          ? buildUnreadableFreshnessRefusalComment(meta.shortId)
+          : buildFreshEventRefusalComment(meta.shortId),
       ]);
       return {
         issue: queueIssue,
         shortId: meta.shortId,
         sentryIssueId: issueId,
-        status: outcome.restored
-          ? "reverted-fresh-events"
-          : "unreverted-fresh-events",
+        status: `${outcome.restored ? "reverted" : "unreverted"}-${
+          unreadable ? "unreadable-freshness" : "fresh-events"
+        }`,
       };
     }
 

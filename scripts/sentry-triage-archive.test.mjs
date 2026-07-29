@@ -10,6 +10,7 @@ import {
   isNotFoundError,
   isNumericId,
   isSafeSentryPermalink,
+  isUsableBaseline,
   lastSeenMoved,
   parseArgs,
   parseStubMetadata,
@@ -195,19 +196,22 @@ function jsonResponse(
 const BASELINE_LAST_SEEN = "2026-07-19T11:59:00.000Z";
 
 function makeFetch({
-  issue = { status: "unresolved", lastSeen: BASELINE_LAST_SEEN },
+  issue = { status: "unresolved" },
   archive = { ok: true },
   linkback = { ok: true },
   resolveShortId = { groupId: "6197137101" },
-  // ISO timestamp a Sentry event stamps onto the issue during the archive PUT,
-  // modelling an event that lands inside the mutation window (issue #1371).
-  eventDuringArchive = null,
+  // What the archive PUT leaves in `lastSeen`. A newer timestamp models an event
+  // landing inside the mutation window; a malformed one models an unreadable
+  // read-back (issue #1371). Null leaves the pre-PUT value alone.
+  lastSeenAfterPut = null,
 } = {}) {
   const calls = [];
   // Stateful: a successful PUT transitions the issue so a later GET (the
   // freshness re-check / idempotency re-check / compensation re-fetch) observes
-  // the new state. Non-status fields (notably `lastSeen`) carry over.
-  let currentIssue = { ...issue };
+  // the new state. Non-status fields (notably `lastSeen`) carry over. Every
+  // fixture gets a parsable `lastSeen` unless it deliberately overrides one —
+  // the pre-PUT baseline gate refuses an issue without it.
+  let currentIssue = { lastSeen: BASELINE_LAST_SEEN, ...issue };
   const fetchImpl = async (url, init = {}) => {
     const method = init.method ?? "GET";
     const body = init.body ? JSON.parse(init.body) : null;
@@ -228,7 +232,7 @@ function makeFetch({
           status: body.status,
           substatus: body.substatus,
         };
-        if (eventDuringArchive) currentIssue.lastSeen = eventDuringArchive;
+        if (lastSeenAfterPut !== null) currentIssue.lastSeen = lastSeenAfterPut;
       }
       return jsonResponse(
         {},
@@ -1059,7 +1063,7 @@ await test("an event landing inside the mutation window reverts and refuses", as
   const stub = makeStub();
   const { runGh, calls: ghCalls } = makeRunGh({ stub });
   const { fetchImpl, calls: fetchCalls } = makeFetch({
-    eventDuringArchive: "2026-07-19T11:59:45.000Z",
+    lastSeenAfterPut: "2026-07-19T11:59:45.000Z",
   });
 
   const result = await runArchive(baseOptions(), {
@@ -1124,18 +1128,80 @@ await test("the audit comment's baseline round-trips through the ingest parser",
   );
 });
 
-await test("a missing Sentry lastSeen records an empty, ignorable baseline", async () => {
-  // Degrades to the closedAt fallback on the ingest side rather than writing a
-  // bogus timestamp that would suppress a real reopen.
+await test("isUsableBaseline accepts only a real date", () => {
+  assertEqual(isUsableBaseline("2026-07-19T11:59:00.000Z"), true);
+  for (const bad of [null, undefined, "", "   ", "not-a-date", "{}"]) {
+    assertEqual(isUsableBaseline(bad), false);
+  }
+});
+
+await test("an unusable pre-PUT lastSeen refuses before any mutation", async () => {
+  // Fail CLOSED. Archiving here would record a junk baseline, ingest would
+  // silently fall back to the closedAt comparison, and race B would be wide
+  // open again with nothing downstream able to detect it.
+  for (const badLastSeen of [undefined, "", "not-a-date"]) {
+    const stub = makeStub();
+    const { runGh, calls: ghCalls } = makeRunGh({ stub });
+    const { fetchImpl, calls: fetchCalls } = makeFetch({
+      issue: { status: "unresolved", lastSeen: badLastSeen },
+    });
+
+    const result = await runArchive(baseOptions(), {
+      runGh,
+      fetchImpl,
+      now: FIXED_NOW,
+    });
+
+    assertEqual(result.status, "skipped-no-baseline");
+    assert(
+      !fetchCalls.some((c) => c.method === "PUT"),
+      "no Sentry mutation without a usable baseline",
+    );
+    assert(!casCall(ghCalls), "the human approval must survive for a retry");
+    assert(!ghCall(ghCalls, "close"), "the stub stays open");
+    assert(!ghCall(ghCalls, "edit"), "no label changes at all");
+    const comment = ghCall(ghCalls, "comment");
+    assert(comment, "explains the refusal on the stub");
+    assert(
+      comment[comment.indexOf("--body") + 1].includes("no usable `lastSeen`"),
+      "the refusal names the missing baseline",
+    );
+  }
+});
+
+await test("an unreadable post-PUT lastSeen reverts and refuses", async () => {
+  // The field parsed before the PUT, so a malformed read-back is anomalous and
+  // cannot establish that nothing moved. Treat it as a refusal, not a pass.
   const stub = makeStub();
   const { runGh, calls: ghCalls } = makeRunGh({ stub });
-  const { fetchImpl } = makeFetch({ issue: { status: "unresolved" } });
+  const { fetchImpl, calls: fetchCalls } = makeFetch({
+    lastSeenAfterPut: "not-a-date",
+  });
 
-  await runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW });
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
 
+  assertEqual(result.status, "reverted-unreadable-freshness");
+  const puts = fetchCalls.filter((c) => c.method === "PUT");
+  assertEqual(puts.length, 2);
+  assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
+  assertDeepEqual(puts[1].body, { status: "unresolved" });
+  assert(!ghCall(ghCalls, "close"), "the stub stays open");
+  assert(!casCall(ghCalls), "the human approval must survive for a retry");
   const comment = ghCall(ghCalls, "comment");
+  assert(comment, "explains the refusal on the stub");
   const body = comment[comment.indexOf("--body") + 1];
-  assertEqual(parseArchiveBaseline(body), null);
+  assert(
+    body.includes("stopped reporting a usable `lastSeen`"),
+    "the refusal names the unreadable read-back",
+  );
+  assert(
+    !body.includes("A new Sentry event"),
+    "must not claim an event landed — that is not what we observed",
+  );
 });
 
 await test("runArchive does not double-post the audit comment on retry", async () => {

@@ -286,8 +286,18 @@ machine-readable `archive_baseline_last_seen` (plus the Sentry issue id), which
 is what ingest's reopen gate compares against. That matters because the
 archive's close necessarily postdates any event that arrived inside the mutation
 window: a `closed_at` comparison would evaluate false for that event forever and
-bury it until some later event happened to arrive. A missing or unparsable
-baseline falls back to `closed_at`.
+bury it until some later event happened to arrive.
+
+The baseline is therefore load-bearing, and the archive fails **closed** without
+one. If Sentry's pre-mutation `lastSeen` does not parse, the run refuses before
+touching anything — no PUT, no queue mutation, the approval label intact so the
+stub stays re-dispatchable. If the post-PUT read-back stops parsing, the run
+reverts the archive and refuses with its own distinct reason, because a
+malformed read cannot prove that no event landed. Neither case may proceed: an
+unusable baseline would send ingest back to the `closed_at` comparison, and
+nothing downstream can distinguish that from a stub archived before this
+contract existed. The `closed_at` fallback in ingest exists only for those older
+stubs, never as a path a fresh archive is allowed to take.
 
 ## Operator runbook
 
