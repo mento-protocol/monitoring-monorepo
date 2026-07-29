@@ -3,7 +3,7 @@ title: Dashboard Local and Browser Verification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-28
+last_verified: 2026-07-29
 doc_type: runbook
 scope: ui-dashboard
 review_interval_days: 90
@@ -86,6 +86,34 @@ Logged-out sessions intentionally hide it and force all-actor queries, so a
 protocol actor appearing while logged out is expected and does not exercise the
 Organic filter. Verify that filter in a simulated session or query with
 `isProtocolActorIn: [false]`.
+
+## Route-specific assertions
+
+Apply these when a change touches the surface. The `/verify-ui` command owns the
+route-level smoke sequence and points here for the assertions.
+
+### Polygon coverage
+
+- `/pools` and `/volume`: select Polygon, verify the URL contains `chain=137`, only Polygon rows/series remain, refresh preserves the selection, and selecting All removes the default query parameter without an RSC refetch.
+- Polygon pool detail: EURm/EUROP renders every active strategy (Open and Reserve once the promoted schema/data are available); during schema rollout, the page degrades to the legacy pointer without blanking the rest of the pool.
+- `/stables`: Polygon USDm and EURm appear as distinct chain-qualified burning-mode supplies rather than being merged with another chain's token row.
+- `/integrations`: Polygon appears for every configured adapter and empty/error states remain distinct from unsupported coverage.
+
+### `/bridge-flows`
+
+- **KPI row (3 tiles):** `Total Bridge Transfers` (BreakdownTile w/ 24h/7d/30d breakdown), `Pending` (number or "1,000+"), `Avg deliver time` (h/m/s). None should be "—" or "…" on a healthy load.
+- **Charts row (3 columns):** `Bridged Volume (USD)` time-series chart with 7d/30d/all range buttons, `Token Breakdown` donut, `Top Bridgers` ranked list with address links.
+- **Recent transfers table (25 rows):** columns Provider, Route, Status, Token, Amount (USD), Amount, Sender, Receiver, Txs, Time. Per-cell click targets:
+  - **Wormholescan** (`wormholescan.io/#/tx/{sentTxHash}`): Provider badge, Amount (USD), Amount, and the `wh` pill in the Txs column
+  - **Chain explorer** (Celoscan / Monadscan / Polygonscan): Token cell (`token contract`), Sender, Receiver, and the `src` pill in the Txs column
+- **Key interactions to spot-check:**
+  - Set source or destination to Polygon → URL contains `source=137` or `destination=137`, the opposite filter/status survives, and pagination resets to page 1
+  - Refresh/back/forward preserves source, destination, status, and page; malformed/default parameters canonicalize out of the URL
+  - Click a sortable header (e.g. "Amount (USD)") → rows re-sort, arrow flips on second click
+  - Click an `AddressLink` → opens the correct explorer (Celoscan for 42220, MonadExplorer for 143, Polygonscan for 137)
+  - Click the Wormholescan `wh` pill → opens `wormholescan.io/#/tx/{sentTxHash}?network=Mainnet` (NOT the digest)
+- **STUCK overlay:** the status badge should read "Stuck" in red once a row remains `SENT` for more than 1h, `ATTESTED` for more than 15m, or `QUEUED_INBOUND` for more than 24h.
+- **Empty / error states:** an error from one query should NOT blank the whole page — each KPI/chart/table gates on its own backing query.
 
 ## Production-build differences
 
