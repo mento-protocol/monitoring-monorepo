@@ -351,12 +351,16 @@ archive carries the same baseline and still dedups.
 Reconciliation needs the process to survive. If the runner is cancelled or killed
 mid-settlement — job timeout, OOM, a cancelled workflow — the stub can be left
 part-settled, and the Sentry issue archived while the stub still carries
-`sentry:approved-archive`. A later `workflow_dispatch` then takes the
-already-archived path and records ITS OWN read time as the baseline, absorbing
-anything that landed in the dead run's window. Closing this would take a durable
-intent record written before the PUT, which is not what this change does. The
-mitigation is operational: a killed archive run leaves a red or cancelled run in
-Actions — check the Sentry issue before re-approving.
+`sentry:approved-archive`. A later `workflow_dispatch` takes the already-archived
+path, and because settlement consumes the approval before it writes the body, the
+stub cannot yet carry a baseline — so that retry is REFUSED as
+`skipped-unbaselined-retry` rather than recording its own read time. Nothing in
+the dead run's window is absorbed, but nothing is recovered either: the Sentry
+issue stays archived and is invisible to both ingest queries until someone acts.
+Closing that would take a durable intent record written before the PUT, which is
+not what this change does. The mitigation is operational: a killed archive run
+leaves a red or cancelled run in Actions — un-archive the Sentry issue so ingest
+re-queues it, then let the normal triage and approval cycle run.
 
 **The archive records a freshness baseline.** Sentry's `substatus` lags a fresh
 event, so the regressed/escalating refusal can pass while an event is already in
