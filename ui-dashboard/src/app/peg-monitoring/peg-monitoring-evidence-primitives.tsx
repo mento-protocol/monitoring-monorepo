@@ -52,14 +52,14 @@ export function EvidenceItem({
 }): React.JSX.Element {
   return (
     <div className="min-w-0 rounded-md border border-slate-800/80 bg-slate-950/40 px-3 py-2.5">
-      <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
         {label}
       </dt>
       <dd className="mt-1 break-words text-sm font-medium text-slate-200">
         {value}
       </dd>
       {detail ? (
-        <dd className="mt-0.5 break-words text-[11px] text-slate-500">
+        <dd className="mt-0.5 break-words text-[11px] text-slate-400">
           {detail}
         </dd>
       ) : null}
