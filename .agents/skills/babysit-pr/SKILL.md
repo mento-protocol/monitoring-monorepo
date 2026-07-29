@@ -109,6 +109,9 @@ item required.
   scope-baseline discipline, batch cadence, and Codex-request rules are
   step 6 of
   [`docs/notes/pr-operating-card.md`](../../../docs/notes/pr-operating-card.md).
+- An explicit user correction updates the request baseline: before the next
+  push, update the PR description so current-head reviewers do not enforce
+  superseded behavior.
 
 Never force-push or amend while babysitting. If target binding fails, move to a
 clean dedicated checkout and repeat the guard before editing; do not continue

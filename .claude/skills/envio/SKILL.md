@@ -43,8 +43,9 @@ Docs: <https://docs.envio.dev/docs/HyperIndex/hosted-service>
 - Always prefer the repo wrappers over the raw CLI so org/indexer defaults and
   guards stay centralized: `pnpm deploy:indexer` plus
   `pnpm deploy:indexer:{status,metrics,info,perf,verify,promote,logs,rollback}`.
-  Each takes a `<commit>` (optional except for `rollback`); check the script for
-  its flags.
+  The companion wrappers take a `<commit>` (optional except for `rollback`);
+  `pnpm deploy:indexer` itself always deploys the checked-out `HEAD` and takes
+  no commit argument. Check each script for its flags.
 - Dashboard: <https://envio.dev/app/mento-protocol/mento>
 
 ## Deployment lifecycle

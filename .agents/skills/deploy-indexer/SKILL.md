@@ -191,6 +191,16 @@ pnpm deploy:indexer:logs <TARGET_COMMIT> --build
 Capture `pnpm deploy:indexer:perf <TARGET_COMMIT>` after sync and before
 verification so the final report has a commit-scoped status/metrics/log record.
 
+Once the candidate reports caught-up, verify runtime health with
+
+```bash
+pnpm deploy:indexer:logs <TARGET_COMMIT> --errors-only --since 2h
+```
+
+Its saturation guard fails closed when logs are unavailable or truncated;
+`deploy:indexer:perf` treats log retrieval as optional and never replaces this
+check.
+
 Treat a successful caught-up exit as `SYNCED_PENDING_DATA_VERIFY`, not
 `READY_TO_PROMOTE`. If the command exits non-zero, the deployment does not
 register within five minutes, or full sync is not reached within 90 minutes, stop
