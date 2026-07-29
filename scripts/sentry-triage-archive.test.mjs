@@ -19,6 +19,7 @@ import {
   isUsableBaseline,
   lastSeenMoved,
   reconcileToTarget,
+  sentryMayBeArchived,
   parseArgs,
   parseStubMetadata,
   resolveArchiveToken,
@@ -259,13 +260,15 @@ function makeRunGh({
   const runGh = async (args) => {
     calls.push(args);
     beforeCall(args);
+    // failOn covers reads too: a settlement read that throws is one of the
+    // failure paths the disarm rule has to cover.
+    const clean = failOn(args);
+    if (clean) throw new Error(clean);
     if (args[0] === "issue" && args[1] === "view") {
       views += 1;
       if (concurrentReopenBeforeView === views) ingestReopen();
       return JSON.stringify(snapshot());
     }
-    const clean = failOn(args);
-    if (clean) throw new Error(clean);
     const ambiguous = ambiguousOn(args);
     if (ambiguous) {
       apply(args); // the mutation LANDS…
@@ -984,7 +987,11 @@ await test("a mid-flight reopen rolls back the queue and leaves Sentry archived"
   // transition and could erase a fresh `regressed` substatus.
   const stub = makeStub();
   // Ingest's reopen lands just before settlement's pre-CAS read (view 2).
-  const { runGh, calls: ghCalls } = makeRunGh({
+  const {
+    runGh,
+    calls: ghCalls,
+    model,
+  } = makeRunGh({
     stub,
     concurrentReopenBeforeView: 2,
   });
@@ -1001,8 +1008,13 @@ await test("a mid-flight reopen rolls back the queue and leaves Sentry archived"
   assertEqual(puts.length, 1, "the archive stands; nothing reverts it");
   assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
   assert(!ghCall(ghCalls, "close"), "reopened stub must not be closed");
-  assert(!ghCall(ghCalls, "edit"), "reopened stub must not be relabeled");
+  assert(
+    !labelEditCall(ghCalls, "--add-label"),
+    "reopened stub must not gain sentry:archived",
+  );
   assert(!ghCall(ghCalls, "comment"), "no audit comment on the reopened stub");
+  // Sentry may be archived, so the approval is spent no matter how far this got.
+  assertEqual(model.labels.includes("sentry:approved-archive"), false);
 });
 
 await test("a mid-flight reopen does not undo a corrective re-archive", async () => {
@@ -1283,10 +1295,13 @@ await test("a lost response on the archive PUT still converges", async () => {
   const puts = fetchCalls.filter((c) => c.method === "PUT");
   assertEqual(puts.length, 1);
   assertDeepEqual(puts[0].body, ARCHIVE_PAYLOAD);
-  // Settlement never started, so the queue is untouched and the approval — the
-  // thing that makes a retry dangerous — is still there for a clean re-run.
+  // Settlement never started, so the stub is untouched apart from the disarm.
   assertEqual(model.state, "OPEN");
-  assert(model.labels.includes("sentry:approved-archive"));
+  // A lost response means Sentry MAY hold the archive, so the approval must not
+  // stay spendable — a retry would take the already-archived path and stamp its
+  // own read time. This is the hoisted rule reaching a path that never got
+  // anywhere near settlement.
+  assertEqual(model.labels.includes("sentry:approved-archive"), false);
 });
 
 await test("a lost response on the terminal label still converges", async () => {
@@ -1692,6 +1707,175 @@ await test("a rejected PUT reports 'not archived' end to end", async () => {
   assert(summary.includes("was NOT archived"), "and does not claim an archive");
 });
 
+await test("a settlement read that throws after the PUT still spends the approval", async () => {
+  // The exact gap: the freshness readback succeeded, then settlement's FIRST
+  // readQueueIssue threw, so onTarget never ran. The outer catch reconciled with
+  // a null target and — before the rule was hoisted — neither consumed the
+  // approval nor recorded a baseline. Sentry archived, approval reusable, no
+  // baseline: a workflow_dispatch retry enters the already-archived path and
+  // stamps its own read time over whatever landed in between.
+  const stub = makeStub();
+  let views = 0;
+  const { runGh, model } = makeRunGh({
+    stub,
+    failOn: (args) => {
+      if (args[0] === "issue" && args[1] === "view") {
+        views += 1;
+        // View 1 is runArchive's pre-mutation read; view 2 is settlement's.
+        if (views === 2) return "gh issue view failed: HTTP 500";
+      }
+      return null;
+    },
+  });
+  const { fetchImpl, calls: fetchCalls } = makeFetch();
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /view failed/,
+  );
+
+  assertEqual(
+    fetchCalls.filter((c) => c.method === "PUT").length,
+    1,
+    "the archive stands — Sentry is not rolled back",
+  );
+  assertEqual(
+    model.labels.includes("sentry:approved-archive"),
+    false,
+    "the approval is spent, so no retry can silently re-baseline",
+  );
+  // Nothing else was written: settlement never began.
+  assertEqual(parseArchiveBaseline(model.body), null);
+  assertEqual(model.state, "OPEN");
+});
+
+await test("the disarm rule covers every non-clean exit uniformly", () => {
+  // The rule as a predicate, so a new archiveState cannot quietly fall outside.
+  assertEqual(sentryMayBeArchived("confirmed"), true);
+  assertEqual(sentryMayBeArchived("pre-existing"), true);
+  assertEqual(sentryMayBeArchived("unknown"), true, "a lost response may hold");
+  // Sentry answered and refused, so nothing is archived and the stub stays
+  // re-dispatchable; likewise a run that never issued a PUT.
+  assertEqual(sentryMayBeArchived("rejected"), false);
+  assertEqual(sentryMayBeArchived("not-attempted"), false);
+});
+
+await test("a definite rejection keeps the approval re-dispatchable", async () => {
+  // The complement of the rule: Sentry refused the PUT, so nothing is archived,
+  // nothing can be re-baselined, and burning the approval would make an operator
+  // re-approve over a transient 403 for no safety gain.
+  const stub = makeStub();
+  const { runGh, model } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch({ archive: { ok: false, status: 403 } });
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /403/,
+  );
+
+  assert(
+    model.labels.includes("sentry:approved-archive"),
+    "a refused PUT leaves the approval alone",
+  );
+});
+
+await test("settlementHeld verifies the baseline, not just state and labels", () => {
+  const settled = {
+    state: "CLOSED",
+    labels: ["sentry-triage", "sentry:verdict-upstream", "sentry:archived"],
+    body: withArchiveBaseline(stubBody(), {
+      lastSeen: BASELINE_LAST_SEEN,
+      sentryIssueId: "6197137101",
+    }),
+  };
+  const expected = {
+    lastSeen: BASELINE_LAST_SEEN,
+    sentryIssueId: "6197137101",
+  };
+  assertEqual(settlementHeld(settled, expected), true);
+  // The baseline is what this whole change exists to guarantee, so a body write
+  // that reported success but left it absent or wrong must NOT read as settled —
+  // otherwise the run reports success on a closed sentry:archived stub whose
+  // body sends ingest straight back to closedAt.
+  assertEqual(
+    settlementHeld({ ...settled, body: stubBody() }, expected),
+    false,
+    "absent baseline is not settled",
+  );
+  assertEqual(
+    settlementHeld(
+      {
+        ...settled,
+        body: withArchiveBaseline(stubBody(), {
+          lastSeen: "2026-07-01T00:00:00.000Z",
+          sentryIssueId: "6197137101",
+        }),
+      },
+      expected,
+    ),
+    false,
+    "a stale baseline is not settled",
+  );
+  assertEqual(
+    settlementHeld(
+      {
+        ...settled,
+        body: withArchiveBaseline(stubBody(), {
+          lastSeen: BASELINE_LAST_SEEN,
+          sentryIssueId: "999",
+        }),
+      },
+      expected,
+    ),
+    false,
+    "a baseline naming another issue is not settled",
+  );
+  // Shape failures still short-circuit, with or without an expectation.
+  assertEqual(settlementHeld({ ...settled, state: "OPEN" }, expected), false);
+  assertEqual(
+    settlementHeld(settled),
+    true,
+    "no expectation checks shape only",
+  );
+});
+
+await test("a body write that silently loses the baseline is not reported settled", async () => {
+  // An authorised body edit races between the settlement write and the
+  // verification read, wiping the baseline. State and labels still look right,
+  // and state-and-labels alone would call this a successful archive.
+  const stub = makeStub();
+  let stripped = false;
+  const { runGh, model } = makeRunGh({
+    stub,
+    beforeCall: (args) => {
+      if (
+        !stripped &&
+        args[0] === "issue" &&
+        args[1] === "view" &&
+        parseArchiveBaseline(model.body)
+      ) {
+        model.body = stubBody();
+        stripped = true;
+      }
+    },
+  });
+  const { fetchImpl } = makeFetch();
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(
+    result.status,
+    "unsettled-reopened",
+    "a missing baseline must not read as a settled archive",
+  );
+  assertEqual(model.labels.includes("sentry:archived"), false);
+  assertEqual(model.labels.includes("sentry:approved-archive"), false);
+});
+
 await test("reconciliation is idempotent — a second pass changes nothing", async () => {
   // The correctness bar for anything that reconciles: converged state is a fixed
   // point. Run the reconciler again against the state the first pass produced.
@@ -1867,7 +2051,10 @@ await test("losing the approval CAS aborts settlement, leaving Sentry archived",
   assertEqual(result.status, "unsettled-reopened");
   assert(casCall(ghCalls), "the CAS was attempted");
   assert(!ghCall(ghCalls, "close"), "must not close after losing the CAS");
-  assert(!ghCall(ghCalls, "edit"), "must not apply sentry:archived");
+  assert(
+    !labelEditCall(ghCalls, "--add-label"),
+    "must not apply sentry:archived",
+  );
   assert(!ghCall(ghCalls, "comment"), "must not post an audit comment");
   const puts = fetchCalls.filter((c) => c.method === "PUT");
   assertEqual(puts.length, 1, "Sentry keeps the approved archive");

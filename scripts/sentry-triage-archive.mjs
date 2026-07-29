@@ -747,6 +747,22 @@ async function ensureArchiveLabels(runGh, repo) {
  * message and must stay unknown: the write may have applied with only the
  * response lost, and claiming either outcome would mislead an operator.
  */
+/** Outcomes where the archive stands and the ledger is settled. Everything else
+ * — refusals, unsettled reopens, throws — must leave the approval spent. */
+const CLEAN_ARCHIVE_STATUSES = new Set(["archived", "already-archived"]);
+
+/** True when Sentry may be holding this run's archive, so a spendable approval
+ * would let a retry re-baseline over it. `rejected` means Sentry answered and
+ * refused (nothing archived, nothing to disarm); `not-attempted` never issued a
+ * PUT, and those paths deliberately keep the approval re-dispatchable. */
+export function sentryMayBeArchived(archiveState) {
+  return (
+    archiveState === "confirmed" ||
+    archiveState === "pre-existing" ||
+    archiveState === "unknown"
+  );
+}
+
 export function isDefiniteRejection(err) {
   return /^Sentry archive request failed: \d{3}\b/.test(
     err instanceof Error ? err.message : "",
@@ -801,13 +817,25 @@ async function consumeApprovalLabel(runGh, repo, queueIssue) {
  * every verdict label AND `sentry:archived` (REOPEN_SHED_LABELS) and flips the
  * state — so this is robust to all of them, not just the tidy one.
  */
-export function settlementHeld({ state, labels } = {}) {
+export function settlementHeld({ state, labels, body } = {}, expected = null) {
   const names = Array.isArray(labels) ? labels : [];
-  return (
+  const shapeHolds =
     String(state ?? "").toUpperCase() === "CLOSED" &&
     names.includes(SENTRY_TRIAGE_LABEL) &&
     names.includes(ARCHIVED_LABEL) &&
-    names.some((name) => name.startsWith("sentry:verdict-"))
+    names.some((name) => name.startsWith("sentry:verdict-"));
+  if (!shapeHolds || !expected) return shapeHolds;
+  // The baseline is the thing this whole change exists to guarantee, so the
+  // verification read must not be the one place that skips it. A body write can
+  // report success and still leave the baseline absent or wrong — an authorised
+  // body edit racing between the write and this check — and state-and-labels
+  // alone would call that settled, reporting success on a closed
+  // `sentry:archived` stub whose body sends ingest straight back to `closedAt`.
+  const recorded = parseArchiveBaseline(body);
+  return (
+    !!recorded &&
+    recorded.lastSeen === String(expected.lastSeen ?? "") &&
+    recorded.sentryIssueId === String(expected.sentryIssueId ?? "")
   );
 }
 
@@ -1196,9 +1224,14 @@ async function settleQueueStub(
   // archived, regression buried, no compensation. Re-read and check the state
   // we should have produced.
   const verify = await readQueueIssue(runGh, repo, queueIssue);
-  if (!settlementHeld(verify)) {
+  if (
+    !settlementHeld(verify, {
+      lastSeen: baselineLastSeen,
+      sentryIssueId,
+    })
+  ) {
     process.stderr.write(
-      `::notice::Issue #${queueIssue} did not hold the settled shape after settlement (state=${verify.state}, labels=${verify.labels.join("|")}); a concurrent regression reopen landed inside the settlement window.\n`,
+      `::notice::Issue #${queueIssue} did not hold the settled shape after settlement (state=${verify.state}, labels=${verify.labels.join("|")}, baseline=${JSON.stringify(parseArchiveBaseline(verify.body))}); a concurrent regression reopen or body edit landed inside the settlement window.\n`,
     );
     // The caller's reconciler rolls the queue stub back against live state.
     return { settled: false };
@@ -1390,43 +1423,21 @@ export async function runArchive(options, deps = {}) {
   // and skip the redundant PUT); the queue-stub settle still runs.
   const alreadyArchived = isAlreadyArchived(current);
 
-  // A retry over an existing archive must NOT re-stamp the baseline. Queue-only
-  // rollback leaves Sentry archived and the runbook tells the operator to
-  // re-approve, so this path is the normal recovery — and stamping the
-  // retry-time `lastSeen` would absorb any event that arrived after the FIRST
-  // run's freshness read while Sentry's substatus still lagged. Ingest would
-  // then skip that event when the regression finally surfaces.
-  //
-  // A visible refusal is the whole mechanism, and it needs no bookkeeping. The
-  // usable-baseline gate above already proved this run's `lastSeen` parses, so
-  // against the stub's recorded baseline there are only two cases: equal, where
-  // re-stamping is a no-op, or newer, which IS the untriaged event — refuse.
-  // (Older would mean a stale read replica; stamping the older value only makes
-  // ingest reopen more eagerly, which is the safe direction.) So there is
-  // nothing to "preserve" beyond refusing, and no branch that would be
-  // unobservable if it were wrong.
-  const recordedBaseline = alreadyArchived
-    ? parseArchiveBaseline(stub.body)
-    : null;
-  if (recordedBaseline && isUsableBaseline(recordedBaseline.lastSeen)) {
-    if (lastSeenMoved(recordedBaseline.lastSeen, current?.lastSeen)) {
-      process.stderr.write(
-        `::notice::Sentry issue ${meta.shortId} (${issueId}) is already archived and its lastSeen (${current?.lastSeen}) has moved past the baseline this stub recorded (${recordedBaseline.lastSeen}); refusing to re-stamp a newer baseline over an untriaged event.\n`,
-      );
-      await runGh([
-        "issue",
-        "comment",
-        String(queueIssue),
-        "-R",
-        repo,
-        "--body",
-        buildStaleRetryRefusalComment(
-          meta.shortId,
-          recordedBaseline.lastSeen,
-          current?.lastSeen,
-        ),
-      ]);
-      // Shed the approval so a bare re-dispatch cannot walk straight back in.
+  // What this run KNOWS about Sentry, so the summary line never asserts an
+  // archive that a rejected PUT never made. "unknown" is a real answer and the
+  // only honest one when the request did not complete cleanly.
+  let archiveState = alreadyArchived ? "pre-existing" : "not-attempted";
+
+  // THE RULE, in one place: while Sentry may be archived, no exit other than a
+  // clean success may leave `sentry:approved-archive` spendable. A stale
+  // approval is the load-bearing hazard behind every finding in this area — an
+  // archive that cannot be silently retried is recoverable, one that can is not,
+  // because the retry takes the already-archived path and stamps its own read
+  // time as the baseline, absorbing whatever landed in between. Enforced below
+  // at exactly two points (the catch, and a post-condition on the returned
+  // status) so a path added later inherits it without remembering to.
+  const disarmApproval = async () => {
+    try {
       await runGh([
         "issue",
         "edit",
@@ -1436,19 +1447,16 @@ export async function runArchive(options, deps = {}) {
         "--remove-label",
         APPROVED_ARCHIVE_LABEL,
       ]);
-      return {
-        issue: queueIssue,
-        shortId: meta.shortId,
-        sentryIssueId: issueId,
-        status: "skipped-stale-retry",
-      };
+      return true;
+    } catch (err) {
+      process.stderr.write(
+        `::error::Could not shed ${APPROVED_ARCHIVE_LABEL} from #${queueIssue} after a failed archive (${
+          err instanceof Error ? err.message : String(err)
+        }); a workflow_dispatch retry could re-archive and re-baseline over an untriaged event. Remove the label by hand.\n`,
+      );
+      return false;
     }
-  }
-
-  // What this run KNOWS about Sentry, so the summary line never asserts an
-  // archive that a rejected PUT never made. "unknown" is a real answer and the
-  // only honest one when the request did not complete cleanly.
-  let archiveState = alreadyArchived ? "pre-existing" : "not-attempted";
+  };
 
   // Pre-mutation observation of the stub, filled in by settleQueueStub's own
   // pre-CAS read. Stays null if settlement never got that far, which is a fact
@@ -1474,7 +1482,54 @@ export async function runArchive(options, deps = {}) {
   // while the call rejects, and the old shape skipped compensation in exactly
   // that case — then a dispatch retry took the `alreadyArchived` path and
   // re-baselined off retry-time `lastSeen`, absorbing the window's events.
-  try {
+  const perform = async () => {
+    // A retry over an existing archive must NOT re-stamp the baseline.
+    // Queue-only rollback leaves Sentry archived and the runbook tells the
+    // operator to re-approve, so this path is the normal recovery — and stamping
+    // the retry-time `lastSeen` would absorb any event that arrived after the
+    // FIRST run's freshness read while Sentry's substatus still lagged. Ingest
+    // would then skip that event when the regression finally surfaces.
+    //
+    // A visible refusal is the whole mechanism, and it needs no bookkeeping. The
+    // usable-baseline gate above already proved this run's `lastSeen` parses, so
+    // against the stub's recorded baseline there are only two cases: equal,
+    // where re-stamping is a no-op, or newer, which IS the untriaged event —
+    // refuse. (Older would mean a stale read replica; stamping the older value
+    // only makes ingest reopen more eagerly, the safe direction.) It lives
+    // inside `perform` so its refusal exits through the shared post-condition
+    // rather than carrying a disarm of its own.
+    const recordedBaseline = alreadyArchived
+      ? parseArchiveBaseline(stub.body)
+      : null;
+    if (
+      recordedBaseline &&
+      isUsableBaseline(recordedBaseline.lastSeen) &&
+      lastSeenMoved(recordedBaseline.lastSeen, current?.lastSeen)
+    ) {
+      process.stderr.write(
+        `::notice::Sentry issue ${meta.shortId} (${issueId}) is already archived and its lastSeen (${current?.lastSeen}) has moved past the baseline this stub recorded (${recordedBaseline.lastSeen}); refusing to re-stamp a newer baseline over an untriaged event.\n`,
+      );
+      await runGh([
+        "issue",
+        "comment",
+        String(queueIssue),
+        "-R",
+        repo,
+        "--body",
+        buildStaleRetryRefusalComment(
+          meta.shortId,
+          recordedBaseline.lastSeen,
+          current?.lastSeen,
+        ),
+      ]);
+      return {
+        issue: queueIssue,
+        shortId: meta.shortId,
+        sentryIssueId: issueId,
+        status: "skipped-stale-retry",
+      };
+    }
+
     if (alreadyArchived) {
       process.stderr.write(
         `::notice::Sentry issue ${meta.shortId} (${issueId}) is already archived_until_escalating (${issueId}); treating as success.\n`,
@@ -1520,34 +1575,11 @@ export async function runArchive(options, deps = {}) {
       const unreadable =
         readbackError !== null || !isUsableBaseline(afterLastSeen);
       if (unreadable || lastSeenMoved(baselineLastSeen, afterLastSeen)) {
-        // Invalidate the approval FIRST. It is one cheap call and it is what
-        // actually disarms the dangerous retry described above; the Sentry restore
-        // below is the larger, likelier-to-fail operation, and if it fails we must
-        // not have left a live approval behind it. Same authority reason as the
-        // live-regression path (scripts/sentry-triage-ingest.mjs,
-        // REOPEN_SHED_LABELS): the dispatch guard requires only
-        // sentry:approved-archive. Verdict labels stay — this is a freshness
-        // refusal, not a Sentry-declared regression, so the stub needs a fresh
-        // approval rather than a full re-triage.
-        let approvalShed = false;
-        try {
-          await runGh([
-            "issue",
-            "edit",
-            String(queueIssue),
-            "-R",
-            repo,
-            "--remove-label",
-            APPROVED_ARCHIVE_LABEL,
-          ]);
-          approvalShed = true;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          process.stderr.write(
-            `::error::Could not shed ${APPROVED_ARCHIVE_LABEL} from #${queueIssue} while refusing the archive (${message}); a workflow_dispatch retry could re-archive over the event that caused this refusal. Remove the label by hand.\n`,
-          );
-        }
-
+        // No disarm here: this returns a non-clean status, so the single
+        // post-condition at the end of runArchive sheds the approval, and the
+        // catch sheds it if the restore below throws first. Verdict labels stay
+        // — this is a freshness refusal, not a Sentry-declared regression, so
+        // the stub needs a fresh approval rather than a full re-triage.
         let outcome = { restored: false };
         let restoreError = null;
         try {
@@ -1593,12 +1625,11 @@ export async function runArchive(options, deps = {}) {
           );
         }
         // Exit 0 only when the compensation actually completed. A refusal whose
-        // own cleanup half-failed is an operational failure, not a policy outcome.
-        if (!approvalShed || restoreError !== null) {
+        // own cleanup half-failed is an operational failure, not a policy
+        // outcome. (The approval half is enforced by the post-condition.)
+        if (restoreError !== null) {
           throw new Error(
-            `Archive refused for #${queueIssue} (${meta.shortId}) but compensation was incomplete` +
-              `${approvalShed ? "" : "; approval label not shed"}` +
-              `${restoreError ? `; Sentry revert failed: ${restoreError}` : ""}.`,
+            `Archive refused for #${queueIssue} (${meta.shortId}) but compensation was incomplete; Sentry revert failed: ${restoreError}.`,
           );
         }
         return {
@@ -1657,7 +1688,25 @@ export async function runArchive(options, deps = {}) {
         status: "unsettled-reopened",
       };
     }
+
+    return {
+      issue: queueIssue,
+      shortId: meta.shortId,
+      sentryIssueId: issueId,
+      status: alreadyArchived ? "already-archived" : "archived",
+    };
+  };
+
+  let result;
+  try {
+    result = await perform();
   } catch (err) {
+    // Rule enforcement point 1 of 2. Runs BEFORE the reconcile so a reconciler
+    // that itself throws cannot leave the approval live. This is what covers a
+    // failure that never reached settlement at all — the first
+    // `readQueueIssue` throwing after the PUT, say — where no target was ever
+    // captured and nothing else in the run would have disarmed anything.
+    if (sentryMayBeArchived(archiveState)) await disarmApproval();
     // Reconcile, then rethrow the ORIGINAL error — it is the diagnostic an
     // operator needs first, and the run fails either way. A bug in the
     // reconciler must never mask it.
@@ -1675,12 +1724,17 @@ export async function runArchive(options, deps = {}) {
     throw err;
   }
 
-  return {
-    issue: queueIssue,
-    shortId: meta.shortId,
-    sentryIssueId: issueId,
-    status: alreadyArchived ? "already-archived" : "archived",
-  };
+  // Rule enforcement point 2 of 2: the exits that RETURN rather than throw.
+  // Every refusal and every unsettled outcome passes through here, so no path
+  // carries its own disarm and none can forget to.
+  if (!CLEAN_ARCHIVE_STATUSES.has(result.status)) {
+    if (sentryMayBeArchived(archiveState) && !(await disarmApproval())) {
+      throw new Error(
+        `Archive for #${queueIssue} (${meta.shortId}) ended as ${result.status} but ${APPROVED_ARCHIVE_LABEL} could not be shed; a retry could re-archive over an untriaged event.`,
+      );
+    }
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
