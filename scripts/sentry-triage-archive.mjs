@@ -1441,6 +1441,25 @@ export async function runArchive(options, deps = {}) {
       "--remove-label",
       REOPEN_SHED_LABELS.join(","),
     ]);
+    // Re-queuing means nothing while the stub is CLOSED. The triage selector
+    // filters on `--state open` (.github/workflows/sentry-triage-agent.yml), and
+    // ingest leaves a closed stub alone whenever this occurrence's `lastSeen` is
+    // not newer than the later `closedAt` — so a stub Stage B already closed
+    // would sit closed wearing `sentry:needs-triage`, seen by nothing, over a
+    // regression we KNOW is live. Decide from observed state rather than from
+    // what this run assumes: re-read and reopen only if it is closed now.
+    //
+    // Reopen LAST, matching ingest's reopen ordering: the state change is what
+    // makes the stub selectable, so if the label edit above had failed we want
+    // it still closed and the whole idempotent sequence retried, rather than
+    // open without `sentry:needs-triage`.
+    const liveStub = await readQueueIssue(runGh, repo, queueIssue);
+    if (liveStub.state === "CLOSED") {
+      process.stderr.write(
+        `::notice::Reopening closed stub #${queueIssue} so the live regression is visible to triage.\n`,
+      );
+      await runGh(["issue", "reopen", String(queueIssue), "-R", repo]);
+    }
     return {
       issue: queueIssue,
       shortId: meta.shortId,

@@ -880,6 +880,45 @@ await test("runArchive refuses and re-queues a live regression instead of archiv
       removed.includes("sentry:verdict-upstream"),
     "sheds the approval + verdict labels",
   );
+  // Already open, so there is nothing to reopen.
+  assert(!ghCall(ghCalls, "reopen"), "an open stub is left alone");
+});
+
+await test("a live regression on a CLOSED stub reopens it", async () => {
+  // Stage B closes a verdicted stub, then a human applies the approval to that
+  // closed stub. Re-queuing alone leaves it CLOSED wearing sentry:needs-triage:
+  // the triage selector filters on --state open, and ingest skips a closed stub
+  // whenever this occurrence's lastSeen is not newer than the later closedAt. A
+  // regression we KNOW is live would sit there, seen by nothing.
+  const stub = makeStub({ state: "CLOSED" });
+  const { runGh, calls: ghCalls, model } = makeRunGh({ stub });
+  const { fetchImpl, calls: fetchCalls } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "skipped-regressed");
+  assert(!fetchCalls.some((c) => c.method === "PUT"), "nothing is archived");
+  // The observable end state is the point: open AND needing triage, which is
+  // exactly the pair the selector looks for.
+  assertEqual(model.state, "OPEN");
+  assert(model.labels.includes("sentry:needs-triage"));
+  assertEqual(model.labels.includes("sentry:approved-archive"), false);
+  assertEqual(model.labels.includes("sentry:verdict-upstream"), false);
+  // Ordering: the state change goes last, so a failed label edit leaves the stub
+  // closed and retryable rather than open without sentry:needs-triage.
+  const edit = ghCall(ghCalls, "edit");
+  const reopen = ghCall(ghCalls, "reopen");
+  assert(reopen, "the closed stub is reopened");
+  assert(
+    ghCalls.indexOf(edit) < ghCalls.indexOf(reopen),
+    "labels before the reopen",
+  );
 });
 
 await test("runArchive re-archives an issue in a different archive mode", async () => {
