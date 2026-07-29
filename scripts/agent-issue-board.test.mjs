@@ -102,6 +102,33 @@ test("project mutation scope failures receive the same guidance", () => {
   );
 });
 
+test("project scope hints ignore scopes that are only granted", () => {
+  assertEqual(
+    githubProjectScopeHint(
+      "The 'repository' field requires one of the following scopes: ['repo']\nThe active token has scopes: ['read:project']",
+    ),
+    "",
+  );
+});
+
+test("environment-provided credentials receive replacement guidance", () => {
+  const stderr =
+    "The 'projectV2' field requires one of the following scopes: ['read:project']";
+  for (const env of [{ GH_TOKEN: "token" }, { GITHUB_TOKEN: "token" }]) {
+    const hint = githubProjectScopeHint(stderr, env);
+    assert(
+      hint.includes(
+        "Replace the environment-provided GH_TOKEN or GITHUB_TOKEN",
+      ),
+      "missing environment credential guidance",
+    );
+    assert(
+      !hint.includes("gh auth refresh -h github.com -s project"),
+      "stored-credential refresh command should be omitted",
+    );
+  }
+});
+
 test("unrelated gh failures do not receive project scope guidance", () => {
   assertEqual(
     githubProjectScopeHint(
