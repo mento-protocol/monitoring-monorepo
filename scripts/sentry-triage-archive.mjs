@@ -599,9 +599,14 @@ export async function archiveIssue(
 }
 
 /**
- * Compensation: undo an archive this run performed after a mid-flight
- * regression-reopen made the human approval stale, restoring the issue's
+ * Compensation: undo an archive this run performed, restoring the issue's
  * captured pre-archive status/substatus.
+ *
+ * ONE caller remains — the post-PUT freshness refusal, where an event landed
+ * inside the mutation window (or could not be ruled out) and the approval's
+ * premise is therefore void. The mid-flight-reopen path that used to call this
+ * no longer does: a failed settlement leaves Sentry archived on purpose, since
+ * that is the approved outcome and it self-heals on escalation.
  *
  * Race-safe: re-fetch first and restore ONLY if the issue is STILL exactly what
  * THIS run wrote (`archived_until_escalating`). If a concurrent escalation or an
@@ -903,6 +908,10 @@ export function isSelectableForTriage({ state, labels } = {}) {
  * `fallbackState` is the caller's pre-run observation, used only to decide
  * whether to attempt a reopen when a read fails; it never satisfies the
  * invariant, which requires a real confirming read.
+ *
+ * Returns the confirming read, so the caller can judge the rest of the stub's
+ * state from what was actually observed rather than from what its own writes
+ * reported — the same ambiguous-response discipline the reconciler uses.
  */
 export async function ensureSelectableForTriage(
   runGh,
@@ -928,7 +937,7 @@ export async function ensureSelectableForTriage(
 
   for (let round = 1; round <= attempts; round += 1) {
     const live = await observe();
-    if (live && isSelectableForTriage(live)) return;
+    if (live && isSelectableForTriage(live)) return live;
 
     // Correct whatever is — or, with no read, may be — wrong. Both writes are
     // idempotent, so a repeat costs nothing and a lost response is harmless.
@@ -976,7 +985,7 @@ export async function ensureSelectableForTriage(
   // The mandatory final verification, on the main path — never skippable, and
   // never reached by a correction whose result nobody looked at.
   const finalLive = await observe();
-  if (finalLive && isSelectableForTriage(finalLive)) return;
+  if (finalLive && isSelectableForTriage(finalLive)) return finalLive;
 
   const seen = observed
     ? `state=${observed.state}, labels=${observed.labels.join("|")}`
@@ -1237,7 +1246,10 @@ async function settleQueueStub(
 ) {
   // This function no longer compensates. It publishes its pre-mutation
   // OBSERVATION via `onTarget` and lets every failure propagate to runArchive's
-  // single reconciling catch, which rolls both systems back against LIVE state.
+  // single reconciling catch, which rolls the QUEUE STUB back against LIVE
+  // state. Sentry is deliberately left archived_until_escalating — the outcome
+  // the approver asked for, which escalation undoes on its own (ADR 0036, and
+  // see reconcileToTarget). Do not reinstate a Sentry rollback here.
   // Nothing here records what we believe we did, because a rejected command is
   // not proof its remote mutation did not happen — `gh issue close` can close
   // the stub and then fail, and every did-we-close flag is wrong in exactly that
@@ -1608,17 +1620,31 @@ export async function runArchive(options, deps = {}) {
     // aborted it, a reopen write that could fail, and then the verifier itself
     // being skippable — because each fix covered only the failure in front of
     // it. Nothing between entering this branch and here can throw past it now.
-    await ensureSelectableForTriage(runGh, {
+    const verified = await ensureSelectableForTriage(runGh, {
       repo,
       queueIssue,
       fallbackState: stub.state,
     });
 
-    // Selectable, but the stale markers are still on it. Loud, after the stub is
-    // safe — never instead of making it safe.
-    if (requeueError) {
+    // Judge the shed from the VERIFICATION READ, not from what the edit
+    // reported. `gh` can apply the label swap and lose the response, and
+    // throwing on the report alone turned a successful refusal into a red run
+    // claiming markers survived that the very next read shows are gone. Fail
+    // only on markers actually still present — loud after the stub is safe,
+    // never instead of making it safe.
+    const survivingMarkers = REOPEN_SHED_LABELS.filter((name) =>
+      verified.labels.includes(name),
+    );
+    if (survivingMarkers.length) {
       throw new Error(
-        `Queue stub #${queueIssue} was made selectable for triage, but shedding its stale approval/verdict markers failed (${requeueError}); it still carries them.`,
+        `Queue stub #${queueIssue} was made selectable for triage, but these stale markers survived: ${survivingMarkers.join(", ")}${
+          requeueError ? ` (label edit reported: ${requeueError})` : ""
+        }.`,
+      );
+    }
+    if (requeueError) {
+      process.stderr.write(
+        `::notice::The re-queue label edit on #${queueIssue} reported a failure (${requeueError}) that the verification read disproves; the stale markers are gone.\n`,
       );
     }
     return {

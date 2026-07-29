@@ -1022,7 +1022,7 @@ await test("a failing re-queue label edit still reaches the verifier, then fails
 
   await assertRejects(
     runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
-    /shedding its stale approval\/verdict markers failed/,
+    /these stale markers survived: .*sentry:approved-archive/,
   );
 
   // The stub is selectable despite the failed edit — that is the placement fix.
@@ -1035,6 +1035,50 @@ await test("a failing re-queue label edit still reaches the verifier, then fails
   assert(
     model.labels.includes("sentry:approved-archive"),
     "the stale markers really did survive, which is why the run is red",
+  );
+});
+
+await test("a lost response on the re-queue edit is not reported as a failure", async () => {
+  // The edit applies and `gh` loses the response. Throwing on the report alone
+  // turned a successful refusal into a red run falsely claiming the stale
+  // markers survived — while the verification read one line later shows them
+  // gone. The read is the authority, not the write's return.
+  const stub = makeStub({ state: "CLOSED" });
+  const { runGh, model } = makeRunGh({
+    stub,
+    ambiguousOn: (args) =>
+      args[1] === "edit" && args.includes("--remove-label")
+        ? "gh issue edit: connection reset"
+        : null,
+  });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+  const stderr = [];
+  const write = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  let result;
+  try {
+    result = await runArchive(baseOptions(), {
+      runGh,
+      fetchImpl,
+      now: FIXED_NOW,
+    });
+  } finally {
+    process.stderr.write = write;
+  }
+
+  assertEqual(result.status, "skipped-regressed", "a refusal, not a red run");
+  assertEqual(model.state, "OPEN");
+  assert(model.labels.includes("sentry:needs-triage"));
+  assertEqual(model.labels.includes("sentry:approved-archive"), false);
+  assertEqual(model.labels.includes("sentry:verdict-upstream"), false);
+  assert(
+    stderr.some((l) => l.includes("that the verification read disproves")),
+    "the discrepancy is still logged",
   );
 });
 

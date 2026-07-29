@@ -278,11 +278,20 @@ label-shed path.
 Consuming before the close costs one thing, and the runbook below covers it. A
 failure past the CAS cannot be retried by `workflow_dispatch`, whose guard needs
 the approval label the run just spent. The stub is rolled back and the run fails
-RED, leaving it open with no approval, no `sentry:archived`, and no
-`sentry:needs-triage`. No stage picks that up: ingest skips an open match, the
-triage agent selects on `sentry:needs-triage`, and archive needs the approval. It
-waits for a human. That is deliberate, since the alternative ordering closes
-stubs over live regressions, but it is a stranded state, not a self-healing one.
+RED, leaving it with no approval, no `sentry:archived`, and no
+`sentry:needs-triage` — in **one of two shapes**, because the rollback restores
+the state the stub had before settlement rather than forcing it open:
+
+- **open**, when the stub arrived open (the common case: a verdicted stub a human
+  approved while it was still open);
+- **closed**, when `sentry-triage-agent.yml` had already closed it. The
+  reconciler deliberately does not reopen a stub this run did not close.
+
+No stage picks up either shape: ingest skips an open match, and skips a closed
+one whose `closed_at` postdates the regression; the triage agent selects on
+`sentry:needs-triage`; archive needs the approval. It waits for a human. That is
+deliberate, since the alternative ordering closes stubs over live regressions,
+but it is a stranded state, not a self-healing one.
 The Sentry issue stays archived throughout — the next paragraph says why, and
 what that means for the re-approval the runbook asks for.
 
@@ -548,13 +557,17 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
 - A projection without its token closes the queue issue with an explicit
   skipped note. Provision the token and re-triage only when the owning-repo
   issue is still required.
-- **A red archive run whose stub is open, verdicted, and carries neither
+- **A red archive run whose stub is verdicted and carries neither
   `sentry:approved-archive` nor `sentry:archived` failed after it consumed the
-  approval.** Nothing retries this on its own, and no re-dispatch is possible —
-  the guard needs the label the run spent. Only the stub was rolled back, so
-  start from the run's one summary line — and read what it says about **Sentry**
-  before assuming anything, because two dispositions produce this same stub
-  shape:
+  approval.** It can be **open or closed** — the rollback restores whichever
+  state the stub had before settlement, so a stub `sentry-triage-agent.yml` had
+  already closed comes back closed. Both are stranded; the closed one is the
+  easier to miss, because it looks like an ordinary settled ledger entry until
+  you notice it has no `sentry:archived`. Nothing retries either on its own, and
+  no re-dispatch is possible — the guard needs the label the run spent. Only the
+  stub was rolled back, so start from the run's one summary line — and read what
+  it says about **Sentry** before assuming anything, because two dispositions
+  produce this same stub shape:
   - **"stays archived_until_escalating"** — the archive landed. That is by
     design, not damage: it is the outcome the approver asked for, and escalation
     undoes it automatically. Carry on with the options below.
@@ -581,11 +594,13 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
     value to adopt, and taking the retry's own read would hide every event since
     the archive. The way through is the next option;
   - to send it back through triage, add `sentry:needs-triage`, remove the
-    `sentry:verdict-*` label, **and un-archive the Sentry issue**. Leaving the
-    approval off is not enough on its own: ingest skips an open stub, the triage
-    agent selects on `sentry:needs-triage`, which nothing here restores, and
-    while the issue stays archived it matches neither ingest query, so nothing
-    re-surfaces it. Un-archiving is what puts it back in front of the pipeline,
+    `sentry:verdict-*` label, **reopen the stub if it came back closed**, and
+    **un-archive the Sentry issue**. Leaving the approval off is not enough on
+    its own: ingest skips an open stub, the triage agent selects on open stubs
+    carrying `sentry:needs-triage` — so a closed one stays invisible however it
+    is labelled — and while the issue stays archived it matches neither ingest
+    query, so nothing re-surfaces it. Un-archiving puts it back in front of the
+    pipeline,
     after which the next archive records a baseline it can stand behind.
 
 - An archive **refusal** comment that says the archive could NOT be reverted is a
