@@ -22,6 +22,7 @@ import {
   mergeSentryIssues,
   normalizeRestIssues,
   parseArchiveBaseline,
+  PaginationLimitError,
   parseArgs,
   parseLinkHeader,
   PROJECTED_LABEL,
@@ -589,6 +590,79 @@ await test("dedup: archived stub stays closed when the baseline is newer than la
   assertEqual(
     decision.reason,
     "archived, no events since the archive baseline",
+  );
+});
+
+await test("dedup: a usable bound baseline wins over a missing closedAt", () => {
+  // Pins the branch ORDER. Hoisting the closedAt fail-open above the baseline
+  // branch — the shape this code had before #1371 — makes both cases below
+  // reopen, defeating the baseline on every run for a stub whose closed_at the
+  // REST payload omitted. The baseline names the instant the archive actually
+  // observed; closedAt is only a proxy for it, so the baseline decides.
+  const decision = decideDedupAction({
+    existingIssue: {
+      state: "CLOSED",
+      closedAt: null,
+      labels: ["sentry-triage", "sentry:verdict-upstream", "sentry:archived"],
+    },
+    isRegressed: true,
+    lastSeen: "2026-07-17T07:00:00Z",
+    archiveBaseline: "2026-07-17T07:59:00Z",
+    archiveBaselineIssueId: "6197137101",
+    sentryIssueId: "6197137101",
+  });
+  assertEqual(decision.action, "skip");
+  assertEqual(
+    decision.reason,
+    "archived, no events since the archive baseline",
+  );
+  // The same missing closedAt with an event past the baseline still reopens —
+  // the baseline decides in both directions, not just toward skip.
+  assertEqual(
+    decideDedupAction({
+      existingIssue: {
+        state: "CLOSED",
+        closedAt: null,
+        labels: ["sentry-triage", "sentry:archived"],
+      },
+      isRegressed: true,
+      lastSeen: "2026-07-17T08:30:00Z",
+      archiveBaseline: "2026-07-17T07:59:00Z",
+      archiveBaselineIssueId: "6197137101",
+      sentryIssueId: "6197137101",
+    }).action,
+    "reopen",
+  );
+});
+
+await test("dedup: an unreadable comment list reopens instead of skipping", () => {
+  // The baseline lives in a stub comment, and a public repo lets anyone grow
+  // that list past the page bound. An unreadable list is not evidence that
+  // nothing happened, so it must never resolve to a silent skip.
+  assertEqual(
+    decideDedupAction({
+      existingIssue: archivedStub("2026-07-17T08:00:00Z"),
+      isRegressed: true,
+      // Old enough that both the closedAt fallback and a baseline comparison
+      // would otherwise skip.
+      lastSeen: "2026-07-17T07:00:00Z",
+      archiveBaselineUnreadable: true,
+    }).action,
+    "reopen",
+  );
+  // Only archived stubs consult comments, so the flag is inert elsewhere.
+  assertEqual(
+    decideDedupAction({
+      existingIssue: {
+        state: "CLOSED",
+        closedAt: "2026-07-17T08:00:00Z",
+        labels: ["sentry-triage", "sentry:verdict-upstream"],
+      },
+      isRegressed: true,
+      lastSeen: "2026-07-17T07:00:00Z",
+      archiveBaselineUnreadable: true,
+    }).action,
+    "skip",
   );
 });
 
@@ -1382,6 +1456,58 @@ await test("the baseline only gates a decision when it names this Sentry issue",
   assertEqual((await runWithBaselineId("9")).skippedExisting, 1);
   assertEqual((await runWithBaselineId("404")).reopened, 1);
   assertEqual((await runWithBaselineId("")).reopened, 1);
+});
+
+await test("an unreadable comment list reopens the archived stub, it never skips", async () => {
+  // End-to-end shape of the page-bound path: the resolver reports it could not
+  // read the list, and the run reopens rather than trusting a closedAt
+  // comparison it has no basis for.
+  const sentryIssue = mapSentryIssue({
+    id: 9,
+    shortId: "X-9",
+    title: "Regressed bug",
+    // Older than the stub's closedAt, so the closedAt fallback would skip.
+    lastSeen: "2026-07-19T10:00:00Z",
+  });
+  let reopenCount = 0;
+
+  const result = await runIngest(
+    { repo: "owner/repo", trackerIssue: 1282 },
+    {
+      fetchMergedSentryIssues: async () => mergeSentryIssues([], [sentryIssue]),
+      listQueueIssues: async () => [
+        {
+          number: 200,
+          title: buildQueueTitle("X-9", "unknown", "error"),
+          state: "CLOSED",
+          closedAt: "2026-07-19T12:00:00Z",
+          labels: ["sentry-triage", "sentry:archived"],
+        },
+      ],
+      ensureLabels: async () => {},
+      createIssue: async () => {},
+      reopenIssue: async () => {
+        reopenCount += 1;
+      },
+      resolveArchiveBaseline: async () => ({ unreadable: true }),
+      postRunRecord: async () => {},
+      now: () => new Date("2026-07-20T05:30:00.000Z"),
+    },
+  );
+  assertEqual(reopenCount, 1);
+  assertEqual(result.reopened, 1);
+  assertEqual(result.skippedExisting, 0);
+});
+
+await test("ghPaginate's page-bound overflow is its own error type", () => {
+  // fetchArchiveBaseline resolves a truncated read toward reopen but must still
+  // rethrow a transport failure, so the two cannot be told apart by message.
+  assert(
+    new PaginationLimitError("x") instanceof Error,
+    "still an Error for every existing handler",
+  );
+  assertEqual(new PaginationLimitError("x").name, "PaginationLimitError");
+  assertEqual(new Error("x") instanceof PaginationLimitError, false);
 });
 
 await test("a stub without sentry:archived never costs a baseline fetch", async () => {

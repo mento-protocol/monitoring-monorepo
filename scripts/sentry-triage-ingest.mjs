@@ -63,6 +63,15 @@ export function resolveLookbackDays(cliValue, env = process.env) {
   return days;
 }
 
+/** `ghPaginate` hit its page bound. Its own type so a caller can distinguish a
+ * truncated read (resolvable) from a transport failure (not). */
+export class PaginationLimitError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "PaginationLimitError";
+  }
+}
+
 export const RUN_RECORD_MARKER = "<!-- sentry-triage-ingest:run-record:v1 -->";
 const BODY_MARKER = "<!-- sentry-triage:v1 -->";
 
@@ -392,9 +401,9 @@ export function indexQueueIssuesByShortId(issues) {
  * `substatus=regressed` for days after a regression, so an unconditional
  * reopen would loop a verdict-closed, already-triaged stub through
  * reopen -> re-triage -> close on every run until Sentry flips the
- * substatus (the counterpart of the Stage B queue-closing step). Missing or
- * unparsable timestamps fail open toward triage (reopen): a wrongly
- * skipped regression is silent, a wrongly reopened one merely re-triages.
+ * substatus (the counterpart of the Stage B queue-closing step). A missing or
+ * unparsable `lastSeen` fails open toward triage (reopen): a wrongly skipped
+ * regression is silent, a wrongly reopened one merely re-triages.
  * Closed match, not regressed -> skip (stays closed). No match -> create.
  *
  * An ARCHIVED stub (`sentry:archived`) compares against `archiveBaseline` — the
@@ -404,6 +413,13 @@ export function indexQueueIssuesByShortId(issues) {
  * forever. A missing, unparsable, or non-date baseline falls back to the
  * `closedAt` comparison, which keeps every stub archived before this contract
  * existed working exactly as before.
+ *
+ * Order matters, and it is deliberate: a usable, bound baseline wins over
+ * `closedAt` even when `closedAt` itself is missing or unparsable. The baseline
+ * is strictly better evidence — it names the instant the archive observed, while
+ * `closedAt` is only a proxy for it — so a NaN `closedAt` must not short-circuit
+ * to reopen ahead of the baseline branch and defeat the mechanism on every run.
+ * The `closedAt` fail-open still applies once no usable baseline is in play.
  *
  * That baseline only gates the decision while it is BOUND to the Sentry issue
  * the stub tracks: the archive leg records the id it mutated
@@ -417,6 +433,13 @@ export function indexQueueIssuesByShortId(issues) {
  * baseline that is present but does not describe this issue. It cannot loop —
  * the reopen sheds `sentry:archived` (REOPEN_SHED_LABELS), so the stub takes the
  * ordinary `closedAt` path from then on.
+ *
+ * `archiveBaselineUnreadable` says the stub's comment list could not be read to
+ * the end (see `fetchArchiveBaseline`), so no statement about the baseline is
+ * possible — including "there isn't one". Falling back to `closedAt` there would
+ * turn an unreadable list into a silent skip, which is the burial this whole
+ * mechanism prevents, so an archived stub reopens instead. The reopen sheds
+ * `sentry:archived`, so it cannot loop.
  */
 export function decideDedupAction({
   existingIssue,
@@ -424,6 +447,7 @@ export function decideDedupAction({
   lastSeen,
   archiveBaseline = null,
   archiveBaselineIssueId = null,
+  archiveBaselineUnreadable = false,
   sentryIssueId = null,
 }) {
   if (!existingIssue) return { action: "create" };
@@ -439,6 +463,7 @@ export function decideDedupAction({
   if (Number.isNaN(lastSeenMs)) return { action: "reopen" };
 
   const isArchived = (existingIssue.labels ?? []).includes(ARCHIVED_LABEL);
+  if (isArchived && archiveBaselineUnreadable) return { action: "reopen" };
   const baselineMs = Date.parse(archiveBaseline ?? "");
   if (isArchived && !Number.isNaN(baselineMs)) {
     const recordedId = String(archiveBaselineIssueId ?? "").trim();
@@ -817,6 +842,10 @@ export function normalizeRestIssues(pages) {
  * result cap (the Codex 1000-cap fix), and terminates on the first short or
  * empty page. Fails loud past `maxPages` instead of silently truncating.
  * Returns an array of pages; `runner` is injectable for tests.
+ *
+ * The overflow is a distinct error TYPE, not a message to match: a caller that
+ * can resolve a truncated read safely (`fetchArchiveBaseline`) must be able to
+ * tell it apart from a transport failure, which it cannot resolve.
  */
 export async function ghPaginate(
   path,
@@ -826,7 +855,7 @@ export async function ghPaginate(
   const pages = [];
   for (let page = 1; ; page += 1) {
     if (page > maxPages) {
-      throw new Error(
+      throw new PaginationLimitError(
         `GitHub pagination exceeded ${maxPages} pages for ${path}; refusing to continue silently`,
       );
     }
@@ -938,18 +967,43 @@ async function reopenQueueIssue(options, existingIssue, sentryIssue) {
   );
 }
 
+// Page bound for a stub's comment scan: 20 pages x 100 = 2000 comments. A queue
+// stub is bot-driven and carries a handful, so this is enormous headroom — but
+// the repo is PUBLIC, so the list length is attacker-influenced and cannot be
+// left on ghPaginate's 200-page default. At that default an inflated list throws
+// on every run, the per-issue catch swallows it, and the stub's reopen path is
+// disabled for good: exactly the silent burial #1371 closes. Bounded here and
+// resolved toward reopen instead.
+export const ARCHIVE_BASELINE_MAX_COMMENT_PAGES = 20;
+
 /**
  * Read the archive freshness baseline off one queue stub. Only called for a
  * CLOSED, regressed, `sentry:archived` stub, so the extra comment fetch is
- * bounded to the handful of stubs the archive leg has actually settled. A fetch
- * failure propagates: the caller counts it as a per-issue error and retries next
- * run, which is safer than degrading to the `closedAt` comparison this baseline
- * exists to replace.
+ * bounded to the handful of stubs the archive leg has actually settled.
+ *
+ * Returns `{ unreadable: true }` when the comment list runs past the page bound.
+ * The baseline is only trustworthy as the LAST matching comment, so a truncated
+ * read cannot report "no baseline" either — it can report nothing at all, and
+ * the caller turns that into a reopen. Any other failure still propagates: the
+ * caller counts it as a per-issue error and retries next run, which is safer
+ * than degrading to the `closedAt` comparison this baseline replaces.
  */
 async function fetchArchiveBaseline(options, existingIssue) {
-  const pages = await ghPaginate(
-    `repos/${options.repo}/issues/${existingIssue.number}/comments`,
-  );
+  let pages;
+  try {
+    pages = await ghPaginate(
+      `repos/${options.repo}/issues/${existingIssue.number}/comments`,
+      { maxPages: ARCHIVE_BASELINE_MAX_COMMENT_PAGES },
+    );
+  } catch (err) {
+    if (!(err instanceof PaginationLimitError)) throw err;
+    process.stderr.write(
+      `::warning::Queue issue #${existingIssue.number} has more than ${
+        ARCHIVE_BASELINE_MAX_COMMENT_PAGES * 100
+      } comments; cannot read its archive baseline, so reopening for re-triage rather than skipping.\n`,
+    );
+    return { unreadable: true };
+  }
   return findArchiveBaseline(pages.flat());
 }
 
@@ -1051,6 +1105,7 @@ export async function runIngest(options, deps = {}) {
         lastSeen: sentryIssue.lastSeen,
         archiveBaseline: baseline?.lastSeen ?? null,
         archiveBaselineIssueId: baseline?.sentryIssueId ?? null,
+        archiveBaselineUnreadable: baseline?.unreadable === true,
         sentryIssueId: sentryIssue.id,
       });
       if (decision.action === "skip") {

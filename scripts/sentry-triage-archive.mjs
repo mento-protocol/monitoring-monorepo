@@ -442,14 +442,25 @@ export function isSettledAuditComment(comment, sentryIssueId) {
   );
 }
 
+/** What the compensation actually did, for the human reading the stub.
+ * `restoreArchivedIssue` deliberately no-ops when another actor already moved
+ * the issue off our archive, so a refusal comment must never assert a revert
+ * that did not happen — and it must say so loudly, since that branch leaves
+ * Sentry in a state nobody on this run chose. */
+function describeRestore(restored) {
+  return restored
+    ? "The archive was reverted."
+    : "The archive could NOT be reverted: Sentry had already moved the issue off `archived_until_escalating`, so this run left its state alone. Check the Sentry issue.";
+}
+
 /** Fixed refusal comment for the fresh-event path (no marker — this stub is not
  * settled). `shortId` is Sentry-assigned but still neutralized as defense in
  * depth. */
-export function buildFreshEventRefusalComment(shortId) {
+export function buildFreshEventRefusalComment(shortId, restored = true) {
   const safeShortId = truncateTitle(neutralizeUntrusted(shortId), 90);
   return [
     `**Not archived.** A new Sentry event for \`${safeShortId}\` landed while the`,
-    "archive was running, so the archive was reverted. Closing this stub over an",
+    `archive was running. ${describeRestore(restored)} Closing this stub over an`,
     "event Sentry has not yet flagged would hide it: the close would postdate the",
     "event and the regression-reopen gate would never fire for it. The stub stays",
     "open and the `sentry:approved-archive` approval was removed; archiving again",
@@ -472,18 +483,21 @@ export function buildMissingBaselineRefusalComment(shortId) {
   ].join("\n");
 }
 
-/** Fixed refusal comment for a `lastSeen` that stops parsing AFTER the mutation
- * (the archive is reverted). Deliberately distinct from the fresh-event comment:
- * we do not know an event landed, only that we can no longer prove none did. */
-export function buildUnreadableFreshnessRefusalComment(shortId) {
+/** Fixed refusal comment for a `lastSeen` that stops parsing AFTER the mutation.
+ * Deliberately distinct from the fresh-event comment: we do not know an event
+ * landed, only that we can no longer prove none did. */
+export function buildUnreadableFreshnessRefusalComment(
+  shortId,
+  restored = true,
+) {
   const safeShortId = truncateTitle(neutralizeUntrusted(shortId), 90);
   return [
     "**Not archived.** Sentry stopped reporting a usable `lastSeen` for",
     `\`${safeShortId}\` immediately after the archive, so this run cannot confirm`,
     "that no event landed while it ran. The field parsed moments earlier, so the",
-    "read-back is anomalous. The archive was reverted, the stub left open, and the",
-    "`sentry:approved-archive` approval removed; re-approve once Sentry reports",
-    "the issue normally.",
+    `read-back is anomalous. ${describeRestore(restored)} The stub stays open and`,
+    "the `sentry:approved-archive` approval was removed; re-approve once Sentry",
+    "reports the issue normally.",
   ].join("\n");
 }
 
@@ -779,12 +793,16 @@ async function settleQueueStub(
   // failed label step could not leave an approved-but-open stub that re-triggers
   // the `issues: labeled` workflow. That property survives inverted: if the CAS
   // succeeds and the close then fails, the stub is open WITHOUT the approval
-  // label (nothing re-triggers) and without `sentry:archived`, so the next
-  // ingest/triage cycle treats it as an ordinary open stub. The cost is that a
-  // transient close failure is no longer retryable via workflow_dispatch — the
-  // retry guard needs the approval label — which is the right trade against
-  // silently burying a live regression, and the Sentry-side mutation is
-  // compensated below so the unretryable run leaves nothing archived.
+  // label, so nothing re-triggers.
+  //
+  // Be precise about what that leaves behind — no automation picks it up. The
+  // stub is OPEN, so ingest's dedup skips it ("already open"); it keeps its
+  // verdict label and never regains `sentry:needs-triage`, so the triage agent's
+  // selector skips it too; and the approval is spent, so workflow_dispatch
+  // refuses it. It sits there until a human re-approves. That is the accepted
+  // cost of not silently burying a live regression, and it is bounded: the catch
+  // below reverts this run's Sentry archive and rethrows, so the run fails RED
+  // and nothing is left archived off a spent approval.
   if (!(await consumeApprovalLabel(runGh, repo, queueIssue))) {
     process.stderr.write(
       `::notice::Issue #${queueIssue} no longer carried ${APPROVED_ARCHIVE_LABEL} when settlement tried to consume it (a concurrent regression reopen won the race); leaving it for re-triage instead of closing.\n`,
@@ -1058,8 +1076,11 @@ export async function runArchive(options, deps = {}) {
         repo,
         "--body",
         unreadable
-          ? buildUnreadableFreshnessRefusalComment(meta.shortId)
-          : buildFreshEventRefusalComment(meta.shortId),
+          ? buildUnreadableFreshnessRefusalComment(
+              meta.shortId,
+              outcome.restored,
+            )
+          : buildFreshEventRefusalComment(meta.shortId, outcome.restored),
       ]);
       // Shed the human approval, exactly as the live-regression path above does
       // and for the same authority reason (scripts/sentry-triage-ingest.mjs,

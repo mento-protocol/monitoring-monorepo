@@ -4,6 +4,8 @@ import {
   ARCHIVE_PAYLOAD,
   archiveIssue,
   buildAuditComment,
+  buildFreshEventRefusalComment,
+  buildUnreadableFreshnessRefusalComment,
   buildRestorePayload,
   isActivelyRegressing,
   isAlreadyArchived,
@@ -205,8 +207,14 @@ function makeFetch({
   // landing inside the mutation window; a malformed one models an unreadable
   // read-back (issue #1371). Null leaves the pre-PUT value alone.
   lastSeenAfterPut = null,
+  // Another actor moves the issue off our archive between the freshness
+  // read-back and the compensation's re-fetch, so restoreArchivedIssue declines
+  // to clobber it and reports { restored: false }.
+  concurrentMoveAfterReadBack = false,
 } = {}) {
   const calls = [];
+  let putDone = false;
+  let getsSincePut = 0;
   // Stateful: a successful PUT transitions the issue so a later GET (the
   // freshness re-check / idempotency re-check / compensation re-fetch) observes
   // the new state. Non-status fields (notably `lastSeen`) carry over. Every
@@ -224,7 +232,15 @@ function makeFetch({
       });
     }
     if (method === "GET" && /\/issues\/[^/]+\/$/.test(url)) {
-      return jsonResponse(currentIssue);
+      const snapshot = { ...currentIssue };
+      if (putDone) {
+        getsSincePut += 1;
+        if (concurrentMoveAfterReadBack && getsSincePut === 1) {
+          currentIssue = { ...currentIssue, status: "resolved" };
+          delete currentIssue.substatus;
+        }
+      }
+      return jsonResponse(snapshot);
     }
     if (method === "PUT" && /\/issues\/[^/]+\/$/.test(url)) {
       if (archive.ok && body) {
@@ -234,6 +250,7 @@ function makeFetch({
           substatus: body.substatus,
         };
         if (lastSeenAfterPut !== null) currentIssue.lastSeen = lastSeenAfterPut;
+        putDone = true;
       }
       return jsonResponse(
         {},
@@ -1128,6 +1145,64 @@ await test("lastSeenMoved compares timestamps and ignores unparsable input", () 
   assertEqual(lastSeenMoved(null, "2026-07-19T11:59:30Z"), false);
   assertEqual(lastSeenMoved("2026-07-19T11:59:00Z", undefined), false);
   assertEqual(lastSeenMoved("garbage", "also garbage"), false);
+});
+
+await test("refusal comments state what the compensation actually did", () => {
+  // restoreArchivedIssue no-ops when another actor already moved the issue off
+  // our archive. Claiming "the archive was reverted" there is a false statement
+  // to whoever reads the stub, in a branch that leaves Sentry in a state nobody
+  // on that run chose.
+  for (const build of [
+    buildFreshEventRefusalComment,
+    buildUnreadableFreshnessRefusalComment,
+  ]) {
+    const reverted = build("GOV-1", true);
+    assert(
+      reverted.includes("The archive was reverted."),
+      "a real revert says so",
+    );
+    assert(
+      !reverted.includes("could NOT be reverted"),
+      "a real revert must not warn",
+    );
+
+    const notReverted = build("GOV-1", false);
+    assert(
+      notReverted.includes("could NOT be reverted"),
+      "a failed revert must say so",
+    );
+    assert(
+      !notReverted.includes("The archive was reverted."),
+      "a failed revert must not claim one",
+    );
+    assert(
+      notReverted.includes("Check the Sentry issue."),
+      "a failed revert points the human at Sentry",
+    );
+  }
+});
+
+await test("a refusal that could not revert says so on the stub", async () => {
+  const stub = makeStub();
+  const { runGh, calls: ghCalls } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch({
+    lastSeenAfterPut: "2026-07-19T11:59:45.000Z",
+    concurrentMoveAfterReadBack: true,
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "unreverted-fresh-events");
+  const comment = ghCall(ghCalls, "comment");
+  const body = comment[comment.indexOf("--body") + 1];
+  assert(
+    body.includes("could NOT be reverted"),
+    "the stub comment must not claim a revert that did not happen",
+  );
 });
 
 await test("an event landing inside the mutation window reverts and refuses", async () => {

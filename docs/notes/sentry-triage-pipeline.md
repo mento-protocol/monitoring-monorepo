@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-07-29
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -271,11 +271,17 @@ human-approved archive queued behind a running ingest.
 stub if that delete succeeded. The label is the single token both writers
 contend for: ingest's regression reopen sheds it too, so a 404 means this run
 lost, and it aborts settlement and runs the same Sentry restore as the
-label-shed path. The cost of consuming before the close: a transient close
-failure can no longer be retried by `workflow_dispatch`, whose guard needs the
-approval label. It leaves the stub open with neither that label nor
-`sentry:archived`, so nothing re-triggers and the next ingest/triage cycle
-treats it as an ordinary open stub.
+label-shed path.
+
+Consuming before the close costs one thing, and the runbook below covers it. A
+failure past the CAS cannot be retried by `workflow_dispatch`, whose guard needs
+the approval label the run just spent. The script reverts its own Sentry archive
+and fails RED, so nothing stays archived off a spent approval — but the stub is
+then open with no approval, no `sentry:archived`, and no `sentry:needs-triage`.
+No stage picks that up: ingest skips an open match, the triage agent selects on
+`sentry:needs-triage`, and archive needs the approval. It waits for a human.
+That is deliberate, since the alternative ordering closes stubs over live
+regressions, but it is a stranded state, not a self-healing one.
 
 **The archive records a freshness baseline.** Sentry's `substatus` lags a fresh
 event, so the regressed/escalating refusal can pass while an event is already in
@@ -441,6 +447,20 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
 - A projection without its token closes the queue issue with an explicit
   skipped note. Provision the token and re-triage only when the owning-repo
   issue is still required.
+- **A red archive run whose stub is open, verdicted, and carries neither
+  `sentry:approved-archive` nor `sentry:archived` failed after it consumed the
+  approval.** Nothing retries this on its own, and no re-dispatch is possible —
+  the guard needs the label the run spent. The script already reverted its
+  Sentry archive, so read the run log to confirm that revert: on the
+  `::error::` line saying the revert itself failed, check the Sentry issue by
+  hand and take it off `archived_until_escalating` before doing anything else.
+  Then re-apply `sentry:approved-archive` to re-run the archive, or leave it off
+  and let the stub go back through triage. Re-approving is a fresh human
+  decision by design, not a formality.
+- An archive refusal comment that says the archive **could NOT be reverted**
+  means something moved the Sentry issue off `archived_until_escalating` while
+  the run held it. Inspect that issue directly; the queue stub's state is
+  correct but says nothing about where Sentry ended up.
 - Do not manually close a pending queue issue to hide a failure. Fix the
   workflow or make a documented human disposition.
 
