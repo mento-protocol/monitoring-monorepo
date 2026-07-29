@@ -268,6 +268,9 @@ describe("PegMonitoringPageClient", () => {
     const decisionMarket = container.querySelector(
       '[data-testid="peg-decision-market-europ-schuman"]',
     );
+    const scorecard = container.querySelector(
+      '[data-testid="peg-scorecard-europ-schuman"]',
+    );
     expect(container.textContent).toContain(
       "Data is stale — showing the last confirmed check",
     );
@@ -276,6 +279,12 @@ describe("PegMonitoringPageClient", () => {
       "At the last confirmed check, a 50,000 EUROP sale would have received about 0.9965 EUR per EUROP.",
     );
     expect(decisionMarket?.textContent).not.toContain("Unavailable");
+    expect(scorecard?.textContent).not.toContain(
+      "Last confirmed executable price is unavailable",
+    );
+    expect(
+      scorecard?.querySelector('[data-testid="peg-current-europ-schuman"]'),
+    ).not.toBeNull();
   });
   it("keeps confirmed structural results visible after the package becomes stale", () => {
     const response = makePegMonitoringResponse();

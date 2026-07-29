@@ -97,6 +97,19 @@ describe("presentPegMonitoring", () => {
       uncertaintyReason:
         "The policy-selected market observation is older than its allowed freshness window.",
     });
+
+    const retained = presentPegMonitoring(sourceProduced40SecondsEarlier, {
+      ...CURRENT_CONTEXT,
+      nowMs: (response.producedAt + 81) * 1_000,
+      packageIsStale: true,
+    });
+    expect(retained.aggregate.label).toBe("Latest data is stale");
+    expect(retained.assets[0]).toMatchObject({
+      decisionSource: expect.any(Object),
+      distanceBps: 10,
+      thresholdTone: "healthy",
+      usableSourceCount: 3,
+    });
   });
 
   it("expires structural evidence strictly after the asset freshness grace", () => {
@@ -139,6 +152,39 @@ describe("presentPegMonitoring", () => {
       uncertain: true,
       uncertaintyReason:
         "The structural checks are older than the policy's freshness window.",
+    });
+  });
+
+  it("keeps stale scorecard safety and price evidence at the confirmed package timestamp", () => {
+    const response = healthyResponse();
+    const item = response.packages[0]!;
+    const retained = presentPegMonitoring(
+      {
+        ...response,
+        packages: [
+          {
+            ...item,
+            policy: { ...item.policy, freshnessGraceSeconds: 60 },
+            sources: item.sources.map((source) => ({
+              ...source,
+              policy: { ...source.policy, staleAfterSeconds: 30 },
+            })),
+          },
+        ],
+      },
+      {
+        ...CURRENT_CONTEXT,
+        nowMs: (response.producedAt + 100) * 1_000,
+        packageIsStale: true,
+      },
+    );
+
+    expect(retained.aggregate.label).toBe("Latest data is stale");
+    expect(retained.assets[0]).toMatchObject({
+      decisionSource: expect.any(Object),
+      distanceBps: 10,
+      structuralEvidenceCurrent: true,
+      usableSourceCount: 3,
     });
   });
 
