@@ -183,6 +183,85 @@ describe("presentPegMonitoring", () => {
     );
   });
 
+  it("expires breaker decisions strictly after the structural freshness grace", () => {
+    const response = healthyResponse();
+    const item = response.packages[0]!;
+    const baseBreaker = item.monitors[0]!.breaker!;
+    const withBreaker = (breaker: typeof baseBreaker | null) => ({
+      ...response,
+      packages: [
+        {
+          ...item,
+          policy: { ...item.policy, freshnessGraceSeconds: 60 },
+          monitors: item.monitors.map((monitor) => ({
+            ...monitor,
+            breaker,
+          })),
+          sources: item.sources.map((source) => ({
+            ...source,
+            policy: {
+              ...source.policy,
+              pollIntervalSeconds: Math.min(
+                source.policy.pollIntervalSeconds,
+                60,
+              ),
+            },
+          })),
+        },
+      ],
+    });
+    const contextAt = (seconds: number) => ({
+      ...CURRENT_CONTEXT,
+      nowMs: (response.producedAt + seconds) * 1_000,
+    });
+
+    for (const unsafeBreaker of [
+      { ...baseBreaker, enabled: false },
+      { ...baseBreaker, status: "TRIPPED" as const },
+    ]) {
+      const atBoundary = presentPegMonitoring(
+        withBreaker(unsafeBreaker),
+        contextAt(60),
+      );
+      const expired = presentPegMonitoring(
+        withBreaker(unsafeBreaker),
+        contextAt(61),
+      );
+
+      expect(atBoundary.aggregate.label).toBe("Critical condition detected");
+      expect(atBoundary.assets[0]).toMatchObject({
+        structuralEvidenceCurrent: true,
+        currentCritical: true,
+      });
+      expect(expired.aggregate.label).toBe("Monitoring checks incomplete");
+      expect(expired.assets[0]).toMatchObject({
+        structuralEvidenceCurrent: false,
+        currentCritical: false,
+        uncertain: true,
+        uncertaintyReason:
+          "The structural checks are older than the policy's freshness window.",
+      });
+      expect(expired.assets[0]?.reasons).not.toContain(
+        "A monitored breaker is disabled or tripped.",
+      );
+    }
+
+    const unavailableExpired = presentPegMonitoring(
+      withBreaker(null),
+      contextAt(61),
+    );
+    expect(unavailableExpired.assets[0]).toMatchObject({
+      structuralEvidenceCurrent: false,
+      currentCritical: false,
+      uncertain: true,
+      uncertaintyReason:
+        "The structural checks are older than the policy's freshness window.",
+    });
+    expect(unavailableExpired.assets[0]?.reasons).not.toContain(
+      "A monitored breaker is unavailable.",
+    );
+  });
+
   it("matches every confirmed blind-while-stressed critical alert leg", () => {
     const response = healthyResponse();
     const item = response.packages[0]!;

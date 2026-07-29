@@ -270,6 +270,18 @@ function hasUnavailableBreaker(item: PegAssetPackage): boolean {
   return item.monitors.some(({ breaker }) => breaker === null);
 }
 
+function currentBreakerSignals(
+  item: PegAssetPackage,
+  structuralExpired: boolean,
+) {
+  if (structuralExpired)
+    return { breakerUnavailable: false, unsafeBreaker: false };
+  return {
+    breakerUnavailable: hasUnavailableBreaker(item),
+    unsafeBreaker: hasUnsafeBreaker(item),
+  };
+}
+
 function uncertaintyReason(input: {
   packageIsStale: boolean;
   usesPreviousPolicy: boolean;
@@ -356,7 +368,10 @@ function classifySafety(
     structuralExpired || hasUnavailableStructuralEvidence(item);
   const sourceUnavailable = selection.decisionSource === null;
   const sourceWarning = isSourceWarning(item, selection.decisionSource);
-  const breakerUnavailable = hasUnavailableBreaker(item);
+  const { breakerUnavailable, unsafeBreaker } = currentBreakerSignals(
+    item,
+    structuralExpired,
+  );
   const deepCritical = isDeepCritical(item, selection.decisionSource);
   const confirmedBlindWhileStressedReason = blindWhileStressedReason(
     item,
@@ -364,7 +379,6 @@ function classifySafety(
     context.nowMs,
     structuralExpired,
   );
-  const unsafeBreaker = hasUnsafeBreaker(item);
   const policyWarning = context.packageIsStale || context.usesPreviousPolicy;
   const critical =
     deepCritical || confirmedBlindWhileStressedReason !== null || unsafeBreaker;

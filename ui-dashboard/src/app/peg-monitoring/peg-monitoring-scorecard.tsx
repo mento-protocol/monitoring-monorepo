@@ -195,9 +195,11 @@ function HealthSummary({
   const breakerHealth =
     breakerCount === 0
       ? "No monitored breakers"
-      : breakerCount === 1 && breakers === 1
-        ? "1 breaker OK"
-        : `${breakers} of ${breakerCount} breakers OK`;
+      : !asset.structuralEvidenceCurrent
+        ? "Check expired"
+        : breakerCount === 1 && breakers === 1
+          ? "1 breaker OK"
+          : `${breakers} of ${breakerCount} breakers OK`;
   return (
     <dl className="mt-5 grid gap-2 border-t border-slate-800 pt-4 sm:grid-cols-4">
       <div>

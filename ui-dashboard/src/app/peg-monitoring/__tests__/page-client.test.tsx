@@ -239,6 +239,66 @@ describe("PegMonitoringPageClient", () => {
       container.querySelector('[data-testid="peg-current-europ-schuman"]'),
     ).not.toBeNull();
   });
+  it("expires breaker conclusions with the structural check", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            policy: { ...item.policy, freshnessGraceSeconds: 60 },
+            monitors: item.monitors.map((monitor) => ({
+              ...monitor,
+              breaker:
+                monitor.breaker === null
+                  ? null
+                  : { ...monitor.breaker, enabled: false },
+            })),
+            sources: item.sources.map((source) => ({
+              ...source,
+              executablePrice:
+                source.id === item.policy.deepVenueSource
+                  ? 0.999
+                  : source.executablePrice,
+              deviationBps:
+                source.id === item.policy.deepVenueSource
+                  ? 10
+                  : source.deviationBps,
+              premiumBps:
+                source.id === item.policy.deepVenueSource
+                  ? 0
+                  : source.premiumBps,
+              policy: {
+                ...source.policy,
+                pollIntervalSeconds: Math.min(
+                  source.policy.pollIntervalSeconds,
+                  60,
+                ),
+              },
+            })),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+    expect(container.textContent).toContain("Critical condition detected");
+    expect(container.textContent).toContain("0 of 1 breakers OK");
+
+    act(() => vi.advanceTimersByTime(50_000));
+    expect(container.textContent).toContain("Monitoring checks incomplete");
+    expect(container.textContent).not.toContain(
+      "Critical condition in the current package",
+    );
+    const breakerLabel = Array.from(container.querySelectorAll("dt")).find(
+      ({ textContent }) => textContent === "Breaker",
+    );
+    expect(breakerLabel?.nextElementSibling?.textContent).toBe("Check expired");
+  });
   it("renders previous-policy, partial source evidence, disabled breaker, and null breaker distinctly", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
