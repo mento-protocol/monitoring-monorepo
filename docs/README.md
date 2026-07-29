@@ -196,6 +196,10 @@ Authority: canonical
 - [`README.md`](../README.md)
 - [`SPEC.md`](../SPEC.md)
 
+Authority: non-canonical
+
+- [`docs/notes/autoreview-runtime-trust.md`](notes/autoreview-runtime-trust.md)
+
 ## notes-plans-archive
 
 Authority: canonical
