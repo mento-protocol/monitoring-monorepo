@@ -701,22 +701,31 @@ await test("selected-verdict-id fails closed to 'none' (#1506)", () => {
   }
 });
 
-await test("select-run-record-id prints the trusted, prefix-anchored record's id, never a planted untrusted one", () => {
+// `gh api ... --paginate --slurp` (what the workflow feeds --comments-file)
+// wraps each page in one outer array — i.e. an array of per-page arrays, not
+// a single flat array of comments. A fixture with the genuine record on a
+// SECOND page is the only way to prove the CLI flattens across pages rather
+// than only ever looking at page 1.
+await test("select-run-record-id flattens multiple --paginate --slurp pages and finds a trusted, prefix-anchored record on a later page, ignoring a planted decoy on an earlier one", () => {
   const dir = mkdtempSync(join(tmpdir(), "autofix-runrecord-id-"));
   const file = join(dir, "comments.json");
   writeFileSync(
     file,
     JSON.stringify([
-      trackerComment(
-        999,
-        `${AUTOFIX_RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
-        "drive-by-user",
-      ),
-      trackerComment(
-        1,
-        `${AUTOFIX_RUN_RECORD_MARKER}\n\n**Sentry autofix — last run:** now`,
-        "github-actions[bot]",
-      ),
+      [
+        trackerComment(
+          999,
+          `${AUTOFIX_RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
+          "drive-by-user",
+        ),
+      ],
+      [
+        trackerComment(
+          1,
+          `${AUTOFIX_RUN_RECORD_MARKER}\n\n**Sentry autofix — last run:** now`,
+          "github-actions[bot]",
+        ),
+      ],
     ]),
   );
   assertEqual(
@@ -725,6 +734,12 @@ await test("select-run-record-id prints the trusted, prefix-anchored record's id
   );
 });
 
+// Reverting the `.flatMap` in the CLI's "select-run-record-id" case back to a
+// bare `Array.isArray(parsed) ? parsed : []` reproduces the bug this test
+// guards: the outer array's elements are page-arrays (no `.body`), so
+// `isTrustedComment`/`startsWith` never match and this prints "none" instead
+// of "1" — silently spamming a fresh comment every run once the tracker
+// passes its first page. Mutation-proven by hand against that revert.
 await test("select-run-record-id fails closed to 'none' for no record, a mid-body marker, and unparsable input", () => {
   const dir = mkdtempSync(join(tmpdir(), "autofix-runrecord-id-none-"));
   const empty = join(dir, "empty.json");
@@ -733,11 +748,13 @@ await test("select-run-record-id fails closed to 'none' for no record, a mid-bod
   writeFileSync(
     midBody,
     JSON.stringify([
-      trackerComment(
-        1,
-        `Some chatter.\n\n${AUTOFIX_RUN_RECORD_MARKER}`,
-        "github-actions[bot]",
-      ),
+      [
+        trackerComment(
+          1,
+          `Some chatter.\n\n${AUTOFIX_RUN_RECORD_MARKER}`,
+          "github-actions[bot]",
+        ),
+      ],
     ]),
   );
   const malformed = join(dir, "bad.json");

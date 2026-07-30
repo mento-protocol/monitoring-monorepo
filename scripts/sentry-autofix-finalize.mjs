@@ -757,9 +757,11 @@ Commands:
   select-run-record-id --comments-file <path>
       Print the numeric id of the tracker issue's existing rolling run-record
       comment (trusted-author + prefix-anchored, selectAutofixRunRecordComment),
-      or "none" if there isn't one yet. The file holds the tracker issue's raw
-      REST comments array. Fail-closed: prints "none" on any parse failure so
-      the workflow creates a fresh comment rather than guessing.
+      or "none" if there isn't one yet. The file holds the tracker issue's
+      comments as produced by \`gh api ... --paginate --slurp\` (an array of
+      per-page arrays/objects — flattened here before selecting). Fail-closed:
+      prints "none" on any parse failure so the workflow creates a fresh
+      comment rather than guessing.
   -h, --help
 `;
 }
@@ -896,12 +898,25 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
       // genuinely absent record — the workflow then creates a fresh comment
       // rather than guessing at an id, which is safe (worst case a stray
       // rolling comment, never a defaced one).
+      //
+      // The workflow feeds this from `gh api ... --paginate --slurp`
+      // (mirroring the flatten `ghApiJsonPages`/`ghApiJsonPagesResult` in
+      // scripts/pr-ready-state.mjs already do for the same gh flag pair): each
+      // page is a separate JSON array or object, `--slurp` wraps them in one
+      // outer array, and PLAIN `--paginate` alone concatenates pages as
+      // adjacent JSON values with no wrapper — `JSON.parse` throws on more
+      // than one page, which fails closed here but would spam a fresh comment
+      // on every run once the tracker issue passes its first page of
+      // comments. Flatten every page-array (or lone object) into one flat
+      // comments list before selecting.
       let comments;
       try {
         const parsed = JSON.parse(
           readFileMaybe(readFlag(args, "--comments-file")),
         );
-        comments = Array.isArray(parsed) ? parsed : [];
+        comments = Array.isArray(parsed)
+          ? parsed.flatMap((page) => (Array.isArray(page) ? page : [page]))
+          : [];
       } catch {
         stdout.write("none\n");
         return;

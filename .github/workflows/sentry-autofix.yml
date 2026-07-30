@@ -1068,7 +1068,14 @@ jobs:
           # record — this repo is public and #1282 is open. Every write tolerates
           # failure (|| true) so a tracker hiccup never reds the run — a MISSING
           # record is itself the signal.
-          gh api "repos/${REPO}/issues/${TRACKER_ISSUE}/comments" --paginate \
+          #
+          # `--slurp` wraps every page in one outer JSON array (mirroring how
+          # scripts/pr-ready-state.mjs already combines paginated `gh api`
+          # output) — plain `--paginate` alone prints each page as a separate,
+          # adjacent JSON value, which is NOT one valid JSON document once the
+          # tracker issue passes its first page of comments, and would make
+          # every run fail to find the existing record and spam a fresh one.
+          gh api "repos/${REPO}/issues/${TRACKER_ISSUE}/comments" --paginate --slurp \
             > "${RUNNER_TEMP}/run-record-comments.json" 2>/dev/null \
             || echo '[]' > "${RUNNER_TEMP}/run-record-comments.json"
           existing_id=$(node scripts/sentry-autofix-finalize.mjs select-run-record-id \
