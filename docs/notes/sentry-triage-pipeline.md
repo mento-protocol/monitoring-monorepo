@@ -164,10 +164,25 @@ body containing `$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites the exported
 variable while the agent's own command line is expanded, before Node starts.
 The authoritative target is a JSON file that a trusted step pins under
 `$RUNNER_TEMP` before the agent runs, left mode 0444 inside a mode 0555
-directory so that a shell redirection — which Claude Code's permission rules do
-match — cannot rewrite it. The env var survives as a cross-check only, and a
-disagreement between the two refuses loudly rather than picking a winner. The
-wrapper also refuses a body that does not start with the
+directory. The env var survives as a cross-check only, and a disagreement
+between the two refuses loudly rather than picking a winner.
+
+Those modes are load-bearing, because **the agent can write files**. Claude
+Code's permission rules match a command carrying an output redirection
+(CHANGELOG v1.0.123), and `gh issue view --template` renders arbitrary
+constructed text, so the read-only `gh` grants compose into "write any content
+to any path this user can write" — including over the wrapper itself. The same
+trusted step therefore copies the wrapper's whole runtime import closure, and
+the post-agent verdict script's, into a read-only `sentry-triage-tools`
+directory under `$RUNNER_TEMP`; the agent's `--allowedTools` grant and the
+deterministic verdict step both execute **those** copies, never `scripts/`, so
+nothing executable is loaded from the agent-writable checkout.
+`scripts/sentry-triage-agent-comment.test.mjs` recomputes the closure from the
+source and fails if the staging list stops matching it, so the attack cannot
+move one file over. The agent job's checkout also sets
+`persist-credentials: false`, matching the autofix agent job.
+
+The wrapper also refuses a body that does not start with the
 verdict marker and a body carrying its own authorship marker; it appends
 `<!-- sentry-triage-agent-authored:v1 -->` and posts with `gh --body-file` from
 `$RUNNER_TEMP`, handing `gh` an allowlisted environment that carries neither the

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   AGENT_COMMENT_MARKER,
@@ -432,4 +435,107 @@ test("a gh failure surfaces instead of being swallowed", async () => {
     }),
     /HTTP 403/,
   );
+});
+
+// ── the executed closure must leave the agent-writable checkout ──────────────
+//
+// The agent can write the checkout: Claude Code matches `Bash(cmd:*)` against a
+// command carrying a redirection (CHANGELOG v1.0.123), and `gh issue view
+// --template` renders arbitrary text, so `gh issue view <n> --template '<js>' >
+// scripts/sentry-triage-agent-comment.mjs` is inside its read-only grants. The
+// workflow therefore runs a read-only COPY from $RUNNER_TEMP. If the wrapper
+// grows an import the copy step does not carry, the attack just moves one file
+// over — so the closure is recomputed here from the source, not trusted to a
+// comment.
+
+const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
+const WORKFLOW = readFileSync(
+  join(SCRIPTS_DIR, "..", ".github", "workflows", "sentry-triage-agent.yml"),
+  "utf8",
+);
+
+/** Transitive closure of relative (in-repo) imports, entry point included. */
+function importClosure(entry) {
+  const seen = new Set();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const file = queue.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const source = readFileSync(join(SCRIPTS_DIR, file), "utf8");
+    for (const match of source.matchAll(
+      /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s+["'](\.\/[^"']+)["']/g,
+    )) {
+      queue.push(match[1].replace(/^\.\//, ""));
+    }
+  }
+  return [...seen].sort();
+}
+
+test("the wrapper's runtime closure is exactly what the workflow stages", () => {
+  const closure = importClosure("sentry-triage-agent-comment.mjs");
+  assert.deepEqual(closure, [
+    "sentry-triage-agent-comment.mjs",
+    "sentry-triage-project-core.mjs",
+  ]);
+  // Every file in the closure must appear in the staging step's copy list.
+  const stagingBlock = WORKFLOW.slice(
+    WORKFLOW.indexOf("Stage immutable agent tools"),
+    WORKFLOW.indexOf("Render triage prompt"),
+  );
+  assert.ok(stagingBlock.length > 0, "staging step not found in the workflow");
+  for (const file of closure) {
+    assert.ok(
+      stagingBlock.includes(file),
+      `${file} is in the wrapper's runtime closure but the staging step does not copy it`,
+    );
+  }
+});
+
+test("the post-agent verdict script's closure is staged too", () => {
+  // This one runs AFTER the agent, from the same job, so it is exposed to the
+  // same rewrite.
+  for (const file of importClosure("sentry-triage-project.mjs")) {
+    const stagingBlock = WORKFLOW.slice(
+      WORKFLOW.indexOf("Stage immutable agent tools"),
+      WORKFLOW.indexOf("Render triage prompt"),
+    );
+    assert.ok(stagingBlock.includes(file), `${file} is not staged`);
+  }
+});
+
+test("no executable grant or in-job node call points at the checkout", () => {
+  const grant = /--allowedTools '([^']*)'/.exec(WORKFLOW);
+  assert.ok(grant, "--allowedTools not found");
+  const bashGrants = [...grant[1].matchAll(/Bash\(([^)]*)\)/g)].map(
+    (m) => m[1],
+  );
+  assert.deepEqual(bashGrants, [
+    "gh issue view:*",
+    "gh issue list:*",
+    "node ${{ runner.temp }}/sentry-triage-tools/sentry-triage-agent-comment.mjs:*",
+  ]);
+  for (const g of bashGrants) {
+    assert.ok(
+      !/(^|\s)node\s+scripts\//.test(g),
+      `grant executes a checkout path: ${g}`,
+    );
+  }
+  // And no step in the file runs node against the checkout inside this job.
+  const triageJob = WORKFLOW.slice(
+    WORKFLOW.indexOf("\n  triage:"),
+    WORKFLOW.indexOf("\n  project:"),
+  );
+  assert.ok(
+    !/node scripts\//.test(triageJob),
+    "the triage job still executes a script from the agent-writable checkout",
+  );
+});
+
+test("the agent job's checkout does not persist the git credential", () => {
+  const triageJob = WORKFLOW.slice(
+    WORKFLOW.indexOf("\n  triage:"),
+    WORKFLOW.indexOf("\n  project:"),
+  );
+  assert.match(triageJob, /persist-credentials: false/);
 });
