@@ -541,6 +541,29 @@ export function isTrustedComment(comment) {
 }
 
 /**
+ * Pick the first comment that is BOTH author-trusted (`isTrustedComment`) AND
+ * anchored at the start of its body by `marker` (`startsWith`, not
+ * `includes`) — the shared fence primitive behind every rolling run-record
+ * writer (the ingest's `RUN_RECORD_MARKER` and the autofix leg's
+ * `AUTOFIX_RUN_RECORD_MARKER`), so the writers share one implementation
+ * instead of two hand-kept copies that could drift apart. This repo is
+ * public and #1282 is open, so without both fences an untrusted commenter
+ * could plant the marker anywhere in a comment body and have the next run's
+ * PATCH land in their comment instead of the pipeline's own record. Null-safe
+ * on a missing/undefined `comments` list.
+ */
+export function selectMarkedComment(comments, marker) {
+  return (
+    (comments ?? []).find(
+      (comment) =>
+        typeof comment?.body === "string" &&
+        isTrustedComment(comment) &&
+        comment.body.startsWith(marker),
+    ) ?? null
+  );
+}
+
+/**
  * Pick the verdict comment to act on. This is the SINGLE selection path for
  * both the workflow's label step (--parse-only) and projection, and it applies
  * two fences:
