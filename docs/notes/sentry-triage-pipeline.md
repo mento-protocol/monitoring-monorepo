@@ -184,11 +184,21 @@ move one file over. The agent job's checkout also sets
 
 The wrapper also refuses a body that does not start with the
 verdict marker and a body carrying its own authorship marker; it appends
-`<!-- sentry-triage-agent-authored:v1 -->` and posts with `gh --body-file` from
-`$RUNNER_TEMP`, handing `gh` an allowlisted environment that carries neither the
-Sentry token nor the Claude OAuth token. Deterministic scripts and the agent
-share the `github-actions[bot]` identity, so that marker — and the required
-verdict-marker prefix — are what separate agent text from pipeline text.
+`<!-- sentry-triage-agent-authored:v1 -->` and pipes the result into
+`gh --body-file -` on stdin, handing `gh` an allowlisted environment that
+carries neither the Sentry token nor the Claude OAuth token. Deterministic
+scripts and the agent share the `github-actions[bot]` identity, so that marker
+— and the required verdict-marker prefix — are what separate agent text from
+pipeline text.
+
+**The body never touches the filesystem, and that is load-bearing.** An earlier
+version wrote the validated body to a predictable `$RUNNER_TEMP` path and let
+`gh` read it back. The agent can background a second permitted command
+(`gh issue view … --template '<forged>' > that-path &`) and swap the content
+inside the window between the check and the read; reproduced, it posted a
+forged `Regressed in Sentry …` control comment past every fence. No check
+closes a check-then-use window on a path the attacker can write — removing the
+file removes the window. Do not reintroduce an intermediate file for the body.
 
 **Credential exfiltration is not contained here, and the wrapper does not claim
 to contain it.** `SENTRY_TRIAGE_TOKEN` must sit in job env for the Sentry MCP

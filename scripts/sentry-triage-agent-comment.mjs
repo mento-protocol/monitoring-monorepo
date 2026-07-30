@@ -64,13 +64,20 @@
  * means removing the credential from the agent's process env, which no check
  * inside this script can do.
  *
- * The body is posted with `gh --body-file` from `$RUNNER_TEMP`, so it never
- * appears in `gh`'s argv.
+ * THE BODY NEVER TOUCHES THE FILESYSTEM. It goes to `gh --body-file -` on the
+ * child's stdin. An earlier version validated the body, wrote it to a
+ * predictable path under `$RUNNER_TEMP`, and let `gh` read it back; the agent
+ * can run a second permitted command concurrently (`… > that path &`) and swap
+ * the content inside that window, so a body that passed every check here was
+ * replaced before `gh` read it — reproduced, posting a forged
+ * `Regressed in Sentry …` control comment. There is no check that closes a
+ * check-then-use window on a path the attacker can write; removing the file
+ * removes the window. Keep it that way: do not reintroduce an intermediate
+ * file for the body.
  */
 
 import { spawn } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
-import { writeFile as writeFileAsync } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -237,7 +244,7 @@ export function resolveTarget(env, readPinnedTarget = readPinnedTargetDefault) {
     );
   }
 
-  return { issue, repo, tempDir: String(env.RUNNER_TEMP) };
+  return { issue, repo };
 }
 
 /** The secret values present in this environment, as {name, value} pairs. Used
@@ -300,12 +307,18 @@ export function buildChildEnv(env) {
   return childEnv;
 }
 
-function runGhDefault(args, childEnv) {
+function runGhDefault(args, childEnv, stdinText) {
   return new Promise((resolve, reject) => {
     const child = spawn("gh", args, {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       env: childEnv,
     });
+    // The body goes down the pipe and nowhere else — no path exists for a
+    // concurrent command to overwrite between validation and use.
+    child.stdin.on("error", (err) =>
+      reject(new Error(`gh stdin failed: ${err.message}`)),
+    );
+    child.stdin.end(stdinText, "utf8");
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -328,31 +341,29 @@ function runGhDefault(args, childEnv) {
 }
 
 /**
- * Post the agent's verdict comment. `runGh` and `writeFile` are injected so
- * the tests drive the whole flow without a runner, a token, or a network.
+ * Post the agent's verdict comment. `runGh` is injected so the tests drive the
+ * whole flow without a runner, a token, or a network.
+ *
+ * This function writes NOTHING to disk. The validated body goes straight to
+ * the child's stdin, so the bytes that were checked are the bytes that are
+ * sent — there is no intermediate path for a concurrent command to swap.
  */
 export async function postAgentComment({
   argv,
   env,
   runGh = runGhDefault,
-  writeFile = writeFileAsync,
   readPinnedTarget = readPinnedTargetDefault,
 }) {
   const { body } = parseArgs(argv);
-  const { issue, repo, tempDir } = resolveTarget(env, readPinnedTarget);
+  const { issue, repo } = resolveTarget(env, readPinnedTarget);
   assertBodyPostable(body, collectSecretValues(env));
 
-  // Fixed prefix and suffix, and `issue` is ^[0-9]+$ — so the one file this
-  // script writes can never collide with the pinned target it reads, whatever
-  // the agent does. Tested.
-  const bodyFile = join(tempDir, `sentry-triage-agent-comment-${issue}.md`);
-  await writeFile(bodyFile, decorateBody(body), "utf8");
-
   const stdout = await runGh(
-    ["issue", "comment", issue, "--repo", repo, "--body-file", bodyFile],
+    ["issue", "comment", issue, "--repo", repo, "--body-file", "-"],
     buildChildEnv(env),
+    decorateBody(body),
   );
-  return { issue, repo, bodyFile, stdout };
+  return { issue, repo, stdout };
 }
 
 async function main() {

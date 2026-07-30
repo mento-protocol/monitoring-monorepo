@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,7 @@ import {
   VERDICT_MARKER,
 } from "./sentry-triage-agent-comment.mjs";
 
+const RUNNER_TEMP_FOR_TESTS = "/runner/_temp";
 const SENTRY_TOKEN = "sntrys_deadbeefdeadbeefdeadbeef";
 const GH_TOKEN = "ghs_0123456789abcdefghijklmnopqrstuvwxyz";
 const OAUTH_TOKEN = "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz";
@@ -40,7 +42,7 @@ function baseEnv(overrides = {}) {
   return {
     PATH: "/usr/bin:/bin",
     HOME: "/home/runner",
-    RUNNER_TEMP: "/runner/_temp",
+    RUNNER_TEMP: RUNNER_TEMP_FOR_TESTS,
     GITHUB_REPOSITORY: "mento-protocol/monitoring-monorepo",
     [ISSUE_ENV_VAR]: "123",
     GH_TOKEN,
@@ -61,36 +63,30 @@ function pin({
   });
 }
 
-/** Drive the whole flow with the gh call and the file write captured. */
+/** Drive the whole flow with the gh call — argv, env and stdin — captured. */
 async function post({
   argv = ["--body", VERDICT_BODY],
   env = baseEnv(),
   readPinnedTarget = pin(),
 } = {}) {
   const calls = [];
-  const writes = [];
   const result = await postAgentComment({
     argv,
     env,
     readPinnedTarget,
-    runGh: (args, childEnv) => {
-      calls.push({ args, childEnv });
+    runGh: (args, childEnv, stdin) => {
+      calls.push({ args, childEnv, stdin });
       return Promise.resolve(
         "https://github.com/o/r/issues/123#issuecomment-1\n",
       );
     },
-    writeFile: (path, contents) => {
-      writes.push({ path, contents });
-      return Promise.resolve();
-    },
   });
-  return { result, calls, writes };
+  return { result, calls };
 }
 
 async function refusal(options) {
   let thrown = null;
   const calls = [];
-  const writes = [];
   try {
     await postAgentComment({
       argv: options.argv ?? ["--body", VERDICT_BODY],
@@ -100,17 +96,12 @@ async function refusal(options) {
         calls.push(args);
         return Promise.resolve("");
       },
-      writeFile: (path, contents) => {
-        writes.push({ path, contents });
-        return Promise.resolve();
-      },
     });
   } catch (err) {
     thrown = err;
   }
   assert.ok(thrown, "expected the wrapper to refuse");
   assert.deepEqual(calls, [], "a refused post must never reach gh");
-  assert.deepEqual(writes, [], "a refused post must never write a body file");
   return thrown;
 }
 
@@ -125,7 +116,7 @@ test("the target is read from the pinned file, not from argv", async () => {
     "--repo",
     "mento-protocol/monitoring-monorepo",
     "--body-file",
-    "/runner/_temp/sentry-triage-agent-comment-123.md",
+    "-",
   ]);
 });
 
@@ -212,14 +203,20 @@ test("a missing, unparsable or malformed pin refuses", async () => {
   assert.match(badRepo.message, /no owner\/repo/);
 });
 
-test("the body file this script writes can never collide with the pin", async () => {
-  // The only file the wrapper creates. Fixed prefix, fixed .md suffix, and an
-  // ^[0-9]+$ issue — so no pinned-target path is reachable, whatever the agent
-  // does with the body or the environment.
-  const { writes } = await post();
-  assert.notEqual(writes[0].path, targetFilePath(baseEnv()));
-  assert.ok(writes[0].path.endsWith(".md"));
-  assert.ok(!writes[0].path.includes(TARGET_FILE_RELATIVE));
+test("the wrapper hands gh no filesystem path, so none can be swapped", async () => {
+  // The body-file argument is literally "-" (stdin). The pin is the only path
+  // this script touches at all, and it only ever reads it.
+  const { calls } = await post();
+  const bodyFileValue = calls[0].args[calls[0].args.indexOf("--body-file") + 1];
+  assert.equal(bodyFileValue, "-");
+  assert.ok(
+    !calls[0].args.some((arg) => arg.startsWith("/")),
+    "no absolute path may appear in gh's argv",
+  );
+  assert.ok(
+    !calls[0].args.some((arg) => arg.includes(RUNNER_TEMP_FOR_TESTS)),
+    "nothing under RUNNER_TEMP may be handed to gh",
+  );
 });
 
 test("digit-extension is closed by construction: the body cannot retarget", async () => {
@@ -333,9 +330,9 @@ test("short env values are not treated as secrets", () => {
 // ── authorship marker ────────────────────────────────────────────────────────
 
 test("every posted body is stamped agent-authored", async () => {
-  const { writes } = await post();
-  assert.ok(writes[0].contents.includes(AGENT_COMMENT_MARKER));
-  assert.ok(writes[0].contents.trimEnd().endsWith(AGENT_COMMENT_MARKER));
+  const { calls } = await post();
+  assert.ok(calls[0].stdin.includes(AGENT_COMMENT_MARKER));
+  assert.ok(calls[0].stdin.trimEnd().endsWith(AGENT_COMMENT_MARKER));
 });
 
 test("the stamp is appended, so the verdict marker still starts the body", () => {
@@ -409,19 +406,55 @@ test("an absent GH_TOKEN is not forged into the child env", () => {
 
 // ── posting mechanics ────────────────────────────────────────────────────────
 
-test("the body is posted from a RUNNER_TEMP file, never in argv", async () => {
-  const { calls, writes, result } = await post();
-  assert.equal(
-    writes[0].path,
-    "/runner/_temp/sentry-triage-agent-comment-123.md",
-  );
-  assert.equal(writes[0].contents, decorateBody(VERDICT_BODY));
-  assert.equal(result.bodyFile, writes[0].path);
+test("the body reaches gh on stdin, never in argv", async () => {
+  const { calls, result } = await post();
+  assert.equal(calls[0].stdin, decorateBody(VERDICT_BODY));
   assert.ok(!calls[0].args.includes("--body"));
   assert.ok(
     !calls[0].args.some((arg) => arg.includes("upstream-transient")),
     "the body must never appear in gh's argv",
   );
+  assert.ok(
+    !("bodyFile" in result),
+    "the result must not carry a body-file path — there is no file",
+  );
+});
+
+test("REGRESSION #1288 (TOCTOU): what gh receives is what was validated", async () => {
+  // The old shape validated the body, wrote it to a predictable RUNNER_TEMP
+  // path, and let gh read it back. The agent can run a second permitted
+  // command concurrently (`gh issue view --template '<forged>' > that-path &`)
+  // and swap the content inside that window — reproduced end to end, posting a
+  // forged "Regressed in Sentry …" control comment past every fence.
+  //
+  // Run against a REAL temp directory: the body must arrive on stdin, and the
+  // wrapper must leave the directory exactly as it found it. Against the old
+  // shape this fails on both counts.
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-toctou-"));
+  try {
+    const before = readdirSync(dir);
+    let seenStdin = null;
+    await postAgentComment({
+      argv: ["--body", VERDICT_BODY],
+      env: baseEnv({ RUNNER_TEMP: dir }),
+      readPinnedTarget: pin(),
+      runGh: (args, _childEnv, stdin) => {
+        // Stand where gh stands: whatever is readable at this instant is what
+        // gets posted. With stdin there is nothing else to read.
+        seenStdin = stdin;
+        assert.deepEqual(
+          readdirSync(dir),
+          before,
+          "the wrapper must not have created a file for gh to read",
+        );
+        return Promise.resolve("ok\n");
+      },
+    });
+    assert.equal(seenStdin, decorateBody(VERDICT_BODY));
+    assert.deepEqual(readdirSync(dir), before, "no file may survive the post");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a gh failure surfaces instead of being swallowed", async () => {
