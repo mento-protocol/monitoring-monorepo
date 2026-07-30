@@ -136,8 +136,15 @@ export function classifyNoise(rawTitle) {
   return NOISE_PATTERNS.some((pattern) => pattern.test(title));
 }
 
+// The queue's "awaiting a current verdict" marker. Stage B's selector filters
+// on it, the digest classifies on it, and the recovery sweep below keys on it —
+// so it is a named constant here rather than a literal at each use site. The
+// LABEL_DEFINITIONS entry keeps its own literal on purpose (the bootstrap must
+// list every label inline).
+export const NEEDS_TRIAGE_LABEL = "sentry:needs-triage";
+
 export function buildQueueLabels(isNoise) {
-  const labels = ["sentry-triage", "sentry:needs-triage"];
+  const labels = ["sentry-triage", NEEDS_TRIAGE_LABEL];
   if (isNoise) labels.push("sentry:candidate-noise");
   return labels;
 }
@@ -442,6 +449,7 @@ export function buildRunRecordBody(counts, timestampIso) {
     `- Created: ${counts.created}`,
     `- Skipped (existing): ${counts.skippedExisting}`,
     `- Reopened (regressed): ${counts.reopened}`,
+    `- Recovered (stranded needs-triage): ${counts.recovered}`,
     `- Errors: ${counts.errors}`,
   ].join("\n");
 }
@@ -670,8 +678,9 @@ async function ensureLabelsExist(options) {
 }
 
 // Normalize a REST-API issue (lowercase `state`, `pull_request` marker on
-// PRs, `closed_at` for the regression-reopen timestamp gate) into the shape
-// decideDedupAction expects. Exported for tests.
+// PRs, `closed_at` for the regression-reopen timestamp gate, `labels` for the
+// stranded-stub sweep) into the shape decideDedupAction and
+// isStrandedNeedsTriage expect. Exported for tests.
 export function normalizeRestIssues(pages) {
   return (pages ?? [])
     .flat()
@@ -681,6 +690,9 @@ export function normalizeRestIssues(pages) {
       title: issue.title ?? "",
       state: String(issue.state ?? "").toUpperCase(),
       closedAt: issue.closed_at ?? null,
+      labels: (issue.labels ?? [])
+        .map((label) => (typeof label === "string" ? label : label?.name))
+        .filter(Boolean),
     }));
 }
 
@@ -776,10 +788,91 @@ export function buildReopenLabelEditArgs(issueNumber, repo) {
     "-R",
     repo,
     "--add-label",
-    "sentry:needs-triage",
+    NEEDS_TRIAGE_LABEL,
     "--remove-label",
     REOPEN_SHED_LABELS.join(","),
   ];
+}
+
+/**
+ * CLOSED + `sentry:needs-triage` is an unreachable pairing, never a resting
+ * state: Stage B's selector lists `--state open` only, and the regression path
+ * above reopens a closed stub solely when Sentry reports events after
+ * `closedAt`. A stub in this pairing is therefore invisible to every stage —
+ * labeled as awaiting a verdict that nothing will ever produce.
+ *
+ * Several stages can produce it, and the list is open-ended. Both
+ * `gh issue close` compensation paths in `.github/workflows/sentry-triage-agent.yml`
+ * (the `verdict` job's close step and the `project` job's per-row close) restore
+ * `sentry:needs-triage` when the close REPORTS failure — correct when the close
+ * did not happen, wrong when only its response was lost, because a rejected
+ * command is not proof its remote mutation did not happen. The archive leg's
+ * live-regression refusal re-queues a stub it never reopens, and this script's
+ * own reopen sequence writes the label before the state change, so a crash
+ * between the two leaves the same pairing behind. A human can hand-edit it in.
+ *
+ * So the pairing is repaired HERE, from observed state, rather than guarded at
+ * each producer: recovery covers every producer that exists today and every one
+ * added later. Reopening (not stripping the label) is the correct repair —
+ * every producer that writes this pairing meant the stub to be triaged.
+ *
+ * The label edit sheds REOPEN_SHED_LABELS, exactly like the regression reopen,
+ * so a hand-edited stub cannot come back carrying both `sentry:needs-triage`
+ * and a stale verdict — two verdict labels would misclassify it downstream. It
+ * is deliberately NOT the regression comment: that text is the verdict parser's
+ * staleness fence, and a recovery is not a new Sentry occurrence, so a verdict
+ * already posted for this stub stays admissible.
+ */
+export function isStrandedNeedsTriage(issue) {
+  return (
+    issue?.state === "CLOSED" &&
+    (issue?.labels ?? []).includes(NEEDS_TRIAGE_LABEL)
+  );
+}
+
+/** Fixed text — no Sentry-derived or otherwise untrusted input. */
+export function buildStrandedRecoveryComment() {
+  return (
+    "Reopened by the Sentry triage ingest: this queue stub was closed while " +
+    "still carrying `sentry:needs-triage`, a pairing no pipeline stage can " +
+    "see (the triage selector lists open stubs only). Re-queued for triage."
+  );
+}
+
+/**
+ * `runGh` is injectable so the test can drive this exact sequence against a
+ * stateful fake instead of re-implementing it.
+ */
+export async function recoverStrandedQueueIssue(
+  options,
+  existingIssue,
+  deps = {},
+) {
+  const run = deps.runGh ?? runGh;
+  // Same ordering rule as reopenQueueIssue: the state change goes LAST, so a
+  // partial failure leaves the stub closed and still labeled — i.e. still
+  // stranded, still matched by the sweep, retried on the next run — instead of
+  // reopening it into a state the label edit never finished describing.
+  await run(buildReopenLabelEditArgs(existingIssue.number, options.repo), {
+    dryRun: options.dryRun,
+    mutates: true,
+  });
+  await run(
+    [
+      "issue",
+      "comment",
+      String(existingIssue.number),
+      "-R",
+      options.repo,
+      "--body",
+      buildStrandedRecoveryComment(),
+    ],
+    { dryRun: options.dryRun, mutates: true },
+  );
+  await run(
+    ["issue", "reopen", String(existingIssue.number), "-R", options.repo],
+    { dryRun: options.dryRun, mutates: true },
+  );
 }
 
 async function reopenQueueIssue(options, existingIssue, sentryIssue) {
@@ -871,6 +964,7 @@ export async function runIngest(options, deps = {}) {
     ensureLabels = ensureLabelsExist,
     createIssue = createQueueIssue,
     reopenIssue = reopenQueueIssue,
+    recoverStranded = recoverStrandedQueueIssue,
     postRunRecord = defaultPostRunRecord,
     now = () => new Date(),
   } = deps;
@@ -880,6 +974,7 @@ export async function runIngest(options, deps = {}) {
     created: 0,
     skippedExisting: 0,
     reopened: 0,
+    recovered: 0,
     errors: 0,
   };
 
@@ -890,6 +985,11 @@ export async function runIngest(options, deps = {}) {
 
   const existingIssues = await listQueueIssues(options);
   const existingByShortId = indexQueueIssuesByShortId(existingIssues);
+
+  // Numbers this run already reopened through the regression path. The queue
+  // snapshot above predates those reopens, so without this the sweep below
+  // could act a second time on a stub that is already open.
+  const reopenedNumbers = new Set();
 
   for (const sentryIssue of merged.values()) {
     try {
@@ -906,6 +1006,7 @@ export async function runIngest(options, deps = {}) {
         counts.created += 1;
       } else if (decision.action === "reopen") {
         await reopenIssue(options, existingIssue, sentryIssue);
+        reopenedNumbers.add(existingIssue.number);
         counts.reopened += 1;
       }
     } catch (err) {
@@ -913,6 +1014,26 @@ export async function runIngest(options, deps = {}) {
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(
         `Error processing Sentry issue ${sentryIssue.shortId || sentryIssue.id}: ${message}\n`,
+      );
+    }
+  }
+
+  // Stranded-stub sweep (see isStrandedNeedsTriage). It runs over the QUEUE,
+  // not over this run's Sentry results: a stranded stub's Sentry issue is
+  // usually outside the firstSeen lookback and not regressed, so the loop above
+  // never visits it. Same per-item error handling as the loop — one unrecovered
+  // stub must not abort the rest, and the run still exits nonzero.
+  for (const existingIssue of existingIssues) {
+    if (reopenedNumbers.has(existingIssue.number)) continue;
+    if (!isStrandedNeedsTriage(existingIssue)) continue;
+    try {
+      await recoverStranded(options, existingIssue);
+      counts.recovered += 1;
+    } catch (err) {
+      counts.errors += 1;
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `Error recovering stranded queue issue #${existingIssue.number}: ${message}\n`,
       );
     }
   }
@@ -1025,7 +1146,7 @@ async function main() {
     process.stdout.write(`${JSON.stringify(counts, null, 2)}\n`);
   } else {
     process.stdout.write(
-      `Sentry triage ingest: fetched=${counts.fetched} created=${counts.created} skipped-existing=${counts.skippedExisting} reopened=${counts.reopened} errors=${counts.errors}\n`,
+      `Sentry triage ingest: fetched=${counts.fetched} created=${counts.created} skipped-existing=${counts.skippedExisting} reopened=${counts.reopened} recovered=${counts.recovered} errors=${counts.errors}\n`,
     );
   }
   // Per-issue mutation failures are tolerated inside the loop (one bad issue

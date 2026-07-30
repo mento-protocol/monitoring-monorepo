@@ -64,6 +64,8 @@ exposure is bounded to inference-quota abuse.
   labels, closures, and projections.
 - Missing, invalid, stale, or unauthenticated verdicts fail loudly and retain
   `sentry:needs-triage` for retry.
+- A closed queue issue never rests on `sentry:needs-triage`. Stages may write
+  that pairing transiently; ingest reopens it on its next run.
 - Closing a queue issue never resolves or archives its Sentry issue.
 - Autofix opens a PR only. Required CI, review, and merge remain human gates.
 - Archiving requires an explicit human-applied
@@ -114,6 +116,19 @@ bulk:
 Missing or invalid timestamps fail toward re-triage. The strict timestamp gate
 prevents Sentry's long-lived regressed substatus from causing a reopen/close
 loop.
+
+Ingest then sweeps the queue itself, independently of that run's Sentry
+results: a closed stub that still carries `sentry:needs-triage` is reopened,
+its stale verdict/projection/autofix/archive labels shed, and a fixed recovery
+note posted. That pairing is unreachable, never a resting state — Stage B
+selects open stubs only, and the regression gate above reopens a closed stub
+only on fresh Sentry events. Several stages can write it (both `gh issue close`
+compensation paths in the triage agent workflow when a close lands but its
+response is lost, the archive leg's live-regression refusal, a crash inside
+ingest's own reopen sequence, a hand-edit), so it is repaired once here from
+observed state rather than guarded at each producer. Declining a stub means
+removing `sentry:needs-triage`, not closing the stub while it still carries the
+label.
 
 The namespace is separate from the development backlog:
 
@@ -339,7 +354,10 @@ Use all three surfaces:
 2. Actions history for the four workflows above;
 3. repository Actions variables for the literal enable flags.
 
-The run record reports fetched, created, skipped, reopened, and error counts.
+The run record reports fetched, created, skipped, reopened, recovered, and
+error counts. A nonzero recovered count means stubs were found closed while
+still labeled `sentry:needs-triage`; a recurring one points at a producer worth
+investigating, not at the sweep.
 Scheduled workflow failures also route through the repository's main-failure
 notifier. Triage produces a per-run `#engineering` digest. Absence of an
 expected record or digest is itself a signal.

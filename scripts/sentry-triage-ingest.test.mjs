@@ -8,6 +8,7 @@ import {
   buildRegressedComment,
   buildReopenLabelEditArgs,
   buildRunRecordBody,
+  buildStrandedRecoveryComment,
   classifyNoise,
   decideDedupAction,
   defangBackticks,
@@ -16,13 +17,16 @@ import {
   ghPaginate,
   indexQueueIssuesByShortId,
   isSafeNextPageUrl,
+  isStrandedNeedsTriage,
   LABEL_DEFINITIONS,
   mapSentryIssue,
   mergeSentryIssues,
+  NEEDS_TRIAGE_LABEL,
   normalizeRestIssues,
   parseArgs,
   parseLinkHeader,
   PROJECTED_LABEL,
+  recoverStrandedQueueIssue,
   REOPEN_SHED_LABELS,
   resolveLookbackDays,
   resolveTokenGuard,
@@ -722,15 +726,23 @@ await test("ghPaginate fails loud on runaway pagination and non-array responses"
   assert(/non-array/.test(threw.message), "wrong non-array error");
 });
 
-await test("REST issue normalization flattens pages, drops PRs, uppercases state, carries closed_at", () => {
+await test("REST issue normalization flattens pages, drops PRs, uppercases state, carries closed_at + labels", () => {
   const normalized = normalizeRestIssues([
     [
-      { number: 1, title: "[sentry] X-1: a", state: "open" },
+      {
+        number: 1,
+        title: "[sentry] X-1: a",
+        state: "open",
+        labels: [{ name: "sentry-triage" }, { name: "sentry:needs-triage" }],
+      },
       {
         number: 2,
         title: "[sentry] X-2: b",
         state: "closed",
         closed_at: "2026-07-16T12:00:00Z",
+        // Label name strings (not objects) must normalize identically — the
+        // stranded sweep reads this field and a silent [] would make it inert.
+        labels: ["sentry-triage", "sentry:verdict-upstream"],
       },
       {
         number: 3,
@@ -742,14 +754,27 @@ await test("REST issue normalization flattens pages, drops PRs, uppercases state
     [{ number: 4, title: "[sentry] X-4: c", state: "closed" }],
   ]);
   assertDeepEqual(normalized, [
-    { number: 1, title: "[sentry] X-1: a", state: "OPEN", closedAt: null },
+    {
+      number: 1,
+      title: "[sentry] X-1: a",
+      state: "OPEN",
+      closedAt: null,
+      labels: ["sentry-triage", "sentry:needs-triage"],
+    },
     {
       number: 2,
       title: "[sentry] X-2: b",
       state: "CLOSED",
       closedAt: "2026-07-16T12:00:00Z",
+      labels: ["sentry-triage", "sentry:verdict-upstream"],
     },
-    { number: 4, title: "[sentry] X-4: c", state: "CLOSED", closedAt: null },
+    {
+      number: 4,
+      title: "[sentry] X-4: c",
+      state: "CLOSED",
+      closedAt: null,
+      labels: [],
+    },
   ]);
 });
 
@@ -776,7 +801,14 @@ await test("merging new + regressed issues flags regression by ID union", () => 
 
 await test("run record body includes counts and the rolling-comment marker", () => {
   const body = buildRunRecordBody(
-    { fetched: 5, created: 2, skippedExisting: 2, reopened: 1, errors: 0 },
+    {
+      fetched: 5,
+      created: 2,
+      skippedExisting: 2,
+      reopened: 1,
+      recovered: 3,
+      errors: 0,
+    },
     "2026-07-15T05:30:00.000Z",
   );
   assert(
@@ -787,6 +819,10 @@ await test("run record body includes counts and the rolling-comment marker", () 
   assert(body.includes("Created: 2"), "missing created count");
   assert(body.includes("Skipped (existing): 2"), "missing skipped count");
   assert(body.includes("Reopened (regressed): 1"), "missing reopened count");
+  assert(
+    body.includes("Recovered (stranded needs-triage): 3"),
+    "missing recovered count",
+  );
   assert(body.includes("Errors: 0"), "missing errors count");
 });
 
@@ -1066,6 +1102,445 @@ await test("a per-issue error is counted without aborting the whole run", async 
   // a missing run record is the dead-man-switch signal, not a per-issue one.
   assert(recordedCounts !== null, "expected run record to be posted");
   assertEqual(recordedCounts.errors, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Stranded `CLOSED + sentry:needs-triage` recovery (issue #1706).
+//
+// The scenario is a LOST CLOSE RESPONSE: `gh issue close` lands server-side and
+// only its response is lost, so the caller sees a rejection and runs its
+// compensation. A rejected command is not proof its remote mutation did not
+// happen. The fake below is stateful and its `ambiguousOn` hook applies the
+// mutation and THEN throws, which is exactly that. Every assertion is on the
+// observable end state — never on which call rejected.
+// ---------------------------------------------------------------------------
+
+const REPO = "mento-protocol/monitoring-monorepo";
+
+/**
+ * Minimal stateful GitHub the `gh` argv arrays actually mutate, so the real
+ * argument builders (not a re-implementation of them) drive the state.
+ */
+function makeFakeGitHub({ issues = [], ambiguousOn = () => false } = {}) {
+  const state = new Map(
+    issues.map((issue) => [
+      issue.number,
+      {
+        closedAt: null,
+        comments: [],
+        ...issue,
+        labels: [...(issue.labels ?? [])],
+      },
+    ]),
+  );
+  const calls = [];
+
+  const flag = (args, name) => {
+    const at = args.indexOf(name);
+    return at === -1 ? null : args[at + 1];
+  };
+  const splitLabels = (value) =>
+    String(value ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+  const apply = (args) => {
+    const [resource, verb, rawNumber] = args;
+    if (resource !== "issue") throw new Error(`unexpected gh call: ${args[0]}`);
+    const issue = state.get(Number(rawNumber));
+    if (!issue) throw new Error(`unknown issue ${rawNumber}`);
+    if (verb === "edit") {
+      for (const name of splitLabels(flag(args, "--remove-label"))) {
+        issue.labels = issue.labels.filter((label) => label !== name);
+      }
+      for (const name of splitLabels(flag(args, "--add-label"))) {
+        if (!issue.labels.includes(name)) issue.labels.push(name);
+      }
+      return;
+    }
+    if (verb === "comment") {
+      issue.comments.push(flag(args, "--body"));
+      return;
+    }
+    if (verb === "close") {
+      issue.state = "CLOSED";
+      issue.closedAt = "2026-07-20T09:00:00Z";
+      const comment = flag(args, "--comment");
+      if (comment) issue.comments.push(comment);
+      return;
+    }
+    if (verb === "reopen") {
+      issue.state = "OPEN";
+      issue.closedAt = null;
+      return;
+    }
+    throw new Error(`unexpected gh issue subcommand: ${verb}`);
+  };
+
+  const runGh = async (args) => {
+    calls.push(args);
+    // Mutation FIRST, rejection second: the server applied it, the client only
+    // lost the answer.
+    apply(args);
+    if (ambiguousOn(args)) {
+      throw new Error(
+        `gh ${args.join(" ")} failed with exit 1:\nerror connecting to api.github.com`,
+      );
+    }
+    return "";
+  };
+
+  return {
+    calls,
+    runGh,
+    get: (number) => state.get(number),
+    /** The normalized queue snapshot ingest's listQueueIssues would return. */
+    snapshot: () =>
+      [...state.values()].map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        state: issue.state,
+        closedAt: issue.closedAt,
+        labels: [...issue.labels],
+      })),
+    /** Stage B's selector: `--label sentry-triage --label ... --state open`. */
+    selectable: () =>
+      [...state.values()]
+        .filter(
+          (issue) =>
+            issue.state === "OPEN" &&
+            issue.labels.includes("sentry-triage") &&
+            issue.labels.includes(NEEDS_TRIAGE_LABEL),
+        )
+        .map((issue) => issue.number),
+  };
+}
+
+/**
+ * The close-then-compensate shell both producer sites in
+ * `.github/workflows/sentry-triage-agent.yml` run. They differ only in which
+ * job hosts them (the `verdict` job's "Close queue stub" step and the `project`
+ * job's per-row close) and in the exact `labels_to_remove` string; the failure
+ * semantics — restore `sentry:needs-triage`, shed the verdict label and
+ * `sentry:projected`, fail loud — are identical, so one helper models both.
+ */
+async function closeWithCompensation(runGh, { number, labelsToRemove }) {
+  try {
+    await runGh([
+      "issue",
+      "close",
+      String(number),
+      "--repo",
+      REPO,
+      "--reason",
+      "completed",
+      "--comment",
+      "Triage complete: upstream. Ledger entry closed; reopens automatically on Sentry regression.",
+    ]);
+    return "closed";
+  } catch {
+    await runGh([
+      "issue",
+      "edit",
+      String(number),
+      "--repo",
+      REPO,
+      "--remove-label",
+      labelsToRemove,
+      "--add-label",
+      NEEDS_TRIAGE_LABEL,
+    ]);
+    return "compensated";
+  }
+}
+
+/** Ingest deps that see NO Sentry results at all. A stranded stub's Sentry
+ * issue is normally outside the firstSeen lookback and no longer flagged
+ * regressed, so the dedup loop never visits it — recovery has to come from the
+ * queue sweep or from nowhere. */
+function ingestDeps(fake, overrides = {}) {
+  return {
+    fetchMergedSentryIssues: async () => mergeSentryIssues([], []),
+    listQueueIssues: async () => fake.snapshot(),
+    ensureLabels: async () => {},
+    createIssue: async () => {
+      throw new Error("unexpected create in this scenario");
+    },
+    reopenIssue: async () => {
+      throw new Error("unexpected regression reopen in this scenario");
+    },
+    recoverStranded: (options, issue) =>
+      recoverStrandedQueueIssue(options, issue, { runGh: fake.runGh }),
+    postRunRecord: async () => {},
+    now: () => new Date("2026-07-21T05:30:00.000Z"),
+    ...overrides,
+  };
+}
+
+await test("isStrandedNeedsTriage matches only closed stubs still awaiting a verdict", () => {
+  assert(
+    isStrandedNeedsTriage({
+      state: "CLOSED",
+      labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+    }),
+    "closed + needs-triage is the stranded pairing",
+  );
+  assert(
+    !isStrandedNeedsTriage({
+      state: "OPEN",
+      labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+    }),
+    "an open stub awaiting triage is the normal queue state",
+  );
+  assert(
+    !isStrandedNeedsTriage({
+      state: "CLOSED",
+      labels: ["sentry-triage", "sentry:verdict-upstream"],
+    }),
+    "a verdict-closed stub is settled, not stranded",
+  );
+  assert(
+    !isStrandedNeedsTriage({ state: "CLOSED" }),
+    "a stub with no labels field must not be treated as stranded",
+  );
+});
+
+await test("stranded recovery re-queues, sheds stale markers, and changes state last", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: [
+          "sentry-triage",
+          NEEDS_TRIAGE_LABEL,
+          "sentry:verdict-upstream",
+        ],
+      },
+    ],
+  });
+
+  await recoverStrandedQueueIssue(
+    { repo: REPO },
+    { number: 42 },
+    {
+      runGh: fake.runGh,
+    },
+  );
+
+  assertDeepEqual(
+    fake.calls.map((args) => args[1]),
+    ["edit", "comment", "reopen"],
+  );
+  assertDeepEqual(fake.calls[0], buildReopenLabelEditArgs(42, REPO));
+  const issue = fake.get(42);
+  assertEqual(issue.state, "OPEN");
+  assertDeepEqual(issue.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
+  assertDeepEqual(issue.comments, [buildStrandedRecoveryComment()]);
+  // The recovery note must NOT be the regression comment: that exact lead-in is
+  // the verdict parser's staleness fence, and a recovery is not a new Sentry
+  // occurrence, so a verdict already posted for this stub stays admissible.
+  assert(
+    !buildStrandedRecoveryComment().includes("Regressed in Sentry (last seen "),
+    "recovery note must not trip the verdict staleness fence",
+  );
+});
+
+for (const producer of [
+  {
+    name: "the verdict job's close step",
+    labelsToRemove: "sentry:verdict-upstream,sentry:projected",
+  },
+  {
+    name: "the project job's per-row close",
+    labelsToRemove: "sentry:verdict-code-fix,sentry:projected",
+  },
+]) {
+  await test(`ingest recovers a stub stranded by a lost close response at ${producer.name}`, async () => {
+    const verdictLabel = producer.labelsToRemove.split(",")[0];
+    const fake = makeFakeGitHub({
+      issues: [
+        {
+          number: 42,
+          title: buildQueueTitle("X-42", "web", "error"),
+          state: "OPEN",
+          labels: ["sentry-triage", verdictLabel],
+        },
+      ],
+      // The close is the ambiguous call: it lands, then its response is lost.
+      ambiguousOn: (args) => args[1] === "close",
+    });
+
+    const outcome = await closeWithCompensation(fake.runGh, {
+      number: 42,
+      labelsToRemove: producer.labelsToRemove,
+    });
+
+    // End state after the lost response: the stub is CLOSED (the mutation
+    // landed) AND wearing sentry:needs-triage (the compensation ran on the
+    // rejection). That pairing is invisible to Stage B.
+    assertEqual(outcome, "compensated");
+    assertEqual(fake.get(42).state, "CLOSED");
+    assert(
+      fake.get(42).labels.includes(NEEDS_TRIAGE_LABEL),
+      "compensation should have restored the needs-triage label",
+    );
+    assertDeepEqual(fake.selectable(), []);
+
+    const counts = await runIngest(
+      { repo: REPO, trackerIssue: 1282 },
+      ingestDeps(fake),
+    );
+
+    // The next scheduled ingest repairs it from observed state.
+    assertEqual(counts.recovered, 1);
+    assertEqual(counts.errors, 0);
+    const issue = fake.get(42);
+    assertEqual(issue.state, "OPEN");
+    assertDeepEqual(issue.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
+    assertDeepEqual(fake.selectable(), [42]);
+  });
+}
+
+await test("stranded recovery terminates: a second ingest run is a no-op", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+  });
+
+  const first = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+  const second = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+
+  assertEqual(first.recovered, 1);
+  // Reopened, so no longer stranded: the sweep cannot cycle a stub it already
+  // fixed, and it never fights the regression gate (which only ever sees stubs
+  // whose needs-triage label the verdict step already removed).
+  assertEqual(second.recovered, 0);
+  assertEqual(fake.get(42).comments.length, 1);
+});
+
+await test("the sweep leaves settled and healthy queue stubs alone", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 10,
+        title: buildQueueTitle("X-10", "web", "error"),
+        state: "CLOSED",
+        closedAt: "2026-07-18T00:00:00Z",
+        labels: ["sentry-triage", "sentry:verdict-upstream"],
+      },
+      {
+        number: 11,
+        title: buildQueueTitle("X-11", "web", "error"),
+        state: "OPEN",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+      {
+        number: 12,
+        title: buildQueueTitle("X-12", "web", "error"),
+        state: "CLOSED",
+        closedAt: "2026-07-18T00:00:00Z",
+        labels: ["sentry-triage", "sentry:verdict-upstream", "sentry:archived"],
+      },
+    ],
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+
+  assertEqual(counts.recovered, 0);
+  assertDeepEqual(fake.calls, []);
+});
+
+await test("a stub reopened by the regression path is not swept a second time", async () => {
+  const sentryIssue = mapSentryIssue({
+    id: 9,
+    shortId: "X-9",
+    lastSeen: "2026-07-20T00:00:00Z",
+  });
+  // The pairing ingest's own reopen leaves behind when it crashes between the
+  // label edit and the state change: closed, already re-labeled needs-triage.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 200,
+        title: buildQueueTitle("X-9", "unknown", "error"),
+        state: "CLOSED",
+        closedAt: "2026-07-19T00:00:00Z",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+  });
+  let reopened = 0;
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, {
+      fetchMergedSentryIssues: async () => mergeSentryIssues([], [sentryIssue]),
+      reopenIssue: async (options, existingIssue) => {
+        reopened += 1;
+        assertEqual(existingIssue.number, 200);
+        await fake.runGh(["issue", "reopen", "200", "-R", REPO]);
+      },
+    }),
+  );
+
+  assertEqual(reopened, 1);
+  assertEqual(counts.reopened, 1);
+  assertEqual(counts.recovered, 0);
+  assertEqual(fake.get(200).state, "OPEN");
+});
+
+await test("one unrecoverable stub is counted without stranding the rest", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+      {
+        number: 43,
+        title: buildQueueTitle("X-43", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, {
+      recoverStranded: async (options, issue) => {
+        if (issue.number === 42) throw new Error("gh issue edit failed");
+        await recoverStrandedQueueIssue(options, issue, { runGh: fake.runGh });
+      },
+    }),
+  );
+
+  assertEqual(counts.recovered, 1);
+  // Nonzero errors is what makes the scheduled run go red and fire the
+  // Slack-on-failure notifier.
+  assertEqual(counts.errors, 1);
+  assertEqual(fake.get(43).state, "OPEN");
+  assertEqual(fake.get(42).state, "CLOSED");
 });
 
 if (failed > 0) {
