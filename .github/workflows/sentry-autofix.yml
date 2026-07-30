@@ -1061,13 +1061,27 @@ jobs:
             --incomplete "${incomplete}")
 
           # Rolling comment: PATCH the existing marker-bearing comment if present,
-          # else create it. Every write tolerates failure (|| true) so a tracker
-          # hiccup never reds the run — a MISSING record is itself the signal.
-          marker='<!-- sentry-autofix:run-record:v1 -->'
-          existing_id=$(gh api "repos/${REPO}/issues/${TRACKER_ISSUE}/comments" --paginate \
-            --jq "[.[] | select(.body != null and (.body | contains(\"${marker}\")))][0].id // empty" \
-            2>/dev/null || true)
-          if [ -n "${existing_id}" ]; then
+          # else create it. Selection is author-fenced + prefix-anchored
+          # (select-run-record-id -> selectMarkedComment, the shared helper in
+          # scripts/sentry-triage-project-core.mjs also used by the ingest's own
+          # run-record write path) so a drive-by comment planting the marker
+          # anywhere in its body is never selected as the record — this repo is
+          # public and #1282 is open. Every write tolerates failure (|| true) so
+          # a tracker hiccup never reds the run — a MISSING record is itself the
+          # signal.
+          #
+          # `--slurp` wraps every page in one outer JSON array (mirroring how
+          # scripts/pr-ready-state.mjs already combines paginated `gh api`
+          # output) — plain `--paginate` alone prints each page as a separate,
+          # adjacent JSON value, which is NOT one valid JSON document once the
+          # tracker issue passes its first page of comments, and would make
+          # every run fail to find the existing record and spam a fresh one.
+          gh api "repos/${REPO}/issues/${TRACKER_ISSUE}/comments" --paginate --slurp \
+            > "${RUNNER_TEMP}/run-record-comments.json" 2>/dev/null \
+            || echo '[]' > "${RUNNER_TEMP}/run-record-comments.json"
+          existing_id=$(node scripts/sentry-autofix-finalize.mjs select-run-record-id \
+            --comments-file "${RUNNER_TEMP}/run-record-comments.json")
+          if [ "${existing_id}" != "none" ]; then
             gh api -X PATCH "repos/${REPO}/issues/comments/${existing_id}" \
               -f "body=${body}" >/dev/null 2>&1 || true
           else

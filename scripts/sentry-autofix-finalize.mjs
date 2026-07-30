@@ -47,6 +47,7 @@ import {
 } from "./sentry-triage-ingest.mjs";
 import {
   isValidShortId,
+  selectMarkedComment,
   selectVerdictComment,
   verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
@@ -544,9 +545,10 @@ export function buildStaleVerdictCloseComment() {
 // autofix leg also leaves a durable per-run record on the pipeline tracker
 // issue — the ADR 0036 observability invariant (every run leaves a record, so a
 // silently-dead schedule is detectable even when the leg is disabled,
-// unprovisioned, or finds zero candidates). This module only BUILDS the body
-// (pure); the workflow's always-run record job does the best-effort
-// rolling-comment upsert keyed by the marker below.
+// unprovisioned, or finds zero candidates). This module BUILDS the body and
+// SELECTS the existing comment to update (both pure); the workflow's
+// always-run record job does the best-effort rolling-comment upsert via the
+// `select-run-record-id` CLI command below.
 // ---------------------------------------------------------------------------
 
 export const AUTOFIX_RUN_RECORD_MARKER =
@@ -732,6 +734,14 @@ Commands:
   run-record --timestamp <iso> --trigger <t> --disposition <d> \\
              --candidates <n> --opened <n> --refused <n> --incomplete <n>
       Print the tracker run-record comment body (rolling comment, marker-keyed).
+  select-run-record-id --comments-file <path>
+      Print the numeric id of the tracker issue's existing rolling run-record
+      comment (trusted-author + prefix-anchored, selectMarkedComment),
+      or "none" if there isn't one yet. The file holds the tracker issue's
+      comments as produced by \`gh api ... --paginate --slurp\` (an array of
+      per-page arrays/objects — flattened here before selecting). Fail-closed:
+      prints "none" on any parse failure so the workflow creates a fresh
+      comment rather than guessing.
   -h, --help
 `;
 }
@@ -860,6 +870,42 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
           refused: readFlag(args, "--refused"),
           incomplete: readFlag(args, "--incomplete"),
         })}\n`,
+      );
+      return;
+    }
+    case "select-run-record-id": {
+      // Fail-closed: any read/parse failure prints "none", the same as a
+      // genuinely absent record — the workflow then creates a fresh comment
+      // rather than guessing at an id, which is safe (worst case a stray
+      // rolling comment, never a defaced one).
+      //
+      // The workflow feeds this from `gh api ... --paginate --slurp`
+      // (mirroring the flatten `ghApiJsonPages`/`ghApiJsonPagesResult` in
+      // scripts/pr-ready-state.mjs already do for the same gh flag pair): each
+      // page is a separate JSON array or object, `--slurp` wraps them in one
+      // outer array, and PLAIN `--paginate` alone concatenates pages as
+      // adjacent JSON values with no wrapper — `JSON.parse` throws on more
+      // than one page, which fails closed here but would spam a fresh comment
+      // on every run once the tracker issue passes its first page of
+      // comments. Flatten every page-array (or lone object) into one flat
+      // comments list before selecting.
+      let comments;
+      try {
+        const parsed = JSON.parse(
+          readFileMaybe(readFlag(args, "--comments-file")),
+        );
+        comments = Array.isArray(parsed)
+          ? parsed.flatMap((page) => (Array.isArray(page) ? page : [page]))
+          : [];
+      } catch {
+        stdout.write("none\n");
+        return;
+      }
+      const existing = selectMarkedComment(comments, AUTOFIX_RUN_RECORD_MARKER);
+      stdout.write(
+        existing && /^\d+$/.test(String(existing.id))
+          ? `${existing.id}\n`
+          : "none\n",
       );
       return;
     }

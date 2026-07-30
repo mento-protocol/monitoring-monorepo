@@ -27,6 +27,7 @@ import {
   runProjectionBatch,
   sanitizeDuplicateIds,
   sanitizeFreeText,
+  selectMarkedComment,
   selectVerdictComment,
   validateAffectedRepo,
   verdictCommentIdFromUrl,
@@ -573,6 +574,72 @@ await test("isTrustedComment accepts both bot login shapes, rejects others and m
     "expected other author untrusted",
   );
   assert(!isTrustedComment({}), "expected missing author to fail closed");
+});
+
+// ---------------------------------------------------------------------------
+// selectMarkedComment: the shared fence primitive behind every rolling
+// run-record writer (the ingest's defaultPostRunRecord call against
+// RUN_RECORD_MARKER, and the autofix leg's select-run-record-id CLI call
+// against AUTOFIX_RUN_RECORD_MARKER, both delegate here) so a single bug fix
+// here fixes both writers — and a single regression here breaks both, hence
+// the direct coverage.
+// ---------------------------------------------------------------------------
+
+const MARKER = "<!-- test:marker:v1 -->";
+
+await test("selectMarkedComment returns null for an undefined comments list", () => {
+  assertEqual(selectMarkedComment(undefined, MARKER), null);
+});
+
+await test("selectMarkedComment returns null for a null comments list", () => {
+  assertEqual(selectMarkedComment(null, MARKER), null);
+});
+
+await test("selectMarkedComment skips a comment with a non-string body", () => {
+  const comments = [
+    { body: null, author: { login: "github-actions" } },
+    { body: undefined, author: { login: "github-actions" } },
+    { body: 42, author: { login: "github-actions" } },
+  ];
+  assertEqual(selectMarkedComment(comments, MARKER), null);
+});
+
+await test("selectMarkedComment rejects a trusted comment where the marker is present but not at position 0", () => {
+  const comments = [
+    {
+      body: `Some chatter first.\n\n${MARKER}`,
+      author: { login: "github-actions" },
+    },
+  ];
+  assertEqual(selectMarkedComment(comments, MARKER), null);
+});
+
+await test("selectMarkedComment rejects an untrusted author even with a correctly anchored marker", () => {
+  const comments = [
+    {
+      body: `${MARKER}\n\nDrive-by defacement.`,
+      author: { login: "drive-by-user" },
+    },
+  ];
+  assertEqual(selectMarkedComment(comments, MARKER), null);
+});
+
+await test("selectMarkedComment selects the trusted, prefix-anchored comment (happy path)", () => {
+  const comments = [
+    {
+      id: 999,
+      body: `${MARKER}\n\nDrive-by defacement.`,
+      author: { login: "drive-by-user" },
+    },
+    {
+      id: 1,
+      body: `${MARKER}\n\n**Run record:** now`,
+      author: { login: "github-actions" },
+    },
+  ];
+  const selected = selectMarkedComment(comments, MARKER);
+  assert(selected !== null, "expected the genuine record to be selected");
+  assertEqual(selected.id, 1);
 });
 
 await test("selectVerdictComment returns the newest verdict comment", () => {
