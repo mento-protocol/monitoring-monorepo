@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import {
   APPROVED_ARCHIVE_LABEL,
   ARCHIVED_LABEL,
+  buildRegressedComment,
   LABEL_DEFINITIONS,
   neutralizeUntrusted,
   REOPEN_SHED_LABELS,
@@ -351,11 +352,34 @@ export function isActivelyRegressing(issue) {
 }
 
 /** Fixed refusal comment for the live-regression path (no marker — this stub is
- * re-queued, not settled). `shortId` is Sentry-assigned but still neutralized as
- * defense in depth. */
-export function buildRegressionRefusalComment(shortId) {
+ * re-queued, not settled).
+ *
+ * THE FIRST LINE IS LOAD-BEARING. It is `buildRegressedComment`, so the body
+ * starts with REGRESSION_PREFIX and `selectVerdictComment`
+ * (scripts/sentry-triage-project-core.mjs) reads this comment as a regression
+ * fence. Without it the re-queued stub still carries the PREVIOUS round's
+ * verdict comment as the newest admissible verdict: when the next triage agent
+ * leg dies before posting, the `verdict` job (which runs on `always()`) accepts
+ * that stale verdict, relabels the stub and closes it — burying a regression
+ * Sentry explicitly reported.
+ *
+ * The fence belongs to THIS path, not to every re-queue. A re-queue caused by
+ * new Sentry events makes any prior verdict stale by definition. A bookkeeping
+ * re-queue — a close whose response was lost, repaired by ingest's stranded-stub
+ * sweep — must NOT fence: nothing about the Sentry issue changed, the prior
+ * verdict is still valid, and fencing it would discard a good verdict and force
+ * a pointless re-triage. Any future refusal path that re-queues on SENTRY
+ * evidence needs this same first line; one that re-queues for a bookkeeping
+ * reason must not have it.
+ *
+ * `shortId` is Sentry-assigned but still neutralized as defense in depth;
+ * `lastSeen` is neutralized and bounded inside `buildRegressedComment`.
+ */
+export function buildRegressionRefusalComment(shortId, lastSeen) {
   const safeShortId = truncateTitle(neutralizeUntrusted(shortId), 90);
   return [
+    buildRegressedComment(lastSeen),
+    "",
     `**Not archived.** The underlying Sentry issue \`${safeShortId}\` currently`,
     "shows a live regression/escalation (new events since triage). Archiving it",
     "now would close this stub over that regression and reset Sentry's escalation",
@@ -730,7 +754,7 @@ export async function runArchive(options, deps = {}) {
       "-R",
       repo,
       "--body",
-      buildRegressionRefusalComment(meta.shortId),
+      buildRegressionRefusalComment(meta.shortId, current.lastSeen),
     ]);
     await runGh([
       "issue",

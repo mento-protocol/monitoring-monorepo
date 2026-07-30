@@ -336,6 +336,15 @@ refuses a currently regressed/escalating issue, and uses the documented issue
 update API to set `archived_until_escalating`. It then records the approver
 and timestamp, applies `sentry:archived`, and closes the queue issue.
 
+The regression refusal re-queues the stub, and its comment opens with the
+regression fence line so the verdict parser reads the previous round's verdict
+as stale. That is the general rule for every re-queue: one caused by new Sentry
+events must fence, because any prior verdict described the old occurrence; one
+caused by bookkeeping — the stranded-stub sweep above — must not, because
+nothing about the Sentry issue changed and that verdict is still valid. Drop the
+fence and a triage round that dies before posting lets the `verdict` job
+re-apply the previous verdict and close the stub over a live regression.
+
 If approval disappears during the mutation window, the script attempts to
 restore the Sentry issue to unresolved and leaves the queue issue available for
 fresh triage. A later Sentry escalation also reopens and cleans the queue stub.

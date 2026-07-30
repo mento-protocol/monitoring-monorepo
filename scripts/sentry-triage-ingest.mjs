@@ -818,10 +818,17 @@ export function buildReopenLabelEditArgs(issueNumber, repo) {
  *
  * The label edit sheds REOPEN_SHED_LABELS, exactly like the regression reopen,
  * so a hand-edited stub cannot come back carrying both `sentry:needs-triage`
- * and a stale verdict — two verdict labels would misclassify it downstream. It
- * is deliberately NOT the regression comment: that text is the verdict parser's
- * staleness fence, and a recovery is not a new Sentry occurrence, so a verdict
- * already posted for this stub stays admissible.
+ * and a stale verdict — two verdict labels would misclassify it downstream.
+ *
+ * The recovery note is deliberately NOT the regression comment: that text is
+ * the verdict parser's staleness fence, and this repair is bookkeeping rather
+ * than a new Sentry occurrence, so a verdict already posted for this stub stays
+ * valid and admissible. The counterpart rule lives on the producer that DOES
+ * know a regression happened — buildRegressionRefusalComment in
+ * scripts/sentry-triage-archive.mjs opens with the fence precisely because
+ * Sentry reported new events there. Fencing here would throw away good
+ * verdicts; not fencing there would close a stub over a live regression. The
+ * two cases are decided at their sources; do not collapse them here.
  */
 export function isStrandedNeedsTriage(issue) {
   return (
