@@ -200,7 +200,10 @@ read-only `sentry-triage-tools` directory under `$RUNNER_TEMP`, and the agent's
 `--allowedTools` grant names **that** path, never `scripts/`.
 `scripts/sentry-triage-agent-comment.test.mjs` recomputes the closure from the
 source and fails if the staging list stops matching it, so the attack cannot
-move one file over. The agent job's checkout also sets
+move one file over. `scripts/sentry-mcp-broker.mjs` is staged alongside it even
+though no grant names it: the rule for this job is that it executes nothing from
+the agent-writable checkout, and a rule with an ordering caveat is one refactor
+away from being wrong. The agent job's checkout also sets
 `persist-credentials: false`, matching the autofix agent job.
 
 **The agent job ends with the agent.** Immutable copies alone would not be
@@ -222,8 +225,9 @@ and that no credential-bearing work follows it.
 The wrapper also refuses a body that does not start with the
 verdict marker and a body carrying its own authorship marker; it appends
 `<!-- sentry-triage-agent-authored:v1 -->` and pipes the result into
-`gh --body-file -` on stdin, handing `gh` an allowlisted environment that
-carries neither the Sentry token nor the Claude OAuth token. Deterministic
+`gh --body-file -` on stdin, handing `gh` an allowlisted environment that drops
+the Claude OAuth token (and would drop a Sentry token, which since #1711 is not
+in that environment to begin with). Deterministic
 scripts and the agent share the `github-actions[bot]` identity, so that marker
 — and the required verdict-marker prefix — are what separate agent text from
 pipeline text.
@@ -237,21 +241,79 @@ forged `Regressed in Sentry …` control comment past every fence. No check
 closes a check-then-use window on a path the attacker can write — removing the
 file removes the window. Do not reintroduce an intermediate file for the body.
 
-**Credential exfiltration is not contained here, and the wrapper does not claim
-to contain it.** `SENTRY_TRIAGE_TOKEN` must sit in job env for the Sentry MCP
-server's `${VAR}` expansion, and `claude-code-action` puts the Claude OAuth
-token in the same process env, so both are live in the agent's Bash. A
-successful prompt injection can put either in a public queue comment. The
-wrapper refuses a body reproducing a token verbatim, which catches the common
-accident — prose that quotes an environment value or a failed command's output
-— but it is not a leak control: the agent writes the shell command, and bash
-expands and transforms `$VAR` before the wrapper sees argv, so a spliced or
-split value passes. Exact-value scanning is the wrong layer when the adversary
-controls the shell. Closing this needs the credential out of the agent's process
-env: per-step or first-class MCP env forwarding, which `claude-code-action` does
-not offer at the pinned v1.0.179, or a local credential broker the MCP server
-talks to so the agent holds no Sentry token at all. Both tokens are read-only or
-inference scoped, and any use lands in an auditable public comment.
+**The Sentry credential is out of the agent's process env** (issue #1711).
+The wrapper's verbatim-token refusal was never a leak control and must not be
+described as one: the agent writes its own shell command, and bash expands and
+transforms `$VAR` before the wrapper sees argv, so a spliced or split value
+passes. Exact-value scanning is the wrong layer when the adversary controls the
+shell. The fix removes the credential instead. See
+[the credential broker](#the-credential-broker) below.
+
+`CLAUDE_CODE_OAUTH_TOKEN` is the remaining credential in the agent's Bash, and
+it stays there: `claude-code-action` places it in that process env itself, and
+the pinned v1.0.179 offers no per-step or first-class MCP env forwarding to move
+it (upstream's only release tag is `v1`, Aug 2025 — there is no newer version to
+adopt). Accepted with its bounding: it is inference-only, so worst case is
+inference-quota abuse, not repo or queue compromise, and any use lands in an
+auditable public comment. Re-check on the next action bump.
+
+### The credential broker
+
+[ADR 0056](../adr/0056-agent-mcp-credential-broker.md) owns the decision and its
+accepted residuals; this is the mechanism.
+
+A trusted step in the triage job — before the agent, holding
+`SENTRY_TRIAGE_TOKEN` step-scoped — starts `scripts/sentry-mcp-broker.mjs` on
+`127.0.0.1:9401` and mints an opaque per-run handle with `openssl rand -hex 32`.
+The agent step receives the handle through `$GITHUB_ENV` and no Sentry
+credential. Its Sentry MCP server runs with
+`--host 127.0.0.1:9401 --insecure-http` and the handle as `SENTRY_ACCESS_TOKEN`;
+the broker validates the handle, swaps in the real token and forwards to
+`https://us.sentry.io`. `--insecure-http` is CLI-only, `SENTRY_URL` must be HTTPS
+and cannot combine with it, and `SENTRY_HOST` takes a bare hostname — so the
+loopback wiring lives in the MCP server's `args` and `SENTRY_HOST` is gone with
+the token. `$GITHUB_ENV` carries the handle and never the token: it exposes a
+value to every later step, which is right for an authenticator that only works
+against a loopback process on this runner and wrong for a credential.
+
+The broker refuses anything that is not a GET on an allow-listed path with the
+exact handle, and refuses to relay an upstream redirect (the MCP client would
+follow it with the handle, off the broker). It also rewrites `links.regionUrl`
+on organization payloads to its own origin — a correctness fix, not hardening:
+Sentry returns `https://us.sentry.io` there, and both the MCP server's internal
+`trace`/`span` path and its `find_organizations` output steer subsequent reads
+off the broker with it. `links.organizationUrl` is left alone so verdict
+comments keep real Sentry permalinks.
+
+**The handle is not a second secret, and that is load-bearing.** Three
+allow-listed tools (`find_projects`, `search_issues`, `search_events`) take an
+agent-controlled `regionUrl`, and the MCP server's `validateRegionUrl` accepts
+the base host plus a hardcoded `{sentry.io, us.sentry.io, de.sentry.io}`, keeps
+only the host and re-applies its own protocol — `http` under `--insecure-http`.
+So an injected agent can send its `Authorization` header to
+`http://us.sentry.io/api/0/...` in cleartext, past the broker. Sentry egress is
+not closed on the runner and this design does not assume it is. What leaks there
+is the handle, which authenticates only to a `127.0.0.1`-bound process that dies
+with the runner, so it is worth nothing off-runner or after the run.
+
+There is deliberately **no stop step**. The triage job must end with the agent —
+the agent can append `BASH_ENV=<payload it wrote>` to `$GITHUB_ENV`, and any
+later step's bash would source that payload before its own command, escaping the
+permission allowlist entirely. The broker bounds its own life with
+`SENTRY_MCP_BROKER_TTL_SECONDS` instead (set to the job timeout), on a runner
+that is destroyed with the job.
+
+**Re-derive the path allowlist on a `@sentry/mcp-server` bump.** It is the
+empirical closure of the granted tools, not a guess from tool names: point the
+pinned MCP server at a capture server with
+`--host 127.0.0.1:<port> --insecure-http`, drive every granted tool over stdio
+(including `get_sentry_resource` across its whole `resourceType` enum and
+`search_events` across every dataset) and collect the request paths. At 0.37.0
+only five of the ten names in `--allowedTools` exist — `find_organizations`,
+`find_projects`, `search_issues`, `search_events`, `get_sentry_resource`; the
+other five are inert grants kept in case a bump restores them. A path the broker
+refuses fails the triage leg loudly with the path named in its log, so a stale
+allowlist is visible rather than silent.
 
 The deterministic parser accepts only comments from
 `github-actions[bot]`. After a regression reopen, it accepts only a verdict

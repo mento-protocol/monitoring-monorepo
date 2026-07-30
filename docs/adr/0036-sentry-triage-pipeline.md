@@ -61,7 +61,9 @@ trust is earned in phases, and Codex remains the independent PR reviewer.**
   Sentry and are fetched at triage time; noise heuristics run on the raw
   payload in-memory only, and only the resulting label is public.
 - **Stage B — read-only agent triage:** per queue issue, a claude-code-action
-  agent (Sentry MCP stdio, read-only token) posts a structured verdict comment
+  agent (Sentry MCP stdio, read-only token reached through the loopback
+  credential broker of [ADR 0056](0056-agent-mcp-credential-broker.md), so the
+  agent's own env holds no Sentry credential) posts a structured verdict comment
   (`code-fix` / `config-fix` / `upstream-transient` / `needs-human`).
   Sentry payloads are treated as untrusted input (prompt-injection surface):
   the investigating agent's only write is that comment — **verdict labels are

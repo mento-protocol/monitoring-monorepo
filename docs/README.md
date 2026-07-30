@@ -181,6 +181,7 @@ Authority: canonical
 - [`docs/adr/0053-explicit-deployment-source-staging.md`](adr/0053-explicit-deployment-source-staging.md) — Routine GCP deploys use explicit source-staging buckets
 - [`docs/adr/0054-same-project-peg-policy-artifact.md`](adr/0054-same-project-peg-policy-artifact.md) — Peg policy stays private in the monitoring project
 - [`docs/adr/0055-peg-policy-bucket-controller-recovery.md`](adr/0055-peg-policy-bucket-controller-recovery.md) — Peg policy bucket controller recovers authoritative IAM reconciliation
+- [`docs/adr/0056-agent-mcp-credential-broker.md`](adr/0056-agent-mcp-credential-broker.md) — An untrusted agent's MCP credentials sit behind a loopback broker, not in its env
 
 Authority: non-canonical
 
