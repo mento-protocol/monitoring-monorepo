@@ -1007,9 +1007,34 @@ export function buildStrandedRecoveryComment() {
   );
 }
 
+/** Live state of one queue stub, for the sweep's pre-mutation revalidation. */
+async function readQueueIssueState(options, issueNumber, runner) {
+  const run = runner ?? ((args) => runGh(args, {}));
+  const stdout = await run([
+    "issue",
+    "view",
+    String(issueNumber),
+    "-R",
+    options.repo,
+    "--json",
+    "number,state,labels",
+  ]);
+  const data = stdout && stdout.trim() ? JSON.parse(stdout) : {};
+  return {
+    number: data.number,
+    state: String(data.state ?? "").toUpperCase(),
+    labels: (data.labels ?? [])
+      .map((label) => (typeof label === "string" ? label : label?.name))
+      .filter(Boolean),
+  };
+}
+
 /**
  * `runGh` is injectable so the test can drive this exact sequence against a
  * stateful fake instead of re-implementing it.
+ *
+ * Returns `{ recovered }` — false when the live re-read no longer shows the
+ * stranded pairing, which is a normal no-op, not a failure.
  */
 export async function recoverStrandedQueueIssue(
   options,
@@ -1017,6 +1042,32 @@ export async function recoverStrandedQueueIssue(
   deps = {},
 ) {
   const run = deps.runGh ?? runGh;
+
+  // REVALIDATE before mutating. The queue snapshot this stub came from was
+  // taken before the whole Sentry loop ran, and ingest holds its own concurrency
+  // group, so minutes can pass — long enough for the premise to stop being true.
+  //
+  // The premise that matters is a human's: removing `sentry:needs-triage` is the
+  // DOCUMENTED way to decline a stub, so re-adding it off a stale snapshot
+  // reverses exactly the action the runbook prescribes. Acting only on what the
+  // stub still shows makes the sweep's decision as fresh as its write.
+  //
+  // A failed read is NOT treated as permission to proceed: it propagates, the
+  // stub stays stranded and visible to the next run, and the run goes nonzero.
+  // Recovering blind is how a snapshot-driven mutation becomes a snapshot-driven
+  // mistake.
+  const live = await readQueueIssueState(
+    options,
+    existingIssue.number,
+    deps.runGh,
+  );
+  if (!isStrandedNeedsTriage(live)) {
+    process.stderr.write(
+      `::notice::Queue issue #${existingIssue.number} is no longer closed-and-needing-triage (state=${live.state}, labels=${live.labels.join(",") || "none"}); leaving it as the current state describes.\n`,
+    );
+    return { recovered: false };
+  }
+
   // Same ordering rule as reopenQueueIssue: the state change goes LAST, so a
   // partial failure leaves the stub closed and still labeled — i.e. still
   // stranded, still matched by the sweep, retried on the next run — instead of
@@ -1041,6 +1092,7 @@ export async function recoverStrandedQueueIssue(
     ["issue", "reopen", String(existingIssue.number), "-R", options.repo],
     { dryRun: options.dryRun, mutates: true },
   );
+  return { recovered: true };
 }
 
 /**
@@ -1090,16 +1142,34 @@ export async function reopenQueueIssue(
   // pairing, but FENCED, which the sweep reopens without loss).
   //
   // Posting first widens the window in which a retry could re-post the fence,
-  // so the post is guarded by an exact-body check. That is safe in the only
-  // direction that matters: an identical body means an identical `lastSeen`,
-  // and the reopen gate (lastSeen > closedAt) cannot fire twice for one
-  // `lastSeen` with a verdict in between — a verdict implies a later close,
-  // which puts closedAt past that lastSeen. So the guard can only suppress a
-  // duplicate of a fence that is already in place, never a fence a new
-  // occurrence needs.
-  const alreadyFenced = (
-    await fetchIssueCommentBodies(options, existingIssue.number, deps.runGh)
-  ).includes(fence);
+  // so the post is guarded by an exact-body check — but ONLY when `lastSeen`
+  // parses, because that is the sole thing making the body identify a specific
+  // occurrence.
+  //
+  // With a usable timestamp the guard is safe in the direction that matters: an
+  // identical body means an identical `lastSeen`, and the reopen gate
+  // (lastSeen > closedAt) cannot fire twice for one `lastSeen` with a verdict in
+  // between — a verdict implies a later close, which puts closedAt past that
+  // lastSeen. The guard can then only suppress a duplicate of a fence already in
+  // place.
+  //
+  // A MISSING or UNPARSABLE `lastSeen` destroys that argument at both ends, and
+  // it is not a hypothetical: decideDedupAction deliberately fails open there
+  // and reopens on EVERY closed observation, while buildRegressedComment renders
+  // the same constant body every time. Identical bodies then prove nothing about
+  // which occurrence they belong to, so round two would find round one's comment
+  // and skip its own fence — leaving round one's VERDICT (posted after that
+  // fence) newest-admissible over a fresh occurrence. Whenever the timestamp
+  // cannot establish belonging, always post: a duplicate fence is noise, a
+  // missing one buries a regression.
+  const fenceIdentifiesOccurrence = !Number.isNaN(
+    Date.parse(sentryIssue.lastSeen ?? ""),
+  );
+  const alreadyFenced =
+    fenceIdentifiesOccurrence &&
+    (
+      await fetchIssueCommentBodies(options, existingIssue.number, deps.runGh)
+    ).includes(fence);
   if (alreadyFenced) {
     process.stderr.write(
       `::notice::Regression fence for ${sentryIssue.lastSeen} already present on #${existingIssue.number}; not re-posting.\n`,
@@ -1293,8 +1363,10 @@ export async function runIngest(options, deps = {}) {
     if (claimedBySentryPath.has(existingIssue.number)) continue;
     if (!isStrandedNeedsTriage(existingIssue)) continue;
     try {
-      await recoverStranded(options, existingIssue);
-      counts.recovered += 1;
+      // A revalidation no-op is not a recovery; only count real ones so the run
+      // record cannot read as activity that never happened.
+      const outcome = await recoverStranded(options, existingIssue);
+      if (outcome?.recovered !== false) counts.recovered += 1;
     } catch (err) {
       counts.errors += 1;
       const message = err instanceof Error ? err.message : String(err);

@@ -1758,6 +1758,17 @@ function makeFakeGitHub({
         (state.get(number)?.comments ?? []).map((body) => ({ body })),
       );
     }
+    // A read: the sweep's pre-mutation revalidation. Serves LIVE state, so a
+    // test can mutate the model after the snapshot and watch the sweep notice.
+    if (args[0] === "issue" && args[1] === "view") {
+      if (rejectOn(args)) throw fail(args);
+      const issue = state.get(Number(args[2]));
+      return JSON.stringify({
+        number: issue?.number,
+        state: issue?.state,
+        labels: (issue?.labels ?? []).map((name) => ({ name })),
+      });
+    }
     // The process died before the call reached GitHub: nothing applied.
     if (rejectOn(args)) throw fail(args);
     // Mutation FIRST, rejection second: the server applied it, the client only
@@ -1906,11 +1917,13 @@ await test("stranded recovery re-queues, sheds stale markers, and changes state 
     },
   );
 
+  // The revalidating read comes FIRST — the sweep decides on live state, never
+  // on the snapshot it was handed — and the state change still comes last.
   assertDeepEqual(
     fake.calls.map((args) => args[1]),
-    ["edit", "comment", "reopen"],
+    ["view", "edit", "comment", "reopen"],
   );
-  assertDeepEqual(fake.calls[0], buildReopenLabelEditArgs(42, REPO));
+  assertDeepEqual(fake.calls[1], buildReopenLabelEditArgs(42, REPO));
   const issue = fake.get(42);
   assertEqual(issue.state, "OPEN");
   assertDeepEqual(issue.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
@@ -2162,6 +2175,98 @@ await test("the next run reopens that stub through the regression path, with its
   ]);
 });
 
+// ---------------------------------------------------------------------------
+// The sweep revalidates before it mutates (issue #1706, fourth follow-up).
+//
+// listQueueIssues() snapshots the whole queue before the Sentry loop runs, and
+// ingest holds its own concurrency group, so minutes can pass before the sweep
+// reaches a given stub. Anything decided from that snapshot is a decision about
+// the past.
+// ---------------------------------------------------------------------------
+
+await test("the sweep does not reverse a human who declined the stub", async () => {
+  // Removing sentry:needs-triage is the DOCUMENTED way to decline a stub, so
+  // re-adding it off a stale snapshot reverses the exact action the runbook
+  // prescribes.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+  });
+  const staleSnapshot = fake.snapshot();
+  // The human declines it after the snapshot, before the sweep gets there.
+  fake.get(42).labels = ["sentry-triage"];
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, { listQueueIssues: async () => staleSnapshot }),
+  );
+
+  assertEqual(counts.recovered, 0);
+  assertEqual(counts.errors, 0);
+  const issue = fake.get(42);
+  assertEqual(issue.state, "CLOSED");
+  assertDeepEqual(issue.labels, ["sentry-triage"]);
+  assertDeepEqual(issue.comments, []);
+  // Read, then nothing: no write was attempted at all.
+  assertDeepEqual(
+    fake.calls.map((args) => args[1]),
+    ["view"],
+  );
+});
+
+await test("the sweep leaves a stub something else already reopened", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+  });
+  const staleSnapshot = fake.snapshot();
+  fake.get(42).state = "OPEN";
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, { listQueueIssues: async () => staleSnapshot }),
+  );
+
+  assertEqual(counts.recovered, 0);
+  assertDeepEqual(fake.get(42).comments, []);
+});
+
+await test("a failed revalidation leaves the stub stranded rather than recovering blind", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+    rejectOn: (args) => args[1] === "view",
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+
+  assertEqual(counts.recovered, 0);
+  assertEqual(counts.errors, 1);
+  assertEqual(fake.get(42).state, "CLOSED");
+  assertDeepEqual(fake.get(42).comments, []);
+});
+
 await test("a failure while DECIDING also withholds the stub from the sweep", async () => {
   // One step earlier than the reopen: if the decision itself throws we cannot
   // say the cause was bookkeeping, so the sweep must not assume it. Modelled by
@@ -2294,6 +2399,60 @@ await test("an interrupted regression reopen retries without double-posting the 
     buildRegressedComment("2026-07-20T00:00:00Z"),
   ]);
 });
+
+for (const [label, lastSeen] of [
+  ["missing", null],
+  ["unparsable", "not-a-timestamp"],
+]) {
+  await test(`a ${label} lastSeen posts a fresh fence on every round, never dedups`, async () => {
+    // decideDedupAction deliberately fails open on an unusable timestamp and
+    // reopens on EVERY closed observation, while buildRegressedComment renders
+    // the same constant body each time. Identical bodies then say nothing about
+    // which occurrence they belong to, so deduping on one would let round one's
+    // fence suppress round two's — leaving round one's VERDICT, posted after
+    // that fence, newest-admissible over a fresh occurrence.
+    const sentryIssue = mapSentryIssue({ id: 9, shortId: "X-9", lastSeen });
+    const fake = makeFakeGitHub({
+      issues: [
+        {
+          number: 200,
+          title: buildQueueTitle("X-9", "web", "error"),
+          state: "CLOSED",
+          closedAt: "2026-07-19T00:00:00Z",
+          labels: ["sentry-triage", "sentry:verdict-upstream"],
+        },
+      ],
+    });
+
+    // Round one.
+    await reopenQueueIssue({ repo: REPO }, { number: 200 }, sentryIssue, {
+      runGh: fake.runGh,
+    });
+    // Triage runs, posts a verdict, and closes the stub again.
+    fake.get(200).comments.push("<!-- sentry-triage-verdict:v1 -->\nupstream");
+    fake.get(200).state = "CLOSED";
+
+    // Round two, same unusable timestamp and therefore the same fence body.
+    await reopenQueueIssue({ repo: REPO }, { number: 200 }, sentryIssue, {
+      runGh: fake.runGh,
+    });
+
+    const fences = fake
+      .get(200)
+      .comments.filter((body) =>
+        body.startsWith("Regressed in Sentry (last seen "),
+      );
+    assertEqual(fences.length, 2);
+    // The decisive property: a fence exists AFTER the verdict, so the parser
+    // stales that verdict out instead of accepting it over the new occurrence.
+    const comments = fake.get(200).comments;
+    assert(
+      comments.lastIndexOf(fences[1]) >
+        comments.findIndex((b) => b.startsWith("<!-- sentry-triage-verdict")),
+      "round two's fence must land after round one's verdict",
+    );
+  });
+}
 
 await test("a NEWER regression still posts its own fence over an older one", async () => {
   // The dedup guard is exact-body, so it must never suppress the fence a fresh

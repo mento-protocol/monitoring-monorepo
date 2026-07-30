@@ -160,6 +160,13 @@ observed state rather than guarded at each producer. Declining a stub means
 removing `sentry:needs-triage`, not closing the stub while it still carries the
 label.
 
+The sweep re-reads each stub immediately before touching it and acts only if it
+is still closed-and-needing-triage. The queue snapshot is taken before the whole
+Sentry loop runs, so by the time the sweep reaches a given stub the snapshot can
+be minutes old — long enough for a human to have declined it by removing the
+label, which the sweep would otherwise put straight back. A failed re-read
+leaves the stub stranded for the next run rather than recovering blind.
+
 The namespace is separate from the development backlog:
 
 | Label                        | Meaning                                                                |
