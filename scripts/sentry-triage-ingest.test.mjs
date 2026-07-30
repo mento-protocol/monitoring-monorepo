@@ -29,11 +29,11 @@ import {
   RUN_RECORD_MARKER,
   runIngest,
   sanitizeFreeText,
-  selectRunRecordComment,
   toMetadata,
   truncateTitle,
   VERDICT_LABELS,
 } from "./sentry-triage-ingest.mjs";
+import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -799,25 +799,28 @@ function trackerComment(id, body, login) {
   return { id, body, user: { login } };
 }
 
-await test("selectRunRecordComment ignores a marker planted by an untrusted author", () => {
+// The fence itself (selectMarkedComment) is unit-tested directly in
+// sentry-triage-project.test.mjs; these cover the ingest's own wiring of it
+// against RUN_RECORD_MARKER.
+await test("ingest run-record selection ignores a marker planted by an untrusted author", () => {
   const planted = trackerComment(
     999,
     `${RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
     "drive-by-user",
   );
-  assertEqual(selectRunRecordComment([planted]), null);
+  assertEqual(selectMarkedComment([planted], RUN_RECORD_MARKER), null);
 });
 
-await test("selectRunRecordComment rejects a trusted comment where the marker is mid-body, not anchored at the start", () => {
+await test("ingest run-record selection rejects a trusted comment where the marker is mid-body, not anchored at the start", () => {
   const midBody = trackerComment(
     1,
     `Some chatter.\n\n${RUN_RECORD_MARKER}`,
     "github-actions[bot]",
   );
-  assertEqual(selectRunRecordComment([midBody]), null);
+  assertEqual(selectMarkedComment([midBody], RUN_RECORD_MARKER), null);
 });
 
-await test("selectRunRecordComment selects the pipeline's own prefix-anchored, trusted-author record", () => {
+await test("ingest run-record selection picks the pipeline's own prefix-anchored, trusted-author record", () => {
   const genuine = trackerComment(
     1,
     `${RUN_RECORD_MARKER}\n\n**Sentry triage ingest — last run:** now`,
@@ -828,15 +831,18 @@ await test("selectRunRecordComment selects the pipeline's own prefix-anchored, t
     `${RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
     "drive-by-user",
   );
-  const selected = selectRunRecordComment([planted, genuine]);
+  const selected = selectMarkedComment([planted, genuine], RUN_RECORD_MARKER);
   assert(selected !== null, "expected the genuine record to be selected");
   assertEqual(selected.id, 1);
 });
 
-await test("selectRunRecordComment returns null when no comment qualifies", () => {
-  assertEqual(selectRunRecordComment([]), null);
+await test("ingest run-record selection returns null when no comment qualifies", () => {
+  assertEqual(selectMarkedComment([], RUN_RECORD_MARKER), null);
   assertEqual(
-    selectRunRecordComment([trackerComment(1, "chatter", "github-actions")]),
+    selectMarkedComment(
+      [trackerComment(1, "chatter", "github-actions")],
+      RUN_RECORD_MARKER,
+    ),
     null,
   );
 });

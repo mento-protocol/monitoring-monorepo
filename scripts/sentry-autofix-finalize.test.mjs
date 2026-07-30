@@ -29,9 +29,9 @@ import {
   MAX_CHANGED_FILES,
   redactCredentialShaped,
   runCli,
-  selectAutofixRunRecordComment,
 } from "./sentry-autofix-finalize.mjs";
 import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
+import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
 import {
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
@@ -514,25 +514,28 @@ function trackerComment(id, body, login) {
   return { id, body, user: { login } };
 }
 
-await test("selectAutofixRunRecordComment ignores a marker planted by an untrusted author", () => {
+// The fence itself (selectMarkedComment) is unit-tested directly in
+// sentry-triage-project.test.mjs; these cover the autofix leg's own wiring
+// of it against AUTOFIX_RUN_RECORD_MARKER.
+await test("autofix run-record selection ignores a marker planted by an untrusted author", () => {
   const planted = trackerComment(
     999,
     `${AUTOFIX_RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
     "drive-by-user",
   );
-  assertEqual(selectAutofixRunRecordComment([planted]), null);
+  assertEqual(selectMarkedComment([planted], AUTOFIX_RUN_RECORD_MARKER), null);
 });
 
-await test("selectAutofixRunRecordComment rejects a trusted comment where the marker is mid-body, not anchored at the start", () => {
+await test("autofix run-record selection rejects a trusted comment where the marker is mid-body, not anchored at the start", () => {
   const midBody = trackerComment(
     1,
     `Some chatter.\n\n${AUTOFIX_RUN_RECORD_MARKER}`,
     "github-actions[bot]",
   );
-  assertEqual(selectAutofixRunRecordComment([midBody]), null);
+  assertEqual(selectMarkedComment([midBody], AUTOFIX_RUN_RECORD_MARKER), null);
 });
 
-await test("selectAutofixRunRecordComment selects the pipeline's own prefix-anchored, trusted-author record", () => {
+await test("autofix run-record selection picks the pipeline's own prefix-anchored, trusted-author record", () => {
   const genuine = trackerComment(
     1,
     `${AUTOFIX_RUN_RECORD_MARKER}\n\n**Sentry autofix — last run:** now`,
@@ -543,7 +546,10 @@ await test("selectAutofixRunRecordComment selects the pipeline's own prefix-anch
     `${AUTOFIX_RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
     "drive-by-user",
   );
-  const selected = selectAutofixRunRecordComment([planted, genuine]);
+  const selected = selectMarkedComment(
+    [planted, genuine],
+    AUTOFIX_RUN_RECORD_MARKER,
+  );
   assert(selected !== null, "expected the genuine record to be selected");
   assertEqual(selected.id, 1);
 });

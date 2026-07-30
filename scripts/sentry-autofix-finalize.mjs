@@ -46,8 +46,8 @@ import {
   LABEL_DEFINITIONS,
 } from "./sentry-triage-ingest.mjs";
 import {
-  isTrustedComment,
   isValidShortId,
+  selectMarkedComment,
   selectVerdictComment,
   verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
@@ -554,26 +554,6 @@ export function buildStaleVerdictCloseComment() {
 export const AUTOFIX_RUN_RECORD_MARKER =
   "<!-- sentry-autofix:run-record:v1 -->";
 
-/**
- * Pick the existing rolling run-record comment to update, if any. Fenced
- * identically to the ingest's `selectRunRecordComment`
- * (scripts/sentry-triage-ingest.mjs) — `isTrustedComment` plus a
- * `startsWith` anchor on the marker — so the two run-record writers cannot
- * drift apart. This repo is public and #1282 is open, so without both fences
- * an untrusted commenter could plant the marker anywhere in a comment body
- * and have the next run PATCH its content into their comment.
- */
-export function selectAutofixRunRecordComment(comments) {
-  return (
-    (comments ?? []).find(
-      (comment) =>
-        typeof comment?.body === "string" &&
-        isTrustedComment(comment) &&
-        comment.body.startsWith(AUTOFIX_RUN_RECORD_MARKER),
-    ) ?? null
-  );
-}
-
 function nonNegativeInt(value) {
   const n = Number(value);
   return Number.isInteger(n) && n >= 0 ? n : 0;
@@ -756,7 +736,7 @@ Commands:
       Print the tracker run-record comment body (rolling comment, marker-keyed).
   select-run-record-id --comments-file <path>
       Print the numeric id of the tracker issue's existing rolling run-record
-      comment (trusted-author + prefix-anchored, selectAutofixRunRecordComment),
+      comment (trusted-author + prefix-anchored, selectMarkedComment),
       or "none" if there isn't one yet. The file holds the tracker issue's
       comments as produced by \`gh api ... --paginate --slurp\` (an array of
       per-page arrays/objects — flattened here before selecting). Fail-closed:
@@ -921,7 +901,7 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
         stdout.write("none\n");
         return;
       }
-      const existing = selectAutofixRunRecordComment(comments);
+      const existing = selectMarkedComment(comments, AUTOFIX_RUN_RECORD_MARKER);
       stdout.write(
         existing && /^\d+$/.test(String(existing.id))
           ? `${existing.id}\n`

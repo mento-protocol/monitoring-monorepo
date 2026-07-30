@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { isTrustedComment } from "./sentry-triage-project-core.mjs";
+import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_ORG = "mento-labs";
@@ -824,31 +824,16 @@ async function fetchTrackerComments(options) {
   return pages.flat();
 }
 
-/**
- * Pick the existing rolling run-record comment to update, if any. Fenced the
- * same way every other pipeline consumer fences a tracker comment
- * (`isTrustedComment`, scripts/sentry-triage-project-core.mjs) plus a
- * `startsWith` anchor on RUN_RECORD_MARKER — this repo is public and #1282 is
- * open, so without both an untrusted commenter could plant the marker
- * anywhere in a comment body and have the next run PATCH its content into
- * their comment, defacing it and losing the real record. Exported so the
- * fence is independently testable (mirrors selectVerdictComment's shape).
- */
-export function selectRunRecordComment(comments) {
-  return (
-    (comments ?? []).find(
-      (comment) =>
-        typeof comment?.body === "string" &&
-        isTrustedComment(comment) &&
-        comment.body.startsWith(RUN_RECORD_MARKER),
-    ) ?? null
-  );
-}
-
 async function defaultPostRunRecord(options, counts, now) {
   const body = buildRunRecordBody(counts, now.toISOString());
   const comments = await fetchTrackerComments(options);
-  const existing = selectRunRecordComment(comments);
+  // Fence: trusted author + startsWith(RUN_RECORD_MARKER) anchor, shared with
+  // the autofix leg's run-record writer via selectMarkedComment
+  // (scripts/sentry-triage-project-core.mjs) so the two writers cannot drift
+  // apart. This repo is public and #1282 is open, so without both fences an
+  // untrusted commenter could plant the marker anywhere in a comment body and
+  // have the next run PATCH its content into their comment.
+  const existing = selectMarkedComment(comments, RUN_RECORD_MARKER);
   if (existing) {
     await runGh(
       [

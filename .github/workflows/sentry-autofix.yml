@@ -1062,12 +1062,13 @@ jobs:
 
           # Rolling comment: PATCH the existing marker-bearing comment if present,
           # else create it. Selection is author-fenced + prefix-anchored
-          # (select-run-record-id -> selectAutofixRunRecordComment, mirroring the
-          # ingest's own selectRunRecordComment fence) so a drive-by comment
-          # planting the marker anywhere in its body is never selected as the
-          # record — this repo is public and #1282 is open. Every write tolerates
-          # failure (|| true) so a tracker hiccup never reds the run — a MISSING
-          # record is itself the signal.
+          # (select-run-record-id -> selectMarkedComment, the shared helper in
+          # scripts/sentry-triage-project-core.mjs also used by the ingest's own
+          # run-record write path) so a drive-by comment planting the marker
+          # anywhere in its body is never selected as the record — this repo is
+          # public and #1282 is open. Every write tolerates failure (|| true) so
+          # a tracker hiccup never reds the run — a MISSING record is itself the
+          # signal.
           #
           # `--slurp` wraps every page in one outer JSON array (mirroring how
           # scripts/pr-ready-state.mjs already combines paginated `gh api`
