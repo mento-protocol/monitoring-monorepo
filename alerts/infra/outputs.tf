@@ -47,6 +47,17 @@ output "oncall_announcer" {
   }
 }
 
+output "sentry_ingest_watcher" {
+  description = "Out-of-band dead-man switch for the Sentry triage ingest pipeline"
+  value = {
+    freshness_metric   = local.sentry_ingest_freshness_metric_type
+    function_logs      = "https://console.cloud.google.com/run/detail/${module.sentry_ingest_watcher.function_location}/${module.sentry_ingest_watcher.function_name}/observability/logs?project=${local.project_id}"
+    function_name      = module.sentry_ingest_watcher.function_name
+    function_url       = module.sentry_ingest_watcher.function_url
+    scheduler_job_name = module.sentry_ingest_watcher.scheduler_job_name
+  }
+}
+
 #####################
 # QuickNode & Cloud Function Outputs
 #####################

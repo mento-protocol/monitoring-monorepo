@@ -57,6 +57,12 @@ export function resolveLookbackDays(cliValue, env = process.env) {
   return days;
 }
 
+// The run record is also a machine-read contract, not just an operator note.
+// `alerts/infra/sentry-ingest-watcher/` pins this exact marker and parses the
+// first ISO-8601 instant in the body as the last-ingest time, because a run
+// that no-ops on the kill switch or a missing token still concludes `success`
+// and never reaches this writer. Bump the version here only together with that
+// reader — an unmatched marker makes the dead-man switch fail closed and page.
 export const RUN_RECORD_MARKER = "<!-- sentry-triage-ingest:run-record:v1 -->";
 const BODY_MARKER = "<!-- sentry-triage:v1 -->";
 
