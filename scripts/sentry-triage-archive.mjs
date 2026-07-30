@@ -36,6 +36,7 @@ import {
 import {
   ARCHIVE_COMMENT_MARKER,
   isTrustedComment,
+  selectVerdictComment,
 } from "./sentry-triage-project-core.mjs";
 
 const NEEDS_TRIAGE_LABEL = "sentry:needs-triage";
@@ -904,34 +905,57 @@ export function settlementHeld({ state, labels, body } = {}, expected = null) {
 }
 
 /**
- * Is the regression fence actually on the stub, posted by us?
+ * Would a verdict still be re-appliable to this stub? True means DANGER: the
+ * `verdict` job could pick a previous round's verdict off these comments and
+ * close the stub with it.
  *
- * AUTHOR-FENCED, and that is not optional: this repo is public, so an equality
- * check over raw bodies lets any commenter satisfy this guard with a copy of the
- * text while `selectVerdictComment` — which does check authorship — ignores
- * their comment and keeps the stale verdict admissible. Same defect class #1715
- * fixed for run-record selection.
+ * PRESENCE IS NOT ADMISSIBILITY, and that distinction is the whole point of this
+ * helper. An earlier check here asked "does a trusted fence exist?" — a
+ * different question from the one the consumer asks. `selectVerdictComment`
+ * selects by RECENCY: it takes the newest verdict and rejects it only when a
+ * newer regression comment exists. A fence that exists but PREDATES the newest
+ * verdict therefore protects nothing, and this path can produce exactly that,
+ * because the refusal comment is byte-identical across runs for one `lastSeen`
+ * (same shortId, same timestamp, fixed prose). Re-approve a stub whose Sentry
+ * issue is still regressing on an unchanged `lastSeen`, have this run's post
+ * fail transiently, and a body check finds LAST round's fence — sitting older
+ * than the verdict posted after it — and waves the re-queue through green.
  *
- * Fails CLOSED: a read that throws returns false, so an unverifiable fence is
- * treated as a missing one.
+ * So ask the consumer's question with the consumer's own primitive: no
+ * admissible verdict may survive. Sharing `selectVerdictComment` is what stops
+ * the guard and the thing it guards against from drifting apart again.
+ *
+ * DO NOT port ingest's reasoning here. `reopenQueueIssue` runs a
+ * near-identical-looking body check and is safe, but only because ingest gates
+ * on `lastSeen > closedAt`: a verdict implies a later close, which puts
+ * `closedAt` past that `lastSeen`, so its gate cannot fire twice for one
+ * timestamp with a verdict in between. This path has no such gate — it fires on
+ * `isActivelyRegressing`, which reads Sentry's substatus and stays true for days
+ * regardless of timestamps. Same-looking code, different premises; assuming they
+ * transfer is what produced this bug.
+ *
+ * Fails CLOSED: a read that throws returns true, so an unverifiable stub counts
+ * as unsafe.
  */
-async function fencePresent(runGh, repo, queueIssue, fence) {
+async function admissibleVerdictSurvives(runGh, repo, queueIssue) {
   try {
     const live = await readQueueIssue(runGh, repo, queueIssue);
-    return (live.comments ?? []).some(
-      (comment) =>
-        typeof comment?.body === "string" &&
-        isTrustedComment(comment) &&
-        comment.body.startsWith(fence),
-    );
+    return hasAdmissibleVerdict(live.comments);
   } catch (err) {
     process.stderr.write(
-      `::notice::Could not re-read #${queueIssue} to confirm the regression fence (${
+      `::notice::Could not re-read #${queueIssue} to check whether a previous verdict is still admissible (${
         err instanceof Error ? err.message : String(err)
-      }); treating it as absent.\n`,
+      }); treating it as unsafe.\n`,
     );
-    return false;
+    return true;
   }
+}
+
+/** The pure half, over an already-read comment list. `selectVerdictComment`
+ * returns a null body when there is no trusted verdict at all, or when the
+ * newest one is fenced out by a newer regression comment — both safe. */
+function hasAdmissibleVerdict(comments) {
+  return selectVerdictComment(comments ?? []).body !== null;
 }
 
 /** The pair Stage B's selector matches: `--state open` AND
@@ -1646,9 +1670,9 @@ export async function runArchive(options, deps = {}) {
     } catch (err) {
       const reported = err instanceof Error ? err.message : String(err);
       process.stderr.write(
-        `::notice::Posting the regression fence on #${queueIssue} reported a failure (${reported}); re-reading the stub to find out whether it landed.\n`,
+        `::notice::Posting the regression fence on #${queueIssue} reported a failure (${reported}); re-reading the stub to check whether a previous verdict is still admissible.\n`,
       );
-      if (!(await fencePresent(runGh, repo, queueIssue, fence))) {
+      if (await admissibleVerdictSurvives(runGh, repo, queueIssue)) {
         // Abort BEFORE the re-queue. The stub keeps `sentry:approved-archive`
         // and its verdict label and stays CLOSED, so: nothing selects it, the
         // stranded sweep does not see it (no `sentry:needs-triage`), and the
@@ -1658,12 +1682,12 @@ export async function runArchive(options, deps = {}) {
         // right one — this state needs a human to linger, while the alternative
         // needs only a second failure to bury the regression silently.
         throw new Error(
-          `Refusing to re-queue #${queueIssue} for triage: the regression fence comment could not be posted (${reported}), and a re-queued stub without it lets a failing triage round close the previous verdict over this live regression. The stub is unchanged — approval and verdict labels intact — so re-dispatch this workflow to retry the whole refusal.`,
+          `Refusing to re-queue #${queueIssue} for triage: the regression fence comment could not be posted (${reported}) and a previous verdict is still admissible, so a failing triage round would close that verdict over this live regression. The stub is unchanged — approval and verdict labels intact — so re-dispatch this workflow to retry the whole refusal.`,
           { cause: err },
         );
       }
       process.stderr.write(
-        `::notice::The fence on #${queueIssue} did land despite the reported failure; continuing.\n`,
+        `::notice::No admissible verdict survives on #${queueIssue} despite the reported failure; continuing.\n`,
       );
     }
 
@@ -1716,22 +1740,18 @@ export async function runArchive(options, deps = {}) {
     // label edit can, so the write's return proves nothing in either direction.
     //
     // The stub is selectable by now — the invariant this path owes — so this is
-    // loud AFTER it is safe, never instead of making it safe. An unfenced
-    // re-queue is not merely untidy: the previous round's verdict stays
-    // newest-admissible, so a triage round that dies before posting lets the
-    // `verdict` job (which runs under always()) re-apply it and close the stub
-    // over a regression Sentry explicitly reported. Red is what gets a human
-    // here before the next triage run.
-    // Author-fenced for the same reason `fencePresent` is: a bare body match on
-    // a public repo is satisfiable by anyone, and this check exists precisely to
-    // decide whether the verdict parser will see a fence — which it only will
-    // from a trusted author.
-    const fencePosted = (verified.comments ?? []).some(
-      (comment) =>
-        typeof comment?.body === "string" &&
-        isTrustedComment(comment) &&
-        comment.body.startsWith(fence),
-    );
+    // loud AFTER it is safe, never instead of making it safe. Red is what gets a
+    // human here before the next triage run.
+    //
+    // Asks the SAME question as the pre-re-queue gate, through the same
+    // primitive: not "is a fence present" but "can a verdict still be
+    // re-applied". A fence deleted between the post and this read, or one that
+    // was always older than the newest verdict, both leave a verdict the
+    // `verdict` job (which runs under always()) would pick up and close the stub
+    // with, over a regression Sentry explicitly reported. Presence would miss the
+    // second case entirely — see admissibleVerdictSurvives for why these two
+    // sites must not diverge.
+    const verdictStillReappliable = hasAdmissibleVerdict(verified.comments);
 
     // Judge the shed from the VERIFICATION READ, not from what the edit
     // reported. `gh` can apply the label swap and lose the response, and
@@ -1745,9 +1765,9 @@ export async function runArchive(options, deps = {}) {
 
     // One throw carrying both, so a doubly-broken run cannot report only half.
     const problems = [];
-    if (!fencePosted) {
+    if (verdictStillReappliable) {
       problems.push(
-        "the regression fence comment is absent, so the previous round's verdict is still admissible and a failing triage round could close this stub over the live regression — post the fence by hand, or re-run this workflow, before the next triage run",
+        "a previous verdict is still admissible — no regression fence newer than it survives on the stub — so a failing triage round could close that verdict over this live regression; post the fence by hand, or re-run this workflow, before the next triage run",
       );
     }
     if (survivingMarkers.length) {

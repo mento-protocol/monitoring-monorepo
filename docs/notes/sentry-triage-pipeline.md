@@ -382,6 +382,14 @@ nothing about the Sentry issue changed and that verdict is still valid. Drop the
 fence and a triage round that dies before posting lets the `verdict` job
 re-apply the previous verdict and close the stub over a live regression.
 
+The refusal will not re-queue a stub it cannot fence, and it decides that by
+asking whether any verdict is still admissible — never by checking that a fence
+comment exists. Presence is not admissibility: the refusal body is identical
+across runs for one `lastSeen`, so an earlier run's fence can sit on the stub
+underneath a verdict posted after it, where the parser correctly ignores it. Both
+checks on this path run `selectVerdictComment`, the parser's own selector, so the
+guard and the thing it guards against cannot drift apart.
+
 If approval disappears during the mutation window, the script rolls the queue
 stub back and leaves it available for fresh triage. It does NOT un-archive the
 Sentry issue: `archived_until_escalating` is the approved outcome and it

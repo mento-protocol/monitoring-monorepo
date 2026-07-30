@@ -206,6 +206,11 @@ function makeRunGh({
 }) {
   const calls = [];
   let views = 0;
+  // createdAt is load-bearing now: selectVerdictComment fences by RECENCY, so a
+  // comment list without timestamps cannot express "the fence is OLDER than the
+  // verdict" — the exact shape this path has to reject. Comments this run posts
+  // are stamped after any the fixture seeded.
+  let commentClock = 100;
   const model = {
     number: stub.number,
     title: stub.title,
@@ -256,9 +261,11 @@ function makeRunGh({
       return "";
     }
     if (a0 === "issue" && a1 === "comment") {
+      commentClock += 1;
       model.comments.push({
         body: args[args.indexOf("--body") + 1],
         author: { login: "github-actions" },
+        createdAt: `2026-07-30T00:00:${commentClock}Z`,
       });
       return "";
     }
@@ -1193,11 +1200,11 @@ await test("isSelectableForTriage is exactly Stage B's selector pair", () => {
 await test("a fence that cannot be posted stops the re-queue instead of exposing the stub", async () => {
   // "Safe first, loud second" assumed making the stub selectable IS the safe
   // act. Once the comment's first line became the regression fence that stopped
-  // being true: a selectable stub with no fence is the close-over-a-live-
-  // regression setup, and the archive and agent workflows hold separate
-  // concurrency groups, so a triage run can select it before any later check
-  // fires. Post the fence, or do not re-queue at all.
-  const stub = makeStub({ state: "CLOSED" });
+  // being true: a selectable stub whose previous verdict is still admissible is
+  // the close-over-a-live-regression setup, and the archive and agent workflows
+  // hold separate concurrency groups, so a triage run can select it before any
+  // later check fires. Fence the verdict, or do not re-queue at all.
+  const stub = makeStub({ state: "CLOSED", comments: [priorVerdict] });
   const { runGh, model } = makeRunGh({
     stub,
     failOn: (args) =>
@@ -1283,7 +1290,7 @@ await test("an untrusted copy of the fence does not satisfy the archive's check"
   // check is satisfiable by anyone, while selectVerdictComment ignores their
   // comment — so the run would go green over a stub the parser sees as unfenced.
   const liveLastSeen = "2026-07-20T08:00:00Z";
-  const stub = makeStub({ state: "CLOSED" });
+  const stub = makeStub({ state: "CLOSED", comments: [priorVerdict] });
   const { runGh, model } = makeRunGh({
     stub,
     failOn: (args) =>
@@ -1319,7 +1326,7 @@ await test("a fence deleted after it was posted still fails the run RED", async 
   // selectable; this end-state check proves it is still there AFTER. They guard
   // different instants, and only the second one covers a comment removed inside
   // the window — the stub is selectable by then, so the run must go red.
-  const stub = makeStub({ state: "CLOSED" });
+  const stub = makeStub({ state: "CLOSED", comments: [priorVerdict] });
   let deleted = false;
   const { runGh, model } = makeRunGh({
     stub,
@@ -1338,17 +1345,156 @@ await test("a fence deleted after it was posted still fails the run RED", async 
 
   await assertRejects(
     runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
-    /regression fence comment is absent/,
+    /a previous verdict is still admissible/,
   );
   // Selectable, which is why this has to be loud rather than silent.
   assertEqual(model.state, "OPEN");
   assert(model.labels.includes("sentry:needs-triage"));
 });
 
+await test("a fence posted over a prior verdict makes the run safe", async () => {
+  // The pre-run snapshot has an admissible verdict; this run's fence lands after
+  // it and fences it out. Judging either check against the SNAPSHOT rather than
+  // the live read would fail a run that is in fact correct.
+  const stub = makeStub({ state: "CLOSED", comments: [priorVerdict] });
+  const { runGh, model } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch({
+    issue: {
+      status: "unresolved",
+      substatus: "regressed",
+      lastSeen: "2026-07-20T08:00:00Z",
+    },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "skipped-regressed");
+  assertEqual(model.state, "OPEN");
+  assert(model.labels.includes("sentry:needs-triage"));
+  assertEqual(selectVerdictComment(model.comments).reason, "stale-verdict");
+});
+
+await test("the post-verifier catches a deleted fence that an older twin masks", async () => {
+  // The subtle half of R1, at the SECOND check. The refusal body is identical
+  // across runs, so after this run's fence is deleted an OLDER copy of the same
+  // bytes is still on the stub — a presence check cannot tell them apart and
+  // passes, while the verdict posted between them stays admissible. Only asking
+  // the parser's question sees it.
+  const liveLastSeen = "2026-07-20T08:00:00Z";
+  const staleTwin = {
+    ...BOT,
+    createdAt: "2026-07-21T10:00:00Z",
+    body: buildRegressionRefusalComment(
+      "GOVERNANCE-MENTO-ORG-51",
+      liveLastSeen,
+    ),
+  };
+  const verdictAfterIt = {
+    ...BOT,
+    createdAt: "2026-07-22T10:00:00Z",
+    body: `${VERDICT_MARKER}\nverdict: upstream\nconfidence: high`,
+  };
+  const stub = makeStub({
+    state: "CLOSED",
+    comments: [staleTwin, verdictAfterIt],
+  });
+  let deleted = false;
+  const { runGh, model } = makeRunGh({
+    stub,
+    beforeCall: (args) => {
+      // Drop THIS run's fence (the newest one) at reopen time, leaving the twin.
+      if (!deleted && args[1] === "reopen") {
+        const mine = [...model.comments]
+          .reverse()
+          .find((c) => String(c?.body ?? "").startsWith(REGRESSION_PREFIX));
+        model.comments = model.comments.filter((c) => c !== mine);
+        deleted = true;
+      }
+    },
+  });
+  const { fetchImpl } = makeFetch({
+    issue: {
+      status: "unresolved",
+      substatus: "regressed",
+      lastSeen: liveLastSeen,
+    },
+  });
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /a previous verdict is still admissible/,
+  );
+  // The twin really is still there — presence was never the question.
+  assert(
+    model.comments.some((c) => c.body === staleTwin.body),
+    "an identical older fence remains on the stub",
+  );
+  assertEqual(model.state, "OPEN");
+});
+
+await test("a stale identical fence does not license the re-queue (R1)", async () => {
+  // PRESENCE IS NOT ADMISSIBILITY. The refusal comment is byte-identical across
+  // runs for one lastSeen, so this stub carries LAST round's fence — and the
+  // verdict that triage posted AFTER it. selectVerdictComment fences by
+  // recency, so that verdict is still the newest admissible one: a body check
+  // sees "a fence is present" and waves the re-queue through GREEN, which is the
+  // silent close-over-a-live-regression this whole path exists to stop.
+  const liveLastSeen = "2026-07-20T08:00:00Z";
+  const staleFence = {
+    ...BOT,
+    createdAt: "2026-07-21T10:00:00Z",
+    body: buildRegressionRefusalComment(
+      "GOVERNANCE-MENTO-ORG-51",
+      liveLastSeen,
+    ),
+  };
+  const verdictAfterIt = {
+    ...BOT,
+    createdAt: "2026-07-22T10:00:00Z",
+    body: `${VERDICT_MARKER}\nverdict: upstream\nconfidence: high`,
+  };
+  const stub = makeStub({
+    state: "CLOSED",
+    comments: [staleFence, verdictAfterIt],
+  });
+  const { runGh, model } = makeRunGh({
+    stub,
+    // This run's own post fails transiently, so the old body is all there is.
+    failOn: (args) =>
+      args[1] === "comment" ? "gh issue comment: HTTP 500" : null,
+  });
+  const { fetchImpl } = makeFetch({
+    issue: {
+      status: "unresolved",
+      substatus: "regressed",
+      lastSeen: liveLastSeen,
+    },
+  });
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /a previous verdict is still admissible/,
+  );
+
+  // Not re-queued, not selectable, and the run is red rather than green.
+  assertEqual(model.state, "CLOSED");
+  assertEqual(model.labels.includes("sentry:needs-triage"), false);
+  assert(model.labels.includes("sentry:approved-archive"));
+  // And the reason really is recency, not absence: the fence IS on the stub.
+  assert(
+    model.comments.some((c) => c.body === staleFence.body),
+    "the stale fence is present — presence was never the question",
+  );
+});
+
 await test("an unverifiable fence is treated as missing, not as present", async () => {
   // fencePresent fails CLOSED. If the confirming read cannot be taken, the run
   // must not re-queue on the assumption that the post probably landed.
-  const stub = makeStub({ state: "CLOSED" });
+  const stub = makeStub({ state: "CLOSED", comments: [priorVerdict] });
   let views = 0;
   const { runGh, model } = makeRunGh({
     stub,
