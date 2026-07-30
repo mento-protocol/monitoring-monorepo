@@ -1096,18 +1096,18 @@ export async function recoverStrandedQueueIssue(
 }
 
 /**
- * Read a queue stub's comment bodies. Used only on the reopen path, so the
- * extra call costs one request per regression rather than per run.
+ * Read a queue stub's comments — WHOLE objects, never bodies alone, because the
+ * only consumer has to fence on authorship and a bare body cannot. Used solely
+ * on the reopen path, so the extra call costs one request per regression rather
+ * than one per run. The REST shape carries `user.login`, which
+ * `isTrustedComment` accepts alongside the GraphQL `author.login`.
  */
-async function fetchIssueCommentBodies(options, issueNumber, runner) {
+async function fetchIssueComments(options, issueNumber, runner) {
   const pages = await ghPaginate(
     `repos/${options.repo}/issues/${issueNumber}/comments`,
     runner ? { runner } : {},
   );
-  return pages
-    .flat()
-    .map((comment) => comment?.body)
-    .filter((body) => typeof body === "string");
+  return pages.flat().filter((comment) => typeof comment?.body === "string");
 }
 
 export async function reopenQueueIssue(
@@ -1162,14 +1162,29 @@ export async function reopenQueueIssue(
   // fence) newest-admissible over a fresh occurrence. Whenever the timestamp
   // cannot establish belonging, always post: a duplicate fence is noise, a
   // missing one buries a regression.
+  // The dedup read is AUTHOR-FENCED, via the same primitive #1715 introduced for
+  // run-record selection. This repo is public: without the author check, anyone
+  // who guesses the regression's exact `lastSeen` — the stub body publishes a
+  // near-miss of it — can pre-post the matching fence body and have this check
+  // suppress the bot's real fence. `selectVerdictComment` would then ignore the
+  // attacker's comment (it does fence on authorship), so the stub ends up
+  // re-queued with the pre-regression verdict still admissible, and a triage
+  // round that dies before posting closes over the new occurrence. An outsider
+  // could drive that from a comment box.
+  //
+  // `selectMarkedComment` anchors with startsWith rather than equality, which is
+  // what we want: the archive's refusal comment opens with this exact fence line
+  // and then adds prose, so a trusted refusal already carrying this `lastSeen`
+  // correctly counts as the fence being in place.
   const fenceIdentifiesOccurrence = !Number.isNaN(
     Date.parse(sentryIssue.lastSeen ?? ""),
   );
   const alreadyFenced =
     fenceIdentifiesOccurrence &&
-    (
-      await fetchIssueCommentBodies(options, existingIssue.number, deps.runGh)
-    ).includes(fence);
+    selectMarkedComment(
+      await fetchIssueComments(options, existingIssue.number, deps.runGh),
+      fence,
+    ) !== null;
   if (alreadyFenced) {
     process.stderr.write(
       `::notice::Regression fence for ${sentryIssue.lastSeen} already present on #${existingIssue.number}; not re-posting.\n`,

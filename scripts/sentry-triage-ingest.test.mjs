@@ -1693,7 +1693,12 @@ function makeFakeGitHub({
       issue.number,
       {
         closedAt: null,
+        // Bodies only — the comments the pipeline itself writes, which keeps the
+        // assertions readable. `untrustedComments` models what anyone with a
+        // comment box can add on this PUBLIC repo; the read below is what
+        // attaches the authorship that tells the two apart.
         comments: [],
+        untrustedComments: [],
         ...issue,
         labels: [...(issue.labels ?? [])],
       },
@@ -1751,12 +1756,22 @@ function makeFakeGitHub({
 
   const runGh = async (args) => {
     calls.push(args);
-    // A read: the comment scan reopenQueueIssue runs before it posts.
+    // A read: the comment scan reopenQueueIssue runs before it posts. Untrusted
+    // comments come FIRST, so a guard that stops at the first body match without
+    // checking the author picks the attacker's copy.
     if (args[0] === "api") {
       const number = Number(/issues\/(\d+)\/comments/.exec(args[1])?.[1]);
-      return JSON.stringify(
-        (state.get(number)?.comments ?? []).map((body) => ({ body })),
-      );
+      const issue = state.get(number);
+      return JSON.stringify([
+        ...(issue?.untrustedComments ?? []).map((body) => ({
+          body,
+          user: { login: "drive-by-account" },
+        })),
+        ...(issue?.comments ?? []).map((body) => ({
+          body,
+          user: { login: "github-actions[bot]" },
+        })),
+      ]);
     }
     // A read: the sweep's pre-mutation revalidation. Serves LIVE state, so a
     // test can mutate the model after the snapshot and watch the sweep notice.
@@ -2453,6 +2468,60 @@ for (const [label, lastSeen] of [
     );
   });
 }
+
+await test("an untrusted pre-posted fence cannot suppress the bot's own", async () => {
+  // This repo is PUBLIC. Without an author fence, anyone who guesses the
+  // regression's exact lastSeen can post the matching body and have the dedup
+  // check swallow the real fence — while selectVerdictComment ignores their
+  // comment, because it DOES check authorship. The stub would then be re-queued
+  // with the pre-regression verdict still admissible.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 200,
+        title: buildQueueTitle("X-9", "web", "error"),
+        state: "CLOSED",
+        closedAt: "2026-07-19T00:00:00Z",
+        labels: ["sentry-triage", "sentry:verdict-upstream"],
+        untrustedComments: [buildRegressedComment("2026-07-20T00:00:00Z")],
+      },
+    ],
+  });
+
+  await reopenQueueIssue({ repo: REPO }, { number: 200 }, REGRESSED_SENTRY, {
+    runGh: fake.runGh,
+  });
+
+  assertDeepEqual(fake.get(200).comments, [
+    buildRegressedComment("2026-07-20T00:00:00Z"),
+  ]);
+  assertEqual(fake.get(200).state, "OPEN");
+});
+
+await test("the bot's own identical fence is still deduped", async () => {
+  // The guard must stay useful: an author-trusted copy of the same fence is a
+  // genuine retry of the same occurrence and must not be re-posted.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 200,
+        title: buildQueueTitle("X-9", "web", "error"),
+        state: "CLOSED",
+        closedAt: "2026-07-19T00:00:00Z",
+        labels: ["sentry-triage", "sentry:verdict-upstream"],
+        comments: [buildRegressedComment("2026-07-20T00:00:00Z")],
+      },
+    ],
+  });
+
+  await reopenQueueIssue({ repo: REPO }, { number: 200 }, REGRESSED_SENTRY, {
+    runGh: fake.runGh,
+  });
+
+  assertDeepEqual(fake.get(200).comments, [
+    buildRegressedComment("2026-07-20T00:00:00Z"),
+  ]);
+});
 
 await test("a NEWER regression still posts its own fence over an older one", async () => {
   // The dedup guard is exact-body, so it must never suppress the fence a fresh

@@ -1190,21 +1190,13 @@ await test("isSelectableForTriage is exactly Stage B's selector pair", () => {
   assertEqual(isSelectableForTriage(), false);
 });
 
-await test("a failing refusal comment cannot abort the state transition, and then fails RED", async () => {
-  // Two properties here, and both are load-bearing.
-  //
-  // Letting the comment throw skipped the label swap AND the verifier, leaving
-  // a closed stub with its stale approval and verdict — ingest keeps skipping it
-  // because the sticky regression predates closedAt. So the post must never be
-  // able to abort the transition; a guard that only runs on the happy path
-  // guards nothing.
-  //
-  // That comment's first line is also the regression fence, so losing it leaves
-  // the previous round's verdict admissible on a stub that is now SELECTABLE: a
-  // triage round dying before it posts would let the always() verdict job
-  // re-apply that verdict and close over the live regression. The transition
-  // still completes — asserted on the model below, unchanged — and only then
-  // does the run go red. Safe first, loud second.
+await test("a fence that cannot be posted stops the re-queue instead of exposing the stub", async () => {
+  // "Safe first, loud second" assumed making the stub selectable IS the safe
+  // act. Once the comment's first line became the regression fence that stopped
+  // being true: a selectable stub with no fence is the close-over-a-live-
+  // regression setup, and the archive and agent workflows hold separate
+  // concurrency groups, so a triage run can select it before any later check
+  // fires. Post the fence, or do not re-queue at all.
   const stub = makeStub({ state: "CLOSED" });
   const { runGh, model } = makeRunGh({
     stub,
@@ -1217,13 +1209,169 @@ await test("a failing refusal comment cannot abort the state transition, and the
 
   await assertRejects(
     runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
-    /regression fence comment is absent/,
+    /Refusing to re-queue #42 for triage/,
   );
 
+  // NOT selectable — the whole point. Closed, and never labeled for triage.
+  assertEqual(model.state, "CLOSED");
+  assertEqual(model.labels.includes("sentry:needs-triage"), false);
+  assertEqual(
+    isSelectableForTriage({ state: model.state, labels: model.labels }),
+    false,
+  );
+  // Untouched, so the documented workflow_dispatch retry still passes its
+  // approval guard and re-runs the whole refusal, fence included. The stub is
+  // also NOT in the stranded shape, so ingest's fence-free sweep cannot claim it.
+  assert(model.labels.includes("sentry:approved-archive"));
+  assert(model.labels.includes("sentry:verdict-upstream"));
+});
+
+await test("a fence whose post lost its response is not treated as missing", async () => {
+  // Unchanged discipline: the report is not the authority, the read is. The
+  // comment lands and `gh` loses the answer — the refusal must complete, not
+  // abort on a fence that is demonstrably there.
+  const stub = makeStub({ state: "CLOSED" });
+  const { runGh, model } = makeRunGh({
+    stub,
+    ambiguousOn: (args) =>
+      args[1] === "comment" ? "gh issue comment: connection reset" : null,
+  });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "skipped-regressed");
   assertEqual(model.state, "OPEN");
   assert(model.labels.includes("sentry:needs-triage"));
-  assertEqual(model.labels.includes("sentry:approved-archive"), false);
-  assertEqual(model.labels.includes("sentry:verdict-upstream"), false);
+});
+
+await test("a later run completes the refusal with its fence", async () => {
+  // The retry path the abort above leaves open: approval intact, so the guard
+  // passes and the whole refusal re-runs.
+  const stub = makeStub({ state: "CLOSED" });
+  const { runGh, model } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+
+  assertEqual(result.status, "skipped-regressed");
+  assertEqual(model.state, "OPEN");
+  assert(model.labels.includes("sentry:needs-triage"));
+  assert(
+    model.comments.some(
+      (c) =>
+        typeof c?.body === "string" && c.body.startsWith(REGRESSION_PREFIX),
+    ),
+    "the completed refusal carries the fence",
+  );
+});
+
+await test("an untrusted copy of the fence does not satisfy the archive's check", async () => {
+  // Same public-repo hazard as the ingest dedup: a body match with no author
+  // check is satisfiable by anyone, while selectVerdictComment ignores their
+  // comment — so the run would go green over a stub the parser sees as unfenced.
+  const liveLastSeen = "2026-07-20T08:00:00Z";
+  const stub = makeStub({ state: "CLOSED" });
+  const { runGh, model } = makeRunGh({
+    stub,
+    failOn: (args) =>
+      args[1] === "comment" ? "gh issue comment: HTTP 500" : null,
+  });
+  // BYTE-IDENTICAL to the fence this run will build, so only the author
+  // distinguishes them. Anything less and the test passes for the wrong reason.
+  model.comments.push({
+    body: buildRegressionRefusalComment(
+      "GOVERNANCE-MENTO-ORG-51",
+      liveLastSeen,
+    ),
+    author: { login: "drive-by-account" },
+  });
+  const { fetchImpl } = makeFetch({
+    issue: {
+      status: "unresolved",
+      substatus: "regressed",
+      lastSeen: liveLastSeen,
+    },
+  });
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /Refusing to re-queue #42 for triage/,
+  );
+  assertEqual(model.state, "CLOSED");
+  assertEqual(model.labels.includes("sentry:needs-triage"), false);
+});
+
+await test("a fence deleted after it was posted still fails the run RED", async () => {
+  // The pre-re-queue check proves the fence was there BEFORE the stub became
+  // selectable; this end-state check proves it is still there AFTER. They guard
+  // different instants, and only the second one covers a comment removed inside
+  // the window — the stub is selectable by then, so the run must go red.
+  const stub = makeStub({ state: "CLOSED" });
+  let deleted = false;
+  const { runGh, model } = makeRunGh({
+    stub,
+    beforeCall: (args) => {
+      if (!deleted && args[1] === "reopen") {
+        model.comments = model.comments.filter(
+          (c) => !String(c?.body ?? "").startsWith(REGRESSION_PREFIX),
+        );
+        deleted = true;
+      }
+    },
+  });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /regression fence comment is absent/,
+  );
+  // Selectable, which is why this has to be loud rather than silent.
+  assertEqual(model.state, "OPEN");
+  assert(model.labels.includes("sentry:needs-triage"));
+});
+
+await test("an unverifiable fence is treated as missing, not as present", async () => {
+  // fencePresent fails CLOSED. If the confirming read cannot be taken, the run
+  // must not re-queue on the assumption that the post probably landed.
+  const stub = makeStub({ state: "CLOSED" });
+  let views = 0;
+  const { runGh, model } = makeRunGh({
+    stub,
+    failOn: (args) => {
+      if (args[1] === "comment") return "gh issue comment: HTTP 500";
+      if (args[1] === "view") {
+        views += 1;
+        // View 1 is runArchive's own pre-run read; view 2 is fencePresent's.
+        if (views >= 2) return "gh issue view: HTTP 500";
+      }
+      return null;
+    },
+  });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "unresolved", substatus: "regressed" },
+  });
+
+  await assertRejects(
+    runArchive(baseOptions(), { runGh, fetchImpl, now: FIXED_NOW }),
+    /Refusing to re-queue #42 for triage/,
+  );
+  assertEqual(model.state, "CLOSED");
+  assertEqual(model.labels.includes("sentry:needs-triage"), false);
 });
 
 await test("a failing re-queue label edit still reaches the verifier, then fails RED", async () => {

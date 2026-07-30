@@ -903,6 +903,37 @@ export function settlementHeld({ state, labels, body } = {}, expected = null) {
   );
 }
 
+/**
+ * Is the regression fence actually on the stub, posted by us?
+ *
+ * AUTHOR-FENCED, and that is not optional: this repo is public, so an equality
+ * check over raw bodies lets any commenter satisfy this guard with a copy of the
+ * text while `selectVerdictComment` — which does check authorship — ignores
+ * their comment and keeps the stale verdict admissible. Same defect class #1715
+ * fixed for run-record selection.
+ *
+ * Fails CLOSED: a read that throws returns false, so an unverifiable fence is
+ * treated as a missing one.
+ */
+async function fencePresent(runGh, repo, queueIssue, fence) {
+  try {
+    const live = await readQueueIssue(runGh, repo, queueIssue);
+    return (live.comments ?? []).some(
+      (comment) =>
+        typeof comment?.body === "string" &&
+        isTrustedComment(comment) &&
+        comment.body.startsWith(fence),
+    );
+  } catch (err) {
+    process.stderr.write(
+      `::notice::Could not re-read #${queueIssue} to confirm the regression fence (${
+        err instanceof Error ? err.message : String(err)
+      }); treating it as absent.\n`,
+    );
+    return false;
+  }
+}
+
 /** The pair Stage B's selector matches: `--state open` AND
  * `sentry:needs-triage`. A stub missing either is invisible to triage, and — if
  * its `closedAt` postdates the regression — to ingest as well. */
@@ -1587,11 +1618,20 @@ export async function runArchive(options, deps = {}) {
     // This comment is prose for a human AND the regression fence for the verdict
     // parser — its first line is what tells `selectVerdictComment`
     // (scripts/sentry-triage-project-core.mjs) that the previous round's verdict
-    // describes a dead occurrence. It is therefore no longer cosmetic, but it is
-    // still POSTED best-effort: anything that can throw ahead of the verifier can
-    // skip it, and a guard that only runs on the happy path guards nothing, so a
-    // note must never abort a state transition. Its absence is judged from the
-    // verification read below instead — after the stub is safe.
+    // describes a dead occurrence.
+    //
+    // That makes the fence a PRECONDITION of re-queuing, not a note about it,
+    // and it inverts the "safe first, loud second" ordering this block used to
+    // follow. That rule assumed making the stub selectable IS the safe act. With
+    // the fence load-bearing it is not: a selectable stub with no fence is
+    // exactly the close-over-a-live-regression setup, and the archive and agent
+    // workflows hold separate concurrency groups, so a triage run can select it
+    // inside the window between here and any later check. Post the fence, or do
+    // not re-queue at all.
+    //
+    // A reported failure is still not proof — that discipline is unchanged. The
+    // post can land and lose its response, so the report is checked against a
+    // READ before anything is decided. Only a fence confirmed absent aborts.
     const fence = buildRegressionRefusalComment(meta.shortId, current.lastSeen);
     try {
       await runGh([
@@ -1604,10 +1644,26 @@ export async function runArchive(options, deps = {}) {
         fence,
       ]);
     } catch (err) {
+      const reported = err instanceof Error ? err.message : String(err);
       process.stderr.write(
-        `::notice::Could not post the regression refusal comment on #${queueIssue} (${
-          err instanceof Error ? err.message : String(err)
-        }); the label and state changes below still run, and the fence check after the verifier decides whether this run goes red.\n`,
+        `::notice::Posting the regression fence on #${queueIssue} reported a failure (${reported}); re-reading the stub to find out whether it landed.\n`,
+      );
+      if (!(await fencePresent(runGh, repo, queueIssue, fence))) {
+        // Abort BEFORE the re-queue. The stub keeps `sentry:approved-archive`
+        // and its verdict label and stays CLOSED, so: nothing selects it, the
+        // stranded sweep does not see it (no `sentry:needs-triage`), and the
+        // documented workflow_dispatch retry still passes its approval guard and
+        // re-runs this whole refusal, fence included. Leaving a known-live
+        // regression closed until someone retries is the cost, and it is the
+        // right one — this state needs a human to linger, while the alternative
+        // needs only a second failure to bury the regression silently.
+        throw new Error(
+          `Refusing to re-queue #${queueIssue} for triage: the regression fence comment could not be posted (${reported}), and a re-queued stub without it lets a failing triage round close the previous verdict over this live regression. The stub is unchanged — approval and verdict labels intact — so re-dispatch this workflow to retry the whole refusal.`,
+          { cause: err },
+        );
+      }
+      process.stderr.write(
+        `::notice::The fence on #${queueIssue} did land despite the reported failure; continuing.\n`,
       );
     }
 
@@ -1666,8 +1722,15 @@ export async function runArchive(options, deps = {}) {
     // `verdict` job (which runs under always()) re-apply it and close the stub
     // over a regression Sentry explicitly reported. Red is what gets a human
     // here before the next triage run.
+    // Author-fenced for the same reason `fencePresent` is: a bare body match on
+    // a public repo is satisfiable by anyone, and this check exists precisely to
+    // decide whether the verdict parser will see a fence — which it only will
+    // from a trusted author.
     const fencePosted = (verified.comments ?? []).some(
-      (comment) => comment?.body === fence,
+      (comment) =>
+        typeof comment?.body === "string" &&
+        isTrustedComment(comment) &&
+        comment.body.startsWith(fence),
     );
 
     // Judge the shed from the VERIFICATION READ, not from what the edit
