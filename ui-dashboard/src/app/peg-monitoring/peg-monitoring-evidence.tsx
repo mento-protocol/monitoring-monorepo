@@ -63,7 +63,7 @@ function CheckStatus({ state }: { state: ConfirmedState }): React.JSX.Element {
           <h2
             id="peg-check-status-heading"
             role="status"
-            className="text-sm font-semibold text-emerald-100"
+            className="text-sm font-semibold text-emerald-200"
           >
             Data is current
           </h2>
@@ -160,10 +160,10 @@ function DecisionMarket({
             id={`peg-decision-market-heading-${asset.asset.asset}`}
             className="text-sm font-semibold text-white"
           >
-            Decision market
+            Market used for this status
           </h4>
           <p className="mt-1 text-xs leading-5 text-slate-400">
-            This is the market used to set the status above.
+            This is the main market checked to set the status above.
           </p>
         </div>
         <StatusPill
@@ -173,7 +173,7 @@ function DecisionMarket({
       </div>
       {source === null ? (
         <p className="mt-4 text-sm text-red-200">
-          The configured decision market is missing from this check.
+          The configured main market is missing from this check.
         </p>
       ) : (
         <div className="mt-4 space-y-3">
@@ -336,16 +336,16 @@ function SafetyChecks({
         id={`peg-safety-checks-heading-${asset.asset.asset}`}
         className="text-sm font-semibold text-white"
       >
-        Safety checks
+        Pool safety
       </h4>
       <p className="mt-1 text-xs leading-5 text-slate-400">
-        On-chain checks show whether the monitored pool is reachable, how close
-        net inflow is to its active trading limit, and whether its trade
-        safeguard is ready.
+        These checks show whether the monitored pool is reachable, how close net
+        inflow is to its active trading limit, and whether its trade safeguard
+        is ready.
       </p>
       <p className="mt-1 text-xs leading-5 text-slate-400">
-        A trade safeguard problem makes this dashboard critical, but it does not
-        page the on-call engineer by itself.
+        A pool or trade safeguard problem can make this dashboard show Critical.
+        It does not page the on-call engineer by itself.
       </p>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <div className="rounded-md border border-slate-800 bg-slate-900/45 p-3">
@@ -493,8 +493,8 @@ export function PegMonitoringEvidence({
           How this status was checked
         </span>
         <span className="mt-1 block max-w-3xl text-xs font-normal leading-5 text-slate-400">
-          See the market check, alert settings, and safety checks behind this
-          result.
+          See the market used for each asset, when alerts fire, and the pool
+          safety checks.
         </span>
       </summary>
       <div className="min-w-0 space-y-5 border-t border-slate-800 p-4 sm:p-6">

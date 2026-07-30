@@ -154,8 +154,8 @@ export function OtherMarkets({
       <div className="border-t border-slate-800 p-4">
         <p className="mb-3 text-xs leading-5 text-slate-400">
           {hasWarningAuthority
-            ? "Secondary markets can raise separate market warnings; the status above uses the decision market. Display-only markets do not affect peg price status, but their health or listing can raise operational warnings."
-            : "Display-only markets do not affect peg price status, but their health or listing can raise operational warnings."}
+            ? "These markets do not set the peg status shown above. Some can send a market warning. Their health or listing can send a monitoring warning."
+            : "These markets do not set the peg status shown above. Their health or listing can send a monitoring warning."}
         </p>
         <div className="grid gap-3 md:grid-cols-2">
           {sources.map((source) => (

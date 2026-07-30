@@ -114,33 +114,42 @@ describe("PegMonitoringPageClient", () => {
       "How this status was checked",
     );
     expect(container.textContent).toContain(
-      "This is the market used to set the status above.",
+      "This is the main market checked to set the status above.",
     );
     expect(container.textContent).toContain(
       "A 50,000 EUROP sale would get about 0.9965 EUR per EUROP.",
     );
     expect(container.textContent).toContain(
-      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target, or when the decision market's buy/sell spread exceeds 30 bps, or when pool inflow reaches 80% of its active trading limit.",
+      "For the main market, at least 80% of usable full-size prices in the last 10 minutes must be 0.25% (25 bps) below target or 0.25% (25 bps) above target.",
     );
     expect(container.textContent).toContain(
-      "Also page immediately when the full-size sale price is missing for 10 consecutive checks and another risk signal is active: high pool inflow, an unusually wide buy/sell spread, or a partial-fill price below the critical limit.",
+      "The main market also warns if its buy/sell spread stays above 30 bps for 10 minutes, or pool inflow stays at 80% or more of the active trading limit for 10 minutes.",
     );
     expect(container.textContent).toContain(
-      "80% of usable readings must cross the limit",
+      "Page the on-call engineer when at least 80% of usable full-size main-market prices in the last 20 minutes are 0.5% (50 bps) below target.",
+    );
+    expect(container.textContent).toContain(
+      "A page can fire sooner, without waiting for the full price window (20 minutes), when 10 scheduled main-market checks produce no new usable full-size price",
+    );
+    expect(container.textContent).toContain(
+      "Critical alerts: Splunk On-Call and @support-engineer in #alerts-critical after 30 seconds.",
+    );
+    expect(container.textContent).toContain(
+      "At least 80% of expected checks must arrive, at least 80% must produce a usable full-size price, and at least 80% of those usable prices must cross the limit.",
     );
     expect(container.textContent).toContain(
       "Net pool inflow is at 42% of the active on-chain trading limit. Warn at 80%.",
     );
     expect(otherMarkets?.hasAttribute("open")).toBe(false);
     expect(otherMarkets?.textContent).toContain(
-      "Secondary markets can raise separate market warnings; the status above uses the decision market. Display-only markets do not affect peg price status, but their health or listing can raise operational warnings.",
+      "These markets do not set the peg status shown above. Some can send a market warning. Their health or listing can send a monitoring warning.",
     );
     expect(container.textContent).toContain(
-      "Separate operations warnings cover market availability and listings, pool reachability, missed checks, and policy rollover. They do not page the on-call engineer.",
+      "Send a warning for unhealthy or missing market data and listings, an unreachable pool, a missing peg-monitor heartbeat, or an unacknowledged alert-policy update.",
     );
-    expect(container.textContent).toContain("Other non-paging warnings");
+    expect(container.textContent).toContain("How alerts are confirmed");
     expect(container.textContent).toContain(
-      "A trade safeguard problem makes this dashboard critical, but it does not page the on-call engineer by itself.",
+      "A pool or trade safeguard problem can make this dashboard show Critical. It does not page the on-call engineer by itself.",
     );
     expect(technical?.hasAttribute("open")).toBe(false);
     expect(technical?.textContent).toContain("Schema");
@@ -170,10 +179,13 @@ describe("PegMonitoringPageClient", () => {
       '[data-testid="peg-alert-settings-europ-schuman"]',
     );
     expect(settings?.textContent).toContain(
-      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target, or when pool inflow reaches 80% of its active trading limit.",
+      "For the main market, at least 80% of usable full-size prices in the last 10 minutes must be 0.25% (25 bps) below target or 0.25% (25 bps) above target.",
     );
-    expect(settings?.textContent).not.toContain(
-      "decision market's buy/sell spread exceeds",
+    expect(settings?.textContent).toContain(
+      "Main-market spread settings are unavailable. Pool inflow stays at 80% or more of the active trading limit for 10 minutes.",
+    );
+    expect(settings?.textContent).toContain(
+      "Main-market settings are unavailable because the configured market is missing from this monitoring package.",
     );
   });
   it("keeps the ticking age outside the live status while announcing semantic state", () => {

@@ -37,7 +37,7 @@ function Snapshot({
           id="snapshot-heading"
           className="text-base font-semibold text-white"
         >
-          Package details
+          Check metadata
         </h3>
         <StatusPill
           label={previous ? "Previous alert policy" : "Current alert policy"}
@@ -89,7 +89,7 @@ function Structural({ item }: { item: PegAssetPackage }): React.JSX.Element {
           detail="Current package flag"
         />
         <EvidenceItem
-          label="Consecutive failed full-size price checks"
+          label="Scheduled checks without a new usable full-size price"
           value={String(value.blindConsecutivePolls)}
           detail={`threshold ${item.policy.blindConsecutivePolls}`}
         />
@@ -419,12 +419,13 @@ export function PegMonitoringTechnicalRecord({
       className="rounded-lg border border-slate-800 bg-slate-950/40"
     >
       <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-200 hover:text-white">
-        Technical record
+        Technical details for investigation
       </summary>
       <div className="space-y-5 border-t border-slate-800 p-4">
         <p className="max-w-3xl text-xs leading-5 text-slate-400">
-          Version IDs, raw measurements, source timing, addresses, and safeguard
-          values for investigation.
+          Raw measurements, timestamps, policy and source IDs, addresses, and
+          trade safeguard values. These details explain the check; they do not
+          change the status above.
         </p>
         <Snapshot data={data} />
         {data.packages.map((item, index) => (
