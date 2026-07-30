@@ -83,6 +83,8 @@ exposure is bounded to inference-quota abuse.
   labels, closures, and projections.
 - Missing, invalid, stale, or unauthenticated verdicts fail loudly and retain
   `sentry:needs-triage` for retry.
+- A closed queue issue never rests on `sentry:needs-triage`. Stages may write
+  that pairing transiently; ingest reopens it on its next run.
 - Closing a queue issue never resolves or archives its Sentry issue.
 - Autofix opens a PR only. Required CI, review, and merge remain human gates.
 - Archiving requires an explicit human-applied
@@ -126,17 +128,44 @@ bulk:
 - no matching queue issue: create one;
 - open match: leave it open;
 - closed match with a regression whose `lastSeen` is newer than
-  `closed_at`: reopen it, remove stale verdict/projection/archive labels, and
-  restore `sentry:needs-triage`;
+  `closed_at`: post the regression fence comment, shed the stale
+  verdict/projection/autofix/archive labels, restore `sentry:needs-triage`, and
+  reopen — in that order;
 - closed match carrying `sentry:archived`: compare `lastSeen` against the
   archive freshness baseline in the stub's own body instead of `closed_at` (see
   the archive section below), falling back to `closed_at` when the body carries
   no parseable baseline;
 - other closed match: leave it closed.
 
+That write order is load-bearing at both ends. The fence goes first so no
+interruption can leave a stub re-queued for triage without it; the state change
+goes last so none can leave it open but unselectable. Every interruption point
+then lands on a state that is inert or recoverable. The fence post is guarded by
+an exact-body check, so a retry completes the sequence without duplicating it.
+
 Missing or invalid timestamps fail toward re-triage. The strict timestamp gate
 prevents Sentry's long-lived regressed substatus from causing a reopen/close
 loop.
+
+Ingest then sweeps the queue itself, independently of that run's Sentry
+results: a closed stub that still carries `sentry:needs-triage` is reopened,
+its stale verdict/projection/autofix/archive labels shed, and a fixed recovery
+note posted. That pairing is unreachable, never a resting state — Stage B
+selects open stubs only, and the regression gate above reopens a closed stub
+only on fresh Sentry events. Several stages can write it (both `gh issue close`
+compensation paths in the triage agent workflow when a close lands but its
+response is lost, the archive leg's live-regression refusal, a crash inside
+ingest's own reopen sequence, a hand-edit), so it is repaired once here from
+observed state rather than guarded at each producer. Declining a stub means
+removing `sentry:needs-triage`, not closing the stub while it still carries the
+label.
+
+The sweep re-reads each stub immediately before touching it and acts only if it
+is still closed-and-needing-triage. The queue snapshot is taken before the whole
+Sentry loop runs, so by the time the sweep reaches a given stub the snapshot can
+be minutes old — long enough for a human to have declined it by removing the
+label, which the sweep would otherwise put straight back. A failed re-read
+leaves the stub stranded for the next run rather than recovering blind.
 
 The namespace is separate from the development backlog:
 
@@ -344,6 +373,23 @@ refuses a currently regressed/escalating issue, and uses the documented issue
 update API to set `archived_until_escalating`. It then records the approver
 and timestamp, applies `sentry:archived`, and closes the queue issue.
 
+The regression refusal re-queues the stub, and its comment opens with the
+regression fence line so the verdict parser reads the previous round's verdict
+as stale. That is the general rule for every re-queue: one caused by new Sentry
+events must fence, because any prior verdict described the old occurrence; one
+caused by bookkeeping — the stranded-stub sweep above — must not, because
+nothing about the Sentry issue changed and that verdict is still valid. Drop the
+fence and a triage round that dies before posting lets the `verdict` job
+re-apply the previous verdict and close the stub over a live regression.
+
+The refusal will not re-queue a stub it cannot fence, and it decides that by
+asking whether any verdict is still admissible — never by checking that a fence
+comment exists. Presence is not admissibility: the refusal body is identical
+across runs for one `lastSeen`, so an earlier run's fence can sit on the stub
+underneath a verdict posted after it, where the parser correctly ignores it. Both
+checks on this path run `selectVerdictComment`, the parser's own selector, so the
+guard and the thing it guards against cannot drift apart.
+
 If approval disappears during the mutation window, the script rolls the queue
 stub back and leaves it available for fresh triage. It does NOT un-archive the
 Sentry issue: `archived_until_escalating` is the approved outcome and it
@@ -528,7 +574,10 @@ Use all three surfaces:
 2. Actions history for the four workflows above;
 3. repository Actions variables for the literal enable flags.
 
-The run record reports fetched, created, skipped, reopened, and error counts.
+The run record reports fetched, created, skipped, reopened, recovered, and
+error counts. A nonzero recovered count means stubs were found closed while
+still labeled `sentry:needs-triage`; a recurring one points at a producer worth
+investigating, not at the sweep.
 Scheduled workflow failures also route through the repository's main-failure
 notifier. Triage produces a per-run `#engineering` digest. Absence of an
 expected record or digest is itself a signal.

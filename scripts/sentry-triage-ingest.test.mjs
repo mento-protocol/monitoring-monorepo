@@ -8,6 +8,7 @@ import {
   buildRegressedComment,
   buildReopenLabelEditArgs,
   buildRunRecordBody,
+  buildStrandedRecoveryComment,
   classifyNoise,
   decideDedupAction,
   defangBackticks,
@@ -16,14 +17,18 @@ import {
   ghPaginate,
   indexQueueIssuesByShortId,
   isSafeNextPageUrl,
+  isStrandedNeedsTriage,
   LABEL_DEFINITIONS,
   mapSentryIssue,
   mergeSentryIssues,
+  NEEDS_TRIAGE_LABEL,
   normalizeRestIssues,
   parseArchiveBaseline,
   parseArgs,
   parseLinkHeader,
   PROJECTED_LABEL,
+  recoverStrandedQueueIssue,
+  reopenQueueIssue,
   REOPEN_SHED_LABELS,
   resolveLookbackDays,
   resolveTokenGuard,
@@ -74,6 +79,15 @@ function assertDeepEqual(actual, expected) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+async function assertRejectsAsync(fn) {
+  try {
+    await fn();
+  } catch {
+    return;
+  }
+  throw new Error("expected the call to reject");
 }
 
 function assertThrows(fn, pattern) {
@@ -1020,7 +1034,12 @@ await test("ghPaginate fails loud on runaway pagination and non-array responses"
 await test("REST issue normalization flattens pages, drops PRs, uppercases state, carries closed_at + labels + body", () => {
   const normalized = normalizeRestIssues([
     [
-      { number: 1, title: "[sentry] X-1: a", state: "open" },
+      {
+        number: 1,
+        title: "[sentry] X-1: a",
+        state: "open",
+        labels: [{ name: "sentry-triage" }, { name: "sentry:needs-triage" }],
+      },
       {
         number: 2,
         title: "[sentry] X-2: b",
@@ -1038,7 +1057,17 @@ await test("REST issue normalization flattens pages, drops PRs, uppercases state
         pull_request: {},
       },
     ],
-    [{ number: 4, title: "[sentry] X-4: c", state: "closed", labels: [] }],
+    // Label name STRINGS (not objects) must normalize identically: the stranded
+    // sweep reads this field, and a silent [] here would make it inert. Closed
+    // and needing triage is exactly the pairing it looks for.
+    [
+      {
+        number: 4,
+        title: "[sentry] X-4: c",
+        state: "closed",
+        labels: ["sentry-triage", "sentry:needs-triage"],
+      },
+    ],
   ]);
   assertDeepEqual(normalized, [
     {
@@ -1047,7 +1076,7 @@ await test("REST issue normalization flattens pages, drops PRs, uppercases state
       state: "OPEN",
       closedAt: null,
       body: "",
-      labels: [],
+      labels: ["sentry-triage", "sentry:needs-triage"],
     },
     {
       number: 2,
@@ -1063,9 +1092,13 @@ await test("REST issue normalization flattens pages, drops PRs, uppercases state
       state: "CLOSED",
       closedAt: null,
       body: "",
-      labels: [],
+      labels: ["sentry-triage", "sentry:needs-triage"],
     },
   ]);
+  assert(
+    isStrandedNeedsTriage(normalized[2]),
+    "a closed stub still labeled needs-triage must survive normalization as stranded",
+  );
   assertEqual(
     parseArchiveBaseline(normalized[1].body).lastSeen,
     "2026-07-16T11:00:00Z",
@@ -1095,7 +1128,14 @@ await test("merging new + regressed issues flags regression by ID union", () => 
 
 await test("run record body includes counts and the rolling-comment marker", () => {
   const body = buildRunRecordBody(
-    { fetched: 5, created: 2, skippedExisting: 2, reopened: 1, errors: 0 },
+    {
+      fetched: 5,
+      created: 2,
+      skippedExisting: 2,
+      reopened: 1,
+      recovered: 3,
+      errors: 0,
+    },
     "2026-07-15T05:30:00.000Z",
   );
   assert(
@@ -1106,6 +1146,10 @@ await test("run record body includes counts and the rolling-comment marker", () 
   assert(body.includes("Created: 2"), "missing created count");
   assert(body.includes("Skipped (existing): 2"), "missing skipped count");
   assert(body.includes("Reopened (regressed): 1"), "missing reopened count");
+  assert(
+    body.includes("Recovered (stranded needs-triage): 3"),
+    "missing recovered count",
+  );
   assert(body.includes("Errors: 0"), "missing errors count");
 });
 
@@ -1620,6 +1664,1002 @@ await test("a per-issue error is counted without aborting the whole run", async 
   // a missing run record is the dead-man-switch signal, not a per-issue one.
   assert(recordedCounts !== null, "expected run record to be posted");
   assertEqual(recordedCounts.errors, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Stranded `CLOSED + sentry:needs-triage` recovery (issue #1706).
+//
+// The scenario is a LOST CLOSE RESPONSE: `gh issue close` lands server-side and
+// only its response is lost, so the caller sees a rejection and runs its
+// compensation. A rejected command is not proof its remote mutation did not
+// happen. The fake below is stateful and its `ambiguousOn` hook applies the
+// mutation and THEN throws, which is exactly that. Every assertion is on the
+// observable end state — never on which call rejected.
+// ---------------------------------------------------------------------------
+
+const REPO = "mento-protocol/monitoring-monorepo";
+
+/**
+ * Minimal stateful GitHub the `gh` argv arrays actually mutate, so the real
+ * argument builders (not a re-implementation of them) drive the state.
+ */
+function makeFakeGitHub({
+  issues = [],
+  ambiguousOn = () => false,
+  rejectOn = () => false,
+} = {}) {
+  const state = new Map(
+    issues.map((issue) => [
+      issue.number,
+      {
+        closedAt: null,
+        // Bodies only — the comments the pipeline itself writes, which keeps the
+        // assertions readable. `untrustedComments` models what anyone with a
+        // comment box can add on this PUBLIC repo; the read below is what
+        // attaches the authorship that tells the two apart.
+        comments: [],
+        untrustedComments: [],
+        ...issue,
+        labels: [...(issue.labels ?? [])],
+      },
+    ]),
+  );
+  const calls = [];
+
+  const flag = (args, name) => {
+    const at = args.indexOf(name);
+    return at === -1 ? null : args[at + 1];
+  };
+  const splitLabels = (value) =>
+    String(value ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+  const apply = (args) => {
+    const [resource, verb, rawNumber] = args;
+    if (resource !== "issue") throw new Error(`unexpected gh call: ${args[0]}`);
+    const issue = state.get(Number(rawNumber));
+    if (!issue) throw new Error(`unknown issue ${rawNumber}`);
+    if (verb === "edit") {
+      for (const name of splitLabels(flag(args, "--remove-label"))) {
+        issue.labels = issue.labels.filter((label) => label !== name);
+      }
+      for (const name of splitLabels(flag(args, "--add-label"))) {
+        if (!issue.labels.includes(name)) issue.labels.push(name);
+      }
+      return;
+    }
+    if (verb === "comment") {
+      issue.comments.push(flag(args, "--body"));
+      return;
+    }
+    if (verb === "close") {
+      issue.state = "CLOSED";
+      issue.closedAt = "2026-07-20T09:00:00Z";
+      const comment = flag(args, "--comment");
+      if (comment) issue.comments.push(comment);
+      return;
+    }
+    if (verb === "reopen") {
+      issue.state = "OPEN";
+      issue.closedAt = null;
+      return;
+    }
+    throw new Error(`unexpected gh issue subcommand: ${verb}`);
+  };
+
+  const fail = (args) =>
+    new Error(
+      `gh ${args.join(" ")} failed with exit 1:\nerror connecting to api.github.com`,
+    );
+
+  const runGh = async (args) => {
+    calls.push(args);
+    // A read: the comment scan reopenQueueIssue runs before it posts. Untrusted
+    // comments come FIRST, so a guard that stops at the first body match without
+    // checking the author picks the attacker's copy.
+    if (args[0] === "api") {
+      const number = Number(/issues\/(\d+)\/comments/.exec(args[1])?.[1]);
+      const issue = state.get(number);
+      return JSON.stringify([
+        ...(issue?.untrustedComments ?? []).map((body) => ({
+          body,
+          user: { login: "drive-by-account" },
+        })),
+        ...(issue?.comments ?? []).map((body) => ({
+          body,
+          user: { login: "github-actions[bot]" },
+        })),
+      ]);
+    }
+    // A read: the sweep's pre-mutation revalidation. Serves LIVE state, so a
+    // test can mutate the model after the snapshot and watch the sweep notice.
+    if (args[0] === "issue" && args[1] === "view") {
+      if (rejectOn(args)) throw fail(args);
+      const issue = state.get(Number(args[2]));
+      return JSON.stringify({
+        number: issue?.number,
+        state: issue?.state,
+        labels: (issue?.labels ?? []).map((name) => ({ name })),
+      });
+    }
+    // The process died before the call reached GitHub: nothing applied.
+    if (rejectOn(args)) throw fail(args);
+    // Mutation FIRST, rejection second: the server applied it, the client only
+    // lost the answer.
+    apply(args);
+    if (ambiguousOn(args)) throw fail(args);
+    return "";
+  };
+
+  return {
+    calls,
+    runGh,
+    get: (number) => state.get(number),
+    /** The normalized queue snapshot ingest's listQueueIssues would return. */
+    snapshot: () =>
+      [...state.values()].map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        state: issue.state,
+        closedAt: issue.closedAt,
+        labels: [...issue.labels],
+      })),
+    /** Stage B's selector: `--label sentry-triage --label ... --state open`. */
+    selectable: () =>
+      [...state.values()]
+        .filter(
+          (issue) =>
+            issue.state === "OPEN" &&
+            issue.labels.includes("sentry-triage") &&
+            issue.labels.includes(NEEDS_TRIAGE_LABEL),
+        )
+        .map((issue) => issue.number),
+  };
+}
+
+/**
+ * The close-then-compensate shell both producer sites in
+ * `.github/workflows/sentry-triage-agent.yml` run. They differ only in which
+ * job hosts them (the `verdict` job's "Close queue stub" step and the `project`
+ * job's per-row close) and in the exact `labels_to_remove` string; the failure
+ * semantics — restore `sentry:needs-triage`, shed the verdict label and
+ * `sentry:projected`, fail loud — are identical, so one helper models both.
+ */
+async function closeWithCompensation(runGh, { number, labelsToRemove }) {
+  try {
+    await runGh([
+      "issue",
+      "close",
+      String(number),
+      "--repo",
+      REPO,
+      "--reason",
+      "completed",
+      "--comment",
+      "Triage complete: upstream. Ledger entry closed; reopens automatically on Sentry regression.",
+    ]);
+    return "closed";
+  } catch {
+    await runGh([
+      "issue",
+      "edit",
+      String(number),
+      "--repo",
+      REPO,
+      "--remove-label",
+      labelsToRemove,
+      "--add-label",
+      NEEDS_TRIAGE_LABEL,
+    ]);
+    return "compensated";
+  }
+}
+
+/** Ingest deps that see NO Sentry results at all. A stranded stub's Sentry
+ * issue is normally outside the firstSeen lookback and no longer flagged
+ * regressed, so the dedup loop never visits it — recovery has to come from the
+ * queue sweep or from nowhere. */
+function ingestDeps(fake, overrides = {}) {
+  return {
+    fetchMergedSentryIssues: async () => mergeSentryIssues([], []),
+    listQueueIssues: async () => fake.snapshot(),
+    ensureLabels: async () => {},
+    createIssue: async () => {
+      throw new Error("unexpected create in this scenario");
+    },
+    reopenIssue: async () => {
+      throw new Error("unexpected regression reopen in this scenario");
+    },
+    recoverStranded: (options, issue) =>
+      recoverStrandedQueueIssue(options, issue, { runGh: fake.runGh }),
+    postRunRecord: async () => {},
+    now: () => new Date("2026-07-21T05:30:00.000Z"),
+    ...overrides,
+  };
+}
+
+await test("isStrandedNeedsTriage matches only closed stubs still awaiting a verdict", () => {
+  assert(
+    isStrandedNeedsTriage({
+      state: "CLOSED",
+      labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+    }),
+    "closed + needs-triage is the stranded pairing",
+  );
+  assert(
+    !isStrandedNeedsTriage({
+      state: "OPEN",
+      labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+    }),
+    "an open stub awaiting triage is the normal queue state",
+  );
+  assert(
+    !isStrandedNeedsTriage({
+      state: "CLOSED",
+      labels: ["sentry-triage", "sentry:verdict-upstream"],
+    }),
+    "a verdict-closed stub is settled, not stranded",
+  );
+  assert(
+    !isStrandedNeedsTriage({ state: "CLOSED" }),
+    "a stub with no labels field must not be treated as stranded",
+  );
+});
+
+await test("the recovery note does not claim a reopen that has not happened", async () => {
+  // The note is posted BEFORE the reopen, because the state change goes last.
+  // So it has to read as intent: a stub left closed by a failed reopen carries
+  // this text, and each retry adds another copy. Copies are the honest signal
+  // that recovery keeps failing — the fix is truthful wording, not a suppressor.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+    rejectOn: (args) => args[1] === "reopen",
+  });
+
+  await assertRejectsAsync(() =>
+    recoverStrandedQueueIssue(
+      { repo: REPO },
+      { number: 42 },
+      { runGh: fake.runGh },
+    ),
+  );
+
+  const issue = fake.get(42);
+  assertEqual(issue.state, "CLOSED");
+  assertDeepEqual(issue.comments, [buildStrandedRecoveryComment()]);
+
+  // Every claim the note makes must hold for a stub that is still CLOSED.
+  const note = issue.comments[0];
+  for (const claim of [
+    /\bReopened\b/,
+    /\bRe-queued\b/,
+    /\bhas been reopened\b/,
+    /\bwas reopened\b/,
+  ]) {
+    assert(
+      !claim.test(note),
+      `the note asserts a completed reopen (${claim}) on a stub that is still ${issue.state}: ${note}`,
+    );
+  }
+  // And it tells the reader why a duplicate is expected, so repeats read as the
+  // signal they are rather than as a bug.
+  assert(
+    /more than once/.test(note),
+    "the note should explain why it can appear twice",
+  );
+});
+
+await test("a retried recovery posts the note again rather than suppressing it", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+    rejectOn: (args) => args[1] === "reopen",
+  });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await assertRejectsAsync(() =>
+      recoverStrandedQueueIssue(
+        { repo: REPO },
+        { number: 42 },
+        { runGh: fake.runGh },
+      ),
+    );
+  }
+
+  // Two attempts, two notes. A stub that keeps failing to reopen should show it.
+  assertEqual(fake.get(42).comments.length, 2);
+  assertEqual(fake.get(42).state, "CLOSED");
+});
+
+await test("stranded recovery re-queues, sheds stale markers, and changes state last", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: [
+          "sentry-triage",
+          NEEDS_TRIAGE_LABEL,
+          "sentry:verdict-upstream",
+        ],
+      },
+    ],
+  });
+
+  await recoverStrandedQueueIssue(
+    { repo: REPO },
+    { number: 42 },
+    {
+      runGh: fake.runGh,
+    },
+  );
+
+  // The revalidating read comes FIRST — the sweep decides on live state, never
+  // on the snapshot it was handed — and the state change still comes last.
+  assertDeepEqual(
+    fake.calls.map((args) => args[1]),
+    ["view", "edit", "comment", "reopen"],
+  );
+  assertDeepEqual(fake.calls[1], buildReopenLabelEditArgs(42, REPO));
+  const issue = fake.get(42);
+  assertEqual(issue.state, "OPEN");
+  assertDeepEqual(issue.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
+  assertDeepEqual(issue.comments, [buildStrandedRecoveryComment()]);
+  // The recovery note must NOT be the regression comment: that exact lead-in is
+  // the verdict parser's staleness fence, and a recovery is not a new Sentry
+  // occurrence, so a verdict already posted for this stub stays admissible.
+  assert(
+    !buildStrandedRecoveryComment().includes("Regressed in Sentry (last seen "),
+    "recovery note must not trip the verdict staleness fence",
+  );
+});
+
+for (const producer of [
+  {
+    name: "the verdict job's close step",
+    labelsToRemove: "sentry:verdict-upstream,sentry:projected",
+  },
+  {
+    name: "the project job's per-row close",
+    labelsToRemove: "sentry:verdict-code-fix,sentry:projected",
+  },
+]) {
+  await test(`ingest recovers a stub stranded by a lost close response at ${producer.name}`, async () => {
+    const verdictLabel = producer.labelsToRemove.split(",")[0];
+    const fake = makeFakeGitHub({
+      issues: [
+        {
+          number: 42,
+          title: buildQueueTitle("X-42", "web", "error"),
+          state: "OPEN",
+          labels: ["sentry-triage", verdictLabel],
+        },
+      ],
+      // The close is the ambiguous call: it lands, then its response is lost.
+      ambiguousOn: (args) => args[1] === "close",
+    });
+
+    const outcome = await closeWithCompensation(fake.runGh, {
+      number: 42,
+      labelsToRemove: producer.labelsToRemove,
+    });
+
+    // End state after the lost response: the stub is CLOSED (the mutation
+    // landed) AND wearing sentry:needs-triage (the compensation ran on the
+    // rejection). That pairing is invisible to Stage B.
+    assertEqual(outcome, "compensated");
+    assertEqual(fake.get(42).state, "CLOSED");
+    assert(
+      fake.get(42).labels.includes(NEEDS_TRIAGE_LABEL),
+      "compensation should have restored the needs-triage label",
+    );
+    assertDeepEqual(fake.selectable(), []);
+
+    const counts = await runIngest(
+      { repo: REPO, trackerIssue: 1282 },
+      ingestDeps(fake),
+    );
+
+    // The next scheduled ingest repairs it from observed state.
+    assertEqual(counts.recovered, 1);
+    assertEqual(counts.errors, 0);
+    const issue = fake.get(42);
+    assertEqual(issue.state, "OPEN");
+    assertDeepEqual(issue.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
+    assertDeepEqual(fake.selectable(), [42]);
+  });
+}
+
+await test("stranded recovery terminates: a second ingest run is a no-op", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+  });
+
+  const first = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+  const second = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+
+  assertEqual(first.recovered, 1);
+  // Reopened, so no longer stranded: the sweep cannot cycle a stub it already
+  // fixed, and it never fights the regression gate (which only ever sees stubs
+  // whose needs-triage label the verdict step already removed).
+  assertEqual(second.recovered, 0);
+  assertEqual(fake.get(42).comments.length, 1);
+});
+
+await test("the sweep leaves settled and healthy queue stubs alone", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 10,
+        title: buildQueueTitle("X-10", "web", "error"),
+        state: "CLOSED",
+        closedAt: "2026-07-18T00:00:00Z",
+        labels: ["sentry-triage", "sentry:verdict-upstream"],
+      },
+      {
+        number: 11,
+        title: buildQueueTitle("X-11", "web", "error"),
+        state: "OPEN",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+      {
+        number: 12,
+        title: buildQueueTitle("X-12", "web", "error"),
+        state: "CLOSED",
+        closedAt: "2026-07-18T00:00:00Z",
+        labels: ["sentry-triage", "sentry:verdict-upstream", "sentry:archived"],
+      },
+    ],
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+
+  assertEqual(counts.recovered, 0);
+  assertDeepEqual(fake.calls, []);
+});
+
+await test("a stub reopened by the regression path is not swept a second time", async () => {
+  const sentryIssue = mapSentryIssue({
+    id: 9,
+    shortId: "X-9",
+    lastSeen: "2026-07-20T00:00:00Z",
+  });
+  // The pairing ingest's own reopen leaves behind when it crashes between the
+  // label edit and the state change: closed, already re-labeled needs-triage.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 200,
+        title: buildQueueTitle("X-9", "unknown", "error"),
+        state: "CLOSED",
+        closedAt: "2026-07-19T00:00:00Z",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+  });
+  let reopened = 0;
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, {
+      fetchMergedSentryIssues: async () => mergeSentryIssues([], [sentryIssue]),
+      reopenIssue: async (options, existingIssue) => {
+        reopened += 1;
+        assertEqual(existingIssue.number, 200);
+        await fake.runGh(["issue", "reopen", "200", "-R", REPO]);
+      },
+    }),
+  );
+
+  assertEqual(reopened, 1);
+  assertEqual(counts.reopened, 1);
+  assertEqual(counts.recovered, 0);
+  assertEqual(fake.get(200).state, "OPEN");
+});
+
+// ---------------------------------------------------------------------------
+// A FAILED Sentry-evidence reopen must not be laundered into a bookkeeping
+// recovery (issue #1706, third follow-up).
+//
+// A stub can be eligible for both paths at once: closed, already wearing
+// `sentry:needs-triage` from an earlier bookkeeping compensation, and now
+// regressed. The regression path claims it and fences; the sweep does not
+// fence, by design. If the reopen throws and the run records only SUCCESSES,
+// the sweep inherits that stub inside the same run and re-queues it fence-free
+// — so the pre-regression verdict stays admissible over a live regression.
+// ---------------------------------------------------------------------------
+
+const BOTH_ELIGIBLE_REGRESSION = mapSentryIssue({
+  id: 9,
+  shortId: "X-9",
+  lastSeen: "2026-07-20T00:00:00Z",
+});
+
+const BOTH_ELIGIBLE_STUB = {
+  number: 200,
+  title: buildQueueTitle("X-9", "web", "error"),
+  state: "CLOSED",
+  closedAt: "2026-07-19T00:00:00Z",
+  // The bookkeeping compensation's leftovers — which is what makes this stub
+  // look stranded to the sweep.
+  labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+};
+
+await test("a regression reopen that fails is not swept as bookkeeping in the same run", async () => {
+  const fake = makeFakeGitHub({
+    issues: [{ ...BOTH_ELIGIBLE_STUB }],
+    // The fence post itself fails — the first write the regression path makes.
+    rejectOn: (args) => args[1] === "comment",
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, {
+      fetchMergedSentryIssues: async () =>
+        mergeSentryIssues([], [BOTH_ELIGIBLE_REGRESSION]),
+      reopenIssue: (options, issue, sentryIssue) =>
+        reopenQueueIssue(options, issue, sentryIssue, { runGh: fake.runGh }),
+    }),
+  );
+
+  // The reopen failed and is counted as an error...
+  assertEqual(counts.reopened, 0);
+  assertEqual(counts.errors, 1);
+  // ...and the decisive assertion: the sweep did NOT pick the stub up.
+  assertEqual(counts.recovered, 0);
+  const issue = fake.get(200);
+  assertEqual(issue.state, "CLOSED");
+  assertDeepEqual(issue.comments, []);
+  assert(
+    !issue.comments.includes(buildStrandedRecoveryComment()),
+    "the bookkeeping recovery note must never land on a failed regression reopen",
+  );
+});
+
+await test("the next run reopens that stub through the regression path, with its fence", async () => {
+  const fake = makeFakeGitHub({ issues: [{ ...BOTH_ELIGIBLE_STUB }] });
+  const deps = ingestDeps(fake, {
+    fetchMergedSentryIssues: async () =>
+      mergeSentryIssues([], [BOTH_ELIGIBLE_REGRESSION]),
+    reopenIssue: (options, issue, sentryIssue) =>
+      reopenQueueIssue(options, issue, sentryIssue, { runGh: fake.runGh }),
+  });
+
+  const counts = await runIngest({ repo: REPO, trackerIssue: 1282 }, deps);
+
+  assertEqual(counts.reopened, 1);
+  assertEqual(counts.recovered, 0);
+  const issue = fake.get(200);
+  assertEqual(issue.state, "OPEN");
+  assertDeepEqual(issue.comments, [
+    buildRegressedComment("2026-07-20T00:00:00Z"),
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// The sweep revalidates before it mutates (issue #1706, fourth follow-up).
+//
+// listQueueIssues() snapshots the whole queue before the Sentry loop runs, and
+// ingest holds its own concurrency group, so minutes can pass before the sweep
+// reaches a given stub. Anything decided from that snapshot is a decision about
+// the past.
+// ---------------------------------------------------------------------------
+
+await test("the sweep does not reverse a human who declined the stub", async () => {
+  // Removing sentry:needs-triage is the DOCUMENTED way to decline a stub, so
+  // re-adding it off a stale snapshot reverses the exact action the runbook
+  // prescribes.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+  });
+  const staleSnapshot = fake.snapshot();
+  // The human declines it after the snapshot, before the sweep gets there.
+  fake.get(42).labels = ["sentry-triage"];
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, { listQueueIssues: async () => staleSnapshot }),
+  );
+
+  assertEqual(counts.recovered, 0);
+  assertEqual(counts.errors, 0);
+  const issue = fake.get(42);
+  assertEqual(issue.state, "CLOSED");
+  assertDeepEqual(issue.labels, ["sentry-triage"]);
+  assertDeepEqual(issue.comments, []);
+  // Read, then nothing: no write was attempted at all.
+  assertDeepEqual(
+    fake.calls.map((args) => args[1]),
+    ["view"],
+  );
+});
+
+await test("the sweep leaves a stub something else already reopened", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+  });
+  const staleSnapshot = fake.snapshot();
+  fake.get(42).state = "OPEN";
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, { listQueueIssues: async () => staleSnapshot }),
+  );
+
+  assertEqual(counts.recovered, 0);
+  assertDeepEqual(fake.get(42).comments, []);
+});
+
+await test("a failed revalidation leaves the stub stranded rather than recovering blind", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+    rejectOn: (args) => args[1] === "view",
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+
+  assertEqual(counts.recovered, 0);
+  assertEqual(counts.errors, 1);
+  assertEqual(fake.get(42).state, "CLOSED");
+  assertDeepEqual(fake.get(42).comments, []);
+});
+
+await test("a failure while DECIDING also withholds the stub from the sweep", async () => {
+  // One step earlier than the reopen: if the decision itself throws we cannot
+  // say the cause was bookkeeping, so the sweep must not assume it. Modelled by
+  // a body the decision phase cannot read.
+  const fake = makeFakeGitHub({ issues: [{ ...BOTH_ELIGIBLE_STUB }] });
+  const poisoned = fake.snapshot();
+  Object.defineProperty(poisoned[0], "body", {
+    get() {
+      throw new Error("body unreadable");
+    },
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, {
+      listQueueIssues: async () => poisoned,
+      fetchMergedSentryIssues: async () =>
+        mergeSentryIssues([], [BOTH_ELIGIBLE_REGRESSION]),
+    }),
+  );
+
+  assertEqual(counts.errors, 1);
+  assertEqual(counts.recovered, 0);
+  assertEqual(fake.get(200).state, "CLOSED");
+  assertDeepEqual(fake.get(200).comments, []);
+});
+
+// ---------------------------------------------------------------------------
+// Regression-reopen crash window (issue #1706 follow-up).
+//
+// `reopenQueueIssue` makes three writes. The invariant across EVERY
+// interruption point: the stub is never left re-queued for triage
+// (`sentry:needs-triage`) without the regression fence. That combination is the
+// dangerous half — once Sentry drops the issue out of `is:regressed`, the
+// stranded sweep reopens it carrying only its non-fence bookkeeping note, and a
+// triage round that dies before posting lets the `always()` verdict job accept
+// the pre-regression verdict and close over the new occurrence.
+// ---------------------------------------------------------------------------
+
+const REGRESSED_STUB = {
+  number: 200,
+  title: buildQueueTitle("X-9", "web", "error"),
+  state: "CLOSED",
+  closedAt: "2026-07-19T00:00:00Z",
+  labels: ["sentry-triage", "sentry:verdict-upstream"],
+};
+const REGRESSED_SENTRY = mapSentryIssue({
+  id: 9,
+  shortId: "X-9",
+  lastSeen: "2026-07-20T00:00:00Z",
+});
+
+for (const verb of ["comment", "edit", "reopen"]) {
+  for (const mode of ["reject", "ambiguous"]) {
+    await test(`regression reopen never leaves a queued-without-fence stub (${mode} on ${verb})`, async () => {
+      const fake = makeFakeGitHub({
+        issues: [{ ...REGRESSED_STUB }],
+        rejectOn: (args) => mode === "reject" && args[1] === verb,
+        ambiguousOn: (args) => mode === "ambiguous" && args[1] === verb,
+      });
+
+      let threw = false;
+      try {
+        await reopenQueueIssue(
+          { repo: REPO },
+          { number: 200 },
+          REGRESSED_SENTRY,
+          {
+            runGh: fake.runGh,
+          },
+        );
+      } catch {
+        threw = true;
+      }
+      assert(threw, "the interrupted write must surface as a rejection");
+
+      const issue = fake.get(200);
+      const queued = issue.labels.includes(NEEDS_TRIAGE_LABEL);
+      const fenced = issue.comments.some((body) =>
+        body.startsWith("Regressed in Sentry (last seen "),
+      );
+      const shape = `labels=${JSON.stringify(issue.labels)} state=${issue.state} comments=${JSON.stringify(issue.comments)}`;
+      // Rule 1 — fence first: never re-queued for triage without the fence.
+      assert(
+        !(queued && !fenced),
+        `interrupting ${verb} left the stub queued for triage with no fence: ${shape}`,
+      );
+      // Rule 2 — state change last: never reopened without being selectable,
+      // which would leave it open and invisible to triage forever.
+      assert(
+        !(issue.state === "OPEN" && !queued),
+        `interrupting ${verb} left the stub open but not selectable: ${shape}`,
+      );
+    });
+  }
+}
+
+await test("an interrupted regression reopen retries without double-posting the fence", async () => {
+  // Crash after the fence lands but before the state change — the widest
+  // window the fence-first order opens. The retry must complete the sequence
+  // and leave exactly ONE fence comment.
+  let armed = true; // fires once, so the retry below runs against a live fake
+  const fake = makeFakeGitHub({
+    issues: [{ ...REGRESSED_STUB }],
+    ambiguousOn: (args) => {
+      if (args[1] !== "reopen" || !armed) return false;
+      armed = false;
+      return true;
+    },
+  });
+
+  await assertRejectsAsync(() =>
+    reopenQueueIssue({ repo: REPO }, { number: 200 }, REGRESSED_SENTRY, {
+      runGh: fake.runGh,
+    }),
+  );
+  // The ambiguous reopen actually landed, so model the harsher retry: put the
+  // stub back where a crashed run would have left it, still closed.
+  fake.get(200).state = "CLOSED";
+  fake.get(200).closedAt = REGRESSED_STUB.closedAt;
+
+  await reopenQueueIssue({ repo: REPO }, { number: 200 }, REGRESSED_SENTRY, {
+    runGh: fake.runGh,
+  });
+
+  const issue = fake.get(200);
+  assertEqual(issue.state, "OPEN");
+  assertDeepEqual(issue.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
+  assertDeepEqual(issue.comments, [
+    buildRegressedComment("2026-07-20T00:00:00Z"),
+  ]);
+});
+
+for (const [label, lastSeen] of [
+  ["missing", null],
+  ["unparsable", "not-a-timestamp"],
+]) {
+  await test(`a ${label} lastSeen posts a fresh fence on every round, never dedups`, async () => {
+    // decideDedupAction deliberately fails open on an unusable timestamp and
+    // reopens on EVERY closed observation, while buildRegressedComment renders
+    // the same constant body each time. Identical bodies then say nothing about
+    // which occurrence they belong to, so deduping on one would let round one's
+    // fence suppress round two's — leaving round one's VERDICT, posted after
+    // that fence, newest-admissible over a fresh occurrence.
+    const sentryIssue = mapSentryIssue({ id: 9, shortId: "X-9", lastSeen });
+    const fake = makeFakeGitHub({
+      issues: [
+        {
+          number: 200,
+          title: buildQueueTitle("X-9", "web", "error"),
+          state: "CLOSED",
+          closedAt: "2026-07-19T00:00:00Z",
+          labels: ["sentry-triage", "sentry:verdict-upstream"],
+        },
+      ],
+    });
+
+    // Round one.
+    await reopenQueueIssue({ repo: REPO }, { number: 200 }, sentryIssue, {
+      runGh: fake.runGh,
+    });
+    // Triage runs, posts a verdict, and closes the stub again.
+    fake.get(200).comments.push("<!-- sentry-triage-verdict:v1 -->\nupstream");
+    fake.get(200).state = "CLOSED";
+
+    // Round two, same unusable timestamp and therefore the same fence body.
+    await reopenQueueIssue({ repo: REPO }, { number: 200 }, sentryIssue, {
+      runGh: fake.runGh,
+    });
+
+    const fences = fake
+      .get(200)
+      .comments.filter((body) =>
+        body.startsWith("Regressed in Sentry (last seen "),
+      );
+    assertEqual(fences.length, 2);
+    // The decisive property: a fence exists AFTER the verdict, so the parser
+    // stales that verdict out instead of accepting it over the new occurrence.
+    const comments = fake.get(200).comments;
+    assert(
+      comments.lastIndexOf(fences[1]) >
+        comments.findIndex((b) => b.startsWith("<!-- sentry-triage-verdict")),
+      "round two's fence must land after round one's verdict",
+    );
+  });
+}
+
+await test("an untrusted pre-posted fence cannot suppress the bot's own", async () => {
+  // This repo is PUBLIC. Without an author fence, anyone who guesses the
+  // regression's exact lastSeen can post the matching body and have the dedup
+  // check swallow the real fence — while selectVerdictComment ignores their
+  // comment, because it DOES check authorship. The stub would then be re-queued
+  // with the pre-regression verdict still admissible.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 200,
+        title: buildQueueTitle("X-9", "web", "error"),
+        state: "CLOSED",
+        closedAt: "2026-07-19T00:00:00Z",
+        labels: ["sentry-triage", "sentry:verdict-upstream"],
+        untrustedComments: [buildRegressedComment("2026-07-20T00:00:00Z")],
+      },
+    ],
+  });
+
+  await reopenQueueIssue({ repo: REPO }, { number: 200 }, REGRESSED_SENTRY, {
+    runGh: fake.runGh,
+  });
+
+  assertDeepEqual(fake.get(200).comments, [
+    buildRegressedComment("2026-07-20T00:00:00Z"),
+  ]);
+  assertEqual(fake.get(200).state, "OPEN");
+});
+
+await test("the bot's own identical fence is still deduped", async () => {
+  // The guard must stay useful: an author-trusted copy of the same fence is a
+  // genuine retry of the same occurrence and must not be re-posted.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 200,
+        title: buildQueueTitle("X-9", "web", "error"),
+        state: "CLOSED",
+        closedAt: "2026-07-19T00:00:00Z",
+        labels: ["sentry-triage", "sentry:verdict-upstream"],
+        comments: [buildRegressedComment("2026-07-20T00:00:00Z")],
+      },
+    ],
+  });
+
+  await reopenQueueIssue({ repo: REPO }, { number: 200 }, REGRESSED_SENTRY, {
+    runGh: fake.runGh,
+  });
+
+  assertDeepEqual(fake.get(200).comments, [
+    buildRegressedComment("2026-07-20T00:00:00Z"),
+  ]);
+});
+
+await test("a NEWER regression still posts its own fence over an older one", async () => {
+  // The dedup guard is exact-body, so it must never suppress the fence a fresh
+  // occurrence needs — only an identical re-post of one already in place.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        ...REGRESSED_STUB,
+        comments: [buildRegressedComment("2026-07-20T00:00:00Z")],
+      },
+    ],
+  });
+
+  await reopenQueueIssue(
+    { repo: REPO },
+    { number: 200 },
+    mapSentryIssue({ id: 9, shortId: "X-9", lastSeen: "2026-07-25T00:00:00Z" }),
+    { runGh: fake.runGh },
+  );
+
+  assertDeepEqual(fake.get(200).comments, [
+    buildRegressedComment("2026-07-20T00:00:00Z"),
+    buildRegressedComment("2026-07-25T00:00:00Z"),
+  ]);
+});
+
+await test("one unrecoverable stub is counted without stranding the rest", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+      {
+        number: 43,
+        title: buildQueueTitle("X-43", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, {
+      recoverStranded: async (options, issue) => {
+        if (issue.number === 42) throw new Error("gh issue edit failed");
+        await recoverStrandedQueueIssue(options, issue, { runGh: fake.runGh });
+      },
+    }),
+  );
+
+  assertEqual(counts.recovered, 1);
+  // Nonzero errors is what makes the scheduled run go red and fire the
+  // Slack-on-failure notifier.
+  assertEqual(counts.errors, 1);
+  assertEqual(fake.get(43).state, "OPEN");
+  assertEqual(fake.get(42).state, "CLOSED");
 });
 
 if (failed > 0) {
