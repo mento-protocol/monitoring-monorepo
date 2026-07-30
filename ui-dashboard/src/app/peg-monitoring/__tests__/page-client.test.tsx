@@ -364,6 +364,41 @@ describe("PegMonitoringPageClient", () => {
     expect(safety?.textContent).toContain("Disabled");
     expect(safety?.textContent).not.toContain("Check expired");
   });
+  it("keeps a confirmed pool inflow warning visible after the package becomes stale", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            structural: {
+              ...item.structural,
+              structuralSaturation: item.policy.structuralWarnFraction,
+            },
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+    state.current = { ...state.current, hasError: true };
+    render();
+
+    const safety = container.querySelector(
+      '[data-testid="peg-safety-checks-europ-schuman"]',
+    );
+    const warningPill = Array.from(safety?.querySelectorAll("span") ?? []).find(
+      ({ textContent }) => textContent === "Last confirmed warning",
+    );
+    expect(warningPill?.className).toContain("text-amber");
+    expect(safety?.textContent).toContain(
+      "At the last confirmed check, net pool inflow was at 80% of the active on-chain trading limit. Warn at 80%.",
+    );
+  });
   it("labels capped supporting-market prices as partial fills", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
@@ -603,6 +638,24 @@ describe("PegMonitoringPageClient", () => {
     expect(disabled?.className).toContain("text-red-300");
     expect(container.textContent).toContain("Safeguard unavailable");
     expect(container.textContent).toContain("0 of 2 breakers OK");
+    const scorecard = container.querySelector(
+      '[data-testid="peg-scorecard-europ-schuman"]',
+    );
+    const evidence = container.querySelector(
+      'article[aria-labelledby="peg-evidence-heading-europ-schuman"]',
+    );
+    expect(scorecard?.textContent).toContain(
+      "Critical result under the previous alert policy",
+    );
+    expect(scorecard?.textContent).toContain(
+      "A monitored breaker is disabled or tripped.",
+    );
+    expect(scorecard?.textContent).not.toContain(
+      "Current status cannot be confirmed",
+    );
+    expect(
+      evidence?.querySelector(':scope > [role="status"]')?.textContent,
+    ).toContain("The current approved policy has not confirmed this result.");
   });
   it("keeps unavailable breakers in the health-summary denominator", () => {
     const response = makePegMonitoringResponse();
@@ -718,6 +771,62 @@ describe("PegMonitoringPageClient", () => {
       "The alert only fires if enough readings stay there long enough.",
     );
     expect(evidenceAlert?.textContent).not.toContain("result limit");
+  });
+  it("retains the last critical cause without presenting it as current when data is stale", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.map((source) =>
+              source.id === item.policy.deepVenueSource
+                ? {
+                    ...source,
+                    executablePrice: 0.995,
+                    deviationBps: item.policy.criticalDeviationBps,
+                    premiumBps: 0,
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+
+    render();
+    state.current = { ...state.current, hasError: true };
+    render();
+
+    const evidence = container.querySelector(
+      'article[aria-labelledby="peg-evidence-heading-europ-schuman"]',
+    );
+    const scorecard = container.querySelector(
+      '[data-testid="peg-scorecard-europ-schuman"]',
+    );
+    const notice = evidence?.querySelector('[role="status"]');
+    expect(evidence?.querySelector('[role="alert"]')).toBeNull();
+    expect(scorecard?.textContent).toContain(
+      "Critical condition in the last confirmed package",
+    );
+    expect(scorecard?.textContent).toContain(
+      "The latest deep-market price crossed the critical threshold.",
+    );
+    expect(scorecard?.textContent).not.toContain(
+      "Current status cannot be confirmed",
+    );
+    expect(notice?.textContent).toContain("Last confirmed critical result");
+    expect(notice?.textContent).toContain(
+      "The latest deep-market price crossed the critical threshold.",
+    );
+    expect(notice?.textContent).toContain(
+      "The data is stale, so this does not confirm the problem is still active.",
+    );
+    expect(notice?.className).toContain("border-amber");
   });
   it("renders confirmed blind-while-stressed evidence as critical", () => {
     const response = makePegMonitoringResponse();

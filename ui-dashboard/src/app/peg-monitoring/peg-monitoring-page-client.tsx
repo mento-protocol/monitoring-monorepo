@@ -40,15 +40,17 @@ export function PegMonitoringPageClient(): React.JSX.Element {
     ...result,
     nowMs,
   });
+  const usesPreviousPolicy =
+    (state.kind === "current" || state.kind === "stale") &&
+    (state.data.policySlot === "previous" ||
+      state.data.producedPolicyVersion !==
+        state.data.approvedActivePolicyVersion);
   const presentation =
     state.kind === "current" || state.kind === "stale"
       ? presentPegMonitoring(state.data, {
           nowMs,
           packageIsStale: state.kind === "stale",
-          usesPreviousPolicy:
-            state.data.policySlot === "previous" ||
-            state.data.producedPolicyVersion !==
-              state.data.approvedActivePolicyVersion,
+          usesPreviousPolicy,
         })
       : null;
   return (
@@ -64,6 +66,7 @@ export function PegMonitoringPageClient(): React.JSX.Element {
             presentation={presentation!}
             ageMs={state.ageMs}
             stale={state.kind === "stale"}
+            usesPreviousPolicy={usesPreviousPolicy}
           />
           <PegMonitoringEvidence
             state={state}

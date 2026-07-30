@@ -110,10 +110,7 @@ function PreviousPolicyNotice({
 }: {
   state: ConfirmedState;
 }): React.JSX.Element | null {
-  const usesPrevious =
-    state.data.policySlot === "previous" ||
-    state.data.producedPolicyVersion !== state.data.approvedActivePolicyVersion;
-  return usesPrevious ? (
+  return usesPreviousPolicy(state) ? (
     <div
       role="status"
       className="rounded-lg border border-amber-500/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-100"
@@ -123,6 +120,13 @@ function PreviousPolicyNotice({
       yet.
     </div>
   ) : null;
+}
+
+function usesPreviousPolicy(state: ConfirmedState): boolean {
+  return (
+    state.data.policySlot === "previous" ||
+    state.data.producedPolicyVersion !== state.data.approvedActivePolicyVersion
+  );
 }
 
 function DecisionMarket({
@@ -298,9 +302,14 @@ function poolCheckState(
       : stale
         ? `At the last confirmed check, net pool inflow was at ${formatFraction(saturation)} of the active on-chain trading limit. Warn at ${warnAt}.`
         : `Net pool inflow is at ${formatFraction(saturation)} of the active on-chain trading limit. Warn at ${warnAt}.`;
-  if (stale) return { label: "Last confirmed", tone: "neutral", text };
-  return saturation !== null &&
-    saturation >= asset.asset.policy.structuralWarnFraction
+  const inflowWarning =
+    saturation !== null &&
+    saturation >= asset.asset.policy.structuralWarnFraction;
+  if (stale)
+    return inflowWarning
+      ? { label: "Last confirmed warning", tone: "warn", text }
+      : { label: "Last confirmed", tone: "neutral", text };
+  return inflowWarning
     ? { label: "Inflow warning", tone: "warn", text }
     : { label: "Reachable", tone: "good", text };
 }
@@ -382,24 +391,41 @@ function SafetyChecks({
   );
 }
 
+function retainedCriticalNotice(
+  asset: PegAssetPresentation,
+  stale: boolean,
+  previousPolicy: boolean,
+): string | null {
+  if (asset.tone !== "critical") return null;
+  if (stale)
+    return `Last confirmed critical result: ${asset.reasons[0] ?? "A critical monitoring condition was active."} The data is stale, so this does not confirm the problem is still active.`;
+  if (previousPolicy)
+    return `Critical result under the previous alert policy: ${asset.reasons[0] ?? "A critical monitoring condition was recorded."} The current approved policy has not confirmed this result.`;
+  return null;
+}
+
 function AssetEvidence({
   asset,
   nowMs,
   confirmedAtMs,
   stale,
+  previousPolicy,
 }: {
   asset: PegAssetPresentation;
   nowMs: number;
   confirmedAtMs: number;
   stale: boolean;
+  previousPolicy: boolean;
 }): React.JSX.Element {
+  const retainedNotice = retainedCriticalNotice(asset, stale, previousPolicy);
   const notice = asset.currentCritical
     ? (asset.reasons[0] ??
       asset.uncertaintyReason ??
       "A critical monitoring condition is active.")
-    : asset.uncertain || asset.tone === "warning"
-      ? (asset.uncertaintyReason ?? asset.reasons[0])
-      : null;
+    : (retainedNotice ??
+      (asset.uncertain || asset.tone === "warning"
+        ? (asset.uncertaintyReason ?? asset.reasons[0])
+        : null));
   return (
     <article
       className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5"
@@ -481,6 +507,7 @@ export function PegMonitoringEvidence({
             nowMs={nowMs}
             confirmedAtMs={state.data.producedAt * 1_000}
             stale={state.kind === "stale"}
+            previousPolicy={usesPreviousPolicy(state)}
           />
         ))}
         <PegMonitoringTechnicalRecord data={state.data} />
