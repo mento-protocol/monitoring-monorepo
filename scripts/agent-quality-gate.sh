@@ -2026,6 +2026,18 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
+    alerts/infra/sentry-ingest-watcher/*)
+      add_surface "alerts-infra"
+      case "$path" in
+        alerts/infra/sentry-ingest-watcher/*.mjs | alerts/infra/sentry-ingest-watcher/package.json)
+          add_command "pnpm alerts:watcher:test" "Sentry ingest dead-man switch changed"
+          ;;
+        alerts/infra/sentry-ingest-watcher/*.tf)
+          add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
+          add_checklist "docs/pr-checklists/terraform-cloudrun.md" "alerts/infra Cloud Function path changed"
+          ;;
+      esac
+      ;;
     alerts/infra/scripts/*)
       add_surface "alerts-infra"
       case "$path" in
