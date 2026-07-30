@@ -221,10 +221,14 @@ jobs:
     #     cannot be model-controlled, agent comments cannot impersonate the
     #     pipeline's control comments, and `gh` itself no longer receives this
     #     token. The token is read-only scoped.
-    #   - SENTRY_TRIAGE_COMMENT_ISSUE: the wrapper's write target. Job env
-    #     because a caller step's env: would not reach the agent's subprocess
-    #     (see above). It is the matrix value, already ^[0-9]+$-validated in the
-    #     select job, and no model output can influence it.
+    #   - SENTRY_TRIAGE_COMMENT_ISSUE: a CROSS-CHECK on the wrapper's write
+    #     target, never the binding itself. Env cannot fence the target: bash
+    #     arithmetic expansion assigns, so a body containing
+    #     `$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites this variable while
+    #     the agent's own command line is expanded, before node starts. The
+    #     authoritative target is the read-only file written by the "Pin the
+    #     agent write target" step below; the wrapper refuses when the two
+    #     disagree, because a disagreement is evidence of exactly that.
     env:
       GH_TOKEN: ${{ github.token }}
       SENTRY_TRIAGE_TOKEN: ${{ secrets.SENTRY_TRIAGE_TOKEN }}
@@ -242,6 +246,47 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+
+      # -----------------------------------------------------------------------
+      # Pin the agent's write target outside the agent's reach (issue #1288).
+      #
+      # Env is not a fence: bash arithmetic expansion ASSIGNS, and it runs while
+      # the agent's own command line is expanded, so a verdict body containing
+      # `$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites the exported variable
+      # before node starts. The authoritative target therefore lives in a file
+      # this trusted step writes before the agent runs.
+      #
+      # The file is left mode 0444 inside a mode 0555 directory, and that is
+      # load-bearing rather than decorative: Claude Code DOCUMENTS that a
+      # `Bash(cmd:*)` rule matches a command carrying an output redirection
+      # (CHANGELOG v1.0.123), so `gh issue list … > path` is within the agent's
+      # grant and it must be assumed able to write files. Against those modes an
+      # `open(O_WRONLY)` fails EACCES for the owning user too, and no entry in
+      # the directory can be created, replaced or unlinked — verified, not
+      # assumed. The wrapper refuses if it ever finds the file writable, which
+      # catches this step regressing.
+      # -----------------------------------------------------------------------
+      - name: Pin the agent write target (trusted)
+        env:
+          QUEUE_ISSUE_NUMBER: ${{ matrix.issue }}
+        run: |
+          set -euo pipefail
+          target_dir="${RUNNER_TEMP}/sentry-triage-target"
+          mkdir -p "${target_dir}"
+          chmod 0755 "${target_dir}"
+          # jq emits the JSON so the values are quoted by a parser rather than
+          # by string concatenation. Both inputs are trusted (a validated
+          # integer and GITHUB_REPOSITORY); the wrapper still parses this as
+          # JSON and must never be handed a hand-rolled document.
+          jq -n \
+            --arg repo "${GITHUB_REPOSITORY}" \
+            --arg issue "${QUEUE_ISSUE_NUMBER}" \
+            '{repo: $repo, issue: $issue}' > "${target_dir}/target.json"
+          chmod 0444 "${target_dir}/target.json"
+          chmod 0555 "${target_dir}"
+          echo "Pinned write target: ${GITHUB_REPOSITORY}#${QUEUE_ISSUE_NUMBER}"
+          ls -ld "${target_dir}"
+          ls -l "${target_dir}/target.json"
 
       - name: Render triage prompt
         id: render

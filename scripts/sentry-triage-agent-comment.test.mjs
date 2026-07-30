@@ -13,6 +13,8 @@ import {
   parseArgs,
   postAgentComment,
   resolveTarget,
+  TARGET_FILE_RELATIVE,
+  targetFilePath,
   VERDICT_MARKER,
 } from "./sentry-triage-agent-comment.mjs";
 
@@ -45,13 +47,29 @@ function baseEnv(overrides = {}) {
   };
 }
 
+/** A pinned target file as the trusted workflow step leaves it: read-only. */
+function pin({
+  repo = "mento-protocol/monitoring-monorepo",
+  issue = "123",
+} = {}) {
+  return () => ({
+    content: JSON.stringify({ repo, issue }),
+    mode: 0o100444,
+  });
+}
+
 /** Drive the whole flow with the gh call and the file write captured. */
-async function post({ argv = ["--body", VERDICT_BODY], env = baseEnv() } = {}) {
+async function post({
+  argv = ["--body", VERDICT_BODY],
+  env = baseEnv(),
+  readPinnedTarget = pin(),
+} = {}) {
   const calls = [];
   const writes = [];
   const result = await postAgentComment({
     argv,
     env,
+    readPinnedTarget,
     runGh: (args, childEnv) => {
       calls.push({ args, childEnv });
       return Promise.resolve(
@@ -74,6 +92,7 @@ async function refusal(options) {
     await postAgentComment({
       argv: options.argv ?? ["--body", VERDICT_BODY],
       env: options.env ?? baseEnv(),
+      readPinnedTarget: options.readPinnedTarget ?? pin(),
       runGh: (args) => {
         calls.push(args);
         return Promise.resolve("");
@@ -92,9 +111,9 @@ async function refusal(options) {
   return thrown;
 }
 
-// ── write target comes from the environment, never from arguments ────────────
+// ── the write target comes from the trusted pinned file ──────────────────────
 
-test("the issue number is read from the workflow env var", async () => {
+test("the target is read from the pinned file, not from argv", async () => {
   const { calls } = await post();
   assert.deepEqual(calls[0].args, [
     "issue",
@@ -105,6 +124,99 @@ test("the issue number is read from the workflow env var", async () => {
     "--body-file",
     "/runner/_temp/sentry-triage-agent-comment-123.md",
   ]);
+});
+
+test("the pinned file lives under RUNNER_TEMP at a fixed relative path", () => {
+  assert.equal(
+    targetFilePath(baseEnv()),
+    `/runner/_temp/${TARGET_FILE_RELATIVE}`,
+  );
+  assert.throws(
+    () => targetFilePath(baseEnv({ RUNNER_TEMP: "" })),
+    /RUNNER_TEMP/,
+  );
+});
+
+test("REGRESSION #1288: a shell-mutated env var cannot retarget the write", async () => {
+  // `--body "…$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))…"` is expanded by the
+  // AGENT'S shell, so node starts with the attacker's number already in
+  // process.env. Verified against bash: the child sees 1234. The pinned file
+  // is what decides, and the disagreement is what gets reported.
+  const err = await refusal({
+    env: baseEnv({ [ISSUE_ENV_VAR]: "1234" }),
+    readPinnedTarget: pin({ issue: "123" }),
+  });
+  assert.match(err.message, /write-target mismatch/);
+  assert.match(err.message, /pinned file says 123/);
+  assert.match(err.message, /says 1234/);
+});
+
+test("a mutated GITHUB_REPOSITORY cannot retarget the write either", async () => {
+  const err = await refusal({
+    env: baseEnv({ GITHUB_REPOSITORY: "attacker/repo" }),
+  });
+  assert.match(err.message, /write-target mismatch/);
+  assert.match(err.message, /mento-protocol\/monitoring-monorepo/);
+});
+
+test("a WRITABLE pin is refused — a pin that can be rewritten is not a pin", async () => {
+  for (const mode of [0o100644, 0o100666, 0o100464, 0o100446]) {
+    const err = await refusal({
+      readPinnedTarget: () => ({
+        content: JSON.stringify({
+          repo: "mento-protocol/monitoring-monorepo",
+          issue: "123",
+        }),
+        mode,
+      }),
+    });
+    assert.match(err.message, /is writable/, `mode ${mode.toString(8)}`);
+  }
+});
+
+test("a missing, unparsable or malformed pin refuses", async () => {
+  const missing = await refusal({
+    readPinnedTarget: () => {
+      throw new Error("ENOENT: no such file or directory");
+    },
+  });
+  assert.match(missing.message, /cannot read the pinned write target/);
+
+  const garbage = await refusal({
+    readPinnedTarget: () => ({ content: "not json", mode: 0o100444 }),
+  });
+  assert.match(garbage.message, /not valid JSON/);
+
+  for (const issue of ["", "12a", " ", "-1", "1_2"]) {
+    const err = await refusal({
+      readPinnedTarget: () => ({
+        content: JSON.stringify({
+          repo: "mento-protocol/monitoring-monorepo",
+          issue,
+        }),
+        mode: 0o100444,
+      }),
+    });
+    assert.match(err.message, /no integer issue/, JSON.stringify(issue));
+  }
+
+  const badRepo = await refusal({
+    readPinnedTarget: () => ({
+      content: JSON.stringify({ repo: "not-a-repo", issue: "123" }),
+      mode: 0o100444,
+    }),
+  });
+  assert.match(badRepo.message, /no owner\/repo/);
+});
+
+test("the body file this script writes can never collide with the pin", async () => {
+  // The only file the wrapper creates. Fixed prefix, fixed .md suffix, and an
+  // ^[0-9]+$ issue — so no pinned-target path is reachable, whatever the agent
+  // does with the body or the environment.
+  const { writes } = await post();
+  assert.notEqual(writes[0].path, targetFilePath(baseEnv()));
+  assert.ok(writes[0].path.endsWith(".md"));
+  assert.ok(!writes[0].path.includes(TARGET_FILE_RELATIVE));
 });
 
 test("digit-extension is closed by construction: the body cannot retarget", async () => {
@@ -125,26 +237,9 @@ test("--issue is not a flag this script understands", async () => {
   assert.match(err.message, /unexpected argument '--issue'/);
 });
 
-test("a non-integer or missing target env var refuses", () => {
-  for (const issue of ["", "12a", " 123", "123 ", "-1", "1_2"]) {
-    assert.throws(
-      () => resolveTarget(baseEnv({ [ISSUE_ENV_VAR]: issue })),
-      new RegExp(ISSUE_ENV_VAR),
-      `expected ${JSON.stringify(issue)} to be refused`,
-    );
-  }
-  const missing = baseEnv();
-  delete missing[ISSUE_ENV_VAR];
-  assert.throws(() => resolveTarget(missing), new RegExp(ISSUE_ENV_VAR));
-});
-
-test("a bad repo or missing RUNNER_TEMP refuses", () => {
+test("a missing RUNNER_TEMP refuses", () => {
   assert.throws(
-    () => resolveTarget(baseEnv({ GITHUB_REPOSITORY: "not-a-repo" })),
-    /GITHUB_REPOSITORY/,
-  );
-  assert.throws(
-    () => resolveTarget(baseEnv({ RUNNER_TEMP: "" })),
+    () => resolveTarget(baseEnv({ RUNNER_TEMP: "" }), pin()),
     /RUNNER_TEMP/,
   );
 });
@@ -331,6 +426,7 @@ test("a gh failure surfaces instead of being swallowed", async () => {
     postAgentComment({
       argv: ["--body", VERDICT_BODY],
       env: baseEnv(),
+      readPinnedTarget: pin(),
       runGh: () => Promise.reject(new Error("gh exited 1: HTTP 403")),
       writeFile: () => Promise.resolve(),
     }),

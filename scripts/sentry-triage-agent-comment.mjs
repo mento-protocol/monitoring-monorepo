@@ -5,12 +5,29 @@
  * `.github/workflows/sentry-triage-agent.yml` used to grant the untrusted LLM
  * `Bash(gh issue comment <matrix.issue>:*)`. Claude Code permission rules are
  * string-prefix matches, so a grant for issue `123` also admits `1234`,
- * `12345`, … The fix is structural rather than another validator: this wrapper
- * takes the write target from the workflow-set `SENTRY_TRIAGE_COMMENT_ISSUE`
- * env var and accepts NO issue argument at all, so no model-supplied string can
- * name a different issue. The remaining prefix match on the grant
- * (`Bash(node scripts/sentry-triage-agent-comment.mjs:*)`) can only extend the
- * ARGUMENTS, which cannot retarget the write.
+ * `12345`, … This wrapper accepts NO issue argument at all, so the remaining
+ * prefix match on its own grant can only extend the ARGUMENTS.
+ *
+ * WHERE THE TARGET COMES FROM, and why not the environment. The first version
+ * of this script read the target from the `SENTRY_TRIAGE_COMMENT_ISSUE` env
+ * var. That is not a fence: bash arithmetic expansion ASSIGNS, and it happens
+ * during the expansion of this script's own arguments, before node starts. A
+ * body containing `$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites the
+ * already-exported variable, so `process.env` holds the attacker's number by
+ * the time this file runs — while the body still satisfies every content
+ * check. Moving the target out of argv and into env moved it between two
+ * model-controlled surfaces.
+ *
+ * The target is therefore read from a FILE written by a trusted workflow step
+ * before the agent starts (TARGET_FILE_RELATIVE under `$RUNNER_TEMP`). The
+ * agent's grant is Read/Grep/Glob, `gh issue view|list`, and this wrapper — no
+ * tool that creates a file. The workflow additionally leaves the pinned file
+ * mode 0444 inside a mode 0555 directory, so an `open(O_WRONLY)` redirect
+ * fails EACCES for the owning user too and no directory entry can be replaced;
+ * this script refuses if it ever finds that file writable, which is the
+ * tamper/regression signal. The env var is kept as a CROSS-CHECK only: the two
+ * must agree, and a disagreement is itself evidence the environment was
+ * mutated, so it refuses loudly rather than picking a winner.
  *
  * Two further fences, both failing closed:
  *
@@ -52,6 +69,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
 import { writeFile as writeFileAsync } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -63,8 +81,12 @@ import {
 
 export { AGENT_COMMENT_MARKER, VERDICT_MARKER };
 
-/** Workflow-set write target. NOT settable from the command line — that is the
- * whole point of this script. */
+/** The authoritative write target, written by a trusted workflow step before
+ * the agent runs. Path is `$RUNNER_TEMP` + this fixed relative path — never an
+ * env var of its own, so there is no string-valued path binding to repoint. */
+export const TARGET_FILE_RELATIVE = "sentry-triage-target/target.json";
+
+/** Cross-check only. The pinned file wins; a disagreement refuses. */
 export const ISSUE_ENV_VAR = "SENTRY_TRIAGE_COMMENT_ISSUE";
 
 /** Env vars whose verbatim value in a body is treated as an accident worth
@@ -104,8 +126,9 @@ export function usage() {
   return [
     "Usage: node scripts/sentry-triage-agent-comment.mjs --body <markdown>",
     "",
-    "Posts the triage verdict comment on the queue issue named by",
-    `${ISSUE_ENV_VAR}. The issue number is NOT an argument.`,
+    "Posts the triage verdict comment on the queue issue pinned by the",
+    "workflow before this agent started. The issue number is NOT an argument",
+    "and NOT taken from the environment.",
     "",
     `The body must start with ${VERDICT_MARKER}.`,
     "",
@@ -132,23 +155,89 @@ export function parseArgs(argv) {
   return { body };
 }
 
-/** Resolve the write target from the environment ONLY. */
-export function resolveTarget(env) {
-  const issue = String(env[ISSUE_ENV_VAR] ?? "");
-  if (!/^[0-9]+$/.test(issue)) {
-    throw new Error(
-      `${ISSUE_ENV_VAR} must be set to a plain integer by the workflow (got ${
-        issue === "" ? "an empty value" : "a non-integer value"
-      })`,
-    );
-  }
-  const repo = String(env.GITHUB_REPOSITORY ?? "");
-  if (!REPO_PATTERN.test(repo)) {
-    throw new Error("GITHUB_REPOSITORY must be set to owner/repo");
-  }
+/** Where the trusted step pinned the write target. RUNNER_TEMP is the one env
+ * input on this path; the agent can only break it (arithmetic assignment sets
+ * integers), never repoint it at a directory it controls, and a broken value
+ * means the file is not found and this script refuses. */
+export function targetFilePath(env) {
   const tempDir = String(env.RUNNER_TEMP ?? "");
   if (tempDir === "") throw new Error("RUNNER_TEMP must be set");
-  return { issue, repo, tempDir };
+  return join(tempDir, TARGET_FILE_RELATIVE);
+}
+
+/** Default reader: content plus mode, so the caller can reject a writable
+ * (therefore tamperable) pin. */
+function readPinnedTargetDefault(path) {
+  return { content: readFileSync(path, "utf8"), mode: statSync(path).mode };
+}
+
+/**
+ * Resolve the write target from the trusted pinned FILE, cross-checked against
+ * the environment. The file is authoritative; the env var must agree.
+ */
+export function resolveTarget(env, readPinnedTarget = readPinnedTargetDefault) {
+  const path = targetFilePath(env);
+
+  let pinned;
+  try {
+    pinned = readPinnedTarget(path);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `cannot read the pinned write target at ${path} (${reason}); the ` +
+        "workflow step that pins it must run before the agent",
+      { cause: err },
+    );
+  }
+
+  // A writable pin is not a pin. Either the workflow stopped locking it down or
+  // something rewrote it — both are refusals, never a best-effort post.
+  if ((pinned.mode & 0o222) !== 0) {
+    throw new Error(
+      `refusing to post: the pinned write target at ${path} is writable ` +
+        `(mode ${(pinned.mode & 0o777).toString(8)}); it must be read-only`,
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(String(pinned.content));
+  } catch {
+    throw new Error(`the pinned write target at ${path} is not valid JSON`);
+  }
+
+  const issue = String(parsed?.issue ?? "").trim();
+  if (!/^[0-9]+$/.test(issue)) {
+    throw new Error(`the pinned write target at ${path} has no integer issue`);
+  }
+  const repo = String(parsed?.repo ?? "").trim();
+  if (!REPO_PATTERN.test(repo)) {
+    throw new Error(`the pinned write target at ${path} has no owner/repo`);
+  }
+
+  // Cross-check. The env values are model-reachable, so they never decide the
+  // target — but a disagreement means something rewrote the environment after
+  // the workflow set it, which is worth failing on rather than shrugging off.
+  const envIssue = String(env[ISSUE_ENV_VAR] ?? "").trim();
+  if (envIssue !== issue) {
+    throw new Error(
+      `refusing to post: write-target mismatch — the pinned file says ` +
+        `${issue}, ${ISSUE_ENV_VAR} says ${
+          envIssue === "" ? "nothing" : envIssue
+        }. The environment was changed after the workflow set it.`,
+    );
+  }
+  const envRepo = String(env.GITHUB_REPOSITORY ?? "").trim();
+  if (envRepo !== repo) {
+    throw new Error(
+      `refusing to post: write-target mismatch — the pinned file says ` +
+        `${repo}, GITHUB_REPOSITORY says ${
+          envRepo === "" ? "nothing" : envRepo
+        }. The environment was changed after the workflow set it.`,
+    );
+  }
+
+  return { issue, repo, tempDir: String(env.RUNNER_TEMP) };
 }
 
 /** The secret values present in this environment, as {name, value} pairs. Used
@@ -247,11 +336,15 @@ export async function postAgentComment({
   env,
   runGh = runGhDefault,
   writeFile = writeFileAsync,
+  readPinnedTarget = readPinnedTargetDefault,
 }) {
   const { body } = parseArgs(argv);
-  const { issue, repo, tempDir } = resolveTarget(env);
+  const { issue, repo, tempDir } = resolveTarget(env, readPinnedTarget);
   assertBodyPostable(body, collectSecretValues(env));
 
+  // Fixed prefix and suffix, and `issue` is ^[0-9]+$ — so the one file this
+  // script writes can never collide with the pinned target it reads, whatever
+  // the agent does. Tested.
   const bodyFile = join(tempDir, `sentry-triage-agent-comment-${issue}.md`);
   await writeFile(bodyFile, decorateBody(body), "utf8");
 

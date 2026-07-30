@@ -158,9 +158,16 @@ three `hypotheses`, an `investigated` list, and an
 an escalation must be decision-ready, not “please look.”
 
 The agent posts that comment through `scripts/sentry-triage-agent-comment.mjs`,
-its only write path. The wrapper takes the target issue from the workflow-set
-`SENTRY_TRIAGE_COMMENT_ISSUE` and accepts no issue argument, so no model output
-can name a different issue. It refuses a body that does not start with the
+its only write path. The wrapper accepts no issue argument, and does not take
+the target from the environment either: bash arithmetic expansion assigns, so a
+body containing `$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites the exported
+variable while the agent's own command line is expanded, before Node starts.
+The authoritative target is a JSON file that a trusted step pins under
+`$RUNNER_TEMP` before the agent runs, left mode 0444 inside a mode 0555
+directory so that a shell redirection — which Claude Code's permission rules do
+match — cannot rewrite it. The env var survives as a cross-check only, and a
+disagreement between the two refuses loudly rather than picking a winner. The
+wrapper also refuses a body that does not start with the
 verdict marker and a body carrying its own authorship marker; it appends
 `<!-- sentry-triage-agent-authored:v1 -->` and posts with `gh --body-file` from
 `$RUNNER_TEMP`, handing `gh` an allowlisted environment that carries neither the
