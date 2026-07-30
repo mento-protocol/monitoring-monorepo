@@ -5,6 +5,9 @@ import {
   archiveIssue,
   buildAuditComment,
   buildFreshEventRefusalComment,
+  buildMissingBaselineRefusalComment,
+  buildStaleRetryRefusalComment,
+  buildUnbaselinedRetryRefusalComment,
   buildUnreadableFreshnessRefusalComment,
   buildRestorePayload,
   isActivelyRegressing,
@@ -31,9 +34,14 @@ import {
   stubIsArchivable,
 } from "./sentry-triage-archive.mjs";
 import {
+  buildRegressedComment,
   parseArchiveBaseline,
   withArchiveBaseline,
 } from "./sentry-triage-ingest.mjs";
+import {
+  selectVerdictComment,
+  VERDICT_MARKER,
+} from "./sentry-triage-project-core.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -958,6 +966,88 @@ await test("a failed read cannot abort the live-regression reopen", async () => 
     "the transition happens off the pre-run observation when the read fails",
   );
   assert(model.labels.includes("sentry:needs-triage"));
+});
+
+// ---------------------------------------------------------------------------
+// Regression-fence discipline (PR #1716). `selectVerdictComment` treats a
+// comment whose FIRST LINE starts with REGRESSION_PREFIX as a regression fence:
+// the prior verdict stops being newest-admissible. A refusal that re-queues a
+// stub for triage on Sentry evidence MUST carry that fence, or a following
+// triage round that fails before posting a fresh verdict lets the `verdict` job
+// (which runs under always()) accept the stale verdict and close over a live
+// regression. A refusal that does NOT re-queue must NOT carry it — fencing
+// indiscriminately stales out perfectly good verdicts, the opposite error.
+//
+// Driven against the REAL parser, both directions, so neither can drift.
+// ---------------------------------------------------------------------------
+
+/** Prior verdict, then a later comment, as selectVerdictComment sees them. */
+function verdictThen(laterBody) {
+  return [
+    {
+      body: `${VERDICT_MARKER}\n\nverdict: upstream-transient`,
+      createdAt: "2026-07-19T10:00:00Z",
+      author: { login: "github-actions" },
+      url: "https://github.com/x/y/issues/42#issuecomment-1",
+    },
+    {
+      body: laterBody,
+      createdAt: "2026-07-19T11:00:00Z",
+      author: { login: "github-actions" },
+      url: "https://github.com/x/y/issues/42#issuecomment-2",
+    },
+  ];
+}
+
+await test("a regression-fenced first line does collapse the prior verdict", () => {
+  // Positive control for the mechanism itself. The live value is deliberately
+  // NOT the stub body's last_seen (2026-07-14T10:00:00Z in stubBody), so a fence
+  // built from the wrong source could not pass this by accident — the trap
+  // #1716 hit.
+  const liveLastSeen = "2026-07-19T11:59:00.000Z";
+  const fenced = `${buildRegressedComment(liveLastSeen)}\n\n**Not archived.** …`;
+  const selected = selectVerdictComment(verdictThen(fenced));
+  assertEqual(selected.reason, "stale-verdict");
+  assertEqual(selected.body, null);
+  assert(
+    !fenced.includes("2026-07-14T10:00:00Z"),
+    "the fence must carry the LIVE lastSeen, not the stub body's copy",
+  );
+});
+
+await test("the non-requeuing refusals must NOT fence the prior verdict", () => {
+  // None of these re-queue the stub: their paths shed at most
+  // sentry:approved-archive and never add sentry:needs-triage, so no triage
+  // round follows and there is no stale verdict to guard against. Fencing them
+  // would discard a verdict the pipeline deliberately keeps.
+  const refusals = {
+    buildFreshEventRefusalComment: buildFreshEventRefusalComment("GOV-1", true),
+    buildMissingBaselineRefusalComment:
+      buildMissingBaselineRefusalComment("GOV-1"),
+    buildUnreadableFreshnessRefusalComment:
+      buildUnreadableFreshnessRefusalComment("GOV-1", true),
+    buildUnbaselinedRetryRefusalComment: buildUnbaselinedRetryRefusalComment(
+      "GOV-1",
+      "2026-07-19T12:30:00.000Z",
+    ),
+    buildStaleRetryRefusalComment: buildStaleRetryRefusalComment(
+      "GOV-1",
+      "2026-07-19T11:59:00.000Z",
+      "2026-07-19T12:30:00.000Z",
+    ),
+  };
+  for (const [name, body] of Object.entries(refusals)) {
+    const selected = selectVerdictComment(verdictThen(body));
+    assertEqual(
+      selected.reason,
+      null,
+      `${name} must not stale out the prior verdict`,
+    );
+    assert(
+      selected.body?.startsWith(VERDICT_MARKER),
+      `${name} must leave the prior verdict selectable`,
+    );
+  }
 });
 
 await test("isSelectableForTriage is exactly Stage B's selector pair", () => {
