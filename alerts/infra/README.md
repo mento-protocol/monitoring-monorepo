@@ -42,7 +42,8 @@ graph LR
     F -->|failed attempt log| J[GCP Monitoring]
     J -->|notification| K[Slack<br/>#alerts-infra]
     L[Cloud Scheduler] -->|HTTP POST<br/>OIDC| M[Cloud Function<br/>sentry-ingest-watcher]
-    M -->|unauthenticated GET<br/>workflow runs| N[GitHub API]
+    M -->|unauthenticated GET<br/>issue #1282 comments| N[GitHub API]
+    N -->|ingest run record| M
     M -->|freshness gauge| J
 ```
 
@@ -53,7 +54,7 @@ graph LR
 3. **Slack Channels**: Receives formatted alerts and event notifications
 4. **On-call Announcer**: Polls Splunk On-Call, posts rotations to `#eng`, and keeps `@support-engineer` membership to the current engineer
 5. **Operational Alerting**: Sends scheduler failures and dropped on-chain events to `#alerts-infra`
-6. **Sentry Ingest Watcher**: Publishes how long ago the Sentry triage ingest workflow last succeeded, and alerts when that number gets too large or stops arriving
+6. **Sentry Ingest Watcher**: Publishes how long ago the Sentry triage ingest last recorded real work — read from the run record on tracker issue #1282, not from the workflow's conclusion — and alerts when that number gets too large or stops arriving
 7. **Terraform**: Manages all infrastructure as code
 
 ### Security
@@ -228,8 +229,9 @@ is what makes its silence unambiguous.
 
 #### After apply: prove the switch fires
 
-Cloud Monitoring cannot alert on a time series that has never existed, so both
-steps below are required before treating this as armed.
+Cloud Monitoring cannot alert on a time series that has never existed, so all
+three steps below are required before treating this as armed. They prove the
+two conditions separately: step 2 covers the threshold, step 3 covers absence.
 
 1. Confirm the first publish, and that the value it published is the real run
    record. Run the scheduler job once, then compare the logged
@@ -266,9 +268,28 @@ steps below are required before treating this as armed.
      -d "{\"timeSeries\":[{\"metric\":{\"type\":\"custom.googleapis.com/sentry_triage/ingest_freshness_seconds\"},\"resource\":{\"type\":\"global\",\"labels\":{\"project_id\":\"$PROJECT_ID\"}},\"points\":[{\"interval\":{\"endTime\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"},\"value\":{\"int64Value\":\"172800\"}}]}]}"
    ```
 
-   The policy aligns on 7200s windows, so allow up to two hours for the
-   incident to open. Do not sign this off on a passing plan alone — an
-   untested dead-man switch is the failure mode being guarded against.
+   The threshold condition runs at `duration = "0s"` and the policy aligns on
+   7200s windows, so allow up to two hours for the incident to open.
+
+3. Prove the absence condition, which is the dead-man half and the one this
+   whole alert exists for. Step 2 does not exercise it: a stale value is still
+   a value. The threshold cannot cover a watcher that stops publishing, so
+   this is the only step that proves the switch survives its own death.
+
+   Pause the scheduler, leave it paused past the condition's 3h duration, and
+   confirm the `#alerts-infra` message arrives. **Resume it afterwards** — a
+   paused watcher is a disarmed switch:
+
+   ```bash
+   gcloud scheduler jobs pause sentry-ingest-freshness-check \
+     --location europe-west1 --project "$PROJECT_ID"
+   # wait > 3h, confirm the alert fires, then:
+   gcloud scheduler jobs resume sentry-ingest-freshness-check \
+     --location europe-west1 --project "$PROJECT_ID"
+   ```
+
+Do not sign this off on a passing plan alone — an untested dead-man switch is
+the failure mode being guarded against.
 
 ### Operational Alerting
 

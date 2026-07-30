@@ -12,7 +12,7 @@ resource "terraform_data" "cloudbuild_builder_dependency" {
 resource "google_cloudfunctions2_function" "sentry_ingest_watcher" {
   project     = var.project_id
   name        = var.function_name
-  description = "Publishes seconds since the last successful Sentry triage ingest run as a Cloud Monitoring gauge"
+  description = "Publishes seconds since the Sentry triage ingest last recorded work on its tracker issue, as a Cloud Monitoring gauge"
   location    = var.region
 
   labels = var.common_labels
@@ -250,7 +250,7 @@ resource "google_cloud_run_v2_service_iam_member" "scheduler_cloud_run_invoker" 
 resource "google_cloud_scheduler_job" "sentry_ingest_freshness" {
   project     = var.project_id
   name        = var.scheduler_name
-  description = "Publish seconds since the last successful Sentry triage ingest run"
+  description = "Publish seconds since the Sentry triage ingest last recorded work on its tracker issue"
   region      = var.region
   schedule    = var.schedule
   time_zone   = var.time_zone

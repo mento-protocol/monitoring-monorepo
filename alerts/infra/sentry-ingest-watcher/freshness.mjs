@@ -94,7 +94,7 @@ export function parseLatestRunRecord(payload) {
 }
 
 /**
- * Seconds elapsed since the last successful ingest, floored at zero so clock
+ * Seconds elapsed since the ingest last recorded work, floored at zero so clock
  * skew between the ingest runner and GCP cannot produce a negative gauge.
  *
  * @param {number} completedAtMs

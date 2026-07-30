@@ -34,7 +34,7 @@ variable "memory_mb" {
 }
 
 variable "metric_type" {
-  description = "Cloud Monitoring custom metric type carrying seconds since the last successful ingest run."
+  description = "Cloud Monitoring custom metric type carrying seconds since the ingest last recorded work on the tracker issue."
   type        = string
 }
 
