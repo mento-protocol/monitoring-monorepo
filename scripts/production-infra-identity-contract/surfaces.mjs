@@ -242,6 +242,7 @@ const RESOURCE_DATA_BLOCK_KEY_GROUPS = [
   "alerts/infra/channels/sentry-bridge/main.tf|sentry_alert.slack_critical_fanout,sentry_alert.slack_default",
   "alerts/infra/channels/sentry-bridge/slack_channels.tf|restapi_object.sentry_slack_channel,restapi_object.sentry_slack_channel_member",
   "alerts/infra/channels/slack-channels/main.tf|restapi_object.channel,restapi_object.channel_member",
+  "alerts/infra/artifact-registry.tf|google_artifact_registry_repository.gcf_artifacts",
   "alerts/infra/ci-failures-channel.tf|data.http.slack_eng_usergroup_members,data.http.slack_usergroups_list,restapi_object.ci_failures_channel,restapi_object.ci_failures_channel_member,restapi_object.ci_failures_invite_eng",
   "alerts/infra/main.tf|github_actions_secret.alerts_infra_tf_vars,google_project_iam_member.cloudbuild_builder,google_project_iam_member.terraform_refresh_readonly,google_service_account.project_sa,terraform_data.oncall_announcer_config_guard",
   "alerts/infra/monitoring.tf|google_logging_metric.onchain_handler_budget_skips,google_logging_metric.onchain_handler_errors,google_monitoring_alert_policy.oncall_announcer_scheduler_errors_policy,google_monitoring_alert_policy.onchain_handler_budget_skips_policy,google_monitoring_alert_policy.onchain_handler_errors_policy,google_monitoring_alert_policy.sentry_ingest_staleness_policy,google_monitoring_metric_descriptor.sentry_ingest_freshness,google_monitoring_notification_channel.alerts_infra_slack",

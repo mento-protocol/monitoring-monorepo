@@ -274,6 +274,24 @@ steps below are required before treating this as armed.
 - `sentry-triage-ingest-stale` shares that destination too, and is the only
   policy here that treats missing data as a firing condition
 
+### Build-artifact retention
+
+Every Gen2 deploy leaves two kinds of debris, both bounded at 30 days to match
+`governance-watchdog/infra`, which worked these numbers out first:
+
+- **Function source zips.** Versioning keeps each replaced archive as a
+  noncurrent generation forever, so each source bucket carries a Delete rule at
+  `days_since_noncurrent_time = 30`. Expire by noncurrent age, never by
+  `num_newer_versions`: the object name embeds the source hash, so no generation
+  ever gains newer versions under its own name and a count condition would never
+  fire. The live archive is never ARCHIVED and always survives.
+  `sentry-ingest-watcher` has this rule; `onchain-event-handler` and
+  `oncall-announcer` still do not.
+- **Build images.** `gcf-artifacts` holds the function and cache images for all
+  three Gen2 functions. `artifact-registry.tf` deletes versions older than 30
+  days while keeping the 3 most recent per package, so the serving image and its
+  rollback candidates are never collected.
+
 ### QuickNode Webhooks
 
 - One webhook per chain
@@ -306,6 +324,29 @@ merged PR apply through the `production-infra` gate.
 ```bash
 pnpm --filter @mento-protocol/alerts-onchain-event-handler logs
 ```
+
+### One-time: adopt the Cloud Functions image repository
+
+`alerts/infra/artifact-registry.tf` manages the `gcf-artifacts` Artifact
+Registry repository that Cloud Functions auto-creates for Gen2 build images.
+The repository already exists, so the **first** apply after that file landed
+needs a state import first — a bare apply fails with "already exists", and the
+identity contract forbids a top-level `import` block (`SUPPORTED_TOP_LEVEL_KINDS`
+in `scripts/production-infra-identity-contract/surfaces.mjs`), so this is a
+deliberate manual step rather than committed config:
+
+```bash
+terraform -chdir=alerts/infra import \
+  google_artifact_registry_repository.gcf_artifacts \
+  projects/alerts-57ed/locations/europe-west1/repositories/gcf-artifacts
+```
+
+Then confirm the plan reads `will be updated in-place` and adds only the two
+`cleanup_policies` blocks. **If it ever says the repository must be replaced,
+stop** — a replace deletes every live build image. Verified against a scratch
+copy of state on 2026-07-30: `15 to add, 1 to change, 0 to destroy`, the change
+being an in-place update. Skip this step on a from-scratch bring-up, where
+Terraform creates the repository before Cloud Functions would.
 
 ### Destroy Resources
 

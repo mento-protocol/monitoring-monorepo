@@ -86,6 +86,36 @@ resource "google_storage_bucket" "function_bucket" {
     enabled = true
   }
 
+  # Same rule and rationale as governance-watchdog/infra/storage.tf, which is
+  # where this repo worked the problem out after 41 archives had piled up.
+  # A source change renames the object (the name embeds the hash), so
+  # Terraform replaces it — and with versioning on, the replaced generation
+  # becomes noncurrent rather than going away. Expire by age of that
+  # noncurrent time, never by `num_newer_versions`: unique names mean no
+  # generation ever gains newer versions under itself, so a count condition
+  # would never fire. 30 days is the rollback window. The live object the
+  # deployed revision was built from is never ARCHIVED and always survives,
+  # so this cannot introduce plan churn.
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      with_state                 = "ARCHIVED"
+      days_since_noncurrent_time = 30
+    }
+  }
+
+  # No `prevent_destroy`, matching all three existing function source buckets
+  # in this repo (onchain-event-handler, oncall-announcer, and the
+  # governance-watchdog one above). These archives are derived artifacts:
+  # `data.archive_file` rebuilds them from git on every apply, so a destroyed
+  # bucket costs a re-upload, not data. Guarding it would also contradict the
+  # rule directly above — the same generations cannot be disposable after 30
+  # days and undestroyable at the same time — and would leave this the only
+  # module in the stack that blocks teardown. `prevent_destroy` here is
+  # reserved for irreplaceable state: the GCP project, the published peg
+  # policy generations, and the Alloy image repository.
   lifecycle {
     prevent_destroy = false
     ignore_changes  = [labels["goog-terraform-provisioned"]]
