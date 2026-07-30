@@ -109,9 +109,16 @@ bulk:
 - no matching queue issue: create one;
 - open match: leave it open;
 - closed match with a regression whose `lastSeen` is newer than
-  `closed_at`: reopen it, remove stale verdict/projection/archive labels, and
-  restore `sentry:needs-triage`;
+  `closed_at`: post the regression fence comment, shed the stale
+  verdict/projection/autofix/archive labels, restore `sentry:needs-triage`, and
+  reopen — in that order;
 - other closed match: leave it closed.
+
+That write order is load-bearing at both ends. The fence goes first so no
+interruption can leave a stub re-queued for triage without it; the state change
+goes last so none can leave it open but unselectable. Every interruption point
+then lands on a state that is inert or recoverable. The fence post is guarded by
+an exact-body check, so a retry completes the sequence without duplicating it.
 
 Missing or invalid timestamps fail toward re-triage. The strict timestamp gate
 prevents Sentry's long-lived regressed substatus from causing a reopen/close

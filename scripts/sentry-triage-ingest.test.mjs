@@ -27,6 +27,7 @@ import {
   parseLinkHeader,
   PROJECTED_LABEL,
   recoverStrandedQueueIssue,
+  reopenQueueIssue,
   REOPEN_SHED_LABELS,
   resolveLookbackDays,
   resolveTokenGuard,
@@ -70,6 +71,15 @@ function assertDeepEqual(actual, expected) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+async function assertRejectsAsync(fn) {
+  try {
+    await fn();
+  } catch {
+    return;
+  }
+  throw new Error("expected the call to reject");
 }
 
 function assertThrows(fn, pattern) {
@@ -1121,7 +1131,11 @@ const REPO = "mento-protocol/monitoring-monorepo";
  * Minimal stateful GitHub the `gh` argv arrays actually mutate, so the real
  * argument builders (not a re-implementation of them) drive the state.
  */
-function makeFakeGitHub({ issues = [], ambiguousOn = () => false } = {}) {
+function makeFakeGitHub({
+  issues = [],
+  ambiguousOn = () => false,
+  rejectOn = () => false,
+} = {}) {
   const state = new Map(
     issues.map((issue) => [
       issue.number,
@@ -1178,16 +1192,26 @@ function makeFakeGitHub({ issues = [], ambiguousOn = () => false } = {}) {
     throw new Error(`unexpected gh issue subcommand: ${verb}`);
   };
 
+  const fail = (args) =>
+    new Error(
+      `gh ${args.join(" ")} failed with exit 1:\nerror connecting to api.github.com`,
+    );
+
   const runGh = async (args) => {
     calls.push(args);
+    // A read: the comment scan reopenQueueIssue runs before it posts.
+    if (args[0] === "api") {
+      const number = Number(/issues\/(\d+)\/comments/.exec(args[1])?.[1]);
+      return JSON.stringify(
+        (state.get(number)?.comments ?? []).map((body) => ({ body })),
+      );
+    }
+    // The process died before the call reached GitHub: nothing applied.
+    if (rejectOn(args)) throw fail(args);
     // Mutation FIRST, rejection second: the server applied it, the client only
     // lost the answer.
     apply(args);
-    if (ambiguousOn(args)) {
-      throw new Error(
-        `gh ${args.join(" ")} failed with exit 1:\nerror connecting to api.github.com`,
-      );
-    }
+    if (ambiguousOn(args)) throw fail(args);
     return "";
   };
 
@@ -1505,6 +1529,137 @@ await test("a stub reopened by the regression path is not swept a second time", 
   assertEqual(counts.reopened, 1);
   assertEqual(counts.recovered, 0);
   assertEqual(fake.get(200).state, "OPEN");
+});
+
+// ---------------------------------------------------------------------------
+// Regression-reopen crash window (issue #1706 follow-up).
+//
+// `reopenQueueIssue` makes three writes. The invariant across EVERY
+// interruption point: the stub is never left re-queued for triage
+// (`sentry:needs-triage`) without the regression fence. That combination is the
+// dangerous half — once Sentry drops the issue out of `is:regressed`, the
+// stranded sweep reopens it carrying only its non-fence bookkeeping note, and a
+// triage round that dies before posting lets the `always()` verdict job accept
+// the pre-regression verdict and close over the new occurrence.
+// ---------------------------------------------------------------------------
+
+const REGRESSED_STUB = {
+  number: 200,
+  title: buildQueueTitle("X-9", "web", "error"),
+  state: "CLOSED",
+  closedAt: "2026-07-19T00:00:00Z",
+  labels: ["sentry-triage", "sentry:verdict-upstream"],
+};
+const REGRESSED_SENTRY = mapSentryIssue({
+  id: 9,
+  shortId: "X-9",
+  lastSeen: "2026-07-20T00:00:00Z",
+});
+
+for (const verb of ["comment", "edit", "reopen"]) {
+  for (const mode of ["reject", "ambiguous"]) {
+    await test(`regression reopen never leaves a queued-without-fence stub (${mode} on ${verb})`, async () => {
+      const fake = makeFakeGitHub({
+        issues: [{ ...REGRESSED_STUB }],
+        rejectOn: (args) => mode === "reject" && args[1] === verb,
+        ambiguousOn: (args) => mode === "ambiguous" && args[1] === verb,
+      });
+
+      let threw = false;
+      try {
+        await reopenQueueIssue(
+          { repo: REPO },
+          { number: 200 },
+          REGRESSED_SENTRY,
+          {
+            runGh: fake.runGh,
+          },
+        );
+      } catch {
+        threw = true;
+      }
+      assert(threw, "the interrupted write must surface as a rejection");
+
+      const issue = fake.get(200);
+      const queued = issue.labels.includes(NEEDS_TRIAGE_LABEL);
+      const fenced = issue.comments.some((body) =>
+        body.startsWith("Regressed in Sentry (last seen "),
+      );
+      const shape = `labels=${JSON.stringify(issue.labels)} state=${issue.state} comments=${JSON.stringify(issue.comments)}`;
+      // Rule 1 — fence first: never re-queued for triage without the fence.
+      assert(
+        !(queued && !fenced),
+        `interrupting ${verb} left the stub queued for triage with no fence: ${shape}`,
+      );
+      // Rule 2 — state change last: never reopened without being selectable,
+      // which would leave it open and invisible to triage forever.
+      assert(
+        !(issue.state === "OPEN" && !queued),
+        `interrupting ${verb} left the stub open but not selectable: ${shape}`,
+      );
+    });
+  }
+}
+
+await test("an interrupted regression reopen retries without double-posting the fence", async () => {
+  // Crash after the fence lands but before the state change — the widest
+  // window the fence-first order opens. The retry must complete the sequence
+  // and leave exactly ONE fence comment.
+  let armed = true; // fires once, so the retry below runs against a live fake
+  const fake = makeFakeGitHub({
+    issues: [{ ...REGRESSED_STUB }],
+    ambiguousOn: (args) => {
+      if (args[1] !== "reopen" || !armed) return false;
+      armed = false;
+      return true;
+    },
+  });
+
+  await assertRejectsAsync(() =>
+    reopenQueueIssue({ repo: REPO }, { number: 200 }, REGRESSED_SENTRY, {
+      runGh: fake.runGh,
+    }),
+  );
+  // The ambiguous reopen actually landed, so model the harsher retry: put the
+  // stub back where a crashed run would have left it, still closed.
+  fake.get(200).state = "CLOSED";
+  fake.get(200).closedAt = REGRESSED_STUB.closedAt;
+
+  await reopenQueueIssue({ repo: REPO }, { number: 200 }, REGRESSED_SENTRY, {
+    runGh: fake.runGh,
+  });
+
+  const issue = fake.get(200);
+  assertEqual(issue.state, "OPEN");
+  assertDeepEqual(issue.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
+  assertDeepEqual(issue.comments, [
+    buildRegressedComment("2026-07-20T00:00:00Z"),
+  ]);
+});
+
+await test("a NEWER regression still posts its own fence over an older one", async () => {
+  // The dedup guard is exact-body, so it must never suppress the fence a fresh
+  // occurrence needs — only an identical re-post of one already in place.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        ...REGRESSED_STUB,
+        comments: [buildRegressedComment("2026-07-20T00:00:00Z")],
+      },
+    ],
+  });
+
+  await reopenQueueIssue(
+    { repo: REPO },
+    { number: 200 },
+    mapSentryIssue({ id: 9, shortId: "X-9", lastSeen: "2026-07-25T00:00:00Z" }),
+    { runGh: fake.runGh },
+  );
+
+  assertDeepEqual(fake.get(200).comments, [
+    buildRegressedComment("2026-07-20T00:00:00Z"),
+    buildRegressedComment("2026-07-25T00:00:00Z"),
+  ]);
 });
 
 await test("one unrecoverable stub is counted without stranding the rest", async () => {

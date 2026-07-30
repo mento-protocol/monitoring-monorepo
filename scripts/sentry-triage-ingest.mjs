@@ -882,32 +882,86 @@ export async function recoverStrandedQueueIssue(
   );
 }
 
-async function reopenQueueIssue(options, existingIssue, sentryIssue) {
-  // Order matters for crash-safety: the reopen (state change) goes LAST.
-  // The closed->open transition is what flips the next run onto the
-  // open-match skip path, so if the label or comment step failed after an
-  // early reopen, the issue would sit open without `sentry:needs-triage`
-  // forever — reopened but invisible to triage. With the state change last,
-  // any partial failure leaves the issue closed and the whole (idempotent)
-  // sequence is retried on the next run; the worst case is a duplicate
-  // regression comment.
-  await runGh(buildReopenLabelEditArgs(existingIssue.number, options.repo), {
+/**
+ * Read a queue stub's comment bodies. Used only on the reopen path, so the
+ * extra call costs one request per regression rather than per run.
+ */
+async function fetchIssueCommentBodies(options, issueNumber, runner) {
+  const pages = await ghPaginate(
+    `repos/${options.repo}/issues/${issueNumber}/comments`,
+    runner ? { runner } : {},
+  );
+  return pages
+    .flat()
+    .map((comment) => comment?.body)
+    .filter((body) => typeof body === "string");
+}
+
+export async function reopenQueueIssue(
+  options,
+  existingIssue,
+  sentryIssue,
+  deps = {},
+) {
+  const run = deps.runGh ?? runGh;
+  const fence = buildRegressedComment(sentryIssue.lastSeen);
+
+  // TWO ordering rules, and they point the same way.
+  //
+  // 1. The FENCE COMMENT GOES FIRST. It is what tells the verdict parser that
+  //    the previous round's verdict describes a dead occurrence
+  //    (selectVerdictComment in scripts/sentry-triage-project-core.mjs). With
+  //    the label edit first, a crash between the two writes leaves the stub
+  //    closed, wearing `sentry:needs-triage`, with NO fence — and once Sentry
+  //    drops the issue out of `is:regressed`, the stranded sweep reopens it
+  //    with only its non-fence bookkeeping note, so a later triage round that
+  //    dies before posting lets the `always()` verdict job accept the
+  //    PRE-REGRESSION verdict and close over the new occurrence. Fence first
+  //    makes the interrupted state fenced-but-not-yet-queued, which is inert:
+  //    nothing selects it, and this whole sequence retries.
+  // 2. The REOPEN (state change) GOES LAST. The closed->open transition is what
+  //    flips the next run onto the open-match skip path, so an early reopen
+  //    followed by a failure would leave the issue open without
+  //    `sentry:needs-triage` — reopened but invisible to triage.
+  //
+  // Every interruption point therefore lands on a safe state: fence only
+  // (inert, retried), or fence + label while still closed (the stranded
+  // pairing, but FENCED, which the sweep reopens without loss).
+  //
+  // Posting first widens the window in which a retry could re-post the fence,
+  // so the post is guarded by an exact-body check. That is safe in the only
+  // direction that matters: an identical body means an identical `lastSeen`,
+  // and the reopen gate (lastSeen > closedAt) cannot fire twice for one
+  // `lastSeen` with a verdict in between — a verdict implies a later close,
+  // which puts closedAt past that lastSeen. So the guard can only suppress a
+  // duplicate of a fence that is already in place, never a fence a new
+  // occurrence needs.
+  const alreadyFenced = (
+    await fetchIssueCommentBodies(options, existingIssue.number, deps.runGh)
+  ).includes(fence);
+  if (alreadyFenced) {
+    process.stderr.write(
+      `::notice::Regression fence for ${sentryIssue.lastSeen} already present on #${existingIssue.number}; not re-posting.\n`,
+    );
+  } else {
+    await run(
+      [
+        "issue",
+        "comment",
+        String(existingIssue.number),
+        "-R",
+        options.repo,
+        "--body",
+        fence,
+      ],
+      { dryRun: options.dryRun, mutates: true },
+    );
+  }
+  await run(buildReopenLabelEditArgs(existingIssue.number, options.repo), {
     dryRun: options.dryRun,
     mutates: true,
   });
-  await runGh(
-    [
-      "issue",
-      "comment",
-      String(existingIssue.number),
-      "-R",
-      options.repo,
-      "--body",
-      buildRegressedComment(sentryIssue.lastSeen),
-    ],
-    { dryRun: options.dryRun, mutates: true },
-  );
-  await runGh(
+  await run(
     ["issue", "reopen", String(existingIssue.number), "-R", options.repo],
     { dryRun: options.dryRun, mutates: true },
   );
