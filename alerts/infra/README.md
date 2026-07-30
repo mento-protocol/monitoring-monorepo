@@ -173,18 +173,34 @@ cloud-routine experiment ran for weeks producing nothing and nobody noticed.
 
 - Cloud Scheduler calls the `sentry-ingest-watcher` Cloud Function hourly,
   entirely outside GitHub Actions
-- The function reads the newest successful `sentry-triage-ingest.yml` run
-  **unauthenticated**. The repository is public and the endpoint needs no
-  scope, so one call per hour stays far inside the 60/hr anonymous limit.
-  **Do not add a token** — a watcher holding a credential is a credential on a
-  service whose only job is to notice silence
-- It publishes the age of that run as
+- The health signal is the rolling ingest **run record** on tracker issue
+  #1282, not the workflow conclusion. `sentry-triage-ingest.yml` concludes
+  `success` when the kill switch is off or `SENTRY_TRIAGE_TOKEN` is missing,
+  and both paths return before the record is written. The record therefore
+  proves work happened, where a green run proves only exit code 0
+- Freshness comes from the ISO timestamp **inside the record body**, which the
+  ingest writes after its loop finishes. Never from the comment's `created_at`
+  or `updated_at`: those move on any edit to the comment object, so a metadata
+  mutation would drive the gauge fresh over a dead pipeline
+- The record is fenced on author (`github-actions[bot]` / `github-actions`) and
+  on the marker appearing at the **start** of the body. #1282 is public, so
+  without both fences a drive-by comment could hold the gauge green. Same
+  discipline as the writers in #1708
+- The read is **unauthenticated**. The repository is public and the endpoint
+  needs no scope, so one call per hour stays far inside the 60/hr anonymous
+  limit. **Do not add a token** — a watcher holding a credential is a
+  credential on a service whose only job is to notice silence
+- It publishes that age as
   `custom.googleapis.com/sentry_triage/ingest_freshness_seconds` (GAUGE, INT64,
   `global` resource). Its runtime identity holds exactly one permission,
   `roles/monitoring.metricWriter`
-- When GitHub is unreachable or answers with something it cannot parse, the
-  function publishes **nothing** and returns 5xx. Guessing a value would look
-  fresh; silence is the honest signal
+- When GitHub is unreachable, no trusted record exists, or the timestamp cannot
+  be read, the function publishes **nothing** and returns 5xx. Guessing a value
+  would look fresh; silence is the honest signal
+- The watcher pins the marker version `run-record:v1`. A `v2` bump that lands
+  without updating the watcher makes it fail closed and alert — deliberate, so
+  the contract cannot drift silently. `RUN_RECORD_MARKER` in
+  `scripts/sentry-triage-ingest.mjs` carries the matching note
 - `sentry-triage-ingest-stale` alerts `#alerts-infra` when the gauge exceeds
   26h (ingest runs 2x/day and GitHub's scheduler drifts up to ~3h, so 26h
   clears normal drift) **or** when the gauge stops arriving for 3h. The
@@ -205,8 +221,11 @@ is what makes its silence unambiguous.
 Cloud Monitoring cannot alert on a time series that has never existed, so both
 steps below are required before treating this as armed.
 
-1. Confirm the first publish. Run the scheduler job once and check the gauge
-   exists:
+1. Confirm the first publish, and that the value it published is the real run
+   record. Run the scheduler job once, then compare the logged
+   `lastIngestRunAt` with the timestamp in the record comment on #1282 — they
+   must match. A publish alone only proves the function ran; matching
+   timestamps prove it read the right signal.
 
    ```bash
    PROJECT_ID=$(terraform -chdir=alerts/infra output -json sentry_ingest_watcher | jq -r .function_logs | sed 's/.*project=//')
@@ -214,7 +233,14 @@ steps below are required before treating this as armed.
      --location europe-west1 --project "$PROJECT_ID"
    gcloud logging read \
      'jsonPayload.message="sentry_ingest_watcher.published"' \
-     --project "$PROJECT_ID" --limit 1 --freshness 10m
+     --project "$PROJECT_ID" --limit 1 --freshness 10m \
+     --format='value(jsonPayload.lastIngestRunAt, jsonPayload.freshnessSeconds)'
+
+   # The record this must agree with:
+   gh api repos/mento-protocol/monitoring-monorepo/issues/1282/comments \
+     --jq '.[] | select(.user.login == "github-actions[bot]")
+                | select(.body | startswith("<!-- sentry-triage-ingest:run-record:v1 -->"))
+                | .body' | head -3
    ```
 
 2. Prove the alert path with a deliberately stale value. Write one point at 48h

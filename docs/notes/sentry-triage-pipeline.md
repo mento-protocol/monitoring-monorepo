@@ -36,11 +36,17 @@ enabling or operating a later stage.
 
 Staleness watch is the only row that does not run in GitHub Actions, and that
 is the whole point: a scheduler that dies silently cannot report its own death.
-It reads the newest successful ingest run over the **unauthenticated** GitHub
-API — the repository is public and the endpoint needs no scope, so it holds no
-credential, deliberately. `sentry-triage-ingest-stale` fires when the last
-successful ingest is older than 26h **or** when the gauge stops arriving, and
-the function publishes nothing rather than guessing when GitHub is unreachable.
+It measures the ingest run record on tracker issue #1282, **not** the ingest
+workflow's conclusion — a run with the kill switch off or `SENTRY_TRIAGE_TOKEN`
+absent still concludes `success` and never reaches the record writer, so the
+record is the only signal that separates work done from exit code 0. Freshness
+comes from the ISO timestamp inside the record body, never the comment's
+`updated_at`, which any edit would move forward. The read is **unauthenticated**
+and author-fenced: the repository is public, so the watcher holds no credential
+and ignores any record not authored by the pipeline.
+`sentry-triage-ingest-stale` fires when the last recorded ingest is older than
+26h **or** when the gauge stops arriving, and the function publishes nothing
+rather than guessing when it cannot read the record.
 Ingest is the correct single canary: the triage, autofix, and archive legs
 legitimately no-op for days when the queue is empty. Operator detail, including
 how to prove the alert fires after an apply, lives in

@@ -293,7 +293,7 @@ resource "google_monitoring_metric_descriptor" "sentry_ingest_freshness" {
   value_type   = "INT64"
   unit         = "s"
   display_name = "Sentry triage ingest freshness"
-  description  = "Seconds since the newest successful sentry-triage-ingest.yml workflow run, published by the sentry-ingest-watcher Cloud Function."
+  description  = "Seconds since the newest Sentry triage ingest run record on the tracker issue, published by the sentry-ingest-watcher Cloud Function. The record is written only by an ingest that actually fetched and counted issues, so this measures work done, not workflow exit codes."
 
   depends_on = [module.project_factory]
 }
@@ -301,7 +301,10 @@ resource "google_monitoring_metric_descriptor" "sentry_ingest_freshness" {
 # The dead-man switch itself. Both conditions matter and the second is the
 # reason this exists:
 #
-#   1. The gauge exceeds 26h — ingest stopped producing successful runs.
+#   1. The gauge exceeds 26h — no ingest has done any work in that window.
+#      The gauge tracks the tracker-issue run record rather than the workflow
+#      conclusion, because a kill-switched or token-less run still concludes
+#      `success` while ingesting nothing.
 #   2. The gauge stops arriving — the watcher itself died, or it refused to
 #      publish because GitHub was unreachable or answered with something it
 #      could not parse. The function never guesses a value in those cases, so
@@ -326,20 +329,28 @@ resource "google_monitoring_alert_policy" "sentry_ingest_staleness_policy" {
     content   = <<-EOT
       ## Sentry triage ingest has gone quiet
 
-      No successful `sentry-triage-ingest.yml` run completed in the last 26h,
-      or the watcher stopped reporting. Either way the Sentry triage pipeline
-      is not turning new Sentry issues into queue issues, and nothing else will
-      say so — the pipeline cannot report its own silence.
+      No Sentry triage ingest has recorded any work in the last 26h, or the
+      watcher stopped reporting. Either way the pipeline is not turning new
+      Sentry issues into queue issues, and nothing else will say so — the
+      pipeline cannot report its own silence.
+
+      A green ingest workflow does not clear this alert. The kill switch and a
+      missing token both let a run conclude `success` while ingesting nothing,
+      which is why the gauge tracks the run record instead.
 
       Check, in order:
 
-      1. Recent runs of the ingest workflow:
-         https://github.com/mento-protocol/monitoring-monorepo/actions/workflows/sentry-triage-ingest.yml
+      1. The run record comment on tracker issue #1282 — its timestamp is what
+         this gauge measures:
+         https://github.com/mento-protocol/monitoring-monorepo/issues/1282
       2. The kill switch `vars.SENTRY_TRIAGE_ENABLED` and the
-         `SENTRY_TRIAGE_TOKEN` secret — both fail safe to a no-op.
-      3. The watcher itself, when the gauge is absent rather than high:
+         `SENTRY_TRIAGE_TOKEN` secret — both fail safe to a no-op, and a no-op
+         run never writes the record.
+      3. Recent runs of the ingest workflow:
+         https://github.com/mento-protocol/monitoring-monorepo/actions/workflows/sentry-triage-ingest.yml
+      4. The watcher itself, when the gauge is absent rather than high:
          https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_run_revision%22%20AND%20resource.labels.service_name%3D%22${module.sentry_ingest_watcher.function_name}%22%20AND%20severity%3E%3DERROR;duration=PT24H
-      4. Scheduler attempts:
+      5. Scheduler attempts:
          https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_scheduler_job%22%20AND%20resource.labels.job_id%3D%22${module.sentry_ingest_watcher.scheduler_job_name}%22;duration=PT24H
 
       Runbook: `docs/notes/sentry-triage-pipeline.md`.
@@ -348,7 +359,7 @@ resource "google_monitoring_alert_policy" "sentry_ingest_staleness_policy" {
   }
 
   conditions {
-    display_name = "No successful ingest run in 26h"
+    display_name = "No recorded ingest work in 26h"
 
     condition_threshold {
       filter = <<EOF

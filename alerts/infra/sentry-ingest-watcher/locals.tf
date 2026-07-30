@@ -6,13 +6,13 @@ locals {
   ]
 
   # Runtime configuration is not part of the archive, so fold it into the
-  # object name. Without this a schedule or workflow-file change would leave
+  # object name. Without this a schedule or tracker-issue change would leave
   # the deployed revision running the old configuration.
   runtime_config_hash = md5(jsonencode({
-    github_repository    = var.github_repository
-    ingest_workflow_file = var.ingest_workflow_file
-    metric_type          = var.metric_type
-    schedule             = var.schedule
+    github_repository = var.github_repository
+    metric_type       = var.metric_type
+    schedule          = var.schedule
+    tracker_issue     = var.tracker_issue
   }))
 
   source_hash = md5(join("", concat(
@@ -24,6 +24,6 @@ locals {
     FRESHNESS_METRIC_TYPE = var.metric_type
     GCP_PROJECT_ID        = var.project_id
     GITHUB_REPOSITORY     = var.github_repository
-    INGEST_WORKFLOW_FILE  = var.ingest_workflow_file
+    TRACKER_ISSUE         = tostring(var.tracker_issue)
   }
 }

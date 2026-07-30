@@ -16,15 +16,9 @@ variable "function_name" {
 }
 
 variable "github_repository" {
-  description = "owner/name of the public repository whose workflow runs are polled. Read unauthenticated — the function holds no GitHub credential."
+  description = "owner/name of the public repository holding the tracker issue. Read unauthenticated — the function holds no GitHub credential."
   type        = string
   default     = "mento-protocol/monitoring-monorepo"
-}
-
-variable "ingest_workflow_file" {
-  description = "Workflow file whose newest successful run defines ingest freshness. Ingest is the only pipeline stage that runs every day regardless of queue state, so it is the correct single canary."
-  type        = string
-  default     = "sentry-triage-ingest.yml"
 }
 
 variable "max_instances" {
@@ -82,6 +76,17 @@ variable "scheduler_name" {
   description = "Name of the Cloud Scheduler job"
   type        = string
   default     = "sentry-ingest-freshness-check"
+}
+
+variable "tracker_issue" {
+  description = "Sentry triage tracker issue carrying the rolling ingest run record. That record is written only after an ingest actually fetched and counted issues, so it is evidence of work; the workflow conclusion is not, because a kill-switched or token-less run still concludes success."
+  type        = number
+  default     = 1282
+
+  validation {
+    condition     = var.tracker_issue > 0 && floor(var.tracker_issue) == var.tracker_issue
+    error_message = "tracker_issue must be a positive issue number."
+  }
 }
 
 variable "timeout_seconds" {

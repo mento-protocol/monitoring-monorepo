@@ -1,13 +1,21 @@
 // Dead-man switch for the Sentry triage pipeline (issue #1281, ADR 0036).
 //
-// Cloud Scheduler calls this hourly. It reads the newest successful
-// `sentry-triage-ingest.yml` run from the GitHub API and publishes the age of
-// that run as a Cloud Monitoring gauge. alerts/infra/monitoring.tf alerts when
-// the gauge exceeds 26h *or* when it stops arriving.
+// Cloud Scheduler calls this hourly. It reads the rolling ingest run record on
+// tracker issue #1282 and publishes the age of that record as a Cloud
+// Monitoring gauge. alerts/infra/monitoring.tf alerts when the gauge exceeds
+// 26h *or* when it stops arriving.
 //
 // It lives outside GitHub Actions on purpose: a scheduler that dies silently
 // cannot report its own death, so the check must not run on the thing it
 // checks.
+//
+// The run record, not the workflow conclusion, is the health signal.
+// `sentry-triage-ingest.yml` concludes `success` when the kill switch is off
+// or `SENTRY_TRIAGE_TOKEN` is absent, and neither path reaches the run record
+// — it is written only after an ingest actually fetched and counted issues.
+// Reading the workflow run instead would report health for a pipeline
+// producing nothing, which is the exact silent failure this switch exists to
+// catch.
 //
 // The GitHub read is deliberately unauthenticated. `mento-protocol/
 // monitoring-monorepo` is public and this endpoint needs no scope, so at one
@@ -15,7 +23,7 @@
 // Adding a token here would hand a credential to a service whose only job is
 // to notice silence — do not add one.
 
-import { freshnessSeconds, parseLatestSuccessfulRun } from "./freshness.mjs";
+import { freshnessSeconds, parseLatestRunRecord } from "./freshness.mjs";
 
 const GITHUB_API_BASE = "https://api.github.com";
 const METADATA_TOKEN_URL =
@@ -37,8 +45,13 @@ function requiredEnv(name) {
   return value;
 }
 
-async function fetchWorkflowRuns(repository, workflowFile) {
-  const url = `${GITHUB_API_BASE}/repos/${repository}/actions/workflows/${workflowFile}/runs?status=success&per_page=10`;
+async function fetchTrackerComments(repository, trackerIssue) {
+  // Ascending creation order is the endpoint default, pinned explicitly so a
+  // default change cannot push the record off the first page. The record is a
+  // single rolling comment created early in the issue's life, so one page of
+  // 100 always contains it; if it ever falls off, the parse fails closed and
+  // the absence condition alerts rather than the gauge going quietly fresh.
+  const url = `${GITHUB_API_BASE}/repos/${repository}/issues/${trackerIssue}/comments?per_page=100&sort=created&direction=asc`;
   const response = await fetch(url, {
     headers: {
       accept: "application/vnd.github+json",
@@ -108,12 +121,12 @@ export const handleSentryIngestFreshness = async (_request, response) => {
   let projectId;
   let metricType;
   let repository;
-  let workflowFile;
+  let trackerIssue;
   try {
     projectId = requiredEnv("GCP_PROJECT_ID");
     metricType = requiredEnv("FRESHNESS_METRIC_TYPE");
     repository = requiredEnv("GITHUB_REPOSITORY");
-    workflowFile = requiredEnv("INGEST_WORKFLOW_FILE");
+    trackerIssue = requiredEnv("TRACKER_ISSUE");
   } catch (error) {
     log("ERROR", "sentry_ingest_watcher.misconfigured", {
       error: String(error),
@@ -124,8 +137,8 @@ export const handleSentryIngestFreshness = async (_request, response) => {
 
   let parsed;
   try {
-    parsed = parseLatestSuccessfulRun(
-      await fetchWorkflowRuns(repository, workflowFile),
+    parsed = parseLatestRunRecord(
+      await fetchTrackerComments(repository, trackerIssue),
     );
   } catch (error) {
     // Publish nothing. A guessed value would look fresh; silence lets the
@@ -133,7 +146,7 @@ export const handleSentryIngestFreshness = async (_request, response) => {
     log("ERROR", "sentry_ingest_watcher.github_unreachable", {
       error: String(error),
       repository,
-      workflowFile,
+      trackerIssue,
     });
     response.status(502).send("github_unreachable");
     return;
@@ -143,7 +156,7 @@ export const handleSentryIngestFreshness = async (_request, response) => {
     log("ERROR", "sentry_ingest_watcher.freshness_unresolved", {
       reason: parsed.reason,
       repository,
-      workflowFile,
+      trackerIssue,
     });
     response.status(502).send(parsed.reason);
     return;
@@ -155,7 +168,7 @@ export const handleSentryIngestFreshness = async (_request, response) => {
     log("ERROR", "sentry_ingest_watcher.freshness_unresolved", {
       reason: "freshness_not_computable",
       repository,
-      workflowFile,
+      trackerIssue,
     });
     response.status(502).send("freshness_not_computable");
     return;
@@ -174,7 +187,7 @@ export const handleSentryIngestFreshness = async (_request, response) => {
 
   log("INFO", "sentry_ingest_watcher.published", {
     freshnessSeconds: seconds,
-    lastSuccessfulRunAt: new Date(parsed.completedAtMs).toISOString(),
+    lastIngestRunAt: new Date(parsed.completedAtMs).toISOString(),
   });
   response.status(200).json({ freshnessSeconds: seconds });
 };
