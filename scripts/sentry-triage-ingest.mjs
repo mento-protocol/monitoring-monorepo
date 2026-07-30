@@ -998,12 +998,28 @@ export function isStrandedNeedsTriage(issue) {
   );
 }
 
-/** Fixed text — no Sentry-derived or otherwise untrusted input. */
+/**
+ * Fixed text — no Sentry-derived or otherwise untrusted input.
+ *
+ * Written as INTENT, not outcome, because of where it sits in the sequence: the
+ * state change goes last, so this note is posted while the stub is still closed
+ * and the reopen may yet fail. Wording it as completed fact ("Reopened…",
+ * "Re-queued…") left a closed stub carrying a note about something that had not
+ * happened, and every retry added another false entry.
+ *
+ * The repetition itself is not the bug and must not be suppressed: a stub that
+ * keeps failing to reopen SHOULD accumulate a note per attempt, because that
+ * repetition is the honest signal. So the text says what this run is doing and
+ * what a failure means, and reads correctly either way.
+ */
 export function buildStrandedRecoveryComment() {
   return (
-    "Reopened by the Sentry triage ingest: this queue stub was closed while " +
+    "Sentry triage ingest is recovering this queue stub: it was closed while " +
     "still carrying `sentry:needs-triage`, a pairing no pipeline stage can " +
-    "see (the triage selector lists open stubs only). Re-queued for triage."
+    "see — the triage selector lists open stubs only. Its stale verdict, " +
+    "projection and autofix markers have been shed, and a reopen follows this " +
+    "note. If that reopen fails the stub stays closed and the next scheduled " +
+    "run retries, so this note can appear more than once."
   );
 }
 

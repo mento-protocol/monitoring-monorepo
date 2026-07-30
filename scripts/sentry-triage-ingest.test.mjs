@@ -1908,6 +1908,84 @@ await test("isStrandedNeedsTriage matches only closed stubs still awaiting a ver
   );
 });
 
+await test("the recovery note does not claim a reopen that has not happened", async () => {
+  // The note is posted BEFORE the reopen, because the state change goes last.
+  // So it has to read as intent: a stub left closed by a failed reopen carries
+  // this text, and each retry adds another copy. Copies are the honest signal
+  // that recovery keeps failing — the fix is truthful wording, not a suppressor.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+    rejectOn: (args) => args[1] === "reopen",
+  });
+
+  await assertRejectsAsync(() =>
+    recoverStrandedQueueIssue(
+      { repo: REPO },
+      { number: 42 },
+      { runGh: fake.runGh },
+    ),
+  );
+
+  const issue = fake.get(42);
+  assertEqual(issue.state, "CLOSED");
+  assertDeepEqual(issue.comments, [buildStrandedRecoveryComment()]);
+
+  // Every claim the note makes must hold for a stub that is still CLOSED.
+  const note = issue.comments[0];
+  for (const claim of [
+    /\bReopened\b/,
+    /\bRe-queued\b/,
+    /\bhas been reopened\b/,
+    /\bwas reopened\b/,
+  ]) {
+    assert(
+      !claim.test(note),
+      `the note asserts a completed reopen (${claim}) on a stub that is still ${issue.state}: ${note}`,
+    );
+  }
+  // And it tells the reader why a duplicate is expected, so repeats read as the
+  // signal they are rather than as a bug.
+  assert(
+    /more than once/.test(note),
+    "the note should explain why it can appear twice",
+  );
+});
+
+await test("a retried recovery posts the note again rather than suppressing it", async () => {
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+      },
+    ],
+    rejectOn: (args) => args[1] === "reopen",
+  });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await assertRejectsAsync(() =>
+      recoverStrandedQueueIssue(
+        { repo: REPO },
+        { number: 42 },
+        { runGh: fake.runGh },
+      ),
+    );
+  }
+
+  // Two attempts, two notes. A stub that keeps failing to reopen should show it.
+  assertEqual(fake.get(42).comments.length, 2);
+  assertEqual(fake.get(42).state, "CLOSED");
+});
+
 await test("stranded recovery re-queues, sheds stale markers, and changes state last", async () => {
   const fake = makeFakeGitHub({
     issues: [
