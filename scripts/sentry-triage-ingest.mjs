@@ -1210,14 +1210,34 @@ export async function runIngest(options, deps = {}) {
   const existingIssues = await listQueueIssues(options);
   const existingByShortId = indexQueueIssuesByShortId(existingIssues);
 
-  // Numbers this run already reopened through the regression path. The queue
-  // snapshot above predates those reopens, so without this the sweep below
-  // could act a second time on a stub that is already open.
-  const reopenedNumbers = new Set();
+  // Stubs this run's SENTRY-EVIDENCE path has taken responsibility for. The
+  // bookkeeping sweep below must not touch them, and the reason is stronger than
+  // avoiding a double write on the stale snapshot.
+  //
+  // These two paths re-queue for OPPOSITE reasons and therefore post opposite
+  // comments: the regression reopen fences (new Sentry events make any prior
+  // verdict stale), the sweep does not (a lost close response changed nothing).
+  // A stub can be eligible for both at once — closed, wearing
+  // `sentry:needs-triage` from an earlier bookkeeping compensation, and NOW
+  // regressed. If the regression reopen throws, recording only SUCCESSES would
+  // leave that stub unclaimed, and the sweep would reopen it seconds later
+  // through the fence-free path: a failed Sentry-evidence re-queue laundered
+  // into a bookkeeping one, inside a single run. The pre-regression verdict
+  // stays admissible, and the next triage round that dies before posting lets
+  // the `verdict` job close over the new occurrence.
+  //
+  // So this records ATTEMPTS, not successes, and it is written before the first
+  // write of the attempt (`Set.add` is synchronous, so it survives a throw from
+  // the await that follows). The catch below claims the stub too, for the same
+  // reason one step earlier: a failure while DECIDING leaves us unable to say
+  // the cause was bookkeeping, and the sweep must never assume that. Deferring a
+  // genuine recovery by one run is cheap; mislabelling a regression is not.
+  const claimedBySentryPath = new Set();
 
   for (const sentryIssue of merged.values()) {
+    let existingIssue = null;
     try {
-      const existingIssue = existingByShortId.get(sentryIssue.shortId) ?? null;
+      existingIssue = existingByShortId.get(sentryIssue.shortId) ?? null;
       // Only an archived, closed, regressed stub needs its audit comment read
       // (issue #1371) — everything else decides off the labels/timestamps we
       // already have.
@@ -1238,11 +1258,24 @@ export async function runIngest(options, deps = {}) {
         await createIssue(options, sentryIssue);
         counts.created += 1;
       } else if (decision.action === "reopen") {
+        // Claim BEFORE the first write, never after it: a reopen that throws
+        // half-way is exactly the case the sweep must not inherit.
+        //
+        // The catch below currently covers this same case, so removing either
+        // one alone keeps the tests green — they are deliberate overlapping
+        // guards, not dead code (removing BOTH does fail). This one survives a
+        // refactor the other does not: give `reopenIssue` its own try/catch, the
+        // way the archive leg wraps its best-effort writes, and the outer catch
+        // stops firing while this line still holds.
+        claimedBySentryPath.add(existingIssue.number);
         await reopenIssue(options, existingIssue, sentryIssue);
-        reopenedNumbers.add(existingIssue.number);
         counts.reopened += 1;
       }
     } catch (err) {
+      // Anything that threw before the branch above could still have been a
+      // regression; with no decision in hand the sweep cannot call it
+      // bookkeeping, so claim it and let the next run decide from scratch.
+      if (existingIssue) claimedBySentryPath.add(existingIssue.number);
       counts.errors += 1;
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(
@@ -1257,7 +1290,7 @@ export async function runIngest(options, deps = {}) {
   // never visits it. Same per-item error handling as the loop — one unrecovered
   // stub must not abort the rest, and the run still exits nonzero.
   for (const existingIssue of existingIssues) {
-    if (reopenedNumbers.has(existingIssue.number)) continue;
+    if (claimedBySentryPath.has(existingIssue.number)) continue;
     if (!isStrandedNeedsTriage(existingIssue)) continue;
     try {
       await recoverStranded(options, existingIssue);

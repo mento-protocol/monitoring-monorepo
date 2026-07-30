@@ -2084,6 +2084,112 @@ await test("a stub reopened by the regression path is not swept a second time", 
 });
 
 // ---------------------------------------------------------------------------
+// A FAILED Sentry-evidence reopen must not be laundered into a bookkeeping
+// recovery (issue #1706, third follow-up).
+//
+// A stub can be eligible for both paths at once: closed, already wearing
+// `sentry:needs-triage` from an earlier bookkeeping compensation, and now
+// regressed. The regression path claims it and fences; the sweep does not
+// fence, by design. If the reopen throws and the run records only SUCCESSES,
+// the sweep inherits that stub inside the same run and re-queues it fence-free
+// — so the pre-regression verdict stays admissible over a live regression.
+// ---------------------------------------------------------------------------
+
+const BOTH_ELIGIBLE_REGRESSION = mapSentryIssue({
+  id: 9,
+  shortId: "X-9",
+  lastSeen: "2026-07-20T00:00:00Z",
+});
+
+const BOTH_ELIGIBLE_STUB = {
+  number: 200,
+  title: buildQueueTitle("X-9", "web", "error"),
+  state: "CLOSED",
+  closedAt: "2026-07-19T00:00:00Z",
+  // The bookkeeping compensation's leftovers — which is what makes this stub
+  // look stranded to the sweep.
+  labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+};
+
+await test("a regression reopen that fails is not swept as bookkeeping in the same run", async () => {
+  const fake = makeFakeGitHub({
+    issues: [{ ...BOTH_ELIGIBLE_STUB }],
+    // The fence post itself fails — the first write the regression path makes.
+    rejectOn: (args) => args[1] === "comment",
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, {
+      fetchMergedSentryIssues: async () =>
+        mergeSentryIssues([], [BOTH_ELIGIBLE_REGRESSION]),
+      reopenIssue: (options, issue, sentryIssue) =>
+        reopenQueueIssue(options, issue, sentryIssue, { runGh: fake.runGh }),
+    }),
+  );
+
+  // The reopen failed and is counted as an error...
+  assertEqual(counts.reopened, 0);
+  assertEqual(counts.errors, 1);
+  // ...and the decisive assertion: the sweep did NOT pick the stub up.
+  assertEqual(counts.recovered, 0);
+  const issue = fake.get(200);
+  assertEqual(issue.state, "CLOSED");
+  assertDeepEqual(issue.comments, []);
+  assert(
+    !issue.comments.includes(buildStrandedRecoveryComment()),
+    "the bookkeeping recovery note must never land on a failed regression reopen",
+  );
+});
+
+await test("the next run reopens that stub through the regression path, with its fence", async () => {
+  const fake = makeFakeGitHub({ issues: [{ ...BOTH_ELIGIBLE_STUB }] });
+  const deps = ingestDeps(fake, {
+    fetchMergedSentryIssues: async () =>
+      mergeSentryIssues([], [BOTH_ELIGIBLE_REGRESSION]),
+    reopenIssue: (options, issue, sentryIssue) =>
+      reopenQueueIssue(options, issue, sentryIssue, { runGh: fake.runGh }),
+  });
+
+  const counts = await runIngest({ repo: REPO, trackerIssue: 1282 }, deps);
+
+  assertEqual(counts.reopened, 1);
+  assertEqual(counts.recovered, 0);
+  const issue = fake.get(200);
+  assertEqual(issue.state, "OPEN");
+  assertDeepEqual(issue.comments, [
+    buildRegressedComment("2026-07-20T00:00:00Z"),
+  ]);
+});
+
+await test("a failure while DECIDING also withholds the stub from the sweep", async () => {
+  // One step earlier than the reopen: if the decision itself throws we cannot
+  // say the cause was bookkeeping, so the sweep must not assume it. Modelled by
+  // a body the decision phase cannot read.
+  const fake = makeFakeGitHub({ issues: [{ ...BOTH_ELIGIBLE_STUB }] });
+  const poisoned = fake.snapshot();
+  Object.defineProperty(poisoned[0], "body", {
+    get() {
+      throw new Error("body unreadable");
+    },
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, {
+      listQueueIssues: async () => poisoned,
+      fetchMergedSentryIssues: async () =>
+        mergeSentryIssues([], [BOTH_ELIGIBLE_REGRESSION]),
+    }),
+  );
+
+  assertEqual(counts.errors, 1);
+  assertEqual(counts.recovered, 0);
+  assertEqual(fake.get(200).state, "CLOSED");
+  assertDeepEqual(fake.get(200).comments, []);
+});
+
+// ---------------------------------------------------------------------------
 // Regression-reopen crash window (issue #1706 follow-up).
 //
 // `reopenQueueIssue` makes three writes. The invariant across EVERY
